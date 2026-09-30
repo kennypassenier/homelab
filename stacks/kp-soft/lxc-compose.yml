@@ -241,3 +241,19 @@ firewall:
       source: 10.10.10.10
       proto: tcp
       dport: 22
+
+# replace-homepage (Kenny, 2026-09-30): this stack's tiles on the dashboard's
+# start page, keyed by the hostname they open (or an id with `url:`). Moved
+# here from Homepage's services-overlay.yml; groups follow their lowest order.
+tiles:
+  job.kp-soft.dev:
+    name: "JobTracker"
+    group: "Eigen"
+    order: 403
+    description: "Sollicitatiedossiers"
+  kp-soft-local:
+    name: "kp-soft"
+    group: "Eigen"
+    order: 401
+    description: "Eigen site (in aanbouw, alleen thuis)"
+    url: "http://10.10.10.16:8080/"

@@ -8160,6 +8160,18 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
+        Rpc::Tiles => {
+            // The plain executor: a reading may read a key on its way.
+            let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+            let st = store.load().await.unwrap_or_default();
+            let tiles = homelab_core::ops::tiles::read_tiles(&RealExecutor, &st).await;
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: serde_json::json!({ "tiles": tiles }).to_string(),
+                deferred: None,
+            }
+        }
         Rpc::ListManualChecks { json } => {
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
             let st = store.load().await.unwrap_or_default();

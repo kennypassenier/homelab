@@ -41,7 +41,10 @@ pub async fn read_tiles(exec: &dyn Executor, state: &HostState) -> Vec<TileView>
                 TileView {
                     stack: stack.clone(),
                     host: host.clone(),
-                    url: format!("https://{}/", host),
+                    url: t
+                        .url
+                        .clone()
+                        .unwrap_or_else(|| format!("https://{}/", host)),
                     name: t.name.clone(),
                     group: t.group.clone(),
                     order: t.order,

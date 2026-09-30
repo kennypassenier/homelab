@@ -171,3 +171,17 @@ firewall:
       proto: tcp
       dport: "22,8080"
       note: Kenny's desktop (ssh and the web ports the homepage tiles link to)
+
+# replace-homepage (Kenny, 2026-09-30): this stack's tiles on the dashboard's
+# start page, keyed by the hostname they open (or an id with `url:`). Moved
+# here from Homepage's services-overlay.yml; groups follow their lowest order.
+tiles:
+  qbit.kp-soft.dev:
+    name: "qBittorrent"
+    group: "Media"
+    order: 107
+    description: "Downloads"
+    reading: |
+      K=$(sed -n 's/^WebUI\\APIKey=//p' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
+      T=$(printf 'header = "Authorization: Bearer %s"\n' "$K" | docker exec -i qbittorrent curl -sf -K - http://localhost:8080/api/v2/torrents/info) || exit 1
+      echo "$T" | jq -r '"\([.[]|select(.state|test("^(downloading|stalledDL|metaDL|forcedDL)$"))]|length) aan het downloaden, \(length) in totaal"'

@@ -332,3 +332,33 @@ home_address_whitelist:
   file: /appdata/gateway/crowdsec-config/parsers/s02-enrich/homelab-home-address.yaml
   test: "docker exec crowdsec crowdsec -c /etc/crowdsec/config.yaml -t -error"
   reload: "docker kill --signal=HUP crowdsec"
+
+# replace-homepage (Kenny, 2026-09-30): this stack's tiles on the dashboard's
+# start page, keyed by the hostname they open (or an id with `url:`). Moved
+# here from Homepage's services-overlay.yml; groups follow their lowest order.
+tiles:
+  ha.kp-soft.dev:
+    name: "Home Assistant"
+    group: "Huis"
+    order: 301
+    description: "Domotica"
+  prox.kp-soft.dev:
+    name: "Proxmox"
+    group: "Infrastructuur"
+    order: 501
+    description: "Hypervisor"
+  traefik.kp-soft.dev:
+    name: "Traefik"
+    group: "Infrastructuur"
+    order: 503
+    description: "Router en certificaten"
+  opn.kp-soft.dev:
+    name: "OPNsense"
+    group: "Infrastructuur"
+    order: 504
+    description: "Firewall en netwerk"
+  trmnl.kp-soft.dev:
+    name: "Terminus"
+    group: "Huis"
+    order: 305
+    description: "E-ink dashboard"

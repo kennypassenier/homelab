@@ -29,6 +29,7 @@ import { mount as hostLog } from "./pages/log.js";
 import { mount as shell } from "./pages/shell.js";
 import { mount as apply } from "./pages/apply.js";
 import { mount as presets } from "./pages/presets.js";
+import { mount as startPage } from "./pages/start.js";
 import { mountVersions } from "./versions.js";
 
 const page = /** @type {HTMLElement} */ (document.getElementById("page"));
@@ -94,6 +95,9 @@ function render() {
   switch (r.page) {
     case "overview":
       cleanup = overview(page, { navigate });
+      break;
+    case "start":
+      cleanup = startPage(page);
       break;
     case "host":
       cleanup = host(page, { navigate });

@@ -180,6 +180,10 @@ const FILES: &[(&str, &[u8])] = &[
         "js/pages/presets.js",
         include_bytes!("../web/js/pages/presets.js"),
     ),
+    (
+        "js/pages/start.js",
+        include_bytes!("../web/js/pages/start.js"),
+    ),
     ("css/app.css", include_bytes!("../web/css/app.css")),
 ];
 

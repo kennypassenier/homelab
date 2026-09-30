@@ -323,6 +323,9 @@ pub enum Command {
     /// — and on 2026-09-03 it turned out it had never worked at all (F205,
     /// F258). A backup you cannot run is a backup nobody verifies.
     BackupDevices,
+    /// replace-homepage (2026-09-30): the start page's tiles as the stacks
+    /// declare them, each with its reading taken now. Read-only; JSON.
+    Tiles,
     /// G17: the questions only a person can answer, as the host has them on
     /// record. Read-only; the deploy is what puts them there.
     ListManualChecks {
@@ -578,6 +581,7 @@ impl Command {
             | FleetCheck { .. }
             | Today { .. }
             | ListManualChecks { .. }
+            | Tiles
             | SessionOptions { .. }
             | CurrentOp
             | History { .. }
@@ -667,6 +671,7 @@ impl Command {
             SetStackEnabled { .. } => "set_stack_enabled",
             BackupDevices => "backup_devices",
             ListManualChecks { .. } => "list_manual_checks",
+            Tiles => "tiles",
             AnswerManualCheck { .. } => "answer_manual_check",
             SessionOptions { .. } => "session_options",
             CurrentOp => "current_op",

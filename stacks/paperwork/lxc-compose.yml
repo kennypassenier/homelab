@@ -180,3 +180,23 @@ firewall:
 homepage_widgets:
   paperless:
     kind: paperlessngx
+
+# replace-homepage (Kenny, 2026-09-30): this stack's tiles on the dashboard's
+# start page, keyed by the hostname they open (or an id with `url:`). Moved
+# here from Homepage's services-overlay.yml; groups follow their lowest order.
+tiles:
+  docs.kp-soft.dev:
+    name: "Paperless"
+    group: "Papierwerk"
+    order: 201
+    description: "Documentarchief"
+  budget.kp-soft.dev:
+    name: "Actual Budget"
+    group: "Papierwerk"
+    order: 202
+    description: "Huishoudboekje"
+  pdf.kp-soft.dev:
+    name: "Stirling PDF"
+    group: "Papierwerk"
+    order: 203
+    description: "PDF-gereedschap"

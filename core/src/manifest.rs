@@ -548,6 +548,10 @@ pub struct Tile {
     /// One line under the name.
     #[serde(default)]
     pub description: Option<String>,
+    /// Where the tile opens when it is not `https://<key>/` (an address on
+    /// the house network, or a page inside an app).
+    #[serde(default)]
+    pub url: Option<String>,
     /// Shell run in the stack's container whose output lines are shown on
     /// the tile ("3 in the queue"); reads the app's own key from its own
     /// config and prints only what is shown. A failure shows as such.

@@ -116,6 +116,10 @@ async fn incidents(State(c): State<Ctx>) -> Response {
     report(&c, "incidents", Command::Incidents { json: true }).await
 }
 
+async fn tiles(State(c): State<Ctx>) -> Response {
+    report(&c, "the start page", Command::Tiles).await
+}
+
 async fn manual_checks(State(c): State<Ctx>) -> Response {
     report(
         &c,
@@ -162,6 +166,7 @@ pub fn router(
         .route("/data/doctor", get(doctor))
         .route("/data/incidents", get(incidents))
         .route("/data/manual-checks", get(manual_checks))
+        .route("/data/tiles", get(tiles))
         .route("/data/current-op", get(current_op))
         .route("/data/history", get(history))
         .with_state(Ctx {

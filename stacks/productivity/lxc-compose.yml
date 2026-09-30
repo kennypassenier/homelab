@@ -156,3 +156,13 @@ firewall:
       proto: tcp
       dport: "22,1900"
       note: Kenny's desktop (ssh and the web ports the homepage tiles link to)
+
+# replace-homepage (Kenny, 2026-09-30): this stack's tiles on the dashboard's
+# start page, keyed by the hostname they open (or an id with `url:`). Moved
+# here from Homepage's services-overlay.yml; groups follow their lowest order.
+tiles:
+  sp.kp-soft.dev:
+    name: "SuperSync"
+    group: "Huis"
+    order: 304
+    description: "Super Productivity"

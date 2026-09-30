@@ -1290,3 +1290,40 @@ td.stack-flags {
   }
 }
 /* ==== END Live view cursor ==== */
+
+/* replace-homepage (2026-09-30): the start page's tiles. */
+.start {
+  display: grid;
+  gap: 20px;
+}
+.start-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 12px;
+}
+.start-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+.start-tile:hover,
+.start-tile:focus-visible {
+  border-color: var(--primary);
+}
+.start-tile__name {
+  font-weight: 600;
+}
+.start-tile__desc,
+.start-tile__line {
+  font-size: 0.9em;
+  color: var(--muted-foreground);
+}
+.start-tile__error {
+  font-size: 0.85em;
+  color: var(--destructive);
+}

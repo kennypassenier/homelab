@@ -226,3 +226,29 @@ generated_dashboards_command: |
   P=$(sed -n 's/^GRAFANA_GF_ADMIN_PASSWORD=//p' /opt/metrics/grafana/.env)
   S=$(printf 'user = "%s:%s"\n' "$U" "$P" | curl -sf -m 15 -K - 'http://127.0.0.1:3000/api/search?tag=generated&limit=500') || exit 1
   printf '%s' "$S" | jq -r '.[].uid'
+
+# replace-homepage (Kenny, 2026-09-30): this stack's tiles on the dashboard's
+# start page, keyed by the hostname they open (or an id with `url:`). Moved
+# here from Homepage's services-overlay.yml; groups follow their lowest order.
+tiles:
+  grafana.kp-soft.dev:
+    name: "Grafana"
+    group: "Infrastructuur"
+    order: 502
+    description: "Grafieken"
+  prom.kp-soft.dev:
+    name: "Prometheus"
+    group: "Infrastructuur"
+    order: 506
+    description: "Metingen"
+  alerts.kp-soft.dev:
+    name: "Alertmanager"
+    group: "Infrastructuur"
+    order: 507
+    description: "Meldingen"
+  loki-explore:
+    name: "Loki"
+    group: "Infrastructuur"
+    order: 508
+    description: "Logboeken"
+    url: "https://grafana.kp-soft.dev/explore"

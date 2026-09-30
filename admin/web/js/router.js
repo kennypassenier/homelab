@@ -19,7 +19,7 @@ export const STACK_TABS = /** @type {const} */ ([
 /** @typedef {(typeof STACK_TABS)[number]["tab"]} StackTab */
 
 /**
- * @typedef {{page: "overview"} | {page: "host"} |
+ * @typedef {{page: "overview"} | {page: "start"} | {page: "host"} |
  *   {page: "stack", name: string, tab: StackTab} |
  *   {page: "activity"} | {page: "timeline"} | {page: "checks"} |
  *   {page: "doctor"} | {page: "jobs"} | {page: "schedules"} |
@@ -34,6 +34,8 @@ export const STACK_TABS = /** @type {const} */ ([
  * 1280 px); a page without one is a top-level link.
  */
 export const NAV = /** @type {const} */ ([
+  // replace-homepage (2026-09-30): the tiles the stacks declare.
+  { page: "start", href: "/app/start", label: "Start" },
   { page: "overview", href: "/app/", label: "Overview" },
   // TUI parity: `homelab today`, the morning question in one answer.
   { page: "today", href: "/app/today", label: "Today" },
@@ -93,6 +95,7 @@ export const OTHER_PAGES = /** @type {const} */ ([
 /** @type {Record<string, Route>} */
 const FIXED = {
   "": { page: "overview" },
+  start: { page: "start" },
   host: { page: "host" },
   activity: { page: "activity" },
   timeline: { page: "timeline" },

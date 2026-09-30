@@ -139,3 +139,16 @@ probes:
     healthy: {at_least: 1}
     layer: user_visible
     blind_spot: "one poster served by Jellyfin; the phone app itself is not asked"
+
+# O10 / app-knowledge (Kenny, 2026-09-30: "Alles verplaatsen"): is anybody
+# watching? Asked before an update or a nightly backup stops Jellyfin. A
+# session with a NowPlayingItem counts, paused or not: restarting the server
+# drops it either way. Prints nothing when idle, a line per viewer when not,
+# and FAILS when it cannot tell (no key, no answer, not a list of sessions),
+# which counts as in use. The key goes in through curl -K -, never argv.
+busy_check:
+  command: |
+    K=$(sqlite3 "file:/appdata/media/jellyfin-config/data/jellyfin.db?mode=ro" 'select AccessToken from ApiKeys limit 1') || exit 1
+    S=$(printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -sf -m 10 -K - http://127.0.0.1:8096/Sessions) || { echo "Jellyfin did not answer" >&2; exit 1; }
+    [ -n "$S" ] || { echo "Jellyfin returned nothing" >&2; exit 1; }
+    printf '%s' "$S" | jq -r 'if type == "array" then .[] | select(.NowPlayingItem != null) | "\(.UserName // "someone") is \(if .PlayState.IsPaused then "paused on" else "watching" end) \(.NowPlayingItem.Name // "something")" else error("not a list of sessions") end'

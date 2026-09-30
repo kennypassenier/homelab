@@ -27,6 +27,7 @@ fn checks(probes: Vec<Probe>, url: Option<&str>) -> BTreeMap<String, ServiceChec
             checks: Vec::new(),
             manual: Vec::new(),
             probes,
+            busy_check: None,
             url: url.map(String::from),
         },
     );

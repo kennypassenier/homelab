@@ -11,6 +11,7 @@ use homelab_core::sink::VecSink;
 
 fn manifest(vmid: u16, stack: &str) -> StackManifest {
     StackManifest {
+        homepage_widgets: Default::default(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),
@@ -2147,6 +2148,19 @@ async fn t1_deploy_writes_a_discovery_file_and_destroy_removes_it() {
     assert!(!native.contains(",\n  {"), "no dangling comma: {}", native);
 }
 
+/// O10 / app-knowledge (2026-09-30): the busy check a deploy registered for
+/// the test stack's apps, answering with `out`.
+async fn seed_busy(exec: &MockExecutor, out: CmdOutput) {
+    let store = homelab_core::state::StateStore::new(exec, "/var/lib/homelab");
+    let mut st = store.load().await.unwrap_or_default();
+    for app in ["app", "jellyfin"] {
+        st.busy_checks
+            .insert(format!("test/{}", app), "echo BUSYQ".into());
+    }
+    store.save(st).await.unwrap();
+    exec.respond_always("BUSYQ", out);
+}
+
 /// O10 end to end: an app that asks to be left alone while in use is skipped,
 /// and nothing is pulled or restarted. The check fails closed, so this also
 /// covers the case that matters most — Jellyfin answering with something the
@@ -2157,17 +2171,19 @@ async fn o10_an_app_in_use_is_skipped_entirely() {
     for (label, body) in [
         (
             "somebody watching",
-            r#"[{"UserName":"kenny","NowPlayingItem":{"Name":"Arrival"},"PlayState":{"IsPaused":true}}]"#,
+            CmdOutput::ok("kenny is paused on Arrival\n"),
         ),
-        ("an unreadable answer", "<html>502</html>"),
+        (
+            "an unreadable answer",
+            CmdOutput::failed(1, "not a list of sessions"),
+        ),
     ] {
         let exec = MockExecutor::new();
         exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
         exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test"));
         exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
         exec.respond_always("update.policy", CmdOutput::ok("auto\n"));
-        exec.respond_always("update.busy-check", CmdOutput::ok("jellyfin\n"));
-        exec.respond_always("Sessions", CmdOutput::ok(body));
+        seed_busy(&exec, body).await;
         let sink = VecSink::new();
         let j = NullJournal;
         let mut m = manifest(108, "test");
@@ -3412,6 +3428,7 @@ async fn t69_a_regressed_check_fails_the_deploy_when_nobody_is_watching() {
         homelab_core::checks::ServiceChecks {
             url: None,
             probes: Vec::new(),
+            busy_check: None,
             checks: vec![homelab_core::checks::Check {
                 name: "routes".into(),
                 command: "echo 28".into(),
@@ -3594,6 +3611,7 @@ async fn t69_an_operator_who_says_yes_lets_the_deploy_finish() {
         homelab_core::checks::ServiceChecks {
             url: None,
             probes: Vec::new(),
+            busy_check: None,
             checks: vec![homelab_core::checks::Check {
                 name: "routes".into(),
                 command: "echo 28".into(),
@@ -3688,14 +3706,7 @@ async fn a_destroy_that_takes_no_backup_always_says_why() {
 async fn f280_a_backup_does_not_stop_a_container_somebody_is_watching() {
     let exec = MockExecutor::new();
     mock_hostname(&exec, 108, "test");
-    exec.respond_always("com.homelab.update.busy-check", CmdOutput::ok("jellyfin\n"));
-    exec.respond_always(
-        "jellyfin.db",
-        CmdOutput::ok(
-            r#"[{"UserName":"kenny","NowPlayingItem":{"Name":"Arrival"},
-                 "PlayState":{"IsPaused":false}}]"#,
-        ),
-    );
+    seed_busy(&exec, CmdOutput::ok("kenny is watching Arrival\n")).await;
     let sink = VecSink::new();
     let j = NullJournal;
     let report = backup(
@@ -3750,8 +3761,7 @@ async fn f280_a_backup_does_not_stop_a_container_somebody_is_watching() {
 async fn f280_an_unanswerable_stack_is_left_alone_as_well() {
     let exec = MockExecutor::new();
     mock_hostname(&exec, 108, "test");
-    exec.respond_always("com.homelab.update.busy-check", CmdOutput::ok("jellyfin\n"));
-    exec.respond_always("jellyfin.db", CmdOutput::ok("<html>502</html>"));
+    seed_busy(&exec, CmdOutput::failed(1, "not a list of sessions")).await;
     let sink = VecSink::new();
     let j = NullJournal;
     let report = backup(
@@ -3770,8 +3780,7 @@ async fn f280_an_unanswerable_stack_is_left_alone_as_well() {
 async fn f280_an_idle_stack_is_backed_up_exactly_as_before() {
     let exec = MockExecutor::new();
     mock_hostname(&exec, 108, "test");
-    exec.respond_always("com.homelab.update.busy-check", CmdOutput::ok("jellyfin\n"));
-    exec.respond_always("jellyfin.db", CmdOutput::ok("[]"));
+    seed_busy(&exec, CmdOutput::ok("")).await;
     exec.respond_always("backup.pause=true --format", CmdOutput::ok("jellyfin\n"));
     let sink = VecSink::new();
     let j = NullJournal;

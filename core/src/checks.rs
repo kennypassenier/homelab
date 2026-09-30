@@ -110,12 +110,25 @@ pub struct ServiceChecks {
     /// reading must be, and anything else is a finding with the app's link.
     #[serde(default)]
     pub probes: Vec<Probe>,
+    /// O10 / app-knowledge (2026-09-30): how to tell that somebody is using
+    /// this app, so an update or a backup does not stop it under them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub busy_check: Option<BusyCheck>,
     /// checks-link (Kenny, 2026-09-30: "een link naar die toepassing in de
     /// notificatie"): where the application is opened. The client fills it
     /// from the stack's route file (the router whose service is this app)
     /// when the file does not name one; None when the app has no route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+}
+
+/// A command run inside the container: nothing on stdout when idle, one
+/// line per user when in use, a failure when it cannot tell (treated as in
+/// use).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BusyCheck {
+    pub command: String,
 }
 
 /// One nightly measurement with an absolute answer (checks-automate).

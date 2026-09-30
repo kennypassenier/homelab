@@ -136,6 +136,7 @@ impl Executor for HybridExec {
 
 fn spec(files_content: &str) -> DeploySpec {
     let mut m = homelab_core::manifest::StackManifest {
+        homepage_widgets: Default::default(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),

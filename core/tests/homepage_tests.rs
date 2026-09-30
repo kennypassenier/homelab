@@ -26,6 +26,27 @@ http:
           - url: "http://10.10.10.6:8096"
 "#;
 
+/// app-knowledge (Kenny, 2026-09-30): the widgets come from the stack files,
+/// so the tests read the repository's own declarations.
+fn widgets(
+    keys: std::collections::HashMap<String, String>,
+) -> homelab_core::ops::homepage::Widgets {
+    #[derive(serde::Deserialize)]
+    struct File {
+        #[serde(default)]
+        homepage_widgets:
+            std::collections::BTreeMap<String, homelab_core::manifest::HomepageWidget>,
+    }
+    let mut declared = std::collections::HashMap::new();
+    for stack in ["media", "paperwork"] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("../stacks/{}/lxc-compose.yml", stack));
+        let f: File = serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        declared.extend(f.homepage_widgets);
+    }
+    homelab_core::ops::homepage::Widgets { declared, keys }
+}
+
 /// covers: F166
 #[test]
 fn a_route_fragment_yields_its_hostnames_and_its_backends() {
@@ -53,7 +74,7 @@ fn a_route_fragment_yields_its_hostnames_and_its_backends() {
     // a widget going out through the public name meets Cloudflare Access and
     // gets a login page instead of an answer (Kenny's own note in the file
     // this replaced). So it is carried, and used for widgets only.
-    let page = services_yaml(&[("media".into(), got)], None, &Default::default());
+    let page = services_yaml(&[("media".into(), got)], None, &widgets(Default::default()));
     for line in page.lines() {
         if line.trim_start().starts_with("href:") || line.trim_start().starts_with("siteMonitor:") {
             assert!(
@@ -80,7 +101,7 @@ fn a_stack_without_routes_is_skipped_rather_than_rendered_empty() {
             ),
         ],
         None,
-        &Default::default(),
+        &widgets(Default::default()),
     );
     assert!(
         !out.contains("registry"),
@@ -109,8 +130,8 @@ fn rendering_twice_produces_the_same_bytes() {
         ],
     )];
     assert_eq!(
-        services_yaml(&stacks, None, &Default::default()),
-        services_yaml(&stacks, None, &Default::default()),
+        services_yaml(&stacks, None, &widgets(Default::default())),
+        services_yaml(&stacks, None, &widgets(Default::default())),
         "a deploy that changes nothing must write an identical file, or every \
          deploy reports a change that is not one"
     );
@@ -240,7 +261,7 @@ fn the_overlay_supplies_what_a_route_cannot_and_nothing_else() {
             ),
         ],
         Some(&ov),
-        &Default::default(),
+        &widgets(Default::default()),
     );
 
     // Kenny's name, group and icon survive the merge, and the widget is
@@ -309,8 +330,8 @@ fn merging_twice_produces_the_same_bytes() {
         }],
     )];
     assert_eq!(
-        services_yaml(&stacks, Some(&ov), &Default::default()),
-        services_yaml(&stacks, Some(&ov), &Default::default())
+        services_yaml(&stacks, Some(&ov), &widgets(Default::default())),
+        services_yaml(&stacks, Some(&ov), &widgets(Default::default()))
     );
 }
 
@@ -322,7 +343,7 @@ fn merging_twice_produces_the_same_bytes() {
 /// backend, and the key from the application itself.
 #[test]
 fn a_widget_is_derived_from_the_route_and_the_application() {
-    use homelab_core::ops::homepage::{parse_overlay, widget_for};
+    use homelab_core::ops::homepage::parse_overlay;
     let mut keys = std::collections::HashMap::new();
     keys.insert("jellyfin".to_string(), "THEKEY".to_string());
 
@@ -339,7 +360,7 @@ fn a_widget_is_derived_from_the_route_and_the_application() {
             }],
         )],
         Some(&ov),
-        &keys,
+        &widgets(keys),
     );
 
     assert!(out.contains("widget:"), "no widget generated: {}", out);
@@ -353,10 +374,17 @@ fn a_widget_is_derived_from_the_route_and_the_application() {
     assert!(out.contains("icon: jellyfin.svg"), "{}", out);
     assert!(out.contains("description: Films en series"), "{}", out);
 
-    // The route name and the widget name differ for seerr, and the table is
-    // where that lives rather than in anybody's config file.
-    assert_eq!(widget_for("seerr").map(|w| w.kind), Some("jellyseerr"));
-    assert!(widget_for("qbittorrent").is_none(), "no widget invented");
+    // The route name and the widget name differ for seerr; since
+    // app-knowledge (2026-09-30) the media stack file says so, not the code.
+    let w = widgets(Default::default());
+    assert_eq!(
+        w.declared.get("seerr").map(|w| w.kind.as_str()),
+        Some("jellyseerr")
+    );
+    assert!(
+        !w.declared.contains_key("qbittorrent"),
+        "no widget invented"
+    );
 }
 
 /// A key that cannot be read must fail visibly rather than vanish: the tile
@@ -374,7 +402,7 @@ fn a_missing_key_still_produces_a_widget() {
             }],
         )],
         None,
-        &Default::default(),
+        &widgets(Default::default()),
     );
     assert!(out.contains("type: sonarr"), "{}", out);
     assert!(
@@ -425,7 +453,7 @@ fn a_second_route_to_the_same_door_is_not_a_second_tile() {
             ],
         )],
         Some(&ov),
-        &Default::default(),
+        &widgets(Default::default()),
     );
 
     assert_eq!(
@@ -468,7 +496,7 @@ fn overlay_lines_sit_under_their_service_not_beside_it() {
             }],
         )],
         Some(&ov),
-        &Default::default(),
+        &widgets(Default::default()),
     );
     for line in out.lines() {
         let t = line.trim_start();
@@ -515,7 +543,7 @@ fn tiles_follow_the_order_written_in_the_overlay() {
             ),
         ],
         Some(&ov),
-        &Default::default(),
+        &widgets(Default::default()),
     );
     let jf = out.find("- Jellyfin:").expect("jellyfin missing");
     let qb = out.find("- qBittorrent:").expect("qbittorrent missing");
@@ -579,7 +607,7 @@ fn the_generated_page_is_valid_yaml() {
             ),
         ],
         Some(&ov),
-        &keys,
+        &widgets(keys),
     );
 
     let parsed: serde_yaml::Value = serde_yaml::from_str(&out)

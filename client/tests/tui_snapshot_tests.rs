@@ -211,6 +211,7 @@ fn plan_modal_previews_changes() {
     use homelab_proto::{BootSpec, DeploySpec, LxcSpec, NetworkSpec, ResourceSpec, StackManifest};
     let mut m = ready_model();
     let manifest = StackManifest {
+        homepage_widgets: Default::default(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),
@@ -1452,6 +1453,7 @@ fn d6_plan_diff_skip_update_and_line_previews() {
         mode: None,
     };
     let mut m = homelab_proto::StackManifest {
+        homepage_widgets: Default::default(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),
@@ -1704,6 +1706,7 @@ fn a_payload_the_link_cannot_carry_is_refused_with_a_reason() {
 fn the_runbook_names_the_repositories_restic_actually_uses() {
     use homelab_core::manifest::*;
     let mut m = StackManifest {
+        homepage_widgets: Default::default(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),

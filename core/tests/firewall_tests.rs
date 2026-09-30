@@ -285,6 +285,7 @@ rules:
 
 fn manifest(vmid: u16, stack: &str, spec: Option<FirewallSpec>) -> StackManifest {
     StackManifest {
+        homepage_widgets: Default::default(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),

@@ -31,6 +31,7 @@ const KUMA: &str = "/appdata/uptime/kuma-seeder-config/host-monitors.json";
 
 fn manifest(vmid: u16, stack: &str) -> StackManifest {
     StackManifest {
+        homepage_widgets: Default::default(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),

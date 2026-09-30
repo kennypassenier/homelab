@@ -510,7 +510,8 @@ pub async fn update(
         let mut skip_app: Option<String> = None;
         step!(runner, &busy_step, {
             // ctx.exec, not the tracing one: see `busy::app_busy`.
-            let Some(verdict) = crate::ops::busy::app_busy(ctx.exec, vmid, &stack, app).await?
+            let Some(verdict) =
+                crate::ops::busy::app_busy(ctx.exec, &ctx.state_dir, vmid, &stack, app).await?
             else {
                 return Ok(StepOutcome::Unchanged);
             };

@@ -3629,9 +3629,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 spec.manifest.vmid,
                 &spec.checks,
             );
+            let busy_before = st.busy_checks.clone();
+            crate::ops::busy::register(&mut st, &spec.manifest.stack_name, &spec.checks);
             if !questions.is_empty()
                 || st.manual_checks.len() != before
                 || st.probes != probes_before
+                || st.busy_checks != busy_before
             {
                 let _ = store.save(st).await;
             }

@@ -2917,6 +2917,29 @@ drops them all. 18 probes replaced or complemented manual questions on
 2026-09-30; each was run once for real, through `lxc-attach` as the host
 runs it, and read healthy.
 
+### App knowledge in the stack files
+
+app-knowledge (Kenny, 2026-09-30: "Alles verplaatsen"): what homelab knows
+about a particular app is declared in that app's stack files, not in code.
+
+- **Front-page tiles**: `homepage_widgets:` in `lxc-compose.yml`, keyed by
+  app, with `kind` (Homepage's widget name), an optional `key_command`
+  (prints the app's API key, run in its container, `{dir}` = its config
+  directory; without it the key comes from Homepage's own
+  `HOMEPAGE_VAR_<APP>`) and optional `extra` lines.
+- **"Is anybody using it"** (O10): `busy_check: {command: …}` in the app's
+  `checks.yml`. Asked before an update or a nightly backup stops the app:
+  nothing on stdout means idle, a line per user means in use, and a failing
+  command means it cannot tell, which counts as in use.
+
+```yaml
+# lxc-compose.yml
+homepage_widgets:
+  sonarr:
+    kind: sonarr
+    key_command: "sed -n 's|.*<ApiKey>\\(.*\\)</ApiKey>.*|\\1|p' {dir}/config.xml"
+```
+
 ### `homelab forget <stack>`: drop a stale record and its registrations
 
 For a stack whose container is already gone (removed by hand, or lost).

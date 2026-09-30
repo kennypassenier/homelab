@@ -10,6 +10,7 @@ use homelab_core::sink::VecSink;
 
 fn manifest(vmid: u16, stack: &str) -> StackManifest {
     StackManifest {
+        homepage_widgets: Default::default(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),
@@ -3054,25 +3055,22 @@ fn the_update_labels_the_code_reads_exist_somewhere_in_the_fleet() {
     assert!(files.len() > 20, "the stack sweep broke: {}", files.len());
     let all = files.join("\n");
 
-    for (label, why) in [
-        (
-            "com.homelab.update.stop-first",
-            "the Postgres services this was written for - a compose recreate makes \
-             their next start a recovery",
-        ),
-        (
-            "com.homelab.update.busy-check",
-            "Jellyfin, so an update does not replace it while somebody is watching",
-        ),
-    ] {
-        assert!(
-            all.contains(label),
-            "'{}' is read by the code and carried by no container, so the feature \
-             cannot run at all. It belongs on {}",
-            label,
-            why
-        );
-    }
+    let label = "com.homelab.update.stop-first";
+    assert!(
+        all.contains(label),
+        "'{}' is read by the code and carried by no container, so the feature \
+         cannot run at all. It belongs on the Postgres services this was written \
+         for - a compose recreate makes their next start a recovery",
+        label
+    );
+    // O10 moved out of labels (app-knowledge, 2026-09-30): the busy check is
+    // a `busy_check:` in an app's checks.yml, and at least one app declares
+    // it, or the feature cannot run at all.
+    let jellyfin = std::fs::read_to_string("../stacks/media/jellyfin/checks.yml").unwrap();
+    assert!(
+        jellyfin.contains("busy_check:"),
+        "Jellyfin lost its busy check"
+    );
 }
 
 /// G17 · a deploy that prints a manual check must also register it.

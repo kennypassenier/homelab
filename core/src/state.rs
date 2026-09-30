@@ -170,6 +170,10 @@ pub struct HostState {
     /// fleet check (nightly and `homelab check`), never answered by a person.
     #[serde(default)]
     pub probes: BTreeMap<String, ProbeRecord>,
+    /// O10 / app-knowledge (2026-09-30): each app's busy check as its
+    /// stack's last deploy declared it, keyed `stack/app`.
+    #[serde(default)]
+    pub busy_checks: BTreeMap<String, String>,
     /// G16: unix time of the last notification that actually arrived.
     #[serde(default)]
     pub last_notify_ok: u64,

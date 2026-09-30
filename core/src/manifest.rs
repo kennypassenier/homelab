@@ -20,6 +20,12 @@ pub struct StackManifest {
     #[serde(default)]
     pub storage: Vec<MountSpec>,
     pub apps: Vec<String>,
+    /// app-knowledge (Kenny, 2026-09-30: "Alles verplaatsen"): each app's
+    /// tile on the Homepage front page, keyed by app. It used to be a table
+    /// of seven apps in core/src/ops/homepage.rs, so a new app got a bare
+    /// link until the code learned about it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub homepage_widgets: BTreeMap<String, HomepageWidget>,
     /// A container that runs no docker at all: its services are native
     /// systemd units, adopted with C7 and supervised through their own
     /// `service.yml`. CT 109 (kyu, kyu-runner, http-switchboard) and CT 112
@@ -492,6 +498,22 @@ impl MountSpec {
     pub fn owner<'a>(&'a self, stack_name: &'a str) -> &'a str {
         self.app.as_deref().unwrap_or(stack_name)
     }
+}
+
+/// One app's Homepage widget (app-knowledge).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HomepageWidget {
+    /// What Homepage calls this widget (`sonarr`, `jellyseerr`, …).
+    pub kind: String,
+    /// Shell that prints the API key and nothing else, run inside the
+    /// container that owns the app; `{dir}` is its config directory. None:
+    /// the key comes from Homepage's own `.env` (`HOMEPAGE_VAR_<APP>`).
+    #[serde(default)]
+    pub key_command: Option<String>,
+    /// Extra lines for the widget block, verbatim.
+    #[serde(default)]
+    pub extra: Vec<String>,
 }
 
 // ── Deploy payload ───────────────────────────────────────────────────────────

@@ -60,6 +60,7 @@ fn manifest(
     retention: Option<Vec<RetentionTier>>,
 ) -> StackManifest {
     StackManifest {
+        homepage_widgets: Default::default(),
         firewall: None,
         registry_login: None,
         retention,

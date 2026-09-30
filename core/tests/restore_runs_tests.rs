@@ -50,6 +50,7 @@ fn mount(path: &str, app: &str) -> MountSpec {
 
 fn paperwork() -> StackManifest {
     StackManifest {
+        homepage_widgets: Default::default(),
         firewall: None,
         registry_login: None,
         retention: None,

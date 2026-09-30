@@ -98,97 +98,13 @@ pub fn entries_from_route(content: &str) -> Vec<Entry> {
     out
 }
 
-/// V6b (Kenny, 2026-09-02): "kan dat niet automatisch?"
-///
-/// A Homepage widget needs three things, and all three turned out to be
-/// readable without anyone typing them:
-///
-/// * **type** — what Homepage calls the app. Equal to the route name for
-///   seven of the nine widgets Kenny had; the other two are aliases and are
-///   spelled out below.
-/// * **url** — the LAN address. It is the backend the route already
-///   forwards to, which is exactly the address a widget must use: through
-///   the public name it would meet Cloudflare Access and get a login page.
-/// * **key** — an API key. NOT a thing to store beside the app: every one
-///   of these applications already keeps its own key on disk, in the config
-///   directory this orchestrator mounts and backs up. Reading it there is
-///   also the only reading that cannot go stale — the same lesson as F32,
-///   where a key copied into an `.env` had been dead for an unknown length
-///   of time while everything reported fine.
-///
-/// This table is knowledge about third-party software rather than a second
-/// copy of anything in this fleet, which is why it is allowed to be written
-/// down (Kenny's rule, 2026-09-02: never write what the system already
-/// knows). It sits in code so a test can reach it.
-pub struct WidgetSpec {
-    /// The route name, which is also the container's service name.
-    pub app: &'static str,
-    /// What Homepage calls this widget.
-    pub kind: &'static str,
-    /// Shell that prints the API key and nothing else, run INSIDE the
-    /// container that owns the app. `{dir}` is its config directory.
-    /// None = the widget needs a credential the application does not store
-    /// for us, and it comes from latch through Homepage's own `.env`.
-    pub key_cmd: Option<&'static str>,
-    /// Extra lines for the widget block, verbatim.
-    pub extra: &'static [&'static str],
-}
-
-pub const KNOWN_WIDGETS: &[WidgetSpec] = &[
-    WidgetSpec {
-        app: "jellyfin",
-        kind: "jellyfin",
-        // The same reading the busy check already does, for the same reason:
-        // ask the application which keys it accepts.
-        key_cmd: Some("sqlite3 {dir}/data/jellyfin.db 'select AccessToken from ApiKeys limit 1'"),
-        extra: &["enableNowPlaying: true", "enableBlocks: true"],
-    },
-    WidgetSpec {
-        app: "sonarr",
-        kind: "sonarr",
-        key_cmd: Some("sed -n 's|.*<ApiKey>\\(.*\\)</ApiKey>.*|\\1|p' {dir}/config.xml"),
-        extra: &[],
-    },
-    WidgetSpec {
-        app: "radarr",
-        kind: "radarr",
-        key_cmd: Some("sed -n 's|.*<ApiKey>\\(.*\\)</ApiKey>.*|\\1|p' {dir}/config.xml"),
-        extra: &[],
-    },
-    WidgetSpec {
-        app: "prowlarr",
-        kind: "prowlarr",
-        key_cmd: Some("sed -n 's|.*<ApiKey>\\(.*\\)</ApiKey>.*|\\1|p' {dir}/config.xml"),
-        extra: &[],
-    },
-    WidgetSpec {
-        app: "bazarr",
-        kind: "bazarr",
-        key_cmd: Some("sed -n 's/^ *apikey: *//p' {dir}/config/config.yaml | head -1"),
-        extra: &[],
-    },
-    // Route name and widget name differ: the route is `seerr`, the software
-    // Homepage knows is `jellyseerr`.
-    WidgetSpec {
-        app: "seerr",
-        kind: "jellyseerr",
-        key_cmd: Some(
-            "sed -n 's/.*\"apiKey\": *\"\\([^\"]*\\)\".*/\\1/p' {dir}/settings.json | head -1",
-        ),
-        extra: &[],
-    },
-    WidgetSpec {
-        app: "paperless",
-        kind: "paperlessngx",
-        // Paperless issues tokens per user through its API rather than
-        // keeping one on disk; Homepage reads it from its own .env.
-        key_cmd: None,
-        extra: &[],
-    },
-];
-
-pub fn widget_for(app: &str) -> Option<&'static WidgetSpec> {
-    KNOWN_WIDGETS.iter().find(|w| w.app == app)
+/// The widgets the fleet declares and the keys read for them: the stacks'
+/// `homepage_widgets` (app-knowledge, 2026-09-30), keyed by app, and each
+/// key as its app printed it.
+#[derive(Debug, Clone, Default)]
+pub struct Widgets {
+    pub declared: std::collections::HashMap<String, crate::manifest::HomepageWidget>,
+    pub keys: std::collections::HashMap<String, String>,
 }
 
 /// V6 (Kenny, 2026-09-02): what the orchestrator cannot derive from a route.
@@ -322,8 +238,9 @@ pub fn parse_overlay(text: &str) -> Overlay {
 /// and reports its own error, which is visible. Leaving the widget out
 /// entirely would look exactly like an app that has no widget, and that is
 /// the difference between "broken" and "nothing to show" disappearing again.
-fn widget_lines(e: &Entry, keys: &std::collections::HashMap<String, String>) -> Vec<String> {
-    let Some(spec) = widget_for(&e.app) else {
+fn widget_lines(e: &Entry, widgets: &Widgets) -> Vec<String> {
+    let keys = &widgets.keys;
+    let Some(spec) = widgets.declared.get(&e.app) else {
         return Vec::new();
     };
     let Some(url) = e.backend.as_deref() else {
@@ -348,7 +265,7 @@ fn widget_lines(e: &Entry, keys: &std::collections::HashMap<String, String>) -> 
             e.app.to_uppercase().replace('-', "_")
         )),
     }
-    for x in spec.extra {
+    for x in &spec.extra {
         out.push(format!("  {}", x));
     }
     out
@@ -357,7 +274,7 @@ fn widget_lines(e: &Entry, keys: &std::collections::HashMap<String, String>) -> 
 pub fn services_yaml(
     stacks: &[(String, Vec<Entry>)],
     overlay: Option<&Overlay>,
-    widget_keys: &std::collections::HashMap<String, String>,
+    widgets: &Widgets,
 ) -> String {
     let mut out = String::from(
         "# Generated by the homelab orchestrator — every stack that has a\n\
@@ -385,7 +302,7 @@ pub fn services_yaml(
                     "    - {}:\n        href: https://{}/\n        siteMonitor: https://{}/\n",
                     e.app, e.host, e.host
                 ));
-                for l in widget_lines(e, widget_keys) {
+                for l in widget_lines(e, widgets) {
                     out.push_str(&format!("        {}\n", l));
                 }
             }
@@ -440,7 +357,7 @@ pub fn services_yaml(
                 .and_then(|b| b.name.clone())
                 .unwrap_or_else(|| e.app.clone());
             let mut body = format!("    - {}:\n        href: {}\n", name, href);
-            let w = widget_lines(e, widget_keys);
+            let w = widget_lines(e, widgets);
             match blk {
                 Some(b) if !b.extra.is_empty() => {
                     // The overlay's own lines first — icon, description and

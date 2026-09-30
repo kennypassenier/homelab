@@ -115,33 +115,31 @@ pub async fn write_homepage_services(
     // Best-effort per app: a key that cannot be read leaves the widget
     // pointing at Homepage's own variable, which fails visibly rather than
     // silently.
-    let mut widget_keys: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
+    let mut widgets = crate::ops::homepage::Widgets::default();
     {
         let store = crate::state::StateStore::new(exec, &ctx.state_dir);
         let st = store.load().await.unwrap_or_default();
         for (stack, entries) in &stacks {
-            let Some(vmid) = st
-                .stacks
-                .get(stack)
-                .and_then(|s| s.manifest.as_ref())
-                .map(|mf| mf.vmid)
-            else {
+            let Some(mf) = st.stacks.get(stack).and_then(|s| s.manifest.as_ref()) else {
                 continue;
             };
             for e in entries {
-                let Some(spec) = crate::ops::homepage::widget_for(&e.app) else {
+                // app-knowledge: the stack file declares the widget.
+                let Some(spec) = mf.homepage_widgets.get(&e.app) else {
                     continue;
                 };
-                let Some(cmd) = spec.key_cmd else { continue };
+                widgets.declared.insert(e.app.clone(), spec.clone());
+                let Some(cmd) = spec.key_command.as_deref() else {
+                    continue;
+                };
                 // O7 makes this path the only legal one, so it is derived
                 // rather than looked up.
                 let dir = format!("/appdata/{}/{}-config", stack, e.app);
                 let script = cmd.replace("{dir}", &dir);
-                if let Ok(out) = pct_sh(ctx.exec, vmid, &script, 30).await {
+                if let Ok(out) = pct_sh(ctx.exec, mf.vmid, &script, 30).await {
                     let k = out.stdout.trim().to_string();
                     if out.success() && !k.is_empty() {
-                        widget_keys.insert(e.app.clone(), k);
+                        widgets.keys.insert(e.app.clone(), k);
                     }
                 }
             }
@@ -151,10 +149,10 @@ pub async fn write_homepage_services(
         ctx,
         format!(
             "[t51] widget keys read from the applications themselves: {}",
-            widget_keys.len()
+            widgets.keys.len()
         ),
     );
-    let body = crate::ops::homepage::services_yaml(&stacks, overlay.as_ref(), &widget_keys);
+    let body = crate::ops::homepage::services_yaml(&stacks, overlay.as_ref(), &widgets);
     match crate::ops::util::write_file_owned_like_dir(exec, dest, &body, 0o644).await {
         Ok(()) => {
             info(

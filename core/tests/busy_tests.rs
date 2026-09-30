@@ -6,7 +6,42 @@
 //! v1 check tested for a field called `IsPlaying` that does not exist, so its
 //! one positive case could never fire.
 
-use homelab_core::ops::busy::{jellyfin_busy, Busy};
+use homelab_core::ops::busy::{interpret, Busy};
+
+/// app-knowledge (2026-09-30): the Jellyfin reading lives in
+/// stacks/media/jellyfin/checks.yml. These fixtures run the part of that
+/// command after the fetch (the empty-answer guard and the jq program) with
+/// `S` set to Jellyfin's body, through a real `sh` and `jq`, and read the
+/// verdict the way the host does.
+fn jellyfin_busy(body: &str) -> Busy {
+    let text = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../stacks/media/jellyfin/checks.yml"),
+    )
+    .unwrap();
+    let sc: homelab_core::checks::ServiceChecks = serde_yaml::from_str(&text).unwrap();
+    let command = sc
+        .busy_check
+        .expect("jellyfin declares a busy check")
+        .command;
+    let tail: Vec<&str> = command
+        .lines()
+        .skip_while(|l| !l.starts_with("S=$("))
+        .skip(1)
+        .collect();
+    assert!(!tail.is_empty(), "the command's shape changed: {}", command);
+    let out = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(tail.join("\n"))
+        .env("S", body)
+        .output()
+        .expect("sh and jq on the test machine");
+    interpret(
+        out.status.success(),
+        &String::from_utf8_lossy(&out.stdout),
+        &String::from_utf8_lossy(&out.stderr),
+    )
+}
 
 /// The real answer when somebody has a film open and paused. It still counts:
 /// restarting the server drops the session either way.
@@ -98,73 +133,71 @@ fn o10_the_v1_field_is_not_what_decides() {
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::ops::backup::NightBackup;
-use homelab_core::ops::busy::{app_busy, wanted_check};
+use homelab_core::ops::busy::{app_busy, register};
+use homelab_core::state::{HostState, StateStore};
 
-const LABEL_CMD: &str = "com.homelab.update.busy-check";
-const SESSIONS_CMD: &str = "jellyfin.db";
+const STATE: &str = "/var/lib/homelab";
 
-fn watching() -> CmdOutput {
-    CmdOutput::ok(
-        r#"[{"Client":"Jellium Desktop","UserName":"kenny",
-             "NowPlayingItem":{"Name":"Arrival"},
-             "PlayState":{"IsPaused":false}}]"#,
-    )
+async fn with_busy_check(exec: &MockExecutor, app: &str, command: &str) {
+    let mut checks = std::collections::BTreeMap::new();
+    checks.insert(
+        app.to_string(),
+        homelab_core::checks::ServiceChecks {
+            busy_check: Some(homelab_core::checks::BusyCheck {
+                command: command.into(),
+            }),
+            ..Default::default()
+        },
+    );
+    let mut st = HostState::default();
+    register(&mut st, "media", &checks);
+    StateStore::new(exec, STATE).save(st).await.unwrap();
 }
 
-/// An app that carries no label is never asked — one call, not two.
+/// An app whose checks.yml declares no busy check is never asked.
 #[tokio::test]
 async fn o10_an_app_that_does_not_ask_is_not_questioned() {
     let exec = MockExecutor::new();
-    exec.respond_always(LABEL_CMD, CmdOutput::ok("\n"));
+    with_busy_check(&exec, "jellyfin", "echo SESSIONS").await;
     assert_eq!(
-        wanted_check(&exec, 106, "media", "sonarr").await.unwrap(),
+        app_busy(&exec, STATE, 106, "media", "sonarr")
+            .await
+            .unwrap(),
         None
     );
-    assert_eq!(app_busy(&exec, 106, "media", "sonarr").await.unwrap(), None);
     assert!(
-        exec.calls_containing(SESSIONS_CMD).is_empty(),
-        "an app with no busy-check label must not be interrogated"
+        exec.calls_containing("SESSIONS").is_empty(),
+        "an app with no busy check must not be interrogated"
     );
 }
 
-/// `docker inspect` prints `<no value>` for a label that is not there, and a
-/// non-empty string that means "absent" is exactly the kind of value that
-/// reads as present. It must not become a check named `<no value>`.
+/// The declared command runs in the app's container, and what it prints is
+/// who is using it.
 #[tokio::test]
-async fn o10_dockers_word_for_absent_is_not_a_check_name() {
+async fn o10_a_watching_session_is_seen_through_the_declared_command() {
     let exec = MockExecutor::new();
-    exec.respond_always(LABEL_CMD, CmdOutput::ok("<no value>\n"));
-    assert_eq!(
-        wanted_check(&exec, 106, "media", "sonarr").await.unwrap(),
-        None
-    );
-}
-
-/// A label naming a check nobody implemented fails closed rather than
-/// silently allowing the stop.
-#[tokio::test]
-async fn o10_an_unknown_check_name_counts_as_in_use() {
-    let exec = MockExecutor::new();
-    exec.respond_always(LABEL_CMD, CmdOutput::ok("plex\n"));
-    let v = app_busy(&exec, 106, "media", "plex")
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(!v.may_update(), "an unimplemented check must not allow it");
-    assert!(homelab_core::ops::busy::reason(&v).contains("no such check exists"));
-}
-
-#[tokio::test]
-async fn o10_a_watching_session_is_seen_through_the_shared_probe() {
-    let exec = MockExecutor::new();
-    exec.respond_always(LABEL_CMD, CmdOutput::ok("jellyfin\n"));
-    exec.respond_always(SESSIONS_CMD, watching());
-    let v = app_busy(&exec, 106, "media", "jellyfin")
+    with_busy_check(&exec, "jellyfin", "echo SESSIONS").await;
+    exec.respond_always("SESSIONS", CmdOutput::ok("kenny is watching Arrival\n"));
+    let v = app_busy(&exec, STATE, 106, "media", "jellyfin")
         .await
         .unwrap()
         .unwrap();
     assert!(!v.may_update());
     assert!(homelab_core::ops::busy::reason(&v).contains("Arrival"));
+}
+
+/// A command that fails is Unknown, and Unknown blocks: fail closed.
+#[tokio::test]
+async fn o10_a_failing_busy_check_counts_as_in_use() {
+    let exec = MockExecutor::new();
+    with_busy_check(&exec, "jellyfin", "echo SESSIONS").await;
+    exec.respond_always("SESSIONS", CmdOutput::failed(1, "Jellyfin did not answer"));
+    let v = app_busy(&exec, STATE, 106, "media", "jellyfin")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!v.may_update());
+    assert!(homelab_core::ops::busy::reason(&v).contains("did not answer"));
 }
 
 // ── The night's three states ───────────────────────────────────────────────

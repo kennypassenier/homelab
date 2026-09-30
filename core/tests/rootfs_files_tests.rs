@@ -56,6 +56,7 @@ fn native_kyu_spec() -> DeploySpec {
         native_binaries: Default::default(),
         native_manifests: Default::default(),
         manifest: StackManifest {
+            homepage_widgets: Default::default(),
             registry_login: None,
             retention: None,
             data_mounts: Vec::new(),

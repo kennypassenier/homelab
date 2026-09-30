@@ -35,6 +35,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
 
 fn paperwork() -> StackManifest {
     StackManifest {
+        homepage_widgets: Default::default(),
         firewall: None,
         registry_login: None,
         retention: None,

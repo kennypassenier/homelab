@@ -303,6 +303,8 @@ async fn unregister(
             let record = state.stacks.remove(stack_name);
             state.manual_checks.retain(|_, r| r.stack != stack_name);
             state.probes.retain(|_, r| r.stack != stack_name);
+            let prefix = format!("{}/", stack_name);
+            state.busy_checks.retain(|k, _| !k.starts_with(&prefix));
             // ask-9: what it leaves behind is kept forever by default, and
             // recorded so the fleet check can say so and `homelab wipe` can
             // find it. The state's own manifest first (it is what applied),

@@ -92,12 +92,6 @@ firewall:
       proto: tcp
       dport: "3100,9090"
       note: Loki (logs panel, Alloy push) and Prometheus (capacity, disk growth)
-    - dir: out
-      action: ACCEPT
-      dest: 10.10.10.4
-      proto: tcp
-      dport: "80"
-      note: the minute watch asks each tile through Traefik (replace-kuma)
     - comment: "every other neighbour in VLAN 10 stays out of reach"
       dir: out
       action: DROP

@@ -52,10 +52,10 @@ Environment=HOMELAB_ADMIN_CHARTS_HOST=pve
 # replace-goaccess (2026-09-30): the Loki job the gateway's log_files gives
 # Traefik's access log.
 Environment=HOMELAB_ADMIN_TRAFFIC_JOB=access
-# replace-kuma (2026-09-30): the minute watch asks each tile's address
-# through Traefik's plain entrypoint on the house network (TLS ends at
-# Cloudflare), not through the internet's front door.
-Environment=HOMELAB_ADMIN_WATCH_VIA=10.10.10.4:80
+# replace-kuma (2026-09-30): HOMELAB_ADMIN_WATCH_VIA is not set yet. Asking
+# the tiles through Traefik's :80 would reopen the Host-header route to the
+# Proxmox and OPNsense logins that fix-89 closed; how the tiles are watched
+# is Kenny's call. Until then the watch covers containers and the host.
 # Live view announces every step this long before taking it (Kenny,
 # 2026-09-29, form "Live view tempo": 5 s; 3 s was "soms nog wat te snel").
 Environment=HOMELAB_ADMIN_LIVE_ANNOUNCE_MS=5000

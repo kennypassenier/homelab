@@ -513,15 +513,20 @@ async fn fix_90_the_dashboard_question_is_asked_where_grafana_runs() {
         &serde_json::json!({
             "schema_version": 1,
             "stacks": {
-                "media": {"vmid": 106, "hostname": "106-app-media", "apps": ["jellyfin"], "applied_at": 1, "manifest": null}
+                "media": {"vmid": 106, "hostname": "106-app-media", "apps": ["jellyfin"], "applied_at": 1, "manifest": null},
+                // app-knowledge (2026-09-30): the question is the command the
+                // metrics stack declares, run where that stack runs.
+                "metrics": {"vmid": 113, "hostname": "113-app-metrics", "apps": ["grafana"], "applied_at": 1,
+                    "manifest": serde_yaml::from_str::<serde_json::Value>(
+                        &std::fs::read_to_string(
+                            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks/metrics/lxc-compose.yml"),
+                        ).unwrap(),
+                    ).unwrap()}
             }
         })
         .to_string(),
     );
-    exec.respond_always(
-        "api/search?tag=generated",
-        CmdOutput::ok(r#"[{"uid":"homelab-media"}]"#),
-    );
+    exec.respond_always("api/search?tag=generated", CmdOutput::ok("homelab-media\n"));
     let mut inp = inputs();
     inp.prometheus_url = Some("http://10.10.10.13:9090".into());
     inp.grafana_dashboards_dir =

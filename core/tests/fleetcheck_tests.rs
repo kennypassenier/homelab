@@ -1343,11 +1343,12 @@ fn r13_the_finding_carries_the_percentage_and_the_free_space() {
         "the subject must name both the stack and the path: {}",
         f[0].subject
     );
-    // The remedy names the lever that is filling it, because on this fleet it
-    // is a known one — R13 chose to let the library grow.
+    // The remedy names the lever that is filling it — R13 chose to let the
+    // library grow — without naming the app that holds it (app-knowledge,
+    // 2026-09-30).
     assert!(
-        f[0].remedy.contains("until_score"),
-        "the remedy should name the upgrade setting: {}",
+        f[0].remedy.contains("quality upgrades"),
+        "the remedy should name the upgrade lever: {}",
         f[0].remedy
     );
 }

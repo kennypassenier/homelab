@@ -2520,10 +2520,11 @@ async fn storage_a_directory_the_app_does_not_mount_is_skipped() {
     );
 }
 
-/// gap-14: the seeder called `host · kyu` and `host · almanac` monitors of
-/// stacks the fleet does not have, because the generated list came only from
-/// stacks with a stack manifest in state — and an adopted native stack has
-/// none. Its address follows from its vmid, so it is on the list now.
+/// gap-14 as amended by app-knowledge (Kenny, 2026-09-30): a stack's address
+/// comes only from its stack file. A stack with no manifest in state (an
+/// adoption from before every stack was deployed from its file) gets no
+/// monitor rather than an address guessed from its vmid; since 2026-09-30
+/// all 15 stacks in state carry one.
 #[tokio::test]
 async fn gap14_the_monitor_list_carries_adopted_native_stacks() {
     let exec = MockExecutor::new();
@@ -2557,8 +2558,8 @@ async fn gap14_the_monitor_list_carries_adopted_native_stacks() {
         .file("/appdata/uptime/kuma-seeder-config/host-monitors.json")
         .expect("the monitor list is written");
     assert!(
-        body.contains("host · kyu") && body.contains("10.10.10.9"),
-        "the adopted native stack is on the list with its derived address: {}",
+        !body.contains("host · kyu"),
+        "no address is guessed for a stack without a manifest: {}",
         body
     );
     assert!(

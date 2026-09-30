@@ -12,5 +12,13 @@ checks:
       challenge succeeds — Cloudflare changes what it asks for, and the first
       sign of that is Prowlarr failing rather than this endpoint.
 
-manual:
-  - "Draai een test-zoekopdracht in Prowlarr op een indexeerder die Cloudflare gebruikt. Dat is de enige controle die de hele keten raakt."
+# checks-automate (Kenny, 2026-09-30: "Alles wat kan"): the questions a
+# machine can answer, measured in every fleet check. Tried once for real on
+# 2026-09-30, read-only; the reading then is in each probe's comment.
+probes:
+  # Read 2026-09-30: ok.
+  - name: "FlareSolverr gezond"
+    command: "wget -qO- http://localhost:8191/health | jq -r .status"
+    healthy: {equals: "ok"}
+    layer: application
+    blind_spot: "FlareSolverr answers; whether Cloudflare lets it through shows in Prowlarr's indexer status"

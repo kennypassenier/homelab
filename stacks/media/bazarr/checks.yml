@@ -30,5 +30,15 @@ checks:
       together separate "the container is gone" from "the container is up and
       blind" — on its own it says almost nothing.
 
-manual:
-  - "Kijk in Bazarr of er providers actief zijn. Een lege providerlijst vindt nul ondertitels omdat er niet meer gezocht wordt, niet omdat alles gevonden is."
+# checks-automate (Kenny, 2026-09-30: "Alles wat kan"): the questions a
+# machine can answer, measured in every fleet check. Tried once for real on
+# 2026-09-30, read-only; the reading then is in each probe's comment.
+probes:
+  # Read 2026-09-30: 4.
+  - name: "providers met status Good"
+    command: |
+      K=$(awk '/^auth:/{f=1} f&&/apikey:/{print $2; exit}' /appdata/media/bazarr-config/config/config.yaml)
+      C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-API-KEY: $K" > "$C"
+      wget --config="$C" -qO- http://localhost:6767/api/providers | jq '[.data[]|select(.status=="Good")]|length'
+    healthy: {at_least: 1}
+    layer: application

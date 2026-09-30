@@ -66,6 +66,16 @@ checks:
       indexers were failing during the rebuild and all three were healthy an
       hour later — the number alone would have looked like damage.
 
-manual:
-  - "Kijk in Sonarr of een recent afgeleverde aflevering in de juiste map staat."
-  - "Controleer of een handmatige zoekopdracht resultaten geeft — dat raakt de indexers, die geen enkele meting hier dekt."
+# checks-automate (Kenny, 2026-09-30: "Alles wat kan"): the questions a
+# machine can answer, measured in every fleet check. Tried once for real on
+# 2026-09-30, read-only; the reading then is in each probe's comment.
+probes:
+  # Read 2026-09-30: 0.
+  - name: "series buiten de root folders"
+    command: |
+      K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml)
+      C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-Api-Key: $K" > "$C"
+      R=$(wget --config="$C" -qO- http://localhost:8989/api/v3/rootfolder | jq -c '[.[].path]')
+      wget --config="$C" -qO- http://localhost:8989/api/v3/series | jq --argjson r "$R" '[.[]|.path as $p|select(any($r[]; . as $x|$p|startswith($x+"/"))|not)]|length'
+    healthy: {equals: "0"}
+    layer: application

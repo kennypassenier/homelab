@@ -104,6 +104,7 @@ fn y4_a_healthy_fleet_is_silent() {
         stack(113, "113-app-metrics", true, NOW - 3600),
     )]);
     let live = LiveFacts {
+        probe_readings: Vec::new(),
         patch: Vec::new(),
         seed: Default::default(),
         digests: vec![],

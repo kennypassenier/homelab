@@ -41,5 +41,13 @@ checks:
       This is the reading the Uptime Kuma monitor takes, and it is 200 for a
       page with nothing on it — which is what it has been.
 
-manual:
-  - "Kijk of de startpagina de diensten toont die je verwacht. Een lege Homepage antwoordt net zo vrolijk met 200 als een volle."
+# checks-automate (Kenny, 2026-09-30: "Alles wat kan"): what a machine can
+# measure of the question above, in every fleet check. Tried once for real on
+# 2026-09-30, read-only; the reading then is in each probe's comment.
+probes:
+  # Read 2026-09-30: ok (27 of 27).
+  - name: "startpagina toont elke geconfigureerde dienst"
+    command: |
+      docker exec homepage sh -c 'a=$(wget -qO- http://127.0.0.1:3000/api/services | node -e "let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>{const g=JSON.parse(s);const n=x=>x.reduce((a,e)=>a+(e.services?n(e.services):1),0);console.log(n(g))})"); c=$(grep -cE "^ +- [^:]+:$" /app/config/services.yaml); if [ "$a" -ge 1 ] && [ "$a" = "$c" ]; then echo ok; else echo "api=$a config=$c"; fi'
+    healthy: {equals: "ok"}
+    layer: application

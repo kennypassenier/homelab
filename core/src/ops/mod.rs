@@ -42,6 +42,7 @@ pub mod patch;
 pub mod pinexists;
 pub mod pins;
 pub mod pool;
+pub mod probes;
 pub mod reconcile;
 pub mod registry_cache;
 pub mod resize;

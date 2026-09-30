@@ -155,6 +155,7 @@ fn blind_spots_are_reported_with_a_green_result() {
 fn a_service_whose_deepest_check_is_a_port_is_refused() {
     let sc = ServiceChecks {
         url: None,
+        probes: Vec::new(),
         checks: vec![Check {
             name: "poort antwoordt".into(),
             command: "curl -s -o /dev/null -w %{http_code} http://127.0.0.1:8096/".into(),
@@ -181,6 +182,7 @@ fn a_service_whose_deepest_check_is_a_port_is_refused() {
 fn a_shallow_check_must_declare_its_blind_spot() {
     let mut sc = ServiceChecks {
         url: None,
+        probes: Vec::new(),
         checks: vec![
             Check {
                 name: "poort antwoordt".into(),

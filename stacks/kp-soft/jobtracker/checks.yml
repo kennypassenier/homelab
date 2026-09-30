@@ -67,3 +67,15 @@ manual:
   # checks-onetime (Kenny, 2026-09-30): answered ok once is answered for good.
   - text: "Registreer een passkey na je eerste wachtwoord-login, anders blijft het wachtwoord de enige sleutel."
     once: true
+
+# checks-automate (Kenny, 2026-09-30: "Alles wat kan"): what a machine can
+# measure of the question above, in every fleet check. Tried once for real on
+# 2026-09-30, read-only; the reading then is in each probe's comment.
+probes:
+  # Read 2026-09-30: 2.
+  - name: "dossiers in de gegevens"
+    command: |
+      docker exec jobtracker sh -c 'find /appdata/jobtracker/repo/applications -mindepth 2 -maxdepth 2 -type d ! -name ".*" | wc -l'
+    healthy: {at_least: 1}
+    layer: application
+    blind_spot: "the dossiers are on disk; that the login shows them is the question above"

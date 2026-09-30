@@ -2887,6 +2887,36 @@ verdict is the note (`client/src/main.rs:388-421`). An unknown id answers
 `no manual check has id <id>` (`host/src/main.rs:3878-3882`). Redeploying
 never resets an answer (`core/src/ops/manualchecks.rs:45-50`).
 
+### Probes: the questions a machine can answer
+
+checks-automate (Kenny, 2026-09-30: "Alles wat kan"). A `checks.yml` may
+hold `probes:` beside `checks:` and `manual:`. Each probe is a command run
+inside the stack's container with `sh -c` in every fleet check (nightly and
+`homelab check`/`today`); its trimmed stdout is the reading and `healthy`
+says what it must be, as a map with one key:
+
+```yaml
+probes:
+  - name: "torrents op missingFiles"
+    command: |
+      K=$(sed -n 's/^WebUI\\APIKey=//p' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
+      docker exec qbittorrent curl -sf -H "Authorization: Bearer $K" \
+        http://localhost:8080/api/v2/torrents/info | jq '[.[]|select(.state=="missingFiles")]|length'
+    healthy: {equals: "0"}      # or {at_least: 1}, {at_most: 0}
+    layer: application
+    blind_spot: "what this does not prove"
+```
+
+A command reads the app's own key from the app's own config inside the
+container and prints only the reading, so no secret enters the repository.
+A reading outside `healthy` is a `broken` finding naming the probe, the
+reading and the app's address (checks-link); a command that fails is
+`drift` ("could not be read"). The deploy registers a stack's probes and
+drops the ones that left its files (`core/src/ops/probes.rs`); a destroy
+drops them all. 18 probes replaced or complemented manual questions on
+2026-09-30; each was run once for real, through `lxc-attach` as the host
+runs it, and read healthy.
+
 ### `homelab forget <stack>`: drop a stale record and its registrations
 
 For a stack whose container is already gone (removed by hand, or lost).

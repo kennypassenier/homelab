@@ -103,12 +103,112 @@ pub struct ServiceChecks {
     /// go and find (form I2).
     #[serde(default)]
     pub manual: Vec<ManualCheck>,
+    /// checks-automate (Kenny, 2026-09-30: "Alles wat kan"): what a manual
+    /// question asked a person to look at, measured every night instead.
+    /// Unlike `checks` (a reading taken before and after an update and
+    /// compared), a probe has an absolute answer: `healthy` says what the
+    /// reading must be, and anything else is a finding with the app's link.
+    #[serde(default)]
+    pub probes: Vec<Probe>,
     /// checks-link (Kenny, 2026-09-30: "een link naar die toepassing in de
     /// notificatie"): where the application is opened. The client fills it
     /// from the stack's route file (the router whose service is this app)
     /// when the file does not name one; None when the app has no route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+}
+
+/// One nightly measurement with an absolute answer (checks-automate).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Probe {
+    /// Shown to Kenny, so it says what it means.
+    pub name: String,
+    /// Run inside the container with `sh -c`; its stdout, trimmed, is the
+    /// reading. It may read the app's own key from the app's own config, and
+    /// prints only the reading.
+    pub command: String,
+    pub healthy: Healthy,
+    pub layer: Layer,
+    /// What this probe does NOT prove, in one line.
+    #[serde(default)]
+    pub blind_spot: Option<String>,
+}
+
+/// What a probe's reading must be. Written in checks.yml as a map with one
+/// key: `healthy: {equals: "0"}`, `{at_least: 1}` or `{at_most: 0}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "HealthySpec", into = "HealthySpec")]
+pub enum Healthy {
+    /// Exactly this text.
+    Equals(String),
+    /// A whole number at least this big.
+    AtLeast(i64),
+    /// A whole number at most this big.
+    AtMost(i64),
+}
+
+/// The map form of [`Healthy`], exactly one key set.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HealthySpec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    equals: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    at_least: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    at_most: Option<i64>,
+}
+
+impl TryFrom<HealthySpec> for Healthy {
+    type Error = String;
+    fn try_from(h: HealthySpec) -> Result<Self, String> {
+        match (h.equals, h.at_least, h.at_most) {
+            (Some(e), None, None) => Ok(Healthy::Equals(e)),
+            (None, Some(n), None) => Ok(Healthy::AtLeast(n)),
+            (None, None, Some(n)) => Ok(Healthy::AtMost(n)),
+            _ => Err("healthy takes exactly one of equals, at_least, at_most".into()),
+        }
+    }
+}
+
+impl From<Healthy> for HealthySpec {
+    fn from(h: Healthy) -> Self {
+        match h {
+            Healthy::Equals(e) => HealthySpec {
+                equals: Some(e),
+                ..Default::default()
+            },
+            Healthy::AtLeast(n) => HealthySpec {
+                at_least: Some(n),
+                ..Default::default()
+            },
+            Healthy::AtMost(n) => HealthySpec {
+                at_most: Some(n),
+                ..Default::default()
+            },
+        }
+    }
+}
+
+impl Healthy {
+    pub fn judge(&self, reading: &str) -> bool {
+        let r = reading.trim();
+        match self {
+            Healthy::Equals(want) => r == want,
+            Healthy::AtLeast(n) => r.parse::<i64>().is_ok_and(|v| v >= *n),
+            Healthy::AtMost(n) => r.parse::<i64>().is_ok_and(|v| v <= *n),
+        }
+    }
+
+    /// In words, for a finding: "0", "at least 1", "at most 0".
+    pub fn describe(&self) -> String {
+        match self {
+            Healthy::Equals(want) => format!("\"{}\"", want),
+            Healthy::AtLeast(n) => format!("at least {}", n),
+            Healthy::AtMost(n) => format!("at most {}", n),
+        }
+    }
 }
 
 /// One question only a person can answer: the plain text, or the text with

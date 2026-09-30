@@ -51,6 +51,8 @@ pub struct Finding {
 pub struct LiveFacts {
     /// vmid → hostname, for every container that exists on the hypervisor.
     pub containers: Vec<(u16, String)>,
+    /// checks-automate: each registered probe, read in its container.
+    pub probe_readings: Vec<crate::ops::probes::ProbeReading>,
     /// Route file name → the address it forwards to, and whether anything
     /// answered there.
     pub routes: Vec<RouteFact>,
@@ -1292,6 +1294,7 @@ pub fn evaluate(
         crate::ops::secondcopy::DEFAULT_CHECK_INTERVAL_S,
     ));
     out.extend(crate::ops::manualchecks::evaluate_manual(state, now_unix));
+    out.extend(crate::ops::probes::evaluate(state, &live.probe_readings));
 
     for r in &live.routes {
         if !r.answered {

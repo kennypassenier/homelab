@@ -38,3 +38,15 @@ checks:
 
 manual:
   - "Maak een testafspraak via almanac en kijk of hij in Google Calendar verschijnt. Een verlopen token laat de dienst gezond ogen en levert niets af."
+
+# checks-automate (Kenny, 2026-09-30: "Alles wat kan"): what a machine can
+# measure of the question above, in every fleet check. Tried once for real on
+# 2026-09-30, read-only; the reading then is in each probe's comment.
+probes:
+  # Read 2026-09-30: 0/0/0.
+  - name: "mislukt/dood/wachtend naar Google Calendar"
+    command: |
+      wget -qO- http://127.0.0.1:8080/metrics | awk '/^almanac_deliveries_failed_total/{f=$2} /^almanac_entries_dead_total/{d=$2} /^almanac_journal_pending/{p=$2} END{printf "%d/%d/%d\n", f, d, p}'
+    healthy: {equals: "0/0/0"}
+    layer: application
+    blind_spot: "almanac exposes no time of its last delivery, so a token that silently stopped working with nothing to deliver reads the same"

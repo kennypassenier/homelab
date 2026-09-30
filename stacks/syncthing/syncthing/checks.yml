@@ -39,5 +39,14 @@ checks:
       kept because a change in it still says something — but it is the example
       this whole file exists to argue against.
 
-manual:
-  - "Open de syncthing-webpagina op 10.10.10.8:8384 en kijk of je vault erbij staat en 'Up to Date' meldt. Een lege syncthing meldt zichzelf net zo gezond als een werkende (F163)."
+# checks-automate (Kenny, 2026-09-30: "Alles wat kan"): what a machine can
+# measure of the question above, in every fleet check. Tried once for real on
+# 2026-09-30, read-only; the reading then is in each probe's comment.
+probes:
+  # Read 2026-09-30: idle/0/0.
+  - name: "vault (obsidian-vault): toestand/nodig/fouten"
+    command: |
+      docker exec syncthing sh -c 'K=$(sed -n "s:.*<apikey>\(.*\)</apikey>.*:\1:p" /var/syncthing/config/config.xml); printf "header = \"X-API-Key: %s\"\n" "$K" | curl -sf -K - "http://127.0.0.1:8384/rest/db/status?folder=obsidian-vault"' | jq -r '"\(.state)/\(.needTotalItems)/\(.errors)"'
+    healthy: {equals: "idle/0/0"}
+    layer: application
+    blind_spot: "this device's view; a remote device that stopped syncing shows in its own status"

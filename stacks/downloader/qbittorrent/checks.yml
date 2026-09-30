@@ -39,7 +39,33 @@ checks:
       Counts top-level entries, so it distinguishes an empty mount from a
       populated one. It says nothing about the files below them.
 
-manual:
-  - "Open qBittorrent en kijk of er torrents op 'missingFiles' staan — dat is de meting die hier ontbreekt en de belangrijkste van allemaal."
-  - "Controleer of de actieve downloads vooruitgaan en niet allemaal op nul staan."
-  - "Kijk bij één afgeronde download of het bestand echt op de juiste schijf staat."
+# checks-automate (Kenny, 2026-09-30: "Alles wat kan"): the questions a
+# machine can answer, measured in every fleet check. Tried once for real on
+# 2026-09-30, read-only; the reading then is in each probe's comment.
+probes:
+  # Read 2026-09-30: 0.
+  - name: "torrents op missingFiles"
+    command: |
+      K=$(sed -n 's/^WebUI\\APIKey=//p' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
+      T=$(printf 'header = "Authorization: Bearer %s"\n' "$K" | docker exec -i qbittorrent curl -sf -K - http://localhost:8080/api/v2/torrents/info) || exit 1
+      echo "$T" | jq '[.[]|select(.state=="missingFiles")]|length'
+    healthy: {equals: "0"}
+    layer: application
+  # Read 2026-09-30: ok (nothing was downloading).
+  - name: "actieve downloads bewegen"
+    command: |
+      K=$(sed -n 's/^WebUI\\APIKey=//p' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
+      T=$(printf 'header = "Authorization: Bearer %s"\n' "$K" | docker exec -i qbittorrent curl -sf -K - http://localhost:8080/api/v2/torrents/info) || exit 1
+      echo "$T" | jq -r '[.[]|select(.state|test("^(downloading|stalledDL|metaDL|forcedDL)$"))] as $a | if ($a|length)==0 or ([$a[]|select(.dlspeed>0)]|length)>0 then "ok" else "stalled" end'
+    healthy: {equals: "ok"}
+    layer: application
+    blind_spot: "one reading; a download that pauses for a moment reads stalled once"
+  # Read 2026-09-30: 0.
+  - name: "afgeronde downloads buiten /downloads/completed"
+    command: |
+      K=$(sed -n 's/^WebUI\\APIKey=//p' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
+      T=$(printf 'header = "Authorization: Bearer %s"\n' "$K" | docker exec -i qbittorrent curl -sf -K - http://localhost:8080/api/v2/torrents/info) || exit 1
+      echo "$T" | jq '[.[]|select(.progress==1 and ((.content_path // .save_path)|startswith("/downloads/completed")|not))]|length'
+    healthy: {equals: "0"}
+    layer: application
+    blind_spot: "the path inside the container; that /downloads is the 18TB disk is the mount's question"

@@ -37,5 +37,16 @@ checks:
       change breaks all of them at once — but this reads the paths, not
       whether the films are there.
 
-manual:
-  - "Open Radarr en kijk of een recent binnengekomen film in de juiste map staat."
+# checks-automate (Kenny, 2026-09-30: "Alles wat kan"): the questions a
+# machine can answer, measured in every fleet check. Tried once for real on
+# 2026-09-30, read-only; the reading then is in each probe's comment.
+probes:
+  # Read 2026-09-30: 0.
+  - name: "films buiten de root folders"
+    command: |
+      K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/radarr-config/config.xml)
+      C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-Api-Key: $K" > "$C"
+      R=$(wget --config="$C" -qO- http://localhost:7878/api/v3/rootfolder | jq -c '[.[].path]')
+      wget --config="$C" -qO- http://localhost:7878/api/v3/movie | jq --argjson r "$R" '[.[]|.path as $p|select(any($r[]; . as $x|$p|startswith($x+"/"))|not)]|length'
+    healthy: {equals: "0"}
+    layer: application

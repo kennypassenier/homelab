@@ -28,5 +28,14 @@ checks:
       file; it does not prove GoAccess still writes it — the reading above is
       what asks that.
 
-manual:
-  - "Open http://10.10.10.4:7881/ op het huisnetwerk en kijk of het tellertje beweegt terwijl je kijkt — dat is het bewijs dat de websocket het doet. Via een publieke naam is dit rapport niet meer bereikbaar, met opzet."
+# checks-automate (Kenny, 2026-09-30: "Alles wat kan"): what a machine can
+# measure of the question above, in every fleet check. Tried once for real on
+# 2026-09-30, read-only; the reading then is in each probe's comment.
+probes:
+  # Read 2026-09-30: 101 (the websocket upgrades; curl then times out, on purpose).
+  - name: "live-teller: websocket antwoordt"
+    command: |
+      curl -s -m 3 -o /dev/null -w "%{http_code}" -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" http://127.0.0.1:7880/ || true
+    healthy: {equals: "101"}
+    layer: application
+    blind_spot: "the websocket accepts; that the counter moves also needs traffic in Traefik's access log"

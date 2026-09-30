@@ -302,6 +302,7 @@ async fn unregister(
             let mut state = store.load().await?;
             let record = state.stacks.remove(stack_name);
             state.manual_checks.retain(|_, r| r.stack != stack_name);
+            state.probes.retain(|_, r| r.stack != stack_name);
             // ask-9: what it leaves behind is kept forever by default, and
             // recorded so the fleet check can say so and `homelab wipe` can
             // find it. The state's own manifest first (it is what applied),

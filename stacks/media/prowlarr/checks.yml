@@ -25,5 +25,24 @@ checks:
       How many warnings there are, not whether they matter. Three failing
       indexers during the rebuild were all healthy an hour later.
 
-manual:
-  - "Doe een handmatige zoekopdracht in Prowlarr — dat is de enige manier om te zien of de indexers echt antwoorden."
+# checks-automate (Kenny, 2026-09-30: "Alles wat kan"): the questions a
+# machine can answer, measured in every fleet check. Tried once for real on
+# 2026-09-30, read-only; the reading then is in each probe's comment.
+probes:
+  # Read 2026-09-30: 0.
+  - name: "indexeerders die falen of uitgeschakeld zijn"
+    command: |
+      K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/prowlarr-config/config.xml)
+      C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-Api-Key: $K" > "$C"
+      wget --config="$C" -qO- http://localhost:9696/api/v1/indexerstatus | jq length
+    healthy: {equals: "0"}
+    layer: application
+    blind_spot: "Prowlarr's own view of its indexers; no search is run (that would load the indexers every night)"
+  # Read 2026-09-30: 0.
+  - name: "gezondheidsmeldingen van Prowlarr"
+    command: |
+      K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/prowlarr-config/config.xml)
+      C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-Api-Key: $K" > "$C"
+      wget --config="$C" -qO- http://localhost:9696/api/v1/health | jq length
+    healthy: {equals: "0"}
+    layer: application

@@ -165,6 +165,11 @@ pub struct HostState {
     /// different question and the old answer no longer applies.
     #[serde(default)]
     pub manual_checks: BTreeMap<String, ManualCheckRecord>,
+    /// checks-automate (2026-09-30): each stack's nightly probes, as its last
+    /// deploy declared them, keyed by `probes::id_for`. Measured by every
+    /// fleet check (nightly and `homelab check`), never answered by a person.
+    #[serde(default)]
+    pub probes: BTreeMap<String, ProbeRecord>,
     /// G16: unix time of the last notification that actually arrived.
     #[serde(default)]
     pub last_notify_ok: u64,
@@ -361,6 +366,18 @@ pub struct RetiredRecord {
 }
 
 /// One thing only a person can confirm, and the last word on it.
+/// checks-automate: one probe as a deploy registered it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProbeRecord {
+    pub stack: String,
+    pub app: String,
+    pub vmid: u16,
+    pub probe: crate::checks::Probe,
+    /// Where the application is opened (checks-link).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManualCheckRecord {
     pub stack: String,

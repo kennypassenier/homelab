@@ -3621,7 +3621,18 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 &questions,
                 ctx.now_unix,
             );
-            if !questions.is_empty() || st.manual_checks.len() != before {
+            // checks-automate: the stack's probes, as this deploy declares them.
+            let probes_before = st.probes.clone();
+            crate::ops::probes::register(
+                &mut st,
+                &spec.manifest.stack_name,
+                spec.manifest.vmid,
+                &spec.checks,
+            );
+            if !questions.is_empty()
+                || st.manual_checks.len() != before
+                || st.probes != probes_before
+            {
                 let _ = store.save(st).await;
             }
         }

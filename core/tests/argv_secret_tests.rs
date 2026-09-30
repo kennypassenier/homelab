@@ -39,7 +39,8 @@ fn credential_in_curl_argv(line: &str) -> bool {
     if code.starts_with("//") || code.starts_with('#') {
         return false;
     }
-    let Some(at) = line.find("curl ") else {
+    // checks-automate (2026-09-30): wget's `--header` is argv the same way.
+    let Some(at) = line.find("curl ").or_else(|| line.find("wget ")) else {
         return false;
     };
     let rest = &line[at..];
@@ -50,12 +51,15 @@ fn credential_in_curl_argv(line: &str) -> bool {
     // header or a query string is in argv just the same, readable through
     // /proc/<pid>/cmdline while curl runs; about 25 service checks and the
     // busy probe did that.
-    let header = rest.match_indices("-H ").any(|(i, _)| {
-        rest[i..]
-            .split_whitespace()
-            .take(4)
-            .any(|w| w.contains('$'))
-    });
+    let header = rest
+        .match_indices("-H ")
+        .chain(rest.match_indices("--header "))
+        .any(|(i, _)| {
+            rest[i..]
+                .split_whitespace()
+                .take(4)
+                .any(|w| w.contains('$'))
+        });
     let query = ["api_key=$", "apikey=$", "token=$"]
         .iter()
         .any(|p| rest.contains(p));

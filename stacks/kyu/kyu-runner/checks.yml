@@ -13,3 +13,15 @@ checks:
 
 manual:
   - "Stuur een testbericht door de keten en kijk of het in Home Assistant aankomt. Elke schakel meldt zichzelf gezond, ook op de dag dat de keten in het midden stuk was."
+
+# checks-automate (Kenny, 2026-09-30: "Alles wat kan"): what a machine can
+# measure of the question above, in every fleet check. Tried once for real on
+# 2026-09-30, read-only; the reading then is in each probe's comment.
+probes:
+  # Read 2026-09-30: 0 (346 delivered).
+  - name: "berichten die Home Assistant weigerde"
+    command: |
+      wget -qO- http://10.10.10.9:8082/metrics | awk '/^kyu_runner_nacked_total/{n+=$2} END{printf "%d\n", n}'
+    healthy: {equals: "0"}
+    layer: application
+    blind_spot: "HA accepted each message; that the right automation acted on it is the question above"

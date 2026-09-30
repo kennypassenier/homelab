@@ -115,4 +115,27 @@ manual:
   - "Speel een film af op de televisie en kijk of het beeld klopt."
   - "Controleer of het geluid synchroon loopt bij een aflevering met AC3-geluid."
   - "Open een film met ingebrande ondertitels en kijk of die leesbaar zijn."
-  - "Kijk in de Jellyfin-app op je telefoon of de posters geladen worden — het artwork staat op een aparte schijf."
+# checks-automate (Kenny, 2026-09-30: "Alles wat kan"): the questions a
+# machine can answer, measured in every fleet check. Tried once for real on
+# 2026-09-30, read-only; the reading then is in each probe's comment.
+probes:
+  # Read 2026-09-30: 0 of 1167 without a poster.
+  - name: "films en series zonder poster"
+    command: |
+      K=$(sqlite3 "file:/appdata/media/jellyfin-config/data/jellyfin.db?mode=ro" "select AccessToken from ApiKeys where Name='Homelab';")
+      C=$(mktemp); trap 'rm -f "$C"' EXIT; printf 'header = Authorization: MediaBrowser Token="%s"\n' "$K" > "$C"
+      A=$(wget --config="$C" -qO- "http://localhost:8096/Items?Recursive=true&IncludeItemTypes=Movie,Series&Limit=0" | jq .TotalRecordCount)
+      P=$(wget --config="$C" -qO- "http://localhost:8096/Items?Recursive=true&IncludeItemTypes=Movie,Series&ImageTypes=Primary&Limit=0" | jq .TotalRecordCount)
+      echo $((A-P))
+    healthy: {equals: "0"}
+    layer: application
+  # Read 2026-09-30: 59561 bytes (resized; full size is larger).
+  - name: "poster van de nieuwste film, bytes van de artwork-schijf"
+    command: |
+      K=$(sqlite3 "file:/appdata/media/jellyfin-config/data/jellyfin.db?mode=ro" "select AccessToken from ApiKeys where Name='Homelab';")
+      C=$(mktemp); trap 'rm -f "$C"' EXIT; printf 'header = Authorization: MediaBrowser Token="%s"\n' "$K" > "$C"
+      ID=$(wget --config="$C" -qO- "http://localhost:8096/Items?Recursive=true&IncludeItemTypes=Movie&ImageTypes=Primary&SortBy=DateCreated&SortOrder=Descending&Limit=1" | jq -r '.Items[0].Id')
+      wget -qO- "http://localhost:8096/Items/$ID/Images/Primary" | wc -c
+    healthy: {at_least: 1}
+    layer: user_visible
+    blind_spot: "one poster served by Jellyfin; the phone app itself is not asked"

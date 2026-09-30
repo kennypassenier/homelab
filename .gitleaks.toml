@@ -46,3 +46,10 @@ condition = "AND"
 paths = ['''^stacks/admin/admin/admin\.service$''', '''^stacks/admin/rootfs/etc/homelab-admin/config\.toml$''']
 regexTarget = "line"
 regexes = ['''(HOMELAB_ADMIN_ACCESS_AUD=|access_aud = ")[0-9a-f]{64}''']
+
+[[allowlists]]
+description = "GoAccess websocket probe: RFC 6455's own sample Sec-WebSocket-Key (base64 of 'the sample nonce'), a handshake nonce, not a secret"
+condition = "AND"
+paths = ['''^stacks/gateway/goaccess/checks\.yml$''']
+regexTarget = "line"
+regexes = ['''Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==''']

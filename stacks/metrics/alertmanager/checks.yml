@@ -28,3 +28,15 @@ checks:
 
 manual:
   - "Stuur één keer per kwartaal een testalarm door de hele keten en kijk of het op je telefoon aankomt. Dat is het enige dat het middenstuk bewijst — elke schakel apart meldt zichzelf gezond, ook toen de keten stuk was."
+
+# checks-automate (Kenny, 2026-09-30: "Alles wat kan"): what a machine can
+# measure of the question above, in every fleet check. Tried once for real on
+# 2026-09-30, read-only; the reading then is in each probe's comment.
+probes:
+  # Read 2026-09-30: 0.
+  - name: "mislukte meldingen van Alertmanager, 7 dagen"
+    command: |
+      wget -qO- 'http://127.0.0.1:9090/api/v1/query?query=sum(increase(alertmanager_notifications_failed_total%5B7d%5D))' | jq -r '(.data.result[0].value[1] // "0") | tonumber | floor'
+    healthy: {equals: "0"}
+    layer: application
+    blind_spot: "Alertmanager handed every alert on; that the phone showed it is the question above"

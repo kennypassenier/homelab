@@ -793,6 +793,42 @@ pub async fn gather_live_facts_with(
     .flatten()
     .collect();
 
+    // checks-automate (2026-09-30): every probe the deploys registered,
+    // read in its own container. A failed command is a reading too ("could
+    // not be read"); the evaluation turns both into findings.
+    progress("reading each app's probes…");
+    let probe_records = crate::state::StateStore::new(exec, &inp.state_dir)
+        .load()
+        .await
+        .map(|st| st.probes)
+        .unwrap_or_default();
+    facts.probe_readings = crate::ops::pool::bounded(
+        probe_records
+            .into_iter()
+            .map(|(id, rec)| async move {
+                let reading = match exec
+                    .run(&crate::executor::attach_sh(
+                        rec.vmid,
+                        &rec.probe.command,
+                        60,
+                    ))
+                    .await
+                {
+                    Ok(out) if out.success() => Ok(out.stdout.trim().to_string()),
+                    Ok(out) => Err(format!(
+                        "exit {}: {}",
+                        out.code,
+                        out.stderr.trim().chars().take(160).collect::<String>()
+                    )),
+                    Err(e) => Err(e.to_string().chars().take(160).collect()),
+                };
+                crate::ops::probes::ProbeReading { id, reading }
+            })
+            .collect(),
+        crate::ops::pool::READ_CONCURRENCY,
+    )
+    .await;
+
     // Is each stack's safety net actually attached? Both questions are
     // skipped when their address is not configured: an unasked question must
     // never become a finding.

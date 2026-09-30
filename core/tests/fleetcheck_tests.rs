@@ -526,6 +526,7 @@ fn boot_manifest(vmid: u16, onboot: bool, order: u16, mem: u32, cores: u16) -> S
         home_address_whitelist: None,
         generated_dashboards_command: None,
         tiles: Default::default(),
+        log_files: Vec::new(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),

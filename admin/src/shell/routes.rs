@@ -185,6 +185,8 @@ pub struct ReadCtx {
     pub live: Live,
     pub loki: Option<Loki>,
     pub prometheus: Option<crate::shell::prometheus::Prometheus>,
+    /// replace-goaccess: the access log's Loki job (`admin.traffic_job`).
+    pub traffic_job: Option<String>,
 }
 
 /// replace-grafana: which charts, over how long.
@@ -400,6 +402,73 @@ async fn logs(State(c): State<ReadCtx>, Query(q): Query<LogQuery>) -> Response {
     }
 }
 
+/// replace-goaccess (Kenny, 2026-09-30): who visits the services from
+/// outside, from the proxy's access log in Loki: requests per hostname and
+/// per status over the window, and the busiest hostnames and client
+/// addresses in it. The log's fields are the proxy's own JSON names.
+async fn traffic(State(c): State<ReadCtx>, Query(q): Query<ChartQuery>) -> Response {
+    let (Some(loki), Some(job)) = (&c.loki, &c.traffic_job) else {
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the traffic",
+            "no Loki or no traffic_job is configured for this dashboard",
+            "set admin.loki_url and admin.traffic_job (the access log's Loki job)",
+        );
+    };
+    let Some((span, step)) = chart_window(q.range.as_deref()) else {
+        return refused(
+            StatusCode::BAD_REQUEST,
+            "the traffic",
+            "unknown range",
+            "use one of 1h, 6h, 24h, 7d, 30d",
+        );
+    };
+    let job = job.replace('"', "");
+    let sel = format!("{{job=\"{job}\"}} | json | __error__=\"\"");
+    let end = now_s();
+    let start = end.saturating_sub(span);
+    let per = |by: &str| format!("topk(8, sum by ({by}) (count_over_time({sel} [{step}s])))");
+    let panels = [
+        ("Requests per hostname", per("RequestHost"), "RequestHost"),
+        (
+            "Requests per status",
+            per("DownstreamStatus"),
+            "DownstreamStatus",
+        ),
+    ];
+    let mut out = Vec::new();
+    for (title, query, legend) in panels {
+        let panel = serde_json::json!({ "title": title, "query": query, "unit": "count", "legend": legend });
+        out.push(
+            match loki
+                .metric_range(&query, start, end, step, Some(legend))
+                .await
+            {
+                Ok(series) => serde_json::json!({ "panel": panel, "series": series }),
+                Err(e) => serde_json::json!({ "panel": panel, "series": [], "error": e }),
+            },
+        );
+    }
+    let top = |by: &str| format!("topk(20, sum by ({by}) (count_over_time({sel} [{span}s])))");
+    let hosts = loki
+        .metric_now(&top("RequestHost"), end, "RequestHost")
+        .await;
+    let clients = loki.metric_now(&top("ClientHost"), end, "ClientHost").await;
+    let table = |r: Result<Vec<(String, f64)>, String>| match r {
+        Ok(rows) => serde_json::json!({ "rows": rows }),
+        Err(e) => serde_json::json!({ "rows": [], "error": e }),
+    };
+    Json(serde_json::json!({
+        "panels": out,
+        "hosts": table(hosts),
+        "clients": table(clients),
+        "from": start,
+        "to": end,
+        "step": step,
+    }))
+    .into_response()
+}
+
 pub fn read_router(ctx: ReadCtx) -> Router {
     Router::new()
         .route("/data/host", get(host))
@@ -408,5 +477,6 @@ pub fn read_router(ctx: ReadCtx) -> Router {
         .route("/data/asks/answer", post(answer))
         .route("/data/logs", get(logs))
         .route("/data/charts", get(charts))
+        .route("/data/traffic", get(traffic))
         .with_state(ctx)
 }

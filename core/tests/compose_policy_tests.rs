@@ -37,6 +37,7 @@ fn paperwork() -> StackManifest {
         home_address_whitelist: None,
         generated_dashboards_command: None,
         tiles: Default::default(),
+        log_files: Vec::new(),
         firewall: None,
         registry_login: None,
         retention: None,

@@ -29,7 +29,8 @@ fn main() {
             &m.stack_name,
             &m.hostname,
             &loki,
-            &m.syslog_receivers
+            &m.syslog_receivers,
+            &m.log_files
         )
     );
 }

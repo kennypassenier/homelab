@@ -2641,6 +2641,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 &m.hostname,
                 loki,
                 &m.syslog_receivers,
+                &m.log_files,
             );
             let changed = push_content(
                 exec,

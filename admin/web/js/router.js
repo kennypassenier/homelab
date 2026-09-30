@@ -19,7 +19,7 @@ export const STACK_TABS = /** @type {const} */ ([
 /** @typedef {(typeof STACK_TABS)[number]["tab"]} StackTab */
 
 /**
- * @typedef {{page: "overview"} | {page: "start"} | {page: "charts"} | {page: "host"} |
+ * @typedef {{page: "overview"} | {page: "start"} | {page: "charts"} | {page: "traffic"} | {page: "host"} |
  *   {page: "stack", name: string, tab: StackTab} |
  *   {page: "activity"} | {page: "timeline"} | {page: "checks"} |
  *   {page: "doctor"} | {page: "jobs"} | {page: "schedules"} |
@@ -42,6 +42,8 @@ export const NAV = /** @type {const} */ ([
   { page: "host", href: "/app/host", label: "Host" },
   // replace-grafana (2026-09-30).
   { page: "charts", href: "/app/charts", label: "Charts" },
+  // replace-goaccess (2026-09-30).
+  { page: "traffic", href: "/app/traffic", label: "Traffic" },
   // TUI parity: LOG_STREAM, every host operation whoever started it.
   { page: "log", href: "/app/log", label: "Live log", group: "Operations" },
   { page: "jobs", href: "/app/jobs", label: "Jobs", group: "Operations" },
@@ -99,6 +101,7 @@ const FIXED = {
   "": { page: "overview" },
   start: { page: "start" },
   charts: { page: "charts" },
+  traffic: { page: "traffic" },
   host: { page: "host" },
   activity: { page: "activity" },
   timeline: { page: "timeline" },

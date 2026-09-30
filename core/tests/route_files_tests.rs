@@ -41,6 +41,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
         home_address_whitelist: None,
         generated_dashboards_command: None,
         tiles: Default::default(),
+        log_files: Vec::new(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),

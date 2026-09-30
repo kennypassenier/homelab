@@ -30,7 +30,7 @@ function svg(tag, attrs, ...kids) {
  * @param {number} from
  * @param {number} to
  */
-function panelEl(p, from, to) {
+export function panelEl(p, from, to) {
   const unit = p.panel.unit;
   const box = h(
     "figure",

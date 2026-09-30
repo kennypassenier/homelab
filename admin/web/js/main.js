@@ -31,6 +31,7 @@ import { mount as apply } from "./pages/apply.js";
 import { mount as presets } from "./pages/presets.js";
 import { mount as startPage } from "./pages/start.js";
 import { mount as chartsPage } from "./pages/charts.js";
+import { mount as trafficPage } from "./pages/traffic.js";
 import { mountVersions } from "./versions.js";
 
 const page = /** @type {HTMLElement} */ (document.getElementById("page"));
@@ -102,6 +103,9 @@ function render() {
       break;
     case "charts":
       cleanup = chartsPage(page, { navigate });
+      break;
+    case "traffic":
+      cleanup = trafficPage(page, { navigate });
       break;
     case "host":
       cleanup = host(page, { navigate });

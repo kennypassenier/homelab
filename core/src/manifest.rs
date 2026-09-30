@@ -46,6 +46,11 @@ pub struct StackManifest {
     /// go.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub tiles: BTreeMap<String, Tile>,
+    /// replace-goaccess (2026-09-30): log files inside the container that
+    /// the log shipper sends to Loki besides docker's and the journal's,
+    /// each under the `job` it names (Traefik's access log, `job=access`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub log_files: Vec<LogFile>,
     /// A container that runs no docker at all: its services are native
     /// systemd units, adopted with C7 and supervised through their own
     /// `service.yml`. CT 109 (kyu, kyu-runner, http-switchboard) and CT 112
@@ -532,6 +537,16 @@ pub struct HomeAddressWhitelist {
     pub test: String,
     /// Shell run in the container to make the app read the new file.
     pub reload: String,
+}
+
+/// A log file the shipper sends to Loki (replace-goaccess).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogFile {
+    /// Absolute path inside the container; a glob is allowed.
+    pub path: String,
+    /// The `job` label its lines carry in Loki.
+    pub job: String,
 }
 
 /// One tile on the start page (replace-homepage).

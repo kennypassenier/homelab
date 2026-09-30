@@ -8,7 +8,7 @@ export const PAD = { left: 56, right: 10, top: 10, bottom: 22 };
 
 /**
  * @typedef {{label: string, points: [number, number][]}} Series
- * @typedef {"cores" | "bytes" | "percent" | "celsius" | "flag"} Unit
+ * @typedef {"cores" | "bytes" | "percent" | "celsius" | "flag" | "count"} Unit
  */
 
 /**
@@ -36,6 +36,8 @@ export function formatValue(v, unit) {
       return v >= 1 ? v.toFixed(2) : `${(v * 1000).toFixed(0)} m`;
     case "flag":
       return v >= 1 ? "ok" : "not ok";
+    case "count":
+      return v >= 1000 ? `${(v / 1000).toFixed(1)} k` : v.toFixed(0);
     default:
       return String(v);
   }

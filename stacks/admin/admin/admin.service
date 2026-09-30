@@ -49,6 +49,9 @@ Environment=HOMELAB_ADMIN_LOKI_URL=http://10.10.10.13:3100
 # `host` label prometheus.yml gives the hypervisor's node exporter.
 Environment=HOMELAB_ADMIN_PROMETHEUS_URL=http://10.10.10.13:9090
 Environment=HOMELAB_ADMIN_CHARTS_HOST=pve
+# replace-goaccess (2026-09-30): the Loki job the gateway's log_files gives
+# Traefik's access log.
+Environment=HOMELAB_ADMIN_TRAFFIC_JOB=access
 # Live view announces every step this long before taking it (Kenny,
 # 2026-09-29, form "Live view tempo": 5 s; 3 s was "soms nog wat te snel").
 Environment=HOMELAB_ADMIN_LIVE_ANNOUNCE_MS=5000

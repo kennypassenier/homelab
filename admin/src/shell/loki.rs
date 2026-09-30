@@ -12,6 +12,84 @@ pub struct Loki {
     http: reqwest::Client,
 }
 
+/// replace-goaccess: a metric query over a window, as chart series.
+impl Loki {
+    pub async fn metric_range(
+        &self,
+        query: &str,
+        start: u64,
+        end: u64,
+        step: u64,
+        legend: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        let v = self
+            .get(
+                "query_range",
+                &[
+                    ("query", query.to_string()),
+                    ("start", start.to_string()),
+                    ("end", end.to_string()),
+                    ("step", format!("{}s", step)),
+                ],
+            )
+            .await?;
+        Ok(crate::shell::prometheus::series(&v, legend))
+    }
+
+    /// An instant metric query: `[(label value, number)]`, largest first.
+    pub async fn metric_now(
+        &self,
+        query: &str,
+        at: u64,
+        label: &str,
+    ) -> Result<Vec<(String, f64)>, String> {
+        let v = self
+            .get(
+                "query",
+                &[("query", query.to_string()), ("time", at.to_string())],
+            )
+            .await?;
+        let mut out: Vec<(String, f64)> = v["data"]["result"]
+            .as_array()
+            .map(|rs| {
+                rs.iter()
+                    .filter_map(|r| {
+                        let k = r["metric"][label].as_str().unwrap_or("").to_string();
+                        let n: f64 = r["value"][1].as_str()?.parse().ok()?;
+                        Some((k, n))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        Ok(out)
+    }
+
+    async fn get(&self, path: &str, q: &[(&str, String)]) -> Result<serde_json::Value, String> {
+        let url = format!("{}/loki/api/v1/{}", self.base, path);
+        let res = self
+            .http
+            .get(&url)
+            .query(q)
+            .send()
+            .await
+            .map_err(|e| format!("Loki at {} did not answer: {e}", self.base))?;
+        let status = res.status();
+        let body = res
+            .text()
+            .await
+            .map_err(|e| format!("Loki's answer broke off: {e}"))?;
+        if !status.is_success() {
+            return Err(format!(
+                "Loki answered HTTP {}: {}",
+                status.as_u16(),
+                body.chars().take(200).collect::<String>()
+            ));
+        }
+        serde_json::from_str(&body).map_err(|e| format!("Loki's answer did not read: {e}"))
+    }
+}
+
 /// What one query answered.
 pub struct Found {
     pub logql: String,

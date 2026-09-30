@@ -362,3 +362,10 @@ tiles:
     group: "Huis"
     order: 305
     description: "E-ink dashboard"
+
+# replace-goaccess (Kenny, 2026-09-30): Traefik's access log also goes to
+# Loki (job=access), so the dashboard's Traffic page reads it there instead
+# of GoAccess reading the file. One JSON object per request.
+log_files:
+  - path: /mnt/traefik-logs/access.log
+    job: access

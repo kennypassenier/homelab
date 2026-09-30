@@ -72,6 +72,11 @@ pub struct AdminConfig {
     /// host charts.
     #[serde(default)]
     pub charts_host: Option<String>,
+    /// replace-goaccess (2026-09-30): the Loki `job` of the proxy's access
+    /// log, one JSON object per request (a stack's `log_files:` declares
+    /// it). Unset: no Traffic page.
+    #[serde(default)]
+    pub traffic_job: Option<String>,
     /// Seconds one Loki query may take. Default 15.
     #[serde(default = "d_loki_timeout")]
     pub loki_timeout_s: u64,
@@ -270,6 +275,7 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<AdminConfig, 
         "loki_url",
         "prometheus_url",
         "charts_host",
+        "traffic_job",
     ];
     let mut t = toml::Table::new();
     for key in STRINGS {

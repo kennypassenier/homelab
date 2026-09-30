@@ -342,7 +342,7 @@ async fn main() -> std::process::ExitCode {
                         .map(|a| a.repo)
                         .unwrap_or_default();
                 let stacks = std::env::var("HOMELAB_ADMIN_DEMO_STACKS")
-                    .unwrap_or_else(|_| "media,home,drill,admin".into())
+                    .unwrap_or_else(|_| "films,notes,oldstack".into())
                     .split(',')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())

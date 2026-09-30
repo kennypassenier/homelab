@@ -576,7 +576,7 @@ async fn alertmanager_hook(
             Json(Refusal::new(
                 "alerts",
                 "no token is configured for this hook",
-                "set HOMELAB_ADMIN_ALERTS_TOKEN in admin.env (latch, environment admin) and the same value in /alertmanager/admin-token on CT 113",
+                "set HOMELAB_ADMIN_ALERTS_TOKEN in admin.env and the same value in the alert sender's credentials file, both through the stacks' latch_files",
             )),
         )
             .into_response();

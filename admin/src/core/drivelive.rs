@@ -194,7 +194,7 @@ fn plan_refused(why: impl Into<String>) -> Refusal {
     Refusal::new(
         "ui plan",
         why,
-        "list the steps that change the screen, e.g. homelab ui plan \"goto jobs\" \"open deploy media\" \"press confirm\"",
+        "list the steps that change the screen, e.g. homelab ui plan \"goto jobs\" \"open deploy mystack\" \"press confirm\"",
     )
 }
 

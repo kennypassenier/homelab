@@ -39,6 +39,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
 
 fn kyu() -> NativeServiceManifest {
     NativeServiceManifest {
+        restore_note: None,
         stack_name: "kyu".into(),
         vmid: 109,
         hostname: "109-app-kyu".into(),

@@ -28,6 +28,7 @@ fn scratch(name: &str) -> PathBuf {
 
 fn repo(host: &str) -> ClientConfig {
     ClientConfig {
+        edge_token_file: None,
         host: Some(host.into()),
         pin: None,
     }
@@ -75,6 +76,7 @@ fn without_a_repo_file_the_machine_file_speaks_and_then_the_default() {
 #[test]
 fn a_repo_file_without_a_host_line_changes_nothing() {
     let cfg = ClientConfig {
+        edge_token_file: None,
         host: None,
         pin: Some("AA:BB".into()),
     };

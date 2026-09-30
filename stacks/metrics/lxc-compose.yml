@@ -214,3 +214,15 @@ firewall:
       proto: tcp
       dport: "22,3000,9090,9093"
       note: Kenny's desktop (ssh and the web ports the homepage tiles link to)
+
+# app-knowledge (Kenny, 2026-09-30): the uids of the generated dashboards
+# Grafana serves, one per line, for the fleet check's comparison with the
+# ones homelab wrote (F149). The credential is read from Grafana's own .env
+# at the moment of asking and reaches curl through -K -, never argv. It fails
+# when Grafana does not answer, so a Grafana that is down is "not asked", not
+# "every dashboard missing". Tried 2026-09-30: 11 uids.
+generated_dashboards_command: |
+  U=$(sed -n 's/^GRAFANA_GF_ADMIN_USER=//p' /opt/metrics/grafana/.env)
+  P=$(sed -n 's/^GRAFANA_GF_ADMIN_PASSWORD=//p' /opt/metrics/grafana/.env)
+  S=$(printf 'user = "%s:%s"\n' "$U" "$P" | curl -sf -m 15 -K - 'http://127.0.0.1:3000/api/search?tag=generated&limit=500') || exit 1
+  printf '%s' "$S" | jq -r '.[].uid'

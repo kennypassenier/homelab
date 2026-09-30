@@ -213,7 +213,7 @@ pct exec <vmid> -- systemctl enable --now <unit>
 
 The program comes from the unit's GitHub release (named per unit in the Stacks section). On a workstation: `gh release download --repo <release_repo> --pattern <asset> --pattern SHA256SUMS`, then `sha256sum -c --ignore-missing SHA256SUMS`, then copy it to the host.
 
-When the daemon is up, `homelab deploy stacks/<stack>` rebuilds a native stack too: it creates the container, writes each `<unit>/<unit>.service`, creates the unit's account, places the program from the unit's release where none exists (it never replaces one), puts back env and credential files from the vault, and starts a unit only when all of that is present. A unit that is not running and whose data directories are empty gets its newest snapshot unpacked back first (fix-146); a unit archived from its own copy (`backup_from_newest`, kyu) is then left stopped until that copy is put in place as the live file. A unit left unstarted is named in the output; a missing program is installed with `homelab install-native stacks/<stack>/<unit>` (or `stacks/<stack>` for the unit whose `service.yml` sits at the top).
+When the daemon is up, `homelab deploy stacks/<stack>` rebuilds a native stack too: it creates the container, writes each `<unit>/<unit>.service`, creates the unit's account, places the program from the unit's release where none exists (it never replaces one), puts back env and credential files from the vault, and starts a unit only when all of that is present. A unit that is not running and whose data directories are empty gets its newest snapshot unpacked back first (fix-146); a unit archived from its own copy (`backup_from_newest`) is then left stopped until that copy is put in place as the live file. A unit left unstarted is named in the output; a missing program is installed with `homelab install-native stacks/<stack>/<unit>` (or `stacks/<stack>` for the unit whose `service.yml` sits at the top).
 
 ## Layer 3: Restore the daemon's own state (host-meta)
 
@@ -298,7 +298,7 @@ pct exec <vmid> -- systemctl start <unit>
 
 `homelab restore` refuses a native stack (gap-28): the compose route's `restic restore latest --target /` would write the archive itself to `/<unit>-data.tar` on the host and unpack nothing. For the same reason a rebuild's automatic restore finds no snapshot for a native unit's directory and leaves it empty: its data always comes back by the commands above.
 
-**A restore brings back what was retired after the snapshot** (gap-16). almanac retires a source by renaming its profile to `*.toml.retired` in `/appdata/almanac/almanac-config/profiles/`, at runtime and without a deploy. A snapshot taken before that rename still holds the live `*.toml`, so restoring it makes almanac load the retired source again. After restoring almanac, compare `ls /appdata/almanac/almanac-config/profiles/` with the list of retired sources before starting the service.
+A native unit may carry a restore note of its own; it is printed under that unit in the Stacks section.
 
 ## Layer 5: ZFS replicas
 
@@ -340,6 +340,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 - Container: hostname `112-app-almanac`, ip `10.10.10.12/24` on `vmbr0` VLAN 10, 1 core(s), 512 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order 50.
 - Runs no docker: native systemd services only.
 - Unit `almanac`:
+  - **Restore note:** A restore brings back what was retired after the snapshot. almanac retires a source by renaming its profile to `*.toml.retired` in `/appdata/almanac/almanac-config/profiles/`, at runtime and without a deploy. A snapshot taken before that rename still holds the live `*.toml`, so restoring it makes almanac load the retired source again. After restoring almanac, compare `ls /appdata/almanac/almanac-config/profiles/` with the list of retired sources before starting the service.
   - program `/opt/almanac/bin/almanac`, from the GitHub release `kennypassenier/almanac` (asset `almanac`); update policy self.
   - unit file `stacks/almanac/almanac/almanac.service` in the repository; the container's copy is `/etc/systemd/system/almanac.service`.
   - data: repository `rclone:gdrive:homelab-backups/almanac-config`, archive `/almanac-data.tar` holding a tar of `/appdata/almanac/almanac-config`.

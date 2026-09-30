@@ -64,6 +64,12 @@ pub struct NativeServiceManifest {
     /// a fabricated directory that would then be backed up for nothing.
     #[serde(default)]
     pub stateless: bool,
+    /// app-knowledge (2026-09-30): what a person restoring this service must
+    /// know that no generic step covers, printed in the DR runbook under the
+    /// unit. almanac's note about retired profiles used to be written into
+    /// the runbook generator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_note: Option<String>,
     /// T11: where the binary comes from when the orchestrator installs it —
     /// `owner/repo` of the GitHub release. None = this service is adopted
     /// only, and its binary arrived by a hand nobody wrote down. That was
@@ -187,8 +193,7 @@ pub fn validate_native(m: &NativeServiceManifest) -> Result<(), Vec<String>> {
         problems.push(
             "data_dirs is empty — a service with no declared state cannot be backed up; \
              declare at least one directory, or set `stateless: true` if it genuinely \
-             keeps none (kyu-runner is the real case: its unit says so and it runs \
-             under DynamicUser)"
+             keeps none (a unit that runs under DynamicUser with no state directory)"
                 .into(),
         );
     }

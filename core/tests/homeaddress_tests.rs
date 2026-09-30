@@ -9,7 +9,6 @@ use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::ops::fleetcheck::{alarming, Severity};
 use homelab_core::ops::homeaddress::{
     evaluate_home_address, parse_public, sync_home_address, whitelist_yaml, whitelisted_address,
-    WHITELIST_FILE,
 };
 use homelab_core::ops::util::staging_path;
 use homelab_core::ops::OpCtx;
@@ -19,6 +18,48 @@ use homelab_core::sink::VecSink;
 use homelab_core::state::HostState;
 
 const NOW: u64 = 1_790_000_000;
+
+/// app-knowledge (2026-09-30): the gateway stack file declares the whitelist.
+const WHITELIST_FILE: &str =
+    "/appdata/gateway/crowdsec-config/parsers/s02-enrich/homelab-home-address.yaml";
+
+/// Host state as a gateway deploy leaves it: the repository's own gateway
+/// stack file, whose `home_address_whitelist` names the file, the test and
+/// the reload.
+async fn seed_gateway(exec: &MockExecutor) {
+    let text = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks/gateway/lxc-compose.yml"),
+    )
+    .unwrap();
+    let m: homelab_core::manifest::StackManifest = serde_yaml::from_str(&text).unwrap();
+    assert_eq!(
+        m.home_address_whitelist.as_ref().map(|w| w.file.as_str()),
+        Some(WHITELIST_FILE)
+    );
+    let mut st = HostState::default();
+    st.stacks.insert(
+        "gateway".into(),
+        homelab_core::state::StackState {
+            applied_source: None,
+            vmid: m.vmid,
+            hostname: m.hostname.clone(),
+            apps: Vec::new(),
+            applied_at: 0,
+            last_backup: 0,
+            applied_hash: String::new(),
+            manifest: Some(m),
+            enabled: true,
+            natives: Vec::new(),
+            incomplete_step: None,
+            route_file: None,
+            extra_route_files: Vec::new(),
+        },
+    );
+    homelab_core::state::StateStore::new(exec, "/var/lib/homelab")
+        .save(st)
+        .await
+        .unwrap();
+}
 
 fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) -> OpCtx<'a> {
     OpCtx {
@@ -79,6 +120,7 @@ fn the_whitelist_names_the_address_and_reads_it_back() {
 #[tokio::test]
 async fn a_changed_address_rewrites_the_whitelist_and_reloads_crowdsec() {
     let exec = MockExecutor::new();
+    seed_gateway(&exec).await;
     exec.respond_always(
         &format!("cat '{}'", WHITELIST_FILE),
         CmdOutput::ok(&whitelist_yaml(home("62.235.8.100"))),
@@ -149,6 +191,7 @@ async fn a_changed_address_rewrites_the_whitelist_and_reloads_crowdsec() {
 #[tokio::test]
 async fn an_unchanged_address_touches_nothing() {
     let exec = MockExecutor::new();
+    seed_gateway(&exec).await;
     exec.respond_always(
         &format!("cat '{}'", WHITELIST_FILE),
         CmdOutput::ok(&whitelist_yaml(home("62.235.8.143"))),
@@ -184,6 +227,7 @@ async fn an_unchanged_address_touches_nothing() {
 #[tokio::test]
 async fn the_first_run_writes_the_whitelist() {
     let exec = MockExecutor::new();
+    seed_gateway(&exec).await;
     exec.respond_always(
         "cdn-cgi/trace",
         CmdOutput::ok("fl=1\nh=cloudflare.com\nip=62.235.8.143\nts=1\n"),
@@ -209,6 +253,7 @@ async fn the_first_run_writes_the_whitelist() {
 #[tokio::test]
 async fn an_unreadable_address_keeps_the_last_known_one() {
     let exec = MockExecutor::new();
+    seed_gateway(&exec).await;
     exec.respond_always(
         &format!("cat '{}'", WHITELIST_FILE),
         CmdOutput::ok(&whitelist_yaml(home("62.235.8.143"))),
@@ -265,6 +310,7 @@ async fn an_unreadable_address_keeps_the_last_known_one() {
 #[tokio::test]
 async fn a_whitelist_crowdsec_refuses_is_put_back() {
     let exec = MockExecutor::new();
+    seed_gateway(&exec).await;
     let before = whitelist_yaml(home("62.235.8.100"));
     exec.respond_always(&format!("cat '{}'", WHITELIST_FILE), CmdOutput::ok(&before));
     exec.respond_always(
@@ -334,6 +380,7 @@ fn fix_156_a_public_service_answer_is_read_and_checked() {
 #[tokio::test]
 async fn fix_156_ipify_answers_when_cloudflare_does_not() {
     let exec = MockExecutor::new();
+    seed_gateway(&exec).await;
     exec.respond_always(&format!("cat '{}'", WHITELIST_FILE), CmdOutput::ok(""));
     exec.respond_always(
         "cdn-cgi/trace",

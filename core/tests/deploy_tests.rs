@@ -11,6 +11,9 @@ use homelab_core::sink::VecSink;
 fn manifest(vmid: u16, stack: &str) -> StackManifest {
     StackManifest {
         homepage_widgets: Default::default(),
+        home_address_whitelist: None,
+        generated_dashboards_command: None,
+        tiles: Default::default(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),
@@ -3164,6 +3167,7 @@ mod native_from_zero {
 
     fn kyu_service(own_copy: bool) -> homelab_core::native::NativeServiceManifest {
         homelab_core::native::NativeServiceManifest {
+            restore_note: None,
             stack_name: "drill".into(),
             vmid: 118,
             hostname: "118-app-drill".into(),

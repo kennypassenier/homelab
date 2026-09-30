@@ -34,6 +34,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
 
 fn almanac(pause: bool) -> NativeServiceManifest {
     NativeServiceManifest {
+        restore_note: None,
         stack_name: "almanac".into(),
         vmid: 112,
         hostname: "112-app-almanac".into(),

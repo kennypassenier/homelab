@@ -186,45 +186,33 @@ pub fn parse_growth(vmid: u16, hostname: &str, stdout: &str) -> Option<GrowthFac
     probed.then_some(g)
 }
 
-/// The uids of the generated dashboards Grafana is actually serving.
+/// The uids of the generated dashboards the dashboard app is serving, asked
+/// with the command its stack declares (`generated_dashboards_command`,
+/// app-knowledge 2026-09-30): one uid per line.
 ///
-/// Asked of Grafana over its own API, with the credentials read from the
-/// app's `.env` at the moment of asking — a credential handed to a check
-/// goes stale without telling anybody (F131), and the service itself is the
-/// only source that cannot. The `.env` path is DERIVED from the dashboards
-/// directory rather than typed, because a second typed path is exactly what
-/// caused the fault this question exists to catch (F149).
+/// The command reads the app's credential at the moment of asking — a
+/// credential handed to a check goes stale without telling anybody (F131).
 ///
 /// `None` means the question could not be asked at all — never an empty
-/// answer, so a Grafana that is down does not turn every stack into a
+/// answer, so a dashboard app that is down does not turn every stack into a
 /// finding.
-pub async fn grafana_generated_uids(
+pub async fn generated_dashboard_uids(
     exec: &dyn Executor,
-    grafana_vmid: u16,
-    dashboards_dir: &str,
+    vmid: u16,
+    command: &str,
 ) -> Option<Vec<String>> {
-    let app_dir = std::path::Path::new(dashboards_dir).parent()?.to_str()?;
-    // fix-32: the credential reaches curl through `-K -` on stdin. `printf`
-    // is a shell builtin, so it never appears in any process's argv.
-    let script = format!(
-        "U=$(grep -h GRAFANA_GF_ADMIN_USER {0}/.env | cut -d= -f2); \
-         P=$(grep -h GRAFANA_GF_ADMIN_PASSWORD {0}/.env | cut -d= -f2); \
-         printf 'user = \"%s:%s\"\\n' \"$U\" \"$P\" | \
-         curl -s -m 15 -K - 'http://127.0.0.1:3000/api/search?tag=generated&limit=500'",
-        app_dir
-    );
     let out = exec
-        .run(&crate::executor::attach_sh(grafana_vmid, &script, 60))
+        .run(&crate::executor::attach_sh(vmid, command, 60))
         .await
         .ok()?;
-    if !out.stdout.contains("\"uid\"") {
+    if !out.success() {
         return None;
     }
     Some(
         out.stdout
-            .split("\"uid\":\"")
-            .skip(1)
-            .filter_map(|rest| rest.split('"').next())
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
             .map(str::to_string)
             .collect(),
     )
@@ -837,9 +825,15 @@ pub async fn gather_live_facts_with(
     let loki = inp.loki_url.as_deref();
     let window = &inp.logs_window;
     let provisioned_fut = async {
-        match inp.grafana_dashboards_dir.as_deref() {
-            Some(dir) => grafana_generated_uids(exec, inp.grafana_vmid, dir).await,
-            None => None,
+        let declared = snapshot.as_ref().and_then(|st| {
+            st.stacks.values().find_map(|s| {
+                let m = s.manifest.as_ref()?;
+                Some((m.vmid, m.generated_dashboards_command.clone()?))
+            })
+        });
+        match (inp.grafana_dashboards_dir.as_deref(), declared) {
+            (Some(_), Some((vmid, cmd))) => generated_dashboard_uids(exec, vmid, &cmd).await,
+            _ => None,
         }
     };
     // ops::pool: one future per recorded stack, a few at a time, and within a

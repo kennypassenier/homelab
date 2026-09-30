@@ -37,6 +37,11 @@ pub struct ClientConfig {
     /// hex, with or without a `SHA256:` prefix. A fresh machine pins this
     /// instead of trusting whatever answers first.
     pub pin: Option<String>,
+    /// app-knowledge (2026-09-30): the read-only Cloudflare token the edge
+    /// comparison uses, `~` for the home directory. Unset: the edge is not
+    /// compared. It used to be a path in client/src/edge.rs naming the zone.
+    #[serde(default)]
+    pub edge_token_file: Option<String>,
 }
 
 /// Where the address in use came from, so `homelab ping` can say so.

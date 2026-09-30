@@ -45,6 +45,9 @@ fn spec() -> DeploySpec {
         native_manifests: Default::default(),
         manifest: StackManifest {
             homepage_widgets: Default::default(),
+            home_address_whitelist: None,
+            generated_dashboards_command: None,
+            tiles: Default::default(),
             firewall: None,
             registry_login: None,
             retention: None,

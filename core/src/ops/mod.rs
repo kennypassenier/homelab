@@ -51,6 +51,7 @@ pub mod retired;
 pub mod secondcopy;
 pub mod selfupdate;
 pub mod template;
+pub mod tiles;
 pub mod today;
 pub mod update;
 pub mod util;

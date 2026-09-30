@@ -7,8 +7,8 @@ use homelab_core::error::OperatorError;
 use homelab_core::notify::{
     click_url, explain_event, explain_fleet_check, explain_op, next_seq, notices_after, op_kind,
     op_stack, parse_notices, prune_notices, push_payload, push_short, urgency, Event, HostNotice,
-    OpFacts, OpKind, BACKUP_OPS, DEFAULT_DASHBOARD_URL, DEPLOY_OPS, DISK_ALERTS, PIPELINE_ALERTS,
-    SERVICE_DOWN_ALERTS, UPDATE_OPS,
+    OpFacts, OpKind, BACKUP_OPS, DEPLOY_OPS, DISK_ALERTS, PIPELINE_ALERTS, SERVICE_DOWN_ALERTS,
+    UPDATE_OPS,
 };
 use homelab_core::ops::fleetcheck::{Finding, Severity};
 
@@ -60,7 +60,7 @@ fn notify_routing_everything_else_goes_to_the_centre_only() {
         "restore",
         "apply-guards",
         "template-build",
-        "crowdsec-home-address",
+        "home-address-whitelist",
         "wipe",
         "boot",
     ] {
@@ -170,10 +170,7 @@ fn notify_detail_every_alert_rule_carries_consequence_remedy_and_link() {
                 );
             }
             assert!(
-                a["click_url"]
-                    .as_str()
-                    .unwrap()
-                    .starts_with(&format!("{DEFAULT_DASHBOARD_URL}/app/")),
+                a["click_url"].as_str().unwrap().contains("/app/"),
                 "{name}: the link opens a dashboard page"
             );
             n += 1;

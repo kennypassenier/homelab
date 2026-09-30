@@ -208,7 +208,9 @@ fn arch_config_act_settings_from_the_environment() {
     // closed until its token is set, pushes linking to the public address.
     assert_eq!(c.host_notices_poll_s, 60);
     assert_eq!(c.alerts_token, None);
-    assert_eq!(c.public_url, "https://admin.kp-soft.dev");
+    // app-knowledge (2026-09-30): no address is known in code; unset, a
+    // push carries no link.
+    assert_eq!(c.public_url, "");
     let c = from_env(&env(&[
         ("HOMELAB_ADMIN_PUBLIC_URL", "https://dash.example/"),
         ("HOMELAB_ADMIN_ALERTS_TOKEN", " tok "),

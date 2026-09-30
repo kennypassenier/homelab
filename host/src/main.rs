@@ -260,8 +260,7 @@ struct FileConfig {
     history_days: Option<u64>,
     history_max_mib: Option<usize>,
     /// Decision notify-detail (2026-09-30): the dashboard's public address,
-    /// for the link a push carries (`click_url`). Default
-    /// `homelab_core::notify::DEFAULT_DASHBOARD_URL`.
+    /// for the link a push carries (`click_url`). Unset: no link.
     dashboard_url: Option<String>,
 }
 
@@ -631,7 +630,7 @@ fn load_config_from(path: String) -> Config {
     ) {
         tracing::warn!(
             "notification route {} sends its bearer token over plain HTTP — anything on that \
-             network segment can read it; an https:// route (kyu behind Traefik) closes this",
+             network segment can read it; an https:// route closes this",
             route
         );
     }
@@ -3704,6 +3703,9 @@ port = 5003
         let mk = |mem: u32| {
             let mut m = homelab_core::manifest::StackManifest {
                 homepage_widgets: Default::default(),
+                home_address_whitelist: None,
+                generated_dashboards_command: None,
+                tiles: Default::default(),
                 registry_login: None,
                 retention: None,
                 data_mounts: Vec::new(),
@@ -4647,7 +4649,7 @@ async fn main() {
         let st = state.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(20)).await;
-            run_mutating_op(&st, &RealExecutor, 0, "crowdsec-home-address", |ctx| {
+            run_mutating_op(&st, &RealExecutor, 0, "home-address-whitelist", |ctx| {
                 Box::pin(
                     async move { homelab_core::ops::homeaddress::sync_home_address(ctx).await },
                 )
@@ -5668,7 +5670,7 @@ async fn scheduler_loop(state: AppState) {
         // whitelist on the gateway equal to it. Cheap when nothing changed:
         // one read of the file, one GET against the router, no write.
         // fix-156: every night, whatever else the night does.
-        run_mutating_op(&state, &exec, 0, "crowdsec-home-address", |ctx| {
+        run_mutating_op(&state, &exec, 0, "home-address-whitelist", |ctx| {
             Box::pin(async move { homelab_core::ops::homeaddress::sync_home_address(ctx).await })
         })
         .await;
@@ -6446,7 +6448,7 @@ async fn publish_notice(state: &AppState, exec: &RealExecutor, f: NoticeFacts) {
             f.ok,
             Some(&short),
             VERSION,
-            Some(&url),
+            Some(url.as_str()).filter(|u| !u.is_empty()),
         );
         match notify_raw(state, exec, payload).await {
             Ok(()) => "sent".to_string(),
@@ -7429,7 +7431,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             // and a failure there is reported as itself rather than as a
             // failed deploy.
             if home_address_after_deploy(vmid, resp.ok, state.config.safety.gateway_vmid) {
-                run_mutating_op(state, &exec, req.id, "crowdsec-home-address", |ctx| {
+                run_mutating_op(state, &exec, req.id, "home-address-whitelist", |ctx| {
                     Box::pin(
                         async move { homelab_core::ops::homeaddress::sync_home_address(ctx).await },
                     )

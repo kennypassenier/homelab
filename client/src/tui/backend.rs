@@ -320,6 +320,8 @@ fn demo_fleet() -> ServerMsg {
             cores_total: 12,
             load1_x100: 285, // load average 2.85
         },
+        // app-knowledge (2026-09-30): the demo fleet is made up, so no real
+        // stack or app is named in code.
         stacks: vec![
             StackView {
                 applied_source: None,
@@ -331,7 +333,7 @@ fn demo_fleet() -> ServerMsg {
                     app("traefik", true),
                     app("loki", true),
                     app("grafana", true),
-                    app("crowdsec", true),
+                    app("guard", true),
                 ],
                 drift: false,
                 applied_hash: String::new(),
@@ -342,13 +344,13 @@ fn demo_fleet() -> ServerMsg {
             StackView {
                 applied_source: None,
                 usage: None,
-                name: "media".into(),
+                name: "films".into(),
                 vmid: 106,
-                hostname: "106-app-media".into(),
+                hostname: "106-app-films".into(),
                 apps: vec![
-                    app("jellyfin", true),
-                    app("sonarr", true),
-                    app("radarr", false),
+                    app("player", true),
+                    app("series", true),
+                    app("movies", false),
                 ],
                 drift: true,
                 applied_hash: String::new(),
@@ -359,10 +361,10 @@ fn demo_fleet() -> ServerMsg {
             StackView {
                 applied_source: None,
                 usage: None,
-                name: "syncthing".into(),
+                name: "notes".into(),
                 vmid: 110,
-                hostname: "110-app-syncthing".into(),
-                apps: vec![app("syncthing", true)],
+                hostname: "110-app-notes".into(),
+                apps: vec![app("sync", true)],
                 drift: false,
                 applied_hash: String::new(),
                 env_sealed: true,
@@ -373,25 +375,19 @@ fn demo_fleet() -> ServerMsg {
     }))
 }
 
-const DEMO_DOCTOR: &str = "doctor: Warn\n  [Ok] host disk — 42% free\n  [Ok] state file — parses\n  [Warn] stack media backup — last backup 51h ago\n        ↳ run a backup; the scheduler may be stalled\n  [Ok] offsite (Drive) — token valid\n  [Ok] github mirror — up to date";
+const DEMO_DOCTOR: &str = "doctor: Warn\n  [Ok] host disk — 42% free\n  [Ok] state file — parses\n  [Warn] stack films backup — last backup 51h ago\n        ↳ run a backup; the scheduler may be stalled\n  [Ok] offsite (Drive) — token valid\n  [Ok] github mirror — up to date";
 
 fn demo_log(n: u64) -> (&'static str, &'static str) {
     const LINES: &[(&str, &str)] = &[
-        ("platform", "traefik :: 200 GET jellyfin.kp-soft.dev 12ms"),
-        ("media", "sonarr :: rss sync complete, 0 new"),
-        (
-            "syncthing",
-            "syncthing :: folder \"obsidian-vault\" in sync",
-        ),
+        ("platform", "traefik :: 200 GET player.example.org 12ms"),
+        ("films", "series :: rss sync complete, 0 new"),
+        ("notes", "sync :: folder \"vault\" in sync"),
         (
             "HOST",
             "heartbeat :: CLIENT fresh — failsafe window skipped",
         ),
-        (
-            "platform",
-            "crowdsec :: ip 185.42.1.9 banned (http-probing)",
-        ),
-        ("media", "jellyfin :: transcode session started (vaapi)"),
+        ("platform", "guard :: ip 185.42.1.9 banned (http-probing)"),
+        ("films", "player :: transcode session started (vaapi)"),
     ];
     LINES[(n as usize) % LINES.len()]
 }

@@ -17,4 +17,9 @@ host = "10.10.10.250:8443"
 # SHA-256 fingerprint of the daemon's TLS certificate, as `homelab-host`
 # prints it at boot. A fresh machine pins this instead of trusting on first
 # use; a machine that already pinned something else is refused loudly.
+# The read-only Cloudflare token `homelab check` compares the edge with (DNS,
+# tunnel, Access) against captured/gateway/. Per machine, never committed:
+# only its path is.
+edge_token_file = "~/.config/cloudflare/kp-soft.token"
+
 pin = "SHA256:85:00:F8:84:44:87:7E:85:FA:2E:29:97:15:16:74:15:43:FE:0E:70:5A:AE:F8:1C:EE:ED:F8:25:42:DC:7F:2A"

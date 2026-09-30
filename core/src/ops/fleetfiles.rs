@@ -190,13 +190,11 @@ pub async fn write_host_monitors(
         .stacks
         .iter()
         .filter_map(|(name, st)| {
-            // gap-14: an adopted native stack has no stack manifest in
-            // state; its address follows from the vmid.
-            let ip = match st.manifest.as_ref() {
-                Some(mf) => mf.network.ip.clone(),
-                None if st.is_native() => crate::ops::monitors::address_for_vmid(st.vmid)?,
-                None => return None,
-            };
+            // app-knowledge (2026-09-30): the address the stack file
+            // declares. A stack with no manifest in state gets no monitor
+            // rather than a guessed address (gap-14 guessed 10.10.10.<vmid-100>;
+            // since every stack is deployed from its file, none lacks one).
+            let ip = st.manifest.as_ref()?.network.ip.clone();
             Some((name.clone(), ip))
         })
         .collect();

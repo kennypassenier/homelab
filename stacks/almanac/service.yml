@@ -74,3 +74,14 @@ release_repo: kennypassenier/almanac
 # update_cmd above and nothing else; `manual` now stops that verb too, which
 # is what http-switchboard's `manual` always meant.
 update_policy: self
+
+# app-knowledge (Kenny, 2026-09-30): printed under this unit in the DR
+# runbook (gap-16); it used to be written into the runbook generator.
+restore_note: >-
+  A restore brings back what was retired after the snapshot. almanac retires
+  a source by renaming its profile to `*.toml.retired` in
+  `/appdata/almanac/almanac-config/profiles/`, at runtime and without a
+  deploy. A snapshot taken before that rename still holds the live `*.toml`,
+  so restoring it makes almanac load the retired source again. After
+  restoring almanac, compare `ls /appdata/almanac/almanac-config/profiles/`
+  with the list of retired sources before starting the service.

@@ -204,60 +204,20 @@ pub fn scan_presets(base: &Path) -> Vec<LoadedPreset> {
 /// Built-in fallback presets (also used by tests and the offline demo when
 /// no presets/ directory exists). Mirrors the shipped preset set.
 pub fn synthetic_presets() -> Vec<LoadedPreset> {
-    let synth = |name: &str, desc: &str, image: &str, ram: u32| LoadedPreset {
-        name: name.into(),
+    // app-knowledge (Kenny, 2026-09-30): no app is known here. The apps a
+    // new stack can start from are the directories in presets/; without
+    // them the wizard offers only the empty stack.
+    vec![LoadedPreset {
+        name: "custom".into(),
         meta: PresetMeta {
-            description: desc.into(),
-            ram_mb: ram,
+            description: "Empty stack — add apps later".into(),
+            ram_mb: 1024,
             ..Default::default()
         },
         dir: None,
-        apps: vec![name.into()],
-        synth_app: Some((name.into(), image.into())),
-    };
-    vec![
-        synth(
-            "actual",
-            "Envelope budgeting",
-            "actualbudget/actual-server:latest",
-            512,
-        ),
-        synth(
-            "jellyfin",
-            "Media server (VAAPI)",
-            "jellyfin/jellyfin:latest",
-            4096,
-        ),
-        synth(
-            "mealie",
-            "Recipes + meal planning",
-            "ghcr.io/mealie-recipes/mealie:latest",
-            512,
-        ),
-        synth(
-            "syncthing",
-            "Obsidian vault peer",
-            "syncthing/syncthing:latest",
-            512,
-        ),
-        synth(
-            "uptime-kuma",
-            "Uptime monitoring",
-            "louislam/uptime-kuma:1",
-            512,
-        ),
-        LoadedPreset {
-            name: "custom".into(),
-            meta: PresetMeta {
-                description: "Empty stack — add apps later".into(),
-                ram_mb: 1024,
-                ..Default::default()
-            },
-            dir: None,
-            apps: Vec::new(),
-            synth_app: None,
-        },
-    ]
+        apps: Vec::new(),
+        synth_app: None,
+    }]
 }
 
 /// The `/appdata` paths a scaffold WOULD create, without creating anything.

@@ -38,6 +38,9 @@ const KYU_ROUTE: &str = "http:\n  routers:\n    kyu:\n      rule: \"Host(`kyu.kp
 fn manifest(vmid: u16, stack: &str) -> StackManifest {
     StackManifest {
         homepage_widgets: Default::default(),
+        home_address_whitelist: None,
+        generated_dashboards_command: None,
+        tiles: Default::default(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),

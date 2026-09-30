@@ -32,6 +32,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
 /// CT 109 as it really is — the first adoption target.
 fn kyu_manifest() -> NativeServiceManifest {
     NativeServiceManifest {
+        restore_note: None,
         stack_name: "kyu".into(),
         vmid: 109,
         hostname: "109-app-kyu".into(),

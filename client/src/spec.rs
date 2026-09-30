@@ -1103,6 +1103,12 @@ fn runbook_stack_section(
             let adopt_dir = native_service_dir(stack_dir, dir_name, &svc.unit)
                 .unwrap_or_else(|| format!("stacks/{}", dir_name));
             s.push_str(&format!("- Unit `{}`:\n", svc.unit));
+            if let Some(note) = &svc.restore_note {
+                s.push_str(&format!(
+                    "  - **Restore note:** {}\n",
+                    note.split_whitespace().collect::<Vec<_>>().join(" ")
+                ));
+            }
             s.push_str(&format!(
                 "  - program `{}`, {}; update policy {}.\n",
                 svc.binary,
@@ -1609,7 +1615,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          replaces one), puts back env and credential files from the vault, and starts a unit \
          only when all of that is present. A unit that is not running and whose data \
          directories are empty gets its newest snapshot unpacked back first (fix-146); a \
-         unit archived from its own copy (`backup_from_newest`, kyu) is then left stopped \
+         unit archived from its own copy (`backup_from_newest`) is then left stopped \
          until that copy is put in place as the live file. A unit left unstarted is named in the output; a \
          missing program is installed with `homelab install-native stacks/<stack>/<unit>` (or \
          `stacks/<stack>` for the unit whose `service.yml` sits at the top).\n\n",
@@ -1731,13 +1737,8 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          the host and unpack nothing. For the same reason a rebuild's automatic restore \
          finds no snapshot for a native unit's directory and leaves it empty: its data \
          always comes back by the commands above.\n\n\
-         **A restore brings back what was retired after the snapshot** (gap-16). almanac \
-         retires a source by renaming its profile to `*.toml.retired` in \
-         `/appdata/almanac/almanac-config/profiles/`, at runtime and without a deploy. A \
-         snapshot taken before that rename still holds the live `*.toml`, so restoring it \
-         makes almanac load the retired source again. After restoring almanac, compare \
-         `ls /appdata/almanac/almanac-config/profiles/` with the list of retired sources \
-         before starting the service.\n\n",
+         A native unit may carry a restore note of its own; it is printed under that \
+         unit in the Stacks section.\n\n",
         base = base,
         pw = pw,
         cache = RESTIC_CACHE_DIR,

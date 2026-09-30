@@ -83,15 +83,21 @@ impl Theme {
         Style::new().fg(self.yellow)
     }
 
-    /// Fixed identity color per stack, so a stack is recognizable everywhere
-    /// (tables, logs, tickers) by hue alone.
+    /// Identity color per stack, so a stack is recognizable everywhere
+    /// (tables, logs, tickers) by hue alone. Derived from the name
+    /// (app-knowledge, 2026-09-30: no stack is named in code), so every
+    /// stack keeps the same color across runs and machines.
     pub fn stack_color(&self, stack_name: &str) -> Color {
-        match stack_name {
-            "platform" => self.cyan,
-            "media" => Color::Rgb(0xFF, 0x8A, 0x2A), // amber
-            "downloader" => self.blue,
-            "syncthing" => self.green,
-            _ => self.magenta,
-        }
+        let palette = [
+            self.cyan,
+            Color::Rgb(0xFF, 0x8A, 0x2A),
+            self.blue,
+            self.green,
+            self.magenta,
+        ];
+        let h = stack_name
+            .bytes()
+            .fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
+        palette[(h as usize) % palette.len()]
     }
 }

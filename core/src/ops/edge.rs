@@ -342,7 +342,7 @@ pub fn compare_edge(captured: &EdgeState, live: &EdgeState) -> Vec<Finding> {
             ));
         }
         out.push(drift(
-            "dns kp-soft.dev".into(),
+            "dns records".into(),
             format!(
                 "the DNS records differ from the capture — {}",
                 parts.join(" · ")

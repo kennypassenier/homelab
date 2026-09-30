@@ -71,7 +71,7 @@ function switchEl(id, label, words = true) {
 export function mount(root) {
   const keys = sortKeys();
   const err = h("div");
-  const push = switchEl("notify-push", "Push to the phone (kyu)");
+  const push = switchEl("notify-push", "Push to the phone");
   const digestInput = h("input", {
     class: "kp-field__input",
     type: "time",

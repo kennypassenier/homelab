@@ -16,6 +16,9 @@ const OLD_SECRET: &str = "OLD_PLANTED_SECRET_previous_value";
 fn spec_with_secret() -> DeploySpec {
     let manifest = StackManifest {
         homepage_widgets: Default::default(),
+        home_address_whitelist: None,
+        generated_dashboards_command: None,
+        tiles: Default::default(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),

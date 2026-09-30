@@ -36,7 +36,9 @@ fn fix_143_the_token_goes_to_curl_on_stdin_never_in_argv() {
 
 #[test]
 fn fix_143_the_token_is_read_where_kenny_keeps_it() {
-    let p = token_path();
+    // app-knowledge (2026-09-30): from `edge_token_file` in config/client.toml,
+    // found upward from the test's directory like any command's.
+    let p = token_path().expect("config/client.toml names edge_token_file");
     assert!(
         p.ends_with(".config/cloudflare/kp-soft.token"),
         "{}",

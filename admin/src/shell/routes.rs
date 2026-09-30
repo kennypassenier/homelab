@@ -313,7 +313,7 @@ async fn logs(State(c): State<ReadCtx>, Query(q): Query<LogQuery>) -> Response {
             StatusCode::BAD_GATEWAY,
             "the logs",
             &e,
-            "check that Loki answers queries from this dashboard (CT 113, port 3100)",
+            "check that the log store at HOMELAB_ADMIN_LOKI_URL answers queries from this dashboard",
         ),
     }
 }

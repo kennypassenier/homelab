@@ -835,8 +835,7 @@ pub fn evaluate_pools(facts: &[PoolFact], lim: GrowthLimits) -> Vec<Finding> {
                 subject: who,
                 what: format!("data pool {}", size),
                 remedy: "an import lands here and there is no room for it — free space, or \
-                         stop the upgrades that are filling it (`upgrade.until_score` in \
-                         `stacks/media/recyclarr/recyclarr.yml`)"
+                         stop the quality upgrades that are filling it"
                     .into(),
             });
         } else if p.used_pct >= lim.pool_drift_pct {
@@ -1108,7 +1107,7 @@ pub fn evaluate(
                     "recorded as '{}' but vmid {} is really '{}' — every operation on this stack fails the hostname guard",
                     st.hostname, st.vmid, hostname
                 ),
-                remedy: "re-adopt or redeploy the stack so its record matches the container; this is how kyu's backup stopped for eight weeks".into(),
+                remedy: "re-adopt or redeploy the stack so its record matches the container; until then its backups and updates stop".into(),
             }),
             Some(_) => {}
         }
@@ -1529,7 +1528,7 @@ pub fn evaluate_notify(state: &HostState, now: u64) -> Vec<Finding> {
                 .unwrap_or_default(),
             format_args!(" — {}", last_ok)
         ),
-        remedy: "check kyu on 10.10.10.9 and `notify_fallback_webhook` in host.toml — \
+        remedy: "check the route in `notify_url` and `notify_fallback_webhook` in host.toml — \
                  while this stands, every warning this host produces is going nowhere, \
                  including this one"
             .into(),
@@ -1566,8 +1565,8 @@ pub fn evaluate_seed(fact: &SeedFact, max_age_s: u64) -> Vec<Finding> {
             severity: Severity::Broken,
             subject: "uptime seeder".into(),
             what: format!("said nothing about the watch list ({})", e),
-            remedy: "check the kuma-seeder container on the uptime stack — while this \
-                     stands, a monitor can outlive its stack with nothing saying so"
+            remedy: "check the seeder that reads `kuma_monitors_file` (host.toml) — while \
+                     this stands, a monitor can outlive its stack with nothing saying so"
                 .into(),
         });
         return out;

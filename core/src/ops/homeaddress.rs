@@ -38,24 +38,13 @@ use crate::state::{HostState, StateStore};
 /// never a new secret for this).
 pub const ROUTER_DEVICE: &str = "opnsense";
 
-/// Where the whitelist lives, as a path inside the gateway container.
-///
-/// `/appdata/gateway/crowdsec-config` is CrowdSec's `/etc/crowdsec`
-/// (stacks/gateway/crowdsec/docker-compose.yml), and every file in
-/// `parsers/s02-enrich/` is loaded as a parser — which is how the static
-/// `whitelists.yaml` is loaded too, bind-mounted beside this one. A file of
-/// its own rather than a line in that one: the repository's copy is laid over
-/// the static file on every deploy, and the address would vanish until the
-/// next check put it back.
-pub const WHITELIST_FILE: &str =
-    "/appdata/gateway/crowdsec-config/parsers/s02-enrich/homelab-home-address.yaml";
-
-/// The same pair CrowdSec's own systemd unit runs for `reload`: test the
-/// configuration, then HUP the running process. The test matters because
-/// CrowdSec exits on a reload it cannot load, and the bouncer fails closed —
-/// a bad whitelist would turn into 403 for every name in the house.
-const CONFIG_TEST: &str = "docker exec crowdsec crowdsec -c /etc/crowdsec/config.yaml -t -error";
-const RELOAD: &str = "docker kill --signal=HUP crowdsec";
+/// Where the whitelist lives and how it is tested and reloaded comes from
+/// the stack that declares `home_address_whitelist:` (app-knowledge,
+/// 2026-09-30); the gateway stack does, for CrowdSec. A file of its own rather
+/// than a line in the app's static whitelist: the repository's copy is laid
+/// over that one on every deploy, and the address would vanish until the next
+/// check put it back.
+use crate::manifest::HomeAddressWhitelist;
 
 /// The whitelist, as CrowdSec reads it. No timestamp in it on purpose: the
 /// content changes only when the address does, so an unchanged address
@@ -157,41 +146,41 @@ async fn read_public(exec: &dyn Executor) -> Result<Ipv4Addr, String> {
 async fn write_and_reload(
     exec: &dyn Executor,
     gw: u16,
+    wl: &HomeAddressWhitelist,
     before: &str,
     want: &str,
 ) -> Result<StepOutcome, CoreError> {
-    push_content(exec, gw, WHITELIST_FILE, want, "644").await?;
-    let test = pct_sh(exec, gw, CONFIG_TEST, 120).await?;
+    push_content(exec, gw, &wl.file, want, "644").await?;
+    let test = pct_sh(exec, gw, &wl.test, 120).await?;
     if !test.success() {
         let restored = if before.is_empty() {
-            pct_sh(exec, gw, &format!("rm -f {}", shq(WHITELIST_FILE)), 30)
+            pct_sh(exec, gw, &format!("rm -f {}", shq(&wl.file)), 30)
                 .await
                 .map(|o| o.success())
                 .unwrap_or(false)
         } else {
-            push_content(exec, gw, WHITELIST_FILE, before, "644")
+            push_content(exec, gw, &wl.file, before, "644")
                 .await
                 .is_ok()
         };
         return Err(CoreError::Other(format!(
-            "CrowdSec's configuration test refused the new whitelist ({}); {} :: remedy: run \
-             `{}` on the gateway and read what it says",
+            "the whitelist's configuration test refused the new file ({}); {} :: remedy: run \
+             `{}` in the container and read what it says",
             format!("{} {}", test.stdout.trim(), test.stderr.trim()).trim(),
             if restored {
                 "the previous file is back and no reload was sent"
             } else {
-                "putting the previous file back FAILED too, and CrowdSec will not start with \
+                "putting the previous file back FAILED too, and the app may not start with \
                  this one — remove it by hand"
             },
-            CONFIG_TEST
+            wl.test
         )));
     }
-    let hup = pct_sh(exec, gw, RELOAD, 30).await?;
+    let hup = pct_sh(exec, gw, &wl.reload, 30).await?;
     if !hup.success() {
         return Err(CoreError::Other(format!(
-            "the whitelist is written but CrowdSec could not be told to reload ({}) :: \
-             remedy: check the crowdsec container on the gateway; it reads the file when it \
-             next starts",
+            "the whitelist is written but its app could not be told to reload ({}) :: \
+             remedy: check the app that reads it; it reads the file when it next starts",
             hup.stderr.trim()
         )));
     }
@@ -211,7 +200,10 @@ async fn record(ctx: &OpCtx<'_>, runner: &Runner<'_>, kept: Option<Ipv4Addr>, er
     if let Err(e) = res {
         runner.log(
             Level::Warn,
-            format!("[crowdsec] could not record the home-address check: {}", e),
+            format!(
+                "[home-address] could not record the home-address check: {}",
+                e
+            ),
         );
     }
 }
@@ -224,14 +216,31 @@ async fn record(ctx: &OpCtx<'_>, runner: &Runner<'_>, kept: Option<Ipv4Addr>, er
 /// operation: a failed operation notifies, and the whitelist still holds the
 /// last known address. It is a noted finding instead.
 pub async fn sync_home_address(ctx: &OpCtx<'_>) -> OperationReport {
-    let mut runner = Runner::new("crowdsec-home-address", ctx.sink, ctx.journal);
+    let mut runner = Runner::new("home-address-whitelist", ctx.sink, ctx.journal);
     let exec = ctx.exec;
-    let gw = ctx.safety.gateway_vmid;
+    // app-knowledge: the stack that declares the whitelist, and its container.
+    let declared = StateStore::new(exec, &ctx.state_dir)
+        .load()
+        .await
+        .ok()
+        .and_then(|st| {
+            st.stacks.values().find_map(|s| {
+                let m = s.manifest.as_ref()?;
+                Some((m.vmid, m.home_address_whitelist.clone()?))
+            })
+        });
+    let Some((gw, wl)) = declared else {
+        runner.log(
+            Level::Info,
+            "[home-address] no stack declares home_address_whitelist; nothing to keep".to_string(),
+        );
+        return runner.finish_ok();
+    };
 
     let before = match pct_sh(
         exec,
         gw,
-        &format!("cat {} 2>/dev/null || true", shq(WHITELIST_FILE)),
+        &format!("cat {} 2>/dev/null || true", shq(&wl.file)),
         30,
     )
     .await
@@ -256,7 +265,7 @@ pub async fn sync_home_address(ctx: &OpCtx<'_>) -> OperationReport {
             runner.log(
                 Level::Warn,
                 format!(
-                    "[crowdsec] could not read the house's public address ({}) — the whitelist \
+                    "[home-address] could not read the house's public address ({}) — the whitelist \
                      {}; nothing was removed",
                     why,
                     match kept {
@@ -275,7 +284,7 @@ pub async fn sync_home_address(ctx: &OpCtx<'_>) -> OperationReport {
         runner.log(
             Level::Info,
             format!(
-                "[crowdsec] home address {} unchanged; whitelist left alone",
+                "[home-address] home address {} unchanged; whitelist left alone",
                 addr
             ),
         );
@@ -285,7 +294,7 @@ pub async fn sync_home_address(ctx: &OpCtx<'_>) -> OperationReport {
 
     const STEP: &str = "whitelist the home address";
     match runner
-        .step(STEP, || write_and_reload(exec, gw, &before, &want))
+        .step(STEP, || write_and_reload(exec, gw, &wl, &before, &want))
         .await
     {
         Ok(_) => {
@@ -293,17 +302,17 @@ pub async fn sync_home_address(ctx: &OpCtx<'_>) -> OperationReport {
                 Level::Info,
                 match kept {
                     Some(old) if old != addr => format!(
-                        "[crowdsec] home address changed from {} to {} — whitelist rewritten, \
-                         CrowdSec reloaded",
+                        "[home-address] home address changed from {} to {} — whitelist rewritten, \
+                         the app reloaded",
                         old, addr
                     ),
                     Some(_) => format!(
-                        "[crowdsec] home address {} rewritten in the current format — CrowdSec \
+                        "[home-address] home address {} rewritten in the current format — the app \
                          reloaded",
                         addr
                     ),
                     None => format!(
-                        "[crowdsec] home address {} whitelisted (none was before) — CrowdSec \
+                        "[home-address] home address {} whitelisted (none was before) — the app \
                          reloaded",
                         addr
                     ),
@@ -338,7 +347,7 @@ pub fn evaluate_home_address(state: &HostState) -> Vec<Finding> {
         } else {
             Severity::Broken
         },
-        subject: "crowdsec home address".into(),
+        subject: "home address whitelist".into(),
         what: format!(
             "the last check ({}) could not keep the house's address current ({}); the \
              whitelist {}",
@@ -346,7 +355,7 @@ pub fn evaluate_home_address(state: &HostState) -> Vec<Finding> {
             why,
             match &state.home_address {
                 Some(a) => format!("keeps {}, the last known address", a),
-                None => "holds no home address, so CrowdSec can ban the house and the admin \
+                None => "holds no home address, so the house can be blocked and the admin \
                          dashboard refuses it"
                     .to_string(),
             }

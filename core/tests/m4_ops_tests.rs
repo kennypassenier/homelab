@@ -12,6 +12,9 @@ use homelab_core::sink::VecSink;
 fn manifest(vmid: u16, stack: &str) -> StackManifest {
     StackManifest {
         homepage_widgets: Default::default(),
+        home_address_whitelist: None,
+        generated_dashboards_command: None,
+        tiles: Default::default(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),
@@ -2035,6 +2038,7 @@ async fn fix_54_a_snapshot_check_that_fails_is_not_read_as_fresh() {
 fn t40_stateless_must_be_declared_not_inferred() {
     use homelab_core::native::{validate_native, NativeServiceManifest};
     let base = NativeServiceManifest {
+        restore_note: None,
         stack_name: "kyu".into(),
         vmid: 109,
         hostname: "109-app-kyu".into(),

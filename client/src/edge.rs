@@ -23,10 +23,18 @@ use serde_json::Value;
 
 const API: &str = "https://api.cloudflare.com/client/v4";
 
-/// Where the read-only token lives (memory: reference_cloudflare_kpsoft_token).
-pub fn token_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".config/cloudflare/kp-soft.token")
+/// Where the read-only token lives: `edge_token_file` in config/client.toml,
+/// with `~` for the home directory. None: not configured.
+pub fn token_path() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let (_, cfg) = crate::repo_config::load(&cwd).ok()??;
+    let raw = cfg.edge_token_file?;
+    Some(match raw.strip_prefix("~/") {
+        Some(rest) => {
+            PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join(rest)
+        }
+        None => PathBuf::from(raw),
+    })
 }
 
 /// curl's arguments: everything, the URL and the token included, comes from
@@ -117,7 +125,9 @@ pub enum EdgeOutcome {
 }
 
 pub fn check_edge(captured_dir: &Path) -> EdgeOutcome {
-    let path = token_path();
+    let Some(path) = token_path() else {
+        return EdgeOutcome::NotCompared("no edge_token_file in config/client.toml".to_string());
+    };
     let Ok(token) = std::fs::read_to_string(&path) else {
         return EdgeOutcome::NotCompared(format!(
             "no read-only Cloudflare token at {}",

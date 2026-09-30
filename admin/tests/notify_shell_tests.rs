@@ -59,6 +59,8 @@ fn center(tag: &str, clock: &TestClock) -> (Arc<NotifyCenter>, Arc<RecPusher>, A
         clock.clock(),
     )
     .unwrap();
+    // app-knowledge (2026-09-30): the public address is configuration.
+    c.set_base_url("https://dash.example");
     (c, pusher, live)
 }
 
@@ -220,10 +222,7 @@ async fn the_digest_goes_out_once_at_nine_only_when_something_waits() {
     let sent = pusher.sent.lock().unwrap().clone();
     assert_eq!(sent.len(), 1);
     let p: serde_json::Value = serde_json::from_str(&sent[0]).unwrap();
-    assert_eq!(
-        p["click_url"],
-        "https://admin.kp-soft.dev/app/notifications"
-    );
+    assert_eq!(p["click_url"], "https://dash.example/app/notifications");
     assert!(p["error"]
         .as_str()
         .unwrap()

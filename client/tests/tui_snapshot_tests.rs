@@ -212,6 +212,9 @@ fn plan_modal_previews_changes() {
     let mut m = ready_model();
     let manifest = StackManifest {
         homepage_widgets: Default::default(),
+        home_address_whitelist: None,
+        generated_dashboards_command: None,
+        tiles: Default::default(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),
@@ -363,8 +366,13 @@ fn scaffold_has_no_watchtower_and_manual_update_policy() {
     // that file came to exist. It now refuses instead, so a test that wants
     // the generic path must still give it somewhere real to read the core
     // apps from.
-    let presets = synthetic_presets();
-    let synth = presets.iter().find(|p| p.name == "syncthing").unwrap();
+    // app-knowledge (2026-09-30): the code carries no app presets any more,
+    // so the test makes the synthetic one it needs.
+    let mut synth = synthetic_presets().remove(0);
+    synth.name = "syncthing".into();
+    synth.apps = vec!["syncthing".into()];
+    synth.synth_app = Some(("syncthing".into(), "syncthing/syncthing:latest".into()));
+    let synth = &synth;
     let real_presets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
     scaffold_stack(
         &tmp,
@@ -1454,6 +1462,9 @@ fn d6_plan_diff_skip_update_and_line_previews() {
     };
     let mut m = homelab_proto::StackManifest {
         homepage_widgets: Default::default(),
+        home_address_whitelist: None,
+        generated_dashboards_command: None,
+        tiles: Default::default(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),
@@ -1707,6 +1718,9 @@ fn the_runbook_names_the_repositories_restic_actually_uses() {
     use homelab_core::manifest::*;
     let mut m = StackManifest {
         homepage_widgets: Default::default(),
+        home_address_whitelist: None,
+        generated_dashboards_command: None,
+        tiles: Default::default(),
         registry_login: None,
         retention: None,
         data_mounts: Vec::new(),

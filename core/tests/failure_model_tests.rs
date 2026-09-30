@@ -17,6 +17,9 @@ fn spec(vmid: u16, stack: &str) -> DeploySpec {
         native_manifests: Default::default(),
         manifest: StackManifest {
             homepage_widgets: Default::default(),
+            home_address_whitelist: None,
+            generated_dashboards_command: None,
+            tiles: Default::default(),
             registry_login: None,
             retention: None,
             data_mounts: Vec::new(),

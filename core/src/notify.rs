@@ -320,9 +320,10 @@ pub fn curl_args(payload: &str, url: &str, header_file: Option<&str>) -> Vec<Str
 // what is wrong, since when, the consequence and what to do, with a link to
 // the dashboard page that acts on it.
 
-/// Where the dashboard answers from outside when nothing else says so
-/// (`dashboard_url` in host.toml, `HOMELAB_ADMIN_PUBLIC_URL` on CT 120).
-pub const DEFAULT_DASHBOARD_URL: &str = "https://admin.kp-soft.dev";
+/// app-knowledge (2026-09-30): no public address is known in code. The
+/// dashboard's comes from `dashboard_url` in host.toml and
+/// `HOMELAB_ADMIN_PUBLIC_URL` in its unit; unset, a push carries no link.
+pub const DEFAULT_DASHBOARD_URL: &str = "";
 
 /// The dashboard pages a notice links to (admin/web/js/router.js).
 pub mod page {
@@ -341,6 +342,9 @@ pub mod page {
 /// A page's absolute address, for a push's `click_url` (newsflash opens
 /// only an absolute http(s) URL).
 pub fn click_url(base: &str, page: &str) -> String {
+    if base.trim().is_empty() {
+        return String::new();
+    }
     format!("{}{}", base.trim_end_matches('/'), page)
 }
 
@@ -835,7 +839,8 @@ pub fn push_payload(
     click_url: Option<&str>,
 ) -> String {
     let base = op_payload_from(source, op, label, ok, short, version);
-    let Some(url) = click_url else {
+    // app-knowledge: an empty address (none configured) is no link.
+    let Some(url) = click_url.filter(|u| !u.is_empty()) else {
         return base;
     };
     let mut v: serde_json::Value = serde_json::from_str(&base).unwrap_or_default();

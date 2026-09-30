@@ -2932,6 +2932,22 @@ about a particular app is declared in that app's stack files, not in code.
   nothing on stdout means idle, a line per user means in use, and a failing
   command means it cannot tell, which counts as in use.
 
+- **The house's address on an allow list** (fix-94):
+  `home_address_whitelist: {file, test, reload}` in `lxc-compose.yml`; the
+  gateway stack declares it for CrowdSec.
+- **Generated dashboards** (F149): `generated_dashboards_command:` in
+  `lxc-compose.yml` prints the uid of every generated dashboard the stack's
+  dashboard app serves; the metrics stack declares it for Grafana.
+- **A restore note** for a native unit: `restore_note:` in its
+  `service.yml`, printed under the unit in the DR runbook.
+- **The edge token**: `edge_token_file` in `config/client.toml`.
+- **The dashboard's public address**: `dashboard_url` in host.toml and
+  `HOMELAB_ADMIN_PUBLIC_URL`; unset, a push carries no link.
+
+A guard test (`core/tests/app_knowledge_guard_tests.rs`) reads every stack
+and app name under `stacks/` and fails when one appears in the code outside
+comments and tests.
+
 ```yaml
 # lxc-compose.yml
 homepage_widgets:

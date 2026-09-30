@@ -321,3 +321,14 @@ firewall:
       proto: tcp
       dport: "22,7880,7881"
       note: Kenny's desktop (ssh, GoAccess report and its websocket)
+
+# app-knowledge (Kenny, 2026-09-30): the house's own public address is kept
+# on CrowdSec's allow list (fix-94). /appdata/gateway/crowdsec-config is
+# CrowdSec's /etc/crowdsec, and every file in parsers/s02-enrich/ is loaded as
+# a parser. `test` must pass before the reload, because CrowdSec exits on a
+# reload it cannot load and the bouncer then fails closed: a bad whitelist
+# would be 403 for every name in the house.
+home_address_whitelist:
+  file: /appdata/gateway/crowdsec-config/parsers/s02-enrich/homelab-home-address.yaml
+  test: "docker exec crowdsec crowdsec -c /etc/crowdsec/config.yaml -t -error"
+  reload: "docker kill --signal=HUP crowdsec"

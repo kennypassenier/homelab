@@ -15,7 +15,7 @@
 //! | `HOMELAB_ADMIN_INCIDENTS_POLL_S` | 300 | how often the host's incident list is read |
 //! | `HOMELAB_ADMIN_HOST_NOTICES_POLL_S` | 60 | how often the host's notices are read into the notification centre (decision notify-routing) |
 //! | `HOMELAB_ADMIN_ALERTS_TOKEN` | none: the Alertmanager hook refuses every call | the bearer Alertmanager sends to `/hooks/alertmanager` (a secret: admin.env) |
-//! | `HOMELAB_ADMIN_PUBLIC_URL` | `https://admin.kp-soft.dev` | the dashboard's public address, which a push links to (`click_url`); chassis reads the same key for passkeys |
+//! | `HOMELAB_ADMIN_PUBLIC_URL` | none: a push carries no link | the dashboard's public address, which a push links to (`click_url`); chassis reads the same key for passkeys |
 //! | `HOMELAB_ADMIN_ACTION_TIMEOUT_S` | 21600 | the longest one action is waited for |
 //! | `HOMELAB_ADMIN_GIT_REMOTE` | `git@github.com:kennypassenier/homelab.git` | where the working copy is cloned from and pushed to (arch-edit-txn); a local path works too (tests) |
 //! | `HOMELAB_ADMIN_GIT_BRANCH` | `main` | the branch it follows and pushes |
@@ -160,9 +160,8 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
         host_notices_poll_s: number(lookup, "HOST_NOTICES_POLL_S", 60, 5, &mut why),
         alerts_token: non_empty("HOMELAB_ADMIN_ALERTS_TOKEN").map(|t| t.trim().to_string()),
         public_url: {
-            let u = non_empty("HOMELAB_ADMIN_PUBLIC_URL")
-                .unwrap_or_else(|| homelab_core::notify::DEFAULT_DASHBOARD_URL.into());
-            if !(u.starts_with("http://") || u.starts_with("https://")) {
+            let u = non_empty("HOMELAB_ADMIN_PUBLIC_URL").unwrap_or_default();
+            if !u.is_empty() && !(u.starts_with("http://") || u.starts_with("https://")) {
                 why.push("HOMELAB_ADMIN_PUBLIC_URL must be an http(s) URL".to_string());
             }
             u.trim_end_matches('/').to_string()

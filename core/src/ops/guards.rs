@@ -81,8 +81,8 @@ pub const CADVISOR_COMPOSE: &str = r#"services:
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
     ports:
-      # 8081 rather than cadvisor's own 8080: on the downloader stack that
-      # port is already published by gluetun, and one uniform port everywhere
+      # 8081 rather than cadvisor's own 8080: an app may already publish
+      # 8080 on the container, and one uniform port everywhere
       # keeps the scrape config to a single pattern.
       - "8081:8080"
     labels:

@@ -17,6 +17,7 @@ use homelab_core::state::{HostState, StackState};
 
 fn unit(name: &str, stateless: bool) -> NativeServiceManifest {
     NativeServiceManifest {
+        restore_note: None,
         stack_name: "drill".into(),
         vmid: 119,
         hostname: "119-app-drill".into(),

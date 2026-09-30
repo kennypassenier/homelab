@@ -26,6 +26,26 @@ pub struct StackManifest {
     /// link until the code learned about it.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub homepage_widgets: BTreeMap<String, HomepageWidget>,
+    /// app-knowledge (2026-09-30): the file that keeps the house's own public
+    /// address unblocked, and how its owner tests and reloads it. The gateway
+    /// stack declares it for CrowdSec; it used to be three constants naming
+    /// CrowdSec's path and container in core/src/ops/homeaddress.rs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_address_whitelist: Option<HomeAddressWhitelist>,
+    /// app-knowledge (2026-09-30): a shell command, run in this stack's
+    /// container, that prints the uid of every generated dashboard its
+    /// dashboard app is serving, one per line (the fleet check compares them
+    /// with the ones homelab wrote, F149). The metrics stack declares it for
+    /// Grafana; the credential names and the API used to be in
+    /// core/src/ops/facts.rs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated_dashboards_command: Option<String>,
+    /// replace-homepage (Kenny, 2026-09-30): this stack's tiles on the
+    /// dashboard's start page, keyed by the hostname they open. The stack
+    /// that owns a route declares its tile; Homepage and its overlay file
+    /// go.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tiles: BTreeMap<String, Tile>,
     /// A container that runs no docker at all: its services are native
     /// systemd units, adopted with C7 and supervised through their own
     /// `service.yml`. CT 109 (kyu, kyu-runner, http-switchboard) and CT 112
@@ -498,6 +518,45 @@ impl MountSpec {
     pub fn owner<'a>(&'a self, stack_name: &'a str) -> &'a str {
         self.app.as_deref().unwrap_or(stack_name)
     }
+}
+
+/// Where the house's public address is kept allowed (fix-94), declared by
+/// the stack whose app reads it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HomeAddressWhitelist {
+    /// Absolute path in the stack's container the whitelist is written to.
+    pub file: String,
+    /// Shell run in the container after writing: must succeed, or the old
+    /// file is put back.
+    pub test: String,
+    /// Shell run in the container to make the app read the new file.
+    pub reload: String,
+}
+
+/// One tile on the start page (replace-homepage).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Tile {
+    /// What the tile is called on the page.
+    pub name: String,
+    /// The heading it sits under.
+    pub group: String,
+    /// Place on the page: groups follow their lowest tile, tiles their own.
+    #[serde(default = "default_tile_order")]
+    pub order: u32,
+    /// One line under the name.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Shell run in the stack's container whose output lines are shown on
+    /// the tile ("3 in the queue"); reads the app's own key from its own
+    /// config and prints only what is shown. A failure shows as such.
+    #[serde(default)]
+    pub reading: Option<String>,
+}
+
+fn default_tile_order() -> u32 {
+    100
 }
 
 /// One app's Homepage widget (app-knowledge).

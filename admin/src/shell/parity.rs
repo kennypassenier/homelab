@@ -622,7 +622,7 @@ async fn dashboard(
             Refusal::new(
                 format!("dashboard {stack}"),
                 "a dashboard needs at least one app, each a plain name",
-                "name the apps: ?apps=jellyfin,sonarr",
+                "name the apps: ?apps=app-a,app-b",
             ),
         );
     }

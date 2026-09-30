@@ -50,7 +50,7 @@ impl Refusal {
             Refusal::NoToken => (
                 "homelab admin · lock 1 · Cloudflare Access",
                 "No pass",
-                "Open the dashboard through https://admin.kp-soft.dev, which signs you in with Cloudflare Access first.".into(),
+                "Open the dashboard through its public address, which signs you in with Cloudflare Access first.".into(),
             ),
             Refusal::Expired => (
                 "homelab admin · lock 1 · Cloudflare Access",
@@ -67,7 +67,7 @@ impl Refusal {
 
     pub fn text(&self) -> String {
         match self {
-            Refusal::NoToken => "refused: no Cloudflare Access token — open the dashboard through https://admin.kp-soft.dev".into(),
+            Refusal::NoToken => "refused: no Cloudflare Access token — open the dashboard through its public address".into(),
             Refusal::Malformed(why) => format!("refused: the Cloudflare Access token does not read ({why})"),
             Refusal::UnknownKey => "refused: the Access token is signed by a key this team does not publish".into(),
             Refusal::BadSignature => "refused: the Access token's signature does not verify".into(),

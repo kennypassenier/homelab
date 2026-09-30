@@ -249,7 +249,7 @@ fn parse_plan(
     };
     if lines.is_empty() {
         return Err(format!(
-            "a plan needs at least one step, e.g. homelab ui plan \"goto jobs\" \"open deploy media\"; {}",
+            "a plan needs at least one step, e.g. homelab ui plan \"goto jobs\" \"open deploy mystack\"; {}",
             usage()
         ));
     }

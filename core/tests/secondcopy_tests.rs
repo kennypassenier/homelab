@@ -61,6 +61,9 @@ fn manifest(
 ) -> StackManifest {
     StackManifest {
         homepage_widgets: Default::default(),
+        home_address_whitelist: None,
+        generated_dashboards_command: None,
+        tiles: Default::default(),
         firewall: None,
         registry_login: None,
         retention,
@@ -121,6 +124,7 @@ fn stack_state(
         natives: natives
             .into_iter()
             .map(|u| NativeServiceManifest {
+                restore_note: None,
                 stack_name: "kyu".into(),
                 vmid: 109,
                 hostname: "109-app-kyu".into(),

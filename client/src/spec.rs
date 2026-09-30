@@ -722,6 +722,20 @@ fn fetch_latch_files(
                 rel, latch_env
             ));
         }
+        // latch parses every file of an environment as variables when any
+        // one of them is read with `--expand`; a `${VAR}` it cannot resolve
+        // in THIS file then refuses every other stack's secrets too. On
+        // 2026-09-30 http-switchboard's `token = "${KYU_TOKEN}"` did exactly
+        // that to the metrics deploy. Refused here so the next deploy of
+        // this stack names the file, rather than another stack failing.
+        if content.contains("${") {
+            return Err(format!(
+                "{} in latch contains `${{`, which latch reads as a template in \
+                 every --expand of this environment :: write the value itself, \
+                 then `latch put {} --env {}`",
+                rel, rel, latch_env
+            ));
+        }
         notes.push(format!("[secret] {} <- latch {}", f.dest, rel));
         out.push(homelab_core::manifest::SecretFile {
             path: f.dest.clone(),

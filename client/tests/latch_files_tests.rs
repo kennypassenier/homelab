@@ -42,6 +42,7 @@ fn install_stub(bin_dir: &Path, log: &Path) {
         "#!/bin/sh\necho \"$(pwd)|$@\" >> {}\ncase \"$LATCH_STUB_MODE\" in\n\
          fail) echo 'not found' >&2; exit 1;;\n\
          empty) exit 0;;\n\
+         template) printf 'token = \"${{KYU_TOKEN}}\"\\n';;\n\
          *) printf 'url = \"http://ha/api/webhook/ID\"\\n';;\nesac",
         log.display()
     )
@@ -110,6 +111,14 @@ fn latch_files_are_read_from_latch_and_checked_before_any_call() {
     let err = homelab_client::spec::build_spec(&dir).unwrap_err();
     assert!(
         err.contains("lftest/switch/config.toml") && err.contains("not found"),
+        "{}",
+        err
+    );
+    // A `${` in a file breaks every --expand of the environment: refused.
+    std::env::set_var("LATCH_STUB_MODE", "template");
+    let err = homelab_client::spec::build_spec(&dir).unwrap_err();
+    assert!(
+        err.contains("template") && err.contains("lftest/switch/config.toml"),
         "{}",
         err
     );

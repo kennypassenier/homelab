@@ -12,6 +12,7 @@ pub mod host_link;
 pub mod hostlog;
 pub mod loki;
 pub mod parity;
+pub mod prometheus;
 pub mod releases;
 pub mod routes;
 pub mod scheduler;

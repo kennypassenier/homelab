@@ -1327,3 +1327,94 @@ td.stack-flags {
   font-size: 0.85em;
   color: var(--destructive);
 }
+
+/* replace-grafana (2026-09-30): the charts page. */
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(26rem, 1fr));
+  gap: 16px;
+}
+.chart {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.chart figcaption {
+  font-weight: 600;
+  margin-block-end: 6px;
+}
+.chart__svg {
+  width: 100%;
+  height: auto;
+}
+.chart__grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.chart__tick {
+  font-size: 11px;
+  fill: var(--muted-foreground);
+}
+.chart__line {
+  fill: none;
+  stroke-width: 1.6;
+}
+.chart__line--0,
+.chart__key--0::before {
+  stroke: var(--chart-1, var(--primary));
+  background: var(--chart-1, var(--primary));
+}
+.chart__line--1,
+.chart__key--1::before {
+  stroke: var(--chart-2, #e8a33d);
+  background: var(--chart-2, #e8a33d);
+}
+.chart__line--2,
+.chart__key--2::before {
+  stroke: var(--chart-3, #3aa675);
+  background: var(--chart-3, #3aa675);
+}
+.chart__line--3,
+.chart__key--3::before {
+  stroke: var(--chart-4, #c75b9b);
+  background: var(--chart-4, #c75b9b);
+}
+.chart__line--4,
+.chart__key--4::before {
+  stroke: var(--chart-5, #5b8fd6);
+  background: var(--chart-5, #5b8fd6);
+}
+.chart__line--5,
+.chart__key--5::before {
+  stroke: var(--muted-foreground);
+  background: var(--muted-foreground);
+}
+.chart__legend {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 0.85em;
+}
+.chart__key::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 3px;
+  margin-inline-end: 6px;
+  vertical-align: middle;
+}
+.chart__empty,
+.chart__error {
+  color: var(--muted-foreground);
+}
+.chart__error {
+  color: var(--destructive);
+}
+.chart-ranges {
+  display: flex;
+  gap: 4px;
+}

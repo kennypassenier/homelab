@@ -199,6 +199,12 @@ firewall:
       note: the homelab daemon's queries from pve
     - dir: in
       action: ACCEPT
+      source: 10.10.10.20
+      proto: tcp
+      dport: "3100,9090"
+      note: the dashboard's logs (Loki) and charts (Prometheus, replace-grafana)
+    - dir: in
+      action: ACCEPT
       source: 10.10.10.7
       proto: icmp
       note: Uptime Kuma ping

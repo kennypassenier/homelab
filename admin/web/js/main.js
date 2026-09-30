@@ -30,6 +30,7 @@ import { mount as shell } from "./pages/shell.js";
 import { mount as apply } from "./pages/apply.js";
 import { mount as presets } from "./pages/presets.js";
 import { mount as startPage } from "./pages/start.js";
+import { mount as chartsPage } from "./pages/charts.js";
 import { mountVersions } from "./versions.js";
 
 const page = /** @type {HTMLElement} */ (document.getElementById("page"));
@@ -98,6 +99,9 @@ function render() {
       break;
     case "start":
       cleanup = startPage(page);
+      break;
+    case "charts":
+      cleanup = chartsPage(page, { navigate });
       break;
     case "host":
       cleanup = host(page, { navigate });

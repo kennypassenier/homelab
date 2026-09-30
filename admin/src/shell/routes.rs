@@ -184,6 +184,83 @@ pub struct ReadCtx {
     pub host: HostClient,
     pub live: Live,
     pub loki: Option<Loki>,
+    pub prometheus: Option<crate::shell::prometheus::Prometheus>,
+}
+
+/// replace-grafana: which charts, over how long.
+#[derive(serde::Deserialize)]
+pub struct ChartQuery {
+    /// A stack's name, or absent for the hypervisor's charts.
+    #[serde(default)]
+    stack: Option<String>,
+    /// `1h`, `6h`, `24h`, `7d` or `30d`; default 24h.
+    #[serde(default)]
+    range: Option<String>,
+}
+
+/// Seconds a range word spans, and the step that gives about 240 points.
+pub fn chart_window(range: Option<&str>) -> Option<(u64, u64)> {
+    let secs = match range.unwrap_or("24h") {
+        "1h" => 3_600,
+        "6h" => 6 * 3_600,
+        "24h" => 86_400,
+        "7d" => 7 * 86_400,
+        "30d" => 30 * 86_400,
+        _ => return None,
+    };
+    Some((secs, (secs / 240).max(15)))
+}
+
+/// replace-grafana (Kenny, 2026-09-30): the charts of one stack, or of the
+/// hypervisor, each panel with its series over the window.
+async fn charts(State(c): State<ReadCtx>, Query(q): Query<ChartQuery>) -> Response {
+    let Some(prom) = &c.prometheus else {
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the charts",
+            "no Prometheus is configured for this dashboard",
+            "set admin.prometheus_url (or HOMELAB_ADMIN_PROMETHEUS_URL) to Prometheus's address",
+        );
+    };
+    let Some((span, step)) = chart_window(q.range.as_deref()) else {
+        return refused(
+            StatusCode::BAD_REQUEST,
+            "the charts",
+            "unknown range",
+            "use one of 1h, 6h, 24h, 7d, 30d",
+        );
+    };
+    let panels = match (&q.stack, &prom.host_label) {
+        (Some(s), _) => homelab_core::charts::stack_panels(s),
+        (None, Some(h)) => homelab_core::charts::host_panels(h),
+        (None, None) => {
+            return refused(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "the host charts",
+                "no charts_host is configured",
+                "set admin.charts_host (or HOMELAB_ADMIN_CHARTS_HOST) to the hypervisor's host label in Prometheus",
+            )
+        }
+    };
+    let end = now_s();
+    let start = end.saturating_sub(span);
+    let mut out = Vec::new();
+    for p in panels {
+        let r = prom
+            .range(&p.query, start, end, step, p.legend.as_deref())
+            .await;
+        out.push(match r {
+            Ok(series) => serde_json::json!({ "panel": p, "series": series }),
+            Err(e) => serde_json::json!({ "panel": p, "series": [], "error": e }),
+        });
+    }
+    Json(serde_json::json!({
+        "panels": out,
+        "from": start,
+        "to": end,
+        "step": step,
+    }))
+    .into_response()
 }
 
 fn refused(status: StatusCode, what: &str, why: &str, fix: &str) -> Response {
@@ -330,5 +407,6 @@ pub fn read_router(ctx: ReadCtx) -> Router {
         .route("/data/asks", get(asks))
         .route("/data/asks/answer", post(answer))
         .route("/data/logs", get(logs))
+        .route("/data/charts", get(charts))
         .with_state(ctx)
 }

@@ -62,6 +62,16 @@ pub struct AdminConfig {
     /// says that no Loki is configured.
     #[serde(default)]
     pub loki_url: Option<String>,
+    /// replace-grafana (2026-09-30): Prometheus's HTTP API, e.g.
+    /// `http://10.10.10.13:9090`, asked by the dashboard's server for the
+    /// charts. Unset: the charts say that no Prometheus is configured.
+    #[serde(default)]
+    pub prometheus_url: Option<String>,
+    /// The `host` label the hypervisor's node_exporter carries in
+    /// Prometheus (the metrics stack's prometheus.yml sets it). Unset: no
+    /// host charts.
+    #[serde(default)]
+    pub charts_host: Option<String>,
     /// Seconds one Loki query may take. Default 15.
     #[serde(default = "d_loki_timeout")]
     pub loki_timeout_s: u64,
@@ -127,6 +137,9 @@ impl AdminConfig {
         if let Some(url) = &self.loki_url {
             self.loki_url = Some(expand(url, lookup)?);
         }
+        if let Some(url) = &self.prometheus_url {
+            self.prometheus_url = Some(expand(url, lookup)?);
+        }
         Ok(self)
     }
 
@@ -185,6 +198,15 @@ impl AdminConfig {
                 ));
             }
         }
+        if let Some(url) = &self.prometheus_url {
+            let scheme_ok = url.starts_with("http://") || url.starts_with("https://");
+            if !scheme_ok || url.contains('?') || url.contains('#') {
+                why.push(format!(
+                    "admin.prometheus_url {:?} must be the base address, e.g. http://prometheus:9090",
+                    url
+                ));
+            }
+        }
         if self.loki_timeout_s == 0 {
             why.push("admin.loki_timeout_s must be at least 1".into());
         }
@@ -201,6 +223,14 @@ impl AdminConfig {
     /// Loki's base address without a trailing slash, when one is set.
     pub fn loki_base(&self) -> Option<String> {
         self.loki_url
+            .as_ref()
+            .map(|u| u.trim_end_matches('/').to_string())
+            .filter(|u| !u.is_empty())
+    }
+
+    /// Prometheus's base address without a trailing slash, when one is set.
+    pub fn prometheus_base(&self) -> Option<String> {
+        self.prometheus_url
             .as_ref()
             .map(|u| u.trim_end_matches('/').to_string())
             .filter(|u| !u.is_empty())
@@ -238,6 +268,8 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<AdminConfig, 
         "access_team_domain",
         "access_aud",
         "loki_url",
+        "prometheus_url",
+        "charts_host",
     ];
     let mut t = toml::Table::new();
     for key in STRINGS {

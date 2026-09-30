@@ -8,6 +8,7 @@
 //! Proxmox required.
 
 pub mod ask;
+pub mod charts;
 pub mod checks;
 pub mod doctor;
 pub mod error;

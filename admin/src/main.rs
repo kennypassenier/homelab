@@ -184,6 +184,11 @@ const FILES: &[(&str, &[u8])] = &[
         "js/pages/start.js",
         include_bytes!("../web/js/pages/start.js"),
     ),
+    (
+        "js/pages/charts.js",
+        include_bytes!("../web/js/pages/charts.js"),
+    ),
+    ("js/charts.js", include_bytes!("../web/js/charts.js")),
     ("css/app.css", include_bytes!("../web/css/app.css")),
 ];
 
@@ -278,6 +283,7 @@ async fn main() -> std::process::ExitCode {
         host: host_client.clone(),
         live: live.clone(),
         loki: homelab_admin::shell::loki::Loki::from_config(config.as_ref()),
+        prometheus: homelab_admin::shell::prometheus::Prometheus::from_config(config.as_ref()),
     }));
     // feat-platform-10: a demo host inside this process instead of the real
     // line, for the browser tests; nothing is sent anywhere. Only a build

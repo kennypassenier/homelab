@@ -55,6 +55,11 @@ TimeoutStopSec=60
 # still runs against this machine's measured directory.
 Environment=KYU_STATE_DIR=/appdata/kyu/kyu-config
 Environment=KYU_TIMEOUT_STOP_SECS=60
+# Traefik on CT 104 (10.10.10.4) is the proxy in front of this service: the
+# only peer whose X-Forwarded-For/Proto are believed. Without it every client
+# shares one rate-limit key, cookies are not Secure and passkeys stay off
+# (the kit's "proxy headers from untrusted peer" warning, 2026-09-30).
+Environment=KYU_TRUSTED_PROXIES=10.10.10.4
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict

@@ -27,6 +27,11 @@ Environment=ALMANAC_STATE_DIR=/appdata/almanac/almanac-config
 Environment=ALMANAC_UPDATE_MODE=supervised
 # Mirrored so `--check` can warn when the shutdown timeout would outlive it.
 Environment=ALMANAC_TIMEOUT_STOP_SECS=60
+# Traefik on CT 104 (10.10.10.4) is the proxy in front of this service: the
+# only peer whose X-Forwarded-For/Proto are believed. Without it every client
+# shares one rate-limit key, cookies are not Secure and passkeys stay off
+# (the kit's "proxy headers from untrusted peer" warning, 2026-09-30).
+Environment=ALMANAC_TRUSTED_PROXIES=10.10.10.4
 WorkingDirectory=/appdata/almanac/almanac-config
 ExecStartPre=/usr/local/bin/latch run -- /opt/almanac/bin/almanac --check
 ExecStart=/usr/local/bin/latch run -- /opt/almanac/bin/almanac

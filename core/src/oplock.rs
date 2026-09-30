@@ -16,6 +16,14 @@ pub struct Holder {
     /// operation.
     pub done: usize,
     pub total: usize,
+    /// Decision "deploys are known outages" (Kenny, 2026-09-30): the one
+    /// stack this operation acts on, when it is a single-stack op (deploy,
+    /// update, patch, resize, restore, backup, adopt, a native lifecycle
+    /// op). None for a fleet-wide or host-only operation (the nightly
+    /// round, a host-meta backup, self-update, …). AR12 holds this lock
+    /// strictly one operation at a time, so at most one stack is ever
+    /// marked this way.
+    pub stack: Option<String>,
 }
 
 /// A duration as minutes and seconds, hours past an hour.

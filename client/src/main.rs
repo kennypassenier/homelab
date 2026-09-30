@@ -647,6 +647,27 @@ async fn run(explicit_host: Option<String>) {
         "backup-devices" => rpc(&host, &token, Command::BackupDevices).await,
         // H10: on-demand snapshot of vault/state/TLS/intent repo.
         "backup-host-meta" => rpc(&host, &token, Command::BackupHostMeta).await,
+        // Owner decision 2026-09-30 (item 2): CLI parity for the
+        // dashboard's "Save and restart the host" — `homelab host
+        // restart` schedules the same systemd restart of
+        // homelab-host.service and waits the same way `release-update`
+        // waits for the host to come back (no version to check, so it
+        // only waits for it to go down and answer again).
+        "host" => match args.get(2).map(|s| s.as_str()) {
+            Some("restart") => {
+                println!(
+                    "{}▶ host restart :: restarting homelab-host.service{}",
+                    C_CYAN, C_RESET
+                );
+                let ok = rpc_with(&host, &token, Command::RestartHost).await
+                    && wait_for_updated_host(&host, &token, None).await;
+                std::process::exit(if ok { 0 } else { 1 });
+            }
+            other => die(&format!(
+                "usage: homelab host restart (got {:?})",
+                other.unwrap_or("nothing")
+            )),
+        },
         // G17: the questions only a person can answer. `homelab checks` lists
         // them with their ids; `homelab checks answer <id> ok|nok [note]`
         // records one. They used to be printed at the end of a deploy and
@@ -1851,6 +1872,7 @@ async fn ui_finish(host: &str, token: &str, json: bool) -> UiStep {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
             FinishNext::NoJob(why) => die(&format!("ui finish: {why}")),
+            FinishNext::Stopped(why) => die(&format!("ui finish: {why}")),
             FinishNext::Release { outcome, failed } => {
                 if let Some(o) = outcome.filter(|_| !json) {
                     println!("{o}");

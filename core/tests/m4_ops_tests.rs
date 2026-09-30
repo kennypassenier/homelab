@@ -80,6 +80,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,
+        tile_watch_source: None,
     }
 }
 
@@ -2994,6 +2995,7 @@ async fn h14_every_destroy_step_is_journaled_running_then_done() {
             asker: &homelab_core::ask::NOBODY,
             backup: Default::default(),
             registry_cache: None,
+            tile_watch_source: None,
         },
         &manifest(108, "test"),
         "test",
@@ -3038,6 +3040,7 @@ async fn h14_failed_step_leaves_running_then_failed_trail() {
             asker: &homelab_core::ask::NOBODY,
             backup: Default::default(),
             registry_cache: None,
+            tile_watch_source: None,
         },
         &manifest(108, "test"),
         "test",

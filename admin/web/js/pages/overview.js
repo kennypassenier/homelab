@@ -17,6 +17,7 @@ import {
   tableBlock,
   td,
 } from "../dom.js";
+import { register } from "../drivehooks.js";
 import { openImport } from "../importstack.js";
 import { openNewStack } from "../newstack.js";
 import { stackHref } from "../router.js";
@@ -195,6 +196,13 @@ export function mount(root, ctx) {
     void openBatch(batchSel.value, stacks);
   });
 
+  // Live view (owner decision 2026-09-30): `homelab ui select` ticks rows
+  // here, exactly as a click would, so a batch action opened right after
+  // it acts on the same stacks.
+  const unregister = register("overview", {
+    select: (/** @type {string[]} */ stacks) => table?.select(stacks),
+  });
+
   const unsub = subscribe(render);
   render();
   const abort = new AbortController();
@@ -221,5 +229,6 @@ export function mount(root, ctx) {
     unsub();
     unbind();
     detach();
+    unregister();
   };
 }

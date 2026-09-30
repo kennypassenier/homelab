@@ -64,11 +64,24 @@ pub struct TransferView {
     pushed_ms: i64,
 }
 
-#[derive(Default)]
 struct Ring {
     next: u64,
     lines: VecDeque<LineView>,
     transfers: BTreeMap<(String, String), TransferView>,
+    /// Decision "23 constants": [`RING`] by default,
+    /// `HOMELAB_ADMIN_HOSTLOG_RING` in `mount()`.
+    cap: usize,
+}
+
+impl Default for Ring {
+    fn default() -> Self {
+        Ring {
+            next: 0,
+            lines: VecDeque::new(),
+            transfers: BTreeMap::new(),
+            cap: RING,
+        }
+    }
 }
 
 impl Ring {
@@ -76,7 +89,7 @@ impl Ring {
         self.next += 1;
         line.seq = self.next;
         self.lines.push_back(line.clone());
-        while self.lines.len() > RING {
+        while self.lines.len() > self.cap {
             self.lines.pop_front();
         }
         line
@@ -133,11 +146,24 @@ fn limit() -> usize {
 
 impl HostLog {
     pub fn new(publish: Arc<dyn Publish>, clock: Clock) -> Self {
+        Self::with_ring(publish, clock, RING)
+    }
+
+    /// Decision "23 constants": the ring size from `ActConfig`
+    /// (`HOMELAB_ADMIN_HOSTLOG_RING`); `mount()` only.
+    pub fn with_ring(publish: Arc<dyn Publish>, clock: Clock, ring: usize) -> Self {
         HostLog {
-            ring: Arc::new(Mutex::new(Ring::default())),
+            ring: Arc::new(Mutex::new(Ring {
+                cap: ring,
+                ..Ring::default()
+            })),
             publish,
             clock,
         }
+    }
+
+    fn cap(&self) -> usize {
+        self.lock().cap
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Ring> {
@@ -207,7 +233,7 @@ impl HostLog {
             })
             .cloned()
             .collect();
-        let n = q.limit.clamp(1, RING);
+        let n = q.limit.clamp(1, r.cap);
         if out.len() > n {
             out.drain(..out.len() - n);
         }
@@ -314,7 +340,7 @@ async fn lines(State(h): State<HostLog>, Query(q): Query<After>) -> Json<serde_j
         "lines": h.lines(&q),
         "sources": h.sources(),
         "transfers": h.transfers(),
-        "ring": RING,
+        "ring": h.cap(),
     }))
 }
 

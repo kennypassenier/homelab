@@ -19,18 +19,16 @@ export const CHORD_MS = 1500;
 /** @type {Record<string, string>} second key after "g" → page */
 const GO = {
   o: "overview",
+  u: "home",
+  k: "health",
+  m: "metrics",
   h: "host",
   a: "activity",
-  t: "timeline",
-  c: "checks",
-  d: "doctor",
   j: "jobs",
   s: "schedules",
   n: "notifications",
   f: "firewall",
   e: "settings",
-  // TUI parity round.
-  y: "today",
   l: "log",
   p: "apply",
   x: "shell",

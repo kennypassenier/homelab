@@ -46,6 +46,7 @@ pub mod probes;
 pub mod reconcile;
 pub mod registry_cache;
 pub mod resize;
+pub mod restarthost;
 pub mod restoredrill;
 pub mod retired;
 pub mod secondcopy;
@@ -169,4 +170,11 @@ pub struct OpCtx<'a> {
     /// every image keeps naming its own origin, which is also what happens
     /// when the cache is configured but does not answer.
     pub registry_cache: Option<registry_cache::CacheCfg>,
+    /// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
+    /// dashboard's own address, from which its once-a-minute tile watch
+    /// reaches every stack's tiles. None or empty = feature off — the
+    /// firewall step derives no rule from `tiles:`, exactly as if the
+    /// stack declared none. Fleet-wide setting `tile_watch_source`
+    /// (`core::hostconfig`).
+    pub tile_watch_source: Option<String>,
 }

@@ -218,3 +218,117 @@ impl Tracker {
         }
     }
 }
+
+/// arch-self: a job whose action restarts the dashboard
+/// (`JobView::restarts_dashboard`) loses the dashboard's own memory of how
+/// it ended; the host's history still has it. A few seconds of clock skew
+/// are allowed between the job's `started_at` and the host's recorded
+/// start, the two clocks not being the same one.
+pub const OUTCOME_SKEW_S: i64 = 5;
+
+/// What the host's history says a job that restarted the dashboard came to.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Outcome {
+    pub found: bool,
+    pub ok: bool,
+    /// The steps the finished run recorded; the page's final "step n/m".
+    pub steps: usize,
+    pub end: i64,
+}
+
+/// The host history entry for `subject` (a job's stack-action, e.g.
+/// `install-native-admin`) whose start is at/after `since` (the job's
+/// `started_at`, a few seconds of skew allowed). Entries are read oldest
+/// first (arch-history), so the earliest match is the run the job itself
+/// started, not one pressed again afterwards.
+pub fn outcome_since(history: &[HistoryEntry], subject: &str, since: i64) -> Outcome {
+    let hit = history.iter().find(|e| match e {
+        HistoryEntry::Op {
+            start,
+            subject: Some(s),
+            ..
+        } => s == subject && *start as i64 >= since - OUTCOME_SKEW_S,
+        _ => false,
+    });
+    match hit {
+        Some(HistoryEntry::Op { end, ok, steps, .. }) => Outcome {
+            found: true,
+            ok: *ok,
+            steps: steps.len(),
+            end: *end as i64,
+        },
+        _ => Outcome::default(),
+    }
+}
+
+#[cfg(test)]
+mod outcome_tests {
+    use super::*;
+
+    fn op(subject: &str, start: u64, end: u64, ok: bool, n_steps: usize) -> HistoryEntry {
+        HistoryEntry::Op {
+            start,
+            end,
+            label: "install-native".into(),
+            subject: Some(subject.into()),
+            req: None,
+            by: None,
+            ok,
+            deferred: None,
+            error: None,
+            steps: (0..n_steps)
+                .map(|i| homelab_core::history::StepTiming {
+                    step: format!("step-{i}"),
+                    start,
+                    end: start + 1,
+                    changed: true,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn outcome_since_finds_the_run_that_started_at_or_after_the_job() {
+        let history = vec![
+            op("install-native-admin", 1_000, 1_010, true, 3),
+            op("install-native-admin", 2_000, 2_022, true, 22),
+            op("deploy-media", 2_005, 2_030, true, 10),
+        ];
+        let out = outcome_since(&history, "install-native-admin", 2_000);
+        assert_eq!(
+            out,
+            Outcome {
+                found: true,
+                ok: true,
+                steps: 22,
+                end: 2_022,
+            }
+        );
+    }
+
+    #[test]
+    fn outcome_since_allows_a_few_seconds_of_clock_skew() {
+        let history = vec![op("install-native-admin", 1_998, 2_020, false, 5)];
+        // The job's started_at (2_000) is 2 s after the host's own start;
+        // within OUTCOME_SKEW_S this still counts as the same run.
+        let out = outcome_since(&history, "install-native-admin", 2_000);
+        assert!(out.found);
+        assert!(!out.ok);
+        assert_eq!(out.steps, 5);
+    }
+
+    #[test]
+    fn outcome_since_nothing_before_the_skew_window_is_unfound() {
+        let history = vec![op("install-native-admin", 1_000, 1_010, true, 3)];
+        let out = outcome_since(&history, "install-native-admin", 2_000);
+        assert_eq!(out, Outcome::default());
+        assert!(!out.found);
+    }
+
+    #[test]
+    fn outcome_since_a_different_subject_does_not_match() {
+        let history = vec![op("deploy-media", 2_000, 2_010, true, 5)];
+        let out = outcome_since(&history, "install-native-admin", 2_000);
+        assert!(!out.found);
+    }
+}

@@ -83,6 +83,12 @@ pub struct Fix {
     pub label: String,
 }
 
+/// An old `notifications.json` holds no `push_short`; read as not urgent
+/// rather than claim a push that was never recorded either way.
+fn push_short_default() -> String {
+    "No push · not urgent".into()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Notice {
     pub id: u64,
@@ -99,6 +105,12 @@ pub struct Notice {
     pub read: bool,
     /// Whether it went to the phone, and if not, why not.
     pub push: PushOutcome,
+    /// Owner decision 2026-09-30 (item 3): the table's own short push
+    /// status ("Pushed", "No push · succeeded", "Push failed", …), derived
+    /// from `push`. `push`'s own `why` (on `Skipped`/`Failed`) stays the
+    /// full reason for the row a reader expands.
+    #[serde(default = "push_short_default")]
+    pub push_short: String,
     #[serde(default)]
     pub level: Level,
     /// Since when it is so (unix seconds): an operation's start, an alert's
@@ -137,6 +149,24 @@ pub enum PushOutcome {
     BySender {
         who: String,
     },
+}
+
+impl PushOutcome {
+    /// Owner decision 2026-09-30 (item 3): the notifications table's own
+    /// short push column ("Pushed", "No push · succeeded", "Push failed",
+    /// …); the full reason stays on the notice itself (`why`, `Skipped`'s
+    /// own field) for the row a reader expands.
+    pub fn short(&self) -> &'static str {
+        match self {
+            PushOutcome::Sent | PushOutcome::BySender { .. } => {
+                homelab_core::notify::push_status_short(true, false, "")
+            }
+            PushOutcome::Failed { .. } => homelab_core::notify::push_status_short(false, true, ""),
+            PushOutcome::Skipped { why } => {
+                homelab_core::notify::push_status_short(false, false, why)
+            }
+        }
+    }
 }
 
 /// feat-ops-9's switches, and the digest's time.
@@ -404,8 +434,9 @@ impl NotifyFile {
         Ok(())
     }
 
-    /// Store a notice; the oldest fall off past `KEEP`.
-    pub fn add(&mut self, d: Draft, at: i64, push: PushOutcome) -> Notice {
+    /// Store a notice; the oldest fall off past `keep` (`KEEP` is the
+    /// default, overridden by `HOMELAB_ADMIN_NOTIFY_KEEP`).
+    pub fn add(&mut self, d: Draft, at: i64, push: PushOutcome, keep: usize) -> Notice {
         let n = Notice {
             id: self.next_id,
             at,
@@ -415,6 +446,7 @@ impl NotifyFile {
             body: d.body,
             job: d.job,
             read: false,
+            push_short: push.short().to_string(),
             push,
             level: d.detail.level,
             since: d.detail.since,
@@ -427,8 +459,8 @@ impl NotifyFile {
         };
         self.next_id += 1;
         self.notices.push(n.clone());
-        if self.notices.len() > KEEP {
-            let cut = self.notices.len() - KEEP;
+        if self.notices.len() > keep {
+            let cut = self.notices.len() - keep;
             self.notices.drain(..cut);
         }
         n
@@ -470,11 +502,16 @@ impl NotifyFile {
         fresh
     }
 
-    /// Snooze everything for `seconds` from `now` (at most a week); 0 ends
-    /// the snooze.
-    pub fn snooze(&mut self, now: i64, seconds: i64) -> Result<Option<i64>, String> {
-        if !(0..=SNOOZE_MAX_S).contains(&seconds) {
-            return Err(format!("a snooze lasts 0 to {SNOOZE_MAX_S} seconds"));
+    /// Snooze everything for `seconds` from `now` (at most `snooze_max_s`,
+    /// `SNOOZE_MAX_S` by default, a week); 0 ends the snooze.
+    pub fn snooze(
+        &mut self,
+        now: i64,
+        seconds: i64,
+        snooze_max_s: i64,
+    ) -> Result<Option<i64>, String> {
+        if !(0..=snooze_max_s).contains(&seconds) {
+            return Err(format!("a snooze lasts 0 to {snooze_max_s} seconds"));
         }
         self.settings.snooze_until = (seconds > 0).then_some(now + seconds);
         Ok(self.settings.snooze_until)
@@ -793,6 +830,7 @@ impl NotifyFile {
         n: &homelab_core::notify::HostNotice,
         job: Option<u64>,
         at: i64,
+        keep: usize,
     ) -> Option<Notice> {
         self.host_cursor = self.host_cursor.max(n.seq);
         let (d, push) = host_draft(n);
@@ -812,7 +850,7 @@ impl NotifyFile {
                 return Some(x.clone());
             }
         }
-        Some(self.add(d, at, push))
+        Some(self.add(d, at, push, keep))
     }
 }
 
@@ -978,19 +1016,19 @@ impl NotifyFile {
     /// One alert into the list. A repeat of an alert that still fires adds
     /// nothing; a resolved one is stored read, and the firing notice it ends
     /// no longer waits.
-    pub fn add_alert(&mut self, a: AlertDraft, at: i64) -> Option<Notice> {
+    pub fn add_alert(&mut self, a: AlertDraft, at: i64, keep: usize) -> Option<Notice> {
         let key = a.draft.detail.key.clone().unwrap_or_default();
         let open = self.alert_open(&key);
         if a.firing {
             if open.is_some() {
                 return None;
             }
-            return Some(self.add(a.draft, at, a.push));
+            return Some(self.add(a.draft, at, a.push, keep));
         }
         if let Some(i) = open {
             self.notices[i].read = true;
         }
-        let mut n = self.add(a.draft, at, a.push);
+        let mut n = self.add(a.draft, at, a.push, keep);
         if let Some(x) = self.notices.iter_mut().rev().find(|x| x.id == n.id) {
             x.read = true;
         }
@@ -1006,8 +1044,14 @@ impl NotifyFile {
 pub const DIGEST_LATE_S: i64 = 3 * 3600;
 
 /// The local day the digest is due for now, if it is: at or after the
-/// digest's time, within [`DIGEST_LATE_S`], and not sent that day yet.
-pub fn digest_due(s: &Settings, last: Option<&DigestRecord>, now: i64) -> Option<String> {
+/// digest's time, within `digest_late_s` (`DIGEST_LATE_S` by default), and
+/// not sent that day yet.
+pub fn digest_due(
+    s: &Settings,
+    last: Option<&DigestRecord>,
+    now: i64,
+    digest_late_s: i64,
+) -> Option<String> {
     let (hh, mm) = super::schedule::parse_hhmm(s.digest_at.as_deref()?)?;
     let (y, m, d, h, min) = super::schedule::to_local(now);
     let day = format!("{y:04}-{m:02}-{d:02}");
@@ -1015,7 +1059,7 @@ pub fn digest_due(s: &Settings, last: Option<&DigestRecord>, now: i64) -> Option
         return None;
     }
     let late = (h as i64 * 60 + min as i64 - (hh as i64 * 60 + mm as i64)) * 60;
-    (0..=DIGEST_LATE_S).contains(&late).then_some(day)
+    (0..=digest_late_s).contains(&late).then_some(day)
 }
 
 /// One line the digest can carry.

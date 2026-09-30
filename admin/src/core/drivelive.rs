@@ -180,6 +180,13 @@ pub fn describe(step: &UiStep, st: &DriveState) -> String {
                 _ => format!("{op} row {t}"),
             }
         }
+        UiStep::Select { stacks } => {
+            if stacks.is_empty() {
+                "clear the fleet table's selection".into()
+            } else {
+                format!("select {} in the fleet table", stacks.join(", "))
+            }
+        }
         UiStep::Close => match title {
             Some(t) => format!("close {t}"),
             None => "close the dialog".into(),

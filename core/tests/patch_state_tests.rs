@@ -34,7 +34,10 @@ fn fix_150_the_threshold_is_seven_days() {
 /// container and the days; three days is not.
 #[test]
 fn fix_150_a_reboot_pending_longer_than_the_threshold_is_drift() {
-    let f = evaluate_patch_state(&[fact(116, 40, Some(8 * DAY), Some(DAY / 2))]);
+    let f = evaluate_patch_state(
+        &[fact(116, 40, Some(8 * DAY), Some(DAY / 2))],
+        PATCH_THRESHOLD_S,
+    );
     assert_eq!(f.len(), 1, "{:?}", f);
     assert_eq!(f[0].severity, Severity::Drift);
     assert!(f[0].subject.contains("116"), "{:?}", f[0]);
@@ -45,7 +48,10 @@ fn fix_150_a_reboot_pending_longer_than_the_threshold_is_drift() {
     );
     assert!(f[0].remedy.contains("reboot"), "{:?}", f[0]);
 
-    let quiet = evaluate_patch_state(&[fact(116, 40, Some(3 * DAY), Some(DAY / 2))]);
+    let quiet = evaluate_patch_state(
+        &[fact(116, 40, Some(3 * DAY), Some(DAY / 2))],
+        PATCH_THRESHOLD_S,
+    );
     assert!(quiet.is_empty(), "{:?}", quiet);
 }
 
@@ -54,7 +60,7 @@ fn fix_150_a_reboot_pending_longer_than_the_threshold_is_drift() {
 /// fresh, are not — the nightly `homelab patch` takes those.
 #[test]
 fn fix_150_a_stalled_unattended_upgrade_is_drift_but_upgradable_packages_alone_are_not() {
-    let f = evaluate_patch_state(&[fact(113, 64, None, Some(9 * DAY))]);
+    let f = evaluate_patch_state(&[fact(113, 64, None, Some(9 * DAY))], PATCH_THRESHOLD_S);
     assert_eq!(f.len(), 1, "{:?}", f);
     assert_eq!(f[0].severity, Severity::Drift);
     assert!(
@@ -63,7 +69,7 @@ fn fix_150_a_stalled_unattended_upgrade_is_drift_but_upgradable_packages_alone_a
         f[0]
     );
 
-    let quiet = evaluate_patch_state(&[fact(113, 64, None, Some(DAY))]);
+    let quiet = evaluate_patch_state(&[fact(113, 64, None, Some(DAY))], PATCH_THRESHOLD_S);
     assert!(quiet.is_empty(), "{:?}", quiet);
 }
 
@@ -71,7 +77,7 @@ fn fix_150_a_stalled_unattended_upgrade_is_drift_but_upgradable_packages_alone_a
 /// too: the daily security patching is not happening there.
 #[test]
 fn fix_150_a_container_without_any_unattended_run_is_drift() {
-    let f = evaluate_patch_state(&[fact(118, 3, None, None)]);
+    let f = evaluate_patch_state(&[fact(118, 3, None, None)], PATCH_THRESHOLD_S);
     assert_eq!(f.len(), 1, "{:?}", f);
     assert!(f[0].what.contains("never"), "{:?}", f[0]);
 }
@@ -85,10 +91,10 @@ fn fix_150_a_container_without_any_unattended_run_is_drift() {
 fn fix_150_a_container_younger_than_the_threshold_is_not_judged_for_never() {
     let mut young = fact(104, 45, None, None);
     young.age_s = Some(3_600);
-    assert!(evaluate_patch_state(&[young]).is_empty());
+    assert!(evaluate_patch_state(&[young], PATCH_THRESHOLD_S).is_empty());
     let mut old = fact(104, 45, None, None);
     old.age_s = Some(8 * DAY);
-    assert_eq!(evaluate_patch_state(&[old]).len(), 1);
+    assert_eq!(evaluate_patch_state(&[old], PATCH_THRESHOLD_S).len(), 1);
 }
 
 /// The probe prints three lines: upgradable count, reboot-required mtime or
@@ -107,5 +113,5 @@ fn fix_150_the_probe_output_parses_into_ages() {
     // Garbage from a broken container is unknown, never a finding.
     let p = parse_patch_probe(113, "113-app-metrics", "lxc-attach: failed\n", NOW);
     assert_eq!(p.upgradable, None);
-    assert!(evaluate_patch_state(&[p]).is_empty());
+    assert!(evaluate_patch_state(&[p], PATCH_THRESHOLD_S).is_empty());
 }

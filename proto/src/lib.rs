@@ -110,6 +110,13 @@ pub enum Command {
     SelfUpdateHost {
         binary_b64: String,
     },
+    /// Owner decision 2026-09-30 (item 2): restart `homelab-host.service`
+    /// itself, so a `host.toml` change marked `Apply::Restart` takes
+    /// effect without a second host update. Nothing is replaced and no
+    /// rollback is armed; the host schedules the restart through systemd
+    /// (`systemctl restart --no-block`) so this reply reaches the client
+    /// first. Refused while an operation runs.
+    RestartHost,
     /// H6: apt dist-upgrade every managed stack (from host state),
     /// sequentially.
     PatchFleet,
@@ -478,6 +485,11 @@ pub enum UiStep {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target: Option<String>,
     },
+    /// Owner decision 2026-09-30: tick rows of the Overview fleet table's
+    /// multiselect, exactly as a click would, so a batch action can be
+    /// opened from that selection (`homelab ui select <stack>,<stack>`,
+    /// `homelab ui select none` clears it). Only on the Overview page.
+    Select { stacks: Vec<String> },
     /// Close the open dialog.
     Close,
     /// Change nothing; answer what is on screen now.
@@ -513,6 +525,7 @@ impl UiStep {
             UiStep::Press { .. } => "press",
             UiStep::Edit { .. } => "edit",
             UiStep::Row { .. } => "row",
+            UiStep::Select { .. } => "select",
             UiStep::Close => "close",
             UiStep::State => "state",
             UiStep::Done => "done",
@@ -620,6 +633,7 @@ impl Command {
             | UiHold { .. } => Scope::Operate,
             DestroyStack { .. }
             | SelfUpdateHost { .. }
+            | RestartHost
             | ExecIn { .. }
             | SetConfig(_)
             | ForgetStack { .. }
@@ -648,6 +662,7 @@ impl Command {
             RestoreStack { .. } => "restore_stack",
             UpdateStack { .. } => "update_stack",
             SelfUpdateHost { .. } => "self_update_host",
+            RestartHost => "restart_host",
             PatchFleet => "patch_fleet",
             ExecIn { .. } => "exec_in",
             BuildTemplate { .. } => "build_template",
@@ -1071,6 +1086,10 @@ mod wire_tests {
                 op: "add".into(),
                 target: None,
             },
+            UiStep::Select {
+                stacks: vec!["media".into(), "uptime".into()],
+            },
+            UiStep::Select { stacks: vec![] },
             UiStep::Close,
             UiStep::State,
             UiStep::Done,

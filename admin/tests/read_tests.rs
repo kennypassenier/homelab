@@ -10,7 +10,7 @@ use chassis::shell::live::Live;
 use homelab_admin::core::asks::{AnswerRequest, Asks, Refusal};
 use homelab_admin::core::config::from_table;
 use homelab_admin::core::guests::parse_status;
-use homelab_admin::core::logs::{logql, parse_answer, window, LogQuery};
+use homelab_admin::core::logs::{logql, parse_answer, window, LogQuery, MAX_LIMIT, MAX_SINCE_S};
 use homelab_admin::shell::host_link::{Shared, Snapshot};
 use homelab_admin::shell::routes::answer_ask;
 use homelab_proto::{Command, RpcResponse};
@@ -261,12 +261,15 @@ fn feat_ops_4_the_window_and_line_count_are_clamped() {
     l.since = 10 * 86400;
     l.limit = 99_999;
     assert_eq!(
-        window(&l, 1_000_000),
+        window(&l, 1_000_000, MAX_SINCE_S, MAX_LIMIT),
         (1_000_000 - 7 * 86400, 1_000_000, 5000)
     );
     l.since = 1;
     l.limit = 0;
-    assert_eq!(window(&l, 1_000_000), (1_000_000 - 60, 1_000_000, 1));
+    assert_eq!(
+        window(&l, 1_000_000, MAX_SINCE_S, MAX_LIMIT),
+        (1_000_000 - 60, 1_000_000, 1)
+    );
 }
 
 #[test]

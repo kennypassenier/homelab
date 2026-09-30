@@ -248,12 +248,12 @@ firewall:
 tiles:
   job.kp-soft.dev:
     name: "JobTracker"
-    group: "Eigen"
+    group: "Own"
     order: 403
-    description: "Sollicitatiedossiers"
+    description: "Job applications"
   kp-soft-local:
     name: "kp-soft"
-    group: "Eigen"
+    group: "Own"
     order: 401
-    description: "Eigen site (in aanbouw, alleen thuis)"
+    description: "Own site (in progress, home only)"
     url: "http://10.10.10.16:8080/"

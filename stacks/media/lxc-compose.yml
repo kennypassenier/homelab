@@ -234,7 +234,7 @@ tiles:
     name: "Jellyfin"
     group: "Media"
     order: 101
-    description: "Films en series"
+    description: "Films and series"
     reading: |
       K=$(sqlite3 "file:/appdata/media/jellyfin-config/data/jellyfin.db?mode=ro" "select AccessToken from ApiKeys where Name='Homelab';")
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf 'header = Authorization: MediaBrowser Token="%s"\n' "$K" > "$C"
@@ -244,7 +244,7 @@ tiles:
     name: "Seerr"
     group: "Media"
     order: 102
-    description: "Aanvragen doen"
+    description: "Requests"
     reading: |
       K=$(sed -n 's/.*"apiKey": *"\([^"]*\)".*/\1/p' /appdata/media/seerr-config/settings.json | head -1)
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-Api-Key: $K" > "$C"
@@ -273,7 +273,7 @@ tiles:
     name: "Prowlarr"
     group: "Media"
     order: 105
-    description: "Indexeerders"
+    description: "Indexers"
     reading: |
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/prowlarr-config/config.xml)
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-Api-Key: $K" > "$C"
@@ -282,7 +282,7 @@ tiles:
     name: "Bazarr"
     group: "Media"
     order: 106
-    description: "Ondertitels"
+    description: "Subtitles"
     reading: |
       K=$(awk '/^auth:/{f=1} f&&/apikey:/{print $2; exit}' /appdata/media/bazarr-config/config/config.yaml)
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-API-KEY: $K" > "$C"

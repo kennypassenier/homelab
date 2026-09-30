@@ -130,6 +130,19 @@ impl Driver {
             .unwrap_or_else(PoisonError::into_inner) = t;
     }
 
+    /// Decision "23 constants": `idle_s` and `release_after_job_s`, from
+    /// `ActConfig` (mount only); `core::drive::IDLE_S` and
+    /// `RELEASE_AFTER_JOB_S` otherwise.
+    pub fn set_limits(&self, idle_s: i64, release_after_job_s: i64) {
+        let mut s = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        s.idle_s = idle_s;
+        s.release_after_job_s = release_after_job_s;
+    }
+
     fn timing(&self) -> LiveTiming {
         *self
             .inner
@@ -177,6 +190,15 @@ impl Driver {
                     *j = job_ref(&v);
                 }
             }
+            // A batch's final press answered `{batch}`: the batch as it
+            // stands now rides along, so `ui finish` can follow it.
+            if let Some(r) = f.edit.as_mut().and_then(|e| e.result.as_mut()) {
+                if let Some(b) = r.get("batch").and_then(Value::as_u64) {
+                    if let Some(v) = self.inner.actions.batch_view(b) {
+                        r["progress"] = v;
+                    }
+                }
+            }
         }
         s
     }
@@ -195,10 +217,41 @@ impl Driver {
     /// The lists an `open` fills its choices from: the fleet's apps, and the
     /// working copy's commits and native units when the form asks.
     async fn sources(&self, step: &UiStep) -> Sources {
+        // dashboard-latest: a unit picked while install-native's dialog is
+        // open re-reads that unit's release list, the same re-fetch the
+        // browser's own listener does when the unit field changes — so a
+        // later `ui pick act-tag <tag>` is checked against the right repo.
+        if let UiStep::Pick { field, value } = step {
+            if field.as_str() == "act-unit" {
+                if let Some(stack) = self.open_form_stack("install-native") {
+                    if let Ok(v) = self
+                        .inner
+                        .actions
+                        .release_options(&stack, Some(value.as_str()))
+                        .await
+                    {
+                        return Sources {
+                            releases: strings(&v["releases"], Some("value")),
+                            ..Sources::default()
+                        };
+                    }
+                }
+            }
+        }
         if let UiStep::Open { form, target } = step {
             if let Some(kind) = EditKind::from_form(form) {
+                // Owner decision 2026-09-30: `open batch <action>` with no
+                // stacks named previews the fleet table's own selection.
+                let selected;
+                let target = match (kind, target.as_deref()) {
+                    (EditKind::Batch, None) => {
+                        selected = self.lock().selected.join(",");
+                        Some(selected.as_str())
+                    }
+                    (_, t) => t,
+                };
                 return Sources {
-                    edit: self.edit_read(kind, form, target.as_deref()).await,
+                    edit: self.edit_read(kind, form, target).await,
                     ..Sources::default()
                 };
             }
@@ -217,6 +270,21 @@ impl Driver {
                         templates: self.os_templates().await,
                         ..Sources::default()
                     }
+                }
+                // dashboard-latest: update-host's tag dropdown, the
+                // homelab repository's own release list.
+                "update-host" => {
+                    let v = self
+                        .inner
+                        .actions
+                        .release_options(act::HOST_TARGET, None)
+                        .await;
+                    return Sources {
+                        releases: v
+                            .map(|v| strings(&v["releases"], Some("value")))
+                            .unwrap_or_default(),
+                        ..Sources::default()
+                    };
                 }
                 _ => {}
             }
@@ -241,20 +309,32 @@ impl Driver {
                 .unwrap_or_default(),
             ..Sources::default()
         };
-        let wants = ActionKind::from_slug(form)
-            .map(|k| {
-                k.args()
-                    .iter()
-                    .any(|a| matches!(a, Arg::Unit | Arg::Commit))
-            })
-            .unwrap_or(false);
-        if wants {
+        let args = ActionKind::from_slug(form).map(|k| k.args()).unwrap_or(&[]);
+        if args.iter().any(|a| matches!(a, Arg::Unit | Arg::Commit)) {
             if let Ok(v) = self.inner.actions.rollback_options(stack.clone()).await {
                 out.units = strings(&v["native_units"], None);
                 out.commits = strings(&v["commits"], Some("commit"));
             }
         }
+        // dashboard-latest: install-native's tag dropdown. The unit is not
+        // picked yet at `open` time; a single-service stack still resolves
+        // (its release_repo needs no unit named), a multi-service one waits
+        // for the Pick branch above.
+        if args.contains(&Arg::Tag) {
+            if let Ok(v) = self.inner.actions.release_options(stack, None).await {
+                out.releases = strings(&v["releases"], Some("value"));
+            }
+        }
         out
+    }
+
+    /// The stack of the open dialog, when it is driving `action`.
+    fn open_form_stack(&self, action: &str) -> Option<String> {
+        self.lock()
+            .form
+            .as_ref()
+            .filter(|f| f.action == action)
+            .map(|f| f.stack.clone())
     }
 
     /// The manual checks' ids, as the checks page lists them.
@@ -394,7 +474,9 @@ impl Driver {
                 Err(_) => parse("the new stack", body),
             },
             EditCall::HostWrite { body } => match serde_json::from_value(body.clone()) {
-                Ok(b) => ed::save_host_settings(&c, b).await.map_err(|(_, r)| r),
+                Ok(b) => ed::save_host_settings(&c, b, origin())
+                    .await
+                    .map_err(|(_, r)| r),
                 Err(_) => parse("the host settings", body),
             },
             EditCall::Batch { body } => match serde_json::from_value(body.clone()) {
@@ -630,6 +712,15 @@ impl Driver {
 
     /// A viewer pressed Pause, Continue or Stop in the announcement bar.
     pub fn control(&self, c: Control, who: &str) -> Result<DriveState, Refusal> {
+        // Read before Stop clears the form: the batch its final press began.
+        let batch = self
+            .lock()
+            .form
+            .as_ref()
+            .and_then(|f| f.edit.as_ref())
+            .and_then(|e| e.result.as_ref())
+            .and_then(|r| r.get("batch"))
+            .and_then(Value::as_u64);
         self.lock().control(c, who, self.now())?;
         tracing::info!(
             viewer = who,
@@ -647,7 +738,18 @@ impl Driver {
             }
             Control::Pause => self.publish_live("control"),
             // The drive ended: every tab closes the dialog, as on `done`.
+            // A batch the drive started stops too: the job running now
+            // ends on its own, the queued ones never start.
             Control::Stop => {
+                if let Some(b) = batch {
+                    let n = self.inner.actions.stop_batch(b, who);
+                    tracing::info!(
+                        viewer = who,
+                        batch = b,
+                        refused = n,
+                        "Stop ended a driven batch"
+                    );
+                }
                 self.set_deadline(None);
                 self.publish(&UiStep::Done, true, None);
             }

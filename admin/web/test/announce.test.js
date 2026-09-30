@@ -77,6 +77,36 @@ test("follow_live_a_pause_freezes_the_countdown_and_offers_continue", () => {
   assert.equal(between?.countdown, false);
 });
 
+test("follow_live_pause_and_stop_stay_while_a_driven_job_runs", () => {
+  // Kenny, 2026-09-30: during `confirm --wait` only "Leave live view" was
+  // left, because nothing was announced while the deploy ran.
+  const form = {
+    id: "f",
+    action: "deploy",
+    stack: "kp-soft",
+    title: "Deploy · kp-soft",
+    steps: ["review"],
+    step: "review",
+    step_index: 0,
+    values: {},
+    errors: {},
+    run_error: null,
+    job: { job: 7, state: "running", message: null, progress: null },
+    fields: [],
+    buttons: [],
+  };
+  const s = state({ form });
+  assert.equal(announceView(s, 0), null, "not driving: no bar");
+  const v = announceView(s, 0, true);
+  assert.equal(v?.text, "Running: job 7 running");
+  assert.equal(v?.paused, false);
+  assert.equal(v?.countdown, false);
+  assert.equal(
+    announceView(state(), 0, true)?.text,
+    "Next: Claude's next step",
+  );
+});
+
 test("follow_live_typing_is_held_without_a_countdown", () => {
   const s = state({
     announce: { ...announce(0, false), text: "type into Snapshot" },

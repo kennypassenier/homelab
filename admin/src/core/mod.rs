@@ -22,6 +22,7 @@ pub mod hostversion;
 pub mod logs;
 pub mod newstack;
 pub mod notify;
+pub mod releaseoptions;
 pub mod schedule;
 pub mod stackedit;
 pub mod templates;

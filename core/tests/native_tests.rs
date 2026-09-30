@@ -26,6 +26,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,
+        tile_watch_source: None,
     }
 }
 
@@ -1405,6 +1406,51 @@ fn b1_the_latest_release_is_reduced_to_tag_and_two_urls_and_refused_without_sums
         Some("abcd")
     );
     assert_eq!(listed_sha("abcd  kyu\n", "kyu-runner"), None);
+}
+
+/// dashboard-latest: the "release tag" dropdown's list, straight from
+/// GitHub's release LIST — drafts and pre-releases left out, order kept,
+/// every entry's signed state read from its own assets.
+#[test]
+fn dashboard_latest_the_release_list_filters_drafts_keeps_order_and_reads_signed() {
+    use homelab_core::ops::native::{list_releases, ReleaseListItem};
+    let json = format!(
+        r#"[
+  {{"tag_name":"v2.8.0","draft":true,"prerelease":false,"assets":[{},{}]}},
+  {{"tag_name":"v2.8.0-rc1","draft":false,"prerelease":true,"assets":[{},{}]}},
+  {{"tag_name":"v2.7.0","draft":false,"prerelease":false,"assets":[{},{}]}},
+  {{"tag_name":"v2.6.0","draft":false,"prerelease":false,"assets":[{}]}}
+]"#,
+        asset("v2.8.0", "kyu"),
+        asset("v2.8.0", "SHA256SUMS.minisig"),
+        asset("v2.8.0-rc1", "kyu"),
+        asset("v2.8.0-rc1", "SHA256SUMS.minisig"),
+        asset("v2.7.0", "kyu"),
+        asset("v2.7.0", "SHA256SUMS.minisig"),
+        asset("v2.6.0", "kyu"),
+    );
+    let list = list_releases(&json).unwrap();
+    assert_eq!(
+        list,
+        vec![
+            ReleaseListItem {
+                tag: "v2.7.0".into(),
+                signed: true
+            },
+            ReleaseListItem {
+                tag: "v2.6.0".into(),
+                signed: false
+            },
+        ]
+    );
+    let why = list_releases(r#"{"message":"Not Found"}"#).unwrap_err();
+    assert!(why.contains("Not Found"), "{why}");
+}
+
+fn asset(tag: &str, name: &str) -> String {
+    format!(
+        r#"{{"name":"{name}","browser_download_url":"https://github.com/kennypassenier/kyu/releases/download/{tag}/{name}"}}"#
+    )
 }
 
 #[test]

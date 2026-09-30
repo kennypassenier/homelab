@@ -218,6 +218,12 @@ struct FileConfig {
     /// gateway's route fragments. Absent = the front page stays hand-made,
     /// which is how it came to be zero bytes.
     homepage_services_file: Option<String>,
+    /// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
+    /// dashboard's own address (CT 120), from which the firewall step of a
+    /// deploy derives an inbound rule per stack for every tile that opens on
+    /// that stack's own container. Absent or empty = feature off, and no
+    /// rule is derived.
+    tile_watch_source: Option<String>,
     /// T49: the file the Uptime Kuma seeder reads its generated half from.
     /// Absent = the watch list stays whatever a hand-run script last made,
     /// which is how a monitor came to report Uptime Kuma itself as down from
@@ -229,6 +235,26 @@ struct FileConfig {
     /// hold the global op lock all night — the lock is held for the whole
     /// operation, so a question nobody answers blocks every other one.
     ask_timeout_s: Option<u64>,
+    /// Decision "23 constants" (Kenny, 2026-09-30): how long a container's
+    /// updates may stand before `homelab check` says so. Default 7 days.
+    patch_threshold_s: Option<u64>,
+    /// How stale a stack's backup may be before it counts as a finding.
+    /// Default 48 hours.
+    backup_max_age_s: Option<u64>,
+    /// How old the daemon's own state backup (vault, state.json, TLS,
+    /// host.toml) may be before it counts as a finding. Default 48 hours.
+    host_meta_max_age_s: Option<u64>,
+    /// How often the nightly report repeats an unchanged set of findings.
+    /// Default 7 days.
+    nightly_report_repeat_s: Option<u64>,
+    /// fix-131: incident bundles older than this many days are pruned.
+    /// Default 90.
+    incident_bundle_max_age_days: Option<u64>,
+    /// fix-131: at most this many incident bundles are kept. Default 200.
+    incident_bundle_max_count: Option<usize>,
+    /// How long one GitHub answer about a pinned upstream stands. Default
+    /// 20 hours.
+    upstream_max_age_s: Option<u64>,
     /// Y1: how many stack backups the nightly round runs at once. Measured
     /// 2026-09-02: a full round took ~38 minutes for thirteen stacks, of
     /// which only ~6 minutes was writing data — the rest was small questions
@@ -266,6 +292,13 @@ struct FileConfig {
     /// minute; five minutes without an answer is an urgent notice, as the
     /// dashboard does for the host. Unset: not watched.
     watch_url: Option<String>,
+    /// Owner decision "default plus per tile" (2026-09-30): how often the
+    /// host asks `watch_url`, and the fleet default the `Tiles` RPC hands
+    /// the dashboard for its own minute watch. Default 60.
+    watch_interval_s: Option<u64>,
+    /// How long `watch_url` (or, by fleet default, a tile) may fail before
+    /// it counts as down. Default 300.
+    watch_down_after_s: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -334,6 +367,12 @@ struct Config {
     /// gateway's route fragments. Absent = the front page stays hand-made,
     /// which is how it came to be zero bytes.
     homepage_services_file: Option<String>,
+    /// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
+    /// dashboard's own address (CT 120), from which the firewall step of a
+    /// deploy derives an inbound rule per stack for every tile that opens on
+    /// that stack's own container. Absent or empty = feature off, and no
+    /// rule is derived.
+    tile_watch_source: Option<String>,
     /// T49: the file the Uptime Kuma seeder reads its generated half from.
     /// Absent = the watch list stays whatever a hand-run script last made,
     /// which is how a monitor came to report Uptime Kuma itself as down from
@@ -345,6 +384,20 @@ struct Config {
     /// hold the global op lock all night — the lock is held for the whole
     /// operation, so a question nobody answers blocks every other one.
     ask_timeout_s: u64,
+    /// Decision "23 constants": [`homelab_core::ops::fleetcheck::PATCH_THRESHOLD_S`] by default.
+    patch_threshold_s: u64,
+    /// [`homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S`] by default.
+    backup_max_age_s: u64,
+    /// [`homelab_core::ops::fleetcheck::HOST_META_MAX_AGE_S`] by default.
+    host_meta_max_age_s: u64,
+    /// [`homelab_core::ops::fleetcheck::NIGHTLY_REPORT_REPEAT_S`] by default.
+    nightly_report_repeat_s: u64,
+    /// [`homelab_core::incidents::BUNDLE_MAX_AGE_DAYS`] by default.
+    incident_bundle_max_age_days: u64,
+    /// [`homelab_core::incidents::BUNDLE_MAX_COUNT`] by default.
+    incident_bundle_max_count: usize,
+    /// [`homelab_core::ops::pins::UPSTREAM_MAX_AGE_S`] by default.
+    upstream_max_age_s: u64,
     /// Y1: how many stack backups the nightly round runs at once. Measured
     /// 2026-09-02: a full round took ~38 minutes for thirteen stacks, of
     /// which only ~6 minutes was writing data — the rest was small questions
@@ -372,6 +425,12 @@ struct Config {
     dashboard_url: String,
     /// replace-kuma: the dashboard's health address, when watched.
     watch_url: Option<String>,
+    /// Owner decision "default plus per tile": how often `watch_url` is
+    /// asked, and the fleet default handed to the dashboard's own watch.
+    watch_interval_s: u64,
+    /// How long `watch_url` (or, by fleet default, a tile) may fail before
+    /// it counts as down.
+    watch_down_after_s: u64,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
     /// host.toml as it was read; a settings save writes this back with only
@@ -586,11 +645,33 @@ fn load_config_from(path: String) -> Config {
         metrics_targets_dir: file.metrics_targets_dir,
         grafana_dashboards_dir: file.grafana_dashboards_dir,
         homepage_services_file: file.homepage_services_file,
+        tile_watch_source: file.tile_watch_source.filter(|s| !s.trim().is_empty()),
         kuma_monitors_file: file.kuma_monitors_file,
         backup_concurrency: file
             .backup_concurrency
             .unwrap_or_else(default_backup_concurrency),
         ask_timeout_s: file.ask_timeout_s.unwrap_or_else(default_ask_timeout_s),
+        patch_threshold_s: file
+            .patch_threshold_s
+            .unwrap_or(homelab_core::ops::fleetcheck::PATCH_THRESHOLD_S),
+        backup_max_age_s: file
+            .backup_max_age_s
+            .unwrap_or(homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S),
+        host_meta_max_age_s: file
+            .host_meta_max_age_s
+            .unwrap_or(homelab_core::ops::fleetcheck::HOST_META_MAX_AGE_S),
+        nightly_report_repeat_s: file
+            .nightly_report_repeat_s
+            .unwrap_or(homelab_core::ops::fleetcheck::NIGHTLY_REPORT_REPEAT_S),
+        incident_bundle_max_age_days: file
+            .incident_bundle_max_age_days
+            .unwrap_or(homelab_core::incidents::BUNDLE_MAX_AGE_DAYS),
+        incident_bundle_max_count: file
+            .incident_bundle_max_count
+            .unwrap_or(homelab_core::incidents::BUNDLE_MAX_COUNT),
+        upstream_max_age_s: file
+            .upstream_max_age_s
+            .unwrap_or(homelab_core::ops::pins::UPSTREAM_MAX_AGE_S),
         second_copy_dataset: file.second_copy_dataset.clone(),
         integrity_data_read_interval_s: file
             .integrity_data_read_interval_s
@@ -605,6 +686,8 @@ fn load_config_from(path: String) -> Config {
             .filter(|u| !u.trim().is_empty())
             .unwrap_or_else(|| homelab_core::notify::DEFAULT_DASHBOARD_URL.to_string()),
         watch_url: file.watch_url.clone().filter(|u| !u.trim().is_empty()),
+        watch_interval_s: file.watch_interval_s.unwrap_or(60),
+        watch_down_after_s: file.watch_down_after_s.unwrap_or(300),
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -818,6 +901,34 @@ fn host_config_view(path: &str, raw: &str) -> Result<homelab_proto::HostConfigFi
         secrets_set,
         unknown: unknown_keys(&table),
     })
+}
+
+/// fix-false-alarm (2026-09-30): the URL to reach once before a
+/// `SetHostConfig` save is accepted, when `changes` sets `watch_url`.
+/// `None` = nothing to check: the key is absent from this save, or set to
+/// empty — turning the watch off is always allowed, since it can never
+/// itself cause a false alarm.
+fn watch_url_to_check(
+    changes: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> Option<String> {
+    let s = changes.get("watch_url")?.as_str()?.trim();
+    (!s.is_empty()).then(|| s.to_string())
+}
+
+/// The reason to refuse the save because the host's own request to `url`
+/// did not succeed (`reached` is what running the same probe
+/// `watch_dashboard` uses — `curl -sf -m 10` — reported), or None when the
+/// save may proceed. Pure: the caller does the actual request.
+fn watch_url_refusal(url: &str, reached: bool) -> Option<String> {
+    if reached {
+        return None;
+    }
+    Some(format!(
+        "the host cannot reach {url}: curl -sf -m 10 did not get an answer — deploy the \
+         firewall rule that opens it first (or fix the address), then save this again; an \
+         address the host cannot reach would page as \"the dashboard is down\" five minutes \
+         after every save"
+    ))
 }
 
 /// feat-settings-1: the new text of host.toml with `changes` applied, or
@@ -1482,6 +1593,58 @@ port = 5003
         assert_eq!(v.sha256, homelab_core::manifest::sha256_hex(raw.as_bytes()));
     }
 
+    /// fix-false-alarm (2026-09-30): what to check before a `watch_url`
+    /// save is accepted — absent or empty needs no request (turning the
+    /// watch off is always allowed), a non-empty value does.
+    #[test]
+    fn fix_false_alarm_watch_url_to_check() {
+        use std::collections::BTreeMap;
+        assert_eq!(super::watch_url_to_check(&BTreeMap::new()), None);
+        assert_eq!(
+            super::watch_url_to_check(&BTreeMap::from([(
+                "watch_url".to_string(),
+                serde_json::json!("")
+            )])),
+            None
+        );
+        assert_eq!(
+            super::watch_url_to_check(&BTreeMap::from([(
+                "watch_url".to_string(),
+                serde_json::json!("  ")
+            )])),
+            None
+        );
+        assert_eq!(
+            super::watch_url_to_check(&BTreeMap::from([(
+                "backup_hour".to_string(),
+                serde_json::json!(4)
+            )])),
+            None,
+            "a save of some other key must not run the probe"
+        );
+        assert_eq!(
+            super::watch_url_to_check(&BTreeMap::from([(
+                "watch_url".to_string(),
+                serde_json::json!("http://10.10.10.20:8080/health")
+            )])),
+            Some("http://10.10.10.20:8080/health".to_string())
+        );
+    }
+
+    /// fix-false-alarm: the save is refused with a reason a person can act
+    /// on when the host's own request failed, and let through otherwise.
+    #[test]
+    fn fix_false_alarm_watch_url_refusal() {
+        assert_eq!(
+            super::watch_url_refusal("http://10.10.10.20:8080/health", true),
+            None
+        );
+        let why = super::watch_url_refusal("http://10.10.10.20:8080/health", false)
+            .expect("a failed request refuses the save");
+        assert!(why.contains("10.10.10.20:8080/health"), "{why}");
+        assert!(why.contains("firewall"), "{why}");
+    }
+
     /// SetHostConfig: a change lands with every other key kept; a file that
     /// moved meanwhile, a locked or ssh-only key, a secret, a stray sub-key
     /// and a value the start-up validation refuses are each refused before
@@ -1771,7 +1934,12 @@ port = 5003
         std::fs::create_dir_all(&old).unwrap();
         std::fs::create_dir_all(&young).unwrap();
         std::fs::write(old.join("report.json"), "{}").unwrap();
-        let removed = prune_incidents(&dir.to_string_lossy(), now);
+        let removed = prune_incidents(
+            &dir.to_string_lossy(),
+            now,
+            homelab_core::incidents::BUNDLE_MAX_AGE_DAYS,
+            homelab_core::incidents::BUNDLE_MAX_COUNT,
+        );
         let (old_gone, young_kept) = (!old.exists(), young.exists());
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(removed, 1);
@@ -2044,6 +2212,7 @@ port = 5003
             started_unix: 1_800_000_000,
             done: 0,
             total: 0,
+            stack: Some("media".into()),
         });
         state.recent.lock().unwrap().push_back(ServerMsg::Log {
             level: homelab_proto::LogLevel::Info,
@@ -4589,6 +4758,8 @@ async fn main() {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0),
+        config.incident_bundle_max_age_days,
+        config.incident_bundle_max_count,
     );
 
     // AR13: surface any operation the previous run left mid-flight.
@@ -5209,7 +5380,7 @@ async fn run_backup_batch(
         limit
     );
     let _guard = lock_ops(state).await;
-    let _busy = BusyMark::set(state, "the nightly backup", jobs.len());
+    let _busy = BusyMark::set(state, "the nightly backup", jobs.len(), None);
     // M-T75: measured, not predicted — the line the morning reads.
     let phase_started = std::time::Instant::now();
     let stacks_in_phase = jobs.len();
@@ -5781,6 +5952,7 @@ async fn scheduler_loop(state: AppState) {
                 &snapshot,
                 &state.config.safety.no_touch,
                 now,
+                state.config.upstream_max_age_s,
             )
             .await;
             for n in notes {
@@ -5816,8 +5988,11 @@ async fn scheduler_loop(state: AppState) {
                     &snapshot,
                     &live,
                     now,
-                    homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
+                    state.config.backup_max_age_s,
                     homelab_core::ops::fleetcheck::GrowthLimits::default(),
+                    state.config.tile_watch_source.as_deref(),
+                    state.config.patch_threshold_s,
+                    state.config.host_meta_max_age_s,
                 );
                 // Z3, now a tested function in core rather than a filter
                 // buried in this loop (G15).
@@ -5831,6 +6006,7 @@ async fn scheduler_loop(state: AppState) {
                         &snapshot.last_fleet_report_fp,
                         snapshot.last_fleet_report_at,
                         now,
+                        state.config.nightly_report_repeat_s,
                     );
                 if send || (problems.is_empty() && !snapshot.last_fleet_report_fp.is_empty()) {
                     // Remember what went out; forget it once nothing is
@@ -5904,9 +6080,11 @@ async fn scheduler_loop(state: AppState) {
         {
             let _guard = state.op_lock.lock().await;
             let dir = state.config.state_dir.clone();
+            let max_age_days = state.config.incident_bundle_max_age_days;
+            let max_count = state.config.incident_bundle_max_count;
             let _ = tokio::task::spawn_blocking(move || {
                 compact_journal_file(&dir);
-                prune_incidents(&dir, now);
+                prune_incidents(&dir, now, max_age_days, max_count);
             })
             .await;
         }
@@ -6417,12 +6595,33 @@ async fn notify_auto_disabled(state: &AppState, exec: &RealExecutor, stack: &str
 /// minutes without an answer is an urgent notice (pushed at once, since the
 /// dashboard that would show it is the thing that is gone), and its return
 /// another.
+/// Decision "deploys are known outages" (Kenny, 2026-09-30): true while the
+/// admin stack is being deployed, or the host itself is updating or
+/// restarting — the dashboard is expected to be briefly unreachable, so the
+/// host's own watch of it must not start (or advance) the down timer then.
+fn dashboard_outage_expected(state: &AppState) -> bool {
+    let Ok(b) = state.busy.lock() else {
+        return false;
+    };
+    b.as_ref().is_some_and(|h| {
+        h.stack.as_deref() == Some("admin")
+            || matches!(h.what.as_str(), "self-update" | "restart-host")
+    })
+}
+
 async fn watch_dashboard(state: AppState, url: String) {
-    let mut t = tokio::time::interval(Duration::from_secs(60));
+    let mut t = tokio::time::interval(Duration::from_secs(state.config.watch_interval_s));
     let mut failing_since: Option<u64> = None;
     let mut told = false;
     loop {
         t.tick().await;
+        if dashboard_outage_expected(&state) {
+            // A known outage: skip this round entirely so the timer restarts
+            // from zero once the deploy, update or restart has ended, same
+            // as a tile the dashboard's own watch treats as "deploying".
+            failing_since = None;
+            continue;
+        }
         let out = RealExecutor
             .run(&homelab_core::executor::Cmd::new(
                 "curl",
@@ -6440,7 +6639,7 @@ async fn watch_dashboard(state: AppState, url: String) {
             continue;
         }
         let since = *failing_since.get_or_insert(now);
-        if !told && now.saturating_sub(since) >= 300 {
+        if !told && now.saturating_sub(since) >= state.config.watch_down_after_s {
             told = true;
             publish_notice(&state, &RealExecutor, watch_facts(false, since, &url)).await;
         }
@@ -6894,8 +7093,29 @@ where
         Box<dyn std::future::Future<Output = homelab_core::runner::OperationReport> + Send + 'a>,
     >,
 {
+    run_mutating_op_for_stack(state, exec, req_id, label, None, op).await
+}
+
+/// Decision "deploys are known outages" (Kenny, 2026-09-30): the same as
+/// [`run_mutating_op`], but names the one stack this operation acts on, so
+/// `Rpc::Tiles` can say it is deploying rather than down while this runs.
+async fn run_mutating_op_for_stack<F>(
+    state: &AppState,
+    exec: &RealExecutor,
+    req_id: u64,
+    label: &str,
+    stack: Option<&str>,
+    op: F,
+) -> RpcResponse
+where
+    F: for<'a> FnOnce(
+        &'a OpCtx<'a>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = homelab_core::runner::OperationReport> + Send + 'a>,
+    >,
+{
     let _guard = lock_ops(state).await;
-    let _busy = BusyMark::set(state, label, 0);
+    let _busy = BusyMark::set(state, label, 0, stack);
     run_op_locked(state, exec, req_id, label, op).await
 }
 
@@ -6949,13 +7169,14 @@ struct BusyMark<'a> {
 }
 
 impl<'a> BusyMark<'a> {
-    fn set(state: &'a AppState, what: &str, total: usize) -> Self {
+    fn set(state: &'a AppState, what: &str, total: usize, stack: Option<&str>) -> Self {
         if let Ok(mut b) = state.busy.lock() {
             *b = Some(homelab_core::oplock::Holder {
                 what: what.to_string(),
                 started_unix: unix_now(),
                 done: 0,
                 total,
+                stack: stack.map(str::to_string),
             });
         }
         BusyMark { state }
@@ -7054,6 +7275,7 @@ where
         metrics_targets_dir: state.config.metrics_targets_dir.clone(),
         grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
         homepage_services_file: state.config.homepage_services_file.clone(),
+        tile_watch_source: state.config.tile_watch_source.clone(),
         kuma_monitors_file: state.config.kuma_monitors_file.clone(),
         // C1/C2: the same Loki the coverage check already asks about, so
         // there is not a second address to keep in step with the first.
@@ -7257,8 +7479,11 @@ async fn gather_today(
                 &snapshot,
                 &live,
                 now,
-                homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
+                state.config.backup_max_age_s,
                 homelab_core::ops::fleetcheck::GrowthLimits::default(),
+                state.config.tile_watch_source.as_deref(),
+                state.config.patch_threshold_s,
+                state.config.host_meta_max_age_s,
             );
             homelab_core::ops::today::assemble(&checks, &findings, &incidents, &snapshot, now)
         }
@@ -7515,9 +7740,15 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 );
             }
             let vmid = spec.manifest.vmid;
-            let resp = run_mutating_op(state, &exec, req.id, "deploy", |ctx| {
-                Box::pin(async move { deploy(ctx, &spec).await })
-            })
+            let stack_name = spec.manifest.stack_name.clone();
+            let resp = run_mutating_op_for_stack(
+                state,
+                &exec,
+                req.id,
+                "deploy",
+                Some(&stack_name),
+                |ctx| Box::pin(async move { deploy(ctx, &spec).await }),
+            )
             .await;
             let _ = std::fs::remove_dir_all(&dir);
             // fix-94: every gateway deploy re-reads the house's address and
@@ -7558,12 +7789,13 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 ..state.config.backup.clone()
             };
             let stack = manifest.stack_name.clone();
-            let resp = run_mutating_op(state, &exec, req.id, "backup", |ctx| {
-                Box::pin(
-                    async move { homelab_core::ops::backup::backup(ctx, &manifest, &cfg).await },
-                )
-            })
-            .await;
+            let resp =
+                run_mutating_op_for_stack(state, &exec, req.id, "backup", Some(&stack), |ctx| {
+                    Box::pin(async move {
+                        homelab_core::ops::backup::backup(ctx, &manifest, &cfg).await
+                    })
+                })
+                .await;
             if resp.ok {
                 record_backup_time(state, &stack).await;
             }
@@ -7592,7 +7824,8 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             // this is the path where a hardcoded 1800 s used to kill a large
             // restore over Google Drive at thirty minutes (F38).
             let cfg = state.config.backup.clone();
-            run_mutating_op(state, &exec, req.id, "restore", |ctx| {
+            let stack_name = manifest.stack_name.clone();
+            run_mutating_op_for_stack(state, &exec, req.id, "restore", Some(&stack_name), |ctx| {
                 Box::pin(async move {
                     homelab_core::ops::backup::restore_app(
                         ctx,
@@ -7608,7 +7841,8 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             .await
         }
         Rpc::UpdateStack { manifest, app } => {
-            run_mutating_op(state, &exec, req.id, "update", |ctx| {
+            let stack_name = manifest.stack_name.clone();
+            run_mutating_op_for_stack(state, &exec, req.id, "update", Some(&stack_name), |ctx| {
                 Box::pin(async move {
                     homelab_core::ops::update::update(ctx, &manifest, app.as_deref(), false).await
                 })
@@ -7631,7 +7865,8 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             .await
         }
         Rpc::ApplyResources(manifest) => {
-            run_mutating_op(state, &exec, req.id, "resize", |ctx| {
+            let stack_name = manifest.stack_name.clone();
+            run_mutating_op_for_stack(state, &exec, req.id, "resize", Some(&stack_name), |ctx| {
                 Box::pin(async move { homelab_core::ops::resize::hot_apply(ctx, &manifest).await })
             })
             .await
@@ -7665,7 +7900,8 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             resp
         }
         Rpc::AdoptService(m) => {
-            run_mutating_op(state, &exec, req.id, "adopt", |ctx| {
+            let stack_name = m.stack_name.clone();
+            run_mutating_op_for_stack(state, &exec, req.id, "adopt", Some(&stack_name), |ctx| {
                 Box::pin(async move { homelab_core::ops::native::adopt(ctx, &m).await })
             })
             .await
@@ -7675,17 +7911,25 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             binary_b64,
             unit_file,
         } => {
-            run_mutating_op(state, &exec, req.id, "install-native", |ctx| {
-                Box::pin(async move {
-                    homelab_core::ops::native::install_native(
-                        ctx,
-                        &manifest,
-                        &binary_b64,
-                        &unit_file,
-                    )
-                    .await
-                })
-            })
+            let stack_name = manifest.stack_name.clone();
+            run_mutating_op_for_stack(
+                state,
+                &exec,
+                req.id,
+                "install-native",
+                Some(&stack_name),
+                |ctx| {
+                    Box::pin(async move {
+                        homelab_core::ops::native::install_native(
+                            ctx,
+                            &manifest,
+                            &binary_b64,
+                            &unit_file,
+                        )
+                        .await
+                    })
+                },
+            )
             .await
         }
         // TUI parity round: the dashboard's install-native; the host fetches
@@ -7715,12 +7959,20 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     deferred: None,
                 };
             }
-            run_mutating_op(state, &exec, req.id, "install-native", |ctx| {
-                Box::pin(async move {
-                    homelab_core::ops::native::install_release(ctx, &manifest, &tag, &unit_file)
-                        .await
-                })
-            })
+            let stack_name = manifest.stack_name.clone();
+            run_mutating_op_for_stack(
+                state,
+                &exec,
+                req.id,
+                "install-native",
+                Some(&stack_name),
+                |ctx| {
+                    Box::pin(async move {
+                        homelab_core::ops::native::install_release(ctx, &manifest, &tag, &unit_file)
+                            .await
+                    })
+                },
+            )
             .await
         }
         Rpc::BackupNative { stack } => {
@@ -7746,11 +7998,18 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     };
                     for m in services {
                         let cfg = cfg.clone();
-                        let r = run_mutating_op(state, &exec, req.id, "backup-native", |ctx| {
-                            Box::pin(async move {
-                                homelab_core::ops::native::backup_native(ctx, &m, &cfg).await
-                            })
-                        })
+                        let r = run_mutating_op_for_stack(
+                            state,
+                            &exec,
+                            req.id,
+                            "backup-native",
+                            Some(&stack),
+                            |ctx| {
+                                Box::pin(async move {
+                                    homelab_core::ops::native::backup_native(ctx, &m, &cfg).await
+                                })
+                            },
+                        )
                         .await;
                         let failed = !r.ok;
                         if resp.ok || failed {
@@ -7784,11 +8043,19 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         deferred: None,
                     };
                     for m in services {
-                        let r = run_mutating_op(state, &exec, req.id, "update-native", |ctx| {
-                            Box::pin(async move {
-                                homelab_core::ops::native::update_native(ctx, &m, stored_at).await
-                            })
-                        })
+                        let r = run_mutating_op_for_stack(
+                            state,
+                            &exec,
+                            req.id,
+                            "update-native",
+                            Some(&stack),
+                            |ctx| {
+                                Box::pin(async move {
+                                    homelab_core::ops::native::update_native(ctx, &m, stored_at)
+                                        .await
+                                })
+                            },
+                        )
                         .await;
                         let failed = !r.ok;
                         if resp.ok || failed {
@@ -7815,11 +8082,18 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     homelab_core::ops::native::select_unit(&services, unit.as_deref())
                 }) {
                 Ok(m) => {
-                    run_mutating_op(state, &exec, req.id, "rollback-native", |ctx| {
-                        Box::pin(async move {
-                            homelab_core::ops::native::rollback_native(ctx, &m).await
-                        })
-                    })
+                    run_mutating_op_for_stack(
+                        state,
+                        &exec,
+                        req.id,
+                        "rollback-native",
+                        Some(&stack),
+                        |ctx| {
+                            Box::pin(async move {
+                                homelab_core::ops::native::rollback_native(ctx, &m).await
+                            })
+                        },
+                    )
                     .await
                 }
                 Err(msg) => RpcResponse {
@@ -7840,13 +8114,19 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         deferred: None,
                     };
                     for m in services {
-                        let r =
-                            run_mutating_op(state, &exec, req.id, "release-update-native", |ctx| {
+                        let r = run_mutating_op_for_stack(
+                            state,
+                            &exec,
+                            req.id,
+                            "release-update-native",
+                            Some(&stack),
+                            |ctx| {
                                 Box::pin(async move {
                                     homelab_core::ops::native::release_update(ctx, &m).await
                                 })
-                            })
-                            .await;
+                            },
+                        )
+                        .await;
                         let failed = !r.ok;
                         if resp.ok || failed {
                             resp = r;
@@ -8111,8 +8391,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs())
                     .unwrap_or(0),
-                homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
+                state.config.backup_max_age_s,
                 homelab_core::ops::fleetcheck::GrowthLimits::default(),
+                state.config.tile_watch_source.as_deref(),
+                state.config.patch_threshold_s,
+                state.config.host_meta_max_age_s,
             );
             RpcResponse {
                 id: req.id,
@@ -8269,10 +8552,24 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 }
             }
             let tiles = homelab_core::ops::tiles::read_tiles(&RealExecutor, &st).await;
+            // Decision "deploys are known outages" (Kenny, 2026-09-30): AR12
+            // holds the operation lock strictly one at a time, so at most
+            // one stack is ever deploying from the host's own view.
+            let deploying_stack = state
+                .busy
+                .lock()
+                .ok()
+                .and_then(|b| b.as_ref().and_then(|h| h.stack.clone()));
             RpcResponse {
                 id: req.id,
                 ok: true,
-                message: serde_json::json!({ "tiles": tiles }).to_string(),
+                message: serde_json::json!({
+                    "tiles": tiles,
+                    "deploying_stack": deploying_stack,
+                    "watch_interval_s": state.config.watch_interval_s,
+                    "watch_down_after_s": state.config.watch_down_after_s,
+                })
+                .to_string(),
                 deferred: None,
             }
         }
@@ -8582,6 +8879,28 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             changes,
             expect_sha256,
         } => {
+            // fix-false-alarm (2026-09-30): a `watch_url` the host cannot
+            // reach would not fail until the notice five minutes later —
+            // the same request `watch_dashboard` runs every minute, once,
+            // before the value is even written.
+            if let Some(url) = watch_url_to_check(&changes) {
+                let out = RealExecutor
+                    .run(&homelab_core::executor::Cmd::new(
+                        "curl",
+                        &["-sf", "-m", "10", "-o", "/dev/null", &url],
+                        20,
+                    ))
+                    .await;
+                let reached = out.as_ref().map(|o| o.success()).unwrap_or(false);
+                if let Some(reason) = watch_url_refusal(&url, reached) {
+                    return RpcResponse {
+                        id: req.id,
+                        ok: false,
+                        message: reason,
+                        deferred: None,
+                    };
+                }
+            }
             let path = state.config.config_path.clone();
             let raw = std::fs::read_to_string(&path).unwrap_or_default();
             let outcome = apply_host_config_changes(&raw, &changes, &expect_sha256)
@@ -8650,6 +8969,27 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             info!("self-update requested: staged {} bytes", bytes.len());
             run_mutating_op(state, &exec, req.id, "self-update", |ctx| {
                 Box::pin(async move { homelab_core::ops::selfupdate::self_update(ctx, &cfg).await })
+            })
+            .await
+        }
+        // Owner decision 2026-09-30 (item 2): "Save and restart the host".
+        // Refused outright rather than queued: waiting behind a running
+        // job and then restarting mid-nightly-round is not what "restart
+        // the host" should ever mean.
+        Rpc::RestartHost => {
+            if let Some(holder) = state.busy.lock().ok().and_then(|b| b.clone()) {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!(
+                        "refused: an operation is running ({}); running jobs are refused while a job runs",
+                        holder.what
+                    ),
+                    deferred: None,
+                };
+            }
+            run_mutating_op(state, &exec, req.id, "restart-host", |ctx| {
+                Box::pin(async move { homelab_core::ops::restarthost::restart_host(ctx).await })
             })
             .await
         }
@@ -8863,8 +9203,8 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
 /// fix-131 (expert panel, orchestrator-logs-only-on-pve, 2026-09-27):
 /// remove the bundles older than `BUNDLE_MAX_AGE_DAYS` and those beyond the
 /// newest `BUNDLE_MAX_COUNT`; returns how many went. Nothing pruned them.
-fn prune_incidents(state_dir: &str, now: u64) -> usize {
-    use homelab_core::incidents::{bundles_to_prune, BUNDLE_MAX_AGE_DAYS, BUNDLE_MAX_COUNT};
+fn prune_incidents(state_dir: &str, now: u64, max_age_days: u64, max_count: usize) -> usize {
+    use homelab_core::incidents::bundles_to_prune;
     let dir = format!("{}/incidents", state_dir);
     let names: Vec<String> = std::fs::read_dir(&dir)
         .into_iter()
@@ -8874,7 +9214,7 @@ fn prune_incidents(state_dir: &str, now: u64) -> usize {
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     let mut removed = 0;
-    for name in bundles_to_prune(&names, now, BUNDLE_MAX_AGE_DAYS, BUNDLE_MAX_COUNT) {
+    for name in bundles_to_prune(&names, now, max_age_days, max_count) {
         match std::fs::remove_dir_all(format!("{}/{}", dir, name)) {
             Ok(()) => removed += 1,
             Err(e) => tracing::warn!("incidents: could not remove {} :: {}", name, e),
@@ -8883,7 +9223,7 @@ fn prune_incidents(state_dir: &str, now: u64) -> usize {
     if removed > 0 {
         info!(
             "incidents: removed {} bundle(s) older than {} days or beyond the newest {}",
-            removed, BUNDLE_MAX_AGE_DAYS, BUNDLE_MAX_COUNT
+            removed, max_age_days, max_count
         );
     }
     removed

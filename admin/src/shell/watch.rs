@@ -1,25 +1,65 @@
 //! replace-kuma (Kenny, 2026-09-30): the dashboard measures every minute
-//! what Uptime Kuma measured. Each tile's address, asked through the proxy
-//! on the house network (`HOMELAB_ADMIN_WATCH_VIA`), not through the
-//! internet's front door; each stack's container, as the host last read it;
-//! and the host itself. Five minutes without an answer is a Down notice
-//! (urgent: pushed at once), and the return an Up notice. The host watches
-//! this dashboard in turn.
+//! what Uptime Kuma measured. Each tile's own backend address, asked
+//! directly (its `probe`, resolved by the client at deploy time,
+//! `core::ops::tiles::TileView::probe`); each stack's container, as the
+//! host last read it; and the host itself. Five minutes without an answer
+//! is a Down notice (urgent: pushed at once), and the return an Up notice.
+//! The host watches this dashboard in turn.
+//!
+//! tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30):
+//! `HOMELAB_ADMIN_WATCH_VIA` (a Traefik plain entrypoint address, asked with
+//! a forged Host header) is gone — measuring a tile through the gateway is
+//! exactly what fix-89 (traefik-lan-host-header-bypass) closed the door on,
+//! and reopening it for the watch was never sound. A tile with a `probe` is
+//! watched, straight to that address; a tile with none is not, the same as
+//! one with no reading.
 
-use std::collections::BTreeMap;
-use std::net::SocketAddr;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::Mutex;
 
-use super::actions::HostPort;
+use super::actions::{Actions, HostPort, JobState};
 use super::actions_notify::NotifyCenter;
 use super::host_link::Shared;
 use crate::core::notify::{Detail, Draft, Kind, Level};
-use crate::core::watch::{step, view, Change, Seen, Target};
+use crate::core::watch::{step, step_deploying, view, Change, Seen, Target, DOWN_AFTER_S};
 
+/// Fallback cadence, unless the host's `watch_interval_s` says otherwise
+/// (decision "default plus per tile", 2026-09-30).
 pub const EVERY: Duration = Duration::from_secs(60);
+
+/// How often the loop wakes: the smallest `watch_every` a tile may declare.
+pub const TICK: Duration = Duration::from_secs(10);
+
+/// What one round decided to do with a target.
+enum Probe {
+    /// Asked, with the answer and how long it may fail before it is down
+    /// (the fleet default, or a tile's own `down_after`).
+    Answer(Result<(), String>, i64),
+    /// Skipped: its stack is known to be deploying — a known outage, not a
+    /// fault (decision "deploys are known outages", 2026-09-30).
+    Deploying,
+    /// Skipped: this tile's own `watch_every` has not passed yet
+    /// (decision "default plus per tile", 2026-09-30). The previous
+    /// reading stands; nothing in `Seen` changes.
+    TooSoon,
+}
+
+/// The host's answer to `Tiles`, beyond the tile list itself.
+#[derive(Default)]
+struct TilesAnswer {
+    tiles: Vec<serde_json::Value>,
+    /// AR12 holds the operation lock one at a time, so at most one stack.
+    deploying_stack: Option<String>,
+    /// Fleet defaults, from host.toml's `watch_interval_s` /
+    /// `watch_down_after_s`; None when the host did not (yet) answer them
+    /// (an older host, or the ask failed) — [`EVERY`] / [`DOWN_AFTER_S`]
+    /// are the fallback either way.
+    watch_interval_s: Option<u64>,
+    watch_down_after_s: Option<u64>,
+}
 
 /// What the watch holds, for the start page.
 #[derive(Default)]
@@ -49,8 +89,9 @@ pub fn router(w: Watched) -> axum::Router {
         .with_state(w)
 }
 
-/// The tiles as the host lists them, without their readings.
-async fn tiles(host: &Arc<dyn HostPort>) -> Result<Vec<serde_json::Value>, String> {
+/// The tiles as the host lists them, without their readings, and the
+/// host's own watch timing and which stack (if any) it is deploying.
+async fn tiles(host: &Arc<dyn HostPort>) -> Result<TilesAnswer, String> {
     let r = host
         .ask_traced(
             homelab_proto::Command::Tiles { bare: true },
@@ -59,7 +100,12 @@ async fn tiles(host: &Arc<dyn HostPort>) -> Result<Vec<serde_json::Value>, Strin
         )
         .await?;
     let v: serde_json::Value = serde_json::from_str(&r.message).map_err(|e| e.to_string())?;
-    Ok(v["tiles"].as_array().cloned().unwrap_or_default())
+    Ok(TilesAnswer {
+        tiles: v["tiles"].as_array().cloned().unwrap_or_default(),
+        deploying_stack: v["deploying_stack"].as_str().map(String::from),
+        watch_interval_s: v["watch_interval_s"].as_u64(),
+        watch_down_after_s: v["watch_down_after_s"].as_u64(),
+    })
 }
 
 /// Ask one address: any answer below 500 means the service is there.
@@ -79,30 +125,38 @@ pub fn spawn(
     host: Arc<dyn HostPort>,
     shared: Shared,
     center: Arc<NotifyCenter>,
-    via: Option<String>,
     watched: Watched,
+    actions: Actions,
 ) {
     tokio::spawn(async move {
-        let mut t = tokio::time::interval(EVERY);
+        // The loop ticks at the smallest interval a tile may ask for
+        // (`watch_every >= 10`); each tile and the fleet default decide for
+        // themselves whether this tick is theirs (`too_soon`). The host and
+        // container readings cost nothing (they come from the fleet state
+        // already read) and down-after is time-based, so a faster tick only
+        // makes the dots more current.
+        let mut t = tokio::time::interval(TICK);
         loop {
             t.tick().await;
-            round(&host, &shared, &center, via.as_deref(), &watched).await;
+            round(&host, &shared, &center, &watched, &actions).await;
         }
     });
 }
 
-async fn round(
+/// `pub` (rather than the module-private a scheduled call needs) so a test
+/// can run one round directly instead of waiting on `EVERY`.
+pub async fn round(
     host: &Arc<dyn HostPort>,
     shared: &Shared,
     center: &Arc<NotifyCenter>,
-    via: Option<&str>,
     watched: &Watched,
+    actions: &Actions,
 ) {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let mut readings: Vec<(Target, Result<(), String>)> = Vec::new();
+    let mut readings: Vec<(Target, Probe)> = Vec::new();
 
     // The host: the line's own state.
     let (link_error, stacks) = {
@@ -120,6 +174,46 @@ async fn round(
                 .unwrap_or_default(),
         )
     };
+
+    // Decision "deploys are known outages" (Kenny, 2026-09-30): the stacks
+    // to treat as a known outage this round, not a fault — the host's own
+    // op-lock holder (AR12: at most one, since it is strictly serial, read
+    // below from the `Tiles` answer) and every stack this dashboard itself
+    // has a job running against.
+    let mut deploying_stacks: HashSet<String> = actions
+        .jobs()
+        .into_iter()
+        .filter(|j| j.state == JobState::Running && !j.stack.is_empty())
+        .map(|j| j.stack)
+        .collect();
+
+    // Decision "default plus per tile" (2026-09-30): the fleet's own watch
+    // timing, from the host's `Tiles` answer (`watch_interval_s` /
+    // `watch_down_after_s`, host.toml); [`EVERY`] / [`DOWN_AFTER_S`] are
+    // the fallback when the host does not send them. One read serves the
+    // tile list, the deploying stack and this timing together.
+    let mut watch_interval_s = EVERY.as_secs();
+    let mut watch_down_after_s = DOWN_AFTER_S;
+    let tiles_answer = if link_error.is_none() {
+        match tiles(host).await {
+            Ok(a) => {
+                if let Some(s) = &a.deploying_stack {
+                    deploying_stacks.insert(s.clone());
+                }
+                if let Some(v) = a.watch_interval_s {
+                    watch_interval_s = v;
+                }
+                if let Some(v) = a.watch_down_after_s {
+                    watch_down_after_s = v as i64;
+                }
+                Some(a)
+            }
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
     readings.push((
         Target {
             key: "host".into(),
@@ -127,10 +221,13 @@ async fn round(
             stack: None,
             link: homelab_core::notify::page::HOST.into(),
         },
-        match &link_error {
-            None => Ok(()),
-            Some(e) => Err(e.clone()),
-        },
+        Probe::Answer(
+            match &link_error {
+                None => Ok(()),
+                Some(e) => Err(e.clone()),
+            },
+            watch_down_after_s,
+        ),
     ));
 
     // Each enabled stack's container, as the host last read it. Only while
@@ -140,6 +237,16 @@ async fn round(
             if !enabled {
                 continue;
             }
+            let probe = if deploying_stacks.contains(&name) {
+                Probe::Deploying
+            } else if online {
+                Probe::Answer(Ok(()), watch_down_after_s)
+            } else {
+                Probe::Answer(
+                    Err("the container is not running".into()),
+                    watch_down_after_s,
+                )
+            };
             readings.push((
                 Target {
                     key: format!("stack:{}", name),
@@ -147,58 +254,71 @@ async fn round(
                     stack: Some(name.clone()),
                     link: homelab_core::notify::page::stack(&name),
                 },
-                if online {
-                    Ok(())
-                } else {
-                    Err("the container is not running".into())
-                },
+                probe,
             ));
         }
     }
 
-    // Each tile's address, through the proxy on the house network.
-    if let (Some(via), true) = (via, link_error.is_none()) {
-        if let Ok(list) = tiles(host).await {
-            let via_addr: Option<SocketAddr> = tokio::net::lookup_host(via)
-                .await
-                .ok()
-                .and_then(|mut a| a.next());
-            let mut builder = reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .redirect(reqwest::redirect::Policy::none());
-            for t in &list {
-                if let (Some(h), Some(a)) = (t["host"].as_str(), via_addr) {
-                    builder = builder.resolve(h, a);
-                }
-            }
-            if let Ok(http) = builder.build() {
-                for t in list {
-                    let (Some(url), Some(name), Some(key)) =
-                        (t["url"].as_str(), t["name"].as_str(), t["host"].as_str())
-                    else {
-                        continue;
-                    };
-                    let stack = t["stack"].as_str().map(String::from);
-                    // Only a tile that opens its own routed hostname: that is
-                    // what the proxy answers for. Through the proxy's plain
-                    // entrypoint, since TLS ends at the front door.
-                    let Some(rest) = url.strip_prefix(&format!("https://{}", key)) else {
-                        continue;
-                    };
-                    let url = format!("http://{}{}", key, rest);
-                    readings.push((
-                        Target {
-                            key: format!("tile:{}", key),
-                            name: name.to_string(),
-                            link: stack
-                                .as_deref()
-                                .map(homelab_core::notify::page::stack)
-                                .unwrap_or_else(|| homelab_core::notify::page::HOST.into()),
-                            stack,
-                        },
-                        ask(&http, &url).await,
-                    ));
-                }
+    // Each tile's own backend, asked directly: no proxy, no Host header
+    // (tile-watch, owner decision "Afgeleid uit de tegels", 2026-09-30 —
+    // fix-89 closed the Traefik-Host-header door, and a measurement through
+    // it never reopens it). Only a tile that carries a `probe` (the client
+    // resolved one, at deploy time) is watched; one with none is silently
+    // skipped, same as one with no reading.
+    if let Some(a) = tiles_answer {
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
+            .build();
+        if let Ok(http) = http {
+            // Owner decision "default plus per tile": a tile checked less
+            // than its own watch_every ago is skipped this round.
+            let checked_at: BTreeMap<String, i64> = {
+                let w = watched.lock().await;
+                w.seen
+                    .iter()
+                    .map(|(k, s)| (k.clone(), s.checked_at))
+                    .collect()
+            };
+            for t in a.tiles {
+                let (Some(probe_url), Some(name), Some(host_key)) =
+                    (t["probe"].as_str(), t["name"].as_str(), t["host"].as_str())
+                else {
+                    continue;
+                };
+                let stack = t["stack"].as_str().map(String::from);
+                let key = format!("tile:{}", host_key);
+                let watch_every = t["watch_every"].as_u64().unwrap_or(watch_interval_s) as i64;
+                let down_after = t["down_after"]
+                    .as_u64()
+                    .map(|v| v as i64)
+                    .unwrap_or(watch_down_after_s);
+                let deploying = stack
+                    .as_deref()
+                    .is_some_and(|s| deploying_stacks.contains(s));
+                let outcome = if deploying {
+                    Probe::Deploying
+                } else if crate::core::watch::too_soon(
+                    checked_at.get(&key).copied().unwrap_or(0),
+                    now,
+                    watch_every,
+                ) {
+                    Probe::TooSoon
+                } else {
+                    Probe::Answer(ask(&http, probe_url).await, down_after)
+                };
+                readings.push((
+                    Target {
+                        key,
+                        name: name.to_string(),
+                        link: stack
+                            .as_deref()
+                            .map(homelab_core::notify::page::stack)
+                            .unwrap_or_else(|| homelab_core::notify::page::HOST.into()),
+                        stack,
+                    },
+                    outcome,
+                ));
             }
         }
     }
@@ -208,10 +328,16 @@ async fn round(
         let mut w = watched.lock().await;
         let keep: Vec<String> = readings.iter().map(|(t, _)| t.key.clone()).collect();
         w.seen.retain(|k, _| keep.contains(k));
-        for (target, answer) in &readings {
+        for (target, outcome) in &readings {
             let seen = w.seen.entry(target.key.clone()).or_default();
-            if let Some(c) = step(seen, now, answer.clone()) {
-                news.push((target.clone(), c));
+            match outcome {
+                Probe::TooSoon => {}
+                Probe::Deploying => step_deploying(seen, now),
+                Probe::Answer(answer, down_after_s) => {
+                    if let Some(c) = step(seen, now, answer.clone(), *down_after_s) {
+                        news.push((target.clone(), c));
+                    }
+                }
             }
         }
         w.targets = readings.into_iter().map(|(t, _)| t).collect();

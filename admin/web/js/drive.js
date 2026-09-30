@@ -22,7 +22,7 @@
 import { openAction } from "./actiondialog.js";
 import { notify } from "./actui.js";
 import { fetchJson, h } from "./dom.js";
-import { setDriven } from "./drivehooks.js";
+import { handle, setDriven } from "./drivehooks.js";
 import {
   announceView,
   countdown,
@@ -137,7 +137,9 @@ export function mountFollow(region, ctx) {
   const paintLive = () => {
     const on =
       following && !!state && (isActive(state, now()) || !!state.announce);
-    const v = on ? announceView(state, clock.left()) : null;
+    const v = on
+      ? announceView(state, clock.left(), isActive(state, now()))
+      : null;
     const d = ctl?.dialog;
     const inDialog = !!d && !!dialogBar && d.contains(dialogBar.el);
     pageBar.paint(inDialog ? null : v, "");
@@ -187,7 +189,9 @@ export function mountFollow(region, ctx) {
       d.querySelector(".kp-dialog__body")?.prepend(b);
     }
     dialogBar.paint(
-      following && state ? announceView(state, clock.left()) : null,
+      following && state
+        ? announceView(state, clock.left(), isActive(state, now()))
+        : null,
       idleText(),
     );
   };
@@ -273,6 +277,20 @@ export function mountFollow(region, ctx) {
       case "row": {
         const c = ctl && "row" in ctl ? ctl : null;
         await flash(c?.row(op.row, op.target) ?? null, "drive-press", 420);
+        return;
+      }
+      case "select": {
+        // Owner decision 2026-09-30: ticks the Overview table's own
+        // multiselect, exactly as a click would, so a batch action opened
+        // right after acts on the same rows a viewer would see ticked.
+        handle("overview")?.select?.(op.stacks);
+        await flash(
+          /** @type {HTMLElement | null} */ (
+            document.querySelector("table.fleet")
+          ),
+          "drive-focus",
+          250,
+        );
         return;
       }
       case "set": {

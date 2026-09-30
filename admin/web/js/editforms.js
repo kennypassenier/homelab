@@ -34,10 +34,12 @@ const say = (key, w = {}) =>
  * @typedef {Record<string, string | boolean>} Values
  * @typedef {{cores: number, memory_mb: number, swap_mb: number,
  *   disk_gb: number, storage?: string}} Resources
+ * @typedef {{watch_every?: number | null, down_after?: number | null}} TileView
  * @typedef {{vmid: number, hostname: string, ip: string,
  *   resources: Resources, boot: {onboot: boolean, order?: number | null},
  *   protection: boolean, apps: string[], natives: string[],
- *   firewall: FirewallSpec | null}} ManifestView
+ *   firewall: FirewallSpec | null,
+ *   tiles?: Record<string, TileView>}} ManifestView
  * @typedef {{dir: "in" | "out", action: "ACCEPT" | "DROP" | "REJECT",
  *   source?: string | null, dest?: string | null,
  *   proto?: "tcp" | "udp" | "icmp" | null, dport?: string | null,
@@ -105,6 +107,8 @@ export function settingsForm(stack, m, images) {
   }));
   for (const [key, image] of Object.entries(images).sort())
     fields.push(imageField(key, image));
+  for (const [key, tile] of Object.entries(m.tiles ?? {}).sort())
+    fields.push(...tileFields(key, tile));
   return {
     id: `edit:settings:${stack}`,
     stack,
@@ -126,6 +130,38 @@ export function imageField(key, image) {
   for (const [k, v] of Object.entries(E.image))
     f[k] = typeof v === "string" && k !== "pattern" ? fill(v, w) : v;
   return /** @type {EditField} */ ({ ...f, current: image });
+}
+
+/** The field name prefixes of a tile's two watch fields (feat-stacks-3
+ * owner remark 2026-09-30, "de uptime-check tijd … in de wizard"). */
+export const TILE_WATCH_PREFIX = "tile_watch_every:";
+export const TILE_DOWN_PREFIX = "tile_down_after:";
+
+/**
+ * The two optional watch fields of one tile, `<host>` = `key`.
+ * @param {string} key
+ * @param {TileView} tile
+ * @returns {EditField[]}
+ */
+export function tileFields(key, tile) {
+  const w = { key, slug: key.replace(/[^a-z0-9]+/gi, "-") };
+  const build = (
+    /** @type {Record<string, unknown>} */ tpl,
+    /** @type {string} */ current,
+  ) => {
+    /** @type {Record<string, unknown>} */
+    const f = {};
+    for (const [k, v] of Object.entries(tpl))
+      f[k] = typeof v === "string" && k !== "pattern" ? fill(v, w) : v;
+    return /** @type {EditField} */ ({ ...f, current });
+  };
+  return [
+    build(
+      E.tile_watch,
+      tile.watch_every != null ? String(tile.watch_every) : "",
+    ),
+    build(E.tile_down, tile.down_after != null ? String(tile.down_after) : ""),
+  ];
 }
 
 /**
@@ -185,17 +221,62 @@ export function settingsBody(form, values) {
   const out = { kind: "settings" };
   /** @type {Record<string, string>} */
   const images = {};
+  /** @type {Record<string, {watch_every?: number, down_after?: number}>} */
+  const tiles = {};
   for (const f of form.steps[0].fields) {
     const v = values[f.name];
     if (f.kind === "check") {
       if (v !== f.current) out[f.name] = v === true;
     } else if (typeof v === "string" && v.trim() !== String(f.current ?? "")) {
       if (f.name.startsWith("image:")) images[f.name.slice(6)] = v.trim();
-      else if (v.trim() !== "") out[f.name] = Number(v.trim());
+      else if (f.name.startsWith(TILE_WATCH_PREFIX)) {
+        if (v.trim() !== "")
+          (tiles[f.name.slice(TILE_WATCH_PREFIX.length)] ??= {}).watch_every =
+            Number(v.trim());
+      } else if (f.name.startsWith(TILE_DOWN_PREFIX)) {
+        if (v.trim() !== "")
+          (tiles[f.name.slice(TILE_DOWN_PREFIX.length)] ??= {}).down_after =
+            Number(v.trim());
+      } else if (v.trim() !== "") out[f.name] = Number(v.trim());
     }
   }
   if (Object.keys(images).length) out.images = images;
+  if (Object.keys(tiles).length) out.tiles = tiles;
   return out;
+}
+
+/**
+ * What is wrong across a tile's two watch fields together (the per-field
+ * checks only see one field at a time): down after must be at least check
+ * every, when both are typed.
+ * @param {Values} values
+ * @returns {Record<string, string>}
+ */
+export function tileProblems(values) {
+  /** @type {Record<string, string>} */
+  const errors = {};
+  /** @type {Set<string>} */
+  const keys = new Set();
+  for (const name of Object.keys(values)) {
+    if (name.startsWith(TILE_WATCH_PREFIX))
+      keys.add(name.slice(TILE_WATCH_PREFIX.length));
+    else if (name.startsWith(TILE_DOWN_PREFIX))
+      keys.add(name.slice(TILE_DOWN_PREFIX.length));
+  }
+  for (const key of keys) {
+    const w = String(values[`${TILE_WATCH_PREFIX}${key}`] ?? "").trim();
+    const d = String(values[`${TILE_DOWN_PREFIX}${key}`] ?? "").trim();
+    if (w === "" || d === "") continue;
+    const wn = Number(w);
+    const dn = Number(d);
+    if (Number.isFinite(wn) && Number.isFinite(dn) && dn < wn)
+      errors[`${TILE_DOWN_PREFIX}${key}`] = say("tile_down_low", {
+        key,
+        watch: wn,
+        down: dn,
+      });
+  }
+  return errors;
 }
 
 /**

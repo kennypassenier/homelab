@@ -123,6 +123,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,
+        tile_watch_source: None,
     }
 }
 
@@ -517,7 +518,16 @@ fn the_fleet_check_reports_a_stack_in_state_without_a_stack_file() {
         stack_files: vec![("stacks/syncthing".into(), 110)],
         ..Default::default()
     };
-    let findings = evaluate(&st, &live, NOW, u64::MAX, GrowthLimits::default());
+    let findings = evaluate(
+        &st,
+        &live,
+        NOW,
+        u64::MAX,
+        GrowthLimits::default(),
+        None,
+        u64::MAX,
+        u64::MAX,
+    );
     let hit: Vec<_> = findings
         .iter()
         .filter(|f| f.subject == "drill" && f.what.contains("no stack file"))
@@ -537,11 +547,18 @@ fn the_fleet_check_reports_a_stack_in_state_without_a_stack_file() {
         stack_files: Vec::new(),
         ..live
     };
-    assert!(
-        !evaluate(&st, &blind, NOW, u64::MAX, GrowthLimits::default())
-            .iter()
-            .any(|f| f.what.contains("no stack file"))
-    );
+    assert!(!evaluate(
+        &st,
+        &blind,
+        NOW,
+        u64::MAX,
+        GrowthLimits::default(),
+        None,
+        u64::MAX,
+        u64::MAX
+    )
+    .iter()
+    .any(|f| f.what.contains("no stack file")));
 }
 
 // ── 6 · destroy works from the manifest recorded in state ───────────────────
@@ -1124,6 +1141,9 @@ fn the_fleet_check_names_what_is_kept_for_every_retired_entry() {
         NOW,
         u64::MAX,
         GrowthLimits::default(),
+        None,
+        u64::MAX,
+        u64::MAX,
     );
     let hit: Vec<_> = findings.iter().filter(|f| f.subject == "drill").collect();
     assert_eq!(hit.len(), 1, "{:?}", findings);

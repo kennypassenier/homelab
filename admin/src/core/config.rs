@@ -85,6 +85,15 @@ pub struct AdminConfig {
     /// send an answer, because the host has stopped waiting.
     #[serde(default = "d_ask_timeout")]
     pub ask_timeout_s: u64,
+    /// Decision "23 constants" (2026-09-30): the longest log window one
+    /// request may ask for, in seconds. Default 604800 (7 d),
+    /// `HOMELAB_ADMIN_LOGS_MAX_SINCE_S`.
+    #[serde(default = "d_logs_max_since")]
+    pub logs_max_since_s: u64,
+    /// The most log lines one request may ask for. Default 5000,
+    /// `HOMELAB_ADMIN_LOGS_MAX_LIMIT`.
+    #[serde(default = "d_logs_max_limit")]
+    pub logs_max_limit: usize,
 }
 
 fn d_poll() -> u64 {
@@ -110,6 +119,12 @@ fn d_loki_timeout() -> u64 {
 }
 fn d_ask_timeout() -> u64 {
     120
+}
+fn d_logs_max_since() -> u64 {
+    crate::core::logs::MAX_SINCE_S
+}
+fn d_logs_max_limit() -> usize {
+    crate::core::logs::MAX_LIMIT
 }
 
 /// `${NAME}` in a value, replaced from `lookup`; an unset name is an error,
@@ -218,6 +233,12 @@ impl AdminConfig {
         if self.ask_timeout_s == 0 {
             why.push("admin.ask_timeout_s must be at least 1".into());
         }
+        if self.logs_max_since_s == 0 {
+            why.push("admin.logs_max_since_s must be at least 1".into());
+        }
+        if self.logs_max_limit == 0 {
+            why.push("admin.logs_max_limit must be at least 1".into());
+        }
         if why.is_empty() {
             Ok(self)
         } else {
@@ -266,6 +287,8 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<AdminConfig, 
         "access_certs_refresh_s",
         "loki_timeout_s",
         "ask_timeout_s",
+        "logs_max_since_s",
+        "logs_max_limit",
     ];
     const STRINGS: &[&str] = &[
         "host",

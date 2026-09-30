@@ -16,6 +16,7 @@ fn fix_104_a_command_behind_the_nightly_backup_is_told_so_at_once() {
         started_unix: NOW - 23 * 60,
         done: 4,
         total: 14,
+        stack: None,
     };
     assert_eq!(
         waiting_message(Some(&h), NOW),
@@ -27,6 +28,7 @@ fn fix_104_a_command_behind_the_nightly_backup_is_told_so_at_once() {
         started_unix: NOW - 75 * 60 - 5,
         done: 0,
         total: 0,
+        stack: Some("media".into()),
     };
     assert_eq!(
         waiting_message(Some(&deploy), NOW),
@@ -37,6 +39,7 @@ fn fix_104_a_command_behind_the_nightly_backup_is_told_so_at_once() {
         started_unix: NOW - 40,
         done: 0,
         total: 0,
+        stack: None,
     };
     assert!(waiting_message(Some(&fresh), NOW).contains("started 40 s ago"));
     assert_eq!(

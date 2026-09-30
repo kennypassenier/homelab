@@ -25,6 +25,24 @@
 //! | `HOMELAB_ADMIN_GIT_AUTHOR` | `homelab-admin <homelab-admin@users.noreply.github.com>` | the author and committer of the dashboard's commits |
 //! | `HOMELAB_ADMIN_LIVE_ANNOUNCE_MS` | 3000 | Live view: how long a driven step is announced ("Next: …" with its countdown) before it is taken; 0 announces nothing, at most 10000 |
 //! | `HOMELAB_ADMIN_LIVE_MAX_PAUSE_S` | 1800 | Live view: how long a step a viewer paused waits for Continue before it fails; 60 to 3600 |
+//!
+//! Decision "23 constants" (Kenny, 2026-09-30): the rest were fixed
+//! `const`s; nothing changes until one is set.
+//!
+//! | Key | Default | Meaning |
+//! |---|---|---|
+//! | `HOMELAB_ADMIN_KEEP_JOBS` | 200 | jobs kept for `GET /data/actions/jobs` and a reload |
+//! | `HOMELAB_ADMIN_HISTORY_WINDOW_S` | 15552000 (180 d) | history read for a job's expected duration |
+//! | `HOMELAB_ADMIN_NOTIFY_KEEP` | 500 | newest notices kept; older ones fall off |
+//! | `HOMELAB_ADMIN_NOTIFY_SNOOZE_MAX_S` | 604800 (7 d) | the longest snooze |
+//! | `HOMELAB_ADMIN_NOTIFY_DIGEST_LATE_S` | 10800 (3 h) | how late the daily digest may still go out |
+//! | `HOMELAB_ADMIN_HOSTLOG_RING` | 2000 | host-log lines kept for a page that opens mid-operation |
+//! | `HOMELAB_ADMIN_RELEASES_WATCH_EVERY_S` | 3600 | how often the "host update available" badge looks for a newer release |
+//! | `HOMELAB_ADMIN_DRIFT_REUSE_S` | 300 | how long a drift reading is reused before latch runs again |
+//! | `HOMELAB_ADMIN_LIVE_ANNOUNCE_MAX_MS` | 10000 | Live view: the longest announcement `HOMELAB_ADMIN_LIVE_ANNOUNCE_MS` may be set to |
+//! | `HOMELAB_ADMIN_LIVE_MAX_PAUSE_MAX_S` | 3600 | Live view: the longest pause `HOMELAB_ADMIN_LIVE_MAX_PAUSE_S` may be set to |
+//! | `HOMELAB_ADMIN_DRIVE_IDLE_S` | 600 | a driver who sends nothing for this long no longer holds the tabs |
+//! | `HOMELAB_ADMIN_RELEASE_AFTER_JOB_S` | 30 | a confirmed dialog whose job has ended, with no step since, is closed and the tabs given back this long after |
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -44,12 +62,6 @@ pub struct ActConfig {
     pub alerts_token: Option<String>,
     /// The dashboard's public address, for a push's `click_url`.
     pub public_url: String,
-    /// replace-kuma (2026-09-30): the proxy address (`host:port`, its plain
-    /// HTTP entrypoint) the minute watch sends each tile's request through,
-    /// so a tile is measured on the house network and not through the
-    /// internet's front door. Unset:
-    /// tiles are not watched (containers and the host still are).
-    pub watch_via: Option<String>,
     pub action_timeout_s: u64,
     /// Live view: the announcement's countdown, in milliseconds.
     pub live_announce_ms: u64,
@@ -57,6 +69,34 @@ pub struct ActConfig {
     pub live_max_pause_s: u64,
     /// arch-edit-txn: the working copy's remote, branch and credential.
     pub git: GitConfig,
+    /// Decision "23 constants": jobs kept for `GET /data/actions/jobs`.
+    pub keep_jobs: usize,
+    /// History read for a job's expected duration, in seconds.
+    pub history_window_s: i64,
+    /// Newest notices kept in the notification centre.
+    pub notify_keep: usize,
+    /// The longest snooze, in seconds.
+    pub notify_snooze_max_s: i64,
+    /// How late the daily digest may still go out, in seconds.
+    pub notify_digest_late_s: i64,
+    /// Host-log lines kept for a page that opens mid-operation.
+    pub hostlog_ring: usize,
+    /// How often the "host update available" badge looks, in seconds.
+    pub releases_watch_every_s: u64,
+    /// How long a drift reading is reused, in seconds.
+    pub drift_reuse_s: u64,
+    /// Live view: the longest announcement `live_announce_ms` may be set
+    /// to, in milliseconds.
+    pub live_announce_max_ms: u64,
+    /// Live view: the longest pause `live_max_pause_s` may be set to, in
+    /// seconds.
+    pub live_max_pause_max_s: u64,
+    /// Live view: a driver who sends nothing for this long no longer holds
+    /// the tabs (`core::drive::IDLE_S` by default).
+    pub drive_idle_s: i64,
+    /// Live view: how long a confirmed, finished dialog waits before it is
+    /// released (`core::drive::RELEASE_AFTER_JOB_S` by default).
+    pub drive_release_after_job_s: i64,
 }
 
 /// arch-edit-txn, arch-push-credential: how the working copy reaches its
@@ -165,7 +205,12 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
         incidents_poll_s: number(lookup, "INCIDENTS_POLL_S", 300, 10, &mut why),
         host_notices_poll_s: number(lookup, "HOST_NOTICES_POLL_S", 60, 5, &mut why),
         alerts_token: non_empty("HOMELAB_ADMIN_ALERTS_TOKEN").map(|t| t.trim().to_string()),
-        watch_via: non_empty("HOMELAB_ADMIN_WATCH_VIA").map(|t| t.trim().to_string()),
+        // tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30):
+        // `HOMELAB_ADMIN_WATCH_VIA` is retired — the minute watch now asks
+        // each tile's own `probe` address directly (see
+        // `shell::watch::round`), not through Traefik with a forged Host
+        // header, which is what this key used to configure. A value left
+        // in admin.env is simply unread from here on; nothing refuses it.
         public_url: {
             let u = non_empty("HOMELAB_ADMIN_PUBLIC_URL").unwrap_or_default();
             if !u.is_empty() && !(u.starts_with("http://") || u.starts_with("https://")) {
@@ -188,6 +233,60 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
             60,
             &mut why,
         ),
+        keep_jobs: number(lookup, "KEEP_JOBS", 200, 1, &mut why) as usize,
+        history_window_s: number(lookup, "HISTORY_WINDOW_S", 180 * 86_400, 1, &mut why) as i64,
+        notify_keep: number(
+            lookup,
+            "NOTIFY_KEEP",
+            crate::core::notify::KEEP as u64,
+            1,
+            &mut why,
+        ) as usize,
+        notify_snooze_max_s: number(
+            lookup,
+            "NOTIFY_SNOOZE_MAX_S",
+            crate::core::notify::SNOOZE_MAX_S as u64,
+            0,
+            &mut why,
+        ) as i64,
+        notify_digest_late_s: number(
+            lookup,
+            "NOTIFY_DIGEST_LATE_S",
+            crate::core::notify::DIGEST_LATE_S as u64,
+            0,
+            &mut why,
+        ) as i64,
+        hostlog_ring: number(lookup, "HOSTLOG_RING", 2_000, 1, &mut why) as usize,
+        releases_watch_every_s: number(lookup, "RELEASES_WATCH_EVERY_S", 3_600, 1, &mut why),
+        drift_reuse_s: number(lookup, "DRIFT_REUSE_S", 300, 0, &mut why),
+        live_announce_max_ms: number(
+            lookup,
+            "LIVE_ANNOUNCE_MAX_MS",
+            crate::core::drivelive::ANNOUNCE_MAX_MS,
+            0,
+            &mut why,
+        ),
+        live_max_pause_max_s: number(
+            lookup,
+            "LIVE_MAX_PAUSE_MAX_S",
+            crate::core::drivelive::MAX_PAUSE_MAX_S,
+            60,
+            &mut why,
+        ),
+        drive_idle_s: number(
+            lookup,
+            "DRIVE_IDLE_S",
+            crate::core::drive::IDLE_S as u64,
+            1,
+            &mut why,
+        ) as i64,
+        drive_release_after_job_s: number(
+            lookup,
+            "RELEASE_AFTER_JOB_S",
+            crate::core::drive::RELEASE_AFTER_JOB_S as u64,
+            0,
+            &mut why,
+        ) as i64,
         git: {
             let remote =
                 non_empty("HOMELAB_ADMIN_GIT_REMOTE").unwrap_or_else(|| DEFAULT_REMOTE.into());
@@ -225,17 +324,29 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
             }
         },
     };
-    if cfg.live_announce_ms > crate::core::drivelive::ANNOUNCE_MAX_MS {
+    if cfg.live_announce_max_ms > crate::core::drivelive::ANNOUNCE_MAX_MS {
         why.push(format!(
-            "HOMELAB_ADMIN_LIVE_ANNOUNCE_MS must be at most {}: the host waits {} s for a step's answer",
+            "HOMELAB_ADMIN_LIVE_ANNOUNCE_MAX_MS must be at most {}: the host waits {} s for a step's answer",
             crate::core::drivelive::ANNOUNCE_MAX_MS,
             homelab_proto::UI_RELAY_WAIT_S
         ));
     }
-    if cfg.live_max_pause_s > crate::core::drivelive::MAX_PAUSE_MAX_S {
+    if cfg.live_announce_ms > cfg.live_announce_max_ms {
         why.push(format!(
-            "HOMELAB_ADMIN_LIVE_MAX_PAUSE_S must be at most {}: the host holds a paused step no longer",
+            "HOMELAB_ADMIN_LIVE_ANNOUNCE_MS must be at most HOMELAB_ADMIN_LIVE_ANNOUNCE_MAX_MS ({})",
+            cfg.live_announce_max_ms
+        ));
+    }
+    if cfg.live_max_pause_max_s > crate::core::drivelive::MAX_PAUSE_MAX_S {
+        why.push(format!(
+            "HOMELAB_ADMIN_LIVE_MAX_PAUSE_MAX_S must be at most {}: the host holds a paused step no longer",
             crate::core::drivelive::MAX_PAUSE_MAX_S
+        ));
+    }
+    if cfg.live_max_pause_s > cfg.live_max_pause_max_s {
+        why.push(format!(
+            "HOMELAB_ADMIN_LIVE_MAX_PAUSE_S must be at most HOMELAB_ADMIN_LIVE_MAX_PAUSE_MAX_S ({})",
+            cfg.live_max_pause_max_s
         ));
     }
     if cfg.schedule_grace_s < cfg.schedule_tick_s {

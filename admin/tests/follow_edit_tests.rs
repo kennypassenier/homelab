@@ -617,6 +617,52 @@ async fn follow_the_batch_and_the_roll_back_dialogs() {
     let _ = &w.actions;
 }
 
+fn select(stacks: &[&str]) -> UiStep {
+    UiStep::Select {
+        stacks: stacks.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+/// Owner decision 2026-09-30: `homelab ui select` ticks the Overview
+/// table's own multiselect, and `open batch <action>` with no stacks named
+/// opens the batch dialog from that selection — the CLI driving the same
+/// bulk action a click would.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_select_ticks_the_fleet_table_for_a_batch_opened_from_it() {
+    let w = world("batch").await;
+    // The selection lives on the Overview page only.
+    ok(&w, open("deploy", Some("kp-soft"))).await;
+    ok(&w, UiStep::Close).await;
+    let (why, _) = refused(&step(&w, select(&["kp-soft"])).await);
+    assert!(why.contains("Overview"), "{why}");
+    ok(
+        &w,
+        UiStep::Goto {
+            path: "/app/".into(),
+        },
+    )
+    .await;
+    let (why, _) = refused(&step(&w, select(&["nope"])).await);
+    assert!(why.contains("no stack nope"), "{why}");
+    // No selection: the batch dialog refuses, naming both fixes.
+    let (why, fix) = refused(&step(&w, open("batch:backup", None)).await);
+    assert!(why.contains("selection is empty"), "{why}");
+    assert!(fix.contains("homelab ui select"), "{fix}");
+    let ticked = ok(&w, select(&["kp-soft", "gateway"])).await;
+    assert_eq!(
+        ticked["state"]["selected"],
+        json!(["gateway", "kp-soft"]),
+        "sorted and deduplicated"
+    );
+    let opened = ok(&w, open("batch:backup", None)).await;
+    assert_eq!(opened["state"]["form"]["title"], "Back up · 2 stacks");
+    assert_eq!(opened["state"]["form"]["stack"], "gateway,kp-soft");
+    ok(&w, UiStep::Close).await;
+    // `select none` clears it.
+    let cleared = ok(&w, select(&[])).await;
+    assert_eq!(cleared["state"]["selected"], json!([]));
+}
+
 /// feat-platform-10 (milestone follow).
 ///
 /// The edit forms' checks are the browser's: the same values give the same
@@ -642,6 +688,7 @@ fn follow_the_edit_checks_match_the_browser_cases() {
                 e.extend(driveedit::rule_problems(&values));
                 json!(e)
             }
+            "tile" => json!(driveedit::tile_problems(&values)),
             "key" => match driveedit::parse_key(&c["kind"], &c["values"]["value"]) {
                 Ok(v) => json!({ "value": v }),
                 Err(why) => json!({ "why": why }),

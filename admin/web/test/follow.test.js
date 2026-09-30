@@ -9,6 +9,7 @@ import {
   ruleFields,
   ruleProblems,
   settingsForm,
+  tileProblems,
 } from "../js/editforms.js";
 import {
   animate,
@@ -292,6 +293,8 @@ test("the edit checks are the server's: the same cases give the same words", () 
     } else if (c.check === "rule") {
       const steps = [{ id: "rule", label: "Rule", fields: ruleFields(null) }];
       got = { ...checkFields({ steps }, v), ...ruleProblems(v) };
+    } else if (c.check === "tile") {
+      got = tileProblems(v);
     } else {
       const p = parseKey(
         /** @type {any} */ ({ kind: c.kind }),

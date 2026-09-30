@@ -25,6 +25,7 @@ import {
   settingsBody,
   settingsForm,
   startValues,
+  tileProblems,
   valueText,
 } from "../js/editforms.js";
 import { editCommands } from "../js/commands.js";
@@ -83,6 +84,64 @@ test("the settings form sends only what changed, with stable field ids", () => {
   const e = checkFields(form, v);
   assert.match(e.cores, /from 1 to 64/);
   assert.match(e.disk_gb, /whole number/);
+});
+
+// owner remark 2026-09-30 ("de uptime-check tijd … in de wizard"): the
+// settings form's per-tile watch fields, blank by default (fleet default
+// applies), writing into `tiles.<key>.{watch_every,down_after}`.
+test("each tile the stack declares gets two optional watch fields", () => {
+  /** @type {import("../js/editforms.js").ManifestView} */
+  const withTile = {
+    ...manifest,
+    tiles: {
+      "kuma.kp-soft.dev": { watch_every: 60, down_after: 300 },
+    },
+  };
+  const form = settingsForm("uptime", withTile, {});
+  const ids = form.steps[0].fields.map((f) => f.id);
+  assert.ok(ids.includes("edit-tile-watch-kuma-kp-soft-dev"));
+  assert.ok(ids.includes("edit-tile-down-kuma-kp-soft-dev"));
+  const v = startValues(form);
+  assert.equal(v["tile_watch_every:kuma.kp-soft.dev"], "60");
+  assert.equal(v["tile_down_after:kuma.kp-soft.dev"], "300");
+  // Unchanged: nothing sent.
+  assert.deepEqual(settingsBody(form, v), { kind: "settings" });
+  v["tile_watch_every:kuma.kp-soft.dev"] = "30";
+  v["tile_down_after:kuma.kp-soft.dev"] = "180";
+  assert.deepEqual(settingsBody(form, v), {
+    kind: "settings",
+    tiles: { "kuma.kp-soft.dev": { watch_every: 30, down_after: 180 } },
+  });
+  // A stack without tiles gets no fields at all: there is nothing to
+  // create one from in this wizard (tiles are hand-declared in the stack
+  // file, not built by the new-stack or add-app wizard).
+  assert.equal(
+    settingsForm("kp-soft", manifest, {}).steps[0].fields.some((f) =>
+      f.name.startsWith("tile_watch_every:"),
+    ),
+    false,
+  );
+});
+
+test("down after must be at least check every, across the two tile fields", () => {
+  assert.deepEqual(
+    tileProblems({
+      "tile_watch_every:kuma.kp-soft.dev": "120",
+      "tile_down_after:kuma.kp-soft.dev": "60",
+    }),
+    {
+      "tile_down_after:kuma.kp-soft.dev":
+        "kuma.kp-soft.dev: down after (60 s) must be at least check every (120 s).",
+    },
+  );
+  // One side blank: nothing to compare yet (the fleet default fills it).
+  assert.deepEqual(
+    tileProblems({
+      "tile_watch_every:kuma.kp-soft.dev": "120",
+      "tile_down_after:kuma.kp-soft.dev": "",
+    }),
+    {},
+  );
 });
 
 test("the firewall model keeps origins, and moving or adding shows as a change", () => {

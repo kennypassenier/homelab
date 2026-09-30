@@ -160,3 +160,116 @@ fn checks_link_a_manual_check_carries_the_address_of_its_app() {
         "first router wins, provider dropped"
     );
 }
+
+// ── tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30) ──────
+//
+// The plain backend address behind a routed hostname — Traefik's own
+// forwarding table, read the same way `service_addresses` already reads
+// the display address, but following through to `loadBalancer.servers`
+// instead of stopping at `https://<host>/`.
+
+/// A router whose `Host(...)` matches resolves to its service's first
+/// server url.
+#[test]
+fn backend_for_host_matches_a_router_and_its_service() {
+    let content = "http:\n  routers:\n    jobtracker:\n      rule: \"Host(`job.kp-soft.dev`)\"\n      service: jobtracker\n  services:\n    jobtracker:\n      loadBalancer:\n        servers:\n          - url: \"http://10.10.10.16:8787\"\n";
+    assert_eq!(
+        homelab_client::routes::backend_for_host(content, "job.kp-soft.dev"),
+        Some("http://10.10.10.16:8787".to_string())
+    );
+    // Case-insensitive, like every other reader of Host(...).
+    assert_eq!(
+        homelab_client::routes::backend_for_host(content, "JOB.kp-soft.dev"),
+        Some("http://10.10.10.16:8787".to_string())
+    );
+}
+
+/// No router in the file names the host: no backend, not an error.
+#[test]
+fn backend_for_host_none_when_no_router_matches() {
+    let content = "http:\n  routers:\n    a:\n      rule: \"Host(`a.kp-soft.dev`)\"\n      service: a\n  services:\n    a:\n      loadBalancer:\n        servers:\n          - url: \"http://10.10.10.1:80\"\n";
+    assert_eq!(
+        homelab_client::routes::backend_for_host(content, "b.kp-soft.dev"),
+        None
+    );
+}
+
+/// Several hosts and routers in one file: each resolves to its own
+/// service's backend, not the first router's.
+#[test]
+fn backend_for_host_picks_the_right_router_among_several() {
+    let content = "http:\n  routers:\n    a:\n      rule: \"Host(`a.kp-soft.dev`)\"\n      service: svc-a\n    b:\n      rule: \"Host(`b.kp-soft.dev`)\"\n      service: svc-b\n  services:\n    svc-a:\n      loadBalancer:\n        servers:\n          - url: \"http://10.10.10.1:8080\"\n    svc-b:\n      loadBalancer:\n        servers:\n          - url: \"http://10.10.10.2:9090\"\n";
+    assert_eq!(
+        homelab_client::routes::backend_for_host(content, "a.kp-soft.dev"),
+        Some("http://10.10.10.1:8080".to_string())
+    );
+    assert_eq!(
+        homelab_client::routes::backend_for_host(content, "b.kp-soft.dev"),
+        Some("http://10.10.10.2:9090".to_string())
+    );
+}
+
+/// A service with an `@provider` suffix (as `service_addresses` already
+/// strips) and a service with no servers at all: the first has a backend,
+/// the second has none.
+#[test]
+fn backend_for_host_strips_provider_and_handles_no_servers() {
+    let content = "http:\n  routers:\n    a:\n      rule: \"Host(`a.kp-soft.dev`)\"\n      service: svc@file\n    b:\n      rule: \"Host(`b.kp-soft.dev`)\"\n      service: empty\n  services:\n    svc:\n      loadBalancer:\n        servers:\n          - url: \"http://10.10.10.1:8080\"\n    empty:\n      loadBalancer:\n        servers: []\n";
+    assert_eq!(
+        homelab_client::routes::backend_for_host(content, "a.kp-soft.dev"),
+        Some("http://10.10.10.1:8080".to_string())
+    );
+    assert_eq!(
+        homelab_client::routes::backend_for_host(content, "b.kp-soft.dev"),
+        None
+    );
+}
+
+// ── tile-watch probe resolution (owner decision "Afgeleid uit de tegels",
+// 2026-09-30) ───────────────────────────────────────────────────────────
+//
+// `build_spec` fills each tile's `probe`: an explicit own-IP url as-is, a
+// Traefik-hostname tile resolved through the stack's own route file, or
+// neither — and says why in a note when it resolves nothing.
+
+#[test]
+fn tile_probe_own_ip_url_as_is_routed_hostname_via_backend_and_unresolved_noted() {
+    let tmp = std::env::temp_dir().join(format!("homelab-tile-probe-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let dir = tmp.join("x");
+    write(
+        &dir.join("lxc-compose.yml"),
+        "stack_name: x\nvmid: 150\nhostname: 150-app-x\n\
+         network: {ip: 10.10.10.50/24, gateway: 10.10.10.1, bridge: vmbr0, vlan: 10}\n\
+         resources: {cores: 1, memory_mb: 512, swap_mb: 256, disk_gb: 4, storage: local-lvm}\n\
+         lxc: {template: 'clone:998', unprivileged: true, features: 'nesting=1', protection: false, gpu: false, vpn: false}\n\
+         boot: {onboot: true, order: 50}\nstorage: []\napps: [app]\n\
+         gateway_route:\n  filename: 150-app-x.yml\n\
+         tiles:\n  \
+           own-ip:\n    name: Own\n    group: G\n    url: \"http://10.10.10.50:8080/\"\n  \
+           x.kp-soft.dev:\n    name: Routed\n    group: G\n  \
+           nowhere.kp-soft.dev:\n    name: Unresolved\n    group: G\n",
+    );
+    write(&dir.join("app/docker-compose.yml"), "services: {}\n");
+    write(
+        &dir.join("traefik-routes.yml"),
+        "http:\n  routers:\n    r:\n      rule: \"Host(`x.kp-soft.dev`)\"\n      service: s\n  services:\n    s:\n      loadBalancer:\n        servers:\n          - url: \"http://10.10.10.50:9090\"\n",
+    );
+    let spec = homelab_client::spec::build_spec(&dir).unwrap();
+    let tiles = &spec.manifest.tiles;
+    assert_eq!(
+        tiles["own-ip"].probe.as_deref(),
+        Some("http://10.10.10.50:8080/"),
+        "an explicit own-IP url is used as-is"
+    );
+    assert_eq!(
+        tiles["x.kp-soft.dev"].probe.as_deref(),
+        Some("http://10.10.10.50:9090"),
+        "a routed hostname resolves through the stack's own traefik-routes.yml"
+    );
+    assert_eq!(
+        tiles["nowhere.kp-soft.dev"].probe, None,
+        "no route in this stack forwards nowhere.kp-soft.dev to anything"
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
+}

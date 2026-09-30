@@ -260,6 +260,31 @@ impl Releases for FakeGitHub {
         let b = self.binary.clone();
         Box::pin(async move { b })
     }
+    fn list<'a>(
+        &'a self,
+        repo: &'a str,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<Vec<homelab_core::ops::native::ReleaseListItem>, String>,
+                > + Send
+                + 'a,
+        >,
+    > {
+        self.asked.lock().unwrap().push(format!("list {repo}"));
+        Box::pin(async {
+            Ok(vec![
+                homelab_core::ops::native::ReleaseListItem {
+                    tag: "v3.63.0".into(),
+                    signed: true,
+                },
+                homelab_core::ops::native::ReleaseListItem {
+                    tag: "v3.62.2".into(),
+                    signed: true,
+                },
+            ])
+        })
+    }
 }
 
 fn queue(

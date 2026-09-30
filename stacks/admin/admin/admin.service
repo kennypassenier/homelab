@@ -59,6 +59,23 @@ Environment=HOMELAB_ADMIN_TRAFFIC_JOB=access
 # Live view announces every step this long before taking it (Kenny,
 # 2026-09-29, form "Live view tempo": 5 s; 3 s was "soms nog wat te snel").
 Environment=HOMELAB_ADMIN_LIVE_ANNOUNCE_MS=5000
+# Decision "23 constants" (Kenny, 2026-09-30): former hardcoded limits, now
+# configurable; nothing changes until one of these is uncommented (defaults
+# shown). See admin/src/core/actions_config.rs and admin/src/core/config.rs.
+#Environment=HOMELAB_ADMIN_KEEP_JOBS=200
+#Environment=HOMELAB_ADMIN_HISTORY_WINDOW_S=15552000
+#Environment=HOMELAB_ADMIN_NOTIFY_KEEP=500
+#Environment=HOMELAB_ADMIN_NOTIFY_SNOOZE_MAX_S=604800
+#Environment=HOMELAB_ADMIN_NOTIFY_DIGEST_LATE_S=10800
+#Environment=HOMELAB_ADMIN_LOGS_MAX_SINCE_S=604800
+#Environment=HOMELAB_ADMIN_LOGS_MAX_LIMIT=5000
+#Environment=HOMELAB_ADMIN_HOSTLOG_RING=2000
+#Environment=HOMELAB_ADMIN_RELEASES_WATCH_EVERY_S=3600
+#Environment=HOMELAB_ADMIN_DRIFT_REUSE_S=300
+#Environment=HOMELAB_ADMIN_LIVE_ANNOUNCE_MAX_MS=10000
+#Environment=HOMELAB_ADMIN_LIVE_MAX_PAUSE_MAX_S=3600
+#Environment=HOMELAB_ADMIN_DRIVE_IDLE_S=600
+#Environment=HOMELAB_ADMIN_RELEASE_AFTER_JOB_S=30
 # arch-exposure: the Access application every kp-soft.dev name sits behind
 # ("*.kp-soft.dev", read from the Access API 2026-09-28); not secrets, both
 # are in every token Access issues.

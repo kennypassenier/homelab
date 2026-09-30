@@ -227,6 +227,8 @@ export function findTarget(step, ctl, s) {
       return ctl?.button?.(t.button) ?? null;
     case "row":
       return ctl?.row?.(t.op, t.target) ?? null;
+    case "select":
+      return q("table.fleet");
     case "close":
       return /** @type {HTMLElement | null} */ (
         ctl?.dialog?.querySelector(".kp-dialog__close") ?? null

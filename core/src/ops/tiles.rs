@@ -13,6 +13,19 @@ pub struct TileView {
     pub stack: String,
     pub host: String,
     pub url: String,
+    /// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
+    /// plain backend address to reach this tile directly at (no Traefik
+    /// hop), as the client resolved it at deploy time. Absent = the tile
+    /// carries no probe and the minute watch does not ask it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probe: Option<String>,
+    /// Owner decision "default plus per tile" (2026-09-30): this tile's own
+    /// watch interval and down-after, when the stack file sets one; absent
+    /// = the fleet default the host answers in the `Tiles` RPC.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watch_every: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub down_after: Option<u64>,
     pub name: String,
     pub group: String,
     pub order: u32,
@@ -45,6 +58,9 @@ pub async fn read_tiles(exec: &dyn Executor, state: &HostState) -> Vec<TileView>
                         .url
                         .clone()
                         .unwrap_or_else(|| format!("https://{}/", host)),
+                    probe: t.probe.clone(),
+                    watch_every: t.watch_every,
+                    down_after: t.down_after,
                     name: t.name.clone(),
                     group: t.group.clone(),
                     order: t.order,

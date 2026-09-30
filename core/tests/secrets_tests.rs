@@ -113,6 +113,7 @@ async fn run_deploy(exec: &MockExecutor, sink: &VecSink) -> homelab_core::runner
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,
+        tile_watch_source: None,
     };
     deploy(&ctx, &spec_with_secret()).await
 }
@@ -207,6 +208,7 @@ async fn sec1_shell_metachar_app_name_refused_everywhere() {
             asker: &homelab_core::ask::NOBODY,
             backup: Default::default(),
             registry_cache: None,
+            tile_watch_source: None,
         };
         let r = match op {
             "backup" => backup(&ctx, &m, &BackupCfg::default()).await,

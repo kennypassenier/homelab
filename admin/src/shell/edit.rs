@@ -336,7 +336,11 @@ fn plan_json(
         .map(|c| c.path.clone())
         .collect();
     let effects = match &p.checked.manifest {
-        Some(new) => editplan::effects(p.old.as_ref(), new, &others),
+        // tile-watch: `plan_json` is pure and has no host.toml fetch of its
+        // own, so the plan does not yet show the derived tile-watch rule —
+        // only the hand-declared ones, same as before that decision. See
+        // the report for wiring the fleet-wide `tile_watch_source` in here.
+        Some(new) => editplan::effects(p.old.as_ref(), new, &others, None),
         None => Vec::new(),
     };
     let summary = if p.summary.is_empty() {
@@ -676,6 +680,7 @@ pub async fn read_stack_edit(
                 "apps": m.apps,
                 "natives": m.natives,
                 "firewall": m.firewall,
+                "tiles": m.tiles,
             }),
             None,
         ),
@@ -1315,14 +1320,21 @@ async fn host_settings_save(
         Ok(b) => b,
         Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
     };
-    answer(save_host_settings(&c, change).await)
+    answer(save_host_settings(&c, change, Origin::Manual).await)
 }
 
 /// feat-settings-1: write host.toml, for the route and a driven final
 /// press: the same check, the same session-only command, once.
+///
+/// Owner decision 2026-09-30 (item 2): when any key just written takes
+/// effect only at the host's next start (`Apply::Restart`), the answer
+/// also carries a `follow` job that restarts `homelab-host.service` — the
+/// same shape `stack_commit`'s `follow_up` gives a deploy, so the generic
+/// driven-form job wiring in `shell::drive` picks it up unchanged.
 pub async fn save_host_settings(
     c: &EditCtx,
     change: hostsettings::Change,
+    origin: Origin,
 ) -> Result<serde_json::Value, (StatusCode, Refusal)> {
     host_new_enough(c)
         .await
@@ -1348,7 +1360,8 @@ pub async fn save_host_settings(
                 "host_settings",
                 serde_json::json!({ "saved": saved, "keys": keys }),
             );
-            Ok(serde_json::json!({ "saved": saved }))
+            let follow = restart_follow_up(c, &keys, origin);
+            Ok(serde_json::json!({ "saved": saved, "follow": follow }))
         }
         Ok(r) => Err((
             StatusCode::CONFLICT,
@@ -1367,6 +1380,33 @@ pub async fn save_host_settings(
             ),
         )),
     }
+}
+
+/// Owner decision 2026-09-30 (item 2): a key just written whose
+/// `Apply::Restart` means the host only reads it at its next start;
+/// queues `restart-host` so "Save and restart the host" does both in one
+/// press. `null` when nothing written needs it.
+fn restart_follow_up(c: &EditCtx, keys: &[String], origin: Origin) -> serde_json::Value {
+    use homelab_core::hostconfig::{key_info, Apply};
+    let needs_restart = keys
+        .iter()
+        .any(|k| key_info(k).is_some_and(|i| i.apply == Apply::Restart));
+    if !needs_restart {
+        return serde_json::Value::Null;
+    }
+    let req = match actions::validate(
+        actions::HOST_TARGET,
+        ActionKind::RestartHost.slug(),
+        ActionArgs::default(),
+    ) {
+        Ok(r) => r,
+        Err(r) => return serde_json::json!({ "refused": r }),
+    };
+    if let Err(r) = c.actions.precheck(&req) {
+        return serde_json::json!({ "refused": r });
+    }
+    let job = c.actions.submit(req, origin);
+    serde_json::json!({ "job": job.job, "action": job.action, "restarts_dashboard": job.restarts_dashboard })
 }
 
 /// Mounted with `dashboard_routes`: the login and both locks stand before

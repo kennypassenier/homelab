@@ -167,6 +167,6 @@ firewall:
 tiles:
   almanac.kp-soft.dev:
     name: "Almanac"
-    group: "Huis"
+    group: "Household"
     order: 302
-    description: "Agenda-hub"
+    description: "Calendar hub"

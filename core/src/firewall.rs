@@ -13,7 +13,7 @@
 
 use std::net::Ipv4Addr;
 
-use crate::manifest::{FirewallRule, FirewallSpec, FwAction, FwDir, FwProto};
+use crate::manifest::{FirewallRule, FirewallSpec, FwAction, FwDir, FwProto, Tile};
 
 /// Where Proxmox reads a guest's firewall: `<dir>/<vmid>.fw` on pmxcfs.
 pub const PVE_FIREWALL_DIR: &str = "/etc/pve/firewall";
@@ -86,6 +86,22 @@ pub fn rule_line(r: &FirewallRule) -> String {
     s
 }
 
+/// `fw` with the tile-watch rule appended (empty when `source` is empty or
+/// derives nothing) — what every renderer and the fleet check must agree
+/// is "the declaration", so a hand-typed rule and a derived one both show
+/// up the same way. Called once per render, right before [`render`].
+pub fn with_tile_watch(
+    fw: &FirewallSpec,
+    own_ip: &str,
+    tiles: &std::collections::BTreeMap<String, Tile>,
+    source: &str,
+) -> FirewallSpec {
+    let mut fw = fw.clone();
+    fw.rules
+        .extend(derive_tile_watch_rules(own_ip, tiles, source));
+    fw
+}
+
 /// The whole `/etc/pve/firewall/<vmid>.fw` for a declaration.
 ///
 /// The first line says where the file comes from, so whoever opens it on pve
@@ -125,6 +141,90 @@ pub fn render(stack: &str, fw: &FirewallSpec) -> String {
         }
     }
     s
+}
+
+/// replace-homepage / tile-watch (owner decision "Afgeleid uit de tegels",
+/// 2026-09-30): the inbound rule the dashboard's once-a-minute tile watch
+/// needs on this container, derived from its own `tiles:` declarations —
+/// never hand-typed, so a tile that goes takes its rule with it at the next
+/// deploy, and a tile that arrives opens for it without anyone touching the
+/// firewall block.
+///
+/// `source` is the fleet-wide `tile_watch_source` (host.toml); `own_ip` is
+/// this container's own address, CIDR or bare (`network.ip` carries the
+/// `/24`; the CIDR is stripped before comparing, so every caller can pass
+/// it unchanged). A tile counts only when its `probe` — the plain backend
+/// address the client resolved at deploy time, `Tile::probe`, never a
+/// hostname read here — names `own_ip`: a tile with no `probe` (a Traefik
+/// hostname no route in this stack's own `traefik-routes.yml` resolves) or
+/// one whose probe names some other container is not this firewall's
+/// business.
+///
+/// Returns nothing when `source` is empty (feature off) or no tile resolves
+/// to a port on this container.
+pub fn derive_tile_watch_rules(
+    own_ip: &str,
+    tiles: &std::collections::BTreeMap<String, Tile>,
+    source: &str,
+) -> Vec<FirewallRule> {
+    let source = source.trim();
+    if source.is_empty() {
+        return Vec::new();
+    }
+    let own_ip = own_ip.split('/').next().unwrap_or(own_ip);
+    let mut ports: std::collections::BTreeSet<u16> = std::collections::BTreeSet::new();
+    for t in tiles.values() {
+        let Some(probe) = t.probe.as_deref() else {
+            continue;
+        };
+        if let Some(port) = tile_port_on(probe, own_ip) {
+            ports.insert(port);
+        }
+    }
+    if ports.is_empty() {
+        return Vec::new();
+    }
+    let dport = ports
+        .iter()
+        .map(u16::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    vec![FirewallRule {
+        dir: FwDir::In,
+        action: FwAction::Accept,
+        source: Some(source.to_string()),
+        dest: None,
+        proto: Some(FwProto::Tcp),
+        dport: Some(dport),
+        comment: None,
+        note: Some("tile watch (derived from tiles)".to_string()),
+    }]
+}
+
+/// The port `url` opens on `own_ip` (bare, no `/prefix`), or None when its
+/// host is not `own_ip`. An explicit port in the URL wins; otherwise 443
+/// for `https`, 80 for `http`, and None for any other scheme.
+fn tile_port_on(url: &str, own_ip: &str) -> Option<u16> {
+    let (scheme, rest) = url.split_once("://")?;
+    let authority = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(rest)
+        .trim_end_matches('/');
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((h, p)) if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) => {
+            (h, p.parse::<u16>().ok())
+        }
+        _ => (authority, None),
+    };
+    if host != own_ip {
+        return None;
+    }
+    port.or(match scheme {
+        "https" => Some(443),
+        "http" => Some(80),
+        _ => None,
+    })
 }
 
 /// The management guard as rules: DNS to the router over udp and tcp, then

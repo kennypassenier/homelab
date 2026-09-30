@@ -12,7 +12,8 @@ use homelab_proto::UiStep;
 use serde_json::Value;
 
 /// The steps, for the usage line and the verb's help.
-pub const STEPS: &str = "goto <path> | open <form> [stack] | type <field> <text> | \
+pub const STEPS: &str = "goto <path> | open <form> [stack] | open batch <action> [<stack>,<stack>] | \
+select <stack>,<stack>|none | type <field> <text> | \
 pick <field> <value> | check <field> on|off | edit <field> <file|-> | \
 row add|edit|up|down|delete [n|key] | press next|back|save|cancel|default | \
 press confirm [--wait] | finish | close | state | done | plan \"<step>\" \"<step>\" … | plan --file <file|->";
@@ -78,17 +79,62 @@ pub enum FinishNext {
     /// A dialog is open and ran no job: nothing to wait for, and closing it
     /// would throw its input away.
     NoJob(String),
+    /// A viewer pressed Stop (Kenny, 2026-09-30). `finish` must not send
+    /// `done`, which would clear the Stop and let the caller's next step
+    /// through; it exits 1 so a script stops too.
+    Stopped(String),
 }
 
 /// The next move of `finish` from the dashboard's answer to `state`.
 pub fn finish_next(message: &str) -> Result<FinishNext, String> {
     let v: Value =
         serde_json::from_str(message).map_err(|_| format!("the host answered: {message}"))?;
+    let stopped = &v["state"]["stopped_by"];
+    if !stopped.is_null() {
+        return Ok(FinishNext::Stopped(format!(
+            "stopped by {}: Live view is no longer driven and every next step is refused; \
+             a job already running on the host runs to its end (`homelab ui state`, the jobs page)",
+            text(stopped)
+        )));
+    }
     let f = &v["state"]["form"];
     if f.is_null() {
         return Ok(FinishNext::Release {
             outcome: None,
             failed: false,
+        });
+    }
+    // A batch's final press queued several jobs: follow the batch
+    // (Kenny, 2026-09-30: `--wait` gave up on a 10-stack batch).
+    let b = &f["edit"]["result"]["progress"];
+    if !b.is_null() {
+        let jobs = b["jobs"].as_array().cloned().unwrap_or_default();
+        let running = jobs
+            .iter()
+            .find(|j| j["state"] == "running")
+            .map(|j| format!(" · now {}", text(&j["stack"])))
+            .unwrap_or_default();
+        let finished = jobs
+            .iter()
+            .filter(|j| !matches!(j["state"].as_str(), Some("queued" | "running")))
+            .count();
+        let failed = b["failed"].as_u64().unwrap_or(0);
+        let line = format!(
+            "batch  {} {}/{} finished · {} ok · {} failed{}",
+            text(&b["batch"]),
+            finished,
+            jobs.len(),
+            b["ok"].as_u64().unwrap_or(0),
+            failed,
+            running
+        );
+        return Ok(if b["done"].as_bool().unwrap_or(false) {
+            FinishNext::Release {
+                outcome: Some(line),
+                failed: failed > 0,
+            }
+        } else {
+            FinishNext::Wait(line)
         });
     }
     let j = &f["job"];
@@ -159,11 +205,27 @@ pub fn parse_with(
             UiStep::Goto { path }
         }
         // `open batch <action> <stack>,<stack>`: the batch form of that
-        // action on those stacks.
+        // action on those stacks. The stacks may be left out (owner
+        // decision 2026-09-30): the dashboard then opens it from the
+        // Overview table's own ticked selection, set first with
+        // `homelab ui select`.
         "open" if args.get(1).map(String::as_str) == Some("batch") => UiStep::Open {
             form: format!("batch:{}", word(2)?),
-            target: Some(word(3)?),
+            target: args.get(3).cloned(),
         },
+        "select" => {
+            let list = word(1)?;
+            let stacks = if list == "none" {
+                Vec::new()
+            } else {
+                list.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            };
+            UiStep::Select { stacks }
+        }
         "open" => UiStep::Open {
             form: word(1)?,
             target: args.get(2).cloned(),
@@ -215,6 +277,7 @@ pub fn parse_with(
         | UiStep::Check { .. }
         | UiStep::Edit { .. }
         | UiStep::Row { .. } => args.len() > 3,
+        UiStep::Select { .. } => args.len() > 2,
         UiStep::Close | UiStep::State | UiStep::Done => args.len() > 1,
         UiStep::Type { .. } | UiStep::Plan { .. } => false,
     };
@@ -306,6 +369,10 @@ pub fn render(message: &str) -> Result<String, String> {
             "not driving: every tab is its viewer's".into()
         };
         out.push_str(&format!("{driving}\npage   {}\n", text(&s["page"])));
+        if let Some(sel) = s["selected"].as_array().filter(|a| !a.is_empty()) {
+            let names: Vec<String> = sel.iter().map(text).collect();
+            out.push_str(&format!("select {}\n", names.join(", ")));
+        }
         if !s["stopped_by"].is_null() {
             out.push_str(&format!(
                 "stopped by {}: every step is refused until `homelab ui done`\n",
@@ -542,6 +609,27 @@ mod tests {
                 target: Some("media,drill".into())
             }
         );
+        // Owner decision 2026-09-30: a batch opened with no stacks named
+        // reads the Overview table's own ticked selection.
+        assert_eq!(
+            parse(&words("open batch deploy")).unwrap(),
+            UiStep::Open {
+                form: "batch:deploy".into(),
+                target: None
+            }
+        );
+        assert_eq!(
+            parse(&words("select media,drill")).unwrap(),
+            UiStep::Select {
+                stacks: vec!["media".into(), "drill".into()]
+            }
+        );
+        assert_eq!(
+            parse(&words("select none")).unwrap(),
+            UiStep::Select { stacks: vec![] }
+        );
+        assert!(parse(&words("select")).is_err());
+        assert!(parse(&words("select media,drill extra")).is_err());
         assert_eq!(
             parse(&words("row up 2")).unwrap(),
             UiStep::Row {
@@ -642,6 +730,29 @@ mod tests {
         };
         assert!(why.contains("Deploy · uptime ran no job"), "{why}");
         assert!(finish_next("not json").is_err());
+        // A Stop wins over a running job: `finish` lets go without `done`.
+        let stopped = serde_json::json!({"state": {"stopped_by": "kenny", "form": null}});
+        let FinishNext::Stopped(why) = finish_next(&stopped.to_string()).unwrap() else {
+            panic!("a Stop is reported as Stopped");
+        };
+        assert!(why.contains("stopped by kenny"), "{why}");
+        // A batch is followed until every job in it finished.
+        let batch = |done: bool, state: &str| {
+            serde_json::json!({"state": {"stopped_by": null, "form": {"title": "Deploy · 2 stacks",
+                "job": null, "edit": {"result": {"batch": 9, "progress": {"batch": 9, "done": done,
+                "ok": 1, "failed": 0, "jobs": [
+                    {"job": 10, "stack": "media", "state": "done"},
+                    {"job": 11, "stack": "uptime", "state": state}]}}}}}})
+            .to_string()
+        };
+        assert_eq!(
+            finish_next(&batch(false, "running")).unwrap(),
+            FinishNext::Wait("batch  9 1/2 finished · 1 ok · 0 failed · now uptime".into())
+        );
+        assert!(matches!(
+            finish_next(&batch(true, "done")).unwrap(),
+            FinishNext::Release { failed: false, .. }
+        ));
     }
 
     #[test]
@@ -729,6 +840,7 @@ mod tests {
         let ok = serde_json::json!({
             "ok": true,
             "state": {"active": true, "by": "wsl", "seq": 4, "page": "/app/stacks/media",
+              "selected": ["media", "drill"],
               "form": {"title": "Deploy · media", "step": "review", "step_index": 0,
                 "steps": ["review"], "buttons": ["confirm"],
                 "fields": [{"id": "act-force", "kind": "check", "value": false, "shown": false, "error": null}],
@@ -736,6 +848,7 @@ mod tests {
         });
         let t = render(&ok.to_string()).unwrap();
         assert!(t.contains("page   /app/stacks/media"), "{t}");
+        assert!(t.contains("select media, drill"), "{t}");
         assert!(t.contains("act-force"), "{t}");
         assert!(t.contains("job    812 done · complete"), "{t}");
         let no = serde_json::json!({

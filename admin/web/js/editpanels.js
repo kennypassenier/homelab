@@ -20,6 +20,7 @@ import {
   settingsBody,
   settingsForm,
   startValues,
+  tileProblems,
 } from "./editforms.js";
 import {
   editField,
@@ -170,7 +171,8 @@ function settingsCard(stack, e, reload) {
     "Review and commit…",
   );
   review.addEventListener("click", () => {
-    if (!markErrors(inputs, checkFields(form, values))) return;
+    const errors = { ...checkFields(form, values), ...tileProblems(values) };
+    if (!markErrors(inputs, errors)) return;
     const edit = settingsBody(form, values);
     if (!changesSomething(edit)) {
       notify("Nothing is changed yet.", "info");

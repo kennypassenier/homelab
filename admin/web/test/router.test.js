@@ -5,6 +5,7 @@ import {
   STACK_TABS,
   navEntries,
   pageTitle,
+  redirectFor,
   route,
   stackHref,
 } from "../js/router.js";
@@ -12,12 +13,11 @@ import {
 test("paths under /app/ name their page", () => {
   assert.deepEqual(route("/app/"), { page: "overview" });
   assert.deepEqual(route("/app"), { page: "overview" });
+  assert.deepEqual(route("/app/home"), { page: "home" });
+  assert.deepEqual(route("/app/health"), { page: "health" });
+  assert.deepEqual(route("/app/metrics"), { page: "metrics" });
   assert.deepEqual(route("/app/host"), { page: "host" });
   assert.deepEqual(route("/app/activity"), { page: "activity" });
-  assert.deepEqual(route("/app/timeline?days=3"), { page: "timeline" });
-  assert.deepEqual(route("/app/checks/"), { page: "checks" });
-  assert.deepEqual(route("/app/doctor"), { page: "doctor" });
-  assert.deepEqual(route("/app/today"), { page: "today" });
   assert.deepEqual(route("/app/log?source=media"), { page: "log" });
   assert.deepEqual(route("/app/shell"), { page: "shell" });
   assert.deepEqual(route("/app/apply"), { page: "apply" });
@@ -32,6 +32,48 @@ test("paths under /app/ name their page", () => {
   assert.equal(route("/app/stacks/a/b").page, "notfound");
   assert.equal(route("/app/stacks/a/b/c").page, "notfound");
   assert.equal(route("/elsewhere").page, "notfound");
+});
+
+test("2026-09-30's retired paths still parse, for an old link or a Live view script", () => {
+  assert.deepEqual(route("/app/start"), { page: "start" });
+  assert.deepEqual(route("/app/today"), { page: "today" });
+  assert.deepEqual(route("/app/doctor"), { page: "doctor" });
+  assert.deepEqual(route("/app/checks/"), { page: "checks" });
+  assert.deepEqual(route("/app/charts"), { page: "charts" });
+  assert.deepEqual(route("/app/traffic"), { page: "traffic" });
+  assert.deepEqual(route("/app/timeline?days=3"), { page: "timeline" });
+});
+
+test("redirectFor sends every retired path on to its merged page", () => {
+  assert.equal(redirectFor(route("/app/start"), ""), "/app/home");
+  assert.equal(redirectFor(route("/app/today"), ""), "/app/health?block=today");
+  assert.equal(
+    redirectFor(route("/app/doctor"), "?doctor.q=x"),
+    "/app/health?doctor.q=x&block=doctor",
+  );
+  assert.equal(
+    redirectFor(route("/app/checks"), ""),
+    "/app/health?block=checks",
+  );
+  assert.equal(
+    redirectFor(route("/app/charts"), "?stack=media&range=6h"),
+    "/app/metrics?stack=media&range=6h&tab=system",
+  );
+  assert.equal(
+    redirectFor(route("/app/traffic"), "?range=7d"),
+    "/app/metrics?range=7d&tab=traffic",
+  );
+  assert.equal(
+    redirectFor(route("/app/timeline"), "?days=30"),
+    "/app/activity?days=30&view=timeline",
+  );
+  // Every other route: nothing to redirect.
+  assert.equal(redirectFor(route("/app/"), ""), null);
+  assert.equal(redirectFor(route("/app/health"), ""), null);
+  assert.equal(
+    redirectFor({ page: "stack", name: "media", tab: "overview" }, ""),
+    null,
+  );
 });
 
 test("every stack tab has its own path and round-trips", () => {
@@ -55,33 +97,21 @@ test("the navigation marks the current page, a stack page beside the overview", 
       .map((n) => n.label);
   assert.deepEqual(cur("/app/"), ["Overview"]);
   assert.deepEqual(cur("/app/host"), ["Host"]);
-  // A page in a dropdown marks its group and itself.
-  assert.deepEqual(cur("/app/doctor"), ["Health"]);
-  const health = navEntries(route("/app/doctor")).find(
-    (n) => n.label === "Health",
-  );
-  assert.deepEqual(
-    health?.items?.map((i) => [i.label, i.current]),
-    [
-      ["Checks", false],
-      ["Doctor", true],
-      ["Charts", false],
-      ["Traffic", false],
-    ],
-  );
-  // Kenny, 2026-09-29: the bar fits one row at 1280 px, so few top items.
+  assert.deepEqual(cur("/app/health"), ["Health"]);
+  assert.deepEqual(cur("/app/metrics"), ["Metrics"]);
+  // Kenny, 2026-09-30: Home, Overview, Health, Metrics, Activity first, each
+  // of the last two a single page rather than a dropdown of them.
   const top = navEntries(route("/app/"));
   assert.deepEqual(
     top.map((n) => n.label),
     [
-      // replace-homepage (2026-09-30): the start page first.
-      "Start",
+      "Home",
       "Overview",
-      "Today",
+      "Health",
+      "Metrics",
+      "Activity",
       "Host",
       "Operations",
-      "History",
-      "Health",
       "Configure",
     ],
   );
@@ -89,7 +119,7 @@ test("the navigation marks the current page, a stack page beside the overview", 
   const reached = top.flatMap((n) =>
     (n.items ? n.items : [n]).map((i) => i.href),
   );
-  assert.equal(reached.length, 16);
+  assert.equal(reached.length, 12);
   const onStack = navEntries(route("/app/stacks/media/apps"));
   assert.deepEqual(onStack[1], {
     href: "/app/stacks/media",
@@ -102,7 +132,7 @@ test("the navigation marks the current page, a stack page beside the overview", 
     pageTitle(route("/app/stacks/media/logs")),
     "Homelab · media · Logs",
   );
-  assert.equal(pageTitle(route("/app/timeline")), "Homelab · Timeline");
+  assert.equal(pageTitle(route("/app/health")), "Homelab · Health");
   assert.equal(pageTitle(route("/app/x")), "Homelab · Not found");
   // Milestone act's pages; the notification centre is not in the bar.
   assert.deepEqual(route("/app/jobs?job=3"), { page: "jobs" });

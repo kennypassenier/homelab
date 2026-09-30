@@ -10,11 +10,9 @@ import { mountChrome } from "./chrome.js";
 import { mountFollow } from "./drive.js";
 import { h } from "./dom.js";
 import { attachNavMenus, attachNavToggles } from "/static/kp/js/components.js";
-import { navEntries, pageTitle, route } from "./router.js";
+import { navEntries, pageTitle, redirectFor, route } from "./router.js";
 import { current, start, subscribe } from "./store.js";
 import { mount as activity } from "./pages/activity.js";
-import { mount as checks } from "./pages/checks.js";
-import { mount as doctor } from "./pages/doctor.js";
 import { mount as firewall } from "./pages/firewall.js";
 import { mount as host } from "./pages/host.js";
 import { mount as jobs } from "./pages/jobs.js";
@@ -23,15 +21,13 @@ import { mount as schedules } from "./pages/schedules.js";
 import { mount as settings } from "./pages/settings.js";
 import { mount as overview } from "./pages/overview.js";
 import { mount as stack } from "./pages/stack.js";
-import { mount as timeline } from "./pages/timeline.js";
-import { mount as today } from "./pages/today.js";
 import { mount as hostLog } from "./pages/log.js";
 import { mount as shell } from "./pages/shell.js";
 import { mount as apply } from "./pages/apply.js";
 import { mount as presets } from "./pages/presets.js";
-import { mount as startPage } from "./pages/start.js";
-import { mount as chartsPage } from "./pages/charts.js";
-import { mount as trafficPage } from "./pages/traffic.js";
+import { mount as homePage } from "./pages/home.js";
+import { mount as healthPage } from "./pages/health.js";
+import { mount as metricsPage } from "./pages/metrics.js";
 import { mountVersions } from "./versions.js";
 
 const page = /** @type {HTMLElement} */ (document.getElementById("page"));
@@ -65,6 +61,16 @@ function closeBar() {
 }
 
 function render() {
+  // 2026-09-30: /app/start, /app/today, /app/doctor, /app/checks,
+  // /app/charts, /app/traffic and /app/timeline are retired; send them on
+  // to their merged page, the right block or tab open, before mounting
+  // anything (redirectFor is null for every other route).
+  const target = redirectFor(route(location.pathname), location.search);
+  if (target != null) {
+    history.replaceState(null, "", target);
+    render();
+    return;
+  }
   cleanup();
   cleanup = () => {};
   const r = route(location.pathname);
@@ -98,14 +104,14 @@ function render() {
     case "overview":
       cleanup = overview(page, { navigate });
       break;
-    case "start":
-      cleanup = startPage(page);
+    case "home":
+      cleanup = homePage(page);
       break;
-    case "charts":
-      cleanup = chartsPage(page, { navigate });
+    case "health":
+      cleanup = healthPage(page);
       break;
-    case "traffic":
-      cleanup = trafficPage(page, { navigate });
+    case "metrics":
+      cleanup = metricsPage(page, { navigate });
       break;
     case "host":
       cleanup = host(page, { navigate });
@@ -114,16 +120,7 @@ function render() {
       cleanup = stack(page, { name: r.name, tab: r.tab, navigate });
       break;
     case "activity":
-      cleanup = activity(page);
-      break;
-    case "timeline":
-      cleanup = timeline(page, { navigate });
-      break;
-    case "checks":
-      cleanup = checks(page);
-      break;
-    case "doctor":
-      cleanup = doctor(page);
+      cleanup = activity(page, { navigate });
       break;
     case "jobs":
       cleanup = jobs(page, { navigate });
@@ -139,9 +136,6 @@ function render() {
       break;
     case "settings":
       cleanup = settings(page);
-      break;
-    case "today":
-      cleanup = today(page);
       break;
     case "log":
       cleanup = hostLog(page);
@@ -161,7 +155,7 @@ function render() {
         h(
           "p",
           null,
-          `There is no page at ${r.path}. `,
+          `There is no page at ${location.pathname}. `,
           h("a", { href: "/app/" }, "Go to the overview"),
         ),
       );

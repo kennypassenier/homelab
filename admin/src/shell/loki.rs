@@ -10,6 +10,11 @@ use crate::core::logs::{self, LogLine, LogQuery};
 pub struct Loki {
     base: String,
     http: reqwest::Client,
+    /// Decision "23 constants": `admin.logs_max_since_s` /
+    /// `admin.logs_max_limit` (`logs::MAX_SINCE_S` / `logs::MAX_LIMIT` by
+    /// default).
+    max_since_s: u64,
+    max_limit: usize,
 }
 
 /// replace-goaccess: a metric query over a window, as chart series.
@@ -107,7 +112,12 @@ impl Loki {
             .timeout(Duration::from_secs(c.loki_timeout_s))
             .build()
             .ok()?;
-        Some(Loki { base, http })
+        Some(Loki {
+            base,
+            http,
+            max_since_s: c.logs_max_since_s,
+            max_limit: c.logs_max_limit,
+        })
     }
 
     /// Where it asks, for error messages.
@@ -118,7 +128,7 @@ impl Loki {
     /// Ask Loki for the lines `q` names, newest first.
     pub async fn query(&self, q: &LogQuery, now: u64) -> Result<Found, String> {
         let logql = logs::logql(q)?;
-        let (from, to, limit) = logs::window(q, now);
+        let (from, to, limit) = logs::window(q, now, self.max_since_s, self.max_limit);
         let ns = |s: u64| (s as u128 * 1_000_000_000).to_string();
         let url = format!("{}/loki/api/v1/query_range", self.base);
         let res = self

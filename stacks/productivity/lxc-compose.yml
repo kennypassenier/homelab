@@ -163,6 +163,6 @@ firewall:
 tiles:
   sp.kp-soft.dev:
     name: "SuperSync"
-    group: "Huis"
+    group: "Household"
     order: 304
     description: "Super Productivity"

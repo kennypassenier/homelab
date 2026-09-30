@@ -95,6 +95,32 @@ pub struct NotifyCenter {
     clock: Clock,
     /// The dashboard's public address, for a push's `click_url`.
     base_url: std::sync::RwLock<String>,
+    /// Decision "23 constants" (2026-09-30): how many notices are kept
+    /// (`notify::KEEP` by default, `HOMELAB_ADMIN_NOTIFY_KEEP`), the
+    /// longest snooze (`notify::SNOOZE_MAX_S`,
+    /// `HOMELAB_ADMIN_NOTIFY_SNOOZE_MAX_S`) and how late a digest may still
+    /// go out (`notify::DIGEST_LATE_S`, `HOMELAB_ADMIN_NOTIFY_DIGEST_LATE_S`).
+    limits: std::sync::RwLock<NotifyLimits>,
+}
+
+/// The three notification-centre limits `mount()` fills from `ActConfig`;
+/// [`NotifyCenter::load`] starts every test and the real dashboard alike
+/// with the module's own defaults.
+#[derive(Debug, Clone, Copy)]
+pub struct NotifyLimits {
+    pub keep: usize,
+    pub snooze_max_s: i64,
+    pub digest_late_s: i64,
+}
+
+impl Default for NotifyLimits {
+    fn default() -> Self {
+        NotifyLimits {
+            keep: notify::KEEP,
+            snooze_max_s: notify::SNOOZE_MAX_S,
+            digest_late_s: notify::DIGEST_LATE_S,
+        }
+    }
 }
 
 impl NotifyCenter {
@@ -120,6 +146,7 @@ impl NotifyCenter {
             base_url: std::sync::RwLock::new(
                 homelab_core::notify::DEFAULT_DASHBOARD_URL.to_string(),
             ),
+            limits: std::sync::RwLock::new(NotifyLimits::default()),
         }))
     }
 
@@ -128,6 +155,18 @@ impl NotifyCenter {
         if let Ok(mut b) = self.base_url.write() {
             *b = url.trim_end_matches('/').to_string();
         }
+    }
+
+    /// The keep/snooze/digest-late limits, from `ActConfig` (mount only;
+    /// every other caller, including every test, keeps the defaults).
+    pub fn set_limits(&self, limits: NotifyLimits) {
+        if let Ok(mut l) = self.limits.write() {
+            *l = limits;
+        }
+    }
+
+    fn limits(&self) -> NotifyLimits {
+        self.limits.read().map(|l| *l).unwrap_or_default()
     }
 
     fn base(&self) -> String {
@@ -160,7 +199,7 @@ impl NotifyCenter {
         };
         let (notice, unread) = {
             let mut s = self.state.lock().await;
-            let n = s.add(draft, now, push);
+            let n = s.add(draft, now, push, self.limits().keep);
             self.save(&s);
             (n, s.unread())
         };
@@ -215,7 +254,7 @@ impl NotifyCenter {
                     continue;
                 }
                 let job = n.req.and_then(job_of);
-                if let Some(x) = s.import_host(n, job, now) {
+                if let Some(x) = s.import_host(n, job, now, self.limits().keep) {
                     out.push(x);
                 }
             }
@@ -239,7 +278,7 @@ impl NotifyCenter {
         {
             let mut s = self.state.lock().await;
             for a in notify::alert_drafts(body) {
-                if let Some(n) = s.add_alert(a, now) {
+                if let Some(n) = s.add_alert(a, now, self.limits().keep) {
                     out.push(n);
                 }
             }
@@ -266,7 +305,12 @@ impl NotifyCenter {
         let now = (self.clock)();
         let (day, settings, notices) = {
             let s = self.state.lock().await;
-            let day = notify::digest_due(&s.settings, s.last_digest.as_ref(), now)?;
+            let day = notify::digest_due(
+                &s.settings,
+                s.last_digest.as_ref(),
+                now,
+                self.limits().digest_late_s,
+            )?;
             (day, s.settings.clone(), s.notices.clone())
         };
         let lines = match today().await {
@@ -372,7 +416,7 @@ impl NotifyCenter {
     pub async fn snooze(&self, seconds: i64) -> Result<Option<i64>, String> {
         let now = (self.clock)();
         let mut s = self.state.lock().await;
-        let until = s.snooze(now, seconds)?;
+        let until = s.snooze(now, seconds, self.limits().snooze_max_s)?;
         self.save(&s);
         let settings = s.settings.clone();
         drop(s);

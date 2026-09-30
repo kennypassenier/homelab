@@ -35,10 +35,11 @@
  * @typedef {{active: boolean, by: string | null, seq: number, page: string,
  *   form: DriveForm | null, last_at: number, idle_s: number,
  *   announce?: DriveAnnounce | null, paused_by?: string | null,
- *   stopped_by?: string | null, plan?: DrivePlan | null}} DriveState
+ *   stopped_by?: string | null, plan?: DrivePlan | null,
+ *   selected?: string[]}} DriveState
  * @typedef {{do: string, path?: string, form?: string, target?: string,
  *   field?: string, text?: string, value?: string, on?: boolean,
- *   button?: string, op?: string}} DriveStep
+ *   button?: string, op?: string, stacks?: string[]}} DriveStep
  * @typedef {{kind?: "step" | "announce" | "control", seq: number,
  *   step: DriveStep, applied: boolean,
  *   refusal: DriveRefusal | null, state: DriveState}} DriveEvent
@@ -50,13 +51,14 @@
  *   {op: "set", name: string, id?: string, value: string | boolean} |
  *   {op: "pick", name: string, id?: string, value: string} |
  *   {op: "row", row: string, target?: string} |
+ *   {op: "select", stacks: string[]} |
  *   {op: "press", button: string} | {op: "sync"} | {op: "close"} |
  *   {op: "note", refusal: DriveRefusal} |
  *   {op: "highlight", step: DriveStep}} Op
  * @typedef {{kind: "link", path: string} | {kind: "action", action: string} |
  *   {kind: "field", id: string} | {kind: "button", button: string} |
  *   {kind: "row", op: string, target?: string} | {kind: "close"} |
- *   {kind: "none"}} Target
+ *   {kind: "select"} | {kind: "none"}} Target
  */
 
 /** Where the Live view switch is remembered: per tab (sessionStorage). */
@@ -136,6 +138,7 @@ export function catchUp(local, s) {
     local.form.stack === f.stack;
   if (local.form && !same) ops.push({ op: "close" });
   if (local.page !== s.page) ops.push({ op: "goto", path: s.page });
+  if (s.selected) ops.push({ op: "select", stacks: s.selected });
   if (f && !same) ops.push(openOp(f));
   if (f) {
     // An edit form's controller fills its own fields in its sync, once
@@ -221,6 +224,8 @@ export function animate(local, step, s) {
         { op: "row", row: step.op ?? "", target: step.target },
         { op: "sync" },
       ];
+    case "select":
+      return [{ op: "select", stacks: s.selected ?? [] }];
     case "press": {
       if (step.button === "close")
         return [{ op: "press", button: "close" }, { op: "close" }];
@@ -309,19 +314,27 @@ export function planCounter(s) {
  * the status and the counter keep their width when empty).
  * @param {DriveState | null} s
  * @param {number} left what `leftNow` says
+ * @param {boolean} [driving] Claude is driving now (`isActive`)
  * @returns {{text: string, count: string, fraction: number,
  *   status: string, counter: string, paused: boolean,
  *   countdown: boolean} | null}
  */
-export function announceView(s, left) {
+export function announceView(s, left, driving = false) {
   if (!s) return null;
   const a = s.announce ?? null;
   const paused = !!s.paused_by;
-  if (!a && !paused) return null;
+  // While Claude drives, Pause and Stop stay offered between two
+  // announcements too: a job running under `confirm --wait` announces
+  // nothing, and that is exactly when the viewer wants to stop.
+  if (!a && !paused && !driving) return null;
   const countdown = !!a && a.countdown;
   const ms = countdown ? Math.max(0, Math.min(a.total_ms, left)) : 0;
   return {
-    text: a ? `Next: ${a.text}` : "Next: Claude's next step",
+    text: a
+      ? `Next: ${a.text}`
+      : s.form?.job && !paused
+        ? `Running: job ${s.form.job.job} ${s.form.job.state}`
+        : "Next: Claude's next step",
     count: countdown ? String(Math.ceil(ms / 1000)) : "",
     fraction: countdown && a.total_ms > 0 ? ms / a.total_ms : 0,
     status: paused ? `Paused by ${s.paused_by}` : "",
@@ -392,6 +405,8 @@ export function targetOf(step) {
         : { kind: "button", button: step.button ?? "" };
     case "row":
       return { kind: "row", op: step.op ?? "", target: step.target };
+    case "select":
+      return { kind: "select" };
     case "close":
       return { kind: "close" };
     default:

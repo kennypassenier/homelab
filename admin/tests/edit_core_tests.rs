@@ -11,7 +11,7 @@ use homelab_admin::core::hostsettings::{self, check, parse_fragment, toml_fragme
 use homelab_admin::core::newstack::{ip_for, problems, suggest_vmid, NewStack, Taken};
 use homelab_admin::core::stackedit::{
     changes, images, mount_value, outside_stack, parse_manifest, raw_path_problem, AddAppFiles,
-    FirewallEdit, RuleEdit, SettingsEdit, StackEdit, StackTexts,
+    FirewallEdit, RuleEdit, SettingsEdit, StackEdit, StackTexts, TileEdit,
 };
 use homelab_admin::core::textdiff::{counts, hunks, unified};
 use homelab_admin::shell::edit::{subject_with_id, version_triple};
@@ -129,7 +129,7 @@ fn feat_firewall_1_add_and_remove_a_rule_keep_the_rest_of_the_file() {
     // The plan: the rendered .fw loses one line and gains one.
     let before = parse_manifest(old).unwrap();
     let after = parse_manifest(new).unwrap();
-    let eff = effects(Some(&before), &after, &[]);
+    let eff = effects(Some(&before), &after, &[], None);
     // The rendered file, the native note, and arch-self: admin restarts.
     assert_eq!(eff.len(), 3, "{eff:?}");
     assert!(eff[2].what.contains("restarts this dashboard"));
@@ -178,6 +178,7 @@ fn feat_firewall_1_options_and_a_new_declaration() {
         Some(&parse_manifest(text).unwrap()),
         &parse_manifest(new).unwrap(),
         &[],
+        None,
     );
     assert!(eff[0].what.contains("declared, not enabled"), "{eff:?}");
     assert_eq!(eff[0].by, None);
@@ -210,6 +211,7 @@ fn feat_stacks_2_settings_and_the_resize_they_need() {
         Some(&parse_manifest(old).unwrap()),
         &parse_manifest(new).unwrap(),
         &[],
+        None,
     );
     let whats: Vec<&str> = eff.iter().map(|e| e.what.as_str()).collect();
     assert!(whats[0].starts_with("Resize applies"), "{whats:?}");
@@ -637,5 +639,131 @@ fn feat_stacks_2_the_commit_subject_says_what_changed() {
     assert_eq!(
         describe(&StackEdit::Firewall(f), Some(&m)),
         "firewall: add IN ACCEPT from 10.10.10.10 tcp 8090, remove 1 rule(s)"
+    );
+}
+
+/// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): when a
+/// `tile_watch_source` is given, the plan shows the same derived rule the
+/// deploy would write, so the owner sees it before it lands on pve rather
+/// than being surprised by it.
+#[test]
+fn tile_watch_derived_rule_shows_in_the_plan() {
+    let base = "stack_name: x\nvmid: 150\nhostname: 150-app-x\nnetwork:\n  ip: 10.10.10.50/24\n  gateway: 10.10.10.1\n  bridge: vmbr0\n  vlan: 10\nresources:\n  cores: 1\n  memory_mb: 512\n  swap_mb: 0\n  disk_gb: 8\n  storage: local-lvm\nlxc:\n  template: clone:996\n  unprivileged: true\n  features: nesting=1\n  protection: true\nboot:\n  onboot: true\napps: []\n";
+    let old = parse_manifest(base).unwrap();
+    let new_text = format!(
+        "{base}tiles:\n  x.kp-soft.dev:\n    name: X\n    group: Apps\n    url: http://10.10.10.50:8080/\n    probe: http://10.10.10.50:8080/\nfirewall:\n  enabled: true\n  rules:\n    - dir: in\n      action: ACCEPT\n      source: 10.10.10.4\n      proto: tcp\n      dport: '80'\n"
+    );
+    let new = parse_manifest(&new_text).unwrap();
+    // No source: only the hand-declared rule renders, as before this
+    // decision.
+    let none = effects(Some(&old), &new, &[], None);
+    assert!(
+        !none[0].detail.iter().any(|l| l.contains("tile watch")),
+        "{:?}",
+        none[0].detail
+    );
+    // A source: the derived rule shows up in the same rendered-file diff.
+    let with = effects(Some(&old), &new, &[], Some("10.10.10.20"));
+    assert!(
+        with[0]
+            .detail
+            .iter()
+            .any(|l| l.contains("-source 10.10.10.20") && l.contains("tile watch")),
+        "{:?}",
+        with[0].detail
+    );
+}
+
+/// owner remark 2026-09-30 ("de uptime-check tijd … in de wizard"): the
+/// settings form's two per-tile fields write straight into the tile's own
+/// `tiles:` entry, comments kept, only when a value is given.
+#[test]
+fn settings_edit_writes_a_tiles_watch_override() {
+    let texts = texts("uptime");
+    let edit = StackEdit::Settings(SettingsEdit {
+        tiles: BTreeMap::from([(
+            "kuma.kp-soft.dev".to_string(),
+            TileEdit {
+                watch_every: Some(30),
+                down_after: Some(180),
+            },
+        )]),
+        ..Default::default()
+    });
+    let out = changes("uptime", &texts, &edit, None).unwrap();
+    assert_eq!(out.len(), 1, "{out:?}");
+    let new = out[0].new.as_ref().unwrap();
+    assert!(
+        new.contains("kuma.kp-soft.dev:\n    name: \"Uptime Kuma\"")
+            || new.contains("kuma.kp-soft.dev:"),
+        "{new}"
+    );
+    let m = parse_manifest(new).unwrap();
+    let t = &m.tiles["kuma.kp-soft.dev"];
+    assert_eq!(t.watch_every, Some(30));
+    assert_eq!(t.down_after, Some(180));
+    // A second edit setting only watch_every leaves down_after as it is
+    // now, and a field left out of the whole edit changes nothing at all.
+    let unchanged = changes(
+        "uptime",
+        &texts,
+        &StackEdit::Settings(SettingsEdit::default()),
+        None,
+    )
+    .unwrap();
+    assert!(unchanged.is_empty());
+}
+
+/// The settings form refuses a tile key the stack does not declare, and a
+/// down_after shorter than watch_every, the same way the browser's
+/// `tileProblems` does before the plan is even asked for.
+#[test]
+fn settings_edit_tile_validation() {
+    let texts = texts("uptime");
+    let unknown = StackEdit::Settings(SettingsEdit {
+        tiles: BTreeMap::from([(
+            "not-a-tile.kp-soft.dev".to_string(),
+            TileEdit {
+                watch_every: Some(30),
+                down_after: None,
+            },
+        )]),
+        ..Default::default()
+    });
+    let err = changes("uptime", &texts, &unknown, None).unwrap_err();
+    assert!(err.why.contains("is not a tile of this stack"), "{err:?}");
+
+    use homelab_admin::core::stackedit::settings_problems;
+    let too_low = SettingsEdit {
+        tiles: BTreeMap::from([(
+            "kuma.kp-soft.dev".to_string(),
+            TileEdit {
+                watch_every: Some(5),
+                down_after: None,
+            },
+        )]),
+        ..Default::default()
+    };
+    let problems = settings_problems(&too_low);
+    assert!(
+        problems.iter().any(|p| p.contains("at least 10 s")),
+        "{problems:?}"
+    );
+    let inverted = SettingsEdit {
+        tiles: BTreeMap::from([(
+            "kuma.kp-soft.dev".to_string(),
+            TileEdit {
+                watch_every: Some(120),
+                down_after: Some(60),
+            },
+        )]),
+        ..Default::default()
+    };
+    let problems = settings_problems(&inverted);
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("must be at least check every")),
+        "{problems:?}"
     );
 }

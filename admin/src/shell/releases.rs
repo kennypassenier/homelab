@@ -10,12 +10,16 @@
 //! * install-native without a tag: the latest tag of the service's
 //!   repository (the host then downloads that release itself).
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chassis::shell::live::Live;
+use tokio::sync::Mutex as AsyncMutex;
+
+use homelab_core::ops::native::{list_releases, ReleaseListItem};
 
 use super::host_link::{now_s, Shared};
 
@@ -27,6 +31,10 @@ pub const HOMELAB_REPO: &str = homelab_client::release::REPO;
 pub const HOST_ASSET: &str = "homelab-host";
 /// How often the badge looks for a newer release.
 pub const WATCH_EVERY: Duration = Duration::from_secs(3600);
+/// dashboard-latest: how long a repository's release list is kept, so
+/// opening the "release tag" dropdown twice in a row (a stray unit change,
+/// a reopened dialog) asks GitHub once.
+pub const LIST_CACHE_S: Duration = Duration::from_secs(60);
 
 /// Where releases come from; a test gives a fake.
 pub trait Releases: Send + Sync + 'static {
@@ -35,11 +43,18 @@ pub trait Releases: Send + Sync + 'static {
     /// The host binary of `tag`, verified (signature, then checksum), as
     /// base64 ready for `SelfUpdateHost`.
     fn host_binary<'a>(&'a self, tag: &'a str) -> BoxFut<'a, Result<String, String>>;
+    /// dashboard-latest: `repo`'s release list, newest first, drafts and
+    /// pre-releases left out, each with whether it carries
+    /// `SHA256SUMS.minisig` (fix-29) — what the "release tag" dropdown is
+    /// built from.
+    fn list<'a>(&'a self, repo: &'a str) -> BoxFut<'a, Result<Vec<ReleaseListItem>, String>>;
 }
 
 /// GitHub over HTTPS.
 pub struct GitHub {
     client: reqwest::Client,
+    /// dashboard-latest: `repo` → (read at, the list), see `LIST_CACHE_S`.
+    list_cache: AsyncMutex<HashMap<String, (Instant, Vec<ReleaseListItem>)>>,
 }
 
 impl Default for GitHub {
@@ -55,7 +70,10 @@ impl GitHub {
             .timeout(Duration::from_secs(300))
             .build()
             .unwrap_or_default();
-        GitHub { client }
+        GitHub {
+            client,
+            list_cache: AsyncMutex::new(HashMap::new()),
+        }
     }
 
     async fn get(&self, url: &str) -> Result<Option<Vec<u8>>, String> {
@@ -115,6 +133,31 @@ impl Releases for GitHub {
                 .await?
                 .map(|b| String::from_utf8_lossy(&b).into_owned());
             verified_b64(tag, &binary, &sums, sig.as_deref())
+        })
+    }
+
+    fn list<'a>(&'a self, repo: &'a str) -> BoxFut<'a, Result<Vec<ReleaseListItem>, String>> {
+        Box::pin(async move {
+            {
+                let cache = self.list_cache.lock().await;
+                if let Some((at, list)) = cache.get(repo) {
+                    if at.elapsed() < LIST_CACHE_S {
+                        return Ok(list.clone());
+                    }
+                }
+            }
+            let url = format!("https://api.github.com/repos/{repo}/releases?per_page=30");
+            let body = self
+                .get(&url)
+                .await?
+                .ok_or_else(|| format!("{repo} has no release"))?;
+            let text = String::from_utf8_lossy(&body).into_owned();
+            let list = list_releases(&text)?;
+            self.list_cache
+                .lock()
+                .await
+                .insert(repo.to_string(), (Instant::now(), list.clone()));
+            Ok(list)
         })
     }
 }

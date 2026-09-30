@@ -187,16 +187,16 @@ homepage_widgets:
 tiles:
   docs.kp-soft.dev:
     name: "Paperless"
-    group: "Papierwerk"
+    group: "Paperwork"
     order: 201
-    description: "Documentarchief"
+    description: "Document archive"
   budget.kp-soft.dev:
     name: "Actual Budget"
-    group: "Papierwerk"
+    group: "Paperwork"
     order: 202
-    description: "Huishoudboekje"
+    description: "Household budget"
   pdf.kp-soft.dev:
     name: "Stirling PDF"
-    group: "Papierwerk"
+    group: "Paperwork"
     order: 203
-    description: "PDF-gereedschap"
+    description: "PDF tools"

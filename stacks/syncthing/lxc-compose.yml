@@ -187,6 +187,6 @@ firewall:
 tiles:
   sync.kp-soft.dev:
     name: "Syncthing"
-    group: "Huis"
+    group: "Household"
     order: 303
-    description: "Obsidian-kluis"
+    description: "File sync between devices"

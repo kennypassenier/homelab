@@ -115,6 +115,8 @@ pub struct EditSpec {
     pub follow: BTreeMap<String, String>,
     pub settings: Vec<EditFieldDef>,
     pub image: EditFieldDef,
+    pub tile_watch: EditFieldDef,
+    pub tile_down: EditFieldDef,
     pub commit: Vec<EditFieldDef>,
     pub raw: Vec<EditFieldDef>,
     pub add_app: Vec<EditFieldDef>,
@@ -671,6 +673,13 @@ pub fn settings_fields(m: &Value, images: &Value) -> Vec<Field> {
             out.push(image_field(key, image.as_str().unwrap_or("")));
         }
     }
+    if let Some(map) = m["tiles"].as_object() {
+        let mut keys: Vec<&String> = map.keys().collect();
+        keys.sort();
+        for key in keys {
+            out.extend(tile_fields(key, &map[key]));
+        }
+    }
     out
 }
 
@@ -685,11 +694,34 @@ pub fn image_field(key: &str, image: &str) -> Field {
     f
 }
 
+/// `tileFields`: one tile's two watch fields (owner remark 2026-09-30).
+pub fn tile_fields(key: &str, tile: &Value) -> Vec<Field> {
+    let slug = regex::Regex::new("[^a-zA-Z0-9]+")
+        .expect("reads")
+        .replace_all(key, "-")
+        .to_string();
+    let words = [("key", key), ("slug", &slug)];
+    let mut watch = es().tile_watch.filled(&words);
+    watch.current = Some(json!(num_text(&tile["watch_every"])));
+    let mut down = es().tile_down.filled(&words);
+    down.current = Some(json!(num_text(&tile["down_after"])));
+    vec![watch, down]
+}
+
+fn num_text(v: &Value) -> String {
+    match v {
+        Value::Null => String::new(),
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
 /// `settingsBody`: only what differs from now.
 pub fn settings_body(fields: &[Field], values: &Values) -> Value {
     let mut out = Map::new();
     out.insert("kind".into(), json!("settings"));
     let mut images = Map::new();
+    let mut tiles = Map::new();
     for f in fields {
         let v = values.get(&f.name);
         if f.kind == FieldKind::Check {
@@ -706,6 +738,14 @@ pub fn settings_body(fields: &[Field], values: &Values) -> Value {
         }
         if let Some(key) = f.name.strip_prefix("image:") {
             images.insert(key.to_string(), json!(t));
+        } else if let Some(key) = f.name.strip_prefix("tile_watch_every:") {
+            if !t.is_empty() {
+                tile_entry(&mut tiles, key).insert("watch_every".into(), js_number(t));
+            }
+        } else if let Some(key) = f.name.strip_prefix("tile_down_after:") {
+            if !t.is_empty() {
+                tile_entry(&mut tiles, key).insert("down_after".into(), js_number(t));
+            }
         } else if !t.is_empty() {
             out.insert(f.name.clone(), js_number(t));
         }
@@ -713,7 +753,57 @@ pub fn settings_body(fields: &[Field], values: &Values) -> Value {
     if !images.is_empty() {
         out.insert("images".into(), Value::Object(images));
     }
+    if !tiles.is_empty() {
+        out.insert("tiles".into(), Value::Object(tiles));
+    }
     Value::Object(out)
+}
+
+/// The tile's map within `tiles`, made fresh the first time it is touched.
+fn tile_entry<'a>(tiles: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String, Value> {
+    tiles
+        .entry(key.to_string())
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .expect("just inserted as an object")
+}
+
+/// `tileProblems`: down after must be at least check every, when both are
+/// typed.
+pub fn tile_problems(values: &Values) -> BTreeMap<String, String> {
+    let mut keys: BTreeSet<String> = BTreeSet::new();
+    for name in values.keys() {
+        if let Some(k) = name.strip_prefix("tile_watch_every:") {
+            keys.insert(k.to_string());
+        } else if let Some(k) = name.strip_prefix("tile_down_after:") {
+            keys.insert(k.to_string());
+        }
+    }
+    let mut out = BTreeMap::new();
+    for key in keys {
+        let w = text_of(values.get(&format!("tile_watch_every:{key}")));
+        let d = text_of(values.get(&format!("tile_down_after:{key}")));
+        let (w, d) = (w.trim(), d.trim());
+        if w.is_empty() || d.is_empty() {
+            continue;
+        }
+        if let (Ok(wn), Ok(dn)) = (w.parse::<i64>(), d.parse::<i64>()) {
+            if dn < wn {
+                out.insert(
+                    format!("tile_down_after:{key}"),
+                    say(
+                        "tile_down_low",
+                        &[
+                            ("key", &key),
+                            ("watch", &wn.to_string()),
+                            ("down", &dn.to_string()),
+                        ],
+                    ),
+                );
+            }
+        }
+    }
+    out
 }
 
 /// `Number(text)` as JSON.
@@ -1419,18 +1509,27 @@ pub fn open(
                     ),
                 ));
             };
-            let list: Vec<String> = target
-                .unwrap_or("")
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect();
+            // Owner decision 2026-09-30: no stacks named opens the batch
+            // dialog from the Overview table's own ticked selection
+            // (`homelab ui select` first), exactly as the page's "Run on
+            // the selected…" button does.
+            let list: Vec<String> = match target {
+                Some(t) => t
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect(),
+                None => st.selected.clone(),
+            };
             if list.is_empty() {
                 return Err(refused(
                     step,
-                    "a batch needs its stacks",
-                    format!("homelab ui open batch {action} <stack>,<stack>"),
+                    "a batch needs its stacks: none were named and the fleet table's selection is empty",
+                    format!(
+                        "homelab ui select <stack>,<stack> then homelab ui open batch {action}, \
+                         or homelab ui open batch {action} <stack>,<stack>"
+                    ),
                 ));
             }
             for s in &list {
@@ -2170,7 +2269,8 @@ pub fn press(
             let fields: Vec<Field> = form.desc.steps[0].fields.clone();
             let body = match k {
                 EditKind::Settings => {
-                    let errors = check_fields(&fields, &form.values);
+                    let mut errors = check_fields(&fields, &form.values);
+                    errors.extend(tile_problems(&form.values));
                     if !errors.is_empty() {
                         return hold(form, "next", errors);
                     }

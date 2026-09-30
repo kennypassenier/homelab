@@ -6,7 +6,14 @@
 
 import { fetchJson } from "./dom.js";
 import { routeError } from "./doctor.js";
-import { addLog, applyProgress, upsertJob } from "./jobs.js";
+import {
+  addLog,
+  applyOutcome,
+  applyProgress,
+  jobsAwaitingOutcome,
+  outcomeSubject,
+  upsertJob,
+} from "./jobs.js";
 import { addNotice } from "./notices.js";
 import { listen } from "./store.js";
 
@@ -154,6 +161,40 @@ export async function loadNotices() {
   tell("notices");
 }
 
+/** arch-self: how long a tab waits between polls of `/data/actions/outcome`
+ * for a job that restarted the dashboard, and how many it tries before it
+ * gives up and shows "unknown". */
+const OUTCOME_POLL_MS = 3000;
+// Steps 13-22 of a dashboard install run after the restart; two minutes
+// covers them with room (measured 2026-09-30: step 12 to the end took 14 s).
+const OUTCOME_TRIES = 40;
+
+/**
+ * Ask the host's history what came of one job that restarted the
+ * dashboard, patch it in, and try again a few times before giving up
+ * (arch-self, `jobs.js#applyOutcome`).
+ * @param {import("./jobs.js").Job} job
+ * @param {number} [tries]
+ */
+async function pollOutcome(job, tries = 0) {
+  const since = job.started_at ?? job.queued_at;
+  const url = `/data/actions/outcome?op=${encodeURIComponent(outcomeSubject(job))}&since=${since}`;
+  const r = await fetchJson(url, "the job's outcome");
+  const out = r.ok ? r.body : { found: false };
+  if (out.found || tries + 1 >= OUTCOME_TRIES) {
+    act.jobs = applyOutcome(act.jobs, job.job, out);
+    tell("jobs", job.job);
+    return;
+  }
+  setTimeout(() => void pollOutcome(job, tries + 1), OUTCOME_POLL_MS);
+}
+
+/** Every held job that restarted the dashboard and is still queued or
+ * running, asked about again now that the live channel is back. */
+function reconcileRestartedJobs() {
+  for (const j of jobsAwaitingOutcome(act.jobs)) void pollOutcome(j);
+}
+
 export async function loadSchedules() {
   const r = await fetchJson("/data/schedules", "the schedules");
   if (!r.ok) return r.error;
@@ -230,7 +271,14 @@ export function startAct() {
     void loadSchedules();
   };
   listen("resync", reload);
-  listen("reopened", reload);
+  // arch-self: a reconnect (never a bare resync) is the one moment a job
+  // restarting the dashboard might have run to its end without this tab
+  // hearing about it; loadJobs first, so it starts from the merged list.
+  listen("reopened", () => {
+    void loadJobs().then(reconcileRestartedJobs);
+    void loadNotices();
+    void loadSchedules();
+  });
   void loadCatalog();
   void loadJobs();
   void loadNotices();

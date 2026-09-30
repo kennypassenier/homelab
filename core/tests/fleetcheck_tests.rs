@@ -76,6 +76,9 @@ fn check(state: &HostState, live: &LiveFacts) -> Vec<homelab_core::ops::fleetche
         NOW,
         homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
         GrowthLimits::default(),
+        None,
+        homelab_core::ops::fleetcheck::PATCH_THRESHOLD_S,
+        homelab_core::ops::fleetcheck::HOST_META_MAX_AGE_S,
     )
 }
 
@@ -1130,6 +1133,9 @@ fn the_full_round_carries_the_restore_drill() {
         NOW,
         homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
         GrowthLimits::default(),
+        None,
+        homelab_core::ops::fleetcheck::PATCH_THRESHOLD_S,
+        homelab_core::ops::fleetcheck::HOST_META_MAX_AGE_S,
     );
     assert!(
         findings.iter().any(|f| f.subject == "restore drill"),
@@ -1282,6 +1288,9 @@ mod seeder_verdict {
             NOW,
             homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
             GrowthLimits::default(),
+            None,
+            homelab_core::ops::fleetcheck::PATCH_THRESHOLD_S,
+            homelab_core::ops::fleetcheck::HOST_META_MAX_AGE_S,
         );
         assert!(
             findings.iter().any(|f| f.subject == "uptime kuma"),

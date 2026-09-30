@@ -1,5 +1,8 @@
-// Activity (feat-ops-1, feat-ops-7): the incident bundles and what the
-// host did in the last fourteen days.
+// Activity (Kenny 2026-09-30, decision "Activity and Timeline → Activity"):
+// the incidents and the last fourteen days, as a list (feat-ops-1,
+// feat-ops-7) or on the timeline (feat-ops-7's SVG), a List/Timeline toggle
+// choosing between them. `?view=timeline` (set by the redirect from the old
+// /app/timeline, which keeps its own `?days=`) opens on the timeline.
 
 import { historyRows, incidentRows } from "../activity.js";
 import { showButton } from "../incident.js";
@@ -14,6 +17,8 @@ import {
 } from "../dom.js";
 import { formatTime, humanDuration } from "../format.js";
 import { sortKeys } from "../sortkeys.js";
+import { setParams } from "../urlstate.js";
+import { mount as mountTimeline } from "./timeline.js";
 import {
   attachDataTables,
   compare,
@@ -21,12 +26,17 @@ import {
 } from "/static/kp/js/datatable.js";
 
 const DAYS = 14;
+const VIEWS = /** @type {const} */ ([
+  { view: "list", label: "List" },
+  { view: "timeline", label: "Timeline" },
+]);
 
 /**
+ * The List view: incidents and history, as two tables.
  * @param {HTMLElement} root
  * @returns {() => void}
  */
-export function mount(root) {
+function mountList(root) {
   const keys = sortKeys();
   /** @param {number | null} unix */
   const time = (unix) =>
@@ -67,16 +77,6 @@ export function mount(root) {
   const incAgo = agoEl("read");
   const histAgo = agoEl("read");
   root.replaceChildren(
-    h(
-      "div",
-      { class: "title-row" },
-      h("h1", null, "Activity"),
-      h(
-        "a",
-        { href: "/app/timeline", class: "kp-button" },
-        "See it on the timeline",
-      ),
-    ),
     h("h2", null, "Incidents"),
     inc.wrap,
     h("p", null, incAgo),
@@ -169,4 +169,50 @@ export function mount(root) {
     unbindH();
     detach();
   };
+}
+
+/**
+ * @param {HTMLElement} root
+ * @param {{navigate: (href: string) => void}} ctx
+ * @returns {() => void}
+ */
+export function mount(root, ctx) {
+  const params = new URLSearchParams(location.search);
+  const view = VIEWS.some((v) => v.view === params.get("view"))
+    ? /** @type {string} */ (params.get("view"))
+    : "list";
+
+  const toggle = h(
+    "div",
+    { class: "chart-ranges", role: "group", "aria-label": "View" },
+    ...VIEWS.map((v) => {
+      const b = h(
+        "button",
+        {
+          type: "button",
+          class: `kp-button${v.view === view ? " kp-button--primary" : ""}`,
+          "aria-pressed": v.view === view ? "true" : "false",
+        },
+        v.label,
+      );
+      b.addEventListener("click", () =>
+        ctx.navigate(
+          `/app/activity${setParams(location.search, { view: v.view === "list" ? null : v.view })}`,
+        ),
+      );
+      return b;
+    }),
+  );
+
+  const body = h("div", { class: "activity-body" });
+  root.replaceChildren(
+    h("div", { class: "title-row" }, h("h1", null, "Activity"), toggle),
+    body,
+  );
+
+  if (view === "timeline") {
+    const cleanup = mountTimeline(body, ctx);
+    return cleanup;
+  }
+  return mountList(body);
 }

@@ -28,6 +28,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,
+        tile_watch_source: None,
     }
 }
 
@@ -116,13 +117,17 @@ fn fleet_with(last_host_meta: u64) -> HostState {
 /// Nobody watched it: a host-meta backup that stopped was reported nowhere.
 #[test]
 fn a_stale_or_missing_host_meta_backup_is_a_finding() {
-    let stale = evaluate_host_meta(&fleet_with(NOW - HOST_META_MAX_AGE_S - 3600), NOW);
+    let stale = evaluate_host_meta(
+        &fleet_with(NOW - HOST_META_MAX_AGE_S - 3600),
+        NOW,
+        HOST_META_MAX_AGE_S,
+    );
     assert_eq!(stale.len(), 1, "{:?}", stale);
     assert_eq!(stale[0].severity, Severity::Broken);
     assert_eq!(stale[0].subject, "host-meta");
-    let never = evaluate_host_meta(&fleet_with(0), NOW);
+    let never = evaluate_host_meta(&fleet_with(0), NOW, HOST_META_MAX_AGE_S);
     assert!(never[0].what.contains("never"), "{:?}", never);
-    assert!(evaluate_host_meta(&fleet_with(NOW - 3600), NOW).is_empty());
+    assert!(evaluate_host_meta(&fleet_with(NOW - 3600), NOW, HOST_META_MAX_AGE_S).is_empty());
     // A host that manages nothing yet has nothing of its own worth keeping.
-    assert!(evaluate_host_meta(&HostState::default(), NOW).is_empty());
+    assert!(evaluate_host_meta(&HostState::default(), NOW, HOST_META_MAX_AGE_S).is_empty());
 }

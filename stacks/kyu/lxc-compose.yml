@@ -254,6 +254,6 @@ firewall:
 tiles:
   kyu.kp-soft.dev:
     name: "Kyu"
-    group: "Eigen"
+    group: "Own"
     order: 402
-    description: "Berichtenhub"
+    description: "Message hub"

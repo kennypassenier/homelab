@@ -1,0 +1,79 @@
+// Health (Kenny 2026-09-30, decision "Today, Doctor and Checks → Health"):
+// the three pages as one, each its own block. Today (doctor, the fleet
+// check, the incidents and the manual checks in one verdict) opens first;
+// Doctor's own ~30 s read only starts once its block is opened, so landing
+// on Health never pays for a read nobody asked for. `?block=` (set by the
+// redirect from the old /app/today, /app/doctor and /app/checks) opens
+// that one block instead and scrolls it into view.
+
+import { h } from "../dom.js";
+import { mount as mountChecks } from "./checks.js";
+import { mount as mountDoctor } from "./doctor.js";
+import { mount as mountToday } from "./today.js";
+
+const BLOCKS = /** @type {const} */ ([
+  { id: "today", label: "Today", mount: mountToday, lazy: false },
+  { id: "doctor", label: "Doctor", mount: mountDoctor, lazy: true },
+  { id: "checks", label: "Checks", mount: mountChecks, lazy: false },
+]);
+
+/**
+ * @param {HTMLElement} root
+ * @returns {() => void}
+ */
+export function mount(root) {
+  const params = new URLSearchParams(location.search);
+  const wanted = params.get("block");
+  const block = BLOCKS.some((b) => b.id === wanted) ? wanted : "today";
+
+  /** @type {(() => void)[]} */
+  const cleanups = [];
+  const sections = BLOCKS.map((b) => {
+    const body = h("div", { class: "health-block__body" });
+    const open = b.id === block;
+    const details = /** @type {HTMLDetailsElement} */ (
+      h(
+        "details",
+        {
+          class: "health-block",
+          id: `health-${b.id}`,
+          ...(open ? { open: "" } : {}),
+        },
+        h("summary", null, h("h2", null, b.label)),
+        body,
+      )
+    );
+    return { spec: b, body, details, mounted: false };
+  });
+
+  root.replaceChildren(
+    h("h1", null, "Health"),
+    ...sections.map((s) => s.details),
+  );
+
+  const mountOne = (/** @type {(typeof sections)[number]} */ s) => {
+    if (s.mounted) return;
+    s.mounted = true;
+    cleanups.push(s.spec.mount(s.body));
+  };
+
+  for (const s of sections) {
+    if (s.spec.lazy) {
+      if (s.details.open) mountOne(s);
+      s.details.addEventListener("toggle", () => {
+        if (s.details.open) mountOne(s);
+      });
+    } else {
+      // Today and Checks are a normal fetch, cheap enough to load closed
+      // or open; only Doctor's own run is asked to wait for an open block.
+      mountOne(s);
+    }
+  }
+
+  const wantedSection = sections.find((s) => s.spec.id === block);
+  if (wanted) wantedSection?.details.scrollIntoView({ block: "start" });
+
+  return () => {
+    for (const c of cleanups) c();
+  };
+}

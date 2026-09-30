@@ -572,6 +572,30 @@ pub struct Tile {
     /// config and prints only what is shown. A failure shows as such.
     #[serde(default)]
     pub reading: Option<String>,
+    /// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
+    /// plain address the firewall derivation and the dashboard's minute
+    /// watch both reach this tile at, resolved by the client at deploy time
+    /// (never by hand) — `url` as-is when it already names this container's
+    /// own address, otherwise the backend `url` behind whichever router in
+    /// this stack's own `traefik-routes.yml` answers for `url`'s host
+    /// (`client::routes::backend_for_host`). Absent = neither applied: the
+    /// tile's host is reached through Traefik by a hostname no route file
+    /// here resolves, and it is not watched (the client's spec notes say
+    /// why). Never edited in the stack file — the client fills it in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe: Option<String>,
+    /// Owner decision "default plus per tile" (2026-09-30): how often the
+    /// dashboard's minute watch checks this tile, in seconds; absent = the
+    /// fleet default (`watch_interval_s`, host.toml). Must be at least 10
+    /// when set (checked by the wizard and by the deploy validation, not
+    /// here — this type carries no app knowledge).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watch_every: Option<u64>,
+    /// How long this tile may fail before it counts as down, in seconds;
+    /// absent = the fleet default (`watch_down_after_s`, host.toml). Must
+    /// be at least `watch_every` when both are set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub down_after: Option<u64>,
 }
 
 fn default_tile_order() -> u32 {
@@ -1014,6 +1038,28 @@ fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
                  other says it holds something not worth keeping; one of the two is wrong",
                 mount.host_path
             ));
+        }
+    }
+    // Owner decision "default plus per tile" (2026-09-30): a tile's own
+    // watch timing, when it sets one.
+    for (host, t) in &m.tiles {
+        if let Some(every) = t.watch_every {
+            if every < 10 {
+                problems.push(format!(
+                    "tile '{}' sets watch_every to {} — it must be at least 10 seconds",
+                    host, every
+                ));
+            }
+        }
+        if let Some(down_after) = t.down_after {
+            let every = t.watch_every.unwrap_or(down_after);
+            if down_after < every {
+                problems.push(format!(
+                    "tile '{}' sets down_after to {} which is less than its watch_every ({}) — \
+                     it would count as down before it was even checked again",
+                    host, down_after, every
+                ));
+            }
         }
     }
 }

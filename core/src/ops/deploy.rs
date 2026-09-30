@@ -353,7 +353,16 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         // still before anything changes.
         if let Some(fw) = m.firewall.as_ref().filter(|f| f.enabled) {
             if m.vmid == ctx.safety.gateway_vmid {
-                let p = crate::firewall::gateway_problems(fw);
+                // tile-watch: the derived rule counts too — a gateway tile
+                // that opens port 80 on itself is exactly what
+                // traefik-lan-host-header-bypass forbids, derived or not.
+                let effective = crate::firewall::with_tile_watch(
+                    fw,
+                    &m.network.ip,
+                    &m.tiles,
+                    ctx.tile_watch_source.as_deref().unwrap_or(""),
+                );
+                let p = crate::firewall::gateway_problems(&effective);
                 if !p.is_empty() {
                     return Err(CoreError::Validation(p.join("; ")));
                 }
@@ -748,7 +757,19 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 return Ok(StepOutcome::Unchanged);
             }
             let path = crate::firewall::fw_path(m.vmid);
-            let body = crate::firewall::render(&m.stack_name, fwspec);
+            // tile-watch (owner decision "Afgeleid uit de tegels",
+            // 2026-09-30): a derived inbound rule for the dashboard's own
+            // tile watch, appended before rendering so it is written, held
+            // against pve and shown in every plan/diff the same way a
+            // hand-declared rule is — and gone again the deploy after its
+            // tile is.
+            let effective = crate::firewall::with_tile_watch(
+                fwspec,
+                &m.network.ip,
+                &m.tiles,
+                ctx.tile_watch_source.as_deref().unwrap_or(""),
+            );
+            let body = crate::firewall::render(&m.stack_name, &effective);
             let old = exec.read_file(&path).await.ok();
             let mut changed = false;
             if old.as_deref() == Some(body.as_str()) {
@@ -1206,7 +1227,13 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         if let Some(fwspec) = m.firewall.as_ref().filter(|f| f.enabled) {
             step!(runner, exec, ctx, m, "firewall after create", {
                 let path = crate::firewall::fw_path(m.vmid);
-                let body = crate::firewall::render(&m.stack_name, fwspec);
+                let effective = crate::firewall::with_tile_watch(
+                    fwspec,
+                    &m.network.ip,
+                    &m.tiles,
+                    ctx.tile_watch_source.as_deref().unwrap_or(""),
+                );
+                let body = crate::firewall::render(&m.stack_name, &effective);
                 // Unconditionally: what pmxcfs reports for a vmid it has just
                 // created is not something to compare against.
                 exec.write_file(&path, &body, 0o640).await?;

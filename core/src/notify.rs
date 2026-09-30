@@ -474,6 +474,41 @@ pub fn urgency(e: &Event) -> Urgency {
     }
 }
 
+/// Owner decision 2026-09-30 (item 3): the notifications table's push
+/// column, short — "not sent: not urgent: it succeeded" read every
+/// [`urgency`] reason in full and was far too long for a column. This
+/// collapses the same judgement to a handful of fixed words; the long
+/// reason stays available for the row a reader expands (`HostNotice::routed`,
+/// an alert's own `Urgency::why`), unabridged.
+///
+/// `sent`/`failed` are the two outcomes a push attempt itself can have;
+/// `why` is the routing reason (`Urgency::why`, or the damper's own line)
+/// when neither is true.
+pub fn push_status_short(sent: bool, failed: bool, why: &str) -> &'static str {
+    if sent {
+        return "Pushed";
+    }
+    if failed {
+        return "Push failed";
+    }
+    if why.contains("not pushed again") {
+        return "No push · repeat";
+    }
+    if why.contains("succeeded") {
+        return "No push · succeeded";
+    }
+    if why.contains("stood aside") {
+        return "No push · stood aside";
+    }
+    if why.contains("drift only") {
+        return "No push · drift only";
+    }
+    if why.contains("nothing interrupted") {
+        return "No push · resolved";
+    }
+    "No push · not urgent"
+}
+
 /// What kind of work an operation label names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpKind {

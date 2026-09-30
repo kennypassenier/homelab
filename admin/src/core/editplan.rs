@@ -85,6 +85,13 @@ pub fn effects(
     old: Option<&StackManifest>,
     new: &StackManifest,
     other_files: &[String],
+    // tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
+    // fleet-wide `tile_watch_source` (host.toml), so the same derived rule
+    // the deploy writes shows in the plan the owner reviews before a
+    // commit. None here (the caller has not yet fetched it from the host)
+    // means the plan shows only the hand-declared rules, same as before
+    // this decision — never wrong, only silent about the derived one.
+    tile_watch_source: Option<&str>,
 ) -> Vec<Effect> {
     let mut out = Vec::new();
     let Some(old) = old else {
@@ -178,8 +185,10 @@ pub fn effects(
             None,
         ));
     }
-    if old.firewall != new.firewall {
-        out.extend(firewall_effects(old, new));
+    // tile-watch: a tile arriving or leaving can change the derived rule
+    // even when the hand-declared `firewall:` block did not move.
+    if old.firewall != new.firewall || old.tiles != new.tiles {
+        out.extend(firewall_effects(old, new, tile_watch_source));
     }
     if old.apps != new.apps {
         let added: Vec<&String> = new.apps.iter().filter(|a| !old.apps.contains(a)).collect();
@@ -238,13 +247,24 @@ pub fn effects(
     out
 }
 
-fn firewall_effects(old: &StackManifest, new: &StackManifest) -> Vec<Effect> {
+fn firewall_effects(
+    old: &StackManifest,
+    new: &StackManifest,
+    tile_watch_source: Option<&str>,
+) -> Vec<Effect> {
     let path = firewall::fw_path(new.vmid);
     let render = |m: &StackManifest| {
-        m.firewall
-            .as_ref()
-            .filter(|f| f.enabled)
-            .map(|f| firewall::render(&m.stack_name, f))
+        m.firewall.as_ref().filter(|f| f.enabled).map(|f| {
+            // tile-watch: the same derived rule the deploy writes, so the
+            // owner sees it here rather than being surprised by it on pve.
+            let effective = firewall::with_tile_watch(
+                f,
+                &m.network.ip,
+                &m.tiles,
+                tile_watch_source.unwrap_or(""),
+            );
+            firewall::render(&m.stack_name, &effective)
+        })
     };
     match (render(old), render(new)) {
         (_, None) if new.firewall.is_some() => vec![effect(

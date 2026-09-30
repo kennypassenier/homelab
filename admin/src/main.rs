@@ -181,18 +181,18 @@ const FILES: &[(&str, &[u8])] = &[
         include_bytes!("../web/js/pages/presets.js"),
     ),
     (
-        "js/pages/start.js",
-        include_bytes!("../web/js/pages/start.js"),
+        "js/pages/home.js",
+        include_bytes!("../web/js/pages/home.js"),
     ),
     (
-        "js/pages/charts.js",
-        include_bytes!("../web/js/pages/charts.js"),
+        "js/pages/health.js",
+        include_bytes!("../web/js/pages/health.js"),
+    ),
+    (
+        "js/pages/metrics.js",
+        include_bytes!("../web/js/pages/metrics.js"),
     ),
     ("js/charts.js", include_bytes!("../web/js/charts.js")),
-    (
-        "js/pages/traffic.js",
-        include_bytes!("../web/js/pages/traffic.js"),
-    ),
     ("css/app.css", include_bytes!("../web/css/app.css")),
 ];
 

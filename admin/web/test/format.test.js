@@ -1,7 +1,7 @@
 // ui-units: durations and moments in human units, in the viewer's locale.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatTime, humanDuration } from "../js/format.js";
+import { formatDateTime, formatTime, humanDuration } from "../js/format.js";
 import { sortKeys } from "../js/sortkeys.js";
 
 test("durations step from seconds to minutes, hours and days", () => {
@@ -28,6 +28,17 @@ test("a moment reads in the viewer's locale, never as ISO", () => {
   assert.doesNotMatch(en, /T\d\d:/);
   assert.equal(formatTime(null), "—");
   assert.equal(formatTime(0), "—");
+});
+
+test("the notification centre's date is a fixed dd/mm/yyyy HH:MM, not the locale", () => {
+  const at = 1790000000; // 2026-09-21 14:13:20 UTC
+  assert.equal(formatDateTime(at, { timeZone: "UTC" }), "21/09/2026 14:13");
+  assert.equal(
+    formatDateTime(at, { timeZone: "Europe/Brussels" }),
+    "21/09/2026 16:13",
+  );
+  assert.equal(formatDateTime(null), "—");
+  assert.equal(formatDateTime(0), "—");
 });
 
 test("sort keys compare the number behind a human text", () => {

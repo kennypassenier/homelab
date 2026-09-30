@@ -360,6 +360,60 @@
       "errors": {
         "value": null
       }
+    },
+    {
+      "check": "settings",
+      "manifest": {
+        "vmid": 150,
+        "hostname": "150-app-x",
+        "ip": "10.10.10.50/24",
+        "resources": {
+          "cores": 1,
+          "memory_mb": 512,
+          "swap_mb": 0,
+          "disk_gb": 8
+        },
+        "boot": {
+          "onboot": true,
+          "order": null
+        },
+        "protection": true,
+        "apps": [],
+        "natives": [],
+        "firewall": null,
+        "tiles": {
+          "x.kp-soft.dev": {
+            "name": "X",
+            "group": "Apps",
+            "watch_every": 60,
+            "down_after": 300
+          }
+        }
+      },
+      "values": {
+        "cores": "1",
+        "memory_mb": "512",
+        "swap_mb": "0",
+        "disk_gb": "8",
+        "onboot": true,
+        "order": "",
+        "protection": true,
+        "tile_watch_every:x.kp-soft.dev": "5",
+        "tile_down_after:x.kp-soft.dev": "3600"
+      },
+      "errors": {
+        "tile_watch_every:x.kp-soft.dev": "Check every (seconds) · x.kp-soft.dev must be a whole number from 10 to 86400."
+      }
+    },
+    {
+      "check": "tile",
+      "values": {
+        "tile_watch_every:x.kp-soft.dev": "120",
+        "tile_down_after:x.kp-soft.dev": "60"
+      },
+      "errors": {
+        "tile_down_after:x.kp-soft.dev": "x.kp-soft.dev: down after (60 s) must be at least check every (120 s)."
+      }
     }
   ]
 }

@@ -100,7 +100,7 @@ async fn fix_83_the_nightly_records_the_digest_each_manual_container_runs() {
             },
         )]),
     );
-    let (facts, notes) = gather(&exec, &state, &[], NOW).await;
+    let (facts, notes) = gather(&exec, &state, &[], NOW, UPSTREAM_MAX_AGE_S).await;
     apply(&mut state, facts);
 
     let gw = &state.running_images["gateway"];
@@ -166,7 +166,7 @@ async fn fix_83_github_is_asked_once_a_night_and_never_waited_on_twice() {
             error: None,
         },
     );
-    let (facts, _) = gather(&exec, &state, &[], NOW).await;
+    let (facts, _) = gather(&exec, &state, &[], NOW, UPSTREAM_MAX_AGE_S).await;
 
     assert!(
         exec.calls_containing("repos/traefik/traefik").is_empty(),
@@ -302,6 +302,9 @@ fn fix_83_a_pinned_app_behind_upstream_is_a_noted_finding_and_nothing_else() {
         NOW,
         homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
         GrowthLimits::default(),
+        None,
+        homelab_core::ops::fleetcheck::PATCH_THRESHOLD_S,
+        homelab_core::ops::fleetcheck::HOST_META_MAX_AGE_S,
     );
     assert!(all.iter().any(|x| x.subject.contains("traefik")));
     let only_pins: Vec<_> = all

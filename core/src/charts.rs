@@ -47,9 +47,14 @@ pub fn stack_panels(stack: &str) -> Vec<Panel> {
     let s = stack.replace('"', "");
     vec![
         p(
+            // Kenny, 2026-09-30 ("219m" read like a Kubernetes label nobody
+            // in this house speaks): node_exporter inside the container only
+            // ever sees the cores Proxmox gave it, so averaging over them
+            // (rather than summing) is already a percentage of the stack's
+            // own cores, with no extra lookup of how many that is.
             "CPU (whole container)",
-            format!("sum(rate(node_cpu_seconds_total{{stack=\"{s}\",mode!=\"idle\"}}[5m]))"),
-            Unit::Cores,
+            format!("100 * avg(rate(node_cpu_seconds_total{{stack=\"{s}\",mode!=\"idle\"}}[5m]))"),
+            Unit::Percent,
             None,
         ),
         p(
@@ -70,8 +75,11 @@ pub fn stack_panels(stack: &str) -> Vec<Panel> {
         ),
         p(
             "CPU per app",
-            format!("sum by (name) (rate(container_cpu_usage_seconds_total{{stack=\"{s}\",name!=\"\"}}[5m]))"),
-            Unit::Cores,
+            // Percent of the container's own cores: node_exporter inside an
+            // LXC sees only the cores Proxmox gave it (measured 2026-09-30:
+            // CT 120 counts 1, CT 106 counts 6).
+            format!("100 * sum by (name) (rate(container_cpu_usage_seconds_total{{stack=\"{s}\",name!=\"\"}}[5m])) / scalar(count(node_cpu_seconds_total{{stack=\"{s}\",mode=\"idle\"}}))"),
+            Unit::Percent,
             Some("name"),
         ),
         p(

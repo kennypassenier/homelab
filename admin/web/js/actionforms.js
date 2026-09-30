@@ -35,7 +35,7 @@ import SPEC from "./formspec.json" with { type: "json" };
  * @typedef {{name: ArgName, id: string, kind: "check" | "text" | "choice" | "typed",
  *   label: string, help: string, required: boolean, pattern?: string,
  *   placeholder?: string,
- *   source?: "apps" | "units" | "commits" | "checks" | "templates",
+ *   source?: "apps" | "units" | "commits" | "checks" | "templates" | "releases",
  *   empty?: string, danger?: boolean, when?: "guard", expect?: string,
  *   choices?: {value: string, label: string}[],
  *   show_when?: ShowWhen, change_when?: ChangeWhen}} Field
@@ -236,7 +236,9 @@ export const formFields = (form) => form.steps.flatMap((s) => s.fields);
 export function initialValues(form, preset = {}) {
   /** @type {Values} */
   const v = {};
-  for (const f of formFields(form)) v[f.name] = f.kind === "check" ? false : "";
+  for (const f of formFields(form))
+    v[f.name] =
+      f.kind === "check" ? false : f.source === "releases" ? "latest" : "";
   for (const [k, x] of Object.entries(preset)) if (k in v) v[k] = x;
   return v;
 }
@@ -335,10 +337,15 @@ export function checkValues(form, values, step) {
  * @param {Field} field
  * @param {{apps?: string[], units?: string[],
  *   commits?: {commit: string, subject: string}[],
- *   checks?: {id: string, label: string}[], templates?: string[]}} sources
- * @returns {{value: string, label: string}[]}
+ *   checks?: {id: string, label: string}[], templates?: string[],
+ *   releases?: {value: string, label: string, disabled: boolean}[]}} sources
+ * @returns {{value: string, label: string, disabled?: boolean}[]}
  */
 export function fieldChoices(field, sources) {
+  // dashboard-latest: the "release tag" dropdown is built server-side
+  // ("latest (now vX.Y.Z)" first, unsigned releases disabled) — no
+  // placeholder row, it is never empty while the repository has a release.
+  if (field.source === "releases") return sources.releases ?? [];
   /** @type {{value: string, label: string}[]} */
   const out = [];
   if (!field.required) out.push({ value: "", label: field.empty ?? "None" });

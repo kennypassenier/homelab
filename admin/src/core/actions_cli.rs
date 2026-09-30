@@ -238,6 +238,10 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
             push(&vmid.to_string())?;
             push(command)?;
         }
+        RestartHost => {
+            push("host")?;
+            push("restart")?;
+        }
         // No verb sends these: binaries go with deploy/install-native/
         // release-update, which fetch them themselves; the rest are reads
         // and replies only the TUI or the dashboard use.

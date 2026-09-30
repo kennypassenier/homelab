@@ -366,6 +366,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,
+        tile_watch_source: None,
     }
 }
 
@@ -718,11 +719,13 @@ fn the_fleet_check_reports_a_firewall_file_that_differs_from_its_declaration() {
 
     let st = state_with("kp-soft", 116, Some(decl.clone()));
     // Equal, flag on: nothing to say.
-    assert!(evaluate_firewalls(&st, &[fact(Some(&rendered))], &[boot(116, NET0_ON)]).is_empty());
+    assert!(
+        evaluate_firewalls(&st, &[fact(Some(&rendered))], &[boot(116, NET0_ON)], None).is_empty()
+    );
 
     // A hand edit on pve.
     let edited = rendered.replace("-dport 22", "-dport 2222");
-    let f = evaluate_firewalls(&st, &[fact(Some(&edited))], &[boot(116, NET0_ON)]);
+    let f = evaluate_firewalls(&st, &[fact(Some(&edited))], &[boot(116, NET0_ON)], None);
     assert_eq!(f.len(), 1, "{:?}", f);
     assert_eq!(f[0].severity, Severity::Drift);
     assert!(
@@ -732,14 +735,14 @@ fn the_fleet_check_reports_a_firewall_file_that_differs_from_its_declaration() {
     );
 
     // Declared but absent, and a NIC that applies nothing.
-    let f = evaluate_firewalls(&st, &[fact(None)], &[boot(116, NET0_OFF)]);
+    let f = evaluate_firewalls(&st, &[fact(None)], &[boot(116, NET0_OFF)], None);
     assert_eq!(f.len(), 2, "{:?}", f);
     assert!(f.iter().any(|x| x.what.contains("absent")));
     assert!(f.iter().any(|x| x.what.contains("firewall=0")));
 
     // A file the repository does not declare.
     let bare = state_with("kp-soft", 116, None);
-    let f = evaluate_firewalls(&bare, &[fact(Some(&rendered))], &[]);
+    let f = evaluate_firewalls(&bare, &[fact(Some(&rendered))], &[], None);
     assert_eq!(f.len(), 1, "{:?}", f);
     assert_eq!(f[0].severity, Severity::Drift);
     assert!(f[0].what.contains("does not enable"), "{:?}", f[0]);
@@ -748,7 +751,7 @@ fn the_fleet_check_reports_a_firewall_file_that_differs_from_its_declaration() {
     let mut off = decl.clone();
     off.enabled = false;
     let st = state_with("kp-soft", 116, Some(off));
-    let f = evaluate_firewalls(&st, &[fact(None)], &[boot(116, NET0_OFF)]);
+    let f = evaluate_firewalls(&st, &[fact(None)], &[boot(116, NET0_OFF)], None);
     assert_eq!(f.len(), 1, "{:?}", f);
     assert_eq!(f[0].severity, Severity::Noted);
     assert!(f[0].what.contains("kp-soft"), "{:?}", f[0]);
@@ -800,4 +803,131 @@ async fn the_facts_read_every_recorded_stacks_firewall_file() {
         got,
         vec![(109, None), (116, Some("[OPTIONS]\nenable: 1\n".into()))]
     );
+}
+
+// ── tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30) ──────
+//
+// The dashboard's once-a-minute tile watch needs an inbound rule per stack,
+// derived from `tiles:` rather than hand-typed, so a tile that goes takes
+// its rule with it at the next deploy. The derivation reads each tile's
+// `probe` — the plain backend address the client already resolved at
+// deploy time (an explicit own-IP url as-is, or the address a route in the
+// stack's own traefik-routes.yml forwards its hostname to; see
+// client/src/routes.rs backend_for_host and client/src/spec.rs) — never a
+// display `url`, because almost every tile's `url` is a Traefik hostname
+// that resolves to nothing on its own (measured against the live fleet:
+// 25 of 26 declared tiles).
+
+fn tile(probe: Option<&str>) -> Tile {
+    Tile {
+        name: "Test".into(),
+        group: "Group".into(),
+        order: 100,
+        description: None,
+        url: None,
+        reading: None,
+        probe: probe.map(str::to_string),
+        watch_every: None,
+        down_after: None,
+    }
+}
+
+#[test]
+fn tile_watch_derives_a_rule_from_a_tile_whose_probe_is_the_container_s_own_address() {
+    let mut tiles = std::collections::BTreeMap::new();
+    tiles.insert(
+        "app.kp-soft.dev".into(),
+        tile(Some("http://10.10.10.116:8080/")),
+    );
+    let rules = firewall::derive_tile_watch_rules("10.10.10.116", &tiles, "10.10.10.20");
+    assert_eq!(rules.len(), 1, "{:?}", rules);
+    assert_eq!(rules[0].dir, FwDir::In);
+    assert_eq!(rules[0].action, FwAction::Accept);
+    assert_eq!(rules[0].source.as_deref(), Some("10.10.10.20"));
+    assert_eq!(rules[0].proto, Some(FwProto::Tcp));
+    assert_eq!(rules[0].dport.as_deref(), Some("8080"));
+    assert_eq!(
+        rules[0].note.as_deref(),
+        Some("tile watch (derived from tiles)")
+    );
+}
+
+/// The manifest's own `network.ip` is CIDR (`10.10.10.116/24`); the
+/// derivation must strip it before comparing against a probe's bare host,
+/// or every tile on the container's own address would be (silently) missed
+/// — exactly the bug this test guards against.
+#[test]
+fn tile_watch_strips_the_cidr_suffix_of_own_ip() {
+    let mut tiles = std::collections::BTreeMap::new();
+    tiles.insert("a".into(), tile(Some("http://10.10.10.116:8080/")));
+    let rules = firewall::derive_tile_watch_rules("10.10.10.116/24", &tiles, "10.10.10.20");
+    assert_eq!(rules.len(), 1, "{:?}", rules);
+    assert_eq!(rules[0].dport.as_deref(), Some("8080"));
+}
+
+#[test]
+fn tile_watch_defaults_the_port_by_the_probe_s_scheme() {
+    let mut tiles = std::collections::BTreeMap::new();
+    tiles.insert("a".into(), tile(Some("https://10.10.10.117/")));
+    let rules = firewall::derive_tile_watch_rules("10.10.10.117", &tiles, "10.10.10.20");
+    assert_eq!(rules.len(), 1, "{:?}", rules);
+    assert_eq!(rules[0].dport.as_deref(), Some("443"));
+}
+
+/// No `probe` at all: the client found no own-IP url and no route in the
+/// stack's own file resolved the tile's hostname — the tile is simply not
+/// counted, not treated as an error.
+#[test]
+fn tile_watch_skips_a_tile_with_no_probe() {
+    let mut tiles = std::collections::BTreeMap::new();
+    tiles.insert("jellyfin.kp-soft.dev".into(), tile(None));
+    let rules = firewall::derive_tile_watch_rules("10.10.10.107", &tiles, "10.10.10.20");
+    assert!(rules.is_empty(), "{:?}", rules);
+}
+
+/// A probe that resolved to some OTHER container's address is not this
+/// firewall's business either.
+#[test]
+fn tile_watch_skips_a_probe_on_another_container() {
+    let mut tiles = std::collections::BTreeMap::new();
+    tiles.insert("a".into(), tile(Some("http://10.10.10.5:8080/")));
+    let rules = firewall::derive_tile_watch_rules("10.10.10.107", &tiles, "10.10.10.20");
+    assert!(rules.is_empty(), "{:?}", rules);
+}
+
+#[test]
+fn tile_watch_merges_several_tiles_into_one_rule_with_every_port() {
+    let mut tiles = std::collections::BTreeMap::new();
+    tiles.insert("a".into(), tile(Some("http://10.10.10.107:8080/")));
+    tiles.insert("b".into(), tile(Some("http://10.10.10.107:9090/")));
+    // Same port twice: still one entry.
+    tiles.insert("c".into(), tile(Some("http://10.10.10.107:8080/admin")));
+    let rules = firewall::derive_tile_watch_rules("10.10.10.107", &tiles, "10.10.10.20");
+    assert_eq!(rules.len(), 1, "{:?}", rules);
+    assert_eq!(rules[0].dport.as_deref(), Some("8080,9090"));
+}
+
+#[test]
+fn tile_watch_off_when_the_source_is_empty() {
+    let mut tiles = std::collections::BTreeMap::new();
+    tiles.insert("a".into(), tile(Some("http://10.10.10.107:8080/")));
+    assert!(firewall::derive_tile_watch_rules("10.10.10.107", &tiles, "").is_empty());
+    assert!(firewall::derive_tile_watch_rules("10.10.10.107", &tiles, "  ").is_empty());
+}
+
+#[test]
+fn tile_watch_rule_is_appended_by_with_tile_watch_and_rendered() {
+    let mut tiles = std::collections::BTreeMap::new();
+    tiles.insert("a".into(), tile(Some("http://10.10.10.116:8080/")));
+    let base = fw(KP_SOFT_116);
+    let n = base.rules.len();
+    let effective = firewall::with_tile_watch(&base, "10.10.10.116", &tiles, "10.10.10.20");
+    assert_eq!(effective.rules.len(), n + 1);
+    let rendered = render("kp-soft", &effective);
+    assert!(rendered.contains("-source 10.10.10.20"));
+    assert!(rendered.contains("tile watch (derived from tiles)"));
+
+    // Empty source: unchanged from the plain render.
+    let unchanged = firewall::with_tile_watch(&base, "10.10.10.116", &tiles, "");
+    assert_eq!(render("kp-soft", &unchanged), render("kp-soft", &base));
 }

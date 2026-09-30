@@ -167,6 +167,7 @@ pub async fn gather(
     state: &HostState,
     no_touch: &[u16],
     now: u64,
+    max_age_s: u64,
 ) -> (PinFacts, Vec<String>) {
     let mut facts = PinFacts::default();
     let mut notes = Vec::new();
@@ -205,7 +206,7 @@ pub async fn gather(
         let fresh = state
             .upstream_releases
             .get(&up)
-            .is_some_and(|r| now.saturating_sub(r.checked_at) < UPSTREAM_MAX_AGE_S);
+            .is_some_and(|r| now.saturating_sub(r.checked_at) < max_age_s);
         if fresh {
             continue;
         }

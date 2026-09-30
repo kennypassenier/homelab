@@ -1,10 +1,116 @@
 // Pure layout for the charts (replace-grafana, 2026-09-30): series in,
 // SVG path data out. No chart library (tech-charts): the page draws the SVG,
-// coloured with kp-themes tokens.
+// coloured with kp-themes tokens. `panelEl` (moved here from pages/charts.js
+// 2026-09-30, feat-metrics-1) is the one panel both tabs of Metrics draw.
+
+import { h } from "./dom.js";
+import { formatTime } from "./format.js";
 
 export const W = 560;
 export const H = 180;
 export const PAD = { left: 56, right: 10, top: 10, bottom: 22 };
+const NS = "http://www.w3.org/2000/svg";
+
+/**
+ * @param {string} tag
+ * @param {Record<string, string>} attrs
+ * @param {(Node | string)[]} kids
+ */
+function svg(tag, attrs, ...kids) {
+  const el = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  for (const k of kids) el.append(k);
+  return el;
+}
+
+/**
+ * One panel: title, the chart, and each series' latest value.
+ * @param {any} p `{panel, series, error?}` from /data/charts or /data/traffic
+ * @param {number} from
+ * @param {number} to
+ */
+export function panelEl(p, from, to) {
+  const unit = p.panel.unit;
+  const box = h(
+    "figure",
+    { class: "chart" },
+    h("figcaption", null, p.panel.title),
+  );
+  if (p.error) {
+    box.append(h("p", { class: "chart__error" }, p.error));
+    return box;
+  }
+  if (
+    !p.series.length ||
+    p.series.every((/** @type {any} */ s) => !s.points.length)
+  ) {
+    box.append(h("p", { class: "chart__empty" }, "No data in this window."));
+    return box;
+  }
+  const L = layout(p.series, from, to, unit);
+  const plot = svg("svg", {
+    viewBox: `0 0 ${W} ${H}`,
+    class: "chart__svg",
+    role: "img",
+    "aria-label": p.panel.title,
+  });
+  for (const t of L.yTicks) {
+    plot.append(
+      svg("line", {
+        x1: String(L.x0),
+        x2: String(L.x1),
+        y1: String(t.y),
+        y2: String(t.y),
+        class: "chart__grid",
+      }),
+      svg(
+        "text",
+        {
+          x: String(L.x0 - 6),
+          y: String(t.y + 4),
+          class: "chart__tick",
+          "text-anchor": "end",
+        },
+        t.label,
+      ),
+    );
+  }
+  plot.append(
+    svg(
+      "text",
+      { x: String(L.x0), y: String(H - 4), class: "chart__tick" },
+      formatTime(from),
+    ),
+    svg(
+      "text",
+      {
+        x: String(L.x1),
+        y: String(H - 4),
+        class: "chart__tick",
+        "text-anchor": "end",
+      },
+      formatTime(to),
+    ),
+  );
+  L.paths.forEach((s, i) =>
+    plot.append(
+      svg("path", { d: s.d, class: `chart__line chart__line--${i % 6}` }),
+    ),
+  );
+  box.append(plot);
+  const legend = h("ul", { class: "chart__legend" });
+  L.paths.forEach((s, i) =>
+    legend.append(
+      h(
+        "li",
+        { class: `chart__key chart__key--${i % 6}` },
+        `${s.label || "now"}: ${s.last == null ? "—" : formatValue(s.last, unit)}`,
+      ),
+    ),
+  );
+  box.append(legend);
+  return box;
+}
 
 /**
  * @typedef {{label: string, points: [number, number][]}} Series

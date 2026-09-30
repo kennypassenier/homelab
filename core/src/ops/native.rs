@@ -1237,6 +1237,50 @@ pub fn newest_signed_release(json: &str, asset: &str) -> Result<ReleaseRefs, Str
         })
 }
 
+/// dashboard-latest: one release of GitHub's release LIST, reduced to what
+/// a "release tag" dropdown needs — the tag, and whether it carries
+/// `SHA256SUMS.minisig` (fix-29: a release without it is listed but not
+/// selectable, never silently skipped).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ReleaseListItem {
+    pub tag: String,
+    pub signed: bool,
+}
+
+/// GitHub's `releases` (list) answer, reduced to the tag and signed state
+/// of every published release, in the order GitHub gives them (newest
+/// first); drafts and pre-releases are left out, the same as
+/// [`newest_signed_release`].
+pub fn list_releases(json: &str) -> Result<Vec<ReleaseListItem>, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("release list is not JSON: {}", e))?;
+    let Some(list) = v.as_array() else {
+        let msg = v
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("not a list of releases");
+        return Err(format!("GitHub answered: {}", msg));
+    };
+    let flag = |r: &serde_json::Value, k: &str| r.get(k).and_then(|b| b.as_bool()) == Some(true);
+    Ok(list
+        .iter()
+        .filter(|r| !flag(r, "draft") && !flag(r, "prerelease"))
+        .filter_map(|r| {
+            let tag = r.get("tag_name")?.as_str()?.to_string();
+            let signed = r
+                .get("assets")
+                .and_then(|a| a.as_array())
+                .is_some_and(|assets| {
+                    assets.iter().any(|a| {
+                        a.get("name").and_then(|n| n.as_str())
+                            == Some(crate::release_sig::SIG_ASSET)
+                    })
+                });
+            Some(ReleaseListItem { tag, signed })
+        })
+        .collect())
+}
+
 /// The checksum a SHA256SUMS file lists for `filename`, if any.
 pub fn listed_sha(sums: &str, filename: &str) -> Option<String> {
     sums.lines().find_map(|l| {

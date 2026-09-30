@@ -339,27 +339,27 @@ home_address_whitelist:
 tiles:
   ha.kp-soft.dev:
     name: "Home Assistant"
-    group: "Huis"
+    group: "Household"
     order: 301
-    description: "Domotica"
+    description: "Home automation"
   prox.kp-soft.dev:
     name: "Proxmox"
-    group: "Infrastructuur"
+    group: "Infrastructure"
     order: 501
     description: "Hypervisor"
   traefik.kp-soft.dev:
     name: "Traefik"
-    group: "Infrastructuur"
+    group: "Infrastructure"
     order: 503
-    description: "Router en certificaten"
+    description: "Router and certificates"
   opn.kp-soft.dev:
     name: "OPNsense"
-    group: "Infrastructuur"
+    group: "Infrastructure"
     order: 504
-    description: "Firewall en netwerk"
+    description: "Firewall and network"
   trmnl.kp-soft.dev:
     name: "Terminus"
-    group: "Huis"
+    group: "Household"
     order: 305
     description: "E-ink dashboard"
 

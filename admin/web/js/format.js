@@ -60,6 +60,31 @@ export function formatTime(unix, opts = {}) {
 }
 
 /**
+ * A unix moment as dd/mm/yyyy HH:MM (Kenny, 2026-09-30: the notification
+ * centre's own format, not the viewer's locale — a fixed field width a
+ * table column can align on).
+ * @param {number | null | undefined} unix seconds
+ * @param {TimeOptions} [opts]
+ * @returns {string}
+ */
+export function formatDateTime(unix, opts = {}) {
+  if (unix == null || !Number.isFinite(unix) || unix <= 0) return "—";
+  const d = new Date(unix * 1000);
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: opts.timeZone,
+  }).formatToParts(d);
+  const get = (/** @type {string} */ t) =>
+    parts.find((p) => p.type === t)?.value ?? "";
+  return `${get("day")}/${get("month")}/${get("year")} ${get("hour")}:${get("minute")}`;
+}
+
+/**
  * "measured 12 s ago", "read 2 min 5 s ago" (feat-overview-4): how old a
  * reading is, in the units `humanDuration` uses. A moment in the future (a
  * clock ahead of this one) reads as 0 s.

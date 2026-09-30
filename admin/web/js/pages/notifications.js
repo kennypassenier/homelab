@@ -16,7 +16,7 @@ import {
   tableBlock,
   td,
 } from "../dom.js";
-import { formatTime } from "../format.js";
+import { formatDateTime } from "../format.js";
 import {
   KIND_ORDER,
   LEVEL_ORDER,
@@ -237,7 +237,65 @@ export function mount(root) {
     stacks.wrap,
   );
   const detachSwitches = attachSwitches(root);
-  const detach = attachDataTables(root, { compare: keys.compare(compare) });
+  // feat-ops-9 (Kenny, 2026-09-30): the "What" cell shows only the title;
+  // the row expands to what/consequence/remedy/link/push reason, keyed by
+  // the notice id this render painted last (noticeById).
+  notices.wrap.setAttribute("data-kp-expandable", "");
+  /** @type {Map<number, ReturnType<typeof noticeRows>[number]>} */
+  const noticeById = new Map();
+  const detach = attachDataTables(root, {
+    compare: keys.compare(compare),
+    detail: (row) => {
+      const id = Number(row.dataset.notice);
+      const r = noticeById.get(id);
+      if (!r) return null;
+      return h(
+        "div",
+        { class: "notice-detail" },
+        ...(r.body ? [h("p", null, r.body)] : []),
+        ...(r.since != null
+          ? [h("p", { class: "measured" }, `Since ${formatDateTime(r.since)}`)]
+          : []),
+        ...(r.consequence
+          ? [h("p", null, h("em", null, "Consequence: "), r.consequence)]
+          : []),
+        ...(r.remedy
+          ? [h("p", null, h("em", null, "What to do: "), r.remedy)]
+          : []),
+        ...(r.link || r.job || r.fixes.length
+          ? [
+              h(
+                "div",
+                { class: "notice-actions" },
+                ...r.fixes.map((f, i) =>
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      class: "kp-button kp-button--sm",
+                      "data-fix": `${r.id}:${i}`,
+                    },
+                    fixLabel(f),
+                  ),
+                ),
+                ...(r.link ? [h("a", { href: r.link }, "Open the page")] : []),
+                ...(r.job
+                  ? [
+                      " ",
+                      h(
+                        "a",
+                        { href: `/app/jobs?job=${r.job}` },
+                        `job ${r.job}`,
+                      ),
+                    ]
+                  : []),
+              ),
+            ]
+          : []),
+        h("p", { class: "measured" }, `Push: ${r.push}`),
+      );
+    },
+  });
   const nTable = dataTable(notices.wrap);
   const sTable = dataTable(stacks.wrap);
   const unbindN = bindTableUrl(nTable, "notices");
@@ -376,6 +434,8 @@ export function mount(root) {
     const noticesChanged = sig !== noticesSig;
     if (noticesChanged) {
       noticesSig = sig;
+      noticeById.clear();
+      for (const r of rows) noticeById.set(r.id, r);
       notices.tbody.replaceChildren(
         ...rows.map((r) =>
           h(
@@ -385,77 +445,11 @@ export function mount(root) {
               "data-kp-row-key": String(r.id),
               class: r.read === "unread" ? "unread" : "",
             },
-            td(keys.note("time", formatTime(r.at), r.at)),
+            td(keys.note("time", formatDateTime(r.at), r.at), "num"),
             badgeCell(r.level),
             badgeCell(r.kind),
             td(r.stack),
-            h(
-              "td",
-              null,
-              h("strong", null, r.title),
-              ...(r.body
-                ? [h("br"), h("span", { class: "notice-what" }, r.body)]
-                : []),
-              ...(r.since != null
-                ? [
-                    h("br"),
-                    h(
-                      "span",
-                      { class: "measured" },
-                      `Since ${formatTime(r.since)}`,
-                    ),
-                  ]
-                : []),
-              ...(r.consequence
-                ? [
-                    h("br"),
-                    h(
-                      "span",
-                      null,
-                      h("em", null, "Consequence: "),
-                      r.consequence,
-                    ),
-                  ]
-                : []),
-              ...(r.remedy
-                ? [
-                    h("br"),
-                    h("span", null, h("em", null, "What to do: "), r.remedy),
-                  ]
-                : []),
-              ...(r.link || r.job || r.fixes.length
-                ? [
-                    h(
-                      "div",
-                      { class: "notice-actions" },
-                      ...r.fixes.map((f, i) =>
-                        h(
-                          "button",
-                          {
-                            type: "button",
-                            class: "kp-button kp-button--sm",
-                            "data-fix": `${r.id}:${i}`,
-                          },
-                          fixLabel(f),
-                        ),
-                      ),
-                      ...(r.link
-                        ? [h("a", { href: r.link }, "Open the page")]
-                        : []),
-                      ...(r.job
-                        ? [
-                            " ",
-                            h(
-                              "a",
-                              { href: `/app/jobs?job=${r.job}` },
-                              `job ${r.job}`,
-                            ),
-                          ]
-                        : []),
-                    ),
-                  ]
-                : []),
-            ),
+            td(r.title, "notify-title"),
             td(r.push),
             r.read === "unread"
               ? h(

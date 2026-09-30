@@ -13,7 +13,7 @@ use serde_yaml::{Mapping, Value};
 use homelab_core::manifest::{FirewallRule, FirewallSpec, FwAction, FwDir, FwProto};
 
 use super::actions::{valid_stack_name, Refusal};
-use super::yamledit::{self, path, EditError, Item, Op};
+use super::yamledit::{self, path, EditError, Item, Op, Seg};
 
 /// The stack file every stack has.
 pub const MANIFEST: &str = "lxc-compose.yml";
@@ -77,6 +77,24 @@ pub struct SettingsEdit {
     /// `ghcr.io/kennypassenier/kp-soft:1.4.0`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub images: BTreeMap<String, String>,
+    /// owner remark 2026-09-30 ("de uptime-check tijd … in de wizard"): a
+    /// tile's own watch seconds, keyed by its `tiles:` key. A field left
+    /// out of a tile's edit is left as it is; blank in the browser means
+    /// the fleet default (host.toml `watch_interval_s` /
+    /// `watch_down_after_s`) applies.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tiles: BTreeMap<String, TileEdit>,
+}
+
+/// One tile's watch override (owner remark 2026-09-30). Both optional;
+/// only the ones given are written.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TileEdit {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watch_every: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub down_after: Option<u64>,
 }
 
 /// feat-firewall-1: the firewall as the editor holds it.
@@ -420,6 +438,35 @@ fn settings_ops(m: &StackManifest, s: &SettingsEdit) -> Vec<Op> {
             value: Value::from(b),
         });
     }
+    // owner remark 2026-09-30: a tile's own watch seconds, written into its
+    // `tiles:` entry. `path()` splits on '.', which would break a tile key
+    // that is itself a hostname (dots in it), so the path is built with
+    // `Seg::Key` directly rather than through `path()`.
+    for (key, edit) in &s.tiles {
+        let Some(tile) = m.tiles.get(key) else {
+            continue;
+        };
+        if let Some(w) = edit.watch_every.filter(|w| tile.watch_every != Some(*w)) {
+            ops.push(Op::Set {
+                path: vec![
+                    Seg::Key("tiles".into()),
+                    Seg::Key(key.clone()),
+                    Seg::Key("watch_every".into()),
+                ],
+                value: Value::from(w),
+            });
+        }
+        if let Some(d) = edit.down_after.filter(|d| tile.down_after != Some(*d)) {
+            ops.push(Op::Set {
+                path: vec![
+                    Seg::Key("tiles".into()),
+                    Seg::Key(key.clone()),
+                    Seg::Key("down_after".into()),
+                ],
+                value: Value::from(d),
+            });
+        }
+    }
     ops
 }
 
@@ -444,6 +491,25 @@ pub fn settings_problems(s: &SettingsEdit) -> Vec<String> {
             out.push(format!(
                 "{k}: {image:?} is not an image reference like name:tag"
             ));
+        }
+    }
+    for (key, t) in &s.tiles {
+        if let Some(w) = t.watch_every {
+            if w < 10 {
+                out.push(format!("{key}: check every must be at least 10 s, not {w}"));
+            }
+        }
+        if let Some(d) = t.down_after {
+            if d < 10 {
+                out.push(format!("{key}: down after must be at least 10 s, not {d}"));
+            }
+            if let Some(w) = t.watch_every {
+                if d < w {
+                    out.push(format!(
+                        "{key}: down after ({d} s) must be at least check every ({w} s)"
+                    ));
+                }
+            }
         }
     }
     out
@@ -562,6 +628,15 @@ pub fn changes(
                     old: texts.get(&rel).cloned(),
                     new: Some(new),
                 });
+            }
+            for key in s.tiles.keys() {
+                if !m.tiles.contains_key(key) {
+                    return Err(refusal(
+                        stack,
+                        format!("{key} is not a tile of this stack"),
+                        "pick a tile the form lists",
+                    ));
+                }
             }
         }
         StackEdit::Firewall(f) => {
@@ -737,6 +812,14 @@ pub fn describe(edit: &StackEdit, old: Option<&StackManifest>) -> String {
             }
             for (k, image) in &s.images {
                 parts.push(format!("{k} → {image}"));
+            }
+            for (key, t) in &s.tiles {
+                if let Some(w) = t.watch_every {
+                    parts.push(format!("{key} checked every {w}s"));
+                }
+                if let Some(d) = t.down_after {
+                    parts.push(format!("{key} down after {d}s"));
+                }
             }
             parts.join(", ")
         }

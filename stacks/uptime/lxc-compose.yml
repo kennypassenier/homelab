@@ -219,6 +219,6 @@ firewall:
 tiles:
   kuma.kp-soft.dev:
     name: "Uptime Kuma"
-    group: "Infrastructuur"
+    group: "Infrastructure"
     order: 505
-    description: "Bereikbaarheid"
+    description: "Uptime"

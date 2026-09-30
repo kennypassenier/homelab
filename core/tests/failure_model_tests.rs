@@ -102,6 +102,7 @@ async fn ar14_failed_deploy_writes_replayable_bundle() {
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,
+        tile_watch_source: None,
     };
     let report = deploy(&ctx, &spec(110, "syncthing")).await;
     assert!(!report.ok);

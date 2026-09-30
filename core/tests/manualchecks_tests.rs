@@ -401,11 +401,20 @@ fn fix_65_a_deliberate_nok_can_be_accepted_until_a_date() {
 /// alarming set changes, and once a week while it stands.
 #[test]
 fn fix_65_the_nightly_report_goes_out_when_the_set_changes_or_weekly() {
-    use homelab_core::ops::fleetcheck::nightly_report_due;
+    use homelab_core::ops::fleetcheck::{nightly_report_due, NIGHTLY_REPORT_REPEAT_S};
     let now = 1_800_000_000u64;
-    assert!(nightly_report_due("Broken|media", "", 0, now), "first time");
     assert!(
-        !nightly_report_due("Broken|media", "Broken|media", now - DAY, now),
+        nightly_report_due("Broken|media", "", 0, now, NIGHTLY_REPORT_REPEAT_S),
+        "first time"
+    );
+    assert!(
+        !nightly_report_due(
+            "Broken|media",
+            "Broken|media",
+            now - DAY,
+            now,
+            NIGHTLY_REPORT_REPEAT_S
+        ),
         "the same set as last night stays quiet"
     );
     assert!(
@@ -413,12 +422,19 @@ fn fix_65_the_nightly_report_goes_out_when_the_set_changes_or_weekly() {
             "Broken|media\nDrift|paperwork",
             "Broken|media",
             now - DAY,
-            now
+            now,
+            NIGHTLY_REPORT_REPEAT_S
         ),
         "something new is sent"
     );
     assert!(
-        nightly_report_due("Broken|media", "Broken|media", now - 7 * DAY, now),
+        nightly_report_due(
+            "Broken|media",
+            "Broken|media",
+            now - 7 * DAY,
+            now,
+            NIGHTLY_REPORT_REPEAT_S
+        ),
         "and a standing problem is repeated weekly"
     );
 }

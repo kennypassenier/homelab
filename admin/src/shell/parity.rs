@@ -44,6 +44,9 @@ pub struct ParityCtx {
     /// (`shell::slow`).
     today_read: Arc<SlowRead>,
     check_read: Arc<SlowRead>,
+    /// Decision "23 constants": [`DRIFT_REUSE_S`] by default,
+    /// `HOMELAB_ADMIN_DRIFT_REUSE_S` in `mount()`.
+    drift_reuse_s: u64,
 }
 
 impl ParityCtx {
@@ -56,6 +59,31 @@ impl ParityCtx {
         scratch: PathBuf,
         publish: Arc<dyn super::actions::Publish>,
     ) -> Self {
+        Self::with_drift_reuse(
+            host,
+            shared,
+            actions,
+            files,
+            repo,
+            scratch,
+            publish,
+            DRIFT_REUSE_S,
+        )
+    }
+
+    /// Decision "23 constants": the drift reuse window from `ActConfig`
+    /// (`HOMELAB_ADMIN_DRIFT_REUSE_S`); `mount()` only.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_drift_reuse(
+        host: Arc<dyn HostPort>,
+        shared: Shared,
+        actions: Actions,
+        files: Arc<dyn StackFiles>,
+        repo: PathBuf,
+        scratch: PathBuf,
+        publish: Arc<dyn super::actions::Publish>,
+        drift_reuse_s: u64,
+    ) -> Self {
         ParityCtx {
             host,
             shared,
@@ -66,6 +94,7 @@ impl ParityCtx {
             drift: Arc::new(Mutex::new(None)),
             today_read: SlowRead::announced("today", "today", publish.clone()),
             check_read: SlowRead::announced("the fleet check", "fleet-check", publish),
+            drift_reuse_s,
         }
     }
 }
@@ -392,7 +421,7 @@ async fn drift(State(c): State<ParityCtx>, Query(q): Query<Fresh>) -> Response {
         .clone();
     let reuse = cached
         .clone()
-        .filter(|(at, _)| !q.fresh || now.saturating_sub(*at) < DRIFT_REUSE_S);
+        .filter(|(at, _)| !q.fresh || now.saturating_sub(*at) < c.drift_reuse_s);
     let (at, local) = match (reuse, q.fresh) {
         (Some(x), _) => x,
         (None, false) => {

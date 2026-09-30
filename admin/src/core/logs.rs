@@ -89,10 +89,12 @@ pub fn logql(q: &LogQuery) -> Result<String, String> {
     Ok(out)
 }
 
-/// The window and line count actually asked, clamped.
-pub fn window(q: &LogQuery, now: u64) -> (u64, u64, usize) {
-    let since = q.since.clamp(60, MAX_SINCE_S);
-    let limit = q.limit.clamp(1, MAX_LIMIT);
+/// The window and line count actually asked, clamped to `max_since_s` /
+/// `max_limit` (`MAX_SINCE_S` / `MAX_LIMIT` by default,
+/// `admin.logs_max_since_s` / `admin.logs_max_limit` otherwise).
+pub fn window(q: &LogQuery, now: u64, max_since_s: u64, max_limit: usize) -> (u64, u64, usize) {
+    let since = q.since.clamp(60, max_since_s.max(60));
+    let limit = q.limit.clamp(1, max_limit.max(1));
     (now.saturating_sub(since), now, limit)
 }
 

@@ -110,7 +110,7 @@ export const badge = (b) =>
  * field's id, so a replayed step (feat-platform-10) finds it.
  * @param {import("./actionforms.js").Field} f
  * @param {string | boolean} value
- * @param {{value: string, label: string}[]} [choices]
+ * @param {{value: string, label: string, disabled?: boolean}[]} [choices]
  * @returns {{wrap: HTMLElement, input: HTMLInputElement | HTMLSelectElement}}
  */
 export function fieldEl(f, value, choices = []) {
@@ -149,7 +149,15 @@ export function fieldEl(f, value, choices = []) {
       name: f.name,
       "aria-describedby": `${f.id}-hint`,
     });
-    sel.append(...choices.map((c) => h("option", { value: c.value }, c.label)));
+    sel.append(
+      ...choices.map((c) =>
+        h(
+          "option",
+          { value: c.value, ...(c.disabled ? { disabled: "" } : {}) },
+          c.label,
+        ),
+      ),
+    );
     // A preset value the list does not hold (yet) still shows.
     if (
       typeof value === "string" &&

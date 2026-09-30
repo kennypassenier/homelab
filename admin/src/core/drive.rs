@@ -27,7 +27,8 @@ pub const FORM_SPEC_JSON: &str = include_str!("../../web/js/formspec.json");
 pub const IDLE_S: i64 = 600;
 
 /// fix-163: a confirmed dialog whose job has ended, with no step since, is
-/// closed and the tabs given back this long after (as `homelab ui done`).
+/// closed and the tabs given back this long after (as `homelab ui done`),
+/// unless `ActConfig` says otherwise (`HOMELAB_ADMIN_RELEASE_AFTER_JOB_S`).
 pub const RELEASE_AFTER_JOB_S: i64 = 30;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -600,6 +601,9 @@ pub struct DriveState {
     /// Unix seconds of the last step.
     pub last_at: i64,
     pub idle_s: i64,
+    /// Decision "23 constants" (2026-09-30): [`RELEASE_AFTER_JOB_S`] by
+    /// default.
+    pub release_after_job_s: i64,
     /// Live view: the step announced now, before it is taken (`drivelive`).
     pub announce: Option<Announce>,
     /// Live view: a viewer paused; the next step waits for Continue.
@@ -609,6 +613,11 @@ pub struct DriveState {
     pub stopped_by: Option<String>,
     /// Live view: the sequence the driver sent up front.
     pub plan: Option<Plan>,
+    /// Owner decision 2026-09-30: the Overview fleet table's ticked stacks
+    /// (`homelab ui select`), so a batch dialog can be opened from them,
+    /// exactly as the page's own "Run on the selected…" button does.
+    #[serde(default)]
+    pub selected: Vec<String>,
 }
 
 impl Default for DriveState {
@@ -621,10 +630,12 @@ impl Default for DriveState {
             form: None,
             last_at: 0,
             idle_s: IDLE_S,
+            release_after_job_s: RELEASE_AFTER_JOB_S,
             announce: None,
             paused_by: None,
             stopped_by: None,
             plan: None,
+            selected: Vec::new(),
         }
     }
 }
@@ -636,6 +647,9 @@ pub struct Sources {
     pub apps: Vec<String>,
     pub units: Vec<String>,
     pub commits: Vec<String>,
+    /// dashboard-latest: the "release tag" dropdown's values (`latest`,
+    /// then every release GitHub lists) of update-host or install-native.
+    pub releases: Vec<String>,
     /// The manual checks' ids (answer-check).
     pub checks: Vec<String>,
     /// The host's OS templates (template-build's base).
@@ -693,6 +707,7 @@ impl OpenForm {
                 Some("apps") => sources.apps.clone(),
                 Some("units") => sources.units.clone(),
                 Some("commits") => sources.commits.clone(),
+                Some("releases") => sources.releases.clone(),
                 Some("checks") => sources.checks.clone(),
                 Some("templates") => sources.templates.clone(),
                 _ => Vec::new(),
@@ -1091,7 +1106,7 @@ impl DriveState {
             && self.paused_by.is_none()
             && self.stopped_by.is_none()
             && self.form.as_ref().is_some_and(|f| f.job.is_some())
-            && now - ended.max(self.last_at) >= RELEASE_AFTER_JOB_S
+            && now - ended.max(self.last_at) >= self.release_after_job_s
     }
 
     /// Release the drive as `homelab ui done` does: the dialog closes and
@@ -1283,6 +1298,37 @@ impl DriveState {
                 self.form = Some(open);
                 Applied { effect, held: None }
             }
+            UiStep::Select { stacks } => {
+                if self.page != "/app/" {
+                    return Err(refused(
+                        step,
+                        format!(
+                            "the fleet table's selection lives on the Overview page, not {}",
+                            self.page
+                        ),
+                        "homelab ui goto / first",
+                    ));
+                }
+                let mut unknown: Vec<&String> = stacks
+                    .iter()
+                    .filter(|s| !cx.stacks.iter().any(|x| x == *s))
+                    .collect();
+                unknown.sort();
+                unknown.dedup();
+                if !unknown.is_empty() {
+                    let names: Vec<&str> = unknown.iter().map(|s| s.as_str()).collect();
+                    return Err(refused(
+                        step,
+                        format!("the fleet has no stack {}", names.join(", ")),
+                        format!("the stacks are: {}", cx.stacks.join(", ")),
+                    ));
+                }
+                let mut list = stacks.clone();
+                list.sort();
+                list.dedup();
+                self.selected = list;
+                plain
+            }
             UiStep::Close => {
                 if self.form.take().is_none() {
                     return Err(refused(step, "no dialog is open", "nothing to close"));
@@ -1291,11 +1337,15 @@ impl DriveState {
             }
             UiStep::Type { field, text } => {
                 let form = self.open_form(step)?;
+                // dashboard-latest, back-compat: `tag` was a text field
+                // before the "release tag" dropdown; `ui type act-tag
+                // v3.63.0` still sets it, checked as a pick would be.
                 let kinds = [
                     FieldKind::Text,
                     FieldKind::Typed,
                     FieldKind::Number,
                     FieldKind::Textarea,
+                    FieldKind::Choice,
                 ];
                 let (name, sub) = form.set(step, field, &kinds, Value::String(text.clone()))?;
                 crate::core::driveedit::after_set(form, &name, sub);

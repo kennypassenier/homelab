@@ -53,7 +53,8 @@ import {
 /**
  * @typedef {{apps?: string[], units?: string[],
  *   commits?: {commit: string, subject: string}[],
- *   checks?: {id: string, label: string}[], templates?: string[]}} Sources
+ *   checks?: {id: string, label: string}[], templates?: string[],
+ *   releases?: {value: string, label: string, disabled: boolean}[]}} Sources
  * @typedef {{preset?: import("./actionforms.js").Values, sources?: Sources,
  *   openRollback?: (stack: string) => void, driven?: boolean}} OpenOpts
  * @typedef {{form: import("./actionforms.js").ActionForm,
@@ -67,6 +68,24 @@ import {
  *   showJob: (job: number) => void}} ActionController
  *   feat-platform-10: what the driven replay (drive.js) does to a dialog.
  */
+
+/**
+ * dashboard-latest: one repository's "release tag" dropdown — GitHub's
+ * release list, newest first, "latest (now vX.Y.Z)" on top, an unsigned
+ * release disabled. `unit` narrows a stack that holds several native
+ * services (e.g. kyu) to the one whose repository is read.
+ * @param {string} stack
+ * @param {string} [unit]
+ * @returns {Promise<{value: string, label: string, disabled: boolean}[]>}
+ */
+async function fetchReleases(stack, unit) {
+  const q = unit ? `?unit=${encodeURIComponent(unit)}` : "";
+  const r = await fetchJson(
+    `/data/actions/${encodeURIComponent(stack)}/releases${q}`,
+    "the release list",
+  );
+  return r.ok ? (r.body.releases ?? []) : [];
+}
 
 /**
  * The lists the form's choices come from: the fleet's apps, and the
@@ -95,6 +114,12 @@ async function readSources(form, given) {
     const r = await fetchJson("/data/templates", "the templates");
     out.templates = r.ok ? (r.body.templates?.os ?? []) : [];
   }
+  // dashboard-latest: the "release tag" dropdown. install-native's unit is
+  // not chosen yet here (single-service stacks still resolve; a
+  // multi-service one gets an empty list until the unit field's own
+  // listener re-fetches it, wired in drawActionDialog).
+  if (!out.releases && fields.some((f) => f.source === "releases"))
+    out.releases = await fetchReleases(form.stack);
   if (wantsRepo) {
     const r = await fetchJson(
       `/data/actions/${encodeURIComponent(form.stack)}/rollback-options`,
@@ -230,6 +255,33 @@ function drawActionDialog(form, values, sources, driven) {
     } else sec.append(...s.fields.map(field));
     return sec;
   });
+  // dashboard-latest: install-native's unit picks the repository the tag
+  // dropdown reads; changing it re-fetches and redraws that dropdown, the
+  // same re-fetch `ui pick act-unit` triggers when Claude drives it.
+  const releaseField = formFields(form).find((f) => f.source === "releases");
+  const unitInput = inputs.get("unit");
+  const tagInput = inputs.get("tag");
+  if (releaseField && unitInput && tagInput instanceof HTMLSelectElement) {
+    unitInput.addEventListener("change", () => {
+      const unit = /** @type {string} */ (unitInput.value);
+      fetchReleases(form.stack, unit).then((list) => {
+        const current = tagInput.value;
+        tagInput.replaceChildren(
+          ...list.map((c) =>
+            h(
+              "option",
+              { value: c.value, ...(c.disabled ? { disabled: "" } : {}) },
+              c.label,
+            ),
+          ),
+        );
+        tagInput.value = list.some((c) => c.value === current)
+          ? current
+          : "latest";
+        values.tag = tagInput.value;
+      });
+    });
+  }
   const back = h(
     "button",
     { type: "button", class: "kp-button", "data-kp-wizard-back": "" },
@@ -825,6 +877,26 @@ export function mountBatchPanel(batch, jobs) {
   const running = h("div", { class: "batch-running" });
   /** @type {{job: number, stop: () => void} | null} */
   let panel = null;
+  // Kenny, 2026-09-30: a running batch could not be stopped halfway. The
+  // job running now ends on its own; the queued ones never start.
+  const stopBtn = h(
+    "button",
+    { type: "button", class: "kp-button kp-button--destructive batch-stop" },
+    "Stop batch",
+  );
+  stopBtn.addEventListener("click", async () => {
+    stopBtn.setAttribute("disabled", "");
+    const r = await send(
+      "POST",
+      `/data/actions/batch/${batch}/stop`,
+      {},
+      "stop the batch",
+    );
+    if (!r.ok) {
+      stopBtn.removeAttribute("disabled");
+      notify(`${r.error.why}.`, "warning");
+    }
+  });
   const element = h(
     "section",
     {
@@ -842,6 +914,7 @@ export function mountBatchPanel(batch, jobs) {
         bar,
         text,
       ),
+      stopBtn,
     ),
     rows,
     running,
@@ -861,6 +934,7 @@ export function mountBatchPanel(batch, jobs) {
       deferred: 0,
     };
     const v = batchView(b);
+    stopBtn.hidden = !!b.done;
     bar.value = v.percent;
     text.textContent = v.text;
     rows.replaceChildren(

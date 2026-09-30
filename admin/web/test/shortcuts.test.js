@@ -12,8 +12,8 @@ test("g then a letter goes to a page, within the chord's time", () => {
   assert.deepEqual(keyAction(r.state, "h", 1500, home).action, {
     navigate: "/app/host",
   });
-  assert.deepEqual(keyAction(r.state, "t", 1000, home).action, {
-    navigate: "/app/timeline",
+  assert.deepEqual(keyAction(r.state, "k", 1000, home).action, {
+    navigate: "/app/health",
   });
   // Too late: the second key is a key on its own.
   assert.equal(keyAction(r.state, "h", 1000 + CHORD_MS + 1, home).action, null);
@@ -52,7 +52,7 @@ test("/ searches; digits and brackets move between a stack's tabs", () => {
 
 test("the sheet lists every go-to key the handler knows", () => {
   const listed = SHORTCUTS.flatMap((g) => g.shortcuts.map((s) => s.keys));
-  for (const k of ["o", "h", "a", "t", "c", "d", "f", "e"]) {
+  for (const k of ["o", "u", "k", "m", "h", "a", "f", "e"]) {
     assert.ok(listed.includes(`g ${k}`), k);
     const r = keyAction(keyAction(idle(), "g", 0, home).state, k, 1, home);
     assert.ok(r.action && "navigate" in r.action, k);

@@ -280,6 +280,7 @@ async fn dashboard_latch_the_golden_template_bakes_latch_through_the_guard() {
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,
+        tile_watch_source: None,
     };
     let report = build_template(&ctx, &TemplateCfg::default()).await;
     assert!(report.ok, "{:?}", report.error);

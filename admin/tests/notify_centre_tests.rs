@@ -7,7 +7,8 @@
 use homelab_admin::core::actions::ActionKind;
 use homelab_admin::core::notify::{
     alert_drafts, digest, digest_due, fix_for, host_draft, push_payload, route, today_lines,
-    DigestRecord, Draft, FixSource, Kind, Level, NotifyFile, PushOutcome, Settings,
+    DigestRecord, Draft, FixSource, Kind, Level, NotifyFile, PushOutcome, Settings, DIGEST_LATE_S,
+    KEEP,
 };
 use homelab_core::notify::HostNotice;
 use homelab_core::ops::fleetcheck::{Finding, Severity};
@@ -255,10 +256,11 @@ fn host_notices_merge_into_the_dashboards_own_notice_of_that_job() {
         },
         950,
         PushOutcome::Skipped { why: "x".into() },
+        KEEP,
     );
     // The job that sent request 77 is job 3: the host's words fill that notice.
     let merged = f
-        .import_host(&host_notice(5, true), Some(3), 1_001)
+        .import_host(&host_notice(5, true), Some(3), 1_001, KEEP)
         .unwrap();
     assert_eq!(merged.id, own.id);
     assert_eq!(f.notices.len(), 1);
@@ -270,7 +272,9 @@ fn host_notices_merge_into_the_dashboards_own_notice_of_that_job() {
     assert_eq!(merged.fixes.len(), 1);
     assert_eq!(f.host_cursor, 5);
     // Without a job of its own it is a notice of its own.
-    let n = f.import_host(&host_notice(6, false), None, 1_002).unwrap();
+    let n = f
+        .import_host(&host_notice(6, false), None, 1_002, KEEP)
+        .unwrap();
     assert_eq!(f.notices.len(), 2);
     assert_eq!(n.kind, Kind::HostEvent);
     assert_eq!(f.host_cursor, 6);
@@ -322,26 +326,28 @@ fn alerts_become_notices_firing_and_resolved() {
     assert!(matches!(warn[0].push, PushOutcome::Skipped { .. }));
 
     let mut f = NotifyFile::default();
-    let first = f.add_alert(firing[0].clone(), 1_000).unwrap();
+    let first = f.add_alert(firing[0].clone(), 1_000, KEEP).unwrap();
     assert!(!first.read);
     // Alertmanager repeats a firing alert every 12 h: one notice, not two.
     assert!(f
         .add_alert(
             alert_drafts(&am("firing", "HostDown", "critical", "fp1"))[0].clone(),
-            2_000
+            2_000,
+            KEEP,
         )
         .is_none());
     // Resolved: stored as read, and the firing one no longer waits.
     let resolved = alert_drafts(&am("resolved", "HostDown", "critical", "fp1"));
     assert_eq!(resolved[0].draft.kind, Kind::AlertResolved);
-    let r = f.add_alert(resolved[0].clone(), 3_000).unwrap();
+    let r = f.add_alert(resolved[0].clone(), 3_000, KEEP).unwrap();
     assert!(r.read && r.fixes.is_empty());
     assert_eq!(f.unread(), 0);
     // Firing again after it resolved is news again.
     assert!(f
         .add_alert(
             alert_drafts(&am("firing", "HostDown", "critical", "fp1"))[0].clone(),
-            4_000
+            4_000,
+            KEEP,
         )
         .is_some());
     assert!(alert_drafts(&serde_json::json!({"alerts": "nope"})).is_empty());
@@ -353,17 +359,28 @@ fn daily_digest_at_nine_only_when_something_waits_worst_first() {
     assert_eq!(s.digest_at.as_deref(), Some("09:00"));
     // 2026-09-30 is summer time in Brussels: 09:00 local is 07:00 UTC.
     let nine = 1_790_751_600;
-    assert_eq!(digest_due(&s, None, nine - 60), None, "not yet");
-    assert_eq!(digest_due(&s, None, nine).as_deref(), Some("2026-09-30"));
+    assert_eq!(
+        digest_due(&s, None, nine - 60, DIGEST_LATE_S),
+        None,
+        "not yet"
+    );
+    assert_eq!(
+        digest_due(&s, None, nine, DIGEST_LATE_S).as_deref(),
+        Some("2026-09-30")
+    );
     let sent = DigestRecord {
         day: "2026-09-30".into(),
         at: nine,
         count: 2,
         push: PushOutcome::Sent,
     };
-    assert_eq!(digest_due(&s, Some(&sent), nine + 600), None, "once a day");
     assert_eq!(
-        digest_due(&s, None, nine + 5 * 3600),
+        digest_due(&s, Some(&sent), nine + 600, DIGEST_LATE_S),
+        None,
+        "once a day"
+    );
+    assert_eq!(
+        digest_due(&s, None, nine + 5 * 3600, DIGEST_LATE_S),
         None,
         "too late that day: skipped, not sent in the evening"
     );
@@ -371,19 +388,19 @@ fn daily_digest_at_nine_only_when_something_waits_worst_first() {
         digest_at: None,
         ..Default::default()
     };
-    assert_eq!(digest_due(&off, None, nine), None);
+    assert_eq!(digest_due(&off, None, nine, DIGEST_LATE_S), None);
 
     let mut f = NotifyFile::default();
     assert!(digest(&f.notices, &[]).is_none(), "all clear: nothing");
     let mut ok = Draft::new(Kind::HostEvent, "deploy-a", "deploy a: done", "");
     ok.detail.level = Level::Ok;
-    f.add(ok, 1, PushOutcome::Skipped { why: "x".into() });
+    f.add(ok, 1, PushOutcome::Skipped { why: "x".into() }, KEEP);
     let mut crit = Draft::new(Kind::HostEvent, "backup-b", "backup b failed", "");
     crit.detail.level = Level::Critical;
-    f.add(crit, 2, PushOutcome::Sent);
+    f.add(crit, 2, PushOutcome::Sent, KEEP);
     let mut done = Draft::new(Kind::Alert, "x", "read already", "");
     done.detail.level = Level::Critical;
-    let n = f.add(done, 3, PushOutcome::Sent);
+    let n = f.add(done, 3, PushOutcome::Sent, KEEP);
     f.mark(Some(&[n.id]), true);
     let today = today_lines(&Today {
         items: vec![Item {

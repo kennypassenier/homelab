@@ -27,14 +27,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Path as UrlPath, State};
+use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use homelab_core::ops::deployguard::{self, Ancestry};
 use homelab_proto::{Command, RpcResponse, ServerMsg};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::actions_notify::NotifyCenter;
@@ -43,7 +43,7 @@ use crate::core::actions::{
     self, ActionArgs, ActionKind, ActionRequest, BatchRequest, Material, Needs, Refusal,
 };
 use crate::core::actions_cli::cli_line_typed;
-use crate::core::actions_progress::{Progress, Tracker};
+use crate::core::actions_progress::{self, Outcome, Progress, Tracker};
 use crate::core::notify::{Draft, Kind};
 
 type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -590,9 +590,11 @@ struct Job {
     view: JobView,
 }
 
-/// Jobs kept for `GET /data/actions/jobs` and reloads.
+/// Jobs kept for `GET /data/actions/jobs` and reloads, unless
+/// [`Actions::set_limits`] says otherwise (`HOMELAB_ADMIN_KEEP_JOBS`).
 const KEEP_JOBS: usize = 200;
-/// History read for the expected durations.
+/// History read for the expected durations, unless [`Actions::set_limits`]
+/// says otherwise (`HOMELAB_ADMIN_HISTORY_WINDOW_S`).
 const HISTORY_WINDOW_S: i64 = 180 * 86_400;
 
 struct Inner {
@@ -611,6 +613,9 @@ struct Inner {
     releases: std::sync::OnceLock<Arc<dyn super::releases::Releases>>,
     /// How long "Update host" waits for the host to come back.
     reconnect_wait: std::sync::OnceLock<Duration>,
+    /// Decision "23 constants": [`KEEP_JOBS`] and [`HISTORY_WINDOW_S`],
+    /// overridden from `ActConfig` (mount only).
+    limits: std::sync::OnceLock<(usize, i64)>,
 }
 
 /// The action queue.
@@ -651,6 +656,7 @@ impl Actions {
             next_job: AtomicU64::new(first.max(1)),
             releases: std::sync::OnceLock::new(),
             reconnect_wait: std::sync::OnceLock::new(),
+            limits: std::sync::OnceLock::new(),
         });
         let worker = Actions {
             inner: inner.clone(),
@@ -679,6 +685,25 @@ impl Actions {
         let _ = self.inner.reconnect_wait.set(d);
     }
 
+    /// Decision "23 constants": jobs kept and the history window, from
+    /// `ActConfig` (mount only). Set once; [`KEEP_JOBS`] and
+    /// [`HISTORY_WINDOW_S`] otherwise.
+    pub fn set_limits(&self, keep_jobs: usize, history_window_s: i64) {
+        let _ = self.inner.limits.set((keep_jobs, history_window_s));
+    }
+
+    fn keep_jobs(&self) -> usize {
+        self.inner.limits.get().map(|l| l.0).unwrap_or(KEEP_JOBS)
+    }
+
+    fn history_window_s(&self) -> i64 {
+        self.inner
+            .limits
+            .get()
+            .map(|l| l.1)
+            .unwrap_or(HISTORY_WINDOW_S)
+    }
+
     /// A read on the host line, for the lists a form's choices come from
     /// (the manual checks, the templates).
     pub async fn ask(&self, command: Command, timeout: Duration) -> Result<RpcResponse, String> {
@@ -701,7 +726,8 @@ impl Actions {
                 *slot = view.clone();
             } else {
                 jobs.push_back(view.clone());
-                while jobs.len() > KEEP_JOBS {
+                let keep_jobs = self.keep_jobs();
+                while jobs.len() > keep_jobs {
                     jobs.pop_front();
                 }
             }
@@ -808,11 +834,23 @@ impl Actions {
     /// carries `--yes`).
     pub async fn preview_of(
         &self,
-        req: ActionRequest,
+        mut req: ActionRequest,
         typed: bool,
     ) -> (Result<String, String>, Option<Refusal>, bool) {
-        let a2 = self.clone();
         let restarts = actions::restarts_dashboard(&req.stack, req.action);
+        // dashboard-latest: the review line never shows the word "latest"
+        // (nor an empty tag) — resolve it to the concrete tag first, the
+        // same tag the press would install.
+        if matches!(
+            req.action.needs(),
+            Needs::HostRelease | Needs::NativeRelease
+        ) {
+            match self.resolve_preview_tag(&req).await {
+                Ok(tag) => req.args.tag = Some(tag),
+                Err(why) => return (Err(why), None, restarts),
+            }
+        }
+        let a2 = self.clone();
         let (line, guard) = tokio::task::spawn_blocking(move || {
             let guard = a2.guard(&req);
             (preview_line(&a2, &req, typed), guard)
@@ -820,6 +858,31 @@ impl Actions {
         .await
         .unwrap_or((Err("internal".into()), Ok(())));
         (line, guard.err(), restarts)
+    }
+
+    /// dashboard-latest: the concrete tag `req.args.tag` resolves to — the
+    /// value already typed/picked (unless it is empty or "latest"), else
+    /// the repository's newest release.
+    async fn resolve_preview_tag(&self, req: &ActionRequest) -> Result<String, String> {
+        if let Some(t) = given_tag(&req.args) {
+            return Ok(t.to_string());
+        }
+        let repo = match req.action.needs() {
+            Needs::HostRelease => super::releases::HOMELAB_REPO.to_string(),
+            Needs::NativeRelease => {
+                let files = self.inner.files.clone();
+                let (stack, unit) = (req.stack.clone(), req.args.unit.clone());
+                let (m, _, _) = tokio::task::spawn_blocking(move || {
+                    files.native_release(&stack, unit.as_deref())
+                })
+                .await
+                .map_err(|e| e.to_string())?
+                .map_err(|r| r.why)?;
+                m.release_repo.unwrap_or_default()
+            }
+            _ => return Err("internal".into()),
+        };
+        self.releases().map_err(|r| r.why)?.latest_tag(&repo).await
     }
 
     /// Queue a validated request; the job as it stands now.
@@ -879,6 +942,15 @@ impl Actions {
     }
 
     fn publish_batch(&self, batch: u64) {
+        if let Some(v) = self.batch_view(batch) {
+            self.inner.publish.publish("action_batch", v);
+        }
+    }
+
+    /// Stop a batch (Kenny, 2026-09-30: a running batch could not be
+    /// stopped halfway). The job that runs now runs to its end; every job
+    /// still queued is refused and never starts. The number refused.
+    pub fn stop_batch(&self, batch: u64, who: &str) -> usize {
         let ids = self
             .inner
             .batches
@@ -886,6 +958,37 @@ impl Actions {
             .ok()
             .and_then(|b| b.get(&batch).cloned())
             .unwrap_or_default();
+        let mut stopped = 0;
+        for id in ids {
+            let Some(mut v) = self.job(id) else { continue };
+            if v.state != JobState::Queued {
+                continue;
+            }
+            v.state = JobState::Refused;
+            v.finished_at = Some(self.now());
+            v.message = Some(format!(
+                "batch stopped by {who}; this stack was not touched"
+            ));
+            self.store(&v);
+            stopped += 1;
+        }
+        self.publish_batch(batch);
+        stopped
+    }
+
+    /// The batch with the latest view of its jobs, as `action_batch` sends
+    /// it and `homelab ui finish` follows it. None for an unknown batch.
+    pub fn batch_view(&self, batch: u64) -> Option<serde_json::Value> {
+        let ids = self
+            .inner
+            .batches
+            .lock()
+            .ok()
+            .and_then(|b| b.get(&batch).cloned())
+            .unwrap_or_default();
+        if ids.is_empty() {
+            return None;
+        }
         let jobs: Vec<serde_json::Value> = ids
             .iter()
             .filter_map(|id| self.job(*id))
@@ -905,17 +1008,14 @@ impl Actions {
             .iter()
             .filter_map(|id| self.job(*id))
             .all(|j| j.state.finished());
-        self.inner.publish.publish(
-            "action_batch",
-            serde_json::json!({
-                "batch": batch,
-                "jobs": jobs,
-                "done": done,
-                "ok": count(JobState::Done),
-                "failed": count(JobState::Failed) + count(JobState::Refused) + count(JobState::Unknown),
-                "deferred": count(JobState::Deferred),
-            }),
-        );
+        Some(serde_json::json!({
+            "batch": batch,
+            "jobs": jobs,
+            "done": done,
+            "ok": count(JobState::Done),
+            "failed": count(JobState::Failed) + count(JobState::Refused) + count(JobState::Unknown),
+            "deferred": count(JobState::Deferred),
+        }))
     }
 
     fn fleet_stack(&self, stack: &str) -> Option<(u16, Option<String>)> {
@@ -954,13 +1054,7 @@ impl Actions {
         match req.action.needs() {
             Needs::HostRelease => {
                 let releases = self.releases()?;
-                let tag = match req
-                    .args
-                    .tag
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|t| !t.is_empty())
-                {
+                let tag = match given_tag(&req.args) {
                     Some(t) => t.to_string(),
                     None => releases
                         .latest_tag(super::releases::HOMELAB_REPO)
@@ -986,13 +1080,7 @@ impl Actions {
                 })
                 .await
                 .map_err(|e| Refusal::new(what.clone(), e.to_string(), "report this"))??;
-                let tag = match req
-                    .args
-                    .tag
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|t| !t.is_empty())
-                {
+                let tag = match given_tag(&req.args) {
                     Some(t) => t.to_string(),
                     None => {
                         let repo = m.release_repo.clone().unwrap_or_default();
@@ -1210,7 +1298,7 @@ impl Actions {
     }
 
     async fn history(&self) -> Vec<homelab_core::history::HistoryEntry> {
-        let since = (self.now() - HISTORY_WINDOW_S).max(0) as u64;
+        let since = (self.now() - self.history_window_s()).max(0) as u64;
         let reply = self
             .inner
             .host
@@ -1228,6 +1316,16 @@ impl Actions {
             .unwrap_or_default()
     }
 
+    /// arch-self, GET `/data/actions/outcome`: what the host's history says
+    /// became of `subject` (a job's `{action}-{stack}`) since `since` (the
+    /// job's `started_at`). The tab that started a job restarting the
+    /// dashboard has no other way to learn how it ended (`outcome_since`,
+    /// `actions_progress`).
+    pub async fn outcome_since(&self, subject: &str, since: i64) -> Outcome {
+        let history = self.history().await;
+        actions_progress::outcome_since(&history, subject, since)
+    }
+
     fn finish(&self, view: &mut JobView, state: JobState, message: String) {
         view.state = state;
         view.message = Some(message);
@@ -1236,6 +1334,14 @@ impl Actions {
     }
 
     async fn run(&self, job: Job) {
+        // A batch stopped while this job waited in the queue: the stored
+        // view already says so, and the job never starts.
+        if self
+            .job(job.view.job)
+            .is_some_and(|v| v.state != JobState::Queued)
+        {
+            return;
+        }
         let mut view = job.view;
         view.state = JobState::Running;
         view.started_at = Some(self.now());
@@ -1373,7 +1479,14 @@ impl Actions {
         }
         let last = last.ok_or_else(|| Stop::Link("nothing was sent".into()))?;
         if req.action == ActionKind::UpdateHost && last.ok {
-            return Ok(self.await_updated_host(view, expected, last).await);
+            return Ok(self.await_updated_host(view, expected, last, false).await);
+        }
+        // Owner decision 2026-09-30 (item 2): "Save and restart the host"
+        // waits the same way `homelab release-update` does — the line
+        // drops and comes back on its own (arch-host-link) — but with no
+        // new version expected, since the binary did not change.
+        if req.action == ActionKind::RestartHost && last.ok {
+            return Ok(self.await_updated_host(view, None, last, true).await);
         }
         Ok(last)
     }
@@ -1381,11 +1494,16 @@ impl Actions {
     /// dash-host-update, fix-121: done means the shipped version answered
     /// after the restart, not that a restart was scheduled. The line drops
     /// and comes back on its own (arch-host-link); this watches the Hello.
+    /// `is_restart`: the host-settings "Save and restart the host" button
+    /// (owner decision 2026-09-30, item 2) — the same wait, but `expected`
+    /// is always None (no new binary, so no version to match or roll back
+    /// to) and the words say "restart" rather than "update".
     async fn await_updated_host(
         &self,
         view: &JobView,
         expected: Option<String>,
         sent: RpcResponse,
+        is_restart: bool,
     ) -> RpcResponse {
         use homelab_client::release::{after_update, AfterUpdate};
         let wait = self
@@ -1403,11 +1521,19 @@ impl Actions {
                 }),
             );
         };
-        say(format!(
-            "the host restarts into {}; the dashboard reconnects and waits for it (at most {} s)",
-            expected.as_deref().unwrap_or("the new binary"),
-            wait.as_secs()
-        ));
+        say(if is_restart {
+            format!(
+                "the host restarts; the dashboard reconnects and waits for it to answer again \
+                 (at most {} s)",
+                wait.as_secs()
+            )
+        } else {
+            format!(
+                "the host restarts into {}; the dashboard reconnects and waits for it (at most {} s)",
+                expected.as_deref().unwrap_or("the new binary"),
+                wait.as_secs()
+            )
+        });
         let end = tokio::time::Instant::now() + wait;
         let mut seen_down = false;
         loop {
@@ -1422,12 +1548,14 @@ impl Actions {
             match after_update(expected.as_deref(), seen_down, answered) {
                 AfterUpdate::Answered => {
                     let v = version.unwrap_or_default();
-                    say(format!("the host answers as {v}: the update is accepted"));
+                    let done = if is_restart {
+                        format!("the host answers as {v} again: it restarted with the new settings")
+                    } else {
+                        format!("the host answers as {v}: the update is accepted")
+                    };
+                    say(done.clone());
                     return RpcResponse {
-                        message: format!(
-                            "{}\nthe host came back as {v} and answers; the update is accepted",
-                            sent.message
-                        ),
+                        message: format!("{}\n{done}", sent.message),
                         ..sent
                     };
                 }
@@ -1447,12 +1575,20 @@ impl Actions {
             if tokio::time::Instant::now() >= end {
                 return RpcResponse {
                     ok: false,
-                    message: format!(
-                        "the host did not come back as {} within {} s; the host page shows what \
-                         answers now",
-                        expected.as_deref().unwrap_or("the new version"),
-                        wait.as_secs()
-                    ),
+                    message: if is_restart {
+                        format!(
+                            "the host did not come back within {} s after the restart; the \
+                             settings page shows what answers now",
+                            wait.as_secs()
+                        )
+                    } else {
+                        format!(
+                            "the host did not come back as {} within {} s; the host page shows what \
+                             answers now",
+                            expected.as_deref().unwrap_or("the new version"),
+                            wait.as_secs()
+                        )
+                    },
                     ..sent
                 };
             }
@@ -1617,6 +1753,42 @@ impl Actions {
             ],
         }))
     }
+
+    /// dashboard-latest: the "release tag" dropdown of update-host (the
+    /// host's own repository) and install-native (`unit`'s `release_repo`,
+    /// from the stack's own files — never hard-coded).
+    pub async fn release_options(
+        &self,
+        stack: &str,
+        unit: Option<&str>,
+    ) -> Result<serde_json::Value, Refusal> {
+        let what = format!("the release list of {stack}");
+        let repo = if stack == actions::HOST_TARGET {
+            super::releases::HOMELAB_REPO.to_string()
+        } else {
+            let files = self.inner.files.clone();
+            let (s, u) = (stack.to_string(), unit.map(str::to_string));
+            let (m, _, _) =
+                tokio::task::spawn_blocking(move || files.native_release(&s, u.as_deref()))
+                    .await
+                    .map_err(|e| Refusal::new(what.clone(), e.to_string(), "report this"))??;
+            m.release_repo.unwrap_or_default()
+        };
+        if repo.is_empty() {
+            return Err(Refusal::new(
+                what,
+                "this service declares no release_repo",
+                "there is nothing to fetch a release list from",
+            ));
+        }
+        let list = self
+            .releases()?
+            .list(&repo)
+            .await
+            .map_err(|why| Refusal::new(what, why, "try again in a moment"))?;
+        let choices = crate::core::releaseoptions::dropdown(&list);
+        Ok(serde_json::json!({ "releases": choices }))
+    }
 }
 
 enum Stop {
@@ -1700,6 +1872,23 @@ async fn batch(State(a): State<Actions>, b: Result<Json<BatchRequest>, JsonRejec
     }
 }
 
+/// The batch panel's Stop: the running job ends on its own, the queued
+/// ones never start.
+async fn stop_batch(State(a): State<Actions>, UrlPath(batch): UrlPath<u64>) -> Response {
+    if a.batch_view(batch).is_none() {
+        return refusal(
+            StatusCode::NOT_FOUND,
+            Refusal::new(
+                "stop the batch",
+                format!("this dashboard knows no batch {batch}"),
+                "the jobs page lists what ran",
+            ),
+        );
+    }
+    let stopped = a.stop_batch(batch, "a viewer");
+    Json(serde_json::json!({ "batch": batch, "stopped": stopped })).into_response()
+}
+
 /// feat-stacks-7 before the press: the CLI line and what the press would
 /// do, read from the stack's manifest only (no secrets, no downloads).
 async fn preview(
@@ -1750,9 +1939,22 @@ async fn preview(
     Json(out).into_response()
 }
 
+/// dashboard-latest: the tag the form sent, when it names one — empty and
+/// the literal "latest" (the dropdown's top option, the back-compat value
+/// of a driven `ui type act-tag latest`) both mean "resolve it", so neither
+/// is a given tag.
+fn given_tag(args: &ActionArgs) -> Option<&str> {
+    args.tag
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty() && *t != crate::core::releaseoptions::LATEST)
+}
+
 fn preview_line(a: &Actions, req: &ActionRequest, typed: bool) -> Result<String, String> {
     // The lines that name more than the command carries, without a
-    // download: the tag as typed ("latest" when empty), apply's flags.
+    // download: apply's flags, and (dashboard-latest) the tag —
+    // `preview_of` has already resolved "latest"/empty to the concrete tag
+    // before this runs, so the CLI line never shows the word "latest".
     let tag = || {
         req.args
             .tag
@@ -1841,6 +2043,36 @@ async fn rollback_options(State(a): State<Actions>, UrlPath(stack): UrlPath<Stri
     }
 }
 
+#[derive(Deserialize)]
+struct ReleasesQuery {
+    unit: Option<String>,
+}
+
+/// dashboard-latest: the "release tag" dropdown's options.
+async fn releases(
+    State(a): State<Actions>,
+    UrlPath(stack): UrlPath<String>,
+    Query(q): Query<ReleasesQuery>,
+) -> Response {
+    match a.release_options(&stack, q.unit.as_deref()).await {
+        Ok(v) => Json(v).into_response(),
+        Err(r) => refusal(StatusCode::BAD_REQUEST, r),
+    }
+}
+
+#[derive(Deserialize)]
+struct OutcomeQuery {
+    op: String,
+    since: i64,
+}
+
+/// arch-self: a job that restarted the dashboard, read back from the
+/// host's history by the tab that started it (design in the module doc of
+/// `core::actions_progress`).
+async fn outcome(State(a): State<Actions>, Query(q): Query<OutcomeQuery>) -> Json<Outcome> {
+    Json(a.outcome_since(&q.op, q.since).await)
+}
+
 /// Mounted with `dashboard_routes`: the login and both locks stand before
 /// every one of them.
 pub fn router(actions: Actions) -> Router {
@@ -1848,12 +2080,15 @@ pub fn router(actions: Actions) -> Router {
         .route("/data/actions/catalog", get(catalog))
         .route("/data/actions/jobs", get(jobs))
         .route("/data/actions/batch", post(batch))
+        .route("/data/actions/batch/{batch}/stop", post(stop_batch))
         .route(
             "/data/actions/{stack}/rollback-options",
             get(rollback_options),
         )
+        .route("/data/actions/{stack}/releases", get(releases))
         .route("/data/actions/{stack}/{action}", post(start))
         .route("/data/actions/{stack}/{action}/preview", post(preview))
+        .route("/data/actions/outcome", get(outcome))
         .with_state(actions)
 }
 
@@ -1909,7 +2144,6 @@ pub fn mount(
     let shared_for_watch = shared.clone();
     let watched: super::watch::Watched = Default::default();
     app.dashboard_routes(super::watch::router(watched.clone()));
-    let watch_via = cfg.watch_via.clone();
     let actions = Actions::start(ActionsDeps {
         host: host.clone(),
         publish: publish.clone(),
@@ -1918,6 +2152,12 @@ pub fn mount(
         notify: notify.clone(),
         clock: clock.clone(),
         timeout: cfg.action_timeout(),
+    });
+    actions.set_limits(cfg.keep_jobs, cfg.history_window_s);
+    notify.set_limits(super::actions_notify::NotifyLimits {
+        keep: cfg.notify_keep,
+        snooze_max_s: cfg.notify_snooze_max_s,
+        digest_late_s: cfg.notify_digest_late_s,
     });
     let scheduler = super::scheduler::Scheduler::load(
         cfg.schedules_file(),
@@ -1949,6 +2189,7 @@ pub fn mount(
         announce: Duration::from_millis(cfg.live_announce_ms),
         max_pause: Duration::from_secs(cfg.live_max_pause_s),
     });
+    driver.set_limits(cfg.drive_idle_s, cfg.drive_release_after_job_s);
     app.dashboard_routes(super::drive::router(driver.clone()));
     #[cfg(feature = "demo-host")]
     if demo_host {
@@ -1959,23 +2200,28 @@ pub fn mount(
     // host's log stream, and the read routes the TUI and CLI had alone.
     let releases: Arc<dyn super::releases::Releases> = Arc::new(super::releases::GitHub::new());
     actions.set_releases(releases.clone());
-    let hostlog = super::hostlog::HostLog::new(publish.clone(), clock.clone());
+    let hostlog =
+        super::hostlog::HostLog::with_ring(publish.clone(), clock.clone(), cfg.hostlog_ring);
     app.dashboard_routes(super::hostlog::router(hostlog.clone()));
-    app.dashboard_routes(super::parity::router(super::parity::ParityCtx::new(
-        host.clone(),
-        shared_for_parity.clone(),
-        actions.clone(),
-        files,
-        cfg.repo.clone(),
-        cfg.scratch_dir(),
-        publish.clone(),
-    )));
+    app.dashboard_routes(super::parity::router(
+        super::parity::ParityCtx::with_drift_reuse(
+            host.clone(),
+            shared_for_parity.clone(),
+            actions.clone(),
+            files,
+            cfg.repo.clone(),
+            cfg.scratch_dir(),
+            publish.clone(),
+            cfg.drift_reuse_s,
+        ),
+    ));
     app.dashboard_routes(router(actions.clone()));
     app.dashboard_routes(super::actions_notify::router(notify.clone()));
     app.dashboard_routes(super::scheduler::router(scheduler.clone()));
     let (tick, poll) = (cfg.tick(), Duration::from_secs(cfg.incidents_poll_s));
     let host_notices_poll = Duration::from_secs(cfg.host_notices_poll_s);
     let actions_for_notices = actions.clone();
+    let actions_for_watch = actions.clone();
     let job_of: Arc<dyn Fn(u64) -> Option<u64> + Send + Sync> =
         Arc::new(move |req| actions_for_notices.job_for_req(req));
     let digest_host = host.clone();
@@ -2020,7 +2266,7 @@ pub fn mount(
                 releases,
                 shared_for_parity,
                 live_for_parity,
-                super::releases::WATCH_EVERY,
+                Duration::from_secs(cfg.releases_watch_every_s),
             );
         }
         super::actions_notify::spawn_host_notice_poll(
@@ -2034,8 +2280,8 @@ pub fn mount(
             host.clone(),
             shared_for_watch,
             notify.clone(),
-            watch_via,
             watched,
+            actions_for_watch,
         );
         super::actions_notify::spawn_incident_poll(host, notify, poll);
     });

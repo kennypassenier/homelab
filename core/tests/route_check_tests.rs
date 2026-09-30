@@ -272,6 +272,9 @@ fn the_full_round_carries_the_route_owner_check() {
         1_789_704_000,
         homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
         GrowthLimits::default(),
+        None,
+        homelab_core::ops::fleetcheck::PATCH_THRESHOLD_S,
+        homelab_core::ops::fleetcheck::HOST_META_MAX_AGE_S,
     );
     assert!(
         findings.iter().any(|f| f.subject.contains("manual-x.yml")),

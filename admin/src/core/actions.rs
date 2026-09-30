@@ -86,6 +86,11 @@ pub enum ActionKind {
     /// Host-wide: the whole stacks directory against the host (ask-8,
     /// dash-apply): deploy what changed, destroy only what was typed.
     Apply,
+    /// Owner decision 2026-09-30 (item 2): host-wide, "Save and restart
+    /// the host" on the host-settings form and its own dashboard action —
+    /// restarts `homelab-host.service` so a `host.toml` change marked
+    /// `Apply::Restart` takes effect without a second host update.
+    RestartHost,
 }
 
 /// What the shell has to read before the command can be built.
@@ -197,6 +202,7 @@ impl ActionKind {
         ActionKind::AnswerCheck,
         ActionKind::InstallNative,
         ActionKind::Apply,
+        ActionKind::RestartHost,
     ];
 
     /// The name in a URL: `deploy`, `backup-native`, ...
@@ -232,6 +238,7 @@ impl ActionKind {
             AnswerCheck => "answer-check",
             InstallNative => "install-native",
             Apply => "apply",
+            RestartHost => "restart-host",
         }
     }
 
@@ -253,6 +260,7 @@ impl ActionKind {
                 | UpdateHost
                 | AnswerCheck
                 | Apply
+                | RestartHost
         )
     }
 
@@ -340,6 +348,7 @@ impl ActionKind {
             AnswerCheck => "Answer a manual check",
             InstallNative => "Install a release",
             Apply => "Apply the repository",
+            RestartHost => "Restart the host",
         }
     }
 
@@ -376,6 +385,7 @@ impl ActionKind {
             AnswerCheck => "record the answer to a manual check: ok, not ok, or a not ok accepted for some days with its reason",
             InstallNative => "install a chosen release of a native service: the host downloads it, checks its signature and checksum, and installs it with an armed rollback (the latest release when no tag is named)",
             Apply => "deploy every stack whose files differ from what the host applied; a stack whose directory is gone is destroyed only when its name is typed",
+            RestartHost => "restarts the host daemon; running jobs are refused while a job runs",
         }
     }
 
@@ -383,7 +393,9 @@ impl ActionKind {
     pub fn scope(self) -> Scope {
         use ActionKind::*;
         match self {
-            PruneOrphans | Destroy | Forget | Wipe | Exec | UpdateHost | Apply => Scope::All,
+            PruneOrphans | Destroy | Forget | Wipe | Exec | UpdateHost | Apply | RestartHost => {
+                Scope::All
+            }
             _ => Scope::Operate,
         }
     }
@@ -1015,6 +1027,7 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
             out
         }
         (Patch, _) => vec![Command::PatchFleet],
+        (RestartHost, _) => vec![Command::RestartHost],
         (ZfsReplicate, _) => vec![Command::ZfsReplicate],
         (BackupHostMeta, _) => vec![Command::BackupHostMeta],
         (BackupDevices, _) => vec![Command::BackupDevices],

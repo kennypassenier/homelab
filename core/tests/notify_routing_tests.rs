@@ -6,9 +6,9 @@
 use homelab_core::error::OperatorError;
 use homelab_core::notify::{
     click_url, explain_event, explain_fleet_check, explain_op, next_seq, notices_after, op_kind,
-    op_stack, parse_notices, prune_notices, push_payload, push_short, urgency, Event, HostNotice,
-    OpFacts, OpKind, BACKUP_OPS, DEPLOY_OPS, DISK_ALERTS, PIPELINE_ALERTS, SERVICE_DOWN_ALERTS,
-    UPDATE_OPS,
+    op_stack, parse_notices, prune_notices, push_payload, push_short, push_status_short, urgency,
+    Event, HostNotice, OpFacts, OpKind, BACKUP_OPS, DEPLOY_OPS, DISK_ALERTS, PIPELINE_ALERTS,
+    SERVICE_DOWN_ALERTS, UPDATE_OPS,
 };
 use homelab_core::ops::fleetcheck::{Finding, Severity};
 
@@ -118,6 +118,65 @@ fn notify_routing_the_urgent_alerts_are_an_explicit_list() {
         12
     );
     assert!(!BACKUP_OPS.is_empty() && !UPDATE_OPS.is_empty() && !DEPLOY_OPS.is_empty());
+}
+
+/// Owner decision 2026-09-30 (item 3): the notifications table's push
+/// column is one of a handful of fixed words, never the full routing
+/// reason ("not sent: not urgent: it succeeded" was far too long).
+#[test]
+fn notify_routing_push_status_short_is_a_fixed_handful_of_words() {
+    assert_eq!(push_status_short(true, false, "whatever"), "Pushed");
+    // A push attempt's own outcome wins over any routing reason text.
+    assert_eq!(
+        push_status_short(true, true, "not urgent: it succeeded"),
+        "Pushed"
+    );
+    assert_eq!(push_status_short(false, true, "anything"), "Push failed");
+    assert_eq!(
+        push_status_short(
+            false,
+            false,
+            "not pushed again: the same failure went out within 20 h"
+        ),
+        "No push · repeat"
+    );
+    assert_eq!(
+        push_status_short(false, false, urgency(&op("deploy", true)).why),
+        "No push · succeeded"
+    );
+    assert_eq!(
+        push_status_short(
+            false,
+            false,
+            urgency(&Event::Op {
+                label: "deploy",
+                ok: false,
+                deferred: true
+            })
+            .why
+        ),
+        "No push · stood aside"
+    );
+    assert_eq!(
+        push_status_short(false, false, urgency(&Event::FleetCheck { broken: 0 }).why),
+        "No push · drift only"
+    );
+    assert_eq!(
+        push_status_short(
+            false,
+            false,
+            urgency(&Event::Boot { interrupted: false }).why
+        ),
+        "No push · resolved"
+    );
+    assert_eq!(
+        push_status_short(
+            false,
+            false,
+            urgency(&op("home-address-whitelist", false)).why
+        ),
+        "No push · not urgent"
+    );
 }
 
 /// Alertmanager routes by the same list: its matcher is written out in

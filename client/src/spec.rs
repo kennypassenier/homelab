@@ -429,7 +429,7 @@ fn spec_without_binaries(dir: &Path, notes: &mut Vec<String>) -> Result<DeploySp
     let manifest_path = dir.join("lxc-compose.yml");
     let raw = std::fs::read_to_string(&manifest_path)
         .map_err(|e| format!("cannot read {}: {}", manifest_path.display(), e))?;
-    let stack_file = parse_stack_file(&raw, &manifest_path)?;
+    let mut stack_file = parse_stack_file(&raw, &manifest_path)?;
 
     let mut files: Vec<FileBlob> = Vec::new();
     let mut env: BTreeMap<String, String> = BTreeMap::new();
@@ -479,6 +479,57 @@ fn spec_without_binaries(dir: &Path, notes: &mut Vec<String>) -> Result<DeploySp
             sc.url = addresses.get(app).cloned();
         }
     }
+
+    // tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): each
+    // tile's plain probe address, so the firewall derivation and the
+    // dashboard's minute watch both reach it directly — never through
+    // Traefik (fix-89 closed that door for a measurement: a Host-header
+    // proxy hop answers for the front door, not the backend). An explicit
+    // `url` that already names this container's own address is used as
+    // written; otherwise the tile's host (its `url`'s host, or the tile's
+    // own key when it has no `url`) is looked up in this stack's own
+    // declared route files. Neither: the tile carries no probe and is not
+    // watched — said here once, rather than discovered later as a silent
+    // gap.
+    let own_ip = stack_file
+        .manifest
+        .network
+        .ip
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .to_string();
+    let route_contents: Vec<String> = declared_routes(dir, &stack_file)?
+        .into_iter()
+        .map(|d| d.decl.content)
+        .collect();
+    for (host, t) in stack_file.manifest.tiles.iter_mut() {
+        let url = t
+            .url
+            .clone()
+            .unwrap_or_else(|| format!("https://{}/", host));
+        let url_host = url
+            .split_once("://")
+            .map(|(_, rest)| rest)
+            .and_then(|rest| rest.split(['/', '?', '#']).next())
+            .map(|authority| authority.rsplit_once(':').map_or(authority, |(h, _)| h))
+            .unwrap_or_default();
+        if url_host == own_ip {
+            t.probe = Some(url);
+            continue;
+        }
+        t.probe = route_contents
+            .iter()
+            .find_map(|c| crate::routes::backend_for_host(c, url_host));
+        if t.probe.is_none() {
+            notes.push(format!(
+                "tile {}: no route in stacks/{}/traefik-routes.yml forwards {} to a backend — \
+                 not watched",
+                host, stack_file.manifest.stack_name, url_host
+            ));
+        }
+    }
+
     for d in declared_routes(dir, &stack_file)? {
         let route = GatewayRoute {
             gateway_vmid: d.gateway_vmid,

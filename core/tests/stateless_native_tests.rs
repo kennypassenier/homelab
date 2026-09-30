@@ -94,6 +94,7 @@ async fn a_stateless_unit_is_not_backed_up_and_that_is_not_a_failure() {
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,
+        tile_watch_source: None,
     };
     let r = backup_native(&ctx, &unit("drillsvc", true), &BackupCfg::default()).await;
     assert!(r.ok, "{:?}", r.error);

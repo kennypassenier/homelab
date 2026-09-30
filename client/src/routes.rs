@@ -85,6 +85,46 @@ pub fn service_addresses(
     Ok(out)
 }
 
+/// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
+/// backend `host.kp-soft.dev` reaches — the first `servers[].url` of the
+/// service whichever router names `host` in a `Host(...)` rule forwards to
+/// (case-insensitive). None when no router in `content` names `host`, or
+/// its service has no server url; the caller (client/src/spec.rs) then has
+/// no probe for that tile and says so.
+pub fn backend_for_host(content: &str, host: &str) -> Option<String> {
+    let doc = parse(content).ok()?;
+    let host = host.to_ascii_lowercase();
+    let routers = doc.get("http")?.get("routers")?.as_mapping()?;
+    for (_, router) in routers {
+        let Some(rule) = router.get("rule").and_then(|r| r.as_str()) else {
+            continue;
+        };
+        if !rule_hosts(rule).contains(&host) {
+            continue;
+        }
+        let Some(service) = router.get("service").and_then(|s| s.as_str()) else {
+            continue;
+        };
+        let service = service.split('@').next().unwrap_or(service);
+        let server_url = doc
+            .get("http")
+            .and_then(|p| p.get("services"))
+            .and_then(|s| s.get(service))
+            .and_then(|s| s.get("loadBalancer"))
+            .and_then(|s| s.get("servers"))
+            .and_then(|s| s.as_sequence())
+            .and_then(|servers| {
+                servers
+                    .iter()
+                    .find_map(|s| s.get("url").and_then(|u| u.as_str()))
+            });
+        if let Some(url) = server_url {
+            return Some(url.to_string());
+        }
+    }
+    None
+}
+
 /// Every backend a route file forwards to: each `url` or `address` in a
 /// `servers` list, exactly as the file writes it.
 pub fn backends(content: &str) -> Result<Vec<String>, String> {

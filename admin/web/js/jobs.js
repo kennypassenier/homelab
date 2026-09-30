@@ -74,6 +74,77 @@ export function upsertJob(jobs, view) {
 }
 
 /**
+ * arch-self: the job's `subject` in the host's history, as the host writes
+ * it (`{action}-{stack}`, e.g. `install-native-admin`). The route that
+ * reads its outcome back takes this as `op`.
+ * @param {Job} j
+ */
+export const outcomeSubject = (j) => `${j.action}-${j.stack}`;
+
+/**
+ * arch-self: jobs whose action restarts the dashboard, still held here as
+ * queued or running. The dashboard's own memory of how they ended did not
+ * survive the restart; these are the ones a reconnect must ask the host's
+ * history about.
+ * @param {Job[]} jobs
+ * @returns {Job[]}
+ */
+export const jobsAwaitingOutcome = (jobs) =>
+  jobs.filter((j) => j.restarts_dashboard && !finished(j.state));
+
+/**
+ * @typedef {{found: boolean, ok: boolean, steps: number, end: number}} Outcome
+ */
+
+/**
+ * A held job (arch-self) patched with what `/data/actions/outcome` answered:
+ * done/failed with the real final step count when the host's history has
+ * it, otherwise "unknown" with a message saying where the real outcome is.
+ * Pure, so the polling loop that calls it (act.js) stays a thin shell.
+ * @param {Job[]} jobs
+ * @param {number} jobId
+ * @param {Outcome} out
+ * @returns {Job[]}
+ */
+export function applyOutcome(jobs, jobId, out) {
+  return jobs.map((j) => {
+    if (j.job !== jobId) return j;
+    if (out.found) {
+      const steps = out.steps || null;
+      return {
+        ...j,
+        state: out.ok ? "done" : "failed",
+        finished_at: out.end,
+        message:
+          j.message ??
+          "the dashboard restarted during this job; this outcome comes from the host's jobs history",
+        progress: steps
+          ? {
+              op: j.progress?.op ?? outcomeSubject(j),
+              step: j.progress?.step ?? "",
+              n: steps,
+              m: steps,
+              finished: true,
+              changed: j.progress?.changed ?? false,
+              expected_step_s: null,
+              expected_total_s: null,
+              expected_remaining_s: null,
+              elapsed_s: j.progress?.elapsed_s ?? 0,
+              runs: j.progress?.runs ?? 0,
+            }
+          : j.progress,
+      };
+    }
+    return {
+      ...j,
+      state: "unknown",
+      message:
+        "the dashboard restarted during this job; the jobs history on the host has the outcome",
+    };
+  });
+}
+
+/**
  * An `action_progress` event laid on its job.
  * @param {Job[]} jobs
  * @param {{job: number, progress: Progress}} ev

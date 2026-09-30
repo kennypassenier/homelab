@@ -239,22 +239,22 @@ generated_dashboards_command: |
 tiles:
   grafana.kp-soft.dev:
     name: "Grafana"
-    group: "Infrastructuur"
+    group: "Infrastructure"
     order: 502
-    description: "Grafieken"
+    description: "Charts"
   prom.kp-soft.dev:
     name: "Prometheus"
-    group: "Infrastructuur"
+    group: "Infrastructure"
     order: 506
-    description: "Metingen"
+    description: "Metrics"
   alerts.kp-soft.dev:
     name: "Alertmanager"
-    group: "Infrastructuur"
+    group: "Infrastructure"
     order: 507
-    description: "Meldingen"
+    description: "Alerts"
   loki-explore:
     name: "Loki"
-    group: "Infrastructuur"
+    group: "Infrastructure"
     order: 508
-    description: "Logboeken"
+    description: "Logs"
     url: "https://grafana.kp-soft.dev/explore"

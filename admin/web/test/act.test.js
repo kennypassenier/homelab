@@ -26,12 +26,15 @@ import {
 } from "../js/commands.js";
 import {
   addLog,
+  applyOutcome,
   applyProgress,
   batchView,
   jobPanel,
   jobRows,
+  jobsAwaitingOutcome,
   logLine,
   outcome,
+  outcomeSubject,
   percent,
   remaining,
   stepText,
@@ -214,6 +217,39 @@ test("the checks name the field and say what to do", () => {
     { value: "", label: "Every app" },
     { value: "sonarr", label: "sonarr" },
   ]);
+});
+
+// dashboard-latest: the "release tag" dropdown of update-host and
+// install-native — a server-built list ("latest" first, an unsigned
+// release disabled), never a free-text tag.
+test("the release tag is a dropdown the server builds, latest by default", () => {
+  const uh = actionForm(
+    entry("update-host", { target: "host", args: ["tag"] }),
+    ctx,
+  );
+  const tagField = uh.steps
+    .flatMap((s) => s.fields)
+    .find((f) => f.name === "tag");
+  assert.equal(tagField?.kind, "choice");
+  assert.equal(tagField?.source, "releases");
+  // The dashboard's server sends the choices ready-made; fieldChoices just
+  // passes them through, with no synthetic empty/"Choose…" row prepended.
+  const releases = [
+    { value: "latest", label: "latest (now v3.63.0)", disabled: false },
+    { value: "v3.63.0", label: "v3.63.0", disabled: false },
+    { value: "v3.62.2", label: "v3.62.2 (unsigned)", disabled: true },
+  ];
+  assert.deepEqual(
+    fieldChoices(/** @type {*} */ (tagField), { releases }),
+    releases,
+  );
+  assert.deepEqual(fieldChoices(/** @type {*} */ (tagField), {}), []);
+  // A fresh form starts on "latest", not empty — the dropdown's top row.
+  const v = initialValues(uh);
+  assert.equal(v.tag, "latest");
+  // The body sends "latest" through unchanged; the server resolves it to
+  // the concrete tag for the preview and the job (never shown here).
+  assert.deepEqual(buildArgs(uh, v), { tag: "latest" });
 });
 
 test("a batch asks each typed name and leaves out what differs per stack", () => {
@@ -447,6 +483,78 @@ test("jobs merge newest first, progress survives a later job view", () => {
     [l.time, l.source, l.severity],
     ["00:00:00", "host", "warning"],
   );
+});
+
+// arch-self: install-native-admin restarts the dashboard mid-job; the tab
+// that started it must not be left saying "running" forever once the host
+// finished it.
+test("a job that restarted the dashboard is read back from the host's history", () => {
+  const restarting = job({
+    job: 9,
+    action: "install-native",
+    stack: "admin",
+    state: "running",
+    started_at: 1000,
+    restarts_dashboard: true,
+    progress: prog({ n: 12, m: 22 }),
+  });
+  const other = job({ job: 10, restarts_dashboard: false, state: "running" });
+  const doneAlready = job({
+    job: 11,
+    state: "done",
+    restarts_dashboard: true,
+  });
+  const jobs = [restarting, other, doneAlready];
+  assert.equal(outcomeSubject(restarting), "install-native-admin");
+  // Only the still-running job that restarts the dashboard needs asking
+  // about; a normal job and one already finished do not.
+  assert.deepEqual(
+    jobsAwaitingOutcome(jobs).map((j) => j.job),
+    [9],
+  );
+
+  const found = applyOutcome(jobs, 9, {
+    found: true,
+    ok: true,
+    steps: 22,
+    end: 1500,
+  });
+  const patched = found.find((j) => j.job === 9);
+  assert.equal(patched?.state, "done");
+  assert.equal(patched?.finished_at, 1500);
+  assert.equal(patched && stepText(patched), "step 22/22");
+  assert.match(String(patched?.message), /host's jobs history/);
+  // A job unrelated to the poll, and one that was never awaiting one, are
+  // untouched.
+  assert.deepEqual(
+    found.find((j) => j.job === 10),
+    other,
+  );
+  assert.deepEqual(
+    found.find((j) => j.job === 11),
+    doneAlready,
+  );
+
+  const failed = applyOutcome(jobs, 9, {
+    found: true,
+    ok: false,
+    steps: 22,
+    end: 1500,
+  });
+  assert.equal(failed.find((j) => j.job === 9)?.state, "failed");
+
+  // Nothing in the host's history within the poll window: shown as
+  // "unknown", pointing at where the real outcome lives.
+  const unknown = applyOutcome(jobs, 9, {
+    found: false,
+    ok: false,
+    steps: 0,
+    end: 0,
+  });
+  const u = unknown.find((j) => j.job === 9);
+  assert.equal(u?.state, "unknown");
+  assert.match(String(u?.message), /jobs history on the host/);
+  assert.deepEqual(jobsAwaitingOutcome(unknown), []);
 });
 
 test("a batch counts its jobs", () => {

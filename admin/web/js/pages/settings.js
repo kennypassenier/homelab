@@ -29,6 +29,7 @@ import {
 import { markErrors } from "../editui.js";
 import { driven, register } from "../drivehooks.js";
 import { formatTime } from "../format.js";
+import { mountJobPanel } from "../jobpanel.js";
 import { listen } from "../store.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 
@@ -385,6 +386,13 @@ export function mount(root) {
   const openReview = () => {
     if (!page) return;
     const body = hostSettingsBody(page.sha256, changes, confirmed);
+    // Owner decision 2026-09-30 (item 2): a staged change whose key only
+    // takes effect at the host's next start means one press both saves
+    // and restarts homelab-host.service, so the change is in force at
+    // once instead of waiting for the next unrelated restart.
+    const restartNeeded = [...changes.values()].some(
+      ({ field }) => field.apply === "restart",
+    );
     const list = h(
       "ul",
       { class: "batch-preview" },
@@ -398,6 +406,7 @@ export function mount(root) {
       ),
     );
     const runError = h("div");
+    const jobBox = h("div");
     const save = h(
       "button",
       {
@@ -405,21 +414,27 @@ export function mount(root) {
         class: "kp-button kp-button--primary",
         id: "settings-write",
       },
-      "Write host.toml",
+      restartNeeded ? "Save and restart the host" : "Save",
     );
     const cancel = h("button", { type: "button", class: "kp-button" }, "Back");
     const d = openDialog({
-      title: "Write host.toml",
-      description:
-        "The host checks the change like a start and refuses it whole if anything is wrong, or if host.toml changed since this page read it.",
+      title: restartNeeded
+        ? "Write host.toml and restart the host"
+        : "Write host.toml",
+      description: restartNeeded
+        ? "The host checks the change like a start and refuses it whole if anything is wrong, or if host.toml changed since this page read it. At least one of these keys only takes effect at the host's next start, so this also restarts homelab-host.service (refused while another job runs) and waits for it to answer again."
+        : "The host checks the change like a start and refuses it whole if anything is wrong, or if host.toml changed since this page read it.",
       id: "settings-review",
       wide: true,
       body: [
         list,
         runError,
+        jobBox,
         h("div", { class: "kp-dialog__actions" }, cancel, save),
       ],
     });
+    /** @type {() => void} */
+    let stopPanel = () => {};
     const unregisterReview = register("host-review", {
       dialog: d.dialog,
       save: () => save,
@@ -428,10 +443,14 @@ export function mount(root) {
         runError.replaceChildren(...(e ? [refusalCallout(e)] : [])),
       close: () => d.close(),
     });
-    d.closed.then(unregisterReview);
+    d.closed.then(() => {
+      unregisterReview();
+      stopPanel();
+    });
     cancel.addEventListener("click", () => d.close());
     save.addEventListener("click", async () => {
-      // Live view: host.toml is written on the dashboard's server, once.
+      // Live view: host.toml is written on the dashboard's server, once,
+      // and the restart follow-up (below) is queued there too.
       if (driven()) return;
       save.disabled = true;
       const r = await send(
@@ -440,14 +459,30 @@ export function mount(root) {
         body,
         "the host settings",
       );
-      save.disabled = false;
       if (!r.ok) {
+        save.disabled = false;
         runError.replaceChildren(refusalCallout(r.error));
         await refusalAlarm(r.error, r.status);
         return;
       }
       saved(r.body);
-      d.close();
+      if (r.body.follow?.refused) {
+        runError.replaceChildren(
+          refusalCallout(r.body.follow.refused, "warning", "Not restarted"),
+        );
+        save.disabled = false;
+        return;
+      }
+      const job = r.body.follow?.job;
+      if (typeof job !== "number") {
+        d.close();
+        return;
+      }
+      cancel.hidden = true;
+      save.hidden = true;
+      const panel = mountJobPanel(job, { compact: true });
+      stopPanel = panel.stop;
+      jobBox.replaceChildren(panel.element);
     });
   };
 
@@ -456,8 +491,11 @@ export function mount(root) {
   const saved = (answer) => {
     const s = answer.saved ?? {};
     const later = /** @type {string[]} */ (s.restart ?? []);
+    const restarting = typeof answer.follow?.job === "number";
     notify(
-      `host.toml written.${later.length ? ` At the host's next start: ${later.join(", ")}.` : " In force now."}`,
+      restarting
+        ? "host.toml written; restarting homelab-host.service…"
+        : `host.toml written.${later.length ? ` At the host's next start: ${later.join(", ")}.` : " In force now."}`,
       "success",
     );
     changes.clear();

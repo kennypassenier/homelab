@@ -1,3 +1,5 @@
+import { setParams } from "./urlstate.js";
+
 // The client-side router's pure half (arch-frontend): a path in, a page
 // out. chassis answers index.html for every extensionless path under /app/.
 // feat-overview-8: every page and every stack tab has its own path; what a
@@ -19,26 +21,40 @@ export const STACK_TABS = /** @type {const} */ ([
 /** @typedef {(typeof STACK_TABS)[number]["tab"]} StackTab */
 
 /**
- * @typedef {{page: "overview"} | {page: "start"} | {page: "charts"} | {page: "traffic"} | {page: "host"} |
+ * @typedef {{page: "overview"} | {page: "home"} | {page: "health"} | {page: "metrics"} | {page: "host"} |
  *   {page: "stack", name: string, tab: StackTab} |
- *   {page: "activity"} | {page: "timeline"} | {page: "checks"} |
- *   {page: "doctor"} | {page: "jobs"} | {page: "schedules"} |
+ *   {page: "activity"} | {page: "jobs"} | {page: "schedules"} |
  *   {page: "notifications"} | {page: "firewall"} | {page: "settings"} |
- *   {page: "today"} | {page: "log"} | {page: "shell"} | {page: "apply"} |
- *   {page: "presets"} | {page: "notfound", path: string}} Route
+ *   {page: "log"} | {page: "shell"} | {page: "apply"} |
+ *   {page: "presets"} |
+ *   {page: "start"} | {page: "today"} | {page: "doctor"} | {page: "checks"} |
+ *   {page: "charts"} | {page: "traffic"} | {page: "timeline"} |
+ *   {page: "notfound", path: string}} Route
+ * The last group (start, today, doctor, checks, charts, traffic, timeline)
+ * are 2026-09-30's retired addresses: `route()` still names them, so an old
+ * link or a Live view script naming one is recognised, but `main.js`
+ * redirects every one of them before it ever mounts a page for them (see
+ * `redirectFor`).
  */
 
 /**
  * The navigation bar, in order. `group` puts a page in a dropdown of the bar
  * (Kenny, 2026-09-29: thirteen top-level links wrapped onto a second row at
- * 1280 px); a page without one is a top-level link.
+ * 1280 px); a page without one is a top-level link. 2026-09-30: Home,
+ * Overview, Health, Metrics, Activity first (Kenny's order), each of the
+ * last three now one page instead of a dropdown of them.
  */
 export const NAV = /** @type {const} */ ([
-  // replace-homepage (2026-09-30): the tiles the stacks declare.
-  { page: "start", href: "/app/start", label: "Start" },
+  // replace-homepage: the tiles the stacks declare, renamed from Start.
+  { page: "home", href: "/app/home", label: "Home" },
   { page: "overview", href: "/app/", label: "Overview" },
-  // TUI parity: `homelab today`, the morning question in one answer.
-  { page: "today", href: "/app/today", label: "Today" },
+  // feat-health-1: Today, Doctor and Checks, merged.
+  { page: "health", href: "/app/health", label: "Health" },
+  // feat-metrics-1 (replace-grafana + replace-goaccess): Charts and
+  // Traffic, merged.
+  { page: "metrics", href: "/app/metrics", label: "Metrics" },
+  // feat-activity-1: Activity and Timeline, merged.
+  { page: "activity", href: "/app/activity", label: "Activity" },
   { page: "host", href: "/app/host", label: "Host" },
   // TUI parity: LOG_STREAM, every host operation whoever started it.
   { page: "log", href: "/app/log", label: "Live log", group: "Operations" },
@@ -51,24 +67,6 @@ export const NAV = /** @type {const} */ ([
     label: "Schedules",
     group: "Operations",
   },
-  {
-    page: "activity",
-    href: "/app/activity",
-    label: "Activity",
-    group: "History",
-  },
-  {
-    page: "timeline",
-    href: "/app/timeline",
-    label: "Timeline",
-    group: "History",
-  },
-  { page: "checks", href: "/app/checks", label: "Checks", group: "Health" },
-  { page: "doctor", href: "/app/doctor", label: "Doctor", group: "Health" },
-  // replace-grafana (2026-09-30).
-  { page: "charts", href: "/app/charts", label: "Charts", group: "Health" },
-  // replace-goaccess (2026-09-30).
-  { page: "traffic", href: "/app/traffic", label: "Traffic", group: "Health" },
   {
     page: "firewall",
     href: "/app/firewall",
@@ -99,25 +97,61 @@ export const OTHER_PAGES = /** @type {const} */ ([
 /** @type {Record<string, Route>} */
 const FIXED = {
   "": { page: "overview" },
-  start: { page: "start" },
-  charts: { page: "charts" },
-  traffic: { page: "traffic" },
+  home: { page: "home" },
+  health: { page: "health" },
+  metrics: { page: "metrics" },
   host: { page: "host" },
   activity: { page: "activity" },
-  timeline: { page: "timeline" },
-  checks: { page: "checks" },
-  doctor: { page: "doctor" },
   jobs: { page: "jobs" },
   schedules: { page: "schedules" },
   notifications: { page: "notifications" },
   firewall: { page: "firewall" },
   settings: { page: "settings" },
-  today: { page: "today" },
   log: { page: "log" },
   shell: { page: "shell" },
   apply: { page: "apply" },
   presets: { page: "presets" },
+  // 2026-09-30: retired addresses, kept parseable for old links and for
+  // Live view's known_page (core::drive checks formspec.json's page list,
+  // not this Route); `redirectFor` sends every one of them on to its new
+  // home before main.js ever mounts a page for them.
+  start: { page: "start" },
+  today: { page: "today" },
+  doctor: { page: "doctor" },
+  checks: { page: "checks" },
+  charts: { page: "charts" },
+  traffic: { page: "traffic" },
+  timeline: { page: "timeline" },
 };
+
+/**
+ * The retired path's replacement, its query string kept and extended so
+ * the merged page opens on the right block or tab; `null` for a path that
+ * is not retired.
+ * @param {Route} r
+ * @param {string} search e.g. location.search
+ * @returns {string | null}
+ */
+export function redirectFor(r, search) {
+  switch (r.page) {
+    case "start":
+      return `/app/home${search}`;
+    case "today":
+      return `/app/health${setParams(search, { block: "today" })}`;
+    case "doctor":
+      return `/app/health${setParams(search, { block: "doctor" })}`;
+    case "checks":
+      return `/app/health${setParams(search, { block: "checks" })}`;
+    case "charts":
+      return `/app/metrics${setParams(search, { tab: "system" })}`;
+    case "traffic":
+      return `/app/metrics${setParams(search, { tab: "traffic" })}`;
+    case "timeline":
+      return `/app/activity${setParams(search, { view: "timeline" })}`;
+    default:
+      return null;
+  }
+}
 
 /**
  * @param {string} pathname a path, with or without a query string
@@ -209,5 +243,5 @@ export function pageTitle(r) {
   }
   if (r.page === "notfound") return "Homelab · Not found";
   const n = [...NAV, ...OTHER_PAGES].find((x) => x.page === r.page);
-  return `Homelab · ${n?.label}`;
+  return `Homelab · ${n?.label ?? r.page}`;
 }

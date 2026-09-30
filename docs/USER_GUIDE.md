@@ -601,7 +601,10 @@ no second way in: the steps travel on the same TLS line as every other verb.
 |---|---|
 | `homelab ui goto <path>` | shows a page: `/app/stacks/media`, `stacks/media/logs`, `/app/jobs` |
 | `homelab ui open <action> [stack]` | opens an action's dialog (`deploy media`; a host-wide action such as `patch` takes no stack) |
-| `homelab ui open <edit form> …` | opens an edit form (below): `settings <stack>`, `raw <stack>`, `add-app <stack>`, `firewall <stack>`, `new-stack`, `host-settings`, `batch <action> <stack>,<stack>`, `rollback <stack>`, `import` |
+| `homelab ui open <edit form> …` | opens an edit form (below): `settings <stack>`, `raw <stack>`, `add-app <stack>`, `firewall <stack>`, `new-stack`, `host-settings`, `batch <action> [<stack>,<stack>]`, `rollback <stack>`, `import` |
+| `homelab ui select <stack>,<stack>` | owner decision 2026-09-30: ticks those rows in the Overview page's fleet table, exactly as a click would (refused off the Overview page, or naming a stack the fleet has not) |
+| `homelab ui select none` | clears the fleet table's selection |
+| `homelab ui open batch <action>` | with no stacks named, opens the batch dialog from the current selection (`homelab ui select` first) instead of a named list — the same "Run on the selected…" a click would start; refused when nothing is selected |
 | `homelab ui type <field> <text>` | types into a text or number field of the open form, by the field's id (`act-snapshot`, `act-confirm`, `edit-memory-mb`, `rule-peer`) |
 | `homelab ui pick <field> <value>` | chooses one value of a choice field (`act-app`, `act-unit`, `act-commit`, `rule-proto`, `edit-follow`) |
 | `homelab ui check <field> on\|off` | ticks or unticks a check field (`act-force`, `act-skip-backup`, `fw-enabled`) |
@@ -664,12 +667,12 @@ repository and the host, on the same pages and dialogs a click uses:
 
 | `open` | What it is | Its steps, and the final press |
 |---|---|---|
-| `settings <stack>` | the Settings tab's form | `settings` (`edit-cores`, `edit-memory-mb`, …, `edit-image-<app>-<service>`) → `plan` → `commit` (`edit-subject`, `edit-note`, `edit-follow`); `confirm` commits and pushes, then queues the follow-up |
+| `settings <stack>` | the Settings tab's form | `settings` (`edit-cores`, `edit-memory-mb`, …, `edit-image-<app>-<service>`, and for each tile the stack declares `edit-tile-watch-<slug>`/`edit-tile-down-<slug>`) → `plan` → `commit` (`edit-subject`, `edit-note`, `edit-follow`); `confirm` commits and pushes, then queues the follow-up |
 | `raw <stack>` | the Settings tab's raw editor | `file` (`raw-file`, and `raw-text` with `edit`) → `plan` → `commit` |
 | `add-app <stack>` | "Add an app" | `app` (`add-app-preset`) → `plan` → `commit` |
 | `firewall <stack>` | the Firewall tab | `rules` (`fw-enabled`, `fw-policy-in`, `fw-policy-out`, `fw-management-open`, `fw-comment`, and `row …` with the rule dialog's `rule-dir`, `rule-action`, `rule-peer`, `rule-proto`, `rule-dport`, `rule-note`, `rule-comment`) → `plan` → `commit` |
 | `new-stack` | the new-stack wizard | `preset` → `identity` (`new-name`, `new-vmid`) → `size` → `data` (`new-nodata-<n>`) → `plan` (the commit's fields); `confirm` commits and pushes |
-| `host-settings` | the Settings page's host.toml | `keys` (`row edit <key>`, then `key-<key>` and, for a key that asks it, `key-<key>-confirm`; `press save`) → `review`; `confirm` writes host.toml. Needs a token of scope `all` |
+| `host-settings` | the Settings page's host.toml | `keys` (`row edit <key>`, then `key-<key>` and, for a key that asks it, `key-<key>-confirm`; `press save`) → `review`; `confirm` writes host.toml, and when any staged key only takes effect at the host's next start also queues `restart-host` (the review button then reads "Save and restart the host"; the queued job is refused if another job is already running). Needs a token of scope `all` |
 | `batch <action> <s1>,<s2>` | the fleet page's batch dialog | `review` (the action's shared fields, and `act-confirm-<stack>` per stack when it asks a typed name); `confirm` queues the batch |
 | `rollback <stack>` | the Roll back dialog | `choose` (`rollback-commit` or `rollback-unit`); `next` opens the deploy-commit or rollback-native dialog with it picked, as the row's button does |
 | `import` | the Import dialog (TUI parity) | `bundle` (`import-bundle`, `import-name`, `import-vmid`) → `plan` → `commit`; `confirm` commits and pushes the new stack |

@@ -175,7 +175,7 @@ pub struct PatchFact {
 /// the nightly `homelab patch` takes them, and on 2026-09-27 21:15 CT 116
 /// held 40 and CT 113 64 with everything working — the count is named in
 /// the finding, never the reason for it. Drift, not Broken: nothing is down.
-pub fn evaluate_patch_state(facts: &[PatchFact]) -> Vec<Finding> {
+pub fn evaluate_patch_state(facts: &[PatchFact], threshold_s: u64) -> Vec<Finding> {
     let days = |s: u64| s / 86_400;
     let mut out = Vec::new();
     for f in facts {
@@ -184,7 +184,7 @@ pub fn evaluate_patch_state(facts: &[PatchFact]) -> Vec<Finding> {
         };
         let subject = format!("{} ({})", f.vmid, f.hostname);
         if let Some(age) = f.reboot_required_age_s {
-            if age > PATCH_THRESHOLD_S {
+            if age > threshold_s {
                 out.push(Finding {
                     severity: Severity::Drift,
                     subject: subject.clone(),
@@ -199,7 +199,7 @@ pub fn evaluate_patch_state(facts: &[PatchFact]) -> Vec<Finding> {
             }
         }
         match f.unattended_stamp_age_s {
-            Some(age) if age > PATCH_THRESHOLD_S => out.push(Finding {
+            Some(age) if age > threshold_s => out.push(Finding {
                 severity: Severity::Drift,
                 subject: subject.clone(),
                 what: format!(
@@ -213,7 +213,7 @@ pub fn evaluate_patch_state(facts: &[PatchFact]) -> Vec<Finding> {
             // A container younger than the threshold has not had its week
             // yet (the first check after the 2026-09-28 rebuilds flagged
             // seven containers built that morning).
-            None if f.age_s.is_some_and(|a| a <= PATCH_THRESHOLD_S) => {}
+            None if f.age_s.is_some_and(|a| a <= threshold_s) => {}
             None => out.push(Finding {
                 severity: Severity::Drift,
                 subject,
@@ -251,20 +251,31 @@ pub fn evaluate_firewalls(
     state: &HostState,
     files: &[FirewallFact],
     boot: &[BootFact],
+    tile_watch_source: Option<&str>,
 ) -> Vec<Finding> {
     let mut out = Vec::new();
     let mut not_enabled: Vec<String> = Vec::new();
     for f in files {
         let path = crate::firewall::fw_path(f.vmid);
         let subject = format!("{} ({})", path, f.stack);
-        let decl = state
-            .stacks
-            .get(&f.stack)
-            .and_then(|s| s.manifest.as_ref())
-            .and_then(|m| m.firewall.as_ref());
+        let manifest = state.stacks.get(&f.stack).and_then(|s| s.manifest.as_ref());
+        let decl = manifest.and_then(|m| m.firewall.as_ref());
         match (decl, f.content.as_deref()) {
             (Some(d), content) if d.enabled => {
-                let want = crate::firewall::render(&f.stack, d);
+                // tile-watch: the fleet check must hold pve to the same
+                // declaration the deploy writes, derived rule included, or
+                // every rollout with a tile watch would report drift.
+                let effective = manifest
+                    .map(|m| {
+                        crate::firewall::with_tile_watch(
+                            d,
+                            &m.network.ip,
+                            &m.tiles,
+                            tile_watch_source.unwrap_or(""),
+                        )
+                    })
+                    .unwrap_or_else(|| d.clone());
+                let want = crate::firewall::render(&f.stack, &effective);
                 match content {
                     None => out.push(Finding {
                         severity: Severity::Drift,
@@ -906,8 +917,9 @@ pub fn nightly_report_due(
     last_fingerprint: &str,
     last_sent: u64,
     now: u64,
+    repeat_s: u64,
 ) -> bool {
-    fingerprint != last_fingerprint || now.saturating_sub(last_sent) >= NIGHTLY_REPORT_REPEAT_S
+    fingerprint != last_fingerprint || now.saturating_sub(last_sent) >= repeat_s
 }
 
 /// fix-147 (restore-check-failure, Kenny 2026-09-27, form "Keuzes helpers"):
@@ -948,12 +960,12 @@ pub const HOST_META_MAX_AGE_S: u64 = 48 * 3600;
 /// doctor line and no finding, so a host-meta backup that stopped was
 /// reported nowhere until the host was lost. A host that manages no stack
 /// yet is left alone: there is nothing of its own worth keeping.
-pub fn evaluate_host_meta(state: &HostState, now: u64) -> Vec<Finding> {
+pub fn evaluate_host_meta(state: &HostState, now: u64, max_age_s: u64) -> Vec<Finding> {
     if state.stacks.is_empty() {
         return Vec::new();
     }
     let age = now.saturating_sub(state.last_host_meta);
-    if state.last_host_meta != 0 && age <= HOST_META_MAX_AGE_S {
+    if state.last_host_meta != 0 && age <= max_age_s {
         return Vec::new();
     }
     vec![Finding {
@@ -1032,17 +1044,21 @@ pub fn render(findings: &[Finding]) -> String {
 }
 
 /// The whole comparison, as one pure function.
+#[allow(clippy::too_many_arguments)]
 pub fn evaluate(
     state: &HostState,
     live: &LiveFacts,
     now_unix: u64,
     backup_max_age_s: u64,
     growth_limits: GrowthLimits,
+    tile_watch_source: Option<&str>,
+    patch_threshold_s: u64,
+    host_meta_max_age_s: u64,
 ) -> Vec<Finding> {
     let mut out = Vec::new();
 
     // fix-150: updates standing still for longer than a week.
-    out.extend(evaluate_patch_state(&live.patch));
+    out.extend(evaluate_patch_state(&live.patch, patch_threshold_s));
 
     // F184: is the HOST itself short? Read once, so every per-container
     // remedy below can say something the machine can actually do.
@@ -1264,7 +1280,12 @@ pub fn evaluate(
     out.extend(evaluate_big_logs(&live.big_logs));
     out.extend(evaluate_owners(&live.owners));
     out.extend(evaluate_route_owners(state, &live.route_files));
-    out.extend(evaluate_firewalls(state, &live.firewalls, &live.boot));
+    out.extend(evaluate_firewalls(
+        state,
+        &live.firewalls,
+        &live.boot,
+        tile_watch_source,
+    ));
     out.extend(evaluate_coverage(&live.coverage));
     out.extend(evaluate_boot(state, &live.boot));
     out.extend(evaluate_watched_backups(&live.watched_backups));
@@ -1283,7 +1304,7 @@ pub fn evaluate(
         now_unix,
         crate::ops::restoredrill::DEFAULT_DRILL_INTERVAL_S,
     ));
-    out.extend(evaluate_host_meta(state, now_unix));
+    out.extend(evaluate_host_meta(state, now_unix, host_meta_max_age_s));
     out.extend(evaluate_restore_checks(state));
     // fix-96: the second copy and the rotating restic check.
     out.extend(crate::ops::secondcopy::evaluate_copies(

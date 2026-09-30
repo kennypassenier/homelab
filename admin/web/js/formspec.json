@@ -119,14 +119,15 @@
       "placeholder": "df -h"
     },
     "tag": {
-      "kind": "text",
+      "kind": "choice",
       "label": "Release tag",
-      "help": "A homelab release such as v3.63.0; empty: the latest release.",
+      "help": "The GitHub releases of this repository, newest first; an unsigned one (no SHA256SUMS.minisig yet) is listed but cannot be chosen.",
       "help_for": {
-        "install-native": "The service's release to install, e.g. v4.0.1; empty: its latest release."
+        "install-native": "The service's release to install, from its own repository's releases; an unsigned one cannot be chosen."
       },
       "required": false,
       "pattern": "tag",
+      "source": "releases",
       "placeholder": "latest"
     },
     "version": {
@@ -222,13 +223,12 @@
   },
   "pages": [
     "",
-    "today",
+    "home",
+    "health",
+    "metrics",
     "host",
     "log",
     "activity",
-    "timeline",
-    "checks",
-    "doctor",
     "jobs",
     "apply",
     "schedules",
@@ -236,10 +236,7 @@
     "firewall",
     "settings",
     "shell",
-    "presets",
-    "start",
-    "charts",
-    "traffic"
+    "presets"
   ],
   "stack_tabs": [
     "overview",
@@ -278,7 +275,8 @@
       "key_line": "One line.",
       "key_confirm": "Type {key} exactly.",
       "batch_confirm": "Type {stack} to confirm.",
-      "rollback_choose": "Choose a commit to deploy or a unit to roll back."
+      "rollback_choose": "Choose a commit to deploy or a unit to roll back.",
+      "tile_down_low": "{key}: down after ({down} s) must be at least check every ({watch} s)."
     },
     "no_touch": [100, 101, 102, 103],
     "follow": {
@@ -365,6 +363,30 @@
       "help": "The image reference in the app's compose file, e.g. name:1.2.3.",
       "required": true,
       "pattern": "[A-Za-z0-9._/:@\\-]{1,255}"
+    },
+    "tile_watch": {
+      "name": "tile_watch_every:{key}",
+      "id": "edit-tile-watch-{slug}",
+      "kind": "number",
+      "label": "Check every (seconds) · {key}",
+      "help": "How often this tile is probed. Blank uses the fleet default (host settings watch_interval_s, 60 s).",
+      "min": 10,
+      "max": 86400,
+      "unit": "s",
+      "placeholder": "60",
+      "required": false
+    },
+    "tile_down": {
+      "name": "tile_down_after:{key}",
+      "id": "edit-tile-down-{slug}",
+      "kind": "number",
+      "label": "Down after (seconds) · {key}",
+      "help": "How long without a good probe before this tile shows down. Blank uses the fleet default (host settings watch_down_after_s, 300 s); must be at least the check interval.",
+      "min": 10,
+      "max": 604800,
+      "unit": "s",
+      "placeholder": "300",
+      "required": false
     },
     "commit": [
       {

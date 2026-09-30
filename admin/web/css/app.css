@@ -840,6 +840,33 @@ td.stack-flags {
 .notice-what {
   white-space: pre-wrap;
 }
+.notice-detail {
+  display: grid;
+  gap: var(--kp-space-1, 0.25rem);
+}
+.notice-detail p {
+  margin: 0;
+}
+
+/* replace-grafana's sibling decision, notify-table (2026-09-30): every cell
+   centred, times and counts right-aligned, the What column one title per
+   row with the rest behind the row's own expand toggle. */
+[data-kp-remember="notices"] td,
+[data-kp-remember="notices"] th,
+[data-kp-remember="notify-stacks"] td,
+[data-kp-remember="notify-stacks"] th {
+  vertical-align: middle;
+}
+[data-kp-remember="notices"] .num,
+[data-kp-remember="notify-stacks"] .num {
+  text-align: right;
+}
+.notify-title {
+  max-width: 32rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* A table the page fills on request stays out of sight until then. */
 [data-kp-datatable][hidden] {
@@ -1328,6 +1355,57 @@ td.stack-flags {
   color: var(--destructive);
 }
 
+/* Activity (2026-09-30): the List/Timeline toggle; the Timeline sub-page
+   still paints its own h1, hidden here since the page's own h1 already
+   says Activity. */
+.activity-body > h1 {
+  display: none;
+}
+
+/* Health (2026-09-30): Today, Doctor and Checks as three <details> blocks;
+   each sub-page still paints its own h1, hidden here since the <summary>
+   already carries the block's name. */
+.health-block {
+  margin-block: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.health-block summary {
+  cursor: pointer;
+}
+.health-block summary h2 {
+  display: inline;
+}
+.health-block__body > h1 {
+  display: none;
+}
+
+/* replace-homepage's health strip (2026-09-30): below the tiles, only when
+   something needs Kenny. */
+.health-strip {
+  border: 1px solid var(--destructive);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.health-strip__toggle {
+  all: unset;
+  cursor: pointer;
+  display: block;
+  width: 100%;
+}
+.health-strip__glyph {
+  display: inline-block;
+  width: 1em;
+}
+.health-strip__list {
+  margin: 8px 0 0;
+  padding-inline-start: 1.5em;
+}
+.health-strip__list[hidden] {
+  display: none;
+}
+
 /* replace-grafana (2026-09-30): the charts page. */
 .chart-grid {
   display: grid;
@@ -1437,4 +1515,9 @@ td.stack-flags {
 }
 .start-dot--down {
   background: var(--destructive);
+}
+/* Decision "deploys are known outages" (2026-09-30): a known outage, not a
+   fault — an accent colour, never the up/down/flaky ones. */
+.start-dot--deploying {
+  background: var(--primary);
 }

@@ -95,7 +95,12 @@ gate_glob suite '*.rs' 'Cargo.toml' 'Cargo.lock' '*/Cargo.toml' \
 # is plain ES modules; tsc checks its JSDoc types (checkJs, strict, no
 # emit), prettier its layout, node --test its pure view models.
 gate_glob admin-web 'admin/web/*' -- \
-  sh -c 'cd admin/web && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && npm run --silent check'
+  sh -c 'cd admin/web && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && npm run --silent lint'
+# Its node --test view-model tests wait for the release (Kenny, 2026-09-30:
+# tests run only after his release go); gate-cache skips them at commit
+# and `make gate` (GATE_FULL=1) runs them.
+gate_glob admin-web-tests 'admin/web/*' -- \
+  sh -c 'cd admin/web && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && node --test test/'
 
 gate_cache_done
 

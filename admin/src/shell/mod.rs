@@ -17,4 +17,5 @@ pub mod releases;
 pub mod routes;
 pub mod scheduler;
 pub mod slow;
+pub mod watch;
 pub mod workcopy;

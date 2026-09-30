@@ -1418,3 +1418,23 @@ td.stack-flags {
   display: flex;
   gap: 4px;
 }
+
+/* replace-kuma (2026-09-30): the minute watch's dot on a tile. */
+.start-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-inline-end: 8px;
+  vertical-align: middle;
+  background: var(--border);
+}
+.start-dot--up {
+  background: var(--chart-3, #3aa675);
+}
+.start-dot--flaky {
+  background: var(--chart-2, #e8a33d);
+}
+.start-dot--down {
+  background: var(--destructive);
+}

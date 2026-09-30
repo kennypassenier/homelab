@@ -26,4 +26,5 @@ pub mod schedule;
 pub mod stackedit;
 pub mod templates;
 pub mod textdiff;
+pub mod watch;
 pub mod yamledit;

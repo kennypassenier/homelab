@@ -117,7 +117,7 @@ async fn incidents(State(c): State<Ctx>) -> Response {
 }
 
 async fn tiles(State(c): State<Ctx>) -> Response {
-    report(&c, "the start page", Command::Tiles).await
+    report(&c, "the start page", Command::Tiles { bare: false }).await
 }
 
 async fn manual_checks(State(c): State<Ctx>) -> Response {

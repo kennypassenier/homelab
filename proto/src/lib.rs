@@ -324,8 +324,13 @@ pub enum Command {
     /// F258). A backup you cannot run is a backup nobody verifies.
     BackupDevices,
     /// replace-homepage (2026-09-30): the start page's tiles as the stacks
-    /// declare them, each with its reading taken now. Read-only; JSON.
-    Tiles,
+    /// declare them, each with its reading taken now unless `bare` (the
+    /// dashboard's minute watch needs only where each tile opens).
+    /// Read-only; JSON.
+    Tiles {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        bare: bool,
+    },
     /// G17: the questions only a person can answer, as the host has them on
     /// record. Read-only; the deploy is what puts them there.
     ListManualChecks {
@@ -581,7 +586,7 @@ impl Command {
             | FleetCheck { .. }
             | Today { .. }
             | ListManualChecks { .. }
-            | Tiles
+            | Tiles { .. }
             | SessionOptions { .. }
             | CurrentOp
             | History { .. }
@@ -671,7 +676,7 @@ impl Command {
             SetStackEnabled { .. } => "set_stack_enabled",
             BackupDevices => "backup_devices",
             ListManualChecks { .. } => "list_manual_checks",
-            Tiles => "tiles",
+            Tiles { .. } => "tiles",
             AnswerManualCheck { .. } => "answer_manual_check",
             SessionOptions { .. } => "session_options",
             CurrentOp => "current_op",

@@ -262,6 +262,10 @@ struct FileConfig {
     /// Decision notify-detail (2026-09-30): the dashboard's public address,
     /// for the link a push carries (`click_url`). Unset: no link.
     dashboard_url: Option<String>,
+    /// replace-kuma (2026-09-30): the dashboard's health address, asked every
+    /// minute; five minutes without an answer is an urgent notice, as the
+    /// dashboard does for the host. Unset: not watched.
+    watch_url: Option<String>,
 }
 
 #[derive(Clone)]
@@ -366,6 +370,8 @@ struct Config {
     history_max_bytes: usize,
     /// Decision notify-detail: the dashboard's public address.
     dashboard_url: String,
+    /// replace-kuma: the dashboard's health address, when watched.
+    watch_url: Option<String>,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
     /// host.toml as it was read; a settings save writes this back with only
@@ -598,6 +604,7 @@ fn load_config_from(path: String) -> Config {
             .clone()
             .filter(|u| !u.trim().is_empty())
             .unwrap_or_else(|| homelab_core::notify::DEFAULT_DASHBOARD_URL.to_string()),
+        watch_url: file.watch_url.clone().filter(|u| !u.trim().is_empty()),
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -4643,6 +4650,12 @@ async fn main() {
         let st = state.clone();
         tokio::spawn(async move { status_loop(st).await });
     }
+    // replace-kuma (Kenny, 2026-09-30): the host watches the dashboard, as
+    // the dashboard watches the host.
+    if let Some(url) = state.config.watch_url.clone() {
+        let st = state.clone();
+        tokio::spawn(async move { watch_dashboard(st, url).await });
+    }
     // fix-156: read the house's address once at start, so a restart (a
     // release, a power cut) does not leave the dashboard's second lock and
     // CrowdSec's whitelist without it until the night.
@@ -6398,6 +6411,87 @@ async fn notify_auto_disabled(state: &AppState, exec: &RealExecutor, stack: &str
         },
     )
     .await;
+}
+
+/// replace-kuma: ask the dashboard's health address every minute; five
+/// minutes without an answer is an urgent notice (pushed at once, since the
+/// dashboard that would show it is the thing that is gone), and its return
+/// another.
+async fn watch_dashboard(state: AppState, url: String) {
+    let mut t = tokio::time::interval(Duration::from_secs(60));
+    let mut failing_since: Option<u64> = None;
+    let mut told = false;
+    loop {
+        t.tick().await;
+        let out = RealExecutor
+            .run(&homelab_core::executor::Cmd::new(
+                "curl",
+                &["-sf", "-m", "10", "-o", "/dev/null", &url],
+                20,
+            ))
+            .await;
+        let ok = out.as_ref().map(|o| o.success()).unwrap_or(false);
+        let now = unix_now();
+        if ok {
+            failing_since = None;
+            if std::mem::take(&mut told) {
+                publish_notice(&state, &RealExecutor, watch_facts(true, now, &url)).await;
+            }
+            continue;
+        }
+        let since = *failing_since.get_or_insert(now);
+        if !told && now.saturating_sub(since) >= 300 {
+            told = true;
+            publish_notice(&state, &RealExecutor, watch_facts(false, since, &url)).await;
+        }
+    }
+}
+
+fn watch_facts(ok: bool, since: u64, url: &str) -> NoticeFacts {
+    NoticeFacts {
+        op: "watch-dashboard".into(),
+        label: "watch".into(),
+        ok,
+        deferred: false,
+        since,
+        ex: homelab_core::notify::Explained {
+            title: if ok {
+                "The dashboard answers again".into()
+            } else {
+                "The dashboard does not answer".into()
+            },
+            stack: None,
+            what: format!(
+                "{} {}",
+                url,
+                if ok {
+                    "answers"
+                } else {
+                    "gave no answer for five minutes"
+                }
+            ),
+            consequence: if ok {
+                "Nothing to do.".into()
+            } else {
+                "Nothing watches the services every minute while it is gone.".into()
+            },
+            remedy: if ok {
+                "Nothing to do.".into()
+            } else {
+                "Look at the dashboard's container and its unit from the host.".into()
+            },
+            page: homelab_core::notify::page::HOST.into(),
+        },
+        // Urgent both ways: its loss is "a service that does not answer", and
+        // its return goes where the loss went.
+        urgency: homelab_core::notify::urgency(&homelab_core::notify::Event::Alert {
+            alertname: homelab_core::notify::SERVICE_DOWN_ALERTS[0],
+        }),
+        incident: None,
+        req: None,
+        by: None,
+        findings: Vec::new(),
+    }
 }
 
 /// Decision notify-routing (2026-09-30): what one notice is made of.
@@ -8161,10 +8255,19 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
-        Rpc::Tiles => {
+        Rpc::Tiles { bare } => {
             // The plain executor: a reading may read a key on its way.
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
-            let st = store.load().await.unwrap_or_default();
+            let mut st = store.load().await.unwrap_or_default();
+            if bare {
+                for s in st.stacks.values_mut() {
+                    if let Some(m) = s.manifest.as_mut() {
+                        for t in m.tiles.values_mut() {
+                            t.reading = None;
+                        }
+                    }
+                }
+            }
             let tiles = homelab_core::ops::tiles::read_tiles(&RealExecutor, &st).await;
             RpcResponse {
                 id: req.id,

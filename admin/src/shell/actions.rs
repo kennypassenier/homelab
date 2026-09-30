@@ -1905,6 +1905,11 @@ pub fn mount(
         wc: Some(wc.clone()),
     });
     let shared_for_parity = shared.clone();
+    // replace-kuma: the minute watch, and what it holds for the start page.
+    let shared_for_watch = shared.clone();
+    let watched: super::watch::Watched = Default::default();
+    app.dashboard_routes(super::watch::router(watched.clone()));
+    let watch_via = cfg.watch_via.clone();
     let actions = Actions::start(ActionsDeps {
         host: host.clone(),
         publish: publish.clone(),
@@ -2025,6 +2030,13 @@ pub fn mount(
             host_notices_poll,
         );
         super::actions_notify::spawn_digest(notify.clone(), today, Duration::from_secs(60));
+        super::watch::spawn(
+            host.clone(),
+            shared_for_watch,
+            notify.clone(),
+            watch_via,
+            watched,
+        );
         super::actions_notify::spawn_incident_poll(host, notify, poll);
     });
     Ok(())

@@ -4,6 +4,7 @@
 // (`tiles:` in lxc-compose.yml); nothing here knows an app.
 
 import { h, fetchJson } from "../dom.js";
+import { formatTime } from "../format.js";
 
 /**
  * @typedef {{stack: string, host: string, url: string, name: string,
@@ -27,10 +28,44 @@ export function grouped(tiles) {
   return out;
 }
 
-/** @param {Tile} t */
-function tileEl(t) {
+/**
+ * @typedef {{key: string, failing_since: number | null, down: boolean,
+ *   why: string | null}} Watch
+ */
+
+/**
+ * The dot beside a tile's name: what the minute watch (replace-kuma) says.
+ * @param {Watch | undefined} w
+ */
+function dot(w) {
+  if (!w) return h("span", { class: "start-dot", title: "not watched yet" });
+  if (w.down)
+    return h("span", {
+      class: "start-dot start-dot--down",
+      title: `no answer since ${formatTime(w.failing_since ?? 0)}: ${w.why ?? ""}`,
+    });
+  if (w.failing_since != null)
+    return h("span", {
+      class: "start-dot start-dot--flaky",
+      title: `failing since ${formatTime(w.failing_since)}: ${w.why ?? ""}`,
+    });
+  return h("span", { class: "start-dot start-dot--up", title: "answers" });
+}
+
+/**
+ * @param {Tile} t
+ * @param {Map<string, Watch>} watch
+ */
+function tileEl(t, watch) {
   /** @type {(string | Node)[]} */
-  const parts = [h("span", { class: "start-tile__name" }, t.name)];
+  const parts = [
+    h(
+      "span",
+      { class: "start-tile__name" },
+      dot(watch.get(`tile:${t.host}`)),
+      t.name,
+    ),
+  ];
   if (t.description)
     parts.push(h("span", { class: "start-tile__desc" }, t.description));
   for (const l of t.lines)
@@ -64,7 +99,14 @@ export function mount(root) {
   root.replaceChildren(h("h1", null, "Start"), status, body);
   const abort = new AbortController();
   (async () => {
-    const r = await fetchJson("/data/tiles", "the start page", abort.signal);
+    const [r, w] = await Promise.all([
+      fetchJson("/data/tiles", "the start page", abort.signal),
+      fetchJson("/data/watch", "the watch", abort.signal),
+    ]);
+    /** @type {Map<string, Watch>} */
+    const watch = new Map(
+      (w.ok ? w.body.targets : []).map((/** @type {Watch} */ x) => [x.key, x]),
+    );
     if (!r.ok) {
       status.textContent = `${r.error.what}: ${r.error.why}`;
       return;
@@ -80,7 +122,11 @@ export function mount(root) {
           "section",
           { class: "start-group" },
           h("h2", null, g.group),
-          h("div", { class: "start-grid" }, ...g.tiles.map(tileEl)),
+          h(
+            "div",
+            { class: "start-grid" },
+            ...g.tiles.map((t) => tileEl(t, watch)),
+          ),
         ),
       ),
     );

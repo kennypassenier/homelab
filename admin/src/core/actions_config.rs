@@ -44,6 +44,12 @@ pub struct ActConfig {
     pub alerts_token: Option<String>,
     /// The dashboard's public address, for a push's `click_url`.
     pub public_url: String,
+    /// replace-kuma (2026-09-30): the proxy address (`host:port`, its plain
+    /// HTTP entrypoint) the minute watch sends each tile's request through,
+    /// so a tile is measured on the house network and not through the
+    /// internet's front door. Unset:
+    /// tiles are not watched (containers and the host still are).
+    pub watch_via: Option<String>,
     pub action_timeout_s: u64,
     /// Live view: the announcement's countdown, in milliseconds.
     pub live_announce_ms: u64,
@@ -159,6 +165,7 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
         incidents_poll_s: number(lookup, "INCIDENTS_POLL_S", 300, 10, &mut why),
         host_notices_poll_s: number(lookup, "HOST_NOTICES_POLL_S", 60, 5, &mut why),
         alerts_token: non_empty("HOMELAB_ADMIN_ALERTS_TOKEN").map(|t| t.trim().to_string()),
+        watch_via: non_empty("HOMELAB_ADMIN_WATCH_VIA").map(|t| t.trim().to_string()),
         public_url: {
             let u = non_empty("HOMELAB_ADMIN_PUBLIC_URL").unwrap_or_default();
             if !u.is_empty() && !(u.starts_with("http://") || u.starts_with("https://")) {

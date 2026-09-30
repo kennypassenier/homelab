@@ -311,6 +311,12 @@ firewall:
       note: Uptime Kuma HTTP monitors (Grafana, Loki)
     - dir: in
       action: ACCEPT
+      source: 10.10.10.20
+      proto: tcp
+      dport: "80"
+      note: the dashboard's minute watch asks each tile through Traefik (replace-kuma)
+    - dir: in
+      action: ACCEPT
       source: 10.10.10.15
       proto: tcp
       dport: "3000"

@@ -47,6 +47,11 @@ pub enum Kind {
     Alert,
     /// … and its end.
     AlertResolved,
+    /// replace-kuma: the dashboard's minute watch saw a service, a
+    /// container or the host stop answering for five minutes …
+    Down,
+    /// … and answer again.
+    Up,
 }
 
 /// How bad a notice is, worst first (the digest's order).
@@ -339,6 +344,12 @@ pub fn draft_urgency(d: &Draft) -> homelab_core::notify::Urgency {
             urgent: false,
             why: "not urgent: it stood aside, nothing broke",
         },
+        // replace-kuma: "a service that has not answered for more than 5
+        // minutes" is urgent (notify-routing); its return goes where its
+        // loss went, as a resolved alert does.
+        Kind::Down | Kind::Up => urgency(&Event::Alert {
+            alertname: homelab_core::notify::SERVICE_DOWN_ALERTS[0],
+        }),
         Kind::HostEvent | Kind::FleetCheck | Kind::Alert | Kind::AlertResolved => Urgency {
             urgent: false,
             why: "pushed at its source",
@@ -523,8 +534,10 @@ pub fn push_payload(d: &Draft, version: &str, base_url: &str) -> String {
         Kind::FleetCheck => "fleet-check",
         Kind::Alert => "alert",
         Kind::AlertResolved => "alert-resolved",
+        Kind::Down => "down",
+        Kind::Up => "up",
     };
-    let ok = matches!(d.kind, Kind::ActionDone | Kind::ActionDeferred);
+    let ok = matches!(d.kind, Kind::ActionDone | Kind::ActionDeferred | Kind::Up);
     let short =
         homelab_core::notify::push_short(&d.title, d.detail.remedy.as_deref().unwrap_or(&d.body));
     let page = d

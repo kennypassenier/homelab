@@ -150,6 +150,7 @@ pub const KEYS: &[KeyInfo] = &[
     k("notify_fallback_webhook", "Notifications", "Fallback webhook", "The second route, tried when the first does not answer 2xx.", "none", Kind::Url, Access::Browser, Apply::Restart),
     k("notify_fallback_auth_bearer", "Notifications", "Fallback token", "The bearer token of the second route. A secret: changed over ssh only.", "none", Kind::Text, Access::Secret, Apply::Restart),
     k("dashboard_url", "Notifications", "Dashboard address", "The dashboard's public address; a push links to its page there (click_url).", "none: a push carries no link", Kind::Url, Access::Browser, Apply::Restart),
+    k("watch_url", "Notifications", "Dashboard health address", "The dashboard's health address on the house network; the host asks it every minute and sends an urgent notice after five minutes without an answer.", "none: the dashboard is not watched", Kind::Url, Access::Browser, Apply::Restart),
     k("ask_timeout_s", "Notifications", "Question wait", "Seconds a suspended step waits for an answer before it gives up.", "120", Kind::Int { min: 10, max: 86_400 }, Access::Browser, Apply::Restart),
     // ── Coverage and monitoring ─────────────────────────────────────────
     k("prometheus_url", "Coverage and monitoring", "Prometheus", "Where the coverage check asks whether a stack is measured; empty: not asked.", "not asked", Kind::Url, Access::Browser, Apply::Restart),

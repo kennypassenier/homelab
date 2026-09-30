@@ -668,10 +668,19 @@ repository and the host, on the same pages and dialogs a click uses:
 | `open` | What it is | Its steps, and the final press |
 |---|---|---|
 | `settings <stack>` | the Settings tab's form | `settings` (`edit-cores`, `edit-memory-mb`, …, `edit-image-<app>-<service>`, and for each tile the stack declares `edit-tile-watch-<slug>`/`edit-tile-down-<slug>`) → `plan` → `commit` (`edit-subject`, `edit-note`, `edit-follow`); `confirm` commits and pushes, then queues the follow-up |
-| `raw <stack>` | the Settings tab's raw editor | `file` (`raw-file`, and `raw-text` with `edit`) → `plan` → `commit` |
-| `add-app <stack>` | "Add an app" | `app` (`add-app-preset`) → `plan` → `commit` |
+| `raw <stack>` | the Settings tab's Files card (open, edit, create, delete, rename any text file of the stack) | `op` (`files-op`, picked: `edit`, `create`, `delete` or `rename`) → `file` (`raw-file`, and `raw-text` with `edit`, for `edit` and `create`; `files-new-path` typed for `create`; `files-rename-to` typed for `rename`) → `plan` → `commit` |
+| `add-app <stack>` | "Add an app" | `app` (`add-app-preset`) → `plan` → `commit`; feat-tiles-3: one optional hostname per app the chosen preset brings in (`add-app-tile-<app>`, blank = no tile), folded into the same commit as the app itself (`StackEdit::AddApp.tiles`, applied alongside `apps:`/`storage:` on the same staged manifest) — not a second commit after the fact, the same one-commit shape `new-stack`'s Tile step above has |
+| `settings-ext <stack>` | the Settings tab's "Network & hardware" card (feat-stacks-9: `network.*`, `lxc.unprivileged`/`gpu`/`vpn`, `resources.storage`, `on_demand`, `retention`) | `settings_ext` (`edit-network-ip`, `edit-network-gateway`, `edit-network-bridge`, `edit-network-vlan`, `edit-lxc-unprivileged`, `edit-lxc-gpu`, `edit-lxc-vpn`, `edit-resources-storage`, `edit-on-demand`, `edit-retention` — a JSON list, `[]` clears the stack's own tiers back to the fleet default) → `plan` → `commit`. `unprivileged`, `gpu`, `vpn` and the storage id only ever take effect at a rebuild of the container; the plan says so. |
+| `apps <stack>` | the Settings tab's "Apps & storage" card (feat-stacks-10: remove/add-blank an app, and `storage:`/`data_mounts:`/`log_files:` as kp datatables with an Add/Edit dialog each, the Firewall tab's rule table generalised) | `apps` (`apps-remove-<app>` checkboxes, `apps-add-blank` comma-separated names) → each list's own Add/Edit dialog behind `row add <list>` / `row edit <list>:<n>` (`list` one of `storage`, `data_mounts`, `log_files`; fields `storage-host-path`/`storage-mount-point`/`storage-app`/`storage-no-data`/`storage-no-backup`/`storage-host-owner-uid`, `mount-host-path`/`mount-mount-point`/`mount-note`/`mount-rotate-files`/`mount-rotate-keep`/`mount-rotate-container`/`mount-rotate-signal`, `logfile-path`/`logfile-job`), `row up`/`row down`/`row delete <list>:<n>` to reorder or drop a row → `plan` → `commit`. Removing an app drops it from `apps:`, its whole directory and any storage/data_mounts row naming it as `app:` — data already on the container is untouched, only the declaration goes. |
+| `latch <stack>` | the Settings tab's "Latch" card (feat-stacks-11: `latch_secrets`, `latch_files` as a kp datatable + dialog) | `latch` (`latch-secret-<app>` checkboxes) → the `latch_files` row dialog behind `row add latch_files` / `row edit latch_files:<n>` (fields `latchfile-from`/`latchfile-dest`/`latchfile-mode`/`latchfile-owner`/`latchfile-restarts`), `row up`/`row down`/`row delete latch_files:<n>` → `plan` → `commit`. A value containing `${` is refused before anything is sent, in the row dialog itself: `latch --expand` parses every file it is handed, so one unresolvable placeholder would break every stack's secrets, not only this one's. |
+| `tiles <stack>` | the Settings tab's "Tiles" card (feat-tiles-1: create, rename or delete any entry of a stack's `tiles:` map, every field, as a kp datatable + dialog) | `tiles` (no scalar fields of its own) → the tile row dialog behind `row add tiles` / `row edit tiles:<n>` (fields `tile-key`, `tile-name`, `tile-group`, `tile-order`, `tile-description`, `tile-url`, `tile-reading`, `tile-watch-every`, `tile-down-after`), `row up`/`row down`/`row delete tiles:<n>` → `plan` → `commit`. `probe` is never written here: the client fills it in at deploy time, per `Tile::probe`'s own doc. The Settings tab's own two per-tile watch fields (`edit-tile-watch-<slug>`/`edit-tile-down-<slug>`, above) keep working exactly as before and write the same `tiles.<key>.{watch_every,down_after}` path, so a quick watch-seconds change does not need this card at all. Renaming a tile's hostname keeps its history; deleting an existing one sends an explicit tombstone (`tilesBody`/`tiles_drive_body`) rather than merely dropping the row, since `tiles:` is a sparse change list, not a full-list rebuild like the other row tables here. |
+| `checks <stack>/<app>` | the Checks tab's edit section (feat-checks-1: one app's whole `checks.yml` — the measured checks, the manual questions, the nightly probes, the busy check and the link — checks/manual/probes each a kp datatable + dialog) | `checks` (`checks-app` picks the app, fixed for the session by the CLI target; `checks-busy`, `checks-url` plain text, always sent as the whole wanted value, blank = none) → each list's own row dialog behind `row add <list>` / `row edit <list>:<n>` (`list` one of `checks`, `manual`, `probes`; fields `check-name`/`check-command`/`check-expect`/`check-layer`/`check-blind-spot`, `manual-text`/`manual-once`, `probe-name`/`probe-command`/`probe-healthy-kind`/`probe-healthy-value`/`probe-layer`/`probe-blind-spot`), `row up`/`row down`/`row delete <list>:<n>` → `plan` → `commit`. An app with no `checks.yml` yet gets one created on Review and commit; a check or probe below the Application layer is refused without a blind spot, the same rule `checks.yml`'s own comments state. The Checks tab still shows the manual-answers table above this section unchanged. |
+| `publish <stack>/<app>` | the Apps tab's "Publish…" dialog, opened per app (feat-publish-1: a hostname and the app's container port, turned into `gateway_route`/`extra_routes` plus the router/service/loadBalancer fragment in `traefik-routes.yml`, optionally a tile) | opened directly (a click-opened dialog, not a page already showing it — the same shape `open preset`/`open new-stack` use), fields `publish-hostname`, `publish-port`, `publish-external` (this backend is not one of the fleet's own managed stacks), `publish-separate-file` (keep this route in a file of its own under `routes/` instead of extending `traefik-routes.yml`), `publish-create-tile`, `publish-tile-name`, `publish-tile-group` → `plan` → `commit`. A stack's first publish becomes its `gateway_route` (content in `stacks/<stack>/traefik-routes.yml`, the filename derived as `<gateway_vmid>-app-<stack>.yml`, the only name `gateway_route.filename` may have); every publish after that adds another router and service to the same file, unless "keep in a file of its own" is ticked, which appends an `extra_routes` entry under `stacks/<stack>/routes/` instead. A tile, if asked for, is keyed by the same hostname as the route. |
 | `firewall <stack>` | the Firewall tab | `rules` (`fw-enabled`, `fw-policy-in`, `fw-policy-out`, `fw-management-open`, `fw-comment`, and `row …` with the rule dialog's `rule-dir`, `rule-action`, `rule-peer`, `rule-proto`, `rule-dport`, `rule-note`, `rule-comment`) → `plan` → `commit` |
-| `new-stack` | the new-stack wizard | `preset` → `identity` (`new-name`, `new-vmid`) → `size` → `data` (`new-nodata-<n>`) → `plan` (the commit's fields); `confirm` commits and pushes |
+| `native <stack>[/<unit>]` | the Settings tab's "Native services" card (feat-native-1, only on a stack `native_only` or that already has `natives:`): one unit picker (`native-unit`), one set of fixed-id fields below it for whichever unit is picked | `native` (`native-unit` a choice field, then `native-binary`, `native-env-file`, `native-data-dirs`, `native-update-cmd`, `native-stateless`, `native-restore-note`, `native-release-repo`, `native-release-asset`, `native-backup-newest`, `native-backup-pause`, `native-update-policy`, `native-metrics` — picking a different unit refills the rest from its own `service.yml`) → `plan` → `commit` at `native-review`. `native-remove` plans and commits `remove_native` for the picked unit instead — a second button next to `next` on the same step, driven with `press remove` (no fields of its own; the already-picked `native-unit` is what gets removed). No target: the stack's first native unit; `<stack>/<unit>` (the slash convention `rollback-native` already uses) picks one. |
+| `add-native <stack>` | the Settings tab's "Add a native unit" card (feat-native-1): a new unit's `service.yml`, always under `<unit>/`, plus a generic systemd unit file (no app knowledge: only the fields the form takes) | `add_native` (`add-native-unit`, `add-native-binary`, `add-native-env-file`, `add-native-data-dirs`, `add-native-notify`) → `plan` → `commit` at `add-native-review`. The systemd unit file itself, once written, is refined in the Files card's raw editor (its exact listen address and so on). |
+| `preset <name>` / `new-preset` | the Presets page's editor dialog (feat-preset-1: `preset.yml`, its app files, a new preset, removing one) — the same dialog both opens land on, through the `preset-editor` handle | `meta` (a new preset adds `new-preset-name` ahead of the rest: `preset-description`, `preset-ram-mb`, `preset-cores`, `preset-disk-gb`, `preset-features`, `preset-gpu`, `preset-vpn`) → `plan` → `commit` at `preset-meta-review`. Files (create, edit, delete, rename — Area A's Files card shape, reusing its starter templates) and "Remove this preset…" are driveable from the same "meta" step, each its own named button beside `next` (`save-file`, `rename-file`, `delete-file`, `remove-preset`): `preset-file-select`/`preset-file-path`/`preset-file-template`/`preset-file-text` → `save-file`, `preset-file-rename-to` → `rename-file`, or `delete-file`; `remove-preset` for the whole preset — each reaches its own `plan` step (`preset-file-save`/`-rename`/`-delete`/`preset-remove` are still the buttons a click uses; a driven press names the action directly). Every press here runs against `/data/presets/plan` and `/data/presets/commit`, not `/data/stacks/<stack>/…` — a preset is not under any stack. |
+| `new-stack` | the new-stack wizard | `preset` → `identity` (`new-name`, `new-vmid`) → `size` → `data` (`new-nodata-<n>`) → `tile` (feat-tiles-3: `new-tile-hostname`, `new-tile-name`, `new-tile-group`, `new-tile-description`, `new-tile-watch-every`, `new-tile-down-after` — blank hostname = no tile) → `plan` (the commit's fields); `confirm` commits and pushes once — a tile, when given, is folded into that same commit (`NewStack.tile`, applied to the scaffolded manifest before it is ever written), not a second call after the fact. A preset may suggest a tile of its own for one of its apps (`preset.yml`'s `tiles:`, keyed by app, with a `__NAME__` hostname placeholder); an explicit choice on this step is not yet wired to override it — the two currently coexist rather than one replacing the other |
 | `host-settings` | the Settings page's host.toml | `keys` (`row edit <key>`, then `key-<key>` and, for a key that asks it, `key-<key>-confirm`; `press save`) → `review`; `confirm` writes host.toml, and when any staged key only takes effect at the host's next start also queues `restart-host` (the review button then reads "Save and restart the host"; the queued job is refused if another job is already running). Needs a token of scope `all` |
 | `batch <action> <s1>,<s2>` | the fleet page's batch dialog | `review` (the action's shared fields, and `act-confirm-<stack>` per stack when it asks a typed name); `confirm` queues the batch |
 | `rollback <stack>` | the Roll back dialog | `choose` (`rollback-commit` or `rollback-unit`); `next` opens the deploy-commit or rollback-native dialog with it picked, as the row's button does |
@@ -1042,6 +1051,17 @@ manual:
   - "Kijk of de startpagina de diensten toont die je verwacht. ..."
 ```
 
+The dashboard's Files card (the stack page's Settings tab, replacing the old
+raw-only editor) checks a `checks.yml` you save the same way it checks a
+`service.yml`: parsed as `homelab_core::checks::ServiceChecks`, not only as
+YAML, so a field of the wrong shape (an `expect` that is not one of the three
+words, a `healthy` with two keys set) is refused with the file and, where
+serde_yaml can say it, the line — before it can be committed. The same card
+can create a new `checks.yml` (or `service.yml`, `traefik-routes.yml`, a
+`routes/<name>.yml`, a systemd unit, or a blank `docker-compose.yml`) from a
+commented skeleton, and delete or rename any file of the stack except its own
+`lxc-compose.yml`.
+
 `expect` is `never_decreases`, `must_match` or `must_be_present` (a check whose
 reading before the work is empty, because the app did not exist on that
 container yet, takes its first reading as the baseline and asks nothing, fix-151);
@@ -1246,6 +1266,13 @@ All fields: `core/src/manifest.rs:11-342`. The rules the validator enforces
   (`core/src/manifest.rs:53-71`, `core/src/ops/deploy.rs:328-329`).
 - Unknown keys are refused, so a typo such as `latch_secret:` cannot pass
   (`client/src/spec.rs:10-21`).
+
+**Dashboard:** the stack page's Settings tab, "Apps & storage" card
+(feat-stacks-10) removes or adds a blank app and edits `storage:`,
+`data_mounts:` and `log_files:` as a kp datatable + Add/Edit dialog each
+(the Firewall tab's rule table, generalised) — the deep rules above (path
+prefixes, naming, ownership) are still enforced on the staged manifest
+before a commit, the same as every other edit.
 
 A **`rootfs/` directory** maps onto the container's `/` for two places only:
 `rootfs/etc/systemd/system/` (units and timers) and `rootfs/usr/local/bin/`
@@ -1549,6 +1576,26 @@ with `--no-backup` (`scripts/drill-native-rollback.sh:1-26`). The drill
 stack claims vmid 119 (`stacks/drill/lxc-compose.yml:19`); when that vmid
 holds another container, the drill's deploy is refused by A2.
 
+**Dashboard:** the stack page's Settings tab, "Native services" card
+(feat-native-1), on a stack with `native_only: true` or an existing
+`natives:` list. One unit picker, one set of fixed-id fields below it for
+every `service.yml` field above plus an optional `metrics` field (a picker:
+`Measured` clears the key, `Not measured` writes `metrics: false`);
+switching units refills the fields from that unit's own manifest. "Remove
+this unit…" drops its `service.yml`, its `<unit>/<unit>.service` and its
+entry in `natives:` in one commit. "Add a native unit" writes a new
+`<unit>/service.yml` plus a generic systemd unit file (`Type=notify` by
+default, the hardening block every unit in this house shares — no
+per-service knowledge, so the fields the form takes are the only things the
+new unit knows), and appends the unit to `natives:`; the exact listen
+address, extra `Environment=` lines and so on are then filled in through the
+Files card's raw editor, the same way `admin.service` and the others carry
+theirs. Same edit plan → diff → commit flow as every other dashboard form
+(`admin/src/core/stackedit_native.rs`). Live view: `homelab ui open native
+<stack>[/<unit>]` and `homelab ui open add-native <stack>` drive both cards
+(section 1.4's driving table); removing a unit is driven too, with
+`homelab ui press remove` on the native step, beside `next`.
+
 ### D · Deployment and gitops
 
 #### D1 · Push-sync over one secured line
@@ -1734,6 +1781,26 @@ prints one line per preset: name, RAM in MiB, description and its apps, with
 preset: [PRESET_GUIDE.md](PRESET_GUIDE.md); converting a vendor compose file:
 [LLM_COMPOSE_CONVERSION.md](LLM_COMPOSE_CONVERSION.md).
 
+**Dashboard (feat-preset-1):** the Presets page is editable, not read-only —
+clicking a preset's name, or "New preset…" (a kp dialog with a name field
+and its own validation, not a browser `prompt()`), opens an editor dialog:
+the `preset.yml` fields, every file the preset holds (one at a time, a
+plain textarea; Area A's Files card shape reused for a preset's app files
+— new, edit, delete and rename, with the same starter templates a stack's
+Files card offers, since an app's files are the same shapes either way),
+and "Remove this preset…" for the whole directory. This is a second edit
+scope beside a stack's own (`presets/` sits next to `stacks/`, under no
+stack), with its own commit (`WorkingCopy::transact_presets`,
+`admin/src/shell/workcopy.rs`) but the same plan → diff → commit flow,
+against `/data/presets/plan` and `/data/presets/commit`
+(`admin/src/core/presetedit.rs`). Kenny never hand-edits a preset's YAML
+either (owner goal, 2026-09-30). Live view: `homelab ui open preset <name>`
+and `homelab ui open new-preset` both drive this one dialog (section 1.4's
+driving table), including the file operations (save, rename, delete) and
+removing a preset — each its own small plan → commit on the "meta" step's
+own buttons (`save-file`/`rename-file`/`delete-file`/`remove-preset`,
+beside `next`), the same shape as the row dialogs and native-remove.
+
 #### D8 · Core apps in every new stack
 
 **Status:** Built, with an empty list. The mechanism copies every app named in
@@ -1858,6 +1925,9 @@ every stack it finds), `export`, `destroy` (when the stack directory exists),
 `client/tests/latch_secrets_tests.rs:62`. Stacks that use it today include
 `stacks/home/lxc-compose.yml:68` and `stacks/gateway/lxc-compose.yml:130`.
 
+**Dashboard:** the stack page's Settings tab, Latch card — one checkbox per
+app (feat-stacks-11, section 1.4's driving table).
+
 ### E · Backup and recovery
 
 #### latch-files · Secret files from latch
@@ -1890,6 +1960,13 @@ Refusals, before latch is asked anything: a `dest` that is not absolute, a
 `user:group`, a `restarts` that is not a native unit of the stack, and
 `HOMELAB_LATCH_ENV` unset. Tests: `client/tests/latch_files_tests.rs`,
 `core/tests/deploy_tests.rs` (`latch_files_*`).
+
+**Dashboard:** the stack page's Settings tab, Latch card, `latch_files` row
+table (feat-stacks-11, `row add latch_files` / `row edit latch_files:<n>`);
+the same refusals run before the commit, plus one more the dashboard adds
+on top: a `${` anywhere in a row is refused outright in the row dialog
+itself, since `latch --expand` parses every file it is handed and one
+unresolvable placeholder would break every stack's secrets.
 
 #### E1 · Restic backups per owning app, with retention
 
@@ -2611,6 +2688,12 @@ the devices (W1), then passes them in when it creates the container
 `presets/jellyfin/preset.yml` has `gpu: true`. Directories the stack only
 borrows (media libraries) are `data_mounts`, see C1.
 
+**Dashboard:** the stack page's Settings tab, "Network & hardware" card
+(feat-stacks-9) edits `network.*`, `lxc.unprivileged`/`gpu`/`vpn` and
+`resources.storage` the same way; the plan warns that these four only ever
+apply at a rebuild (`pct create`/`pct clone` are the only places Proxmox
+reads them), same shape as the existing protection warning.
+
 #### H5 · Host self-update with rollback
 
 **Status:** Built. The part that restores the old binary when the new one
@@ -2745,6 +2828,11 @@ and nightly backups alike; the backup logs
 `[w2] <stack> keeps snapshots by its own policy (<n> tier(s)), not the fleet-wide one`
 (`core/src/manifest.rs:72-82`, `core/src/ops/backup.rs:647-667`). The tiers
 above are an example. Test: `core/tests/m4_ops_tests.rs:266`.
+
+**Dashboard:** the stack page's Settings tab, "Network & hardware" card,
+`edit-retention` field — a JSON list of `{"every_days": N, "span_days": N}`;
+an empty list `[]` clears the stack's own tiers and goes back to the
+fleet-wide policy from G8 (feat-stacks-9).
 
 #### W3 · Boot order and resource reconciliation
 

@@ -28,6 +28,44 @@ pub struct NewStack {
     /// `/appdata` paths whose app keeps nothing of its own (`no_data`).
     #[serde(default)]
     pub no_data: Vec<String>,
+    /// feat-tiles-3: the wizard's own optional Tile step, applied to the
+    /// freshly scaffolded manifest in the SAME commit as the stack itself
+    /// (`edit::prepare_new`) — `None` is the step's "no tile" answer.
+    #[serde(default)]
+    pub tile: Option<NewStackTile>,
+}
+
+/// feat-tiles-3: one tile, as the new-stack wizard's Tile step sends it —
+/// `hostname` becomes the tile's key in `tiles:`, the rest
+/// `stackedit_tiles::TileFields` (minus `url`/`reading`, which the wizard
+/// does not ask for).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct NewStackTile {
+    pub hostname: String,
+    pub name: String,
+    pub group: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub watch_every: Option<u64>,
+    #[serde(default)]
+    pub down_after: Option<u64>,
+}
+
+impl NewStackTile {
+    pub fn fields(&self) -> super::stackedit_tiles::TileFields {
+        super::stackedit_tiles::TileFields {
+            name: self.name.clone(),
+            group: self.group.clone(),
+            order: None,
+            description: self.description.clone(),
+            url: None,
+            reading: None,
+            watch_every: self.watch_every,
+            down_after: self.down_after,
+        }
+    }
 }
 
 /// What is taken already: names and vmids from the host's fleet and the
@@ -69,6 +107,17 @@ pub fn problems(req: &NewStack, taken: &Taken, presets: &[String]) -> Vec<(Strin
         );
     }
     size_problems(req, &mut say);
+    if let Some(tile) = &req.tile {
+        if tile.hostname.trim().is_empty() {
+            say("tile_hostname", "a tile needs a hostname".into());
+        }
+        if tile.name.trim().is_empty() {
+            say("tile_name", "a tile needs a name".into());
+        }
+        if tile.group.trim().is_empty() {
+            say("tile_group", "a tile needs a group".into());
+        }
+    }
     out
 }
 

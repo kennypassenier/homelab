@@ -5,9 +5,13 @@ import assert from "node:assert/strict";
 import { actionForm, checkValues } from "../js/actionforms.js";
 import {
   checkFields,
+  latchFileFields,
+  latchFileProblems,
   parseKey,
   ruleFields,
   ruleProblems,
+  settingsExtForm,
+  settingsExtProblems,
   settingsForm,
   tileProblems,
 } from "../js/editforms.js";
@@ -295,6 +299,15 @@ test("the edit checks are the server's: the same cases give the same words", () 
       got = { ...checkFields({ steps }, v), ...ruleProblems(v) };
     } else if (c.check === "tile") {
       got = tileProblems(v);
+    } else if (c.check === "settings_ext") {
+      const form = settingsExtForm("kp-soft", /** @type {any} */ (c.manifest));
+      got = { ...checkFields(form, v), ...settingsExtProblems(v) };
+    } else if (c.check === "latch_file") {
+      const m = /** @type {any} */ ({ natives: c.natives ?? [] });
+      const steps = [
+        { id: "row", label: "Row", fields: latchFileFields(m, null) },
+      ];
+      got = { ...checkFields({ steps }, v), ...latchFileProblems(v) };
     } else {
       const p = parseKey(
         /** @type {any} */ ({ kind: c.kind }),
@@ -304,4 +317,46 @@ test("the edit checks are the server's: the same cases give the same words", () 
     }
     assert.deepEqual(got, c.errors, JSON.stringify(c));
   }
+});
+
+test("feat-native-1 / feat-preset-1: the driven forms' field ids are the browser's own", () => {
+  // The native/add-native/preset forms are hand-built DOM (editpanels.js,
+  // presetseditor.js), not editforms.js's Field/checkFields machinery like
+  // Settings — so this is the id contract itself, not a computed form: if
+  // formspec.json's ids drift from the literal ids those two files use,
+  // `homelab ui open native|add-native|preset|new-preset` breaks silently
+  // (byId() in editdrive.js finds nothing).
+  const ids = (/** @type {{id: string}[]} */ list) => list.map((f) => f.id);
+  assert.deepEqual(ids(SPEC.edit.native), [
+    "native-unit",
+    "native-binary",
+    "native-env-file",
+    "native-data-dirs",
+    "native-update-cmd",
+    "native-stateless",
+    "native-restore-note",
+    "native-release-repo",
+    "native-release-asset",
+    "native-backup-newest",
+    "native-backup-pause",
+    "native-update-policy",
+    "native-metrics",
+  ]);
+  assert.deepEqual(ids(SPEC.edit.add_native), [
+    "add-native-unit",
+    "add-native-binary",
+    "add-native-env-file",
+    "add-native-data-dirs",
+    "add-native-notify",
+  ]);
+  assert.deepEqual(ids(SPEC.edit.preset_meta), [
+    "preset-description",
+    "preset-ram-mb",
+    "preset-cores",
+    "preset-disk-gb",
+    "preset-features",
+    "preset-gpu",
+    "preset-vpn",
+  ]);
+  assert.equal(SPEC.edit.new_preset_name.id, "new-preset-name");
 });

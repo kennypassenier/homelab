@@ -31,8 +31,40 @@ pub enum StackEdit {
     Firewall(FirewallEdit),
     /// feat-stacks-2: one file of the stack, typed in whole.
     Raw { path: String, content: String },
-    /// feat-stacks-3: a preset's app added to this stack.
-    AddApp { preset: String },
+    /// feat-stacks-3: a preset's app added to this stack. feat-tiles-3:
+    /// each app's own optional tile, keyed by app, applied to the SAME
+    /// staged manifest as the app itself — one commit, not the app's
+    /// commit followed by a second, best-effort `StackEdit::Tiles` one.
+    AddApp {
+        preset: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        tiles: BTreeMap<String, String>,
+    },
+    /// feat-stacks-files: create, delete or rename a file of the stack
+    /// (editing an existing one's content stays `Raw`, above).
+    Files(super::stackedit_files::FilesEdit),
+    /// feat-checks-1: one app's whole `checks.yml`.
+    Checks(super::stackedit_checks::ChecksEdit),
+    /// feat-tiles-1: the stack's `tiles:` map, created/renamed/removed.
+    Tiles(super::stackedit_tiles::TilesEdit),
+    /// feat-stacks-9: network, lxc flags, resources.storage, on_demand,
+    /// retention — the settings form's second page.
+    SettingsExt(super::stackedit_settings_ext::SettingsExtEdit),
+    /// feat-stacks-10: the Apps tab — remove/add-blank an app, storage,
+    /// data_mounts, log_files.
+    Apps(super::stackedit_apps::AppsEdit),
+    /// feat-stacks-11: `latch_secrets` and `latch_files`.
+    Latch(super::stackedit_latch::LatchEdit),
+    /// feat-native-1: one native unit's `service.yml` fields.
+    Native(super::stackedit_native::NativeEdit),
+    /// feat-native-1: a new native unit — `service.yml`, its systemd unit
+    /// and `natives:`.
+    AddNative(super::stackedit_native::AddNativeEdit),
+    /// feat-native-1: remove a native unit — its files and `natives:`.
+    RemoveNative { unit: String },
+    /// feat-publish-1: an app's hostname and port published through the
+    /// gateway, and optionally a tile for it, in one commit.
+    PublishApp(super::stackedit_publish::PublishAppEdit),
 }
 
 impl StackEdit {
@@ -42,6 +74,16 @@ impl StackEdit {
             StackEdit::Firewall(_) => "firewall",
             StackEdit::Raw { .. } => "raw",
             StackEdit::AddApp { .. } => "add_app",
+            StackEdit::Files(_) => "files",
+            StackEdit::Checks(_) => "checks",
+            StackEdit::Tiles(_) => "tiles",
+            StackEdit::SettingsExt(_) => "settings_ext",
+            StackEdit::Apps(_) => "apps",
+            StackEdit::Latch(_) => "latch",
+            StackEdit::Native(_) => "native",
+            StackEdit::AddNative(_) => "add_native",
+            StackEdit::RemoveNative { .. } => "remove_native",
+            StackEdit::PublishApp(_) => "publish_app",
         }
     }
 
@@ -50,6 +92,16 @@ impl StackEdit {
         match self {
             StackEdit::Firewall(_) => "feat-firewall-1",
             StackEdit::AddApp { .. } => "feat-stacks-3",
+            StackEdit::Files(_) => "feat-stacks-files",
+            StackEdit::Checks(_) => "feat-checks-1",
+            StackEdit::Tiles(_) => "feat-tiles-1",
+            StackEdit::SettingsExt(_) => "feat-stacks-9",
+            StackEdit::Apps(_) => "feat-stacks-10",
+            StackEdit::Latch(_) => "feat-stacks-11",
+            StackEdit::Native(_) | StackEdit::AddNative(_) | StackEdit::RemoveNative { .. } => {
+                "feat-native-1"
+            }
+            StackEdit::PublishApp(_) => "feat-publish-1",
             _ => "feat-stacks-2",
         }
     }
@@ -134,7 +186,7 @@ pub struct FileChange {
 /// stack's directory → text.
 pub type StackTexts = BTreeMap<String, String>;
 
-fn refusal(stack: &str, why: impl Into<String>, fix: impl Into<String>) -> Refusal {
+pub(crate) fn refusal(stack: &str, why: impl Into<String>, fix: impl Into<String>) -> Refusal {
     Refusal::new(format!("the edit of {stack}"), why, fix)
 }
 
@@ -656,7 +708,7 @@ pub fn changes(
                 push(MANIFEST, Some(manifest_text), new);
             }
         }
-        StackEdit::AddApp { preset } => {
+        StackEdit::AddApp { preset, tiles } => {
             let files = add_app.ok_or_else(|| {
                 refusal(
                     stack,
@@ -677,6 +729,35 @@ pub fn changes(
                         stack,
                         format!("{stack} already has an app called {app}"),
                         "pick another preset, or edit the existing app",
+                    ));
+                }
+            }
+            // feat-tiles-3: a tile may only be given to an app this edit
+            // itself adds, and its hostname must be free — applied to the
+            // SAME staged manifest below, in the SAME commit.
+            for app in tiles.keys() {
+                if !files.apps.iter().any(|a| a == app) {
+                    return Err(refusal(
+                        stack,
+                        format!("{app} is not one of this preset's apps"),
+                        "pick an app the wizard lists",
+                    ));
+                }
+            }
+            let mut seen_hostnames = std::collections::BTreeSet::new();
+            for hostname in tiles.values() {
+                if m.tiles.contains_key(hostname) {
+                    return Err(refusal(
+                        stack,
+                        format!("{hostname} is already a tile of this stack"),
+                        "pick another hostname",
+                    ));
+                }
+                if !seen_hostnames.insert(hostname.as_str()) {
+                    return Err(refusal(
+                        stack,
+                        format!("{hostname} is used for two apps' tiles in this edit"),
+                        "give each app its own hostname",
                     ));
                 }
             }
@@ -714,6 +795,17 @@ pub fn changes(
                     });
                 }
             }
+            for (app, hostname) in tiles {
+                let fields = super::stackedit_tiles::TileFields {
+                    name: app.clone(),
+                    group: "Own".into(),
+                    ..Default::default()
+                };
+                ops.push(Op::Set {
+                    path: vec![Seg::Key("tiles".into()), Seg::Key(hostname.clone())],
+                    value: super::stackedit_tiles::tile_value_for(&fields),
+                });
+            }
             let new = yamledit::edit(manifest_text, &ops)
                 .map_err(|e| from_edit_error(stack, MANIFEST, e))?;
             push(MANIFEST, Some(manifest_text), new);
@@ -723,6 +815,377 @@ pub fn changes(
                     old: None,
                     new: Some(content.clone()),
                 });
+            }
+        }
+        StackEdit::Files(f) => {
+            out.extend(super::stackedit_files::changes(stack, texts, f)?);
+        }
+        StackEdit::Checks(c) => {
+            let problems = super::stackedit_checks::checks_problems(c);
+            if !problems.is_empty() {
+                return Err(refusal(
+                    stack,
+                    problems.join("; "),
+                    "correct the values in the form",
+                ));
+            }
+            let m = parse_manifest(manifest_text).map_err(|e| {
+                refusal(
+                    stack,
+                    format!("stacks/{stack}/{MANIFEST} does not read: {e}"),
+                    "fix it in the raw editor first",
+                )
+            })?;
+            if !m.apps.contains(&c.app) {
+                return Err(refusal(
+                    stack,
+                    format!("{} is not an app of this stack", c.app),
+                    "pick an app the form lists",
+                ));
+            }
+            let rel = format!("{}/checks.yml", c.app);
+            match texts.get(&rel) {
+                None => {
+                    let new = serde_yaml::to_string(&super::stackedit_checks::checks_value(c))
+                        .map_err(|e| refusal(stack, e.to_string(), "reload the checks editor"))?;
+                    push(&rel, None, new);
+                }
+                Some(text) => {
+                    let old: homelab_core::checks::ServiceChecks = serde_yaml::from_str(text)
+                        .map_err(|e| {
+                            refusal(
+                                stack,
+                                format!("stacks/{stack}/{rel} does not read: {e}"),
+                                "fix it in the raw editor first",
+                            )
+                        })?;
+                    let ops = super::stackedit_checks::checks_ops(&old, c).map_err(|why| {
+                        refusal(stack, why, "reload the checks editor and redo the change")
+                    })?;
+                    if !ops.is_empty() {
+                        let new = yamledit::edit(text, &ops)
+                            .map_err(|e| from_edit_error(stack, &rel, e))?;
+                        push(&rel, Some(text), new);
+                    }
+                }
+            }
+        }
+        StackEdit::Tiles(t) => {
+            let problems = super::stackedit_tiles::tiles_problems(t);
+            if !problems.is_empty() {
+                return Err(refusal(
+                    stack,
+                    problems.join("; "),
+                    "correct the values in the form",
+                ));
+            }
+            let m = parse_manifest(manifest_text).map_err(|e| {
+                refusal(
+                    stack,
+                    format!("stacks/{stack}/{MANIFEST} does not read: {e}"),
+                    "fix it in the raw editor first",
+                )
+            })?;
+            let ops = super::stackedit_tiles::tiles_ops(&m, t).map_err(|why| {
+                refusal(stack, why, "reload the tiles editor and redo the change")
+            })?;
+            if !ops.is_empty() {
+                let new = yamledit::edit(manifest_text, &ops)
+                    .map_err(|e| from_edit_error(stack, MANIFEST, e))?;
+                push(MANIFEST, Some(manifest_text), new);
+            }
+        }
+        StackEdit::SettingsExt(s) => {
+            let problems = super::stackedit_settings_ext::problems(s);
+            if !problems.is_empty() {
+                return Err(refusal(
+                    stack,
+                    problems.join("; "),
+                    "correct the values in the form",
+                ));
+            }
+            let m = parse_manifest(manifest_text).map_err(|e| {
+                refusal(
+                    stack,
+                    format!("stacks/{stack}/{MANIFEST} does not read: {e}"),
+                    "fix it in the raw editor first",
+                )
+            })?;
+            let ops = super::stackedit_settings_ext::ops(&m, s);
+            if !ops.is_empty() {
+                let new = yamledit::edit(manifest_text, &ops)
+                    .map_err(|e| from_edit_error(stack, MANIFEST, e))?;
+                push(MANIFEST, Some(manifest_text), new);
+            }
+        }
+        StackEdit::Apps(a) => {
+            let m = parse_manifest(manifest_text).map_err(|e| {
+                refusal(
+                    stack,
+                    format!("stacks/{stack}/{MANIFEST} does not read: {e}"),
+                    "fix it in the raw editor first",
+                )
+            })?;
+            let problems = super::stackedit_apps::problems(&m, a);
+            if !problems.is_empty() {
+                return Err(refusal(
+                    stack,
+                    problems.join("; "),
+                    "correct the values in the form",
+                ));
+            }
+            let (ops, files) = super::stackedit_apps::apply(&m, texts, a)
+                .map_err(|why| refusal(stack, why, "reload the apps editor and redo the change"))?;
+            if !ops.is_empty() {
+                let new = yamledit::edit(manifest_text, &ops)
+                    .map_err(|e| from_edit_error(stack, MANIFEST, e))?;
+                push(MANIFEST, Some(manifest_text), new);
+            }
+            for f in &files {
+                out.push(FileChange {
+                    path: full(&f.rel),
+                    old: texts.get(&f.rel).cloned(),
+                    new: f.content.clone(),
+                });
+            }
+        }
+        StackEdit::Latch(l) => {
+            let m = parse_manifest(manifest_text).map_err(|e| {
+                refusal(
+                    stack,
+                    format!("stacks/{stack}/{MANIFEST} does not read: {e}"),
+                    "fix it in the raw editor first",
+                )
+            })?;
+            let problems = super::stackedit_latch::problems(&m, l);
+            if !problems.is_empty() {
+                return Err(refusal(
+                    stack,
+                    problems.join("; "),
+                    "correct the values in the form",
+                ));
+            }
+            let ops = super::stackedit_latch::ops(manifest_text, l);
+            if !ops.is_empty() {
+                let new = yamledit::edit(manifest_text, &ops)
+                    .map_err(|e| from_edit_error(stack, MANIFEST, e))?;
+                push(MANIFEST, Some(manifest_text), new);
+            }
+        }
+        StackEdit::Native(n) => {
+            let Some(p) = super::stackedit_native::native_path(texts, &n.unit) else {
+                return Err(refusal(
+                    stack,
+                    format!("{} is not a native unit of {stack}", n.unit),
+                    "pick a unit the form lists",
+                ));
+            };
+            let text = texts.get(&p).expect("native_path found it in texts");
+            let m: homelab_proto::NativeServiceManifest =
+                serde_yaml::from_str(text).map_err(|e| {
+                    refusal(
+                        stack,
+                        format!("stacks/{stack}/{p} does not read: {e}"),
+                        "fix it in the raw editor first",
+                    )
+                })?;
+            let ops = super::stackedit_native::native_ops(&m, n);
+            if !ops.is_empty() {
+                let new = yamledit::edit(text, &ops).map_err(|e| from_edit_error(stack, &p, e))?;
+                push(&p, Some(text), new);
+            }
+        }
+        StackEdit::AddNative(a) => {
+            let m = parse_manifest(manifest_text).map_err(|e| {
+                refusal(
+                    stack,
+                    format!("stacks/{stack}/{MANIFEST} does not read: {e}"),
+                    "fix it in the raw editor first",
+                )
+            })?;
+            let unit = a.unit.trim();
+            if unit.is_empty() {
+                return Err(refusal(
+                    stack,
+                    "the unit needs a name",
+                    "name the systemd unit",
+                ));
+            }
+            if m.natives.iter().any(|u| u == unit)
+                || texts.contains_key(&format!("{unit}/service.yml"))
+            {
+                return Err(refusal(
+                    stack,
+                    format!("{stack} already has a native unit called {unit}"),
+                    "pick another unit name",
+                ));
+            }
+            let (yml, unit_file) = super::stackedit_native::add_native_files(&m, a);
+            push(&format!("{unit}/service.yml"), None, yml);
+            push(&format!("{unit}/{unit}.service"), None, unit_file);
+            let mut items: Vec<Item> = (0..m.natives.len()).map(Item::Keep).collect();
+            items.push(Item::New(Value::from(unit)));
+            let new = yamledit::edit(
+                manifest_text,
+                &[Op::Seq {
+                    path: path("natives"),
+                    items,
+                }],
+            )
+            .map_err(|e| from_edit_error(stack, MANIFEST, e))?;
+            push(MANIFEST, Some(manifest_text), new);
+        }
+        StackEdit::RemoveNative { unit } => {
+            let m = parse_manifest(manifest_text).map_err(|e| {
+                refusal(
+                    stack,
+                    format!("stacks/{stack}/{MANIFEST} does not read: {e}"),
+                    "fix it in the raw editor first",
+                )
+            })?;
+            let Some(idx) = m.natives.iter().position(|u| u == unit) else {
+                return Err(refusal(
+                    stack,
+                    format!("{unit} is not a native unit of {stack}"),
+                    "pick a unit the form lists",
+                ));
+            };
+            let Some(p) = super::stackedit_native::native_path(texts, unit) else {
+                return Err(refusal(
+                    stack,
+                    format!("{unit}'s service.yml could not be found"),
+                    "use the raw editor",
+                ));
+            };
+            let items: Vec<Item> = (0..m.natives.len())
+                .filter(|&i| i != idx)
+                .map(Item::Keep)
+                .collect();
+            let new = yamledit::edit(
+                manifest_text,
+                &[Op::Seq {
+                    path: path("natives"),
+                    items,
+                }],
+            )
+            .map_err(|e| from_edit_error(stack, MANIFEST, e))?;
+            push(MANIFEST, Some(manifest_text), new);
+            out.push(FileChange {
+                path: full(&p),
+                old: texts.get(&p).cloned(),
+                new: None,
+            });
+            let uf = super::stackedit_native::unit_file_path(unit);
+            if let Some(t) = texts.get(&uf) {
+                out.push(FileChange {
+                    path: full(&uf),
+                    old: Some(t.clone()),
+                    new: None,
+                });
+            }
+        }
+        StackEdit::PublishApp(p) => {
+            let problems = super::stackedit_publish::publish_problems(p);
+            if !problems.is_empty() {
+                return Err(refusal(
+                    stack,
+                    problems.join("; "),
+                    "correct the values in the form",
+                ));
+            }
+            let m = parse_manifest(manifest_text).map_err(|e| {
+                refusal(
+                    stack,
+                    format!("stacks/{stack}/{MANIFEST} does not read: {e}"),
+                    "fix it in the raw editor first",
+                )
+            })?;
+            if !m.apps.contains(&p.app) {
+                return Err(refusal(
+                    stack,
+                    format!("{} is not an app of this stack", p.app),
+                    "pick an app the form lists",
+                ));
+            }
+            let gateway_vmid = homelab_core::safety::SafetyConfig::default().gateway_vmid;
+            let (has_gateway_route, extra_route_count) =
+                super::stackedit_publish::gateway_route_state(manifest_text);
+            let write = super::stackedit_publish::plan_gateway_write(
+                &m,
+                gateway_vmid,
+                stack,
+                p,
+                has_gateway_route,
+                extra_route_count,
+            );
+            match write {
+                super::stackedit_publish::GatewayWrite::Primary {
+                    filename,
+                    route_file,
+                } => {
+                    let ip = super::stackedit_publish::container_ip(&m);
+                    let backend = format!("http://{ip}:{}", p.port);
+                    let op = super::stackedit_publish::primary_op(
+                        gateway_vmid,
+                        &filename,
+                        p.external,
+                        &backend,
+                    );
+                    let new = yamledit::edit(manifest_text, std::slice::from_ref(&op))
+                        .map_err(|e| from_edit_error(stack, MANIFEST, e))?;
+                    push(MANIFEST, Some(manifest_text), new);
+                    push(
+                        "traefik-routes.yml",
+                        texts.get("traefik-routes.yml"),
+                        route_file,
+                    );
+                }
+                super::stackedit_publish::GatewayWrite::Extend { ops } => {
+                    let existing = texts.get("traefik-routes.yml").ok_or_else(|| {
+                        refusal(
+                            stack,
+                            "gateway_route is set but traefik-routes.yml is missing",
+                            "use the raw editor to restore it first",
+                        )
+                    })?;
+                    let new = yamledit::edit(existing, &ops)
+                        .map_err(|e| from_edit_error(stack, "traefik-routes.yml", e))?;
+                    push("traefik-routes.yml", Some(existing), new);
+                }
+                super::stackedit_publish::GatewayWrite::Extra {
+                    filename,
+                    route_file,
+                    op,
+                } => {
+                    let new = yamledit::edit(manifest_text, std::slice::from_ref(&op))
+                        .map_err(|e| from_edit_error(stack, MANIFEST, e))?;
+                    push(MANIFEST, Some(manifest_text), new);
+                    let rel = format!("routes/{filename}");
+                    push(&rel, texts.get(&rel), route_file);
+                }
+            }
+            if let Some(tile) = &p.tile {
+                let key = p.hostname.clone();
+                if !m.tiles.contains_key(&key) {
+                    let value = super::stackedit_tiles::tile_value_for(tile);
+                    let tile_op = Op::Set {
+                        path: vec![Seg::Key("tiles".into()), Seg::Key(key)],
+                        value,
+                    };
+                    let base = out
+                        .iter()
+                        .find(|c| c.path == full(MANIFEST))
+                        .and_then(|c| c.new.clone())
+                        .unwrap_or_else(|| manifest_text.to_string());
+                    let new = yamledit::edit(&base, &[tile_op])
+                        .map_err(|e| from_edit_error(stack, MANIFEST, e))?;
+                    out.retain(|c| c.path != full(MANIFEST));
+                    out.push(FileChange {
+                        path: full(MANIFEST),
+                        old: Some(manifest_text.to_string()),
+                        new: Some(new),
+                    });
+                }
             }
         }
     }
@@ -867,7 +1330,34 @@ pub fn describe(edit: &StackEdit, old: Option<&StackManifest>) -> String {
             format!("firewall: {}", parts.join(", "))
         }
         StackEdit::Raw { path, .. } => format!("{path} edited in the dashboard"),
-        StackEdit::AddApp { preset } => format!("add the {preset} preset's app"),
+        StackEdit::AddApp { preset, tiles } => {
+            if tiles.is_empty() {
+                format!("add the {preset} preset's app")
+            } else {
+                format!(
+                    "add the {preset} preset's app, with {} tile(s)",
+                    tiles.len()
+                )
+            }
+        }
+        StackEdit::Files(f) => f.describe(),
+        StackEdit::Checks(c) => c.describe(),
+        StackEdit::Tiles(t) => t.describe(),
+        StackEdit::SettingsExt(s) => {
+            let Some(m) = old else { return String::new() };
+            super::stackedit_settings_ext::describe(s, m).join(", ")
+        }
+        StackEdit::Apps(a) => super::stackedit_apps::describe(a).join(", "),
+        StackEdit::Latch(l) => super::stackedit_latch::describe(l).join(", "),
+        StackEdit::Native(n) => format!("{}: service.yml edited", n.unit),
+        StackEdit::AddNative(a) => format!("add the native unit {}", a.unit),
+        StackEdit::RemoveNative { unit } => format!("remove the native unit {unit}"),
+        StackEdit::PublishApp(p) => format!(
+            "publish {} at {}{}",
+            p.app,
+            p.hostname,
+            if p.tile.is_some() { " with a tile" } else { "" }
+        ),
     }
 }
 

@@ -6,12 +6,29 @@ import { humanMb } from "../fleet.js";
 import { bindTableUrl, fetchJson, h, tableBlock, td } from "../dom.js";
 import { openImport } from "../importstack.js";
 import { openNewStack } from "../newstack.js";
+import { openPresetEditor } from "../presetseditor.js";
 import { sortKeys } from "../sortkeys.js";
 import {
   attachDataTables,
   compare,
   dataTable,
 } from "/static/kp/js/datatable.js";
+
+/**
+ * The preset's name, as a button that opens the presets editor
+ * (feat-preset-1) — editing a preset never touches its YAML by hand.
+ * @param {string} name
+ * @param {() => void} onChanged
+ */
+function presetNameCell(name, onChanged) {
+  const btn = h(
+    "button",
+    { type: "button", class: "kp-link-button", "data-preset-edit": name },
+    name,
+  );
+  btn.addEventListener("click", () => void openPresetEditor(name, onChanged));
+  return btn;
+}
 
 /**
  * @param {HTMLElement} root
@@ -54,12 +71,18 @@ export function mount(root, ctx) {
     "Import a bundle…",
   );
   importBtn.addEventListener("click", () => void openImport(ctx.navigate));
+  const newPreset = h(
+    "button",
+    { type: "button", class: "kp-button", id: "presets-new-preset" },
+    "New preset…",
+  );
+  newPreset.addEventListener("click", () => void openPresetEditor(null, retry));
   root.replaceChildren(
     h(
       "div",
       { class: "title-row" },
       h("h1", null, "Presets"),
-      h("span", { class: "actions-row" }, importBtn, newStack),
+      h("span", { class: "actions-row" }, importBtn, newPreset, newStack),
     ),
     note,
     t.wrap,
@@ -85,7 +108,7 @@ export function mount(root, ctx) {
         return h(
           "tr",
           { "data-preset": p.name },
-          td(p.name),
+          h("td", null, presetNameCell(p.name, retry)),
           // The memory column sorts by the number behind the words.
           td(keys.note("size", humanMb(p.ram_mb), p.ram_mb), "num"),
           td(String(p.cores), "num"),

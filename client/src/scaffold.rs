@@ -5,6 +5,7 @@
 //! part of the scaffold: the deploy installs Grafana Alloy in every container
 //! itself (C1/C2, 2026-09-02).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -122,6 +123,32 @@ pub struct PresetMeta {
     pub gpu: bool,
     /// H4: give the container a /dev/net/tun device (VPN clients).
     pub vpn: bool,
+    /// feat-tiles-2 (B): this preset's suggested tile per app, keyed by the
+    /// app directory name — the tile step's default, offered rather than
+    /// forced: the wizard still lets a blank entry mean no tile at all, and
+    /// an explicit `TileChoice` in `StackParams::tiles` always wins over
+    /// this one. Generic by design (a preset's own file, not code) — the
+    /// `no app-specific knowledge in code` rule is about `core/`/`client/`
+    /// Rust, not a preset's own declared data.
+    pub tiles: BTreeMap<String, PresetTile>,
+}
+
+/// One preset app's suggested tile (`PresetMeta::tiles`), every field
+/// optional — the wizard fills in what is missing with its own sensible
+/// blanks (the app's own name, the preset's own default group).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct PresetTile {
+    /// The hostname template, e.g. `__NAME__.kp-soft.dev`; `__NAME__` is
+    /// substituted with the stack's own name the same way the compose
+    /// templates are (`copy_app_templates`). `None`: the wizard proposes
+    /// nothing and the person types one, or leaves the tile out.
+    pub hostname: Option<String>,
+    pub name: Option<String>,
+    pub group: Option<String>,
+    pub description: Option<String>,
+    pub watch_every: Option<u64>,
+    pub down_after: Option<u64>,
 }
 
 impl Default for PresetMeta {
@@ -135,6 +162,7 @@ impl Default for PresetMeta {
             unprivileged: None,
             gpu: false,
             vpn: false,
+            tiles: BTreeMap::new(),
         }
     }
 }
@@ -457,7 +485,67 @@ pub fn scaffold_stack_with(
             .join("\n");
         format!("\nstorage:\n{}\n", entries)
     };
-    let manifest = format!("{manifest_head}{storage_yaml}\napps:\n{apps_yaml}\n");
+
+    // feat-tiles-2 (B): one tile per app whose preset suggests one
+    // (`PresetMeta::tiles`) — a default only, never forced: a preset with
+    // none declared scaffolds exactly as it always did. The wizard's own
+    // explicit per-app choice (add/edit/drop a tile, any group) is applied
+    // afterward, through the same `stackedit_tiles::TilesEdit` a stack's
+    // Tiles form already uses — one code path for "what a tile is",
+    // whether it is set at scaffold time or edited into an existing stack
+    // later.
+    struct TileRow<'a> {
+        host: String,
+        name: String,
+        group: String,
+        description: Option<&'a str>,
+        watch_every: Option<u64>,
+        down_after: Option<u64>,
+    }
+    let tile_rows: Vec<TileRow> = apps
+        .iter()
+        .filter_map(|app| {
+            let pt = preset.and_then(|pr| pr.meta.tiles.get(app))?;
+            let hostname = pt.hostname.as_ref()?.replace("__NAME__", name);
+            Some(TileRow {
+                host: hostname,
+                name: pt.name.clone().unwrap_or_else(|| app.clone()),
+                group: pt.group.clone().unwrap_or_else(|| "Apps".to_string()),
+                description: pt.description.as_deref(),
+                watch_every: pt.watch_every,
+                down_after: pt.down_after,
+            })
+        })
+        .collect();
+    let tiles_yaml = if tile_rows.is_empty() {
+        String::new()
+    } else {
+        let entries = tile_rows
+            .iter()
+            .map(|row| {
+                let mut s = format!(
+                    "  {}:\n    name: \"{}\"\n    group: \"{}\"\n",
+                    row.host,
+                    yaml_escape(&row.name),
+                    yaml_escape(&row.group)
+                );
+                if let Some(d) = row.description {
+                    s += &format!("    description: \"{}\"\n", yaml_escape(d));
+                }
+                if let Some(w) = row.watch_every {
+                    s += &format!("    watch_every: {w}\n");
+                }
+                if let Some(d) = row.down_after {
+                    s += &format!("    down_after: {d}\n");
+                }
+                s
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        format!("\ntiles:\n{entries}")
+    };
+
+    let manifest = format!("{manifest_head}{storage_yaml}{tiles_yaml}\napps:\n{apps_yaml}\n");
     write_file(&dir.join("lxc-compose.yml"), &manifest, &mut files)?;
 
     Ok(Scaffolded { dir, files })
@@ -527,6 +615,12 @@ fn generic_compose(app: &str, image: &str, name: &str) -> String {
     format!(
         "services:\n  {app}:\n    image: {image}\n    container_name: {app}\n    restart: unless-stopped\n    labels:\n      # backup: stop this container while it is snapshotted (E4)\n      - com.homelab.backup.pause=true\n      # managed updates (D9): manual by default; set auto or auto-after-Nd\n      - com.homelab.update.policy=manual\n    networks:\n      - {name}_net\n\nnetworks:\n  {name}_net:\n    external: true\n    name: {name}_net\n"
     )
+}
+
+/// A value written inside `"…"` in generated YAML: backslash and the
+/// closing quote are the only two characters that would break it.
+fn yaml_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn write_file(path: &Path, content: &str, files: &mut Vec<String>) -> Result<(), String> {

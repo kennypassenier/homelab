@@ -202,21 +202,28 @@ export function diffBlocks(files) {
   /** @type {HTMLElement[]} */
   const out = [];
   for (const f of files) {
-    const table = h("div", {
-      class: "diff mono",
-      role: "table",
+    // kp-themes' diff component [TH54]: a `<pre class="kp-diff">` of
+    // `.kp-diff__line[data-kind]` lines, each a number, a sign (its own
+    // column, so the change survives without colour) and the text. kp has
+    // no hunk-header element, so `@@ … @@` stays a small local style.
+    const table = h("pre", {
+      class: "kp-diff",
       "aria-label": `Changes in ${f.path}`,
     });
     for (const hk of f.hunks) {
-      table.append(h("div", { class: "diff-hunk", role: "row" }, hk.head));
+      table.append(h("div", { class: "diff-hunk kp-text-muted" }, hk.head));
       for (const l of hk.lines)
         table.append(
           h(
-            "div",
-            { class: `diff-line ${l.cls}`, role: "row" },
-            h("span", { class: "diff-no" }, l.no == null ? "" : String(l.no)),
-            h("span", { class: "diff-mark" }, l.mark),
-            h("span", { class: "diff-text" }, l.text),
+            "span",
+            { class: "kp-diff__line", "data-kind": l.kind },
+            h(
+              "span",
+              { class: "kp-diff__number" },
+              l.no == null ? "" : String(l.no),
+            ),
+            h("span", { class: "kp-diff__sign" }, l.mark),
+            h("span", null, l.text),
           ),
         );
     }

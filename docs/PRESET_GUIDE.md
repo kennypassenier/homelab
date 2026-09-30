@@ -81,11 +81,27 @@ cores: 4            # optional — omit to use StackDefaults (2)
 disk_gb: 64         # optional — omit to use StackDefaults (32)
 features: "nesting=1,keyctl=1,fuse=1"  # optional LXC features override
 unprivileged: false # optional — ONLY for presets that truly need privileged
+tiles:               # optional (feat-tiles-2): a suggested tile per app
+  jellyfin:           # keyed by the app directory name
+    hostname: "__NAME__.kp-soft.dev"  # __NAME__ is the stack's own name;
+                                       # no hostname here = no tile suggested
+    name: "Jellyfin"    # optional — the app's own directory name otherwise
+    group: "Media"       # optional — "Apps" otherwise
+    description: "Films and series"  # optional
+    watch_every: 30       # optional, seconds — the fleet default otherwise
+    down_after: 180        # optional, seconds
 ```
 
 Everything the preset does not set comes from `StackDefaults` (client
 config): network conventions, swap formula, boot order, protection flag,
 which core apps get injected.
+
+A preset's `tiles:` is a default, never forced — the wizard's own Tile
+step (one optional hostname per app) is a separate, explicit choice made
+after the stack exists, not yet wired to override a preset's suggestion
+when the two would name the same hostname. A preset that declares none
+scaffolds exactly as it always did; `tiles:` is the one field here that is
+about the dashboard's front page, not the container.
 
 ## Placeholders
 

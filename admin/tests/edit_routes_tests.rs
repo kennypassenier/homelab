@@ -569,3 +569,141 @@ async fn parity_an_export_bundle_imports_as_a_new_stack() {
         "{changed}"
     );
 }
+
+/// feat-stacks-files: the general file editor's create, delete and rename,
+/// through the very `/plan` and `/commit` routes every edit ends in — and
+/// checks.yml now validated as `homelab_core::checks::ServiceChecks`
+/// rather than only as YAML.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn feat_stacks_files_create_delete_rename_and_checks_schema() {
+    let w = world("files").await;
+
+    // Create: a brand new file under the stack, template content and all.
+    let create = serde_json::json!({
+        "kind": "files", "op": "create",
+        "path": "kp-soft/new-note.yml", "content": "hello: world\n"
+    });
+    let (st, plan) = call(
+        &w.app,
+        "POST",
+        "/data/stacks/kp-soft/plan",
+        Some(serde_json::json!({ "edit": create })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{plan}");
+    assert_eq!(plan["valid"], true, "{plan}");
+    assert_eq!(plan["files"][0]["status"], "added", "{plan}");
+    let (st, v) = call(
+        &w.app,
+        "POST",
+        "/data/stacks/kp-soft/commit",
+        Some(serde_json::json!({ "edit": create, "subject": "a new note" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let commit1 = v["committed"]["commit"].as_str().unwrap().to_string();
+    assert_eq!(
+        git(&w.bare, &["show", "main:stacks/kp-soft/new-note.yml"]),
+        "hello: world\n"
+    );
+
+    // Create refuses a path that already exists. `changes()` refuses
+    // before any staging, so this is a CONFLICT with a Refusal body, the
+    // same shape every other pre-stage refusal in this router takes (see
+    // the import test's "Refusals change nothing" block above).
+    let (st, v) = call(
+        &w.app,
+        "POST",
+        "/data/stacks/kp-soft/plan",
+        Some(serde_json::json!({ "edit": {
+            "kind": "files", "op": "create",
+            "path": "kp-soft/new-note.yml", "content": "x"
+        } })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CONFLICT, "{v}");
+    assert!(v["why"].as_str().unwrap().contains("already"), "{v}");
+
+    // Create refuses a secret and a path escaping the stack.
+    for bad in ["kp-soft/.env", "../escape.yml"] {
+        let (st, v) = call(
+            &w.app,
+            "POST",
+            "/data/stacks/kp-soft/plan",
+            Some(serde_json::json!({ "edit": {
+                "kind": "files", "op": "create", "path": bad, "content": "x"
+            } })),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "{bad}: {v}");
+    }
+
+    // Rename: the new note moves, old path gone, new one holds its text.
+    let rename = serde_json::json!({
+        "kind": "files", "op": "rename",
+        "from": "kp-soft/new-note.yml", "to": "kp-soft/renamed-note.yml"
+    });
+    let (st, v) = call(
+        &w.app,
+        "POST",
+        "/data/stacks/kp-soft/commit",
+        Some(serde_json::json!({ "edit": rename, "subject": "rename the note" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    assert_eq!(
+        git(&w.bare, &["show", "main:stacks/kp-soft/renamed-note.yml"]),
+        "hello: world\n"
+    );
+    let (st, _) = call(&w.app, "GET", "/data/stacks/kp-soft/edit", None).await;
+    assert_eq!(st, StatusCode::OK);
+
+    // Delete: the renamed note goes away; the manifest may not be deleted.
+    let delete =
+        serde_json::json!({ "kind": "files", "op": "delete", "path": "kp-soft/renamed-note.yml" });
+    let (st, v) = call(
+        &w.app,
+        "POST",
+        "/data/stacks/kp-soft/commit",
+        Some(serde_json::json!({ "edit": delete, "subject": "drop the note" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let ls = git(&w.bare, &["ls-tree", "-r", "--name-only", "main"]);
+    assert!(!ls.contains("renamed-note.yml"), "{ls}");
+
+    let (st, v) = call(
+        &w.app,
+        "POST",
+        "/data/stacks/kp-soft/plan",
+        Some(serde_json::json!({ "edit": {
+            "kind": "files", "op": "delete", "path": "lxc-compose.yml"
+        } })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CONFLICT, "{v}");
+    assert!(v["why"].as_str().unwrap().contains("manifest"), "{v}");
+
+    // checks.yml is now judged as homelab_core::checks::ServiceChecks, not
+    // only as YAML: a value of the wrong shape is refused before commit.
+    let (st, v) = call(
+        &w.app,
+        "POST",
+        "/data/stacks/kp-soft/plan",
+        Some(serde_json::json!({ "edit": {
+            "kind": "raw", "path": "kp-soft/checks.yml",
+            "content": "checks:\n  - name: x\n    command: echo x\n    expect: not_a_real_expect\n    layer: process\n"
+        } })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    assert_eq!(v["valid"], false, "{v}");
+    assert!(
+        v["problems"][0]
+            .as_str()
+            .unwrap()
+            .contains("kp-soft/checks.yml"),
+        "{v}"
+    );
+    let _ = commit1;
+}

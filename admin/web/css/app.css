@@ -524,41 +524,10 @@ tr.unread td:first-child {
   cursor: pointer;
   overflow-wrap: anywhere;
 }
-.diff {
-  font-size: 0.8rem;
-  overflow-x: auto;
-  border: 1px solid var(--kp-color-border, currentColor);
-  border-radius: 0.25rem;
-  margin-block: 0.5rem;
-}
+/* The diff itself is kp-themes' `.kp-diff` component [TH54]; kp has no
+ * hunk-header element, so the `@@ … @@` line keeps this one local rule. */
 .diff-hunk {
   padding: 0.125rem 0.5rem;
-  opacity: 0.75;
-}
-.diff-line {
-  display: grid;
-  grid-template-columns: 3.5em 1.5em 1fr;
-  white-space: pre;
-}
-.diff-no {
-  text-align: end;
-  padding-inline-end: 0.5em;
-  opacity: 0.6;
-  user-select: none;
-}
-.diff-mark {
-  text-align: center;
-  user-select: none;
-}
-.diff-add {
-  background: color-mix(
-    in srgb,
-    var(--kp-color-success, green) 18%,
-    transparent
-  );
-}
-.diff-del {
-  background: color-mix(in srgb, var(--kp-color-danger, red) 18%, transparent);
 }
 tr.rule-new td {
   font-style: italic;
@@ -588,9 +557,6 @@ tr.rule-new td {
   margin-block: 0.5rem;
 }
 @media (max-width: 40rem) {
-  .diff-line {
-    grid-template-columns: 2.5em 1.2em 1fr;
-  }
   .edit-grid {
     grid-template-columns: 1fr;
   }

@@ -414,6 +414,133 @@
       "errors": {
         "tile_down_after:x.kp-soft.dev": "x.kp-soft.dev: down after (60 s) must be at least check every (120 s)."
       }
+    },
+    {
+      "check": "settings_ext",
+      "manifest": {
+        "vmid": 116,
+        "hostname": "116-app-kp-soft",
+        "ip": "10.10.10.16/24",
+        "resources": {
+          "cores": 2,
+          "memory_mb": 2048,
+          "swap_mb": 0,
+          "disk_gb": 16,
+          "storage": "local-lvm"
+        },
+        "boot": {
+          "onboot": true,
+          "order": 75
+        },
+        "protection": true,
+        "apps": ["kp-soft"],
+        "natives": [],
+        "firewall": null,
+        "network": {
+          "ip": "10.10.10.16/24",
+          "gateway": "10.10.10.1",
+          "bridge": "vmbr0",
+          "vlan": 10
+        },
+        "lxc": {
+          "unprivileged": true,
+          "gpu": false,
+          "vpn": false
+        },
+        "on_demand": false,
+        "retention": null
+      },
+      "values": {
+        "ip": "10.10.10.16/24",
+        "gateway": "not-an-ip",
+        "bridge": "vmbr0",
+        "vlan": "",
+        "unprivileged": true,
+        "gpu": false,
+        "vpn": false,
+        "storage": "local-lvm",
+        "on_demand": false,
+        "retention": "not json"
+      },
+      "errors": {
+        "gateway": "\"not-an-ip\" is not a valid gateway.",
+        "retention": "Not valid JSON: a list like [] or [{\"every_days\": 1, \"span_days\": 7}]."
+      }
+    },
+    {
+      "check": "settings_ext",
+      "manifest": {
+        "vmid": 116,
+        "hostname": "116-app-kp-soft",
+        "ip": "10.10.10.16/24",
+        "resources": {
+          "cores": 2,
+          "memory_mb": 2048,
+          "swap_mb": 0,
+          "disk_gb": 16,
+          "storage": "local-lvm"
+        },
+        "boot": {
+          "onboot": true,
+          "order": 75
+        },
+        "protection": true,
+        "apps": ["kp-soft"],
+        "natives": [],
+        "firewall": null,
+        "network": {
+          "ip": "10.10.10.16/24",
+          "gateway": "10.10.10.1",
+          "bridge": "vmbr0",
+          "vlan": 10
+        },
+        "lxc": {
+          "unprivileged": true,
+          "gpu": false,
+          "vpn": false
+        },
+        "on_demand": false,
+        "retention": null
+      },
+      "values": {
+        "ip": "10.10.10.16/24",
+        "gateway": "10.10.10.1",
+        "bridge": "vmbr0",
+        "vlan": "",
+        "unprivileged": true,
+        "gpu": false,
+        "vpn": false,
+        "storage": "local-lvm",
+        "on_demand": false,
+        "retention": "[]"
+      },
+      "errors": {}
+    },
+    {
+      "check": "latch_file",
+      "natives": ["kyu"],
+      "values": {
+        "from": "unit.env",
+        "dest": "/etc/kyu/${TOKEN}",
+        "mode": "640",
+        "owner": "",
+        "restarts": "kyu"
+      },
+      "errors": {
+        "dest": "must not contain '${': latch --expand parses every file it is given, so one unresolvable placeholder would break every stack's secrets, not only this one's."
+      }
+    },
+    {
+      "check": "latch_file",
+      "natives": ["kyu"],
+      "values": {
+        "from": "unit.env",
+        "dest": "/etc/kyu/unit.env",
+        "mode": "640",
+        "owner": "",
+        "restarts": "kyu"
+      },
+      "errors": {}
     }
   ]
 }

@@ -26,7 +26,8 @@
  *   sub?: {kind: string, title: string, target: number | string | null,
  *   values: Record<string, string | boolean>, errors: Record<string, string>},
  *   plan?: any, result?: any, staged?: Record<string, unknown>,
- *   confirmed?: string[], stacks?: string[], guarded: number}} DriveEdit
+ *   confirmed?: string[], stacks?: string[], guarded: number,
+ *   action?: string}} DriveEdit
  * @typedef {{id: number, step: DriveStep, text: string, countdown: boolean,
  *   total_ms: number, left_ms: number}} DriveAnnounce
  * @typedef {{step: DriveStep, text: string, done: boolean}} DrivePlanStep
@@ -369,7 +370,13 @@ const EDIT_TABS = /** @type {Record<string, string>} */ ({
   settings: "settings",
   raw: "settings",
   "add-app": "settings",
+  "settings-ext": "settings",
+  apps: "settings",
+  latch: "settings",
+  tiles: "settings",
   firewall: "firewall",
+  checks: "checks",
+  publish: "apps",
 });
 
 /**
@@ -386,8 +393,10 @@ export function targetOf(step) {
     case "open": {
       const form = step.form ?? "";
       const tab = EDIT_TABS[form];
-      if (tab && step.target)
-        return { kind: "link", path: `/app/stacks/${step.target}/${tab}` };
+      // checks/publish take "<stack>/<app>"; the page is the stack's own.
+      const stackPart = step.target?.split("/")[0];
+      if (tab && stackPart)
+        return { kind: "link", path: `/app/stacks/${stackPart}/${tab}` };
       if (form === "host-settings")
         return { kind: "link", path: "/app/settings" };
       if (form.startsWith("batch") || form === "new-stack" || form === "import")

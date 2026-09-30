@@ -185,6 +185,55 @@ pub fn effects(
             None,
         ));
     }
+    // feat-stacks-9: O5/H4 — `unprivileged`, `gpu` and `vpn` are only ever
+    // set at `pct create`/`pct clone`; a deploy of a running container
+    // leaves them exactly as they are, same shape as protection above.
+    for (label, was, is) in [
+        (
+            "privilege level",
+            old.lxc.unprivileged,
+            new.lxc.unprivileged,
+        ),
+        ("gpu passthrough", old.lxc.gpu, new.lxc.gpu),
+        ("vpn device", old.lxc.vpn, new.lxc.vpn),
+    ] {
+        if was != is {
+            out.push(effect(
+                "warning",
+                format!(
+                    "{label} {}: only a rebuild of CT {} applies it; a deploy leaves the \
+                     running container as it is",
+                    if is { "on" } else { "off" },
+                    new.vmid
+                ),
+                None,
+            ));
+        }
+    }
+    if old.resources.storage != new.resources.storage {
+        out.push(effect(
+            "warning",
+            format!(
+                "storage {} → {}: only a rebuild of CT {} moves the disk; a deploy leaves it where it is",
+                old.resources.storage, new.resources.storage, new.vmid
+            ),
+            None,
+        ));
+    }
+    if old.network.ip != new.network.ip
+        || old.network.gateway != new.network.gateway
+        || old.network.bridge != new.network.bridge
+        || old.network.vlan != new.network.vlan
+    {
+        out.push(effect(
+            "info",
+            format!(
+                "the deploy writes the new network config to CT {}'s config; the container picks it up at its next start",
+                new.vmid
+            ),
+            Some("deploy"),
+        ));
+    }
     // tile-watch: a tile arriving or leaving can change the derived rule
     // even when the hand-declared `firewall:` block did not move.
     if old.firewall != new.firewall || old.tiles != new.tiles {

@@ -37,8 +37,9 @@ export function fileViews(list) {
     hunks: f.hunks.map((h) => ({
       head: `@@ −${h.old_start},${h.old_len} +${h.new_start},${h.new_len} @@`,
       lines: h.lines.map((l) => ({
-        cls:
-          l.op === "+" ? "diff-add" : l.op === "-" ? "diff-del" : "diff-same",
+        // kp-themes' diff component (`.kp-diff__line[data-kind]`): "added",
+        // "removed", or "same" for a context line.
+        kind: l.op === "+" ? "added" : l.op === "-" ? "removed" : "same",
         mark: l.op === "=" ? " " : l.op,
         no: l.op === "+" ? l.new : l.old,
         text: l.text,

@@ -378,7 +378,16 @@ impl Driver {
             ));
         };
         match kind {
-            EditKind::Settings | EditKind::Raw | EditKind::AddApp | EditKind::Firewall => {
+            EditKind::Settings
+            | EditKind::Raw
+            | EditKind::AddApp
+            | EditKind::Firewall
+            | EditKind::AddNative
+            // feat-stacks-9/10/11: also one stack's own edit, the same read.
+            | EditKind::SettingsExt
+            | EditKind::Apps
+            | EditKind::Latch
+            | EditKind::Tiles => {
                 match target {
                     Some(t) if act::valid_stack_name(t) => ed::read_stack_edit(c, t)
                         .await
@@ -386,6 +395,36 @@ impl Driver {
                     _ => Value::Null,
                 }
             }
+            // feat-checks-1/feat-publish-1: `<stack>/<app>` — only the
+            // stack part is a stack name; the same read has every app's
+            // checks.yml (`e.checks`), which is all either form needs.
+            EditKind::Checks | EditKind::PublishApp => {
+                let stack = target.map(|t| t.split_once('/').map_or(t, |(s, _)| s));
+                match stack {
+                    Some(t) if act::valid_stack_name(t) => ed::read_stack_edit(c, t)
+                        .await
+                        .unwrap_or_else(|(_, r)| err(r)),
+                    _ => Value::Null,
+                }
+            }
+            // feat-native-1: `<stack>[/<unit>]` — only the stack part is a
+            // stack name, and the same read has every unit's manifest.
+            EditKind::Native => {
+                let stack = target.map(|t| t.split_once('/').map_or(t, |(s, _)| s));
+                match stack {
+                    Some(t) if act::valid_stack_name(t) => ed::read_stack_edit(c, t)
+                        .await
+                        .unwrap_or_else(|(_, r)| err(r)),
+                    _ => Value::Null,
+                }
+            }
+            // feat-preset-1: an existing preset's `preset.yml` and files;
+            // a new preset reads nothing (the name is typed in the form).
+            EditKind::Preset => match target {
+                Some(t) => ed::read_preset_edit(c, t).await.unwrap_or_else(|(_, r)| err(r)),
+                None => Value::Null,
+            },
+            EditKind::NewPreset => Value::Null,
             // The taken names and numbers, and whether there is a working
             // copy, as the new-stack wizard reads them.
             EditKind::NewStack | EditKind::Import => ed::read_presets(c).await,
@@ -490,6 +529,14 @@ impl Driver {
             EditCall::ImportCommit { body } => match serde_json::from_value(body.clone()) {
                 Ok(b) => ed::commit_import(&c, b, origin()).await.map_err(|(_, r)| r),
                 Err(_) => parse("the import", body),
+            },
+            EditCall::PresetPlan { edit } => match serde_json::from_value(edit.clone()) {
+                Ok(e) => ed::plan_preset(&c, e).await.map_err(|(_, r)| r),
+                Err(_) => parse("the preset's plan", edit),
+            },
+            EditCall::PresetCommit { body } => match serde_json::from_value(body.clone()) {
+                Ok(b) => ed::commit_preset(&c, b).await.map_err(|(_, r)| r),
+                Err(_) => parse("the preset's commit", body),
             },
         };
         if call.final_press() {

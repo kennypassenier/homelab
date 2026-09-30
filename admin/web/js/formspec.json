@@ -276,7 +276,10 @@
       "key_confirm": "Type {key} exactly.",
       "batch_confirm": "Type {stack} to confirm.",
       "rollback_choose": "Choose a commit to deploy or a unit to roll back.",
-      "tile_down_low": "{key}: down after ({down} s) must be at least check every ({watch} s)."
+      "tile_down_low": "{key}: down after ({down} s) must be at least check every ({watch} s).",
+      "retention_json": "A JSON list of {\"every_days\": N, \"span_days\": N} (span_days optional).",
+      "retention_not_json": "Not valid JSON: a list like [] or [{\"every_days\": 1, \"span_days\": 7}].",
+      "dollar_expand": "must not contain '${': latch --expand parses every file it is given, so one unresolvable placeholder would break every stack's secrets, not only this one's."
     },
     "no_touch": [100, 101, 102, 103],
     "follow": {
@@ -355,6 +358,91 @@
         "help": "Refuses a destroy at the hypervisor; a rebuild applies a change."
       }
     ],
+    "settings_ext": [
+      {
+        "name": "ip",
+        "id": "edit-network-ip",
+        "kind": "text",
+        "label": "Address (CIDR)",
+        "help": "The container's own address, e.g. 10.10.10.10/24. Checked against every other stack's address before the commit.",
+        "required": false,
+        "pattern": "\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}/\\d{1,2}"
+      },
+      {
+        "name": "gateway",
+        "id": "edit-network-gateway",
+        "kind": "text",
+        "label": "Gateway",
+        "help": "The router's address on this VLAN, e.g. 10.10.10.1.",
+        "required": false,
+        "pattern": "\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}"
+      },
+      {
+        "name": "bridge",
+        "id": "edit-network-bridge",
+        "kind": "text",
+        "label": "Bridge",
+        "help": "The Proxmox bridge this container's NIC attaches to, e.g. vmbr0.",
+        "required": false,
+        "pattern": "[A-Za-z0-9_\\-]{1,15}"
+      },
+      {
+        "name": "vlan",
+        "id": "edit-network-vlan",
+        "kind": "number",
+        "label": "VLAN tag",
+        "help": "Blank leaves the tag as it is.",
+        "min": 1,
+        "max": 4094,
+        "unit": "",
+        "required": false
+      },
+      {
+        "name": "unprivileged",
+        "id": "edit-lxc-unprivileged",
+        "kind": "check",
+        "label": "Unprivileged",
+        "help": "Only takes effect at a rebuild of the container (pct create/clone sets it once); a deploy never changes a running container's privilege level."
+      },
+      {
+        "name": "gpu",
+        "id": "edit-lxc-gpu",
+        "kind": "check",
+        "label": "GPU passthrough",
+        "help": "Passes /dev/dri in. Only takes effect at a rebuild."
+      },
+      {
+        "name": "vpn",
+        "id": "edit-lxc-vpn",
+        "kind": "check",
+        "label": "VPN device",
+        "help": "Gives the container /dev/net/tun. Only takes effect at a rebuild."
+      },
+      {
+        "name": "storage",
+        "id": "edit-resources-storage",
+        "kind": "text",
+        "label": "Proxmox storage",
+        "help": "The pve storage id the root disk lives on, e.g. local-lvm. Only takes effect at a rebuild.",
+        "required": false,
+        "pattern": "[A-Za-z0-9_\\-]{1,64}"
+      },
+      {
+        "name": "on_demand",
+        "id": "edit-on-demand",
+        "kind": "check",
+        "label": "On demand",
+        "help": "A stack created and destroyed in one sitting, like a drill; the fleet check does not report it as declared-but-never-deployed."
+      },
+      {
+        "name": "retention",
+        "id": "edit-retention",
+        "kind": "textarea",
+        "label": "Retention tiers (JSON, blank = fleet default)",
+        "help": "A JSON list of {\"every_days\": N, \"span_days\": N} kept newest-first, the last tier's span_days omitted to mean forever. An empty list [] clears this stack's own tiers and goes back to the fleet-wide policy. Leave the field exactly as shown to make no change.",
+        "required": false
+      }
+    ],
     "image": {
       "name": "image:{key}",
       "id": "edit-image-{slug}",
@@ -414,18 +502,57 @@
     ],
     "raw": [
       {
+        "name": "op",
+        "id": "files-op",
+        "kind": "choice",
+        "label": "What to do",
+        "help": "Edit an existing file's text, create a new one, delete one, or rename one.",
+        "choices": [
+          {
+            "value": "edit",
+            "label": "Edit"
+          },
+          {
+            "value": "create",
+            "label": "Create"
+          },
+          {
+            "value": "delete",
+            "label": "Delete"
+          },
+          {
+            "value": "rename",
+            "label": "Rename"
+          }
+        ]
+      },
+      {
         "name": "file",
         "id": "raw-file",
         "kind": "choice",
         "label": "File",
-        "help": "Anything the form does not cover. Secrets (.env) are not here: they live in latch."
+        "help": "Anything the form does not cover. Secrets (.env) are not here: they live in latch. For create, this is ignored."
       },
       {
         "name": "text",
         "id": "raw-text",
         "kind": "textarea",
         "label": "The file's text",
-        "help": "The whole file as it should be; homelab ui edit raw-text <file> sets it."
+        "help": "The whole file as it should be; homelab ui edit raw-text <file> sets it. For create, the new file's starting text."
+      },
+      {
+        "name": "new_path",
+        "id": "files-new-path",
+        "kind": "text",
+        "label": "New path",
+        "help": "Where the created file goes, relative to the stack's directory (op: create)."
+      },
+      {
+        "name": "rename_to",
+        "id": "files-rename-to",
+        "kind": "text",
+        "label": "Rename to",
+        "help": "The file's new path, relative to the stack's directory (op: rename)."
       }
     ],
     "add_app": [
@@ -435,6 +562,158 @@
         "kind": "choice",
         "label": "Preset",
         "help": "A preset's app joins this stack: its files, its entry in apps and its /appdata folder."
+      }
+    ],
+    "native": [
+      {
+        "name": "unit",
+        "id": "native-unit",
+        "kind": "choice",
+        "label": "Unit",
+        "help": "Which native unit of this stack service.yml below edits."
+      },
+      {
+        "name": "binary",
+        "id": "native-binary",
+        "kind": "text",
+        "label": "Binary",
+        "help": "The absolute path of the installed program inside the container."
+      },
+      {
+        "name": "env_file",
+        "id": "native-env-file",
+        "kind": "text",
+        "label": "Environment file",
+        "help": "The unit's EnvironmentFile; empty clears it."
+      },
+      {
+        "name": "data_dirs",
+        "id": "native-data-dirs",
+        "kind": "textarea",
+        "label": "Data directories (one per line)",
+        "help": "What the nightly backup archives."
+      },
+      {
+        "name": "update_cmd",
+        "id": "native-update-cmd",
+        "kind": "textarea",
+        "label": "Update command",
+        "help": "Empty: the homelab runs no verb of its own for this service."
+      },
+      {
+        "name": "stateless",
+        "id": "native-stateless",
+        "kind": "check",
+        "label": "Stateless (no data_dirs, by design)"
+      },
+      {
+        "name": "restore_note",
+        "id": "native-restore-note",
+        "kind": "textarea",
+        "label": "Restore note",
+        "help": "Printed in the DR runbook under this unit."
+      },
+      {
+        "name": "release_repo",
+        "id": "native-release-repo",
+        "kind": "text",
+        "label": "Release repo",
+        "help": "owner/name on GitHub; empty means adopted only."
+      },
+      {
+        "name": "release_asset",
+        "id": "native-release-asset",
+        "kind": "text",
+        "label": "Release asset",
+        "help": "Empty: the unit name."
+      },
+      {
+        "name": "backup_from_newest",
+        "id": "native-backup-newest",
+        "kind": "text",
+        "label": "Backup from newest",
+        "help": "An absolute glob with a '*', e.g. /appdata/…/backup-*.db."
+      },
+      {
+        "name": "backup_pause",
+        "id": "native-backup-pause",
+        "kind": "check",
+        "label": "Pause the unit for the nightly backup"
+      },
+      {
+        "name": "update_policy",
+        "id": "native-update-policy",
+        "kind": "choice",
+        "label": "Update policy",
+        "help": "manual: never; auto: nightly release check; self: the unit's own update_cmd, nightly.",
+        "choices": [
+          {
+            "value": "manual",
+            "label": "Manual"
+          },
+          {
+            "value": "auto",
+            "label": "Auto"
+          },
+          {
+            "value": "self",
+            "label": "Self"
+          }
+        ]
+      },
+      {
+        "name": "metrics",
+        "id": "native-metrics",
+        "kind": "choice",
+        "label": "Metrics",
+        "help": "Measured clears the key (the default); Not measured writes metrics: false.",
+        "choices": [
+          {
+            "value": "measured",
+            "label": "Measured"
+          },
+          {
+            "value": "not_measured",
+            "label": "Not measured"
+          }
+        ]
+      }
+    ],
+    "add_native": [
+      {
+        "name": "unit",
+        "id": "add-native-unit",
+        "kind": "text",
+        "label": "Unit name",
+        "help": "The systemd unit name, without .service. Its service.yml and unit file go under <unit>/.",
+        "required": true,
+        "pattern": "[a-z0-9][a-z0-9\\-]*"
+      },
+      {
+        "name": "binary",
+        "id": "add-native-binary",
+        "kind": "text",
+        "label": "Binary",
+        "help": "The absolute path of the program inside the container.",
+        "required": true
+      },
+      {
+        "name": "env_file",
+        "id": "add-native-env-file",
+        "kind": "text",
+        "label": "Environment file"
+      },
+      {
+        "name": "data_dirs",
+        "id": "add-native-data-dirs",
+        "kind": "textarea",
+        "label": "Data directories (one per line)"
+      },
+      {
+        "name": "notify",
+        "id": "add-native-notify",
+        "kind": "check",
+        "label": "Type=notify (the chassis-rs kit's shape)"
       }
     ],
     "firewall": [
@@ -607,6 +886,549 @@
         "current": ""
       }
     ],
+    "apps_remove": {
+      "name": "apps-remove:{app}",
+      "id": "apps-remove-{app}",
+      "kind": "check",
+      "label": "{app}",
+      "help": "Drops {app} from apps:, its directory, and any storage or data_mounts row naming it as app: — data already on the container is untouched."
+    },
+    "apps_add_blank": {
+      "name": "add_blank",
+      "id": "apps-add-blank",
+      "kind": "text",
+      "label": "Add blank app(s), comma-separated",
+      "help": "Each gets a directory and a minimal docker-compose.yml to fill in; no preset.",
+      "pattern": "[a-z0-9][a-z0-9\\-]*( *, *[a-z0-9][a-z0-9\\-]*)*",
+      "required": false
+    },
+    "add_app_tile": {
+      "name": "add-app-tile:{app}",
+      "id": "add-app-tile-{app}",
+      "kind": "text",
+      "label": "{app} hostname",
+      "help": "Blank: no tile for this app. Named after the app, group \"Own\"; refine it afterward in the Tiles card.",
+      "required": false
+    },
+    "storage_entry": [
+      {
+        "name": "host_path",
+        "id": "storage-host-path",
+        "kind": "text",
+        "label": "Host path",
+        "help": "Under /appdata/, named <app>-config; the owning app keeps its own backup history across a move (D25).",
+        "pattern": "/appdata/[A-Za-z0-9._\\-/]+",
+        "required": true
+      },
+      {
+        "name": "mount_point",
+        "id": "storage-mount-point",
+        "kind": "text",
+        "label": "Mount point",
+        "help": "Where it appears inside the container.",
+        "pattern": "/[A-Za-z0-9._\\-/]*",
+        "required": true
+      },
+      {
+        "name": "app",
+        "id": "storage-app",
+        "kind": "choice",
+        "label": "Owning app",
+        "help": "The restic repository is named after this app; empty: the stack itself owns it.",
+        "required": false
+      },
+      {
+        "name": "no_data",
+        "id": "storage-no-data",
+        "kind": "check",
+        "label": "No data (this app keeps nothing of its own on disk)"
+      },
+      {
+        "name": "no_backup",
+        "id": "storage-no-backup",
+        "kind": "text",
+        "label": "No backup, because…",
+        "help": "Empty: backed up normally. A reason here deliberately stops the backup (Z3).",
+        "required": false
+      },
+      {
+        "name": "host_owner_uid",
+        "id": "storage-host-owner-uid",
+        "kind": "number",
+        "label": "Host owner uid",
+        "help": "Empty: the fleet default appdata owner.",
+        "min": 0,
+        "max": 4294967295,
+        "unit": "",
+        "required": false
+      }
+    ],
+    "data_mount": [
+      {
+        "name": "host_path",
+        "id": "mount-host-path",
+        "kind": "text",
+        "label": "Host path",
+        "help": "A directory on the Proxmox host this stack only borrows (media libraries): never created, never backed up. Must already exist.",
+        "pattern": "/[A-Za-z0-9._\\-/]+",
+        "required": true
+      },
+      {
+        "name": "mount_point",
+        "id": "mount-mount-point",
+        "kind": "text",
+        "label": "Mount point",
+        "help": "Frozen across a rebuild: every app config that points at this path depends on it.",
+        "pattern": "/[A-Za-z0-9._\\-/]*",
+        "required": true
+      },
+      {
+        "name": "note",
+        "id": "mount-note",
+        "kind": "text",
+        "label": "Note",
+        "help": "Whose directory this is, for the next reader.",
+        "required": false
+      },
+      {
+        "name": "rotate_files",
+        "id": "mount-rotate-files",
+        "kind": "text",
+        "label": "Rotate: file name or glob",
+        "help": "Empty: this mount's log is not rotated. Joined to the mount point, e.g. access.log or *.log.",
+        "pattern": "[^/]+",
+        "required": false
+      },
+      {
+        "name": "rotate_keep",
+        "id": "mount-rotate-keep",
+        "kind": "number",
+        "label": "Rotate: copies kept",
+        "help": "Empty with a file name given: 14.",
+        "min": 1,
+        "max": 3650,
+        "unit": "",
+        "required": false
+      },
+      {
+        "name": "rotate_container",
+        "id": "mount-rotate-container",
+        "kind": "text",
+        "label": "Rotate: tell this container",
+        "help": "docker kill --signal after the rename, so the app opens a new file rather than losing the copytruncate window. Empty: copytruncate.",
+        "required": false
+      },
+      {
+        "name": "rotate_signal",
+        "id": "mount-rotate-signal",
+        "kind": "text",
+        "label": "Rotate: signal",
+        "help": "Empty with a container given: USR1.",
+        "placeholder": "USR1",
+        "required": false
+      }
+    ],
+    "log_file": [
+      {
+        "name": "path",
+        "id": "logfile-path",
+        "kind": "text",
+        "label": "Path",
+        "help": "Absolute path inside the container; a glob is allowed.",
+        "pattern": "/[A-Za-z0-9._\\-/*]+",
+        "required": true
+      },
+      {
+        "name": "job",
+        "id": "logfile-job",
+        "kind": "text",
+        "label": "Job label",
+        "help": "The `job` label its lines carry in Loki, e.g. access.",
+        "pattern": "[A-Za-z0-9._\\-]{1,64}",
+        "required": true
+      }
+    ],
+    "latch_secret": {
+      "name": "latch-secret:{app}",
+      "id": "latch-secret-{app}",
+      "kind": "check",
+      "label": "{app}",
+      "help": "{app}'s .env comes from latch instead of a plaintext file."
+    },
+    "latch_file": [
+      {
+        "name": "from",
+        "id": "latchfile-from",
+        "kind": "text",
+        "label": "From (in latch, under this stack)",
+        "help": "A relative path; latch holds it at <stack>/<from>.",
+        "pattern": "[A-Za-z0-9._\\-/]+",
+        "required": true
+      },
+      {
+        "name": "dest",
+        "id": "latchfile-dest",
+        "kind": "text",
+        "label": "Destination (absolute, in the container)",
+        "pattern": "/[A-Za-z0-9._\\-/]+",
+        "required": true
+      },
+      {
+        "name": "mode",
+        "id": "latchfile-mode",
+        "kind": "text",
+        "label": "Mode",
+        "help": "Octal, like 640.",
+        "pattern": "[0-7]{3,4}",
+        "placeholder": "640",
+        "required": true
+      },
+      {
+        "name": "owner",
+        "id": "latchfile-owner",
+        "kind": "text",
+        "label": "Owner",
+        "help": "user:group inside the container; empty: left as the file arrives.",
+        "pattern": "[A-Za-z0-9_\\-]+:[A-Za-z0-9_\\-]+",
+        "required": false
+      },
+      {
+        "name": "restarts",
+        "id": "latchfile-restarts",
+        "kind": "choice",
+        "label": "Restarts this native unit",
+        "help": "Empty: nothing restarts when the file changes (a unit that reads it with EnvironmentFile= restarts anyway).",
+        "required": false
+      }
+    ],
+    "check_row": [
+      {
+        "name": "name",
+        "id": "check-name",
+        "kind": "text",
+        "label": "Name",
+        "help": "Shown to Kenny: \"films in the library\", not a variable name.",
+        "required": true
+      },
+      {
+        "name": "command",
+        "id": "check-command",
+        "kind": "text",
+        "label": "Command",
+        "help": "Run inside the container; its stdout, trimmed, is the reading.",
+        "required": true
+      },
+      {
+        "name": "expect",
+        "id": "check-expect",
+        "kind": "choice",
+        "label": "Expect",
+        "required": true,
+        "choices": [
+          {
+            "value": "never_decreases",
+            "label": "Never decreases (counted things)"
+          },
+          {
+            "value": "must_match",
+            "label": "Must match (configuration)"
+          },
+          {
+            "value": "must_be_present",
+            "label": "Non-empty afterward"
+          }
+        ]
+      },
+      {
+        "name": "layer",
+        "id": "check-layer",
+        "kind": "choice",
+        "label": "Layer",
+        "help": "How deep this reading actually goes.",
+        "required": true,
+        "choices": [
+          {
+            "value": "network",
+            "label": "Network (something answered)"
+          },
+          {
+            "value": "process",
+            "label": "Process (up, or a file exists)"
+          },
+          {
+            "value": "application",
+            "label": "Application (answered its own question)"
+          },
+          {
+            "value": "user_visible",
+            "label": "User-visible (what a person notices)"
+          }
+        ]
+      },
+      {
+        "name": "blind_spot",
+        "id": "check-blind-spot",
+        "kind": "text",
+        "label": "Blind spot",
+        "help": "What this does NOT prove. Required below Application layer.",
+        "required": false
+      }
+    ],
+    "probe_row": [
+      {
+        "name": "name",
+        "id": "probe-name",
+        "kind": "text",
+        "label": "Name",
+        "required": true
+      },
+      {
+        "name": "command",
+        "id": "probe-command",
+        "kind": "text",
+        "label": "Command",
+        "help": "Run with sh -c; its stdout, trimmed, is the reading.",
+        "required": true
+      },
+      {
+        "name": "healthy_kind",
+        "id": "probe-healthy-kind",
+        "kind": "choice",
+        "label": "Healthy when the reading…",
+        "required": true,
+        "choices": [
+          {
+            "value": "equals",
+            "label": "Equals (exact text)"
+          },
+          {
+            "value": "at_least",
+            "label": "Is at least (a whole number)"
+          },
+          {
+            "value": "at_most",
+            "label": "Is at most (a whole number)"
+          }
+        ]
+      },
+      {
+        "name": "healthy_value",
+        "id": "probe-healthy-value",
+        "kind": "text",
+        "label": "…this value",
+        "required": true
+      },
+      {
+        "name": "layer",
+        "id": "probe-layer",
+        "kind": "choice",
+        "label": "Layer",
+        "required": true,
+        "choices": [
+          {
+            "value": "network",
+            "label": "Network (something answered)"
+          },
+          {
+            "value": "process",
+            "label": "Process (up, or a file exists)"
+          },
+          {
+            "value": "application",
+            "label": "Application (answered its own question)"
+          },
+          {
+            "value": "user_visible",
+            "label": "User-visible (what a person notices)"
+          }
+        ]
+      },
+      {
+        "name": "blind_spot",
+        "id": "probe-blind-spot",
+        "kind": "text",
+        "label": "Blind spot",
+        "help": "What this does NOT prove. Required below Application layer.",
+        "required": false
+      }
+    ],
+    "manual_row": [
+      {
+        "name": "text",
+        "id": "manual-text",
+        "kind": "text",
+        "label": "Question",
+        "required": true
+      },
+      {
+        "name": "once",
+        "id": "manual-once",
+        "kind": "check",
+        "label": "Asked once, not every round"
+      }
+    ],
+    "checks_scalar": [
+      {
+        "name": "app",
+        "id": "checks-app",
+        "kind": "choice",
+        "label": "App",
+        "required": true
+      },
+      {
+        "name": "busy_check",
+        "id": "checks-busy",
+        "kind": "text",
+        "label": "Busy check command",
+        "help": "Shell command run in the container; blank = none.",
+        "required": false
+      },
+      {
+        "name": "url",
+        "id": "checks-url",
+        "kind": "text",
+        "label": "Link",
+        "help": "https://…; blank = derived from the route file.",
+        "required": false
+      }
+    ],
+    "tile_row": [
+      {
+        "name": "key",
+        "id": "tile-key",
+        "kind": "text",
+        "label": "Hostname",
+        "help": "What the tile opens at; renaming this hostname keeps the tile's history.",
+        "required": true
+      },
+      {
+        "name": "name",
+        "id": "tile-name",
+        "kind": "text",
+        "label": "Name",
+        "required": true
+      },
+      {
+        "name": "group",
+        "id": "tile-group",
+        "kind": "text",
+        "label": "Group",
+        "help": "The heading it sits under; pick one already used or type a new one.",
+        "required": true
+      },
+      {
+        "name": "order",
+        "id": "tile-order",
+        "kind": "number",
+        "label": "Order",
+        "help": "Lower sits first. Blank: 100.",
+        "min": 0,
+        "max": 100000,
+        "unit": "",
+        "required": false
+      },
+      {
+        "name": "description",
+        "id": "tile-description",
+        "kind": "text",
+        "label": "Description",
+        "help": "One line under the name.",
+        "required": false
+      },
+      {
+        "name": "url",
+        "id": "tile-url",
+        "kind": "text",
+        "label": "Opens at",
+        "help": "Blank: https://<hostname>/.",
+        "required": false
+      },
+      {
+        "name": "reading",
+        "id": "tile-reading",
+        "kind": "text",
+        "label": "Reading command",
+        "help": "Shell run in the container; its output shows on the tile.",
+        "required": false
+      },
+      {
+        "name": "watch_every",
+        "id": "tile-watch-every",
+        "kind": "number",
+        "label": "Check every (seconds)",
+        "help": "Blank: the fleet default.",
+        "min": 10,
+        "max": 86400,
+        "unit": "s",
+        "required": false
+      },
+      {
+        "name": "down_after",
+        "id": "tile-down-after",
+        "kind": "number",
+        "label": "Down after (seconds)",
+        "help": "Blank: the fleet default; must be at least check every.",
+        "min": 10,
+        "max": 604800,
+        "unit": "s",
+        "required": false
+      }
+    ],
+    "publish": [
+      {
+        "name": "hostname",
+        "id": "publish-hostname",
+        "kind": "text",
+        "label": "Hostname",
+        "help": "Where this app opens.",
+        "required": true
+      },
+      {
+        "name": "port",
+        "id": "publish-port",
+        "kind": "number",
+        "label": "Container port",
+        "help": "The port the app's own container answers on.",
+        "min": 1,
+        "max": 65535,
+        "unit": "",
+        "required": true
+      },
+      {
+        "name": "external",
+        "id": "publish-external",
+        "kind": "check",
+        "label": "This backend is not one of the fleet's own managed stacks"
+      },
+      {
+        "name": "separate_file",
+        "id": "publish-separate-file",
+        "kind": "check",
+        "label": "Keep this route in a file of its own (extra_routes) instead of adding to traefik-routes.yml"
+      },
+      {
+        "name": "create_tile",
+        "id": "publish-create-tile",
+        "kind": "check",
+        "label": "Also create a tile for this hostname"
+      },
+      {
+        "name": "tile_name",
+        "id": "publish-tile-name",
+        "kind": "text",
+        "label": "Tile name",
+        "help": "Blank: the app's own name.",
+        "required": false
+      },
+      {
+        "name": "tile_group",
+        "id": "publish-tile-group",
+        "kind": "text",
+        "label": "Tile group",
+        "help": "Blank: \"Own\".",
+        "required": false
+      }
+    ],
     "new_stack": [
       {
         "id": "preset",
@@ -704,6 +1526,66 @@
         "fields": []
       },
       {
+        "id": "tile",
+        "label": "Tile",
+        "fields": [
+          {
+            "name": "tile_hostname",
+            "id": "new-tile-hostname",
+            "kind": "text",
+            "label": "Hostname",
+            "help": "Where this stack's tile opens, e.g. recipes.kp-soft.dev. Blank: no tile is created.",
+            "required": false,
+            "placeholder": "recipes.kp-soft.dev"
+          },
+          {
+            "name": "tile_name",
+            "id": "new-tile-name",
+            "kind": "text",
+            "label": "Name",
+            "help": "What the tile is called on the dashboard's start page. Blank: the stack's own name.",
+            "required": false
+          },
+          {
+            "name": "tile_group",
+            "id": "new-tile-group",
+            "kind": "text",
+            "label": "Group",
+            "help": "The heading the tile sits under; an existing group or a new one.",
+            "required": false,
+            "placeholder": "Own"
+          },
+          {
+            "name": "tile_description",
+            "id": "new-tile-description",
+            "kind": "text",
+            "label": "Description",
+            "help": "One line under the name. Blank: none.",
+            "required": false
+          },
+          {
+            "name": "tile_watch_every",
+            "id": "new-tile-watch-every",
+            "kind": "number",
+            "label": "Check every",
+            "help": "How often the dashboard's minute watch checks this tile, in seconds. Blank: the fleet default.",
+            "min": 10,
+            "unit": "s",
+            "required": false
+          },
+          {
+            "name": "tile_down_after",
+            "id": "new-tile-down-after",
+            "kind": "number",
+            "label": "Down after",
+            "help": "How long it may fail before it counts as down, in seconds. Blank: the fleet default.",
+            "min": 10,
+            "unit": "s",
+            "required": false
+          }
+        ]
+      },
+      {
         "id": "plan",
         "label": "Plan and commit",
         "fields": []
@@ -770,6 +1652,102 @@
         "required": true,
         "min": 102,
         "max": 354
+      }
+    ],
+    "preset_meta": [
+      {
+        "name": "description",
+        "id": "preset-description",
+        "kind": "text",
+        "label": "Description"
+      },
+      {
+        "name": "ram_mb",
+        "id": "preset-ram-mb",
+        "kind": "number",
+        "label": "Memory (MB)",
+        "min": 128,
+        "max": 262144
+      },
+      {
+        "name": "cores",
+        "id": "preset-cores",
+        "kind": "number",
+        "label": "Cores (blank: the stack default)",
+        "min": 1,
+        "max": 64
+      },
+      {
+        "name": "disk_gb",
+        "id": "preset-disk-gb",
+        "kind": "number",
+        "label": "Disk (GB, blank: the stack default)",
+        "min": 2,
+        "max": 4096
+      },
+      {
+        "name": "features",
+        "id": "preset-features",
+        "kind": "text",
+        "label": "LXC features (blank: the stack default)"
+      },
+      {
+        "name": "gpu",
+        "id": "preset-gpu",
+        "kind": "check",
+        "label": "Pass the host GPU through (VAAPI)"
+      },
+      {
+        "name": "vpn",
+        "id": "preset-vpn",
+        "kind": "check",
+        "label": "Give a /dev/net/tun device (VPN clients)"
+      }
+    ],
+    "new_preset_name": {
+      "name": "name",
+      "id": "new-preset-name",
+      "kind": "text",
+      "label": "Preset name",
+      "help": "Lowercase letters, digits and dashes, not starting with '_'.",
+      "required": true,
+      "pattern": "[a-z0-9][a-z0-9\\-]*"
+    },
+    "preset_file": [
+      {
+        "name": "file",
+        "id": "preset-file-select",
+        "kind": "choice",
+        "label": "File",
+        "help": "Empty: a new file, at the path below."
+      },
+      {
+        "name": "path",
+        "id": "preset-file-path",
+        "kind": "text",
+        "label": "Path",
+        "help": "Relative to the preset's own directory, e.g. myapp/docker-compose.yml.",
+        "required": false
+      },
+      {
+        "name": "text",
+        "id": "preset-file-text",
+        "kind": "textarea",
+        "label": "The file's text"
+      },
+      {
+        "name": "template",
+        "id": "preset-file-template",
+        "kind": "choice",
+        "label": "Start from",
+        "help": "A starter template's text, for a new file only."
+      },
+      {
+        "name": "rename_to",
+        "id": "preset-file-rename-to",
+        "kind": "text",
+        "label": "New path",
+        "help": "The selected file's new path, relative to the preset's own directory."
       }
     ]
   }

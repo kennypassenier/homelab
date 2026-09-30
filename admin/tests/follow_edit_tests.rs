@@ -256,6 +256,12 @@ fn row(op: &str, t: Option<&str>) -> UiStep {
         target: t.map(str::to_string),
     }
 }
+fn checked(f: &str, on: bool) -> UiStep {
+    UiStep::Check {
+        field: f.into(),
+        on,
+    }
+}
 
 async fn step(w: &World, s: UiStep) -> Value {
     w.driver.step("wsl", Scope::Operate, s).await
@@ -469,6 +475,391 @@ async fn follow_settings_commit_and_deploy_and_the_raw_editor() {
     assert_eq!(commits(&w), 2);
 }
 
+/// feat-platform-10 (milestone follow), feat-stacks-9.
+///
+/// The settings-extension form (network, lxc flags, storage, on_demand,
+/// retention): a field changed, the plan, the commit, once — the same
+/// shape `follow_settings_commit_and_deploy_and_the_raw_editor` proves for
+/// the first settings page.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_settings_ext_commits_once() {
+    let w = world("settings-ext").await;
+    let opened = ok(&w, open("settings-ext", Some("kp-soft"))).await;
+    assert_eq!(opened["state"]["page"], "/app/stacks/kp-soft/settings");
+    assert_eq!(opened["state"]["form"]["step"], "settings_ext");
+    let (why, _) = refused(&step(&w, press("next")).await);
+    assert!(why.contains("Nothing is changed yet."), "{why}");
+    ok(&w, typed("edit-network-vlan", "20")).await;
+    let plan = ok(&w, press("next")).await;
+    assert_eq!(plan["state"]["form"]["edit"]["plan"]["valid"], true);
+    ok(&w, press("next")).await;
+    ok(&w, typed("edit-subject", "kp-soft moves to vlan 20")).await;
+    let done = ok(&w, press("confirm")).await;
+    assert!(
+        done["state"]["form"]["edit"]["result"]["committed"]["commit"].is_string(),
+        "{done}"
+    );
+    assert_eq!(commits(&w), 2);
+    let file = git(&w.bare, &["show", "main:stacks/kp-soft/lxc-compose.yml"]);
+    assert!(file.contains("vlan: 20"), "{file}");
+}
+
+/// feat-platform-10 (milestone follow), feat-stacks-10.
+///
+/// Apps & storage: the storage row dialog — the same "row add/edit" shape
+/// the firewall rule dialog uses, generalised (`Sub.kind` is the list's
+/// own name here, `"storage"`, rather than `"rule"`) — add, edit and
+/// delete a row (deleted again before the commit: storage naming is
+/// D25-owner-shaped and both of kp-soft's apps already have their
+/// directory, so a synthetic third would fail the staged manifest's own
+/// check — the deep rule this milestone leaves to `check_dir`, same as
+/// every other edit); a blank app committed once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_apps_row_dialog_and_a_blank_app_commit_once() {
+    let w = world("apps").await;
+    let opened = ok(&w, open("apps", Some("kp-soft"))).await;
+    assert_eq!(opened["state"]["form"]["step"], "apps");
+    let n = opened["state"]["form"]["edit"]["rows"]
+        .as_array()
+        .unwrap()
+        .len();
+    // The row dialog's fields are behind `row add storage`.
+    let (why, _) = refused(&step(&w, typed("storage-host-path", "/appdata/kp-soft/x")).await);
+    assert!(why.contains("no field storage-host-path"), "{why}");
+    ok(&w, row("add", Some("storage"))).await;
+    // A relative path is refused in the row dialog's own words, before
+    // anything is sent.
+    let held = step(&w, press("save")).await;
+    let (why, _) = refused(&held);
+    assert!(
+        why.contains("storage-host-path") && why.contains("storage-mount-point"),
+        "{why}"
+    );
+    ok(
+        &w,
+        typed("storage-host-path", "/appdata/kp-soft/drive-test-config"),
+    )
+    .await;
+    ok(
+        &w,
+        typed("storage-mount-point", "/appdata/kp-soft/drive-test-config"),
+    )
+    .await;
+    let saved = ok(&w, press("save")).await;
+    let rows = saved["state"]["form"]["edit"]["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), n + 1, "{rows:?}");
+    assert!(
+        rows.iter()
+            .any(|r| r.as_str().unwrap_or("").contains("drive-test-config (new)")),
+        "{rows:?}"
+    );
+    // Edited, then deleted again: the dialog re-opens with the row's
+    // current values.
+    ok(&w, row("edit", Some(&format!("storage:{}", n + 1)))).await;
+    let f = &step(&w, UiStep::State).await["state"]["form"];
+    let host_path = f["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["id"] == "storage-host-path")
+        .unwrap()["value"]
+        .clone();
+    assert_eq!(host_path, json!("/appdata/kp-soft/drive-test-config"));
+    ok(&w, press("save")).await;
+    ok(&w, row("delete", Some(&format!("storage:{}", n + 1)))).await;
+    let back = &step(&w, UiStep::State).await["state"]["form"]["edit"]["rows"];
+    assert_eq!(back.as_array().unwrap().len(), n);
+    ok(&w, typed("apps-add-blank", "drive-test-app")).await;
+    let plan = ok(&w, press("next")).await;
+    assert_eq!(
+        plan["state"]["form"]["edit"]["plan"]["valid"], true,
+        "{plan}"
+    );
+    ok(&w, press("next")).await;
+    ok(&w, typed("edit-subject", "kp-soft gets a blank app")).await;
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), 2);
+    let file = git(&w.bare, &["show", "main:stacks/kp-soft/lxc-compose.yml"]);
+    assert!(file.contains("drive-test-app"), "{file}");
+    assert!(!file.contains("drive-test-config"), "{file}");
+    let compose = git(
+        &w.bare,
+        &[
+            "show",
+            "main:stacks/kp-soft/drive-test-app/docker-compose.yml",
+        ],
+    );
+    assert!(compose.contains("drive-test-app"), "{compose}");
+}
+
+/// feat-platform-10 (milestone follow), feat-stacks-11.
+///
+/// Latch: a secret app ticked and a latch_files row added — refused first
+/// for a `${` placeholder (the known `latch --expand` trap), same as the
+/// browser, then accepted once fixed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_latch_secret_and_a_file_row_refuse_dollar_then_commit_once() {
+    let w = world("latch").await;
+    let opened = ok(&w, open("latch", Some("kp-soft"))).await;
+    assert_eq!(opened["state"]["form"]["step"], "latch");
+    ok(&w, checked("latch-secret-jobtracker", true)).await;
+    ok(&w, row("add", Some("latch_files"))).await;
+    ok(&w, typed("latchfile-from", "kp-soft/unit.env")).await;
+    ok(&w, typed("latchfile-dest", "/var/www/${TOKEN}")).await;
+    ok(&w, typed("latchfile-mode", "640")).await;
+    let held = step(&w, press("save")).await;
+    let (why, _) = refused(&held);
+    assert!(why.contains("latchfile-dest"), "{why}");
+    ok(&w, typed("latchfile-dest", "/var/www/unit.env")).await;
+    ok(&w, press("save")).await;
+    let plan = ok(&w, press("next")).await;
+    assert_eq!(plan["state"]["form"]["edit"]["plan"]["valid"], true);
+    ok(&w, press("next")).await;
+    ok(
+        &w,
+        typed("edit-subject", "kp-soft: jobtracker latch secrets"),
+    )
+    .await;
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), 2);
+    let file = git(&w.bare, &["show", "main:stacks/kp-soft/lxc-compose.yml"]);
+    assert!(file.contains("jobtracker"), "{file}");
+    assert!(file.contains("unit.env"), "{file}");
+    assert!(!file.contains("${TOKEN}"), "{file}");
+}
+
+/// feat-platform-10 (milestone follow), feat-checks-1.
+///
+/// Checks: a check row added through its own dialog (refused first for a
+/// missing blind spot below Application layer, same as the browser), the
+/// busy check set, then plan and commit once — `checks.yml` is its own
+/// tab, so this opens `checks-edit:<stack>`, not `stack-edit:<stack>`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_checks_row_add_and_busy_check_commit_once() {
+    let w = world("checks").await;
+    let opened = ok(&w, open("checks", Some("kp-soft/kp-soft"))).await;
+    assert_eq!(opened["state"]["page"], "/app/stacks/kp-soft/checks");
+    assert_eq!(opened["state"]["form"]["step"], "checks");
+    let n = opened["state"]["form"]["edit"]["rows"]
+        .as_array()
+        .unwrap()
+        .len();
+    ok(&w, row("add", Some("checks"))).await;
+    ok(&w, typed("check-name", "drive test")).await;
+    ok(&w, typed("check-command", "echo 1")).await;
+    ok(&w, pick("check-expect", "must_match")).await;
+    ok(&w, pick("check-layer", "network")).await;
+    let held = step(&w, press("save")).await;
+    let (why, _) = refused(&held);
+    assert!(why.contains("blind spot"), "{why}");
+    ok(
+        &w,
+        typed("check-blind-spot", "does not prove the app itself is up"),
+    )
+    .await;
+    let saved = ok(&w, press("save")).await;
+    let rows = saved["state"]["form"]["edit"]["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), n + 1, "{rows:?}");
+    assert!(
+        rows.iter()
+            .any(|r| r.as_str().unwrap_or("").contains("drive test (network)")),
+        "{rows:?}"
+    );
+    ok(&w, typed("checks-busy", "echo busy")).await;
+    let plan = ok(&w, press("next")).await;
+    assert_eq!(
+        plan["state"]["form"]["edit"]["plan"]["valid"], true,
+        "{plan}"
+    );
+    ok(&w, press("next")).await;
+    ok(&w, typed("edit-subject", "kp-soft: a drive-tested check")).await;
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), 2);
+    let file = git(&w.bare, &["show", "main:stacks/kp-soft/kp-soft/checks.yml"]);
+    assert!(file.contains("drive test"), "{file}");
+    assert!(file.contains("echo busy"), "{file}");
+}
+
+/// feat-platform-10 (milestone follow), feat-tiles-1.
+///
+/// Tiles: a tile edited (its own row dialog, `Sub.kind = "tiles"`) then a
+/// second one deleted — deleting an EXISTING tile needs the sparse
+/// `delete: true` tombstone `tilesBody`/`tiles_drive_body` build, not mere
+/// omission (unlike storage/checks' full-list `Seq`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_tiles_edit_and_delete_commit_once() {
+    let w = world("tiles").await;
+    let opened = ok(&w, open("tiles", Some("gateway"))).await;
+    assert_eq!(opened["state"]["page"], "/app/stacks/gateway/settings");
+    let n = opened["state"]["form"]["edit"]["rows"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert!(n >= 2, "{opened}");
+    ok(&w, row("edit", Some("tiles:1"))).await;
+    let f = &step(&w, UiStep::State).await["state"]["form"];
+    let name = f["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["id"] == "tile-name")
+        .unwrap()["value"]
+        .clone();
+    assert_eq!(name, json!("Home Assistant"));
+    ok(&w, typed("tile-description", "drive test")).await;
+    ok(&w, press("save")).await;
+    ok(&w, row("delete", Some("tiles:2"))).await;
+    let plan = ok(&w, press("next")).await;
+    assert_eq!(
+        plan["state"]["form"]["edit"]["plan"]["valid"], true,
+        "{plan}"
+    );
+    ok(&w, press("next")).await;
+    ok(
+        &w,
+        typed("edit-subject", "gateway: a drive-tested tile edit"),
+    )
+    .await;
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), 2);
+    let file = git(&w.bare, &["show", "main:stacks/gateway/lxc-compose.yml"]);
+    assert!(file.contains("drive test"), "{file}");
+    assert!(!file.contains("opn.kp-soft.dev"), "{file}");
+}
+
+/// feat-platform-10 (milestone follow), feat-publish-1.
+///
+/// `homelab ui open publish <stack>/<app>` opens the Apps tab's dialog
+/// directly (it is a click-opened dialog, not a page already showing it —
+/// `editdrive.js::publishApp`), then plan and commit once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_publish_app_commits_once() {
+    let w = world("publish").await;
+    let opened = ok(&w, open("publish", Some("kp-soft/jobtracker"))).await;
+    assert_eq!(opened["state"]["page"], "/app/stacks/kp-soft/apps");
+    let (why, _) = refused(&step(&w, press("next")).await);
+    assert!(why.contains("is needed"), "{why}");
+    ok(&w, typed("publish-hostname", "jobtracker.kp-soft.dev")).await;
+    ok(&w, typed("publish-port", "8080")).await;
+    let plan = ok(&w, press("next")).await;
+    assert_eq!(
+        plan["state"]["form"]["edit"]["plan"]["valid"], true,
+        "{plan}"
+    );
+    ok(&w, press("next")).await;
+    ok(&w, typed("edit-subject", "kp-soft: jobtracker publishes")).await;
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), 2);
+    let file = git(&w.bare, &["show", "main:stacks/kp-soft/traefik-routes.yml"]);
+    assert!(file.contains("jobtracker.kp-soft.dev"), "{file}");
+}
+
+/// feat-platform-10 (milestone follow), feat-native-1.
+///
+/// The native step's second button, `remove` (`#native-remove`, beside
+/// `next`) — refused here because `admin` is `native_only` with this its
+/// one unit (removing it would leave no app and no native, which
+/// `validate_manifest` refuses); the refusal proves the button reaches the
+/// real `remove_native` edit and the real validator, not a stub.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_native_remove_reaches_the_real_edit_and_validator() {
+    let w = world("native-remove").await;
+    ok(&w, open("native", Some("admin"))).await;
+    let plan = ok(&w, press("remove")).await;
+    let p = &plan["state"]["form"]["edit"]["plan"];
+    assert_eq!(p["valid"], false, "{p}");
+    assert!(
+        p["problems"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x.as_str().unwrap_or("").contains("native")),
+        "{p}"
+    );
+    assert_eq!(commits(&w), 1, "a refused plan writes nothing");
+}
+
+/// feat-platform-10 (milestone follow), feat-stacks-files.
+///
+/// `homelab ui open raw <stack>` does what the Files card's own New file /
+/// Rename / Delete buttons do: the `op` field (`files-op`, picked, not
+/// typed — it is a choice field like `raw-file`) switches what the rest of
+/// the form means, and the commit still runs once per op, through the
+/// very `StackEdit::Files` the click path builds (stackedit_files.rs).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_the_raw_editor_creates_renames_and_deletes_a_file() {
+    let w = world("files").await;
+
+    // Create: op picked, a new path typed, the starting text edited in.
+    ok(&w, open("raw", Some("kp-soft"))).await;
+    ok(&w, pick("files-op", "create")).await;
+    let (why, _) = refused(&step(&w, press("next")).await);
+    assert!(why.contains("New path is needed."), "{why}");
+    ok(&w, typed("files-new-path", "kp-soft/new-note.yml")).await;
+    ok(
+        &w,
+        UiStep::Edit {
+            field: "raw-text".into(),
+            text: "hello: world\n".into(),
+        },
+    )
+    .await;
+    let plan = ok(&w, press("next")).await;
+    assert_eq!(
+        plan["state"]["form"]["edit"]["plan"]["valid"], true,
+        "{plan}"
+    );
+    ok(&w, press("next")).await;
+    ok(&w, typed("edit-subject", "a new note")).await;
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), 2);
+    assert_eq!(
+        git(&w.bare, &["show", "main:stacks/kp-soft/new-note.yml"]),
+        "hello: world\n"
+    );
+    ok(&w, UiStep::Close).await;
+
+    // Rename: op picked, the existing file picked (from the choices the
+    // reopened form reads fresh, so the file just created is on the list),
+    // the new path typed.
+    ok(&w, open("raw", Some("kp-soft"))).await;
+    ok(&w, pick("files-op", "rename")).await;
+    ok(&w, pick("raw-file", "kp-soft/new-note.yml")).await;
+    let (why, _) = refused(&step(&w, press("next")).await);
+    assert!(why.contains("Rename to is needed."), "{why}");
+    ok(&w, typed("files-rename-to", "kp-soft/renamed-note.yml")).await;
+    ok(&w, press("next")).await;
+    ok(&w, press("next")).await;
+    ok(&w, typed("edit-subject", "rename the note")).await;
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), 3);
+    assert_eq!(
+        git(&w.bare, &["show", "main:stacks/kp-soft/renamed-note.yml"]),
+        "hello: world\n"
+    );
+    ok(&w, UiStep::Close).await;
+
+    // Delete: op and file picked, nothing else to fill in.
+    ok(&w, open("raw", Some("kp-soft"))).await;
+    ok(&w, pick("files-op", "delete")).await;
+    ok(&w, pick("raw-file", "kp-soft/renamed-note.yml")).await;
+    ok(&w, press("next")).await;
+    ok(&w, press("next")).await;
+    ok(&w, typed("edit-subject", "drop the note")).await;
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), 4);
+    let ls = git(&w.bare, &["ls-tree", "-r", "--name-only", "main"]);
+    assert!(!ls.contains("renamed-note.yml"), "{ls}");
+
+    // The stack's own manifest may not be deleted or renamed this way.
+    ok(&w, open("raw", Some("kp-soft"))).await;
+    ok(&w, pick("files-op", "delete")).await;
+    ok(&w, pick("raw-file", "lxc-compose.yml")).await;
+    let (why, _) = refused(&step(&w, press("next")).await);
+    assert!(why.contains("manifest"), "{why}");
+    assert_eq!(commits(&w), 4);
+}
+
 /// feat-platform-10 (milestone follow), feat-stacks-3.
 ///
 /// The new-stack wizard step by step: the preset's size follows the pick,
@@ -505,6 +896,9 @@ async fn follow_the_new_stack_wizard_commits_once() {
             .any(|x| x["id"] == "new-nodata-0"),
         "{f}"
     );
+    let tile_step = ok(&w, press("next")).await;
+    assert_eq!(tile_step["state"]["form"]["step"], "tile");
+    // Left blank: feat-tiles-3's "no tile" answer.
     let plan = ok(&w, press("next")).await;
     let p = &plan["state"]["form"];
     assert_eq!(p["edit"]["plan"]["valid"], true, "{p}");
@@ -519,6 +913,204 @@ async fn follow_the_new_stack_wizard_commits_once() {
         files.lines().all(|l| l.starts_with("stacks/recipes/")),
         "{files}"
     );
+}
+
+/// feat-platform-10 (milestone follow), feat-tiles-3.
+///
+/// The new-stack wizard's Tile step folds into the SAME commit as the
+/// stack itself — `newstack.rs::NewStack.tile`, applied to the staged
+/// manifest before it is ever written (`edit::apply_new_stack_tile`) —
+/// rather than a second, best-effort `StackEdit::Tiles` commit once the
+/// stack already exists: exactly one commit, and the tile is in the very
+/// file that commit writes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_new_stack_tile_folds_into_the_one_commit() {
+    let w = world("new-tile").await;
+    ok(&w, open("new-stack", None)).await;
+    ok(&w, pick("new-preset", "mealie")).await;
+    ok(&w, press("next")).await;
+    ok(&w, typed("new-name", "recipes")).await;
+    ok(&w, typed("new-vmid", "121")).await;
+    ok(&w, press("next")).await;
+    ok(&w, press("next")).await;
+    ok(&w, press("next")).await;
+    let tile_step = &step(&w, UiStep::State).await["state"]["form"];
+    assert_eq!(tile_step["step"], "tile");
+    ok(&w, typed("new-tile-hostname", "recipes.kp-soft.dev")).await;
+    ok(&w, typed("new-tile-group", "Household")).await;
+    let plan = ok(&w, press("next")).await;
+    assert_eq!(
+        plan["state"]["form"]["edit"]["plan"]["valid"], true,
+        "{plan}"
+    );
+    ok(&w, press("next")).await;
+    ok(
+        &w,
+        typed("edit-subject", "recipes: a new stack with a tile"),
+    )
+    .await;
+    let before = commits(&w);
+    ok(&w, press("confirm")).await;
+    assert_eq!(
+        commits(&w),
+        before + 1,
+        "exactly one commit, not a second one for the tile"
+    );
+    let file = git(&w.bare, &["show", "main:stacks/recipes/lxc-compose.yml"]);
+    assert!(file.contains("recipes.kp-soft.dev"), "{file}");
+    assert!(file.contains("Household"), "{file}");
+}
+
+/// feat-platform-10 (milestone follow), feat-tiles-3.
+///
+/// Add-app's own per-app tile hostname (`add-app-tile-<app>`) folds into
+/// the SAME commit as the app it names — `StackEdit::AddApp.tiles`,
+/// applied to the staged manifest alongside `apps:`/`storage:` — rather
+/// than a second, best-effort `StackEdit::Tiles` commit after the app
+/// already exists.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_add_app_tile_folds_into_the_one_commit() {
+    let w = world("add-app-tile").await;
+    ok(&w, open("add-app", Some("kp-soft"))).await;
+    // `(EditKind::AddApp, "preset")`'s after_set rebuilds the step's
+    // fields for whichever preset is picked, the same as the browser's
+    // own `renderTiles` on a preset change.
+    let picked = ok(&w, pick("add-app-preset", "mealie")).await;
+    let fields = picked["state"]["form"]["fields"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert!(
+        fields.iter().any(|f| f["id"] == "add-app-tile-mealie"),
+        "{fields:?}"
+    );
+    ok(&w, typed("add-app-tile-mealie", "mealie.kp-soft.dev")).await;
+    let plan = ok(&w, press("next")).await;
+    assert_eq!(
+        plan["state"]["form"]["edit"]["plan"]["valid"], true,
+        "{plan}"
+    );
+    ok(&w, press("next")).await;
+    ok(
+        &w,
+        typed("edit-subject", "kp-soft: mealie joins, with a tile"),
+    )
+    .await;
+    let before = commits(&w);
+    ok(&w, press("confirm")).await;
+    assert_eq!(
+        commits(&w),
+        before + 1,
+        "exactly one commit, not a second one for the tile"
+    );
+    let file = git(&w.bare, &["show", "main:stacks/kp-soft/lxc-compose.yml"]);
+    assert!(file.contains("mealie.kp-soft.dev"), "{file}");
+    assert!(file.contains("mealie"), "{file}");
+}
+
+/// feat-platform-10 (milestone follow), feat-preset-1.
+///
+/// The presets editor's Files card: a file created, then renamed, then
+/// deleted, then the whole preset removed — each its own small
+/// plan/commit on the "meta" step's extra buttons
+/// (`save-file`/`rename-file`/`delete-file`/`remove-preset`, beside
+/// `next`), driven the same way the row dialogs and native-remove are.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_preset_files_and_removal_each_commit_once() {
+    let w = world("preset-files").await;
+    let opened = ok(&w, open("preset", Some("mealie"))).await;
+    assert_eq!(opened["state"]["form"]["step"], "meta");
+    assert_eq!(
+        opened["state"]["form"]["buttons"],
+        json!([
+            "next",
+            "save-file",
+            "rename-file",
+            "delete-file",
+            "remove-preset"
+        ])
+    );
+    // Create a file.
+    ok(&w, typed("preset-file-path", "mealie/README.md")).await;
+    ok(&w, typed("preset-file-text", "drive test")).await;
+    let plan = ok(&w, press("save-file")).await;
+    assert_eq!(
+        plan["state"]["form"]["edit"]["plan"]["valid"], true,
+        "{plan}"
+    );
+    ok(&w, press("next")).await;
+    ok(&w, typed("edit-subject", "mealie: a drive-tested file")).await;
+    let before = commits(&w);
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), before + 1);
+    let file = git(&w.bare, &["show", "main:presets/mealie/README.md"]);
+    assert_eq!(file, "drive test");
+    ok(&w, UiStep::Close).await;
+
+    // Rename it.
+    ok(&w, open("preset", Some("mealie"))).await;
+    ok(&w, pick("preset-file-select", "mealie/README.md")).await;
+    let f = &step(&w, UiStep::State).await["state"]["form"];
+    assert_eq!(
+        f["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["id"] == "preset-file-path")
+            .unwrap()["value"],
+        json!("mealie/README.md"),
+        "{f}"
+    );
+    ok(&w, typed("preset-file-rename-to", "mealie/NOTES.md")).await;
+    ok(&w, press("rename-file")).await;
+    ok(&w, press("next")).await;
+    ok(
+        &w,
+        typed("edit-subject", "mealie: rename the drive-tested file"),
+    )
+    .await;
+    let before = commits(&w);
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), before + 1);
+    assert!(git(
+        &w.bare,
+        &["ls-tree", "-r", "--name-only", "main", "presets/mealie/"]
+    )
+    .contains("NOTES.md"));
+    ok(&w, UiStep::Close).await;
+
+    // Delete it.
+    ok(&w, open("preset", Some("mealie"))).await;
+    ok(&w, pick("preset-file-select", "mealie/NOTES.md")).await;
+    ok(&w, press("delete-file")).await;
+    ok(&w, press("next")).await;
+    ok(
+        &w,
+        typed("edit-subject", "mealie: remove the drive-tested file"),
+    )
+    .await;
+    let before = commits(&w);
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), before + 1);
+    assert!(!git(
+        &w.bare,
+        &["ls-tree", "-r", "--name-only", "main", "presets/mealie/"]
+    )
+    .contains("NOTES.md"));
+    ok(&w, UiStep::Close).await;
+
+    // Remove the whole preset.
+    ok(&w, open("preset", Some("mealie"))).await;
+    ok(&w, press("remove-preset")).await;
+    let removed_plan = ok(&w, press("next")).await;
+    assert_eq!(removed_plan["state"]["form"]["edit"]["plan"]["valid"], true);
+    ok(&w, typed("edit-subject", "remove the mealie preset")).await;
+    let before = commits(&w);
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), before + 1);
+    assert!(git(&w.bare, &["ls-tree", "main", "presets/"])
+        .lines()
+        .all(|l| !l.contains("mealie")));
 }
 
 /// feat-platform-10 (milestone follow), feat-settings-1.
@@ -689,6 +1281,24 @@ fn follow_the_edit_checks_match_the_browser_cases() {
                 json!(e)
             }
             "tile" => json!(driveedit::tile_problems(&values)),
+            "settings_ext" => {
+                let fields = driveedit::settings_ext_fields(&c["manifest"]);
+                let mut e = driveedit::check_fields(&fields, &values);
+                e.extend(driveedit::settings_ext_problems(&values));
+                json!(e)
+            }
+            "latch_file" => {
+                let natives: Vec<String> = c["natives"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect();
+                let fields = driveedit::latch_file_fields(&natives, None);
+                let mut e = driveedit::check_fields(&fields, &values);
+                e.extend(driveedit::latch_file_problems(&values));
+                json!(e)
+            }
             "key" => match driveedit::parse_key(&c["kind"], &c["values"]["value"]) {
                 Ok(v) => json!({ "value": v }),
                 Err(why) => json!({ "why": why }),
@@ -794,4 +1404,143 @@ async fn parity_the_import_form_commits_once() {
         files.lines().all(|l| l.starts_with("stacks/uptime2/")),
         "{files}"
     );
+}
+
+/// feat-platform-10 (milestone follow), feat-native-1.
+///
+/// `homelab ui open native <stack>[/<unit>]` edits one native unit's
+/// `service.yml` — admin's own (`stacks/admin/service.yml`, its one native
+/// unit, at the stack's root) — through the generic stack-edit plan and
+/// commit every other stack-edit form uses (`EditKind::stack_edit`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_native_edit_commits_once() {
+    let w = world("native").await;
+    let opened = ok(&w, open("native", Some("admin"))).await;
+    assert_eq!(opened["state"]["page"], "/app/stacks/admin/settings");
+    let fields = opened["state"]["form"]["fields"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let value_of = |id: &str| {
+        fields
+            .iter()
+            .find(|x| x["id"] == id)
+            .map(|x| x["value"].clone())
+            .unwrap_or_default()
+    };
+    assert_eq!(value_of("native-unit"), "admin");
+    assert_eq!(
+        value_of("native-binary"),
+        "/opt/homelab-admin/bin/homelab-admin"
+    );
+    // admin/service.yml already names a release_repo, so switching from
+    // `manual` to `auto` is a valid change (`validate_native` refuses
+    // `auto` without one).
+    ok(&w, pick("native-update-policy", "auto")).await;
+    let plan = ok(&w, press("next")).await;
+    let p = &plan["state"]["form"]["edit"]["plan"];
+    assert_eq!(p["valid"], true, "{p}");
+    ok(&w, press("next")).await;
+    ok(
+        &w,
+        typed("edit-subject", "admin's updates run through the homelab"),
+    )
+    .await;
+    let before = commits(&w);
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), before + 1);
+    let head = git(&w.bare, &["show", "main:stacks/admin/service.yml"]);
+    assert!(head.contains("update_policy: auto"), "{head}");
+    ok(&w, UiStep::Close).await;
+}
+
+/// feat-platform-10 (milestone follow), feat-native-1.
+///
+/// `homelab ui open add-native <stack>` writes a new unit's `service.yml`
+/// and a generic systemd unit file under `<unit>/`, and appends it to
+/// `natives:` — one commit, the same plan/commit flow.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_add_native_unit_commits_once() {
+    let w = world("add-native").await;
+    ok(&w, open("add-native", Some("admin"))).await;
+    let (why, _) = refused(&step(&w, press("next")).await);
+    assert!(why.contains("is needed"), "{why}");
+    ok(&w, typed("add-native-unit", "worker")).await;
+    ok(&w, typed("add-native-binary", "/opt/worker/bin/worker")).await;
+    let plan = ok(&w, press("next")).await;
+    assert_eq!(plan["state"]["form"]["edit"]["plan"]["valid"], true);
+    ok(&w, press("next")).await;
+    ok(&w, typed("edit-subject", "add the worker native unit")).await;
+    let before = commits(&w);
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), before + 1);
+    let manifest = git(&w.bare, &["show", "main:stacks/admin/lxc-compose.yml"]);
+    assert!(manifest.contains("worker"), "{manifest}");
+    let svc = git(&w.bare, &["show", "main:stacks/admin/worker/service.yml"]);
+    assert!(svc.contains("unit: worker"), "{svc}");
+    ok(&w, UiStep::Close).await;
+}
+
+/// feat-platform-10 (milestone follow), feat-preset-1.
+///
+/// `homelab ui open preset <name>` edits `presets/<name>/preset.yml`
+/// through its own plan and commit (`/data/presets/plan`,
+/// `/data/presets/commit` — not a stack's), on the seeded `mealie` preset.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_preset_meta_commits_once() {
+    let w = world("preset").await;
+    let opened = ok(&w, open("preset", Some("mealie"))).await;
+    assert_eq!(opened["state"]["page"], "/app/presets");
+    let fields = opened["state"]["form"]["fields"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let value_of = |id: &str| {
+        fields
+            .iter()
+            .find(|x| x["id"] == id)
+            .map(|x| x["value"].clone())
+            .unwrap_or_default()
+    };
+    assert_eq!(value_of("preset-description"), "Recipes + meal planning");
+    assert_eq!(value_of("preset-ram-mb"), "512");
+    ok(&w, typed("preset-ram-mb", "1024")).await;
+    let plan = ok(&w, press("next")).await;
+    assert_eq!(plan["state"]["form"]["edit"]["plan"]["valid"], true);
+    ok(&w, press("next")).await;
+    ok(&w, typed("edit-subject", "mealie gets more memory")).await;
+    let before = commits(&w);
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), before + 1);
+    let meta = git(&w.bare, &["show", "main:presets/mealie/preset.yml"]);
+    assert!(meta.contains("ram_mb: 1024"), "{meta}");
+    ok(&w, UiStep::Close).await;
+}
+
+/// feat-platform-10 (milestone follow), feat-preset-1.
+///
+/// `homelab ui open new-preset` names the preset in the form itself
+/// (`new-preset-name`), then the same `preset_meta` fields; the plan
+/// writes a brand-new `presets/<name>/preset.yml`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_new_preset_commits_once() {
+    let w = world("new-preset").await;
+    let opened = ok(&w, open("new-preset", None)).await;
+    assert_eq!(opened["state"]["page"], "/app/presets");
+    let (why, _) = refused(&step(&w, press("next")).await);
+    assert!(why.contains("Preset name"), "{why}");
+    ok(&w, typed("new-preset-name", "demo2")).await;
+    ok(&w, typed("preset-description", "A demo preset")).await;
+    ok(&w, typed("preset-ram-mb", "2048")).await;
+    let plan = ok(&w, press("next")).await;
+    let p = &plan["state"]["form"]["edit"]["plan"];
+    assert_eq!(p["valid"], true, "{p}");
+    ok(&w, press("next")).await;
+    ok(&w, typed("edit-subject", "a demo preset")).await;
+    let before = commits(&w);
+    ok(&w, press("confirm")).await;
+    assert_eq!(commits(&w), before + 1);
+    let meta = git(&w.bare, &["show", "main:presets/demo2/preset.yml"]);
+    assert!(meta.contains("A demo preset"), "{meta}");
+    ok(&w, UiStep::Close).await;
 }

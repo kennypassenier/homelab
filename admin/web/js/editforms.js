@@ -35,11 +35,31 @@ const say = (key, w = {}) =>
  * @typedef {{cores: number, memory_mb: number, swap_mb: number,
  *   disk_gb: number, storage?: string}} Resources
  * @typedef {{watch_every?: number | null, down_after?: number | null}} TileView
+ * @typedef {{ip: string, gateway: string, bridge: string,
+ *   vlan?: number | null}} NetworkView
+ * @typedef {{template: string, unprivileged: boolean, features: string,
+ *   protection: boolean, gpu: boolean, vpn: boolean}} LxcView
+ * @typedef {{host_path: string, mount_point: string, no_data: boolean,
+ *   no_backup?: string | null, host_owner_uid?: number | null,
+ *   app?: string | null}} StorageView
+ * @typedef {{files: string, keep?: number, reopen?:
+ *   {container: string, signal?: string} | null}} RotateView
+ * @typedef {{host_path: string, mount_point: string, note?: string | null,
+ *   rotate?: RotateView | null}} DataMountView
+ * @typedef {{path: string, job: string}} LogFileView
+ * @typedef {{every_days: number, span_days?: number | null}} RetentionTierView
+ * @typedef {{from: string, dest: string, mode: string, owner?: string | null,
+ *   restarts?: string | null}} LatchFileView
+ * @typedef {{latch_secrets: string[], latch_files: LatchFileView[]}} LatchView
  * @typedef {{vmid: number, hostname: string, ip: string,
  *   resources: Resources, boot: {onboot: boolean, order?: number | null},
  *   protection: boolean, apps: string[], natives: string[],
- *   firewall: FirewallSpec | null,
- *   tiles?: Record<string, TileView>}} ManifestView
+ *   native_only?: boolean, firewall: FirewallSpec | null,
+ *   tiles?: Record<string, TileFieldsView>, network?: NetworkView, lxc?: LxcView,
+ *   on_demand?: boolean, storage?: StorageView[],
+ *   data_mounts?: DataMountView[], log_files?: LogFileView[],
+ *   retention?: RetentionTierView[] | null,
+ *   latch?: LatchView}} ManifestView
  * @typedef {{dir: "in" | "out", action: "ACCEPT" | "DROP" | "REJECT",
  *   source?: string | null, dest?: string | null,
  *   proto?: "tcp" | "udp" | "icmp" | null, dport?: string | null,
@@ -51,6 +71,19 @@ const say = (key, w = {}) =>
  * @typedef {{origin: number | null, rule: Rule}} RuleEdit
  * @typedef {{enabled: boolean, comment: string, policy_in: string,
  *   policy_out: string, management_open: string, rules: RuleEdit[]}} FirewallModel
+ * @typedef {{name: string, command: string,
+ *   expect: "never_decreases" | "must_match" | "must_be_present",
+ *   layer: "network" | "process" | "application" | "user_visible",
+ *   blind_spot?: string | null}} CheckView
+ * @typedef {{healthy: {equals: string} | {at_least: number} | {at_most: number}}
+ *   & Omit<CheckView, "expect">} ProbeView
+ * @typedef {{checks: CheckView[], manual: ({text: string, once?: boolean} | string)[],
+ *   probes: ProbeView[], busy_check?: {command: string} | null,
+ *   url?: string | null}} ChecksReadView
+ * @typedef {ChecksReadView | {error: string}} ChecksView
+ * @typedef {{name: string, group: string, order?: number | null,
+ *   description?: string | null, url?: string | null, reading?: string | null,
+ *   watch_every?: number | null, down_after?: number | null}} TileFieldsView
  */
 
 /** The step every edit ends on: the plan, then the commit. */
@@ -285,6 +318,767 @@ export function tileProblems(values) {
  */
 export const changesSomething = (body) =>
   Object.keys(body).some((k) => k !== "kind");
+
+// ── feat-stacks-9: network, lxc flags, storage, on_demand, retention ────
+
+/**
+ * The settings-extension form: a second page next to Settings, so neither
+ * grows past what the dashboard shows at once.
+ * @param {string} stack
+ * @param {ManifestView} m
+ * @returns {{id: string, stack: string, title: string, steps: EditStep[]}}
+ */
+export function settingsExtForm(stack, m) {
+  /** @type {Record<string, string | boolean>} */
+  const now = {
+    ip: m.network?.ip ?? "",
+    gateway: m.network?.gateway ?? "",
+    bridge: m.network?.bridge ?? "",
+    vlan: m.network?.vlan != null ? String(m.network.vlan) : "",
+    unprivileged: m.lxc?.unprivileged ?? true,
+    gpu: m.lxc?.gpu ?? false,
+    vpn: m.lxc?.vpn ?? false,
+    storage: m.resources?.storage ?? "",
+    on_demand: m.on_demand ?? false,
+    retention: JSON.stringify(m.retention ?? []),
+  };
+  /** @type {EditField[]} */
+  const fields = /** @type {EditField[]} */ (E.settings_ext).map((f) => ({
+    ...f,
+    current: now[f.name],
+  }));
+  return {
+    id: `edit:settings-ext:${stack}`,
+    stack,
+    title: `Network & hardware · ${stack}`,
+    steps: [{ id: "settings_ext", label: "Network & hardware", fields }],
+  };
+}
+
+/**
+ * The retention field is JSON, not a plain pattern — checked on its own
+ * (checkFields skips it, having no pattern).
+ * @param {Values} values
+ */
+export function settingsExtProblems(values) {
+  /** @type {Record<string, string>} */
+  const errors = {};
+  const text = String(values.retention ?? "").trim();
+  if (text === "") return errors;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    errors.retention =
+      'Not valid JSON: a list like [] or [{"every_days": 1, "span_days": 7}].';
+    return errors;
+  }
+  if (
+    !Array.isArray(parsed) ||
+    !parsed.every(
+      (t) =>
+        t &&
+        typeof t === "object" &&
+        Number.isInteger(t.every_days) &&
+        (t.span_days === undefined || Number.isInteger(t.span_days)),
+    )
+  )
+    errors.retention =
+      'A JSON list of {"every_days": N, "span_days": N} (span_days optional).';
+  return errors;
+}
+
+/**
+ * @param {ReturnType<typeof settingsExtForm>} form
+ * @param {Values} values
+ * @returns {{kind: "settings_ext"} & Record<string, unknown>}
+ */
+export function settingsExtBody(form, values) {
+  /** @type {{kind: "settings_ext"} & Record<string, unknown>} */
+  const out = { kind: "settings_ext" };
+  for (const f of form.steps[0].fields) {
+    const v = values[f.name];
+    if (f.kind === "check") {
+      if (v !== f.current) out[f.name] = v === true;
+      continue;
+    }
+    const text = typeof v === "string" ? v.trim() : "";
+    if (f.name === "retention") {
+      if (text !== String(f.current ?? "").trim())
+        out.retention = JSON.parse(text === "" ? "[]" : text);
+      continue;
+    }
+    if (text === "" || text === String(f.current ?? "")) continue;
+    out[f.name] = f.kind === "number" ? Number(text) : text;
+  }
+  return out;
+}
+
+// ── feat-checks-1: origin-tracked JSON list fields (checks.yml) ─────────
+//
+// `checks.yml`'s own lists (checks/manual/probes, Area B) are all "send
+// the end state, origins track the old rows" lists on the server (the
+// same shape `FirewallEdit.rules` uses, `yamledit::Item::{Keep,Retext,New}`
+// under it) and are drawn as one JSON textarea per list, pre-filled with
+// the current rows and their index as `origin` so a row left untouched
+// keeps its file comments. Storage entries, data mounts, log files and
+// latch files (feat-stacks-10/11, below) used to be drawn the same way;
+// they now have their own row table + dialog (`rowModel`/`rowBody` and
+// the per-list field functions further down), the same shape the
+// Firewall tab's rule table uses.
+
+/**
+ * @param {Record<string, unknown>[]} rows
+ */
+export function originJson(rows) {
+  return JSON.stringify(
+    rows.map((r, i) => ({ origin: i, ...r })),
+    null,
+    2,
+  );
+}
+
+/**
+ * @param {string} text
+ * @param {string[]} keys the fields every row must have, besides `origin`
+ * @returns {{ok: true, rows: Record<string, unknown>[]} | {ok: false, error: string}}
+ */
+export function parseJsonList(text, keys) {
+  /** @type {unknown} */
+  let parsed;
+  try {
+    parsed = JSON.parse(text.trim() === "" ? "[]" : text);
+  } catch {
+    return { ok: false, error: "Not valid JSON." };
+  }
+  if (!Array.isArray(parsed))
+    return { ok: false, error: "Must be a JSON list." };
+  for (const row of parsed) {
+    if (!row || typeof row !== "object" || Array.isArray(row))
+      return { ok: false, error: "Every row must be a JSON object." };
+    for (const k of keys)
+      if (!(k in /** @type {Record<string, unknown>} */ (row)))
+        return { ok: false, error: `Every row needs "${k}".` };
+  }
+  return {
+    ok: true,
+    rows: /** @type {Record<string, unknown>[]} */ (parsed),
+  };
+}
+
+// ── feat-checks-1: check/probe/manual rows, tile rows ────────────────────
+//
+// checks/manual/probes are "send the end state, origin tracks the old
+// row" lists like storage/data_mounts/log_files below — `rowModel`/
+// `rowBody` there apply unchanged. Tiles are the odd one out:
+// `stackedit_tiles::TilesEdit.tiles` is a SPARSE change list keyed by the
+// tile's hostname (`origin: Option<String>`, not an array index) — a tile
+// not mentioned is left alone, and deleting an EXISTING one needs an
+// explicit `delete: true` tombstone rather than just being missing. So the
+// tile row table still uses the generic `rowTable`/`rowModel` (its
+// `origin` is simply a string instead of a number, which the generic
+// machinery never inspects), but `tilesBody` below — not `rowBody` — turns
+// the displayed rows into that sparse body.
+
+/**
+ * @param {Record<string, unknown> | null} row
+ * @returns {EditField[]}
+ */
+export function checkRowFields(row) {
+  const from = row ?? {};
+  return /** @type {EditField[]} */ (E.check_row).map((f) => ({
+    ...f,
+    current: /** @type {string} */ (from[f.name] ?? f.current),
+  }));
+}
+
+/** @param {Values} v */
+export function checkRowFromValues(v) {
+  /** @type {Record<string, unknown>} */
+  const out = {
+    name: String(v.name ?? "").trim(),
+    command: String(v.command ?? "").trim(),
+    expect: String(v.expect ?? "never_decreases"),
+    layer: String(v.layer ?? "network"),
+  };
+  const bs = String(v.blind_spot ?? "").trim();
+  if (bs) out.blind_spot = bs;
+  return out;
+}
+
+/** @param {Values} v */
+export function checkRowProblems(v) {
+  /** @type {Record<string, string>} */
+  const errors = {};
+  const layer = String(v.layer ?? "");
+  const bs = String(v.blind_spot ?? "").trim();
+  if (layer !== "application" && layer !== "user_visible" && !bs)
+    errors.blind_spot = "A check below Application layer needs a blind spot.";
+  return errors;
+}
+
+/** @param {Record<string, unknown>} row */
+export function checkRowSummary(row) {
+  return `${row.name} (${row.layer})`;
+}
+
+/**
+ * @param {Record<string, unknown> | null} row
+ * @returns {EditField[]}
+ */
+export function probeRowFields(row) {
+  const from = /** @type {Record<string, unknown>} */ (row ?? {});
+  let healthyKind = "equals";
+  let healthyValue = "";
+  const h = /** @type {Record<string, unknown> | undefined} */ (from.healthy);
+  if (h && "equals" in h) {
+    healthyKind = "equals";
+    healthyValue = String(h.equals);
+  } else if (h && "at_least" in h) {
+    healthyKind = "at_least";
+    healthyValue = String(h.at_least);
+  } else if (h && "at_most" in h) {
+    healthyKind = "at_most";
+    healthyValue = String(h.at_most);
+  }
+  const merged = /** @type {Record<string, unknown>} */ ({
+    ...from,
+    healthy_kind: healthyKind,
+    healthy_value: healthyValue,
+  });
+  return /** @type {EditField[]} */ (E.probe_row).map((f) => ({
+    ...f,
+    current: /** @type {string} */ (merged[f.name] ?? f.current),
+  }));
+}
+
+/** @param {Values} v */
+export function probeRowFromValues(v) {
+  const kind = String(v.healthy_kind ?? "equals");
+  const val = String(v.healthy_value ?? "").trim();
+  const healthy =
+    kind === "equals"
+      ? { equals: val }
+      : kind === "at_most"
+        ? { at_most: Number(val) }
+        : { at_least: Number(val) };
+  /** @type {Record<string, unknown>} */
+  const out = {
+    name: String(v.name ?? "").trim(),
+    command: String(v.command ?? "").trim(),
+    healthy,
+    layer: String(v.layer ?? "network"),
+  };
+  const bs = String(v.blind_spot ?? "").trim();
+  if (bs) out.blind_spot = bs;
+  return out;
+}
+
+/** @param {Values} v */
+export function probeRowProblems(v) {
+  /** @type {Record<string, string>} */
+  const errors = {};
+  const kind = String(v.healthy_kind ?? "");
+  const val = String(v.healthy_value ?? "").trim();
+  if (
+    (kind === "at_least" || kind === "at_most") &&
+    val !== "" &&
+    !/^-?\d+$/.test(val)
+  )
+    errors.healthy_value = "A whole number.";
+  const layer = String(v.layer ?? "");
+  const bs = String(v.blind_spot ?? "").trim();
+  if (layer !== "application" && layer !== "user_visible" && !bs)
+    errors.blind_spot = "A probe below Application layer needs a blind spot.";
+  return errors;
+}
+
+/** @param {Record<string, unknown>} row */
+export function probeRowSummary(row) {
+  const h = /** @type {Record<string, unknown>} */ (row.healthy ?? {});
+  const word =
+    "equals" in h
+      ? `= ${h.equals}`
+      : "at_least" in h
+        ? `>= ${h.at_least}`
+        : "at_most" in h
+          ? `<= ${h.at_most}`
+          : "";
+  return `${row.name} (${word})`;
+}
+
+/**
+ * A manual check row normalized to an object: `checks.yml`'s `manual:`
+ * list is a bare string unless the question has `once: true`.
+ * @param {{text: string, once?: boolean} | string} row
+ */
+export function manualRow(row) {
+  return typeof row === "string"
+    ? { text: row, once: false }
+    : { text: row.text, once: !!row.once };
+}
+
+/**
+ * @param {Record<string, unknown> | null} row
+ * @returns {EditField[]}
+ */
+export function manualRowFields(row) {
+  const from = /** @type {Record<string, unknown> | null} */ (
+    row ? manualRow(/** @type {any} */ (row)) : null
+  );
+  return /** @type {EditField[]} */ (E.manual_row).map((f) => ({
+    ...f,
+    current: /** @type {string | boolean} */ (from?.[f.name] ?? f.current),
+  }));
+}
+
+/** @param {Values} v */
+export function manualRowFromValues(v) {
+  return { text: String(v.text ?? "").trim(), once: v.once === true };
+}
+
+/** @param {Record<string, unknown>} row */
+export function manualRowSummary(row) {
+  const r = manualRow(/** @type {any} */ (row));
+  return r.once ? `${r.text} (once)` : r.text;
+}
+
+/**
+ * @param {string[]} groups
+ * @param {Record<string, unknown> | null} row
+ * @returns {EditField[]}
+ */
+export function tileRowFields(groups, row) {
+  const from = /** @type {Record<string, unknown>} */ (row ?? {});
+  return /** @type {EditField[]} */ (E.tile_row).map((f) => {
+    /** @type {EditField} */
+    const out = {
+      ...f,
+      current: /** @type {string} */ (from[f.name] ?? f.current),
+    };
+    for (const k of ["order", "watch_every", "down_after"])
+      if (f.name === k) out.current = from[k] != null ? String(from[k]) : "";
+    return out;
+  });
+}
+
+/** @param {Values} v */
+export function tileRowFromValues(v) {
+  /** @type {Record<string, unknown>} */
+  const out = {
+    key: String(v.key ?? "").trim(),
+    name: String(v.name ?? "").trim(),
+    group: String(v.group ?? "").trim(),
+  };
+  const order = String(v.order ?? "").trim();
+  if (order !== "") out.order = Number(order);
+  for (const k of /** @type {const} */ (["description", "url", "reading"])) {
+    const t = String(v[k] ?? "").trim();
+    if (t) out[k] = t;
+  }
+  const we = String(v.watch_every ?? "").trim();
+  if (we !== "") out.watch_every = Number(we);
+  const da = String(v.down_after ?? "").trim();
+  if (da !== "") out.down_after = Number(da);
+  return out;
+}
+
+/** @param {Values} v */
+export function tileRowProblems(v) {
+  /** @type {Record<string, string>} */
+  const errors = {};
+  const we = String(v.watch_every ?? "").trim();
+  const da = String(v.down_after ?? "").trim();
+  if (we !== "" && da !== "" && Number(da) < Number(we))
+    errors.down_after = "Must be at least check every (seconds).";
+  return errors;
+}
+
+/** @param {Record<string, unknown>} row */
+export function tileRowSummary(row) {
+  return `${row.key} · ${row.name} (${row.group})`;
+}
+
+/**
+ * Turns the tile row table's displayed rows (`RowEdit[]`, `origin` the old
+ * hostname or `null`) into `TilesEdit.tiles`: only the rows that actually
+ * changed, plus a `delete: true` tombstone for every original tile whose
+ * hostname no longer appears among the rows (deleting a row that was
+ * itself new, `origin: null`, needs no tombstone — it never existed).
+ * @param {RowEdit[]} rows
+ * @param {Record<string, Record<string, unknown>>} originals hostname → its fields, as read
+ */
+export function tilesBody(rows, originals) {
+  const present = new Set(
+    rows
+      .map((r) => (typeof r.origin === "string" ? r.origin : null))
+      .filter((k) => k != null),
+  );
+  /** @type {Record<string, unknown>[]} */
+  const out = [];
+  for (const r of rows) {
+    const origin = typeof r.origin === "string" ? r.origin : null;
+    if (origin == null) {
+      out.push({
+        origin: null,
+        key: r.row.key,
+        delete: false,
+        tile: withoutKey(r.row),
+      });
+      continue;
+    }
+    const was = originals[origin];
+    const changed =
+      !was || JSON.stringify(withoutKey(r.row)) !== JSON.stringify(was);
+    if (changed || r.row.key !== origin) {
+      out.push({
+        origin,
+        key: r.row.key,
+        delete: false,
+        tile: withoutKey(r.row),
+      });
+    }
+  }
+  for (const key of Object.keys(originals)) {
+    if (!present.has(key))
+      out.push({ origin: key, key, delete: true, tile: {} });
+  }
+  return out;
+}
+
+/** @param {Record<string, unknown>} row */
+function withoutKey(row) {
+  const { key, ...rest } = row;
+  return rest;
+}
+
+// ── feat-stacks-10 / feat-stacks-11: storage, data_mounts, log_files,
+// latch_files row tables ─────────────────────────────────────────────────
+//
+// Each is a kp datatable + add/edit dialog, the same shape the Firewall
+// tab's rule table uses: `rowModel`/`rowBody` carry the generic
+// "origin tracks the old row, index i" bookkeeping (any row not
+// referenced by its old index drops out, matching `yamledit::Op::Seq`);
+// the per-list `*Fields`/`*FromValues`/`*Problems`/`*Summary` functions are
+// the one place each list's own shape lives, the same split
+// `ruleFields`/`ruleFromValues`/`ruleProblems`/`ruleSummary` uses for rules.
+
+/**
+ * @typedef {{origin: number | string | null, row: Record<string, unknown>}} RowEdit
+ */
+
+/**
+ * @param {Record<string, unknown>[]} rows
+ * @returns {RowEdit[]}
+ */
+export function rowModel(rows) {
+  return (rows ?? []).map((row, i) => ({ origin: i, row }));
+}
+
+/**
+ * @param {RowEdit[]} rows
+ */
+export function rowBody(rows) {
+  return rows.map((r) => ({ origin: r.origin, ...r.row }));
+}
+
+/**
+ * Whether the list changed from its starting rows.
+ * @param {RowEdit[]} rows
+ * @param {RowEdit[]} start
+ */
+export const rowsChanged = (rows, start) =>
+  JSON.stringify(rowBody(rows)) !== JSON.stringify(rowBody(start));
+
+/**
+ * @param {{app: string, checks: RowEdit[] | null, manual: RowEdit[] | null,
+ *   probes: RowEdit[] | null, busyCheck: string, url: string}} parts
+ */
+export function checksBody(parts) {
+  /** @type {{kind: "checks"} & Record<string, unknown>} */
+  const out = { kind: "checks", app: parts.app };
+  if (parts.checks) out.checks = rowBody(parts.checks);
+  if (parts.manual) out.manual = rowBody(parts.manual);
+  if (parts.probes) out.probes = rowBody(parts.probes);
+  out.busy_check = parts.busyCheck.trim() || null;
+  out.url = parts.url.trim() || null;
+  return out;
+}
+
+/**
+ * @param {RowEdit[]} rows
+ * @param {Record<string, Record<string, unknown>>} originals
+ */
+export function tilesEditBody(rows, originals) {
+  return { kind: "tiles", tiles: tilesBody(rows, originals) };
+}
+
+/** @param {string} app */
+export function appsRemoveField(app) {
+  const w = { app };
+  /** @type {Record<string, unknown>} */
+  const f = {};
+  for (const [k, v] of Object.entries(E.apps_remove))
+    f[k] = typeof v === "string" ? fill(v, w) : v;
+  return /** @type {EditField} */ ({ ...f, current: false });
+}
+
+/** @returns {EditField} */
+export function appsAddBlankField() {
+  return /** @type {EditField} */ ({ ...E.apps_add_blank, current: "" });
+}
+
+/** @param {string} app */
+export function latchSecretField(app) {
+  const w = { app };
+  /** @type {Record<string, unknown>} */
+  const f = {};
+  for (const [k, v] of Object.entries(E.latch_secret))
+    f[k] = typeof v === "string" ? fill(v, w) : v;
+  return /** @type {EditField} */ ({ ...f, current: false });
+}
+
+/**
+ * feat-stacks-3/feat-tiles-3: a preset's app(s) added to this stack, and
+ * each app's own optional tile hostname, applied to the SAME staged
+ * manifest as the app itself (one commit, not the app's commit followed
+ * by a second, best-effort `StackEdit::Tiles` one).
+ * @param {string} preset
+ * @param {Record<string, string>} tiles app → hostname, only apps that got one
+ */
+export function addAppBody(preset, tiles) {
+  /** @type {{kind: "add_app"} & Record<string, unknown>} */
+  const out = { kind: "add_app", preset };
+  if (Object.keys(tiles).length) out.tiles = tiles;
+  return out;
+}
+
+/**
+ * The apps & storage edit the server takes: only the parts touched.
+ * @param {{remove: string[], addBlank: string[], storage: RowEdit[] | null,
+ *   dataMounts: RowEdit[] | null, logFiles: RowEdit[] | null}} parts
+ */
+export function appsBody(parts) {
+  /** @type {{kind: "apps"} & Record<string, unknown>} */
+  const out = { kind: "apps" };
+  if (parts.remove.length) out.remove = parts.remove;
+  if (parts.addBlank.length) out.add_blank = parts.addBlank;
+  if (parts.storage) out.storage = rowBody(parts.storage);
+  if (parts.dataMounts) out.data_mounts = rowBody(parts.dataMounts);
+  if (parts.logFiles) out.log_files = rowBody(parts.logFiles);
+  return out;
+}
+
+/**
+ * @param {{secrets: string[] | null, files: RowEdit[] | null}} parts
+ */
+export function latchBody(parts) {
+  /** @type {{kind: "latch"} & Record<string, unknown>} */
+  const out = { kind: "latch" };
+  if (parts.secrets) out.secrets = parts.secrets;
+  if (parts.files) out.files = rowBody(parts.files);
+  return out;
+}
+
+/**
+ * @param {ManifestView} m
+ * @param {Record<string, unknown> | null} row
+ * @returns {EditField[]}
+ */
+export function storageFields(m, row) {
+  const from = row ?? {};
+  return /** @type {EditField[]} */ (E.storage_entry).map((f) => {
+    /** @type {EditField} */
+    const out = {
+      ...f,
+      current: /** @type {string | boolean} */ (from[f.name] ?? f.current),
+    };
+    if (f.name === "no_data") out.current = from.no_data === true;
+    if (f.name === "host_owner_uid")
+      out.current =
+        from.host_owner_uid != null ? String(from.host_owner_uid) : "";
+    if (f.name === "app")
+      out.choices = [
+        { value: "", label: "(the stack itself)" },
+        ...(m.apps ?? []).map((a) => ({ value: a, label: a })),
+      ];
+    return out;
+  });
+}
+
+/** @param {Values} v */
+export function storageFromValues(v) {
+  /** @type {Record<string, unknown>} */
+  const out = {
+    host_path: String(v.host_path ?? "").trim(),
+    mount_point: String(v.mount_point ?? "").trim(),
+    no_data: v.no_data === true,
+  };
+  const app = String(v.app ?? "").trim();
+  if (app) out.app = app;
+  const noBackup = String(v.no_backup ?? "").trim();
+  if (noBackup) out.no_backup = noBackup;
+  const uid = String(v.host_owner_uid ?? "").trim();
+  if (uid !== "") out.host_owner_uid = Number(uid);
+  return out;
+}
+
+/** @param {Record<string, unknown>} row */
+export function storageSummary(row) {
+  const app = row.app ? ` (${row.app})` : "";
+  return `${row.host_path} → ${row.mount_point}${app}`;
+}
+
+/**
+ * @param {Record<string, unknown> | null} row
+ * @returns {EditField[]}
+ */
+export function dataMountFields(row) {
+  const from = row ?? {};
+  return /** @type {EditField[]} */ (E.data_mount).map((f) => ({
+    ...f,
+    current: /** @type {string | boolean} */ (from[f.name] ?? f.current),
+  }));
+}
+
+/** @param {Values} v */
+export function dataMountFromValues(v) {
+  /** @type {Record<string, unknown>} */
+  const out = {
+    host_path: String(v.host_path ?? "").trim(),
+    mount_point: String(v.mount_point ?? "").trim(),
+  };
+  const note = String(v.note ?? "").trim();
+  if (note) out.note = note;
+  const files = String(v.rotate_files ?? "").trim();
+  if (files) {
+    /** @type {Record<string, unknown>} */
+    const rotate = { files };
+    const keep = String(v.rotate_keep ?? "").trim();
+    if (keep !== "") rotate.keep = Number(keep);
+    const container = String(v.rotate_container ?? "").trim();
+    if (container) {
+      /** @type {Record<string, unknown>} */
+      const reopen = { container };
+      const signal = String(v.rotate_signal ?? "").trim();
+      if (signal) reopen.signal = signal;
+      rotate.reopen = reopen;
+    }
+    out.rotate = rotate;
+  }
+  return out;
+}
+
+/** @param {Values} v */
+export function dataMountProblems(v) {
+  /** @type {Record<string, string>} */
+  const errors = {};
+  if (String(v.rotate_files ?? "").trim() === "") {
+    for (const k of ["rotate_keep", "rotate_container", "rotate_signal"])
+      if (String(v[k] ?? "").trim() !== "")
+        errors[k] = "Needs a rotate file name/glob above.";
+  }
+  return errors;
+}
+
+/** @param {Record<string, unknown>} row */
+export function dataMountSummary(row) {
+  return `${row.host_path} → ${row.mount_point}`;
+}
+
+/**
+ * @param {Record<string, unknown> | null} row
+ * @returns {EditField[]}
+ */
+export function logFileFields(row) {
+  const from = row ?? {};
+  return /** @type {EditField[]} */ (E.log_file).map((f) => ({
+    ...f,
+    current: /** @type {string} */ (from[f.name] ?? f.current),
+  }));
+}
+
+/** @param {Values} v */
+export function logFileFromValues(v) {
+  return {
+    path: String(v.path ?? "").trim(),
+    job: String(v.job ?? "").trim(),
+  };
+}
+
+/** @param {Record<string, unknown>} row */
+export function logFileSummary(row) {
+  return `${row.path} (${row.job})`;
+}
+
+/**
+ * @param {ManifestView} m
+ * @param {Record<string, unknown> | null} row
+ * @returns {EditField[]}
+ */
+export function latchFileFields(m, row) {
+  const from = row ?? {};
+  return /** @type {EditField[]} */ (E.latch_file).map((f) => {
+    /** @type {EditField} */
+    const out = {
+      ...f,
+      current: /** @type {string} */ (from[f.name] ?? f.current),
+    };
+    if (f.name === "restarts")
+      out.choices = [
+        { value: "", label: "(none)" },
+        ...(m.natives ?? []).map((u) => ({ value: u, label: u })),
+      ];
+    return out;
+  });
+}
+
+/** @param {Values} v */
+export function latchFileFromValues(v) {
+  /** @type {Record<string, unknown>} */
+  const out = {
+    from: String(v.from ?? "").trim(),
+    dest: String(v.dest ?? "").trim(),
+    mode: String(v.mode ?? "").trim(),
+  };
+  const owner = String(v.owner ?? "").trim();
+  if (owner) out.owner = owner;
+  const restarts = String(v.restarts ?? "").trim();
+  if (restarts) out.restarts = restarts;
+  return out;
+}
+
+/**
+ * The latch --expand trap: refused before anything is sent, on every
+ * field a latch_files row carries.
+ * @param {Values} v
+ */
+export function latchFileProblems(v) {
+  /** @type {Record<string, string>} */
+  const errors = {};
+  for (const k of ["from", "dest", "mode", "owner", "restarts"]) {
+    if (String(v[k] ?? "").includes("${")) errors[k] = say("dollar_expand");
+  }
+  return errors;
+}
+
+/** @param {Record<string, unknown>} row */
+export function latchFileSummary(row) {
+  return `${row.from} → ${row.dest}`;
+}
+
+/**
+ * The latch_secrets checkboxes: refuse '${' the same way a latch_files
+ * row does, although the app-name charset already excludes it.
+ * @param {string[]} apps
+ */
+export function latchSecretsProblems(apps) {
+  /** @type {Record<string, string>} */
+  const errors = {};
+  for (const a of apps)
+    if (a.includes("${")) errors[`latch-secret:${a}`] = say("dollar_expand");
+  return errors;
+}
 
 // ── feat-firewall-1 ─────────────────────────────────────────────────────
 
@@ -556,12 +1350,45 @@ export const dataFields = (paths) =>
   }));
 
 /**
+ * feat-tiles-3: the wizard's optional Tile step, folded into the SAME
+ * `NewStack` body the stack itself is scaffolded from (`m.tile` on the
+ * Rust side, applied to the staged manifest before it is ever written —
+ * one commit, not the stack's commit followed by a second, best-effort
+ * `StackEdit::Tiles` one). `null` when the hostname is blank, which is the
+ * step's "no tile" answer. A blank name/group falls back to the stack's
+ * own name / a generic "Own", so the one required choice is the hostname.
+ * @param {Values} v
+ */
+function newStackTile(v) {
+  const hostname = String(v.tile_hostname ?? "").trim();
+  if (!hostname) return null;
+  const num = (/** @type {string} */ k) => {
+    const s = String(v[k] ?? "").trim();
+    return s ? Number(s) : null;
+  };
+  /** @type {Record<string, unknown>} */
+  const tile = {
+    hostname,
+    name: String(v.tile_name ?? "").trim() || String(v.name ?? "").trim(),
+    group: String(v.tile_group ?? "").trim() || "Own",
+  };
+  const description = String(v.tile_description ?? "").trim();
+  if (description) tile.description = description;
+  const watchEvery = num("tile_watch_every");
+  if (watchEvery != null) tile.watch_every = watchEvery;
+  const downAfter = num("tile_down_after");
+  if (downAfter != null) tile.down_after = downAfter;
+  return tile;
+}
+
+/**
  * What the wizard sends.
  * @param {Values} v
  */
 export function newStackBody(v) {
   const n = (/** @type {string} */ k) => Number(String(v[k] ?? "").trim());
   const swap = String(v.swap_mb ?? "").trim();
+  const tile = newStackTile(v);
   return {
     name: String(v.name ?? "").trim(),
     vmid: n("vmid"),
@@ -573,6 +1400,7 @@ export function newStackBody(v) {
     no_data: Object.entries(v)
       .filter(([k, x]) => k.startsWith("nodata:") && x === true)
       .map(([k]) => k.slice(7)),
+    ...(tile ? { tile } : {}),
   };
 }
 

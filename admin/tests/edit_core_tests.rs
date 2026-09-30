@@ -330,6 +330,7 @@ fn feat_stacks_3_an_app_joins_a_stack_with_its_data_folder() {
         &t,
         &StackEdit::AddApp {
             preset: "mealie".into(),
+            tiles: Default::default(),
         },
         Some(&files),
     )
@@ -350,7 +351,10 @@ fn feat_stacks_3_an_app_joins_a_stack_with_its_data_folder() {
     assert!(changes(
         "kp-soft",
         &t,
-        &StackEdit::AddApp { preset: "x".into() },
+        &StackEdit::AddApp {
+            preset: "x".into(),
+            tiles: Default::default(),
+        },
         Some(&again)
     )
     .is_err());
@@ -376,6 +380,7 @@ fn feat_stacks_3_a_new_stack_is_checked_against_the_fleet() {
         disk_gb: 16,
         swap_mb: None,
         no_data: vec![],
+        tile: None,
     };
     let presets = vec!["custom".to_string(), "mealie".into()];
     assert!(problems(&ok, &taken, &presets).is_empty());

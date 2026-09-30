@@ -357,6 +357,9 @@ export async function openNewStack(navigate) {
       await refusalAlarm(x.error, x.status);
       return;
     }
+    // feat-tiles-3: the wizard's Tile step is folded into `newStackBody`
+    // above, applied to the staged manifest in the very same commit
+    // (`newstack.rs`/`prepare_new`) — no follow-up call needed here.
     showCommitted(x.body);
   });
 }

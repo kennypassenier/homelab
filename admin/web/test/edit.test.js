@@ -3,29 +3,75 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  addAppBody,
+  appsAddBlankField,
+  appsBody,
+  appsRemoveField,
   checkFields,
   checkNewStep,
+  checkRowFields,
+  checkRowFromValues,
+  checkRowProblems,
+  checkRowSummary,
+  checksBody,
   commitFields,
   dataFields,
+  dataMountFields,
+  dataMountFromValues,
+  dataMountProblems,
+  dataMountSummary,
   editable,
   fieldText,
   firewallBody,
   firewallChanged,
   firewallModel,
   hostSettingsBody,
+  latchBody,
+  latchFileFields,
+  latchFileFromValues,
+  latchFileProblems,
+  latchFileSummary,
+  latchSecretField,
+  latchSecretsProblems,
+  logFileFields,
+  logFileFromValues,
+  logFileSummary,
+  manualRow,
+  manualRowFields,
+  manualRowFromValues,
+  manualRowSummary,
   moveRule,
   newStackBody,
   newStackWizard,
   parseKey,
   presetSize,
+  probeRowFields,
+  probeRowFromValues,
+  probeRowProblems,
+  probeRowSummary,
+  rowBody,
+  rowModel,
+  rowsChanged,
   ruleFields,
   ruleFromValues,
   ruleProblems,
   ruleSummary,
   settingsBody,
+  settingsExtBody,
+  settingsExtForm,
+  settingsExtProblems,
   settingsForm,
   startValues,
+  storageFields,
+  storageFromValues,
+  storageSummary,
   tileProblems,
+  tileRowFields,
+  tileRowFromValues,
+  tileRowProblems,
+  tileRowSummary,
+  tilesBody,
+  tilesEditBody,
   valueText,
 } from "../js/editforms.js";
 import { editCommands } from "../js/commands.js";
@@ -94,7 +140,12 @@ test("each tile the stack declares gets two optional watch fields", () => {
   const withTile = {
     ...manifest,
     tiles: {
-      "kuma.kp-soft.dev": { watch_every: 60, down_after: 300 },
+      "kuma.kp-soft.dev": {
+        name: "Uptime Kuma",
+        group: "Infrastructure",
+        watch_every: 60,
+        down_after: 300,
+      },
     },
   };
   const form = settingsForm("uptime", withTile, {});
@@ -254,7 +305,7 @@ test("the new-stack wizard is data: steps, ids, the preset's size, the body", ()
   const w = newStackWizard(presets, 121);
   assert.deepEqual(
     w.steps.map((s) => s.id),
-    ["preset", "identity", "size", "data", "plan"],
+    ["preset", "identity", "size", "data", "tile", "plan"],
   );
   assert.deepEqual(
     w.steps.flatMap((s) => s.fields.map((f) => f.id)),
@@ -266,6 +317,12 @@ test("the new-stack wizard is data: steps, ids, the preset's size, the body", ()
       "new-cores",
       "new-disk-gb",
       "new-swap-mb",
+      "new-tile-hostname",
+      "new-tile-name",
+      "new-tile-group",
+      "new-tile-description",
+      "new-tile-watch-every",
+      "new-tile-down-after",
     ],
   );
   const v = startValues(w);
@@ -300,6 +357,51 @@ test("the new-stack wizard is data: steps, ids, the preset's size, the body", ()
   });
   v.swap_mb = "256";
   assert.equal(newStackBody(v).swap_mb, 256);
+});
+
+test("the wizard's Tile step folds into newStackBody's own commit, not a second one", () => {
+  const v = /** @type {any} */ ({
+    name: "recipes",
+    vmid: "121",
+    preset: "mealie",
+    ram_mb: "512",
+    cores: "2",
+    disk_gb: "32",
+  });
+  // Blank hostname: no tile at all, not an empty one.
+  assert.equal("tile" in newStackBody(v), false);
+  v.tile_hostname = "recipes.kp-soft.dev";
+  v.tile_watch_every = "60";
+  assert.deepEqual(newStackBody(v).tile, {
+    hostname: "recipes.kp-soft.dev",
+    name: "recipes",
+    group: "Own",
+    watch_every: 60,
+  });
+  v.tile_name = "Recipes";
+  v.tile_group = "Household";
+  v.tile_description = "Meal planning";
+  v.tile_down_after = "300";
+  assert.deepEqual(newStackBody(v).tile, {
+    hostname: "recipes.kp-soft.dev",
+    name: "Recipes",
+    group: "Household",
+    description: "Meal planning",
+    watch_every: 60,
+    down_after: 300,
+  });
+});
+
+test("addAppBody folds each app's optional tile into the app's own commit", () => {
+  assert.deepEqual(addAppBody("mealie", {}), {
+    kind: "add_app",
+    preset: "mealie",
+  });
+  assert.deepEqual(addAppBody("mealie", { mealie: "recipes.kp-soft.dev" }), {
+    kind: "add_app",
+    preset: "mealie",
+    tiles: { mealie: "recipes.kp-soft.dev" },
+  });
 });
 
 test("the commit step offers what the plan says can follow", () => {
@@ -376,11 +478,11 @@ test("the plan reads as files, effects and whether it may go", () => {
   };
   const v = planView(plan);
   assert.deepEqual(
-    v.files[0].hunks[0].lines.map((l) => [l.cls, l.no]),
+    v.files[0].hunks[0].lines.map((l) => [l.kind, l.no]),
     [
-      ["diff-same", 33],
-      ["diff-del", 34],
-      ["diff-add", 34],
+      ["same", 33],
+      ["removed", 34],
+      ["added", 34],
     ],
   );
   assert.equal(v.files[0].hunks[0].head, "@@ −33,2 +33,2 @@");
@@ -621,4 +723,445 @@ test("every stack's edit tabs and a new stack are palette commands, the open sta
   assert.equal(list[2].href, "/app/stacks/media/firewall");
   list[0].run?.();
   assert.equal(opened, 1);
+});
+
+test("the settings-ext form sends only what changed, retention as JSON", () => {
+  const m = /** @type {any} */ ({
+    ...manifest,
+    network: { ip: "10.10.10.16/24", gateway: "10.10.10.1", bridge: "vmbr0" },
+    lxc: { unprivileged: true, gpu: false, vpn: false },
+    resources: { ...manifest.resources, storage: "local-lvm" },
+    on_demand: false,
+    retention: null,
+  });
+  const form = settingsExtForm("kp-soft", m);
+  assert.deepEqual(
+    form.steps[0].fields.map((f) => f.id),
+    [
+      "edit-network-ip",
+      "edit-network-gateway",
+      "edit-network-bridge",
+      "edit-network-vlan",
+      "edit-lxc-unprivileged",
+      "edit-lxc-gpu",
+      "edit-lxc-vpn",
+      "edit-resources-storage",
+      "edit-on-demand",
+      "edit-retention",
+    ],
+  );
+  const values = startValues(form);
+  assert.deepEqual(settingsExtBody(form, values), { kind: "settings_ext" });
+  values.ip = "10.10.10.20/24";
+  values.gpu = true;
+  assert.deepEqual(settingsExtBody(form, values), {
+    kind: "settings_ext",
+    ip: "10.10.10.20/24",
+    gpu: true,
+  });
+  values.retention = "not json";
+  assert.match(settingsExtProblems(values).retention, /valid JSON/);
+  values.retention = '[{"every_days": "soon"}]';
+  assert.match(settingsExtProblems(values).retention, /every_days/);
+  values.retention = "[]";
+  assert.deepEqual(settingsExtProblems(values), {});
+  assert.deepEqual(settingsExtBody(form, values).retention, []);
+});
+
+test("the origin-tracked row helpers: model, body, change detection", () => {
+  const rows = rowModel([{ a: 1 }, { a: 2 }]);
+  assert.deepEqual(rows, [
+    { origin: 0, row: { a: 1 } },
+    { origin: 1, row: { a: 2 } },
+  ]);
+  assert.deepEqual(rowBody(rows), [
+    { origin: 0, a: 1 },
+    { origin: 1, a: 2 },
+  ]);
+  assert.equal(rowsChanged(rows, rows), false);
+  const edited = [{ origin: 0, row: { a: 9 } }, rows[1]];
+  assert.equal(rowsChanged(edited, rows), true);
+});
+
+test("a storage row reads in words and its form has an app picker", () => {
+  const m = /** @type {any} */ ({ ...manifest, apps: ["jellyfin", "sonarr"] });
+  assert.equal(
+    storageSummary({
+      host_path: "/appdata/media/jellyfin-config",
+      mount_point: "/config",
+      app: "jellyfin",
+    }),
+    "/appdata/media/jellyfin-config → /config (jellyfin)",
+  );
+  const fields = storageFields(m, null);
+  const app = fields.find((f) => f.name === "app");
+  assert.deepEqual(
+    app?.choices?.map((c) => c.value),
+    ["", "jellyfin", "sonarr"],
+  );
+  assert.deepEqual(
+    storageFromValues({
+      host_path: "/appdata/media/jellyfin-config",
+      mount_point: "/config",
+      no_data: true,
+      app: "jellyfin",
+    }),
+    {
+      host_path: "/appdata/media/jellyfin-config",
+      mount_point: "/config",
+      no_data: true,
+      app: "jellyfin",
+    },
+  );
+});
+
+test("a data mount's rotate fields: absent files means no rotation, and orphan fields refuse", () => {
+  assert.deepEqual(
+    dataMountFromValues({ host_path: "/mnt/a", mount_point: "/data" }),
+    { host_path: "/mnt/a", mount_point: "/data" },
+  );
+  assert.deepEqual(
+    dataMountFromValues({
+      host_path: "/mnt/a",
+      mount_point: "/data",
+      rotate_files: "access.log",
+      rotate_keep: "30",
+      rotate_container: "traefik",
+      rotate_signal: "USR1",
+    }),
+    {
+      host_path: "/mnt/a",
+      mount_point: "/data",
+      rotate: {
+        files: "access.log",
+        keep: 30,
+        reopen: { container: "traefik", signal: "USR1" },
+      },
+    },
+  );
+  assert.match(
+    dataMountProblems({ rotate_keep: "5" }).rotate_keep,
+    /file name\/glob above/,
+  );
+  assert.deepEqual(
+    dataMountProblems({ rotate_files: "x.log", rotate_keep: "5" }),
+    {},
+  );
+  assert.equal(
+    dataMountSummary({ host_path: "/mnt/a", mount_point: "/data" }),
+    "/mnt/a → /data",
+  );
+  assert.deepEqual(
+    dataMountFields(null).map((f) => f.id),
+    [
+      "mount-host-path",
+      "mount-mount-point",
+      "mount-note",
+      "mount-rotate-files",
+      "mount-rotate-keep",
+      "mount-rotate-container",
+      "mount-rotate-signal",
+    ],
+  );
+});
+
+test("a log_files row is two fields", () => {
+  assert.deepEqual(
+    logFileFields(null).map((f) => f.id),
+    ["logfile-path", "logfile-job"],
+  );
+  assert.deepEqual(
+    logFileFromValues({ path: "/var/log/x.log", job: "access" }),
+    {
+      path: "/var/log/x.log",
+      job: "access",
+    },
+  );
+  assert.equal(
+    logFileSummary({ path: "/var/log/x.log", job: "access" }),
+    "/var/log/x.log (access)",
+  );
+});
+
+test("a latch_files row refuses '${' everywhere, and restarts picks a native", () => {
+  const m = /** @type {any} */ ({ ...manifest, natives: ["kyu"] });
+  const fields = latchFileFields(m, null);
+  const restarts = fields.find((f) => f.name === "restarts");
+  assert.deepEqual(
+    restarts?.choices?.map((c) => c.value),
+    ["", "kyu"],
+  );
+  assert.deepEqual(
+    latchFileFromValues({
+      from: "a.env",
+      dest: "/etc/a.env",
+      mode: "640",
+      restarts: "kyu",
+    }),
+    { from: "a.env", dest: "/etc/a.env", mode: "640", restarts: "kyu" },
+  );
+  assert.match(latchFileProblems({ dest: "/etc/${X}" }).dest, /latch --expand/);
+  assert.deepEqual(
+    latchFileProblems({ from: "a.env", dest: "/etc/a.env", mode: "640" }),
+    {},
+  );
+  assert.equal(
+    latchFileSummary({ from: "a.env", dest: "/etc/a.env" }),
+    "a.env → /etc/a.env",
+  );
+});
+
+test("apps_remove and latch_secret are one field per app, from the same template", () => {
+  const remove = appsRemoveField("jellyfin");
+  assert.equal(remove.id, "apps-remove-jellyfin");
+  assert.equal(remove.name, "apps-remove:jellyfin");
+  const secret = latchSecretField("jellyfin");
+  assert.equal(secret.id, "latch-secret-jellyfin");
+  assert.equal(appsAddBlankField().id, "apps-add-blank");
+  assert.deepEqual(latchSecretsProblems(["ok-app"]), {});
+  assert.match(
+    latchSecretsProblems(["bad${app"])["latch-secret:bad${app"],
+    /latch --expand/,
+  );
+});
+
+test("appsBody and latchBody send only the parts touched", () => {
+  assert.deepEqual(
+    appsBody({
+      remove: [],
+      addBlank: [],
+      storage: null,
+      dataMounts: null,
+      logFiles: null,
+    }),
+    { kind: "apps" },
+  );
+  assert.deepEqual(
+    appsBody({
+      remove: ["old-app"],
+      addBlank: ["new-app"],
+      storage: rowModel([
+        { host_path: "/appdata/x/y-config", mount_point: "/y" },
+      ]),
+      dataMounts: null,
+      logFiles: null,
+    }),
+    {
+      kind: "apps",
+      remove: ["old-app"],
+      add_blank: ["new-app"],
+      storage: [
+        { origin: 0, host_path: "/appdata/x/y-config", mount_point: "/y" },
+      ],
+    },
+  );
+  assert.deepEqual(latchBody({ secrets: null, files: null }), {
+    kind: "latch",
+  });
+  assert.deepEqual(
+    latchBody({
+      secrets: ["jellyfin"],
+      files: rowModel([{ from: "a", dest: "/b", mode: "640" }]),
+    }),
+    {
+      kind: "latch",
+      secrets: ["jellyfin"],
+      files: [{ origin: 0, from: "a", dest: "/b", mode: "640" }],
+    },
+  );
+});
+
+test("a check row reads in words and refuses a missing blind spot below Application", () => {
+  assert.deepEqual(
+    checkRowFields(null).map((f) => f.id),
+    [
+      "check-name",
+      "check-command",
+      "check-expect",
+      "check-layer",
+      "check-blind-spot",
+    ],
+  );
+  assert.deepEqual(
+    checkRowFromValues({
+      name: "films",
+      command: "echo 3",
+      expect: "must_match",
+      layer: "network",
+    }),
+    {
+      name: "films",
+      command: "echo 3",
+      expect: "must_match",
+      layer: "network",
+    },
+  );
+  assert.match(checkRowProblems({ layer: "network" }).blind_spot, /blind spot/);
+  assert.deepEqual(checkRowProblems({ layer: "application" }), {});
+  assert.equal(
+    checkRowSummary({ name: "films", layer: "network" }),
+    "films (network)",
+  );
+});
+
+test("a probe row's healthy field round-trips equals/at_least/at_most", () => {
+  const fields = probeRowFields({
+    name: "x",
+    command: "y",
+    healthy: { at_least: 3 },
+    layer: "network",
+  });
+  const kind = fields.find((f) => f.name === "healthy_kind");
+  const value = fields.find((f) => f.name === "healthy_value");
+  assert.equal(kind?.current, "at_least");
+  assert.equal(value?.current, "3");
+  assert.deepEqual(
+    probeRowFromValues({
+      name: "films",
+      command: "echo 3",
+      healthy_kind: "at_least",
+      healthy_value: "3",
+      layer: "network",
+    }),
+    {
+      name: "films",
+      command: "echo 3",
+      healthy: { at_least: 3 },
+      layer: "network",
+    },
+  );
+  assert.match(
+    probeRowProblems({ healthy_kind: "at_least", healthy_value: "abc" })
+      .healthy_value,
+    /whole number/,
+  );
+  assert.equal(
+    probeRowSummary({ name: "films", healthy: { at_least: 3 } }),
+    "films (>= 3)",
+  );
+});
+
+test("a manual row is a bare string unless once is set, and normalises either way", () => {
+  assert.deepEqual(
+    manualRowFromValues({ text: "did you register a passkey?", once: true }),
+    {
+      text: "did you register a passkey?",
+      once: true,
+    },
+  );
+  assert.deepEqual(manualRow("plain question"), {
+    text: "plain question",
+    once: false,
+  });
+  assert.equal(manualRowSummary(manualRow("plain question")), "plain question");
+  assert.equal(
+    manualRowSummary({ text: "once only", once: true }),
+    "once only (once)",
+  );
+  assert.deepEqual(
+    manualRowFields(manualRow("plain question")).map((f) => f.current),
+    ["plain question", false],
+  );
+});
+
+test("checksBody sends only the parts touched", () => {
+  assert.deepEqual(
+    checksBody({
+      app: "kp-soft",
+      checks: null,
+      manual: null,
+      probes: null,
+      busyCheck: "",
+      url: "",
+    }),
+    { kind: "checks", app: "kp-soft", busy_check: null, url: null },
+  );
+  assert.deepEqual(
+    checksBody({
+      app: "kp-soft",
+      checks: rowModel([
+        { name: "a", command: "b", expect: "must_match", layer: "network" },
+      ]),
+      manual: null,
+      probes: null,
+      busyCheck: "echo busy",
+      url: "",
+    }),
+    {
+      kind: "checks",
+      app: "kp-soft",
+      checks: [
+        {
+          origin: 0,
+          name: "a",
+          command: "b",
+          expect: "must_match",
+          layer: "network",
+        },
+      ],
+      busy_check: "echo busy",
+      url: null,
+    },
+  );
+});
+
+test("a tile row's fields and the sparse tilesBody (delete needs a tombstone)", () => {
+  assert.deepEqual(
+    tileRowFields(["Own"], null).map((f) => f.id),
+    [
+      "tile-key",
+      "tile-name",
+      "tile-group",
+      "tile-order",
+      "tile-description",
+      "tile-url",
+      "tile-reading",
+      "tile-watch-every",
+      "tile-down-after",
+    ],
+  );
+  assert.deepEqual(
+    tileRowFromValues({ key: "a.kp-soft.dev", name: "A", group: "Own" }),
+    { key: "a.kp-soft.dev", name: "A", group: "Own" },
+  );
+  assert.match(
+    tileRowProblems({ watch_every: "60", down_after: "10" }).down_after,
+    /at least check every/,
+  );
+  assert.equal(
+    tileRowSummary({ key: "a.kp-soft.dev", name: "A", group: "Own" }),
+    "a.kp-soft.dev · A (Own)",
+  );
+  const originals = {
+    "a.kp-soft.dev": { name: "A", group: "Own" },
+    "b.kp-soft.dev": { name: "B", group: "Own" },
+  };
+  // Untouched: nothing sent.
+  const untouched = [
+    {
+      origin: "a.kp-soft.dev",
+      row: { key: "a.kp-soft.dev", name: "A", group: "Own" },
+    },
+    {
+      origin: "b.kp-soft.dev",
+      row: { key: "b.kp-soft.dev", name: "B", group: "Own" },
+    },
+  ];
+  assert.deepEqual(tilesBody(untouched, originals), []);
+  // "b" deleted (row simply removed from the table) needs its own
+  // tombstone, not silent omission.
+  const oneDeleted = [untouched[0]];
+  assert.deepEqual(tilesBody(oneDeleted, originals), [
+    { origin: "b.kp-soft.dev", key: "b.kp-soft.dev", delete: true, tile: {} },
+  ]);
+  // A brand-new row (origin null) needs no tombstone when later removed
+  // again — it never existed in the file.
+  const addedThenRemoved = untouched;
+  assert.deepEqual(tilesBody(addedThenRemoved, originals), []);
+  assert.deepEqual(tilesEditBody(oneDeleted, originals), {
+    kind: "tiles",
+    tiles: [
+      { origin: "b.kp-soft.dev", key: "b.kp-soft.dev", delete: true, tile: {} },
+    ],
+  });
 });

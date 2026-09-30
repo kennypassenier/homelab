@@ -118,6 +118,15 @@ fn form_name(form: &str, target: Option<&str>) -> String {
             ),
             EditKind::Rollback => format!("Roll back · {t}"),
             EditKind::Import => "the Import dialog".into(),
+            EditKind::SettingsExt => format!("Network & hardware · {t}"),
+            EditKind::Apps => format!("Apps & storage · {t}"),
+            EditKind::Latch => format!("Latch · {t}"),
+            EditKind::Checks => format!("checks.yml · {t}"),
+            EditKind::Tiles => format!("Tiles · {t}"),
+            EditKind::PublishApp => format!("Publish · {t}"),
+            EditKind::Native | EditKind::AddNative | EditKind::Preset | EditKind::NewPreset => {
+                format!("{} · {t}", capital(kind.slug()))
+            }
         };
     }
     match ActionKind::from_slug(form) {

@@ -3,7 +3,12 @@
 // tab filters on is in the query string (feat-overview-8).
 
 import { mountActionsArea } from "../actionsarea.js";
-import { firewallTab, settingsTab } from "../editpanels.js";
+import {
+  checksEditTab,
+  firewallTab,
+  openPublishDialog,
+  settingsTab,
+} from "../editpanels.js";
 import { historyRows, incidentRows } from "../activity.js";
 import { agoEl, setAgo } from "../ago.js";
 import { checkRows } from "../checks.js";
@@ -270,6 +275,7 @@ function appsTab(panel, params) {
       },
       { label: "Restarts", sort: "number" },
       { label: "Logs", sort: "text" },
+      { label: "Publish", sort: "text" },
     ],
   });
   panel.replaceChildren(t.wrap, h("p", null, ago));
@@ -282,8 +288,19 @@ function appsTab(panel, params) {
     const d = stackDetail(f, params.name);
     if (!f || !d) return;
     t.tbody.replaceChildren(
-      ...d.apps.map((a) =>
-        h(
+      ...d.apps.map((a) => {
+        // feat-publish-1 (B): a hostname and a port, turned into
+        // gateway_route/extra_routes + traefik-routes.yml and optionally a
+        // tile, for this one app.
+        const publish = h(
+          "button",
+          { type: "button", class: "kp-button kp-button--small" },
+          "Publish…",
+        );
+        publish.addEventListener("click", () => {
+          openPublishDialog(params.name, a.name, () => void render());
+        });
+        return h(
           "tr",
           null,
           td(a.name),
@@ -300,8 +317,9 @@ function appsTab(panel, params) {
               `${a.name} logs`,
             ),
           ),
-        ),
-      ),
+          h("td", null, publish),
+        );
+      }),
     );
     t.ready();
     setAgo(ago, f.measured_at);
@@ -606,8 +624,17 @@ function logsTab(panel, params) {
   };
 }
 
-/** @type {(p: HTMLElement, params: Params) => () => void} */
+/**
+ * feat-checks-1 (B): this tab used to only read `checks.yml` (the manual
+ * answers table below); it now also edits it, one app at a time, above
+ * that table.
+ * @type {(p: HTMLElement, params: Params) => () => void}
+ */
 function checksTab(panel, params) {
+  const editHost = h("div");
+  const tableHost = h("div");
+  panel.replaceChildren(editHost, tableHost);
+  const stopEdit = checksEditTab(editHost, params);
   const keys = sortKeys();
   /** @param {number | null} unix */
   const time = (unix) =>
@@ -633,8 +660,10 @@ function checksTab(panel, params) {
       { label: "Answer", sort: "text" },
     ],
   });
-  panel.replaceChildren(t.wrap, h("p", null, ago));
-  const detach = attachDataTables(panel, { compare: keys.compare(compare) });
+  tableHost.replaceChildren(t.wrap, h("p", null, ago));
+  const detach = attachDataTables(tableHost, {
+    compare: keys.compare(compare),
+  });
   const table = dataTable(t.wrap);
   const unbind = bindTableUrl(table, "checks");
   const abort = new AbortController();
@@ -675,6 +704,7 @@ function checksTab(panel, params) {
   panel.addEventListener("kp-datatable-retry", retry);
   retry();
   return () => {
+    stopEdit();
     abort.abort();
     panel.removeEventListener("kp-datatable-retry", retry);
     unbind();

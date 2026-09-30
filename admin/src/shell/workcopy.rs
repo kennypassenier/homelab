@@ -633,6 +633,195 @@ impl WorkingCopy {
         }
     }
 
+    /// Every text file of `presets/`, keyed `<preset>/<rel>` —
+    /// `stack_texts`'s twin for the presets editor (feat-preset-1).
+    pub fn preset_texts(&self) -> crate::core::presetedit::PresetTexts {
+        let _g = self.hold();
+        read_texts(&self.repo.join("presets"))
+    }
+
+    /// A copy of `presets/` with `changes` laid over it, in a fresh scratch
+    /// directory; `f` looks at it, then it is removed. `with_staged`'s
+    /// twin, scoped to the whole presets tree rather than one stack.
+    pub fn with_staged_presets<T>(
+        &self,
+        changes: &[FileChange],
+        f: impl FnOnce(&Path) -> T,
+    ) -> Result<T, Refusal> {
+        let _g = self.hold();
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let base = self.scratch.join(format!(
+            "stage-presets-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let fail = |why: String| {
+            refusal(
+                "the validation",
+                why,
+                "report this with the dashboard's log",
+            )
+        };
+        let _ = std::fs::remove_dir_all(&base);
+        let dir = base.join("presets");
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| fail(format!("scratch {}: {e}", dir.display())))?;
+        let src = self.repo.join("presets");
+        if src.is_dir() {
+            copy_tree(&src, &dir).map_err(|e| fail(format!("copy of presets: {e}")))?;
+        }
+        write_changes(&base, changes).map_err(fail)?;
+        let out = f(&dir);
+        let _ = std::fs::remove_dir_all(&base);
+        Ok(out)
+    }
+
+    /// The transaction for `presets/` — `transact`'s twin, committing under
+    /// `presets/` as a whole instead of one stack's directory.
+    pub fn transact_presets(
+        &self,
+        changes: &[FileChange],
+        message: &str,
+        validate: impl FnOnce(&Path) -> Vec<String>,
+    ) -> Result<Committed, Refusal> {
+        let what = "the commit to presets/".to_string();
+        let _g = self.hold();
+        let synced = self.sync_locked();
+        self.set_error(synced.as_ref().err().map(|e| e.why.clone()));
+        synced?;
+        if changes.is_empty() {
+            return Err(refusal(&what, "nothing changes", "change something first"));
+        }
+        let outside =
+            crate::core::presetedit::outside_presets(changes.iter().map(|c| c.path.as_str()));
+        if !outside.is_empty() {
+            return Err(refusal(
+                &what,
+                format!("the edit touches {} outside presets/", outside.join(", ")),
+                "the dashboard commits only under presets/ here",
+            ));
+        }
+        for c in changes {
+            let now = std::fs::read_to_string(self.repo.join(&c.path)).ok();
+            if now != c.old {
+                return Err(refusal(
+                    &what,
+                    format!("{} changed since the plan was made", c.path),
+                    "make the plan again; it will start from the newest files",
+                ));
+            }
+        }
+        let problems = self.with_staged_presets(changes, validate)?;
+        if !problems.is_empty() {
+            return Err(refusal(
+                &what,
+                problems.join("; "),
+                "correct the edit; nothing was written",
+            ));
+        }
+        let before = self
+            .git(&["rev-parse", "HEAD"])
+            .map_err(|e| refusal(&what, e, "look at the working copy by hand"))?
+            .trim()
+            .to_string();
+        let undo = |me: &Self| {
+            let _ = me.git(&["reset", "--quiet", "--hard", &before]);
+            let _ = me.git(&["clean", "-fdq", "--", "presets"]);
+        };
+        if let Err(e) = write_changes(&self.repo, changes) {
+            undo(self);
+            return Err(refusal(
+                &what,
+                format!("writing failed: {e}"),
+                "nothing was committed",
+            ));
+        }
+        if let Err(e) = self.git(&["add", "--all", "--", "presets"]) {
+            undo(self);
+            return Err(refusal(
+                &what,
+                format!("git add failed: {e}"),
+                "nothing was committed",
+            ));
+        }
+        let staged: Vec<String> = self
+            .git(&["diff", "--cached", "--name-only", "-z"])
+            .unwrap_or_default()
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+            .collect();
+        let outside = crate::core::presetedit::outside_presets(staged.iter().map(String::as_str));
+        if staged.is_empty() || !outside.is_empty() {
+            undo(self);
+            return Err(refusal(
+                &what,
+                if staged.is_empty() {
+                    "nothing was staged".to_string()
+                } else {
+                    format!(
+                        "the staged set holds {} outside presets/",
+                        outside.join(", ")
+                    )
+                },
+                "nothing was committed",
+            ));
+        }
+        let _ = std::fs::create_dir_all(&self.scratch);
+        let msg_file = self
+            .scratch
+            .join(format!("commit-msg-presets-{}", std::process::id()));
+        if let Err(e) = std::fs::write(&msg_file, message) {
+            undo(self);
+            return Err(refusal(
+                &what,
+                format!("the message file: {e}"),
+                "nothing was committed",
+            ));
+        }
+        let committed = self.git(&["commit", "--quiet", "-F", &msg_file.display().to_string()]);
+        let _ = std::fs::remove_file(&msg_file);
+        if let Err(e) = committed {
+            undo(self);
+            return Err(refusal(
+                &what,
+                format!("git commit failed: {e}"),
+                "nothing was committed",
+            ));
+        }
+        let head = self.head().ok_or_else(|| {
+            refusal(
+                &what,
+                "the new commit could not be read",
+                "look at the working copy by hand",
+            )
+        })?;
+        match self.push_locked() {
+            Ok(landed_despite_error) => Ok(Committed {
+                commit: head.commit,
+                subject: head.subject,
+                pushed: true,
+                landed_despite_error,
+            }),
+            Err(PushFail::Refused(e)) => {
+                undo(self);
+                Err(refusal(
+                    &what,
+                    format!("the push was refused and the commit is not on the remote: {e}"),
+                    "the working copy is back where it was; make the plan again",
+                ))
+            }
+            Err(PushFail::Unknown(e)) => Err(refusal(
+                &what,
+                format!("the push failed and whether it landed is unknown: {e}"),
+                format!(
+                    "commit {} stays here, unpushed; the working copy panel offers push, rebase or drop",
+                    &head.commit[..12.min(head.commit.len())]
+                ),
+            )),
+        }
+    }
+
     /// Push HEAD; on an error ask the remote whether it has HEAD anyway.
     fn push_locked(&self) -> Result<bool, PushFail> {
         let refspec = format!("HEAD:refs/heads/{}", self.git.branch);

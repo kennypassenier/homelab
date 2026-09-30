@@ -13,6 +13,8 @@ import { openBatch } from "./actiondialog.js";
 import { handle, waitFor, waitHandle } from "./drivehooks.js";
 import { openImport } from "./importstack.js";
 import { openNewStack } from "./newstack.js";
+import { openPublishDialog } from "./editpanels.js";
+import { openPresetEditor } from "./presetseditor.js";
 import { openRollback } from "./rollbackdialog.js";
 import { clearError, showError } from "/static/kp/js/forms.js";
 
@@ -125,8 +127,17 @@ function stackEdit(first) {
   const { closed, done } = base();
   let current = first;
   const fwKey = `firewall:${stack}`;
-  const seKey = `stack-edit:${stack}`;
-  const top = () => handle("rule")?.dialog ?? handle("plan")?.dialog ?? null;
+  // feat-checks-1: checks.yml is its own tab (like firewall), so it
+  // registers its own handle rather than settings' `stack-edit:<stack>`.
+  const seKey =
+    family === "checks" ? `checks-edit:${stack}` : `stack-edit:${stack}`;
+  // feat-stacks-9/10/11: the firewall's rule dialog is "rule"; the
+  // storage/data_mounts/log_files/latch_files row dialogs (one at a time,
+  // same as "rule") are "row" — both expose the same
+  // {dialog, save, cancel, close} shape, so most of this controller only
+  // needs to ask for "whichever sub-dialog is open" without caring which.
+  const sub = () => handle("rule") ?? handle("row");
+  const top = () => sub()?.dialog ?? handle("plan")?.dialog ?? null;
   return {
     get dialog() {
       return top();
@@ -134,6 +145,7 @@ function stackEdit(first) {
     closed,
     close: () => {
       handle("rule")?.close();
+      handle("row")?.close();
       handle("plan")?.close();
       done();
     },
@@ -143,9 +155,12 @@ function stackEdit(first) {
       if (el) setInput(el, v);
     },
     button: (name) => {
-      const rule = handle("rule");
-      if (rule) return name === "save" ? rule.save() : rule.cancel();
+      const s = sub();
+      if (s) return name === "save" ? s.save() : s.cancel();
       if (name === "close") return closeOf(top());
+      // feat-native-1: "remove" is a second button on the native step,
+      // beside "next" — its own `#native-remove`, not the family's review.
+      if (name === "remove") return handle(seKey)?.remove?.() ?? null;
       if (current.step_index === 0)
         return family === "firewall"
           ? (handle(fwKey)?.review() ?? null)
@@ -154,9 +169,15 @@ function stackEdit(first) {
       return name === "back" ? (p?.back() ?? null) : (p?.next() ?? null);
     },
     row: (op, target) => {
-      const fw = handle(fwKey);
-      if (!fw) return null;
-      return op === "add" ? fw.add() : fw.rowButton(op, Number(target) - 1);
+      if (family === "firewall") {
+        const fw = handle(fwKey);
+        if (!fw) return null;
+        return op === "add" ? fw.add() : fw.rowButton(op, Number(target) - 1);
+      }
+      // feat-stacks-10/11: `stack-edit:<stack>`'s own `row` resolves the
+      // right storage/data_mounts/log_files/latch_files table by the
+      // op's target ("<list>" or "<list>:<n>") — see editpanels.js.
+      return handle(seKey)?.row?.(op, target) ?? null;
     },
     sync: async (f) => {
       current = f;
@@ -168,12 +189,26 @@ function stackEdit(first) {
       if (family === "raw") se?.openRaw();
       if (fw && e.model && canon(fw.model()) !== canon(e.model))
         fw.setModel(e.model);
-      const rule = handle("rule");
-      if (fw && e.sub && !rule) {
+      const openSub = sub();
+      if (fw && e.sub && !openSub) {
         fw.openRule(typeof e.sub.target === "number" ? e.sub.target : null);
         await waitHandle("rule", 2000);
-      } else if (!e.sub && rule) rule.close();
-      fill(f, (x) => x.step === f.steps[0] || x.step === "rule");
+      } else if (se && e.sub && !openSub) {
+        se.openRow?.(
+          e.sub.kind,
+          typeof e.sub.target === "number" ? e.sub.target : null,
+        );
+        await waitHandle("row", 2000);
+      } else if (!e.sub && openSub) {
+        openSub.close();
+      }
+      fill(
+        f,
+        (x) =>
+          x.step === f.steps[0] ||
+          x.step === "rule" ||
+          (!!e.sub && x.step === e.sub.kind),
+      );
       if (f.step_index === 0) handle("plan")?.close();
       else {
         let p = handle("plan");
@@ -300,6 +335,150 @@ async function importEdit(navigate) {
         let p = handle("plan");
         if (!p) {
           handle("import")?.review().click();
+          p = await waitHandle("plan", 3000);
+        }
+        if (p) {
+          await p.ready;
+          const want = f.step === "commit" ? 1 : 0;
+          if (p.step() !== want) await p.goTo(want);
+          fill(f, (x) => x.step === "commit");
+          p.runError(f.run_error);
+          if (f.edit?.result) p.showCommitted(f.edit.result);
+        }
+      }
+      mark(f);
+    },
+  };
+}
+
+/**
+ * The presets editor dialog: `preset <name>` and `new-preset` both open it
+ * (one handle, `preset-editor` — `presetseditor.js`'s `openPresetEditor`).
+ * @param {DriveForm} first
+ * @returns {Promise<DrivenControl>}
+ */
+async function presetEdit(first) {
+  const { closed, done } = base();
+  const presetName = first.action === "preset" ? first.stack : null;
+  void openPresetEditor(presetName, () => {});
+  const p0 = await waitHandle("preset-editor", 5000);
+  p0?.closed.then(done);
+  let current = first;
+  const top = () =>
+    handle("plan")?.dialog ?? handle("preset-editor")?.dialog ?? null;
+  // feat-preset-1: the Files card's three buttons and "Remove this
+  // preset…" share the meta step with the meta form's own "next" — which
+  // DOM button a press means is named by the button itself; which one to
+  // click to actually open the plan (in `sync`, once) is named by the
+  // server's `edit.action` (unset: the meta form's own review).
+  const actionButton = (/** @type {string} */ btn) => {
+    const h = handle("preset-editor");
+    switch (btn) {
+      case "save-file":
+        return h?.fileSave() ?? null;
+      case "rename-file":
+        return h?.fileRename() ?? null;
+      case "delete-file":
+        return h?.fileDelete() ?? null;
+      case "remove-preset":
+        return h?.remove() ?? null;
+      default:
+        return h?.review() ?? null;
+    }
+  };
+  return {
+    get dialog() {
+      return top();
+    },
+    closed,
+    close: () => {
+      handle("plan")?.close();
+      handle("preset-editor")?.close();
+    },
+    input: (_n, id) => byId(id),
+    set: (_n, v, id) => {
+      const el = byId(id);
+      if (el) setInput(el, v);
+    },
+    button: (name) => {
+      if (name === "close") return closeOf(top());
+      if (current.step_index === 0) return actionButton(name);
+      const p = handle("plan");
+      return name === "back" ? (p?.back() ?? null) : (p?.next() ?? null);
+    },
+    row: () => null,
+    sync: async (f) => {
+      current = f;
+      fill(f, (x) => x.step === f.steps[0]);
+      if (f.step_index === 0) handle("plan")?.close();
+      else {
+        let p = handle("plan");
+        if (!p) {
+          actionButton(f.edit?.action ?? "next")?.click();
+          p = await waitHandle("plan", 3000);
+        }
+        if (p) {
+          await p.ready;
+          const want = f.step === "commit" ? 1 : 0;
+          if (p.step() !== want) await p.goTo(want);
+          fill(f, (x) => x.step === "commit");
+          p.runError(f.run_error);
+          if (f.edit?.result) p.showCommitted(f.edit.result);
+        }
+      }
+      mark(f);
+    },
+  };
+}
+
+/**
+ * feat-publish-1: the Apps tab's "Publish…" dialog — opened by a click,
+ * not by a page already showing it (the same shape `presetEdit` and
+ * `newStack` use), so driving calls `openPublishDialog` directly. The app
+ * is not one of the form's own fields (the dialog is opened per app by
+ * its own button); the server names it in the form's `id`
+ * (`edit:publish:<stack>:<app>`).
+ * @param {DriveForm} first
+ * @returns {Promise<DrivenControl>}
+ */
+async function publishApp(first) {
+  const { closed, done } = base();
+  const stack = first.stack;
+  const app = first.id.split(":").pop() ?? "";
+  void openPublishDialog(stack, app, () => {});
+  const p0 = await waitHandle("publish", 5000);
+  p0?.closed.then(done);
+  let current = first;
+  const top = () => handle("plan")?.dialog ?? handle("publish")?.dialog ?? null;
+  return {
+    get dialog() {
+      return top();
+    },
+    closed,
+    close: () => {
+      handle("plan")?.close();
+      handle("publish")?.close();
+    },
+    input: (_n, id) => byId(id),
+    set: (_n, v, id) => {
+      const el = byId(id);
+      if (el) setInput(el, v);
+    },
+    button: (name) => {
+      if (name === "close") return closeOf(top());
+      if (current.step_index === 0) return handle("publish")?.review() ?? null;
+      const p = handle("plan");
+      return name === "back" ? (p?.back() ?? null) : (p?.next() ?? null);
+    },
+    row: () => null,
+    sync: async (f) => {
+      current = f;
+      fill(f, (x) => x.step === f.steps[0]);
+      if (f.step_index === 0) handle("plan")?.close();
+      else {
+        let p = handle("plan");
+        if (!p) {
+          handle("publish")?.review()?.click();
           p = await waitHandle("plan", 3000);
         }
         if (p) {
@@ -483,6 +662,11 @@ export async function openDriven(f, ctx) {
       return rollback(f);
     case "import":
       return importEdit(ctx.navigate);
+    case "preset":
+    case "new-preset":
+      return presetEdit(f);
+    case "publish":
+      return publishApp(f);
     default:
       return stackEdit(f);
   }

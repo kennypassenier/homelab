@@ -236,7 +236,10 @@
     "firewall",
     "settings",
     "shell",
-    "presets"
+    "presets",
+    "start",
+    "charts",
+    "traffic"
   ],
   "stack_tabs": [
     "overview",

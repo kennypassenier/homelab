@@ -40,10 +40,6 @@ export const NAV = /** @type {const} */ ([
   // TUI parity: `homelab today`, the morning question in one answer.
   { page: "today", href: "/app/today", label: "Today" },
   { page: "host", href: "/app/host", label: "Host" },
-  // replace-grafana (2026-09-30).
-  { page: "charts", href: "/app/charts", label: "Charts" },
-  // replace-goaccess (2026-09-30).
-  { page: "traffic", href: "/app/traffic", label: "Traffic" },
   // TUI parity: LOG_STREAM, every host operation whoever started it.
   { page: "log", href: "/app/log", label: "Live log", group: "Operations" },
   { page: "jobs", href: "/app/jobs", label: "Jobs", group: "Operations" },
@@ -69,6 +65,10 @@ export const NAV = /** @type {const} */ ([
   },
   { page: "checks", href: "/app/checks", label: "Checks", group: "Health" },
   { page: "doctor", href: "/app/doctor", label: "Doctor", group: "Health" },
+  // replace-grafana (2026-09-30).
+  { page: "charts", href: "/app/charts", label: "Charts", group: "Health" },
+  // replace-goaccess (2026-09-30).
+  { page: "traffic", href: "/app/traffic", label: "Traffic", group: "Health" },
   {
     page: "firewall",
     href: "/app/firewall",

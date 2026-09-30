@@ -65,6 +65,8 @@ test("the navigation marks the current page, a stack page beside the overview", 
     [
       ["Checks", false],
       ["Doctor", true],
+      ["Charts", false],
+      ["Traffic", false],
     ],
   );
   // Kenny, 2026-09-29: the bar fits one row at 1280 px, so few top items.
@@ -72,6 +74,8 @@ test("the navigation marks the current page, a stack page beside the overview", 
   assert.deepEqual(
     top.map((n) => n.label),
     [
+      // replace-homepage (2026-09-30): the start page first.
+      "Start",
       "Overview",
       "Today",
       "Host",
@@ -85,7 +89,7 @@ test("the navigation marks the current page, a stack page beside the overview", 
   const reached = top.flatMap((n) =>
     (n.items ? n.items : [n]).map((i) => i.href),
   );
-  assert.equal(reached.length, 13);
+  assert.equal(reached.length, 16);
   const onStack = navEntries(route("/app/stacks/media/apps"));
   assert.deepEqual(onStack[1], {
     href: "/app/stacks/media",

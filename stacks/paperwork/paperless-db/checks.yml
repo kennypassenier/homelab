@@ -22,5 +22,7 @@ checks:
       this table's metadata while every file survived on disk, and nothing
       noticed until somebody looked for a tag.
 
-manual:
-  - "Open Paperless en zoek op een correspondent. Documenten zonder metadata zijn vindbaar op tekst en onvindbaar op alles wat je erover wist."
+# The manual question "search by correspondent" went on 2026-09-30 (Kenny:
+# "Schrappen"): Paperless had no correspondents at all, so it checked
+# nothing. When correspondents are used, a probe belongs here instead:
+# correspondents with documents, at least 1.

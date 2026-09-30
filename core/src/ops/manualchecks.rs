@@ -42,31 +42,46 @@ pub fn id_for(stack: &str, app: &str, text: &str) -> String {
     format!("{:08x}", (h >> 32) as u32)
 }
 
+/// One question as a deploy registers it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Question {
+    pub app: String,
+    pub text: String,
+    pub once: bool,
+    pub url: Option<String>,
+}
+
 /// Fold the questions a deploy just printed into the state.
 ///
 /// Idempotent, and it never touches an answer: re-deploying a stack ten times
 /// does not make an answered check unanswered. Questions that disappeared
 /// from the stack files are dropped, but only for the stack being deployed —
 /// a deploy of `media` says nothing about `paperwork`'s checks.
-pub fn register(state: &mut HostState, stack: &str, questions: &[(String, String)], now: u64) {
+pub fn register(state: &mut HostState, stack: &str, questions: &[Question], now: u64) {
     let mut seen: Vec<String> = Vec::new();
-    for (app, text) in questions {
-        let id = id_for(stack, app, text);
+    for q in questions {
+        let id = id_for(stack, &q.app, &q.text);
         seen.push(id.clone());
-        state
+        let r = state
             .manual_checks
             .entry(id)
             .or_insert_with(|| ManualCheckRecord {
                 stack: stack.to_string(),
-                app: app.clone(),
-                text: text.clone(),
+                app: q.app.clone(),
+                text: q.text.clone(),
                 registered_at: now,
                 answered_at: None,
                 ok: None,
                 note: String::new(),
                 answered_hash: None,
                 accepted_until: None,
+                once: false,
+                url: None,
             });
+        // Not the answer: whether it is asked once and where the app is can
+        // change with the stack file, and follow it.
+        r.once = q.once;
+        r.url = q.url.clone();
     }
     // Gone from the stack file = gone as a question. Keeping it would grow a
     // list nobody can shrink, which is the hand-maintained file this exists
@@ -115,13 +130,6 @@ pub fn accept(state: &mut HostState, id: &str, until: u64, reason: &str, now: u6
     true
 }
 
-/// How long an answer stays good before the question is asked again.
-///
-/// Ninety days: long enough that answering is not a chore, short enough that
-/// "yes the television picture is fine" cannot silently mean "fine in March".
-/// Configurable per standing rule 27 — the caller passes it.
-pub const DEFAULT_ANSWER_MAX_AGE_S: u64 = 90 * 24 * 3600;
-
 /// What the state says about the questions nobody can measure.
 ///
 /// Three outcomes, and the difference between them matters:
@@ -131,18 +139,20 @@ pub const DEFAULT_ANSWER_MAX_AGE_S: u64 = 90 * 24 * 3600;
 /// - never answered, or answered before the stack's last deploy → **Drift**,
 ///   aggregated per stack: the deploy may have changed exactly the thing the
 ///   question asks about.
-/// - answered ok but going stale → **Noted**, also aggregated.
+/// - answered ok → silent until a deploy changes the stack's files; a
+///   `once` question answered ok stays answered even then. There is no age
+///   limit (checks-interval, Kenny, 2026-09-30: only a new version that
+///   really changes the stack asks again; the 90-day window is gone).
 ///
 /// The aggregation is not tidiness. There are 94 of these across the fleet,
 /// and a nightly report with 94 lines in it is a report nobody reads — which
 /// is the exact failure this gap exists to fix. One line per stack with a
 /// count and two examples is something Kenny can act on; the full list is one
 /// command away.
-pub fn evaluate_manual(state: &HostState, now: u64, answer_max_age_s: u64) -> Vec<Finding> {
+pub fn evaluate_manual(state: &HostState, now: u64) -> Vec<Finding> {
     let mut out: Vec<Finding> = Vec::new();
     // stack -> (unanswered//stale-by-deploy, stale-by-age)
     let mut pending: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let mut aging: BTreeMap<String, Vec<String>> = BTreeMap::new();
     // fix-65: how many of a stack's open checks were answered before and
     // reopened because its files changed, so the finding can say why.
     let mut reopened: BTreeMap<String, usize> = BTreeMap::new();
@@ -190,7 +200,8 @@ pub fn evaluate_manual(state: &HostState, now: u64, answer_max_age_s: u64) -> Ve
             (_, None) => pending
                 .entry(r.stack.clone())
                 .or_default()
-                .push(r.text.clone()),
+                .push(labelled(r)),
+            (Some(true), Some(_)) if r.once => {}
             (_, Some(at)) if files_changed(at) => {
                 if r.answered_hash.is_some() {
                     *reopened.entry(r.stack.clone()).or_default() += 1;
@@ -198,12 +209,8 @@ pub fn evaluate_manual(state: &HostState, now: u64, answer_max_age_s: u64) -> Ve
                 pending
                     .entry(r.stack.clone())
                     .or_default()
-                    .push(r.text.clone())
+                    .push(labelled(r))
             }
-            (_, Some(at)) if now.saturating_sub(at) > answer_max_age_s => aging
-                .entry(r.stack.clone())
-                .or_default()
-                .push(r.text.clone()),
             _ => {}
         }
     }
@@ -231,21 +238,17 @@ pub fn evaluate_manual(state: &HostState, now: u64, answer_max_age_s: u64) -> Ve
                 .into(),
         });
     }
-    for (stack, mut texts) in aging {
-        texts.sort();
-        out.push(Finding {
-            severity: Severity::Noted,
-            subject: stack,
-            what: format!(
-                "{} answered check(s) are older than the window, e.g. {}",
-                texts.len(),
-                examples(&texts)
-            ),
-            remedy: "nothing is wrong; it is time to look again".into(),
-        });
-    }
     out.sort_by(|a, b| a.subject.cmp(&b.subject).then(a.what.cmp(&b.what)));
     out
+}
+
+/// The question as a finding quotes it, with the application's address when
+/// it has one (checks-link), so the notification opens the right app.
+fn labelled(r: &ManualCheckRecord) -> String {
+    match &r.url {
+        Some(u) => format!("{} ({})", r.text, u),
+        None => r.text.clone(),
+    }
 }
 
 /// Two examples and a tail, so a one-line finding still says something
@@ -305,6 +308,9 @@ pub fn render_listing(rows: &[(String, ManualCheckRecord)], now: u64) -> String 
             open += 1;
         }
         s.push_str(&format!("  {}  [{:>11}]  {}\n", id, status, r.text));
+        if let Some(u) = &r.url {
+            s.push_str(&format!("                         {}\n", u));
+        }
     }
     s.push_str(&format!(
         "\n{} answered ok, {} open. Answer one with:\n  homelab checks answer <id> ok|nok [note]\n  \
@@ -315,13 +321,16 @@ pub fn render_listing(rows: &[(String, ManualCheckRecord)], now: u64) -> String 
 }
 
 /// The questions a deploy printed, flattened out of the checks map.
-pub fn questions_of(
-    checks: &BTreeMap<String, crate::checks::ServiceChecks>,
-) -> Vec<(String, String)> {
-    let mut v: Vec<(String, String)> = Vec::new();
+pub fn questions_of(checks: &BTreeMap<String, crate::checks::ServiceChecks>) -> Vec<Question> {
+    let mut v: Vec<Question> = Vec::new();
     for (app, sc) in checks {
-        for t in &sc.manual {
-            v.push((app.clone(), t.clone()));
+        for m in &sc.manual {
+            v.push(Question {
+                app: app.clone(),
+                text: m.text().to_string(),
+                once: m.once(),
+                url: sc.url.clone(),
+            });
         }
     }
     v

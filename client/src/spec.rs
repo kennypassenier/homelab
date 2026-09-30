@@ -465,6 +465,20 @@ fn spec_without_binaries(dir: &Path, notes: &mut Vec<String>) -> Result<DeploySp
     // question (fix-92), and the host writes a route the same either way.
     let mut gateway_route = None;
     let mut extra_routes = Vec::new();
+    // checks-link (Kenny, 2026-09-30): each app's manual checks carry where
+    // the app is opened, read from the router whose service is that app,
+    // unless its checks.yml names an address itself.
+    let mut addresses = std::collections::BTreeMap::new();
+    for d in declared_routes(dir, &stack_file)? {
+        for (service, url) in crate::routes::service_addresses(&d.decl.content)? {
+            addresses.entry(service).or_insert(url);
+        }
+    }
+    for (app, sc) in checks.iter_mut() {
+        if sc.url.is_none() && !sc.manual.is_empty() {
+            sc.url = addresses.get(app).cloned();
+        }
+    }
     for d in declared_routes(dir, &stack_file)? {
         let route = GatewayRoute {
             gateway_vmid: d.gateway_vmid,

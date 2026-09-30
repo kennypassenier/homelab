@@ -100,4 +100,6 @@ checks:
       because a Recyclarr that never ran leaves the scores where they were.
 
 manual:
-  - "Kijk in Radarr bij Settings › Profiles of het 1080p-profiel er nog uitziet zoals je wil, één keer na de eerste sync."
+  # checks-onetime (Kenny, 2026-09-30): answered ok once is answered for good.
+  - text: "Kijk in Radarr bij Settings › Profiles of het 1080p-profiel er nog uitziet zoals je wil, één keer na de eerste sync."
+    once: true

@@ -387,6 +387,13 @@ pub struct ManualCheckRecord {
     /// with the reason in `note`. Noted until then, Broken after.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accepted_until: Option<u64>,
+    /// checks-onetime (2026-09-30): answered `ok` once is answered for good;
+    /// a changed stack does not reopen it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub once: bool,
+    /// checks-link (2026-09-30): where the application is opened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 /// fix-51 (expert panel, state-writes-race, 2026-09-27): the lock that

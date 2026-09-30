@@ -2862,6 +2862,23 @@ before fix-65 is still judged by the old rule until it is answered again.
 broken, until that many days from now, and broken again after; the listing
 shows it as `accepted to <date>`.
 
+Since 2026-09-30 an answer does not expire with time: the 90-day window is
+gone (checks-interval), so only a deploy that really changes the stack's
+files asks again. A question written as `- text: "…"` with `once: true`
+(checks-onetime) is answered for good by one `ok`, even after such a
+deploy. Every question also carries the address of its application
+(checks-link), read from the router in the stack's route file whose
+`service` is the app, or from a `url:` in its `checks.yml`; the open-checks
+finding and `homelab checks` show it next to the question.
+
+```yaml
+manual:
+  - "Speel een film af op de televisie en kijk of het beeld klopt."
+  - text: "Registreer een passkey na je eerste wachtwoord-login."
+    once: true
+url: https://job.kp-soft.dev   # only when no router names the app
+```
+
 The listing is grouped per stack, one line per question with its id and
 status (`unanswered`, `ok, <n>d ago` or `NOT OK`), and ends with the count of
 answered and open questions (`core/src/ops/manualchecks.rs:221-250`). `ok`,

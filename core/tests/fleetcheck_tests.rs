@@ -1000,7 +1000,12 @@ fn the_full_round_carries_the_manual_checks() {
     homelab_core::ops::manualchecks::register(
         &mut st,
         "media",
-        &[("jellyfin".to_string(), "is the sound in sync".to_string())],
+        &[homelab_core::ops::manualchecks::Question {
+            app: "jellyfin".into(),
+            text: "is the sound in sync".into(),
+            once: false,
+            url: None,
+        }],
         100,
     );
     let findings = check(&st, &LiveFacts::default());

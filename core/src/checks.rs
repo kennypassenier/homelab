@@ -102,7 +102,52 @@ pub struct ServiceChecks {
     /// as a notification he has to acknowledge rather than a page he has to
     /// go and find (form I2).
     #[serde(default)]
-    pub manual: Vec<String>,
+    pub manual: Vec<ManualCheck>,
+    /// checks-link (Kenny, 2026-09-30: "een link naar die toepassing in de
+    /// notificatie"): where the application is opened. The client fills it
+    /// from the stack's route file (the router whose service is this app)
+    /// when the file does not name one; None when the app has no route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// One question only a person can answer: the plain text, or the text with
+/// `once: true` for something done a single time (register a passkey), which
+/// an `ok` answers for good (checks-onetime, Kenny, 2026-09-30).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ManualCheck {
+    Text(String),
+    Detailed {
+        text: String,
+        #[serde(default)]
+        once: bool,
+    },
+}
+
+impl From<&str> for ManualCheck {
+    fn from(t: &str) -> Self {
+        ManualCheck::Text(t.to_string())
+    }
+}
+
+impl From<String> for ManualCheck {
+    fn from(t: String) -> Self {
+        ManualCheck::Text(t)
+    }
+}
+
+impl ManualCheck {
+    pub fn text(&self) -> &str {
+        match self {
+            ManualCheck::Text(t) => t,
+            ManualCheck::Detailed { text, .. } => text,
+        }
+    }
+
+    pub fn once(&self) -> bool {
+        matches!(self, ManualCheck::Detailed { once: true, .. })
+    }
 }
 
 /// One measurement, taken twice.

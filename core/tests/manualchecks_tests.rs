@@ -2,7 +2,7 @@
 
 use homelab_core::ops::fleetcheck::Severity;
 use homelab_core::ops::manualchecks::{
-    answer, evaluate_manual, id_for, listing, register, render_listing, DEFAULT_ANSWER_MAX_AGE_S,
+    answer, evaluate_manual, id_for, listing, register, render_listing, Question,
 };
 use homelab_core::state::{HostState, StackState};
 
@@ -31,8 +31,13 @@ fn state_with_stack(applied_at: u64) -> HostState {
     st
 }
 
-fn q(app: &str, text: &str) -> (String, String) {
-    (app.into(), text.into())
+fn q(app: &str, text: &str) -> Question {
+    Question {
+        app: app.into(),
+        text: text.into(),
+        once: false,
+        url: None,
+    }
 }
 
 #[test]
@@ -123,7 +128,7 @@ fn answering_an_unknown_id_says_so_rather_than_doing_nothing() {
 fn a_question_nobody_ever_answered_is_a_finding() {
     let mut st = state_with_stack(100);
     register(&mut st, "media", &[q("jellyfin", "sound in sync")], 100);
-    let f = evaluate_manual(&st, 200, DEFAULT_ANSWER_MAX_AGE_S);
+    let f = evaluate_manual(&st, 200);
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].severity, Severity::Drift);
     assert_eq!(f[0].subject, "media");
@@ -137,7 +142,7 @@ fn a_no_from_a_person_is_the_strongest_signal_and_stays_until_it_is_a_yes() {
     let id = id_for("media", "jellyfin", "sound in sync");
     answer(&mut st, &id, false, "half a second late", 200);
 
-    let f = evaluate_manual(&st, 300, DEFAULT_ANSWER_MAX_AGE_S);
+    let f = evaluate_manual(&st, 300);
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].severity, Severity::Broken);
     assert!(
@@ -148,7 +153,7 @@ fn a_no_from_a_person_is_the_strongest_signal_and_stays_until_it_is_a_yes() {
 
     answer(&mut st, &id, true, "", 400);
     assert!(
-        evaluate_manual(&st, 500, DEFAULT_ANSWER_MAX_AGE_S).is_empty(),
+        evaluate_manual(&st, 500).is_empty(),
         "and it clears when somebody says it is right"
     );
 }
@@ -164,31 +169,71 @@ fn an_answer_older_than_the_deploy_that_followed_it_is_asked_again() {
     // fix-65: that holds for a deploy that changed the stack's files.
     st.stacks.get_mut("media").unwrap().applied_hash = "changed".into();
 
-    let f = evaluate_manual(&st, 1_100, DEFAULT_ANSWER_MAX_AGE_S);
+    let f = evaluate_manual(&st, 1_100);
     assert_eq!(f.len(), 1, "{:?}", f);
     assert_eq!(f[0].severity, Severity::Drift);
     assert!(f[0].what.contains("1 check(s)"), "{}", f[0].what);
 }
 
+/// checks-interval (Kenny, 2026-09-30): an answer has no age limit. Only a
+/// deploy that really changes the stack asks again; the 90-day window, which
+/// reopened a year of "ok" every quarter, is gone.
 #[test]
-fn an_answer_going_stale_is_noted_not_shouted() {
+fn an_answer_does_not_expire_with_time() {
     let mut st = state_with_stack(100);
     register(&mut st, "media", &[q("jellyfin", "sound in sync")], 100);
     let id = id_for("media", "jellyfin", "sound in sync");
-    let answered = 10 * DAY;
-    answer(&mut st, &id, true, "", answered);
-
+    answer(&mut st, &id, true, "", 10 * DAY);
     assert!(
-        evaluate_manual(&st, answered + 89 * DAY, DEFAULT_ANSWER_MAX_AGE_S).is_empty(),
-        "89 days is still good"
+        evaluate_manual(&st, 10 * DAY + 3650 * DAY).is_empty(),
+        "ten years on, still answered"
     );
-    let f = evaluate_manual(&st, answered + 91 * DAY, DEFAULT_ANSWER_MAX_AGE_S);
-    assert_eq!(f.len(), 1);
+}
+
+/// checks-onetime (Kenny, 2026-09-30): a `once` question answered ok stays
+/// answered, even after a deploy that changed the stack; answered not ok,
+/// or never, it is open like any other.
+#[test]
+fn a_once_question_answered_ok_is_answered_for_good() {
+    let mut st = state_with_stack(100);
+    let mut once = q("jobtracker", "register a passkey");
+    once.once = true;
+    register(&mut st, "media", &[once.clone()], 100);
+    let id = id_for("media", "jobtracker", "register a passkey");
+    assert_eq!(evaluate_manual(&st, 200).len(), 1, "unanswered is open");
+    answer(&mut st, &id, true, "", 300);
+    st.stacks.get_mut("media").unwrap().applied_hash = "changed".into();
+    assert!(
+        evaluate_manual(&st, 400).is_empty(),
+        "a changed stack does not reopen it"
+    );
+    // The flag follows the stack file: dropped there, the rule is back.
+    let mut plain = once;
+    plain.once = false;
+    register(&mut st, "media", &[plain], 500);
+    assert_eq!(evaluate_manual(&st, 600).len(), 1);
+}
+
+/// checks-link (Kenny, 2026-09-30): the finding names where the application
+/// is opened, so the notification leads straight to it.
+#[test]
+fn an_open_question_carries_the_address_of_its_application() {
+    let mut st = state_with_stack(100);
+    let mut with_url = q("sonarr", "recent episode in the right folder");
+    with_url.url = Some("https://son.kp-soft.dev".into());
+    register(&mut st, "media", &[with_url], 100);
+    let f = evaluate_manual(&st, 200);
+    assert!(
+        f[0].what.contains("(https://son.kp-soft.dev)"),
+        "{}",
+        f[0].what
+    );
+    let id = id_for("media", "sonarr", "recent episode in the right folder");
     assert_eq!(
-        f[0].severity,
-        Severity::Noted,
-        "nothing is wrong; it is time to look again"
+        st.manual_checks[&id].url.as_deref(),
+        Some("https://son.kp-soft.dev")
     );
+    assert!(render_listing(&listing(&st), 200).contains("https://son.kp-soft.dev"));
 }
 
 #[test]
@@ -236,8 +281,8 @@ fn an_empty_register_says_so_instead_of_printing_nothing() {
 #[test]
 fn many_open_questions_on_one_stack_are_one_line_with_a_count_and_examples() {
     let mut st = state_with_stack(100);
-    let qs: Vec<(String, String)> = (0..12)
-        .map(|i| ("jellyfin".to_string(), format!("question number {:02}", i)))
+    let qs: Vec<Question> = (0..12)
+        .map(|i| q("jellyfin", &format!("question number {:02}", i)))
         .collect();
     register(&mut st, "media", &qs, 100);
     register(
@@ -247,7 +292,7 @@ fn many_open_questions_on_one_stack_are_one_line_with_a_count_and_examples() {
         100,
     );
 
-    let f = evaluate_manual(&st, 200, DEFAULT_ANSWER_MAX_AGE_S);
+    let f = evaluate_manual(&st, 200);
     assert_eq!(
         f.len(),
         2,
@@ -272,15 +317,15 @@ fn many_open_questions_on_one_stack_are_one_line_with_a_count_and_examples() {
 #[test]
 fn a_no_keeps_its_own_line_even_among_many_open_ones() {
     let mut st = state_with_stack(100);
-    let mut qs: Vec<(String, String)> = (0..5)
-        .map(|i| ("jellyfin".to_string(), format!("question {}", i)))
+    let mut qs: Vec<Question> = (0..5)
+        .map(|i| q("jellyfin", &format!("question {}", i)))
         .collect();
     qs.push(q("jellyfin", "is the sound in sync"));
     register(&mut st, "media", &qs, 100);
     let id = id_for("media", "jellyfin", "is the sound in sync");
     answer(&mut st, &id, false, "half a second late", 200);
 
-    let f = evaluate_manual(&st, 300, DEFAULT_ANSWER_MAX_AGE_S);
+    let f = evaluate_manual(&st, 300);
     let broken: Vec<_> = f
         .iter()
         .filter(|x| x.severity == Severity::Broken)
@@ -311,14 +356,14 @@ fn fix_65_a_redeploy_that_changed_nothing_does_not_reopen_an_answer() {
     // Redeployed at 1000 with the same files: the answer stands.
     st.stacks.get_mut("media").unwrap().applied_at = 1_000;
     assert!(
-        evaluate_manual(&st, 1_100, DEFAULT_ANSWER_MAX_AGE_S).is_empty(),
+        evaluate_manual(&st, 1_100).is_empty(),
         "{:?}",
-        evaluate_manual(&st, 1_100, DEFAULT_ANSWER_MAX_AGE_S)
+        evaluate_manual(&st, 1_100)
     );
 
     // Redeployed with changed files: asked again, and told why.
     st.stacks.get_mut("media").unwrap().applied_hash = "h2".into();
-    let f = evaluate_manual(&st, 1_100, DEFAULT_ANSWER_MAX_AGE_S);
+    let f = evaluate_manual(&st, 1_100);
     assert_eq!(f.len(), 1, "{:?}", f);
     assert_eq!(f[0].severity, Severity::Drift);
     assert!(f[0].what.contains("files changed"), "{}", f[0].what);
@@ -340,13 +385,13 @@ fn fix_65_a_deliberate_nok_can_be_accepted_until_a_date() {
     let id = id_for("media", "jellyfin", "reachable from outside");
     assert!(accept(&mut st, &id, 30 * DAY, "by design, D56", 500));
 
-    let f = evaluate_manual(&st, 10 * DAY, DEFAULT_ANSWER_MAX_AGE_S);
+    let f = evaluate_manual(&st, 10 * DAY);
     assert_eq!(f.len(), 1, "{:?}", f);
     assert_eq!(f[0].severity, Severity::Noted, "{:?}", f[0]);
     assert!(f[0].what.contains("accepted until"), "{}", f[0].what);
     assert!(f[0].what.contains("by design, D56"), "{}", f[0].what);
 
-    let f = evaluate_manual(&st, 31 * DAY, DEFAULT_ANSWER_MAX_AGE_S);
+    let f = evaluate_manual(&st, 31 * DAY);
     assert_eq!(f.len(), 1, "{:?}", f);
     assert_eq!(f[0].severity, Severity::Broken, "the acceptance ran out");
 }

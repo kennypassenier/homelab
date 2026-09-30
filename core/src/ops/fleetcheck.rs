@@ -1291,11 +1291,7 @@ pub fn evaluate(
         live.second_copy_dataset.as_deref(),
         crate::ops::secondcopy::DEFAULT_CHECK_INTERVAL_S,
     ));
-    out.extend(crate::ops::manualchecks::evaluate_manual(
-        state,
-        now_unix,
-        crate::ops::manualchecks::DEFAULT_ANSWER_MAX_AGE_S,
-    ));
+    out.extend(crate::ops::manualchecks::evaluate_manual(state, now_unix));
 
     for r in &live.routes {
         if !r.answered {

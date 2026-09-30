@@ -29,19 +29,57 @@ pub fn hostnames(content: &str) -> Result<Vec<String>, String> {
             let Some(rule) = router.get("rule").and_then(|r| r.as_str()) else {
                 continue;
             };
-            let mut rest = rule;
-            while let Some(at) = rest.find("Host(") {
-                let args = &rest[at + "Host(".len()..];
-                let end = args.find(')').unwrap_or(args.len());
-                // Host(`a`) and the older Host(`a`, `b`): every backticked
-                // name between the parentheses.
-                for (i, part) in args[..end].split('`').enumerate() {
-                    if i % 2 == 1 && !part.is_empty() {
-                        out.push(part.to_ascii_lowercase());
-                    }
-                }
-                rest = &args[end..];
+            out.extend(rule_hosts(rule));
+        }
+    }
+    Ok(out)
+}
+
+/// The names inside `Host(...)` of one router rule, lower-cased.
+fn rule_hosts(rule: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = rule;
+    while let Some(at) = rest.find("Host(") {
+        let args = &rest[at + "Host(".len()..];
+        let end = args.find(')').unwrap_or(args.len());
+        // Host(`a`) and the older Host(`a`, `b`): every backticked name
+        // between the parentheses.
+        for (i, part) in args[..end].split('`').enumerate() {
+            if i % 2 == 1 && !part.is_empty() {
+                out.push(part.to_ascii_lowercase());
             }
+        }
+        rest = &args[end..];
+    }
+    out
+}
+
+/// checks-link (Kenny, 2026-09-30): the address each Traefik service is
+/// opened at, `https://<first Host of its first router>`, keyed by the
+/// service name without its `@provider`. A stack's services are named after
+/// its apps, which is how a manual check finds its application's link.
+pub fn service_addresses(
+    content: &str,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let doc = parse(content)?;
+    let mut out = std::collections::BTreeMap::new();
+    let Some(routers) = doc
+        .get("http")
+        .and_then(|p| p.get("routers"))
+        .and_then(|r| r.as_mapping())
+    else {
+        return Ok(out);
+    };
+    for (_, router) in routers {
+        let (Some(rule), Some(service)) = (
+            router.get("rule").and_then(|r| r.as_str()),
+            router.get("service").and_then(|r| r.as_str()),
+        ) else {
+            continue;
+        };
+        let service = service.split('@').next().unwrap_or(service).to_string();
+        if let Some(host) = rule_hosts(rule).into_iter().next() {
+            out.entry(service).or_insert(format!("https://{}", host));
         }
     }
     Ok(out)

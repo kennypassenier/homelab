@@ -3629,11 +3629,11 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     if !questions.is_empty() {
         let lines: Vec<String> = questions
             .iter()
-            .map(|(app, text)| {
+            .map(|q| {
                 format!(
                     "{}  {}",
-                    crate::ops::manualchecks::id_for(&spec.manifest.stack_name, app, text),
-                    text
+                    crate::ops::manualchecks::id_for(&spec.manifest.stack_name, &q.app, &q.text),
+                    q.text
                 )
             })
             .collect();

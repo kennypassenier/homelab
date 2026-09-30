@@ -135,3 +135,28 @@ fn hostnames_are_read_from_every_router_rule() {
         ]
     );
 }
+
+/// checks-link (Kenny, 2026-09-30: "een link naar die toepassing in de
+/// notificatie"): a manual check carries its application's address, read
+/// from the router whose service is that app. The repository's own media
+/// stack: Sonarr is son.kp-soft.dev, and an app with no router has none.
+#[test]
+fn checks_link_a_manual_check_carries_the_address_of_its_app() {
+    let spec = homelab_client::spec::build_spec(&stacks().join("media")).unwrap();
+    assert_eq!(
+        spec.checks["sonarr"].url.as_deref(),
+        Some("https://son.kp-soft.dev")
+    );
+    assert_eq!(
+        spec.checks["jellyfin"].url.as_deref(),
+        Some("https://fin.kp-soft.dev")
+    );
+    let addresses = homelab_client::routes::service_addresses(
+        "http:\n  routers:\n    a:\n      rule: \"Host(`A.example`) && PathPrefix(`/x`)\"\n      service: app@file\n    b:\n      rule: \"Host(`b.example`)\"\n      service: app\n",
+    )
+    .unwrap();
+    assert_eq!(
+        addresses["app"], "https://a.example",
+        "first router wins, provider dropped"
+    );
+}

@@ -3410,6 +3410,7 @@ async fn t69_a_regressed_check_fails_the_deploy_when_nobody_is_watching() {
     checks.insert(
         "app".to_string(),
         homelab_core::checks::ServiceChecks {
+            url: None,
             checks: vec![homelab_core::checks::Check {
                 name: "routes".into(),
                 command: "echo 28".into(),
@@ -3590,6 +3591,7 @@ async fn t69_an_operator_who_says_yes_lets_the_deploy_finish() {
     checks.insert(
         "app".to_string(),
         homelab_core::checks::ServiceChecks {
+            url: None,
             checks: vec![homelab_core::checks::Check {
                 name: "routes".into(),
                 command: "echo 28".into(),

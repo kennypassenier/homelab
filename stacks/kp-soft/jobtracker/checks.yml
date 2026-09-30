@@ -64,4 +64,6 @@ checks:
 
 manual:
   - "Log één keer in op job.kp-soft.dev en kijk of je dossiers er staan. De metingen zien de bestanden, niet het scherm."
-  - "Registreer een passkey na je eerste wachtwoord-login, anders blijft het wachtwoord de enige sleutel."
+  # checks-onetime (Kenny, 2026-09-30): answered ok once is answered for good.
+  - text: "Registreer een passkey na je eerste wachtwoord-login, anders blijft het wachtwoord de enige sleutel."
+    once: true

@@ -103,7 +103,7 @@ gate_glob admin-web 'admin/web/*' -- \
 # tests run only after his release go); gate-cache skips them at commit
 # and `make gate` (GATE_FULL=1) runs them.
 gate_glob admin-web-tests 'admin/web/*' -- \
-  sh -c 'cd admin/web && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && node --test test/'
+  sh -c 'cd admin/web && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && node --import ./test/support/kp-register.mjs --test test/'
 
 gate_cache_done
 

@@ -22,7 +22,7 @@ services:
     container_name: socket-proxy
     networks:
       - gateway_net
-    # No `ports:` — gateway_net only. Traefik reaches it as
+    # No published port — gateway_net only. Traefik reaches it as
     # `tcp://socket-proxy:2375`, and nothing outside this docker network can.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro

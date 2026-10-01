@@ -2,7 +2,7 @@
 // the incidents and the last fourteen days, as a list (feat-ops-1,
 // feat-ops-7) or on the timeline (feat-ops-7's SVG), a List/Timeline toggle
 // choosing between them. `?view=timeline` (set by the redirect from the old
-// /app/timeline, which keeps its own `?days=`) opens on the timeline.
+// /timeline, which keeps its own `?days=`) opens on the timeline.
 
 import { historyRows, incidentRows } from "../activity.js";
 import { showButton } from "../incident.js";
@@ -197,7 +197,7 @@ export function mount(root, ctx) {
       );
       b.addEventListener("click", () =>
         ctx.navigate(
-          `/app/activity${setParams(location.search, { view: v.view === "list" ? null : v.view })}`,
+          `/activity${setParams(location.search, { view: v.view === "list" ? null : v.view })}`,
         ),
       );
       return b;

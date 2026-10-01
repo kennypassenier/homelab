@@ -411,6 +411,62 @@ latch keys until latch decides otherwise. No such step exists: the only
 latch call in the workspace is the client's `latch cat`
 (`client/src/spec.rs:375`).
 
+**fix-67, stated (2026-10-01): the client sends no bearer to an unpinned or
+mismatched host.** The sequence diagram above already shows why: step 7
+(`C->>H: HTTP upgrade with Authorization Bearer`) happens only after steps
+4-6 (the TLS handshake, the pin check, the signature check) complete —
+`connect_async_tls_with_config` runs the TLS handshake first, verified by
+`PinnedVerifier` against the reconciled pin, and the bearer-carrying HTTP
+upgrade request is only ever written to a socket whose TLS handshake
+already held. A mismatched fingerprint aborts the handshake (`PinnedVerifier::verify_server_cert`
+returns `Err(rustls::Error::General(...))`); with fix-149 compiling the fleet pin into
+the client, "unpinned" cannot happen for a machine built from this
+repository — the built-in pin is the only certificate ever trusted, first
+connection included — and only applies to a client built and run outside
+it, where the design is identical: no pin reconciled means
+`PinnedVerifier::new(None)` still demands a certificate, trust-on-first-use
+records it on the FIRST connection's successful handshake, not before.
+Either way, the bearer never reaches a socket whose peer was not already
+held to a fingerprint.
+
+**Per-machine tokens (fix-120, owner decision 2026-10-01).** `host.toml`'s
+`[[tokens]]` is a list of `{name, scope, sha256}`; the legacy single
+`token` key is compared alongside it (`identify`, `host/src/main.rs:5564`).
+Minting and revoking are their own scope-All RPCs
+(`TokenIssue`/`TokenRevoke`, `proto/src/lib.rs`) rather than going through
+`SetHostConfig`, because `tokens` is `Access::Locked` there on purpose
+(arch-self: the dashboard's own token must not be able to loosen what it
+may do by editing the list that authenticates it). `AppState.tokens` holds
+the list in force right now, read on every connection
+(`AppState::live_tokens`), separately from `Config.tokens`, which stays
+frozen at what host.toml said when the daemon started — so a freshly
+issued token authenticates immediately, and a revoked one stops working
+immediately, neither waiting for `Apply::Restart`.
+
+**LAN-only TLS to kyu (fix-126, owner decision 2026-10-01).** A route
+pinned to a self-signed certificate (no public CA) is the same trust shape
+as the client's own pin to the host (fix-149/A4): trust exactly the one
+certificate named, nothing a system CA bundle would otherwise accept. The
+host does it with curl's `--cacert` (`core::notify::curl_args_pinned`); the
+dashboard, over `reqwest`, with `add_root_certificate` plus
+`tls_built_in_root_certs(false)` so the two trust stores are never both
+active at once (`admin/src/shell/actions_notify.rs::KyuPusher::new_pinned`).
+Both re-read the certificate file and re-check its fingerprint on every
+send, not only at start — the file can be rewritten by a regenerated hub
+certificate while the sending process keeps running, and a stale pin must
+stop the send rather than silently widen to whatever is on disk now
+(`core::notify::cert_fingerprint`).
+
+**Cloudflare token as a dashboard secret (fix-143, owner decision
+2026-10-01).** `Access::DashboardSecret` is a new `host.toml` access level,
+beside the existing `Access::Secret` (ssh-only, both ways): it keeps the
+same "never shown, never sent" promise but may be WRITTEN from the
+browser, a one-way drop box the same shape the vault already uses for
+`latch_secrets`. `cloudflare_token` is the first field to use it
+(`core/src/hostconfig.rs`); a key stays plain `Secret` unless something
+argues for the dashboard field specifically, which here is "the nightly
+round needs this token but Kenny should not have to ssh in to set one."
+
 ## 5. Self-preservation
 
 - **Self-update (H5).** Steps `selfcheck candidate`, `backup current` (to

@@ -16,6 +16,12 @@ data_dirs:
 # (the drill server on Kenny's PC is not a release host); the nightly run backs up only.
 release_repo: kennypassenier/chassis-rs
 release_asset: inbox
+# fix-113 (owner decision, Kenny 2026-10-01): inbox is paused for its nightly
+# backup through the chassis-rs kit's own backup-pause/backup-resume
+# subcommand (chassis-rs commit 722249b) rather than a plain systemctl stop.
+# Falls back to stopping the unit when the binary predates the subcommand or
+# cannot quiesce it.
+backup_pause: chassis
 # Deliberately not measured by Prometheus (Kenny, Phase 9 form 2026-09-27,
 # inbox-guards: "Grenzen zetten"): a scratch service of chassis-rs that this
 # project only backs up. The fleet check notes it instead of reporting drift.

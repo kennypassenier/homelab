@@ -24,6 +24,12 @@ pub struct Check {
 #[derive(Debug, Clone, Default)]
 pub struct Probes {
     pub host_disk_free_pct: Option<u64>,
+    /// fix-113 ADDENDUM (owner + chassis-rs, 2026-10-01): free % on the
+    /// chassis backup staging directory's filesystem — only asked, and only
+    /// a finding, when `native_backup_staging_dir` is set; unset is not a
+    /// finding, it just means chassis-paused backups skip staging.
+    /// `Some(None)`: configured but unreadable. `None`: not configured.
+    pub staging_disk_free_pct: Option<Option<u64>>,
     pub state_parses: bool,
     pub managed_stacks: Vec<StackProbe>,
     pub offsite_configured: bool,
@@ -152,6 +158,45 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
             remedy: Some("could not read host disk usage".into()),
         },
     });
+
+    // fix-113 ADDENDUM: only a finding when staging is configured — an
+    // unconfigured staging directory is the normal, default state and must
+    // not nag every night.
+    if let Some(staging) = p.staging_disk_free_pct {
+        checks.push(match staging {
+            Some(free) if free < 10 => Check {
+                name: "backup staging disk".into(),
+                health: Health::Fail,
+                detail: format!("{}% free", free),
+                remedy: Some(
+                    "free space on the chassis backup staging pool — chassis-paused native \
+                     backups will skip staging and fall back to a live, held-open pause"
+                        .into(),
+                ),
+            },
+            Some(free) if free < 20 => Check {
+                name: "backup staging disk".into(),
+                health: Health::Warn,
+                detail: format!("{}% free", free),
+                remedy: Some(
+                    "getting tight — chassis-paused native backups may start skipping staging"
+                        .into(),
+                ),
+            },
+            Some(free) => Check {
+                name: "backup staging disk".into(),
+                health: Health::Ok,
+                detail: format!("{}% free", free),
+                remedy: None,
+            },
+            None => Check {
+                name: "backup staging disk".into(),
+                health: Health::Warn,
+                detail: "unknown".into(),
+                remedy: Some("could not read the staging directory's free space".into()),
+            },
+        });
+    }
 
     checks.push(Check {
         name: "state file".into(),

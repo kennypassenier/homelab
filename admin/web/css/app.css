@@ -1878,3 +1878,53 @@ td.stack-flags {
   block-size: 10px;
   margin: 0;
 }
+
+/* feat-pages-1 (chassis-rs 3.1.0): the kit's own pages, drawn by this app
+   (Status, Clients, Passkeys). */
+.status-rows {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+.status-rows dt {
+  color: var(--muted-foreground);
+}
+.status-rows dd {
+  margin: 0;
+}
+.status-actions {
+  margin-block-start: 12px;
+  flex-wrap: wrap;
+}
+.status-action {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.status-problems {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+.client-manage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-block-start: 8px;
+}
+.client-manage h4 {
+  margin: 8px 0 0;
+  font-size: 0.9rem;
+}
+.passkeys-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}

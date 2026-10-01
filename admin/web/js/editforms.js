@@ -1462,7 +1462,8 @@ export function checkNewStep(w, step, v, taken) {
  *   {type: "text_list"} | {type: "window"} | {type: "table"}} KeyKind
  * @typedef {{key: string, group: string, label: string, help: string,
  *   default: string, kind: KeyKind,
- *   access: "browser" | "confirm" | "locked" | "ssh_only" | "secret",
+ *   access: "browser" | "confirm" | "locked" | "ssh_only" | "secret" |
+ *     "dashboard_secret",
  *   apply: "live" | "restart", set: boolean, value: unknown,
  *   toml: string | null}} HostField
  */
@@ -1474,17 +1475,28 @@ export const ACCESS = /** @type {const} */ ({
   locked: "ssh only (can cut the dashboard off)",
   ssh_only: "ssh only (safety policy)",
   secret: "ssh only (secret)",
+  // fix-143: a write-only field, set or replaced here, never read back —
+  // the same "never sent" promise as `secret`, minus the ssh requirement.
+  dashboard_secret: "Here (secret, write-only)",
 });
 
+/** fix-143: `dashboard_secret` is a secret that may still be WRITTEN here.
+ * @param {HostField} f */
+export const isSecret = (f) =>
+  f.access === "secret" || f.access === "dashboard_secret";
+
 /** @param {HostField} f */
-export const editable = (f) => f.access === "browser" || f.access === "confirm";
+export const editable = (f) =>
+  f.access === "browser" ||
+  f.access === "confirm" ||
+  f.access === "dashboard_secret";
 
 /**
  * A key's value as the table shows it.
  * @param {HostField} f
  */
 export function valueText(f) {
-  if (f.access === "secret") return f.set ? "set (hidden)" : "not set";
+  if (isSecret(f)) return f.set ? "set (hidden)" : "not set";
   if (!f.set) return `default: ${f.default}`;
   const v = f.value;
   if (f.kind.type === "table") {

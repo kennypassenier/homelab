@@ -1902,7 +1902,7 @@ pub fn native_body(fields: &[Field], values: &Values) -> Value {
         "release_repo": s("release_repo"),
         "release_asset": s("release_asset"),
         "backup_from_newest": s("backup_from_newest"),
-        "backup_pause": b("backup_pause"),
+        "backup_pause": s("backup_pause"),
         "update_policy": s("update_policy"),
         "metrics": s("metrics"),
     })
@@ -1935,7 +1935,16 @@ pub fn add_native_body(fields: &[Field], values: &Values) -> Value {
 pub fn native_current(name: &str, m: &Value) -> Value {
     match name {
         "data_dirs" => json!(strings(&m["data_dirs"]).join("\n")),
-        "stateless" | "backup_pause" => json!(m[name].as_bool().unwrap_or(false)),
+        "stateless" => json!(m[name].as_bool().unwrap_or(false)),
+        // fix-113 (owner decision, 2026-10-01): `backup_pause` reads from
+        // the manifest as a bool (false/true) or the string "chassis" —
+        // `NativeServiceManifest`'s own `BackupPause::Serialize` shape — and
+        // the select wants it back as one of those three strings.
+        "backup_pause" => json!(match m[name].as_str() {
+            Some("chassis") => "chassis",
+            _ if m[name].as_bool() == Some(true) => "true",
+            _ => "false",
+        }),
         "update_policy" => json!(m[name].as_str().unwrap_or("manual")),
         "metrics" => json!(if m["metrics"] == json!(false) {
             "not_measured"
@@ -2626,7 +2635,7 @@ pub fn open(
             } else {
                 "settings"
             };
-            let page = format!("/app/stacks/{stack}/{tab}");
+            let page = format!("/stacks/{stack}/{tab}");
             let plan_steps = |first: FormStep| {
                 vec![
                     first,
@@ -2970,7 +2979,7 @@ pub fn open(
                         fields: Vec::new(),
                     },
                 ],
-                format!("/app/stacks/{stack}/settings"),
+                format!("/stacks/{stack}/settings"),
             )
         }
         EditKind::Checks | EditKind::PublishApp => {
@@ -3080,7 +3089,7 @@ pub fn open(
                             label: "Checks".into(),
                             fields,
                         }),
-                        format!("/app/stacks/{stack}/checks"),
+                        format!("/stacks/{stack}/checks"),
                     )
                 }
                 _ => {
@@ -3095,7 +3104,7 @@ pub fn open(
                             label: "Publish".into(),
                             fields,
                         }),
-                        format!("/app/stacks/{stack}/apps"),
+                        format!("/stacks/{stack}/apps"),
                     )
                 }
             }
@@ -3148,7 +3157,7 @@ pub fn open(
                         fields: Vec::new(),
                     },
                 ],
-                "/app/settings".to_string(),
+                "/settings".to_string(),
             )
         }
         EditKind::Batch => {
@@ -3245,7 +3254,9 @@ pub fn open(
                     label: "Review and run".into(),
                     fields: batch_fields(ak, &list),
                 }],
-                "/app/".to_string(),
+                // A batch action is opened from the Overview page's own
+                // selection (drive.rs's Select step requires it).
+                "/overview".to_string(),
             )
         }
         EditKind::Import => {
@@ -3336,7 +3347,7 @@ pub fn open(
                         fields: Vec::new(),
                     },
                 ],
-                "/app/presets".to_string(),
+                "/presets".to_string(),
             )
         }
         EditKind::NewPreset => {
@@ -3368,7 +3379,7 @@ pub fn open(
                         fields: Vec::new(),
                     },
                 ],
-                "/app/presets".to_string(),
+                "/presets".to_string(),
             )
         }
         EditKind::Rollback => {
@@ -3410,7 +3421,7 @@ pub fn open(
                     label: "Choose".into(),
                     fields,
                 }],
-                format!("/app/stacks/{stack}"),
+                format!("/stacks/{stack}"),
             )
         }
     };

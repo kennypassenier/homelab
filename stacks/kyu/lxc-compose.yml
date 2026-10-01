@@ -130,6 +130,16 @@ storage:
     # directory, for a cause that lives in this file.
     host_owner_uid: 100995
     app: http-switchboard
+  - host_path: /appdata/kyu/tls
+    mount_point: /appdata/kyu/tls
+    # fix-126 (TLS to the message hub, owner decision 2026-10-01): the
+    # self-signed certificate and private key kyu-tls.service's
+    # ExecStartPre (kyu-tls-cert) maintains for the TLS terminator in front
+    # of the hub. Root-owned (100000 + 0): the terminator unit runs as root,
+    # same as kyu-backup.service and kyu-alert@.service — no kit user owns
+    # this directory, it belongs to the terminator, not to kyu itself.
+    host_owner_uid: 100000
+    app: kyu
 
 # No docker apps by design. The three services are named in their own
 # service.yml files: kyu, kyu-runner, http-switchboard.

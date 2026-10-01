@@ -4,16 +4,16 @@ import assert from "node:assert/strict";
 import { CHORD_MS, SHORTCUTS, idle, keyAction } from "../js/shortcuts.js";
 import { route } from "../js/router.js";
 
-const home = route("/app/");
+const home = route("/");
 
 test("g then a letter goes to a page, within the chord's time", () => {
   let r = keyAction(idle(), "g", 1000, home);
   assert.equal(r.action, null);
   assert.deepEqual(keyAction(r.state, "h", 1500, home).action, {
-    navigate: "/app/host",
+    navigate: "/host",
   });
   assert.deepEqual(keyAction(r.state, "k", 1000, home).action, {
-    navigate: "/app/health",
+    navigate: "/health",
   });
   // Too late: the second key is a key on its own.
   assert.equal(keyAction(r.state, "h", 1000 + CHORD_MS + 1, home).action, null);
@@ -27,23 +27,23 @@ test("/ searches; digits and brackets move between a stack's tabs", () => {
   assert.deepEqual(keyAction(idle(), "/", 0, home).action, {
     focusSearch: true,
   });
-  const logs = route("/app/stacks/media/logs");
+  const logs = route("/stacks/media/logs");
   assert.deepEqual(keyAction(idle(), "1", 0, logs).action, {
-    navigate: "/app/stacks/media",
+    navigate: "/stacks/media",
   });
   assert.deepEqual(keyAction(idle(), "[", 0, logs).action, {
-    navigate: "/app/stacks/media/history",
+    navigate: "/stacks/media/history",
   });
   assert.deepEqual(keyAction(idle(), "]", 0, logs).action, {
-    navigate: "/app/stacks/media/checks",
+    navigate: "/stacks/media/checks",
   });
   assert.equal(keyAction(idle(), "4", 0, logs).action, null); // already there
   assert.deepEqual(keyAction(idle(), "7", 0, logs).action, {
-    navigate: "/app/stacks/media/firewall",
+    navigate: "/stacks/media/firewall",
   });
   assert.equal(keyAction(idle(), "9", 0, logs).action, null);
   assert.equal(
-    keyAction(idle(), "]", 0, route("/app/stacks/media/firewall")).action,
+    keyAction(idle(), "]", 0, route("/stacks/media/firewall")).action,
     null,
   );
   // Digits mean nothing off a stack's page.

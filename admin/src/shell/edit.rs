@@ -1673,8 +1673,21 @@ async fn host_settings_save(
     answer(save_host_settings(&c, change, Origin::Manual).await)
 }
 
-/// feat-settings-1: write host.toml, for the route and a driven final
-/// press: the same check, the same session-only command, once.
+/// feat-settings-1 / fix-110: write host.toml, for the route and a driven
+/// final press: the same check, once.
+///
+/// Declarative like a stack (fix-110, 2026-10-01): the change is committed
+/// to `config/host.toml` in the working copy FIRST — the repository is the
+/// record of every non-secret host setting, the same as a stack's files —
+/// and only then applied to the host, from that exact committed text
+/// (`Command::ApplyHostConfig`, not the per-key `SetHostConfig` the TUI's
+/// older settings screen still uses). A host and a repository can then
+/// never silently disagree about what was asked for: `homelab check`
+/// reports it when they do (a push that is refused, or a save made
+/// meanwhile over ssh). If the commit lands but the host refuses or does
+/// not answer, the change still exists in the repository, and the error
+/// says to run `homelab host apply` once the host accepts it — nothing is
+/// lost, only not yet applied.
 ///
 /// Owner decision 2026-09-30 (item 2): when any key just written takes
 /// effect only at the host's next start (`Apply::Restart`), the answer
@@ -1689,20 +1702,68 @@ pub async fn save_host_settings(
     host_new_enough(c)
         .await
         .map_err(|r| (StatusCode::SERVICE_UNAVAILABLE, r))?;
-    let expect = change.expect_sha256.clone();
     let changes = hostsettings::check(change).map_err(|r| (StatusCode::BAD_REQUEST, r))?;
     let keys: Vec<String> = changes.keys().cloned().collect();
+
+    let wc = c.wc.clone();
+    let changes2 = changes.clone();
+    let prepared = blocking(move || -> Result<(FileChange, String), Refusal> {
+        let path = "config/host.toml".to_string();
+        let old = std::fs::read_to_string(wc.repo.join(&path)).ok();
+        let new = homelab_core::hostconfig::merge_changes(old.as_deref().unwrap_or(""), &changes2)
+            .map_err(|e| Refusal::new("the host settings", e, "correct the marked fields"))?;
+        Ok((
+            FileChange {
+                path,
+                old,
+                new: Some(new.clone()),
+            },
+            new,
+        ))
+    })
+    .await
+    .and_then(|r| r);
+    let (fc, new_text) = match prepared {
+        Ok(v) => v,
+        Err(r) => return Err((StatusCode::BAD_REQUEST, r)),
+    };
+    let message = format!(
+        "chore(host): {} [fix-110]\n\nFrom the dashboard's host settings page.\n",
+        keys.join(", ")
+    );
+    let wc = c.wc.clone();
+    let committed = blocking(move || wc.transact_file(&fc, &message, |_| Vec::new()))
+        .await
+        .and_then(|r| r);
+    publish_repo(c).await;
+    let committed = match committed {
+        Ok(committed) => committed,
+        Err(r) => return Err((StatusCode::CONFLICT, r)),
+    };
+
+    // The host's current sha256, fresh — not the page's possibly-stale
+    // `expect_sha256` — so an edit made meanwhile (over ssh, or a TUI
+    // save) is refused rather than silently overwritten.
+    let expect_sha256 = c
+        .host
+        .ask_traced(Command::GetHostConfig, Duration::from_secs(20), None)
+        .await
+        .ok()
+        .filter(|r| r.ok)
+        .and_then(|r| serde_json::from_str::<homelab_proto::HostConfigFile>(&r.message).ok())
+        .map(|f| f.sha256);
     let r = c
         .host
         .ask_traced(
-            Command::SetHostConfig {
-                changes,
-                expect_sha256: expect,
+            Command::ApplyHostConfig {
+                toml: new_text,
+                expect_sha256,
             },
             Duration::from_secs(30),
             None,
         )
         .await;
+    let short = &committed.commit[..12.min(committed.commit.len())];
     match r {
         Ok(r) if r.ok => {
             let saved: serde_json::Value = serde_json::from_str(&r.message).unwrap_or_default();
@@ -1711,22 +1772,179 @@ pub async fn save_host_settings(
                 serde_json::json!({ "saved": saved, "keys": keys }),
             );
             let follow = restart_follow_up(c, &keys, origin);
-            Ok(serde_json::json!({ "saved": saved, "follow": follow }))
+            Ok(serde_json::json!({ "committed": committed, "saved": saved, "follow": follow }))
         }
         Ok(r) => Err((
-            StatusCode::CONFLICT,
+            StatusCode::BAD_GATEWAY,
             Refusal::new(
                 "the host settings",
-                r.message,
-                "nothing was written; correct the change or reload the page",
+                format!(
+                    "committed to the repository as {short}, but the host refused it: {}",
+                    r.message
+                ),
+                "the commit is in the repository; `homelab host apply` once the host accepts it",
             ),
         )),
         Err(e) => Err((
             StatusCode::BAD_GATEWAY,
             Refusal::new(
                 "the host settings",
-                format!("{e}; whether the host wrote it is unknown"),
-                "reload the page: it shows host.toml as it is now",
+                format!("committed to the repository as {short}, but the host did not answer: {e}"),
+                "the commit is in the repository; `homelab host apply` once the host answers",
+            ),
+        )),
+    }
+}
+
+// ── fix-120 (per-machine tokens, owner decision 2026-10-01) ────────────────
+//
+// Issuing and revoking are their own commands rather than going through
+// `SetHostConfig` — `tokens` is `Access::Locked` there on purpose
+// (arch-self: the dashboard's own token must not be able to loosen what it
+// may do). Both still need scope `All`, so a read- or operate-scope
+// dashboard session is refused by the host itself, the same as any other
+// scope-all command.
+
+async fn tokens_list(State(c): State<EditCtx>) -> Response {
+    answer(read_tokens(&c).await)
+}
+
+/// The tokens the host currently trusts, name and scope only.
+pub async fn read_tokens(c: &EditCtx) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+    let r = c
+        .host
+        .ask_traced(Command::TokenList, Duration::from_secs(20), None)
+        .await;
+    match r {
+        Ok(r) if r.ok => match serde_json::from_str::<Vec<homelab_proto::TokenView>>(&r.message) {
+            Ok(tokens) => Ok(serde_json::json!({ "tokens": tokens })),
+            Err(e) => Err((
+                StatusCode::BAD_GATEWAY,
+                Refusal::new(
+                    "the tokens",
+                    format!("the host's answer did not read: {e}"),
+                    "update the host and the dashboard to the same release",
+                ),
+            )),
+        },
+        Ok(r) => Err((
+            StatusCode::BAD_GATEWAY,
+            Refusal::new("the tokens", r.message, "look at host.toml on pve"),
+        )),
+        Err(e) => Err((
+            StatusCode::BAD_GATEWAY,
+            Refusal::new(
+                "the tokens",
+                e,
+                "check that the host answers (homelab ping)",
+            ),
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct IssueTokenBody {
+    pub name: String,
+    pub scope: homelab_proto::Scope,
+}
+
+async fn tokens_issue(
+    State(c): State<EditCtx>,
+    b: Result<Json<IssueTokenBody>, JsonRejection>,
+) -> Response {
+    let b = match body(b, "a new token") {
+        Ok(b) => b,
+        Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
+    };
+    answer(issue_token(&c, b.name, b.scope).await)
+}
+
+/// Mint a new `[[tokens]]` entry. `token` is in this one answer and nowhere
+/// else — the host keeps only its SHA-256, and this function never logs it.
+pub async fn issue_token(
+    c: &EditCtx,
+    name: String,
+    scope: homelab_proto::Scope,
+) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+    let r = c
+        .host
+        .ask_traced(
+            Command::TokenIssue { name, scope },
+            Duration::from_secs(20),
+            None,
+        )
+        .await;
+    match r {
+        Ok(r) if r.ok => match serde_json::from_str::<homelab_proto::TokenIssued>(&r.message) {
+            Ok(issued) => {
+                c.publish
+                    .publish("tokens", serde_json::json!({ "issued": issued.name }));
+                Ok(serde_json::json!({ "issued": issued }))
+            }
+            Err(e) => Err((
+                StatusCode::BAD_GATEWAY,
+                Refusal::new(
+                    "a new token",
+                    format!("the host's answer did not read: {e}"),
+                    "the token was written to host.toml; read it again over ssh if this page \
+                     could not show it",
+                ),
+            )),
+        },
+        Ok(r) => Err((
+            StatusCode::BAD_REQUEST,
+            Refusal::new("a new token", r.message, "pick another name"),
+        )),
+        Err(e) => Err((
+            StatusCode::BAD_GATEWAY,
+            Refusal::new(
+                "a new token",
+                e,
+                "check that the host answers (homelab ping)",
+            ),
+        )),
+    }
+}
+
+async fn tokens_revoke(State(c): State<EditCtx>, UrlPath(name): UrlPath<String>) -> Response {
+    answer(revoke_token(&c, name).await)
+}
+
+/// Remove one `[[tokens]]` entry by name. Refused for `"legacy"` (the
+/// single `token` key; see OPERATIONS_RUNBOOK's migration note) and for a
+/// name that is not there.
+pub async fn revoke_token(
+    c: &EditCtx,
+    name: String,
+) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+    let r = c
+        .host
+        .ask_traced(
+            Command::TokenRevoke { name: name.clone() },
+            Duration::from_secs(20),
+            None,
+        )
+        .await;
+    match r {
+        Ok(r) if r.ok => {
+            c.publish
+                .publish("tokens", serde_json::json!({ "revoked": name }));
+            Ok(serde_json::json!({ "revoked": name }))
+        }
+        Ok(r) => Err((
+            StatusCode::BAD_REQUEST,
+            Refusal::new(
+                "revoke a token",
+                r.message,
+                "`homelab token list` (or this page) shows the current names",
+            ),
+        )),
+        Err(e) => Err((
+            StatusCode::BAD_GATEWAY,
+            Refusal::new(
+                "revoke a token",
+                e,
+                "check that the host answers (homelab ping)",
             ),
         )),
     }
@@ -1785,5 +2003,7 @@ pub fn router(ctx: EditCtx) -> Router {
             "/data/host-settings",
             get(host_settings).put(host_settings_save),
         )
+        .route("/data/tokens", get(tokens_list).post(tokens_issue))
+        .route("/data/tokens/{name}", axum::routing::delete(tokens_revoke))
         .with_state(ctx)
 }

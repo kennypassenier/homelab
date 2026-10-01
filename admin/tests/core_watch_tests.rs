@@ -11,7 +11,7 @@ fn target(key: &str, stack: Option<&str>) -> Target {
         key: key.to_string(),
         name: key.to_string(),
         stack: stack.map(str::to_string),
-        link: "/app/health".into(),
+        link: "/health".into(),
     }
 }
 

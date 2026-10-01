@@ -87,13 +87,12 @@ pub fn counts_down(step: &UiStep) -> bool {
 }
 
 fn page_name(path: &str) -> String {
-    let rest = path
-        .trim_start_matches("/app")
-        .trim_start_matches('/')
-        .trim_end_matches('/');
+    // nav-decisions (chassis-rs 3.1.0): every page lives at the root now;
+    // the root itself (`/`) is Apps, not Overview (moved to `/overview`).
+    let rest = path.trim_start_matches('/').trim_end_matches('/');
     let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
     match parts.as_slice() {
-        [] => "the fleet overview".into(),
+        [] => "the apps page".into(),
         ["stacks", name] => format!("the stack {name}"),
         ["stacks", name, tab] => format!("the {tab} tab of {name}"),
         [page] => format!("the {page} page"),
@@ -362,7 +361,7 @@ mod tests {
 
     #[test]
     fn follow_live_view_typing_is_held_but_not_announced() {
-        assert!(counts_down(&goto("/app/jobs")));
+        assert!(counts_down(&goto("/jobs")));
         assert!(counts_down(&UiStep::Press {
             button: "next".into()
         }));
@@ -379,10 +378,11 @@ mod tests {
     #[test]
     fn follow_live_view_steps_read_as_words() {
         let st = DriveState::default();
-        assert_eq!(describe(&goto("/app/"), &st), "go to the fleet overview");
-        assert_eq!(describe(&goto("/app/jobs"), &st), "go to the jobs page");
+        assert_eq!(describe(&goto("/"), &st), "go to the apps page");
+        assert_eq!(describe(&goto("/overview"), &st), "go to the overview page");
+        assert_eq!(describe(&goto("/jobs"), &st), "go to the jobs page");
         assert_eq!(
-            describe(&goto("/app/stacks/media/logs"), &st),
+            describe(&goto("/stacks/media/logs"), &st),
             "go to the logs tab of media"
         );
         assert_eq!(
@@ -422,15 +422,15 @@ mod tests {
     #[test]
     fn follow_live_view_the_plan_advances_and_a_deviation_marks_it_changed() {
         let st = DriveState::default();
-        let a = goto("/app/jobs");
-        let b = goto("/app/host");
+        let a = goto("/jobs");
+        let b = goto("/host");
         let c = UiStep::Close;
         let mut p = new_plan(&[a.clone(), b.clone(), c.clone()], "wsl", &st).unwrap();
         p.advance(&a);
         assert_eq!((p.next, p.changed), (1, false));
         assert!(p.steps[0].done && !p.steps[1].done);
         // Not on the plan: taken, the plan is changed, nothing moves.
-        p.advance(&goto("/app/log"));
+        p.advance(&goto("/log"));
         assert_eq!((p.next, p.changed), (1, true));
         // A later step of the plan: it is done, the skipped one is not.
         let mut q = new_plan(&[a.clone(), b.clone(), c.clone()], "wsl", &st).unwrap();

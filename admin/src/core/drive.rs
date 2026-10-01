@@ -628,7 +628,10 @@ impl Default for DriveState {
             active: false,
             by: None,
             seq: 0,
-            page: "/app/".into(),
+            // nav-decisions (chassis-rs 3.1.0): the root is Apps now, not
+            // Overview (moved to `/overview`); a fresh browser session
+            // lands there too.
+            page: "/".into(),
             form: None,
             last_at: 0,
             idle_s: IDLE_S,
@@ -1073,18 +1076,17 @@ impl OpenForm {
 }
 
 /// Is `path` a page of the dashboard? The page list is `formspec.json`'s,
-/// which a web test holds equal to the router's.
+/// which a web test holds equal to the router's. nav-decisions
+/// (chassis-rs 3.1.0): every page lives at the root now, so `path` is
+/// checked as-is rather than stripped of an `/app` prefix.
 fn known_page(path: &str, stacks: &[String]) -> Result<String, String> {
     let p = path.split(['?', '#']).next().unwrap_or("");
-    if p != "/app" && !p.starts_with("/app/") {
-        return Err(format!("{path} is not under /app/"));
+    if !p.starts_with('/') {
+        return Err(format!("{path} is not an absolute path"));
     }
-    let rest = p
-        .trim_start_matches("/app")
-        .trim_start_matches('/')
-        .trim_end_matches('/');
+    let rest = p.trim_start_matches('/').trim_end_matches('/');
     if spec().pages.iter().any(|x| x == rest) {
-        return Ok(format!("/app/{rest}"));
+        return Ok(format!("/{rest}"));
     }
     let parts: Vec<&str> = rest.split('/').collect();
     if parts.first() == Some(&"stacks") && (parts.len() == 2 || parts.len() == 3) {
@@ -1100,9 +1102,9 @@ fn known_page(path: &str, stacks: &[String]) -> Result<String, String> {
             ));
         }
         return Ok(if tab == "overview" {
-            format!("/app/stacks/{name}")
+            format!("/stacks/{name}")
         } else {
-            format!("/app/stacks/{name}/{tab}")
+            format!("/stacks/{name}/{tab}")
         });
     }
     Err(format!("there is no page at {path}"))
@@ -1210,14 +1212,14 @@ impl DriveState {
                         step,
                         why,
                         format!(
-                            "pages: /app/, /app/{}; a stack: /app/stacks/<name>[/<tab>]",
+                            "pages: /, /{}; a stack: /stacks/<name>[/<tab>]",
                             spec()
                                 .pages
                                 .iter()
                                 .filter(|p| !p.is_empty())
                                 .cloned()
                                 .collect::<Vec<_>>()
-                                .join(", /app/")
+                                .join(", /")
                         ),
                     )
                 })?;
@@ -1300,11 +1302,11 @@ impl DriveState {
                     ));
                 }
                 self.page = if kind.host_wide() {
-                    "/app/host".into()
-                } else if self.page.starts_with(&format!("/app/stacks/{stack}")) {
+                    "/host".into()
+                } else if self.page.starts_with(&format!("/stacks/{stack}")) {
                     self.page.clone()
                 } else {
-                    format!("/app/stacks/{stack}")
+                    format!("/stacks/{stack}")
                 };
                 let open = OpenForm::new(desc, cx.sources);
                 let effect = if open.step == REVIEW {
@@ -1316,14 +1318,14 @@ impl DriveState {
                 Applied { effect, held: None }
             }
             UiStep::Select { stacks } => {
-                if self.page != "/app/" {
+                if self.page != "/overview" {
                     return Err(refused(
                         step,
                         format!(
                             "the fleet table's selection lives on the Overview page, not {}",
                             self.page
                         ),
-                        "homelab ui goto / first",
+                        "homelab ui goto /overview first",
                     ));
                 }
                 let mut unknown: Vec<&String> = stacks

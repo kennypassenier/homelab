@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use chassis::shell::live::Live;
+use chassis::shell::pages::Page;
 use chassis::shell::webapp::WebApp;
 use chassis::{App, AppSpec};
 use tokio::sync::RwLock;
@@ -197,6 +198,22 @@ const FILES: &[(&str, &[u8])] = &[
         include_bytes!("../web/js/pages/metrics.js"),
     ),
     ("js/charts.js", include_bytes!("../web/js/charts.js")),
+    // feat-pages-1 (chassis-rs 3.1.0): the page registry itself, and the
+    // kit's own pages (Status, Clients, Passkeys) drawn by this web app
+    // from /api/kit/status|clients|passkeys (`kit_pages_in_webapp`).
+    ("js/pages.js", include_bytes!("../web/js/pages.js")),
+    (
+        "js/pages/status.js",
+        include_bytes!("../web/js/pages/status.js"),
+    ),
+    (
+        "js/pages/clients.js",
+        include_bytes!("../web/js/pages/clients.js"),
+    ),
+    (
+        "js/pages/passkeys.js",
+        include_bytes!("../web/js/pages/passkeys.js"),
+    ),
     ("css/app.css", include_bytes!("../web/css/app.css")),
 ];
 
@@ -278,8 +295,41 @@ async fn main() -> std::process::ExitCode {
         None
     };
     let live = Live::new(config.as_ref().map(|c| c.sse_buffer).unwrap_or(256));
+    // feat-pages-1 (chassis-rs 3.1.0): the web app mounts at the root by
+    // default, is the router's fallback, and `index.html` answers for every
+    // extensionless path that is not the kit's. `/app` and `/app/…` from
+    // before 3.1.0 get a 308 to the same path at the root (the kit's own).
     app.webapp(WebApp::embedded(FILES));
-    app.nav_entry("Fleet", "/app/");
+    // nav-decisions (Kenny, 2026-10-01): Apps (today's tile page, renamed
+    // from Home) is the root; Overview is reachable but hidden from the
+    // nav, and the brand link ("Homelab") opens it instead. Every other
+    // page registers its group (a bar dropdown) and keeps its registration
+    // order, which `Page` sorts stably among ties. The kit's own pages
+    // (Status, Clients, Passkeys) register themselves; `kit_pages_in_webapp`
+    // below has this web app draw them too, in the same bar.
+    app.page(Page::new("home", "Apps", "/"))
+        .page(Page::new("overview", "Overview", "/overview").hidden())
+        .page(Page::new("health", "Health", "/health"))
+        .page(Page::new("metrics", "Metrics", "/metrics"))
+        .page(Page::new("activity", "Activity", "/activity"))
+        .page(Page::new("host", "Host", "/host"))
+        .page(Page::new("log", "Live log", "/log").group("Operations"))
+        .page(Page::new("jobs", "Jobs", "/jobs").group("Operations"))
+        .page(Page::new("apply", "Apply", "/apply").group("Operations"))
+        .page(Page::new("schedules", "Schedules", "/schedules").group("Operations"))
+        .page(Page::new("firewall", "Firewall", "/firewall").group("Configure"))
+        .page(Page::new("backups", "Backups", "/backups").group("Configure"))
+        .page(Page::new("secrets", "Secrets", "/secrets").group("Configure"))
+        .page(Page::new("settings", "Settings", "/settings").group("Configure"))
+        .page(Page::new("fleetview", "Fleet view", "/fleetview").group("Visuals"))
+        .page(Page::new("backupcalendar", "Backup calendar", "/backupcalendar").group("Visuals"))
+        // Reachable at a fixed address, not shown in the bar (the bell,
+        // the shell button and the new-stack wizard link them).
+        .page(Page::new("notifications", "Notifications", "/notifications").hidden())
+        .page(Page::new("shell", "Shell", "/shell").hidden())
+        .page(Page::new("presets", "Presets", "/presets").hidden())
+        .brand("/overview")
+        .kit_pages_in_webapp();
     app.dashboard_routes(live.router("/events"));
     // Doctor reads for about a minute on pve (fix-68), so the pages wait up
     // to two for an answer.

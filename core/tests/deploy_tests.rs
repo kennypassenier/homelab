@@ -3142,7 +3142,7 @@ mod native_from_zero {
             release_asset: None,
             backup_from_newest: own_copy
                 .then(|| "/appdata/drill/kyu-config/kyu.backup-*.db".to_string()),
-            backup_pause: false,
+            backup_pause: homelab_core::native::BackupPause::Off,
             update_policy: Default::default(),
             metrics: None,
         }

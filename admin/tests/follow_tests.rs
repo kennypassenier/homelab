@@ -177,7 +177,7 @@ async fn follow_the_final_press_runs_once_with_zero_one_or_two_tabs() {
     for tabs in 0..=2usize {
         let w = world(&format!("once-{tabs}"), MemFiles::default(), None);
         let app = router(w.driver.clone());
-        assert_eq!(step(&w, goto("/app/stacks/media")).await["ok"], true);
+        assert_eq!(step(&w, goto("/stacks/media")).await["ok"], true);
         let opened = step(&w, open("deploy", Some("media"))).await;
         assert_eq!(opened["ok"], true, "{opened}");
         assert_eq!(opened["state"]["form"]["step"], "review");
@@ -237,12 +237,12 @@ async fn follow_the_final_press_runs_once_with_zero_one_or_two_tabs() {
 #[tokio::test]
 async fn follow_steps_are_checked_against_the_form_description() {
     let w = world("checked", MemFiles::default(), None);
-    let (_, why, fix) = refused(&step(&w, goto("/app/nowhere")).await);
+    let (_, why, fix) = refused(&step(&w, goto("/nowhere")).await);
     assert!(
-        why.contains("no page") && fix.contains("/app/stacks/<name>"),
+        why.contains("no page") && fix.contains("/stacks/<name>"),
         "{why} {fix}"
     );
-    let (_, why, _) = refused(&step(&w, goto("/app/stacks/ghost")).await);
+    let (_, why, _) = refused(&step(&w, goto("/stacks/ghost")).await);
     assert!(why.contains("no stack ghost"));
     let (_, _, fix) = refused(&step(&w, open("fly", Some("media"))).await);
     assert!(fix.contains("deploy"), "{fix}");
@@ -254,7 +254,7 @@ async fn follow_steps_are_checked_against_the_form_description() {
 
     let opened = step(&w, open("restore", Some("media"))).await;
     assert_eq!(opened["state"]["form"]["step"], "options");
-    assert_eq!(opened["state"]["page"], "/app/stacks/media");
+    assert_eq!(opened["state"]["page"], "/stacks/media");
     let (_, why, fix) = refused(&step(&w, typed("act-reason", "new version")).await);
     assert!(why.contains("no field act-reason"), "{why}");
     assert!(
@@ -305,12 +305,9 @@ async fn follow_steps_are_checked_against_the_form_description() {
     );
     assert!(held["state"]["form"]["job"].is_null());
     assert_eq!(w.host.ran().len(), 0, "nothing reached the host");
-    refused(&step(&w, goto("/app/jobs")).await);
+    refused(&step(&w, goto("/jobs")).await);
     assert_eq!(step(&w, UiStep::Close).await["state"]["form"], Value::Null);
-    assert_eq!(
-        step(&w, goto("/app/jobs")).await["state"]["page"],
-        "/app/jobs"
-    );
+    assert_eq!(step(&w, goto("/jobs")).await["state"]["page"], "/jobs");
 }
 
 /// feat-platform-10 (milestone follow).
@@ -409,7 +406,7 @@ async fn follow_the_deploy_guard_holds_a_driven_press_until_force() {
 #[tokio::test]
 async fn follow_every_step_is_pushed_to_the_tabs_with_the_whole_state() {
     let w = world("pushed", MemFiles::default(), None);
-    step(&w, goto("/app/stacks/media")).await;
+    step(&w, goto("/stacks/media")).await;
     step(&w, UiStep::State).await;
     step(&w, open("update", Some("media"))).await;
     step(&w, typed("act-nope", "x")).await;
@@ -446,7 +443,7 @@ async fn parity_exec_is_drivable_and_keeps_its_scope() {
     let opened = all(open("exec", None)).await;
     assert_eq!(opened["ok"], true, "{opened}");
     assert_eq!(opened["state"]["form"]["step"], "review");
-    assert_eq!(opened["state"]["page"], "/app/host");
+    assert_eq!(opened["state"]["page"], "/host");
     assert_eq!(all(typed("act-vmid", "106")).await["ok"], true);
     let t = all(typed("act-command", "df -h")).await;
     assert_eq!(t["ok"], true, "{t}");

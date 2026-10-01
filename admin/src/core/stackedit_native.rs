@@ -13,7 +13,7 @@
 //! validates every other `service.yml` (`admin/src/shell/edit.rs`'s
 //! `check_dir`), so this module does not repeat that check.
 
-use homelab_core::native::UpdatePolicy;
+use homelab_core::native::{BackupPause, UpdatePolicy};
 use homelab_proto::{NativeServiceManifest, StackManifest};
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
@@ -95,8 +95,10 @@ pub struct NativeEdit {
     pub release_asset: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup_from_newest: Option<String>,
+    /// The select sends `false`, `true` or `chassis`, read back the same
+    /// way `service.yml` itself does (fix-113, owner decision 2026-10-01).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub backup_pause: Option<bool>,
+    pub backup_pause: Option<BackupPause>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_policy: Option<UpdatePolicy>,
     /// The metrics picker's choice; absent = leave it as it is.
@@ -159,6 +161,19 @@ fn set_or_remove(ops: &mut Vec<Op>, key: &str, old: Option<&str>, want: Option<&
             value: Value::from(v),
         }),
         None => ops.push(Op::Remove { path: path(key) }),
+    }
+}
+
+/// `backup_pause`'s three states, written the way `service.yml` itself
+/// writes them: a plain bool for `Off`/`Unit`, the string `chassis` for
+/// `Chassis` — the same shape `BackupPause`'s own `Serialize` produces, but
+/// `yamledit`'s ops work on `serde_yaml::Value` directly rather than through
+/// serde.
+fn backup_pause_value(v: BackupPause) -> Value {
+    match v {
+        BackupPause::Off => Value::from(false),
+        BackupPause::Unit => Value::from(true),
+        BackupPause::Chassis => Value::from("chassis"),
     }
 }
 
@@ -237,7 +252,7 @@ pub fn native_ops(old: &NativeServiceManifest, e: &NativeEdit) -> Vec<Op> {
     if let Some(v) = e.backup_pause.filter(|v| *v != old.backup_pause) {
         ops.push(Op::Set {
             path: path("backup_pause"),
-            value: Value::from(v),
+            value: backup_pause_value(v),
         });
     }
     if let Some(v) = e.update_policy.filter(|v| *v != old.update_policy) {
@@ -296,7 +311,7 @@ pub fn add_native_files(stack: &StackManifest, a: &AddNativeEdit) -> (String, St
         release_repo: cleared(a.release_repo.clone()),
         release_asset: cleared(a.release_asset.clone()),
         backup_from_newest: None,
-        backup_pause: false,
+        backup_pause: BackupPause::Off,
         update_policy: UpdatePolicy::Manual,
         metrics: None,
     };
@@ -392,7 +407,7 @@ mod tests {
             release_repo: None,
             release_asset: None,
             backup_from_newest: None,
-            backup_pause: false,
+            backup_pause: BackupPause::Off,
             update_policy: UpdatePolicy::Manual,
             metrics: None,
         }

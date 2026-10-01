@@ -950,10 +950,13 @@ pub fn alert_drafts(body: &serde_json::Value) -> Vec<AlertDraft> {
                 &text(&ann, "description").unwrap_or_default(),
             );
             let remedy = text(&ann, "remedy");
-            let link = text(&ann, "click_url").and_then(|u| {
-                u.find("/app/")
-                    .map(|i| u[i..].to_string())
-                    .or_else(|| u.starts_with('/').then_some(u.clone()))
+            // nav-decisions (chassis-rs 3.1.0): every dashboard page now
+            // lives at the root, so there is no `/app/` marker left to
+            // find; take the path after the scheme and host instead (or
+            // the whole string when it is already a bare path).
+            let link = text(&ann, "click_url").and_then(|u| match u.split_once("://") {
+                Some((_, rest)) => rest.find('/').map(|i| rest[i..].to_string()),
+                None => u.starts_with('/').then_some(u.clone()),
             });
             d.detail = Detail {
                 level: if !firing {

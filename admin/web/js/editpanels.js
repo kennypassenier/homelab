@@ -90,7 +90,7 @@ import { attachSwitches, showError } from "/static/kp/js/forms.js";
  *   binary: string, env_file: string | null, data_dirs: string[],
  *   update_cmd: string | null, stateless: boolean, restore_note: string | null,
  *   release_repo: string | null, release_asset: string | null,
- *   backup_from_newest: string | null, backup_pause: boolean,
+ *   backup_from_newest: string | null, backup_pause: boolean | "chassis",
  *   update_policy: "manual" | "auto" | "self",
  *   metrics: boolean | null}} NativeManifestView
  */
@@ -2145,11 +2145,19 @@ function nativeUnitForm(stack, natives, reload) {
     "",
     { help: "An absolute glob with a '*', e.g. /appdata/…/backup-*.db." },
   );
-  const backupPause = h("input", {
-    type: "checkbox",
-    id: "native-backup-pause",
-    class: "kp-field__check",
-  });
+  const backupPause = nativeChoice(
+    "native-backup-pause",
+    "Pause for the nightly backup",
+    [
+      { value: "false", label: "Off" },
+      { value: "true", label: "Homelab stops the unit" },
+      {
+        value: "chassis",
+        label: "Chassis kit (backup-pause, falls back to stop)",
+      },
+    ],
+    "false",
+  );
   const updatePolicy = nativeChoice(
     "native-update-policy",
     "Update policy",
@@ -2208,7 +2216,12 @@ function nativeUnitForm(stack, natives, reload) {
     releaseRepo.input.value = m?.release_repo ?? "";
     releaseAsset.input.value = m?.release_asset ?? "";
     backupNewest.input.value = m?.backup_from_newest ?? "";
-    backupPause.checked = m?.backup_pause ?? false;
+    backupPause.input.value =
+      m?.backup_pause === "chassis"
+        ? "chassis"
+        : m?.backup_pause
+          ? "true"
+          : "false";
     updatePolicy.input.value = m?.update_policy ?? "manual";
     metrics.input.value = m?.metrics === false ? "not_measured" : "measured";
   };
@@ -2229,7 +2242,9 @@ function nativeUnitForm(stack, natives, reload) {
     release_repo: releaseRepo.input.value,
     release_asset: releaseAsset.input.value,
     backup_from_newest: backupNewest.input.value,
-    backup_pause: backupPause.checked,
+    backup_pause: /** @type {"false" | "true" | "chassis"} */ (
+      backupPause.input.value
+    ),
     update_policy: /** @type {"manual" | "auto" | "self"} */ (
       updatePolicy.input.value
     ),
@@ -2284,6 +2299,7 @@ function nativeUnitForm(stack, natives, reload) {
       updatePolicy.wrap,
       metrics.wrap,
       backupNewest.wrap,
+      backupPause.wrap,
       h(
         "div",
         { class: "kp-field kp-field--check" },
@@ -2292,16 +2308,6 @@ function nativeUnitForm(stack, natives, reload) {
           "label",
           { class: "kp-field__label", for: "native-stateless" },
           "Stateless (no data_dirs, by design)",
-        ),
-      ),
-      h(
-        "div",
-        { class: "kp-field kp-field--check" },
-        backupPause,
-        h(
-          "label",
-          { class: "kp-field__label", for: "native-backup-pause" },
-          "Pause the unit for the nightly backup",
         ),
       ),
     ),
@@ -2715,7 +2721,7 @@ function drawFirewall(panel, stack, e, reload) {
         "p",
         { class: "measured" },
         `Written by the deploy to /etc/pve/firewall/${m.vmid}.fw from stacks/${stack}/lxc-compose.yml. `,
-        h("a", { href: "/app/firewall" }, "The fleet's matrix"),
+        h("a", { href: "/firewall" }, "The fleet's matrix"),
       ),
       h(
         "label",

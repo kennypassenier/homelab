@@ -83,8 +83,9 @@ pub fn page(file: &HostConfigFile) -> Page {
             let value = file.values.get(info.key).cloned();
             let set = value.is_some() || file.secrets_set.iter().any(|k| k == info.key);
             let value = value.unwrap_or(serde_json::Value::Null);
-            let toml = (info.kind == Kind::Table && info.access != Access::Secret)
-                .then(|| toml_fragment(info.key, &value));
+            let toml = (info.kind == Kind::Table
+                && !matches!(info.access, Access::Secret | Access::DashboardSecret))
+            .then(|| toml_fragment(info.key, &value));
             Field {
                 info: *info,
                 set,

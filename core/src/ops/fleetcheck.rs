@@ -108,6 +108,18 @@ pub struct LiveFacts {
     /// the local-lvm thin pool, pve's journald against its own cap, and
     /// every ZFS pool on the host. Empty when none were read.
     pub host_capacity: Vec<HostCapacityFact>,
+    /// fix-110: `config/host.toml` as the client's (or the dashboard's)
+    /// working copy reads it, non-secret keys only. `None` from an older
+    /// client, the nightly round, or a repository that does not carry the
+    /// file yet — the comparison is then skipped, same as `digests` being
+    /// empty skips the stack-file comparison.
+    pub declared_host_config: Option<std::collections::BTreeMap<String, serde_json::Value>>,
+    /// fix-110: the same non-secret keys as the host's OWN host.toml sets
+    /// them right now — gathered host-side, the way `GetHostConfig` reads
+    /// them, so the comparison is file-to-file rather than against a
+    /// resolved-with-defaults view nobody else sees. Empty when the host
+    /// sets none of them (every key then uses its compiled default).
+    pub live_host_config: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// fix-92 (routes-outside-repo-unvalidated, 2026-09-27): a file in the
@@ -477,6 +489,49 @@ pub fn evaluate_repo_drift(state: &HostState, live: &LiveFacts) -> Vec<Finding> 
                  files back as they were",
                 d.stack
             ),
+        });
+    }
+    out
+}
+
+/// fix-110 (homelab-admin, 2026-10-01): `config/host.toml` against the
+/// host's own running host.toml, key by key — the same shape
+/// `evaluate_repo_drift` compares a stack's files in. `declared_host_config`
+/// absent (an older client, the nightly round, or a repository without the
+/// file yet) skips the comparison entirely, same as empty `digests` skips
+/// the stack-file one. A key either side sets that the other does not, or
+/// sets to a different value, is one Drift finding naming both.
+pub fn evaluate_host_config_drift(live: &LiveFacts) -> Vec<Finding> {
+    let Some(declared) = &live.declared_host_config else {
+        return Vec::new();
+    };
+    let mut keys: std::collections::BTreeSet<&String> = declared
+        .keys()
+        .chain(live.live_host_config.keys())
+        .collect();
+    // The order drives only the output; sorted for a stable report.
+    let mut out = Vec::new();
+    while let Some(key) = keys.pop_first() {
+        let want = declared.get(key);
+        let have = live.live_host_config.get(key);
+        if want == have {
+            continue;
+        }
+        let describe = |v: Option<&serde_json::Value>| match v {
+            Some(v) => v.to_string(),
+            None => "its compiled default (unset)".to_string(),
+        };
+        out.push(Finding {
+            severity: Severity::Drift,
+            subject: "host.toml".into(),
+            what: format!(
+                "{key}: config/host.toml declares {}, the host's host.toml has {}",
+                describe(want),
+                describe(have)
+            ),
+            remedy: "`homelab host apply` to make the host match the repository, or edit \
+                      config/host.toml to match the host and commit that"
+                .into(),
         });
     }
     out
@@ -1525,6 +1580,7 @@ pub fn evaluate(
 
     // fix-142: the files against what the host applied.
     out.extend(evaluate_repo_drift(state, live));
+    out.extend(evaluate_host_config_drift(live));
 
     out.extend(evaluate_growth(
         &live.growth,

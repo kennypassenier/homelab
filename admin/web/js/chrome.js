@@ -317,7 +317,7 @@ function mountBell(navigate) {
     "a",
     {
       class: "kp-button kp-button--ghost bell",
-      href: "/app/notifications",
+      href: "/notifications",
       id: "bell",
     },
     bellIcon(),
@@ -345,9 +345,9 @@ function mountBell(navigate) {
       job
         ? {
             label: "Open the job",
-            onClick: () => navigate(`/app/jobs?job=${job}`),
+            onClick: () => navigate(`/jobs?job=${job}`),
           }
-        : { label: "Open", onClick: () => navigate("/app/notifications") },
+        : { label: "Open", onClick: () => navigate("/notifications") },
     );
   });
   return link;

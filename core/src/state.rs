@@ -240,6 +240,21 @@ pub struct HostState {
     /// last known value, and since when.
     #[serde(default)]
     pub home_address_error: Option<String>,
+    /// fix-143 (Cloudflare nightly comparison, owner decision 2026-10-01):
+    /// unix time of the last nightly edge comparison the HOST ran (the one
+    /// `homelab check` runs from the workstation is unaffected and keeps its
+    /// own rhythm). 0 = never — not configured counts as never too, so
+    /// setting `cloudflare_token` later runs it at the first opportunity.
+    #[serde(default)]
+    pub last_edge_check: u64,
+    /// How many findings that comparison reported, 0 meaning it agreed.
+    #[serde(default)]
+    pub last_edge_findings: usize,
+    /// Why the comparison could not run at all (no token, the API did not
+    /// answer, the capture does not read). None when it ran, whatever it
+    /// found — this is "not compared", never counted as a finding itself.
+    #[serde(default)]
+    pub last_edge_error: Option<String>,
     /// fix-83 (manual-images-latest-unpinned, 2026-09-27): per stack, per
     /// container, the image and digest each `manual` container ran when the
     /// nightly round last looked. The stack file says what SHOULD run; this

@@ -473,6 +473,7 @@ impl Model {
         self.outbox.push(Command::Today {
             stack_files: crate::spec::stack_files_with_vmids(&self.stacks_dir.to_string_lossy()),
             digests: vec![],
+            host_config: None,
         });
     }
 
@@ -1860,6 +1861,7 @@ fn start_fleet_check(model: &mut Model) {
         stack_files,
         digests: vec![],
         json: false,
+        host_config: None,
     });
 }
 

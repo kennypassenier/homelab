@@ -59,17 +59,17 @@ fn notify_routing_the_dashboard_pushes_only_the_urgent() {
 fn notify_detail_the_push_is_short_with_a_link() {
     let mut d = draft(Kind::ScheduleMissed, Some("backup"));
     d.detail.remedy = Some("run `homelab backup media`".into());
-    d.detail.link = Some("/app/stacks/media".into());
+    d.detail.link = Some("/stacks/media".into());
     let p: serde_json::Value =
         serde_json::from_str(&push_payload(&d, "3.64.0", "https://admin.kp-soft.dev")).unwrap();
     assert_eq!(p["source"], "homelab-admin");
-    assert_eq!(p["click_url"], "https://admin.kp-soft.dev/app/stacks/media");
+    assert_eq!(p["click_url"], "https://admin.kp-soft.dev/stacks/media");
     assert_eq!(p["error"], "t — run `homelab backup media`");
     // No page of its own: the notifications page.
     let bare = draft(Kind::ScheduleMissed, Some("backup"));
     let p: serde_json::Value =
         serde_json::from_str(&push_payload(&bare, "3.64.0", "https://x.test/")).unwrap();
-    assert_eq!(p["click_url"], "https://x.test/app/notifications");
+    assert_eq!(p["click_url"], "https://x.test/notifications");
 }
 
 #[test]
@@ -183,7 +183,7 @@ fn host_notice(seq: u64, urgent: bool) -> HostNotice {
         what: "compose: pull failed".into(),
         consequence: "It may run the old version.".into(),
         remedy: "Run it again: `homelab deploy media`.".into(),
-        page: "/app/stacks/media".into(),
+        page: "/stacks/media".into(),
         urgent,
         routed: "urgent: a deploy failed".into(),
         push: "sent".into(),
@@ -200,7 +200,7 @@ fn host_notices_land_in_the_centre_with_their_detail_and_fix() {
     assert_eq!(d.kind, Kind::HostEvent);
     assert_eq!(d.detail.level, Level::Critical);
     assert_eq!(d.detail.since, Some(900));
-    assert_eq!(d.detail.link.as_deref(), Some("/app/stacks/media"));
+    assert_eq!(d.detail.link.as_deref(), Some("/stacks/media"));
     assert_eq!(d.detail.fixes[0].action, "deploy");
     assert_eq!(
         push,
@@ -292,7 +292,7 @@ fn am(status: &str, name: &str, severity: &str, fp: &str) -> serde_json::Value {
                 "description": "the detail",
                 "consequence": "what it costs",
                 "remedy": "what to do",
-                "click_url": "https://admin.kp-soft.dev/app/host"
+                "click_url": "https://admin.kp-soft.dev/host"
             },
             "startsAt": "2026-09-30T07:00:00Z",
             "endsAt": "0001-01-01T00:00:00Z",
@@ -313,7 +313,7 @@ fn alerts_become_notices_firing_and_resolved() {
     assert_eq!(a.draft.detail.since, Some(1_790_751_600));
     assert_eq!(a.draft.detail.consequence.as_deref(), Some("what it costs"));
     assert_eq!(a.draft.detail.remedy.as_deref(), Some("what to do"));
-    assert_eq!(a.draft.detail.link.as_deref(), Some("/app/host"));
+    assert_eq!(a.draft.detail.link.as_deref(), Some("/host"));
     assert_eq!(a.draft.detail.fixes[0].action, "deploy");
     assert_eq!(
         a.push,

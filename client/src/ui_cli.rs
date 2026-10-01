@@ -197,10 +197,12 @@ pub fn parse_with(
     let step = match verb {
         "goto" => {
             let p = word(1)?;
+            // nav-decisions (chassis-rs 3.1.0): every dashboard page lives
+            // at the root now; `app/jobs` or `jobs` both mean `/jobs`.
             let path = if p.starts_with('/') {
                 p
             } else {
-                format!("/app/{}", p.trim_start_matches("app/"))
+                format!("/{}", p.trim_start_matches("app/"))
             };
             UiStep::Goto { path }
         }
@@ -570,7 +572,7 @@ mod tests {
         assert_eq!(
             parse(&words("goto stacks/media")).unwrap(),
             UiStep::Goto {
-                path: "/app/stacks/media".into()
+                path: "/stacks/media".into()
             }
         );
         assert_eq!(
@@ -685,7 +687,7 @@ mod tests {
     fn finish_waits_while_the_job_runs_then_releases_with_its_outcome() {
         let with_job = |state: &str, progress: Value, message: Value| {
             serde_json::json!({"ok": true, "state": {"active": true, "by": "wsl", "seq": 7,
-                "page": "/app/stacks/uptime", "form": {"title": "Deploy · uptime",
+                "page": "/stacks/uptime", "form": {"title": "Deploy · uptime",
                 "job": {"job": 458, "state": state, "progress": progress, "message": message}}}})
             .to_string()
         };
@@ -768,7 +770,7 @@ mod tests {
         assert_eq!(
             steps[0],
             UiStep::Goto {
-                path: "/app/jobs".into()
+                path: "/jobs".into()
             }
         );
         let file = "# deploy media\n\ngoto stacks/media\ntype act-confirm media now\nedit raw-text f.yml\n";
@@ -811,7 +813,7 @@ mod tests {
         let v = serde_json::json!({
             "ok": false,
             "refusal": {"what": "ui press", "why": "stopped by the viewer kenny", "fix": "ask Kenny"},
-            "state": {"active": false, "by": "wsl", "seq": 9, "page": "/app/", "form": null,
+            "state": {"active": false, "by": "wsl", "seq": 9, "page": "/", "form": null,
               "paused_by": null, "stopped_by": "the viewer kenny",
               "plan": {"next": 1, "changed": true, "steps": [
                 {"text": "go to jobs", "done": true}, {"text": "press Confirm", "done": false}]}}
@@ -826,9 +828,7 @@ mod tests {
     fn follow_a_ui_step_keeps_the_line_quiet_and_other_verbs_do_not() {
         use homelab_proto::Command;
         let step = Command::Ui {
-            step: UiStep::Goto {
-                path: "/app/".into(),
-            },
+            step: UiStep::Goto { path: "/".into() },
         };
         assert!(quiet_line(&step));
         assert!(!quiet_line(&Command::Ping));
@@ -839,7 +839,7 @@ mod tests {
     fn follow_the_answer_renders_the_screen_and_a_refusal_is_an_error() {
         let ok = serde_json::json!({
             "ok": true,
-            "state": {"active": true, "by": "wsl", "seq": 4, "page": "/app/stacks/media",
+            "state": {"active": true, "by": "wsl", "seq": 4, "page": "/stacks/media",
               "selected": ["media", "drill"],
               "form": {"title": "Deploy · media", "step": "review", "step_index": 0,
                 "steps": ["review"], "buttons": ["confirm"],
@@ -847,14 +847,14 @@ mod tests {
                 "guard": null, "job": {"job": 812, "state": "done", "message": "complete", "progress": null}}}
         });
         let t = render(&ok.to_string()).unwrap();
-        assert!(t.contains("page   /app/stacks/media"), "{t}");
+        assert!(t.contains("page   /stacks/media"), "{t}");
         assert!(t.contains("select media, drill"), "{t}");
         assert!(t.contains("act-force"), "{t}");
         assert!(t.contains("job    812 done · complete"), "{t}");
         let no = serde_json::json!({
             "ok": false,
             "refusal": {"what": "ui type", "why": "no field act-reason", "fix": "fields: act-force"},
-            "state": {"active": true, "by": "wsl", "seq": 4, "page": "/app/", "form": null}
+            "state": {"active": true, "by": "wsl", "seq": 4, "page": "/", "form": null}
         });
         let e = render(&no.to_string()).unwrap_err();
         assert!(
@@ -870,7 +870,7 @@ mod tests {
     fn fix_answer_days_a_hidden_field_says_when_it_shows() {
         let ok = serde_json::json!({
             "ok": true,
-            "state": {"active": true, "by": "wsl", "seq": 4, "page": "/app/host",
+            "state": {"active": true, "by": "wsl", "seq": 4, "page": "/host",
               "form": {"title": "Answer check · the whole host", "step": "options", "step_index": 0,
                 "steps": ["options", "review"], "buttons": ["next", "close"],
                 "fields": [

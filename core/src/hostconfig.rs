@@ -16,6 +16,15 @@
 //! * a key that can take the dashboard's own route or the backups down is
 //!   editable only with a second, typed confirmation.
 //!
+//! fix-143 (Cloudflare nightly comparison, owner decision 2026-10-01):
+//! `Access::DashboardSecret` is the same "never sent, only whether it is
+//! set" promise as `Access::Secret`, but the dashboard may WRITE it — the
+//! field is a one-way drop box, never a read, the same shape the vault
+//! already uses for `latch_secrets`. A key stays plain `Secret` (ssh only,
+//! both ways) unless something — here, "the nightly round needs a
+//! Cloudflare token but Kenny should not have to ssh in to set one" —
+//! argues for the dashboard field specifically.
+//!
 //! Zero I/O: values travel as JSON, the TOML side is the host's.
 
 use serde::Serialize;
@@ -34,13 +43,21 @@ pub enum Access {
     Locked,
     /// Shown, changed over ssh only: a policy the token must not loosen.
     SshOnly,
-    /// Never shown, never sent: only whether it is set.
+    /// Never shown, never sent, never changed from the browser: ssh only,
+    /// both ways.
     Secret,
+    /// Never shown, never sent — like `Secret` — but WRITABLE from the
+    /// browser: a one-way field, set or replaced here, never read back.
+    /// fix-143.
+    DashboardSecret,
 }
 
 impl Access {
     pub fn editable(self) -> bool {
-        matches!(self, Access::Browser | Access::Confirm)
+        matches!(
+            self,
+            Access::Browser | Access::Confirm | Access::DashboardSecret
+        )
     }
 }
 
@@ -144,11 +161,19 @@ pub const KEYS: &[KeyInfo] = &[
     k("device_backups", "Nightly round and backups", "Device backups", "Devices that hand over their own configuration once a night.", "none", Kind::Table, Access::Browser, Apply::Restart),
     k("watched_backups", "Nightly round and backups", "Watched backups", "Backups other devices make that the host watches for age.", "none", Kind::Table, Access::Browser, Apply::Restart),
     k("mirror_remote", "Nightly round and backups", "Intent mirror remote", "Git remote the host mirrors its intent repository to; empty: off.", "off", Kind::Text, Access::Browser, Apply::Restart),
+    // fix-113 ADDENDUM (owner + chassis-rs, 2026-10-01): where a
+    // `backup_pause: chassis` native backup stages its local copy.
+    k("native_backup_staging_dir", "Nightly round and backups", "Chassis backup staging directory", "Where a chassis-paused native backup (backup_pause: chassis) tars its data locally before restic uploads it, so the write-pause only lasts as long as the local copy, not the upload. A directory on a data pool, not the root disk. \"none\": no staging — chassis-paused backups tar straight to restic under a renewed pause.", "/appdata/.backup-staging", Kind::Text, Access::Browser, Apply::Live),
+    k("native_backup_staging_cap_mib", "Nightly round and backups", "Chassis backup staging cap", "Largest one staged tar may be, in MiB, before a 20% safety margin; a copy that would not fit (that margin, or the directory's free space) skips staging for that run and backs up live under the renewed pause instead.", "10240 (10 GiB)", Kind::Int { min: 1, max: U32 }, Access::Browser, Apply::Live),
     // ── Notifications ───────────────────────────────────────────────────
     k("notify_webhook", "Notifications", "Notification webhook", "Where the host posts a notification after each operation; empty: off.", "off", Kind::Url, Access::Browser, Apply::Live),
     k("notify_auth_bearer", "Notifications", "Webhook token", "The bearer token sent with it. A secret: changed over ssh only.", "none", Kind::Text, Access::Secret, Apply::Restart),
     k("notify_fallback_webhook", "Notifications", "Fallback webhook", "The second route, tried when the first does not answer 2xx.", "none", Kind::Url, Access::Browser, Apply::Restart),
     k("notify_fallback_auth_bearer", "Notifications", "Fallback token", "The bearer token of the second route. A secret: changed over ssh only.", "none", Kind::Text, Access::Secret, Apply::Restart),
+    k("notify_tls_cert", "Notifications", "Pinned hub certificate", "Path to the LAN self-signed certificate (PEM) an https:// notify route is pinned to. Not a secret — the fingerprint below is what proves it.", "none", Kind::Text, Access::Browser, Apply::Restart),
+    k("notify_tls_fingerprint", "Notifications", "Pinned hub fingerprint", "SHA-256 of that certificate. Read it again from the container (openssl x509 -noout -fingerprint -sha256) whenever the certificate is regenerated.", "none", Kind::Text, Access::Browser, Apply::Restart),
+    // ── Nightly checks ──────────────────────────────────────────────────
+    k("cloudflare_token", "Nightly checks", "Cloudflare read-only token", "Lets the host's own nightly round compare the Cloudflare edge against captured/gateway/, the same comparison `homelab check` runs from the workstation. Read-only token; set or replaced here (never read back) or over ssh. Absent: the nightly comparison reports \"not configured\", not broken.", "none", Kind::Text, Access::DashboardSecret, Apply::Restart),
     k("dashboard_url", "Notifications", "Dashboard address", "The dashboard's public address; a push links to its page there (click_url).", "none: a push carries no link", Kind::Url, Access::Browser, Apply::Restart),
     k("watch_url", "Notifications", "Dashboard health address", "The dashboard's health address on the house network; the host asks it every minute and sends an urgent notice after five minutes without an answer.", "none: the dashboard is not watched", Kind::Url, Access::Browser, Apply::Restart),
     k("watch_interval_s", "Notifications", "Watch interval", "How often the host asks the dashboard's health address, and the fleet default for how often the dashboard's own minute watch asks a tile (a tile may set its own in its stack file).", "60", Kind::Int { min: 10, max: 86_400 }, Access::Browser, Apply::Restart),
@@ -194,12 +219,19 @@ pub fn key_info(key: &str) -> Option<&'static KeyInfo> {
 
 /// Keys whose value is never sent anywhere.
 pub fn is_secret(key: &str) -> bool {
-    key_info(key).is_some_and(|k| k.access == Access::Secret)
+    key_info(key).is_some_and(|k| matches!(k.access, Access::Secret | Access::DashboardSecret))
 }
 
 /// Why `value` is not a value for `key`, or Ok. `null` is always allowed
 /// for an editable key: it removes the key, and the host takes its default.
 /// Tables are checked by the host against its own types.
+///
+/// Browser-only gate (`Access::editable`) plus the shape check
+/// ([`check_shape`]). A caller whose own path already decided a key may be
+/// changed — `homelab host apply` reading `config/host.toml`, or the
+/// dashboard's declarative commit of it — checks shape alone, since that
+/// whole-file apply is the ssh-equivalent path `Locked`/`SshOnly` keys name
+/// as their real route (arch-self; fix-110).
 pub fn check_value(key: &str, value: &serde_json::Value) -> Result<(), String> {
     let Some(info) = key_info(key) else {
         return Err(format!("{key} is not a setting the host reads"));
@@ -213,6 +245,15 @@ pub fn check_value(key: &str, value: &serde_json::Value) -> Result<(), String> {
             _ => format!("{key} is a secret and is changed over ssh only"),
         });
     }
+    check_shape(key, value)
+}
+
+/// Why `value` is not shaped like `key`'s kind, or Ok — without the access
+/// gate `check_value` adds. `null` is always allowed: it removes the key.
+pub fn check_shape(key: &str, value: &serde_json::Value) -> Result<(), String> {
+    let Some(info) = key_info(key) else {
+        return Err(format!("{key} is not a setting the host reads"));
+    };
     if value.is_null() {
         return Ok(());
     }
@@ -296,4 +337,105 @@ pub fn redact(key: &str, value: &serde_json::Value) -> serde_json::Value {
         }
     }
     value.clone()
+}
+
+/// JSON as a TOML value; `null` inside a value has no TOML form (only a
+/// whole key may be null, meaning "remove it", which the caller handles
+/// before reaching here). Shared by the host's per-key `SetHostConfig` and
+/// `config/host.toml`'s whole-file apply (fix-110), so both read the same
+/// JSON the dashboard and `homelab host apply` send.
+pub fn json_to_toml(v: &serde_json::Value) -> Result<toml::Value, String> {
+    Ok(match v {
+        serde_json::Value::Null => return Err("null inside a value has no TOML form".into()),
+        serde_json::Value::Bool(b) => toml::Value::Boolean(*b),
+        serde_json::Value::Number(n) => match n.as_i64() {
+            Some(i) => toml::Value::Integer(i),
+            None => toml::Value::Float(n.as_f64().ok_or("not a number")?),
+        },
+        serde_json::Value::String(s) => toml::Value::String(s.clone()),
+        serde_json::Value::Array(a) => {
+            toml::Value::Array(a.iter().map(json_to_toml).collect::<Result<_, _>>()?)
+        }
+        serde_json::Value::Object(o) => {
+            let mut t = toml::Table::new();
+            for (k, x) in o {
+                if !x.is_null() {
+                    t.insert(k.clone(), json_to_toml(x)?);
+                }
+            }
+            toml::Value::Table(t)
+        }
+    })
+}
+
+/// fix-110: `raw` (a TOML document) with `changes` applied (a key → null
+/// removes it), shape-checked key by key with [`check_shape`] — not
+/// [`check_value`]'s access gate, which the caller's own path already
+/// decided (see `check_value`'s doc). Returns the new pretty-printed TOML
+/// text, or every reason it is refused. Pure: parsing and type-checking
+/// only, no file I/O and no `FileConfig`/`startup_problems` validation —
+/// the host runs those itself before it writes anything, since only the
+/// host knows the full set of fields and their cross-field rules.
+pub fn merge_changes(
+    raw: &str,
+    changes: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> Result<String, String> {
+    if changes.is_empty() {
+        return Err("no change was sent".into());
+    }
+    let mut why = Vec::new();
+    for (key, value) in changes {
+        if let Err(e) = check_shape(key, value) {
+            why.push(e);
+        }
+    }
+    if !why.is_empty() {
+        return Err(why.join("; "));
+    }
+    let mut table: toml::Table = if raw.trim().is_empty() {
+        toml::Table::new()
+    } else {
+        toml::from_str(raw).map_err(|e| format!("does not parse as TOML: {e}"))?
+    };
+    for (key, value) in changes {
+        if value.is_null() {
+            table.remove(key);
+        } else {
+            let v = json_to_toml(value).map_err(|e| format!("{key}: {e}"))?;
+            table.insert(key.clone(), v);
+        }
+    }
+    toml::to_string_pretty(&table).map_err(|e| e.to_string())
+}
+
+/// fix-110: `declared` (the non-secret table `config/host.toml` holds) laid
+/// over `current` (the host's own host.toml, parsed), keeping every secret
+/// key `current` already sets untouched — `declared` must never carry one
+/// (checked here), since the repository is not where a secret lives. A key
+/// `current` sets that `declared` does not is dropped: the repository is
+/// the whole declarative picture for everything but secrets, the same rule
+/// `homelab apply` already keeps for a stack's files. Returns the merged
+/// table, or why `declared` cannot be applied. Pure.
+pub fn apply_declared(
+    declared: &toml::Table,
+    current: &toml::Table,
+) -> Result<toml::Table, String> {
+    let secret_in_repo: Vec<&str> = declared
+        .keys()
+        .map(String::as_str)
+        .filter(|k| is_secret(k))
+        .collect();
+    if !secret_in_repo.is_empty() {
+        return Err(format!(
+            "config/host.toml sets {} — a secret, which must never be in the repository",
+            secret_in_repo.join(", ")
+        ));
+    }
+    let mut merged = declared.clone();
+    for (key, value) in current {
+        if is_secret(key) {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    Ok(merged)
 }

@@ -191,7 +191,7 @@ impl Scheduler {
             link: Some(if on_stack {
                 homelab_core::notify::page::stack(&s.stack)
             } else {
-                "/app/schedules".into()
+                "/schedules".into()
             }),
             label: Some(s.action.clone()),
             fixes: crate::core::notify::fix_for(&crate::core::notify::FixSource::Retry {

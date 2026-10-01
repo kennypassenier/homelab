@@ -110,14 +110,14 @@ async fn follow_live_a_step_is_announced_and_held_for_the_countdown() {
     let w = world("announce");
     let holds = Holds::default();
     let t0 = Instant::now();
-    let pending = send(&w, goto("/app/jobs"), &holds);
+    let pending = send(&w, goto("/jobs"), &holds);
     let a = announced(&w).await;
     assert_eq!(a.text, "go to the jobs page");
     assert!(
         a.countdown && a.total_ms == 3000 && a.left_ms <= 3000,
         "{a:?}"
     );
-    assert_eq!(w.driver.snapshot().page, "/app/", "not taken yet");
+    assert_eq!(w.driver.snapshot().page, "/", "not taken yet");
     // Every tab heard the announcement before the step.
     let kinds: Vec<Value> = w
         .live
@@ -129,7 +129,7 @@ async fn follow_live_a_step_is_announced_and_held_for_the_countdown() {
     let answer = pending.await.unwrap();
     assert_eq!(answer["ok"], true, "{answer}");
     assert!(t0.elapsed() >= Duration::from_secs(3), "{:?}", t0.elapsed());
-    assert_eq!(answer["state"]["page"], "/app/jobs");
+    assert_eq!(answer["state"]["page"], "/jobs");
     assert!(answer["state"]["announce"].is_null());
     assert!(
         holds.lock().unwrap().is_empty(),
@@ -139,7 +139,7 @@ async fn follow_live_a_step_is_announced_and_held_for_the_countdown() {
     // A step that will be refused is refused at once, never announced.
     let before = w.live.events("drive").len();
     let t1 = Instant::now();
-    let r = send(&w, goto("/app/nowhere"), &holds).await.unwrap();
+    let r = send(&w, goto("/nowhere"), &holds).await.unwrap();
     assert_eq!(r["ok"], false);
     assert!(t1.elapsed() < Duration::from_millis(100));
     assert!(w.live.events("drive")[before..]
@@ -182,7 +182,7 @@ async fn follow_live_a_step_is_announced_and_held_for_the_countdown() {
 async fn follow_live_pause_holds_the_step_until_continue_or_the_longest_pause() {
     let w = world("pause");
     let holds = Holds::default();
-    let pending = send(&w, goto("/app/jobs"), &holds);
+    let pending = send(&w, goto("/jobs"), &holds);
     announced(&w).await;
     let st = w
         .driver
@@ -194,7 +194,7 @@ async fn follow_live_pause_holds_the_step_until_continue_or_the_longest_pause() 
     );
     tokio::time::sleep(Duration::from_secs(600)).await;
     assert!(!pending.is_finished(), "paused for 10 min, still held");
-    assert_eq!(w.driver.snapshot().page, "/app/");
+    assert_eq!(w.driver.snapshot().page, "/");
     // The screen can be read while a step is held.
     let now = w.driver.step("wsl", Scope::Read, UiStep::State).await;
     assert_eq!(now["state"]["paused_by"], "the viewer kenny@example.org");
@@ -218,7 +218,7 @@ async fn follow_live_pause_holds_the_step_until_continue_or_the_longest_pause() 
         .unwrap();
     let answer = pending.await.unwrap();
     assert_eq!(answer["ok"], true, "{answer}");
-    assert_eq!(answer["state"]["page"], "/app/jobs");
+    assert_eq!(answer["state"]["page"], "/jobs");
     let notes: Vec<String> = holds
         .lock()
         .unwrap()
@@ -237,7 +237,7 @@ async fn follow_live_pause_holds_the_step_until_continue_or_the_longest_pause() 
         .control(Control::Pause, "the viewer kenny")
         .unwrap();
     let t0 = Instant::now();
-    let pending = send(&w, goto("/app/host"), &holds);
+    let pending = send(&w, goto("/host"), &holds);
     let r = pending.await.unwrap();
     assert!(
         t0.elapsed() >= Duration::from_secs(1800),
@@ -251,7 +251,7 @@ async fn follow_live_pause_holds_the_step_until_continue_or_the_longest_pause() 
         "{why}"
     );
     assert!(!r["refusal"]["fix"].as_str().unwrap().is_empty());
-    assert_eq!(r["state"]["page"], "/app/jobs", "nothing was taken");
+    assert_eq!(r["state"]["page"], "/jobs", "nothing was taken");
     assert!(r["state"]["paused_by"].is_null() && r["state"]["announce"].is_null());
 }
 
@@ -302,14 +302,14 @@ async fn follow_live_stop_ends_the_sequence_and_a_stopped_press_never_runs() {
         .any(|e| e["step"]["do"] == "done" && e["applied"] == true));
 
     // Refused until `done`, at once and without an announcement.
-    let r = send(&w, goto("/app/jobs"), &holds).await.unwrap();
+    let r = send(&w, goto("/jobs"), &holds).await.unwrap();
     let fix = r["refusal"]["fix"].as_str().unwrap();
     assert!(fix.contains("homelab ui done"), "{fix}");
     assert_eq!(
         w.driver.step("wsl", Scope::Operate, UiStep::Done).await["ok"],
         true
     );
-    let r = send(&w, goto("/app/jobs"), &holds).await.unwrap();
+    let r = send(&w, goto("/jobs"), &holds).await.unwrap();
     assert_eq!(r["ok"], true, "{r}");
     // Nothing to stop or pause once nobody drives.
     w.driver.step("wsl", Scope::Operate, UiStep::Done).await;
@@ -326,7 +326,7 @@ async fn follow_live_the_plan_is_ticked_step_by_step_and_a_deviation_marks_it_ch
     let w = world("plan");
     let holds = Holds::default();
     let plan = UiStep::Plan {
-        steps: vec![goto("/app/jobs"), goto("/app/host"), UiStep::Done],
+        steps: vec![goto("/jobs"), goto("/host"), UiStep::Done],
     };
     let r = w.driver.step("wsl", Scope::Operate, plan).await;
     assert_eq!(r["ok"], true, "{r}");
@@ -336,12 +336,12 @@ async fn follow_live_the_plan_is_ticked_step_by_step_and_a_deviation_marks_it_ch
         (p["next"].clone(), p["changed"].clone()),
         (0.into(), false.into())
     );
-    assert_eq!(r["state"]["page"], "/app/");
-    let r = send(&w, goto("/app/jobs"), &holds).await.unwrap();
+    assert_eq!(r["state"]["page"], "/");
+    let r = send(&w, goto("/jobs"), &holds).await.unwrap();
     assert_eq!(r["state"]["plan"]["next"], 1);
     assert_eq!(r["state"]["plan"]["steps"][0]["done"], true);
     assert_eq!(r["state"]["plan"]["changed"], false);
-    let r = send(&w, goto("/app/log"), &holds).await.unwrap();
+    let r = send(&w, goto("/log"), &holds).await.unwrap();
     assert_eq!(r["ok"], true, "a step off the plan is still taken");
     assert_eq!(r["state"]["plan"]["changed"], true);
     assert_eq!(r["state"]["plan"]["next"], 1);
@@ -386,7 +386,7 @@ async fn follow_live_the_control_route_pauses_and_refuses_when_nobody_drives() {
             .unwrap();
     assert_eq!(body["why"], "Claude is not driving");
     let holds = Holds::default();
-    let pending = send(&w, goto("/app/jobs"), &holds);
+    let pending = send(&w, goto("/jobs"), &holds);
     announced(&w).await;
     let r = app
         .clone()

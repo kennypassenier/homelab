@@ -182,6 +182,59 @@ mod tests {
         assert_eq!(v["source"], "homelab-host");
         assert_eq!(v["label"], "nightly");
     }
+
+    /// fix-126: `--cacert` is added only for an `https://` url with a path
+    /// given, never for `http://` (plain routes stay untouched during the
+    /// stepwise migration) and never silently dropped when one is given.
+    #[test]
+    fn curl_args_pinned_adds_cacert_only_for_https_with_a_path() {
+        let plain = curl_args_pinned("{}", "http://kyu.lan/x", None, Some("/tls/hub.pem"));
+        assert!(
+            !plain.contains(&"--cacert".to_string()),
+            "http:// must not carry --cacert even if a path is given: {:?}",
+            plain
+        );
+        let https_unpinned = curl_args_pinned("{}", "https://kyu.lan/x", None, None);
+        assert!(
+            !https_unpinned.contains(&"--cacert".to_string()),
+            "{:?}",
+            https_unpinned
+        );
+        let https_pinned = curl_args_pinned("{}", "https://kyu.lan/x", None, Some("/tls/hub.pem"));
+        let i = https_pinned
+            .iter()
+            .position(|a| a == "--cacert")
+            .expect("--cacert missing");
+        assert_eq!(https_pinned[i + 1], "/tls/hub.pem");
+    }
+
+    /// fix-126: `cert_fingerprint` is the SHA-256 of the PEM's DECODED body
+    /// (the DER bytes), not of the PEM text itself — frozen with a body
+    /// that is not a real certificate (the function never parses X.509, it
+    /// only base64-decodes and hashes) so the test needs no real key pair.
+    #[test]
+    fn cert_fingerprint_hashes_the_decoded_der_not_the_pem_text() {
+        use sha2::{Digest, Sha256};
+        // base64 of "hello"
+        let pem = "-----BEGIN CERTIFICATE-----\naGVsbG8=\n-----END CERTIFICATE-----\n";
+        let got = cert_fingerprint(pem).unwrap();
+        let want: String = Sha256::digest(b"hello")
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
+        assert_eq!(got, want);
+    }
+
+    /// fix-126: a PEM whose body is not valid base64 is refused with a
+    /// readable reason, not a panic — this runs on whatever file
+    /// `notify_tls_cert` happens to name, which a typo can point anywhere.
+    #[test]
+    fn cert_fingerprint_refuses_invalid_base64() {
+        assert!(cert_fingerprint(
+            "-----BEGIN CERTIFICATE-----\nnot-base64!!!\n-----END CERTIFICATE-----\n"
+        )
+        .is_err());
+    }
 }
 
 /// G16 · did the POST actually arrive?
@@ -283,6 +336,27 @@ pub fn header_file_content(token: &str) -> String {
 /// through a 0600 header file that curl reads with `-H @<path>`; argv only
 /// ever names the path.
 pub fn curl_args(payload: &str, url: &str, header_file: Option<&str>) -> Vec<String> {
+    curl_args_pinned(payload, url, header_file, None)
+}
+
+/// [`curl_args`], plus `--cacert cacert_path` when one is given.
+///
+/// fix-126 (TLS to the message hub, owner decision 2026-10-01): a route
+/// pinned to a LAN self-signed certificate (no public CA, no Cloudflare)
+/// trusts exactly that certificate and nothing curl's system CA bundle
+/// would otherwise accept — the same "trust only what was pinned" shape as
+/// the client's own TLS pin to the host (`client/src/tls.rs`), done with
+/// curl's own mechanism rather than a second TLS stack. `cacert_path` is
+/// refused as a route at startup (`startup_problems`) unless its on-disk
+/// fingerprint matches the configured one, so this function itself does not
+/// re-check it — by the time a POST is sent, the file is already the
+/// pinned certificate.
+pub fn curl_args_pinned(
+    payload: &str,
+    url: &str,
+    header_file: Option<&str>,
+    cacert_path: Option<&str>,
+) -> Vec<String> {
     let mut args: Vec<String> = [
         "-m",
         "5",
@@ -306,10 +380,40 @@ pub fn curl_args(payload: &str, url: &str, header_file: Option<&str>) -> Vec<Str
         args.push("-H".into());
         args.push(format!("@{}", path));
     }
+    if url.starts_with("https://") {
+        if let Some(cacert) = cacert_path {
+            // --cacert alone, not --cacert plus the system bundle: the
+            // whole point is trusting only the pinned certificate, not
+            // widening what is trusted.
+            args.push("--cacert".into());
+            args.push(cacert.into());
+        }
+    }
     args.push("-d".into());
     args.push(payload.into());
     args.push(url.into());
     args
+}
+
+/// fix-126: the SHA-256 of a PEM certificate file's DER bytes, lowercase
+/// hex — what a configured `notify_tls_fingerprint` is checked against
+/// before the host ever trusts the file at `notify_tls_cert`. Reusing the
+/// same shape as `homelab_host::tls::fingerprint_of`, but over bytes
+/// already read rather than a path, so core stays free of file I/O.
+pub fn cert_fingerprint(pem: &str) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let body: String = pem
+        .lines()
+        .filter(|l| !l.starts_with("-----"))
+        .collect::<String>();
+    use base64::Engine as _;
+    let der = base64::engine::general_purpose::STANDARD
+        .decode(body.trim())
+        .map_err(|e| format!("invalid certificate PEM: {e}"))?;
+    Ok(Sha256::digest(&der)
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect())
 }
 
 // ── Decision notify-routing (2026-09-30) ───────────────────────────────
@@ -326,16 +430,20 @@ pub fn curl_args(payload: &str, url: &str, header_file: Option<&str>) -> Vec<Str
 pub const DEFAULT_DASHBOARD_URL: &str = "";
 
 /// The dashboard pages a notice links to (admin/web/js/router.js).
+///
+/// nav-decisions (chassis-rs 3.1.0, 2026-10-01): every page lives at the
+/// root now (the web app mounts at `/`; `/app/…` from before is a 308
+/// chassis answers, never a path this crate should mint).
 pub mod page {
-    pub const NOTIFICATIONS: &str = "/app/notifications";
-    pub const HOST: &str = "/app/host";
-    pub const CHECKS: &str = "/app/checks";
-    pub const TODAY: &str = "/app/today";
-    pub const JOBS: &str = "/app/jobs";
+    pub const NOTIFICATIONS: &str = "/notifications";
+    pub const HOST: &str = "/host";
+    pub const CHECKS: &str = "/health?block=checks";
+    pub const TODAY: &str = "/health?block=today";
+    pub const JOBS: &str = "/jobs";
 
     /// One stack's page.
     pub fn stack(name: &str) -> String {
-        format!("/app/stacks/{}", name)
+        format!("/stacks/{}", name)
     }
 }
 

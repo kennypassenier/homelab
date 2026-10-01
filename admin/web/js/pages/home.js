@@ -1,4 +1,6 @@
-// The home page (replace-homepage, Kenny 2026-09-30, renamed from Start):
+// The Apps page (replace-homepage, Kenny 2026-09-30, renamed from Start;
+// nav-decisions, Kenny 2026-10-01: renamed again from Home to Apps and
+// moved to the root `/`, Overview's old address):
 // one tile per service, grouped, each opening its app in a new tab, with
 // the line its stack file's reading prints. Everything on a tile is
 // declared in the stack that owns the route (`tiles:` in lxc-compose.yml);
@@ -156,7 +158,7 @@ function healthStrip(problems) {
         p.text,
       ),
     ),
-    h("li", null, h("a", { href: "/app/health" }, "Open Health")),
+    h("li", null, h("a", { href: "/health" }, "Open Health")),
   );
   summary.addEventListener("click", () => {
     const open = summary.getAttribute("aria-expanded") === "true";
@@ -215,7 +217,7 @@ export function mount(root) {
       ),
     ),
   );
-  root.replaceChildren(h("h1", null, "Home"), status, body, strip, legend);
+  root.replaceChildren(h("h1", null, "Apps"), status, body, strip, legend);
   const abort = new AbortController();
   (async () => {
     const [r, w] = await Promise.all([

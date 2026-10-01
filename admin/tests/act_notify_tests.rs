@@ -154,10 +154,7 @@ fn feat_ops_8_the_push_is_the_hosts_payload_from_homelab_admin() {
     assert_eq!(p["ok"], false);
     // Decision notify-detail: the short version, title and what to do.
     assert_eq!(p["error"], "t — b");
-    assert_eq!(
-        p["click_url"],
-        "https://admin.kp-soft.dev/app/notifications"
-    );
+    assert_eq!(p["click_url"], "https://admin.kp-soft.dev/notifications");
     let ok: serde_json::Value = serde_json::from_str(&push_payload(
         &draft(Kind::ActionDone, None, Some(900)),
         "3.62.2",
@@ -261,4 +258,87 @@ fn arch_config_act_settings_from_the_environment() {
         !e.contains("secret-value"),
         "a secret never lands in an error: {e}"
     );
+}
+
+/// fix-126 (TLS to the message hub, owner decision 2026-10-01): an
+/// `https://` notify route needs both `HOMELAB_ADMIN_NOTIFY_TLS_CERT` and
+/// `HOMELAB_ADMIN_NOTIFY_TLS_FINGERPRINT` — a `http://` route needs
+/// neither, and the two must come as a pair, not separately.
+#[test]
+fn fix_126_an_https_notify_route_needs_both_pin_variables() {
+    let env = |pairs: &'static [(&'static str, &'static str)]| {
+        move |k: &str| {
+            pairs
+                .iter()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| v.to_string())
+        }
+    };
+    // http:// needs no pin at all.
+    let c = from_env(&env(&[(
+        "HOMELAB_ADMIN_NOTIFY_URL",
+        "http://10.10.10.9:8080/publish/notify.kenny",
+    )]))
+    .unwrap();
+    assert_eq!(c.notify_tls_cert, None);
+    assert_eq!(c.notify_tls_fingerprint, None);
+
+    // https:// with no pin at all is refused.
+    let e = from_env(&env(&[(
+        "HOMELAB_ADMIN_NOTIFY_URL",
+        "https://10.10.10.9:8443/publish/notify.kenny",
+    )]))
+    .unwrap_err();
+    assert!(
+        e.contains("TLS_CERT") && e.contains("TLS_FINGERPRINT"),
+        "{e}"
+    );
+
+    // https:// with both set is accepted.
+    let c = from_env(&env(&[
+        (
+            "HOMELAB_ADMIN_NOTIFY_URL",
+            "https://10.10.10.9:8443/publish/notify.kenny",
+        ),
+        ("HOMELAB_ADMIN_NOTIFY_TLS_CERT", "/appdata/admin/hub.pem"),
+        ("HOMELAB_ADMIN_NOTIFY_TLS_FINGERPRINT", "ab12"),
+    ]))
+    .unwrap();
+    assert_eq!(c.notify_tls_cert.as_deref(), Some("/appdata/admin/hub.pem"));
+    assert_eq!(c.notify_tls_fingerprint.as_deref(), Some("ab12"));
+
+    // The pin variables set on a plain http:// route is also refused —
+    // leftover config from a migration that went back to http would
+    // otherwise go unnoticed.
+    let e = from_env(&env(&[
+        (
+            "HOMELAB_ADMIN_NOTIFY_URL",
+            "http://10.10.10.9:8080/publish/notify.kenny",
+        ),
+        ("HOMELAB_ADMIN_NOTIFY_TLS_CERT", "/appdata/admin/hub.pem"),
+        ("HOMELAB_ADMIN_NOTIFY_TLS_FINGERPRINT", "ab12"),
+    ]))
+    .unwrap_err();
+    assert!(
+        e.contains("TLS_CERT") || e.contains("TLS_FINGERPRINT"),
+        "{e}"
+    );
+}
+
+/// fix-126: `KyuPusher::new_pinned` builds successfully whether or not a
+/// pin is given — the mismatch/missing-pin cases are refused loudly via
+/// `tracing::error!` (unobservable here) rather than a panic, so the
+/// pusher always exists and a later send simply fails at the TLS
+/// handshake. This freezes the "never panics" contract.
+#[test]
+fn fix_126_kyu_pusher_new_pinned_never_panics() {
+    use homelab_admin::shell::actions_notify::KyuPusher;
+    let _ = KyuPusher::new_pinned("https://kyu.lan/x".into(), None, None, None);
+    let _ = KyuPusher::new_pinned(
+        "https://kyu.lan/x".into(),
+        None,
+        Some("-----BEGIN CERTIFICATE-----\naGVsbG8=\n-----END CERTIFICATE-----\n"),
+        Some("wrong-fingerprint"),
+    );
+    let _ = KyuPusher::new_pinned("http://kyu.lan/x".into(), None, None, None);
 }

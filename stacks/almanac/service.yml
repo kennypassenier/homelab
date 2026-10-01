@@ -68,6 +68,13 @@ update_cmd: cd /appdata/almanac/almanac-config && set -a && . /appdata/almanac/a
 # 2026-09-02: release v1.4.0 carries `almanac` and a SHA256SUMS, which is what
 # `homelab install-native` verifies against before it ships anything.
 release_repo: kennypassenier/almanac
+# fix-113 (owner decision, Kenny 2026-10-01): almanac is paused for its
+# nightly backup through the chassis-rs kit's own backup-pause/backup-resume
+# subcommand (chassis-rs commit 722249b) instead of a plain systemctl stop —
+# almanac's profiles and latch credentials are written at runtime, and the
+# kit can hold writes without a full stop. Falls back to stopping the unit
+# when the binary predates the subcommand or cannot quiesce it.
+backup_pause: chassis
 # B1: almanac updates itself and keeps its previous binary; the orchestrator
 # observes its revert and never installs over it.
 # fix-58 (2026-09-27): `self`, not `manual`. The nightly round runs the

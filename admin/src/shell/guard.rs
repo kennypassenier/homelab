@@ -48,8 +48,8 @@ fn refuse(r: Refusal) -> Response {
 }
 
 /// The refusal page's module, answered before the locks: a refused visitor
-/// never reaches `/app` (behind the login), and the script is the same
-/// public kp-themes glue for everyone.
+/// never reaches the dashboard (behind the login), and the script is the
+/// same public kp-themes glue for everyone.
 // The Err is chassis' request-guard contract: the response to send instead.
 #[allow(clippy::result_large_err)]
 pub fn refusal_script(r: &GuardRequest) -> Result<(), Response> {

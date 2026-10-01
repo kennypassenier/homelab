@@ -264,10 +264,19 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         | BackupCalendar { .. }
         | GetHostConfig
         | SetHostConfig { .. }
+        | ApplyHostConfig { .. }
         | Ui { .. }
         | UiAttach
         | UiReply { .. }
         | UiHold { .. }
+        // fix-120: the dashboard's token dialogs send these directly
+        // (`admin/src/shell/edit.rs::issue_token`/`revoke_token`); the CLI
+        // equivalent (`homelab token issue|list|revoke`) is documented on
+        // its own, not built from a `Command` that carries a plaintext
+        // token in the reply this function has no way to show.
+        | TokenIssue { .. }
+        | TokenList
+        | TokenRevoke { .. }
         // feat-backup-1/3, feat-secrets-1/2: reads and a value write with
         // no CLI verb of their own — the Backups and Secrets pages are the
         // only callers, so there is nothing to mirror as a copyable line.

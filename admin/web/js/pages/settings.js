@@ -23,6 +23,7 @@ import {
   editable,
   fieldText,
   hostSettingsBody,
+  isSecret,
   parseKey,
   valueText,
 } from "../editforms.js";
@@ -55,6 +56,33 @@ export function mount(root) {
     "aria-live": "polite",
   });
   const ago = agoEl("read");
+  // fix-120 (per-machine tokens, owner decision 2026-10-01): one bearer per
+  // machine, named, hashed at rest (host.toml `[[tokens]]`) — issued and
+  // revoked here so a lost or retired machine's access ends without
+  // touching any other machine's token. The legacy single `token` key still
+  // works (shown as "legacy"); the migration note is in OPERATIONS_RUNBOOK.
+  const tokensAgo = agoEl("read");
+  const tk = tableBlock({
+    remember: "tokens",
+    caption: "Per-machine tokens",
+    search: "Search tokens",
+    state: "loading",
+    nothing: "No tokens yet: Issue a token adds one.",
+    columns: [
+      { label: "Name", sort: "text" },
+      { label: "Scope", sort: "text", filter: "choice" },
+      { label: "Revoke", sort: "text" },
+    ],
+  });
+  const issueBtn = h(
+    "button",
+    {
+      type: "button",
+      class: "kp-button kp-button--primary",
+      id: "tokens-issue",
+    },
+    "Issue token",
+  );
   const t = tableBlock({
     remember: "host-settings",
     caption: "host.toml on pve",
@@ -70,7 +98,7 @@ export function mount(root) {
         label: "Changed",
         sort: "text",
         order:
-          "ssh only (secret),ssh only (safety policy),ssh only (can cut the dashboard off),Here with the name typed,Here",
+          "ssh only (secret),ssh only (safety policy),ssh only (can cut the dashboard off),Here with the name typed,Here (secret, write-only),Here",
         filter: "choice",
       },
       { label: "Edit", sort: "text" },
@@ -90,10 +118,25 @@ export function mount(root) {
     staged,
     t.wrap,
     h("p", null, ago),
+    h(
+      "div",
+      { class: "title-row" },
+      h("h2", null, "Per-machine tokens"),
+      issueBtn,
+    ),
+    h(
+      "p",
+      null,
+      "Each machine gets its own bearer, hashed at rest; revoking one never touches another's. The legacy single token (host.toml's bare `token` key, shown as “legacy”) still works until every machine has its own — see the migration note in the runbook.",
+    ),
+    tk.wrap,
+    h("p", null, tokensAgo),
   );
   const detach = attachDataTables(root);
   const table = dataTable(t.wrap);
+  const tokensTable = dataTable(tk.wrap);
   const unbind = bindTableUrl(table, "settings");
+  const unbindTokens = bindTableUrl(tokensTable, "tokens");
   const abort = new AbortController();
 
   // ── the working copy ──
@@ -232,6 +275,238 @@ export function mount(root) {
     setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
   };
 
+  // ── fix-120: per-machine tokens ──
+  const paintTokens = (
+    /** @type {{name: string, scope: string}[]} */ tokens,
+  ) => {
+    tk.tbody.replaceChildren(
+      ...tokens.map((v) => {
+        const revoke = h(
+          "button",
+          {
+            type: "button",
+            class: "kp-button kp-button--sm kp-button--destructive",
+            "data-token": v.name,
+          },
+          "Revoke",
+        );
+        if (v.name === "legacy") {
+          revoke.disabled = true;
+          revoke.title =
+            "the single `token` key is cleared over ssh (see the migration note)";
+        } else {
+          revoke.addEventListener("click", () => revokeTokenDialog(v.name));
+        }
+        return h(
+          "tr",
+          { "data-kp-row-key": v.name },
+          td(v.name),
+          td(v.scope),
+          h("td", null, revoke),
+        );
+      }),
+    );
+    tokensTable?.refresh();
+  };
+  const loadTokens = async () => {
+    tk.loading({ words: "Reading the tokens from the host…" });
+    const r = await fetchJson("/data/tokens", "the tokens", abort.signal);
+    if (!r.ok) {
+      tk.failed(r.error);
+      return;
+    }
+    paintTokens(r.body.tokens ?? []);
+    tk.ready();
+    setAgo(tokensAgo, Date.now() / 1000);
+  };
+  const issueTokenDialog = () => {
+    const name = h("input", {
+      class: "kp-field__input",
+      type: "text",
+      id: "token-name",
+      autocomplete: "off",
+      placeholder: "e.g. wsl, ct120-dev",
+    });
+    const scope = h(
+      "select",
+      { class: "kp-field__input", id: "token-scope" },
+      h("option", { value: "read" }, "read — look only"),
+      h("option", { value: "operate" }, "operate — act without destroying"),
+      h(
+        "option",
+        { value: "all" },
+        "all — everything, including the dashboard's own",
+      ),
+    );
+    scope.value = "operate";
+    const go = h(
+      "button",
+      { type: "button", class: "kp-button kp-button--primary" },
+      "Issue",
+    );
+    const cancel = h(
+      "button",
+      { type: "button", class: "kp-button" },
+      "Cancel",
+    );
+    const errBox = h("div");
+    const d = openDialog({
+      title: "Issue a new token",
+      description:
+        "What is it for, and what may it do? The plaintext is shown once, right after this — save it there; the host keeps only its SHA-256.",
+      id: "token-issue-dialog",
+      body: [
+        h(
+          "div",
+          { class: "kp-field" },
+          h("label", { class: "kp-field__label", for: "token-name" }, "Name"),
+          name,
+          h(
+            "span",
+            { class: "kp-field__help" },
+            "What `homelab doctor` and audit.log will call this machine.",
+          ),
+        ),
+        h(
+          "div",
+          { class: "kp-field" },
+          h("label", { class: "kp-field__label", for: "token-scope" }, "Scope"),
+          scope,
+        ),
+        errBox,
+        h("div", { class: "kp-dialog__actions" }, cancel, go),
+      ],
+    });
+    const unregister = register("tokens-issue", {
+      dialog: d.dialog,
+      go: () => go,
+      cancel: () => cancel,
+      close: () => d.close(),
+    });
+    d.closed.then(unregister);
+    cancel.addEventListener("click", () => d.close());
+    go.addEventListener("click", async () => {
+      if (driven()) return;
+      const n = name.value.trim();
+      if (!n) {
+        markErrors(new Map([["name", name]]), { name: "A name is needed." });
+        return;
+      }
+      go.disabled = true;
+      const r = await send(
+        "POST",
+        "/data/tokens",
+        { name: n, scope: scope.value },
+        "a new token",
+      );
+      go.disabled = false;
+      if (!r.ok) {
+        errBox.replaceChildren(refusalCallout(r.error));
+        return;
+      }
+      d.close();
+      showIssuedToken(r.body.issued);
+      void loadTokens();
+    });
+  };
+  /** @param {{name: string, scope: string, token: string}} issued */
+  const showIssuedToken = (issued) => {
+    const box = h("input", {
+      class: "kp-field__input mono",
+      type: "text",
+      readonly: "",
+      id: "issued-token",
+    });
+    box.value = issued.token;
+    const copy = h("button", { type: "button", class: "kp-button" }, "Copy");
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(issued.token);
+        notify("Copied.", "success");
+      } catch {
+        box.select();
+      }
+    });
+    const done = h(
+      "button",
+      { type: "button", class: "kp-button kp-button--primary" },
+      "Done — I saved it",
+    );
+    const d = openDialog({
+      title: `${issued.name} · shown once`,
+      description: `Set it as HOMELAB_TOKEN on that machine (its own .env or ~/.config/homelab/env). It is never shown again, and it is not shared with any other machine's token.`,
+      id: "token-issued-dialog",
+      body: [
+        h("div", { class: "kp-field" }, box, " ", copy),
+        h("div", { class: "kp-dialog__actions" }, done),
+      ],
+    });
+    done.addEventListener("click", () => d.close());
+  };
+  const revokeTokenDialog = (/** @type {string} */ name) => {
+    const typed = h("input", {
+      class: "kp-field__input",
+      type: "text",
+      id: "token-revoke-confirm",
+      autocomplete: "off",
+      placeholder: name,
+    });
+    const go = h(
+      "button",
+      { type: "button", class: "kp-button kp-button--destructive" },
+      "Revoke",
+    );
+    const cancel = h(
+      "button",
+      { type: "button", class: "kp-button" },
+      "Cancel",
+    );
+    const errBox = h("div");
+    const d = openDialog({
+      title: `Revoke ${name}`,
+      description:
+        "That machine's token stops working at once; no other machine's token is affected.",
+      id: "token-revoke-dialog",
+      body: [
+        h(
+          "div",
+          { class: "kp-field" },
+          h(
+            "label",
+            { class: "kp-field__label", for: "token-revoke-confirm" },
+            `Type ${name} to confirm`,
+          ),
+          typed,
+        ),
+        errBox,
+        h("div", { class: "kp-dialog__actions" }, cancel, go),
+      ],
+    });
+    cancel.addEventListener("click", () => d.close());
+    go.addEventListener("click", async () => {
+      if (driven()) return;
+      if (typed.value.trim() !== name) {
+        markErrors(new Map([["c", typed]]), { c: `Type ${name} exactly.` });
+        return;
+      }
+      go.disabled = true;
+      const r = await send(
+        "DELETE",
+        `/data/tokens/${encodeURIComponent(name)}`,
+        undefined,
+        "revoke a token",
+      );
+      go.disabled = false;
+      if (!r.ok) {
+        errBox.replaceChildren(refusalCallout(r.error));
+        return;
+      }
+      notify(`${name} revoked.`, "success");
+      d.close();
+      void loadTokens();
+    });
+  };
+
   /** @param {HostField} f */
   const openKey = (f) => {
     const pending = changes.get(f.key);
@@ -261,7 +536,10 @@ export function mount(root) {
     } else {
       const i = h("input", {
         class: "kp-field__input",
-        type: "text",
+        // fix-143: a dashboard_secret field is write-only (the host never
+        // sends its value back, same as an ssh-only secret) — masked so it
+        // is not read over someone's shoulder while it is typed.
+        type: isSecret(f) ? "password" : "text",
         id,
         autocomplete: "off",
         spellcheck: "false",
@@ -297,7 +575,7 @@ export function mount(root) {
     );
     const d = openDialog({
       title: `${f.label} · ${f.key}`,
-      description: `${f.help} Default: ${f.default}. Takes effect ${f.apply === "live" ? "at once" : "at the host's next start"}.`,
+      description: `${f.help} Default: ${f.default}. Takes effect ${f.apply === "live" ? "at once" : "at the host's next start"}.${isSecret(f) ? ` Currently ${f.set ? "set" : "not set"} — the value itself is never shown.` : ""}`,
       id: "key-dialog",
       body: [
         h(
@@ -316,7 +594,9 @@ export function mount(root) {
             { class: "kp-field__help" },
             f.kind.type === "table"
               ? "Only this key: [[key]] or [key] sections. Empty removes it."
-              : "Empty removes the key: the host takes the default.",
+              : isSecret(f)
+                ? "Leave empty and save to clear it; Cancel leaves it as it is."
+                : "Empty removes the key: the host takes the default.",
           ),
         ),
         ...(f.access === "confirm"
@@ -552,19 +832,28 @@ export function mount(root) {
     },
   });
 
+  issueBtn.addEventListener("click", () => issueTokenDialog());
+
   const offRepo = listen("repo", (v) => drawRepo(repoBox, v, loadRepo));
   const offHost = listen("host_settings", () => void loadHost());
+  const offTokens = listen("tokens", () => void loadTokens());
   const retry = () => void loadHost().catch(() => {});
+  const retryTokens = () => void loadTokens().catch(() => {});
   root.addEventListener("kp-datatable-retry", retry);
+  root.addEventListener("kp-datatable-retry", retryTokens);
   void loadRepo().catch(() => {});
   retry();
+  retryTokens();
   return () => {
     unregister();
     abort.abort();
     offRepo();
     offHost();
+    offTokens();
     root.removeEventListener("kp-datatable-retry", retry);
+    root.removeEventListener("kp-datatable-retry", retryTokens);
     unbind();
+    unbindTokens();
     detach();
   };
 }

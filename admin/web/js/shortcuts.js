@@ -3,11 +3,33 @@
 // that does nothing. Two-key shortcuts ("g o") wait `CHORD_MS` for the
 // second key.
 
-import { NAV, OTHER_PAGES, STACK_TABS, stackHref } from "./router.js";
-
-const PAGES = [...NAV, ...OTHER_PAGES];
+import { STACK_TABS, stackHref } from "./router.js";
 
 export const CHORD_MS = 1500;
+
+/**
+ * Where "g" + a letter goes, and what the shortcut sheet calls it. A
+ * fixed, local table (never the page registry, pages.js): the sheet must
+ * work before `GET /api/kit/pages` has answered, and these are this
+ * app's own addresses either way.
+ * @type {Record<string, {href: string, label: string}>}
+ */
+const PAGES = {
+  overview: { href: "/overview", label: "Overview" },
+  home: { href: "/", label: "Apps" },
+  health: { href: "/health", label: "Health" },
+  metrics: { href: "/metrics", label: "Metrics" },
+  host: { href: "/host", label: "Host" },
+  activity: { href: "/activity", label: "Activity" },
+  jobs: { href: "/jobs", label: "Jobs" },
+  schedules: { href: "/schedules", label: "Schedules" },
+  notifications: { href: "/notifications", label: "Notifications" },
+  firewall: { href: "/firewall", label: "Firewall" },
+  settings: { href: "/settings", label: "Settings" },
+  log: { href: "/log", label: "Live log" },
+  apply: { href: "/apply", label: "Apply" },
+  shell: { href: "/shell", label: "Shell" },
+};
 
 /**
  * @typedef {{keys: string, what: string}} Shortcut
@@ -44,7 +66,7 @@ export const SHORTCUTS = [
       { keys: "/", what: "Search the first table on the page" },
       ...Object.entries(GO).map(([k, page]) => ({
         keys: `g ${k}`,
-        what: `Go to ${PAGES.find((n) => n.page === page)?.label}`,
+        what: `Go to ${PAGES[page]?.label}`,
       })),
     ],
   },
@@ -75,7 +97,7 @@ export function keyAction(state, key, now, route) {
   const chord = state.prefix != null && now - state.at <= CHORD_MS;
   if (chord && state.prefix === "g") {
     const page = GO[key.toLowerCase()];
-    const n = PAGES.find((x) => x.page === page);
+    const n = page ? PAGES[page] : undefined;
     return { state: idle(), action: n ? { navigate: n.href } : null };
   }
   if (key === "g") return { state: { prefix: "g", at: now }, action: null };

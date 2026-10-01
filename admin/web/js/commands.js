@@ -4,7 +4,8 @@
 // themes. Later milestones register their actions here (a deploy, a backup)
 // without the palette knowing them.
 
-import { NAV, OTHER_PAGES, STACK_TABS, stackHref } from "./router.js";
+import { pages } from "./pages.js";
+import { STACK_TABS, stackHref } from "./router.js";
 
 /**
  * @typedef {{fleet: import("./fleet.js").Fleet | null,
@@ -90,14 +91,20 @@ const PAGE_KEYS = {
   shell: "g x",
 };
 
-/** @type {Provider} */
+/**
+ * Every page the registry lists (nav-decisions: the palette renders from
+ * the same `GET /api/kit/pages` list as the bar — pages.js — so the kit's
+ * own pages, Status/Clients/Passkeys, show up here too without this
+ * module naming them). Empty until the registry has answered.
+ * @type {Provider}
+ */
 export const pageCommands = () =>
-  [...NAV, ...OTHER_PAGES].map((n) => ({
-    id: `page:${n.page}`,
+  (pages()?.pages ?? []).map((p) => ({
+    id: `page:${p.id}`,
     group: "Pages",
-    label: n.label,
-    href: n.href,
-    keys: PAGE_KEYS[n.page],
+    label: p.title,
+    href: p.path,
+    keys: PAGE_KEYS[p.id],
   }));
 
 /**

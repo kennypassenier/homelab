@@ -1,10 +1,23 @@
 import { setParams } from "./urlstate.js";
 
 // The client-side router's pure half (arch-frontend): a path in, a page
-// out. chassis answers index.html for every extensionless path under /app/.
-// feat-overview-8: every page and every stack tab has its own path; what a
-// page filters on lives in the query string (urlstate.js), so any state a
-// person can see is a link they can keep.
+// out. chassis answers index.html for every extensionless path the kit
+// does not claim (`/api`, `/static`, `/login`, `/logout`, `/clients`,
+// `/passkeys`, `/healthz`, `/readyz`, `/metrics` stay the kit's; with
+// `kit_pages_in_webapp` the kit claims no GET page at `/status`,
+// `/clients` or `/passkeys` either, so this app's fallback serves them
+// too). feat-overview-8: every page and every stack tab has its own path;
+// what a page filters on lives in the query string (urlstate.js), so any
+// state a person can see is a link they can keep.
+//
+// nav-decisions (chassis-rs 3.1.0, Kenny 2026-10-01): since every path now
+// lives at the root (`/app/…` from before is a 308 the kit answers, not a
+// route this module parses), and the nav bar and the command palette
+// (commands.js) render from the page registry (`GET /api/kit/pages`, see
+// pages.js) instead of a hand-written list here. This module keeps only
+// what the registry cannot know: which path belongs to which SPA page
+// (`ROUTES`), the stack sub-router, and the client-side fallback titles
+// for a page the registry has not answered yet.
 
 /** The stack page's tabs (feat-stacks-1), in order. */
 export const STACK_TABS = /** @type {const} */ ([
@@ -29,138 +42,116 @@ export const STACK_TABS = /** @type {const} */ ([
  *   {page: "log"} | {page: "shell"} | {page: "apply"} |
  *   {page: "presets"} |
  *   {page: "fleetview"} | {page: "backupcalendar"} |
+ *   {page: "status"} | {page: "clients"} | {page: "passkeys"} |
  *   {page: "start"} | {page: "today"} | {page: "doctor"} | {page: "checks"} |
  *   {page: "charts"} | {page: "traffic"} | {page: "timeline"} |
+ *   {page: "home-legacy"} |
  *   {page: "notfound", path: string}} Route
  * The last group (start, today, doctor, checks, charts, traffic, timeline)
  * are 2026-09-30's retired addresses: `route()` still names them, so an old
  * link or a Live view script naming one is recognised, but `main.js`
  * redirects every one of them before it ever mounts a page for them (see
- * `redirectFor`).
+ * `redirectFor`). `status`, `clients` and `passkeys` are the kit's own
+ * pages, drawn by this app since `kit_pages_in_webapp()`.
  */
 
 /**
- * The navigation bar, in order. `group` puts a page in a dropdown of the bar
- * (Kenny, 2026-09-29: thirteen top-level links wrapped onto a second row at
- * 1280 px); a page without one is a top-level link. 2026-09-30: Home,
- * Overview, Health, Metrics, Activity first (Kenny's order), each of the
- * last three now one page instead of a dropdown of them.
+ * Every address this app answers itself, by its route's `page`. The page
+ * registry (pages.js) carries each one's title, group and order; this
+ * table only says which URL is which page, for `route()` and `pageTitle`'s
+ * fallback before the registry has answered.
+ * @type {Record<string, Route["page"]>}
  */
-export const NAV = /** @type {const} */ ([
-  // replace-homepage: the tiles the stacks declare, renamed from Start.
-  { page: "home", href: "/app/home", label: "Home" },
-  { page: "overview", href: "/app/", label: "Overview" },
-  // feat-health-1: Today, Doctor and Checks, merged.
-  { page: "health", href: "/app/health", label: "Health" },
-  // feat-metrics-1 (replace-grafana + replace-goaccess): Charts and
-  // Traffic, merged.
-  { page: "metrics", href: "/app/metrics", label: "Metrics" },
-  // feat-activity-1: Activity and Timeline, merged.
-  { page: "activity", href: "/app/activity", label: "Activity" },
-  { page: "host", href: "/app/host", label: "Host" },
-  // TUI parity: LOG_STREAM, every host operation whoever started it.
-  { page: "log", href: "/app/log", label: "Live log", group: "Operations" },
-  { page: "jobs", href: "/app/jobs", label: "Jobs", group: "Operations" },
-  // TUI parity: `homelab apply`, plan first.
-  { page: "apply", href: "/app/apply", label: "Apply", group: "Operations" },
-  {
-    page: "schedules",
-    href: "/app/schedules",
-    label: "Schedules",
-    group: "Operations",
-  },
-  {
-    page: "firewall",
-    href: "/app/firewall",
-    label: "Firewall",
-    group: "Configure",
-  },
-  {
-    page: "backups",
-    href: "/app/backups",
-    label: "Backups",
-    group: "Configure",
-  },
-  {
-    page: "secrets",
-    href: "/app/secrets",
-    label: "Secrets",
-    group: "Configure",
-  },
-  {
-    page: "settings",
-    href: "/app/settings",
-    label: "Settings",
-    group: "Configure",
-  },
-  // visuals (feat-overview-7/10/11/12, feat-stacks-9/10): the fleet-wide
-  // graphs, grouped apart from the single-stack and single-purpose pages
-  // above so Configure does not grow a sixth unrelated entry.
-  {
-    page: "fleetview",
-    href: "/app/fleetview",
-    label: "Fleet view",
-    group: "Visuals",
-  },
-  {
-    page: "backupcalendar",
-    href: "/app/backupcalendar",
-    label: "Backup calendar",
-    group: "Visuals",
-  },
-]);
-
-/** Pages with a fixed address that the bar does not list (the bell opens it). */
-export const OTHER_PAGES = /** @type {const} */ ([
-  {
-    page: "notifications",
-    href: "/app/notifications",
-    label: "Notifications",
-  },
-  // TUI parity: the SHELL tab (the host page and a stack page link it) and
-  // the preset catalogue (`homelab presets`; the new-stack wizard links it).
-  { page: "shell", href: "/app/shell", label: "Shell" },
-  { page: "presets", href: "/app/presets", label: "Presets" },
-]);
-
-/** @type {Record<string, Route>} */
-const FIXED = {
-  "": { page: "overview" },
-  home: { page: "home" },
-  health: { page: "health" },
-  metrics: { page: "metrics" },
-  host: { page: "host" },
-  activity: { page: "activity" },
-  jobs: { page: "jobs" },
-  schedules: { page: "schedules" },
-  notifications: { page: "notifications" },
-  firewall: { page: "firewall" },
-  backups: { page: "backups" },
-  secrets: { page: "secrets" },
-  settings: { page: "settings" },
-  log: { page: "log" },
-  shell: { page: "shell" },
-  apply: { page: "apply" },
-  presets: { page: "presets" },
-  fleetview: { page: "fleetview" },
-  backupcalendar: { page: "backupcalendar" },
+const PATH_TO_PAGE = {
+  "": "home",
+  overview: "overview",
+  health: "health",
+  metrics: "metrics",
+  host: "host",
+  activity: "activity",
+  jobs: "jobs",
+  schedules: "schedules",
+  notifications: "notifications",
+  firewall: "firewall",
+  backups: "backups",
+  secrets: "secrets",
+  settings: "settings",
+  log: "log",
+  shell: "shell",
+  apply: "apply",
+  presets: "presets",
+  fleetview: "fleetview",
+  backupcalendar: "backupcalendar",
+  status: "status",
+  clients: "clients",
+  passkeys: "passkeys",
   // 2026-09-30: retired addresses, kept parseable for old links and for
   // Live view's known_page (core::drive checks formspec.json's page list,
-  // not this Route); `redirectFor` sends every one of them on to its new
+  // not this table); `redirectFor` sends every one of them on to its new
   // home before main.js ever mounts a page for them.
-  start: { page: "start" },
-  today: { page: "today" },
-  doctor: { page: "doctor" },
-  checks: { page: "checks" },
-  charts: { page: "charts" },
-  traffic: { page: "traffic" },
-  timeline: { page: "timeline" },
+  start: "start",
+  today: "today",
+  doctor: "doctor",
+  checks: "checks",
+  charts: "charts",
+  traffic: "traffic",
+  timeline: "timeline",
+  // Pre-3.1.0 address for the tile page, now the root: kept so an old
+  // bookmark still lands somewhere (`redirectFor` sends it on to `/`).
+  home: "home-legacy",
 };
 
 /**
- * The retired path's replacement, its query string kept and extended so
- * the merged page opens on the right block or tab; `null` for a path that
- * is not retired.
+ * The addresses a driven `goto` may land on (core::drive's `known_page`),
+ * i.e. every current page of `PATH_TO_PAGE` without the retired or
+ * pre-3.1.0 ones `redirectFor` sends on elsewhere. A web test holds this
+ * equal to `formspec.json`'s `pages` (follow.test.js), which `core::drive`
+ * reads on the server.
+ */
+export const DRIVABLE_PATHS = Object.keys(PATH_TO_PAGE).filter(
+  (k) =>
+    ![
+      "start",
+      "today",
+      "doctor",
+      "checks",
+      "charts",
+      "traffic",
+      "timeline",
+      "home",
+    ].includes(k),
+);
+
+/** Fallback titles for a page before the registry has answered. */
+const FALLBACK_TITLE = /** @type {Record<string, string>} */ ({
+  home: "Apps",
+  overview: "Overview",
+  health: "Health",
+  metrics: "Metrics",
+  activity: "Activity",
+  host: "Host",
+  log: "Live log",
+  jobs: "Jobs",
+  apply: "Apply",
+  schedules: "Schedules",
+  firewall: "Firewall",
+  backups: "Backups",
+  secrets: "Secrets",
+  settings: "Settings",
+  fleetview: "Fleet view",
+  backupcalendar: "Backup calendar",
+  notifications: "Notifications",
+  shell: "Shell",
+  presets: "Presets",
+  status: "Status",
+  clients: "Clients",
+  passkeys: "Passkeys",
+});
+
+/**
+ * The retired (or pre-3.1.0) path's replacement, its query string kept
+ * and extended so the merged page opens on the right block or tab; `null`
+ * for a path that is not retired.
  * @param {Route} r
  * @param {string} search e.g. location.search
  * @returns {string | null}
@@ -168,19 +159,21 @@ const FIXED = {
 export function redirectFor(r, search) {
   switch (r.page) {
     case "start":
-      return `/app/home${search}`;
+      return `/${search}`;
+    case "home-legacy":
+      return `/${search}`;
     case "today":
-      return `/app/health${setParams(search, { block: "today" })}`;
+      return `/health${setParams(search, { block: "today" })}`;
     case "doctor":
-      return `/app/health${setParams(search, { block: "doctor" })}`;
+      return `/health${setParams(search, { block: "doctor" })}`;
     case "checks":
-      return `/app/health${setParams(search, { block: "checks" })}`;
+      return `/health${setParams(search, { block: "checks" })}`;
     case "charts":
-      return `/app/metrics${setParams(search, { tab: "system" })}`;
+      return `/metrics${setParams(search, { tab: "system" })}`;
     case "traffic":
-      return `/app/metrics${setParams(search, { tab: "traffic" })}`;
+      return `/metrics${setParams(search, { tab: "traffic" })}`;
     case "timeline":
-      return `/app/activity${setParams(search, { view: "timeline" })}`;
+      return `/activity${setParams(search, { view: "timeline" })}`;
     default:
       return null;
   }
@@ -192,10 +185,12 @@ export function redirectFor(r, search) {
  */
 export function route(pathname) {
   const path = pathname.split(/[?#]/)[0];
-  if (path !== "/app" && !path.startsWith("/app/"))
-    return { page: "notfound", path };
-  const rest = path.replace(/^\/app\/?/, "").replace(/\/+$/, "");
-  if (Object.hasOwn(FIXED, rest)) return FIXED[rest];
+  if (!path.startsWith("/")) return { page: "notfound", path };
+  const rest = path.replace(/^\/+/, "").replace(/\/+$/, "");
+  if (Object.hasOwn(PATH_TO_PAGE, rest)) {
+    const page = PATH_TO_PAGE[rest];
+    return /** @type {Route} */ ({ page });
+  }
   const m = /^stacks\/([^/]+)(?:\/([^/]+))?$/.exec(rest);
   if (m) {
     const tab = STACK_TABS.find((t) => t.tab === (m[2] ?? "overview"));
@@ -215,7 +210,20 @@ export function route(pathname) {
  * @param {StackTab} [tab]
  */
 export const stackHref = (name, tab = "overview") =>
-  `/app/stacks/${encodeURIComponent(name)}${tab === "overview" ? "" : `/${tab}`}`;
+  `/stacks/${encodeURIComponent(name)}${tab === "overview" ? "" : `/${tab}`}`;
+
+/**
+ * The address a route answers at, the reverse of `route()`, for marking
+ * the current entry in a nav built from the registry.
+ * @param {Route} r
+ * @returns {string | null}
+ */
+function hrefOf(r) {
+  if (r.page === "stack") return stackHref(r.name, r.tab);
+  if (r.page === "notfound") return null;
+  const rest = Object.entries(PATH_TO_PAGE).find(([, p]) => p === r.page)?.[0];
+  return rest == null ? null : `/${rest}`;
+}
 
 /**
  * @typedef {{href: string, label: string, current: boolean}} NavLink
@@ -224,31 +232,35 @@ export const stackHref = (name, tab = "overview") =>
  */
 
 /**
- * The navigation bar for a route, the current page marked (a group is
- * current when one of its pages is). A stack page has no fixed link, so
- * while one is open it gets its own entry beside the overview it was opened
- * from.
+ * The navigation bar for a route, built from the page registry (`nav:
+ * true` pages, in the order and the groups the server sorted them into).
+ * A page's `group` puts it in a dropdown of the bar; one without a group
+ * is a top-level link. A stack page has no entry of its own in the
+ * registry, so while one is open it gets its own entry beside the page it
+ * was opened from.
+ * @param {import("./pages.js").PageSet | null} pageSet
  * @param {Route} r
  * @returns {NavEntry[]}
  */
-export function navEntries(r) {
+export function navEntries(pageSet, r) {
   /** @type {NavEntry[]} */
   const out = [];
-  for (const n of NAV) {
-    const link = { href: n.href, label: n.label, current: n.page === r.page };
-    const group = "group" in n ? n.group : undefined;
-    if (!group) {
+  const current = hrefOf(r);
+  for (const p of pageSet?.pages ?? []) {
+    if (!p.nav) continue;
+    const link = { href: p.path, label: p.title, current: p.path === current };
+    if (!p.group) {
       out.push(link);
       continue;
     }
     const last = out[out.length - 1];
-    if (last && last.items && last.label === group) {
+    if (last && last.items && last.label === p.group) {
       last.items.push(link);
       last.current = last.current || link.current;
     } else {
       out.push({
-        href: n.href,
-        label: group,
+        href: p.path,
+        label: p.group,
         current: link.current,
         items: [link],
       });
@@ -264,10 +276,13 @@ export function navEntries(r) {
 }
 
 /**
- * The browser tab's title.
+ * The browser tab's title. Reads the registry when it has answered;
+ * before that (first paint) it falls back to a local table, so the title
+ * is never blank while `GET /api/kit/pages` is still in flight.
  * @param {Route} r
+ * @param {import("./pages.js").PageSet | null} [pageSet]
  */
-export function pageTitle(r) {
+export function pageTitle(r, pageSet) {
   if (r.page === "stack") {
     const tab = STACK_TABS.find((t) => t.tab === r.tab);
     return r.tab === "overview"
@@ -275,6 +290,6 @@ export function pageTitle(r) {
       : `Homelab · ${r.name} · ${tab?.label}`;
   }
   if (r.page === "notfound") return "Homelab · Not found";
-  const n = [...NAV, ...OTHER_PAGES].find((x) => x.page === r.page);
-  return `Homelab · ${n?.label ?? r.page}`;
+  const fromRegistry = pageSet?.pages.find((p) => p.id === r.page)?.title;
+  return `Homelab · ${fromRegistry ?? FALLBACK_TITLE[r.page] ?? r.page}`;
 }

@@ -609,7 +609,7 @@ no second way in: the steps travel on the same TLS line as every other verb.
 
 | Step | What it does |
 |---|---|
-| `homelab ui goto <path>` | shows a page: `/app/stacks/media`, `stacks/media/logs`, `/app/jobs` |
+| `homelab ui goto <path>` | shows a page: `/stacks/media`, `stacks/media/logs`, `/jobs` |
 | `homelab ui open <action> [stack]` | opens an action's dialog (`deploy media`; a host-wide action such as `patch` takes no stack) |
 | `homelab ui open <edit form> …` | opens an edit form (below): `settings <stack>`, `raw <stack>`, `add-app <stack>`, `firewall <stack>`, `new-stack`, `host-settings`, `batch <action> [<stack>,<stack>]`, `rollback <stack>`, `import` |
 | `homelab ui select <stack>,<stack>` | owner decision 2026-09-30: ticks those rows in the Overview page's fleet table, exactly as a click would (refused off the Overview page, or naming a stack the fleet has not) |
@@ -725,7 +725,7 @@ homelab ui close
 An example session, a deploy of `media`:
 
 ```
-homelab ui goto /app/stacks/media
+homelab ui goto /stacks/media
 homelab ui open deploy media        # the review step: the CLI line, the deploy guard
 homelab ui press confirm            # the deploy runs once, on the dashboard's side
 homelab ui state                    # job 1790… running · step 2/3 … then done · complete
@@ -807,8 +807,8 @@ workstation), `testplan` and `update-policy` (repository documents), and
 
 | TUI / CLI | In the dashboard | `homelab ui` |
 |---|---|---|
-| `homelab today` | **Today** page: the verdict first, then every item with its remedy | `goto /app/today` |
-| `homelab check`, TUI `c` | **Today** page, "Run the fleet check": every finding with its remedy (the Cloudflare edge and the registries' pins stay on a workstation: they need its token) | `goto /app/today` |
+| `homelab today` | **Today** page: the verdict first, then every item with its remedy | `goto /health?block=today` |
+| `homelab check`, TUI `c` | **Today** page, "Run the fleet check": every finding with its remedy (the Cloudflare edge and the registries' pins stay on a workstation: they need its token) | `goto /health?block=today` |
 | `homelab checks answer <id> ok\|nok\|accept <days> <reason>` | an **Answer…** button on each manual check (Checks page, a stack's Checks tab); the form `answer-check` | `open answer-check`, `pick act-check <id>`, `pick act-verdict ok\|nok\|accept`, `type act-days 30`, `type act-note <reason>` |
 | `homelab incidents show <name>` | a **Show** button on each incident (Activity page, a stack's History tab): the bundle's text, secrets masked | — (a read) |
 | `homelab exec <vmid> <cmd>`, TUI SHELL | the form `exec` (one step, no typed name: Kenny, "we hebben genoeg security"; the host still refuses unless `exec_enabled = true`), and the **Shell** page, one line at a time, Up recalls | `open exec`, `type act-vmid 105`, `type act-command df -h`, `press confirm` (a token of scope `all`) |
@@ -819,11 +819,11 @@ workstation), `testplan` and `update-policy` (repository documents), and
 | `homelab apply` | **Apply** page (the plan per stack, each diff on request) and the form `apply` | `open apply`, `type act-destroy drill` |
 | `homelab runbook`, `export` | downloads: the runbook on the Host page, a stack's export bundle on its overview | — |
 | `homelab import <bundle.yml> <new-name> <vmid>` | **Import…** on the Overview and Presets pages: a bundle pasted or uploaded becomes a new stack through the plan and the commit every edit ends in (a bundle carrying a `.env` is refused) | `open import`, `edit import-bundle <file>`, `type import-name uptime2`, `type import-vmid 197`, `press next` (the plan), `press next`, `type edit-subject …`, `press confirm` |
-| `homelab presets` | **Presets** page | `goto /app/presets` |
+| `homelab presets` | **Presets** page | `goto /presets` |
 | `homelab guards <vmid>` | the form `guards-ct`: any container by its number (a stack's Apply guards still uses its own) | `open guards-ct`, `type act-vmid 104` |
 | `homelab ping` | **Host** page, "The line to the host": the round trip, the address and where it was set, the pinned certificate, the host's TLS fingerprint | — |
 | TUI `[CHANGED]` `[NOENV]` `[OFF]` | the Flags column of the fleet table and the badges beside a stack's state; drift and env on its overview. `[CHANGED]` needs **Compare with the files** (it runs latch once per stack for the secrets the host's hash covers, so it runs when asked, and a reading is reused for five minutes); until then drift says "not compared yet" | — |
-| TUI LOG_STREAM, DATA_TRANSFERS | **Live log** page: every line of every operation, whoever started it (this dashboard, a CLI or TUI session, the nightly round), filtered per stack, level and text; follow the tail or scroll back; the transfers' byte counters on top | `goto /app/log` |
+| TUI LOG_STREAM, DATA_TRANSFERS | **Live log** page: every line of every operation, whoever started it (this dashboard, a CLI or TUI session, the nightly round), filtered per stack, level and text; follow the tail or scroll back; the transfers' byte counters on top | `goto /log` |
 
 **Update the host.** The dashboard downloads the release's `homelab-host`,
 `SHA256SUMS` and `SHA256SUMS.minisig` from GitHub itself (the repository is
@@ -890,7 +890,7 @@ Tests: `admin/tests/parity_tests.rs`, `admin/tests/act_actions_tests.rs`
 
 **Status:** Built, not yet measured live (needs the next release).
 
-`/app/backups` lists every stack's restic repositories: a compose stack has
+`/backups` lists every stack's restic repositories: a compose stack has
 one per app that owns data (D25); a native (adopted) service has exactly
 one, named after the unit. Each row is read straight from the host
 (`GetBackups`, `core::ops::backup::backup_status`/`repo_status_of`) — newest
@@ -924,7 +924,7 @@ steps, and the failed-unpack case).
 
 **Status:** Built, not yet measured live (needs the next release).
 
-`/app/secrets` lists what a chosen stack declares in `latch_secrets` and
+`/secrets` lists what a chosen stack declares in `latch_secrets` and
 `latch_files` — read from the dashboard's own working copy of
 `lxc-compose.yml` (`admin::core::stackedit_latch::current`), the same source
 the stack editor's latch form already reads. No value is fetched ahead of a
@@ -959,6 +959,48 @@ has been staged by hand.
 
 Tests: `core/src/ops/secrets.rs` (`vault_rel`, `latch_rel_path`),
 `host/src/secrets.rs` (`latch_put` refuses without `HOMELAB_LATCH_ENV`).
+
+#### feat-settings-1 · Settings page (host.toml on pve)
+
+**Status:** Built.
+
+`/app/settings` lists every `host.toml` key the dashboard may show
+(`core/src/hostconfig.rs::KEYS`), grouped, with its current value, how it
+is changed ("Here", "Here with the name typed", "Here (secret,
+write-only)", or an ssh-only reason) and whether it takes effect live or
+needs the host to restart. Editable keys open a row form; Save stages
+every change, Review shows the diff, and Confirm writes `host.toml` in one
+shot — a key marked `Apply::Restart` queues "Save and restart the host"
+automatically. The whole page needs a token of scope `all`
+(`admin/web/js/pages/settings.js`, `admin/src/shell/edit.rs::save_host_settings`).
+
+**Per-machine tokens (fix-120, owner decision 2026-10-01).** Below the
+host.toml table, a second panel lists every machine's token by name and
+scope. "Issue token" asks for a name (what `homelab doctor` and the audit
+log will call that machine) and a scope (read / operate / all), then
+shows the plaintext exactly once — copy it into that machine's
+`HOMELAB_TOKEN` at once, it cannot be shown again. Revoke removes one
+entry immediately; the legacy single token (shown as "legacy") cannot be
+revoked here — see OPERATIONS_RUNBOOK's migration note for retiring it
+over ssh. The same is available from the command line:
+`homelab token issue|list|revoke`.
+
+**TLS pin fields (fix-126, owner decision 2026-10-01).** "Pinned hub
+certificate" and "Pinned hub fingerprint" under Notifications hold the
+path and SHA-256 of the certificate an `https://` notification route to
+kyu is pinned to; both are ordinary (non-secret) fields, edited "Here",
+because the fingerprint itself is what proves trust — the path and hash
+are not sensitive on their own. See OPERATIONS_RUNBOOK's TLS-to-kyu
+section for how to pin a route.
+
+**Cloudflare read-only token (fix-143, owner decision 2026-10-01).** Under
+a new "Nightly checks" group, "Cloudflare read-only token" is a
+write-only field ("Here (secret, write-only)"): typing a value and saving
+sets or replaces it, the page never shows what is currently set beyond
+"set"/"not set". This lets the host's own nightly round compare the
+Cloudflare edge against `captured/gateway/` the way `homelab check`
+already does from the workstation; left unset, the nightly line reads
+"not configured", which is a normal, unbroken state.
 
 #### A5 · Secrets vault on the host
 
@@ -1556,7 +1598,7 @@ a container runs several (`stacks/kyu/kyu-runner/service.yml`)
 | `update_cmd` | its own self-update command; absent means never updated by the host | `core/src/native.rs:48` |
 | `release_repo`, `release_asset` | `owner/name` on GitHub and the asset (default: the unit name) | `core/src/native.rs:64-68,88-90` |
 | `backup_from_newest` | archive the newest file matching this glob instead of `data_dirs` | `core/src/native.rs:79` |
-| `backup_pause` | stop the unit for the length of the nightly tar and start it again afterwards, whatever the snapshot did (fix-113); default off | `core/src/native.rs` |
+| `backup_pause` | how the service is quiesced for the nightly tar (fix-113; default `false`, no quiescing). `true`: the homelab stops the unit itself before the tar and starts it again afterwards, whatever the snapshot did. `chassis`: the chassis-rs kit's own `backup-pause`/`backup-resume` subcommand does it, which can hold writes without a full stop; the homelab falls back to the `true` mechanism when the binary predates the subcommand or cannot quiesce it (owner decision, Kenny 2026-10-01: `stacks/almanac`, `stacks/inbox`) — see "Chassis pause: heartbeat and staging" below | `core/src/native.rs`, `core/src/ops/native.rs::decide_chassis_pause` |
 | `update_policy` | `auto`, `self` or `manual` (default) | `core/src/native.rs` |
 
 The verbs:
@@ -1575,6 +1617,31 @@ of the service files the host recorded at adoption, and on every service of
 the stack in turn (`host/src/main.rs:3441-3555`). A stack the host does not
 know answers `adopt it first`, followed by the adopt command
 (`host/src/main.rs:3121-3124`).
+
+**Chassis pause: heartbeat and staging** (fix-113 ADDENDUM, owner + chassis-rs
+agreement, 2026-10-01). `backup_pause: chassis` never asks the binary to hold
+its pause for a guessed, possibly multi-hour window: it asks for 120 s
+(`backup-native::CHASSIS_PAUSE_FOR_S`) and renews that window every 60 s
+(`CHASSIS_HEARTBEAT_INTERVAL_S`) for as long as work is still running under
+it, so a homelab process that dies mid-backup leaves the service un-paused
+again within two minutes, never parked for hours. What is renewed is kept as
+short as possible: when `native_backup_staging_dir` is set in host.toml, the
+pause covers only a LOCAL tar of the data dirs onto that directory (on pve,
+not inside the container) — the service is resumed the moment that local
+copy lands, and restic then uploads from the staged file with the pause
+already over, so a slow upload (Google Drive, a residential uplink) never
+lengthens it. Before staging, the host checks the directory's free space and
+`native_backup_staging_cap_mib` (default 10 GiB) against the copy's estimated
+size (`du`) plus a 20% margin (`fits_staging`); either too tight skips
+staging for that run and backs up live under the renewed pause instead, the
+same as when no staging directory is configured at all. A staged tar is
+deleted the moment its snapshot is taken (success or failure) and any
+leftover from a run that died mid-copy is cleared at the start of the next
+one — nothing from this accumulates on disk (rule 20). `homelab doctor`
+reports the staging directory's free space as its own finding ("backup
+staging disk") once a staging directory is configured; unconfigured raises
+no finding. Source: `core/src/ops/native.rs` (`fits_staging`,
+`chassis_pause_heartbeat`, `run_under_chassis_heartbeat`), `core/src/doctor.rs`.
 
 Adoption refuses an inactive unit (`adoption never starts services; start it yourself and re-run`),
 a unit that runs a different binary or reads a different env file
@@ -2397,7 +2464,7 @@ and Grafana" (2026-09-30, `docs/admin/DECISIONS.md`); they need the host
 release, the admin release and a deploy of the metrics stack that carry it.
 
 **Everything lands in the dashboard's notification centre** (the bell, page
-`/app/notifications`), with its history: the host's operations (every
+`/notifications`), with its history: the host's operations (every
 deploy, backup, update, self-update, …, success or failure), the boot notice,
 a stack parked after a failed night, the nightly fleet check's report, every
 Alertmanager alert (firing and resolved), and the dashboard's own actions and
@@ -2447,7 +2514,7 @@ How it travels:
   ```json
   {"source": "homelab-host", "op": "<op>", "label": "<label>", "ok": false,
    "error": "<title> — <what to do>", "version": "<host version>",
-   "click_url": "https://admin.kp-soft.dev/app/stacks/<stack>"}
+   "click_url": "https://admin.kp-soft.dev/stacks/<stack>"}
   ```
 
   The link's address is `dashboard_url` in host.toml (default
@@ -3122,24 +3189,28 @@ drops them all. 18 probes replaced or complemented manual questions on
 2026-09-30; each was run once for real, through `lxc-attach` as the host
 runs it, and read healthy.
 
-### The dashboard: Start, Charts, Traffic and the minute watch
+### The dashboard: Apps, Metrics and the minute watch
 
 Kenny, 2026-09-30 ("Vervangen" four times; one place to look) and "Alle vier
 meteen" (2026-10-01): Homepage, Grafana, GoAccess and Uptime Kuma are
 retired — four separate apps replaced by four parts of this one dashboard.
+nav-decisions (chassis-rs 3.1.0, 2026-10-01): the tile page is now called
+**Apps** (it was Home, briefly, after the "Start" rename below) and sits
+at the dashboard's root `/`; the fleet Overview moved to `/overview`
+(reached from the "Homelab" brand link, not a bar entry).
 
-- **Start** (`/app/start`): one tile per service, grouped, from the stacks'
+- **Apps** (`/`): one tile per service, grouped, from the stacks'
   `tiles:` (keyed by the hostname a tile opens, or an id with `url:`; name,
   group, order, description, and an optional `reading` command whose lines
   show on the tile). The host reads them from the deployed manifests
   (`Command::Tiles`); nothing in the code names an app.
-- **Charts** (`/app/charts`): the hypervisor's panels, or one stack's, over
-  1h to 30d, from Prometheus (`admin.prometheus_url`,
-  `admin.charts_host`); the panels are `core::charts`.
-- **Traffic** (`/app/traffic`): requests per hostname and per status, and
-  the busiest hostnames and client addresses, from the proxy's access log in
-  Loki (`admin.traffic_job`); a stack ships a log file to Loki with
-  `log_files: [{path, job}]`.
+- **Metrics** (`/metrics`, System and Traffic tabs — Charts and Traffic
+  merged into one page 2026-09-30): the hypervisor's panels or one stack's
+  over 1h to 30d, from Prometheus (`admin.prometheus_url`,
+  `admin.charts_host`, the panels are `core::charts`); and requests per
+  hostname and per status, and the busiest hostnames and client addresses,
+  from the proxy's access log in Loki (`admin.traffic_job`; a stack ships a
+  log file to Loki with `log_files: [{path, job}]`).
 - **The minute watch**: the dashboard asks each routed tile through Traefik
   on the house network (`HOMELAB_ADMIN_WATCH_VIA`), each enabled container
   and the host every minute; five minutes without an answer is an urgent
@@ -3154,7 +3225,7 @@ fleet check's own findings. See `docs/admin/FEATURES.md` for the feature
 text and `docs/admin/REALIZATION_PLAN.md`'s `visuals` milestone for the
 decisions behind each one.
 
-- **Fleet view** (`/app/fleetview`): five sections, each reading its own
+- **Fleet view** (`/fleetview`): five sections, each reading its own
   route so a Prometheus outage only empties the two that need it.
   - **Topology** (feat-overview-7, `/data/topology`): which container may
     reach which, drawn as an inline SVG graph (deterministic layout: nodes
@@ -3185,7 +3256,7 @@ decisions behind each one.
     table instead of a sentence — it reads the same run the Health page's
     fleet check uses (`check_read`), so visiting both never starts the
     read twice.
-- **Backup calendar** (`/app/backupcalendar`, feat-overview-10): the last
+- **Backup calendar** (`/backupcalendar`, feat-overview-10): the last
   35 nights, one cell per day, green when every stack that keeps data has
   at least one restic snapshot that night, amber for some, red for none.
   Its own host command (`Command::BackupCalendar`, read-only, asks restic
@@ -3312,6 +3383,73 @@ output of the finding for that record):
   [noted] drill — retired 2026-09-27 (stack, vmid 119) — kept: restic none; /appdata none; vault /var/lib/homelab/secrets/drill
       remedy: kept on purpose until you decide (ask-9); `homelab wipe drill` deletes exactly these after you type the name
 ```
+
+### `homelab host apply`: the host's settings against `config/host.toml`
+
+```bash
+homelab host apply                       # reads ./config/host.toml
+homelab host apply ~/Projects/homelab/config/host.toml
+```
+
+Host settings are declarative, like a stack (fix-110): `config/host.toml`
+holds every non-secret key `homelab_core::hostconfig::KEYS` knows, one row
+per key, seeded with the host's own compiled defaults so an unmodified
+checkout already matches an unmodified host. Secrets (`token`,
+`notify_auth_bearer`, `notify_fallback_auth_bearer`) are never in this file
+— they stay in the host's own vault, set once over ssh.
+
+`homelab host apply` reads the file (the repository's `config/host.toml`
+unless a path is given), refuses early if it does not parse as TOML, reads
+the host's current `host.toml` sha256 (`GetHostConfig`) and sends it whole as
+`Command::ApplyHostConfig` (`client/src/main.rs:671-726`,
+`proto/src/lib.rs:447-466`). The host lays `config/host.toml` over its own
+file with `homelab_core::hostconfig::apply_declared`
+(`core/src/hostconfig.rs:391-414`): every secret key the host already has
+survives untouched, a secret the repository tries to set is refused outright
+(the repository is never where a secret lives), and a key the host has that
+the repository does not declare is dropped — the same "the file is the whole
+picture" rule `homelab apply` already keeps for a stack. The result is
+validated with the same parser `host.toml` has always used
+(`host/src/main.rs:1025-1084`, `apply_host_config_whole`) and written. The
+reply names which changed keys took effect at once (`live`) and which wait
+for the host's next start (`restart`) — only the keys whose value actually
+moved, not every key the file happens to declare:
+
+```text
+▶ host apply :: config/host.toml
+✓ applied
+  live now: backup_hour
+  takes effect at the host's next start: gateway_vmid — `homelab host restart`
+```
+
+`homelab check` and `homelab today` compare `config/host.toml` against the
+host's own running settings, key by key, and report one `Drift` finding per
+key that differs (`evaluate_host_config_drift`,
+`core/src/ops/fleetcheck.rs:498-528`):
+
+```text
+  [drift] host.toml — gateway_vmid: config/host.toml declares 105, the host's host.toml has 104
+      remedy: `homelab host apply` to make the host match the repository, or edit config/host.toml to match the host and commit that
+```
+
+A repository checkout with no `config/host.toml` yet, or an older client
+that never built the comparison, skips it entirely — the same way an empty
+stack-digest list skips the stack-file comparison. A host without the file
+keeps working exactly as before: `config/host.toml` is additive, not a
+requirement the host enforces.
+
+The admin dashboard's host settings page (`/app/settings`) writes the same
+way: a save is committed to `config/host.toml` in the dashboard's working
+copy first — through the same commit/push transaction a stack's edit uses
+(`WorkingCopy::transact_file`, `admin/src/shell/workcopy.rs:644-772`) — and
+only then applied to the host from that committed text
+(`admin/src/shell/edit.rs`, `save_host_settings`). If the commit lands but
+the host refuses it or does not answer, the change still exists in the
+repository and the error says to run `homelab host apply` once the host
+accepts it — nothing already written is lost. The TUI's own settings screen
+is unchanged by this: it still edits only the three keys it always has
+(`backup_hour`, `notify_webhook`, `retention`) over the older `SetConfig`
+command, and does not yet read or write `config/host.toml`.
 
 ### `homelab wipe <name>`: delete what a retired stack, app or unit kept
 

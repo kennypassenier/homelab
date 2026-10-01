@@ -1,15 +1,20 @@
 // The dashboard shell (arch-frontend): the navigation bar, the history-API
 // router and the one store. Each page is its own module with a `mount`
 // that returns its cleanup; chassis answers index.html for every
-// extensionless path under /app/, so a deep link lands here too
+// extensionless path this app's web app (mounted at the root since
+// chassis-rs 3.1.0) does not already claim, so a deep link lands here too
 // (feat-overview-8). The palette, the shortcuts, the theme menu and the
-// host's questions sit around every page (chrome.js).
+// host's questions sit around every page (chrome.js). The nav bar renders
+// from the page registry (`GET /api/kit/pages`, pages.js), which is also
+// how the kit's own pages (Status, Clients, Passkeys — `kit_pages_in_webapp`)
+// end up in it without this module naming them.
 
 import { startAgoTicker } from "./ago.js";
 import { mountChrome } from "./chrome.js";
 import { mountFollow } from "./drive.js";
 import { h } from "./dom.js";
 import { attachNavMenus, attachNavToggles } from "/static/kp/js/components.js";
+import { loadPages, pages, subscribePages } from "./pages.js";
 import { navEntries, pageTitle, redirectFor, route } from "./router.js";
 import { current, start, subscribe } from "./store.js";
 import { mount as activity } from "./pages/activity.js";
@@ -32,18 +37,22 @@ import { mount as healthPage } from "./pages/health.js";
 import { mount as metricsPage } from "./pages/metrics.js";
 import { mount as fleetviewPage } from "./pages/fleetview.js";
 import { mount as backupCalendarPage } from "./pages/backupcalendar.js";
+import { mount as statusPage } from "./pages/status.js";
+import { mount as clientsPage } from "./pages/clients.js";
+import { mount as passkeysPage } from "./pages/passkeys.js";
 import { mountVersions } from "./versions.js";
 
 const page = /** @type {HTMLElement} */ (document.getElementById("page"));
 const nav = /** @type {HTMLElement} */ (document.getElementById("nav"));
 const bar = /** @type {HTMLElement} */ (document.getElementById("bar"));
+const brand = /** @type {HTMLElement} */ (document.getElementById("brand"));
 const asks = /** @type {HTMLElement} */ (document.getElementById("asks"));
 const link = /** @type {HTMLElement} */ (document.getElementById("link"));
 
 /** @type {() => void} */
 let cleanup = () => {};
 
-/** @param {string} href a path under /app/, with its query string */
+/** @param {string} href an absolute path, with its query string */
 function navigate(href) {
   if (href === location.pathname + location.search) return;
   history.pushState(null, "", href);
@@ -64,23 +73,22 @@ function closeBar() {
   if (f instanceof HTMLElement && bar.contains(f)) f.blur();
 }
 
-function render() {
-  // 2026-09-30: /app/start, /app/today, /app/doctor, /app/checks,
-  // /app/charts, /app/traffic and /app/timeline are retired; send them on
-  // to their merged page, the right block or tab open, before mounting
-  // anything (redirectFor is null for every other route).
-  const target = redirectFor(route(location.pathname), location.search);
-  if (target != null) {
-    history.replaceState(null, "", target);
-    render();
-    return;
-  }
-  cleanup();
-  cleanup = () => {};
+/**
+ * The nav bar, the brand link and the tab title — everything the page
+ * registry (pages.js) drives — redrawn on its own, so the registry's
+ * first answer (arriving async, after the first paint) does not have to
+ * wait for a page remount to show up.
+ */
+function renderNav() {
   const r = route(location.pathname);
-  document.title = pageTitle(r);
+  const ps = pages();
+  document.title = pageTitle(r, ps);
+  if (ps) {
+    brand.textContent = ps.brand.title;
+    brand.setAttribute("href", ps.brand.href);
+  }
   nav.replaceChildren(
-    ...navEntries(r).map((n) => {
+    ...navEntries(ps, r).map((n) => {
       /** @type {Record<string, string>} */
       const a = { class: "kp-nav__link", href: n.href };
       if (n.current) a["aria-current"] = "page";
@@ -104,6 +112,23 @@ function render() {
     }),
   );
   queueMicrotask(fitBar);
+}
+
+function render() {
+  // 2026-09-30: /start, /today, /doctor, /checks, /charts, /traffic and
+  // /timeline are retired, and /home is the pre-3.1.0 address of the tile
+  // page (now the root); send every one of them on to its new home before
+  // mounting anything (redirectFor is null for every other route).
+  const target = redirectFor(route(location.pathname), location.search);
+  if (target != null) {
+    history.replaceState(null, "", target);
+    render();
+    return;
+  }
+  cleanup();
+  cleanup = () => {};
+  const r = route(location.pathname);
+  renderNav();
   switch (r.page) {
     case "overview":
       cleanup = overview(page, { navigate });
@@ -165,6 +190,18 @@ function render() {
     case "backupcalendar":
       cleanup = backupCalendarPage(page);
       break;
+    // The kit's own pages (chassis-rs 3.1.0, `kit_pages_in_webapp`): this
+    // app draws them from GET /api/kit/status|clients|passkeys, in this
+    // same bar, instead of the kit's own layout.
+    case "status":
+      cleanup = statusPage(page);
+      break;
+    case "clients":
+      cleanup = clientsPage(page);
+      break;
+    case "passkeys":
+      cleanup = passkeysPage(page);
+      break;
     default:
       page.replaceChildren(
         h("h1", null, "Not found"),
@@ -172,22 +209,40 @@ function render() {
           "p",
           null,
           `There is no page at ${location.pathname}. `,
-          h("a", { href: "/app/" }, "Go to the overview"),
+          h("a", { href: "/" }, "Go to Apps"),
         ),
       );
   }
   window.scrollTo(0, 0);
 }
 
-// Same-origin links under /app/ stay in the page; a modified click (new
-// tab, download) is the browser's.
+// Paths the kit answers itself, never this app's router (`/passkeys` is
+// its registration/login actions; `/status` and `/clients` without
+// `kit_pages_in_webapp` would be too, but the dashboard turns that on, so
+// their GET pages fall through to this app like any other route).
+const RESERVED = [
+  "/api",
+  "/static",
+  "/login",
+  "/logout",
+  "/healthz",
+  "/readyz",
+  "/metrics",
+];
+
+// Same-origin links this app's router can name stay in the page; a
+// modified click (new tab, download) and a reserved or file path are the
+// browser's.
 document.addEventListener("click", (e) => {
   if (e.defaultPrevented || e.button !== 0) return;
   if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   const a = /** @type {Element} */ (e.target).closest("a");
   if (!a || a.target || a.hasAttribute("download")) return;
   const url = new URL(a.href, location.href);
-  if (url.origin !== location.origin || !url.pathname.startsWith("/app/"))
+  if (url.origin !== location.origin) return;
+  if (
+    RESERVED.some((p) => url.pathname === p || url.pathname.startsWith(`${p}/`))
+  )
     return;
   if (/\.[a-z0-9]+$/i.test(url.pathname)) return;
   e.preventDefault();
@@ -213,6 +268,10 @@ mountVersions(/** @type {HTMLElement} */ (document.getElementById("versions")));
 startAgoTicker();
 start();
 render();
+// The registry answers after the first paint; redraw the nav (never the
+// mounted page) the moment it lands, and again if it ever changes.
+subscribePages(renderNav);
+void loadPages();
 // kp-themes' bar: the phone menu button, and dropdowns kept inside the window.
 attachNavToggles(bar);
 attachNavMenus(bar);

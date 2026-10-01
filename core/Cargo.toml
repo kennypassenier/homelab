@@ -11,6 +11,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
 sha2.workspace = true
+# fix-126: decoding a pinned certificate's PEM to DER for its fingerprint.
+base64.workspace = true
 # fix-29: the ecosystem's release signatures, the same crate chassis-rs uses.
 minisign-verify = "0.2"
 # fix-51: one async lock per state file, so load-modify-save sequences from
@@ -19,6 +21,10 @@ tokio = { version = "1", features = ["sync"] }
 # The long reads (check, doctor, today) run their per-container and per-route
 # questions a bounded number at a time (`ops::pool`). Combinators only, no I/O.
 futures-util.workspace = true
+# fix-110: `hostconfig::merge_changes`/`apply_declared` read and write TOML
+# directly — host.toml's own format, shared with the host and the dashboard
+# so all three build the same text from the same JSON changes.
+toml.workspace = true
 
 [features]
 # mock-executor-weak-assertions (expert panel, 2026-09-27): the scripted

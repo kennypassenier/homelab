@@ -155,6 +155,12 @@ async fn world(tag: &str) -> World {
                             .to_string(),
                     ..Script::ok(&[])
                 },
+                Command::ApplyHostConfig { .. } => Script {
+                    message:
+                        json!({"sha256": "c".repeat(64), "live": ["backup_hour"], "restart": []})
+                            .to_string(),
+                    ..Script::ok(&[])
+                },
                 _ => Script::ok(&[("run", 1)]),
             }
         }),
@@ -314,7 +320,7 @@ async fn follow_firewall_rule_add_plan_commit_runs_once_with_zero_one_or_two_tab
         let w = world(&format!("fw-{tabs}")).await;
         let opened = ok(&w, open("firewall", Some("admin"))).await;
         let f = &opened["state"]["form"];
-        assert_eq!(opened["state"]["page"], "/app/stacks/admin/firewall");
+        assert_eq!(opened["state"]["page"], "/stacks/admin/firewall");
         assert_eq!(f["step"], "rules");
         let n = f["edit"]["rows"].as_array().unwrap().len();
         assert!(n > 0, "{f}");
@@ -406,7 +412,7 @@ async fn follow_firewall_rule_add_plan_commit_runs_once_with_zero_one_or_two_tab
 async fn follow_settings_commit_and_deploy_and_the_raw_editor() {
     let w = world("settings").await;
     let opened = ok(&w, open("settings", Some("kp-soft"))).await;
-    assert_eq!(opened["state"]["page"], "/app/stacks/kp-soft/settings");
+    assert_eq!(opened["state"]["page"], "/stacks/kp-soft/settings");
     let (why, _) = refused(&step(&w, press("next")).await);
     assert!(why.contains("Nothing is changed yet."), "{why}");
     ok(&w, typed("edit-memory-mb", "64")).await;
@@ -485,7 +491,7 @@ async fn follow_settings_commit_and_deploy_and_the_raw_editor() {
 async fn follow_settings_ext_commits_once() {
     let w = world("settings-ext").await;
     let opened = ok(&w, open("settings-ext", Some("kp-soft"))).await;
-    assert_eq!(opened["state"]["page"], "/app/stacks/kp-soft/settings");
+    assert_eq!(opened["state"]["page"], "/stacks/kp-soft/settings");
     assert_eq!(opened["state"]["form"]["step"], "settings_ext");
     let (why, _) = refused(&step(&w, press("next")).await);
     assert!(why.contains("Nothing is changed yet."), "{why}");
@@ -659,7 +665,7 @@ async fn follow_latch_secret_and_a_file_row_refuse_dollar_then_commit_once() {
 async fn follow_checks_row_add_and_busy_check_commit_once() {
     let w = world("checks").await;
     let opened = ok(&w, open("checks", Some("kp-soft/kp-soft"))).await;
-    assert_eq!(opened["state"]["page"], "/app/stacks/kp-soft/checks");
+    assert_eq!(opened["state"]["page"], "/stacks/kp-soft/checks");
     assert_eq!(opened["state"]["form"]["step"], "checks");
     let n = opened["state"]["form"]["edit"]["rows"]
         .as_array()
@@ -711,7 +717,7 @@ async fn follow_checks_row_add_and_busy_check_commit_once() {
 async fn follow_tiles_edit_and_delete_commit_once() {
     let w = world("tiles").await;
     let opened = ok(&w, open("tiles", Some("gateway"))).await;
-    assert_eq!(opened["state"]["page"], "/app/stacks/gateway/settings");
+    assert_eq!(opened["state"]["page"], "/stacks/gateway/settings");
     let n = opened["state"]["form"]["edit"]["rows"]
         .as_array()
         .unwrap()
@@ -763,7 +769,7 @@ async fn follow_tiles_edit_and_delete_commit_once() {
 async fn follow_publish_app_commits_once() {
     let w = world("publish").await;
     let opened = ok(&w, open("publish", Some("kp-soft/jobtracker"))).await;
-    assert_eq!(opened["state"]["page"], "/app/stacks/kp-soft/apps");
+    assert_eq!(opened["state"]["page"], "/stacks/kp-soft/apps");
     let (why, _) = refused(&step(&w, press("next")).await);
     assert!(why.contains("is needed"), "{why}");
     ok(&w, typed("publish-hostname", "jobtracker.kp-soft.dev")).await;
@@ -1168,7 +1174,7 @@ async fn follow_host_settings_write_once_within_scope() {
     let all = |s| w.driver.step("wsl-all", Scope::All, s);
     let opened = all(open("host-settings", None)).await;
     assert_eq!(opened["ok"], true, "{opened}");
-    assert_eq!(opened["state"]["page"], "/app/settings");
+    assert_eq!(opened["state"]["page"], "/settings");
     let (why, _) = refused(&all(row("edit", Some("listen"))).await);
     assert!(why.contains("ssh only"), "{why}");
     assert_eq!(all(row("edit", Some("backup_hour"))).await["ok"], true);
@@ -1186,13 +1192,18 @@ async fn follow_host_settings_write_once_within_scope() {
     );
     refused(&all(press("confirm")).await);
     let sent = w.sent.lock().unwrap().clone();
+    // fix-110: the save is now committed to config/host.toml in the
+    // working copy (no RPC) and applied whole, not with the per-key
+    // `SetHostConfig` this test's own mock still answers for other paths.
     let writes: Vec<&Command> = sent
         .iter()
-        .filter(|c| c.name() == "set_host_config")
+        .filter(|c| c.name() == "apply_host_config")
         .collect();
     assert_eq!(writes.len(), 1, "{sent:?}");
     match writes[0] {
-        Command::SetHostConfig { changes, .. } => assert_eq!(changes["backup_hour"], 5),
+        Command::ApplyHostConfig { toml, .. } => {
+            assert!(toml.contains("backup_hour = 5"), "{toml}")
+        }
         other => panic!("{other:?}"),
     }
     assert_eq!(w.live.events("host_settings").len(), 1);
@@ -1230,7 +1241,7 @@ async fn follow_the_batch_and_the_roll_back_dialogs() {
     ok(&w, UiStep::Close).await;
 
     let r = ok(&w, open("rollback", Some("kp-soft"))).await;
-    assert_eq!(r["state"]["page"], "/app/stacks/kp-soft");
+    assert_eq!(r["state"]["page"], "/stacks/kp-soft");
     let (why, _) = refused(&step(&w, press("next")).await);
     assert!(why.contains("Choose a commit"), "{why}");
     ok(
@@ -1272,7 +1283,7 @@ async fn follow_select_ticks_the_fleet_table_for_a_batch_opened_from_it() {
     ok(
         &w,
         UiStep::Goto {
-            path: "/app/".into(),
+            path: "/overview".into(),
         },
     )
     .await;
@@ -1456,7 +1467,7 @@ async fn parity_the_import_form_commits_once() {
 async fn follow_native_edit_commits_once() {
     let w = world("native").await;
     let opened = ok(&w, open("native", Some("admin"))).await;
-    assert_eq!(opened["state"]["page"], "/app/stacks/admin/settings");
+    assert_eq!(opened["state"]["page"], "/stacks/admin/settings");
     let fields = opened["state"]["form"]["fields"]
         .as_array()
         .unwrap()
@@ -1536,7 +1547,7 @@ async fn follow_add_native_unit_commits_once() {
 async fn follow_preset_meta_commits_once() {
     let w = world("preset").await;
     let opened = ok(&w, open("preset", Some("mealie"))).await;
-    assert_eq!(opened["state"]["page"], "/app/presets");
+    assert_eq!(opened["state"]["page"], "/presets");
     let fields = opened["state"]["form"]["fields"]
         .as_array()
         .unwrap()
@@ -1572,7 +1583,7 @@ async fn follow_preset_meta_commits_once() {
 async fn follow_new_preset_commits_once() {
     let w = world("new-preset").await;
     let opened = ok(&w, open("new-preset", None)).await;
-    assert_eq!(opened["state"]["page"], "/app/presets");
+    assert_eq!(opened["state"]["page"], "/presets");
     let (why, _) = refused(&step(&w, press("next")).await);
     assert!(why.contains("Preset name"), "{why}");
     ok(&w, typed("new-preset-name", "demo2")).await;

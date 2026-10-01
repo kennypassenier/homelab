@@ -62,7 +62,7 @@ cargo test -p homelab-core --test app_knowledge_guard_tests
 | [`homeaddress_tests`](#homeaddress_tests) | homelab-core | 10 | 2 |
 | [`hostconfig_tests`](#hostconfig_tests) | homelab-core | 6 | 0 |
 | [`hostmeta_tests`](#hostmeta_tests) | homelab-core | 3 | 0 |
-| [`internal_ip_gate_tests`](#internal_ip_gate_tests) | homelab-core | 3 | 1 |
+| [`internal_ip_gate_tests`](#internal_ip_gate_tests) | homelab-core | 3 | 0 |
 | [`latch_guard_tests`](#latch_guard_tests) | homelab-core | 12 | 0 |
 | [`livestatus_tests`](#livestatus_tests) | homelab-core | 6 | 0 |
 | [`logshipper_tests`](#logshipper_tests) | homelab-core | 29 | 1 |
@@ -828,15 +828,11 @@ Tests:
 
 The pre-commit internal-address gate (`.githooks/check-internal-ips.sh`).
 
-Findings these tests pin:
-
-- **public-repo-attack-map**: not found in REGISTER.md.
-
 Tests:
 
-- `an_added_internal_address_is_refused_in_docs` *(pins public-repo-attack-map)*
-- `a_machine_name_or_an_rfc5737_placeholder_passes` *(pins public-repo-attack-map)*
-- `removing_a_leaked_address_stays_possible` *(pins public-repo-attack-map)*
+- `an_added_internal_address_is_refused_in_docs`: guards: public-repo-attack-map
+- `a_machine_name_or_an_rfc5737_placeholder_passes`: guards: public-repo-attack-map
+- `removing_a_leaked_address_stays_possible`: guards: public-repo-attack-map
 
 ### latch_guard_tests
 

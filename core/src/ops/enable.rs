@@ -105,13 +105,10 @@ pub const AUTO_PARK_NOTICE: &str = "nightly update failed — automatic updates 
 /// parked something that was not parked before, so the caller sends one
 /// notice rather than one every night.
 ///
-/// fix-59 (failed-update-parks-backups, 2026-09-27): a failed night used to
-/// set `enabled = false`, and a disabled stack gets no nightly backup either,
-/// so one bad upstream image or one Drive error at the backup hour switched
-/// the stack's backups off until somebody noticed. Now a failed update parks
-/// the automatic updates only, and a failed backup parks nothing: it is
-/// tried again the next night, its own failure notification goes out every
-/// night it fails, and the backup-age check in `fleetcheck` escalates it.
+/// fix-59: a failed update parks the automatic updates only, and a failed
+/// backup parks nothing: it is tried again the next night, its own failure
+/// notification goes out every night it fails, and the backup-age check in
+/// `fleetcheck` escalates it. Story: `docs/deployment/REGISTER.md`.
 pub fn after_night(
     state: &mut crate::state::HostState,
     stack: &str,

@@ -84,18 +84,10 @@ pub fn common_base(source: &[String], target: &[String]) -> Option<String> {
     // send is impossible and the caller must decide, not guess.
 }
 
-// fix-85 (expert panel, zfs-replica-mirrors-mistakes, 2026-09-27): the
-// replica keeps its own history.
+// fix-85: the replica keeps its own history. Story:
+// docs/deployment/REGISTER.md.
 //
-// Until then every job was ONE `zfs send -RI | zfs receive -F`. A
-// replication stream (-R) received with -F destroys on the target every
-// snapshot and file system that no longer exists on the source
-// (zfs-receive(8)), so the replica was a mirror: measured on pve that day,
-// every replica dataset held exactly its source's snapshots and no hold. A
-// mistaken `zfs destroy -r HDD4TB/backups` would have reached
-// HDD18TB/replica/HDD4TB/backups the next night.
-//
-// Now every dataset of the source subtree is sent on its own, without -R, so
+// Every dataset of the source subtree is sent on its own, without -R, so
 // no stream carries the source's idea of what should exist. What the source
 // lost stays on the replica: a dataset the source no longer has is an
 // orphan, left untouched and never pruned; a snapshot the source destroyed

@@ -1,10 +1,7 @@
 //! fix-143 (expert panel 2026-09-27, edge-changes-unnoticed): the Cloudflare
 //! edge against its capture in `captured/gateway/`.
 //!
-//! The capture (R5, 2026-09-20) was read once and never again, and
-//! CLOUDFLARE.md had already drifted from it (`trmnl.kp-soft.dev`). A
-//! dashboard click, or a compromised Cloudflare session, that flips the
-//! wildcard Access app to bypass makes the house public, and nothing said so.
+//! Story: `docs/deployment/REGISTER.md`.
 //!
 //! Pure: the caller fetches the API's answers (read-only token); this
 //! projects them onto the capture's own shape, e-mail addresses redacted the

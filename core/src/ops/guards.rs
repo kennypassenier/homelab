@@ -53,11 +53,10 @@ pub const DOCKER_DAEMON_JSON: &str = r#"{
 /// only reaches containers cloned afterwards, and the two blind spots are
 /// containers that already exist. The guards run on every managed container
 /// on every deploy, which is exactly the reach this needs.
-/// fix-82 (manual-images-latest-unpinned, 2026-09-27): the version and digest
-/// every docker container ran that day (12 of 12, measured). `:latest` on a
-/// `manual` service meant the next fresh container got whatever gcr.io called
-/// latest, and nothing recorded which. The template pre-pulls this same
-/// reference; moving it is an edit of this line and of the compose below.
+/// fix-82: the version and digest cAdvisor ran, pinned so a fresh container
+/// never gets whatever the registry calls `latest` on the day it is cloned.
+/// The template pre-pulls this same reference; moving it is an edit of this
+/// line and of the compose below. Story: `docs/deployment/REGISTER.md`.
 pub const CADVISOR_IMAGE: &str = "gcr.io/cadvisor/cadvisor:v0.55.1@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57";
 
 pub const CADVISOR_COMPOSE: &str = r#"services:

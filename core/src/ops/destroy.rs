@@ -117,11 +117,9 @@ pub async fn destroy(
             return Ok(StepOutcome::Unchanged);
         }
         if manifest.storage.is_empty() {
-            // F210: this used to return in silence, so a stack that declares
-            // no storage was destroyed with no backup and nothing said —
-            // indistinguishable in the transcript from a backup that ran.
-            // For a native stack that is exactly wrong: its state lives
-            // INSIDE the container, which is the thing about to be deleted.
+            // F210: said loudly rather than in silence — for a native stack
+            // this is exactly wrong, since its state lives INSIDE the
+            // container about to be deleted. Story: docs/deployment/REGISTER.md.
             runner_warn(
                 ctx,
                 format!(

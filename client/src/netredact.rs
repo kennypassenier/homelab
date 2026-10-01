@@ -233,21 +233,21 @@ mod tests {
         m
     }
 
-    /// covers: rule-public-docs
+    /// guards: rule-public-docs
     #[test]
     fn a_mapped_address_becomes_its_name_and_drops_the_mask() {
         let out = redact("ip `10.10.10.20/24` on vmbr0", &map());
         assert_eq!(out, "ip `CT 120 (admin)` on vmbr0");
     }
 
-    /// covers: rule-public-docs
+    /// guards: rule-public-docs
     #[test]
     fn a_mapped_address_keeps_its_port() {
         let out = redact("reach it at 10.10.10.250:8443 from the lan", &map());
         assert_eq!(out, "reach it at pve:8443 from the lan");
     }
 
-    /// covers: rule-public-docs
+    /// guards: rule-public-docs
     #[test]
     fn an_unmapped_address_gets_an_rfc5737_placeholder() {
         let out = redact("node-exporter on 10.10.10.13:9100 timed out", &map());
@@ -258,7 +258,7 @@ mod tests {
         );
     }
 
-    /// covers: rule-public-docs
+    /// guards: rule-public-docs
     #[test]
     fn the_same_unmapped_address_gets_the_same_placeholder_every_time() {
         let out = redact("a at 10.10.10.6:1 and again 10.10.10.6:2", &map());
@@ -275,14 +275,14 @@ mod tests {
         );
     }
 
-    /// covers: rule-public-docs
+    /// guards: rule-public-docs
     #[test]
     fn a_public_or_already_placeholder_address_is_untouched() {
         let out = redact("8.8.8.8 and 198.51.100.5 stay put", &map());
         assert_eq!(out, "8.8.8.8 and 198.51.100.5 stay put");
     }
 
-    /// covers: rule-public-docs
+    /// guards: rule-public-docs
     #[test]
     fn a_bare_network_address_is_redacted_even_with_no_host_match() {
         let out = redact("whitelists 172.16.0.0/12 on the bridge", &map());

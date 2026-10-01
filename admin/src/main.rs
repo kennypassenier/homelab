@@ -214,6 +214,30 @@ const FILES: &[(&str, &[u8])] = &[
         "js/pages/passkeys.js",
         include_bytes!("../web/js/pages/passkeys.js"),
     ),
+    // The backup-secrets and visuals milestones: the fleet map and topology
+    // figure firewall and fleet-view share, the backup calendar, and the
+    // dedicated secrets and backups pages.
+    ("js/topology.js", include_bytes!("../web/js/topology.js")),
+    (
+        "js/backupcalendar.js",
+        include_bytes!("../web/js/backupcalendar.js"),
+    ),
+    (
+        "js/pages/fleetview.js",
+        include_bytes!("../web/js/pages/fleetview.js"),
+    ),
+    (
+        "js/pages/backupcalendar.js",
+        include_bytes!("../web/js/pages/backupcalendar.js"),
+    ),
+    (
+        "js/pages/backups.js",
+        include_bytes!("../web/js/pages/backups.js"),
+    ),
+    (
+        "js/pages/secrets.js",
+        include_bytes!("../web/js/pages/secrets.js"),
+    ),
     ("css/app.css", include_bytes!("../web/css/app.css")),
 ];
 

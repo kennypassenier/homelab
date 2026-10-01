@@ -1280,7 +1280,13 @@ async fn follow_select_ticks_the_fleet_table_for_a_batch_opened_from_it() {
     ok(&w, UiStep::Close).await;
     let (why, _) = refused(&step(&w, select(&["kp-soft"])).await);
     assert!(why.contains("Overview"), "{why}");
-    ok(&w, UiStep::Goto { path: "/".into() }).await;
+    ok(
+        &w,
+        UiStep::Goto {
+            path: "/overview".into(),
+        },
+    )
+    .await;
     let (why, _) = refused(&step(&w, select(&["nope"])).await);
     assert!(why.contains("no stack nope"), "{why}");
     // No selection: the batch dialog refuses, naming both fixes.

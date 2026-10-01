@@ -6,8 +6,9 @@
 
 use homelab_core::manifest::StackManifest;
 use homelab_core::ops::fleetcheck::{
-    evaluate, evaluate_boot, evaluate_coverage, evaluate_growth, evaluate_repo_drift, BootFact,
-    CoverageFact, GrowthFact, GrowthLimits, LiveFacts, RouteFact, Severity, StackDigest,
+    evaluate, evaluate_boot, evaluate_coverage, evaluate_growth, evaluate_host_meta,
+    evaluate_repo_drift, BootFact, CoverageFact, GrowthFact, GrowthLimits, LiveFacts, RouteFact,
+    Severity, StackDigest,
 };
 use homelab_core::state::{HostState, StackState};
 
@@ -1683,4 +1684,44 @@ fn fix_142_a_stack_without_a_manifest_compares_its_files_only() {
         ..Default::default()
     };
     assert!(evaluate_repo_drift(&st, &live).is_empty());
+}
+
+/// gap-23: the host-meta repository — the vault holding `restic.pw`, the
+/// state snapshot and the TLS material — is the one a lost host rebuilds
+/// from, so a backup that quietly stopped is the single worst silent
+/// failure this project can have. fix-111 wired `evaluate_host_meta` into
+/// `evaluate`'s own round; this is the direct test of the function itself,
+/// which had none.
+#[test]
+fn gap_23_a_stale_or_missing_host_meta_backup_is_broken() {
+    let never = HostState {
+        last_host_meta: 0,
+        ..Default::default()
+    };
+    let findings = evaluate_host_meta(&never, NOW, 24 * 3600);
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].severity, Severity::Broken);
+    assert_eq!(findings[0].subject, "host-meta");
+    assert!(
+        findings[0].what.to_lowercase().contains("never"),
+        "{}",
+        findings[0].what
+    );
+
+    let stale = HostState {
+        last_host_meta: NOW - 48 * 3600,
+        ..Default::default()
+    };
+    let findings = evaluate_host_meta(&stale, NOW, 24 * 3600);
+    assert_eq!(findings.len(), 1, "older than the max age is broken too");
+    assert_eq!(findings[0].severity, Severity::Broken);
+
+    let fresh = HostState {
+        last_host_meta: NOW - 3600,
+        ..Default::default()
+    };
+    assert!(
+        evaluate_host_meta(&fresh, NOW, 24 * 3600).is_empty(),
+        "a backup inside the window is not a finding"
+    );
 }

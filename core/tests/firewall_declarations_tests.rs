@@ -70,12 +70,29 @@ fn kp_soft_declares_its_live_firewall_minus_kuma() {
     let loki_old =
         "OUT ACCEPT -dest 10.10.10.4 -p tcp -dport 3100 # Loki push (Alloy), added 2026-09-25\n";
     assert!(live.contains(loki_old));
+    // Uptime Kuma's retirement (2026-10-01) did not just drop its icmp rule
+    // (above) — the stack file's own prose comment was rewritten to say so,
+    // and the "# 4 · who may reach" rule comment dropped its mention too.
+    // Both are hand-written text in `stacks/kp-soft/lxc-compose.yml`, copied
+    // here rather than derived, the same way `icmp` and `loki_old` are.
+    let header_old = "# route (8080, 8787), the Prometheus targets (8081, 9100) and the Uptime Kuma\n\
+                       # ping. Kenny approved it on 2026-09-20 (\"Klopt\").\n";
+    assert!(live.contains(header_old));
+    let header_new = "# route (8080, 8787) and the Prometheus targets (8081, 9100).\n\
+                       # Kenny approved it on 2026-09-20 (\"Klopt\"). Uptime Kuma's rules, added\n\
+                       # 2026-09-27, were retired with Uptime Kuma on 2026-10-01.\n";
+    let rule4_old = "#     (cadvisor, node exporter), Uptime Kuma (ping), Kenny's desktop (ssh)\n";
+    assert!(live.contains(rule4_old));
+    let rule4_new = "#     (cadvisor, node exporter), Kenny's desktop (ssh)\n";
     let want = format!(
         "# Written by homelab from stacks/kp-soft/lxc-compose.yml (fix-88): edit that file, not this one\n{}",
-        live.replace(icmp, "").replace(
-            loki_old,
-            "OUT ACCEPT -dest 10.10.10.13 -p tcp -dport 3100 # Loki push (Alloy), added 2026-09-25\n"
-        )
+        live.replace(icmp, "")
+            .replace(
+                loki_old,
+                "OUT ACCEPT -dest 10.10.10.13 -p tcp -dport 3100 # Loki push (Alloy), added 2026-09-25\n"
+            )
+            .replace(header_old, header_new)
+            .replace(rule4_old, rule4_new)
     );
     let all = stacks();
     let m = &all["kp-soft"];

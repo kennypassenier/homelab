@@ -75,8 +75,14 @@ impl Executor for HybridExec {
                 if rendered.contains("docker --version") {
                     return Ok(CmdOutput::ok("Docker 27"));
                 }
-                if rendered.contains("--status running --services") {
-                    return Ok(CmdOutput::ok("app\n"));
+                // fix-132/fix-133: the health read is now
+                // `docker compose ps --format json`, parsed by the
+                // Unknown-carrying JSON parser — a plain "app\n" line no
+                // longer reads as a running service.
+                if rendered.contains("docker compose ps") && rendered.contains("--format json") {
+                    return Ok(CmdOutput::ok(
+                        "{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n",
+                    ));
                 }
                 // S2: the deploy now reads its own pushes back, so this fake
                 // has to model the destination side of `pct push` — the file

@@ -1,6 +1,6 @@
 //! The pre-commit internal-address gate (`.githooks/check-internal-ips.sh`).
 //!
-//! covers: public-repo-attack-map (deep-dive: "only replace the internal
+//! guards: public-repo-attack-map (deep-dive: "only replace the internal
 //! addresses")
 
 use std::path::PathBuf;
@@ -27,7 +27,7 @@ fn run_on(diff: &str) -> i32 {
         .unwrap_or(-1)
 }
 
-/// covers: public-repo-attack-map
+/// guards: public-repo-attack-map
 #[test]
 fn an_added_internal_address_is_refused_in_docs() {
     let leak = "+++ b/docs/x.md\n+reach it at 10.10.10.9:8080 from the LAN\n";
@@ -52,7 +52,7 @@ fn an_added_internal_address_is_refused_in_docs() {
     );
 }
 
-/// covers: public-repo-attack-map
+/// guards: public-repo-attack-map
 #[test]
 fn a_machine_name_or_an_rfc5737_placeholder_passes() {
     let named = "+++ b/docs/x.md\n+reach it at kyu (CT 109):8080 from the LAN\n";
@@ -74,7 +74,7 @@ fn a_machine_name_or_an_rfc5737_placeholder_passes() {
     );
 }
 
-/// covers: public-repo-attack-map
+/// guards: public-repo-attack-map
 #[test]
 fn removing_a_leaked_address_stays_possible() {
     let removed = "+++ b/docs/x.md\n-reach it at 10.10.10.9:8080 from the LAN\n";

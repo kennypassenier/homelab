@@ -18,8 +18,12 @@ fn cd_and_cmd_quote_every_value() {
 fn a_value_holding_a_quote_is_escaped_not_injected() {
     let got = Script::new().cd("/appdata/x'; rm -rf /").build();
     // The negative twin: the attacker's `;` never becomes an active
-    // separator — it stays inside the single-quoted argument.
-    assert!(!got.contains("'; rm -rf /'"), "{got}");
+    // separator — it stays inside the single-quoted argument. Checked
+    // against the UNescaped value: the correct `'\''` escape necessarily
+    // places two adjacent quotes right before the payload, so a loose
+    // search for `'; rm -rf /'` matches the properly escaped output too —
+    // it has to look for the raw, un-doubled quote the attacker supplied.
+    assert!(!got.contains("x'; rm -rf /'"), "{got}");
     assert_eq!(got, "cd '/appdata/x'\\''; rm -rf /'");
 }
 

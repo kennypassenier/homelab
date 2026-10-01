@@ -1866,9 +1866,20 @@ fn fix_110_host_config_drift_names_the_differing_key() {
 /// which had none.
 #[test]
 fn gap_23_a_stale_or_missing_host_meta_backup_is_broken() {
+    // fix-130 (2026-10-01): a host with nothing deployed yet (`stacks`
+    // empty) never fails this check from emptiness alone — the fleet
+    // genuinely has no host-meta to lose yet. These scenarios are about a
+    // host that already has a stack, so each carries one.
+    let one_stack = || {
+        let mut s = HostState::default();
+        s.stacks
+            .insert("test".into(), stack(108, "108-app-test", true, NOW));
+        s
+    };
+
     let never = HostState {
         last_host_meta: 0,
-        ..Default::default()
+        ..one_stack()
     };
     let findings = evaluate_host_meta(&never, NOW, 24 * 3600);
     assert_eq!(findings.len(), 1);
@@ -1882,7 +1893,7 @@ fn gap_23_a_stale_or_missing_host_meta_backup_is_broken() {
 
     let stale = HostState {
         last_host_meta: NOW - 48 * 3600,
-        ..Default::default()
+        ..one_stack()
     };
     let findings = evaluate_host_meta(&stale, NOW, 24 * 3600);
     assert_eq!(findings.len(), 1, "older than the max age is broken too");
@@ -1890,11 +1901,16 @@ fn gap_23_a_stale_or_missing_host_meta_backup_is_broken() {
 
     let fresh = HostState {
         last_host_meta: NOW - 3600,
-        ..Default::default()
+        ..one_stack()
     };
     assert!(
         evaluate_host_meta(&fresh, NOW, 24 * 3600).is_empty(),
         "a backup inside the window is not a finding"
+    );
+
+    assert!(
+        evaluate_host_meta(&HostState::default(), NOW, 24 * 3600).is_empty(),
+        "a fresh host with nothing deployed never fails from emptiness alone"
     );
 }
 

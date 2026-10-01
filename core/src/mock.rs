@@ -324,6 +324,34 @@ impl Executor for MockExecutor {
                 up.remove(app);
             }
         }
+        // fix-132's health read (`docker compose ps --format json`, scoped to
+        // one app's directory) needs its own model: it is not the
+        // fleet-wide `docker ps --format` query above, and an app the mock
+        // never saw a scripted answer for must report itself running once
+        // `compose up` has put it in `container_running` — otherwise every
+        // verify-health step reads back "no running services" for a
+        // container the test never meant to be down.
+        if rendered.contains("docker compose ps") && rendered.contains("--format json") {
+            let scripted = {
+                let always = self.always.lock().unwrap();
+                always.iter().any(|r| rendered.contains(&r.matcher))
+            } || {
+                let queue = self.queue.lock().unwrap();
+                queue.iter().any(|(m, _)| rendered.contains(m))
+            };
+            if !scripted
+                && let Some(dir) = cmd.args.iter().find_map(|a| cd_target(a))
+                && let Some(app) = dir.rsplit('/').next()
+            {
+                let up = self.container_running.lock().unwrap();
+                if up.contains(app) {
+                    return Ok(CmdOutput::ok(&format!(
+                        "{{\"Service\":\"{}\",\"State\":\"running\",\"Health\":\"\"}}\n",
+                        app
+                    )));
+                }
+            }
+        }
         if rendered.contains("docker ps --format") {
             let up = self.container_running.lock().unwrap();
             if !up.is_empty() {

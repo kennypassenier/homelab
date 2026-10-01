@@ -1682,7 +1682,7 @@ async fn d1_fresh_deploy_command_sequence() {
     let start = pos("pct start 110");
     let push = pos("pct push 110");
     let up = pos("compose up -d");
-    let verify = pos("ps --status running --services");
+    let verify = pos("docker compose ps --format json");
     let route = pos("pct push 104");
     assert!(create < start, "create before start");
     assert!(start < push, "start before file push");
@@ -2351,10 +2351,7 @@ async fn s2_reconcile_catches_a_container_that_does_not_match() {
     script_fresh(&exec);
     // Asked the way reconcile asks it: per app directory, because an app is
     // a compose project whose services carry names of their own.
-    exec.respond_first(
-        "docker compose ps --status running --services",
-        CmdOutput::ok(""),
-    );
+    exec.respond_first("docker compose ps --format json", CmdOutput::ok(""));
     let sink = VecSink::new();
     let journal = NullJournal;
     let sp = spec(110, "syncthing");

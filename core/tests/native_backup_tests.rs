@@ -526,7 +526,10 @@ mod chassis_pause_addendum {
         // call here (the leftover-clear and final cleanup are both `rm -f`).
         let tar = position(&calls, "tar -cf -");
         let resume = position(&calls, "backup-resume");
-        let upload = position(&calls, "cat ");
+        // "cat " alone now also matches the repository-health
+        // preflight (`restic cat config`, gap-24), which runs before the
+        // pause; the upload read is specifically of the staged file.
+        let upload = position(&calls, "cat '/HDD4TB/backup-staging");
         assert!(
             pause < tar && tar < resume && resume < upload,
             "expected pause < local tar < resume < upload: {:?}",
@@ -574,8 +577,14 @@ mod chassis_pause_addendum {
         let tar = position(&calls, "tar -cf -");
         let resume = position(&calls, "backup-resume");
         assert!(tar < resume, "{:?}", calls);
+        // rule 20 (2026-10-01): a leftover stage file from a run that died
+        // mid-copy is cleared at the START of every run, before the fit
+        // decision is even made — so the path's name is allowed to appear
+        // once, as that cleanup, even on the "does not fit" branch. What
+        // must never happen is an actual write to it.
         assert!(
-            exec.calls_containing("almanac-stage.tar").is_empty(),
+            exec.calls_containing("> '/HDD4TB/backup-staging")
+                .is_empty(),
             "nothing should have been staged: {:?}",
             calls
         );
@@ -609,8 +618,12 @@ mod chassis_pause_addendum {
             "the service must be resumed even when the local copy failed: {:?}",
             exec.calls()
         );
+        // See the "fits" test above: "cat " alone also matches the
+        // repository-health preflight; the claim here is specifically that
+        // the (torn) staged file is never read for upload.
         assert!(
-            exec.calls_containing("cat ").is_empty(),
+            exec.calls_containing("cat '/HDD4TB/backup-staging")
+                .is_empty(),
             "nothing is uploaded from a copy that never finished: {:?}",
             exec.calls()
         );

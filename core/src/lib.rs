@@ -10,6 +10,7 @@
 pub mod ask;
 pub mod charts;
 pub mod checks;
+pub mod diskgrowth;
 pub mod doctor;
 pub mod error;
 pub mod executor;

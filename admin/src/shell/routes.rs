@@ -469,6 +469,131 @@ async fn traffic(State(c): State<ReadCtx>, Query(q): Query<ChartQuery>) -> Respo
     .into_response()
 }
 
+/// The stack names the fleet currently reports, for a fleet-wide Prometheus
+/// query (feat-overview-11, feat-overview-12, feat-firewall-3) — the same
+/// source `/data/host` reads.
+async fn fleet_stack_names(c: &ReadCtx) -> Vec<String> {
+    c.shared
+        .read()
+        .await
+        .fleet
+        .as_ref()
+        .map(|f| f.stacks.iter().map(|s| s.name.clone()).collect())
+        .unwrap_or_default()
+}
+
+/// feat-overview-11 (capacity map): CPU, memory and disk side by side for
+/// every stack, one Prometheus call per metric across the whole fleet.
+async fn capacity(State(c): State<ReadCtx>) -> Response {
+    let Some(prom) = &c.prometheus else {
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the capacity map",
+            "no Prometheus is configured for this dashboard",
+            "set admin.prometheus_url (or HOMELAB_ADMIN_PROMETHEUS_URL) to Prometheus's address",
+        );
+    };
+    let stacks = fleet_stack_names(&c).await;
+    if stacks.is_empty() {
+        return Json(serde_json::json!({ "panels": [] })).into_response();
+    }
+    let mut out = Vec::new();
+    for p in homelab_core::charts::fleet_capacity_panels(&stacks) {
+        let r = prom.instant(&p.query, p.legend.as_deref()).await;
+        out.push(match r {
+            Ok(series) => serde_json::json!({ "panel": p, "series": series }),
+            Err(e) => serde_json::json!({ "panel": p, "series": [], "error": e }),
+        });
+    }
+    Json(serde_json::json!({ "panels": out, "measured_at": now_s() })).into_response()
+}
+
+/// feat-overview-12 (disk-growth prediction): every stack's root disk, and
+/// every filesystem of the hypervisor, fitted over `range` (default 7d) and
+/// warned about within `within_days` (default
+/// `homelab_core::diskgrowth::DEFAULT_WARN_DAYS`).
+#[derive(Deserialize)]
+struct GrowthQuery {
+    #[serde(default)]
+    range: Option<String>,
+    #[serde(default)]
+    within_days: Option<f64>,
+}
+
+async fn disk_growth(State(c): State<ReadCtx>, Query(q): Query<GrowthQuery>) -> Response {
+    let Some(prom) = &c.prometheus else {
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "disk growth",
+            "no Prometheus is configured for this dashboard",
+            "set admin.prometheus_url (or HOMELAB_ADMIN_PROMETHEUS_URL) to Prometheus's address",
+        );
+    };
+    let Some((span, step)) = chart_window(q.range.as_deref().or(Some("7d"))) else {
+        return refused(
+            StatusCode::BAD_REQUEST,
+            "disk growth",
+            "unknown range",
+            "use one of 1h, 6h, 24h, 7d, 30d",
+        );
+    };
+    let within_days = q
+        .within_days
+        .unwrap_or(homelab_core::diskgrowth::DEFAULT_WARN_DAYS);
+    let end = now_s();
+    let start = end.saturating_sub(span);
+    let stacks = fleet_stack_names(&c).await;
+    let mut rows = Vec::new();
+    let mut queries: Vec<(String, homelab_core::charts::Panel)> = Vec::new();
+    if !stacks.is_empty() {
+        queries.push((
+            "stacks".into(),
+            homelab_core::charts::fleet_disk_growth_query(&stacks),
+        ));
+    }
+    if let Some(h) = &prom.host_label {
+        queries.push((
+            "host".into(),
+            homelab_core::charts::host_disk_growth_query(h),
+        ));
+    }
+    for (scope, p) in queries {
+        let series = prom
+            .range(&p.query, start, end, step, p.legend.as_deref())
+            .await;
+        let Ok(series) = series else { continue };
+        for s in series {
+            let label = s["label"].as_str().unwrap_or("").to_string();
+            let points: Vec<(f64, f64)> = s["points"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|p| Some((p[0].as_f64()?, p[1].as_f64()?)))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let Some(fit) = homelab_core::diskgrowth::fit(&points) else {
+                continue;
+            };
+            let warning = homelab_core::diskgrowth::is_warning(&fit, within_days);
+            rows.push(serde_json::json!({
+                "scope": scope,
+                "subject": label,
+                "fit": fit,
+                "warning": warning,
+            }));
+        }
+    }
+    Json(serde_json::json!({
+        "rows": rows,
+        "within_days": within_days,
+        "from": start,
+        "to": end,
+        "measured_at": end,
+    }))
+    .into_response()
+}
+
 pub fn read_router(ctx: ReadCtx) -> Router {
     Router::new()
         .route("/data/host", get(host))
@@ -478,5 +603,7 @@ pub fn read_router(ctx: ReadCtx) -> Router {
         .route("/data/logs", get(logs))
         .route("/data/charts", get(charts))
         .route("/data/traffic", get(traffic))
+        .route("/data/capacity", get(capacity))
+        .route("/data/disk-growth", get(disk_growth))
         .with_state(ctx)
 }

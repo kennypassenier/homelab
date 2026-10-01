@@ -331,7 +331,13 @@ names `homelab release-update`. The steps below are the parts it merges.
    match the host and commit that when the
    host's value is the one to keep. A repository checkout with no
    `config/host.toml` yet skips this comparison entirely — it is additive,
-   not a requirement.
+   not a requirement. A fourth, since 2026-10-01 (rule-20): a `drift` or
+   `broken` finding per host-level capacity reading past its warn or
+   critical threshold — pve's root fs, the local-lvm thin pool, every ZFS
+   pool, pve's journald, Prometheus' TSDB and the native-backup staging
+   directory (USER_GUIDE.md, "Disk caps and thresholds"). The remedy line
+   says what to free or grow; the thresholds themselves are one
+   `host.toml` table (`capacity_thresholds`), editable from the dashboard.
 2. `homelab doctor`. Host disk, state file, backup age per stack, the Drive
    remote, mirror lag, interrupted operations (`core/src/doctor.rs:45-188`).
 3. `homelab incidents`. One directory per failed operation;

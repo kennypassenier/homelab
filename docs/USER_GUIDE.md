@@ -3451,6 +3451,46 @@ is unchanged by this: it still edits only the three keys it always has
 (`backup_hour`, `notify_webhook`, `retention`) over the older `SetConfig`
 command, and does not yet read or write `config/host.toml`.
 
+### Disk caps and thresholds
+
+rule-20 (disk-audit, 2026-10-01): every place on the fleet that grows gets
+either a declared cap, a threshold that notifies before it is full, or
+both. One table, so the question "is this bounded, and where" has one
+place to look.
+
+| Source | Cap/threshold | Where it is declared |
+|---|---|---|
+| pve apt cache (`/var/cache/apt/archives`) | `APT_AUTOCLEAN` (weekly clean/autoclean) | `core/src/ops/guards.rs` (`APT_AUTOCLEAN`), pushed to pve itself from a self-update step (`core/src/ops/selfupdate.rs`) — before this it only reached managed CTs |
+| pve `/etc/logrotate.d/homelab` | daily, 7 kept, steps aside for rsyslog's own fragment | same self-update step, reusing `guards::LOGROTATE_POLICY` / `logrotate_policy` |
+| pve journald | `SystemMaxUse=2G` (cap) · 80/95% of that cap (notify) | cap: `core/src/hostunits.rs` (`JOURNALD_CAP`); threshold: `capacity_thresholds` in `host.toml`, `HostCapacityMetric::Journald` |
+| pve root filesystem (`/`) | 70/85% (notify) | `host.toml` `capacity_thresholds`, `HostCapacityMetric::PveRoot` |
+| local-lvm thin pool, data% | 70/85% (notify) | `host.toml` `capacity_thresholds`, `HostCapacityMetric::ThinPoolData` |
+| local-lvm thin pool, metadata% | 50/70% (notify, lower — harder to recover from) | `host.toml` `capacity_thresholds`, `HostCapacityMetric::ThinPoolMeta` |
+| every ZFS pool | 80/90% (notify) | `host.toml` `capacity_thresholds`, `HostCapacityMetric::ZfsPool` |
+| Prometheus TSDB vs its `--storage.tsdb.retention.size` | 70/90% of the configured cap (notify) | cap itself: `stacks/metrics/prometheus/docker-compose.yml`; the cap value core asks against: `host.toml` `tsdb_retention_size_mib` (Kenny's own number, matching the compose file — core has no business knowing an app's configured value); threshold: `capacity_thresholds`, `HostCapacityMetric::PrometheusTsdb` |
+| native-backup staging directory (`/appdata/.backup-staging`) | emptied every run, capped by `native_backup_staging_cap_mib`; 10/50% of that cap (notify, deliberately low — anything here between runs is already a finding) | cap: `host.toml` `native_backup_staging_cap_mib`; threshold: `capacity_thresholds`, `HostCapacityMetric::NativeBackupStaging` |
+| every managed container's own rootfs | 70/85% (notify) | `host.toml`-free, a compiled default (`GrowthLimits`, `core/src/ops/fleetcheck.rs`) — unchanged by this round |
+| a stack's own declared data pool (`data_mounts`) | 80/90% (notify) | `GrowthLimits::pool_drift_pct` / `pool_broken_pct`, same module |
+| per-stack log rotation on a data mount | the stack's own `rotate:`, or — new — the fleet default (`*.log`, 50M, keep 5) for a mount that declares neither `rotate:` nor `no_default_rotate: true` | stack's own: `data_mounts[].rotate` in its `lxc-compose.yml`; fleet default: `host.toml` `default_log_rotation` |
+| registry pull-through cache (CT 117) | 168h proxy ttl (age) + nightly `registry garbage-collect` (frees what ttl expired) | ttl: `stacks/registry/registry/*.yml` (`proxy.ttl`, already declared); GC: `stacks/registry/rootfs/` (a stack-declared systemd timer, `registry-gc.timer`/`.service`) |
+| homelab daemon's own `push-staging-*` files | swept at daemon start and after every operation, 1h grace | `core/src/ops/util.rs` (`stale_push_staging`), called from `host/src/main.rs` (`cleanup_push_staging`) |
+| incident bundles | age + count (`incident_bundle_max_age_days`/`_count`) | `host.toml`, unchanged by this round |
+| journal.jsonl (daemon's own) | size (`journal_max_bytes`) | `host.toml`, unchanged by this round |
+| dashboard notification store | count (`notify_keep`) + age (new: `notify_max_age_days`, default 180) | env vars on CT 120, `HOMELAB_ADMIN_NOTIFY_KEEP` / `HOMELAB_ADMIN_NOTIFY_MAX_AGE_DAYS` — `admin/src/core/actions_config.rs` |
+| kyu's own backup-file retention | count (`KYU_BACKUP_KEEP`, default 7) | `stacks/kyu/rootfs/usr/local/bin/kyu-backup` — already had a default |
+| kyu's own message-store retention | kyu's own concern, outside this repository | not declared here; flagged to the kyu project (disk-audit) |
+| kyu migration leftovers (`kyu-config-newstore-backup`, `kyu-config-pre-update` on CT 109) | none — small today, never cleaned up | manual cleanup for Kenny; this repo's code does not know an individual stack's leftover file names (app-knowledge guard, `core/tests/app_knowledge_guard_tests.rs`) |
+
+Every `capacity_thresholds` pair is one host.toml table, edited like any
+other fleet default from the dashboard's settings page (`hostconfig.rs`
+wires it in automatically, the same mechanism every other key there uses).
+A reading past its warn threshold is a `Drift` finding; past critical, a
+`Broken` one — both flow through `fleetcheck::evaluate()` into the same
+nightly round, the same de-duplication (`report_fingerprint` /
+`nightly_report_due`) and the same notification path as every other
+finding, so they show up wherever findings already do (Health → Checks)
+without a dedicated dashboard page.
+
 ### `homelab wipe <name>`: delete what a retired stack, app or unit kept
 
 A destroy, a forget, and a deploy that dropped an app or a native unit keep

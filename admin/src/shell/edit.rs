@@ -1482,45 +1482,62 @@ async fn import_commit(
 
 // ── feat-firewall-2 ─────────────────────────────────────────────────────
 
+/// The fleet's firewall declarations, the editable summary rows the
+/// firewall page shows, and the working copy's head commit (if any) they
+/// were read at.
+type FleetFirewallRead = (
+    Vec<FleetFirewall>,
+    Vec<serde_json::Value>,
+    Option<super::workcopy::CommitRef>,
+);
+
+/// Shared by every reader that needs the fleet's firewall declarations
+/// (feat-firewall-2's matrix, feat-overview-7's topology, feat-stacks-9's
+/// dependencies): one pass over the working copy's stack manifests.
+fn fleet_firewall(wc: &WorkingCopy) -> Result<FleetFirewallRead, Refusal> {
+    if !wc.present() {
+        return Err(Refusal::new(
+            "the fleet's firewall declarations",
+            "the dashboard has no working copy of the homelab repository yet",
+            "the working copy panel says why; it clones at start once the deploy key is there",
+        ));
+    }
+    let mut fleet = Vec::new();
+    let mut summaries = Vec::new();
+    for name in wc.stack_names() {
+        let Ok(texts) = wc.stack_texts(&name) else {
+            continue;
+        };
+        let Some(Ok(m)) = texts.get(MANIFEST).map(|t| stackedit::parse_manifest(t)) else {
+            continue;
+        };
+        let Ok(ip) = bare_ip(&m.network.ip).parse() else {
+            continue;
+        };
+        summaries.push(serde_json::json!({
+            "stack": name, "vmid": m.vmid, "ip": bare_ip(&m.network.ip),
+            "declared": m.firewall.is_some(),
+            "enabled": m.firewall.as_ref().is_some_and(|f| f.enabled),
+            "policy_in": m.firewall.as_ref().map(|f| stackedit::action_word(f.policy_in)),
+            "policy_out": m.firewall.as_ref().map(|f| stackedit::action_word(f.policy_out)),
+            "rules": m.firewall.as_ref().map(|f| f.rules.len()).unwrap_or(0),
+            "management_open": m.firewall.as_ref().and_then(|f| f.management_open.clone()),
+        }));
+        fleet.push(FleetFirewall {
+            stack: name,
+            vmid: m.vmid,
+            ip,
+            firewall: m.firewall,
+        });
+    }
+    let head = wc.status().head;
+    Ok((fleet, summaries, head))
+}
+
 async fn firewall(State(c): State<EditCtx>) -> Response {
     let wc = c.wc.clone();
     let read = blocking(move || {
-        if !wc.present() {
-            return Err(Refusal::new(
-                "the firewall page",
-                "the dashboard has no working copy of the homelab repository yet",
-                "the working copy panel says why; it clones at start once the deploy key is there",
-            ));
-        }
-        let mut fleet = Vec::new();
-        let mut summaries = Vec::new();
-        for name in wc.stack_names() {
-            let Ok(texts) = wc.stack_texts(&name) else {
-                continue;
-            };
-            let Some(Ok(m)) = texts.get(MANIFEST).map(|t| stackedit::parse_manifest(t)) else {
-                continue;
-            };
-            let Ok(ip) = bare_ip(&m.network.ip).parse() else {
-                continue;
-            };
-            summaries.push(serde_json::json!({
-                "stack": name, "vmid": m.vmid, "ip": bare_ip(&m.network.ip),
-                "declared": m.firewall.is_some(),
-                "enabled": m.firewall.as_ref().is_some_and(|f| f.enabled),
-                "policy_in": m.firewall.as_ref().map(|f| stackedit::action_word(f.policy_in)),
-                "policy_out": m.firewall.as_ref().map(|f| stackedit::action_word(f.policy_out)),
-                "rules": m.firewall.as_ref().map(|f| f.rules.len()).unwrap_or(0),
-                "management_open": m.firewall.as_ref().and_then(|f| f.management_open.clone()),
-            }));
-            fleet.push(FleetFirewall {
-                stack: name,
-                vmid: m.vmid,
-                ip,
-                firewall: m.firewall,
-            });
-        }
-        let head = wc.status().head;
+        let (fleet, summaries, head) = fleet_firewall(&wc)?;
         Ok((fwmatrix::matrix(&fleet), summaries, head))
     })
     .await
@@ -1529,6 +1546,46 @@ async fn firewall(State(c): State<EditCtx>) -> Response {
         Ok((m, summaries, head)) => {
             Json(serde_json::json!({ "matrix": m, "stacks": summaries, "head": head }))
                 .into_response()
+        }
+        Err(r) => refusal(StatusCode::CONFLICT, r),
+    }
+}
+
+// ── feat-overview-7 / feat-stacks-9 ──────────────────────────────────────
+
+/// feat-overview-7 (topology: which container talks to which): the same
+/// firewall declarations feat-firewall-2 reads, turned into nodes and
+/// edges (`crate::core::topology`). The firewall page overlays measured
+/// traffic on this same shape (feat-firewall-3); this route stays the
+/// plain, undecorated graph so the Overview page costs no Prometheus call.
+async fn topology(State(c): State<EditCtx>) -> Response {
+    let wc = c.wc.clone();
+    let read = blocking(move || {
+        let (fleet, _summaries, head) = fleet_firewall(&wc)?;
+        Ok((crate::core::topology::from_fleet(&fleet), head))
+    })
+    .await
+    .and_then(|r| r);
+    match read {
+        Ok((t, head)) => Json(serde_json::json!({ "topology": t, "head": head })).into_response(),
+        Err(r) => refusal(StatusCode::CONFLICT, r),
+    }
+}
+
+/// feat-stacks-9 (dependencies between stacks): the topology's edges, read
+/// per stack as "depends on" / "depended on by".
+async fn dependencies(State(c): State<EditCtx>) -> Response {
+    let wc = c.wc.clone();
+    let read = blocking(move || {
+        let (fleet, _summaries, head) = fleet_firewall(&wc)?;
+        let topo = crate::core::topology::from_fleet(&fleet);
+        Ok((crate::core::topology::dependencies(&topo), head))
+    })
+    .await
+    .and_then(|r| r);
+    match read {
+        Ok((rows, head)) => {
+            Json(serde_json::json!({ "dependencies": rows, "head": head })).into_response()
         }
         Err(r) => refusal(StatusCode::CONFLICT, r),
     }
@@ -1722,6 +1779,8 @@ pub fn router(ctx: EditCtx) -> Router {
         .route("/data/stacks-import/plan", post(import_plan))
         .route("/data/stacks-import/commit", post(import_commit))
         .route("/data/firewall", get(firewall))
+        .route("/data/topology", get(topology))
+        .route("/data/dependencies", get(dependencies))
         .route(
             "/data/host-settings",
             get(host_settings).put(host_settings_save),

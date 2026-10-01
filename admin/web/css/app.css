@@ -1690,6 +1690,79 @@ td.stack-flags {
   gap: 4px;
 }
 
+/* feat-overview-7 / feat-firewall-3: the topology graph. */
+.topology {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.topology figcaption {
+  font-weight: 600;
+  margin-block-end: 6px;
+}
+.topology__svg {
+  width: 100%;
+  max-width: 480px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+.topology__edge {
+  fill: none;
+  stroke: var(--chart-1, var(--primary));
+  stroke-width: 1.4;
+  opacity: 0.7;
+}
+.topology__edge--open {
+  stroke: var(--muted-foreground);
+  stroke-dasharray: 3 3;
+  opacity: 0.5;
+}
+.topology__dot {
+  fill: var(--primary);
+  stroke: var(--background);
+  stroke-width: 1.5;
+}
+.topology__node:focus-visible .topology__dot {
+  outline: 2px solid var(--ring, var(--primary));
+}
+.topology__traffic-ring {
+  fill: none;
+  stroke: var(--chart-2, #e8a33d);
+  stroke-width: 2;
+  opacity: 0.6;
+}
+.topology__label {
+  font-size: 10px;
+  fill: var(--foreground);
+}
+.topology__legend {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 0.85em;
+  color: var(--muted-foreground);
+}
+.topology__key::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 3px;
+  margin-inline-end: 6px;
+  vertical-align: middle;
+  background: var(--chart-1, var(--primary));
+}
+.topology__key--open::before {
+  background: var(--muted-foreground);
+}
+.topology__key--traffic::before {
+  background: var(--chart-2, #e8a33d);
+}
+
 /* replace-kuma (2026-09-30): the minute watch's dot on a tile. */
 .start-dot {
   display: inline-block;

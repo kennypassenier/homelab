@@ -36,5 +36,6 @@ pub mod stackedit_settings_ext;
 pub mod stackedit_tiles;
 pub mod templates;
 pub mod textdiff;
+pub mod topology;
 pub mod watch;
 pub mod yamledit;

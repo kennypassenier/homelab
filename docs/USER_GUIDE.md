@@ -886,6 +886,80 @@ Tests: `admin/tests/parity_tests.rs`, `admin/tests/act_actions_tests.rs`
 (`parity_*`), `admin/tests/follow_tests.rs` (`parity_*`),
 `core/tests/native_tests.rs` (`parity_*`), `admin/web/test/parity.test.js`.
 
+#### feat-backup-1/2/3 · Backups page
+
+**Status:** Built, not yet measured live (needs the next release).
+
+`/app/backups` lists every stack's restic repositories: a compose stack has
+one per app that owns data (D25); a native (adopted) service has exactly
+one, named after the unit. Each row is read straight from the host
+(`GetBackups`, `core::ops::backup::backup_status`/`repo_status_of`) — newest
+snapshot, its age and size, the repository's own snapshot count, and the
+last restore-drill verdict for that repository (never drilled, passed, or
+failed with its reason). Nothing here starts a backup or a restore by
+itself.
+
+**Restore.** The Restore… button on a repository with a snapshot opens the
+existing `restore` (compose) or `restore-native` dialog with that snapshot
+pre-filled, so picking a snapshot and running the restore are one motion.
+`restore-native` (feat-backup-2) is `RestoreNative`'s own action: gated the
+same way `restore` is (the stack name must be typed, fix-64's rule, mirrored
+in `core::ops::native::restore_native`) — it stops the unit, copies the
+current data aside on the host first (`pre-restore/<stack>-<ts>`, never
+removed automatically), unpacks the chosen snapshot with `restic dump | tar
+-x`, and restarts the unit. A failed unpack leaves the unit stopped rather
+than restarted over a half-written directory.
+
+**Browse a snapshot (feat-backup-3).** Read-only, from `BrowseSnapshot`
+(`core::ops::backup::browse_snapshot`, `restic ls --json` parsed by
+`parse_snapshot_ls`): expand a snapshot's file list inline on the page,
+descend into a directory with `?path=`, nothing here restores a single
+file — that stays a whole-repository restore, named above.
+
+Tests: `core/ops/backup.rs`'s own unit tests (`parse_snapshot_ls`),
+`core/tests/native_restore_tests.rs` (`restore_native`'s gate, order of
+steps, and the failed-unpack case).
+
+#### feat-secrets-1/2 · Secrets page
+
+**Status:** Built, not yet measured live (needs the next release).
+
+`/app/secrets` lists what a chosen stack declares in `latch_secrets` and
+`latch_files` — read from the dashboard's own working copy of
+`lxc-compose.yml` (`admin::core::stackedit_latch::current`), the same source
+the stack editor's latch form already reads. No value is fetched ahead of a
+click.
+
+**Reveal.** Pressing Reveal on one row asks the host for that one value
+(`RevealSecret`, read straight from the host's vault —
+`{state_dir}/secrets/<stack>/…`, never through a traced process) and shows
+it inline; Hide (or leaving the page) drops it from the page without asking
+the host again. Every reveal is one audit-log line on the host naming WHICH
+secret was read, never the value.
+
+**Change a secret (feat-secrets-2).** Change… opens a small form on the same
+row: the new value is staged first (`POST /data/secrets/stage`, held in
+memory on the host for five minutes, taken exactly once) and the write
+itself rides `ActionKind::ChangeSecret` — the same job/audit/progress
+machinery every other dashboard write gets, driven with the secret
+reference and the one-time stage token, never the value itself (it never
+becomes a job argument, a "copy as CLI command" line, or a `homelab ui`
+step's field). The host writes it with `latch put <stack>/<app>/.env --env
+<env>` (or the matching `latch_files` path) from its own intent-repo
+checkout — the exact file the next deploy reads, nothing else in latch is
+touched. Redeploy the stack for the running container to pick it up.
+`HOMELAB_LATCH_ENV` must be set on the host (the same variable the nightly
+deploy uses) or the write is refused with that remedy.
+
+Not drivable with `homelab ui` as a scripted preset the way other actions
+are (Reveal and the staged value are deliberately a page-only, click-through
+flow); the dialog itself still opens and plays through `open
+change-secret`/`type act-secret_ref …`/`type act-stage_token …` once a value
+has been staged by hand.
+
+Tests: `core/src/ops/secrets.rs` (`vault_rel`, `latch_rel_path`),
+`host/src/secrets.rs` (`latch_put` refuses without `HOMELAB_LATCH_ENV`).
+
 #### A5 · Secrets vault on the host
 
 **Status:** Built.

@@ -37,6 +37,14 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
 #[tokio::test]
 async fn fix_70_the_template_declares_systemd_start_time_metrics() {
     let exec = MockExecutor::new();
+    // The "claim temp vmid" gate refuses to build over an existing guest —
+    // an unscripted `pct config` defaults to success in the mock, which
+    // reads as "already exists", so the temp vmid must be scripted absent
+    // first, same as every other template-build test.
+    exec.enqueue(
+        "pct config 999",
+        homelab_core::executor::CmdOutput::failed(2, "does not exist"),
+    );
     exec.respond_always(
         "systemctl is-system-running",
         homelab_core::executor::CmdOutput::ok("running"),

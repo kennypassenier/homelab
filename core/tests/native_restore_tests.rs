@@ -182,7 +182,11 @@ async fn a_stateless_unit_is_told_there_is_nothing_to_restore() {
 #[tokio::test]
 async fn a_failed_unpack_still_leaves_the_unit_stopped_rather_than_half_restored() {
     let exec = harness();
-    exec.respond_always("restic dump", CmdOutput::failed(1, "no such snapshot"));
+    // respond_first: the harness already scripts a healthy "restic dump" as
+    // its default, and `respond_always` only appends — the first-registered
+    // rule still wins, so this override must jump the queue to actually
+    // replace it.
+    exec.respond_first("restic dump", CmdOutput::failed(1, "no such snapshot"));
     let sink = VecSink::new();
     let j = NullJournal;
     let r = restore_native(

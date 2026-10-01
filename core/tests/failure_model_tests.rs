@@ -236,6 +236,11 @@ fn ar13_completed_op_is_not_flagged() {
 fn f6_doctor_healthy_system_is_ok() {
     let p = Probes {
         host_disk_free_pct: Some(57),
+        // fix-62 (2026-10-01): asked unconditionally, unlike staging disk
+        // (which is only a finding when configured) — a healthy system
+        // still has to answer it, or doctor reads "not asked" as "could not
+        // read" and warns.
+        restore_scratch_disk_free_pct: Some(57),
         state_parses: true,
         managed_stacks: vec![StackProbe {
             name: "syncthing".into(),

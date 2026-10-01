@@ -111,7 +111,7 @@ pub const VERBS: &[Verb] = &[
         "snapshots",
         "stacks/<name> [--json]",
         "every backup snapshot of a stack's repositories, newest first — the id `homelab restore` takes",
-        "homelab snapshots stacks/kyu",
+        "homelab snapshots stacks/mystack",
     ),
     v(
         Daily,

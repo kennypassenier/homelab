@@ -358,7 +358,10 @@ fn plan_json(
         // own, so the plan does not yet show the derived tile-watch rule —
         // only the hand-declared ones, same as before that decision. See
         // the report for wiring the fleet-wide `tile_watch_source` in here.
-        Some(new) => editplan::effects(p.old.as_ref(), new, &others, None),
+        // tile-watch-watcher-out: same reason, the fleet-wide targets are
+        // empty here too — `plan_json` has no `HostState` to derive them
+        // from, so a watcher stack's own preview shows no OUT rule yet.
+        Some(new) => editplan::effects(p.old.as_ref(), new, &others, None, &Vec::new()),
         None => Vec::new(),
     };
     let summary = if p.summary.is_empty() {

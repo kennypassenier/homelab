@@ -177,4 +177,20 @@ pub struct OpCtx<'a> {
     /// stack declared none. Fleet-wide setting `tile_watch_source`
     /// (`core::hostconfig`).
     pub tile_watch_source: Option<String>,
+    /// tile-watch-watcher-out (found 2026-10-01): every applied stack's own
+    /// ip and the tile-watch ports its own tiles probe — every stack, with
+    /// or without a firewall of its own, since the watcher's own `OUT DROP`
+    /// blocks both alike — computed once from `HostState`
+    /// (`core::ops::tiles::fleet_tile_watch_targets`) and handed to the
+    /// deploy so it can derive the watcher's own OUT rule the same way the
+    /// fleet check and the editplan preview do. Empty when there is no
+    /// state to read yet, or the caller has none to offer.
+    pub tile_watch_targets: crate::firewall::FleetTileTargets,
+    /// The stack whose own ip is `tile_watch_source` — the watcher itself —
+    /// so a deploy that changes the fleet's tile-watch targets can also
+    /// re-render and write THAT stack's firewall file in the same op,
+    /// without redeploying it (`core::ops::tiles::tile_watch_watcher`).
+    /// None when the watcher is not a currently-applied stack, or
+    /// `tile_watch_source` is unset.
+    pub tile_watch_watcher: Option<crate::firewall::TileWatcher>,
 }

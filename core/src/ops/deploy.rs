@@ -361,6 +361,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     &m.network.ip,
                     &m.tiles,
                     ctx.tile_watch_source.as_deref().unwrap_or(""),
+                    &ctx.tile_watch_targets,
                 );
                 let p = crate::firewall::gateway_problems(&effective);
                 if !p.is_empty() {
@@ -768,6 +769,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 &m.network.ip,
                 &m.tiles,
                 ctx.tile_watch_source.as_deref().unwrap_or(""),
+                &ctx.tile_watch_targets,
             );
             let body = crate::firewall::render(&m.stack_name, &effective);
             let old = exec.read_file(&path).await.ok();
@@ -1232,6 +1234,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     &m.network.ip,
                     &m.tiles,
                     ctx.tile_watch_source.as_deref().unwrap_or(""),
+                    &ctx.tile_watch_targets,
                 );
                 let body = crate::firewall::render(&m.stack_name, &effective);
                 // Unconditionally: what pmxcfs reports for a vmid it has just
@@ -1244,6 +1247,70 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 ));
                 Ok(StepOutcome::Changed)
             });
+        }
+    }
+
+    // ── tile-watch-watcher-out (found 2026-10-01): this stack's own tiles
+    // may have just changed what the WATCHER (`tile_watch_source`) needs to
+    // reach outbound — a tile that arrived or left here changes the derived
+    // OUT rule on a container this deploy never touches otherwise. Folding
+    // this stack's fresh `m.tiles` into the fleet targets read a moment
+    // earlier (`ctx.tile_watch_targets`, from `HostState`) means the
+    // watcher's file is correct even though its own deploy has not run.
+    // Skipped when there is no watcher, or this deploy IS the watcher (its
+    // own "firewall" step above already derived its OUT rule from the same
+    // fleet targets).
+    if let (Some(watcher), Some(source)) = (
+        ctx.tile_watch_watcher.as_ref(),
+        ctx.tile_watch_source
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+    ) {
+        if watcher.stack != m.stack_name {
+            step!(
+                runner,
+                exec,
+                ctx,
+                m,
+                "refresh the tile watcher's firewall",
+                {
+                    let fresh_targets = crate::firewall::with_fresh_target(
+                        &ctx.tile_watch_targets,
+                        &m.network.ip,
+                        &m.tiles,
+                        true,
+                    );
+                    let effective = crate::firewall::with_tile_watch(
+                        &watcher.firewall,
+                        &watcher.own_ip,
+                        &watcher.tiles,
+                        source,
+                        &fresh_targets,
+                    );
+                    let path = crate::firewall::fw_path(watcher.vmid);
+                    let body = crate::firewall::render(&watcher.stack, &effective);
+                    let old = exec.read_file(&path).await.ok();
+                    if old.as_deref() == Some(body.as_str()) {
+                        log_info(format!(
+                            "[firewall] tile watcher {} ({}) unchanged",
+                            path, watcher.stack
+                        ));
+                        return Ok(StepOutcome::Unchanged);
+                    }
+                    exec.write_file(&path, &body, 0o640).await?;
+                    let (added, removed) =
+                        crate::firewall::line_changes(old.as_deref().unwrap_or(""), &body);
+                    log_info(format!(
+                        "[firewall] tile watcher {} ({}) refreshed by this deploy's tiles: +{} -{}",
+                        path,
+                        watcher.stack,
+                        added.len(),
+                        removed.len()
+                    ));
+                    Ok(StepOutcome::Changed)
+                }
+            );
         }
     }
 

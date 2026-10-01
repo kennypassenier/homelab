@@ -235,6 +235,8 @@ async fn r9_intent_history_against_real_git_two_deploys_two_commits_revert_works
         backup: Default::default(),
         registry_cache: None,
         tile_watch_source: None,
+        tile_watch_targets: Vec::new(),
+        tile_watch_watcher: None,
     };
     // Deploy 1: repo is initialized, one commit lands.
     let r1 = deploy(&ctx, &spec("services: {}\n")).await;
@@ -294,6 +296,8 @@ async fn r9_broken_git_identity_fails_the_deploy_not_silently() {
         backup: Default::default(),
         registry_cache: None,
         tile_watch_source: None,
+        tile_watch_targets: Vec::new(),
+        tile_watch_watcher: None,
     };
     let r = deploy(&ctx, &spec("services: {}\n")).await;
     // Restore perms so tempdir cleanup works.

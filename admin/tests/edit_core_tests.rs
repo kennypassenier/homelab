@@ -129,7 +129,7 @@ fn feat_firewall_1_add_and_remove_a_rule_keep_the_rest_of_the_file() {
     // The plan: the rendered .fw loses one line and gains one.
     let before = parse_manifest(old).unwrap();
     let after = parse_manifest(new).unwrap();
-    let eff = effects(Some(&before), &after, &[], None);
+    let eff = effects(Some(&before), &after, &[], None, &Vec::new());
     // The rendered file, the native note, and arch-self: admin restarts.
     assert_eq!(eff.len(), 3, "{eff:?}");
     assert!(eff[2].what.contains("restarts this dashboard"));
@@ -179,6 +179,7 @@ fn feat_firewall_1_options_and_a_new_declaration() {
         &parse_manifest(new).unwrap(),
         &[],
         None,
+        &Vec::new(),
     );
     assert!(eff[0].what.contains("declared, not enabled"), "{eff:?}");
     assert_eq!(eff[0].by, None);
@@ -212,6 +213,7 @@ fn feat_stacks_2_settings_and_the_resize_they_need() {
         &parse_manifest(new).unwrap(),
         &[],
         None,
+        &Vec::new(),
     );
     let whats: Vec<&str> = eff.iter().map(|e| e.what.as_str()).collect();
     assert!(whats[0].starts_with("Resize applies"), "{whats:?}");
@@ -661,14 +663,14 @@ fn tile_watch_derived_rule_shows_in_the_plan() {
     let new = parse_manifest(&new_text).unwrap();
     // No source: only the hand-declared rule renders, as before this
     // decision.
-    let none = effects(Some(&old), &new, &[], None);
+    let none = effects(Some(&old), &new, &[], None, &Vec::new());
     assert!(
         !none[0].detail.iter().any(|l| l.contains("tile watch")),
         "{:?}",
         none[0].detail
     );
     // A source: the derived rule shows up in the same rendered-file diff.
-    let with = effects(Some(&old), &new, &[], Some("10.10.10.20"));
+    let with = effects(Some(&old), &new, &[], Some("10.10.10.20"), &Vec::new());
     assert!(
         with[0]
             .detail

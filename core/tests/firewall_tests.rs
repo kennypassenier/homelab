@@ -367,6 +367,8 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         backup: Default::default(),
         registry_cache: None,
         tile_watch_source: None,
+        tile_watch_targets: Vec::new(),
+        tile_watch_watcher: None,
     }
 }
 
@@ -921,13 +923,138 @@ fn tile_watch_rule_is_appended_by_with_tile_watch_and_rendered() {
     tiles.insert("a".into(), tile(Some("http://10.10.10.116:8080/")));
     let base = fw(KP_SOFT_116);
     let n = base.rules.len();
-    let effective = firewall::with_tile_watch(&base, "10.10.10.116", &tiles, "10.10.10.20");
+    let effective =
+        firewall::with_tile_watch(&base, "10.10.10.116", &tiles, "10.10.10.20", &Vec::new());
     assert_eq!(effective.rules.len(), n + 1);
     let rendered = render("kp-soft", &effective);
     assert!(rendered.contains("-source 10.10.10.20"));
     assert!(rendered.contains("tile watch (derived from tiles)"));
 
     // Empty source: unchanged from the plain render.
-    let unchanged = firewall::with_tile_watch(&base, "10.10.10.116", &tiles, "");
+    let unchanged = firewall::with_tile_watch(&base, "10.10.10.116", &tiles, "", &Vec::new());
     assert_eq!(render("kp-soft", &unchanged), render("kp-soft", &base));
+}
+
+/// tile-watch-watcher-out: the watcher's own OUT rule is PREPENDED, so it
+/// is matched before the stack's own declared `OUT DROP` rules — appending
+/// it after those would never be reached by Proxmox's first-match order.
+#[test]
+fn watcher_out_rule_is_prepended_before_declared_out_drop() {
+    let mut fw = fw(KP_SOFT_116);
+    fw.rules.push(FirewallRule {
+        dir: FwDir::Out,
+        action: FwAction::Drop,
+        source: None,
+        dest: Some("10.10.10.0/24".into()),
+        proto: None,
+        dport: None,
+        comment: None,
+        note: None,
+    });
+    let targets: firewall::FleetTileTargets = vec![(
+        "10.10.10.107".into(),
+        std::collections::BTreeSet::from([8080]),
+    )];
+    let effective = firewall::with_tile_watch(
+        &fw,
+        "10.10.10.20",
+        &std::collections::BTreeMap::new(),
+        "10.10.10.20",
+        &targets,
+    );
+    // The derived OUT ACCEPT must come before the hand-declared OUT DROP.
+    let out_positions: Vec<usize> = effective
+        .rules
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.dir == FwDir::Out)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(effective.rules[out_positions[0]].action, FwAction::Accept);
+    assert_eq!(
+        effective.rules[out_positions[0]].dest.as_deref(),
+        Some("10.10.10.107")
+    );
+    assert_eq!(
+        effective.rules[out_positions[0]].dport.as_deref(),
+        Some("8080")
+    );
+    assert!(out_positions[1..]
+        .iter()
+        .any(|&i| effective.rules[i].action == FwAction::Drop));
+}
+
+#[test]
+fn watcher_out_rules_empty_when_own_ip_is_not_the_source() {
+    let targets: firewall::FleetTileTargets = vec![(
+        "10.10.10.107".into(),
+        std::collections::BTreeSet::from([8080]),
+    )];
+    assert!(firewall::derive_watcher_out_rules("10.10.10.21", "10.10.10.20", &targets).is_empty());
+    assert!(firewall::derive_watcher_out_rules("10.10.10.20", "", &targets).is_empty());
+}
+
+#[test]
+fn derive_fleet_tile_targets_collects_every_stack_sorted_by_ip() {
+    let mut tiles_a = std::collections::BTreeMap::new();
+    tiles_a.insert("a".into(), tile(Some("http://10.10.10.107:8080/")));
+    let mut tiles_b = std::collections::BTreeMap::new();
+    tiles_b.insert("b".into(), tile(Some("http://10.10.10.21:9090/")));
+    let mut tiles_none = std::collections::BTreeMap::new();
+    tiles_none.insert("c".into(), tile(None));
+    let targets = firewall::derive_fleet_tile_targets([
+        ("10.10.10.21/24", &tiles_b),
+        ("10.10.10.107", &tiles_a),
+        ("10.10.10.9", &tiles_none),
+    ]);
+    assert_eq!(
+        targets,
+        vec![
+            (
+                "10.10.10.107".to_string(),
+                std::collections::BTreeSet::from([8080])
+            ),
+            (
+                "10.10.10.21".to_string(),
+                std::collections::BTreeSet::from([9090])
+            ),
+        ]
+    );
+}
+
+#[test]
+fn with_fresh_target_replaces_only_its_own_entry() {
+    let mut targets: firewall::FleetTileTargets = vec![(
+        "10.10.10.21".into(),
+        std::collections::BTreeSet::from([9090]),
+    )];
+    let mut tiles = std::collections::BTreeMap::new();
+    tiles.insert("a".into(), tile(Some("http://10.10.10.107:8080/")));
+    let fresh = firewall::with_fresh_target(&targets, "10.10.10.107", &tiles, true);
+    assert_eq!(
+        fresh,
+        vec![
+            (
+                "10.10.10.107".to_string(),
+                std::collections::BTreeSet::from([8080])
+            ),
+            (
+                "10.10.10.21".to_string(),
+                std::collections::BTreeSet::from([9090])
+            ),
+        ]
+    );
+    // Disabled: its own entry drops out even though `tiles` still names one.
+    targets.push((
+        "10.10.10.107".into(),
+        std::collections::BTreeSet::from([8080]),
+    ));
+    let disabled = firewall::with_fresh_target(&targets, "10.10.10.107", &tiles, false);
+    assert_eq!(
+        disabled,
+        vec![(
+            "10.10.10.21".to_string(),
+            std::collections::BTreeSet::from([9090])
+        )]
+    );
 }

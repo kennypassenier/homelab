@@ -81,6 +81,8 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         backup: Default::default(),
         registry_cache: None,
         tile_watch_source: None,
+        tile_watch_targets: Vec::new(),
+        tile_watch_watcher: None,
     }
 }
 
@@ -2996,6 +2998,8 @@ async fn h14_every_destroy_step_is_journaled_running_then_done() {
             backup: Default::default(),
             registry_cache: None,
             tile_watch_source: None,
+            tile_watch_targets: Vec::new(),
+            tile_watch_watcher: None,
         },
         &manifest(108, "test"),
         "test",
@@ -3041,6 +3045,8 @@ async fn h14_failed_step_leaves_running_then_failed_trail() {
             backup: Default::default(),
             registry_cache: None,
             tile_watch_source: None,
+            tile_watch_targets: Vec::new(),
+            tile_watch_watcher: None,
         },
         &manifest(108, "test"),
         "test",

@@ -109,6 +109,48 @@ pub async fn read_tiles(exec: &dyn Executor, state: &HostState) -> Vec<TileView>
     tiles
 }
 
+/// tile-watch-watcher-out (found 2026-10-01): every applied stack's own ip
+/// and the tile-watch ports its own tiles probe, for every stack (with or
+/// without a firewall of its own) — the fleet-wide input the deploy, the fleet check
+/// and the editplan preview all derive the SAME watcher OUT rule from.
+/// Walks `state.stacks` the same way [`read_tiles`] does.
+pub fn fleet_tile_watch_targets(state: &HostState) -> crate::firewall::FleetTileTargets {
+    crate::firewall::derive_fleet_tile_targets(state.stacks.values().filter_map(|st| {
+        // Every stack with probes, firewall or not: the watcher's own
+        // `OUT DROP` towards the VLAN blocks a target that has no firewall
+        // of its own just the same (measured 2026-10-01: CT 120 reached no
+        // backend on CT 106, which has no firewall file).
+        let m = st.manifest.as_ref()?;
+        Some((m.network.ip.as_str(), &m.tiles))
+    }))
+}
+
+/// The stack whose own ip is `source` (the dashboard/watcher itself), as
+/// everything a deploy needs to re-render and write its firewall. None when
+/// `source` is empty, or no applied stack's own ip matches it, or that
+/// stack declares no firewall.
+pub fn tile_watch_watcher(state: &HostState, source: &str) -> Option<crate::firewall::TileWatcher> {
+    let source = source.trim();
+    let source = source.split('/').next().unwrap_or(source);
+    if source.is_empty() {
+        return None;
+    }
+    state.stacks.values().find_map(|st| {
+        let m = st.manifest.as_ref()?;
+        let ip = m.network.ip.split('/').next().unwrap_or(&m.network.ip);
+        if ip != source {
+            return None;
+        }
+        Some(crate::firewall::TileWatcher {
+            vmid: m.vmid,
+            stack: m.stack_name.clone(),
+            own_ip: m.network.ip.clone(),
+            firewall: m.firewall.clone()?,
+            tiles: m.tiles.clone(),
+        })
+    })
+}
+
 /// Groups by their lowest order, then tiles by order and name.
 pub fn sort(tiles: &mut [TileView]) {
     let mut first: std::collections::HashMap<String, u32> = std::collections::HashMap::new();

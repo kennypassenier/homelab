@@ -7265,6 +7265,28 @@ where
         state,
         timeout_s: state.config.ask_timeout_s,
     };
+    // tile-watch-watcher-out (found 2026-10-01): the fleet-wide tile-watch
+    // targets and the watcher stack itself, read once per op from the same
+    // snapshot `deploy`'s own prior-state read uses — a deploy in progress
+    // folds its own, fresher manifest in on top of this (`with_fresh_target`),
+    // so a load a moment old is never wrong, only momentarily incomplete for
+    // the very stack being deployed. A snapshot that fails to load leaves
+    // both empty, same as `tile_watch_source` unset: no OUT rule is derived.
+    let (tile_watch_targets, tile_watch_watcher) =
+        match homelab_core::state::StateStore::new(exec, &state.config.state_dir)
+            .load()
+            .await
+        {
+            Ok(snapshot) => (
+                homelab_core::ops::tiles::fleet_tile_watch_targets(&snapshot),
+                state
+                    .config
+                    .tile_watch_source
+                    .as_deref()
+                    .and_then(|s| homelab_core::ops::tiles::tile_watch_watcher(&snapshot, s)),
+            ),
+            Err(_) => (Vec::new(), None),
+        };
     let ctx = OpCtx {
         exec,
         sink: &sink,
@@ -7276,6 +7298,8 @@ where
         grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
         homepage_services_file: state.config.homepage_services_file.clone(),
         tile_watch_source: state.config.tile_watch_source.clone(),
+        tile_watch_targets,
+        tile_watch_watcher,
         kuma_monitors_file: state.config.kuma_monitors_file.clone(),
         // C1/C2: the same Loki the coverage check already asks about, so
         // there is not a second address to keep in step with the first.

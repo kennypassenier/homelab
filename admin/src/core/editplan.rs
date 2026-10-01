@@ -92,6 +92,14 @@ pub fn effects(
     // means the plan shows only the hand-declared rules, same as before
     // this decision — never wrong, only silent about the derived one.
     tile_watch_source: Option<&str>,
+    // tile-watch-watcher-out (found 2026-10-01): the fleet-wide tile-watch
+    // targets (`core::ops::tiles::fleet_tile_watch_targets`), so a stack
+    // that IS the watcher shows its derived OUT rule here too. Empty here
+    // for the same reason `tile_watch_source` above is often None: this
+    // function is pure and has no `HostState` of its own — a caller that
+    // has fetched the fleet already should pass it; one that has not shows
+    // only the hand-declared rules, same as before this decision.
+    fleet_targets: &firewall::FleetTileTargets,
 ) -> Vec<Effect> {
     let mut out = Vec::new();
     let Some(old) = old else {
@@ -237,7 +245,7 @@ pub fn effects(
     // tile-watch: a tile arriving or leaving can change the derived rule
     // even when the hand-declared `firewall:` block did not move.
     if old.firewall != new.firewall || old.tiles != new.tiles {
-        out.extend(firewall_effects(old, new, tile_watch_source));
+        out.extend(firewall_effects(old, new, tile_watch_source, fleet_targets));
     }
     if old.apps != new.apps {
         let added: Vec<&String> = new.apps.iter().filter(|a| !old.apps.contains(a)).collect();
@@ -300,6 +308,7 @@ fn firewall_effects(
     old: &StackManifest,
     new: &StackManifest,
     tile_watch_source: Option<&str>,
+    fleet_targets: &firewall::FleetTileTargets,
 ) -> Vec<Effect> {
     let path = firewall::fw_path(new.vmid);
     let render = |m: &StackManifest| {
@@ -311,6 +320,7 @@ fn firewall_effects(
                 &m.network.ip,
                 &m.tiles,
                 tile_watch_source.unwrap_or(""),
+                fleet_targets,
             );
             firewall::render(&m.stack_name, &effective)
         })

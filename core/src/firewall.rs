@@ -86,20 +86,155 @@ pub fn rule_line(r: &FirewallRule) -> String {
     s
 }
 
-/// `fw` with the tile-watch rule appended (empty when `source` is empty or
+/// `fw` with the tile-watch rules added (empty when `source` is empty or
 /// derives nothing) — what every renderer and the fleet check must agree
 /// is "the declaration", so a hand-typed rule and a derived one both show
 /// up the same way. Called once per render, right before [`render`].
+///
+/// Two halves, found a day apart (2026-09-30 then 2026-10-01): the IN rule
+/// below opens the watched stack to the watcher; [`derive_watcher_out_rules`]
+/// opens the WATCHER's own outbound side towards every watched stack, and is
+/// PREPENDED so it is matched before this container's own declared `OUT
+/// DROP` rules (every container's east-west guard, `flat-vlan-no-east-
+/// west-control`) — appending it after those would never be reached. The IN
+/// rule stays appended: `policy_in` is DROP fleet-wide, so order among IN
+/// rules never matters the same way.
 pub fn with_tile_watch(
     fw: &FirewallSpec,
     own_ip: &str,
     tiles: &std::collections::BTreeMap<String, Tile>,
     source: &str,
+    fleet_targets: &FleetTileTargets,
 ) -> FirewallSpec {
     let mut fw = fw.clone();
+    let out_rules = derive_watcher_out_rules(own_ip, source, fleet_targets);
+    if !out_rules.is_empty() {
+        fw.rules = out_rules.into_iter().chain(fw.rules).collect();
+    }
     fw.rules
         .extend(derive_tile_watch_rules(own_ip, tiles, source));
     fw
+}
+
+/// One fleet stack's own address and the tile-watch ports its own `tiles:`
+/// open on it (the same ports [`derive_tile_watch_rules`] would open
+/// inbound for it) — the fleet-wide input the watcher's OUT rule is derived
+/// from. `(ip, ports)`, sorted by ip, `ip` CIDR-stripped.
+pub type FleetTileTargets = Vec<(String, std::collections::BTreeSet<u16>)>;
+
+/// [`FleetTileTargets`] from every applied stack's own ip and tiles —
+/// callers pass only the stacks whose firewall is actually enabled (an IN
+/// rule that is never applied opens nothing for the watcher to reach
+/// either). Walks the same shape `core::ops::tiles::read_tiles` does, so a
+/// caller already holding `HostState` can feed this straight from
+/// `state.stacks`.
+pub fn derive_fleet_tile_targets<'a>(
+    stacks: impl IntoIterator<Item = (&'a str, &'a std::collections::BTreeMap<String, Tile>)>,
+) -> FleetTileTargets {
+    let mut out: FleetTileTargets = Vec::new();
+    for (own_ip, tiles) in stacks {
+        let own_ip = own_ip.split('/').next().unwrap_or(own_ip);
+        let mut ports: std::collections::BTreeSet<u16> = std::collections::BTreeSet::new();
+        for t in tiles.values() {
+            if let Some(probe) = t.probe.as_deref() {
+                if let Some(port) = tile_port_on(probe, own_ip) {
+                    ports.insert(port);
+                }
+            }
+        }
+        if !ports.is_empty() {
+            out.push((own_ip.to_string(), ports));
+        }
+    }
+    out.sort();
+    out
+}
+
+/// `targets` with `own_ip`'s own entry replaced by what its OWN `tiles` say
+/// right now (`enabled` false drops it; the deploy passes true, since the
+/// watcher must reach a target whether or not that target has a firewall) — so a deploy in progress can fold its own,
+/// still-being-written manifest into a fleet target list read from state
+/// a moment earlier, without a second state load. Used to keep the
+/// watcher's firewall in step with the very deploy that is changing it.
+pub fn with_fresh_target(
+    targets: &FleetTileTargets,
+    own_ip: &str,
+    tiles: &std::collections::BTreeMap<String, Tile>,
+    enabled: bool,
+) -> FleetTileTargets {
+    let own_ip = own_ip.split('/').next().unwrap_or(own_ip);
+    let mut out: FleetTileTargets = targets
+        .iter()
+        .filter(|(ip, _)| ip != own_ip)
+        .cloned()
+        .collect();
+    if enabled {
+        out.extend(derive_fleet_tile_targets(std::iter::once((own_ip, tiles))));
+    }
+    out.sort();
+    out
+}
+
+/// Everything a deploy needs to re-render and write the WATCHER's own
+/// firewall file — the stack whose own ip is the fleet's
+/// `tile_watch_source` — without redeploying it. Found 2026-10-01: the
+/// watcher's OUT rule depends on every OTHER stack's tiles, so a tile
+/// arriving or leaving anywhere must reach the watcher's file, not just the
+/// stack that changed.
+#[derive(Debug, Clone)]
+pub struct TileWatcher {
+    pub vmid: u16,
+    pub stack: String,
+    pub own_ip: String,
+    pub firewall: FirewallSpec,
+    pub tiles: std::collections::BTreeMap<String, Tile>,
+}
+
+/// OUT rules the watcher itself needs: one `OUT ACCEPT -dest <ip> -p tcp
+/// -dport <ports>` per fleet target, when `own_ip` (CIDR-stripped) is the
+/// fleet's `tile_watch_source` (also CIDR-stripped, by the same convention
+/// every other tile-watch function uses). The missing half measured
+/// 2026-10-01: the watched stack's IN rule came from [`derive_tile_watch_rules`]
+/// readily enough, but the watcher's own `OUT DROP -dest <lan>` (every
+/// container's east-west guard) silently ate its outbound probes, because
+/// nothing ever told the watcher's own firewall about them — 23 false "does
+/// not answer" notices from curl returning 000. Empty when `source` is
+/// empty or `own_ip` is not the watcher.
+pub fn derive_watcher_out_rules(
+    own_ip: &str,
+    source: &str,
+    targets: &FleetTileTargets,
+) -> Vec<FirewallRule> {
+    let source = source.trim();
+    if source.is_empty() {
+        return Vec::new();
+    }
+    let own_ip = own_ip.split('/').next().unwrap_or(own_ip);
+    let source = source.split('/').next().unwrap_or(source);
+    if own_ip != source {
+        return Vec::new();
+    }
+    targets
+        .iter()
+        .filter(|(_, ports)| !ports.is_empty())
+        .map(|(ip, ports)| {
+            let dport = ports
+                .iter()
+                .map(u16::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
+            FirewallRule {
+                dir: FwDir::Out,
+                action: FwAction::Accept,
+                source: None,
+                dest: Some(ip.clone()),
+                proto: Some(FwProto::Tcp),
+                dport: Some(dport),
+                comment: None,
+                note: Some("tile watch (derived from tiles)".to_string()),
+            }
+        })
+        .collect()
 }
 
 /// The whole `/etc/pve/firewall/<vmid>.fw` for a declaration.

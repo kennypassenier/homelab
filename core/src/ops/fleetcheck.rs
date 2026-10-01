@@ -255,6 +255,12 @@ pub fn evaluate_firewalls(
 ) -> Vec<Finding> {
     let mut out = Vec::new();
     let mut not_enabled: Vec<String> = Vec::new();
+    // tile-watch-watcher-out: computed once for every stack below, so the
+    // watcher's own file is held against declared + derived IN *and* OUT —
+    // the same `with_tile_watch` call that renders every other stack's file
+    // also renders the watcher's, and this is the one fleet-wide input it
+    // needs to do that.
+    let fleet_targets = crate::ops::tiles::fleet_tile_watch_targets(state);
     for f in files {
         let path = crate::firewall::fw_path(f.vmid);
         let subject = format!("{} ({})", path, f.stack);
@@ -272,6 +278,7 @@ pub fn evaluate_firewalls(
                             &m.network.ip,
                             &m.tiles,
                             tile_watch_source.unwrap_or(""),
+                            &fleet_targets,
                         )
                     })
                     .unwrap_or_else(|| d.clone());

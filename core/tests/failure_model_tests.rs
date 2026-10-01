@@ -103,6 +103,8 @@ async fn ar14_failed_deploy_writes_replayable_bundle() {
         backup: Default::default(),
         registry_cache: None,
         tile_watch_source: None,
+        tile_watch_targets: Vec::new(),
+        tile_watch_watcher: None,
     };
     let report = deploy(&ctx, &spec(110, "syncthing")).await;
     assert!(!report.ok);

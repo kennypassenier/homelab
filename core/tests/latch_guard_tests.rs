@@ -281,6 +281,8 @@ async fn dashboard_latch_the_golden_template_bakes_latch_through_the_guard() {
         backup: Default::default(),
         registry_cache: None,
         tile_watch_source: None,
+        tile_watch_targets: Vec::new(),
+        tile_watch_watcher: None,
     };
     let report = build_template(&ctx, &TemplateCfg::default()).await;
     assert!(report.ok, "{:?}", report.error);

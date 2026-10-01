@@ -331,6 +331,13 @@ pub const VERBS: &[Verb] = &[
         "homelab self-install",
     ),
     v(
+        Host,
+        "token",
+        "issue <name> <read|operate|all> | list | revoke <name>",
+        "manage per-machine tokens, so one can be revoked without touching the others",
+        "homelab token issue laptop operate",
+    ),
+    v(
         Local,
         "presets",
         "",
@@ -458,7 +465,7 @@ pub fn usage() -> String {
          the command runs outside it\n\
          cert pin: ~/.config/homelab/pin\n\
          --answer allow|stop: answers any question the command's operation raises, \
-         without waiting (fix-66); on a terminal with no --answer, the same question \
+         without waiting; on a terminal with no --answer, the same question \
          is asked here as [a]/[s]\n",
     );
     out

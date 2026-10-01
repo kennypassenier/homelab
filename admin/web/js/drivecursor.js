@@ -266,6 +266,8 @@ export function makeCursor() {
    *   clicked: boolean} | {kind: "timed", start: number, dur: number}} */
   let move = null;
   let frame = 0;
+  /** When `tick` last re-revealed a drifting target (ms, performance.now). */
+  let revealedAt = 0;
   /** @type {Element | null} */
   let raisedOver = null;
   /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -326,6 +328,18 @@ export function makeCursor() {
     frame = 0;
     if (!shown) return;
     raise();
+    // Kenny, 2026-10-01: the page under a step can still be rendering
+    // when the step is announced (a stack page fills in after `goto`), so
+    // the target revealed at the start drifts below the window and the
+    // pointer ends up "over nothing". While the pointer is heading for a
+    // target, keep it revealed: re-check at most every 300 ms.
+    if (move && target?.isConnected) {
+      const now = performance.now();
+      if (now - revealedAt > 300) {
+        revealedAt = now;
+        reveal(target);
+      }
+    }
     const aim = aimNow();
     if (move?.kind === "count") {
       const left = move.left();

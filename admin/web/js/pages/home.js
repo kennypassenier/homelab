@@ -12,7 +12,7 @@
 // to the list and links on to the Health page.
 
 import { h, fetchJson } from "../dom.js";
-import { formatTime } from "../format.js";
+import { formatDateTime } from "../format.js";
 import { todayView } from "../parity.js";
 import { keptRead } from "../slowread.js";
 
@@ -60,12 +60,12 @@ function dot(w) {
   if (w.down)
     return h("span", {
       class: "start-dot start-dot--down",
-      title: `no answer since ${formatTime(w.failing_since ?? 0)}: ${w.why ?? ""}`,
+      title: `no answer since ${formatDateTime(w.failing_since ?? 0)}: ${w.why ?? ""}`,
     });
   if (w.failing_since != null)
     return h("span", {
       class: "start-dot start-dot--flaky",
-      title: `failing since ${formatTime(w.failing_since)}: ${w.why ?? ""}`,
+      title: `failing since ${formatDateTime(w.failing_since)}: ${w.why ?? ""}`,
     });
   return h("span", { class: "start-dot start-dot--up", title: "answers" });
 }
@@ -142,14 +142,19 @@ function healthStrip(problems) {
     { type: "button", class: "health-strip__toggle", "aria-expanded": "false" },
     glyph,
     ` ${problems.length} problem${problems.length === 1 ? "" : "s"}: `,
-    first.since != null ? `${formatTime(first.since)} ` : "",
+    first.since != null ? `${formatDateTime(first.since)} ` : "",
     first.text,
   );
   const list = h(
     "ul",
     { class: "health-strip__list", hidden: "" },
     ...sorted.map((p) =>
-      h("li", null, p.since != null ? `${formatTime(p.since)} ` : "", p.text),
+      h(
+        "li",
+        null,
+        p.since != null ? `${formatDateTime(p.since)} ` : "",
+        p.text,
+      ),
     ),
     h("li", null, h("a", { href: "/app/health" }, "Open Health")),
   );
@@ -159,7 +164,14 @@ function healthStrip(problems) {
     glyph.textContent = open ? "▸" : "▾";
     list.hidden = open;
   });
-  return h("div", { class: "health-strip", role: "status" }, summary, list);
+  // The same `kp-alert` every other warning on the dashboard uses (Today's
+  // verdict, the restart notice), not a one-off tinted box of its own
+  // (Kenny, 2026-10-02).
+  return h(
+    "div",
+    { class: "health-strip kp-alert kp-alert--warning", role: "status" },
+    h("div", { class: "kp-alert__body" }, summary, list),
+  );
 }
 
 /**

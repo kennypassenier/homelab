@@ -15,7 +15,7 @@ import {
   tableBlock,
   td,
 } from "../dom.js";
-import { formatTime, humanDuration } from "../format.js";
+import { formatDateTime, humanDuration } from "../format.js";
 import { sortKeys } from "../sortkeys.js";
 import { setParams } from "../urlstate.js";
 import { mount as mountTimeline } from "./timeline.js";
@@ -40,7 +40,7 @@ function mountList(root) {
   const keys = sortKeys();
   /** @param {number | null} unix */
   const time = (unix) =>
-    unix == null ? "—" : keys.note("time", formatTime(unix), unix);
+    unix == null ? "—" : keys.note("time", formatDateTime(unix), unix);
   const inc = tableBlock({
     remember: "incidents",
     caption: "Incidents",

@@ -5,7 +5,7 @@
 // since when, the consequence and what to do, with its page and, when the
 // dashboard can run the remedy, a Fix button; a digest goes out at 09:00.
 
-import { formatTime, humanDuration } from "./format.js";
+import { formatDateTime, humanDuration } from "./format.js";
 
 /**
  * @typedef {"action_done" | "action_failed" | "action_deferred" |
@@ -129,7 +129,7 @@ export function snoozeState(s, now, opts) {
   if (until == null || until <= now) return { on: false, text: "Not snoozed" };
   return {
     on: true,
-    text: `Snoozed until ${formatTime(until, opts)} (${humanDuration(until - now)} from now)`,
+    text: `Snoozed until ${formatDateTime(until, opts)} (${humanDuration(until - now)} from now)`,
   };
 }
 
@@ -164,7 +164,7 @@ export function noticeRows(notices) {
  */
 export function digestText(d, opts) {
   if (!d) return "No digest sent yet.";
-  const when = formatTime(d.at, opts);
+  const when = formatDateTime(d.at, opts);
   if (d.push.state === "sent")
     return `Last digest ${when}: ${d.count} thing(s) waited, pushed.`;
   return `Last digest ${when}: ${d.count} thing(s) waited, ${pushText(d.push)}.`;

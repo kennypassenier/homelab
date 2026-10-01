@@ -12,7 +12,7 @@ import {
   tableBlock,
   td,
 } from "../dom.js";
-import { formatTime } from "../format.js";
+import { formatDateTime } from "../format.js";
 import { sortKeys } from "../sortkeys.js";
 import {
   attachDataTables,
@@ -28,7 +28,7 @@ export function mount(root) {
   const keys = sortKeys();
   /** @param {number | null} unix */
   const time = (unix) =>
-    unix == null ? "never" : keys.note("time", formatTime(unix), unix);
+    unix == null ? "never" : keys.note("time", formatDateTime(unix), unix);
   const t = tableBlock({
     remember: "checks",
     caption: "Manual checks",

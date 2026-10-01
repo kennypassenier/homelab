@@ -30,6 +30,7 @@ export function mount(root) {
   const cleanups = [];
   const sections = BLOCKS.map((b) => {
     const body = h("div", { class: "health-block__body" });
+    const summary = h("summary", null, h("h2", null, b.label));
     const open = b.id === block;
     const details = /** @type {HTMLDetailsElement} */ (
       h(
@@ -39,11 +40,11 @@ export function mount(root) {
           id: `health-${b.id}`,
           ...(open ? { open: "" } : {}),
         },
-        h("summary", null, h("h2", null, b.label)),
+        summary,
         body,
       )
     );
-    return { spec: b, body, details, mounted: false };
+    return { spec: b, body, summary, details, mounted: false };
   });
 
   root.replaceChildren(
@@ -51,10 +52,35 @@ export function mount(root) {
     ...sections.map((s) => s.details),
   );
 
+  // A sub-page paints its own h1 beside its own buttons in one
+  // `.title-row` (Doctor's Refresh, Today's Read again) — the right place
+  // when it is its own page. Embedded here the h1 is hidden (the
+  // `<summary>` already carries the name), which used to leave the button
+  // behind on a now near-empty row of its own, under the summary rather
+  // than beside it (Kenny, 2026-10-02). Moved into the summary itself,
+  // right-aligned next to the name, so opening a block and acting on it is
+  // the same line.
+  const adoptActions = (
+    /** @type {{summary: HTMLElement, body: HTMLElement}} */ s,
+  ) => {
+    const row = s.body.querySelector(":scope > .title-row");
+    if (!row) return;
+    for (const child of [...row.children]) {
+      if (child.tagName === "H1") continue;
+      if (
+        child instanceof HTMLButtonElement ||
+        child instanceof HTMLAnchorElement
+      )
+        child.addEventListener("click", (e) => e.stopPropagation());
+      s.summary.append(child);
+    }
+  };
+
   const mountOne = (/** @type {(typeof sections)[number]} */ s) => {
     if (s.mounted) return;
     s.mounted = true;
     cleanups.push(s.spec.mount(s.body));
+    adoptActions(s);
   };
 
   for (const s of sections) {

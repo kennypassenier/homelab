@@ -8,7 +8,7 @@ import { openAction } from "./actiondialog.js";
 import { openDialog, refusalCallout } from "./actui.js";
 import { fetchJson, h, tableBlock, td } from "./dom.js";
 import { register } from "./drivehooks.js";
-import { formatTime } from "./format.js";
+import { formatDateTime } from "./format.js";
 import { rollbackView } from "./rollback.js";
 import { sortKeys } from "./sortkeys.js";
 import {
@@ -93,7 +93,7 @@ export async function openRollback(stack) {
       return h(
         "tr",
         { "data-kp-row-key": c.commit },
-        td(keys.note("time", formatTime(c.at), c.at)),
+        td(keys.note("time", formatDateTime(c.at), c.at)),
         td(c.short, "mono"),
         td(c.subject),
         td(c.applied),

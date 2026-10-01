@@ -20,7 +20,7 @@ import {
   refusalCallout,
 } from "../actui.js";
 import { bindTableUrl, h, stateWord, tableBlock, td } from "../dom.js";
-import { formatTime } from "../format.js";
+import { formatDateTime } from "../format.js";
 import {
   DAYS,
   scheduleBody,
@@ -136,7 +136,7 @@ export function mount(root) {
               [
                 "off",
                 "no further run",
-                formatTime(r.next ?? Date.now() / 1000),
+                formatDateTime(r.next ?? Date.now() / 1000),
               ],
             ),
           ),

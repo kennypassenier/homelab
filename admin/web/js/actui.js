@@ -38,6 +38,24 @@ export function copyLine(text, label = "Copy the CLI command") {
 }
 
 /**
+ * A copy line with its own lead-in label on the same row (Kenny,
+ * 2026-10-01: "The same from a workstation:" used to sit on a row of its
+ * own above the line it describes). Wraps only when the row itself runs
+ * out of width.
+ * @param {string} label the lead-in text, e.g. "The same from a workstation:"
+ * @param {string} text the command line to copy
+ * @param {string} [srLabel] what the button copies, for a screen reader
+ */
+export function labeledCopyLine(label, text, srLabel) {
+  return h(
+    "div",
+    { class: "cli-row" },
+    h("span", { class: "measured cli-row__label" }, label),
+    copyLine(text, srLabel),
+  );
+}
+
+/**
  * A kp callout for a refusal or an error (arch-errors).
  * @param {import("./doctor.js").RouteError} e
  * @param {"destructive" | "warning" | "info"} [tone]

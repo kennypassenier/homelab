@@ -29,19 +29,122 @@
   margin: 0 0 4px;
   font-size: 0.9em;
 }
+/* Kenny, 2026-10-01: key/value facts read as one left-aligned column when
+   every dt/dd just flows into equal-width cells — a label and a long value
+   land in different rows' columns and nothing lines up. `.kv-grid` (and
+   `.facts`, its `<dl>` form used across the dashboard) is now a fixed
+   two-column grid instead: the label column sized to its own text, the
+   value column taking the rest. One shared shape, reused everywhere
+   instead of rebuilt per page. */
+.kv-grid,
 .facts {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 8px 16px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 16px;
+  row-gap: 6px;
   margin: 0;
 }
+.kv-grid > dt,
+.kv-grid > .kv-grid__label,
 .facts dt {
   color: var(--muted-foreground);
   font-size: 0.85em;
+  white-space: nowrap;
+  align-self: baseline;
+  padding-block-start: 0.2em;
 }
+.kv-grid > dd,
+.kv-grid > .kv-grid__value,
 .facts dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+/* A phone's label column has no room to sit beside a long value: stack
+   label over value instead of squeezing both into half the width. */
+@media (max-width: 30rem) {
+  .kv-grid,
+  .facts {
+    grid-template-columns: 1fr;
+    row-gap: 2px;
+  }
+  .kv-grid > dt,
+  .kv-grid > .kv-grid__label,
+  .facts dt {
+    white-space: normal;
+    padding-block-start: 10px;
+  }
+  .kv-grid > dt:first-child,
+  .kv-grid > .kv-grid__label:first-child,
+  .facts dt:first-child {
+    padding-block-start: 0;
+  }
+}
+
+/* `.stat-grid` is the other half (Kenny, 2026-10-01): short stat tiles —
+   a host card, a batch's totals — that should sit in a grid of their own
+   place rather than trail down the page as a single column. */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px 12px;
+  margin: 0;
+}
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 6px);
+  background: var(--card);
+  color: var(--card-foreground, inherit);
+}
+.stat-tile__label {
+  font-size: 0.8em;
+  color: var(--muted-foreground);
+}
+.stat-tile__value {
+  font-size: 1.2em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+/* A fixed three-across grid for a known six tiles (the host card): auto-fit
+   left five in a row and one orphan, and the longest value ("25.4 GB of
+   64.0 GB") wrapped in a 160px tile, giving the row uneven heights. Three
+   columns divide six evenly and give every value room for one line. */
+.stat-grid--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.stat-grid--3 .stat-tile__value {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 40rem) {
+  .stat-grid--3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* A label beside its value on one row (Kenny, 2026-10-01): "The same from
+   a workstation:" used to sit on its own line above the CLI line below it.
+   `.cli-row` keeps both on one row and wraps only when the row itself runs
+   out of width; `.cli-line` (the copy control) is `inline-flex` so it can
+   sit after ordinary inline text (a batch preview's stack name) too. */
+.cli-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-block: 8px;
+}
+.cli-row__label {
+  white-space: nowrap;
+}
+.cli-row > .cli-line {
+  flex: 1 1 320px;
+  min-inline-size: 0;
 }
 .kp-card {
   margin-block: 12px;
@@ -50,6 +153,17 @@
   width: 100%;
   border-collapse: collapse;
   margin-block: 12px;
+}
+/* Every kp-datatable's own `<table>` carries `.grid` too (`dom.js`
+   tableBlock's `class="kp-table grid"`, left from before kp's own
+   component existed) — `.grid`'s 12px top margin landed between the
+   toolbar/caption and the table itself on top of kp's own spacing,
+   measured with Playwright's getBoundingClientRect (Kenny, 2026-10-02):
+   the real cause of the gap, not the sort-line or caption rules touched
+   in the previous round. kp already gives the table its own rhythm; this
+   combination needs none of its own. */
+.kp-table.grid {
+  margin-block: 0;
 }
 .grid th,
 .grid td {
@@ -102,6 +216,24 @@
   font-size: 0.9em;
   /* "9 s ago" and "10 s ago" as wide per digit: ticking text never jiggles. */
   font-variant-numeric: tabular-nums;
+}
+/* `.measured` is almost always a `<p>` (a status line, an "ago" line, a
+   table's sort summary) and a bare `<p>` carries the UA's own ~1em block
+   margin — nobody asked for the 25-30px of empty space above and below
+   every one of these short lines; added up down a page (and inside a
+   datatable's own toolbar, between its search row and its caption) they
+   were the real source of "too much air" Kenny flagged (2026-10-02), not
+   any padding this sheet or kp-themes set on purpose. One shared rhythm
+   instead of the browser's paragraph default. Also catches a bare
+   `<p>` that holds only an `agoEl()` span — several pages wrap one in a
+   plain, classless `<p>` and never reach `.measured` directly. */
+.measured,
+p:has(> .measured:only-child) {
+  margin-block: 0.3em;
+}
+.measured:first-child,
+p:has(> .measured:only-child):first-child {
+  margin-block-start: 0;
 }
 /* feat-overview-4: live data that stopped renewing. The plate is a
    shadow, not padding, so going stale moves nothing. */
@@ -237,6 +369,21 @@
 .swatch.info {
   background: var(--chart-1, var(--primary));
 }
+/* A table's caption (its accessible name, same text as its toolbar's
+   `aria-label`) is UA-default centred, bold and set off by its own margin —
+   a second, competing headline sitting between the toolbar and the header
+   row (Kenny, 2026-10-01: "Stacks" floating there, bigger than the page's
+   own h1 right above it). It is still needed for assistive tech, so it
+   stays in the DOM; visually it reads as a quiet caption line, not a
+   heading, flush with the table like the rest of its chrome. */
+.kp-table caption {
+  margin-block-end: 4px;
+  padding-inline: var(--kp-table-cell-inline, 0.625rem);
+  color: var(--muted-foreground);
+  font-size: 0.8em;
+  font-weight: 400;
+  text-align: start;
+}
 #host-bars .kp-progress-group {
   max-inline-size: 40rem;
 }
@@ -262,27 +409,37 @@
 .actions-running:not(:empty) {
   margin-block-start: 12px;
 }
-/* The action dialog and its wizard; full width on a phone. */
+/* The action dialog and its wizard; full width on a phone. Widened
+   (Kenny, 2026-10-01): a review step's plan, diff and CLI line were
+   cramped at 40rem and wrapped far more than the screen needed to. */
 .act-dialog {
-  inline-size: min(40rem, calc(100vw - 32px));
-  max-inline-size: calc(100vw - 32px);
+  inline-size: min(960px, 94vw);
+  max-inline-size: 94vw;
 }
 .act-dialog--wide {
-  inline-size: min(60rem, calc(100vw - 32px));
+  inline-size: min(1200px, 96vw);
+  max-inline-size: 96vw;
 }
-/* The action dialog is wider on a large screen, so the Live view banner
-   and a running job's panel have room (Kenny, 2026-09-29); still the full
-   width less the gutter on a phone. kp's own dialog width token, so the
-   theme's dialog stays the one in use. */
+/* The action dialog is wider still on a large screen, so the Live view
+   banner and a running job's panel have room (Kenny, 2026-09-29); still
+   the full width less the gutter on a phone. kp's own dialog width token,
+   so the theme's dialog stays the one in use. */
 #action-dialog {
-  --kp-dialog-max-width: calc(100vw - 32px);
-  inline-size: min(52rem, calc(100vw - 32px));
+  --kp-dialog-max-width: 95vw;
+  inline-size: min(1100px, 95vw);
 }
 /* A running job without a count to go by is busy, not empty: kp-themes
    draws the indeterminate stripes as a background image, which every
    theme's own `.kp-progress { background: … }` rule later in the sheet
    resets, so the bar read as 0% until the end (Kenny, 2026-09-29). This
    sheet is outside kp's layers, so the stripes win here. */
+/* About twice kp's own thickness (Kenny, 2026-10-01): a 0.5rem bar read as
+   a hairline on the batch panel, the job panel and the Live view countdown.
+   kp-themes has no token for the track's height (`.kp-progress` hardcodes
+   `block-size: 0.5rem`), so this overrides the property itself. */
+.kp-progress {
+  block-size: 1rem;
+}
 .kp-progress:indeterminate {
   background-image: linear-gradient(
     -45deg,
@@ -297,6 +454,23 @@
 .act-dialog .kp-field,
 .sched-form .kp-field {
   margin-block: 10px;
+}
+/* kp's own dialog keeps title and actions fixed and scrolls only its body
+   — but the wizard's Back/Next sit inside that same scrolling body (one
+   element, passed in as the dialog's whole content), so a long review (a
+   deploy's diff, a plan with many files) pushed them down with it: reaching
+   Next meant scrolling past everything first (Kenny, 2026-10-01, seen on a
+   phone where the buttons ran off the bottom of the screen entirely). Stuck
+   to the bottom of the scrolling body instead, with the dialog's own
+   background under it so scrolled content does not show through, and a
+   rule above it standing in for the frame a fixed `.kp-dialog__actions`
+   would otherwise have drawn. */
+.act-wizard .kp-wizard__actions {
+  position: sticky;
+  inset-block-end: -1px;
+  padding-block: 0.75rem 1px;
+  background: var(--popover);
+  border-block-start: 1px solid var(--border);
 }
 .act-what {
   margin-block: 0 8px;
@@ -316,7 +490,10 @@
 }
 /* feat-stacks-7: a CLI line wraps rather than widening the page. */
 .cli-line {
-  display: flex;
+  /* inline-flex, not flex: a flex box is block-level and used to drop to
+     its own line after any preceding inline text (a batch row's stack
+     name) even when there was room beside it. */
+  display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
@@ -331,8 +508,17 @@
 .job-panel .title-row h3 {
   margin: 0;
 }
-.job-origin {
-  margin: 4px 0 8px;
+/* A job started from the action dialog shows this same panel (`compact:
+   true` drops only its heading) directly in the dialog's own body, so its
+   `.kp-card` border and background doubled up with the dialog's own frame
+   around it — a card inside a card (Kenny, 2026-10-01). The dialog body
+   already is the frame; flatten the panel back to plain content there. */
+.kp-dialog__body > .job-panel {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
 }
 .job-step-name {
   margin: 4px 0 8px;
@@ -461,13 +647,8 @@ tr.unread td:first-child {
   margin: 4px 0 0;
   padding-inline-start: 1.2em;
 }
-.job-times {
-  grid-template-columns: max-content 1fr;
-  gap: 2px 12px;
+.job-facts {
   margin-block: 8px 0;
-}
-.job-times dt {
-  align-self: baseline;
 }
 /* On a phone a log line's message gets a row of its own. */
 @media (max-width: 520px) {
@@ -645,8 +826,15 @@ td.stack-flags {
   gap: 8px;
   margin-block: 8px;
 }
-/* Today: the verdict first. */
+/* Today: the verdict first. `.kp-alert` is `display: flex` but still a
+   block box, so it filled the page's full width under a short line like
+   "1 thing needs you" — a tinted bar mostly empty space (Kenny,
+   2026-10-02). `inline-flex` shrinks it to its own content, same icon,
+   padding and colour kp's alert already draws; `max-inline-size: 100%`
+   keeps a long verdict wrapping inside the page rather than overflowing. */
 .today-verdict {
+  display: inline-flex;
+  max-inline-size: 100%;
   font-size: 1.1em;
   margin-block: 8px;
 }
@@ -850,6 +1038,20 @@ td.stack-flags {
    seconds are tabular, so the count ticking never changes its width. */
 .kp-datatable__status {
   font-variant-numeric: tabular-nums;
+}
+/* The multi-sort summary ("Not sorted.") is kp's own second toolbar row,
+   `.kp-datatable__bar` again, so it carried the same block padding as the
+   search row above it — plus the summary `<p>`'s own UA margin on top of
+   that (`.measured` above resets `.measured` itself, but this one is
+   `.kp-datatable__status.kp-datatable__sort-summary`, not `.measured`) —
+   stacking into the ~40px gaps Kenny measured between the search row,
+   "Not sorted." and the table's caption (2026-10-02). Flush under the
+   search row, no margin of its own, one small gap before the caption. */
+.kp-datatable__sort-summary {
+  margin: 0;
+}
+.kp-datatable__bar.kp-datatable__sort-line {
+  padding-block: 0 0.125rem;
 }
 /* kp's failed slot and empty box inside the table's frame; the failed
    slot's reason is three lines (what, why, what to do: tablestate.js
@@ -1324,7 +1526,7 @@ td.stack-flags {
 /* Activity (2026-09-30): the List/Timeline toggle; the Timeline sub-page
    still paints its own h1, hidden here since the page's own h1 already
    says Activity. */
-.activity-body > h1 {
+.activity-body h1 {
   display: none;
 }
 
@@ -1338,21 +1540,46 @@ td.stack-flags {
   padding: 8px 12px;
 }
 .health-block summary {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
   cursor: pointer;
 }
 .health-block summary h2 {
   display: inline;
+  margin: 0;
 }
-.health-block__body > h1 {
+/* The sub-page's own action buttons (Today's "Read again", Doctor's
+   Refresh + its state badge) move into the summary itself (health.js
+   `adoptActions`), right-aligned beside the block's name, so opening a
+   block and acting on it read as one line instead of a bare button sitting
+   alone under the heading (Kenny, 2026-10-02). */
+.health-block summary .kp-button,
+.health-block summary .state {
+  margin-inline-start: auto;
+}
+.health-block summary .kp-button + .kp-button,
+.health-block summary .kp-button + .state,
+.health-block summary .state + .kp-button {
+  margin-inline-start: 0;
+}
+/* The sub-page's own h1 sits inside a `.title-row` with its own buttons
+   (Today's "Read again", Doctor's refresh), not as the body's direct
+   child, so the selector has to reach it as a descendant (Kenny,
+   2026-10-01: "Today" was painting twice — once as the <summary>, once as
+   this hidden-in-theory heading right under it). */
+.health-block__body h1 {
   display: none;
 }
 
 /* replace-homepage's health strip (2026-09-30): below the tiles, only when
-   something needs Kenny. */
+   something needs Kenny. It is a `kp-alert` now (Kenny, 2026-10-02: it used
+   to be a one-off tinted box, its own border colour and no gap above it —
+   it sat flush against the last tile group); the same 20px the tile groups
+   themselves are spaced by, instead of a bare block right under them. */
 .health-strip {
-  border: 1px solid var(--destructive);
-  border-radius: 8px;
-  padding: 8px 12px;
+  margin-block-start: 20px;
 }
 .health-strip__toggle {
   all: unset;

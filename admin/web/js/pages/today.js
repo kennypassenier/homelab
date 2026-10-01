@@ -109,17 +109,21 @@ export function mount(root) {
     ],
   });
   root.replaceChildren(
-    h("div", { class: "title-row" }, h("h1", null, "Today"), read),
+    h("div", { class: "title-row" }, h("h1", null, "Today"), ago, read),
     verdict,
     note,
     items.wrap,
     unread,
-    h("p", null, ago),
-    h("div", { class: "title-row" }, h("h2", null, "Fleet check"), checkBtn),
+    h(
+      "div",
+      { class: "title-row" },
+      h("h2", null, "Fleet check"),
+      checkAgo,
+      checkBtn,
+    ),
     checkAbout,
     checkNote,
     findings.wrap,
-    h("p", null, checkAgo),
   );
   const detach = attachDataTables(root);
   const table = dataTable(items.wrap);
@@ -160,13 +164,13 @@ export function mount(root) {
         h("strong", null, v.verdict),
       ),
     );
+    // How long the read took is shown once, beside the title (`ago`'s own
+    // line already says how long ago that was) — not repeated here too
+    // (Kenny, 2026-10-02: "Read in 0 s." above the table and "read 0 s
+    // ago" below it said the same thing twice).
     note.textContent = [
       v.note,
-      o.last
-        ? "The last reading, while the host reads again."
-        : o.took
-          ? `Read in ${o.took}.`
-          : "",
+      o.last ? "The last reading, while the host reads again." : "",
     ]
       .filter(Boolean)
       .join(" ");
@@ -272,13 +276,13 @@ export function mount(root) {
       ),
     );
     checkTable?.refresh();
+    // How long ago is `checkAgo`'s own job, beside the title, same as
+    // Today's — not repeated here as "checked in Xs" too.
     const when = o.last
-      ? "the last reading, while the host checks again"
-      : o.took
-        ? `checked in ${o.took}`
-        : "the last reading";
+      ? ", the last reading, while the host checks again"
+      : "";
     checkNote.textContent =
-      `${body.passes ? "Passes" : "Does not pass"}: ${rows.length} finding(s) over ${body.stack_files} stack file(s), ${when}. ${body.skipped ?? ""} ${body.not_here ?? ""}`.trim();
+      `${body.passes ? "Passes" : "Does not pass"}: ${rows.length} finding(s) over ${body.stack_files} stack file(s)${when}. ${body.skipped ?? ""} ${body.not_here ?? ""}`.trim();
     setAgo(checkAgo, body.read_at ?? body.measured_at ?? Date.now() / 1000);
     checkPage.shown = body.read_run ?? null;
     if (!o.last) keepRead("/data/fleet-check", body);

@@ -28,7 +28,7 @@ import {
 } from "../editforms.js";
 import { markErrors } from "../editui.js";
 import { driven, register } from "../drivehooks.js";
-import { formatTime } from "../format.js";
+import { formatDateTime } from "../format.js";
 import { mountJobPanel } from "../jobpanel.js";
 import { listen } from "../store.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
@@ -596,7 +596,7 @@ function drawRepo(box, v, reload) {
           : "not cloned yet",
     ),
     h("dt", null, "Last fetched"),
-    h("dd", null, r.fetched_at ? formatTime(r.fetched_at) : "not yet"),
+    h("dd", null, r.fetched_at ? formatDateTime(r.fetched_at) : "not yet"),
     ...(r.key_present === null
       ? []
       : [

@@ -2,7 +2,7 @@
 // host's ManualCheckRecord (core/src/state.rs); fields this page does not
 // know yet are still shown, generically, in the last column.
 
-import { formatTime } from "./format.js";
+import { formatDateTime } from "./format.js";
 
 /**
  * @typedef {{stack: string, app: string, text: string, registered_at: number,
@@ -49,7 +49,7 @@ export function checkAnswer(r, now) {
 export function extraField(key, value, opts) {
   const label = key.replaceAll("_", " ");
   if (/(_at|_until)$/.test(key) && typeof value === "number")
-    return `${label}: ${formatTime(value, opts)}`;
+    return `${label}: ${formatDateTime(value, opts)}`;
   if (value !== null && typeof value === "object")
     return `${label}: ${JSON.stringify(value)}`;
   return `${label}: ${String(value)}`;
@@ -69,7 +69,7 @@ export function checkRows(checks, now, opts) {
       const note = [
         r.note ?? "",
         answer.label === "accepted" && r.accepted_until != null
-          ? `accepted until ${formatTime(r.accepted_until, opts)}`
+          ? `accepted until ${formatDateTime(r.accepted_until, opts)}`
           : "",
       ]
         .filter((s) => s !== "")

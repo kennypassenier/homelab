@@ -249,18 +249,33 @@ export function mount(root) {
       const id = Number(row.dataset.notice);
       const r = noticeById.get(id);
       if (!r) return null;
+      // Kenny, 2026-10-01: Since/Consequence/What to do used to be three
+      // separate paragraphs, each its own line; a kv-grid keeps the label
+      // and its value on one row, lined up with the others.
+      const rows = [
+        ...(r.since != null
+          ? [{ label: "Since", value: formatDateTime(r.since) }]
+          : []),
+        ...(r.consequence
+          ? [{ label: "Consequence", value: r.consequence }]
+          : []),
+        ...(r.remedy ? [{ label: "What to do", value: r.remedy }] : []),
+      ];
       return h(
         "div",
         { class: "notice-detail" },
         ...(r.body ? [h("p", null, r.body)] : []),
-        ...(r.since != null
-          ? [h("p", { class: "measured" }, `Since ${formatDateTime(r.since)}`)]
-          : []),
-        ...(r.consequence
-          ? [h("p", null, h("em", null, "Consequence: "), r.consequence)]
-          : []),
-        ...(r.remedy
-          ? [h("p", null, h("em", null, "What to do: "), r.remedy)]
+        ...(rows.length
+          ? [
+              h(
+                "dl",
+                { class: "facts" },
+                ...rows.flatMap((x) => [
+                  h("dt", null, x.label),
+                  h("dd", null, x.value),
+                ]),
+              ),
+            ]
           : []),
         ...(r.link || r.job || r.fixes.length
           ? [

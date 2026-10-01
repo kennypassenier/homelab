@@ -4,7 +4,7 @@
 // jobPanel() in jobs.js; this module only puts it on the page.
 
 import { act, actionLabel, onAct } from "./act.js";
-import { badge, copyLine } from "./actui.js";
+import { badge, labeledCopyLine } from "./actui.js";
 import { h } from "./dom.js";
 import { jobPanel, logLine } from "./jobs.js";
 import { attachLogs } from "/static/kp/js/log.js";
@@ -17,14 +17,14 @@ import { attachLogs } from "/static/kp/js/log.js";
  */
 export function mountJobPanel(jobId, opts = {}) {
   const title = h("h3", { class: "job-title" });
-  const state = h("span");
-  const origin = h("p", { class: "measured job-origin" });
+  const stateDD = h("dd", { class: "job-state" });
+  const stepDD = h("dd", { class: "job-step" });
+  const originDD = h("dd", { class: "job-origin" });
   const restarts = h(
     "div",
     { class: "kp-alert kp-alert--warning", role: "status", hidden: "" },
     "This job restarts the dashboard: the page loses its link for a moment and reads the job's end after the restart.",
   );
-  const stepLabel = h("span", { class: "kp-progress__label job-step" });
   const bar = h("progress", {
     class: "kp-progress",
     max: "100",
@@ -34,6 +34,23 @@ export function mountJobPanel(jobId, opts = {}) {
   const stepName = h("p", { class: "job-step-name mono" });
   const elapsed = h("dd", { class: "job-elapsed" });
   const left = h("dd", { class: "job-remaining" });
+  // Kenny, 2026-10-01: state, step, origin, elapsed and remaining used to
+  // scatter across a title row and two separate paragraphs; one kv-grid
+  // keeps every fact lined up in place instead.
+  const facts = h(
+    "dl",
+    { class: "facts job-facts" },
+    h("dt", null, "State"),
+    stateDD,
+    h("dt", null, "Step"),
+    stepDD,
+    h("dt", null, "Origin"),
+    originDD,
+    h("dt", null, "Running for"),
+    elapsed,
+    h("dt", null, "Expected remaining"),
+    left,
+  );
   const basis = h("p", { class: "measured job-basis" });
   const end = h("div", { class: "job-outcome" });
   const cli = h("div", { class: "job-cli" });
@@ -56,25 +73,21 @@ export function mountJobPanel(jobId, opts = {}) {
       "aria-label": `Job ${jobId}`,
       "data-job": String(jobId),
     },
-    ...(opts.compact ? [] : [h("div", { class: "title-row" }, title, state)]),
-    ...(opts.compact
-      ? [h("div", { class: "title-row" }, state, origin)]
-      : [origin]),
+    ...(opts.compact ? [] : [h("div", { class: "title-row" }, title)]),
     restarts,
+    facts,
     h(
       "div",
       { class: "kp-progress-group job-progress" },
-      h("div", { class: "kp-progress__wrap" }, stepLabel, bar, pctText),
+      h(
+        "div",
+        { class: "kp-progress__wrap" },
+        h("span", { class: "kp-progress__label" }, "Progress"),
+        bar,
+        pctText,
+      ),
     ),
     stepName,
-    h(
-      "dl",
-      { class: "facts job-times" },
-      h("dt", null, "Running for"),
-      elapsed,
-      h("dt", null, "Expected remaining"),
-      left,
-    ),
     basis,
     end,
     cli,
@@ -92,7 +105,7 @@ export function mountJobPanel(jobId, opts = {}) {
   const paint = () => {
     const j = act.jobs.find((x) => x.job === jobId);
     if (!j) {
-      origin.textContent = `Job ${jobId}: waiting for the dashboard to report it…`;
+      originDD.textContent = `Job ${jobId}: waiting for the dashboard to report it…`;
       return;
     }
     const v = jobPanel(j, {
@@ -101,10 +114,10 @@ export function mountJobPanel(jobId, opts = {}) {
       now: Date.now() / 1000,
     });
     title.textContent = v.title;
-    state.replaceChildren(badge(v.badge));
-    origin.textContent = `Job ${j.job} · ${v.origin}`;
+    stateDD.replaceChildren(badge(v.badge));
+    originDD.textContent = `Job ${j.job} · ${v.origin}`;
     restarts.hidden = !v.restarts;
-    stepLabel.textContent = v.step;
+    stepDD.textContent = v.step;
     if (v.percent == null) {
       bar.removeAttribute("value");
       pctText.textContent = v.finished ? "" : "…";
@@ -148,10 +161,7 @@ export function mountJobPanel(jobId, opts = {}) {
       cliShown = v.cli ?? "";
       cli.replaceChildren(
         ...(v.cli
-          ? [
-              h("p", { class: "measured" }, "The same from a workstation:"),
-              copyLine(v.cli),
-            ]
+          ? [labeledCopyLine("The same from a workstation:", v.cli)]
           : []),
       );
     }

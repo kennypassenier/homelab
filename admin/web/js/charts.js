@@ -4,7 +4,7 @@
 // 2026-09-30, feat-metrics-1) is the one panel both tabs of Metrics draw.
 
 import { h } from "./dom.js";
-import { formatTime } from "./format.js";
+import { formatDateTime } from "./format.js";
 
 export const W = 560;
 export const H = 180;
@@ -79,7 +79,7 @@ export function panelEl(p, from, to) {
     svg(
       "text",
       { x: String(L.x0), y: String(H - 4), class: "chart__tick" },
-      formatTime(from),
+      formatDateTime(from),
     ),
     svg(
       "text",
@@ -89,7 +89,7 @@ export function panelEl(p, from, to) {
         class: "chart__tick",
         "text-anchor": "end",
       },
-      formatTime(to),
+      formatDateTime(to),
     ),
   );
   L.paths.forEach((s, i) =>

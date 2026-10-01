@@ -6,7 +6,7 @@
 
 import { panelEl } from "../charts.js";
 import { h, fetchJson } from "../dom.js";
-import { formatTime } from "../format.js";
+import { formatDateTime } from "../format.js";
 import { current, subscribe } from "../store.js";
 import { choice, setParams } from "../urlstate.js";
 
@@ -160,7 +160,7 @@ export function mount(root, ctx) {
         status.textContent = `${r.error.what}: ${r.error.why} — ${r.error.fix}`;
         return;
       }
-      status.textContent = `${stack ? `Stack ${stack}` : "The host"}, ${formatTime(r.body.from)} to ${formatTime(r.body.to)}`;
+      status.textContent = `${stack ? `Stack ${stack}` : "The host"}, ${formatDateTime(r.body.from)} to ${formatDateTime(r.body.to)}`;
       grid.replaceChildren(
         ...r.body.panels.map((/** @type {any} */ p) =>
           panelEl(p, r.body.from, r.body.to),
@@ -180,7 +180,7 @@ export function mount(root, ctx) {
         return;
       }
       const b = r.body;
-      status.textContent = `${formatTime(b.from)} to ${formatTime(b.to)} · reads again every 30 s`;
+      status.textContent = `${formatDateTime(b.from)} to ${formatDateTime(b.to)} · reads again every 30 s`;
       grid.replaceChildren(
         ...b.panels.map((/** @type {any} */ p) => panelEl(p, b.from, b.to)),
       );

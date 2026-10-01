@@ -28,7 +28,7 @@ import {
 import { stackDetail } from "../fleet.js";
 import { badge } from "../actui.js";
 import { driftFact, stackFlags } from "../parity.js";
-import { formatTime, humanDuration } from "../format.js";
+import { formatDateTime, humanDuration } from "../format.js";
 import {
   JOURNAL,
   SINCE,
@@ -338,7 +338,7 @@ function historyTab(panel, params) {
   const keys = sortKeys();
   /** @param {number | null} unix */
   const time = (unix) =>
-    unix == null ? "—" : keys.note("time", formatTime(unix), unix);
+    unix == null ? "—" : keys.note("time", formatDateTime(unix), unix);
   const ago = agoEl("read");
   const hist = tableBlock({
     remember: "stack-history",
@@ -638,7 +638,7 @@ function checksTab(panel, params) {
   const keys = sortKeys();
   /** @param {number | null} unix */
   const time = (unix) =>
-    unix == null ? "never" : keys.note("time", formatTime(unix), unix);
+    unix == null ? "never" : keys.note("time", formatDateTime(unix), unix);
   const ago = agoEl("read");
   const t = tableBlock({
     remember: "stack-checks",

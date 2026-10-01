@@ -4,7 +4,7 @@
 // coloured with kp-themes tokens.
 
 import { entryOutcome, entryWhat, parseIncident } from "./activity.js";
-import { formatTime, humanDuration } from "./format.js";
+import { formatDateTime, humanDuration } from "./format.js";
 
 export const GUTTER = 118;
 export const RIGHT = 12;
@@ -80,14 +80,27 @@ export function ticks(from, to, px, opts = {}) {
   const most = Math.max(2, Math.floor(px / 80));
   const step =
     STEPS.find((s) => (to - from) / s <= most) ?? STEPS[STEPS.length - 1];
-  const day = new Intl.DateTimeFormat(opts.locale, {
-    month: "short",
-    day: "numeric",
+  // dd/mm and 24h HH:MM, not the viewer's locale's own field order
+  // (Kenny, 2026-10-02): `Intl.DateTimeFormat`'s part order still follows
+  // `opts.locale` (en-US reads month/day first), so the parts are pulled
+  // out and joined by hand, the same fixed order as `formatDateTime`.
+  const dayFmt = new Intl.DateTimeFormat(opts.locale, {
+    month: "2-digit",
+    day: "2-digit",
     timeZone: opts.timeZone,
   });
+  const day = {
+    format: (/** @type {Date} */ d) => {
+      const parts = dayFmt.formatToParts(d);
+      const get = (/** @type {string} */ t) =>
+        parts.find((p) => p.type === t)?.value ?? "";
+      return `${get("day")}/${get("month")}`;
+    },
+  };
   const hour = new Intl.DateTimeFormat(opts.locale, {
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
     timeZone: opts.timeZone,
   });
   const out = [];
@@ -169,7 +182,7 @@ export function timelineModel(input, opts = {}) {
       h: ROW,
       tone: o.tone,
       label: entryWhat(s.e),
-      title: `${entryWhat(s.e)} · ${o.label} · ${formatTime(s.e.start, timeOpts)} · ${took}`,
+      title: `${entryWhat(s.e)} · ${o.label} · ${formatDateTime(s.e.start, timeOpts)} · ${took}`,
       start: s.e.start,
     });
   });
@@ -183,7 +196,7 @@ export function timelineModel(input, opts = {}) {
       h: ROW,
       tone: "info",
       label: entryWhat(s.e),
-      title: `${entryWhat(s.e)} · ${formatTime(s.e.start, timeOpts)} · ${humanDuration(s.b - s.a)}`,
+      title: `${entryWhat(s.e)} · ${formatDateTime(s.e.start, timeOpts)} · ${humanDuration(s.b - s.a)}`,
       start: s.e.start,
     });
   });
@@ -197,7 +210,7 @@ export function timelineModel(input, opts = {}) {
       h: ROW,
       tone: "bad",
       label: i.op,
-      title: `incident: ${i.op} · ${formatTime(at, timeOpts)}`,
+      title: `incident: ${i.op} · ${formatDateTime(at, timeOpts)}`,
       start: at,
     });
   }

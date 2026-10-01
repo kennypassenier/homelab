@@ -11,7 +11,7 @@ import {
   tableBlock,
   td,
 } from "../dom.js";
-import { formatTime, humanDuration } from "../format.js";
+import { formatDateTime, humanDuration } from "../format.js";
 import { fetchAnnounced, keepRead, keptRead, runUrl } from "../slowread.js";
 import { listen } from "../store.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
@@ -75,7 +75,7 @@ export function mount(root) {
     overall.replaceChildren(h("span", null, `overall ${hl.label}`));
     status.textContent =
       o.began != null && !o.last
-        ? `${doctorSummary(report)} · asked ${formatTime(o.began / 1000)}, took ${humanDuration((Date.now() - o.began) / 1000)}`
+        ? `${doctorSummary(report)} · asked ${formatDateTime(o.began / 1000)}, took ${humanDuration((Date.now() - o.began) / 1000)}`
         : `${doctorSummary(report)} · the last reading${o.last ? ", while the host runs the doctor again" : ""}`;
     t.tbody.replaceChildren(
       ...doctorRows(report).map((x) =>

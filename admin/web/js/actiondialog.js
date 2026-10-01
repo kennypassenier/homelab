@@ -27,12 +27,13 @@ import {
   badge,
   copyLine,
   fieldEl,
+  labeledCopyLine,
   notify,
   openDialog,
   refusalAlarm,
   refusalCallout,
 } from "./actui.js";
-import { fetchJson, fetchReport, h } from "./dom.js";
+import { fetchJson, fetchReport, h, statTile } from "./dom.js";
 import { diffBlocks } from "./editui.js";
 import { applySummary, checkChoices } from "./parity.js";
 import { fileViews } from "./plan.js";
@@ -399,8 +400,7 @@ function drawActionDialog(form, values, sources, driven) {
         ? h(
             "div",
             { class: "act-cli" },
-            h("p", { class: "measured" }, "The same from a workstation:"),
-            copyLine(p.cli),
+            labeledCopyLine("The same from a workstation:", p.cli),
           )
         : h(
             "p",
@@ -873,6 +873,22 @@ export function mountBatchPanel(batch, jobs) {
     "aria-label": "Batch progress",
   });
   const text = h("span", { class: "kp-progress__value" });
+  // Kenny, 2026-10-01: the totals used to be one sentence; stat tiles keep
+  // Done/OK/Failed/Deferred in their own place instead.
+  const totalTile = statTile("Total");
+  const doneTile = statTile("Done");
+  const okTile = statTile("OK");
+  const failedTile = statTile("Failed");
+  const deferredTile = statTile("Deferred");
+  const totals = h(
+    "div",
+    { class: "stat-grid batch-totals" },
+    totalTile.el,
+    doneTile.el,
+    okTile.el,
+    failedTile.el,
+    deferredTile.el,
+  );
   const rows = h("ul", { class: "batch-jobs" });
   const running = h("div", { class: "batch-running" });
   /** @type {{job: number, stop: () => void} | null} */
@@ -916,6 +932,7 @@ export function mountBatchPanel(batch, jobs) {
       ),
       stopBtn,
     ),
+    totals,
     rows,
     running,
   );
@@ -936,7 +953,12 @@ export function mountBatchPanel(batch, jobs) {
     const v = batchView(b);
     stopBtn.hidden = !!b.done;
     bar.value = v.percent;
-    text.textContent = v.text;
+    text.textContent = `${v.percent}%`;
+    totalTile.value.textContent = String(v.total);
+    doneTile.value.textContent = String(b.done);
+    okTile.value.textContent = String(b.ok);
+    failedTile.value.textContent = String(b.failed);
+    deferredTile.value.textContent = String(b.deferred);
     rows.replaceChildren(
       ...v.rows.map((r) => {
         const live = act.jobs.find((x) => x.job === r.job);

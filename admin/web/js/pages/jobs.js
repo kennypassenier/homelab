@@ -4,7 +4,7 @@
 import { act, actionLabel, loadJobs, onAct } from "../act.js";
 import { agoEl, setAgo } from "../ago.js";
 import { badgeCell, bindTableUrl, h, tableBlock, td } from "../dom.js";
-import { formatTime } from "../format.js";
+import { formatDateTime } from "../format.js";
 import { STATE_ORDER, jobRows } from "../jobs.js";
 import { mountJobPanel } from "../jobpanel.js";
 import { sortKeys } from "../sortkeys.js";
@@ -137,7 +137,7 @@ export function mount(root, ctx) {
             "data-kp-row-key": String(r.job),
           },
           td(String(r.job), "num"),
-          td(keys.note("time", formatTime(r.queued), r.queued)),
+          td(keys.note("time", formatDateTime(r.queued), r.queued)),
           td(r.stack),
           td(r.action),
           td(r.origin),

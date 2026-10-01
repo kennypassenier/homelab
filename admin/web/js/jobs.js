@@ -3,7 +3,7 @@
 // and `action_log` events and the `action_batch` event; the clock comes in
 // as an argument, so `node --test` can drive every line.
 
-import { formatTime, humanDuration } from "./format.js";
+import { formatDateTime, humanDuration } from "./format.js";
 
 /**
  * @typedef {{op: string, step: string, n: number, m: number | null,
@@ -411,10 +411,12 @@ export function logLine(l, opts = {}) {
           ? "debug"
           : "info";
   return {
+    // 24h, not the viewer's locale (Kenny, 2026-10-02).
     time: new Intl.DateTimeFormat(opts.locale, {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
+      hour12: false,
       timeZone: opts.timeZone,
     }).format(new Date(l.ts * 1000)),
     source: l.source || "host",
@@ -429,4 +431,4 @@ export function logLine(l, opts = {}) {
  * @param {Job} j
  * @param {{locale?: string, timeZone?: string}} [opts]
  */
-export const queuedText = (j, opts) => formatTime(j.queued_at, opts);
+export const queuedText = (j, opts) => formatDateTime(j.queued_at, opts);

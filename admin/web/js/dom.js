@@ -254,9 +254,12 @@ export function tableBlock(spec) {
         shownFrom:
           readAt != null &&
           tbody.querySelector("tr:not([data-kp-skeleton-row])")
-            ? new Date(readAt).toLocaleTimeString(undefined, {
+            ? // 24h, not the viewer's locale (Kenny, 2026-10-02): no
+              // am/pm, consistent with dd/mm/yyyy HH:MM everywhere else.
+              new Date(readAt).toLocaleTimeString(undefined, {
                 hour: "2-digit",
                 minute: "2-digit",
+                hour12: false,
               })
             : null,
       }),
@@ -582,6 +585,46 @@ export function fillFacts(dl, facts) {
   dl.replaceChildren(
     ...facts.flatMap((x) => [h("dt", null, x.label), h("dd", null, x.value)]),
   );
+}
+
+/**
+ * A row of stat tiles from a plain list, redrawn whole (Kenny, 2026-10-01):
+ * for a count that does not need its own live-updating node.
+ * @param {{label: string, value: string}[]} stats
+ */
+export function statGrid(stats) {
+  return h(
+    "div",
+    { class: "stat-grid" },
+    ...stats.map((s) => statTile(s.label, s.value).el),
+  );
+}
+
+/**
+ * Refills a stat grid in place, the stat-tile counterpart of `fillFacts`.
+ * @param {HTMLElement} grid
+ * @param {{label: string, value: string}[]} stats
+ */
+export function fillStatGrid(grid, stats) {
+  grid.replaceChildren(...stats.map((s) => statTile(s.label, s.value).el));
+}
+
+/**
+ * One stat tile with an updatable value node, for a panel that repaints a
+ * number in place rather than rebuilding the whole grid (Kenny, 2026-10-01:
+ * job panel and batch panel totals).
+ * @param {string} label
+ * @param {string} [value]
+ */
+export function statTile(label, value = "") {
+  const valueEl = h("span", { class: "stat-tile__value" }, value);
+  const el = h(
+    "div",
+    { class: "stat-tile" },
+    h("span", { class: "stat-tile__label" }, label),
+    valueEl,
+  );
+  return { el, value: valueEl };
 }
 
 /**

@@ -3,7 +3,7 @@
 // The times a schedule names are the host's wall clock (Europe/Brussels);
 // the next run is shown in the viewer's own time.
 
-import { formatTime } from "./format.js";
+import { formatDateTime } from "./format.js";
 
 /**
  * @typedef {{every: "day", at: string} |
@@ -53,13 +53,11 @@ export function whenText(w, zone, opts = {}) {
     const d = daysText(w.days);
     return `${d[0].toUpperCase()}${d.slice(1)} at ${w.at}${tz}`;
   }
+  // dd/mm/yyyy, not the viewer's locale (Kenny, 2026-10-02) — built
+  // straight from the ISO date's own digits, so it needs no Intl call (and
+  // no locale) at all.
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(w.date);
-  const date = m
-    ? new Intl.DateTimeFormat(opts.locale, {
-        dateStyle: "medium",
-        timeZone: "UTC",
-      }).format(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
-    : w.date;
+  const date = m ? `${m[3]}/${m[2]}/${m[1]}` : w.date;
   return `Once on ${date} at ${w.at}${tz}`;
 }
 
@@ -125,7 +123,7 @@ export function scheduleRows(list, label, opts = {}) {
         ? "off"
         : v.next_run == null
           ? "no further run"
-          : formatTime(v.next_run, opts),
+          : formatDateTime(v.next_run, opts),
       last: last
         ? `${last.state} (job ${last.job})`
         : s.last_run

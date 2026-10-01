@@ -13,6 +13,7 @@ import {
   bindTableUrl,
   h,
   fetchJson,
+  fillStatGrid,
   selectCell,
   tableBlock,
   td,
@@ -32,7 +33,9 @@ import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
  * @returns {() => void}
  */
 export function mount(root, ctx) {
-  const card = h("dl", { class: "facts" });
+  // Kenny, 2026-10-01: the host card's six facts are short stats, not a
+  // label/value list — they sit in a stat-grid instead of one long column.
+  const card = h("div", { class: "stat-grid stat-grid--3" });
   // feat-overview-4: the reading's age, ticking.
   const ago = agoEl("measured", null, { live: true });
   const measured = h("p", { class: "measured", id: "measured" }, ago);
@@ -139,12 +142,7 @@ export function mount(root, ctx) {
   const render = () => {
     const f = current().fleet;
     if (!f) return;
-    card.replaceChildren(
-      ...hostCard(f).flatMap((x) => [
-        h("dt", null, x.label),
-        h("dd", null, x.value),
-      ]),
-    );
+    fillStatGrid(card, hostCard(f));
     // The ticked stacks survive the live update that redraws the rows.
     const ticked = table?.selected() ?? [];
     const rows = f.stacks.map((s) => {

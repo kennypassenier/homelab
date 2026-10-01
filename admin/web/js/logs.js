@@ -66,19 +66,25 @@ export function levelTone(level) {
 }
 
 /**
- * The time of a line to the second, in the viewer's locale.
+ * The time of a line to the second, dd/mm HH:MM:SS (not the viewer's
+ * locale, Kenny 2026-10-02 — same fixed order as `formatDateTime`, with
+ * seconds added since a log line needs them).
  * @param {number} ms unix milliseconds
  * @param {import("./format.js").TimeOptions} [opts]
  */
 export function lineTime(ms, opts = {}) {
-  return new Intl.DateTimeFormat(opts.locale, {
-    month: "short",
-    day: "numeric",
+  const parts = new Intl.DateTimeFormat(opts.locale, {
+    month: "2-digit",
+    day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+    hour12: false,
     timeZone: opts.timeZone,
-  }).format(new Date(ms));
+  }).formatToParts(new Date(ms));
+  const get = (/** @type {string} */ t) =>
+    parts.find((p) => p.type === t)?.value ?? "";
+  return `${get("day")}/${get("month")} ${get("hour")}:${get("minute")}:${get("second")}`;
 }
 
 /**

@@ -242,12 +242,11 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
         incidents_poll_s: number(lookup, "INCIDENTS_POLL_S", 300, 10, &mut why),
         host_notices_poll_s: number(lookup, "HOST_NOTICES_POLL_S", 60, 5, &mut why),
         alerts_token: non_empty("HOMELAB_ADMIN_ALERTS_TOKEN").map(|t| t.trim().to_string()),
-        // tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30):
-        // `HOMELAB_ADMIN_WATCH_VIA` is retired — the minute watch now asks
-        // each tile's own `probe` address directly (see
-        // `shell::watch::round`), not through Traefik with a forged Host
-        // header, which is what this key used to configure. A value left
-        // in admin.env is simply unread from here on; nothing refuses it.
+        // tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30,
+        // see REGISTER.md fix-89): `HOMELAB_ADMIN_WATCH_VIA` is retired —
+        // the minute watch now asks each tile's own `probe` address
+        // directly (see `shell::watch::round`). A value left in admin.env
+        // is simply unread from here on; nothing refuses it.
         public_url: {
             let u = non_empty("HOMELAB_ADMIN_PUBLIC_URL").unwrap_or_default();
             if !u.is_empty() && !(u.starts_with("http://") || u.starts_with("https://")) {

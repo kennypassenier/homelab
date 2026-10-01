@@ -7,12 +7,10 @@
 //! The host watches this dashboard in turn.
 //!
 //! tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30):
-//! `HOMELAB_ADMIN_WATCH_VIA` (a Traefik plain entrypoint address, asked with
-//! a forged Host header) is gone — measuring a tile through the gateway is
-//! exactly what fix-89 (traefik-lan-host-header-bypass) closed the door on,
-//! and reopening it for the watch was never sound. A tile with a `probe` is
-//! watched, straight to that address; a tile with none is not, the same as
-//! one with no reading.
+//! `HOMELAB_ADMIN_WATCH_VIA` is gone — measuring a tile through the gateway
+//! would reopen what fix-89 closed (see REGISTER.md). A tile with a `probe`
+//! is watched, straight to that address; a tile with none is not, the same
+//! as one with no reading.
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -260,11 +258,9 @@ pub async fn round(
     }
 
     // Each tile's own backend, asked directly: no proxy, no Host header
-    // (tile-watch, owner decision "Afgeleid uit de tegels", 2026-09-30 —
-    // fix-89 closed the Traefik-Host-header door, and a measurement through
-    // it never reopens it). Only a tile that carries a `probe` (the client
-    // resolved one, at deploy time) is watched; one with none is silently
-    // skipped, same as one with no reading.
+    // (tile-watch, see REGISTER.md fix-89). Only a tile that carries a
+    // `probe` (the client resolved one, at deploy time) is watched; one
+    // with none is silently skipped, same as one with no reading.
     if let Some(a) = tiles_answer {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))

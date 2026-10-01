@@ -3583,6 +3583,27 @@ A bare `homelab` (no verb) runs `homelab today`.
 `docs/deployment/TEST_PLAN.md` from the test files and the realization plan;
 run it from the repository root (`client/src/main.rs:882-898`).
 
+### Answering a question from the command line
+
+Some operations ask a question mid-run (T69) — the ask window the TUI's
+focus window shows. Before fix-66 the CLI could only print it and wait for
+the host's own timeout to turn it into Unattended: "no answer from here:
+run this from the TUI to decide". It now answers too:
+
+- On a terminal, with no `--answer` flag: the same `[a] allow / [s] stop`
+  choice the TUI offers, typed at a prompt (`a`/`allow`, `s`/`stop`;
+  anything else asks again).
+- `homelab <verb> --answer allow` or `--answer stop`: pre-answers every
+  question the command's operation raises, without waiting — for a script,
+  or any run with no one watching. Prints what it answered and what that
+  sets in motion before sending it.
+- Piped or redirected stdin, no `--answer`: unchanged — the question is
+  printed and the host's own timeout still turns it into Unattended.
+
+The answer is its own request over the same connection and gets its own
+reply, which does not end the command — the operation's own reply still
+decides that (`client/src/answer.rs`, `client/src/main.rs`).
+
 ---
 
 ## 4 · Where the code and FEATURES.md part ways

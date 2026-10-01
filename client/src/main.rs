@@ -37,6 +37,10 @@ static REPO_PIN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new(
 /// fix-101 (cli-path-vs-name-and-cwd, 2026-09-27): the repository, found once
 /// in `main`, so every verb reads the same stacks from any directory.
 static REPO_ROOT: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+// fix-66: `--answer allow|stop`, read once in `run`. Pre-answers any host
+// question an operation started from this command raises, so a script
+// never waits on a question nobody is watching for.
+static PRE_ANSWER: std::sync::OnceLock<Option<bool>> = std::sync::OnceLock::new();
 
 fn repo_root() -> Option<&'static Path> {
     REPO_ROOT.get().and_then(|r| r.as_deref())
@@ -249,6 +253,16 @@ async fn run(explicit_host: Option<String>) {
     let _ = REPO_PIN.set(repo_cfg.as_ref().and_then(|(_, c)| c.pin.clone()));
     let token = std::env::var("HOMELAB_TOKEN").unwrap_or_default();
     let offline = args.iter().any(|a| a == "--offline" || a == "--demo");
+    // fix-66: `--answer allow|stop` pre-answers every host question this
+    // command's operation raises, without waiting for a terminal.
+    let pre_answer = homelab_client::answer::parse_pre_answer_flag(
+        args.iter()
+            .position(|a| a == "--answer")
+            .and_then(|i| args.get(i + 1))
+            .map(String::as_str),
+    )
+    .unwrap_or_else(|e| die(&e));
+    let _ = PRE_ANSWER.set(pre_answer);
     // Commands that never touch the network need no token: help, offline TUI,
     // and `plan` (local validation only, D10).
     let needs_token = !matches!(
@@ -2106,6 +2120,7 @@ async fn rpc_exchange(
     Option<homelab_proto::FleetState>,
     Option<homelab_proto::RpcResponse>,
 ) {
+    use std::io::IsTerminal as _;
     let mut fleet_seen: Option<homelab_proto::FleetState> = None;
     // F303: the size guard lives HERE, where every command passes, and not in
     // the three call sites that happened to remember it.
@@ -2135,6 +2150,19 @@ async fn rpc_exchange(
     let names_builds = matches!(command, Command::Ping | Command::Status);
     let mut payload_seen = false;
     let mut done: Option<bool> = None;
+    // fix-66 (host-questions-unanswerable, 2026-09-27): the CLI could not
+    // answer a question an operation started from it raised — "no answer
+    // from here: run this from the TUI to decide" was the whole story.
+    // Answers now run beside the host's queue (that part is built); this is
+    // the client side of actually sending one. `PRE_ANSWER` (`--answer
+    // allow|stop`, read once in `run`) answers every question without
+    // waiting; otherwise, on a terminal, the same `[a] allow / [s] stop`
+    // choice the TUI's focus window offers is asked here. Not a terminal
+    // and no pre-answer: unchanged — printed, and left to time out as
+    // Unattended. Each answer sent here gets its own RpcDone, which would
+    // otherwise be read as the whole exchange's result; `answer_pending`
+    // tells those apart from the command's own reply.
+    let mut answer_pending: u32 = 0;
     // fix-67: the pin, the frame ceiling and the version gate live in one
     // place, shared with the TUI, whose own copy had drifted from this one.
     let link = homelab_client::link::connect(
@@ -2191,15 +2219,66 @@ async fn rpc_exchange(
             // watching. Print it and let the host's timeout do the rest,
             // which lands on Unattended rather than on a guess.
             ServerMsg::Ask { .. } if quiet => {}
-            ServerMsg::Ask { op, step, what, .. } => {
+            ServerMsg::Ask {
+                id,
+                op,
+                step,
+                what,
+                if_allowed,
+                if_stopped,
+                boot,
+            } => {
                 eprintln!(
                     "{}? {} :: {} is waiting for a decision — {}{}",
                     C_YELLOW, op, step, what, C_RESET
                 );
-                eprintln!(
-                    "  no answer from here: run this from the TUI to decide, \
-                     or it times out as unattended"
-                );
+                let pre_answer = PRE_ANSWER.get().copied().flatten();
+                let allow = match homelab_client::answer::choose(
+                    pre_answer,
+                    std::io::stdin().is_terminal(),
+                ) {
+                    homelab_client::answer::AnswerChoice::PreAnswered(allow) => {
+                        eprintln!(
+                            "  --answer {} :: {}",
+                            if allow { "allow" } else { "stop" },
+                            if allow { &if_allowed } else { &if_stopped }
+                        );
+                        Some(allow)
+                    }
+                    homelab_client::answer::AnswerChoice::Prompt => {
+                        eprintln!("    [a] allow — {}", if_allowed);
+                        eprintln!("    [s] stop  — {}", if_stopped);
+                        loop {
+                            match homelab_client::answer::parse_prompt_answer(&read_typed("  ")) {
+                                Some(allow) => break Some(allow),
+                                None => eprintln!("  type 'a' or 's'"),
+                            }
+                        }
+                    }
+                    homelab_client::answer::AnswerChoice::TimesOut => None,
+                };
+                match allow {
+                    Some(allow) => {
+                        let answer = RpcRequest {
+                            id: req.id + answer_pending as u64 + 1,
+                            command: Command::Answer { id, allow, boot },
+                        };
+                        if tx
+                            .send(Message::Text(
+                                serde_json::to_string(&answer).unwrap().into(),
+                            ))
+                            .await
+                            .is_ok()
+                        {
+                            answer_pending += 1;
+                        }
+                    }
+                    None => eprintln!(
+                        "  no answer from here: run this from the TUI to decide, \
+                         `homelab <verb> --answer allow|stop` answers without waiting, \
+                         or it times out as unattended"
+                    ),
+                }
             }
             ServerMsg::Hello {
                 version,
@@ -2318,6 +2397,21 @@ async fn rpc_exchange(
                 fleet_seen = Some(*fleet);
             }
             ServerMsg::RpcDone(resp) => {
+                // fix-66: an answer sent above is its own RPC and gets its
+                // own RpcDone, which would otherwise be read as the whole
+                // exchange's result — it arrives beside, not instead of,
+                // the operation's own reply (the host runs it off the
+                // queue, "beside" it as the register entry says).
+                if answer_pending > 0 && resp.id != req.id {
+                    answer_pending -= 1;
+                    if !resp.ok {
+                        eprintln!(
+                            "{}✗ answer not delivered: {}{}",
+                            C_RED, resp.message, C_RESET
+                        );
+                    }
+                    continue;
+                }
                 if !echo_reply {
                     return (resp.ok, fleet_seen, Some(resp));
                 }

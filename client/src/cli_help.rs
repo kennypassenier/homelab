@@ -155,7 +155,10 @@ pub fn usage() -> String {
         "\nenv: HOMELAB_TOKEN and HOMELAB_HOST (default 10.10.5.250:8443), from the \
          environment or ~/.config/homelab/env; HOMELAB_REPO names the repository when \
          the command runs outside it\n\
-         cert pin: ~/.config/homelab/pin\n",
+         cert pin: ~/.config/homelab/pin\n\
+         --answer allow|stop: answers any question the command's operation raises, \
+         without waiting (fix-66); on a terminal with no --answer, the same question \
+         is asked here as [a]/[s]\n",
     );
     out
 }

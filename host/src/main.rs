@@ -76,6 +76,47 @@ struct Identity {
     scope: homelab_proto::Scope,
 }
 
+/// fix-122: `tracing_subscriber::EnvFilter::try_new` almost never returns
+/// `Err` — its directive grammar is deliberately forgiving, so garbage like
+/// "not a directive!!" parses as a bare directive and is accepted rather
+/// than refused (measured 2026-10-01: `try_new` on exactly that string is
+/// `Ok`). A log level a person can type wrong needs a check that actually
+/// rejects the wrong ones, so this re-checks the grammar `EnvFilter` itself
+/// documents: comma-separated directives, each either a bare level keyword
+/// or `target[span]=level`.
+fn log_level_is_valid(s: &str) -> bool {
+    fn is_level(s: &str) -> bool {
+        matches!(
+            s.to_ascii_lowercase().as_str(),
+            "trace" | "debug" | "info" | "warn" | "error" | "off"
+        ) || matches!(s, "0" | "1" | "2" | "3" | "4" | "5")
+    }
+    fn is_target(s: &str) -> bool {
+        // A span suffix, `target[span]`, narrows further; only the target
+        // itself (a crate/module path) needs validating here.
+        let target = s.split('[').next().unwrap_or(s);
+        !target.is_empty()
+            && target
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && target
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ':' | '-'))
+    }
+    let s = s.trim();
+    !s.is_empty()
+        && s.split(',').map(str::trim).all(|d| {
+            if d.is_empty() {
+                return false;
+            }
+            match d.split_once('=') {
+                Some((target, level)) => is_target(target) && is_level(level),
+                None => is_level(d),
+            }
+        })
+}
+
 /// arch-tokens: a token list the host can trust, or the reason it cannot.
 fn validate_tokens(tokens: &[TokenEntry]) -> Result<(), String> {
     let mut seen = std::collections::HashSet::new();
@@ -623,7 +664,7 @@ fn load_config_from(path: String) -> Config {
         .clone()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "info".to_string());
-    if tracing_subscriber::EnvFilter::try_new(&log_level).is_err() {
+    if !log_level_is_valid(&log_level) {
         eprintln!(
             "FATAL: {}: log_level {:?} is not a tracing/EnvFilter directive (e.g. \"info\", \"debug\")",
             path, log_level
@@ -992,7 +1033,7 @@ fn startup_problems(file: &FileConfig) -> Vec<String> {
     }
     if let Some(level) = &file.log_level
         && !level.trim().is_empty()
-        && tracing_subscriber::EnvFilter::try_new(level).is_err()
+        && !log_level_is_valid(level)
     {
         out.push(format!(
             "log_level {:?} is not a tracing/EnvFilter directive (e.g. \"info\", \"debug\")",

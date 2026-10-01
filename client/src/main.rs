@@ -1141,7 +1141,9 @@ async fn run(explicit_host: Option<String>) {
             ),
         },
         "plan" => {
-            // D6/D10: validate locally and show what would be sent — no network.
+            // D6/D10: validate locally first — this much never needs the
+            // network, and a bad stack file fails before anything is asked
+            // of the host.
             let dir = &stack_dir(
                 args.get(2)
                     .unwrap_or_else(|| die("usage: homelab plan stacks/<name>")),
@@ -1159,6 +1161,66 @@ async fn run(explicit_host: Option<String>) {
                     spec.env.len()
                 ),
                 Err(e) => die(&format!("validation failed: {}", e)),
+            }
+            // fix-100 (apply-no-confirm-creates-drill, 2026-09-27): the
+            // per-file diff this verb never had, now that `apply` has one
+            // for every stack at once — this reads one stack's, with
+            // HOMELAB_TOKEN set (D10's "no network" promise is kept when
+            // it is not: validation above already ran and stands).
+            if token.is_empty() {
+                println!(
+                    "{}  (per-file diff needs HOMELAB_TOKEN — validation above stands on its \
+                     own){}",
+                    C_DIM, C_RESET
+                );
+            } else {
+                match rpc_reply(
+                    &host,
+                    &token,
+                    Command::GetApplied {
+                        stack: spec.manifest.stack_name.clone(),
+                    },
+                )
+                .await
+                {
+                    Some(r) if r.ok => {
+                        match serde_json::from_str::<Vec<homelab_proto::FileBlob>>(&r.message) {
+                            Ok(applied) => {
+                                let changes =
+                                    homelab_client::apply::file_changes(&spec.files, &applied);
+                                if changes.is_empty() {
+                                    println!(
+                                        "{}  files unchanged (secrets or settings differ){}",
+                                        C_DIM, C_RESET
+                                    );
+                                }
+                                for c in changes {
+                                    println!("  {}", c);
+                                }
+                                for r in
+                                    homelab_client::apply::native_restarts(&spec.files, &applied)
+                                {
+                                    println!("{}  ↻ {}{}", C_YELLOW, r, C_RESET);
+                                }
+                            }
+                            Err(_) => println!(
+                                "{}  (could not read what the host applied — the host answered: \
+                                 {}){}",
+                                C_DIM, r.message, C_RESET
+                            ),
+                        }
+                    }
+                    Some(_not_ok) => println!(
+                        "{}  new: the host has never applied {} — the deploy would create CT \
+                         {}{}",
+                        C_DIM, spec.manifest.stack_name, spec.manifest.vmid, C_RESET
+                    ),
+                    None => println!(
+                        "{}  (the host did not answer — per-file diff skipped, validation above \
+                         stands){}",
+                        C_DIM, C_RESET
+                    ),
+                }
             }
         }
         "deploy" => {

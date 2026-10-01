@@ -1910,7 +1910,11 @@ host pushes all branches of the intent repository to the git remote named
 **Status:** Built.
 
 On the command line, `homelab plan stacks/<name>` validates without the host
-(see C1). In the TUI, `p` on a stack found under `stacks/` asks the host for
+(see C1), then — with `HOMELAB_TOKEN` set — asks it for the files it last
+applied and prints the same per-file `+`/`~`/`-` diff and native-unit
+restarts `homelab apply` shows (fix-100); without a token, or if the host
+does not answer, the validation line stands on its own and says so. In the
+TUI, `p` on a stack found under `stacks/` asks the host for
 the files it last applied and shows, per app, `SKIP` (no changes) or `UPDATE`
 with the changed files and up to three added and three removed lines each,
 `REMOVE` for files the host has and the checkout does not, and the payload

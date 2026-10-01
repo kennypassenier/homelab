@@ -66,7 +66,7 @@ resources:
   storage: local-lvm
 
 lxc:
-  # 998 is the unprivileged golden template. It bakes docker in, which this
+  # 996 is the unprivileged golden template. It bakes docker in, which this
   # container does not need and will not be given — see native_only above.
   template: clone:996
   unprivileged: true

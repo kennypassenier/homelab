@@ -44,7 +44,7 @@ resources:
   storage: local-lvm
 
 lxc:
-  # 997 is the privileged golden template. This container is privileged today
+  # 995 is the privileged golden template. This container is privileged today
   # and stays so: PUID 1000 inside must remain host uid 1000, which is what
   # owns the media tree.
   template: clone:995

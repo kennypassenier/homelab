@@ -36,6 +36,10 @@ lxc:
   template: clone:996
   unprivileged: true
   features: "nesting=1,keyctl=1"
+  # T62: the only permanent, stateful stack without it — every other
+  # non-ephemeral stack guards against an accidental destroy/restore of the
+  # wrong vmid this way.
+  protection: true
 
 boot:
   onboot: true

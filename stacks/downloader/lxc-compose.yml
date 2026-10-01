@@ -53,7 +53,7 @@ resources:
   storage: local-lvm
 
 lxc:
-  # 997 is the privileged golden template; 998 is the unprivileged one.
+  # 995 is the privileged golden template; 996 is the unprivileged one.
   template: clone:995
   unprivileged: false
   features: nesting=1,keyctl=1

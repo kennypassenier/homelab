@@ -21,6 +21,10 @@ futures-util = "0.3"
 thiserror = "2"
 async-trait = "0.1"
 toml = "0.8"
+# fix-134 (config-four-representations): a settings save edits host.toml in
+# place so comments and key order survive, rather than round-tripping
+# through a struct and losing both.
+toml_edit = "0.22"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 sha2 = "0.10"

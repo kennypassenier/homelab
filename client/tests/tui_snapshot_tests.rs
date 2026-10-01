@@ -241,6 +241,7 @@ fn plan_modal_previews_changes() {
             storage: "local-lvm".into(),
         },
         lxc: LxcSpec {
+            timezone: "host".into(),
             template: "debian-12".into(),
             unprivileged: true,
             features: "nesting=1".into(),
@@ -1504,6 +1505,7 @@ fn d6_plan_diff_skip_update_and_line_previews() {
             storage: "s".into(),
         },
         lxc: homelab_proto::LxcSpec {
+            timezone: "host".into(),
             template: "t".into(),
             unprivileged: true,
             features: String::new(),
@@ -1761,6 +1763,7 @@ fn the_runbook_names_the_repositories_restic_actually_uses() {
             storage: "local-lvm".into(),
         },
         lxc: LxcSpec {
+            timezone: "host".into(),
             template: "clone:997".into(),
             unprivileged: false,
             features: "nesting=1,keyctl=1".into(),

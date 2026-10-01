@@ -419,6 +419,15 @@
         "help": "Gives the container /dev/net/tun. Only takes effect at a rebuild."
       },
       {
+        "name": "timezone",
+        "id": "edit-lxc-timezone",
+        "kind": "text",
+        "label": "Timezone",
+        "help": "Passed to pct create --timezone; \"host\" inherits the Proxmox host's timezone. Only takes effect at a rebuild.",
+        "required": false,
+        "pattern": "[A-Za-z0-9_/+\\-]{1,64}"
+      },
+      {
         "name": "storage",
         "id": "edit-resources-storage",
         "kind": "text",

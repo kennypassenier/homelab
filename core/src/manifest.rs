@@ -382,6 +382,13 @@ pub struct LxcSpec {
     /// Proxmox protection flag: hypervisor refuses destroy while set.
     #[serde(default)]
     pub protection: bool,
+    /// T62: the container's timezone, applied at `pct create` time. Default
+    /// `host` inherits the Proxmox host's timezone (CET/CEST), which is what
+    /// every managed container ran on before this field existed and what a
+    /// fresh deploy must keep reproducing — logs correlate against
+    /// Loki/Grafana timestamps that assume host time.
+    #[serde(default = "default_timezone")]
+    pub timezone: String,
     /// H4: pass the host GPU (/dev/dri) into the container (VAAPI).
     #[serde(default)]
     pub gpu: bool,
@@ -395,6 +402,9 @@ fn yes() -> bool {
 }
 fn default_features() -> String {
     "nesting=1,keyctl=1".into()
+}
+fn default_timezone() -> String {
+    "host".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

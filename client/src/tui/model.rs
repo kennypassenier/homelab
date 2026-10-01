@@ -1410,6 +1410,7 @@ fn resolve_spec(model: &Model) -> Result<(homelab_proto::DeploySpec, bool), Stri
             storage: d.storage.clone(),
         },
         lxc: homelab_proto::LxcSpec {
+            timezone: d.timezone.clone(),
             template: d.template.clone(),
             unprivileged: d.unprivileged,
             features: d.features.clone(),

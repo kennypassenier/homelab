@@ -45,6 +45,7 @@ fn spec_with_secret() -> DeploySpec {
             storage: "local-lvm".into(),
         },
         lxc: LxcSpec {
+            timezone: "host".into(),
             template: "debian-12".into(),
             unprivileged: true,
             features: "nesting=1".into(),

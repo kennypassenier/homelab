@@ -3908,6 +3908,7 @@ port = 5003
                     storage: "s".into(),
                 },
                 lxc: homelab_core::manifest::LxcSpec {
+                    timezone: "host".into(),
                     template: "t".into(),
                     unprivileged: true,
                     features: String::new(),

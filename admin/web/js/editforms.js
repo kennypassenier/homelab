@@ -38,7 +38,7 @@ const say = (key, w = {}) =>
  * @typedef {{ip: string, gateway: string, bridge: string,
  *   vlan?: number | null}} NetworkView
  * @typedef {{template: string, unprivileged: boolean, features: string,
- *   protection: boolean, gpu: boolean, vpn: boolean}} LxcView
+ *   protection: boolean, gpu: boolean, vpn: boolean, timezone: string}} LxcView
  * @typedef {{host_path: string, mount_point: string, no_data: boolean,
  *   no_backup?: string | null, host_owner_uid?: number | null,
  *   app?: string | null}} StorageView
@@ -339,6 +339,7 @@ export function settingsExtForm(stack, m) {
     unprivileged: m.lxc?.unprivileged ?? true,
     gpu: m.lxc?.gpu ?? false,
     vpn: m.lxc?.vpn ?? false,
+    timezone: m.lxc?.timezone ?? "host",
     storage: m.resources?.storage ?? "",
     on_demand: m.on_demand ?? false,
   };

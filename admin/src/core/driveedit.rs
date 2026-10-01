@@ -751,6 +751,10 @@ pub fn settings_ext_fields(m: &Value) -> Vec<Field> {
                 "unprivileged" => json!(m["lxc"]["unprivileged"].as_bool().unwrap_or(true)),
                 "gpu" => json!(m["lxc"]["gpu"].as_bool().unwrap_or(false)),
                 "vpn" => json!(m["lxc"]["vpn"].as_bool().unwrap_or(false)),
+                "timezone" => {
+                    let tz = m["lxc"]["timezone"].as_str().unwrap_or("host");
+                    json!(tz)
+                }
                 "storage" => m["resources"]["storage"].clone(),
                 "on_demand" => json!(m["on_demand"].as_bool().unwrap_or(false)),
                 _ => Value::Null,

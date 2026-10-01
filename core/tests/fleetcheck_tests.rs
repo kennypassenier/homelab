@@ -555,6 +555,7 @@ fn boot_manifest(vmid: u16, onboot: bool, order: u16, mem: u32, cores: u16) -> S
             storage: "local-lvm".into(),
         },
         lxc: homelab_core::manifest::LxcSpec {
+            timezone: "host".into(),
             template: "clone:998".into(),
             unprivileged: true,
             features: "nesting=1,keyctl=1".into(),

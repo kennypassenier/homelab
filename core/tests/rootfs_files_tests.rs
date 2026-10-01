@@ -86,6 +86,7 @@ fn native_kyu_spec() -> DeploySpec {
                 storage: "local-lvm".into(),
             },
             lxc: LxcSpec {
+                timezone: "host".into(),
                 template: "clone:998".into(),
                 unprivileged: true,
                 features: "nesting=1".into(),

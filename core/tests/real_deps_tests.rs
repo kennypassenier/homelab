@@ -166,6 +166,7 @@ fn spec(files_content: &str) -> DeploySpec {
             storage: "local-lvm".into(),
         },
         lxc: homelab_core::manifest::LxcSpec {
+            timezone: "host".into(),
             template: "debian-12".into(),
             unprivileged: true,
             features: "nesting=1".into(),

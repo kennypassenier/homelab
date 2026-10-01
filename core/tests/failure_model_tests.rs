@@ -46,6 +46,7 @@ fn spec(vmid: u16, stack: &str) -> DeploySpec {
                 storage: "local-lvm".into(),
             },
             lxc: LxcSpec {
+                timezone: "host".into(),
                 template: "local:vztmpl/debian-12.tar.zst".into(),
                 unprivileged: true,
                 features: "nesting=1".into(),

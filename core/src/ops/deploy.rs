@@ -905,8 +905,10 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     desc,
                     "--tags".into(),
                     "homelab".into(),
+                    // T62: declared (default `host`), same as the `pct
+                    // create` path.
                     "--timezone".into(),
-                    "host".into(),
+                    m.lxc.timezone.clone(),
                 ];
                 if let Some(order) = m.boot.order {
                     set_args.push("--startup".into());
@@ -987,14 +989,15 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 m.lxc.features.clone(),
                 "--onboot".into(),
                 if m.boot.onboot { "1" } else { "0" }.into(),
-                // Managed containers are recognizable in the Proxmox UI and
-                // inherit the host timezone.
+                // Managed containers are recognizable in the Proxmox UI.
                 "--description".into(),
                 format!("managed by homelab v2 :: stack {}", m.stack_name),
                 "--tags".into(),
                 "homelab".into(),
+                // T62: declared (default `host`), not hardcoded — a stack
+                // that needs a different zone can say so.
                 "--timezone".into(),
-                "host".into(),
+                m.lxc.timezone.clone(),
             ];
             if let Some(order) = m.boot.order {
                 args.push("--startup".into());

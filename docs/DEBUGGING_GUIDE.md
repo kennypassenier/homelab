@@ -395,7 +395,8 @@ written to be idempotent (`core/src/doctor.rs:183`).
 ## 5. The daemon log and the live transcript
 
 The daemon writes its log to stderr through `tracing`, filtered by
-`RUST_LOG`, default `info` (`host/src/main.rs:1780-1785`). Under systemd
+`RUST_LOG` at start when set, else `log_level` from host.toml (default
+`info`) — `init_production_logging` (`host/src/main.rs`). Under systemd
 that normally lands in the journal of the `homelab-host` unit; the unit name
 is the one self-update restarts (`core/src/ops/selfupdate.rs:46`).
 
@@ -404,6 +405,26 @@ is the one self-update restarts (`core/src/ops/selfupdate.rs:46`).
 journalctl -u homelab-host -n 100 --no-pager
 journalctl -u homelab-host --since "-1h" --no-pager
 ```
+
+**fix-122 ADDENDUM (Kenny's go, 2026-10-01): a second sink, and a live
+toggle.** Every line also lands in a size-capped JSONL ring at
+`<state_dir>/logs/host.jsonl` (default cap 4 MiB, `log_ring_max_bytes` in
+host.toml) — a `tail`/`jq` session needs no `journalctl`, and the ring
+outlives a journal that has rotated. It is cut back to half its cap the same
+way `journal.jsonl` (AR13's operation journal, a different file with a
+different job) is, oldest lines first:
+
+```bash
+# Proxmox host, as root
+tail -f /var/lib/homelab/logs/host.jsonl | jq -c .
+```
+
+`log_level` (host.toml, dashboard-editable) is applied live — no restart —
+through a shared `tracing_subscriber::reload::Handle`
+(`Rpc::SetHostConfig`/`Rpc::ApplyHostConfig`, `AppState::log_filter`). It
+takes any `tracing`/`EnvFilter` directive, not only a bare level:
+`homelab_host=debug,info` raises only this crate. `RUST_LOG` still wins at
+start when the unit sets it; `log_level` is what changes without one.
 
 **The transcript is in the daemon log too.** Every log line an operation
 emits is also written with `tracing::info!`, whatever its level

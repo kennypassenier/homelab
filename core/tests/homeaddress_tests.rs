@@ -40,6 +40,7 @@ async fn seed_gateway(exec: &MockExecutor) {
     st.stacks.insert(
         "gateway".into(),
         homelab_core::state::StackState {
+            pushed_file_hashes: std::collections::BTreeMap::new(),
             applied_source: None,
             vmid: m.vmid,
             hostname: m.hostname.clone(),

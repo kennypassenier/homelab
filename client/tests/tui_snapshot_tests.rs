@@ -531,6 +531,7 @@ fn settings_tab_renders_config_and_edits() {
                 backup_hour: Some(4),
                 notify_webhook: None,
                 retention: homelab_core::retention::default_tiers(),
+                log_level: "info".to_string(),
             })),
         )),
     );
@@ -3599,6 +3600,7 @@ fn fix_102_deleting_a_retention_tier_asks_first() {
                 backup_hour: Some(4),
                 notify_webhook: None,
                 retention: homelab_core::retention::default_tiers(),
+                log_level: "info".to_string(),
             })),
         )),
     );

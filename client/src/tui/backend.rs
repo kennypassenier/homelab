@@ -274,6 +274,7 @@ impl Backend for DemoBackend {
                                             notify_webhook: None,
                                             retention:
                                                 homelab_core::retention::default_tiers(),
+                                            log_level: "info".to_string(),
                                         },
                                     ))))
                                     .await;

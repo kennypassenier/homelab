@@ -84,6 +84,10 @@ incident_bundle_max_age_days = 90
 incident_bundle_max_count = 200
 upstream_max_age_s = 72000
 
+# ── Logging ──────────────────────────────────────────────────────────────────
+log_level = "info"
+log_ring_max_bytes = 4194304
+
 # ── Safety (ssh-only; declared here for `homelab check`, changed only over
 #    ssh — see `homelab_core::hostconfig::Access::SshOnly`) ─────────────────
 no_touch = [100, 101, 102, 103]

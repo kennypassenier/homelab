@@ -272,6 +272,16 @@ struct FileConfig {
     /// host.toml key and no dashboard row, unlike the incident-bundle
     /// limits right above it.
     journal_max_bytes: Option<u64>,
+    /// fix-122 (AR15's JSONL ring, Kenny's go 2026-10-01): size cap in bytes
+    /// of `logs/host.jsonl`, the daemon's own trace ring — cut back to half
+    /// of it, the same way `journal.jsonl` is, once it grows past it.
+    /// Default [`homelab_core::logring::LOG_RING_MAX_BYTES`].
+    log_ring_max_bytes: Option<u64>,
+    /// fix-122: a `tracing`/`EnvFilter` directive (e.g. "info", "debug",
+    /// "homelab_host=debug,info"), applied to both the journald sink and the
+    /// JSONL ring. Default "info". Editable from the dashboard and applied
+    /// live — no restart — unlike `log_ring_max_bytes` above it.
+    log_level: Option<String>,
     /// How long one GitHub answer about a pinned upstream stands. Default
     /// 20 hours.
     upstream_max_age_s: Option<u64>,
@@ -438,6 +448,15 @@ struct Config {
     incident_bundle_max_count: usize,
     /// gap-26: [`homelab_core::incidents::JOURNAL_MAX_BYTES`] by default.
     journal_max_bytes: u64,
+    /// fix-122: [`homelab_core::logring::LOG_RING_MAX_BYTES`] by default.
+    /// Restart-applied, like `journal_max_bytes` beside it: the ring
+    /// writer's cap is read once, at `init_production_logging`.
+    log_ring_max_bytes: u64,
+    /// fix-122: the daemon's startup filter — `RUST_LOG` wins over this when
+    /// set, exactly as it always has. Live-reloadable afterwards through
+    /// `settings.log_level` and `AppState::log_filter`; this field is read
+    /// only once, to seed the subscriber.
+    log_level: String,
     /// [`homelab_core::ops::pins::UPSTREAM_MAX_AGE_S`] by default.
     upstream_max_age_s: u64,
     /// Y1: how many stack backups the nightly round runs at once. Measured
@@ -599,6 +618,23 @@ fn load_config_from(path: String) -> Config {
         eprintln!("FATAL: {}: status_interval_s must be at least 10 (each reading runs one probe per container)", path);
         std::process::exit(1);
     }
+    // fix-122: the runtime debug toggle, checked the same way at start as it
+    // is at `SetHostConfig` (`startup_problems`) — a directive string
+    // `EnvFilter` cannot parse would otherwise be written to host.toml and
+    // only fail the NEXT restart, silently, with the daemon logging nothing
+    // at all.
+    let log_level = file
+        .log_level
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "info".to_string());
+    if tracing_subscriber::EnvFilter::try_new(&log_level).is_err() {
+        eprintln!(
+            "FATAL: {}: log_level {:?} is not a tracing/EnvFilter directive (e.g. \"info\", \"debug\")",
+            path, log_level
+        );
+        std::process::exit(1);
+    }
     let tokens = file.tokens.clone().unwrap_or_default();
     if let Err(e) = validate_tokens(&tokens) {
         eprintln!("FATAL: {}: {}", path, e);
@@ -730,6 +766,10 @@ fn load_config_from(path: String) -> Config {
         journal_max_bytes: file
             .journal_max_bytes
             .unwrap_or(homelab_core::incidents::JOURNAL_MAX_BYTES as u64),
+        log_ring_max_bytes: file
+            .log_ring_max_bytes
+            .unwrap_or(homelab_core::logring::LOG_RING_MAX_BYTES as u64),
+        log_level: log_level.clone(),
         upstream_max_age_s: file
             .upstream_max_age_s
             .unwrap_or(homelab_core::ops::pins::UPSTREAM_MAX_AGE_S),
@@ -755,6 +795,7 @@ fn load_config_from(path: String) -> Config {
             retention: file
                 .retention
                 .unwrap_or_else(homelab_core::retention::default_tiers),
+            log_level: log_level.clone(),
         },
         file: as_read,
     };
@@ -957,6 +998,14 @@ fn startup_problems(file: &FileConfig) -> Vec<String> {
     }
     if file.retention.as_ref().is_some_and(|r| r.is_empty()) {
         out.push("retention needs at least one tier".into());
+    }
+    if let Some(level) = &file.log_level {
+        if !level.trim().is_empty() && tracing_subscriber::EnvFilter::try_new(level).is_err() {
+            out.push(format!(
+                "log_level {:?} is not a tracing/EnvFilter directive (e.g. \"info\", \"debug\")",
+                level
+            ));
+        }
     }
     for job in file.zfs_jobs.iter().flatten() {
         if let Some(p) = homelab_core::ops::zfs::job_problems(job) {
@@ -2288,6 +2337,39 @@ span_days = 7\n";
         );
         assert!(e.contains("zfs_jobs"), "{e}");
         assert!(refused(one("nonsense", serde_json::json!(1)), &sha).contains("not a setting"));
+    }
+
+    /// fix-122 (AR15's runtime debug toggle, Kenny's go 2026-10-01): a
+    /// directive `EnvFilter` cannot parse is refused the same way an
+    /// out-of-range `backup_hour` is — at the save, not discovered on the
+    /// next restart when the daemon refuses to start at all.
+    #[test]
+    fn fix_122_an_unparsable_log_level_is_refused() {
+        let raw = "token = \"0123456789abcdef0123\"\n";
+        let sha = homelab_core::manifest::sha256_hex(raw.as_bytes());
+        let changes = std::collections::BTreeMap::from([(
+            "log_level".to_string(),
+            serde_json::json!("not a directive!!"),
+        )]);
+        let e = apply_host_config_changes(raw, &changes, &sha).unwrap_err();
+        assert!(e.contains("log_level"), "{e}");
+        assert!(e.contains("EnvFilter"), "{e}");
+    }
+
+    /// fix-122: a valid directive saves and is live (G8), the same way
+    /// `backup_hour` is — `saved.live` names it, not `saved.restart`.
+    #[test]
+    fn fix_122_a_valid_log_level_saves_as_a_live_key() {
+        let raw = "token = \"0123456789abcdef0123\"\n";
+        let sha = homelab_core::manifest::sha256_hex(raw.as_bytes());
+        let changes = std::collections::BTreeMap::from([(
+            "log_level".to_string(),
+            serde_json::json!("debug"),
+        )]);
+        let (text, saved) = apply_host_config_changes(raw, &changes, &sha).unwrap();
+        let t: toml::Table = toml::from_str(&text).unwrap();
+        assert_eq!(t["log_level"].as_str(), Some("debug"));
+        assert_eq!(saved.live, vec!["log_level"]);
     }
 
     use super::*;
@@ -4587,6 +4669,7 @@ span_days = 7\n";
                 incomplete_step: None,
                 route_file: None,
                 extra_route_files: Vec::new(),
+                pushed_file_hashes: std::collections::BTreeMap::new(),
             },
         );
         hs.stacks.insert(
@@ -4605,6 +4688,7 @@ span_days = 7\n";
                 incomplete_step: None,
                 route_file: None,
                 extra_route_files: Vec::new(),
+                pushed_file_hashes: std::collections::BTreeMap::new(),
             },
         );
         let (total, used, committed, cores, load1) =
@@ -4974,6 +5058,24 @@ struct AppState {
     /// goes stale, so a scheduler wedged inside a single await (not a
     /// panic, which `supervise()` already catches) is still noticed.
     scheduler_heartbeat: Arc<std::sync::atomic::AtomicU64>,
+    /// fix-122: the runtime debug toggle's live end — reloading this swaps
+    /// the `EnvFilter` both the journald sink and the JSONL ring read from,
+    /// with no restart. A throwaway handle outside `main()` (every test, and
+    /// anything built before `init_production_logging` runs): reloading it
+    /// changes nothing, because nothing reads from it.
+    log_filter: LogFilterHandle,
+}
+
+/// fix-122: the subscriber's filter, reloadable from `Rpc::SetHostConfig`
+/// and `Rpc::ApplyHostConfig` without a restart.
+type LogFilterHandle =
+    tracing_subscriber::reload::Handle<tracing_subscriber::EnvFilter, tracing_subscriber::Registry>;
+
+/// fix-122: a handle usable nowhere — not wired to any global subscriber —
+/// for `AppState`s that will never have logging live (every test, and
+/// `AppState::new` before `main` attaches the real one).
+fn inert_log_filter_handle() -> LogFilterHandle {
+    tracing_subscriber::reload::Layer::new(tracing_subscriber::EnvFilter::new("info")).1
 }
 
 /// fix-52 residual: how long the scheduler may go without a heartbeat touch
@@ -5039,7 +5141,18 @@ impl AppState {
                     .map(|d| d.as_secs())
                     .unwrap_or(0),
             )),
+            log_filter: inert_log_filter_handle(),
         }
+    }
+
+    /// fix-122: attaches the real, globally-wired filter handle
+    /// `init_production_logging` returned — only `main` calls this; every
+    /// test keeps the inert one from `new`, which is exactly as capable as
+    /// no handle at all, since no test installs a global subscriber for it
+    /// to reach.
+    fn with_log_filter(mut self, handle: LogFilterHandle) -> Self {
+        self.log_filter = handle;
+        self
     }
 
     /// fix-120: a snapshot of the tokens in force right now, for the
@@ -5262,6 +5375,12 @@ impl homelab_core::ask::Asker for LiveAsker<'_> {
 /// fix-122 (expert panel, journal-lines-lack-op-context, 2026-09-27): no
 /// ANSI colour. tracing-subscriber colours by default, so a journal line
 /// read `\x1b[33m WARN\x1b[0m` and `grep 'WARN scheduler'` found nothing.
+///
+/// `main` builds its own subscriber (`init_production_logging`, below) —
+/// journald plus the JSONL ring, one reloadable filter for both. This one
+/// stays test-only: it pins the ANSI-free, span-carrying shape of a single
+/// journald line without the ring's file I/O getting in the way.
+#[cfg(test)]
 fn journal_subscriber<W>(writer: W, default_filter: &str) -> impl tracing::Subscriber + Send + Sync
 where
     W: for<'a> tracing_subscriber::fmt::MakeWriter<'a> + Send + Sync + 'static,
@@ -5274,6 +5393,129 @@ where
         .with_ansi(false)
         .with_writer(writer)
         .finish()
+}
+
+/// fix-122 (AR15's JSONL ring + runtime debug toggle, Kenny's go
+/// 2026-10-01, `main`'s own subscriber — `journal_subscriber` above stays
+/// as it was, for the test that pins its ANSI-free, span-carrying shape):
+/// journald (no ANSI, same as `journal_subscriber`) plus a size-capped
+/// JSONL ring under `<state_dir>/logs/host.jsonl` (`RingWriter`), behind
+/// one `EnvFilter` both sinks share — reloadable at runtime
+/// (`Rpc::SetHostConfig`/`Rpc::ApplyHostConfig`'s `log_level`) through the
+/// `LogFilterHandle` this returns, with no restart.
+///
+/// `RUST_LOG` wins when set, exactly as `journal_subscriber` already did;
+/// `initial_level` (`config.log_level`, host.toml's own) is the fallback.
+fn init_production_logging(
+    state_dir: &str,
+    initial_level: &str,
+    ring_max_bytes: u64,
+) -> LogFilterHandle {
+    use tracing_subscriber::prelude::*;
+
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| initial_level.into());
+    let (filter, handle) = tracing_subscriber::reload::Layer::new(filter);
+
+    let journal_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .with_writer(std::io::stderr);
+
+    let ring_path = std::path::Path::new(state_dir)
+        .join("logs")
+        .join("host.jsonl");
+    let ring_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .json()
+        .with_writer(RingWriter::new(ring_path, ring_max_bytes));
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(journal_layer)
+        .with(ring_layer)
+        .init();
+    handle
+}
+
+/// fix-122: writes to `logs/host.jsonl`, cutting the file back to half its
+/// cap — the same shape `compact_journal_file` cuts `journal.jsonl` in —
+/// once a write leaves it over `max_bytes`. Reopened on every write rather
+/// than held open: the daemon's own log volume is small (a home fleet, not
+/// a datacentre), and this way a rotated or removed file is simply
+/// recreated on the next line instead of silently writing nowhere.
+#[derive(Clone)]
+struct RingWriter {
+    path: std::path::PathBuf,
+    max_bytes: u64,
+}
+
+impl RingWriter {
+    fn new(path: std::path::PathBuf, max_bytes: u64) -> Self {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        RingWriter { path, max_bytes }
+    }
+}
+
+impl std::io::Write for RingWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        f.write_all(buf)?;
+        let over = f
+            .metadata()
+            .map(|m| m.len() > self.max_bytes)
+            .unwrap_or(false);
+        drop(f);
+        if over {
+            compact_log_ring_file(&self.path, self.max_bytes);
+        }
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for RingWriter {
+    type Writer = RingWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+/// fix-122: `compact_journal_file`'s shape, for `logs/host.jsonl` instead
+/// of `journal.jsonl` — same atomic write-then-rename, same 0600, no
+/// "interrupted operation" to pin (`logring::compact_ring` keeps only the
+/// newest lines, nothing more).
+fn compact_log_ring_file(path: &std::path::Path, max_bytes: u64) {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let Some(cut) = homelab_core::logring::compact_ring(&content, max_bytes as usize) else {
+        return;
+    };
+    let tmp = path.with_extension("jsonl.compact.tmp");
+    let written = (|| -> std::io::Result<()> {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let _ = std::fs::remove_file(&tmp);
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        f.write_all(cut.as_bytes())?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        tracing::warn!("{}: could not compact :: {}", path.display(), e);
+    }
 }
 
 /// fix-122: the span that names the stack an operation works on. Every
@@ -5445,14 +5687,21 @@ async fn main() {
         }
     }
 
-    {
-        use tracing_subscriber::util::SubscriberInitExt as _;
-        journal_subscriber(std::io::stderr, "info").init();
-    }
-
+    // fix-122: config loads first now, so the subscriber can start with
+    // `state_dir` (the ring's home) and `log_level` (its seed filter)
+    // already known, rather than the bootstrap "info"-to-stderr-only that
+    // used to run before it. `load_config` never logs — a parse failure or
+    // a refused value goes to stderr directly and exits — so nothing is
+    // lost by moving it ahead of the subscriber.
     let config = load_config();
+    let log_filter = init_production_logging(
+        &config.state_dir,
+        &config.log_level,
+        config.log_ring_max_bytes,
+    );
+
     let (log_tx, _) = broadcast::channel(4096);
-    let state = AppState::new(config.clone(), log_tx);
+    let state = AppState::new(config.clone(), log_tx).with_log_filter(log_filter);
 
     // fix-125: records written before the private modes existed.
     tighten_private_paths(&config.state_dir);
@@ -6878,8 +7127,22 @@ async fn scheduler_loop(state: AppState) {
             // the host, so "does this file target a vmid somebody else owns"
             // is a question `homelab check` asks from the workstation. The
             // host answers everything it can actually see.
-            let live = gather_live_facts(&exec, &state, &[], true).await;
+            let mut live = gather_live_facts(&exec, &state, &[], true).await;
             if let Ok(snapshot) = store.load().await {
+                // fix-142: the in-container half of the nightly hash
+                // comparison — only the host can ask this, since it needs
+                // `pct exec`, so it runs here and nowhere else. Only stacks
+                // with a recorded push (deployed since this was built) are
+                // asked.
+                let stacks_with_hashes: Vec<(String, u16)> = snapshot
+                    .stacks
+                    .iter()
+                    .filter(|(_, st)| !st.pushed_file_hashes.is_empty())
+                    .map(|(name, st)| (name.clone(), st.vmid))
+                    .collect();
+                live.container_file_hashes =
+                    homelab_core::ops::facts::container_file_hashes(&exec, &stacks_with_hashes)
+                        .await;
                 let findings = homelab_core::ops::fleetcheck::evaluate(
                     &snapshot,
                     &live,
@@ -10458,18 +10721,37 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 .and_then(|(text, saved)| write_config_file(&path, &text).map(|()| (text, saved)));
             match outcome {
                 Ok((text, saved)) => {
-                    // The G8 keys are live: the scheduler hour, the webhook
-                    // and the retention read the settings, not the file.
+                    // The G8 keys are live: the scheduler hour, the webhook,
+                    // the retention and (fix-122) the log level read the
+                    // settings, not the file.
                     if let Ok(file) = toml::from_str::<FileConfig>(&text) {
-                        let mut live = state
-                            .settings
-                            .write()
-                            .unwrap_or_else(PoisonError::into_inner);
-                        live.backup_hour = file.backup_hour;
-                        live.notify_webhook = file.notify_webhook;
-                        live.retention = file
-                            .retention
-                            .unwrap_or_else(homelab_core::retention::default_tiers);
+                        let new_level = file
+                            .log_level
+                            .clone()
+                            .filter(|s| !s.trim().is_empty())
+                            .unwrap_or_else(|| "info".to_string());
+                        {
+                            let mut live = state
+                                .settings
+                                .write()
+                                .unwrap_or_else(PoisonError::into_inner);
+                            live.backup_hour = file.backup_hour;
+                            live.notify_webhook = file.notify_webhook;
+                            live.retention = file
+                                .retention
+                                .unwrap_or_else(homelab_core::retention::default_tiers);
+                            live.log_level = new_level.clone();
+                        }
+                        // fix-122: reload the filter both the journald sink
+                        // and the JSONL ring read from. `startup_problems`
+                        // already refused an unparsable directive before the
+                        // file was written, so this falls back to "info"
+                        // only in the theoretical case of a file edited by
+                        // hand between the write above and this line.
+                        let _ = state.log_filter.reload(
+                            tracing_subscriber::EnvFilter::try_new(&new_level)
+                                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                        );
                     }
                     info!(
                         "host.toml changed via the dashboard: {}",
@@ -10597,15 +10879,28 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             match outcome {
                 Ok((text, saved)) => {
                     if let Ok(file) = toml::from_str::<FileConfig>(&text) {
-                        let mut live = state
-                            .settings
-                            .write()
-                            .unwrap_or_else(PoisonError::into_inner);
-                        live.backup_hour = file.backup_hour;
-                        live.notify_webhook = file.notify_webhook;
-                        live.retention = file
-                            .retention
-                            .unwrap_or_else(homelab_core::retention::default_tiers);
+                        let new_level = file
+                            .log_level
+                            .clone()
+                            .filter(|s| !s.trim().is_empty())
+                            .unwrap_or_else(|| "info".to_string());
+                        {
+                            let mut live = state
+                                .settings
+                                .write()
+                                .unwrap_or_else(PoisonError::into_inner);
+                            live.backup_hour = file.backup_hour;
+                            live.notify_webhook = file.notify_webhook;
+                            live.retention = file
+                                .retention
+                                .unwrap_or_else(homelab_core::retention::default_tiers);
+                            live.log_level = new_level.clone();
+                        }
+                        // fix-122: same live reload as `SetHostConfig`.
+                        let _ = state.log_filter.reload(
+                            tracing_subscriber::EnvFilter::try_new(&new_level)
+                                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                        );
                     }
                     info!("host.toml applied from config/host.toml (fix-110)");
                     RpcResponse {

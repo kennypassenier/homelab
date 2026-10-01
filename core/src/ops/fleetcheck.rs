@@ -120,6 +120,14 @@ pub struct LiveFacts {
     /// resolved-with-defaults view nobody else sees. Empty when the host
     /// sets none of them (every key then uses its compiled default).
     pub live_host_config: std::collections::BTreeMap<String, serde_json::Value>,
+    /// fix-142 (nightly hash comparison, Kenny's go 2026-10-01): every
+    /// recorded stack's `/opt/<stack>/` hashed inside its container right
+    /// now, stack → manifest path → sha256 — gathered host-side, nightly
+    /// only (like `digests` from the repository side, this is empty on a
+    /// `homelab check` the host did not run itself). Compared against
+    /// `StackState::pushed_file_hashes` by `evaluate_container_drift`.
+    pub container_file_hashes:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
 }
 
 /// fix-92 / fix-130: every name in the gateway's routes directory that no
@@ -499,6 +507,86 @@ pub fn evaluate_repo_drift(state: &HostState, live: &LiveFacts) -> Vec<Finding> 
                 "`homelab deploy stacks/{}` (or `homelab apply`) to apply them, or put the \
                  files back as they were",
                 d.stack
+            ),
+        });
+    }
+    out
+}
+
+/// fix-142 (nightly hash comparison, Kenny's go 2026-10-01): the files a
+/// deploy pushed under `/opt/<stack>/` against what sits in the container
+/// right now, hashed inside it.
+///
+/// Unlike `evaluate_repo_drift`, which compares the repository with the
+/// host's intent-history copy, this compares the host's own record of what
+/// it pushed — post any registry-cache compose rewrite,
+/// `StackState::pushed_file_hashes` — with the live container. That was the
+/// missing half the original fleetcheck-blind-to-repo-drift finding could
+/// not build: a deploy rewrites every cached app's compose file, so hashing
+/// the repository's own copy and comparing it straight against the
+/// container would call every cached app drifted. Now the host hashes what
+/// it actually wrote, once, at deploy time, and only ever compares against
+/// that.
+///
+/// Nightly only (`live.container_file_hashes` is gathered host-side, like
+/// `digests` is client-side for `evaluate_repo_drift` — the two run in
+/// different places and never both at once). A stack with no recorded
+/// pushed hashes (never deployed since this was built, or adopted rather
+/// than deployed) is skipped, and a container that could not be asked is
+/// left out of the comparison rather than reported as entirely gone — an
+/// unasked question is not a finding. A file the container has that was
+/// never pushed is not reported either: `/opt/<stack>/` legitimately holds
+/// files no deploy wrote (logs, caches, `generated_dirs`), and listing those
+/// every night would bury the files that actually matter.
+pub fn evaluate_container_drift(state: &HostState, live: &LiveFacts) -> Vec<Finding> {
+    let mut out = Vec::new();
+    for (name, st) in &state.stacks {
+        if st.pushed_file_hashes.is_empty() {
+            continue;
+        }
+        let Some(live_files) = live.container_file_hashes.get(name) else {
+            continue;
+        };
+        let list = |names: Vec<&String>| -> String {
+            names
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let changed: Vec<&String> = st
+            .pushed_file_hashes
+            .iter()
+            .filter(|(p, h)| live_files.get(*p).is_some_and(|c| c != *h))
+            .map(|(p, _)| p)
+            .collect();
+        let gone: Vec<&String> = st
+            .pushed_file_hashes
+            .keys()
+            .filter(|p| !live_files.contains_key(*p))
+            .collect();
+        if changed.is_empty() && gone.is_empty() {
+            continue;
+        }
+        let mut parts: Vec<String> = Vec::new();
+        if !changed.is_empty() {
+            parts.push(format!("changed inside the container: {}", list(changed)));
+        }
+        if !gone.is_empty() {
+            parts.push(format!("gone from the container: {}", list(gone)));
+        }
+        out.push(Finding {
+            severity: Severity::Drift,
+            subject: name.clone(),
+            what: format!(
+                "/opt/{} no longer matches what the last deploy pushed — {}",
+                name,
+                parts.join("; ")
+            ),
+            remedy: format!(
+                "redeploy {} to put back what was pushed, or adopt the change if it was \
+                 intentional — nothing but a deploy is meant to write these files",
+                name
             ),
         });
     }
@@ -1619,6 +1707,7 @@ pub fn evaluate(
 
     // fix-142: the files against what the host applied.
     out.extend(evaluate_repo_drift(state, live));
+    out.extend(evaluate_container_drift(state, live));
     out.extend(evaluate_host_config_drift(live));
 
     out.extend(evaluate_growth(

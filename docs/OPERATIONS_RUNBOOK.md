@@ -294,6 +294,31 @@ this before everything else that genuinely needs an answer.
   (`/etc/homelab/host.toml`, `systemctl restart homelab-host`). Until then
   the nightly line reads "not configured", which is expected, not broken.
 
+**In-container hash comparison (fix-142 ADDENDUM, Kenny's go 2026-10-01).**
+Every deploy records the sha256 of each file it pushes to `/opt/<stack>/`,
+by its manifest path — the content as actually written, after any
+registry-cache compose rewrite (`StackState.pushed_file_hashes`). Each
+night, in the same no-stack-files block fleet check item 8 above already
+runs, the host hashes `/opt/<stack>/` from inside every recorded stack's own
+container (`pct exec … sha256sum`, `facts::container_file_hashes`) and
+compares it with what it recorded pushing
+(`fleetcheck::evaluate_container_drift`):
+
+- a file changed or gone since the last deploy is `drift`, naming the
+  stack and the files, remedy "redeploy, or adopt the change";
+- a file the container has that no deploy ever pushed (logs, caches, a
+  container-generated directory) is not reported;
+- a stack with no recorded pushed hashes (deployed before this existed, or
+  adopted rather than deployed) is skipped, not reported as everything
+  gone;
+- a container that could not be asked is left out of the comparison, the
+  same "an unasked question is not a finding" rule the rest of the fleet
+  check follows.
+
+Unlike the repository-vs-intent comparison in op-2 below, this runs only
+here — it needs `pct exec`, which only the host can reach, so `homelab
+check` from the workstation never raises it.
+
 ---
 
 ## op-2 · The morning check

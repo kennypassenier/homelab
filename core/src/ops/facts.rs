@@ -945,6 +945,55 @@ pub async fn intent_files(
     read.into_iter().flatten().collect()
 }
 
+/// fix-142 (nightly hash comparison, Kenny's go 2026-10-01): `/opt/<stack>/`
+/// hashed from inside each container, for comparison with what the last
+/// deploy recorded as pushed (`StackState::pushed_file_hashes`,
+/// `fleetcheck::evaluate_container_drift`).
+///
+/// `stacks` is `(name, vmid)`, same shape as the repository side's
+/// `intent_files` takes stack names — the caller passes only the stacks that
+/// have something recorded to compare against, so an adopted or
+/// never-rebuilt stack is never asked. A container that does not answer, or
+/// whose `/opt/<stack>` is not there, is left out rather than entered empty:
+/// "no files" would make every pushed file look gone.
+pub async fn container_file_hashes(
+    exec: &dyn Executor,
+    stacks: &[(String, u16)],
+) -> std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> {
+    let read = crate::ops::pool::bounded(
+        stacks
+            .iter()
+            .map(|(name, vmid)| async move {
+                let script = format!(
+                    "cd '/opt/{}' 2>/dev/null && find . -type f -exec sha256sum {{}} +",
+                    name
+                );
+                let o = crate::executor::pct_sh(exec, *vmid, &script, 60)
+                    .await
+                    .ok()?;
+                if !o.success() {
+                    return None;
+                }
+                let files = o
+                    .stdout
+                    .lines()
+                    .filter_map(|l| {
+                        let (hash, path) = l.split_once("  ")?;
+                        Some((
+                            path.trim_start_matches("./").to_string(),
+                            hash.trim().to_string(),
+                        ))
+                    })
+                    .collect();
+                Some((name.clone(), files))
+            })
+            .collect(),
+        crate::ops::pool::READ_CONCURRENCY,
+    )
+    .await;
+    read.into_iter().flatten().collect()
+}
+
 /// gap-27: the secret files on a stack's container that have no copy in the
 /// host's vault. A compose app's `/opt/<stack>/<app>/.env` is sealed at
 /// `<state_dir>/secrets/<stack>/<app>.env`; a native unit's env file at the

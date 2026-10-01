@@ -15,6 +15,7 @@ fn state_with_stack(applied_at: u64) -> HostState {
     st.stacks.insert(
         "media".into(),
         StackState {
+            pushed_file_hashes: std::collections::BTreeMap::new(),
             applied_source: None,
             vmid: 106,
             hostname: "106-app-media".into(),

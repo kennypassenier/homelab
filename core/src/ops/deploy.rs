@@ -102,6 +102,7 @@ async fn mark_incomplete(
                     extra_route_files: Vec::new(),
                     natives: Vec::new(),
                     incomplete_step: Some(step.to_string()),
+                    pushed_file_hashes: std::collections::BTreeMap::new(),
                 },
             );
         }
@@ -1696,6 +1697,16 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     let pushed: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>> =
         std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let pushed_w = pushed.clone();
+    // fix-142 (nightly hash comparison, Kenny's go 2026-10-01): sha256 of
+    // EVERY non-rootfs file this deploy sends, by its manifest path
+    // ("<app>/<file>"), whether or not `push_content` found it changed —
+    // an unchanged file is still ground truth for what should be sitting in
+    // the container tonight. Kept apart from `pushed` on purpose: that one
+    // exists to drive restarts and only needs the files that moved.
+    let all_file_hashes: std::sync::Arc<
+        std::sync::Mutex<std::collections::BTreeMap<String, String>>,
+    > = std::sync::Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
+    let all_file_hashes_w = all_file_hashes.clone();
     // latch-files: the secret files whose content this deploy changed, for
     // the native step's restarts. Apart from `pushed` on purpose: that list
     // is hashed back from the container at the end of the step, and a
@@ -1774,6 +1785,15 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     }
                     _ => f.content.clone(),
                 };
+                // fix-142: recorded unconditionally, before `changed` is
+                // even known, and keyed by `f.path` (not `dest`) so it reads
+                // the same as `evaluate_repo_drift`'s `StackDigest::files` —
+                // both are "<app>/<file>" against /opt/<stack>.
+                if !rootfs {
+                    if let Ok(mut g) = all_file_hashes_w.lock() {
+                        g.insert(f.path.clone(), manifest::sha256_hex(content.as_bytes()));
+                    }
+                }
                 let changed = push_content(exec, m.vmid, &dest, &content, &perms).await?;
                 if changed {
                     if let Ok(mut g) = pushed_w.lock() {
@@ -3341,6 +3361,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     .iter()
                     .map(|r| r.filename.clone())
                     .collect(),
+                // fix-142: ground truth for the nightly in-container hash
+                // comparison (`evaluate_container_drift`).
+                pushed_file_hashes: all_file_hashes
+                    .lock()
+                    .map(|g| g.clone())
+                    .unwrap_or_default(),
             },
         );
         store.save(state).await?;

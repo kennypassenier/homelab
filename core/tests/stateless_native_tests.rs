@@ -52,6 +52,7 @@ fn a_stateless_unit_has_no_repository_to_copy() {
     st.stacks.insert(
         "drill".into(),
         StackState {
+            pushed_file_hashes: std::collections::BTreeMap::new(),
             applied_source: None,
             extra_route_files: Vec::new(),
             vmid: 119,

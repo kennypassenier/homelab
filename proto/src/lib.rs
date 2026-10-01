@@ -866,6 +866,16 @@ pub struct HostConfigView {
     pub notify_webhook: Option<String>,
     /// Tiered snapshot retention.
     pub retention: Vec<RetentionTier>,
+    /// fix-122 (AR15's runtime debug toggle, Kenny's go 2026-10-01): a
+    /// `tracing`/`EnvFilter` directive (e.g. "info", "debug",
+    /// "homelab_host=debug,info"), applied live to the journal and the
+    /// JSONL ring — no restart.
+    #[serde(default = "default_log_level")]
+    pub log_level: String,
+}
+
+fn default_log_level() -> String {
+    "info".to_string()
 }
 
 /// feat-settings-1: host.toml as `GetHostConfig` answers it.

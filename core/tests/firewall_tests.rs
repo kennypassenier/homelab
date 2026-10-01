@@ -674,6 +674,7 @@ fn state_with(stack: &str, vmid: u16, spec: Option<FirewallSpec>) -> HostState {
     st.stacks.insert(
         stack.into(),
         StackState {
+            pushed_file_hashes: std::collections::BTreeMap::new(),
             applied_source: None,
             vmid,
             hostname: m.hostname.clone(),

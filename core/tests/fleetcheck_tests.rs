@@ -16,6 +16,7 @@ const NOW: u64 = 1_788_000_000;
 
 fn stack(vmid: u16, hostname: &str, enabled: bool, last_backup: u64) -> StackState {
     StackState {
+        pushed_file_hashes: std::collections::BTreeMap::new(),
         applied_source: None,
         vmid,
         hostname: hostname.into(),
@@ -126,6 +127,7 @@ fn y4_a_healthy_fleet_is_silent() {
         host_capacity: Vec::new(),
         declared_host_config: None,
         live_host_config: Default::default(),
+        container_file_hashes: Default::default(),
     };
     assert!(check(&st, &live).is_empty(), "{:?}", check(&st, &live));
 }
@@ -897,6 +899,7 @@ mod incomplete_deploys {
     fn state_with(step: Option<&str>) -> HostState {
         let mut st = HostState::default();
         let s = homelab_core::state::StackState {
+            pushed_file_hashes: std::collections::BTreeMap::new(),
             applied_source: None,
             vmid: 118,
             hostname: "118-app-drill".into(),
@@ -1689,6 +1692,127 @@ fn fix_142_a_stack_without_a_manifest_compares_its_files_only() {
         ..Default::default()
     };
     assert!(evaluate_repo_drift(&st, &live).is_empty());
+}
+
+// ── fix-142: the nightly hash comparison, the in-container half ────────────
+//
+// The REGISTER row's own "not built" note: a byte comparison between the
+// repository and the container would call every registry-cached compose
+// file drifted, because a deploy rewrites it on the way in. These compare
+// against `StackState::pushed_file_hashes` instead — what the host itself
+// wrote, after that rewrite — so a cached app that nobody has touched since
+// its deploy reads as quiet.
+
+fn container(stack: &str, files: &[(&str, &str)]) -> IntentFiles {
+    intent(stack, files)
+}
+
+#[test]
+fn fix_142_a_file_changed_inside_the_container_is_drift() {
+    let mut st = stack(115, "115-app-home", true, NOW - 3600);
+    st.pushed_file_hashes = [("app/docker-compose.yml".to_string(), "aaa".to_string())]
+        .into_iter()
+        .collect();
+    let st = state(vec![("home", st)]);
+    let live = LiveFacts {
+        container_file_hashes: container("home", &[("app/docker-compose.yml", "bbb")]),
+        ..Default::default()
+    };
+    let got = homelab_core::ops::fleetcheck::evaluate_container_drift(&st, &live);
+    assert_eq!(got.len(), 1, "{got:#?}");
+    assert_eq!(got[0].severity, Severity::Drift);
+    assert_eq!(got[0].subject, "home");
+    assert!(
+        got[0].what.contains("app/docker-compose.yml"),
+        "{}",
+        got[0].what
+    );
+    assert!(got[0].remedy.contains("redeploy home"), "{}", got[0].remedy);
+}
+
+#[test]
+fn fix_142_a_file_gone_from_the_container_is_drift() {
+    let mut st = stack(115, "115-app-home", true, NOW - 3600);
+    st.pushed_file_hashes = [("app/config.yml".to_string(), "aaa".to_string())]
+        .into_iter()
+        .collect();
+    let st = state(vec![("home", st)]);
+    let live = LiveFacts {
+        container_file_hashes: container("home", &[]),
+        ..Default::default()
+    };
+    let got = homelab_core::ops::fleetcheck::evaluate_container_drift(&st, &live);
+    assert_eq!(got.len(), 1, "{got:#?}");
+    assert!(
+        got[0].what.contains("gone from the container"),
+        "{}",
+        got[0].what
+    );
+    assert!(got[0].what.contains("app/config.yml"), "{}", got[0].what);
+}
+
+#[test]
+fn fix_142_a_container_matching_what_was_pushed_is_quiet() {
+    let mut st = stack(115, "115-app-home", true, NOW - 3600);
+    st.pushed_file_hashes = [("app/docker-compose.yml".to_string(), "aaa".to_string())]
+        .into_iter()
+        .collect();
+    let st = state(vec![("home", st)]);
+    let live = LiveFacts {
+        container_file_hashes: container("home", &[("app/docker-compose.yml", "aaa")]),
+        ..Default::default()
+    };
+    assert!(homelab_core::ops::fleetcheck::evaluate_container_drift(&st, &live).is_empty());
+}
+
+/// A file the container has that was never pushed (logs, caches,
+/// `generated_dirs`) is not reported — only what the host knows it wrote.
+#[test]
+fn fix_142_an_extra_file_in_the_container_is_not_drift() {
+    let mut st = stack(115, "115-app-home", true, NOW - 3600);
+    st.pushed_file_hashes = [("app/docker-compose.yml".to_string(), "aaa".to_string())]
+        .into_iter()
+        .collect();
+    let st = state(vec![("home", st)]);
+    let live = LiveFacts {
+        container_file_hashes: container(
+            "home",
+            &[
+                ("app/docker-compose.yml", "aaa"),
+                ("app/data/cache.db", "whatever"),
+            ],
+        ),
+        ..Default::default()
+    };
+    assert!(homelab_core::ops::fleetcheck::evaluate_container_drift(&st, &live).is_empty());
+}
+
+/// No recorded pushed hashes (never deployed since this was built, or
+/// adopted rather than deployed) is skipped, not reported as everything
+/// gone.
+#[test]
+fn fix_142_a_stack_with_no_recorded_pushed_hashes_is_skipped() {
+    let st = stack(115, "115-app-home", true, NOW - 3600); // pushed_file_hashes empty
+    let st = state(vec![("home", st)]);
+    let live = LiveFacts {
+        container_file_hashes: container("home", &[]),
+        ..Default::default()
+    };
+    assert!(homelab_core::ops::fleetcheck::evaluate_container_drift(&st, &live).is_empty());
+}
+
+/// A container that could not be asked (no entry in `container_file_hashes`
+/// at all — an older host build still running, or the probe failed) is left
+/// out of the comparison, not reported as every pushed file gone.
+#[test]
+fn fix_142_a_container_that_could_not_be_asked_is_not_reported() {
+    let mut st = stack(115, "115-app-home", true, NOW - 3600);
+    st.pushed_file_hashes = [("app/docker-compose.yml".to_string(), "aaa".to_string())]
+        .into_iter()
+        .collect();
+    let st = state(vec![("home", st)]);
+    let live = LiveFacts::default();
+    assert!(homelab_core::ops::fleetcheck::evaluate_container_drift(&st, &live).is_empty());
 }
 
 /// fix-110: no declared config (an older client, the nightly round, or a

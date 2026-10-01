@@ -25,6 +25,7 @@ fn one_stack() -> homelab_core::state::HostState {
     st.stacks.insert(
         "media".into(),
         homelab_core::state::StackState {
+            pushed_file_hashes: std::collections::BTreeMap::new(),
             applied_source: None,
             vmid: 106,
             hostname: "106-app-media".into(),

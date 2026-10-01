@@ -568,7 +568,7 @@ Verification: `SHA256SUMS.minisig` over `SHA256SUMS` with the compiled
 | AR12 | serial mutations | `host/src/main.rs:1667,2944` |
 | AR13 | journal names interrupted ops | `core/src/incidents.rs:117-137` |
 | AR14 | incident bundle per failure | `core/src/incidents.rs:56-110` |
-| AR15 | journald only (amended 2026-09-27) | stderr to the journal, no colour codes; every line of an operation inside `rpc{id,stack}` or `stack{stack}` and `op{op}` spans, step starts and finishes logged (fix-122, `journal_subscriber`, `run_op_locked`); no ring, no runtime debug toggle |
+| AR15 | journald + JSONL ring + runtime debug toggle (built 2026-10-01, superseding the "journald only" amendment) | stderr to the journal, no colour codes; every line of an operation inside `rpc{id,stack}` or `stack{stack}` and `op{op}` spans, step starts and finishes logged (fix-122, `journal_subscriber`, `run_op_locked`); `<state_dir>/logs/host.jsonl`, size-capped and cut back like `journal.jsonl` (`core/src/logring.rs`, `host::RingWriter`); `log_level` in host.toml, dashboard-editable, applied live via `tracing_subscriber::reload` (`AppState::log_filter`, `init_production_logging`) |
 | AR16 | `commands.sh` replay, no frame capture (amended 2026-09-27) | `core/src/incidents.rs` |
 | AR17 | dependency policy | a process rule |
 | AR18 | MSRV 1.88, checked in `make release` (amended 2026-09-27) | `Cargo.toml` `rust-version`; `Makefile` release target; no CI job (finding `ci-hygiene-gaps`) |

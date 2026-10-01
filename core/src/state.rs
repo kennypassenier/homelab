@@ -71,6 +71,18 @@ pub struct StackState {
     /// None for a deploy from a client that did not say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_source: Option<String>,
+    /// fix-142 (nightly hash comparison, Kenny's go 2026-10-01): sha256 of
+    /// every non-rootfs file the last deploy pushed under `/opt/<stack>/`,
+    /// keyed by its manifest path ("<app>/<file>") — the content as actually
+    /// written, after any registry-cache compose rewrite. Ground truth for
+    /// `fleetcheck::evaluate_container_drift`, which the repository-side
+    /// intent copy cannot be: a deploy rewrites every cached app's compose
+    /// file, so comparing the container against the repository directly
+    /// would call every one of them drifted. Empty for a stack deployed
+    /// before this existed, or adopted rather than deployed — the nightly
+    /// comparison then skips it, same as an unasked question.
+    #[serde(default)]
+    pub pushed_file_hashes: std::collections::BTreeMap<String, String>,
 }
 
 /// A unix timestamp as `YYYY-MM-DD`, for messages that have to say when a

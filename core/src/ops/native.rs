@@ -360,6 +360,7 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
             incomplete_step: None,
             route_file: None,
             extra_route_files: Vec::new(),
+            pushed_file_hashes: std::collections::BTreeMap::new(),
         };
         // fix-164: install-native re-adopts every time; a stack a deploy
         // already recorded keeps its manifest, hash, routes, enabled flag and

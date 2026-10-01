@@ -3707,6 +3707,7 @@ mod native_from_zero {
             hs.stacks.insert(
                 "drill".into(),
                 homelab_core::state::StackState {
+                    pushed_file_hashes: std::collections::BTreeMap::new(),
                     extra_route_files: Vec::new(),
                     applied_source: None,
                     vmid: 118,
@@ -4527,4 +4528,38 @@ async fn fix_141_a_deploy_without_a_source_records_none() {
         .await
         .unwrap();
     assert_eq!(state.stacks["syncthing"].applied_source, None);
+}
+
+/// fix-142 (nightly hash comparison, Kenny's go 2026-10-01): a deploy
+/// records the sha256 of every file it sent, by its manifest path — ground
+/// truth for `fleetcheck::evaluate_container_drift`, which has no other way
+/// to know what SHOULD be in the container without re-hashing a
+/// registry-cache-rewritten compose file and calling it drifted.
+#[tokio::test]
+async fn fix_142_a_deploy_records_the_hash_of_every_file_it_pushed() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    exec.respond_always(
+        "ls -A '/appdata/syncthing/syncthing-config'",
+        CmdOutput::ok("config.xml\n"),
+    );
+    exec.respond_always("restic snapshots", CmdOutput::ok("[]"));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let sp = spec(110, "syncthing");
+    let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
+    assert!(report.ok, "deploy failed: {:?}", report.error);
+    let state = homelab_core::state::StateStore::new(&exec, "/var/lib/homelab")
+        .load()
+        .await
+        .unwrap();
+    let hashes = &state.stacks["syncthing"].pushed_file_hashes;
+    assert_eq!(
+        hashes
+            .get("syncthing/docker-compose.yml")
+            .map(String::as_str),
+        Some(homelab_core::manifest::sha256_hex("services: {}\n".as_bytes()).as_str()),
+        "{:?}",
+        hashes
+    );
 }

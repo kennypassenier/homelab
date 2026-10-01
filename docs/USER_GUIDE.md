@@ -3128,6 +3128,28 @@ the stack's recorded manifest and its intent-history copy under
 Secrets are not compared (they would need latch); `homelab apply --plan`
 compares them too. The nightly check has no repository, so it raises neither.
 
+**ADDENDUM (fix-142, Kenny's go 2026-10-01): a second, host-only
+comparison, nightly only.** Every deploy now records the sha256 of each
+file it pushes under `/opt/<stack>/`, by its manifest path — the content as
+actually written, after any registry-cache compose rewrite — so it is
+ground truth for what the container should hold, unlike re-hashing the
+repository (which a cache rewrite would call drifted on every cached app).
+Each night, the host hashes `/opt/<stack>/` from inside every recorded
+stack's own container (`pct exec … sha256sum`) and compares it against what
+it recorded pushing (`evaluate_container_drift` in
+`core/src/ops/fleetcheck.rs`):
+
+- `drift`, `` /opt/<stack> no longer matches what the last deploy pushed — changed inside the container: <files>; gone from the container: <files> ``,
+  remedy `` redeploy <stack> to put back what was pushed, or adopt the change if it was intentional ``.
+
+A file the container has that no deploy ever pushed (logs, caches, a
+container-generated directory) is not reported — only what the host itself
+wrote is compared. A stack deployed before this existed, or only adopted,
+has no recorded hashes and is skipped rather than reported as everything
+gone. This comparison runs only in the nightly round, the opposite of the
+repository comparison above — `homelab check` from the workstation never
+sees it, since it needs `pct exec`, which only the host can reach.
+
 After the host's answer, `homelab check` compares the Cloudflare edge with
 `captured/gateway/` using the read-only token at
 `~/.config/cloudflare/kp-soft.token` (fix-143): `edge: Cloudflare agrees with

@@ -20,6 +20,7 @@ pub mod history;
 pub mod hostconfig;
 pub mod hostunits;
 pub mod incidents;
+pub mod logring;
 pub mod manifest;
 #[cfg(any(test, feature = "test-support"))]
 pub mod mock;

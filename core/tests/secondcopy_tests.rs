@@ -112,6 +112,7 @@ fn stack_state(
     last_backup: u64,
 ) -> StackState {
     StackState {
+        pushed_file_hashes: std::collections::BTreeMap::new(),
         applied_source: None,
         extra_route_files: Vec::new(),
         vmid: 110,

@@ -143,6 +143,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
 
 fn record(m: &StackManifest) -> StackState {
     StackState {
+        pushed_file_hashes: std::collections::BTreeMap::new(),
         applied_source: None,
         vmid: m.vmid,
         hostname: m.hostname.clone(),

@@ -966,7 +966,11 @@ The procedure is DR_RUNBOOK.md Layer 4, "A native stack"
   data directories hold no files while its repository has snapshots, and the
   refusal names this procedure. That is what a rebuilt container looks like
   before this procedure has run; before the guard, one night was enough to
-  make the empty state the latest snapshot. The deploy still starts the unit
+  make the empty state the latest snapshot. The worked example below is read
+  straight out of this file and run against the mock executor by
+  `core/tests/fix_63_op11_runbook_tests.rs`, so an edit here that breaks the
+  sequence (stop before unpack, start after, a vmid that drifts between the
+  lines) fails at commit time rather than at 2am. The deploy still starts the unit
   on empty directories, so the service runs empty until this is done.
 
 Worked example, host, almanac on CT 112:

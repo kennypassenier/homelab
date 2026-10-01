@@ -292,13 +292,21 @@ pub fn checks_ops(old: &ServiceChecks, want: &ChecksEdit) -> Result<Vec<Op>, Str
     let old_busy = old.busy_check.as_ref().map(|b| b.command.clone());
     if old_busy.as_deref().map(str::trim) != want.busy_check.as_deref().map(str::trim) {
         match &want.busy_check {
+            // The whole mapping, not `busy_check.command` alone: the file
+            // may have no `busy_check:` key yet at all, and `yamledit`'s
+            // `Op::Set` cannot create a mapping a nested path's parent
+            // segment does not already find (`map_at` only ever descends
+            // into a key that is there).
             Some(cmd) if !cmd.trim().is_empty() => ops.push(Op::Set {
-                path: path("busy_check.command"),
-                value: Value::from(cmd.as_str()),
+                path: path("busy_check"),
+                value: to_value(&BusyCheck {
+                    command: cmd.clone(),
+                }),
             }),
-            _ => ops.push(Op::Remove {
+            _ if old.busy_check.is_some() => ops.push(Op::Remove {
                 path: path("busy_check"),
             }),
+            _ => {}
         }
     }
     let old_url = old.url.as_deref().map(str::trim);
@@ -309,7 +317,8 @@ pub fn checks_ops(old: &ServiceChecks, want: &ChecksEdit) -> Result<Vec<Op>, Str
                 path: path("url"),
                 value: Value::from(u),
             }),
-            _ => ops.push(Op::Remove { path: path("url") }),
+            _ if old.url.is_some() => ops.push(Op::Remove { path: path("url") }),
+            _ => {}
         }
     }
     Ok(ops)

@@ -649,6 +649,20 @@ impl WorkingCopy {
         f: impl FnOnce(&Path) -> T,
     ) -> Result<T, Refusal> {
         let _g = self.hold();
+        self.with_staged_presets_locked(changes, f)
+    }
+
+    /// `with_staged_presets` without taking the lock itself — for
+    /// `transact_presets`, which already holds it (`with_staged`/
+    /// `with_staged_locked`'s split, mirrored here: calling the public,
+    /// lock-taking `with_staged_presets` from inside `transact_presets`
+    /// would deadlock on `self.hold()`, a plain `std::sync::Mutex` that is
+    /// not reentrant).
+    fn with_staged_presets_locked<T>(
+        &self,
+        changes: &[FileChange],
+        f: impl FnOnce(&Path) -> T,
+    ) -> Result<T, Refusal> {
         static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let base = self.scratch.join(format!(
             "stage-presets-{}-{}",
@@ -711,7 +725,7 @@ impl WorkingCopy {
                 ));
             }
         }
-        let problems = self.with_staged_presets(changes, validate)?;
+        let problems = self.with_staged_presets_locked(changes, validate)?;
         if !problems.is_empty() {
             return Err(refusal(
                 &what,

@@ -225,7 +225,7 @@ pub enum GatewayWrite {
     Extra {
         filename: String,
         route_file: String,
-        op: super::yamledit::Op,
+        ops: Vec<super::yamledit::Op>,
     },
 }
 
@@ -256,16 +256,27 @@ pub fn plan_gateway_write(
     }
     let filename = extra_filename(&edit.hostname);
     let value = gateway_route_value(gateway_vmid, &filename, edit.external, &backend);
+    let mut ops = Vec::new();
+    if extra_route_count == 0 {
+        // `extra_routes:` may not be in the file yet — Op::Seq only grows
+        // a list that already exists (a `[]` counts), so give it one
+        // first; harmless when it is already there and empty.
+        ops.push(super::yamledit::Op::Set {
+            path: vec![Seg::Key("extra_routes".into())],
+            value: Value::Sequence(Vec::new()),
+        });
+    }
+    ops.push(super::yamledit::Op::Seq {
+        path: vec![Seg::Key("extra_routes".into())],
+        items: (0..extra_route_count)
+            .map(super::yamledit::Item::Keep)
+            .chain(std::iter::once(super::yamledit::Item::New(value)))
+            .collect(),
+    });
     GatewayWrite::Extra {
         filename: filename.clone(),
         route_file: new_route_file(&edit.app, &edit.hostname, ip, edit.port),
-        op: super::yamledit::Op::Seq {
-            path: vec![Seg::Key("extra_routes".into())],
-            items: (0..extra_route_count)
-                .map(super::yamledit::Item::Keep)
-                .chain(std::iter::once(super::yamledit::Item::New(value)))
-                .collect(),
-        },
+        ops,
     }
 }
 

@@ -153,6 +153,8 @@ pub struct EditSpec {
     pub storage_entry: Vec<EditFieldDef>,
     pub data_mount: Vec<EditFieldDef>,
     pub log_file: Vec<EditFieldDef>,
+    /// W2: the settings-ext form's retention row dialog.
+    pub retention_tier: Vec<EditFieldDef>,
     /// feat-stacks-11: one app's `latch_secrets` checkbox.
     pub latch_secret: EditFieldDef,
     pub latch_file: Vec<EditFieldDef>,
@@ -335,6 +337,7 @@ impl EditKind {
                 | "manual"
                 | "probes"
                 | "tiles"
+                | "retention"
         )
     }
 
@@ -750,7 +753,6 @@ pub fn settings_ext_fields(m: &Value) -> Vec<Field> {
                 "vpn" => json!(m["lxc"]["vpn"].as_bool().unwrap_or(false)),
                 "storage" => m["resources"]["storage"].clone(),
                 "on_demand" => json!(m["on_demand"].as_bool().unwrap_or(false)),
-                "retention" => json!(retention_text(&m["retention"])),
                 _ => Value::Null,
             });
             f
@@ -758,40 +760,13 @@ pub fn settings_ext_fields(m: &Value) -> Vec<Field> {
         .collect()
 }
 
-/// `JSON.stringify(m.retention ?? [])`.
-fn retention_text(v: &Value) -> String {
-    let arr = v.as_array().cloned().unwrap_or_default();
-    serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
-}
-
-/// `settingsExtProblems`: the retention textarea is JSON, not a plain
-/// pattern (`checkFields` skips it, having no pattern).
-pub fn settings_ext_problems(v: &Values) -> BTreeMap<String, String> {
-    let mut out = BTreeMap::new();
-    let text = text_of(v.get("retention")).trim().to_string();
-    if text.is_empty() {
-        return out;
-    }
-    match serde_json::from_str::<Value>(&text) {
-        Err(_) => {
-            out.insert("retention".into(), say("retention_not_json", &[]));
-        }
-        Ok(Value::Array(items))
-            if items.iter().all(|t| {
-                t.as_object().is_some_and(|o| {
-                    o.get("every_days").is_some_and(Value::is_u64)
-                        && o.get("span_days").map(Value::is_u64).unwrap_or(true)
-                })
-            }) => {}
-        Ok(_) => {
-            out.insert("retention".into(), say("retention_json", &[]));
-        }
-    }
-    out
-}
-
-/// `settingsExtBody`: only what differs from now.
-pub fn settings_ext_body(fields: &[Field], values: &Values) -> Value {
+/// `settingsExtBody`: only what differs from now — `retention` the same
+/// origin-less full list `appsBody`'s storage/data_mounts/log_files use,
+/// `model["retention"]` as the editor holds it now, `data` the manifest
+/// `open` started from (`SettingsExtEdit.retention` is a plain
+/// `Option<Vec<RetentionTierEdit>>`, not origin-tracked on the server
+/// either — a tier carries no identity of its own to keep across an edit).
+pub fn settings_ext_body(fields: &[Field], values: &Values, model: &Value, data: &Value) -> Value {
     let mut out = Map::new();
     out.insert("kind".into(), json!("settings_ext"));
     for f in fields {
@@ -804,14 +779,6 @@ pub fn settings_ext_body(fields: &[Field], values: &Values) -> Value {
         }
         let Some(Value::String(t)) = v else { continue };
         let t = t.trim();
-        if f.name == "retention" {
-            if t != text_of(f.current.as_ref()).trim() {
-                let arr: Value =
-                    serde_json::from_str(if t.is_empty() { "[]" } else { t }).unwrap_or(json!([]));
-                out.insert("retention".into(), arr);
-            }
-            continue;
-        }
         let now = text_of(f.current.as_ref());
         if t.is_empty() || t == now {
             continue;
@@ -822,7 +789,79 @@ pub fn settings_ext_body(fields: &[Field], values: &Values) -> Value {
             out.insert(f.name.clone(), json!(t));
         }
     }
+    let now_retention = with_origin(&data["retention"]);
+    if model["retention"] != now_retention {
+        let rows: Vec<Value> = model["retention"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(without_origin)
+            .collect();
+        out.insert("retention".into(), Value::Array(rows));
+    }
     Value::Object(out)
+}
+
+/// The opposite of `with_origin`: a row with its bookkeeping `origin` key
+/// dropped, the shape the server's own plain (non-origin-tracked) lists
+/// take — `SettingsExtEdit.retention` (`Vec<RetentionTierEdit>`).
+fn without_origin(row: &Value) -> Value {
+    let mut m = row.as_object().cloned().unwrap_or_default();
+    m.remove("origin");
+    Value::Object(m)
+}
+
+/// `retentionRowFields`.
+pub fn retention_row_fields(row: Option<&Value>) -> Vec<Field> {
+    es().retention_tier
+        .iter()
+        .map(|d| {
+            let mut f = d.field();
+            if let Some(r) = row {
+                f.current = Some(json!(num_text(&r[&d.name])));
+            }
+            f
+        })
+        .collect()
+}
+
+/// `retentionRowFromValues` (no `origin`: the caller adds it).
+pub fn retention_row_from_values(v: &Values) -> Value {
+    let mut m = Map::new();
+    m.insert(
+        "every_days".into(),
+        js_number(text_of(v.get("every_days")).trim()),
+    );
+    let span = text_of(v.get("span_days")).trim().to_string();
+    if !span.is_empty() {
+        m.insert("span_days".into(), js_number(&span));
+    }
+    Value::Object(m)
+}
+
+/// `retentionRowProblems`.
+pub fn retention_row_problems(v: &Values) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let every = text_of(v.get("every_days")).trim().to_string();
+    let span = text_of(v.get("span_days")).trim().to_string();
+    if let (Ok(e), Ok(s)) = (every.parse::<i64>(), span.parse::<i64>()) {
+        if s < e {
+            out.insert(
+                "span_days".into(),
+                "Must be at least the keep-one-every span.".into(),
+            );
+        }
+    }
+    out
+}
+
+/// `retentionRowSummary`.
+pub fn retention_row_summary(row: &Value) -> String {
+    match row["span_days"].as_i64() {
+        Some(span) => format!("every {}d, kept {span}d", row["every_days"]),
+        None => format!("every {}d, kept forever", row["every_days"]),
+    }
 }
 
 // ── feat-stacks-10: apps & storage ──────────────────────────────────────
@@ -2720,26 +2759,37 @@ pub fn open(
                         page,
                     )
                 }
-                EditKind::SettingsExt => (
-                    format!("edit:settings-ext:{stack}"),
-                    stack.clone(),
-                    format!("Network & hardware · {stack}"),
-                    plan_steps(FormStep {
-                        id: "settings_ext".into(),
-                        label: "Network & hardware".into(),
-                        fields: settings_ext_fields(m),
-                    }),
-                    page,
-                ),
+                EditKind::SettingsExt => {
+                    // W2: retention is a row table like storage/data_mounts
+                    // (full end-state list, origin tracks the old row), not
+                    // a plain field — `es_.model` carries it the same way
+                    // Apps' three lists ride along beside their fields.
+                    es_.model = Some(json!({ "retention": with_origin(&m["retention"]) }));
+                    (
+                        format!("edit:settings-ext:{stack}"),
+                        stack.clone(),
+                        format!("Network & hardware · {stack}"),
+                        plan_steps(FormStep {
+                            id: "settings_ext".into(),
+                            label: "Network & hardware".into(),
+                            fields: settings_ext_fields(m),
+                        }),
+                        page,
+                    )
+                }
                 EditKind::Apps => {
                     let apps = strings(&m["apps"]);
                     let mut fields: Vec<Field> =
                         apps.iter().map(|a| apps_remove_field(a)).collect();
                     fields.push(apps_add_blank_field());
+                    // storage/data_mounts/log_files live on the manifest
+                    // (`m`), not on the edit-read envelope (`data`) itself
+                    // — `data["storage"]` was always null, so the row
+                    // table opened empty no matter what the stack held.
                     es_.model = Some(json!({
-                        "storage": with_origin(&data["storage"]),
-                        "data_mounts": with_origin(&data["data_mounts"]),
-                        "log_files": with_origin(&data["log_files"]),
+                        "storage": with_origin(&m["storage"]),
+                        "data_mounts": with_origin(&m["data_mounts"]),
+                        "log_files": with_origin(&m["log_files"]),
                     }));
                     (
                         format!("edit:apps:{stack}"),
@@ -2755,7 +2805,9 @@ pub fn open(
                 }
                 EditKind::Latch => {
                     let apps = strings(&m["apps"]);
-                    let secrets = strings(&data["latch"]["latch_secrets"]);
+                    // `latch` lives on the manifest (`m`) too, the same
+                    // fix as storage/data_mounts/log_files above.
+                    let secrets = strings(&m["latch"]["latch_secrets"]);
                     let fields: Vec<Field> = apps
                         .iter()
                         .map(|a| {
@@ -2765,7 +2817,7 @@ pub fn open(
                         })
                         .collect();
                     es_.model = Some(json!({
-                        "latch_files": with_origin(&data["latch"]["latch_files"]),
+                        "latch_files": with_origin(&m["latch"]["latch_files"]),
                     }));
                     (
                         format!("edit:latch:{stack}"),
@@ -2971,7 +3023,9 @@ pub fn open(
             };
             match kind {
                 EditKind::Checks => {
-                    let orig = &data["checks"][app];
+                    // `checks` lives on the manifest (`m`), not the
+                    // envelope (`data`) — same fix as Apps/Latch above.
+                    let orig = &m["checks"][app];
                     let checks_rows = with_origin(orig.get("checks").unwrap_or(&Value::Null));
                     let manual_rows = with_origin(&manual_as_objects(
                         orig.get("manual").unwrap_or(&Value::Null),
@@ -3608,6 +3662,18 @@ pub fn refresh(form: &mut OpenForm) {
                 }
             })
             .collect(),
+        EditKind::SettingsExt => e
+            .model
+            .as_ref()
+            .and_then(|m| m["retention"].as_array())
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .map(|(i, r)| {
+                let new = if r["origin"].is_null() { " (new)" } else { "" };
+                format!("retention {}. {}{new}", i + 1, retention_row_summary(r))
+            })
+            .collect(),
         EditKind::Apps => ["storage", "data_mounts", "log_files"]
             .iter()
             .flat_map(|list| {
@@ -3928,8 +3994,20 @@ pub fn row(
             });
             Ok(plain())
         }
-        EditKind::Apps | EditKind::Latch | EditKind::Checks | EditKind::Tiles => {
-            if form.step != kind.slug() {
+        EditKind::SettingsExt
+        | EditKind::Apps
+        | EditKind::Latch
+        | EditKind::Checks
+        | EditKind::Tiles => {
+            // SettingsExt's own step is "settings_ext" (its form's field
+            // grouping predates `kind.slug()`'s hyphen, "settings-ext",
+            // which only ever named the `homelab ui open` verb).
+            let expected_step = if kind == EditKind::SettingsExt {
+                "settings_ext"
+            } else {
+                kind.slug()
+            };
+            if form.step != expected_step {
                 return Err(refused(
                     step,
                     format!("the rows are not on screen on the step {}", form.step),
@@ -3942,6 +4020,7 @@ pub fn row(
                 None => (raw_target, None),
             };
             let allowed: &[&str] = match kind {
+                EditKind::SettingsExt => &["retention"],
                 EditKind::Apps => &["storage", "data_mounts", "log_files"],
                 EditKind::Checks => &["checks", "manual", "probes"],
                 EditKind::Tiles => &["tiles"],
@@ -3996,6 +4075,7 @@ pub fn row(
                     "checks" => check_row_fields(row),
                     "manual" => manual_row_fields(row),
                     "probes" => probe_row_fields(row),
+                    "retention" => retention_row_fields(row),
                     _ => tile_row_fields(&groups, row),
                 }
             };
@@ -4008,6 +4088,7 @@ pub fn row(
                     "checks" => check_row_summary(r),
                     "manual" => manual_row_summary(r),
                     "probes" => probe_row_summary(r),
+                    "retention" => retention_row_summary(r),
                     _ => tile_row_summary(r),
                 }
             };
@@ -4165,6 +4246,7 @@ pub fn press(
                 "checks" => check_row_problems(&sub.values),
                 "probes" => probe_row_problems(&sub.values),
                 "tiles" => tile_row_problems(&sub.values),
+                "retention" => retention_row_problems(&sub.values),
                 _ => BTreeMap::new(),
             });
             if !errors.is_empty() {
@@ -4185,6 +4267,7 @@ pub fn press(
                 "checks" => check_row_from_values(&sub.values),
                 "manual" => manual_row_from_values(&sub.values),
                 "probes" => probe_row_from_values(&sub.values),
+                "retention" => retention_row_from_values(&sub.values),
                 _ => tile_row_from_values(&sub.values),
             };
             let e = edit(form);
@@ -4599,12 +4682,14 @@ pub fn press(
                     add_native_body(&fields, &form.values)
                 }
                 EditKind::SettingsExt => {
-                    let mut errors = check_fields(&fields, &form.values);
-                    errors.extend(settings_ext_problems(&form.values));
+                    let errors = check_fields(&fields, &form.values);
                     if !errors.is_empty() {
                         return hold(form, "next", errors);
                     }
-                    let b = settings_ext_body(&fields, &form.values);
+                    let e = edit(form);
+                    let model = e.model.clone().unwrap_or(Value::Null);
+                    let data = e.data.clone();
+                    let b = settings_ext_body(&fields, &form.values, &model, &data["manifest"]);
                     if !changes_something(&b) {
                         return Ok(held_msg("next", &say("unchanged", &[])));
                     }
@@ -4633,7 +4718,7 @@ pub fn press(
                 EditKind::Checks => {
                     let e = edit(form);
                     let model = e.model.clone().unwrap_or(Value::Null);
-                    let data = e.data.clone();
+                    let data = e.data["manifest"].clone();
                     let app = model["app"].as_str().unwrap_or("").to_string();
                     let b = checks_drive_body(&form.values, &model, &data, &app);
                     if !checks_changed(&b, &data, &app) {
@@ -4895,12 +4980,21 @@ pub fn plan_summary(p: &Value) -> Value {
 pub fn done(form: &mut OpenForm, call: &EditCall, outcome: Result<Value, Refusal>) {
     match (call, outcome) {
         (
-            EditCall::Plan { .. } | EditCall::NewPlan { .. } | EditCall::ImportPlan { .. },
+            EditCall::Plan { .. }
+            | EditCall::NewPlan { .. }
+            | EditCall::ImportPlan { .. }
+            | EditCall::PresetPlan { .. },
             Ok(plan),
         ) => {
             let follow_ups = strings(&plan["follow_ups"]);
             let fields = commit_fields(&follow_ups, plan["subject"].as_str().unwrap_or(""));
-            let at = if matches!(call, EditCall::Plan { .. } | EditCall::ImportPlan { .. }) {
+            // A preset's own steps are the same `plan_steps()` shape a
+            // stack edit's are (`[first, "plan", "commit"]`), so its plan
+            // lands on "commit" the same way `EditCall::Plan`'s does.
+            let at = if matches!(
+                call,
+                EditCall::Plan { .. } | EditCall::ImportPlan { .. } | EditCall::PresetPlan { .. }
+            ) {
                 "commit"
             } else {
                 "plan"
@@ -4915,7 +5009,10 @@ pub fn done(form: &mut OpenForm, call: &EditCall, outcome: Result<Value, Refusal
             edit(form).plan = Some(plan_summary(&plan));
         }
         (
-            EditCall::Plan { .. } | EditCall::NewPlan { .. } | EditCall::ImportPlan { .. },
+            EditCall::Plan { .. }
+            | EditCall::NewPlan { .. }
+            | EditCall::ImportPlan { .. }
+            | EditCall::PresetPlan { .. },
             Err(r),
         ) => {
             edit(form).plan = None;

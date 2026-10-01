@@ -381,7 +381,23 @@ impl Doc {
     }
 
     /// The mapping a key's block value is.
-    fn child_map(&self, k: &KeyAt, what: &[Seg]) -> Result<Map, EditError> {
+    fn child_map(&mut self, k: &KeyAt, what: &[Seg]) -> Result<Map, EditError> {
+        if self.inline(k) == "{}" {
+            // An explicit empty mapping (written by a Remove that took the
+            // last entry out, above): clear it back to a bare key so a
+            // write into it lands as an ordinary block child, not beside
+            // a stray "{}".
+            let line = &self.lines[k.line];
+            self.lines[k.line] = format!("{}{}", &line[..k.value_start], &line[k.value_end..])
+                .trim_end()
+                .to_string();
+            return Ok(Map {
+                start: k.child_start,
+                end: k.child_start,
+                col: k.col + 2,
+                dash: None,
+            });
+        }
         if !self.inline(k).is_empty() {
             return Err(EditError::Unsupported(path_text(what)));
         }
@@ -461,7 +477,7 @@ impl Doc {
     }
 
     /// Walk `p` to a mapping.
-    fn map_at(&self, p: &[Seg]) -> Result<Map, EditError> {
+    fn map_at(&mut self, p: &[Seg]) -> Result<Map, EditError> {
         let mut m = self.root();
         let mut i = 0;
         while i < p.len() {
@@ -505,7 +521,16 @@ impl Doc {
                     // The item's first key: the item would lose its dash.
                     return Err(EditError::Unsupported(path_text(path)));
                 }
+                let removed = at.child_end - at.line;
                 self.lines.drain(at.line..at.child_end);
+                let new_end = m.end - removed;
+                if !parent.is_empty() && (m.start..new_end).all(|j| quiet(&self.lines[j])) {
+                    // The last entry of this mapping is gone: an empty
+                    // body parses back as null, not `{}`, so the round
+                    // trip's own check would flag this as drift. Write
+                    // the now-empty mapping explicitly.
+                    self.set(parent, &Value::Mapping(Mapping::new()))?;
+                }
                 Ok(())
             }
             Op::Seq { path, items } => self.rebuild(path, items),

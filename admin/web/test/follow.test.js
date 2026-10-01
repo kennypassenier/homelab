@@ -11,7 +11,6 @@ import {
   ruleFields,
   ruleProblems,
   settingsExtForm,
-  settingsExtProblems,
   settingsForm,
   tileProblems,
 } from "../js/editforms.js";
@@ -301,7 +300,7 @@ test("the edit checks are the server's: the same cases give the same words", () 
       got = tileProblems(v);
     } else if (c.check === "settings_ext") {
       const form = settingsExtForm("kp-soft", /** @type {any} */ (c.manifest));
-      got = { ...checkFields(form, v), ...settingsExtProblems(v) };
+      got = checkFields(form, v);
     } else if (c.check === "latch_file") {
       const m = /** @type {any} */ ({ natives: c.natives ?? [] });
       const steps = [

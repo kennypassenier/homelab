@@ -433,13 +433,29 @@
         "kind": "check",
         "label": "On demand",
         "help": "A stack created and destroyed in one sitting, like a drill; the fleet check does not report it as declared-but-never-deployed."
+      }
+    ],
+    "retention_tier": [
+      {
+        "name": "every_days",
+        "id": "retention-every-days",
+        "kind": "number",
+        "label": "Keep one every",
+        "help": "A snapshot is kept from every span of this many days.",
+        "min": 1,
+        "max": 3650,
+        "unit": "days",
+        "required": true
       },
       {
-        "name": "retention",
-        "id": "edit-retention",
-        "kind": "textarea",
-        "label": "Retention tiers (JSON, blank = fleet default)",
-        "help": "A JSON list of {\"every_days\": N, \"span_days\": N} kept newest-first, the last tier's span_days omitted to mean forever. An empty list [] clears this stack's own tiers and goes back to the fleet-wide policy. Leave the field exactly as shown to make no change.",
+        "name": "span_days",
+        "id": "retention-span-days",
+        "kind": "number",
+        "label": "For",
+        "help": "How long this tier's snapshots are kept; blank means forever (only the last tier may be left blank).",
+        "min": 1,
+        "max": 3650,
+        "unit": "days",
         "required": false
       }
     ],

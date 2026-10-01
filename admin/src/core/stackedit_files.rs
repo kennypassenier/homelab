@@ -233,7 +233,7 @@ const CHECKS_TEMPLATE: &str = r#"# checks.yml — what this service is judged on
 # busy_check:
 #   command: who-is-using-this --count
 #
-# url: https://example.kp-soft.dev
+# url: https://example.org
 checks: []
 probes: []
 manual: []
@@ -278,7 +278,7 @@ const TRAEFIK_ROUTES_TEMPLATE: &str = r#"# traefik-routes.yml — this stack's g
 http:
   routers:
     <app>:
-      rule: "Host(`<app>.kp-soft.dev`)"
+      rule: "Host(`<app>.example.org`)"
       entryPoints: [web]
       service: <app>
 
@@ -295,7 +295,7 @@ const ROUTE_FILE_TEMPLATE: &str = r#"# routes/<name>.yml — one of this stack's
 http:
   routers:
     <name>:
-      rule: "Host(`<name>.kp-soft.dev`)"
+      rule: "Host(`<name>.example.org`)"
       entryPoints: [web]
       service: <name>
 

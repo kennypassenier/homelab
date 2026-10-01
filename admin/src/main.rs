@@ -146,6 +146,10 @@ const FILES: &[(&str, &[u8])] = &[
     ("js/newstack.js", include_bytes!("../web/js/newstack.js")),
     ("js/plan.js", include_bytes!("../web/js/plan.js")),
     (
+        "js/presetseditor.js",
+        include_bytes!("../web/js/presetseditor.js"),
+    ),
+    (
         "js/pages/firewall.js",
         include_bytes!("../web/js/pages/firewall.js"),
     ),

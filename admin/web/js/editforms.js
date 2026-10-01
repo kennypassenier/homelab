@@ -340,7 +340,6 @@ export function settingsExtForm(stack, m) {
     vpn: m.lxc?.vpn ?? false,
     storage: m.resources?.storage ?? "",
     on_demand: m.on_demand ?? false,
-    retention: JSON.stringify(m.retention ?? []),
   };
   /** @type {EditField[]} */
   const fields = /** @type {EditField[]} */ (E.settings_ext).map((f) => ({
@@ -356,44 +355,12 @@ export function settingsExtForm(stack, m) {
 }
 
 /**
- * The retention field is JSON, not a plain pattern — checked on its own
- * (checkFields skips it, having no pattern).
- * @param {Values} values
- */
-export function settingsExtProblems(values) {
-  /** @type {Record<string, string>} */
-  const errors = {};
-  const text = String(values.retention ?? "").trim();
-  if (text === "") return errors;
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    errors.retention =
-      'Not valid JSON: a list like [] or [{"every_days": 1, "span_days": 7}].';
-    return errors;
-  }
-  if (
-    !Array.isArray(parsed) ||
-    !parsed.every(
-      (t) =>
-        t &&
-        typeof t === "object" &&
-        Number.isInteger(t.every_days) &&
-        (t.span_days === undefined || Number.isInteger(t.span_days)),
-    )
-  )
-    errors.retention =
-      'A JSON list of {"every_days": N, "span_days": N} (span_days optional).';
-  return errors;
-}
-
-/**
  * @param {ReturnType<typeof settingsExtForm>} form
  * @param {Values} values
+ * @param {RowEdit[] | null} retention rows if the retention table changed, else null (unchanged)
  * @returns {{kind: "settings_ext"} & Record<string, unknown>}
  */
-export function settingsExtBody(form, values) {
+export function settingsExtBody(form, values, retention) {
   /** @type {{kind: "settings_ext"} & Record<string, unknown>} */
   const out = { kind: "settings_ext" };
   for (const f of form.steps[0].fields) {
@@ -403,15 +370,66 @@ export function settingsExtBody(form, values) {
       continue;
     }
     const text = typeof v === "string" ? v.trim() : "";
-    if (f.name === "retention") {
-      if (text !== String(f.current ?? "").trim())
-        out.retention = JSON.parse(text === "" ? "[]" : text);
-      continue;
-    }
     if (text === "" || text === String(f.current ?? "")) continue;
     out[f.name] = f.kind === "number" ? Number(text) : text;
   }
+  // W2: a plain list, not origin-tracked like storage/data_mounts/log_files
+  // — the server takes the whole end state (`SettingsExtEdit.retention`,
+  // `Option<Vec<RetentionTierEdit>>`); an empty list clears this stack's
+  // own tiers and goes back to the fleet-wide policy.
+  if (retention)
+    out.retention = retention.map((r) => retentionRowFromRow(r.row));
   return out;
+}
+
+/**
+ * @param {Record<string, unknown> | null} row
+ * @returns {EditField[]}
+ */
+export function retentionRowFields(row) {
+  const from = row ?? {};
+  return /** @type {EditField[]} */ (E.retention_tier).map((f) => ({
+    ...f,
+    current:
+      from[f.name] != null ? String(/** @type {unknown} */ (from[f.name])) : "",
+  }));
+}
+
+/** @param {Values} v */
+export function retentionRowFromValues(v) {
+  /** @type {Record<string, unknown>} */
+  const out = { every_days: Number(String(v.every_days ?? "").trim()) };
+  const span = String(v.span_days ?? "").trim();
+  if (span !== "") out.span_days = Number(span);
+  return out;
+}
+
+/** @param {Record<string, unknown>} row */
+function retentionRowFromRow(row) {
+  return retentionRowFromValues(
+    /** @type {Values} */ ({
+      every_days: row.every_days,
+      span_days: row.span_days,
+    }),
+  );
+}
+
+/** @param {Values} v */
+export function retentionRowProblems(v) {
+  /** @type {Record<string, string>} */
+  const errors = {};
+  const every = String(v.every_days ?? "").trim();
+  const span = String(v.span_days ?? "").trim();
+  if (every !== "" && span !== "" && Number(span) < Number(every))
+    errors.span_days = "Must be at least the keep-one-every span.";
+  return errors;
+}
+
+/** @param {Record<string, unknown>} row */
+export function retentionRowSummary(row) {
+  return row.span_days != null
+    ? `every ${row.every_days}d, kept ${row.span_days}d`
+    : `every ${row.every_days}d, kept forever`;
 }
 
 // ── feat-checks-1: origin-tracked JSON list fields (checks.yml) ─────────

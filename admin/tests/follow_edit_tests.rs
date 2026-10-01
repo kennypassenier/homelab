@@ -469,7 +469,7 @@ async fn follow_settings_commit_and_deploy_and_the_raw_editor() {
     assert!(why.contains("The file is as it was."), "{why}");
     let (why, fix) = refused(&step(&w, typed("raw-file", "x")).await);
     assert!(
-        why.contains("choice field") && fix.contains("pick"),
+        why.contains("is not a choice of raw-file") && fix.contains("choices are"),
         "{why} {fix}"
     );
     assert_eq!(commits(&w), 2);
@@ -490,6 +490,22 @@ async fn follow_settings_ext_commits_once() {
     let (why, _) = refused(&step(&w, press("next")).await);
     assert!(why.contains("Nothing is changed yet."), "{why}");
     ok(&w, typed("edit-network-vlan", "20")).await;
+    // W2: retention is a row table, the same origin-less full-list shape
+    // the backend always took — `row add retention`, same as `row add
+    // storage` on the Apps tab.
+    ok(&w, row("add", Some("retention"))).await;
+    let held = step(&w, press("save")).await;
+    let (why, _) = refused(&held);
+    assert!(why.contains("retention-every-days"), "{why}");
+    ok(&w, typed("retention-every-days", "1")).await;
+    ok(&w, typed("retention-span-days", "7")).await;
+    let saved = ok(&w, press("save")).await;
+    let rows = saved["state"]["form"]["edit"]["rows"].as_array().unwrap();
+    assert!(
+        rows.iter()
+            .any(|r| r.as_str().unwrap_or("").contains("every 1d, kept 7d (new)")),
+        "{rows:?}"
+    );
     let plan = ok(&w, press("next")).await;
     assert_eq!(plan["state"]["form"]["edit"]["plan"]["valid"], true);
     ok(&w, press("next")).await;
@@ -502,6 +518,8 @@ async fn follow_settings_ext_commits_once() {
     assert_eq!(commits(&w), 2);
     let file = git(&w.bare, &["show", "main:stacks/kp-soft/lxc-compose.yml"]);
     assert!(file.contains("vlan: 20"), "{file}");
+    assert!(file.contains("every_days: 1"), "{file}");
+    assert!(file.contains("span_days: 7"), "{file}");
 }
 
 /// feat-platform-10 (milestone follow), feat-stacks-10.
@@ -613,7 +631,10 @@ async fn follow_latch_secret_and_a_file_row_refuse_dollar_then_commit_once() {
     ok(&w, typed("latchfile-dest", "/var/www/unit.env")).await;
     ok(&w, press("save")).await;
     let plan = ok(&w, press("next")).await;
-    assert_eq!(plan["state"]["form"]["edit"]["plan"]["valid"], true);
+    assert_eq!(
+        plan["state"]["form"]["edit"]["plan"]["valid"], true,
+        "{plan}"
+    );
     ok(&w, press("next")).await;
     ok(
         &w,
@@ -724,7 +745,13 @@ async fn follow_tiles_edit_and_delete_commit_once() {
     assert_eq!(commits(&w), 2);
     let file = git(&w.bare, &["show", "main:stacks/gateway/lxc-compose.yml"]);
     assert!(file.contains("drive test"), "{file}");
-    assert!(!file.contains("opn.kp-soft.dev"), "{file}");
+    // Row 2, alphabetically sorted by hostname, is "opn.kp-soft.dev"
+    // (gateway's tiles: ha, opn, prox, traefik, trmnl — the file itself
+    // lists them ha, prox, traefik, opn, trmnl, but the editor sorts by
+    // hostname) — checked as a `tiles:` map key line, not a bare
+    // substring: the hostname also names OPNsense's login page in an
+    // unrelated `extra_routes` comment further up the same file.
+    assert!(!file.contains("  opn.kp-soft.dev:"), "{file}");
 }
 
 /// feat-platform-10 (milestone follow), feat-publish-1.
@@ -791,11 +818,14 @@ async fn follow_the_raw_editor_creates_renames_and_deletes_a_file() {
     let w = world("files").await;
 
     // Create: op picked, a new path typed, the starting text edited in.
+    // The path is relative to the stack's own directory, the same as
+    // every choice `raw-file` offers (`kp-soft/checks.yml` there names an
+    // app dir, not the stack) — not prefixed with the stack name again.
     ok(&w, open("raw", Some("kp-soft"))).await;
     ok(&w, pick("files-op", "create")).await;
     let (why, _) = refused(&step(&w, press("next")).await);
     assert!(why.contains("New path is needed."), "{why}");
-    ok(&w, typed("files-new-path", "kp-soft/new-note.yml")).await;
+    ok(&w, typed("files-new-path", "new-note.yml")).await;
     ok(
         &w,
         UiStep::Edit {
@@ -824,10 +854,10 @@ async fn follow_the_raw_editor_creates_renames_and_deletes_a_file() {
     // the new path typed.
     ok(&w, open("raw", Some("kp-soft"))).await;
     ok(&w, pick("files-op", "rename")).await;
-    ok(&w, pick("raw-file", "kp-soft/new-note.yml")).await;
+    ok(&w, pick("raw-file", "new-note.yml")).await;
     let (why, _) = refused(&step(&w, press("next")).await);
     assert!(why.contains("Rename to is needed."), "{why}");
-    ok(&w, typed("files-rename-to", "kp-soft/renamed-note.yml")).await;
+    ok(&w, typed("files-rename-to", "renamed-note.yml")).await;
     ok(&w, press("next")).await;
     ok(&w, press("next")).await;
     ok(&w, typed("edit-subject", "rename the note")).await;
@@ -842,7 +872,7 @@ async fn follow_the_raw_editor_creates_renames_and_deletes_a_file() {
     // Delete: op and file picked, nothing else to fill in.
     ok(&w, open("raw", Some("kp-soft"))).await;
     ok(&w, pick("files-op", "delete")).await;
-    ok(&w, pick("raw-file", "kp-soft/renamed-note.yml")).await;
+    ok(&w, pick("raw-file", "renamed-note.yml")).await;
     ok(&w, press("next")).await;
     ok(&w, press("next")).await;
     ok(&w, typed("edit-subject", "drop the note")).await;
@@ -850,13 +880,20 @@ async fn follow_the_raw_editor_creates_renames_and_deletes_a_file() {
     assert_eq!(commits(&w), 4);
     let ls = git(&w.bare, &["ls-tree", "-r", "--name-only", "main"]);
     assert!(!ls.contains("renamed-note.yml"), "{ls}");
+    ok(&w, UiStep::Close).await;
 
-    // The stack's own manifest may not be deleted or renamed this way.
+    // The stack's own manifest may not be deleted or renamed this way. The
+    // press itself succeeds (the plan call, not the step, is what refuses
+    // it) — the refusal lands in the form's own `run_error`, the same
+    // "soft" shape every plan-time refusal takes, not a hard step refusal.
     ok(&w, open("raw", Some("kp-soft"))).await;
     ok(&w, pick("files-op", "delete")).await;
     ok(&w, pick("raw-file", "lxc-compose.yml")).await;
-    let (why, _) = refused(&step(&w, press("next")).await);
-    assert!(why.contains("manifest"), "{why}");
+    let held = ok(&w, press("next")).await;
+    let why = held["state"]["form"]["run_error"]["why"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(why.contains("manifest"), "{held}");
     assert_eq!(commits(&w), 4);
 }
 
@@ -943,7 +980,8 @@ async fn follow_new_stack_tile_folds_into_the_one_commit() {
         plan["state"]["form"]["edit"]["plan"]["valid"], true,
         "{plan}"
     );
-    ok(&w, press("next")).await;
+    // "plan" is new-stack's own last step (no separate "commit" step the
+    // way a stack edit or a preset has); its fields are already on screen.
     ok(
         &w,
         typed("edit-subject", "recipes: a new stack with a tile"),
@@ -1027,11 +1065,15 @@ async fn follow_preset_files_and_removal_each_commit_once() {
             "save-file",
             "rename-file",
             "delete-file",
-            "remove-preset"
+            "remove-preset",
+            "close"
         ])
     );
-    // Create a file.
-    ok(&w, typed("preset-file-path", "mealie/README.md")).await;
+    // Create a file. Its path is relative to the preset's own directory
+    // (`presets/mealie/`), the same as `mealie/docker-compose.yml` among
+    // the file choices names the app dir nested under it, not the preset
+    // root again — a plain "README.md" here, not "mealie/README.md".
+    ok(&w, typed("preset-file-path", "README.md")).await;
     ok(&w, typed("preset-file-text", "drive test")).await;
     let plan = ok(&w, press("save-file")).await;
     assert_eq!(
@@ -1049,7 +1091,7 @@ async fn follow_preset_files_and_removal_each_commit_once() {
 
     // Rename it.
     ok(&w, open("preset", Some("mealie"))).await;
-    ok(&w, pick("preset-file-select", "mealie/README.md")).await;
+    ok(&w, pick("preset-file-select", "README.md")).await;
     let f = &step(&w, UiStep::State).await["state"]["form"];
     assert_eq!(
         f["fields"]
@@ -1058,10 +1100,10 @@ async fn follow_preset_files_and_removal_each_commit_once() {
             .iter()
             .find(|x| x["id"] == "preset-file-path")
             .unwrap()["value"],
-        json!("mealie/README.md"),
+        json!("README.md"),
         "{f}"
     );
-    ok(&w, typed("preset-file-rename-to", "mealie/NOTES.md")).await;
+    ok(&w, typed("preset-file-rename-to", "NOTES.md")).await;
     ok(&w, press("rename-file")).await;
     ok(&w, press("next")).await;
     ok(
@@ -1081,7 +1123,7 @@ async fn follow_preset_files_and_removal_each_commit_once() {
 
     // Delete it.
     ok(&w, open("preset", Some("mealie"))).await;
-    ok(&w, pick("preset-file-select", "mealie/NOTES.md")).await;
+    ok(&w, pick("preset-file-select", "NOTES.md")).await;
     ok(&w, press("delete-file")).await;
     ok(&w, press("next")).await;
     ok(
@@ -1283,9 +1325,7 @@ fn follow_the_edit_checks_match_the_browser_cases() {
             "tile" => json!(driveedit::tile_problems(&values)),
             "settings_ext" => {
                 let fields = driveedit::settings_ext_fields(&c["manifest"]);
-                let mut e = driveedit::check_fields(&fields, &values);
-                e.extend(driveedit::settings_ext_problems(&values));
-                json!(e)
+                json!(driveedit::check_fields(&fields, &values))
             }
             "latch_file" => {
                 let natives: Vec<String> = c["natives"]
@@ -1467,8 +1507,14 @@ async fn follow_add_native_unit_commits_once() {
     assert!(why.contains("is needed"), "{why}");
     ok(&w, typed("add-native-unit", "worker")).await;
     ok(&w, typed("add-native-binary", "/opt/worker/bin/worker")).await;
+    // A unit with no declared state cannot be backed up (core's own
+    // check) — either a data dir or `stateless: true` is required.
+    ok(&w, typed("add-native-data-dirs", "/opt/worker/data")).await;
     let plan = ok(&w, press("next")).await;
-    assert_eq!(plan["state"]["form"]["edit"]["plan"]["valid"], true);
+    assert_eq!(
+        plan["state"]["form"]["edit"]["plan"]["valid"], true,
+        "{plan}"
+    );
     ok(&w, press("next")).await;
     ok(&w, typed("edit-subject", "add the worker native unit")).await;
     let before = commits(&w);

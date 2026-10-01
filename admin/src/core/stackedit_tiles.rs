@@ -50,7 +50,14 @@ pub struct TileItemEdit {
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TileFields {
+    // A `delete: true` row's own `tile` is ignored (`TileItemEdit`'s doc),
+    // but still has to deserialize — the browser and the driving surface
+    // both send `"tile":{}` for a tombstone rather than omitting the key,
+    // so these two can't be required the way a real tile's are (checked
+    // instead by `tile_problems`, before a non-delete row is ever sent).
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub group: String,
     #[serde(default)]
     pub order: Option<u32>,
@@ -150,9 +157,21 @@ pub fn tiles_problems(edit: &TilesEdit) -> Vec<String> {
 
 /// The ops that turn the stack file's `tiles:` map into what `edit`
 /// describes. `m` is the manifest as it reads now, to diff against and to
-/// check a rename or delete's `origin` really exists.
-pub fn tiles_ops(m: &StackManifest, edit: &TilesEdit) -> Result<Vec<Op>, String> {
+/// check a rename or delete's `origin` really exists. `manifest_text` is
+/// the raw file, so a stack with no `tiles:` key at all yet can be told
+/// apart from one whose map is merely empty — a nested `Set` needs the
+/// mapping to exist first.
+pub fn tiles_ops(
+    m: &StackManifest,
+    manifest_text: &str,
+    edit: &TilesEdit,
+) -> Result<Vec<Op>, String> {
+    let has_tiles = serde_yaml::from_str::<Value>(manifest_text)
+        .ok()
+        .and_then(|d| d.get("tiles").cloned())
+        .is_some_and(|v| !v.is_null());
     let mut ops = Vec::new();
+    let mut tiles_created = false;
     for item in &edit.tiles {
         if item.delete {
             let origin = item.origin.as_ref().expect("checked by tiles_problems");
@@ -168,6 +187,13 @@ pub fn tiles_ops(m: &StackManifest, edit: &TilesEdit) -> Result<Vec<Op>, String>
             None => {
                 if m.tiles.contains_key(&item.key) {
                     return Err(format!("{} is already a tile of this stack", item.key));
+                }
+                if !has_tiles && !tiles_created {
+                    ops.push(Op::Set {
+                        path: vec![Seg::Key("tiles".into())],
+                        value: Value::Mapping(serde_yaml::Mapping::new()),
+                    });
+                    tiles_created = true;
                 }
                 ops.push(Op::Set {
                     path: vec![Seg::Key("tiles".into()), Seg::Key(item.key.clone())],
@@ -207,6 +233,39 @@ fn tile_value(f: &TileFields) -> Value {
 /// going through a whole `TilesEdit`.
 pub fn tile_value_for(f: &TileFields) -> Value {
     tile_value(f)
+}
+
+/// The ops that set one tile directly on a manifest's own text — the
+/// publish-app flow's own shape (`stackedit::changes`'s `PublishApp` arm),
+/// reused by `AddApp`'s per-app tile and the new-stack wizard's tile step:
+/// `tiles:` itself may not be in the file yet (a fresh scaffold, or a stack
+/// that never had one), and a nested `Op::Set` at `tiles.<hostname>` needs
+/// the mapping to exist first — so an empty one is set ahead of it when
+/// missing, applied within the same `yamledit::edit` call so the second op
+/// sees the first one's result.
+pub fn set_tile_ops(text: &str, hostname: &str, fields: &TileFields) -> Vec<Op> {
+    let mut ops = Vec::new();
+    if !has_tiles(text) {
+        ops.push(Op::Set {
+            path: vec![Seg::Key("tiles".into())],
+            value: Value::Mapping(serde_yaml::Mapping::new()),
+        });
+    }
+    ops.push(Op::Set {
+        path: vec![Seg::Key("tiles".into()), Seg::Key(hostname.to_string())],
+        value: tile_value_for(fields),
+    });
+    ops
+}
+
+/// Whether `text` already has a (non-null) `tiles:` key — checked by
+/// parsing rather than a text search, the same care `set_tile_ops` and the
+/// publish-app flow it was lifted from already took.
+pub fn has_tiles(text: &str) -> bool {
+    serde_yaml::from_str::<Value>(text)
+        .ok()
+        .and_then(|d| d.get("tiles").cloned())
+        .is_some_and(|v| !v.is_null())
 }
 
 /// Set or remove only the fields of one tile that actually changed, so an

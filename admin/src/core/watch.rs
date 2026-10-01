@@ -30,6 +30,11 @@ pub struct Seen {
     pub failing_since: Option<i64>,
     /// A Down notice went out for this run.
     pub down_told: bool,
+    /// When the Down notice went out (`down_told` became true); this, not
+    /// `failing_since`, is what an Up notice's `was_down_s` counts from —
+    /// the outage was only "down" from the notice on, not from the first
+    /// flaky failure.
+    pub down_since: Option<i64>,
     /// When it was last measured, and what the last failure said.
     pub checked_at: i64,
     pub why: Option<String>,
@@ -61,11 +66,12 @@ pub fn step(
     seen.deploying = false;
     match answer {
         Ok(()) => {
-            let was = seen.failing_since.take();
+            seen.failing_since = None;
+            let down_since = seen.down_since.take();
             seen.why = None;
             if std::mem::take(&mut seen.down_told) {
                 Some(Change::Up {
-                    was_down_s: now - was.unwrap_or(now),
+                    was_down_s: now - down_since.unwrap_or(now),
                 })
             } else {
                 None
@@ -76,6 +82,7 @@ pub fn step(
             seen.why = Some(why.clone());
             if !seen.down_told && now - since >= down_after_s {
                 seen.down_told = true;
+                seen.down_since = Some(now);
                 Some(Change::Down { since, why })
             } else {
                 None
@@ -93,6 +100,7 @@ pub fn step_deploying(seen: &mut Seen, now: i64) {
     seen.deploying = true;
     seen.failing_since = None;
     seen.down_told = false;
+    seen.down_since = None;
     seen.why = None;
 }
 

@@ -46,6 +46,10 @@ import {
   probeRowFromValues,
   probeRowProblems,
   probeRowSummary,
+  retentionRowFields,
+  retentionRowFromValues,
+  retentionRowProblems,
+  retentionRowSummary,
   rowBody,
   rowModel,
   rowsChanged,
@@ -56,7 +60,6 @@ import {
   settingsBody,
   settingsExtBody,
   settingsExtForm,
-  settingsExtProblems,
   settingsForm,
   startValues,
   storageFields,
@@ -173,11 +176,13 @@ export function settingsTab(panel, params) {
       );
     parts.push(filesCard(stack, e, load));
     if (e.manifest && e.presets.length) parts.push(addAppCard(stack, e, load));
+    let settingsExt = null;
     let apps = null;
     let latch = null;
     let tiles = null;
     if (e.manifest) {
-      parts.push(settingsExtCard(stack, e, load));
+      settingsExt = settingsExtCard(stack, e, load);
+      parts.push(settingsExt.node);
       apps = appsEditCard(stack, e, load);
       parts.push(apps.node);
       latch = latchEditCard(stack, e, load);
@@ -193,11 +198,13 @@ export function settingsTab(panel, params) {
     // level here since several tables share this one tab).
     detachTables();
     detachTables = attachDataTables(panel);
+    settingsExt?.bind();
     apps?.bind();
     latch?.bind();
     tiles?.bind();
     detachRows();
     detachRows = () => {
+      settingsExt?.detach();
       apps?.detach();
       latch?.detach();
       tiles?.detach();
@@ -625,7 +632,7 @@ function addAppCard(stack, e, reload) {
             class: "kp-field__input",
             type: "text",
             id,
-            placeholder: `${app}.kp-soft.dev`,
+            placeholder: `${app}.example.org`,
           })
         );
         tileInputs.set(app, input);
@@ -722,7 +729,7 @@ export function openPublishDialog(stack, app, onCommitted) {
       class: "kp-field__input",
       type: "text",
       id: "publish-hostname",
-      placeholder: `${app}.kp-soft.dev`,
+      placeholder: `${app}.example.org`,
     })
   );
   const port = /** @type {HTMLInputElement} */ (
@@ -881,30 +888,59 @@ function settingsExtCard(stack, e, reload) {
   const fields = form.steps[0].fields.map((f) => {
     const x = editField(f, values[f.name], (v) => {
       values[f.name] = v;
-      status.textContent = changesSomething(settingsExtBody(form, values))
-        ? "Changed; not committed."
-        : "";
+      repaintStatus();
     });
     inputs.set(f.name, x.input);
     return x.wrap;
+  });
+  const startRetention = rowModel(m.retention ?? []);
+  const retention = rowTable({
+    remember: "stack-retention",
+    caption: `Retention of ${stack}`,
+    nothing: "No tiers of its own yet; the fleet default applies.",
+    columns: [
+      { label: "Every", sort: "text" },
+      { label: "Kept for", sort: "text" },
+    ],
+    toCells: (row) => [
+      td(`${row.every_days}d`),
+      td(row.span_days != null ? `${row.span_days}d` : "forever"),
+    ],
+    summary: retentionRowSummary,
+    fieldsFor: retentionRowFields,
+    fromValues: retentionRowFromValues,
+    problems: retentionRowProblems,
+    addLabel: "Add a tier…",
+    driveKey: `row-table:retention:${stack}`,
+    rows: startRetention,
+    onChange: () => repaintStatus(),
   });
   const status = h("span", {
     class: "measured state-word",
     "data-size": "Changed; not committed.",
     role: "status",
   });
+  const repaintStatus = () => {
+    const changed =
+      changesSomething(settingsExtBody(form, values, null)) ||
+      rowsChanged(retention.getRows(), startRetention);
+    status.textContent = changed ? "Changed; not committed." : "";
+  };
   const review = h(
     "button",
     { type: "button", class: "kp-button", id: "settings-ext-review" },
     "Review and commit…",
   );
   review.addEventListener("click", () => {
-    const errors = {
-      ...checkFields(form, values),
-      ...settingsExtProblems(values),
-    };
+    const errors = checkFields(form, values);
     if (!markErrors(inputs, errors)) return;
-    const edit = settingsExtBody(form, values);
+    const edit = settingsExtBody(
+      form,
+      values,
+      rowsChanged(retention.getRows(), startRetention)
+        ? retention.getRows()
+        : null,
+    );
     if (!changesSomething(edit)) {
       notify("Nothing is changed yet.", "info");
       return;
@@ -919,7 +955,7 @@ function settingsExtCard(stack, e, reload) {
       onCommitted: () => void reload(),
     });
   });
-  return h(
+  const node = h(
     "section",
     {
       class: "kp-card edit-card",
@@ -934,8 +970,15 @@ function settingsExtCard(stack, e, reload) {
       "The address, the lxc flags and the storage a rebuild would use, and this stack's own snapshot retention. Address/vmid clashes with another stack are caught at Review. Unprivileged, gpu, vpn and Proxmox storage only ever apply at a rebuild of the container.",
     ),
     h("div", { class: "edit-grid" }, ...fields),
+    h("h3", null, "retention:"),
+    ...retention.wrap,
     h("div", { class: "row-buttons" }, review, " ", status),
   );
+  return {
+    node,
+    bind: () => retention.bind(),
+    detach: () => retention.detach(),
+  };
 }
 
 // ── feat-stacks-10 / feat-stacks-11: the row tables behind storage,

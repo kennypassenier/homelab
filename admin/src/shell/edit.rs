@@ -45,7 +45,7 @@ use crate::core::stackedit_files;
 use crate::core::stackedit_latch;
 use crate::core::stackedit_native;
 use crate::core::stackedit_tiles;
-use crate::core::yamledit::{self, Op, Seg};
+use crate::core::yamledit;
 
 /// The host release that answers `GetHostConfig` (feat-settings-1). An
 /// older host drops a request it cannot parse without a word, so the page
@@ -1131,11 +1131,8 @@ fn apply_new_stack_tile(
         ));
     };
     let text = entry.new.clone().unwrap_or_default();
-    let op = Op::Set {
-        path: vec![Seg::Key("tiles".into()), Seg::Key(tile.hostname.clone())],
-        value: stackedit_tiles::tile_value_for(&tile.fields()),
-    };
-    let new = yamledit::edit(&text, &[op]).map_err(|e| {
+    let ops = stackedit_tiles::set_tile_ops(&text, &tile.hostname, &tile.fields());
+    let new = yamledit::edit(&text, &ops).map_err(|e| {
         Refusal::new(
             "the new stack's tile",
             format!("{rel}: {e}"),

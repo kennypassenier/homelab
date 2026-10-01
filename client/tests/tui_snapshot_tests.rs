@@ -953,6 +953,12 @@ fn the_runbook_warns_that_a_restore_revives_retired_almanac_profiles() {
 /// wrong; leaving the question unanswered is.
 const CLI_ONLY: &[(&str, &str)] = &[
     (
+        "RestartHost",
+        "Kenny, 2026-09-30: the dashboard's host-settings form restarts the host \
+         (\"Save and restart the host\") and `homelab host restart` does from the \
+         command line; the TUI edits no host.toml keys, so nothing there needs it",
+    ),
+    (
         "History",
         "arch-history (homelab-admin): the dashboard's charts and timeline read it; \
          the TUI shows the live stream instead",

@@ -581,7 +581,7 @@ async fn feat_stacks_files_create_delete_rename_and_checks_schema() {
     // Create: a brand new file under the stack, template content and all.
     let create = serde_json::json!({
         "kind": "files", "op": "create",
-        "path": "kp-soft/new-note.yml", "content": "hello: world\n"
+        "path": "new-note.yml", "content": "hello: world\n"
     });
     let (st, plan) = call(
         &w.app,
@@ -617,7 +617,7 @@ async fn feat_stacks_files_create_delete_rename_and_checks_schema() {
         "/data/stacks/kp-soft/plan",
         Some(serde_json::json!({ "edit": {
             "kind": "files", "op": "create",
-            "path": "kp-soft/new-note.yml", "content": "x"
+            "path": "new-note.yml", "content": "x"
         } })),
     )
     .await;
@@ -641,7 +641,7 @@ async fn feat_stacks_files_create_delete_rename_and_checks_schema() {
     // Rename: the new note moves, old path gone, new one holds its text.
     let rename = serde_json::json!({
         "kind": "files", "op": "rename",
-        "from": "kp-soft/new-note.yml", "to": "kp-soft/renamed-note.yml"
+        "from": "new-note.yml", "to": "renamed-note.yml"
     });
     let (st, v) = call(
         &w.app,
@@ -659,8 +659,7 @@ async fn feat_stacks_files_create_delete_rename_and_checks_schema() {
     assert_eq!(st, StatusCode::OK);
 
     // Delete: the renamed note goes away; the manifest may not be deleted.
-    let delete =
-        serde_json::json!({ "kind": "files", "op": "delete", "path": "kp-soft/renamed-note.yml" });
+    let delete = serde_json::json!({ "kind": "files", "op": "delete", "path": "renamed-note.yml" });
     let (st, v) = call(
         &w.app,
         "POST",

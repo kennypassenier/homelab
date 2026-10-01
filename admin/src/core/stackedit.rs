@@ -795,16 +795,32 @@ pub fn changes(
                     });
                 }
             }
+            // `tiles:` may not be in the file yet; `set_tile_ops` only
+            // needs to create it ahead of the first tile — checked once
+            // against the original text, since every op here lands in the
+            // same `yamledit::edit` call below (a second "create tiles: {}"
+            // op, from a naive per-tile call, would wipe out the first
+            // tile's own Set that already ran).
+            let mut tiles_created = super::stackedit_tiles::has_tiles(manifest_text);
             for (app, hostname) in tiles {
                 let fields = super::stackedit_tiles::TileFields {
                     name: app.clone(),
                     group: "Own".into(),
                     ..Default::default()
                 };
-                ops.push(Op::Set {
-                    path: vec![Seg::Key("tiles".into()), Seg::Key(hostname.clone())],
-                    value: super::stackedit_tiles::tile_value_for(&fields),
-                });
+                if tiles_created {
+                    ops.push(Op::Set {
+                        path: vec![Seg::Key("tiles".into()), Seg::Key(hostname.clone())],
+                        value: super::stackedit_tiles::tile_value_for(&fields),
+                    });
+                } else {
+                    ops.extend(super::stackedit_tiles::set_tile_ops(
+                        manifest_text,
+                        hostname,
+                        &fields,
+                    ));
+                    tiles_created = true;
+                }
             }
             let new = yamledit::edit(manifest_text, &ops)
                 .map_err(|e| from_edit_error(stack, MANIFEST, e))?;
@@ -886,7 +902,7 @@ pub fn changes(
                     "fix it in the raw editor first",
                 )
             })?;
-            let ops = super::stackedit_tiles::tiles_ops(&m, t).map_err(|why| {
+            let ops = super::stackedit_tiles::tiles_ops(&m, manifest_text, t).map_err(|why| {
                 refusal(stack, why, "reload the tiles editor and redo the change")
             })?;
             if !ops.is_empty() {
@@ -1155,9 +1171,9 @@ pub fn changes(
                 super::stackedit_publish::GatewayWrite::Extra {
                     filename,
                     route_file,
-                    op,
+                    ops,
                 } => {
-                    let new = yamledit::edit(manifest_text, std::slice::from_ref(&op))
+                    let new = yamledit::edit(manifest_text, &ops)
                         .map_err(|e| from_edit_error(stack, MANIFEST, e))?;
                     push(MANIFEST, Some(manifest_text), new);
                     let rel = format!("routes/{filename}");
@@ -1167,17 +1183,13 @@ pub fn changes(
             if let Some(tile) = &p.tile {
                 let key = p.hostname.clone();
                 if !m.tiles.contains_key(&key) {
-                    let value = super::stackedit_tiles::tile_value_for(tile);
-                    let tile_op = Op::Set {
-                        path: vec![Seg::Key("tiles".into()), Seg::Key(key)],
-                        value,
-                    };
                     let base = out
                         .iter()
                         .find(|c| c.path == full(MANIFEST))
                         .and_then(|c| c.new.clone())
                         .unwrap_or_else(|| manifest_text.to_string());
-                    let new = yamledit::edit(&base, &[tile_op])
+                    let ops = super::stackedit_tiles::set_tile_ops(&base, &key, tile);
+                    let new = yamledit::edit(&base, &ops)
                         .map_err(|e| from_edit_error(stack, MANIFEST, e))?;
                     out.retain(|c| c.path != full(MANIFEST));
                     out.push(FileChange {

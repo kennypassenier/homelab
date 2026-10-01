@@ -38,7 +38,8 @@ test("pages, every stack with each tab, and the themes", () => {
   const all = allCommands({ fleet, themes, theme: "dark" });
   const ids = all.map((c) => c.id);
   assert.ok(ids.includes("page:host"));
-  assert.ok(ids.includes("page:timeline"));
+  assert.ok(ids.includes("page:activity"));
+  assert.ok(!ids.includes("page:timeline"), "Timeline merged into Activity");
   assert.ok(ids.includes("stack:media:overview"));
   assert.ok(ids.includes("stack:media:logs"));
   assert.equal(all.find((c) => c.id === "page:host")?.keys, "g h");

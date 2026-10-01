@@ -49,6 +49,10 @@ import {
   probeRowFromValues,
   probeRowProblems,
   probeRowSummary,
+  retentionRowFields,
+  retentionRowFromValues,
+  retentionRowProblems,
+  retentionRowSummary,
   rowBody,
   rowModel,
   rowsChanged,
@@ -59,7 +63,6 @@ import {
   settingsBody,
   settingsExtBody,
   settingsExtForm,
-  settingsExtProblems,
   settingsForm,
   startValues,
   storageFields,
@@ -725,7 +728,7 @@ test("every stack's edit tabs and a new stack are palette commands, the open sta
   assert.equal(opened, 1);
 });
 
-test("the settings-ext form sends only what changed, retention as JSON", () => {
+test("the settings-ext form sends only what changed; retention is a row table, not JSON", () => {
   const m = /** @type {any} */ ({
     ...manifest,
     network: { ip: "10.10.10.16/24", gateway: "10.10.10.1", bridge: "vmbr0" },
@@ -747,25 +750,73 @@ test("the settings-ext form sends only what changed, retention as JSON", () => {
       "edit-lxc-vpn",
       "edit-resources-storage",
       "edit-on-demand",
-      "edit-retention",
     ],
   );
   const values = startValues(form);
-  assert.deepEqual(settingsExtBody(form, values), { kind: "settings_ext" });
+  assert.deepEqual(settingsExtBody(form, values, null), {
+    kind: "settings_ext",
+  });
   values.ip = "10.10.10.20/24";
   values.gpu = true;
-  assert.deepEqual(settingsExtBody(form, values), {
+  assert.deepEqual(settingsExtBody(form, values, null), {
     kind: "settings_ext",
     ip: "10.10.10.20/24",
     gpu: true,
   });
-  values.retention = "not json";
-  assert.match(settingsExtProblems(values).retention, /valid JSON/);
-  values.retention = '[{"every_days": "soon"}]';
-  assert.match(settingsExtProblems(values).retention, /every_days/);
-  values.retention = "[]";
-  assert.deepEqual(settingsExtProblems(values), {});
-  assert.deepEqual(settingsExtBody(form, values).retention, []);
+  // W2: retention is the same origin-less full-list shape the backend
+  // already took for the textarea — a plain array, no `origin` field, an
+  // empty list going back to the fleet default.
+  assert.deepEqual(
+    settingsExtBody(form, values, [
+      { origin: 0, row: { every_days: 1, span_days: 7 } },
+      { origin: null, row: { every_days: 30 } },
+    ]).retention,
+    [{ every_days: 1, span_days: 7 }, { every_days: 30 }],
+  );
+  assert.deepEqual(settingsExtBody(form, values, []).retention, []);
+});
+
+test("retentionRowFields/FromValues/Problems/Summary — the retention row dialog", () => {
+  assert.deepEqual(
+    retentionRowFields({ every_days: 7, span_days: 90 }).map((f) => [
+      f.name,
+      f.current,
+    ]),
+    [
+      ["every_days", "7"],
+      ["span_days", "90"],
+    ],
+  );
+  assert.deepEqual(
+    retentionRowFields(null).map((f) => f.current),
+    ["", ""],
+  );
+  assert.deepEqual(
+    retentionRowFromValues({ every_days: "1", span_days: "7" }),
+    { every_days: 1, span_days: 7 },
+  );
+  assert.deepEqual(
+    retentionRowFromValues({ every_days: "30", span_days: "" }),
+    {
+      every_days: 30,
+    },
+  );
+  assert.equal(
+    retentionRowProblems({ every_days: "10", span_days: "3" }).span_days,
+    "Must be at least the keep-one-every span.",
+  );
+  assert.deepEqual(
+    retentionRowProblems({ every_days: "1", span_days: "7" }),
+    {},
+  );
+  assert.equal(
+    retentionRowSummary({ every_days: 1, span_days: 7 }),
+    "every 1d, kept 7d",
+  );
+  assert.equal(
+    retentionRowSummary({ every_days: 30 }),
+    "every 30d, kept forever",
+  );
 });
 
 test("the origin-tracked row helpers: model, body, change detection", () => {

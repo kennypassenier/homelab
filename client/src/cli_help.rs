@@ -98,6 +98,7 @@ pub const VERBS: &[Verb] = &[
     v(Host, "templates", "", "list the golden container templates", "homelab templates"),
     v(Host, "template-build", "[vmid] [version] [--privileged] [--base <vztmpl>]", "build a golden template on a scratch vmid (999 and version 1 when not given)", "homelab template-build 999 5 --base debian-13-standard_13.1-2_amd64.tar.zst"),
     v(Host, "release-update", "[tag]", "download the host daemon's release (newest when no tag), verify it, ship it to the host", "homelab release-update v3.60.0"),
+    v(Host, "host", "restart", "restart the host daemon so settings saved to host.toml load; refused while a job runs", "homelab host restart"),
     v(Host, "self-update", "<path-to-homelab-host>", "ship a locally built host daemon to the host; it rolls back on a failed selfcheck", "homelab self-update target/release/homelab-host"),
     v(Host, "self-install", "[tag]", "replace this client with a release's (newest when no tag), signature- and checksum-verified", "homelab self-install"),
     v(Local, "presets", "", "list the preset catalog", "homelab presets"),

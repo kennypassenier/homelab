@@ -116,7 +116,8 @@ fn the_first_publish_of_a_stack_becomes_the_primary_route() {
 fn a_second_app_extends_the_same_route_file_instead_of_a_new_gateway_route() {
     let mut t = texts();
     let with_route = format!(
-        "{BASE}apps: [sonarr, radarr]\ngateway_route:\n  filename: 104-app-x.yml\n  gateway_vmid: 104\n"
+        "{}gateway_route:\n  filename: 104-app-x.yml\n  gateway_vmid: 104\n",
+        BASE.replace("apps: [sonarr]", "apps: [sonarr, radarr]")
     );
     t.insert("lxc-compose.yml".to_string(), with_route);
     t.insert(

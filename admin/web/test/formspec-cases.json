@@ -459,12 +459,10 @@
         "gpu": false,
         "vpn": false,
         "storage": "local-lvm",
-        "on_demand": false,
-        "retention": "not json"
+        "on_demand": false
       },
       "errors": {
-        "gateway": "\"not-an-ip\" is not a valid gateway.",
-        "retention": "Not valid JSON: a list like [] or [{\"every_days\": 1, \"span_days\": 7}]."
+        "gateway": "\"not-an-ip\" is not a valid gateway."
       }
     },
     {
@@ -511,8 +509,7 @@
         "gpu": false,
         "vpn": false,
         "storage": "local-lvm",
-        "on_demand": false,
-        "retention": "[]"
+        "on_demand": false
       },
       "errors": {}
     },

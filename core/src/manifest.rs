@@ -903,6 +903,33 @@ fn compose_mount_targets(content: &str) -> Vec<(String, String, bool)> {
 }
 
 fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
+    // Pure manifest shape, needed no matter whether this is a fresh deploy
+    // (`validate`, below) or a staged dashboard edit not yet deployed
+    // (`validate_manifest`, called from the plan/commit path so this is
+    // caught before anything is written, not only at the next deploy) —
+    // a native unit removed down to none must also clear `native_only`,
+    // or refuse the edit, the same as declaring apps would.
+    if m.native_only && m.natives.is_empty() {
+        problems.push(
+            "native_only is set but no natives are declared :: name the systemd units this \
+             container runs, so the deploy knows what to install and a rebuild is not guesswork"
+                .into(),
+        );
+    }
+    if m.apps.is_empty() && !m.native_only {
+        problems.push(
+            "a stack needs at least one app :: a container that deliberately runs no docker \
+             says so with `native_only: true`, so that an empty list is never mistaken for a \
+             list somebody forgot to fill in"
+                .into(),
+        );
+    }
+    if !m.apps.is_empty() && m.native_only {
+        problems.push(format!(
+            "native_only is set but the stack declares apps ({}) :: one of the two is wrong",
+            m.apps.join(", ")
+        ));
+    }
     // fix-88: a firewall Proxmox would reject or misread is refused before
     // anything is written — a rule that silently means the whole VLAN is the
     // failure a firewall exists to prevent.
@@ -1114,27 +1141,6 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
         problems.push(format!(
             "disk_gb {} below the sane floor of 2",
             m.resources.disk_gb
-        ));
-    }
-    if m.native_only && m.natives.is_empty() {
-        problems.push(
-            "native_only is set but no natives are declared :: name the systemd units this \
-             container runs, so the deploy knows what to install and a rebuild is not guesswork"
-                .into(),
-        );
-    }
-    if m.apps.is_empty() && !m.native_only {
-        problems.push(
-            "a stack needs at least one app :: a container that deliberately runs no docker \
-             says so with `native_only: true`, so that an empty list is never mistaken for a \
-             list somebody forgot to fill in"
-                .into(),
-        );
-    }
-    if !m.apps.is_empty() && m.native_only {
-        problems.push(format!(
-            "native_only is set but the stack declares apps ({}) :: one of the two is wrong",
-            m.apps.join(", ")
         ));
     }
     // M1: the two lists must stay distinct. A directory the orchestrator owns

@@ -695,7 +695,22 @@ pub fn refused(step: &UiStep, why: impl Into<String>, fix: impl Into<String>) ->
 }
 
 const BUTTONS: &[&str] = &[
-    "next", "back", "confirm", "close", "save", "default", "cancel",
+    "next",
+    "back",
+    "confirm",
+    "close",
+    "save",
+    "default",
+    "cancel",
+    // feat-native-1: native-remove's own button, beside "next".
+    "remove",
+    // feat-preset-1: the Files card's own three buttons and "Remove this
+    // preset…", beside "next" (`EditState.action` names which one built
+    // the current plan).
+    "save-file",
+    "rename-file",
+    "delete-file",
+    "remove-preset",
 ];
 
 impl OpenForm {

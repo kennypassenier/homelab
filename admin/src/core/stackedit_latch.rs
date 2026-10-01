@@ -247,6 +247,28 @@ pub fn ops(manifest_text: &str, e: &LatchEdit) -> Vec<Op> {
                         path: path("latch_files"),
                     });
                 }
+            } else if old_len == 0 {
+                // Nothing to keep or retext (every item is `Item::New`
+                // since there was nothing old to point `origin` at) and
+                // possibly no `latch_files:` key in the file at all yet —
+                // `Op::Seq`'s rebuild needs an existing key to rewrite,
+                // the same as `Op::Set` needs for a NESTED path, but a
+                // top-level `Op::Set` (like `latch_secrets` above) creates
+                // the key when it is missing, so it is used here instead.
+                ops.push(Op::Set {
+                    path: path("latch_files"),
+                    value: Value::Sequence(
+                        items
+                            .into_iter()
+                            .map(|it| match it {
+                                Item::New(v) => v,
+                                Item::Keep(_) | Item::Retext(_, _) => {
+                                    unreachable!("old_len == 0: every item is Item::New")
+                                }
+                            })
+                            .collect(),
+                    ),
+                });
             } else {
                 ops.push(Op::Seq {
                     path: path("latch_files"),
@@ -345,7 +367,8 @@ natives: [kyu]
             secrets: Some(vec!["jellyfin".into()]),
             ..Default::default()
         };
-        assert!(ops(TEXT, &e).is_empty());
+        let text = format!("{TEXT}latch_secrets: [jellyfin]\n");
+        assert!(ops(&text, &e).is_empty());
     }
 
     #[test]

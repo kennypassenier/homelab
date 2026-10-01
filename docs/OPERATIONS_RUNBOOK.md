@@ -934,7 +934,10 @@ once the restore is proven; `--no-safety-copy` skips it), then
 even when the restore failed, and verifies they run
 (`core/src/ops/backup.rs:803-962`).
 
-**Restore to a named snapshot.** `homelab restore stacks/<name> <id>`. The
+**Restore to a named snapshot.** `homelab restore stacks/<name> <id>`.
+`homelab snapshots stacks/<name>` (fix-64) lists the ids there is to pick
+from, one repository at a time, newest first, reusing `GetBackups`
+unchanged — also palette-only in the TUI, Ctrl+K then "snapshots". The
 id must exist in **every** owning app's repository, otherwise the restore
 stops before anything is stopped with `"is not in the repository for"`
 (`core/src/ops/backup.rs:836-880`). A restic snapshot id belongs to one

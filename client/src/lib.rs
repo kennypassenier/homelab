@@ -15,6 +15,7 @@ pub mod release;
 pub mod repo_config;
 pub mod routes;
 pub mod scaffold;
+pub mod snapshots;
 pub mod spec;
 pub mod status;
 pub mod testplan;

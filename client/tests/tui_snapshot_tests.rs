@@ -922,6 +922,69 @@ fn fix_107_apply_in_the_tui_deploys_every_changed_stack_after_one_y() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// fix-64 (restore-no-confirm-no-safety-snapshot): a snapshot list in the
+/// TUI, palette-only ("op.snapshots") — the same `GetBackups` reply the
+/// dashboard's Backups page and `homelab snapshots` read, rendered into the
+/// focus window's scrollable feed instead of shown as raw JSON.
+#[test]
+fn fix_64_snapshots_in_the_tui_lists_every_repository_from_get_backups() {
+    use homelab_proto::{Command, ServerMsg};
+    let mut m = ready_model();
+    m.selected_stack = 0;
+    let stack_name = m.fleet.as_ref().unwrap().stacks[0].name.clone();
+
+    m.palette_open = true;
+    m.palette_input = "snapshots:".into();
+    m.palette_sel = 0;
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        )),
+    );
+    assert!(m.snapshots_pending);
+    assert!(m
+        .outbox
+        .iter()
+        .any(|c| matches!(c, Command::GetBackups { stack } if *stack == stack_name)));
+    assert!(m.focus.as_ref().unwrap().title.contains(&stack_name));
+    assert!(!m.focus.as_ref().unwrap().done);
+
+    let payload = serde_json::json!({
+        "native": false,
+        "repos": [{
+            "owner": "syncthing",
+            "newest_snapshot": {"id": "aaaaaaaa", "short_id": "aaaaaaaa", "time": 2000, "run": 2000},
+            "snapshot_count": 1,
+            "snapshots": [{"id": "aaaaaaaa", "short_id": "aaaaaaaa", "time": 2000, "run": 2000}],
+        }]
+    });
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Backend(homelab_client::tui::backend::BackendEvent::Server(
+            ServerMsg::RpcDone(homelab_proto::RpcResponse {
+                id: 1,
+                ok: true,
+                message: payload.to_string(),
+                deferred: None,
+            }),
+        )),
+    );
+    assert!(!m.snapshots_pending);
+    let focus = m.focus.as_ref().unwrap();
+    assert!(focus.done);
+    assert!(focus.ok);
+    let feed: String = focus
+        .feed
+        .iter()
+        .map(|l| l.msg.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(feed.contains("syncthing"), "{}", feed);
+    assert!(feed.contains("aaaaaaaa"), "{}", feed);
+}
+
 #[test]
 fn d11_bundle_round_trip_excludes_secrets_and_substitutes() {
     let tmp = std::env::temp_dir().join(format!("homelab-bundle-{}", std::process::id()));

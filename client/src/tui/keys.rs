@@ -201,6 +201,16 @@ pub const KEYMAP: &[Binding] = &[
         None,
         Some("op.apply"),
     ),
+    // fix-64 (restore-no-confirm-no-safety-snapshot): a read, not one of
+    // the six stack operations with keys — palette-only, same as `homelab
+    // snapshots` on the command line.
+    b(
+        "",
+        "snapshots: every backup of the selected stack's repositories",
+        Scope::Stacks,
+        None,
+        Some("op.snapshots"),
+    ),
     // LOG_STREAM.
     b(
         "LEFT/RIGHT",

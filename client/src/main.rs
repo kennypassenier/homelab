@@ -1101,6 +1101,35 @@ async fn run(explicit_host: Option<String>) {
                 other
             )),
         },
+        // fix-64 (restore-no-confirm-no-safety-snapshot, 2026-09-27):
+        // `homelab restore` already takes a snapshot id; this is where to
+        // read what ids exist without the dashboard. Reuses `GetBackups`
+        // (feat-backup-1/2) unchanged — the same per-repository status,
+        // with every snapshot, the Backups page and its restore picker
+        // already read.
+        "snapshots" => {
+            let stack = homelab_client::repo_config::stack_name(
+                args.get(2)
+                    .unwrap_or_else(|| die("usage: homelab snapshots stacks/<name>")),
+            );
+            let json = args.iter().any(|a| a == "--json");
+            let reply = rpc_reply(&host, &token, Command::GetBackups { stack })
+                .await
+                .unwrap_or_else(|| die("the host did not answer"));
+            if !reply.ok {
+                die(&reply.message);
+            }
+            if json {
+                println!("{}", reply.message);
+            } else {
+                match serde_json::from_str::<homelab_client::snapshots::GetBackupsReply>(
+                    &reply.message,
+                ) {
+                    Ok(r) => print!("{}", homelab_client::snapshots::render(r.native, &r.repos)),
+                    Err(_) => println!("{}", reply.message),
+                }
+            }
+        }
         // fix-120 (per-machine tokens, owner decision 2026-10-01): a token
         // per machine, so one can be revoked without touching the others.
         "token" => match args.get(2).map(String::as_str) {

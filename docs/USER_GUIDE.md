@@ -2219,6 +2219,14 @@ homelab restore stacks/syncthing --yes        # scripts: the name counts as type
 homelab restore stacks/media --app sonarr     # one app; the others keep running
 ```
 
+`homelab snapshots stacks/<name>` (fix-64) lists the `<snapshot-id>` values
+above, one repository at a time, newest first — `--json` for a script. It
+reuses `Command::GetBackups` (feat-backup-1/2) unchanged, the same
+per-repository status the dashboard's Backups page and its restore picker
+already read, so there is one source of this list. Also in the TUI,
+palette-only ("snapshots: every backup…", Ctrl+K — a read, not one of the
+six stack operations with keys).
+
 Since fix-112 (2026-09-27) a stack with several repositories is restored to
 one night across all of them (the `run-<unix time>` tag every backup
 writes), never each repository's own newest; with the safety copy taken,

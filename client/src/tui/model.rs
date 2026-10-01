@@ -353,6 +353,10 @@ pub struct Model {
     pub today: Option<homelab_core::ops::today::Today>,
     /// A `Today` request is on the wire.
     pub today_pending: bool,
+    /// fix-64 (restore-no-confirm-no-safety-snapshot): a `GetBackups`
+    /// request for the snapshot-list focus window is on the wire — the
+    /// reply is rendered into the window instead of shown as raw JSON.
+    pub snapshots_pending: bool,
 
     pub should_quit: bool,
     /// Commands the update fn wants sent to the backend this cycle.
@@ -422,6 +426,7 @@ impl Model {
             local_hashes: std::collections::HashMap::new(),
             today: None,
             today_pending: false,
+            snapshots_pending: false,
             should_quit: false,
             outbox: Vec::new(),
         }
@@ -697,6 +702,38 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                         lines,
                         spec,
                     });
+                    return;
+                }
+                // fix-64: the snapshot-list focus window's GetBackups
+                // reply, rendered the same way `homelab snapshots` renders
+                // it on the command line (one line per snapshot, fed into
+                // the scrollable transcript) rather than shown as raw JSON.
+                if model.snapshots_pending {
+                    model.snapshots_pending = false;
+                    if let Some(focus) = model.focus.as_mut() {
+                        focus.done = true;
+                        focus.ok = resp.ok;
+                        if resp.ok {
+                            match serde_json::from_str::<crate::snapshots::GetBackupsReply>(
+                                &resp.message,
+                            ) {
+                                Ok(r) => {
+                                    let text = crate::snapshots::render(r.native, &r.repos);
+                                    for line in text.lines() {
+                                        focus.feed.push(LogRow {
+                                            level: LogLevel::Info,
+                                            source: "HOST".into(),
+                                            msg: line.to_string(),
+                                        });
+                                    }
+                                    focus.result = format!("{} repositor(y/ies)", r.repos.len());
+                                }
+                                Err(_) => focus.result = resp.message.clone(),
+                            }
+                        } else {
+                            focus.result = resp.message.clone();
+                        }
+                    }
                     return;
                 }
                 if model.shell_waiting {
@@ -1369,6 +1406,7 @@ fn run_action(model: &mut Model, id: &str) {
         "op.park" => ask_park(model),
         "op.host-update" => ask_host_update(model),
         "op.apply" => ask_apply(model),
+        "op.snapshots" => open_snapshots(model),
         "op.restore" => {
             if let Some(name) = selected_stack_name(model) {
                 model.confirm = Some(Confirm {
@@ -1647,6 +1685,27 @@ fn ask_apply(model: &mut Model) {
         ),
         action: YesNoAction::Apply(changed),
     });
+}
+
+/// fix-64 (restore-no-confirm-no-safety-snapshot, 2026-09-27): every backup
+/// snapshot of the selected stack's repositories — the same `GetBackups`
+/// the dashboard's Backups page and `homelab snapshots` read, so there is
+/// one source of this list. Palette-only; it is a read, not one of the six
+/// stack operations form T1 gave keys to.
+fn open_snapshots(model: &mut Model) {
+    let Some(name) = selected_stack_name(model) else {
+        return;
+    };
+    model.focus = Some(Focus {
+        title: format!("SNAPSHOTS {}", name),
+        feed: Vec::new(),
+        scroll: 0,
+        done: false,
+        ok: false,
+        result: String::new(),
+    });
+    model.snapshots_pending = true;
+    model.outbox.push(Command::GetBackups { stack: name });
 }
 
 /// G2: open the new-stack wizard (key `n`, and the palette since fix-107).

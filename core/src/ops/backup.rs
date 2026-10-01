@@ -1825,7 +1825,10 @@ pub fn snapshot_is_empty(stdout: &str) -> bool {
 /// on the remote, and the last restore-drill verdict recorded for it
 /// (`state::DrillRecord`, keyed the same way the drill itself keys it: by
 /// repository name).
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+// fix-64: Deserialize added so the CLI (`homelab snapshots`) can parse the
+// host's GetBackups reply; the dashboard, which only ever serialized this
+// to JSON for its own JS, did not need it before.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RepoStatus {
     /// D25: the owning app (compose) or unit (native) — the restic
     /// repository is named `<base>/<owner>-config`.

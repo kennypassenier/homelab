@@ -70,6 +70,7 @@ pub const VERBS: &[Verb] = &[
     v(Daily, "status", "[--json]", "the fleet as the host records it, one line per stack (--json: the raw FleetState)", "homelab status"),
     v(Daily, "doctor", "", "the host's own diagnosis: state, backups, offsite, disk", "homelab doctor"),
     v(Daily, "incidents", "[show <name>]", "the bundles failed operations left behind; `show` prints one: the error, the versions and the end of its transcript", "homelab incidents show 1790530911-deploy-mystack"),
+    v(Daily, "snapshots", "stacks/<name> [--json]", "every backup snapshot of a stack's repositories, newest first — the id `homelab restore` takes", "homelab snapshots stacks/kyu"),
     v(Daily, "ping", "", "is the host there, which version, and where the address came from", "homelab ping"),
     v(Daily, "tui", "[--offline]", "the terminal interface; --offline runs it against a demo host", "homelab tui"),
     v(ChangeAStack, "plan", "stacks/<name>", "validate a stack here and print what a deploy would send", "homelab plan mystack"),

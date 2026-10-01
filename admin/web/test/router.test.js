@@ -358,7 +358,7 @@ test("the navigation renders from the registry and marks the current page", () =
   const reached = top.flatMap((n) =>
     (n.items ? n.items : [n]).map((i) => i.href),
   );
-  assert.equal(reached.length, 16);
+  assert.equal(reached.length, pageSet.pages.filter((p) => p.nav).length);
   assert.equal(navEntries(null, route("/")).length, 0);
   const onStack = navEntries(pageSet, route("/stacks/media/apps"));
   assert.deepEqual(onStack[1], {

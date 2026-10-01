@@ -82,8 +82,10 @@ pub fn from_fleet(fleet: &[FleetFirewall]) -> Topology {
 }
 
 /// feat-stacks-9: what each stack reaches (its outbound dependencies) and
-/// what reaches it (who depends on it), read off the same edges — a
-/// dependency is simply a declared (or open) flow, directed.
+/// what reaches it (who depends on it), read off the same edges. Only a
+/// declared flow counts: an open edge means nothing stops the traffic, not
+/// that anything relies on it, and counting it would make every stack
+/// depend on every unguarded one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DependencyRow {
     pub stack: String,
@@ -100,13 +102,13 @@ pub fn dependencies(topo: &Topology) -> Vec<DependencyRow> {
             let mut depends_on: Vec<String> = topo
                 .edges
                 .iter()
-                .filter(|e| e.from == n.stack)
+                .filter(|e| e.kind == "declared" && e.from == n.stack)
                 .map(|e| e.to.clone())
                 .collect();
             let mut depended_on_by: Vec<String> = topo
                 .edges
                 .iter()
-                .filter(|e| e.to == n.stack)
+                .filter(|e| e.kind == "declared" && e.to == n.stack)
                 .map(|e| e.from.clone())
                 .collect();
             depends_on.sort();

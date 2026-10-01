@@ -187,8 +187,8 @@ pub async fn orphan_files_keeping(
         exec,
         m.vmid,
         &format!(
-            "cd '/opt/{0}' 2>/dev/null && find . -type f -printf '%P\\n' 2>/dev/null || true",
-            m.stack_name
+            "cd {0} 2>/dev/null && find . -type f -printf '%P\\n' 2>/dev/null || true",
+            shq(&format!("/opt/{}", m.stack_name))
         ),
         120,
     )
@@ -2383,18 +2383,21 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     step!(runner, exec, ctx, m, "verify health", {
         exec.sleep_ms(5000).await;
         for app in &m.apps {
-            let dir = shq(&format!("/opt/{}/{}", m.stack_name, app));
-            let out = pct_sh(
-                exec,
-                m.vmid,
-                &format!(
-                    "cd {} && docker compose ps --status running --services",
-                    dir
-                ),
-                60,
-            )
-            .await?;
-            if out.stdout.trim().is_empty() {
+            // fix-132/fix-133: `docker compose ps --format json` through the
+            // Unknown-carrying parser, instead of matching the plain-text
+            // table (`--status running --services`) and reading an empty
+            // answer as "nothing running" — which is also what a probe that
+            // could not even ask compose looks like.
+            let running =
+                crate::ops::util::compose_running_services(exec, m.vmid, &m.stack_name, app, "")
+                    .await?;
+            let reason = match &running {
+                Some(r) if !r.is_empty() => None,
+                Some(_) => Some("no running services".to_string()),
+                None => Some("could not read `docker compose ps` for this app".to_string()),
+            };
+            if let Some(reason) = reason {
+                let dir = shq(&format!("/opt/{}/{}", m.stack_name, app));
                 let diag = pct_sh(
                     exec,
                     m.vmid,
@@ -2409,7 +2412,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 .unwrap_or_default();
                 return Err(CoreError::Command {
                     rendered: format!("verify {}", app),
-                    detail: format!("no running services\n{}", diag),
+                    detail: format!("{}\n{}", reason, diag),
                 });
             }
             log_info(format!("[gate] {} :: running", app));
@@ -3438,20 +3441,25 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         // `registry`. Matching names reported that healthy stack as broken.
         if !m.native_only {
             for app in &m.apps {
-                let out = pct_sh(
+                // fix-132/fix-133: JSON + the Unknown state, so a probe that
+                // could not be read is its own finding rather than silently
+                // the same "no running service" as an actually dead app.
+                match crate::ops::util::compose_running_services(
                     exec,
                     m.vmid,
-                    &format!(
-                        "cd '/opt/{}/{}' && docker compose ps --status running --services",
-                        m.stack_name, app
-                    ),
-                    120,
+                    &m.stack_name,
+                    app,
+                    "",
                 )
                 .await
-                .map(|o| o.stdout.trim().to_string())
-                .unwrap_or_default();
-                if out.is_empty() {
-                    wrong.push(format!("app '{}' has no running service", app));
+                .unwrap_or(None)
+                {
+                    Some(running) if !running.is_empty() => {}
+                    Some(_) => wrong.push(format!("app '{}' has no running service", app)),
+                    None => wrong.push(format!(
+                        "app '{}' :: could not read `docker compose ps`",
+                        app
+                    )),
                 }
             }
         }

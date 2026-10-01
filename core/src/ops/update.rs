@@ -27,10 +27,9 @@ async fn capture_app(
     stack: &str,
     app: &str,
 ) -> Result<Vec<CapturedImage>, CoreError> {
-    let script = format!(
-        "cd '/opt/{}/{}' && docker compose ps -q | xargs -r docker inspect --format '{{{{.Image}}}} {{{{.Config.Image}}}}'",
-        stack, app
-    );
+    let script = super::util::app_dir_script(stack, app)
+        .raw("docker compose ps -q | xargs -r docker inspect --format '{{.Image}} {{.Config.Image}}'")
+        .build();
     let out = super::util_pct_sh(exec, vmid, &script, 60).await?;
     Ok(out
         .stdout
@@ -92,10 +91,12 @@ async fn service_policies(
     stack: &str,
     app: &str,
 ) -> Result<Vec<(String, String)>, CoreError> {
-    let script = format!(
-        "cd '/opt/{}/{}' && docker compose ps -q | xargs -r docker inspect --format '{{{{index .Config.Labels \"com.homelab.update.policy\"}}}}|{{{{index .Config.Labels \"com.docker.compose.service\"}}}}'",
-        stack, app
-    );
+    let script = super::util::app_dir_script(stack, app)
+        .raw(
+            "docker compose ps -q | xargs -r docker inspect --format \
+             '{{index .Config.Labels \"com.homelab.update.policy\"}}|{{index .Config.Labels \"com.docker.compose.service\"}}'",
+        )
+        .build();
     let out = super::util_pct_sh(exec, vmid, &script, 60).await?;
     Ok(out
         .stdout
@@ -128,7 +129,7 @@ async fn service_policies(
 /// came up" from "came up and died".
 pub fn settle_script(stack: &str, app: &str, want: &[String], services: &str) -> String {
     format!(
-        "cd '/opt/{stack}/{app}' || exit 1; \
+        "cd {dir} || exit 1; \
          want='{want}'; \
          running() {{ docker compose ps --services --status running{svcs} | sort; }}; \
          missing() {{ r=$(running); for w in $want; do echo \"$r\" | grep -qx \"$w\" || echo \"$w\"; done; }}; \
@@ -146,8 +147,7 @@ pub fn settle_script(stack: &str, app: &str, want: &[String], services: &str) ->
            [ $i -ge 24 ] && {{ echo NEVER_HEALTHY; exit 1; }}; sleep 5; i=$((i+1)); done; \
          u=$(health | grep ' unhealthy$'); [ -z \"$u\" ] || {{ echo UNHEALTHY $u; exit 1; }}; \
          echo HEALTHY",
-        stack = stack,
-        app = app,
+        dir = shq(&format!("/opt/{}/{}", stack, app)),
         want = want.join(" "),
         svcs = services
     )
@@ -163,26 +163,19 @@ async fn running_services(
     app: &str,
     services: &str,
 ) -> Result<Vec<String>, CoreError> {
-    let out = super::util_pct_sh(
-        exec,
-        vmid,
-        &format!(
-            "cd '/opt/{}/{}' && docker compose ps --services --status running{}",
-            stack, app, services
-        ),
-        60,
-    )
-    .await?;
-    let mut names: Vec<String> = out
-        .stdout
-        .lines()
-        .map(str::trim)
+    // fix-132/fix-133: `--format json` through the Unknown-carrying parser.
+    // A probe that could not be read is treated as before this fix found no
+    // reader to prefer: nothing was running yet.
+    let names = super::util::compose_running_services(exec, vmid, stack, app, services)
+        .await?
+        .unwrap_or_default();
+    let mut names: Vec<String> = names
+        .into_iter()
         .filter(|l| {
             !l.is_empty()
                 && l.chars()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
         })
-        .map(str::to_string)
         .collect();
     names.sort();
     names.dedup();
@@ -224,12 +217,10 @@ async fn verify_app(
     stack: &str,
     app: &str,
 ) -> Result<bool, CoreError> {
-    let script = format!(
-        "cd '/opt/{}/{}' && docker compose ps --status running --services",
-        stack, app
-    );
-    let out = super::util_pct_sh(exec, vmid, &script, 60).await?;
-    Ok(!out.stdout.trim().is_empty())
+    // fix-132/fix-133: JSON + Unknown. A probe that could not be read is, as
+    // before this fix gave it its own name, not healthy either.
+    let running = super::util::compose_running_services(exec, vmid, stack, app, "").await?;
+    Ok(matches!(running, Some(r) if !r.is_empty()))
 }
 
 /// fix-61: what the pre-update copy step decided.
@@ -276,11 +267,12 @@ async fn pre_update_copy_of(
     let pulled = super::util_pct_sh(
         exec,
         m.vmid,
-        &format!(
-            "cd '/opt/{}/{}' && docker compose config --images{} | xargs -r docker image \
-             inspect --format '{{{{.Id}}}}'",
-            m.stack_name, app, services
-        ),
+        &super::util::app_dir_script(&m.stack_name, app)
+            .raw(&format!(
+                "docker compose config --images{} | xargs -r docker image inspect --format '{{{{.Id}}}}'",
+                services
+            ))
+            .build(),
         60,
     )
     .await?;
@@ -352,13 +344,8 @@ async fn pre_update_copy_of(
 
     // Paused, not stopped: the processes are frozen for the copy and carry on
     // on the old image if anything below fails.
-    super::util_pct_sh(
-        exec,
-        m.vmid,
-        &format!("cd '/opt/{}/{}' && docker compose pause", m.stack_name, app),
-        60,
-    )
-    .await?;
+    super::util::compose_in_app(exec, m.vmid, &m.stack_name, app, "docker compose pause", 60)
+        .await?;
     let copied = exec
         .run(&Cmd::new(
             "sh",
@@ -373,13 +360,12 @@ async fn pre_update_copy_of(
             1800,
         ))
         .await;
-    let unpaused = super::util_pct_sh(
+    let unpaused = super::util::compose_in_app(
         exec,
         m.vmid,
-        &format!(
-            "cd '/opt/{}/{}' && docker compose unpause",
-            m.stack_name, app
-        ),
+        &m.stack_name,
+        app,
+        "docker compose unpause",
         60,
     )
     .await;
@@ -536,10 +522,9 @@ pub async fn update(
             let out = super::util_pct_sh(
                 exec,
                 vmid,
-                &format!(
-                    "cd '/opt/{}/{}' && docker compose pull -q{}",
-                    stack, app, services
-                ),
+                &super::util::app_dir_script(&stack, app)
+                    .raw(&format!("docker compose pull -q{}", services))
+                    .build(),
                 600,
             )
             .await?;
@@ -613,12 +598,14 @@ pub async fn update(
         // for backups.
         let stop_step = format!("{} :: stop-first", app);
         step!(runner, &stop_step, {
-            let script = format!(
-                "cd '/opt/{}/{}' && for c in $(docker compose ps -q{}); do \
-                   if [ \"$(docker inspect --format '{{{{index .Config.Labels \"com.homelab.update.stop-first\"}}}}' $c)\" = true ]; then \
-                     docker stop -t 60 $c; fi; done; true",
-                stack, app, services
-            );
+            let script = super::util::app_dir_script(&stack, app)
+                .raw(&format!(
+                    "for c in $(docker compose ps -q{}); do \
+                       if [ \"$(docker inspect --format '{{{{index .Config.Labels \"com.homelab.update.stop-first\"}}}}' $c)\" = true ]; then \
+                         docker stop -t 60 $c; fi; done; true",
+                    services
+                ))
+                .build();
             let out = super::util_pct_sh(exec, vmid, &script, 180).await?;
             Ok(if out.stdout.trim().is_empty() {
                 StepOutcome::Unchanged
@@ -629,22 +616,17 @@ pub async fn update(
 
         let up_step = format!("{} :: up", app);
         step!(runner, &up_step, {
+            let verb = if services.is_empty() {
+                "docker compose up -d --remove-orphans".to_string()
+            } else {
+                // fix-117: only the auto services, and not the services they
+                // depend on, which keep their own label.
+                format!("docker compose up -d --no-deps{}", services)
+            };
             let out = super::util_pct_sh(
                 exec,
                 vmid,
-                &if services.is_empty() {
-                    format!(
-                        "cd '/opt/{}/{}' && docker compose up -d --remove-orphans",
-                        stack, app
-                    )
-                } else {
-                    // fix-117: only the auto services, and not the services
-                    // they depend on, which keep their own label.
-                    format!(
-                        "cd '/opt/{}/{}' && docker compose up -d --no-deps{}",
-                        stack, app, services
-                    )
-                },
+                &super::util::app_dir_script(&stack, app).raw(&verb).build(),
                 600,
             )
             .await?;
@@ -712,10 +694,12 @@ pub async fn update(
             super::util_pct_sh(
                 exec,
                 vmid,
-                &format!(
-                    "cd '/opt/{}/{}' && {}docker compose up -d --force-recreate{}",
-                    stack, app, retags, services
-                ),
+                &super::util::app_dir_script(&stack, app)
+                    .raw(&format!(
+                        "{}docker compose up -d --force-recreate{}",
+                        retags, services
+                    ))
+                    .build(),
                 300,
             )
             .await?;

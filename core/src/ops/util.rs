@@ -1,7 +1,8 @@
 //! Small shared helpers for operations.
 
+use crate::compose::ComposePs;
 use crate::error::CoreError;
-use crate::executor::{pct_sh, run_ok, Cmd, Executor};
+use crate::executor::{pct_sh, run_ok, Cmd, CmdOutput, Executor, Script};
 
 /// Push literal content to a path inside an LXC. Returns true when the
 /// destination changed (drives conditional restarts — B1).
@@ -188,6 +189,68 @@ pub fn stale_push_staging(entries: &[(String, u64)], now: u64, max_age_s: u64) -
         })
         .map(|(name, _)| name.clone())
         .collect()
+}
+
+/// `cd /opt/<stack>/<app>`, built through the quote-safe [`Script`] (shell-
+/// strings-quoting, expert panel 2026-09-27) instead of a `format!` that
+/// interpolates `stack`/`app` between bare `'{}'` quotes — the shape
+/// fix-132/fix-133 found still hand-rolled at several `docker compose` call
+/// sites.
+pub fn app_dir_script(stack: &str, app: &str) -> Script {
+    Script::new().cd(&format!("/opt/{}/{}", stack, app))
+}
+
+/// Run `docker compose <verb>` in `/opt/<stack>/<app>`, quoted through
+/// [`app_dir_script`]. `verb` is a fixed, trusted fragment (never a value
+/// built from stack/app data) — the same trust `Script::raw` documents.
+pub async fn compose_in_app(
+    exec: &dyn Executor,
+    vmid: u16,
+    stack: &str,
+    app: &str,
+    verb: &str,
+    timeout_s: u64,
+) -> Result<CmdOutput, CoreError> {
+    let script = app_dir_script(stack, app).raw(verb).build();
+    pct_sh(exec, vmid, &script, timeout_s).await
+}
+
+/// Compose's own idea of which services in `/opt/<stack>/<app>` are running,
+/// read through `docker compose ps --format json` (fix-132: the text table
+/// changes shape across compose versions) instead of
+/// `--status running --services`.
+///
+/// `Ok(None)` is fix-132/fix-133's `Unknown`: the probe failed, or its
+/// output held no line the parser could read as a compose-ps entry. That is
+/// not the same claim as "no service is running" (an app that is actually up
+/// would be reported dead), so every caller handles it as its own case
+/// rather than folding it into an empty list.
+///
+/// `services_filter` is appended after `--format json` verbatim (a leading-
+/// space-separated list of service names, or empty for the whole app) — the
+/// same positional-argument filter `docker compose ps` already accepts.
+pub async fn compose_running_services(
+    exec: &dyn Executor,
+    vmid: u16,
+    stack: &str,
+    app: &str,
+    services_filter: &str,
+) -> Result<Option<Vec<String>>, CoreError> {
+    let verb = format!("docker compose ps --format json{}", services_filter);
+    let out = compose_in_app(exec, vmid, stack, app, &verb, 60).await?;
+    if !out.success() {
+        return Ok(None);
+    }
+    match crate::compose::parse_compose_ps(&out.stdout) {
+        ComposePs::Answered(entries) => Ok(Some(
+            entries
+                .into_iter()
+                .filter(|e| e.running())
+                .map(|e| e.service)
+                .collect(),
+        )),
+        ComposePs::Unknown(_) => Ok(None),
+    }
 }
 
 #[cfg(test)]

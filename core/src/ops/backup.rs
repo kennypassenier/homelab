@@ -793,7 +793,11 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
         let dir_cmds = m
             .apps
             .iter()
-            .map(|a| format!("cd '/opt/{}/{}' && docker compose up -d", m.stack_name, a))
+            .map(|a| {
+                super::util::app_dir_script(&m.stack_name, a)
+                    .raw("docker compose up -d")
+                    .build()
+            })
             .collect::<Vec<_>>()
             .join("; ");
         if !dir_cmds.is_empty() {
@@ -1443,10 +1447,12 @@ pub async fn restore_app(
     // Stop the whole stack for a consistent restore.
     step!(runner, "quiesce stack", {
         for a in &apps {
-            let _ = super::util_pct_sh(
+            let _ = super::util::compose_in_app(
                 exec,
                 m.vmid,
-                &format!("cd '/opt/{}/{}' && docker compose down", m.stack_name, a),
+                &m.stack_name,
+                a,
+                "docker compose down",
                 120,
             )
             .await?;
@@ -1555,10 +1561,12 @@ pub async fn restore_app(
 
     step!(runner, "resume stack", {
         for a in &apps {
-            super::util_pct_sh(
+            super::util::compose_in_app(
                 exec,
                 m.vmid,
-                &format!("cd '/opt/{}/{}' && docker compose up -d", m.stack_name, a),
+                &m.stack_name,
+                a,
+                "docker compose up -d",
                 300,
             )
             .await?;
@@ -1575,18 +1583,20 @@ pub async fn restore_app(
 
     step!(runner, "verify health", {
         for a in &apps {
-            let out = super::util_pct_sh(
-                exec,
-                m.vmid,
-                &format!(
-                    "cd '/opt/{}/{}' && docker compose ps --status running --services",
-                    m.stack_name, a
-                ),
-                60,
-            )
-            .await?;
-            if out.stdout.trim().is_empty() {
-                return Err(CoreError::Other(format!("{} not running after restore", a)));
+            // fix-132/fix-133: read via `--format json` and the Unknown
+            // state, so a probe that could not answer at all is reported as
+            // what it is rather than folded into "nothing is running".
+            match super::util::compose_running_services(exec, m.vmid, &m.stack_name, a, "").await? {
+                Some(running) if running.is_empty() => {
+                    return Err(CoreError::Other(format!("{} not running after restore", a)));
+                }
+                Some(_) => {}
+                None => {
+                    return Err(CoreError::Other(format!(
+                        "{} :: could not read whether it is running after restore",
+                        a
+                    )));
+                }
             }
         }
         Ok(StepOutcome::Unchanged)

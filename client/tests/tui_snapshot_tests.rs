@@ -397,6 +397,9 @@ fn scaffold_has_no_watchtower_and_manual_update_policy() {
     assert!(compose.contains("com.homelab.update.policy=manual"));
     let manifest = std::fs::read_to_string(tmp.join("x/lxc-compose.yml")).unwrap();
     assert!(!manifest.contains("watchtower"));
+    // The positive twin: the manifest is a real stack file, not an empty
+    // one that would also pass "no watchtower".
+    assert!(manifest.contains("syncthing"), "{}", manifest);
     assert!(manifest.contains("swap_mb: 512")); // 1:1 for 512
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -498,6 +501,9 @@ fn scaffold_injects_no_promtail_sidecar() {
     );
     let manifest = std::fs::read_to_string(tmp.join("retrotest/lxc-compose.yml")).unwrap();
     assert!(!manifest.contains("promtail"), "{}", manifest);
+    // The positive twin: a real manifest, not an empty file that would also
+    // pass "no promtail".
+    assert!(manifest.contains("retrotest"), "{}", manifest);
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
@@ -3516,6 +3522,9 @@ fn fix_107_one_language_per_surface() {
         .unwrap();
     for file in ["client/src/tui/view/focus.rs", "core/src/ops/deploy.rs"] {
         let src = std::fs::read_to_string(root.join(file)).unwrap();
+        // The positive twin: a real, substantial source file — not an empty
+        // one that would also pass "no Dutch word anywhere".
+        assert!(src.len() > 1000, "{} read as suspiciously short", file);
         for dutch in ["toelaten", "stoppen", "onbeheerd", "de uitrol"] {
             let code: String = src
                 .lines()

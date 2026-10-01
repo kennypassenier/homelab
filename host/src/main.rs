@@ -1677,6 +1677,9 @@ mod tests {
             .unwrap_err();
         let line = super::unparseable_frame_line(&e, r#"{"id":"s3cr3t-token","cmd":"ping"}"#);
         assert!(!line.contains("s3cr3t-token"), "{}", line);
+        // The positive twin: still a real diagnostic line, not an empty one
+        // that would also pass "no secret in it".
+        assert!(!line.is_empty(), "the frame still gets a log line");
     }
 
     /// Load a config from `raw` through a file of its own. Tests run as
@@ -1845,6 +1848,8 @@ mod tests {
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].name, "ct120");
         assert!(!text.contains("\"wsl\""), "{}", text);
+        // The positive twin: the other token's entry is still there.
+        assert!(text.contains("\"ct120\""), "{}", text);
     }
 
     /// fix-120: revoking a name that is not there, or "legacy" (the single
@@ -2315,6 +2320,9 @@ span_days = 7\n";
             apply_host_config_changes(raw, &one("backup_hour", serde_json::Value::Null), &sha)
                 .unwrap();
         assert!(!text.contains("backup_hour"), "{text}");
+        // The positive twin: the rest of the file is still there, not an
+        // empty file that would also pass "no backup_hour".
+        assert!(text.contains("token"), "{text}");
 
         let refused = |changes: BTreeMap<String, serde_json::Value>, expect: &str| {
             apply_host_config_changes(raw, &changes, expect).unwrap_err()

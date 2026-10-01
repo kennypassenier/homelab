@@ -789,22 +789,21 @@ async fn run(explicit_host: Option<String>) {
                 die("internal: resize parsed as another verb")
             };
             let dir = &stack_dir(&stack);
-            let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
+            // gap-34: resize sends only the manifest (`ApplyResources`
+            // takes `Box<StackManifest>`) — building the full spec ran
+            // latch for any stack with `latch_secrets`/`latch_files` and
+            // then threw every secret away unread.
+            let manifest = spec::build_manifest(Path::new(dir)).unwrap_or_else(|e| die(&e));
             println!(
                 "{}▶ resize {} :: {} MiB / {} cores / {}G{}",
                 C_CYAN,
-                spec.manifest.stack_name,
-                spec.manifest.resources.memory_mb,
-                spec.manifest.resources.cores,
-                spec.manifest.resources.disk_gb,
+                manifest.stack_name,
+                manifest.resources.memory_mb,
+                manifest.resources.cores,
+                manifest.resources.disk_gb,
                 C_RESET
             );
-            rpc(
-                &host,
-                &token,
-                Command::ApplyResources(Box::new(spec.manifest)),
-            )
-            .await;
+            rpc(&host, &token, Command::ApplyResources(Box::new(manifest))).await;
         }
         "templates" => rpc(&host, &token, Command::ListTemplates).await,
         "template-build" => {
@@ -1547,7 +1546,11 @@ async fn run(explicit_host: Option<String>) {
                 die("internal: prune-orphans parsed as another verb")
             };
             let dir = &stack_dir(&stack);
-            let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
+            // gap-34: `orphan_files_keeping` (core/src/ops/deploy.rs) reads
+            // only `spec.files` — never `.env` or `.secret_files` — so
+            // latch never needed to run here. `build_spec` ran it anyway
+            // for any stack with `latch_secrets`/`latch_files`.
+            let spec = spec::build_spec_files_only(Path::new(dir)).unwrap_or_else(|e| die(&e));
             let stack = spec.manifest.stack_name.clone();
             let confirm = if yes {
                 stack.clone()
@@ -1624,8 +1627,12 @@ async fn run(explicit_host: Option<String>) {
                 )
                 .await;
             }
-            let spec = spec::build_spec(Path::new(dir)).unwrap_or_else(|e| die(&e));
-            let stack = &spec.manifest.stack_name;
+            // gap-34: `DestroyStack` sends only the manifest — building
+            // the full spec ran latch for any stack with
+            // `latch_secrets`/`latch_files` and then threw every secret
+            // away unread (F291 made the same point for `backup`).
+            let manifest = spec::build_manifest(Path::new(dir)).unwrap_or_else(|e| die(&e));
+            let stack = &manifest.stack_name;
             // Kenny's B2: the destroy backs up first and refuses if that
             // fails. Skipping is deliberate and says so out loud.
             if skip_backup {
@@ -1658,7 +1665,7 @@ async fn run(explicit_host: Option<String>) {
                 &host,
                 &token,
                 Command::DestroyStack {
-                    manifest: Box::new(spec.manifest),
+                    manifest: Box::new(manifest),
                     confirm,
                     skip_backup,
                 },

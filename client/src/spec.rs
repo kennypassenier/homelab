@@ -2,10 +2,14 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use serde::Deserialize;
 
 use homelab_proto::{DeploySpec, FileBlob, GatewayRoute, StackManifest};
+
+use crate::pinexists::PIN_ASK_WIDTH;
 
 /// A typo used to be free. `latch_secret:` instead of `latch_secrets:` parsed
 /// cleanly, deployed cleanly, and produced a container with no secrets in it;
@@ -259,7 +263,7 @@ pub fn build_manifest(dir: &Path) -> Result<homelab_core::manifest::StackManifes
 
 pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
     let mut notes = Vec::new();
-    let built = spec_without_binaries(dir, &mut notes);
+    let built = spec_without_binaries(dir, &mut notes, true);
     for line in &notes {
         eprintln!("{}", line);
     }
@@ -272,9 +276,218 @@ pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
     // GitHub being down must not stop a running stack from being reconciled,
     // and the host refuses to START a unit whose program is absent anyway.
     spec.native_binaries = stage_native_binaries(dir, &spec.manifest.natives);
+    // registry-cache-plaintext (deep-dive answer, 2026-10-01): pin every
+    // tag-only image to the digest its SOURCE registry hands out right now,
+    // before the host ever points anything at the pull-through cache. The
+    // cache answers over plain HTTP and can be told to serve a different
+    // image for the same tag; it cannot do that for a digest docker itself
+    // verifies. Best-effort and silent on failure beyond a note: a registry
+    // having a bad evening must cost nothing more than staying unpinned for
+    // this one deploy (the same stance D60 takes toward the cache itself).
+    for line in resolve_compose_digests(&mut spec.files) {
+        eprintln!("{}", line);
+    }
     // fix-141: where these files came from, recorded by the host.
     spec.source = stack_source(dir);
     Ok(spec)
+}
+
+/// registry-cache-plaintext: resolve every tag-only `image:` line in `files`
+/// against its source registry and rewrite it to `tag@sha256:…`. Returns one
+/// note per image that could not be resolved (never fatal).
+pub fn resolve_compose_digests(files: &mut [FileBlob]) -> Vec<String> {
+    resolve_compose_digests_with(files, |registry, repository, tag| {
+        crate::pinexists::resolve_digest(registry, repository, tag)
+    })
+}
+
+fn resolve_compose_digests_with<F>(files: &mut [FileBlob], resolve: F) -> Vec<String>
+where
+    F: Fn(&str, &str, &str) -> Result<Option<String>, String> + Sync,
+{
+    // Every distinct reference across every compose file, asked once each —
+    // same shape as `answer_pins` (gap-37), and for the same reason: a
+    // stack's apps often share a registry, and asking it 8-wide instead of
+    // one curl at a time is the difference between this costing seconds and
+    // costing minutes of every deploy.
+    use std::collections::BTreeSet;
+    let mut by_ref: BTreeMap<String, homelab_core::ops::pinexists::TaggedImage> = BTreeMap::new();
+    for f in files.iter() {
+        if !f.path.ends_with("docker-compose.yml") {
+            continue;
+        }
+        for img in homelab_core::ops::pinexists::tagged_images(&f.content) {
+            by_ref.entry(img.reference.clone()).or_insert(img);
+        }
+    }
+    let refs: Vec<&homelab_core::ops::pinexists::TaggedImage> = by_ref.values().collect();
+    let notes: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let resolved: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
+    let dead: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+    let next = AtomicUsize::new(0);
+    let workers = PIN_ASK_WIDTH.min(refs.len().max(1));
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| loop {
+                let i = next.fetch_add(1, Ordering::SeqCst);
+                let Some(img) = refs.get(i) else { break };
+                let known_dead = dead
+                    .lock()
+                    .map(|d| d.contains(&img.registry))
+                    .unwrap_or(false);
+                if known_dead {
+                    if let Ok(mut n) = notes.lock() {
+                        n.push(format!(
+                            "[digest] {} not resolved :: {} did not answer — left as a tag",
+                            img.reference, img.registry
+                        ))
+                    }
+                    continue;
+                }
+                match resolve(&img.registry, &img.repository, &img.tag) {
+                    Ok(Some(digest)) => {
+                        if let Ok(mut r) = resolved.lock() {
+                            r.insert(img.reference.clone(), digest);
+                        }
+                    }
+                    Ok(None) => {
+                        if let Ok(mut n) = notes.lock() {
+                            n.push(format!(
+                                "[digest] {} answered with no Docker-Content-Digest — left as \
+                                 a tag",
+                                img.reference
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        if e.ends_with("did not answer") {
+                            if let Ok(mut d) = dead.lock() {
+                                d.insert(img.registry.clone());
+                            }
+                        }
+                        if let Ok(mut n) = notes.lock() {
+                            n.push(format!(
+                                "[digest] {} not resolved :: {} — left as a tag",
+                                img.reference, e
+                            ));
+                        }
+                    }
+                }
+            });
+        }
+    });
+    let resolved = resolved.into_inner().unwrap_or_default();
+    if !resolved.is_empty() {
+        for f in files.iter_mut() {
+            if f.path.ends_with("docker-compose.yml") {
+                f.content = homelab_core::ops::pinexists::rewrite_tag_lines(&f.content, &resolved);
+            }
+        }
+    }
+    notes.into_inner().unwrap_or_default()
+}
+
+#[cfg(test)]
+mod registry_cache_plaintext_tests {
+    //! registry-cache-plaintext (deep-dive answer, 2026-10-01): proves the
+    //! part `resolve_compose_digests` cannot — the compose-file rewrite and
+    //! the best-effort behaviour when a registry fails to answer — with an
+    //! injected resolver standing in for `pinexists::resolve_digest`, the
+    //! same shape `pin_ask_tests.rs` uses for the sibling gap-37 check.
+    use super::*;
+
+    fn blob(path: &str, content: &str) -> FileBlob {
+        FileBlob {
+            path: path.to_string(),
+            content: content.to_string(),
+            mode: None,
+        }
+    }
+
+    #[test]
+    fn a_resolved_tag_is_pinned_by_digest_and_an_unresolved_one_is_left_as_written() {
+        let mut files = vec![
+            blob(
+                "stacks/x/docker-compose.yml",
+                "services:\n  a:\n    image: ghcr.io/kp/app:1.2.3\n  b:\n    image: redis:7\n",
+            ),
+            blob("stacks/x/README.md", "image: not-a-compose-file:1\n"),
+        ];
+        let notes = resolve_compose_digests_with(&mut files, |_registry, repository, _tag| {
+            if repository == "kp/app" {
+                Ok(Some("sha256:aaaa".to_string()))
+            } else {
+                Ok(None) // answered, no Docker-Content-Digest header
+            }
+        });
+        assert_eq!(
+            files[0].content,
+            "services:\n  a:\n    image: ghcr.io/kp/app:1.2.3@sha256:aaaa\n  \
+             b:\n    image: redis:7\n"
+        );
+        // A non-compose file is never touched, even though it has an
+        // `image:` line of its own.
+        assert_eq!(files[1].content, "image: not-a-compose-file:1\n");
+        assert!(
+            notes
+                .iter()
+                .any(|n| n.contains("redis") && n.contains("no Docker-Content-Digest")),
+            "{:?}",
+            notes
+        );
+    }
+
+    #[test]
+    fn a_dead_registry_is_asked_once_and_every_other_image_on_it_is_noted_the_same_way() {
+        let mut files = vec![blob(
+            "stacks/x/docker-compose.yml",
+            "services:\n  a:\n    image: dead.example/kp/one:1\n  \
+             b:\n    image: dead.example/kp/two:1\n",
+        )];
+        let asked = std::sync::Mutex::new(Vec::new());
+        let notes = resolve_compose_digests_with(&mut files, |registry, repository, _tag| {
+            asked
+                .lock()
+                .unwrap()
+                .push(format!("{}/{}", registry, repository));
+            Err(format!("{} did not answer", registry))
+        });
+        // Nothing was resolved, so the compose file is byte-for-byte
+        // unchanged — the "never fatal" contract this function documents.
+        assert_eq!(
+            files[0].content,
+            "services:\n  a:\n    image: dead.example/kp/one:1\n  \
+             b:\n    image: dead.example/kp/two:1\n"
+        );
+        assert_eq!(notes.len(), 2, "{:?}", notes);
+        assert!(
+            notes.iter().all(|n| n.contains("did not answer")),
+            "{:?}",
+            notes
+        );
+    }
+
+    #[test]
+    fn an_identical_reference_across_two_files_is_asked_once() {
+        let mut files = vec![
+            blob(
+                "stacks/x/docker-compose.yml",
+                "services:\n  a:\n    image: ghcr.io/kp/app:1\n",
+            ),
+            blob(
+                "stacks/x/other/docker-compose.yml",
+                "services:\n  b:\n    image: ghcr.io/kp/app:1\n",
+            ),
+        ];
+        let asks = std::sync::atomic::AtomicUsize::new(0);
+        resolve_compose_digests_with(&mut files, |_r, _repo, _tag| {
+            asks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Some("sha256:bbbb".to_string()))
+        });
+        assert_eq!(asks.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(files[0].content.contains("@sha256:bbbb"));
+        assert!(files[1].content.contains("@sha256:bbbb"));
+    }
 }
 
 /// fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci): the
@@ -404,8 +617,25 @@ pub fn uncommitted_warning(stack: &str, src: &homelab_proto::SourceRev) -> Optio
 /// so `latch` still runs; the caller runs this off the UI thread.
 pub fn local_intent_hash(dir: &Path) -> Result<(String, Vec<String>), String> {
     let mut notes = Vec::new();
-    let spec = spec_without_binaries(dir, &mut notes)?;
+    let spec = spec_without_binaries(dir, &mut notes, true)?;
     Ok((homelab_core::manifest::intent_hash(&spec), notes))
+}
+
+/// gap-34: `prune-orphans` needs `DeploySpec.files` (the paths a deploy
+/// would write) to tell which files on the container are no longer in the
+/// repository — `orphan_files_keeping` reads only `.files`, never `.env` or
+/// `.secret_files`. Running latch to fill those two fields was pure cost: a
+/// stack with `latch_secrets` or `latch_files` could not `prune-orphans`
+/// without a working latch session even though no secret ever left this
+/// function. This builds the same spec with `env` left as whatever is on
+/// disk (never latch) and `secret_files` empty.
+pub fn build_spec_files_only(dir: &Path) -> Result<DeploySpec, String> {
+    let mut notes = Vec::new();
+    let spec = spec_without_binaries(dir, &mut notes, false)?;
+    for line in &notes {
+        eprintln!("{}", line);
+    }
+    Ok(spec)
 }
 
 /// TUI parity round: a stack's files as a deploy sends them, without its
@@ -425,7 +655,17 @@ pub fn stack_files(dir: &Path) -> Result<Vec<FileBlob>, String> {
 }
 
 /// Everything of the deploy spec but the native programs.
-fn spec_without_binaries(dir: &Path, notes: &mut Vec<String>) -> Result<DeploySpec, String> {
+///
+/// `fetch_secrets`: whether to run latch at all. A caller that only needs
+/// `.files` (gap-34: `prune-orphans`) passes `false` — `env` then holds
+/// exactly what is on disk and `secret_files` stays empty, which costs
+/// nothing because neither field is ever read for that purpose. A real
+/// deploy, or anything that hashes the spec to detect drift, passes `true`.
+fn spec_without_binaries(
+    dir: &Path,
+    notes: &mut Vec<String>,
+    fetch_secrets: bool,
+) -> Result<DeploySpec, String> {
     let manifest_path = dir.join("lxc-compose.yml");
     let raw = std::fs::read_to_string(&manifest_path)
         .map_err(|e| format!("cannot read {}: {}", manifest_path.display(), e))?;
@@ -451,15 +691,19 @@ fn spec_without_binaries(dir: &Path, notes: &mut Vec<String>) -> Result<DeploySp
     // its secrets came from, on every deploy, whether or not latch was
     // involved.
     let from_disk: std::collections::BTreeSet<String> = env.keys().cloned().collect();
-    fetch_latch_secrets(
-        dir,
-        &stack_file.latch_secrets,
-        &stack_file.manifest.apps,
-        &mut env,
-        notes,
-    )?;
-    notes.extend(env_sources(&from_disk, &stack_file.latch_secrets, &env));
-    let secret_files = fetch_latch_files(dir, &stack_file, notes)?;
+    let secret_files = if fetch_secrets {
+        fetch_latch_secrets(
+            dir,
+            &stack_file.latch_secrets,
+            &stack_file.manifest.apps,
+            &mut env,
+            notes,
+        )?;
+        notes.extend(env_sources(&from_disk, &stack_file.latch_secrets, &env));
+        fetch_latch_files(dir, &stack_file, notes)?
+    } else {
+        Vec::new()
+    };
 
     // The external declarations stay here: they are the client's plan-time
     // question (fix-92), and the host writes a route the same either way.

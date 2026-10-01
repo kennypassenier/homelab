@@ -135,6 +135,36 @@ fn ask(p: &PinnedDigest) -> PinAnswer {
     }
 }
 
+/// registry-cache-plaintext (deep-dive answer, 2026-10-01): resolve one
+/// `registry/repository:tag` to the digest the source registry hands out
+/// for it right now. Same anonymous-token flow as `ask` above, `HEAD` in
+/// place of a digest `GET` because only the header is needed; `None` when
+/// the registry answered but carried no `Docker-Content-Digest` (an old
+/// registry, a manifest list format it chose not to send one for) rather
+/// than treating that as a hard failure — the caller leaves the tag as
+/// written either way.
+pub fn resolve_digest(
+    registry: &str,
+    repository: &str,
+    tag: &str,
+) -> Result<Option<String>, String> {
+    let tok = token(registry, repository)?;
+    let url = format!("https://{}/v2/{}/manifests/{}", registry, repository, tag);
+    let accept = format!("Accept: {}", ACCEPT);
+    let auth = tok.map(|t| format!("Authorization: Bearer {}", t));
+    let mut args: Vec<&str> = vec!["-I", "-H", &accept];
+    if let Some(a) = auth.as_deref() {
+        args.push("-H");
+        args.push(a);
+    }
+    args.push(&url);
+    let (headers, err) = curl(&args);
+    if !err.is_empty() {
+        return Err(err);
+    }
+    Ok(homelab_core::ops::pinexists::parse_digest_header(&headers))
+}
+
 /// How many registries are asked at the same time (decision "Fleet check
 /// speed", 2026-09-29): 8, no answer remembered across runs.
 pub const PIN_ASK_WIDTH: usize = 8;

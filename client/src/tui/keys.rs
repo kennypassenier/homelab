@@ -1,13 +1,7 @@
-//! fix-107 (tui-indicators-claim-too-much, 2026-09-27): every key of the
-//! TUI in one table, which the key map (`h`), the footer and the palette are
-//! all drawn from.
-//!
-//! They were three hand-kept lists and had drifted apart: the key map said
-//! `1-4` for six tabs and left SHIFT+A, SHIFT+I and every settings key out,
-//! and the palette, there so that nothing needs a keybind first, had no
-//! deploy, plan, park or new stack. What a key DOES is still decided in
-//! `model::on_key`; the palette's ids are checked against that dispatcher by
-//! `h19_every_palette_action_reaches_a_real_handler`.
+//! fix-107 (see REGISTER.md): every key of the TUI in one table, which the
+//! key map (`h`), the footer and the palette are all drawn from. What a key
+//! DOES is still decided in `model::on_key`; the palette's ids are checked
+//! against that dispatcher by `h19_every_palette_action_reaches_a_real_handler`.
 
 use crate::tui::model::Tab;
 

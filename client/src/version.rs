@@ -49,25 +49,13 @@ pub fn older(host: &str, client: &str) -> bool {
 
 /// The largest single message the CLIENT↔HOST link carries. The host sets the
 /// same ceiling; this copy exists so a payload that cannot arrive is refused
-/// before it is sent, with a sentence that says what happened.
-///
-/// It was found the way these things are always found: the host binary grew
-/// 132 KB past the old 16 MiB default between two releases, and
-/// `homelab release-update` answered "Connection reset by peer". That names
-/// the network. The limit had never been written down anywhere, so there was
-/// nothing to read.
+/// before it is sent, with a sentence that says what happened (F303, see
+/// REGISTER.md).
 pub const MAX_WS_FRAME: usize = 256 * 1024 * 1024;
 
-// Raised from 64 MiB on 2026-09-09 (F303). The old figure was "five times the
-// current binary" — reasoning about the HOST binary, which was the only large
-// payload the link had at the time. A stack deploy carries every native
-// service's program in one message, so the ceiling has to scale with the
-// STACK, not with one program: CT 109 alone ships kyu, kyu-runner and
-// http-switchboard, 71 MiB of binaries and 94.7 MiB once base64-encoded.
-//
-// Headroom, not a solution. The honest fix is to send those programs one at a
-// time instead of in one message — recorded as T85. This number only buys the
-// room to get there without a wall in the middle.
+// Raised from 64 MiB on 2026-09-09 (F303, see REGISTER.md). Headroom, not a
+// solution: the honest fix is to send a stack's programs one at a time
+// instead of in one message — recorded as T85.
 
 /// Refuse a payload the far side cannot accept, and say why.
 pub fn too_large(len: usize) -> Option<String> {
@@ -83,18 +71,9 @@ pub fn too_large(len: usize) -> Option<String> {
     })
 }
 
-/// F309: does this invocation ask for help rather than for work?
-///
-/// `homelab template-build --help` did not print usage on 2026-09-09. That
-/// verb reads its arguments positionally, `--help` failed to parse as a vmid,
-/// and `unwrap_or(default)` turned an argument nobody understood into a real
-/// golden-template build on a live host. The stray template had to be
-/// destroyed afterwards; nothing was lost, and only because that verb's
-/// default target is a scratch vmid it owns.
-///
-/// Checked over EVERY argument, not just the second: the flag is as likely to
-/// be typed after a positional one, and a guard that only covers the position
-/// where it first bit is the shape this project keeps writing findings about.
+/// F309 (see REGISTER.md): does this invocation ask for help rather than for
+/// work? Checked over EVERY argument, not just the second: the flag is as
+/// likely to be typed after a positional one.
 pub fn wants_help(args: &[String]) -> bool {
     args.iter().skip(1).any(|a| a == "--help" || a == "-h")
 }

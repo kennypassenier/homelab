@@ -584,8 +584,7 @@ fn draw_tab_bar(f: &mut Frame, model: &Model, area: Rect) {
         })
         .collect();
 
-    // fix-106 (tui-not-calm, 2026-09-27): tab labels and titles used to
-    // scramble into glyphs at random; text that carries meaning stands still.
+    // fix-106 (see REGISTER.md): text that carries meaning stands still.
     let title = "HOMELAB :: CONTROL_DECK".to_string();
 
     let (dot, conn_txt, conn_style) = match model.conn {
@@ -732,9 +731,8 @@ fn draw_ticker(f: &mut Frame, model: &Model, area: Rect) {
         c.extend(calm);
         (c, THEME.faint)
     };
-    // fix-106 (tui-not-calm, 2026-09-27): the alerts used to scroll past as
-    // a marquee, so reading one meant waiting for it. They stand still; what
-    // does not fit is counted, and the TODAY panel lists everything.
+    // fix-106 (see REGISTER.md): the alerts stand still; what does not fit
+    // is counted, and the TODAY panel lists everything.
     let text = static_line(&segs, area.width as usize);
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
@@ -809,9 +807,8 @@ fn draw_footer(f: &mut Frame, model: &Model, area: Rect) {
     );
 }
 
-/// fix-107 (tui-indicators-claim-too-much, 2026-09-27): the key map of the
-/// tab in front of the operator, from the one key table. It used to be a
-/// list of its own that said `1-4` for six tabs and left keys out.
+/// fix-107 (see REGISTER.md): the key map of the tab in front of the
+/// operator, from the one key table.
 fn draw_help(f: &mut Frame, tab: Tab) {
     let area = f.area();
     let w = 76u16.min(area.width - 4);

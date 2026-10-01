@@ -1,13 +1,9 @@
-//! fix-143 (expert panel 2026-09-27, edge-changes-unnoticed): the client
-//! half of the Cloudflare edge comparison run by `homelab check`.
+//! fix-143 (see REGISTER.md): the client half of the Cloudflare edge
+//! comparison run by `homelab check`.
 //!
-//! The capture in `captured/gateway/` was read once, on 2026-09-20, and
-//! nothing read it again; a dashboard click that flipped the wildcard Access
-//! app to bypass would have gone unreported. The comparison runs here, on
-//! the workstation, because this is where the read-only token Kenny issued
-//! lives (`~/.config/cloudflare/kp-soft.token`) and where the capture is
-//! committed. Running it nightly on the host would need that token on the
-//! hypervisor, which is Kenny's call and not made here.
+//! It runs here, on the workstation, because this is where the read-only
+//! token Kenny issued lives (`~/.config/cloudflare/kp-soft.token`) and where
+//! the capture is committed.
 //!
 //! Only GETs, only with that token, and the token goes to curl on stdin.
 

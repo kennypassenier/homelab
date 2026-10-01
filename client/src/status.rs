@@ -1,9 +1,6 @@
-//! fix-68 (four-answers-to-is-anything-wrong, 2026-09-27): `homelab status`
-//! used to print raw `pct list` output followed by the whole of
-//! `state.json` — 1,473 lines, measured live 2026-09-27, for a question
-//! that is really "what does the host know about each stack". This renders
-//! the same `FleetState` the dashboard and `homelab ui` read as a short
-//! human table instead; `--json` still gets the raw structure, for a script.
+//! fix-68 (see REGISTER.md): `homelab status` renders the same `FleetState`
+//! the dashboard and `homelab ui` read as a short human table; `--json`
+//! still gets the raw structure, for a script.
 
 use homelab_proto::FleetState;
 

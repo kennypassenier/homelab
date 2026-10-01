@@ -432,9 +432,8 @@ impl Model {
         }
     }
 
-    /// fix-106 (tui-not-calm, 2026-09-27): always whole. Hostnames and
-    /// doctor lines used to "decrypt" in on every tab switch; text that
-    /// carries meaning is never animated.
+    /// fix-106 (see REGISTER.md): always whole; text that carries meaning
+    /// is never animated.
     pub fn reveal_progress(&self) -> f32 {
         1.0
     }

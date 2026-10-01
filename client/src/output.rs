@@ -40,12 +40,10 @@ pub enum Tone {
     Plain,
 }
 
-/// fix-103 (check-output-buries-problem, 2026-09-27): the tone of every line
-/// of a fleet check reply. The whole check used to be printed in red, the
-/// `noted` items ("nothing to do") included, so nine red lines hid the one
-/// that needed action. Each group now keeps its own tone, the lines under a
-/// group heading take the heading's, and the summary line takes the tone of
-/// the worst group it counts.
+/// fix-103 (see REGISTER.md): the tone of every line of a fleet check reply.
+/// Each group keeps its own tone, the lines under a group heading take the
+/// heading's, and the summary line takes the tone of the worst group it
+/// counts.
 pub fn check_tones(msg: &str) -> Vec<(Tone, &str)> {
     let mut tone = Tone::Plain;
     msg.lines()

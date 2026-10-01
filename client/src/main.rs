@@ -186,25 +186,13 @@ async fn run(explicit_host: Option<String>) {
         std::env::var("NO_COLOR").ok().as_deref(),
     ));
     let args: Vec<String> = std::env::args().collect();
-    // fix-68: bare `homelab` used to print the whole help; what an operator
-    // sitting down actually wants is the morning answer ("is anything
-    // waiting for me?"), the same one `homelab today` gives.
+    // fix-68 (see REGISTER.md): bare `homelab` gives the morning answer
+    // ("is anything waiting for me?"), the same one `homelab today` gives.
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("today");
 
-    // F309: `--help` anywhere means SHOW the help, never do the thing.
-    //
-    // On 2026-09-09 `homelab template-build --help` did not print usage. The
-    // verb reads its arguments positionally, `--help` failed to parse as a
-    // vmid, the parse fell back to the default — and a real golden template
-    // was built on a live host, ending as a stray Debian 12 template that had
-    // to be destroyed afterwards. Nothing was lost, and only because that
-    // verb's default target is a scratch vmid it owns.
-    //
-    // `unwrap_or(default)` on an argument that could not be understood is the
-    // fault, and it is a fault this whole suite is otherwise built against:
-    // an unparseable input is a question, not a licence to proceed. Fixing it
-    // here covers every verb at once rather than the one that happened to
-    // bite.
+    // F309 (see REGISTER.md): `--help` anywhere means SHOW the help, never
+    // do the thing. Checked over every argument, not just the one that bit:
+    // an unparseable input is a question, not a licence to proceed.
     if homelab_client::version::wants_help(&args) {
         // fix-108 (help-flat-ids-typo-exit0, 2026-09-27): `homelab <verb>
         // --help` is that verb's help with an example, not the whole list.
@@ -761,11 +749,9 @@ async fn run(explicit_host: Option<String>) {
                 rpc(&host, &token, Command::ListManualChecks { json: false }).await
             }
             Some("answer") => {
-                // fix-65 (nightly-report-always-red, 2026-09-27): one id
-                // used to mean one command; a comma-separated list answers
-                // several at once with the same verdict, note and (for
-                // `accept`) days — the morning round of open checks no
-                // longer needs one invocation each.
+                // fix-65 (see REGISTER.md): a comma-separated list answers
+                // several ids at once with the same verdict, note and (for
+                // `accept`) days.
                 let usage = "usage: homelab checks answer <id>[,<id>,...] ok|nok [note]";
                 let ids =
                     homelab_client::checks::split_ids(args.get(3).unwrap_or_else(|| die(usage)));
@@ -916,8 +902,8 @@ async fn run(explicit_host: Option<String>) {
             // `--base <vztmpl>` picks the OS. Absent keeps the host's default,
             // so this stays the command it has always been for a caller that
             // does not care which Debian it is baking.
-            // fix-110 (small-sharp-edges, 2026-09-27): an argument that does
-            // not parse is refused; it used to become vmid 999 or version 1.
+            // fix-110 (see REGISTER.md): an argument that does not parse is
+            // refused.
             let homelab_client::version::TemplateArgs {
                 temp_vmid,
                 version,
@@ -1326,8 +1312,7 @@ async fn run(explicit_host: Option<String>) {
                 .cloned()
                 .unwrap_or_else(|| stacks_base().display().to_string());
             let skip_backup = args.iter().any(|a| a == "--no-backup");
-            // fix-100 (apply-no-confirm-creates-drill, 2026-09-27): the plan
-            // used to be printed and deployed in the same breath.
+            // fix-100 (see REGISTER.md)
             let dry_run = args.iter().any(|a| a == "--dry-run");
             let assume_yes = args.iter().any(|a| a == "--yes");
             let plan_only = args.iter().any(|a| a == "--plan");
@@ -1652,11 +1637,9 @@ async fn run(explicit_host: Option<String>) {
                 die("internal: update parsed as another verb")
             };
             let dir = &stack_dir(&stack);
-            // F294: an update pulls an image and recreates a container on the
-            // host; the files and secrets it used to build here were thrown
-            // away one line later. Demanding them meant a machine without the
-            // latch key could not update a stack whose secrets had not
-            // changed — the same fault F291 closed for `backup`, still open in
+            // F294 (see REGISTER.md): an update pulls an image and recreates
+            // a container on the host, so it needs only the manifest, the
+            // same fault F291 closed for `backup`, still open in
             // the two verbs beside it.
             let manifest = spec::build_manifest(Path::new(dir)).unwrap_or_else(|e| die(&e));
             println!(
@@ -1989,13 +1972,11 @@ async fn host_version(host: &str, token: &str) -> Option<String> {
     .flatten()
 }
 
-/// fix-121 (expert panel, self-update-acceptance-weak, 2026-09-27): after a
-/// self-update, watch the host come back. `true` once the shipped version
-/// (`expected`; any restarted daemon when unknown) has answered a ping, which
-/// is also what accepts the update on the host; `false` when the old version
-/// came back (the rollback ran) or nothing answered in time. It used to
-/// return as soon as the restart was scheduled, and a rollback was visible
-/// only in a notification.
+/// fix-121 (see REGISTER.md): after a self-update, watch the host come back.
+/// `true` once the shipped version (`expected`; any restarted daemon when
+/// unknown) has answered a ping, which is also what accepts the update on
+/// the host; `false` when the old version came back (the rollback ran) or
+/// nothing answered in time.
 async fn wait_for_updated_host(host: &str, token: &str, expected: Option<String>) -> bool {
     use homelab_client::release::{AfterUpdate, after_update};
     // The old daemon may finish a running operation first (up to 60 s,
@@ -2177,16 +2158,9 @@ async fn rpc_exchange(
 ) {
     use std::io::IsTerminal as _;
     let mut fleet_seen: Option<homelab_proto::FleetState> = None;
-    // F303: the size guard lives HERE, where every command passes, and not in
-    // the three call sites that happened to remember it.
-    //
-    // `too_large` was written after `release-update` answered "Connection
-    // reset by peer" for a host binary 132 KB past the old ceiling — its own
-    // comment says so. It was then wired into the verbs that ship the host
-    // binary, and nowhere else. On 2026-09-09 `deploy stacks/kyu` built a
-    // 94.7 MiB payload (three service binaries at once) and got the identical
-    // reset, with the identical nothing to read. Same fault, one caller over,
-    // because the fix had been fitted to the place it was found rather than
+    // F303 (see REGISTER.md): the size guard lives HERE, where every
+    // command passes, because the property is "any message can outgrow the
+    // link," not "the host binary can."
     // to the property: any message can outgrow the link.
     if let Some(why) = serde_json::to_vec(&command)
         .ok()

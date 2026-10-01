@@ -201,15 +201,13 @@ pub fn built_in_pin() -> Option<&'static str> {
     (!pin.is_empty()).then_some(pin)
 }
 
-/// fix-149: [`reconcile_pin`] with the pin the client was built with on top.
-///
-/// A machine with no pin of its own used to trust the first certificate it
-/// saw and send it the bearer token. With a built-in pin that is the only
-/// certificate trusted, first connection included; a machine pin or a
-/// repository pin that disagrees with it is refused, never followed, because
-/// either one differing is exactly what a changed certificate or a stale
-/// checkout looks like, and a person has to look. A client built without a
-/// pin behaves as before.
+/// fix-149 (see REGISTER.md): [`reconcile_pin`] with the pin the client was
+/// built with on top. With a built-in pin that is the only certificate
+/// trusted, first connection included; a machine pin or a repository pin
+/// that disagrees with it is refused, never followed, because either one
+/// differing is exactly what a changed certificate or a stale checkout
+/// looks like, and a person has to look. A client built without a pin
+/// behaves as before.
 pub fn reconcile_pin_built_in(
     built_in: Option<&str>,
     machine: Option<String>,

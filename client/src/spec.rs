@@ -243,16 +243,10 @@ fn parse_stack_file(raw: &str, path: &Path) -> Result<StackFile, String> {
     })
 }
 
-/// Just the intent — no files, no secrets, no latch.
+/// Just the intent — no files, no secrets, no latch (F291, see REGISTER.md).
 ///
 /// The backup and destroy verbs need the manifest and nothing else: they run
-/// entirely on the host against `/appdata` paths. They used to call
-/// `build_spec` and throw everything but the manifest away, which made both
-/// of them depend on a credential they never use. Measured 2026-09-04: with
-/// the latch key detached from this session's kernel keyring,
-/// `homelab backup stacks/kp-soft` refused with a message about secrets —
-/// during a restore drill, which is exactly the moment a backup must not be
-/// the thing that is broken (F291).
+/// entirely on the host against `/appdata` paths.
 pub fn build_manifest(dir: &Path) -> Result<homelab_core::manifest::StackManifest, String> {
     let manifest_path = dir.join("lxc-compose.yml");
     let raw = std::fs::read_to_string(&manifest_path)
@@ -607,16 +601,11 @@ pub fn uncommitted_warning(stack: &str, src: &homelab_proto::SourceRev) -> Optio
     ))
 }
 
-/// fix-69 (tui-refresh-blocks-on-downloads, 2026-09-27): the intent hash of a
-/// local stack, for the TUI's drift badge, with what would have been printed
-/// handed back as lines.
-///
-/// The TUI used to call `build_spec` for this inside `update()` on every
-/// fleet state: a `gh` release download per native service (kyu alone about
-/// 71 MiB) while the screen could not redraw, with progress lines printed
-/// over the raw-mode screen. The programs are not part of the hash, so they
-/// are not fetched. The secrets are, because the host's hash includes them,
-/// so `latch` still runs; the caller runs this off the UI thread.
+/// fix-69 (see REGISTER.md): the intent hash of a local stack, for the TUI's
+/// drift badge, with what would have been printed handed back as lines. The
+/// programs are not part of the hash, so they are not fetched. The secrets
+/// are, because the host's hash includes them, so `latch` still runs; the
+/// caller runs this off the UI thread.
 pub fn local_intent_hash(dir: &Path) -> Result<(String, Vec<String>), String> {
     let mut notes = Vec::new();
     let spec = spec_without_binaries(dir, &mut notes, true)?;
@@ -953,10 +942,8 @@ fn collect(
 /// them first or fails hard.
 /// One line per app saying where its secrets came from (MR1).
 ///
-/// Pure on purpose: the report IS the measure Kenny chose, so it has to be
-/// testable without capturing stderr. `deploy` used to print a count of env
-/// blobs, which says nothing about their origin — and origin is the whole
-/// question once a local file may win over latch.
+/// Pure on purpose (D110/MR1, see REGISTER.md): the report IS the measure
+/// Kenny chose, so it has to be testable without capturing stderr.
 pub fn env_sources(
     from_disk: &std::collections::BTreeSet<String>,
     latch_secrets: &[String],
@@ -1231,11 +1218,8 @@ pub fn is_ephemeral(dir: &Path) -> bool {
         .is_some_and(|f| f.ephemeral)
 }
 
-/// fix-100 (apply-no-confirm-creates-drill, 2026-09-27): the stacks the
-/// repository declares as part of the fleet, which `apply` holds the host to
-/// and the DR runbook rebuilds. Every directory with an `lxc-compose.yml`
-/// used to count, so the throwaway drill stack (vmid 119) would have been
-/// created by the next `homelab apply` and rebuilt after a disaster.
+/// fix-100 (see REGISTER.md): the stacks the repository declares as part of
+/// the fleet, which `apply` holds the host to and the DR runbook rebuilds.
 pub fn declared_stacks(base: &Path) -> Vec<(String, PathBuf)> {
     scan_local_stacks(base)
         .into_iter()

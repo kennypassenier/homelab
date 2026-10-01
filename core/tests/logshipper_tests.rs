@@ -376,6 +376,9 @@ mod syslog_receiver {
             &[opnsense()],
             &[],
         );
+        // The positive twin: the receiver itself still renders — it is the
+        // filter rule that is gone, not the whole config.
+        assert!(c.contains("loki.source.syslog"), "{c}");
         assert!(!c.contains("__syslog_connection_ip_address"), "{c}");
         assert!(!c.contains("syslog_opnsense_sender"), "{c}");
     }
@@ -386,6 +389,10 @@ mod syslog_receiver {
     #[test]
     fn a_stack_that_declares_no_receiver_opens_no_port() {
         let c = config("kyu", "109-app-kyu", "http://10.10.10.13:3100", &[], &[]);
+        // The positive twin: this is still a real, non-empty config — the
+        // writer every source forwards to is there, just nothing forwards
+        // to it over syslog.
+        assert!(c.contains("loki.write.default"), "{}", c);
         assert!(!c.contains("loki.source.syslog"), "{}", c);
         assert!(!c.contains("1514"), "{}", c);
     }

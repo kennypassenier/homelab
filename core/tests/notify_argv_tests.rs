@@ -36,7 +36,9 @@ fn fix_123_a_route_in_a_log_line_keeps_its_host_and_withholds_its_path() {
         "{shown}"
     );
     assert!(shown.contains("kyu.example"), "{shown}");
-    // Something that is not a URL at all is not echoed either.
+    // Something that is not a URL at all is not echoed either — it is said
+    // plainly to be not one, rather than silently producing an empty line.
+    assert_eq!(route_for_log("webhook-id-only"), "<not a URL>");
     assert!(!route_for_log("webhook-id-only").contains("webhook-id-only"));
 }
 

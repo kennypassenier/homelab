@@ -1687,6 +1687,9 @@ async fn parity_install_release_refuses_an_unsigned_release_and_a_bad_tag() {
         ",\n  {\"name\":\"SHA256SUMS.minisig\",\"browser_download_url\":\"https://github.com/kennypassenier/kyu/releases/download/v3.3.0/SHA256SUMS.minisig\"}",
         "",
     );
+    // The positive twin: the fixture surgery removed only the minisig
+    // asset, not the whole release — SHA256SUMS itself is still there.
+    assert!(unsigned.contains("SHA256SUMS"), "{unsigned}");
     assert!(!unsigned.contains("minisig"));
     exec.respond_always("releases/tags/v3.3.0", CmdOutput::ok(&unsigned));
     let sink = VecSink::new();

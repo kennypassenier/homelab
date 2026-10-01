@@ -559,7 +559,11 @@ fn the_monitoring_data_is_not_backed_up_and_the_services_are_not_paused() {
         "metrics/alertmanager/docker-compose.yml",
         "metrics/loki/docker-compose.yml",
     ] {
-        assert!(!read(compose).contains("backup.pause=true"), "{compose}");
+        let c = read(compose);
+        // The positive twin: a real compose file was read, not an empty
+        // one that would also pass the negative check below.
+        assert!(c.contains("services:"), "{compose}");
+        assert!(!c.contains("backup.pause=true"), "{compose}");
     }
 }
 
@@ -730,6 +734,9 @@ fn fix_90_loki_runs_on_the_metrics_stack() {
         (Some("loki"), Some(110001))
     );
     assert!(loki.no_backup.is_some(), "fix-81: Loki's chunks stay out");
+    // The positive twin: the gateway still declares its own storage — this
+    // is "loki's gone", not "the list is empty".
+    assert!(!gateway.storage.is_empty(), "{:?}", gateway.storage);
     assert!(!gateway.storage.iter().any(|s| s.host_path.contains("loki")));
     let loki_compose = read("metrics/loki/docker-compose.yml");
     assert!(loki_compose.contains("/appdata/metrics/loki-config/data:/loki"));

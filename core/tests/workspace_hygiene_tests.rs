@@ -128,6 +128,14 @@ fn every_declared_dependency_is_used() {
 #[test]
 fn no_host_code_changes_the_process_environment() {
     let src = read("host/src/main.rs");
+    // The positive twin: the file is read, and it still takes the config
+    // path as a value rather than through the environment — so the negative
+    // checks below are not passing merely because this read returned
+    // nothing, or because the function they describe was renamed away.
+    assert!(
+        src.contains("load_config_from"),
+        "host/src/main.rs: load_config_from not found"
+    );
     assert!(
         !src.contains("env::set_var"),
         "host/src/main.rs sets a variable"
@@ -147,5 +155,11 @@ fn the_tui_mockup_is_not_a_workspace_member() {
         .iter()
         .filter_map(|v| v.as_str())
         .collect();
+    // The positive twin: the crates that ARE workspace members are still
+    // listed — so this is a check of membership, not of an array that
+    // happens to be empty.
+    for m in MEMBERS {
+        assert!(members.contains(&m), "{m} missing: {members:?}");
+    }
     assert!(!members.contains(&"tui-preview"), "{members:?}");
 }

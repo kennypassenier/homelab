@@ -88,6 +88,14 @@ async fn refuses_without_the_typed_name() {
     )
     .await;
     assert!(!r.ok);
+    // The positive twin: the refusal names why, not just that it failed.
+    assert!(
+        r.error
+            .as_ref()
+            .is_some_and(|e| e.why.contains("no typed stack name")),
+        "{:?}",
+        r.error
+    );
     // Nothing was stopped — the gate runs before any step that touches
     // the unit (fix-64's rule, mirrored for the native path).
     assert!(!exec.calls().iter().any(|c| c.contains("systemctl stop")));
@@ -107,6 +115,15 @@ async fn refuses_when_the_typed_name_does_not_match() {
     )
     .await;
     assert!(!r.ok);
+    // The positive twin: refused for naming the wrong stack, not some
+    // other reason.
+    assert!(
+        r.error
+            .as_ref()
+            .is_some_and(|e| e.why.contains("does not match")),
+        "{:?}",
+        r.error
+    );
 }
 
 #[tokio::test]
@@ -152,6 +169,12 @@ async fn a_stateless_unit_is_told_there_is_nothing_to_restore() {
     )
     .await;
     assert!(r.ok, "{:?}", r.error);
+    // The positive twin: it is told so, not merely silent about it.
+    assert!(
+        sink.lines().join("\n").contains("nothing to restore"),
+        "{:?}",
+        sink.lines()
+    );
     assert!(!exec.calls().iter().any(|c| c.contains("systemctl stop")));
 }
 
@@ -170,5 +193,8 @@ async fn a_failed_unpack_still_leaves_the_unit_stopped_rather_than_half_restored
     )
     .await;
     assert!(!r.ok);
+    // The positive twin: the unit WAS stopped — "left stopped", not "never
+    // touched" — before the unpack failed and the restart never ran.
+    assert!(exec.calls().iter().any(|c| c.contains("systemctl stop")));
     assert!(!exec.calls().iter().any(|c| c.contains("systemctl start")));
 }

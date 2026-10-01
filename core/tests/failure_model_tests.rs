@@ -639,6 +639,9 @@ fn fix_57_a_failure_reason_is_masked_everywhere_and_capped_on_the_phone() {
     // And a raw secret handed straight to the payload is masked there too.
     let payload =
         homelab_core::notify::op_payload("x", "deploy", false, Some("KYU_TOKEN=abc123"), "1");
+    // The positive twin: the name is kept, only the value is gone — this is
+    // masking, not a payload that silently dropped the whole error.
+    assert!(payload.contains("KYU_TOKEN"), "{payload}");
     assert!(!payload.contains("abc123"), "{payload}");
 }
 

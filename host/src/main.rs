@@ -147,6 +147,24 @@ struct FileConfig {
     /// Credential for that second route, when it needs one. The HA webhook
     /// does not; something else might.
     notify_fallback_auth_bearer: Option<String>,
+    /// fix-126 (TLS to the message hub, owner decision 2026-10-01): the
+    /// LAN-only self-signed certificate (PEM) an `https://` route is pinned
+    /// to — the host's own copy, for curl's `--cacert`. Required once any
+    /// notify route is `https://` (`startup_problems`); absent otherwise.
+    notify_tls_cert: Option<String>,
+    /// The SHA-256 of that certificate's DER form, lowercase hex. Checked
+    /// against the file on disk at every start: a mismatch means the file
+    /// changed since it was pinned (the hub's certificate was regenerated,
+    /// or the file is the wrong one), and is refused the same way a
+    /// changed host certificate refuses the client (`reconcile_pin`).
+    notify_tls_fingerprint: Option<String>,
+    /// fix-143 (Cloudflare nightly comparison, owner decision 2026-10-01):
+    /// the read-only Cloudflare API token the host's nightly edge check
+    /// uses, mirroring the workstation's `~/.config/cloudflare/kp-soft.token`
+    /// (`client/src/edge.rs`). A secret: changed over ssh or the dashboard's
+    /// secret field, never shown back. Absent = the nightly comparison
+    /// reports "not configured", not broken.
+    cloudflare_token: Option<String>,
     /// Where the coverage check asks whether a stack is measured and whether
     /// its logs arrive. Unset means the question is not asked at all, which
     /// is deliberate: an unasked question must never become a finding.
@@ -334,6 +352,24 @@ struct Config {
     /// Credential for that second route, when it needs one. The HA webhook
     /// does not; something else might.
     notify_fallback_auth_bearer: Option<String>,
+    /// fix-126 (TLS to the message hub, owner decision 2026-10-01): the
+    /// LAN-only self-signed certificate (PEM) an `https://` route is pinned
+    /// to — the host's own copy, for curl's `--cacert`. Required once any
+    /// notify route is `https://` (`startup_problems`); absent otherwise.
+    notify_tls_cert: Option<String>,
+    /// The SHA-256 of that certificate's DER form, lowercase hex. Checked
+    /// against the file on disk at every start: a mismatch means the file
+    /// changed since it was pinned (the hub's certificate was regenerated,
+    /// or the file is the wrong one), and is refused the same way a
+    /// changed host certificate refuses the client (`reconcile_pin`).
+    notify_tls_fingerprint: Option<String>,
+    /// fix-143 (Cloudflare nightly comparison, owner decision 2026-10-01):
+    /// the read-only Cloudflare API token the host's nightly edge check
+    /// uses, mirroring the workstation's `~/.config/cloudflare/kp-soft.token`
+    /// (`client/src/edge.rs`). A secret: changed over ssh or the dashboard's
+    /// secret field, never shown back. Absent = the nightly comparison
+    /// reports "not configured", not broken.
+    cloudflare_token: Option<String>,
     /// Where the coverage check asks whether a stack is measured and whether
     /// its logs arrive. Unset means the question is not asked at all, which
     /// is deliberate: an unasked question must never become a finding.
@@ -581,6 +617,9 @@ fn load_config_from(path: String) -> Config {
             .unwrap_or(homelab_core::ops::restoredrill::DEFAULT_DRILL_INTERVAL_S),
         notify_fallback_webhook: file.notify_fallback_webhook.clone(),
         notify_fallback_auth_bearer: file.notify_fallback_auth_bearer.clone(),
+        notify_tls_cert: file.notify_tls_cert.clone(),
+        notify_tls_fingerprint: file.notify_tls_fingerprint.clone(),
+        cloudflare_token: file.cloudflare_token.clone(),
         prometheus_url: file.prometheus_url.clone(),
         loki_url: file.loki_url.clone(),
         loki_vmid: file.loki_vmid,
@@ -724,6 +763,34 @@ fn load_config_from(path: String) -> Config {
             route
         );
     }
+    // fix-126: an https:// route is already refused at start without a pin
+    // (`startup_problems`); this is the one check that needs the file on
+    // disk, so it runs here instead — a mismatch means the hub's
+    // certificate changed (or notify_tls_cert points at the wrong file) and
+    // is as loud as a client refusing a changed host certificate.
+    if let (Some(path), Some(want)) = (&cfg.notify_tls_cert, &cfg.notify_tls_fingerprint) {
+        match std::fs::read_to_string(path).map(|pem| homelab_core::notify::cert_fingerprint(&pem))
+        {
+            Ok(Ok(got)) if &got != want => {
+                tracing::error!(
+                    "notify_tls_cert {} does not match notify_tls_fingerprint ({}; the file is \
+                     {}) — notifications over https will be refused until this is fixed: either \
+                     the hub's certificate changed (read its fingerprint again and update \
+                     notify_tls_fingerprint) or notify_tls_cert is the wrong file",
+                    path,
+                    want,
+                    got
+                );
+            }
+            Ok(Err(e)) => {
+                tracing::error!("notify_tls_cert {} is not a valid certificate: {}", path, e);
+            }
+            Err(e) => {
+                tracing::error!("notify_tls_cert {} could not be read: {}", path, e);
+            }
+            Ok(Ok(_)) => {}
+        }
+    }
     cfg
 }
 
@@ -847,6 +914,28 @@ fn startup_problems(file: &FileConfig) -> Vec<String> {
         if let Some(p) = homelab_core::ops::zfs::job_problems(job) {
             out.push(format!("zfs_jobs {} → {}: {}", job.source, job.target, p));
         }
+    }
+    // fix-126 (TLS to the message hub, owner decision 2026-10-01): an
+    // `https://` notify route with no pin would fall back to curl's system
+    // CA bundle, which a LAN self-signed certificate never passes — refused
+    // here, at the config, rather than discovered as "every notification
+    // fails" at 04:00. `http://` stays accepted unconditionally (migration
+    // is stepwise); the actual fingerprint-on-disk match is a boot-time
+    // warning (`load_config_from`), not refused here, since it needs to
+    // read the file.
+    let https_route = [
+        file.notify_webhook.as_deref(),
+        file.notify_fallback_webhook.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|u| u.starts_with("https://"));
+    if https_route && (file.notify_tls_cert.is_none() || file.notify_tls_fingerprint.is_none()) {
+        out.push(
+            "an https:// notify route needs notify_tls_cert and notify_tls_fingerprint — the \
+             LAN hub's certificate is self-signed, so curl trusts nothing unless it is pinned"
+                .into(),
+        );
     }
     out
 }
@@ -1032,6 +1121,100 @@ fn write_config_file(path: &str, raw: &str) -> Result<(), String> {
     }
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// fix-120: a fresh per-machine bearer, 32 random bytes as lowercase hex.
+/// `/dev/urandom` rather than a new crate dependency: this is the one place
+/// the host needs cryptographic randomness.
+fn random_token() -> Result<String, String> {
+    use std::io::Read as _;
+    let mut f = std::fs::File::open("/dev/urandom").map_err(|e| format!("/dev/urandom: {}", e))?;
+    let mut buf = [0u8; 32];
+    f.read_exact(&mut buf)
+        .map_err(|e| format!("/dev/urandom: {}", e))?;
+    Ok(buf.iter().map(|b| format!("{:02x}", b)).collect())
+}
+
+/// fix-120: the `[[tokens]]` list out of raw host.toml text, read-modify-
+/// write helpers share this so neither duplicates the parse.
+fn read_tokens(raw: &str) -> Result<(toml::Table, Vec<TokenEntry>), String> {
+    let table: toml::Table = if raw.trim().is_empty() {
+        toml::Table::new()
+    } else {
+        toml::from_str(raw).map_err(|e| format!("host.toml does not parse as TOML: {}", e))?
+    };
+    let file: FileConfig = table
+        .clone()
+        .try_into()
+        .map_err(|e| format!("host.toml is not a valid host config: {}", e))?;
+    Ok((table, file.tokens.unwrap_or_default()))
+}
+
+/// fix-120: `tokens` written back into `table` and the whole file
+/// re-rendered, after `validate_tokens` has already passed.
+fn write_tokens(mut table: toml::Table, tokens: &[TokenEntry]) -> Result<String, String> {
+    if tokens.is_empty() {
+        table.remove("tokens");
+    } else {
+        table.insert(
+            "tokens".into(),
+            toml::Value::try_from(tokens).map_err(|e| e.to_string())?,
+        );
+    }
+    toml::to_string_pretty(&table).map_err(|e| e.to_string())
+}
+
+/// fix-120 (per-machine tokens, owner decision 2026-10-01): the current
+/// `[[tokens]]` list plus a new entry named `name` at `scope`, whose SHA-256
+/// is of `plain_token` — pure, so the random token itself is handed in and
+/// tested separately. Refuses an empty or duplicate name, `"legacy"`, and
+/// anything `validate_tokens` would refuse at start.
+fn issue_token_in(
+    raw: &str,
+    name: &str,
+    scope: homelab_proto::Scope,
+    plain_token: &str,
+) -> Result<(String, Vec<TokenEntry>), String> {
+    let (table, mut tokens) = read_tokens(raw)?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("a token needs a name".into());
+    }
+    use sha2::{Digest, Sha256};
+    let sha256: String = Sha256::digest(plain_token.as_bytes())
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
+    tokens.push(TokenEntry {
+        name: name.to_string(),
+        scope,
+        sha256,
+    });
+    validate_tokens(&tokens)?;
+    let text = write_tokens(table, &tokens)?;
+    Ok((text, tokens))
+}
+
+/// fix-120: the current `[[tokens]]` list with `name` removed, or the
+/// reason it is refused: `"legacy"` is the single `token` key, cleared over
+/// ssh instead (OPERATIONS_RUNBOOK's migration note), and a name that is
+/// not there is refused rather than silently a no-op.
+fn revoke_token_in(raw: &str, name: &str) -> Result<(String, Vec<TokenEntry>), String> {
+    if name == "legacy" {
+        return Err(
+            "\"legacy\" is the single `token` key, not a [[tokens]] entry — clear `token` over \
+             ssh once every machine has its own named token"
+                .into(),
+        );
+    }
+    let (table, mut tokens) = read_tokens(raw)?;
+    let before = tokens.len();
+    tokens.retain(|t| t.name != name);
+    if tokens.len() == before {
+        return Err(format!("no token named {:?}", name));
+    }
+    let text = write_tokens(table, &tokens)?;
+    Ok((text, tokens))
 }
 
 #[cfg(test)]
@@ -1362,6 +1545,168 @@ mod tests {
         ] {
             assert!(!bearer_ok(Some(bad), token), "{:?}", bad);
         }
+    }
+
+    /// fix-120: `random_token` makes a 64-hex-char token and never repeats
+    /// (a weak source would have shown up as a collision across a thousand
+    /// draws).
+    #[test]
+    fn fix_120_random_token_is_64_hex_and_does_not_repeat() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..1000 {
+            let t = random_token().unwrap();
+            assert_eq!(t.len(), 64, "{}", t);
+            assert!(t.bytes().all(|b| b.is_ascii_hexdigit()), "{}", t);
+            assert!(seen.insert(t), "random_token repeated");
+        }
+    }
+
+    /// fix-120: issuing a token adds exactly one `[[tokens]]` entry, whose
+    /// SHA-256 is of the plaintext handed in — never the plaintext itself.
+    #[test]
+    fn fix_120_issue_token_adds_one_entry_hashed_not_plain() {
+        let (text, tokens) =
+            issue_token_in("", "wsl", homelab_proto::Scope::Operate, "a-fresh-token").unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].name, "wsl");
+        assert_eq!(tokens[0].scope, homelab_proto::Scope::Operate);
+        use sha2::{Digest, Sha256};
+        let want: String = Sha256::digest(b"a-fresh-token")
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
+        assert_eq!(tokens[0].sha256, want);
+        assert!(!text.contains("a-fresh-token"), "{}", text);
+        assert!(text.contains(&want), "{}", text);
+        // Issuing a second, differently-named token keeps the first.
+        let (_, tokens2) =
+            issue_token_in(&text, "ct120", homelab_proto::Scope::All, "another-token").unwrap();
+        assert_eq!(tokens2.len(), 2);
+    }
+
+    /// fix-120: a duplicate name, an empty name and the reserved name
+    /// "legacy" are refused rather than silently applied.
+    #[test]
+    fn fix_120_issue_token_refuses_bad_names() {
+        assert!(issue_token_in("", "", homelab_proto::Scope::Read, "x").is_err());
+        assert!(issue_token_in("", "legacy", homelab_proto::Scope::Read, "x").is_err());
+        let (text, _) = issue_token_in("", "wsl", homelab_proto::Scope::Read, "x").unwrap();
+        assert!(issue_token_in(&text, "wsl", homelab_proto::Scope::All, "y").is_err());
+    }
+
+    /// fix-120: revoking removes only the named entry, and leaves the rest
+    /// untouched — the whole point of per-machine tokens is that revoking
+    /// one never affects another.
+    #[test]
+    fn fix_120_revoke_token_removes_only_that_one() {
+        let (text, _) = issue_token_in("", "wsl", homelab_proto::Scope::Operate, "a").unwrap();
+        let (text, _) = issue_token_in(&text, "ct120", homelab_proto::Scope::All, "b").unwrap();
+        let (text, tokens) = revoke_token_in(&text, "wsl").unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].name, "ct120");
+        assert!(!text.contains("\"wsl\""), "{}", text);
+    }
+
+    /// fix-120: revoking a name that is not there, or "legacy" (the single
+    /// `token` key, not a `[[tokens]]` entry), is refused.
+    #[test]
+    fn fix_120_revoke_token_refuses_unknown_and_legacy() {
+        assert!(revoke_token_in("", "legacy").is_err());
+        assert!(revoke_token_in("", "nobody").is_err());
+    }
+
+    /// fix-126: an `https://` notify route with no pin configured is
+    /// refused at start, before any notification is ever attempted —
+    /// `http://` stays accepted (migration is stepwise).
+    #[test]
+    fn fix_126_an_https_notify_route_with_no_pin_is_refused_at_start() {
+        let raw = "token = \"0123456789abcdef0123\"\nnotify_webhook = \"https://kyu.lan/x\"\n";
+        let file: FileConfig = toml::from_str(raw).unwrap();
+        let problems = startup_problems(&file);
+        assert!(
+            problems.iter().any(|p| p.contains("notify_tls_cert")),
+            "{:?}",
+            problems
+        );
+
+        let raw_http = "token = \"0123456789abcdef0123\"\nnotify_webhook = \"http://kyu.lan/x\"\n";
+        let file_http: FileConfig = toml::from_str(raw_http).unwrap();
+        assert!(
+            startup_problems(&file_http)
+                .iter()
+                .all(|p| !p.contains("notify_tls_cert")),
+            "plain http must not need a pin"
+        );
+    }
+
+    /// fix-126: `pinned_cacert` hands back the path only when the file on
+    /// disk hashes to the configured fingerprint — a stale pin (the hub's
+    /// certificate was regenerated since) is refused rather than silently
+    /// trusting whatever is on disk now, and a plain `http://` url needs no
+    /// pin at all.
+    #[test]
+    fn fix_126_pinned_cacert_checks_the_file_against_the_fingerprint() {
+        use sha2::{Digest, Sha256};
+        let path = std::env::temp_dir().join(format!(
+            "homelab-host-test-cert-{}-{}.pem",
+            std::process::id(),
+            line!()
+        ));
+        let pem = "-----BEGIN CERTIFICATE-----\naGVsbG8=\n-----END CERTIFICATE-----\n";
+        std::fs::write(&path, pem).unwrap();
+        let good: String = Sha256::digest(b"hello")
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
+
+        let raw = format!(
+            "token = \"0123456789abcdef0123\"\nnotify_tls_cert = \"{}\"\nnotify_tls_fingerprint = \"{}\"\n",
+            path.display(),
+            good
+        );
+        let cfg = config_from_text(&raw);
+        assert_eq!(
+            pinned_cacert(&cfg, "https://kyu.lan/x").unwrap(),
+            Some(path.display().to_string())
+        );
+        // http:// needs no pin at all, even with one configured.
+        assert_eq!(pinned_cacert(&cfg, "http://kyu.lan/x").unwrap(), None);
+
+        let raw_wrong = format!(
+            "token = \"0123456789abcdef0123\"\nnotify_tls_cert = \"{}\"\nnotify_tls_fingerprint = \"deadbeef\"\n",
+            path.display()
+        );
+        let cfg_wrong = config_from_text(&raw_wrong);
+        assert!(pinned_cacert(&cfg_wrong, "https://kyu.lan/x").is_err());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// fix-143: no `cloudflare_token` is reported as "not configured", not
+    /// as a failure — the nightly round must never turn an unasked question
+    /// into a finding, same rule `prometheus_url`/`loki_url` already
+    /// follow.
+    #[tokio::test]
+    async fn fix_143_the_nightly_edge_check_reports_not_configured_without_a_token() {
+        let dir = std::env::temp_dir().join(format!("homelab-fix143-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let raw = format!(
+            "token = \"0123456789abcdef0123\"\nstate_dir = \"{}\"\n",
+            dir.display()
+        );
+        let cfg = config_from_text(&raw);
+        let state_dir = cfg.state_dir.clone();
+        let app = AppState::new(cfg, tokio::sync::broadcast::channel(16).0);
+        let exec = RealExecutor;
+        run_nightly_edge_check(&app, &exec, 1_800_000_000).await;
+        let store = homelab_core::state::StateStore::new(&exec, &state_dir);
+        let s = store.load().await.unwrap();
+        assert_eq!(s.last_edge_check, 1_800_000_000);
+        assert_eq!(s.last_edge_findings, 0);
+        assert_eq!(
+            s.last_edge_error.as_deref(),
+            Some("not configured (no cloudflare_token in host.toml)")
+        );
     }
 
     /// fix-120: a connection refused for its token used to leave no trace at
@@ -4316,6 +4661,12 @@ struct AppState {
     /// Decision notify-routing: the newest notice's `seq`, read back from
     /// notices.jsonl at start so it only grows.
     notice_seq: Arc<std::sync::Mutex<u64>>,
+    /// fix-120: the `[[tokens]]` list in force right now. Starts as
+    /// `config.tokens` (what host.toml said at start) and is overwritten in
+    /// place by `TokenIssue`/`TokenRevoke`, so a newly issued token works at
+    /// once — host.toml marks `tokens` `Apply::Restart` for the generic
+    /// settings path, but this dedicated one does not wait for a restart.
+    tokens: Arc<std::sync::RwLock<Vec<TokenEntry>>>,
 }
 
 impl AppState {
@@ -4335,6 +4686,7 @@ impl AppState {
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             settings: Arc::new(std::sync::RwLock::new(config.initial_settings.clone())),
+            tokens: Arc::new(std::sync::RwLock::new(config.tokens.clone())),
             config,
             log_tx,
             op_lock: Arc::new(Mutex::new(())),
@@ -4358,6 +4710,16 @@ impl AppState {
                 std::process::id()
             ),
         }
+    }
+
+    /// fix-120: a snapshot of the tokens in force right now, for the
+    /// runtime paths that authenticate a connection — never `config.tokens`
+    /// directly, which stays frozen at what host.toml said at start.
+    fn live_tokens(&self) -> Vec<TokenEntry> {
+        self.tokens
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 }
 
@@ -4481,7 +4843,7 @@ async fn version_endpoint(
     if identify(
         headers.get("authorization").and_then(|v| v.to_str().ok()),
         &state.config.token,
-        &state.config.tokens,
+        &state.live_tokens(),
     )
     .is_some()
     {
@@ -5964,6 +6326,16 @@ async fn scheduler_loop(state: AppState) {
             }
         }
 
+        // fix-143 (Cloudflare nightly comparison, owner decision
+        // 2026-10-01): once a night, like the integrity check — this used
+        // to run only from the workstation (`homelab check`), so a night
+        // nobody ran it went unwatched.
+        if let Ok(fresh) = store.load().await {
+            if homelab_core::ops::restoredrill::due(fresh.last_edge_check, now, 24 * 3600) {
+                run_nightly_edge_check(&state, &exec, now).await;
+            }
+        }
+
         // Y4: after the night's work, hold the record against the machine.
         // Unconditional, because the findings this exists for are precisely
         // the ones that produce no failure of their own: a stack whose
@@ -6115,7 +6487,7 @@ async fn ws_upgrade(
     let Some(who) = identify(
         headers.get("authorization").and_then(|v| v.to_str().ok()),
         &state.config.token,
-        &state.config.tokens,
+        &state.live_tokens(),
     ) else {
         log_refused(&state, peer, "/api/ws");
         return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
@@ -6956,6 +7328,39 @@ fn exec_allowed(config: &Config, vmid: u16) -> Result<(), homelab_core::error::C
 /// the status, falls back to the second route when the first fails, and
 /// records the outcome in state so an unreachable notification path becomes a
 /// finding instead of a silence.
+/// fix-126 (TLS to the message hub, owner decision 2026-10-01): the
+/// `--cacert` path for `url`, or the reason it is refused. `Ok(None)` for a
+/// plain `http://` route, which needs no pin (migration is stepwise).
+/// Re-checked at every send, not only at boot: the certificate file can be
+/// rewritten — a regenerated hub certificate — without the host restarting,
+/// and a stale pin must stop the send, not weaken into trusting whatever is
+/// on disk now.
+fn pinned_cacert(cfg: &Config, url: &str) -> Result<Option<String>, String> {
+    if !url.starts_with("https://") {
+        return Ok(None);
+    }
+    let path = cfg
+        .notify_tls_cert
+        .as_deref()
+        .ok_or("https:// route with no notify_tls_cert configured")?;
+    let want = cfg
+        .notify_tls_fingerprint
+        .as_deref()
+        .ok_or("https:// route with no notify_tls_fingerprint configured")?;
+    let pem =
+        std::fs::read_to_string(path).map_err(|e| format!("notify_tls_cert {}: {}", path, e))?;
+    let got = homelab_core::notify::cert_fingerprint(&pem)
+        .map_err(|e| format!("notify_tls_cert {}: {}", path, e))?;
+    if got != want {
+        return Err(format!(
+            "notify_tls_cert {} does not match notify_tls_fingerprint ({} on disk, {} \
+             configured) — the hub's certificate changed, or this is the wrong file",
+            path, got, want
+        ));
+    }
+    Ok(Some(path.to_string()))
+}
+
 async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) -> Result<(), String> {
     let primary = state
         .settings
@@ -6996,7 +7401,27 @@ async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) -> R
             }
             None => None,
         };
-        let owned = homelab_core::notify::curl_args(&payload, url, header_file.as_deref());
+        // fix-126: the pin is re-checked here, not only at boot — the
+        // certificate file can be rewritten (a regenerated hub certificate)
+        // without the host restarting.
+        let cacert = match pinned_cacert(&state.config, url) {
+            Ok(c) => c,
+            Err(e) => {
+                last = e;
+                tracing::warn!(
+                    "notification route {} refused: {}",
+                    homelab_core::notify::route_for_log(url),
+                    last
+                );
+                continue;
+            }
+        };
+        let owned = homelab_core::notify::curl_args_pinned(
+            &payload,
+            url,
+            header_file.as_deref(),
+            cacert.as_deref(),
+        );
         let args: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
         let out = exec.run(&Cmd::new("curl", &args, 10)).await;
         let (ran, code) = match &out {
@@ -7072,6 +7497,146 @@ async fn record_notify_outcome(state: &AppState, exec: &RealExecutor, delivered:
             st.last_notify_failed = now;
             st.last_notify_error = Some(why.to_string());
         }
+    })
+    .await;
+}
+
+/// fix-143 (Cloudflare nightly comparison, owner decision 2026-10-01): one
+/// GET against the Cloudflare API, through the Executor rather than
+/// `std::process::Command` directly (unlike `client/src/edge.rs`, which runs
+/// on the workstation and is free to shell out itself) and with the token in
+/// a 0600 header file rather than on curl's argv (fix-35's own pattern,
+/// reused rather than the client's `-K -` on stdin, which `Executor` has no
+/// way to feed).
+async fn edge_get(
+    exec: &RealExecutor,
+    header_file: &str,
+    path: &str,
+) -> Result<serde_json::Value, String> {
+    let url = format!("{}{}", homelab_core::ops::edge::API, path);
+    let args = [
+        "-sS",
+        "--fail",
+        "-m",
+        "20",
+        "-H",
+        &format!("@{}", header_file),
+        &url,
+    ];
+    let out = exec
+        .run(&Cmd::new("curl", &args, 25))
+        .await
+        .map_err(|e| format!("GET {}: {}", path, e))?;
+    if !out.success() {
+        return Err(format!("GET {}: curl exited {}", path, out.code));
+    }
+    let v: serde_json::Value =
+        serde_json::from_str(&out.stdout).map_err(|e| format!("GET {}: {}", path, e))?;
+    if v.get("success") != Some(&serde_json::Value::Bool(true)) {
+        return Err(format!("GET {}: the API did not answer success", path));
+    }
+    Ok(v.get("result").cloned().unwrap_or(serde_json::Value::Null))
+}
+
+/// fix-143: the live edge, projected like the capture — the host's own copy
+/// of `client/src/edge.rs::fetch_live`.
+async fn fetch_live_edge(
+    exec: &RealExecutor,
+    header_file: &str,
+    ids: &homelab_core::ops::edge::EdgeIds,
+) -> Result<homelab_core::ops::edge::EdgeState, String> {
+    use homelab_core::ops::edge::{project_apps, project_dns, project_tunnel, EdgeState};
+    let tunnel = edge_get(
+        exec,
+        header_file,
+        &format!("/accounts/{}/cfd_tunnel/{}", ids.account_id, ids.tunnel_id),
+    )
+    .await?;
+    let config = edge_get(
+        exec,
+        header_file,
+        &format!(
+            "/accounts/{}/cfd_tunnel/{}/configurations",
+            ids.account_id, ids.tunnel_id
+        ),
+    )
+    .await?;
+    let apps = edge_get(
+        exec,
+        header_file,
+        &format!("/accounts/{}/access/apps", ids.account_id),
+    )
+    .await?;
+    let dns = edge_get(
+        exec,
+        header_file,
+        &format!("/zones/{}/dns_records", ids.zone_id),
+    )
+    .await?;
+    Ok(EdgeState {
+        tunnels: serde_json::Value::Array(vec![project_tunnel(&tunnel, &config)]),
+        apps: project_apps(&apps),
+        dns: project_dns(&dns),
+    })
+}
+
+/// fix-143: the nightly half of the Cloudflare edge comparison — the same
+/// `core::ops::edge` logic `homelab check` already runs from the
+/// workstation, run here too so a flipped Access app is noticed even on a
+/// night nobody ran the CLI. `cloudflare_token` absent is reported as "not
+/// configured", never as a failure: an unasked question must never become a
+/// finding (the same rule `prometheus_url`/`loki_url` follow).
+async fn run_nightly_edge_check(state: &AppState, exec: &RealExecutor, now: u64) {
+    let store = homelab_core::state::StateStore::new(exec, &state.config.state_dir);
+    let Some(token) = state.config.cloudflare_token.clone() else {
+        record_state(&store, "edge check", |s| {
+            s.last_edge_check = now;
+            s.last_edge_findings = 0;
+            s.last_edge_error = Some("not configured (no cloudflare_token in host.toml)".into());
+        })
+        .await;
+        return;
+    };
+    let captured_dir = std::path::Path::new(&state.config.state_dir).join("repo/captured/gateway");
+    let (findings, error) = match homelab_core::ops::edge::load_capture(&captured_dir) {
+        Ok((ids, captured)) => {
+            let header_file = format!("{}/secrets/cloudflare.header", state.config.state_dir);
+            let header = format!("authorization: Bearer {}\n", token.trim());
+            match exec.write_file(&header_file, &header, 0o600).await {
+                Ok(()) => match fetch_live_edge(exec, &header_file, &ids).await {
+                    Ok(live) => (
+                        homelab_core::ops::edge::compare_edge(&captured, &live),
+                        None,
+                    ),
+                    Err(e) => (
+                        Vec::new(),
+                        Some(format!("the Cloudflare API did not answer: {e}")),
+                    ),
+                },
+                Err(e) => (
+                    Vec::new(),
+                    Some(format!("cannot write the header file: {e}")),
+                ),
+            }
+        }
+        Err(e) => (Vec::new(), Some(format!("the capture does not read: {e}"))),
+    };
+    if let Some(e) = &error {
+        tracing::warn!("edge check: not compared — {}", e);
+    } else if !findings.is_empty() {
+        tracing::warn!(
+            "edge check: {} finding(s) against captured/gateway/ — {}",
+            findings.len(),
+            homelab_core::ops::fleetcheck::render(&findings)
+        );
+    } else {
+        info!("edge check: Cloudflare agrees with captured/gateway/");
+    }
+    let count = findings.len();
+    record_state(&store, "edge check", |s| {
+        s.last_edge_check = now;
+        s.last_edge_findings = count;
+        s.last_edge_error = error;
     })
     .await;
 }
@@ -8952,6 +9517,98 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         id: req.id,
                         ok: true,
                         message: serde_json::to_string(&saved).unwrap_or_default(),
+                        deferred: None,
+                    }
+                }
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e,
+                    deferred: None,
+                },
+            }
+        }
+        // fix-120 (per-machine tokens, owner decision 2026-10-01): mint,
+        // list and revoke `[[tokens]]` entries. The scope-all audit line
+        // above already named who issued or revoked.
+        Rpc::TokenIssue { name, scope } => {
+            let path = state.config.config_path.clone();
+            let raw = std::fs::read_to_string(&path).unwrap_or_default();
+            let plain = match random_token() {
+                Ok(t) => t,
+                Err(e) => {
+                    return RpcResponse {
+                        id: req.id,
+                        ok: false,
+                        message: e,
+                        deferred: None,
+                    }
+                }
+            };
+            match issue_token_in(&raw, &name, scope, &plain)
+                .and_then(|(text, tokens)| write_config_file(&path, &text).map(|()| tokens))
+            {
+                Ok(tokens) => {
+                    *state.tokens.write().unwrap_or_else(PoisonError::into_inner) = tokens;
+                    info!(name = %name, scope = ?scope, "token issued");
+                    let issued = homelab_proto::TokenIssued {
+                        name,
+                        scope,
+                        token: plain,
+                    };
+                    RpcResponse {
+                        id: req.id,
+                        ok: true,
+                        message: serde_json::to_string(&issued).unwrap_or_default(),
+                        deferred: None,
+                    }
+                }
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e,
+                    deferred: None,
+                },
+            }
+        }
+        Rpc::TokenList => {
+            let mut views: Vec<homelab_proto::TokenView> = state
+                .live_tokens()
+                .into_iter()
+                .map(|t| homelab_proto::TokenView {
+                    name: t.name,
+                    scope: t.scope,
+                })
+                .collect();
+            if !state.config.token.is_empty() {
+                views.insert(
+                    0,
+                    homelab_proto::TokenView {
+                        name: "legacy".into(),
+                        scope: homelab_proto::Scope::All,
+                    },
+                );
+            }
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: serde_json::to_string(&views).unwrap_or_default(),
+                deferred: None,
+            }
+        }
+        Rpc::TokenRevoke { name } => {
+            let path = state.config.config_path.clone();
+            let raw = std::fs::read_to_string(&path).unwrap_or_default();
+            match revoke_token_in(&raw, &name)
+                .and_then(|(text, tokens)| write_config_file(&path, &text).map(|()| tokens))
+            {
+                Ok(tokens) => {
+                    *state.tokens.write().unwrap_or_else(PoisonError::into_inner) = tokens;
+                    info!(name = %name, "token revoked");
+                    RpcResponse {
+                        id: req.id,
+                        ok: true,
+                        message: format!("token {:?} revoked", name),
                         deferred: None,
                     }
                 }

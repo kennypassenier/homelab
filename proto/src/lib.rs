@@ -408,6 +408,30 @@ pub enum Command {
         changes: std::collections::BTreeMap<String, serde_json::Value>,
         expect_sha256: String,
     },
+    /// fix-120 (per-machine tokens, owner decision 2026-10-01): mint a new
+    /// `[[tokens]]` entry at `scope`, named `name` (must be unique, not
+    /// "legacy"), and write it to host.toml at once — unlike `tokens`
+    /// itself, which `SetHostConfig` refuses (arch-self), this is its own
+    /// narrow, scope-`All`-only action. Answered as JSON [`TokenIssued`];
+    /// the plaintext token is in that one reply and nowhere else — never
+    /// logged, never re-readable.
+    TokenIssue {
+        name: String,
+        scope: Scope,
+    },
+    /// fix-120: every token the host currently trusts, name and scope only
+    /// — never a hash, never a plaintext token. Answered as JSON
+    /// `Vec<TokenView>`, the legacy single `token` included as `"legacy"`
+    /// when one is set.
+    TokenList,
+    /// fix-120: remove the `[[tokens]]` entry named `name`, at once, so the
+    /// token stops working without touching any other machine's. Refused
+    /// for `"legacy"` (the single `token` key; cleared over ssh, see
+    /// OPERATIONS_RUNBOOK's migration note) and for a name that is not
+    /// there.
+    TokenRevoke {
+        name: String,
+    },
     /// feat-platform-10 (milestone follow): one step of driving the
     /// dashboard's open tabs (`homelab ui <step>`). The host hands it to the
     /// session that sent `UiAttach` and answers with that session's
@@ -604,7 +628,8 @@ impl Command {
             | CurrentOp
             | History { .. }
             | Notices { .. }
-            | GetHostConfig => Scope::Read,
+            | GetHostConfig
+            | TokenList => Scope::Read,
             Ui { step } => step.scope(),
             DeployStack(_)
             | StageNativeBinary { .. }
@@ -640,7 +665,9 @@ impl Command {
             | DestroyRecorded { .. }
             | WipeRetired { .. }
             | PruneOrphans { .. }
-            | SetHostConfig { .. } => Scope::All,
+            | SetHostConfig { .. }
+            | TokenIssue { .. }
+            | TokenRevoke { .. } => Scope::All,
         }
     }
 
@@ -699,6 +726,9 @@ impl Command {
             Notices { .. } => "notices",
             GetHostConfig => "get_host_config",
             SetHostConfig { .. } => "set_host_config",
+            TokenIssue { .. } => "token_issue",
+            TokenList => "token_list",
+            TokenRevoke { .. } => "token_revoke",
             Ui { .. } => "ui",
             UiAttach => "ui_attach",
             UiReply { .. } => "ui_reply",
@@ -753,6 +783,25 @@ pub struct HostConfigSaved {
     pub live: Vec<String>,
     /// Changed keys that take effect at the host's next start.
     pub restart: Vec<String>,
+}
+
+/// fix-120: what `TokenList` answers for one `[[tokens]]` entry (or the
+/// legacy single `token`, named `"legacy"`) — never a hash, never a
+/// plaintext token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenView {
+    pub name: String,
+    pub scope: Scope,
+}
+
+/// fix-120: what `TokenIssue` answers. `token` is the plaintext bearer the
+/// new machine must save (e.g. into `HOMELAB_TOKEN`) — this is the only
+/// place it is ever sent; the host keeps only its SHA-256.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenIssued {
+    pub name: String,
+    pub scope: Scope,
+    pub token: String,
 }
 
 /// A stack as the TUI sees it — structured, not free text.

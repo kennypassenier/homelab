@@ -10,6 +10,8 @@
 //! | `HOMELAB_ADMIN_REPO` | `<data dir>/repo` | the homelab working copy the stack files are read from |
 //! | `HOMELAB_ADMIN_NOTIFY_URL` | none: no pushes | kyu's publish URL for feat-ops-8 |
 //! | `HOMELAB_ADMIN_NOTIFY_TOKEN` | none | kyu's bearer token (a secret: admin.env) |
+//! | `HOMELAB_ADMIN_NOTIFY_TLS_CERT` | none | fix-126: path of the LAN hub's self-signed certificate (PEM), required once `HOMELAB_ADMIN_NOTIFY_URL` is `https://` |
+//! | `HOMELAB_ADMIN_NOTIFY_TLS_FINGERPRINT` | none | fix-126: that certificate's SHA-256, checked against the file on disk at every start |
 //! | `HOMELAB_ADMIN_SCHEDULE_TICK_S` | 20 | how often the scheduler looks |
 //! | `HOMELAB_ADMIN_SCHEDULE_GRACE_S` | 300 | how late a slot may still run |
 //! | `HOMELAB_ADMIN_INCIDENTS_POLL_S` | 300 | how often the host's incident list is read |
@@ -53,6 +55,14 @@ pub struct ActConfig {
     pub repo: PathBuf,
     pub notify_url: Option<String>,
     pub notify_token: Option<String>,
+    /// fix-126 (TLS to the message hub, owner decision 2026-10-01): the
+    /// LAN-only self-signed certificate `notify_url` is pinned to, when it
+    /// is `https://` — mirrors the host's `notify_tls_cert`. `None` on a
+    /// plain `http://` route (migration is stepwise).
+    pub notify_tls_cert: Option<String>,
+    /// The SHA-256 of that certificate's DER form, lowercase hex. Checked
+    /// against the file on disk at every start, the same as the host.
+    pub notify_tls_fingerprint: Option<String>,
     pub schedule_tick_s: u64,
     pub schedule_grace_s: u64,
     pub incidents_poll_s: u64,
@@ -195,11 +205,33 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
     if notify_token.is_some() && notify_url.is_none() {
         why.push("HOMELAB_ADMIN_NOTIFY_TOKEN is set without HOMELAB_ADMIN_NOTIFY_URL".into());
     }
+    let notify_tls_cert = non_empty("HOMELAB_ADMIN_NOTIFY_TLS_CERT");
+    let notify_tls_fingerprint = non_empty("HOMELAB_ADMIN_NOTIFY_TLS_FINGERPRINT");
+    let https_route = notify_url
+        .as_deref()
+        .is_some_and(|u| u.starts_with("https://"));
+    if https_route && (notify_tls_cert.is_none() || notify_tls_fingerprint.is_none()) {
+        why.push(
+            "HOMELAB_ADMIN_NOTIFY_URL is https:// but HOMELAB_ADMIN_NOTIFY_TLS_CERT or \
+             HOMELAB_ADMIN_NOTIFY_TLS_FINGERPRINT is not set — the LAN hub's certificate is \
+             self-signed, so nothing is trusted unless it is pinned"
+                .into(),
+        );
+    }
+    if !https_route && (notify_tls_cert.is_some() || notify_tls_fingerprint.is_some()) {
+        why.push(
+            "HOMELAB_ADMIN_NOTIFY_TLS_CERT/_FINGERPRINT are set but HOMELAB_ADMIN_NOTIFY_URL is \
+             not https://"
+                .into(),
+        );
+    }
     let cfg = ActConfig {
         data_dir: data_dir.clone(),
         repo,
         notify_url,
         notify_token,
+        notify_tls_cert,
+        notify_tls_fingerprint,
         schedule_tick_s: number(lookup, "SCHEDULE_TICK_S", 20, 1, &mut why),
         schedule_grace_s: number(lookup, "SCHEDULE_GRACE_S", 300, 1, &mut why),
         incidents_poll_s: number(lookup, "INCIDENTS_POLL_S", 300, 10, &mut why),

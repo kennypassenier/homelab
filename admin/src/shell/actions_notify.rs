@@ -35,10 +35,69 @@ pub struct KyuPusher {
 
 impl KyuPusher {
     pub fn new(url: String, token: Option<String>) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()
-            .unwrap_or_default();
+        Self::new_pinned(url, token, None, None)
+    }
+
+    /// fix-126 (TLS to the message hub, owner decision 2026-10-01): `cert`
+    /// and `fingerprint` pin the client to the LAN hub's self-signed
+    /// certificate the same way the host's own notify route is pinned
+    /// (`core::notify::curl_args_pinned`'s `--cacert`) — trusting exactly
+    /// that certificate and nothing reqwest's built-in root store would
+    /// otherwise accept, never both. A mismatch, an unreadable file, or
+    /// `url` being `http://` all fall back to the plain client: an
+    /// `https://` route with no valid pin then fails at the TLS handshake
+    /// (reqwest trusts nothing for a LAN self-signed certificate on its
+    /// own), which is refused the same way as a missing pin on the host.
+    pub fn new_pinned(
+        url: String,
+        token: Option<String>,
+        cert_pem: Option<&str>,
+        fingerprint: Option<&str>,
+    ) -> Self {
+        let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(5));
+        if url.starts_with("https://") {
+            if let (Some(pem), Some(want)) = (cert_pem, fingerprint) {
+                match homelab_core::notify::cert_fingerprint(pem) {
+                    Ok(got) if got == want => {
+                        match reqwest::Certificate::from_pem(pem.as_bytes()) {
+                            Ok(cert) => {
+                                builder = builder
+                                    .add_root_certificate(cert)
+                                    .tls_built_in_root_certs(false);
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                "HOMELAB_ADMIN_NOTIFY_TLS_CERT does not read as a certificate: \
+                                 {e} — notification pushes over https will fail until this is \
+                                 fixed"
+                            );
+                            }
+                        }
+                    }
+                    Ok(got) => {
+                        tracing::error!(
+                            "HOMELAB_ADMIN_NOTIFY_TLS_CERT does not match \
+                             HOMELAB_ADMIN_NOTIFY_TLS_FINGERPRINT ({want}; the file is {got}) — \
+                             the hub's certificate changed, or this is the wrong file; \
+                             notification pushes over https will fail until this is fixed"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "HOMELAB_ADMIN_NOTIFY_TLS_CERT is not a valid certificate: {e} — \
+                             notification pushes over https will fail until this is fixed"
+                        );
+                    }
+                }
+            } else {
+                tracing::error!(
+                    "HOMELAB_ADMIN_NOTIFY_URL is https:// with no pinned certificate — \
+                     notification pushes over https will fail until HOMELAB_ADMIN_NOTIFY_TLS_CERT \
+                     and HOMELAB_ADMIN_NOTIFY_TLS_FINGERPRINT are set"
+                );
+            }
+        }
+        let client = builder.build().unwrap_or_default();
         KyuPusher { url, token, client }
     }
 }

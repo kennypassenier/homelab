@@ -2110,10 +2110,22 @@ pub fn mount(
     let publish: Arc<dyn Publish> = Arc::new(live);
     let host: Arc<dyn HostPort> = Arc::new(host);
     let pusher: Arc<dyn super::actions_notify::Pusher> = match &cfg.notify_url {
-        Some(url) => Arc::new(super::actions_notify::KyuPusher::new(
-            url.clone(),
-            cfg.notify_token.clone(),
-        )),
+        // fix-126: the pin is read fresh here (not cached across restarts
+        // of the dashboard's own process; the certificate file can be
+        // rewritten by a regenerated hub certificate) and handed to the
+        // client, which refuses to trust anything else over https.
+        Some(url) => {
+            let pem = cfg
+                .notify_tls_cert
+                .as_deref()
+                .and_then(|p| std::fs::read_to_string(p).ok());
+            Arc::new(super::actions_notify::KyuPusher::new_pinned(
+                url.clone(),
+                cfg.notify_token.clone(),
+                pem.as_deref(),
+                cfg.notify_tls_fingerprint.as_deref(),
+            ))
+        }
         None => Arc::new(super::actions_notify::NoPusher),
     };
     let shared_for_edit = shared.clone();

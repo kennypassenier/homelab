@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# fix-126 (TLS to the message hub, owner decision 2026-10-01): make sure a
+# self-signed certificate for the TLS terminator in front of the hub exists
+# and is still good, generating one the first time this runs and whenever
+# the existing one is within 30 days of expiring.
+#
+# Deliberately idempotent and silent on a no-op run: this is ExecStartPre=
+# for kyu-tls.service, so it runs every time that unit starts (a reboot, a
+# restart after an update) and must not regenerate a certificate that is
+# still fine — a changed certificate makes every pinned sender (the host's
+# notify_tls_fingerprint, the dashboard's HOMELAB_ADMIN_NOTIFY_TLS_FINGERPRINT)
+# refuse the connection until someone updates the pin by hand.
+#
+# LAN-only, no CA: this is the same trust model as the client's own pin to
+# the host (A4/fix-149) — the certificate is self-signed and whoever sends
+# to it pins the exact fingerprint rather than asking a certificate
+# authority whether to trust it. A 10-year validity is deliberate: the
+# alternative (a short-lived certificate) needs a renewal path that updates
+# every pinned sender in step, which does not exist yet and is a needless
+# outage risk for a certificate nothing public ever sees.
+set -euo pipefail
+
+DIR=${KYU_TLS_DIR:?kyu-tls-cert needs KYU_TLS_DIR. systemd passes it via Environment= in kyu-tls.service.}
+CERT="${DIR}/hub.pem"
+KEY="${DIR}/hub.key"
+
+mkdir -p "$DIR"
+chmod 700 "$DIR"
+
+if [ -s "$CERT" ] && [ -s "$KEY" ] && openssl x509 -in "$CERT" -noout -checkend $((30 * 86400)) >/dev/null 2>&1; then
+    echo "kyu-tls-cert: ${CERT} is still good, nothing to do"
+    exit 0
+fi
+
+tmp_cert=$(mktemp "${DIR}/.hub.pem.XXXXXX")
+tmp_key=$(mktemp "${DIR}/.hub.key.XXXXXX")
+trap 'rm -f "$tmp_cert" "$tmp_key"' EXIT
+
+# CN is the hostname a sender would otherwise expect to validate against;
+# it is never checked here (senders pin the fingerprint, not the name), but
+# a real-looking certificate is easier to read with `openssl x509 -text`
+# when someone is debugging the pin by hand.
+openssl req -x509 -newkey rsa:2048 -nodes \
+    -keyout "$tmp_key" -out "$tmp_cert" \
+    -days 3650 -subj "/CN=kyu.kp-soft.lan" \
+    -addext "subjectAltName=DNS:kyu.kp-soft.lan,IP:10.10.10.9" \
+    2>/dev/null
+
+chmod 600 "$tmp_key"
+chmod 644 "$tmp_cert"
+mv -f "$tmp_key" "$KEY"
+mv -f "$tmp_cert" "$CERT"
+trap - EXIT
+
+fingerprint=$(openssl x509 -in "$CERT" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f')
+echo "kyu-tls-cert: wrote a fresh certificate, SHA-256 ${fingerprint}"
+echo "kyu-tls-cert: copy ${CERT} to the senders' notify_tls_cert path and set their notify_tls_fingerprint to ${fingerprint}"

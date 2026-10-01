@@ -990,6 +990,74 @@ async fn run(explicit_host: Option<String>) {
                 other
             )),
         },
+        // fix-120 (per-machine tokens, owner decision 2026-10-01): a token
+        // per machine, so one can be revoked without touching the others.
+        "token" => match args.get(2).map(String::as_str) {
+            Some("issue") => {
+                let name = args.get(3).cloned().unwrap_or_else(|| {
+                    die(
+                        "usage: homelab token issue <name> <read|operate|all> :: name is what \
+                         `homelab doctor` and audit.log will call this machine",
+                    )
+                });
+                let scope = match args.get(4).map(String::as_str) {
+                    Some("read") => homelab_proto::Scope::Read,
+                    Some("operate") => homelab_proto::Scope::Operate,
+                    Some("all") => homelab_proto::Scope::All,
+                    _ => die(
+                        "usage: homelab token issue <name> <read|operate|all> :: read = look, \
+                         operate = act without destroying, all = everything",
+                    ),
+                };
+                match rpc_reply(&host, &token, Command::TokenIssue { name, scope }).await {
+                    Some(r) if r.ok => {
+                        match serde_json::from_str::<homelab_proto::TokenIssued>(&r.message) {
+                            Ok(issued) => {
+                                println!(
+                                    "issued {:?} (scope {:?}) — shown once, save it now:",
+                                    issued.name, issued.scope
+                                );
+                                println!("{}", issued.token);
+                                println!(
+                                    "set it as HOMELAB_TOKEN on that machine (its own .env or \
+                                     ~/.config/homelab/env), never shared with another machine's"
+                                );
+                            }
+                            Err(e) => die(&format!("issued, but could not read the reply: {}", e)),
+                        }
+                    }
+                    Some(r) => die(&r.message),
+                    None => die("the host did not answer"),
+                }
+            }
+            Some("list") => match rpc_reply(&host, &token, Command::TokenList).await {
+                Some(r) if r.ok => {
+                    match serde_json::from_str::<Vec<homelab_proto::TokenView>>(&r.message) {
+                        Ok(views) => {
+                            if views.is_empty() {
+                                println!("no tokens");
+                            }
+                            for v in views {
+                                println!("{:<20} {:?}", v.name, v.scope);
+                            }
+                        }
+                        Err(e) => die(&format!("could not read the reply: {}", e)),
+                    }
+                }
+                Some(r) => die(&r.message),
+                None => die("the host did not answer"),
+            },
+            Some("revoke") => {
+                let name = args.get(3).cloned().unwrap_or_else(|| {
+                    die("usage: homelab token revoke <name> :: `homelab token list` shows the names")
+                });
+                rpc(&host, &token, Command::TokenRevoke { name }).await
+            }
+            _ => die(
+                "usage: homelab token issue <name> <read|operate|all> | homelab token list | \
+                 homelab token revoke <name>",
+            ),
+        },
         "plan" => {
             // D6/D10: validate locally and show what would be sent — no network.
             let dir = &stack_dir(

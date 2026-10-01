@@ -16,6 +16,15 @@
 //! * a key that can take the dashboard's own route or the backups down is
 //!   editable only with a second, typed confirmation.
 //!
+//! fix-143 (Cloudflare nightly comparison, owner decision 2026-10-01):
+//! `Access::DashboardSecret` is the same "never sent, only whether it is
+//! set" promise as `Access::Secret`, but the dashboard may WRITE it — the
+//! field is a one-way drop box, never a read, the same shape the vault
+//! already uses for `latch_secrets`. A key stays plain `Secret` (ssh only,
+//! both ways) unless something — here, "the nightly round needs a
+//! Cloudflare token but Kenny should not have to ssh in to set one" —
+//! argues for the dashboard field specifically.
+//!
 //! Zero I/O: values travel as JSON, the TOML side is the host's.
 
 use serde::Serialize;
@@ -34,13 +43,21 @@ pub enum Access {
     Locked,
     /// Shown, changed over ssh only: a policy the token must not loosen.
     SshOnly,
-    /// Never shown, never sent: only whether it is set.
+    /// Never shown, never sent, never changed from the browser: ssh only,
+    /// both ways.
     Secret,
+    /// Never shown, never sent — like `Secret` — but WRITABLE from the
+    /// browser: a one-way field, set or replaced here, never read back.
+    /// fix-143.
+    DashboardSecret,
 }
 
 impl Access {
     pub fn editable(self) -> bool {
-        matches!(self, Access::Browser | Access::Confirm)
+        matches!(
+            self,
+            Access::Browser | Access::Confirm | Access::DashboardSecret
+        )
     }
 }
 
@@ -149,6 +166,10 @@ pub const KEYS: &[KeyInfo] = &[
     k("notify_auth_bearer", "Notifications", "Webhook token", "The bearer token sent with it. A secret: changed over ssh only.", "none", Kind::Text, Access::Secret, Apply::Restart),
     k("notify_fallback_webhook", "Notifications", "Fallback webhook", "The second route, tried when the first does not answer 2xx.", "none", Kind::Url, Access::Browser, Apply::Restart),
     k("notify_fallback_auth_bearer", "Notifications", "Fallback token", "The bearer token of the second route. A secret: changed over ssh only.", "none", Kind::Text, Access::Secret, Apply::Restart),
+    k("notify_tls_cert", "Notifications", "Pinned hub certificate", "Path to the LAN self-signed certificate (PEM) an https:// notify route is pinned to. Not a secret — the fingerprint below is what proves it.", "none", Kind::Text, Access::Browser, Apply::Restart),
+    k("notify_tls_fingerprint", "Notifications", "Pinned hub fingerprint", "SHA-256 of that certificate. Read it again from the container (openssl x509 -noout -fingerprint -sha256) whenever the certificate is regenerated.", "none", Kind::Text, Access::Browser, Apply::Restart),
+    // ── Nightly checks ──────────────────────────────────────────────────
+    k("cloudflare_token", "Nightly checks", "Cloudflare read-only token", "Lets the host's own nightly round compare the Cloudflare edge against captured/gateway/, the same comparison `homelab check` runs from the workstation. Read-only token; set or replaced here (never read back) or over ssh. Absent: the nightly comparison reports \"not configured\", not broken.", "none", Kind::Text, Access::DashboardSecret, Apply::Restart),
     k("dashboard_url", "Notifications", "Dashboard address", "The dashboard's public address; a push links to its page there (click_url).", "none: a push carries no link", Kind::Url, Access::Browser, Apply::Restart),
     k("watch_url", "Notifications", "Dashboard health address", "The dashboard's health address on the house network; the host asks it every minute and sends an urgent notice after five minutes without an answer.", "none: the dashboard is not watched", Kind::Url, Access::Browser, Apply::Restart),
     k("watch_interval_s", "Notifications", "Watch interval", "How often the host asks the dashboard's health address, and the fleet default for how often the dashboard's own minute watch asks a tile (a tile may set its own in its stack file).", "60", Kind::Int { min: 10, max: 86_400 }, Access::Browser, Apply::Restart),
@@ -194,7 +215,7 @@ pub fn key_info(key: &str) -> Option<&'static KeyInfo> {
 
 /// Keys whose value is never sent anywhere.
 pub fn is_secret(key: &str) -> bool {
-    key_info(key).is_some_and(|k| k.access == Access::Secret)
+    key_info(key).is_some_and(|k| matches!(k.access, Access::Secret | Access::DashboardSecret))
 }
 
 /// Why `value` is not a value for `key`, or Ok. `null` is always allowed

@@ -92,6 +92,9 @@ export const ACT_EVENTS = /** @type {const} */ ([
   // Milestone edit: the working copy moved, host.toml was written.
   "repo",
   "host_settings",
+  // fix-120 (per-machine tokens, owner decision 2026-10-01): a token was
+  // issued or revoked.
+  "tokens",
   // Milestone follow: Claude drove one step (feat-platform-10).
   "drive",
   // TUI parity: every host line, the byte counters, the newest release.

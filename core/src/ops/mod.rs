@@ -46,6 +46,7 @@ pub mod restarthost;
 pub mod restoredrill;
 pub mod retired;
 pub mod secondcopy;
+pub mod secrets;
 pub mod selfupdate;
 pub mod template;
 pub mod tiles;

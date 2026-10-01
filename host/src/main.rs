@@ -31,6 +31,7 @@ use homelab_core::sink::{PipelineEvent, Sink};
 
 use homelab_proto::{Command as Rpc, RpcRequest, RpcResponse, ServerMsg};
 
+mod secrets;
 mod tls;
 mod ui_relay;
 
@@ -4574,7 +4575,11 @@ fn rpc_stack(command: &Rpc) -> Option<String> {
         | Rpc::ForgetStack { stack }
         | Rpc::DestroyRecorded { stack, .. }
         | Rpc::SetStackEnabled { stack, .. }
-        | Rpc::GetApplied { stack } => Some(stack.clone()),
+        | Rpc::GetApplied { stack }
+        | Rpc::GetBackups { stack }
+        | Rpc::RestoreNative { stack, .. }
+        | Rpc::RevealSecret { stack, .. }
+        | Rpc::SetSecret { stack, .. } => Some(stack.clone()),
         Rpc::InstallNative { manifest, .. }
         | Rpc::InstallNativeRelease { manifest, .. }
         | Rpc::AdoptService(manifest) => Some(manifest.stack_name.clone()),
@@ -8778,6 +8783,230 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 ok: true,
                 message: serde_json::to_string(&files).unwrap_or_else(|_| "[]".into()),
                 deferred: None,
+            }
+        }
+        // feat-backup-1: per-repository status (D25's owning-app repos for
+        // a compose stack, one per unit for a native stack), joined with
+        // the restore-drill verdict the nightly drill already recorded.
+        Rpc::GetBackups { stack } => {
+            let store =
+                homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
+            let snapshot = store.load().await.unwrap_or_default();
+            let Some(st) = snapshot.stacks.get(&stack) else {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("no such stack '{}'", stack),
+                    deferred: None,
+                };
+            };
+            let tiers = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retention
+                .clone();
+            let cfg = homelab_core::ops::backup::BackupCfg {
+                tiers,
+                ..state.config.backup.clone()
+            };
+            let (native, statuses) = if let Some(m) = &st.manifest {
+                (
+                    false,
+                    homelab_core::ops::backup::backup_status(
+                        &exec,
+                        m,
+                        &cfg,
+                        &snapshot.restore_drills,
+                    )
+                    .await,
+                )
+            } else {
+                let mut v = Vec::new();
+                for n in &st.natives {
+                    v.push(
+                        homelab_core::ops::backup::repo_status_of(
+                            &exec,
+                            &cfg,
+                            &snapshot.restore_drills,
+                            n.unit.clone(),
+                        )
+                        .await,
+                    );
+                }
+                (true, v)
+            };
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: serde_json::json!({ "native": native, "repos": statuses }).to_string(),
+                deferred: None,
+            }
+        }
+        // feat-backup-3: read-only, never stops anything.
+        Rpc::BrowseSnapshot {
+            owner,
+            snapshot,
+            path,
+        } => {
+            let tiers = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retention
+                .clone();
+            let cfg = homelab_core::ops::backup::BackupCfg {
+                tiers,
+                ..state.config.backup.clone()
+            };
+            match homelab_core::ops::backup::browse_snapshot(&exec, &cfg, &owner, &snapshot, &path)
+                .await
+            {
+                Ok(entries) => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: serde_json::to_string(&entries).unwrap_or_else(|_| "[]".into()),
+                    deferred: None,
+                },
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e.to_string(),
+                    deferred: None,
+                },
+            }
+        }
+        Rpc::RestoreNative {
+            stack,
+            snapshot,
+            confirm,
+        } => match native_from_state(&state.config.state_dir, &stack).await {
+            Ok((services, _)) => {
+                let cfg = state.config.backup.clone();
+                let mut resp = RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: format!("no services on stack '{}'", stack),
+                    deferred: None,
+                };
+                for m in services {
+                    let cfg = cfg.clone();
+                    let snap = snapshot.clone();
+                    let confirm = confirm.clone();
+                    let r = run_mutating_op_for_stack(
+                        state,
+                        &exec,
+                        req.id,
+                        "restore-native",
+                        Some(&stack),
+                        |ctx| {
+                            Box::pin(async move {
+                                homelab_core::ops::native::restore_native(
+                                    ctx,
+                                    &m,
+                                    &cfg,
+                                    &snap,
+                                    confirm.as_deref(),
+                                )
+                                .await
+                            })
+                        },
+                    )
+                    .await;
+                    let failed = !r.ok;
+                    if resp.ok || failed {
+                        resp = r;
+                    }
+                    if failed {
+                        break;
+                    }
+                }
+                resp
+            }
+            Err(msg) => RpcResponse {
+                id: req.id,
+                ok: false,
+                message: msg,
+                deferred: None,
+            },
+        },
+        // feat-secrets-1: the value, read straight from the host's own
+        // vault (never a process, never traced). Audited before the read,
+        // naming what was asked for, never the value.
+        Rpc::RevealSecret { stack, secret } => {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let audit = format!("{} reveal-secret stack={} secret={:?}\n", ts, stack, secret);
+            if let Err(e) = append_audit(&format!("{}/audit.log", state.config.state_dir), &audit) {
+                tracing::warn!("audit.log: could not record the reveal :: {}", e);
+            }
+            match crate::secrets::reveal(&state.config.state_dir, &stack, &secret).await {
+                Ok(content) => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: content,
+                    deferred: None,
+                },
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e,
+                    deferred: None,
+                },
+            }
+        }
+        // feat-secrets-2: through latch, exactly the one relative path a
+        // deploy would read back — the rest of latch is untouched. Audited
+        // before the write, never the value; `latch_put` itself never goes
+        // through `Executor`/`Cmd` either (core::ops::secrets).
+        Rpc::SetSecret {
+            stack,
+            secret,
+            content,
+        } => {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let rel = homelab_core::ops::secrets::latch_rel_path(&stack, &secret);
+            let audit = format!(
+                "{} set-secret stack={} secret={:?} rel={}\n",
+                ts, stack, secret, rel
+            );
+            if let Err(e) = append_audit(&format!("{}/audit.log", state.config.state_dir), &audit) {
+                tracing::warn!("audit.log: could not record the write :: {}", e);
+            }
+            let env = std::env::var("HOMELAB_LATCH_ENV").unwrap_or_default();
+            let project_root = format!("{}/repo", state.config.state_dir);
+            let result = tokio::task::spawn_blocking(move || {
+                crate::secrets::latch_put(&project_root, &env, &rel, &content)
+            })
+            .await;
+            match result {
+                Ok(Ok(())) => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: format!(
+                        "{} written in latch; the other files latch holds for this stack are \
+                         untouched; redeploy the stack for the running container to pick it up",
+                        homelab_core::ops::secrets::latch_rel_path(&stack, &secret)
+                    ),
+                    deferred: None,
+                },
+                Ok(Err(e)) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e,
+                    deferred: None,
+                },
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("internal: {e}"),
+                    deferred: None,
+                },
             }
         }
         Rpc::GetConfig => {

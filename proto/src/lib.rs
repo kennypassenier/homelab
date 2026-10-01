@@ -437,7 +437,65 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         note: Option<String>,
     },
+    /// feat-backup-1: per-repository backup status of one stack (a compose
+    /// stack has one per owning app, D25; a native stack has exactly one,
+    /// named after the unit) — last snapshot, its age and size, and the last
+    /// restore-drill verdict recorded for that repository. Read-only.
+    GetBackups {
+        stack: String,
+    },
+    /// feat-backup-3: list the files one snapshot holds under `path` ("" =
+    /// the snapshot root), read-only. `owner` is a repository name from
+    /// `GetBackups` (the owning app, or the native unit).
+    BrowseSnapshot {
+        owner: String,
+        snapshot: String,
+        #[serde(default)]
+        path: String,
+    },
+    /// feat-backup-2: restore a native (adopted) service from a snapshot
+    /// (default "latest"). Unpacks the archive `restic dump` emits straight
+    /// into the container with `tar`, the same pipeline the auto-restore of
+    /// an empty unit already uses (`native::restore_empty_unit`) — see
+    /// `native::restore_native` for the gated, chosen-snapshot version.
+    RestoreNative {
+        stack: String,
+        snapshot: String,
+        /// fix-64-equivalent: the stack name as typed; refused without it,
+        /// same rule as `RestoreStack::confirm`.
+        #[serde(default)]
+        confirm: Option<String>,
+    },
+    /// feat-secrets-1: the content of one secret, read from the host's own
+    /// vault (the value a deploy last sealed there — `ops::deploy`'s
+    /// `{state_dir}/secrets/...`), never from a process the transcript or
+    /// journal could echo. Every call is audit-logged on the host (the
+    /// request, never the value). `confirm` carries the stack name typed by
+    /// the viewer requesting the reveal, so an empty confirm (an old client)
+    /// is refused rather than silently handed the value.
+    RevealSecret {
+        stack: String,
+        secret: SecretRef,
+    },
+    /// feat-secrets-2: change ONE secret, writing through latch exactly as
+    /// `homelab deploy` reads one (`latch put <stack>/<app>/.env --env …` or
+    /// `latch put <stack>/<from> --env …`), from the host's own intent repo
+    /// checkout. The sibling files in latch are untouched — only this one
+    /// relative path is written. `content` is never logged: the host side
+    /// hands it to `latch put` on stdin and the line it runs is traced with
+    /// the secret value itself stripped, not merely masked.
+    SetSecret {
+        stack: String,
+        secret: SecretRef,
+        content: String,
+    },
 }
+
+// feat-secrets-1/2: `SecretRef` is a domain type (core has no I/O of its
+// own but every other wire type that is also domain-shaped lives there —
+// see the `pub use homelab_core::...` block above), defined in
+// `homelab_core::ops::secrets` and re-exported here for the wire.
+pub use homelab_core::ops::secrets::SecretRef;
 
 /// Live view: the longest one `UiHold` may ask the host to wait. The
 /// dashboard's own longest pause (`HOMELAB_ADMIN_LIVE_MAX_PAUSE_S`, at most
@@ -604,7 +662,9 @@ impl Command {
             | CurrentOp
             | History { .. }
             | Notices { .. }
-            | GetHostConfig => Scope::Read,
+            | GetHostConfig
+            | GetBackups { .. }
+            | BrowseSnapshot { .. } => Scope::Read,
             Ui { step } => step.scope(),
             DeployStack(_)
             | StageNativeBinary { .. }
@@ -630,7 +690,9 @@ impl Command {
             | AnswerManualCheck { .. }
             | UiAttach
             | UiReply { .. }
-            | UiHold { .. } => Scope::Operate,
+            | UiHold { .. }
+            | RestoreNative { .. }
+            | RevealSecret { .. } => Scope::Operate,
             DestroyStack { .. }
             | SelfUpdateHost { .. }
             | RestartHost
@@ -640,7 +702,8 @@ impl Command {
             | DestroyRecorded { .. }
             | WipeRetired { .. }
             | PruneOrphans { .. }
-            | SetHostConfig { .. } => Scope::All,
+            | SetHostConfig { .. }
+            | SetSecret { .. } => Scope::All,
         }
     }
 
@@ -703,6 +766,11 @@ impl Command {
             UiAttach => "ui_attach",
             UiReply { .. } => "ui_reply",
             UiHold { .. } => "ui_hold",
+            GetBackups { .. } => "get_backups",
+            BrowseSnapshot { .. } => "browse_snapshot",
+            RestoreNative { .. } => "restore_native",
+            RevealSecret { .. } => "reveal_secret",
+            SetSecret { .. } => "set_secret",
         }
     }
 

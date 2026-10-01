@@ -1142,6 +1142,14 @@ zfs-replicate` ran with no jobs (`core/src/ops/zfs.rs:432-437`).
    `template: clone:<vmid>` (`core/src/ops/template.rs:317`). Build one
    unprivileged and one `--privileged`: a clone cannot change its privilege
    level (`core/src/ops/template.rs:40-44`).
+4. node_exporter is baked in with
+   `--collector.systemd.enable-start-time-metrics`
+   (`core/src/ops/template.rs::NODE_EXPORTER_ARGS`, fix-70): without it
+   `node_systemd_unit_state` carries no start time, and a native stack's
+   generated "Service uptime" panel (`core/src/charts.rs`) has nothing to
+   subtract from "now". A template built before fix-70 needs a new
+   `template-build` to pick the flag up — an existing clone is not patched
+   in place.
 
 ---
 

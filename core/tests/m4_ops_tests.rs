@@ -522,7 +522,10 @@ async fn e2_restore_validates_quiesces_restores_resumes_verifies() {
         "snapshots",
         CmdOutput::ok("ID  Time  Host\nabc123  today  pve\n"),
     );
-    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     let sink = VecSink::new();
     let j = NullJournal;
     let cfg = BackupCfg::default();
@@ -556,7 +559,7 @@ async fn e2_restore_fails_when_app_not_running_after() {
     mock_hostname(&exec, 108, "test");
     exec.respond_always("snapshots", CmdOutput::ok("ID  Time\nabc123  today\n"));
     // verify returns empty → app not running.
-    exec.respond_always("ps --status running --services", CmdOutput::ok(""));
+    exec.respond_always("docker compose ps --format json", CmdOutput::ok(""));
     let sink = VecSink::new();
     let j = NullJournal;
     let report = restore(
@@ -602,7 +605,10 @@ async fn fix_64_a_restore_copies_the_current_data_aside_before_it_writes() {
     let exec = MockExecutor::new();
     mock_hostname(&exec, 108, "test");
     exec.respond_always("snapshots", CmdOutput::ok("ID  Time\nabc123  today\n"));
-    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     let sink = VecSink::new();
     let j = NullJournal;
     let report = restore_with(
@@ -688,21 +694,28 @@ async fn d9_update_capture_pull_verify_order() {
         "docker inspect --format",
         CmdOutput::ok("sha256:aaa myimg:latest\n"),
     );
-    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     let sink = VecSink::new();
     let j = NullJournal;
     let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, false).await;
     assert!(report.ok, "{:?}", report.error);
     let calls = exec.calls();
     let pos = |n: &str| calls.iter().position(|c| c.contains(n)).unwrap();
-    assert!(
-        pos("docker inspect --format") < pos("compose pull"),
-        "capture before pull"
-    );
-    assert!(
-        pos("compose pull") < pos("ps --status running"),
-        "pull before verify"
-    );
+    // The before-capture and the post-up verify both read
+    // `docker compose ps --format json` (fix-132/fix-133), so "after the
+    // pull" means the first such read that comes after it, not the first
+    // one overall — that one is the before-capture, which runs first.
+    let pull = pos("compose pull");
+    assert!(pos("docker inspect --format") < pull, "capture before pull");
+    let verify = calls
+        .iter()
+        .enumerate()
+        .position(|(i, c)| i > pull && c.contains("docker compose ps --format json"))
+        .expect("a verify read after the pull");
+    assert!(pull < verify, "pull before verify");
     // No rollback happened on the happy path.
     assert!(exec.calls_containing("docker tag").is_empty());
 }
@@ -734,9 +747,20 @@ async fn b6_failed_update_rolls_back_to_captured_image() {
         "docker inspect --format",
         CmdOutput::ok("sha256:oldimg myimg:latest\n"),
     );
-    // First verify after update: not running. Second verify (post-rollback): running.
-    exec.enqueue("ps --status running --services", CmdOutput::ok(""));
-    exec.enqueue("ps --status running --services", CmdOutput::ok("app\n"));
+    // fix-118's "running before" read and fix-132/fix-133's verify share the
+    // same rendered probe now (`docker compose ps --format json`), so the
+    // queue needs one slot for each: before (running, as any healthy app
+    // is), then after the update (not running), then after rollback
+    // (running again).
+    exec.enqueue(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
+    exec.enqueue("docker compose ps --format json", CmdOutput::ok(""));
+    exec.enqueue(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     let sink = VecSink::new();
     let j = NullJournal;
     let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, false).await;
@@ -763,8 +787,17 @@ async fn a_rollback_of_a_digest_pinned_image_does_not_try_to_tag_it() {
         "docker inspect --format",
         CmdOutput::ok("sha256:oldimg myimg:1.2@sha256:abc\n"),
     );
-    exec.enqueue("ps --status running --services", CmdOutput::ok(""));
-    exec.enqueue("ps --status running --services", CmdOutput::ok("app\n"));
+    // See b6 above: one extra slot for the "running before" read fix-118
+    // shares the same probe text with.
+    exec.enqueue(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
+    exec.enqueue("docker compose ps --format json", CmdOutput::ok(""));
+    exec.enqueue(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     let sink = VecSink::new();
     let j = NullJournal;
     let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, false).await;
@@ -805,7 +838,10 @@ const PRE_UPDATE_COPY: &str = "/var/lib/homelab/pre-update/test/app-1760000000";
 async fn fix_61_an_auto_update_copies_the_apps_data_before_the_new_image_starts() {
     let exec = MockExecutor::new();
     auto_update_mocks(&exec, "sha256:new");
-    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     let sink = VecSink::new();
     let j = NullJournal;
     let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, true).await;
@@ -830,7 +866,7 @@ async fn fix_61_an_auto_update_copies_the_apps_data_before_the_new_image_starts(
     // Verified: this operation's own copy is dropped, and only that one.
     let dropped = exec.calls_containing(&format!("rm -rf '{}'", PRE_UPDATE_COPY));
     assert_eq!(dropped.len(), 1, "{:#?}", calls);
-    assert!(pos("ps --status running") < pos(&format!("rm -rf '{}'", PRE_UPDATE_COPY)));
+    assert!(pos("docker compose ps --format json") < pos(&format!("rm -rf '{}'", PRE_UPDATE_COPY)));
 }
 
 /// fix-61: a rolled-back update keeps the copy and names it.
@@ -838,8 +874,17 @@ async fn fix_61_an_auto_update_copies_the_apps_data_before_the_new_image_starts(
 async fn fix_61_a_rolled_back_update_keeps_the_pre_update_copy_and_names_it() {
     let exec = MockExecutor::new();
     auto_update_mocks(&exec, "sha256:new");
-    exec.enqueue("ps --status running --services", CmdOutput::ok(""));
-    exec.enqueue("ps --status running --services", CmdOutput::ok("app\n"));
+    // See b6 above: one extra slot for the "running before" read fix-118
+    // shares the same probe text with.
+    exec.enqueue(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
+    exec.enqueue("docker compose ps --format json", CmdOutput::ok(""));
+    exec.enqueue(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     let sink = VecSink::new();
     let j = NullJournal;
     let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, true).await;
@@ -859,7 +904,10 @@ async fn fix_61_a_rolled_back_update_keeps_the_pre_update_copy_and_names_it() {
 async fn fix_61_no_copy_without_a_new_image_and_no_update_without_room_for_one() {
     let exec = MockExecutor::new();
     auto_update_mocks(&exec, "sha256:old");
-    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     let sink = VecSink::new();
     let j = NullJournal;
     let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, true).await;
@@ -1225,7 +1273,10 @@ async fn h4_gpu_and_vpn_flags_produce_device_config() {
     exec.respond_always("pct status", CmdOutput::ok("status: running"));
     exec.respond_always("is-system-running", CmdOutput::ok("running"));
     exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
-    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     exec.seed_file(
         "/etc/pve/lxc/108.conf",
         "arch: amd64\nhostname: 108-app-test\n",
@@ -1288,7 +1339,10 @@ async fn h4_no_flags_no_device_config() {
     exec.respond_always("pct status", CmdOutput::ok("status: running"));
     exec.respond_always("is-system-running", CmdOutput::ok("running"));
     exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
-    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     let spec = DeploySpec {
         secret_files: Vec::new(),
         source: None,
@@ -1432,7 +1486,10 @@ async fn b8_clone_template_provisions_via_pct_clone() {
     exec.respond_always("pct status", CmdOutput::ok("status: running"));
     exec.respond_always("is-system-running", CmdOutput::ok("running"));
     exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
-    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     // The golden template is unprivileged, which is what this stack asks for.
     exec.respond_always("pct config 999", CmdOutput::ok("unprivileged: 1"));
     let mut m = manifest(108, "test");
@@ -1703,7 +1760,10 @@ fn deploy_mocks(exec: &MockExecutor) {
     exec.respond_always("pct status", CmdOutput::ok("status: running"));
     exec.respond_always("is-system-running", CmdOutput::ok("running"));
     exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
-    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     // O5: the clone path reads the template's privilege level and refuses a
     // mismatch, so every deploy that clones needs a template to describe.
     exec.respond_always("pct config 999", CmdOutput::ok("unprivileged: 1"));
@@ -2161,7 +2221,10 @@ async fn o10_an_app_in_use_is_skipped_entirely() {
         let exec = MockExecutor::new();
         exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
         exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test"));
-        exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+        exec.respond_always(
+            "docker compose ps --format json",
+            CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+        );
         exec.respond_always("update.policy", CmdOutput::ok("auto\n"));
         seed_busy(&exec, body).await;
         let sink = VecSink::new();
@@ -2202,7 +2265,10 @@ async fn o9_stop_first_happens_between_the_pull_and_the_up() {
     let exec = MockExecutor::new();
     exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
     exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test"));
-    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     exec.respond_always("update.policy", CmdOutput::ok("auto\n"));
     let sink = VecSink::new();
     let j = NullJournal;
@@ -3288,7 +3354,10 @@ async fn t69_a_regressed_check_fails_the_deploy_when_nobody_is_watching() {
     exec.respond_always("pct status", CmdOutput::ok("status: running"));
     exec.respond_always("is-system-running", CmdOutput::ok("running"));
     exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
-    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     exec.respond_always("test -d", CmdOutput::ok("yes\n"));
     // 29 to the baseline, 28 afterwards: the fall Kenny described.
     exec.enqueue("echo 28", CmdOutput::ok("29\n"));
@@ -3365,7 +3434,10 @@ async fn e2_a_failed_restore_still_brings_the_stack_back_up() {
     let exec = MockExecutor::new();
     mock_hostname(&exec, 108, "test");
     exec.respond_always("snapshots", CmdOutput::ok("id  time\nabc123  today\n"));
-    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     // The restore itself dies half way.
     exec.respond_always(
         "restic restore",
@@ -3412,7 +3484,10 @@ async fn e2_an_unknown_snapshot_id_is_refused_before_anything_is_stopped() {
         "snapshots",
         CmdOutput::ok("ID        Time\nabc123    2026-09-01\ndef456    2026-09-02\n"),
     );
-    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     let sink = VecSink::new();
     let j = NullJournal;
     let report = restore(
@@ -3471,7 +3546,10 @@ async fn t69_an_operator_who_says_yes_lets_the_deploy_finish() {
     exec.respond_always("pct status", CmdOutput::ok("status: running"));
     exec.respond_always("is-system-running", CmdOutput::ok("running"));
     exec.respond_always("docker --version", CmdOutput::ok("Docker 27"));
-    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     exec.respond_always("test -d", CmdOutput::ok("yes\n"));
     // The same fall Kenny described: 29 to the baseline, 28 afterwards.
     exec.enqueue("echo 28", CmdOutput::ok("29\n"));
@@ -4105,7 +4183,10 @@ async fn gap_25_a_failed_pull_stops_the_update_before_anything_is_restarted() {
         "compose pull",
         CmdOutput::failed(1, "Error response from daemon: manifest unknown"),
     );
-    exec.respond_always("ps --status running --services", CmdOutput::ok("app\n"));
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
     let sink = VecSink::new();
     let j = NullJournal;
     let report = update(&ctx(&exec, &sink, &j), &manifest(108, "test"), None, false).await;

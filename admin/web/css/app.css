@@ -1700,19 +1700,25 @@ td.stack-flags {
   vertical-align: middle;
   background: var(--border);
 }
+/* Status colours mean the same in every theme (Kenny, 2026-10-01: in Dark
+   the chart hues made "up" pink and "failing" purple). Fixed hues, not the
+   theme's chart palette; a thin ring keeps a dot visible on any ground. */
+.start-dot {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 25%, transparent);
+}
 .start-dot--up {
-  background: var(--chart-3, #3aa675);
+  background: #2fa86a;
 }
 .start-dot--flaky {
-  background: var(--chart-2, #e8a33d);
+  background: #e3a21a;
 }
 .start-dot--down {
-  background: var(--destructive);
+  background: #e5484d;
 }
 /* Decision "deploys are known outages" (2026-09-30): a known outage, not a
    fault — an accent colour, never the up/down/flaky ones. */
 .start-dot--deploying {
-  background: var(--primary);
+  background: #3e8ed0;
 }
 .start-legend {
   display: flex;

@@ -945,7 +945,11 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 model.outbox.push(Command::GetState);
                 model.request_today();
             }
-            KeyCode::Char('u') => ask_host_update(model),
+            // fix-102 (tui-single-keys-no-confirm, 2026-09-27): `u` sat one
+            // Shift from SHIFT+U and started a host self-update with no
+            // question asked. It now reaches `ask_host_update` only through
+            // the command palette's "op.host-update" (below), which still
+            // asks first; typing a bare `u` here does nothing.
             KeyCode::Char('D') => start_deploy(model),
             // The six operations Kenny reaches for in ordinary use (form T1).
             // They existed only on the command line, which meant opening a

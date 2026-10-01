@@ -450,8 +450,10 @@ Workstation, repository root.
 | More RAM, cores or disk | edit `resources:`, then `homelab resize stacks/<name>` | Grows a running container; shrinking a running one is refused (`core/src/ops/resize.rs:1-4`). |
 | Runaway guards on a container this suite did not build | `homelab guards <vmid>` | Log caps, journald limits, logrotate, weekly prune; refused on the no-touch list (`host/src/main.rs:3687-3727`). |
 
-In the TUI, `U` updates the selected stack; lowercase `u` is the host
-update (`client/src/tui/model.rs:780-800`).
+In the TUI, `U` updates the selected stack; the host update is palette-only
+("host update…", Ctrl+K) since fix-102 — it had sat one Shift from `U`, with
+lasting consequences, and was pulled off a bare key (`client/src/tui/model.rs`,
+`client/src/tui/keys.rs`).
 
 ---
 
@@ -815,9 +817,10 @@ Workstation, repository root, on `main`, after `make hooks` once per clone
    publishes them with `gh release create --verify-tag` (`Makefile`,
    `release`). **Point of no return:** the push. Nothing runs on GitHub.
 3. **Roll out to the host.** `homelab release-update` (newest) or
-   `homelab release-update vx.y.z`; or TUI key `u` when the dashboard shows
+   `homelab release-update vx.y.z`; or the TUI palette's "host update" entry
+   (Ctrl+K, fix-102 moved it off a bare key) when the dashboard shows
    `"HOST UPDATE <tag> available"` (`client/src/main.rs:808-834`,
-   `client/src/tui/model.rs:780-792`, `client/src/tui/view/mod.rs:601-605`).
+   `client/src/tui/model.rs`, `client/src/tui/view/mod.rs:601-605`).
    The client downloads with `gh`, checks the checksum, and ships the
    binary over the line. There is no signature on the orchestrator's own
    releases, only the checksum (`client/src/release.rs:55-62`).

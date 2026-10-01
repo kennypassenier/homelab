@@ -296,13 +296,18 @@ All of these act on the stack under the cursor.
 | `c` | fleet check over `stacks/` | `client/src/tui/model.rs:825` |
 | `i` | list incident bundles | `client/src/tui/model.rs:826-836` |
 | `e` | park or unpark for the nightly run (H8), after a `y` to a question that says what parking costs (fix-102) | `client/src/tui/model.rs:837-850` |
-| `u` | update the host binary, only when a newer release is offered (H7), after a `y` (fix-102) | `client/src/tui/model.rs:780-792` |
 | `n` | new-stack wizard (G2) | `client/src/tui/model.rs:852-872` |
 
 `SHIFT+A` and `SHIFT+I` work but are not listed in the `h` key map
 (`client/src/tui/view/mod.rs:774-794`); the palette lists them as
 `adopt: native services of selected stack` and
 `install-native: binaries of selected stack` (`client/src/tui/model.rs:1156-1163`).
+
+The host update is palette-only (`host update, when a newer release is
+offered (asks first)`, Ctrl+K): fix-102 pulled it off the bare `u` key it
+used to sit on, one Shift from `SHIFT+U`'s native self-update, because it
+too starts the daemon replacing itself. It still asks `y`/N before it acts
+(`client/src/tui/keys.rs`, `client/src/tui/model.rs`).
 
 On a native-only stack, `SHIFT+B` runs the native backup and `SHIFT+U` the
 supervised self-update; `SHIFT+R` is refused with

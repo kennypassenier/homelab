@@ -1608,12 +1608,16 @@ fn h19_every_palette_action_reaches_a_real_handler() {
     }
 }
 
+// fix-102 (tui-single-keys-no-confirm, 2026-09-27): a bare `u` sat one
+// Shift from SHIFT+U and started a host self-update with no question
+// asked. It now does nothing; the only way in is the command palette's
+// "op.host-update" entry, which still asks first (fix-107 built the ask).
 #[test]
-fn b6_update_badge_and_u_key_flow() {
+fn fix_102_the_host_update_key_is_gone_the_palette_asks_first() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let mut m = ready_model();
     m.host_version = "2.6.0".into();
-    // No release known → no badge, U does nothing.
+    // No release known → no badge, u does nothing.
     let out = render(&m);
     assert!(!out.contains("HOST UPDATE"));
     homelab_client::tui::model::update(
@@ -1625,10 +1629,27 @@ fn b6_update_badge_and_u_key_flow() {
     homelab_client::tui::model::update(&mut m, Msg::ReleaseTag(Some("v9.9.9".into())));
     let out = render(&m);
     assert!(out.contains("HOST UPDATE v9.9.9"), "badge must appear");
-    // u asks first (fix-102); y opens the focus window and requests staging.
+    // A bare `u`, even with the badge showing, is no longer wired to
+    // anything (fix-102: the key was removed, not just re-armed).
     homelab_client::tui::model::update(
         &mut m,
         Msg::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE)),
+    );
+    assert!(m.release_update_requested.is_none());
+    assert!(m.focus.is_none());
+    // The palette's "op.host-update" still reaches it, and still asks
+    // first: open the palette, search to the one match, Enter runs it,
+    // y opens the focus window and requests staging.
+    m.palette_open = true;
+    m.palette_input = "host update".into();
+    m.palette_sel = 0;
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+    );
+    assert!(
+        !m.palette_open,
+        "Enter on the one match runs it and closes the palette"
     );
     homelab_client::tui::model::update(
         &mut m,

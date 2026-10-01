@@ -180,8 +180,12 @@ pub const KEYMAP: &[Binding] = &[
         None,
         Some("op.incidents"),
     ),
+    // fix-102 (tui-single-keys-no-confirm, 2026-09-27): `u` sat one Shift
+    // from SHIFT+U and started a host self-update with no question asked.
+    // The command palette ("op.host-update") is the only way to reach it
+    // now, so there is one fewer key with consequences this large.
     b(
-        "u",
+        "",
         "host update, when a newer release is offered (asks first)",
         Scope::Stacks,
         None,

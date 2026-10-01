@@ -295,6 +295,17 @@ struct FileConfig {
     /// How long `watch_url` (or, by fleet default, a tile) may fail before
     /// it counts as down. Default 300.
     watch_down_after_s: Option<u64>,
+    /// rule-20 (disk-audit, 2026-10-01): `[capacity_thresholds]` — warn and
+    /// critical percentages for pve's root fs, the local-lvm thin pool, every
+    /// ZFS pool, pve's journald and Prometheus' TSDB. Absent = the audit's
+    /// own defaults (`HostCapacityThresholds::default()`).
+    capacity_thresholds: Option<homelab_core::ops::fleetcheck::HostCapacityThresholds>,
+    /// rule-20: the configured `--storage.tsdb.retention.size` of whatever
+    /// runs Prometheus, in MiB — Kenny's own number, matching what the
+    /// stack's compose file declares; core has no business knowing it.
+    /// Absent (with `prometheus_url`) = the question is not asked, same as
+    /// every other Prometheus-backed reading in this daemon.
+    tsdb_retention_size_mib: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -420,6 +431,10 @@ struct Config {
     /// How long `watch_url` (or, by fleet default, a tile) may fail before
     /// it counts as down.
     watch_down_after_s: u64,
+    /// rule-20: warn/critical thresholds for pve's own capacity readings.
+    capacity_thresholds: homelab_core::ops::fleetcheck::HostCapacityThresholds,
+    /// rule-20: Prometheus' own TSDB cap, in MiB; None = not asked.
+    tsdb_retention_size_mib: Option<u64>,
     /// Initial mutable settings (live copy lives in AppState.settings).
     initial_settings: homelab_proto::HostConfigView,
     /// host.toml as it was read; a settings save writes this back with only
@@ -619,6 +634,9 @@ fn load_config_from(path: String) -> Config {
         registry_cache: file.registry_cache,
         // rule-20: absent from host.toml = no fleet default, same as before.
         default_log_rotation: file.default_log_rotation,
+        // rule-20: absent from host.toml = the audit's own defaults.
+        capacity_thresholds: file.capacity_thresholds.unwrap_or_default(),
+        tsdb_retention_size_mib: file.tsdb_retention_size_mib,
         backup: {
             let d = homelab_core::ops::backup::BackupCfg::default();
             homelab_core::ops::backup::BackupCfg {
@@ -6175,6 +6193,7 @@ async fn scheduler_loop(state: AppState) {
                     state.config.tile_watch_source.as_deref(),
                     state.config.patch_threshold_s,
                     state.config.host_meta_max_age_s,
+                    state.config.capacity_thresholds,
                 );
                 // Z3, now a tested function in core rather than a filter
                 // buried in this loop (G15).
@@ -7693,6 +7712,7 @@ async fn gather_today(
                 state.config.tile_watch_source.as_deref(),
                 state.config.patch_threshold_s,
                 state.config.host_meta_max_age_s,
+                state.config.capacity_thresholds,
             );
             homelab_core::ops::today::assemble(&checks, &findings, &incidents, &snapshot, now)
         }
@@ -7753,7 +7773,143 @@ async fn gather_live_facts(
     }
     // fix-96: so the check can say when a configured second copy stops.
     facts.second_copy_dataset = state.config.second_copy_dataset.clone();
+    // rule-20: pve's own capacity — not a managed container's rootfs
+    // (`growth`) and not a stack's declared data pool (`pools`).
+    facts.host_capacity = gather_host_capacity(
+        exec,
+        state.config.prometheus_url.as_deref(),
+        state.config.tsdb_retention_size_mib,
+    )
+    .await;
     facts
+}
+
+/// rule-20 (disk-audit, 2026-10-01): pve's root filesystem, the local-lvm
+/// thin pool (data and metadata), every ZFS pool, pve's own journald
+/// against its own cap (`hostunits::JOURNALD_CAP`, 2G), and — only when
+/// both are configured — Prometheus' TSDB against the cap Kenny declared
+/// for it. Every command runs directly on pve (this daemon's own host, not
+/// a container); a command that fails or does not parse simply contributes
+/// no fact, same as an unasked question.
+async fn gather_host_capacity(
+    exec: &dyn Executor,
+    prometheus_url: Option<&str>,
+    tsdb_retention_size_mib: Option<u64>,
+) -> Vec<homelab_core::ops::fleetcheck::HostCapacityFact> {
+    use homelab_core::ops::fleetcheck::{parse_df_pcent, HostCapacityFact, HostCapacityMetric};
+    let mut out = Vec::new();
+
+    if let Ok(o) = exec
+        .run(&Cmd::new("df", &["--output=pcent", "/"], 15))
+        .await
+    {
+        if let Some(pct) = parse_df_pcent(&o.stdout) {
+            out.push(HostCapacityFact {
+                metric: HostCapacityMetric::PveRoot,
+                subject: "pve".into(),
+                used_pct: pct,
+                detail: format!("{}% full", pct),
+            });
+        }
+    }
+
+    // The default Proxmox thin pool: volume group `pve`, logical volume
+    // `data`. A host configured with a different pool name is not measured
+    // here — that is a fact to add, not a guess to make.
+    if let Ok(o) = exec
+        .run(&Cmd::new(
+            "lvs",
+            &[
+                "--noheadings",
+                "-o",
+                "data_percent,metadata_percent",
+                "pve/data",
+            ],
+            15,
+        ))
+        .await
+    {
+        if let Some((data, meta)) =
+            homelab_core::ops::fleetcheck::parse_thin_pool_percents(&o.stdout)
+        {
+            out.push(HostCapacityFact {
+                metric: HostCapacityMetric::ThinPoolData,
+                subject: "local-lvm".into(),
+                used_pct: data,
+                detail: format!("{}% full (data)", data),
+            });
+            out.push(HostCapacityFact {
+                metric: HostCapacityMetric::ThinPoolMeta,
+                subject: "local-lvm".into(),
+                used_pct: meta,
+                detail: format!("{}% full (metadata)", meta),
+            });
+        }
+    }
+
+    if let Ok(o) = exec
+        .run(&Cmd::new(
+            "zpool",
+            &["list", "-H", "-o", "name,capacity"],
+            15,
+        ))
+        .await
+    {
+        for (pool, pct) in homelab_core::ops::fleetcheck::parse_zpool_capacities(&o.stdout) {
+            out.push(HostCapacityFact {
+                metric: HostCapacityMetric::ZfsPool,
+                subject: pool.clone(),
+                used_pct: pct,
+                detail: format!("{}% full", pct),
+            });
+        }
+    }
+
+    if let Ok(o) = exec
+        .run(&Cmd::new("journalctl", &["--disk-usage"], 15))
+        .await
+    {
+        if let Some(used_mib) =
+            homelab_core::ops::fleetcheck::parse_journal_disk_usage_mib(&o.stdout)
+        {
+            // hostunits::JOURNALD_CAP: SystemMaxUse=2G.
+            let cap_mib: u64 = 2048;
+            let pct = ((used_mib * 100) / cap_mib).min(255) as u8;
+            out.push(HostCapacityFact {
+                metric: HostCapacityMetric::Journald,
+                subject: "pve".into(),
+                used_pct: pct,
+                detail: format!("{} MiB of its {} MiB cap ({}%)", used_mib, cap_mib, pct),
+            });
+        }
+    }
+
+    if let (Some(base), Some(cap_mib)) = (prometheus_url, tsdb_retention_size_mib) {
+        let q = format!(
+            "{}/api/v1/query?query=sum(prometheus_tsdb_storage_blocks_bytes)",
+            base.trim_end_matches('/')
+        );
+        if let Ok(o) = exec
+            .run(&Cmd::new("curl", &["-s", "-m", "10", &q], 20))
+            .await
+        {
+            if let Some(bytes) = homelab_core::ops::fleetcheck::parse_prometheus_scalar(&o.stdout) {
+                let used_mib = (bytes / 1024.0 / 1024.0).round() as u64;
+                let pct = ((used_mib * 100) / cap_mib.max(1)).min(255) as u8;
+                out.push(HostCapacityFact {
+                    metric: HostCapacityMetric::PrometheusTsdb,
+                    subject: "Prometheus".into(),
+                    used_pct: pct,
+                    detail: format!(
+                        "{} MiB of its {} MiB retention.size ({}%)",
+                        used_mib, cap_mib, pct
+                    ),
+                });
+            }
+        }
+    }
+
+    out
 }
 
 /// A backup is a backup, whoever asked for it. The scheduler recorded
@@ -8599,6 +8755,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 state.config.tile_watch_source.as_deref(),
                 state.config.patch_threshold_s,
                 state.config.host_meta_max_age_s,
+                state.config.capacity_thresholds,
             );
             RpcResponse {
                 id: req.id,

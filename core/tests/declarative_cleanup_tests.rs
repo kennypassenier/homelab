@@ -499,6 +499,7 @@ fn the_fleet_check_reports_a_stack_in_state_without_a_stack_file() {
         None,
         u64::MAX,
         u64::MAX,
+        homelab_core::ops::fleetcheck::HostCapacityThresholds::default(),
     );
     let hit: Vec<_> = findings
         .iter()
@@ -527,7 +528,8 @@ fn the_fleet_check_reports_a_stack_in_state_without_a_stack_file() {
         GrowthLimits::default(),
         None,
         u64::MAX,
-        u64::MAX
+        u64::MAX,
+        homelab_core::ops::fleetcheck::HostCapacityThresholds::default()
     )
     .iter()
     .any(|f| f.what.contains("no stack file")));
@@ -1085,6 +1087,7 @@ fn the_fleet_check_names_what_is_kept_for_every_retired_entry() {
         None,
         u64::MAX,
         u64::MAX,
+        homelab_core::ops::fleetcheck::HostCapacityThresholds::default(),
     );
     let hit: Vec<_> = findings.iter().filter(|f| f.subject == "drill").collect();
     assert_eq!(hit.len(), 1, "{:?}", findings);

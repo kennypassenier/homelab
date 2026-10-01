@@ -102,6 +102,12 @@ pub struct LiveFacts {
     /// stack → container-bound path → sha256. A stack with no copy is absent.
     pub intent_files:
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    /// rule-20 (disk-audit, 2026-10-01): host-level capacity readings that
+    /// are neither a managed container's own rootfs (`growth`) nor a
+    /// stack's declared data pool (`pools`) — pve's own root filesystem,
+    /// the local-lvm thin pool, pve's journald against its own cap, and
+    /// every ZFS pool on the host. Empty when none were read.
+    pub host_capacity: Vec<HostCapacityFact>,
 }
 
 /// fix-92 (routes-outside-repo-unvalidated, 2026-09-27): a file in the
@@ -859,6 +865,251 @@ pub fn evaluate_pools(facts: &[PoolFact], lim: GrowthLimits) -> Vec<Finding> {
     out
 }
 
+// ── rule-20: host-level capacity thresholds ────────────────────────────────
+//
+// Disk-growth audit (2026-10-01): measurable today but unalarmed — pve's own
+// root filesystem, the local-lvm thin pool's data and metadata percentages,
+// every ZFS pool, and pve's journald against its own 2G cap
+// (`hostunits::JOURNALD_CAP`). One evaluator for all of them, generic over
+// which metric a fact names, the same shape as `evaluate_pools` beside it:
+// the shell measures, this only judges.
+
+/// Which host-level capacity reading a `HostCapacityFact` is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostCapacityMetric {
+    /// `/` on pve itself.
+    PveRoot,
+    /// local-lvm thin pool, data%.
+    ThinPoolData,
+    /// local-lvm thin pool, metadata% — harder to recover from than data%,
+    /// so it gets its own, lower, pair of thresholds.
+    ThinPoolMeta,
+    /// One ZFS pool, named in `subject`.
+    ZfsPool,
+    /// pve's own journald, against its own `SystemMaxUse` cap
+    /// (`hostunits::JOURNALD_CAP`) — distinct from a managed container's own
+    /// small cap, which `GrowthFact::journal_mb` already covers.
+    Journald,
+    /// Prometheus' TSDB against its configured `--storage.tsdb.retention.size`.
+    PrometheusTsdb,
+}
+
+impl HostCapacityMetric {
+    fn label(self) -> &'static str {
+        match self {
+            Self::PveRoot => "pve's root filesystem",
+            Self::ThinPoolData => "the local-lvm thin pool (data)",
+            Self::ThinPoolMeta => "the local-lvm thin pool (metadata)",
+            Self::ZfsPool => "ZFS pool",
+            Self::Journald => "pve's journald",
+            Self::PrometheusTsdb => "Prometheus' TSDB",
+        }
+    }
+    fn remedy(self) -> &'static str {
+        match self {
+            Self::PveRoot => {
+                "free space on pve itself — apt cache, old kernels, /var/lib/vz ISOs and \
+                 templates — or grow pve/root"
+            }
+            Self::ThinPoolData => {
+                "an LXC or VM disk write can fail once this pool is full — free space (prune \
+                 old container disks/snapshots) or extend the pool"
+            }
+            Self::ThinPoolMeta => {
+                "metadata exhaustion is harder to recover from than data: `lvextend \
+                 --poolmetadatasize` ahead of time, not after"
+            }
+            Self::ZfsPool => "`zfs list -o name,used,avail` on the host — free space or add a vdev",
+            Self::Journald => {
+                "journald rotates its own oldest entries past this, but it is close to the cap \
+                 all the time — `journalctl --vacuum-size` or raise SystemMaxUse in \
+                 hostunits.rs"
+            }
+            Self::PrometheusTsdb => {
+                "retention.size is the ceiling, not a target — either it is doing its job and \
+                 this is expected, or retention.time is now too generous for the ceiling"
+            }
+        }
+    }
+}
+
+/// One host-level capacity reading, judged against `HostCapacityThresholds`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostCapacityFact {
+    pub metric: HostCapacityMetric,
+    /// What to call it in the report — "pve", a ZFS pool's name, "Prometheus
+    /// (CT 113)". `metric` already says WHAT kind of reading this is; this
+    /// says WHICH one.
+    pub subject: String,
+    pub used_pct: u8,
+    /// Extra detail for the message, e.g. "27.66% of 794.3G pool" — numbers
+    /// Kenny can act on beside the bare percentage.
+    pub detail: String,
+}
+
+/// Warn/critical pairs, one per `HostCapacityMetric`. A host.toml key
+/// (`capacity_thresholds`), editable from the dashboard like every other
+/// fleet default. Defaults are the disk-growth audit's own numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostCapacityThresholds {
+    pub pve_root_warn_pct: u8,
+    pub pve_root_critical_pct: u8,
+    pub thin_data_warn_pct: u8,
+    pub thin_data_critical_pct: u8,
+    pub thin_meta_warn_pct: u8,
+    pub thin_meta_critical_pct: u8,
+    pub zfs_pool_warn_pct: u8,
+    pub zfs_pool_critical_pct: u8,
+    /// Of pve journald's own `SystemMaxUse` cap (2G, `hostunits::JOURNALD_CAP`).
+    pub journald_warn_pct: u8,
+    pub journald_critical_pct: u8,
+    /// Of Prometheus' configured `--storage.tsdb.retention.size`.
+    pub tsdb_warn_pct: u8,
+    pub tsdb_critical_pct: u8,
+}
+
+impl Default for HostCapacityThresholds {
+    fn default() -> Self {
+        Self {
+            pve_root_warn_pct: 70,
+            pve_root_critical_pct: 85,
+            thin_data_warn_pct: 70,
+            thin_data_critical_pct: 85,
+            // Lower and narrower than data: metadata exhaustion takes the
+            // pool down in a way data filling up does not.
+            thin_meta_warn_pct: 50,
+            thin_meta_critical_pct: 70,
+            zfs_pool_warn_pct: 80,
+            zfs_pool_critical_pct: 90,
+            journald_warn_pct: 80,
+            journald_critical_pct: 95,
+            tsdb_warn_pct: 70,
+            tsdb_critical_pct: 90,
+        }
+    }
+}
+
+impl HostCapacityThresholds {
+    fn pair(self, metric: HostCapacityMetric) -> (u8, u8) {
+        match metric {
+            HostCapacityMetric::PveRoot => (self.pve_root_warn_pct, self.pve_root_critical_pct),
+            HostCapacityMetric::ThinPoolData => {
+                (self.thin_data_warn_pct, self.thin_data_critical_pct)
+            }
+            HostCapacityMetric::ThinPoolMeta => {
+                (self.thin_meta_warn_pct, self.thin_meta_critical_pct)
+            }
+            HostCapacityMetric::ZfsPool => (self.zfs_pool_warn_pct, self.zfs_pool_critical_pct),
+            HostCapacityMetric::Journald => (self.journald_warn_pct, self.journald_critical_pct),
+            HostCapacityMetric::PrometheusTsdb => (self.tsdb_warn_pct, self.tsdb_critical_pct),
+        }
+    }
+}
+
+/// rule-20: pve's own root filesystem, from `df --output=pcent /` (or any
+/// single-column `df` output ending in a percentage) — the last non-empty
+/// line, so a header row (`Use%`) is skipped without needing to know
+/// whether one was printed.
+pub fn parse_df_pcent(out: &str) -> Option<u8> {
+    out.lines()
+        .rev()
+        .map(str::trim)
+        .find(|l| !l.is_empty())?
+        .trim_end_matches('%')
+        .parse()
+        .ok()
+}
+
+/// rule-20: `lvs --noheadings -o data_percent,metadata_percent <thin-pool>`
+/// — one line, two space-separated percentages (lvs prints them as plain
+/// decimals, e.g. `27.66  1.15`, no `%` sign). Returns `(data, meta)`
+/// rounded to the nearest whole percent.
+pub fn parse_thin_pool_percents(out: &str) -> Option<(u8, u8)> {
+    let line = out.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let mut parts = line.split_whitespace();
+    let data: f64 = parts.next()?.parse().ok()?;
+    let meta: f64 = parts.next()?.parse().ok()?;
+    Some((data.round() as u8, meta.round() as u8))
+}
+
+/// rule-20: `zpool list -H -o name,capacity` — `-H` makes it tab-separated,
+/// one pool per line, capacity as e.g. `79%`. Every pool on the host, not
+/// only the ones a stack happens to declare a mount on.
+pub fn parse_zpool_capacities(out: &str) -> Vec<(String, u8)> {
+    out.lines()
+        .filter_map(|l| {
+            let mut c = l.split('\t');
+            let name = c.next()?.trim();
+            let pct: u8 = c.next()?.trim().trim_end_matches('%').parse().ok()?;
+            (!name.is_empty()).then(|| (name.to_string(), pct))
+        })
+        .collect()
+}
+
+/// rule-20: `journalctl --disk-usage`, e.g. "Archived and active journals \
+/// take up 1.9G in the file system." — the number and unit just before "in
+/// the file system", converted to MiB. None when the line cannot be read,
+/// which is not the same as "empty" and is simply not reported.
+pub fn parse_journal_disk_usage_mib(out: &str) -> Option<u64> {
+    let line = out.lines().find(|l| l.contains("in the file system"))?;
+    let token = line.split_whitespace().find(|t| {
+        t.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && matches!(t.chars().last(), Some('K' | 'M' | 'G' | 'T'))
+    })?;
+    let (num, unit) = token.split_at(token.len() - 1);
+    let value: f64 = num.parse().ok()?;
+    let mib = match unit {
+        "K" => value / 1024.0,
+        "M" => value,
+        "G" => value * 1024.0,
+        "T" => value * 1024.0 * 1024.0,
+        _ => return None,
+    };
+    Some(mib.round() as u64)
+}
+
+/// rule-20: the scalar value of a Prometheus instant-query response, e.g.
+/// `{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1,"12345"]}]}}`
+/// — the number right after the first `"value":[<timestamp>,`. None for an
+/// empty result (`"result":[]`, nothing scraped yet) or anything that does
+/// not parse, which is not the same as zero and is simply not reported.
+pub fn parse_prometheus_scalar(json: &str) -> Option<f64> {
+    let after = json.split_once("\"value\":[")?.1;
+    let after_ts = after.split_once(',')?.1;
+    let quoted = after_ts.split_once('"')?.1;
+    let (num, _) = quoted.split_once('"')?;
+    num.parse().ok()
+}
+
+/// rule-20: a finding per host-level capacity reading past its warn or
+/// critical threshold. Pure — the shell measures, this only judges.
+pub fn evaluate_host_capacity(
+    facts: &[HostCapacityFact],
+    lim: HostCapacityThresholds,
+) -> Vec<Finding> {
+    let mut out = Vec::new();
+    for f in facts {
+        let (warn, critical) = lim.pair(f.metric);
+        if f.used_pct >= critical {
+            out.push(Finding {
+                severity: Severity::Broken,
+                subject: f.subject.clone(),
+                what: format!("{} is {}", f.metric.label(), f.detail),
+                remedy: f.metric.remedy().into(),
+            });
+        } else if f.used_pct >= warn {
+            out.push(Finding {
+                severity: Severity::Drift,
+                subject: f.subject.clone(),
+                what: format!("{} is {}", f.metric.label(), f.detail),
+                remedy: f.metric.remedy().into(),
+            });
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteFact {
     pub file: String,
@@ -1050,11 +1301,19 @@ pub fn evaluate(
     tile_watch_source: Option<&str>,
     patch_threshold_s: u64,
     host_meta_max_age_s: u64,
+    host_capacity_limits: HostCapacityThresholds,
 ) -> Vec<Finding> {
     let mut out = Vec::new();
 
     // fix-150: updates standing still for longer than a week.
     out.extend(evaluate_patch_state(&live.patch, patch_threshold_s));
+
+    // rule-20: pve's own capacity — root fs, thin pool, journald, every ZFS
+    // pool, Prometheus' TSDB.
+    out.extend(evaluate_host_capacity(
+        &live.host_capacity,
+        host_capacity_limits,
+    ));
 
     // F184: is the HOST itself short? Read once, so every per-container
     // remedy below can say something the machine can actually do.

@@ -1,0 +1,10 @@
+[Unit]
+Description=registry pull-through cache — garbage-collect expired blobs
+Documentation=https://distribution.github.io/distribution/about/garbage-collection/
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/registry-gc
+TimeoutStartSec=600

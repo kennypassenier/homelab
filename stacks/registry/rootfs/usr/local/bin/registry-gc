@@ -1,0 +1,21 @@
+#!/bin/sh
+# rule-20 (disk-audit, 2026-10-01): the four pull-through caches already
+# expire a cached manifest 168h after it was last pulled — proxy.ttl in each
+# of dockerhub.yml/ghcr.yml/gcr.yml/lscr.yml, REGISTRY_STORAGE_DELETE_ENABLED
+# in docker-compose.yml. What ttl expiry does NOT do is free the blob data
+# an expired manifest was the last reference to: registry's own garbage
+# collector is a separate step, and nothing ran it (measured 2026-08-31:
+# 1.1G across the four caches, growing with every new tag ever pulled,
+# unboundedly).
+#
+# Run against the live container (supported since registry 2.3; distribution
+# docs: https://distribution.github.io/distribution/about/garbage-collection/)
+# with --delete-untagged=false — only blobs an expired, already-deleted
+# manifest left orphaned are removed; nothing a container still names is
+# ever touched. Scheduled at 03:10, ahead of the host's own nightly round
+# (04:00) and OPNsense's backup (01:00), so it never competes with either.
+set -eu
+for name in dockerhub ghcr gcr lscr; do
+    echo "== cache-$name =="
+    docker exec "cache-$name" registry garbage-collect --delete-untagged=false /etc/docker/registry/config.yml
+done

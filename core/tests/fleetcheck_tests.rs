@@ -72,6 +72,7 @@ fn check(state: &HostState, live: &LiveFacts) -> Vec<homelab_core::ops::fleetche
         None,
         homelab_core::ops::fleetcheck::PATCH_THRESHOLD_S,
         homelab_core::ops::fleetcheck::HOST_META_MAX_AGE_S,
+        homelab_core::ops::fleetcheck::HostCapacityThresholds::default(),
     )
 }
 
@@ -122,6 +123,7 @@ fn y4_a_healthy_fleet_is_silent() {
         boot: Vec::new(),
         host_memory: None,
         second_copy_dataset: None,
+        host_capacity: Vec::new(),
     };
     assert!(check(&st, &live).is_empty(), "{:?}", check(&st, &live));
 }
@@ -1077,6 +1079,7 @@ fn the_full_round_carries_the_restore_drill() {
         None,
         homelab_core::ops::fleetcheck::PATCH_THRESHOLD_S,
         homelab_core::ops::fleetcheck::HOST_META_MAX_AGE_S,
+        homelab_core::ops::fleetcheck::HostCapacityThresholds::default(),
     );
     assert!(
         findings.iter().any(|f| f.subject == "restore drill"),
@@ -1723,5 +1726,148 @@ fn gap_23_a_stale_or_missing_host_meta_backup_is_broken() {
     assert!(
         evaluate_host_meta(&fresh, NOW, 24 * 3600).is_empty(),
         "a backup inside the window is not a finding"
+    );
+}
+
+// ── rule-20: host-level capacity thresholds ─────────────────────────────────
+
+use homelab_core::ops::fleetcheck::{
+    evaluate_host_capacity, parse_df_pcent, parse_journal_disk_usage_mib, parse_prometheus_scalar,
+    parse_thin_pool_percents, parse_zpool_capacities, HostCapacityFact, HostCapacityMetric,
+    HostCapacityThresholds,
+};
+
+#[test]
+fn rule_20_parse_prometheus_scalar_reads_the_instant_query_shape() {
+    let body = r#"{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1759000000,"10307921510"]}]}}"#;
+    assert_eq!(parse_prometheus_scalar(body), Some(10307921510.0));
+    let empty = r#"{"status":"success","data":{"resultType":"vector","result":[]}}"#;
+    assert_eq!(parse_prometheus_scalar(empty), None);
+    assert_eq!(parse_prometheus_scalar("not json"), None);
+}
+
+#[test]
+fn rule_20_parse_df_pcent_reads_the_last_line_header_or_not() {
+    assert_eq!(parse_df_pcent("50%\n"), Some(50));
+    assert_eq!(parse_df_pcent("Use%\n 50%\n"), Some(50));
+    assert_eq!(parse_df_pcent(""), None);
+    assert_eq!(parse_df_pcent("not a percentage\n"), None);
+}
+
+#[test]
+fn rule_20_parse_thin_pool_percents_reads_data_then_metadata() {
+    assert_eq!(parse_thin_pool_percents("  27.66  1.15\n"), Some((28, 1)));
+    assert_eq!(parse_thin_pool_percents(""), None);
+}
+
+#[test]
+fn rule_20_parse_zpool_capacities_reads_every_pool() {
+    let out = "HDD12TB\t79%\nHDD18TB\t34%\nHDD4TB\t10%\nHDD2TB\t0%\n";
+    assert_eq!(
+        parse_zpool_capacities(out),
+        vec![
+            ("HDD12TB".into(), 79),
+            ("HDD18TB".into(), 34),
+            ("HDD4TB".into(), 10),
+            ("HDD2TB".into(), 0),
+        ]
+    );
+}
+
+#[test]
+fn rule_20_parse_journal_disk_usage_converts_to_mib() {
+    assert_eq!(
+        parse_journal_disk_usage_mib(
+            "Archived and active journals take up 1.9G in the file system.\n"
+        ),
+        Some(1946)
+    );
+    assert_eq!(
+        parse_journal_disk_usage_mib(
+            "Archived and active journals take up 512M in the file system.\n"
+        ),
+        Some(512)
+    );
+    assert_eq!(parse_journal_disk_usage_mib("nothing useful here\n"), None);
+}
+
+/// rule-20: a reading under warn is silent, warn is Drift, critical is
+/// Broken — the shape every other evaluator in this module uses.
+#[test]
+fn rule_20_evaluate_host_capacity_uses_warn_and_critical() {
+    let lim = HostCapacityThresholds::default();
+    let fact = |pct: u8| HostCapacityFact {
+        metric: HostCapacityMetric::PveRoot,
+        subject: "pve".into(),
+        used_pct: pct,
+        detail: format!("{}%", pct),
+    };
+    assert!(evaluate_host_capacity(&[fact(50)], lim).is_empty());
+    let warn = evaluate_host_capacity(&[fact(75)], lim);
+    assert_eq!(warn.len(), 1);
+    assert_eq!(warn[0].severity, Severity::Drift);
+    let critical = evaluate_host_capacity(&[fact(90)], lim);
+    assert_eq!(critical.len(), 1);
+    assert_eq!(critical[0].severity, Severity::Broken);
+}
+
+/// rule-20: each metric is judged against its OWN pair — metadata's lower
+/// threshold must not borrow data's, and a ZFS pool's name carries through
+/// to the finding's subject so the message points at the right pool.
+#[test]
+fn rule_20_each_metric_has_its_own_thresholds() {
+    let lim = HostCapacityThresholds::default();
+    let facts = vec![
+        HostCapacityFact {
+            metric: HostCapacityMetric::ThinPoolMeta,
+            subject: "local-lvm".into(),
+            used_pct: 55,
+            detail: "55%".into(),
+        },
+        HostCapacityFact {
+            metric: HostCapacityMetric::ThinPoolData,
+            subject: "local-lvm".into(),
+            used_pct: 55,
+            detail: "55%".into(),
+        },
+        HostCapacityFact {
+            metric: HostCapacityMetric::ZfsPool,
+            subject: "HDD12TB".into(),
+            used_pct: 79,
+            detail: "79%".into(),
+        },
+    ];
+    let findings = evaluate_host_capacity(&facts, lim);
+    // Metadata's warn is 50: 55% is already Drift. Data's warn is 70: 55% is
+    // silent. The ZFS pool's warn is 80: 79% is still silent too.
+    assert_eq!(findings.len(), 1, "{:?}", findings);
+    assert_eq!(findings[0].subject, "local-lvm");
+    assert!(
+        findings[0].what.contains("metadata"),
+        "{}",
+        findings[0].what
+    );
+}
+
+/// rule-20: wired into the full round, same as every other reading.
+#[test]
+fn rule_20_evaluate_fans_out_to_host_capacity() {
+    let st = HostState::default();
+    let live = LiveFacts {
+        host_capacity: vec![HostCapacityFact {
+            metric: HostCapacityMetric::Journald,
+            subject: "pve".into(),
+            used_pct: 97,
+            detail: "97% of its 2G cap".into(),
+        }],
+        ..Default::default()
+    };
+    let findings = check(&st, &live);
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.subject == "pve" && f.severity == Severity::Broken),
+        "evaluate() must fan out to it, or the reader is wired to nothing again: {:?}",
+        findings
     );
 }

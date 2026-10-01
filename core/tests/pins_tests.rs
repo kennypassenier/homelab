@@ -305,6 +305,7 @@ fn fix_83_a_pinned_app_behind_upstream_is_a_noted_finding_and_nothing_else() {
         None,
         homelab_core::ops::fleetcheck::PATCH_THRESHOLD_S,
         homelab_core::ops::fleetcheck::HOST_META_MAX_AGE_S,
+        homelab_core::ops::fleetcheck::HostCapacityThresholds::default(),
     );
     assert!(all.iter().any(|x| x.subject.contains("traefik")));
     let only_pins: Vec<_> = all

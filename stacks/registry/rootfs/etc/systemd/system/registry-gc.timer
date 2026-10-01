@@ -1,0 +1,12 @@
+[Unit]
+Description=registry pull-through cache — nightly garbage-collect
+
+[Timer]
+# Ahead of the host's own nightly round (04:00) and OPNsense's backup
+# (01:00) — never competing with either.
+OnCalendar=*-*-* 03:10:00
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

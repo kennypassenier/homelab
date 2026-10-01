@@ -85,6 +85,7 @@ fn fix_59_a_failed_night_never_stops_the_stacks_backups() {
         None,
         homelab_core::ops::fleetcheck::PATCH_THRESHOLD_S,
         homelab_core::ops::fleetcheck::HOST_META_MAX_AGE_S,
+        homelab_core::ops::fleetcheck::HostCapacityThresholds::default(),
     );
     assert!(
         findings

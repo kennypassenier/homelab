@@ -3147,6 +3147,7 @@ homelab checks                              # list them
 homelab checks answer <id> ok               # record an answer
 homelab checks answer <id> nok the subtitles drift after an hour
 homelab checks answer <id> accept 90 by design, D56   # a deliberate nok
+homelab checks answer <id1>,<id2>,<id3> ok  # several at once, same verdict (fix-65)
 ```
 
 Since fix-65 (2026-09-27): an answer is reopened only by a deploy that changed

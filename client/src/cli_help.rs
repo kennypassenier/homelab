@@ -66,7 +66,7 @@ use Group::*;
 pub const VERBS: &[Verb] = &[
     v(Daily, "today", "[stacks/]", "what needs you: doctor, fleet check, incidents and manual checks in one list", "homelab today"),
     v(Daily, "check", "[stacks/]", "hold the stack files against what runs on the host", "homelab check"),
-    v(Daily, "checks", "[answer <id> ok|nok [note]]", "list, or answer, the checks only a person can do", "homelab checks answer 3f2a9c1e ok"),
+    v(Daily, "checks", "[answer <id>[,<id>,...] ok|nok [note]]", "list, or answer (one or several at once, same verdict), the checks only a person can do", "homelab checks answer 3f2a9c1e,9c1e3f2a ok"),
     v(Daily, "status", "[--json]", "the fleet as the host records it, one line per stack (--json: the raw FleetState)", "homelab status"),
     v(Daily, "doctor", "", "the host's own diagnosis: state, backups, offsite, disk", "homelab doctor"),
     v(Daily, "incidents", "[show <name>]", "the bundles failed operations left behind; `show` prints one: the error, the versions and the end of its transcript", "homelab incidents show 1790530911-deploy-mystack"),

@@ -342,10 +342,12 @@ names `homelab release-update`. The steps below are the parts it merges.
    remote, mirror lag, interrupted operations (`core/src/doctor.rs:45-188`).
 3. `homelab incidents`. One directory per failed operation;
    `homelab incidents show <name>` reads one (fix-131).
-4. `homelab checks`. The questions only a person can answer; record one
-   with `homelab checks answer <id> ok|nok [note]`, or accept a deliberate
-   `nok` for a while with `homelab checks answer <id> accept <days> <reason>`
-   (fix-65; `client/src/main.rs`).
+4. `homelab checks`. The questions only a person can answer; record one or
+   several at once (same verdict) with
+   `homelab checks answer <id>[,<id>,...] ok|nok [note]`, or accept a
+   deliberate `nok` for a while with
+   `homelab checks answer <id>[,<id>,...] accept <days> <reason>`
+   (fix-65; `client/src/main.rs`, `client/src/checks.rs`).
 5. Host, only when one of the above points there:
 
    ```sh

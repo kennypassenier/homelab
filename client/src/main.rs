@@ -755,16 +755,23 @@ async fn run(explicit_host: Option<String>) {
                 rpc(&host, &token, Command::ListManualChecks { json: false }).await
             }
             Some("answer") => {
-                let id = args
-                    .get(3)
-                    .unwrap_or_else(|| die("usage: homelab checks answer <id> ok|nok [note]"));
-                let verdict = args
-                    .get(4)
-                    .unwrap_or_else(|| die("usage: homelab checks answer <id> ok|nok [note]"));
+                // fix-65 (nightly-report-always-red, 2026-09-27): one id
+                // used to mean one command; a comma-separated list answers
+                // several at once with the same verdict, note and (for
+                // `accept`) days — the morning round of open checks no
+                // longer needs one invocation each.
+                let usage = "usage: homelab checks answer <id>[,<id>,...] ok|nok [note]";
+                let ids =
+                    homelab_client::checks::split_ids(args.get(3).unwrap_or_else(|| die(usage)));
+                if ids.is_empty() {
+                    die(usage);
+                }
+                let verdict = args.get(4).unwrap_or_else(|| die(usage));
                 // fix-65: `accept <days> <reason>` records a deliberate nok
                 // that is noted, not broken, until that many days from now.
                 let (ok, note, accept_days) = if verdict == "accept" {
-                    let usage = "usage: homelab checks answer <id> accept <days> <reason>";
+                    let usage = "usage: homelab checks answer <id>[,<id>,...] accept <days> \
+                                  <reason>";
                     let days: u32 = args
                         .get(5)
                         .and_then(|d| d.parse().ok())
@@ -790,17 +797,25 @@ async fn run(explicit_host: Option<String>) {
                     };
                     (ok, args[5..].join(" "), None)
                 };
-                rpc(
-                    &host,
-                    &token,
-                    Command::AnswerManualCheck {
-                        check_id: id.clone(),
-                        ok,
-                        note,
-                        accept_days,
-                    },
-                )
-                .await;
+                let mut all_ok = true;
+                for id in &ids {
+                    if ids.len() > 1 {
+                        println!("{}▶ {}{}", C_CYAN, id, C_RESET);
+                    }
+                    let one_ok = rpc_with(
+                        &host,
+                        &token,
+                        Command::AnswerManualCheck {
+                            check_id: id.clone(),
+                            ok,
+                            note: note.clone(),
+                            accept_days,
+                        },
+                    )
+                    .await;
+                    all_ok &= one_ok;
+                }
+                std::process::exit(if all_ok { 0 } else { 1 });
             }
             Some(other) => die(&format!(
                 "unknown: homelab checks {} — try `list` or `answer`",

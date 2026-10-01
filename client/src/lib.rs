@@ -3,6 +3,7 @@
 
 pub mod answer;
 pub mod apply;
+pub mod checks;
 pub mod cli_args;
 pub mod cli_help;
 

@@ -678,8 +678,23 @@
       {
         "name": "backup_pause",
         "id": "native-backup-pause",
-        "kind": "check",
-        "label": "Pause the unit for the nightly backup"
+        "kind": "choice",
+        "label": "Pause for the nightly backup",
+        "help": "false: no quiescing. true: the homelab stops/starts the unit itself. chassis: the chassis-rs kit's own backup-pause/backup-resume, falling back to stop/start when it cannot.",
+        "choices": [
+          {
+            "value": "false",
+            "label": "Off"
+          },
+          {
+            "value": "true",
+            "label": "Homelab stops the unit"
+          },
+          {
+            "value": "chassis",
+            "label": "Chassis kit (backup-pause, falls back to stop)"
+          }
+        ]
       },
       {
         "name": "update_policy",

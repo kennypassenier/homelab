@@ -32,6 +32,78 @@ pub enum UpdatePolicy {
     OwnVerb,
 }
 
+/// fix-113 (owner decision, 2026-10-01): how a native service's store is
+/// quiesced for the length of the nightly tar. Written in `service.yml` as
+/// `false` (the default), `true` or `chassis` — not as a Rust-style tag —
+/// so the (de)serialization is hand-rolled rather than `rename_all`.
+///
+/// `Off` and `Unit` are what `bool` used to mean before this field grew a
+/// third state. `Chassis` asks the chassis-rs kit's own binary to pause
+/// (`pct exec <ct> -- <binary> backup-pause --for <secs>`), which can hold
+/// writes without stopping the process at all; `backup_native` falls back to
+/// `Unit`'s stop/start when the binary cannot (see
+/// `crate::ops::native::decide_chassis_pause`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BackupPause {
+    #[default]
+    Off,
+    /// The homelab stops the unit itself before the tar and starts it again
+    /// after, whatever the snapshot did (the original fix-113 mechanism).
+    Unit,
+    /// The binary's own `backup-pause`/`backup-resume` subcommand.
+    Chassis,
+}
+
+impl BackupPause {
+    /// `skip_serializing_if`: the default (`false` in the file) need not be
+    /// written at all, same as the plain `bool` this field used to be.
+    pub fn is_off(&self) -> bool {
+        matches!(self, BackupPause::Off)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for BackupPause {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Bool(bool),
+            Str(String),
+        }
+        // Accepted both as a real bool (the `service.yml` shape) and as the
+        // string "false"/"true" (the dashboard's edit JSON, which sends
+        // every field of a select as text — `admin/web/js/editpanels.js`'s
+        // `nativeChoice`, the same way `update_policy` and `metrics` do).
+        match Raw::deserialize(d)? {
+            Raw::Bool(false) => Ok(BackupPause::Off),
+            Raw::Bool(true) => Ok(BackupPause::Unit),
+            Raw::Str(s) if s == "false" => Ok(BackupPause::Off),
+            Raw::Str(s) if s == "true" => Ok(BackupPause::Unit),
+            Raw::Str(s) if s == "chassis" => Ok(BackupPause::Chassis),
+            Raw::Str(other) => Err(serde::de::Error::custom(format!(
+                "backup_pause: '{}' is not one of false, true, chassis",
+                other
+            ))),
+        }
+    }
+}
+
+impl serde::Serialize for BackupPause {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            BackupPause::Off => s.serialize_bool(false),
+            BackupPause::Unit => s.serialize_bool(true),
+            BackupPause::Chassis => s.serialize_str("chassis"),
+        }
+    }
+}
+
 /// Everything the homelab needs to know about one native service. One
 /// service per stack/container — the shapes that need more run compose.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -93,15 +165,19 @@ pub struct NativeServiceManifest {
     /// back as the live file and delete any `-wal`/`-shm` beside it.
     #[serde(default)]
     pub backup_from_newest: Option<String>,
-    /// fix-113 (native-tar-no-quiesce, 2026-09-27): stop the unit for the
-    /// length of the tar and start it again afterwards, whatever the snapshot
-    /// did. The native counterpart of the `com.homelab.backup.pause` label: a
-    /// service that writes its store at night is otherwise archived mid-write,
-    /// a torn file that looks like a backup. Off by default; the stack file
-    /// says which services need it (kyu has the better answer,
-    /// `backup_from_newest`).
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub backup_pause: bool,
+    /// fix-113 (native-tar-no-quiesce, 2026-09-27; extended 2026-10-01 for
+    /// the chassis-rs kit's `backup-pause`/`backup-resume` subcommand, owner
+    /// decision on fix-113): how the service is quiesced for the length of
+    /// the tar. `false` (the default): no quiescing. `true`: the homelab
+    /// stops the unit itself before the tar and starts it again afterwards,
+    /// whatever the snapshot did — the original fix-113 mechanism. `chassis`:
+    /// the binary's own `backup-pause`/`backup-resume` verbs do it, which can
+    /// pause writes without a full stop; the homelab falls back to the `true`
+    /// mechanism when the binary cannot (see [`BackupPause`]). Off by
+    /// default; the stack file says which services need it (kyu has the
+    /// better answer, `backup_from_newest`).
+    #[serde(default, skip_serializing_if = "BackupPause::is_off")]
+    pub backup_pause: BackupPause,
     /// B1: `auto` = the nightly round installs the latest release when its
     /// checksum differs from the installed binary; `manual` = never.
     #[serde(default)]
@@ -199,7 +275,7 @@ pub fn validate_native(m: &NativeServiceManifest) -> Result<(), Vec<String>> {
     }
     // fix-113: pausing a service that keeps nothing would stop it nightly for
     // a backup that has nothing to take.
-    if m.stateless && m.backup_pause {
+    if m.stateless && !m.backup_pause.is_off() {
         problems.push(
             "backup_pause is set on a stateless service — there is nothing to archive, so \
              nothing to pause for"

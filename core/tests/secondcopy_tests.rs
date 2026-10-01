@@ -6,7 +6,7 @@
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::manifest::*;
-use homelab_core::native::NativeServiceManifest;
+use homelab_core::native::{BackupPause, NativeServiceManifest};
 use homelab_core::ops::backup::BackupCfg;
 use homelab_core::ops::fleetcheck::Severity;
 use homelab_core::ops::secondcopy::{
@@ -137,7 +137,7 @@ fn stack_state(
                 release_repo: None,
                 release_asset: None,
                 backup_from_newest: None,
-                backup_pause: false,
+                backup_pause: BackupPause::Off,
                 update_policy: Default::default(),
                 metrics: None,
             })

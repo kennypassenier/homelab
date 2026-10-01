@@ -223,6 +223,12 @@ struct FileConfig {
     /// Seconds a single restore may take. Default 4 h, matching the snapshot
     /// side — it used to be a hardcoded 1800 (F38).
     restic_restore_timeout_s: Option<u64>,
+    /// fix-113 ADDENDUM (owner + chassis-rs, 2026-10-01): where a
+    /// `backup_pause: chassis` native backup stages its local copy before
+    /// restic uploads it. Absent/empty = no staging.
+    native_backup_staging_dir: Option<String>,
+    /// fix-113 ADDENDUM: the staging cap, in MiB, before its 20% margin.
+    native_backup_staging_cap_mib: Option<u64>,
     /// T1: directory the orchestrator writes per-stack Prometheus discovery
     /// files into. Absent = off, and the scrape list stays hand-maintained.
     metrics_targets_dir: Option<String>,
@@ -658,6 +664,15 @@ fn load_config_from(path: String) -> Config {
                     .restic_snapshot_timeout_s
                     .unwrap_or(d.snapshot_timeout_s),
                 restore_timeout_s: file.restic_restore_timeout_s.unwrap_or(d.restore_timeout_s),
+                // Unset: the default staging dir. "none" or empty: no staging.
+                staging_dir: match file.native_backup_staging_dir {
+                    None => d.staging_dir,
+                    Some(s) if s.trim().is_empty() || s.trim() == "none" => None,
+                    Some(s) => Some(s),
+                },
+                staging_cap_mib: file
+                    .native_backup_staging_cap_mib
+                    .unwrap_or(d.staging_cap_mib),
                 tiers: d.tiers,
             }
         },
@@ -2203,7 +2218,7 @@ port = 5003
             "lsd gdrive:homelab-backups",
             CmdOutput::failed(3, "token expired"),
         );
-        let probes = gather_probes(&exec, "/var/lib/homelab", None, now, &|_| {}).await;
+        let probes = gather_probes(&exec, "/var/lib/homelab", None, None, now, &|_| {}).await;
         assert_eq!(probes.managed_stacks.len(), 1);
         assert_eq!(probes.managed_stacks[0].backup_age_h, Some(80));
         assert!(probes.managed_stacks[0].container_present);
@@ -8276,6 +8291,7 @@ async fn gather_today(
             exec,
             &state.config.state_dir,
             state.config.mirror_remote.as_deref(),
+            state.config.backup.staging_dir.as_deref(),
             now,
             &|line: &str| progress_line(state, line),
         )
@@ -10231,6 +10247,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 &exec,
                 &state.config.state_dir,
                 state.config.mirror_remote.as_deref(),
+                state.config.backup.staging_dir.as_deref(),
                 now,
                 &|line: &str| progress_line(state, line),
             )
@@ -10746,6 +10763,7 @@ async fn gather_probes(
     exec: &dyn Executor,
     state_dir: &str,
     mirror_remote: Option<&str>,
+    staging_dir: Option<&str>,
     now_unix: u64,
     progress: &(dyn Fn(&str) + Send + Sync),
 ) -> homelab_core::doctor::Probes {
@@ -10875,6 +10893,24 @@ async fn gather_probes(
                 .and_then(|l| l.trim().trim_end_matches('%').parse::<u64>().ok())
                 .map(|used| 100u64.saturating_sub(used))
         });
+    // fix-113 ADDENDUM: free % on the chassis backup staging directory —
+    // only asked when one is configured; `None` outer = not configured, so
+    // `diagnose` raises no finding over a feature nobody turned on.
+    let staging_disk_free_pct = match staging_dir {
+        Some(dir) => Some(
+            exec.run(&Cmd::new("df", &["--output=pcent", dir], 20))
+                .await
+                .ok()
+                .and_then(|o| {
+                    o.stdout
+                        .lines()
+                        .nth(1)
+                        .and_then(|l| l.trim().trim_end_matches('%').parse::<u64>().ok())
+                        .map(|used| 100u64.saturating_sub(used))
+                }),
+        ),
+        None => None,
+    };
     // The daemon's own units, held against the copies this binary carries.
     let mut units = Vec::new();
     for u in homelab_core::hostunits::UNITS {
@@ -10884,6 +10920,7 @@ async fn gather_probes(
     Probes {
         host_units_drift,
         host_disk_free_pct: disk,
+        staging_disk_free_pct,
         state_parses,
         managed_stacks,
         offsite_configured,

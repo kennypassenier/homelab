@@ -4,7 +4,7 @@
 //! rotation and its night failed on a repository that does not exist.
 
 use homelab_core::executor::MockExecutor;
-use homelab_core::native::NativeServiceManifest;
+use homelab_core::native::{BackupPause, NativeServiceManifest};
 use homelab_core::ops::backup::BackupCfg;
 use homelab_core::ops::native::backup_native;
 use homelab_core::ops::restoredrill::backed_up_units;
@@ -34,7 +34,7 @@ fn unit(name: &str, stateless: bool) -> NativeServiceManifest {
         release_repo: None,
         release_asset: None,
         backup_from_newest: None,
-        backup_pause: false,
+        backup_pause: BackupPause::Off,
         update_policy: Default::default(),
         metrics: None,
     }

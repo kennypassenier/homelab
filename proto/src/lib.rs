@@ -14,7 +14,7 @@ pub use homelab_core::manifest::{
     BootSpec, DeploySpec, FileBlob, GatewayRoute, LxcSpec, MountSpec, NetworkSpec, ResourceSpec,
     SourceRev, StackManifest,
 };
-pub use homelab_core::native::NativeServiceManifest;
+pub use homelab_core::native::{BackupPause, NativeServiceManifest};
 pub use homelab_core::retention::RetentionTier;
 
 /// Sent in `Hello`. Bumped when a change would make an older peer misread a

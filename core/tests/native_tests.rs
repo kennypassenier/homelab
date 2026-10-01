@@ -3,7 +3,7 @@
 //! backup and update at the wrong thing.
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
-use homelab_core::native::{validate_native, NativeServiceManifest};
+use homelab_core::native::{validate_native, BackupPause, NativeServiceManifest};
 use homelab_core::ops::native::adopt;
 use homelab_core::ops::OpCtx;
 use homelab_core::runner::NullJournal;
@@ -43,7 +43,7 @@ fn kyu_manifest() -> NativeServiceManifest {
         update_cmd: Some("kyu update".into()),
         stateless: false,
         backup_from_newest: None,
-        backup_pause: false,
+        backup_pause: BackupPause::Off,
         update_policy: Default::default(),
         metrics: None,
         release_repo: None,
@@ -347,7 +347,7 @@ async fn t5_a_stack_holds_several_native_services() {
         data_dirs: vec![],
         stateless: true,
         backup_from_newest: None,
-        backup_pause: false,
+        backup_pause: BackupPause::Off,
         update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
@@ -381,7 +381,7 @@ async fn t5_a_stack_holds_several_native_services() {
         data_dirs: vec![],
         stateless: true,
         backup_from_newest: None,
-        backup_pause: false,
+        backup_pause: BackupPause::Off,
         update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
@@ -495,7 +495,7 @@ async fn d25_native_backup_uses_the_service_name_for_its_repo() {
         data_dirs: vec!["/etc/kyu-runner".into()],
         stateless: false,
         backup_from_newest: None,
-        backup_pause: false,
+        backup_pause: BackupPause::Off,
         update_policy: Default::default(),
         release_repo: None,
         release_asset: None,

@@ -5,7 +5,7 @@
 //! `release_update` does.
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
-use homelab_core::native::NativeServiceManifest;
+use homelab_core::native::{BackupPause, NativeServiceManifest};
 use homelab_core::ops::native::update_native;
 use homelab_core::ops::OpCtx;
 use homelab_core::runner::NullJournal;
@@ -50,7 +50,7 @@ fn kyu() -> NativeServiceManifest {
         release_repo: Some("kennypassenier/kyu".into()),
         release_asset: Some("kyu".into()),
         backup_from_newest: None,
-        backup_pause: false,
+        backup_pause: BackupPause::Off,
         update_policy: Default::default(),
         metrics: None,
     }

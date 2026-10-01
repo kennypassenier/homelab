@@ -205,7 +205,7 @@ test("the logs tab reads its settings from the address and asks the server", () 
   assert.equal(levelTone("warning"), "warn");
   assert.equal(levelTone("informational"), "ok");
   assert.equal(levelTone(""), "");
-  assert.equal(lineTime(1790606585948, UTC), "28 Sept, 14:43:05");
+  assert.equal(lineTime(1790606585948, UTC), "28/09 14:43:05");
   const rows = logRows(
     [
       { ts_ms: 1000, source: "a", stream: "stdout", level: "", line: "old" },
@@ -309,7 +309,7 @@ test("the axis steps on whole local hours or days", () => {
     [43200, false],
     [86400, true],
   ]);
-  assert.equal(t[0].label, "1 Jan");
+  assert.equal(t[0].label, "01/01");
   assert.equal(t[1].label, "12:00");
   // An offset moves the midnight marks to local midnight.
   const b = ticks(0, 86400, 100, { ...UTC, offset: () => 7200 });

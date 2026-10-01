@@ -608,7 +608,7 @@ test("a schedule's when in words and back from the form", () => {
     whenText({ every: "once", date: "2026-10-01", at: "02:00" }, undefined, {
       locale: "en-GB",
     }),
-    "Once on 1 Oct 2026 at 02:00",
+    "Once on 01/10/2026 at 02:00",
   );
   assert.deepEqual(
     whenFromValues({ every: "week", at: "03:00", days: [4, 1, 4], date: "" }),
@@ -658,7 +658,7 @@ test("a schedule's when in words and back from the form", () => {
     () => "Back up",
     { locale: "en-GB", timeZone: "UTC" },
   );
-  assert.match(rows[0].nextText, /^21 Sept? 2026, 14:13$/);
+  assert.match(rows[0].nextText, /^21\/09\/2026 14:13$/);
   assert.equal(rows[0].last, "never");
   assert.deepEqual(toggledBody(s, false), {
     stack: "media",

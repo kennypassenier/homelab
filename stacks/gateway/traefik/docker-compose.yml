@@ -13,6 +13,9 @@ services:
     command:
       - "--api.dashboard=true"
       - "--api.insecure=false"
+      # Kenny, 2026-10-01: the "Upgrade to Traefik Hub" banner is an ad for
+      # the paid product; nothing here uses it.
+      - "--api.disabledashboardad=true"
       - "--entrypoints.web.address=:80"
       # The tunnel's requests reach :80 through docker's bridge, so every
       # visitor arrived as 172.18.0.1 (measured 2026-09-27: 462 of 464

@@ -186,27 +186,36 @@ export function mount(root) {
   );
   const body = h("div", { class: "start" });
   const strip = h("div", { class: "health-strip-slot" });
-  // Kenny, 2026-10-01: the dots need a legend; one quiet line under the
-  // heading, the same dots and words as their tooltips.
+  // Kenny, 2026-10-01: the dots need a legend, as a section of its own
+  // (never under each tile): a kp card after the tiles, kp swatches in the
+  // dots' own colours.
   const legend = h(
-    "p",
-    { class: "start-legend", "aria-label": "What the dots mean" },
-    ...[
-      ["up", "answers"],
-      ["flaky", "failing, under the down threshold"],
-      ["down", "down"],
-      ["deploying", "deploying"],
-      ["", "not watched"],
-    ].map(([k, words]) =>
-      h(
-        "span",
-        { class: "start-legend__item" },
-        h("span", { class: `start-dot${k ? ` start-dot--${k}` : ""}` }),
-        words,
+    "section",
+    { class: "kp-card start-legend", "aria-labelledby": "start-legend-h" },
+    h("h2", { id: "start-legend-h", class: "start-legend__title" }, "Legend"),
+    h(
+      "ul",
+      { class: "start-legend__list" },
+      ...[
+        ["up", "Answers"],
+        ["flaky", "Failing, not yet down"],
+        ["down", "Down"],
+        ["deploying", "Deploying (no alarm)"],
+        ["", "Not watched"],
+      ].map(([k, words]) =>
+        h(
+          "li",
+          { class: "start-legend__item" },
+          h("span", {
+            class: `kp-swatch start-dot${k ? ` start-dot--${k}` : ""}`,
+            "aria-hidden": "true",
+          }),
+          words,
+        ),
       ),
     ),
   );
-  root.replaceChildren(h("h1", null, "Home"), legend, status, body, strip);
+  root.replaceChildren(h("h1", null, "Home"), status, body, strip, legend);
   const abort = new AbortController();
   (async () => {
     const [r, w] = await Promise.all([

@@ -357,11 +357,6 @@ tiles:
     group: "Infrastructure"
     order: 504
     description: "Firewall and network"
-  trmnl.kp-soft.dev:
-    name: "Terminus"
-    group: "Household"
-    order: 305
-    description: "E-ink dashboard"
 
 # replace-goaccess (Kenny, 2026-09-30): Traefik's access log also goes to
 # Loki (job=access), so the dashboard's Traffic page reads it there instead

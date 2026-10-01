@@ -6,9 +6,9 @@
 
 use homelab_core::manifest::StackManifest;
 use homelab_core::ops::fleetcheck::{
-    evaluate, evaluate_boot, evaluate_coverage, evaluate_growth, evaluate_host_meta,
-    evaluate_repo_drift, BootFact, CoverageFact, GrowthFact, GrowthLimits, LiveFacts, RouteFact,
-    Severity, StackDigest,
+    evaluate, evaluate_boot, evaluate_coverage, evaluate_growth, evaluate_host_config_drift,
+    evaluate_host_meta, evaluate_repo_drift, BootFact, CoverageFact, GrowthFact, GrowthLimits,
+    LiveFacts, RouteFact, Severity, StackDigest,
 };
 use homelab_core::state::{HostState, StackState};
 
@@ -122,6 +122,8 @@ fn y4_a_healthy_fleet_is_silent() {
         boot: Vec::new(),
         host_memory: None,
         second_copy_dataset: None,
+        declared_host_config: None,
+        live_host_config: Default::default(),
     };
     assert!(check(&st, &live).is_empty(), "{:?}", check(&st, &live));
 }
@@ -1684,6 +1686,47 @@ fn fix_142_a_stack_without_a_manifest_compares_its_files_only() {
         ..Default::default()
     };
     assert!(evaluate_repo_drift(&st, &live).is_empty());
+}
+
+/// fix-110: no declared config (an older client, the nightly round, or a
+/// repository with no config/host.toml yet) means no comparison at all —
+/// backwards compatible, the same way empty `digests` skips the stack-file
+/// comparison above.
+#[test]
+fn fix_110_no_declared_host_config_skips_the_comparison() {
+    let live = LiveFacts {
+        live_host_config: std::collections::BTreeMap::from([(
+            "gateway_vmid".to_string(),
+            serde_json::json!(104),
+        )]),
+        ..Default::default()
+    };
+    assert!(evaluate_host_config_drift(&live).is_empty());
+}
+
+/// fix-110: a key the repository declares that the host's file does not set
+/// (or sets to something else) is one Drift finding; a key both sides agree
+/// on produces none.
+#[test]
+fn fix_110_host_config_drift_names_the_differing_key() {
+    let live = LiveFacts {
+        declared_host_config: Some(std::collections::BTreeMap::from([
+            ("gateway_vmid".to_string(), serde_json::json!(104)),
+            ("backup_concurrency".to_string(), serde_json::json!(3)),
+        ])),
+        live_host_config: std::collections::BTreeMap::from([
+            ("gateway_vmid".to_string(), serde_json::json!(105)),
+            ("backup_concurrency".to_string(), serde_json::json!(3)),
+        ]),
+        ..Default::default()
+    };
+    let got = evaluate_host_config_drift(&live);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].severity, Severity::Drift);
+    assert_eq!(got[0].subject, "host.toml");
+    assert!(got[0].what.contains("gateway_vmid"), "{}", got[0].what);
+    assert!(got[0].what.contains("104"), "{}", got[0].what);
+    assert!(got[0].what.contains("105"), "{}", got[0].what);
 }
 
 /// gap-23: the host-meta repository — the vault holding `restic.pw`, the

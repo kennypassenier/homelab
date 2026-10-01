@@ -264,6 +264,7 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         | BackupCalendar { .. }
         | GetHostConfig
         | SetHostConfig { .. }
+        | ApplyHostConfig { .. }
         | Ui { .. }
         | UiAttach
         | UiReply { .. }

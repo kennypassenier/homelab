@@ -155,6 +155,12 @@ async fn world(tag: &str) -> World {
                             .to_string(),
                     ..Script::ok(&[])
                 },
+                Command::ApplyHostConfig { .. } => Script {
+                    message:
+                        json!({"sha256": "c".repeat(64), "live": ["backup_hour"], "restart": []})
+                            .to_string(),
+                    ..Script::ok(&[])
+                },
                 _ => Script::ok(&[("run", 1)]),
             }
         }),
@@ -1186,13 +1192,18 @@ async fn follow_host_settings_write_once_within_scope() {
     );
     refused(&all(press("confirm")).await);
     let sent = w.sent.lock().unwrap().clone();
+    // fix-110: the save is now committed to config/host.toml in the
+    // working copy (no RPC) and applied whole, not with the per-key
+    // `SetHostConfig` this test's own mock still answers for other paths.
     let writes: Vec<&Command> = sent
         .iter()
-        .filter(|c| c.name() == "set_host_config")
+        .filter(|c| c.name() == "apply_host_config")
         .collect();
     assert_eq!(writes.len(), 1, "{sent:?}");
     match writes[0] {
-        Command::SetHostConfig { changes, .. } => assert_eq!(changes["backup_hour"], 5),
+        Command::ApplyHostConfig { toml, .. } => {
+            assert!(toml.contains("backup_hour = 5"), "{toml}")
+        }
         other => panic!("{other:?}"),
     }
     assert_eq!(w.live.events("host_settings").len(), 1);

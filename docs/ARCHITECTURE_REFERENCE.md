@@ -137,7 +137,17 @@ caller decides (`:60-63`). `MockExecutor` records calls and timeouts and
 models `pct push`, `pct set/create/clone`, `docker compose up/down` and
 `sha256sum` read-back (`:181-459`). `TracingExecutor` emits `[run ]` lines
 and cuts output lines at 300 bytes (`:79-145`). 313 test attributes sit in
-the 18 files that name `MockExecutor`.
+the 18 files that name `MockExecutor`. `Script` builds a `pct_sh`/`attach_sh`
+snippet one quote-safe piece at a time (`cd`, `cmd`, `raw`, each argument
+through `shq`) instead of a `format!` between bare `'{}'` quotes
+(fix-132, shell-strings-quoting; `core/src/executor.rs`, not yet used at
+every `cd '/opt/...'` call site — see `core/tests/script_tests.rs`).
+`core/src/compose.rs` reads `docker compose ps --format json` (one JSON
+object per line) into `ComposePsEntry`, with a `ComposePs::Unknown` state
+for output the parser cannot place a single service in, so a probe that
+cannot answer is never folded into "nothing is running"; not yet wired
+into the existing text-based `--status running --services` call sites,
+which ~30 tests pin to that exact string.
 
 **Runner and `step!` (AR3).** `Runner::step` journals `running` before the
 body and `done` or `failed` after (`core/src/runner.rs:76-106`).

@@ -485,6 +485,58 @@ pub fn lxc_conf_current(conf: &str) -> &str {
     &conf[..end]
 }
 
+/// Builds a shell snippet (for [`pct_sh`]/[`attach_sh`]) one quote-safe piece
+/// at a time, instead of a `format!` that interpolates a value between bare
+/// `'{}'` quotes.
+///
+/// shell-strings-quoting (expert panel, 2026-09-27): about 20 call sites did
+/// `format!("cd '/opt/{}/{}' && ...", stack, app)`, which is only as safe as
+/// every caller remembering to quote; a Script never offers a way to append
+/// a value unquoted. Every piece is joined with ` && ` (the shape every
+/// existing snippet already used), so a failed `cd` or probe short-circuits
+/// the rest exactly as the hand-written scripts did.
+#[derive(Debug, Clone, Default)]
+pub struct Script {
+    parts: Vec<String>,
+}
+
+impl Script {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// `cd <dir>` — `dir` is quoted through [`shq`].
+    pub fn cd(mut self, dir: &str) -> Self {
+        self.parts.push(format!("cd {}", shq(dir)));
+        self
+    }
+
+    /// A fixed shell fragment with no interpolated value, trusted as
+    /// already safe (`docker compose ps -q`, `|| true`, and the like).
+    pub fn raw(mut self, fragment: &str) -> Self {
+        self.parts.push(fragment.to_string());
+        self
+    }
+
+    /// `program arg1 arg2 ...`, each argument quoted through [`shq`] on its
+    /// own — the safe way to splice a value (a path, an app name) into the
+    /// middle of a script.
+    pub fn cmd(mut self, program: &str, args: &[&str]) -> Self {
+        let mut line = program.to_string();
+        for a in args {
+            line.push(' ');
+            line.push_str(&shq(a));
+        }
+        self.parts.push(line);
+        self
+    }
+
+    /// The script text, pieces joined with ` && `.
+    pub fn build(self) -> String {
+        self.parts.join(" && ")
+    }
+}
+
 /// Run a shell script inside an LXC via `pct exec`.
 ///
 /// fix-53 (expert panel, timeout-leaves-container-work-running, 2026-09-27):

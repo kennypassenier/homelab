@@ -86,19 +86,16 @@ storage:
     mount_point: /appdata/gateway/crowdsec-config
     host_owner_uid: 100000
     app: crowdsec
-  - host_path: /appdata/gateway/goaccess-config
-    mount_point: /appdata/gateway/goaccess-config
-    host_owner_uid: 100000
-    app: goaccess
 
 # G3: Traefik's access log is 145 of the 146 MB under traefik-config, and it
 # is data that is different tomorrow and never restored. Borrowed from a pool
 # outside /appdata, so the nightly snapshot drops from 146 MB to 1.2 MB.
 #
 # Only the HOST side moves. Inside the containers the path stays
-# /var/log/traefik, because Traefik writes it, CrowdSec parses it and GoAccess
-# reports on it — three readers whose configuration should not have to know
-# where the bytes physically live.
+# /var/log/traefik, because Traefik writes it and CrowdSec parses it — two
+# readers whose configuration should not have to know where the bytes
+# physically live. The dashboard's log shipper reads the same path too
+# (log_files below, job=access), replacing GoAccess as the third reader.
 data_mounts:
   - host_path: /HDD2TB/logs/traefik
     mount_point: /mnt/traefik-logs
@@ -113,7 +110,7 @@ data_mounts:
         container: traefik
         signal: USR1
 
-apps: [traefik, cloudflared, crowdsec, goaccess]
+apps: [traefik, cloudflared, crowdsec]
 
 latch_secrets: [traefik, cloudflared]
 
@@ -171,10 +168,13 @@ syslog_receivers:
 firewall:
   enabled: false
   comment: |-
-    CT 104 (gateway), the gateway: Traefik, cloudflared, CrowdSec, Grafana, Loki, GoAccess.
+    CT 104 (gateway), the gateway: Traefik, cloudflared, CrowdSec.
     Declared from the flows measured 2026-09-27 (fix-89): tcpdump on pve's veths,
-    conntrack and ss in the container, the Prometheus targets, the Uptime Kuma
-    monitors, the Traefik routes and the stacks' own configuration.
+    conntrack and ss in the container, the Prometheus targets, the Traefik
+    routes and the stacks' own configuration. Retired 2026-10-01: the
+    Uptime Kuma, Grafana and GoAccess rules this stack used to carry
+    (Homepage, Grafana, GoAccess and Uptime Kuma are retired; the dashboard
+    replaced them).
     Port 80 is open to nobody (traefik-lan-host-header-bypass): the tunnel reaches
     Traefik over gateway_net inside this container (172.18.0.1 in the access log),
     which never crosses the veth. Uptime Kuma's bare-Host monitor on :80 has to move
@@ -205,12 +205,6 @@ firewall:
       note: media routes
     - dir: out
       action: ACCEPT
-      dest: 10.10.10.7
-      proto: tcp
-      dport: "3001"
-      note: Uptime Kuma routes
-    - dir: out
-      action: ACCEPT
       dest: 10.10.10.8
       proto: tcp
       dport: "8384"
@@ -237,20 +231,14 @@ firewall:
       action: ACCEPT
       dest: 10.10.10.13
       proto: tcp
-      dport: "3000,3100,9090,9093"
-      note: prom and alerts routes, Grafana's datasource
+      dport: "3100,9090,9093"
+      note: Loki push, Prometheus and Alertmanager routes
     - dir: out
       action: ACCEPT
       dest: 10.10.10.14
       proto: tcp
       dport: "5006,8080,8000"
       note: paperwork routes
-    - dir: out
-      action: ACCEPT
-      dest: 10.10.10.15
-      proto: tcp
-      dport: "3000"
-      note: homepage route
     - dir: out
       action: ACCEPT
       dest: 10.10.10.16
@@ -300,27 +288,10 @@ firewall:
       note: Prometheus (cadvisor, traefik metrics, node exporter)
     - dir: in
       action: ACCEPT
-      source: 10.10.10.7
-      proto: icmp
-      note: Uptime Kuma ping
-    - dir: in
-      action: ACCEPT
-      source: 10.10.10.7
-      proto: tcp
-      dport: "3000,3100"
-      note: Uptime Kuma HTTP monitors (Grafana, Loki)
-    - dir: in
-      action: ACCEPT
-      source: 10.10.10.15
-      proto: tcp
-      dport: "3000"
-      note: homepage's Grafana widget
-    - dir: in
-      action: ACCEPT
       source: 10.10.10.10
       proto: tcp
-      dport: "22,7880,7881"
-      note: Kenny's desktop (ssh, GoAccess report and its websocket)
+      dport: "22"
+      note: Kenny's desktop (ssh)
 
 # app-knowledge (Kenny, 2026-09-30): the house's own public address is kept
 # on CrowdSec's allow list (fix-94). /appdata/gateway/crowdsec-config is

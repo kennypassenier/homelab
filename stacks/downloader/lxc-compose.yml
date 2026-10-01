@@ -156,21 +156,10 @@ firewall:
       note: Prometheus (cadvisor, node exporter)
     - dir: in
       action: ACCEPT
-      source: 10.10.10.7
-      proto: icmp
-      note: Uptime Kuma ping
-    - dir: in
-      action: ACCEPT
-      source: 10.10.10.7
-      proto: tcp
-      dport: "8080"
-      note: Uptime Kuma HTTP monitor
-    - dir: in
-      action: ACCEPT
       source: 10.10.10.10
       proto: tcp
       dport: "22,8080"
-      note: Kenny's desktop (ssh and the web ports the homepage tiles link to)
+      note: Kenny's desktop (ssh and the web ports the dashboard tiles link to)
 
 # replace-homepage (Kenny, 2026-09-30): this stack's tiles on the dashboard's
 # start page, keyed by the hostname they open (or an id with `url:`). Moved

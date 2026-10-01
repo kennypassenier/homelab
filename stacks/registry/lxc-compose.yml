@@ -113,18 +113,13 @@ firewall:
       source: 10.10.10.0/24
       proto: tcp
       dport: "5000:5003"
-      note: docker pulls from every container (and Uptime Kuma's monitor on 5000)
+      note: docker pulls from every container
     - dir: in
       action: ACCEPT
       source: 10.10.10.13
       proto: tcp
       dport: "8081,9100"
       note: Prometheus (cadvisor, node exporter)
-    - dir: in
-      action: ACCEPT
-      source: 10.10.10.7
-      proto: icmp
-      note: Uptime Kuma ping
     - dir: in
       action: ACCEPT
       source: 10.10.10.10

@@ -16,12 +16,12 @@ fn material_for(kind: ActionKind, stack: &str) -> Material {
         Needs::Nothing => Material::None,
         Needs::Vmid => Material::Vmid(104),
         Needs::Manifest => {
-            let mut m = manifest("home");
+            let mut m = manifest("media");
             m.stack_name = stack.into();
             Material::Manifest(Box::new(m))
         }
         Needs::Spec => {
-            let mut s = spec("home");
+            let mut s = spec("media");
             s.manifest.stack_name = stack.into();
             Material::Spec(Box::new(s))
         }
@@ -45,9 +45,22 @@ fn material_for(kind: ActionKind, stack: &str) -> Material {
             }
         }
         Needs::Apply => Material::Apply {
-            deploy: vec![spec("home")],
+            deploy: vec![spec("media")],
             destroy: vec!["gone".into()],
         },
+    }
+}
+
+/// feat-secrets-2: `ChangeSecret`'s `Needs::Nothing` only covers what the
+/// generic read step does (none — the shell resolves the staged value
+/// itself right before building the command); the material still has to
+/// carry the secret the staged edit was for.
+fn secret_material() -> Material {
+    Material::Secret {
+        secret: homelab_proto::SecretRef::Env {
+            app: "admin".into(),
+        },
+        content: "NEW=1\n".into(),
     }
 }
 
@@ -70,6 +83,15 @@ fn args_for(kind: ActionKind, stack: &str) -> ActionArgs {
             a.verdict = Some("ok".into());
         }
         ActionKind::Apply => a.destroy = Some("gone".into()),
+        ActionKind::ChangeSecret => {
+            a.secret_ref = Some(
+                serde_json::to_string(&homelab_proto::SecretRef::Env {
+                    app: "admin".into(),
+                })
+                .unwrap(),
+            );
+            a.stage_token = Some("stage-1".into());
+        }
         _ => {}
     }
     a
@@ -85,8 +107,12 @@ fn feat_stacks_4_every_action_builds_a_command_whose_scope_the_catalog_names() {
         };
         let req = validate(stack, kind.slug(), args_for(*kind, stack))
             .unwrap_or_else(|r| panic!("{:?}: {r}", kind));
-        let cmds = commands(&req, material_for(*kind, stack))
-            .unwrap_or_else(|r| panic!("{:?}: {r}", kind));
+        let material = if *kind == ActionKind::ChangeSecret {
+            secret_material()
+        } else {
+            material_for(*kind, stack)
+        };
+        let cmds = commands(&req, material).unwrap_or_else(|r| panic!("{:?}: {r}", kind));
         let main = cmds.last().expect("a command");
         assert_eq!(kind.scope(), main.scope(), "{:?} → {}", kind, main.name());
         assert_eq!(ActionKind::from_slug(kind.slug()), Some(*kind));
@@ -524,7 +550,7 @@ fn parity_apply_destroys_only_typed_gone_stacks() {
     let cmds = commands(
         &req,
         Material::Apply {
-            deploy: vec![spec("home")],
+            deploy: vec![spec("media")],
             destroy: vec!["drill".into()],
         },
     )

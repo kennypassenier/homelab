@@ -307,13 +307,13 @@ fn rule_20_notices_older_than_max_age_days_fall_off() {
     );
     let recent = f.add(
         draft(Kind::ActionDone, Some("new")),
-        5 * day,
+        12 * day,
         PushOutcome::Sent,
         KEEP,
         10,
     );
     // "now" (`at` of the add that triggers the prune) is 20 days past the
-    // first notice and 15 past the second — only the second is inside the
+    // first notice and 8 past the second — only the second is inside the
     // 10-day window.
     let _ = f.add(
         draft(Kind::ActionDone, Some("trigger")),

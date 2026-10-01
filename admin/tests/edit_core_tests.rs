@@ -85,13 +85,18 @@ fn feat_firewall_1_an_unchanged_firewall_changes_no_file() {
 fn feat_firewall_1_add_and_remove_a_rule_keep_the_rest_of_the_file() {
     let t = texts("admin");
     let mut f = firewall_as_is("admin");
-    // Uptime Kuma's HTTP monitor, found by its note: rules added in the
-    // browser land after it (fix-157's end-to-end run added one).
+    // The host's own /healthz watch, found by its note: rules added in the
+    // browser land after it (fix-157's end-to-end run added one). This rule
+    // replaced Uptime Kuma's HTTP monitor when Kuma was retired
+    // (replace-kuma, 2026-10-01).
     let kuma = f
         .rules
         .iter()
-        .position(|r| r.rule.note.as_deref() == Some("Uptime Kuma HTTP monitor (/healthz)"))
-        .expect("the stack still has Uptime Kuma's HTTP rule");
+        .position(|r| {
+            r.rule.note.as_deref()
+                == Some("the host watches the dashboard's /healthz every minute (replace-kuma)")
+        })
+        .expect("the stack still has the healthz-watch rule");
     f.rules.remove(kuma);
     f.rules.push(RuleEdit {
         origin: None,
@@ -112,7 +117,11 @@ fn feat_firewall_1_add_and_remove_a_rule_keep_the_rest_of_the_file() {
     let new = out[0].new.as_deref().unwrap();
     let old = out[0].old.as_deref().unwrap();
     assert!(new.contains("      source: 10.10.10.10\n      proto: tcp\n      dport: '8090'\n      note: the desktop\n"), "{new}");
-    assert!(!new.contains("note: Uptime Kuma HTTP monitor (/healthz)"));
+    assert!(
+        !new.contains(
+            "note: the host watches the dashboard's /healthz every minute (replace-kuma)"
+        )
+    );
     let (added, removed) = counts(old, new);
     assert!(
         (3..=6).contains(&added) && (3..=6).contains(&removed),
@@ -147,7 +156,7 @@ fn feat_firewall_1_add_and_remove_a_rule_keep_the_rest_of_the_file() {
         eff[0]
             .detail
             .iter()
-            .any(|l| l.starts_with("- IN ACCEPT -source 10.10.10.7 -p tcp -dport 8090"))
+            .any(|l| l.starts_with("- IN ACCEPT -source 10.10.10.250 -p tcp -dport 8090"))
     );
     assert_eq!(follow_ups(&eff), vec!["deploy"]);
 }
@@ -466,7 +475,7 @@ fn feat_firewall_2_the_matrix_reads_both_ends() {
             firewall: m.firewall,
         }
     };
-    let fleet: Vec<FleetFirewall> = ["admin", "gateway", "kp-soft", "uptime", "metrics"]
+    let fleet: Vec<FleetFirewall> = ["admin", "gateway", "kp-soft", "metrics"]
         .iter()
         .map(|s| load(s))
         .collect();
@@ -480,7 +489,12 @@ fn feat_firewall_2_the_matrix_reads_both_ends() {
     };
     // Traefik (gateway, CT 104) reaches the dashboard on 8090, and nothing else does from kp-soft.
     assert_eq!(cell("gateway", "admin").allowed, vec!["tcp 8090"]);
-    assert_eq!(cell("uptime", "admin").allowed, vec!["tcp 8090", "icmp"]);
+    // Prometheus (CT 113) reaches the dashboard on two ports: node exporter
+    // (fix-162) and the Alertmanager hook (notify-routing, replace-kuma).
+    assert_eq!(
+        cell("metrics", "admin").allowed,
+        vec!["tcp 8090", "tcp 9100"]
+    );
     assert_eq!(cell("kp-soft", "admin").state, "none");
     // Prometheus (CT 113) scrapes kp-soft on 8081 and 9100.
     assert_eq!(
@@ -698,10 +712,10 @@ fn tile_watch_derived_rule_shows_in_the_plan() {
 /// `tiles:` entry, comments kept, only when a value is given.
 #[test]
 fn settings_edit_writes_a_tiles_watch_override() {
-    let texts = texts("uptime");
+    let texts = texts("almanac");
     let edit = StackEdit::Settings(SettingsEdit {
         tiles: BTreeMap::from([(
-            "kuma.kp-soft.dev".to_string(),
+            "almanac.kp-soft.dev".to_string(),
             TileEdit {
                 watch_every: Some(30),
                 down_after: Some(180),
@@ -709,22 +723,22 @@ fn settings_edit_writes_a_tiles_watch_override() {
         )]),
         ..Default::default()
     });
-    let out = changes("uptime", &texts, &edit, None).unwrap();
+    let out = changes("almanac", &texts, &edit, None).unwrap();
     assert_eq!(out.len(), 1, "{out:?}");
     let new = out[0].new.as_ref().unwrap();
     assert!(
-        new.contains("kuma.kp-soft.dev:\n    name: \"Uptime Kuma\"")
-            || new.contains("kuma.kp-soft.dev:"),
+        new.contains("almanac.kp-soft.dev:\n    name: \"Almanac\"")
+            || new.contains("almanac.kp-soft.dev:"),
         "{new}"
     );
     let m = parse_manifest(new).unwrap();
-    let t = &m.tiles["kuma.kp-soft.dev"];
+    let t = &m.tiles["almanac.kp-soft.dev"];
     assert_eq!(t.watch_every, Some(30));
     assert_eq!(t.down_after, Some(180));
     // A second edit setting only watch_every leaves down_after as it is
     // now, and a field left out of the whole edit changes nothing at all.
     let unchanged = changes(
-        "uptime",
+        "almanac",
         &texts,
         &StackEdit::Settings(SettingsEdit::default()),
         None,
@@ -738,7 +752,7 @@ fn settings_edit_writes_a_tiles_watch_override() {
 /// `tileProblems` does before the plan is even asked for.
 #[test]
 fn settings_edit_tile_validation() {
-    let texts = texts("uptime");
+    let texts = texts("almanac");
     let unknown = StackEdit::Settings(SettingsEdit {
         tiles: BTreeMap::from([(
             "not-a-tile.kp-soft.dev".to_string(),
@@ -749,13 +763,13 @@ fn settings_edit_tile_validation() {
         )]),
         ..Default::default()
     });
-    let err = changes("uptime", &texts, &unknown, None).unwrap_err();
+    let err = changes("almanac", &texts, &unknown, None).unwrap_err();
     assert!(err.why.contains("is not a tile of this stack"), "{err:?}");
 
     use homelab_admin::core::stackedit::settings_problems;
     let too_low = SettingsEdit {
         tiles: BTreeMap::from([(
-            "kuma.kp-soft.dev".to_string(),
+            "almanac.kp-soft.dev".to_string(),
             TileEdit {
                 watch_every: Some(5),
                 down_after: None,
@@ -770,7 +784,7 @@ fn settings_edit_tile_validation() {
     );
     let inverted = SettingsEdit {
         tiles: BTreeMap::from([(
-            "kuma.kp-soft.dev".to_string(),
+            "almanac.kp-soft.dev".to_string(),
             TileEdit {
                 watch_every: Some(120),
                 down_after: Some(60),

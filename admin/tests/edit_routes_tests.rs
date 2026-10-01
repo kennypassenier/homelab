@@ -84,7 +84,7 @@ fn seed(root: &Path) -> PathBuf {
         ],
     );
     git(&seed, &["checkout", "--quiet", "-b", "main"]);
-    for s in ["admin", "kp-soft", "gateway", "uptime", "metrics"] {
+    for s in ["admin", "kp-soft", "gateway", "registry", "metrics"] {
         copy(&src.join("stacks").join(s), &seed.join("stacks").join(s));
     }
     for p in ["custom", "mealie"] {
@@ -522,10 +522,10 @@ async fn feat_settings_1_read_and_write_with_the_session_commands_only() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn parity_an_export_bundle_imports_as_a_new_stack() {
     let w = world("import").await;
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks/uptime");
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks/registry");
     let (bundle, n) = homelab_client::spec::bundle_text(&src).unwrap();
     assert!(n > 0);
-    let req = serde_json::json!({ "bundle": bundle, "name": "uptime2", "vmid": 197 });
+    let req = serde_json::json!({ "bundle": bundle, "name": "registry2", "vmid": 197 });
     let (st, plan) = call(
         &w.app,
         "POST",
@@ -540,7 +540,7 @@ async fn parity_an_export_bundle_imports_as_a_new_stack() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|f| f["path"].as_str().unwrap().starts_with("stacks/uptime2/"))
+            .all(|f| f["path"].as_str().unwrap().starts_with("stacks/registry2/"))
     );
     assert_eq!(plan["follow_ups"], serde_json::json!(["deploy"]), "{plan}");
     assert_eq!(git(&w.bare, &["rev-list", "--count", "main"]).trim(), "1");
@@ -548,21 +548,21 @@ async fn parity_an_export_bundle_imports_as_a_new_stack() {
     // Refusals change nothing.
     for (body, why) in [
         (
-            serde_json::json!({ "bundle": bundle, "name": "uptime", "vmid": 197 }),
+            serde_json::json!({ "bundle": bundle, "name": "registry", "vmid": 197 }),
             "already",
         ),
         (
-            serde_json::json!({ "bundle": bundle, "name": "uptime2", "vmid": 101 }),
+            serde_json::json!({ "bundle": bundle, "name": "registry2", "vmid": 101 }),
             "no-touch",
         ),
         (
-            serde_json::json!({ "bundle": "not: a bundle", "name": "uptime2", "vmid": 197 }),
+            serde_json::json!({ "bundle": "not: a bundle", "name": "registry2", "vmid": 197 }),
             "bundle",
         ),
         (
             serde_json::json!({
-                "bundle": bundle.replacen("files:\n", "files:\n- path: uptime/.env\n  content: SECRET=1\n", 1),
-                "name": "uptime2", "vmid": 197
+                "bundle": bundle.replacen("files:\n", "files:\n- path: registry/.env\n  content: SECRET=1\n", 1),
+                "name": "registry2", "vmid": 197
             }),
             "secrets file",
         ),
@@ -577,18 +577,18 @@ async fn parity_an_export_bundle_imports_as_a_new_stack() {
         &w.app,
         "POST",
         "/data/stacks-import/commit",
-        Some(serde_json::json!({ "edit": req, "subject": "uptime2 from the uptime bundle" })),
+        Some(serde_json::json!({ "edit": req, "subject": "registry2 from the registry bundle" })),
     )
     .await;
     assert_eq!(st, StatusCode::OK, "{v}");
     let commit = v["committed"]["commit"].as_str().unwrap().to_string();
     assert_eq!(git(&w.bare, &["rev-parse", "main"]).trim(), commit);
-    let manifest = git(&w.bare, &["show", "main:stacks/uptime2/lxc-compose.yml"]);
-    assert!(manifest.contains("stack_name: uptime2"), "{manifest}");
+    let manifest = git(&w.bare, &["show", "main:stacks/registry2/lxc-compose.yml"]);
+    assert!(manifest.contains("stack_name: registry2"), "{manifest}");
     assert!(manifest.contains("vmid: 197"), "{manifest}");
     let changed = git(&w.bare, &["show", "--name-only", "--format=", "main"]);
     assert!(
-        changed.lines().all(|l| l.starts_with("stacks/uptime2/")),
+        changed.lines().all(|l| l.starts_with("stacks/registry2/")),
         "{changed}"
     );
 }

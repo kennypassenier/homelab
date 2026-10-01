@@ -135,7 +135,7 @@ fn alert_body(status: &str) -> String {
             "labels": {"alertname": "FilesystemAlmostFull", "severity": "warning", "device": "/dev/sda1"},
             "annotations": {"summary": "/dev/sda1 is over 90% full", "description": "d",
                 "consequence": "writes fail", "remedy": "free space",
-                "click_url": "https://admin.kp-soft.dev/checks"},
+                "click_url": "https://admin.kp-soft.dev/health?block=checks"},
             "startsAt": "2026-09-30T07:00:00.123Z",
             "fingerprint": "abc"
         }]

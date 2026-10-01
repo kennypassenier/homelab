@@ -168,9 +168,9 @@ impl StackFiles for MemFiles {
             return Err(Refusal::new("read", "no working copy", "clone it"));
         }
         let real = |s: &str| {
-            // Tests act on "home" (compose) and "admin" (native); any other
-            // name is read as "home" renamed, so a stack name is just a name.
-            let mut m = manifest(if s == "admin" { "admin" } else { "home" });
+            // Tests act on "media" (compose) and "admin" (native); any other
+            // name is read as "media" renamed, so a stack name is just a name.
+            let mut m = manifest(if s == "admin" { "admin" } else { "media" });
             m.stack_name = s.to_string();
             m
         };
@@ -179,7 +179,7 @@ impl StackFiles for MemFiles {
             Needs::Manifest if self.gone.iter().any(|g| g == stack) => Material::None,
             Needs::Manifest => Material::Manifest(Box::new(real(stack))),
             Needs::Spec => {
-                let mut s = spec("home");
+                let mut s = spec("media");
                 s.manifest = real(stack);
                 Material::Spec(Box::new(s))
             }

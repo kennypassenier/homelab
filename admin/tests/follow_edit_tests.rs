@@ -1429,7 +1429,7 @@ fn follow_every_browser_module_is_embedded() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn parity_the_import_form_commits_once() {
     let w = world("import").await;
-    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks/uptime");
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks/registry");
     let (bundle, _) = homelab_client::spec::bundle_text(&src).unwrap();
     let opened = ok(&w, open("import", None)).await;
     assert_eq!(opened["state"]["form"]["step"], "bundle");
@@ -1448,13 +1448,13 @@ async fn parity_the_import_form_commits_once() {
         why.contains("There is a stack called kp-soft already."),
         "{why}"
     );
-    ok(&w, typed("import-name", "uptime2")).await;
+    ok(&w, typed("import-name", "registry2")).await;
     let plan = ok(&w, press("next")).await;
     let p = &plan["state"]["form"];
     assert_eq!(p["step"], "plan");
     assert_eq!(p["edit"]["plan"]["valid"], true, "{p}");
     ok(&w, press("next")).await;
-    ok(&w, typed("edit-subject", "uptime2 from a bundle")).await;
+    ok(&w, typed("edit-subject", "registry2 from a bundle")).await;
     ok(&w, pick("edit-follow", "none")).await;
     ok(&w, press("confirm")).await;
     let (why, _) = refused(&step(&w, press("confirm")).await);
@@ -1462,7 +1462,7 @@ async fn parity_the_import_form_commits_once() {
     assert_eq!(commits(&w), 2);
     let files = git(&w.bare, &["show", "--name-only", "--format=", "main"]);
     assert!(
-        files.lines().all(|l| l.starts_with("stacks/uptime2/")),
+        files.lines().all(|l| l.starts_with("stacks/registry2/")),
         "{files}"
     );
 }

@@ -24,14 +24,14 @@ fn back(line: &str) -> Invocation {
 }
 
 fn named(stack: &str) -> homelab_proto::StackManifest {
-    let mut m = manifest("home");
+    let mut m = manifest("media");
     m.stack_name = stack.into();
     m
 }
 
 #[test]
 fn feat_stacks_7_every_stack_action_round_trips_through_the_cli_parser() {
-    let mut s = spec("home");
+    let mut s = spec("media");
     s.manifest.stack_name = "media".into();
     let cases: Vec<(Command, bool, Invocation)> = vec![
         (

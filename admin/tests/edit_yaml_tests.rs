@@ -137,8 +137,11 @@ fn feat_firewall_1_a_rule_is_added_changed_and_removed_with_its_comments() {
     );
     assert!(!out.contains("source: 10.10.10.10"));
     assert!(out.contains("    - dir: in\n      action: ACCEPT\n      source: 10.10.10.20\n      proto: tcp\n      dport: '8080'\n      note: the dashboard\n"), "{out}");
-    // The comment lines above the Kuma rule (Kenny's form item) stayed.
-    assert!(out.contains("    # Kenny, 2026-09-27 (form item kp-soft-kuma-firewall"));
+    // A kept rule's own note (not retexted, not removed) stayed untouched.
+    // (Kuma's rules and their form-item provenance comment were retired
+    // with Uptime Kuma on 2026-10-01; this note on the Loki rule is the
+    // next one down that a Keep leaves alone.)
+    assert!(out.contains("note: Loki push (Alloy), added 2026-09-25"));
     assert_eq!(rules_len(&out), n);
 }
 

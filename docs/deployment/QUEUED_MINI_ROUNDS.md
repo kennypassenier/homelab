@@ -118,7 +118,9 @@ Klopt · Aanpassen · Schrappen.
    project, together with the other generated-document decisions (runbook,
    test plan, homepage services list).
 
-**Status:** queued, not presented. The revert is already done and pushed.
+**Status: CLOSED 2026-10-01.** Presented and ratified — Kenny: Klopt on
+all nine fields. Full record in `docs/deployment/CORRECTIONS.md`. The
+revert was already done and pushed when this was queued.
 
 ---
 
@@ -159,12 +161,14 @@ stack was destroyed (F292, task T82).
 
 ---
 
-## QUEUED · Correction form — two sessions nearly put the same decision to Kenny twice
+## CLOSED · Correction form — two sessions nearly put the same decision to Kenny twice
 
-**Not opened as a form yet, deliberately.** The fault is "a second form on top
-of an open form"; opening a correction form while B8's form is unanswered
-would commit it again. This entry is the queue, per FORM_PROTOCOL §8 field 7:
-the loop stays open until the form has actually been put and answered.
+**Status: CLOSED 2026-10-01.** Presented and ratified — Kenny: Klopt. Full
+record in `docs/deployment/CORRECTIONS.md`. It had deliberately not been
+opened as a form earlier: the fault is "a second form on top of an open
+form", and opening a correction form while B8's form was unanswered would
+have committed it again. This entry was the queue, per FORM_PROTOCOL §8
+field 7: the loop stayed open until the form was actually put and answered.
 
 ↳ *B8 = the register row for kp-soft v0.3.0 being blocked on the latch key.*
 

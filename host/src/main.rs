@@ -1147,6 +1147,36 @@ mod tests {
         assert_eq!(code, 0);
     }
 
+    /// fix-52 residual (2026-10-01): the 10 s ping only ever proved that its
+    /// own loop was still scheduled, not that the scheduler was making any
+    /// progress — a nightly round wedged inside one `await` (not a panic,
+    /// which the test above already covers) kept being fed forever. Now the
+    /// ping is withheld once the scheduler's heartbeat is older than
+    /// `SCHEDULER_WATCHDOG_STALE_S`, so systemd's `WatchdogSec` eventually
+    /// restarts a daemon whose scheduler stopped making progress.
+    #[test]
+    fn fix_52_residual_a_stale_scheduler_heartbeat_withholds_the_watchdog_ping() {
+        let stale_after = super::SCHEDULER_WATCHDOG_STALE_S;
+        // A heartbeat from a few seconds ago: still alive.
+        assert!(super::scheduler_is_alive(1_000_000, 999_990, stale_after));
+        // Exactly at the edge still counts.
+        assert!(super::scheduler_is_alive(
+            1_000_000,
+            1_000_000 - stale_after,
+            stale_after
+        ));
+        // One second past the edge: the scheduler has made no progress in
+        // longer than the tolerance, so the ping must stop.
+        assert!(!super::scheduler_is_alive(
+            1_000_000,
+            1_000_000 - stale_after - 1,
+            stale_after
+        ));
+        // A heartbeat from "the future" (clock skew on a fresh AppState,
+        // or `now` ticking backwards) never reads as stale.
+        assert!(super::scheduler_is_alive(1_000_000, 1_000_100, stale_after));
+    }
+
     /// fix-53 (expert panel, timeout-leaves-container-work-running,
     /// 2026-09-27): a timeout killed only the direct child (`pct`), not what
     /// it had started (`lxc-attach` and the script), so a "timed out" step
@@ -4284,6 +4314,26 @@ struct AppState {
     /// Decision notify-routing: the newest notice's `seq`, read back from
     /// notices.jsonl at start so it only grows.
     notice_seq: Arc<std::sync::Mutex<u64>>,
+    /// fix-52 residual: unix seconds of the scheduler's last sign of
+    /// progress — touched when a tick wakes and after each stack's night
+    /// work. The watchdog feeder refuses to send `WATCHDOG=1` once this
+    /// goes stale, so a scheduler wedged inside a single await (not a
+    /// panic, which `supervise()` already catches) is still noticed.
+    scheduler_heartbeat: Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// fix-52 residual: how long the scheduler may go without a heartbeat touch
+/// before the watchdog feeder stops pinging systemd. Idle ticks are 20
+/// minutes apart (`SCHEDULER_FIRST_CHECK_S` then `20 * 60`) and a single
+/// stack's backup or update can legitimately run long, so this has to clear
+/// both with margin — it is not a tight liveness check, it is "a hung
+/// nightly round is eventually noticed" rather than "never".
+const SCHEDULER_WATCHDOG_STALE_S: u64 = 3600;
+
+/// fix-52 residual: the decision the watchdog-feeder loop makes every tick.
+/// Pure so it is unit-tested without a real systemd socket.
+fn scheduler_is_alive(now: u64, heartbeat: u64, stale_after_s: u64) -> bool {
+    now.saturating_sub(heartbeat) <= stale_after_s
 }
 
 impl AppState {
@@ -4325,8 +4375,28 @@ impl AppState {
                     .unwrap_or(0),
                 std::process::id()
             ),
+            // fix-52 residual: fresh as of construction, so the watchdog
+            // feeder does not see a stale scheduler before it has had its
+            // first chance to tick.
+            scheduler_heartbeat: Arc::new(std::sync::atomic::AtomicU64::new(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            )),
         }
     }
+}
+
+/// fix-52 residual: stamp the scheduler's heartbeat with the current time.
+fn touch_scheduler_heartbeat(state: &AppState) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    state
+        .scheduler_heartbeat
+        .store(now, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// T69: a question waiting for its answer.
@@ -4832,6 +4902,8 @@ async fn main() {
         handle
     };
     let op_lock = state.op_lock.clone();
+    // fix-52 residual: taken before `state` moves into `app_router`.
+    let scheduler_heartbeat = state.scheduler_heartbeat.clone();
 
     let app = app_router(state);
 
@@ -4893,13 +4965,38 @@ async fn main() {
 
     // B7: tell systemd we're ready, then feed its watchdog. If this loop
     // ever stops (deadlock/hang), systemd kills and restarts the daemon.
+    //
+    // fix-52 residual: a ping every 10 s used to prove only that THIS loop
+    // was still scheduled, which says nothing about the scheduler — a
+    // nightly round wedged inside one `await` (not a panic; `supervise()`
+    // already turns a panic or a dead task into exit 1) kept being fed
+    // forever. Now the ping is withheld once the scheduler's own heartbeat
+    // goes stale, so systemd's `WatchdogSec` eventually restarts a daemon
+    // whose scheduler stopped making progress, not just one whose process
+    // stopped existing.
     sd_notify("READY=1");
-    tokio::spawn(async {
-        loop {
-            tokio::time::sleep(Duration::from_secs(10)).await;
-            sd_notify("WATCHDOG=1");
-        }
-    });
+    {
+        let heartbeat = scheduler_heartbeat;
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let last = heartbeat.load(std::sync::atomic::Ordering::Relaxed);
+                if scheduler_is_alive(now, last, SCHEDULER_WATCHDOG_STALE_S) {
+                    sd_notify("WATCHDOG=1");
+                } else {
+                    tracing::error!(
+                        "scheduler heartbeat is {} s old — withholding WATCHDOG=1 so systemd \
+                         restarts a daemon whose nightly round has stalled",
+                        now.saturating_sub(last)
+                    );
+                }
+            }
+        });
+    }
 
     let code = supervise(
         // fix-120: with the peer address, so a refused connection says where
@@ -5523,6 +5620,9 @@ async fn scheduler_loop(state: AppState) {
     loop {
         tokio::time::sleep(wait).await;
         wait = Duration::from_secs(20 * 60);
+        // fix-52 residual: the loop woke up on its own, which is the one
+        // thing an `await` stuck forever cannot do.
+        touch_scheduler_heartbeat(&state);
         spawn_mirror_push(&state); // D5 retry queue: try again every tick
         let (hour, tiers) = {
             let s = state
@@ -5651,6 +5751,8 @@ async fn scheduler_loop(state: AppState) {
             .collect();
         let backup_done =
             run_backup_batch(&state, &exec, backup_jobs, state.config.backup_concurrency).await;
+        // fix-52 residual: the batch — which can run for hours — returned.
+        touch_scheduler_heartbeat(&state);
 
         // fix-138 (expert panel, host-monolith-untested, 2026-09-27): what
         // each stack's night does is decided by `ops::night::stack_night`,
@@ -5734,6 +5836,9 @@ async fn scheduler_loop(state: AppState) {
             if night.settle_park {
                 park_after_night(&state, &exec, &store, &name, update_ok, now).await;
             }
+            // fix-52 residual: this stack's update work (which can itself
+            // run long) finished without the loop ever stalling on it.
+            touch_scheduler_heartbeat(&state);
         }
 
         // H10: the host's own crown jewels — the secrets vault (holding the

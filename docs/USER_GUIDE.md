@@ -1208,10 +1208,22 @@ per app. The capture lives only for the duration of one update.
 
 **Status:** Built (daemon side).
 
-The daemon sends `READY=1` at start and `WATCHDOG=1` every 10 seconds
-(`host/src/main.rs:1893-1901`). The unit settings that act on it
-(`WatchdogSec`, restart) are part of the host installation, not of this
-repository's code.
+The daemon sends `READY=1` at start, then `WATCHDOG=1` every 10 seconds —
+but only while the nightly scheduler's own heartbeat is fresh. fix-52
+(background-tasks-unsupervised) made a panicked or killed scheduler end the
+process (`supervise()`); its residual gap was a scheduler wedged inside one
+`await` forever, which the 10-second loop could not see because it proved
+only that itself was still scheduled. `scheduler_loop` now stamps a shared
+heartbeat when a tick wakes, after the nightly backup batch returns, and
+after each stack's night work; the ping loop withholds `WATCHDOG=1` once
+that heartbeat is older than `SCHEDULER_WATCHDOG_STALE_S` (one hour —
+longer than any single backup or update should legitimately take, so a
+hung round is noticed rather than fed forever). The unit itself
+(`WatchdogSec=30`, `Type=notify`, `OnFailure=homelab-host-rollback.service`)
+ships from this repository (`core/assets/host-units/homelab-host.service`,
+`core/src/hostunits.rs`) and is installed by every self-update. Test:
+`fix_52_residual_a_stale_scheduler_heartbeat_withholds_the_watchdog_ping`
+(`host/src/main.rs`).
 
 #### B8 · Golden template
 

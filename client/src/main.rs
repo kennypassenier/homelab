@@ -174,7 +174,10 @@ async fn run(explicit_host: Option<String>) {
         std::env::var("NO_COLOR").ok().as_deref(),
     ));
     let args: Vec<String> = std::env::args().collect();
-    let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
+    // fix-68: bare `homelab` used to print the whole help; what an operator
+    // sitting down actually wants is the morning answer ("is anything
+    // waiting for me?"), the same one `homelab today` gives.
+    let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("today");
 
     // F309: `--help` anywhere means SHOW the help, never do the thing.
     //
@@ -1032,7 +1035,26 @@ async fn run(explicit_host: Option<String>) {
                 );
             }
         }
-        "status" => rpc(&host, &token, Command::Status).await,
+        // fix-68: a human table by default; `--json` still gets the
+        // `FleetState` as-is, for a script (previously raw `pct list` +
+        // the whole of state.json — 1,473 lines, measured live).
+        "status" => {
+            let json = args.iter().any(|a| a == "--json");
+            let reply = rpc_reply(&host, &token, Command::Status)
+                .await
+                .unwrap_or_else(|| die("the host did not answer"));
+            if !reply.ok {
+                die(&reply.message);
+            }
+            if json {
+                println!("{}", reply.message);
+            } else {
+                match serde_json::from_str::<homelab_proto::FleetState>(&reply.message) {
+                    Ok(fleet) => print!("{}", homelab_client::status::render_table(&fleet)),
+                    Err(_) => println!("{}", reply.message),
+                }
+            }
+        }
         "doctor" => rpc(&host, &token, Command::Doctor { json: false }).await,
         // fix-131: `incidents show <name>` reads one bundle; it took a root
         // shell on pve before.

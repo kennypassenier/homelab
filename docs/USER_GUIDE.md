@@ -3556,7 +3556,11 @@ and stores it with restic; without that list it answers
 
 ### `homelab status`, `homelab incidents`, `homelab testplan`
 
-`status` prints `pct list` and the raw `state.json` (`host/src/main.rs:3227-3240`).
+`status` prints the fleet as a short human table, one line per stack (vmid,
+online, enabled, drift, how many apps are running); `--json` prints the raw
+`FleetState` instead, for a script (fix-68; it used to print `pct list` and
+the whole of `state.json`, 1,473 lines measured live 2026-09-27).
+A bare `homelab` (no verb) runs `homelab today`.
 `incidents` lists the incident bundle directories (A3); `incidents show
 <name>` prints one bundle's error, versions and transcript end (fix-131). `testplan` rebuilds
 `docs/deployment/TEST_PLAN.md` from the test files and the realization plan;

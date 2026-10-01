@@ -14,6 +14,7 @@ pub mod repo_config;
 pub mod routes;
 pub mod scaffold;
 pub mod spec;
+pub mod status;
 pub mod testplan;
 pub mod tls;
 #[cfg(feature = "tui")]

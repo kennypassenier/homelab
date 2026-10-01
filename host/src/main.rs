@@ -6257,6 +6257,127 @@ fn live_app(
     }
 }
 
+/// fix-68: the fleet snapshot `GetState` broadcasts and `Status` now
+/// returns directly, built once so neither drifts from the other.
+async fn build_fleet_state(state: &AppState, exec: &RealExecutor) -> homelab_proto::FleetState {
+    let store = homelab_core::state::StateStore::new(exec, &state.config.state_dir);
+    let hs = store.load().await.unwrap_or_default();
+    // H16: real capacity numbers (C6) — free -m, nproc, loadavg,
+    // and committed RAM summed from the stored manifests.
+    let free_out = exec
+        .run(&Cmd::new("free", &["-m"], 15))
+        .await
+        .map(|o| o.stdout)
+        .unwrap_or_default();
+    let nproc_out = exec
+        .run(&Cmd::new("nproc", &[], 15))
+        .await
+        .map(|o| o.stdout)
+        .unwrap_or_default();
+    let loadavg = exec.read_file("/proc/loadavg").await.unwrap_or_default();
+    let cap = capacity_numbers(&free_out, &nproc_out, &loadavg, &hs);
+    let df = exec
+        .run(&Cmd::new(
+            "df",
+            &["--output=pcent", &state.config.state_dir],
+            20,
+        ))
+        .await
+        .ok()
+        .and_then(|o| {
+            o.stdout
+                .lines()
+                .nth(1)
+                .and_then(|l| l.trim().trim_end_matches('%').parse::<u64>().ok())
+        })
+        .unwrap_or(0);
+    let (_, fingerprint) = tls::ensure_cert(&state.config.state_dir, "homelab-host").unwrap_or((
+        tls::CertPaths {
+            cert_pem: String::new(),
+            key_pem: String::new(),
+        },
+        "unknown".into(),
+    ));
+    // feat-platform-2: the newest status reading, when there is one.
+    let reading = state.live_status.read().ok().and_then(|r| r.clone());
+    let stacks = hs
+        .stacks
+        .values()
+        .map(|s| homelab_proto::StackView {
+            applied_source: s.applied_source.clone(),
+            name: s
+                .hostname
+                .rsplit("-app-")
+                .next()
+                .unwrap_or(&s.hostname)
+                .to_string(),
+            vmid: s.vmid,
+            hostname: s.hostname.clone(),
+            // fix-160: a native stack's units are its apps, also on
+            // stacks adopted before install-native recorded them.
+            apps: s
+                .apps
+                .iter()
+                .chain(
+                    s.natives
+                        .iter()
+                        .map(|n| &n.unit)
+                        .filter(|u| !s.apps.contains(u)),
+                )
+                .map(|a| {
+                    let (running, restarts) = live_app(reading.as_ref(), s.vmid, a);
+                    homelab_proto::AppView {
+                        name: a.clone(),
+                        running,
+                        restarts,
+                    }
+                })
+                .collect(),
+            drift: false, // computed client-side from applied_hash
+            applied_hash: s.applied_hash.clone(),
+            env_sealed: true,
+            online: reading
+                .as_ref()
+                .and_then(|r| r.guests.get(&s.vmid))
+                .map(|g| g.running)
+                .unwrap_or(true),
+            enabled: s.enabled,
+            usage: reading
+                .as_ref()
+                .and_then(|r| r.guests.get(&s.vmid))
+                .map(|g| homelab_proto::GuestUsage {
+                    cpu_permille: g.cpu_permille,
+                    ram_used_mb: g.mem_used_mb,
+                    ram_max_mb: g.mem_max_mb,
+                    uptime_s: g.uptime_s,
+                }),
+        })
+        .collect();
+    homelab_proto::FleetState {
+        status_measured_at: reading.as_ref().map(|r| r.measured_at),
+        host: homelab_proto::HostView {
+            home_address: hs.home_address.clone(),
+            name: "pve-01".into(),
+            cpu_pct: 0,
+            // feat-platform-2: was a fixed 0; used over total, both
+            // from `free -m` (C6).
+            ram_pct: if cap.0 > 0 {
+                u64::from(cap.1) * 100 / u64::from(cap.0)
+            } else {
+                0
+            },
+            disk_pct: df,
+            tls_fingerprint: fingerprint,
+            ram_total_mb: cap.0,
+            ram_used_mb: cap.1,
+            ram_committed_mb: cap.2,
+            cores_total: cap.3,
+            load1_x100: cap.4,
+        },
+        stacks,
+    }
+}
+
 /// feat-platform-2: one reading every `status_interval_s`, the managed
 /// stacks taken from state.json each time so a new stack is read at once.
 async fn status_loop(state: AppState) {
@@ -8816,17 +8937,17 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             message: "pong".into(),
             deferred: None,
         },
+        // fix-68: this used to dump raw `pct list` plus the whole of
+        // state.json (1,473 lines live, measured 2026-09-27) for the
+        // operator to read by eye. It now hands back the same fleet
+        // snapshot `homelab ui`/the dashboard use, which the client turns
+        // into a short human table, or prints as-is for `--json`.
         Rpc::Status => {
-            let out = exec.run(&Cmd::new("pct", &["list"], 30)).await;
-            let listing = out.map(|o| o.stdout).unwrap_or_else(|e| e.to_string());
-            let managed = exec
-                .read_file(&format!("{}/state.json", state.config.state_dir))
-                .await
-                .unwrap_or_else(|_| "{}".into());
+            let fleet = build_fleet_state(state, &exec).await;
             RpcResponse {
                 id: req.id,
                 ok: true,
-                message: format!("pct list:\n{}\nmanaged state:\n{}", listing, managed),
+                message: serde_json::to_string(&fleet).unwrap_or_else(|_| "{}".into()),
                 deferred: None,
             }
         }
@@ -10598,123 +10719,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             }
         }
         Rpc::GetState => {
-            let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
-            let hs = store.load().await.unwrap_or_default();
-            // H16: real capacity numbers (C6) — free -m, nproc, loadavg,
-            // and committed RAM summed from the stored manifests.
-            let free_out = exec
-                .run(&Cmd::new("free", &["-m"], 15))
-                .await
-                .map(|o| o.stdout)
-                .unwrap_or_default();
-            let nproc_out = exec
-                .run(&Cmd::new("nproc", &[], 15))
-                .await
-                .map(|o| o.stdout)
-                .unwrap_or_default();
-            let loadavg = exec.read_file("/proc/loadavg").await.unwrap_or_default();
-            let cap = capacity_numbers(&free_out, &nproc_out, &loadavg, &hs);
-            let df = exec
-                .run(&Cmd::new(
-                    "df",
-                    &["--output=pcent", &state.config.state_dir],
-                    20,
-                ))
-                .await
-                .ok()
-                .and_then(|o| {
-                    o.stdout
-                        .lines()
-                        .nth(1)
-                        .and_then(|l| l.trim().trim_end_matches('%').parse::<u64>().ok())
-                })
-                .unwrap_or(0);
-            let (_, fingerprint) = tls::ensure_cert(&state.config.state_dir, "homelab-host")
-                .unwrap_or((
-                    tls::CertPaths {
-                        cert_pem: String::new(),
-                        key_pem: String::new(),
-                    },
-                    "unknown".into(),
-                ));
-            // feat-platform-2: the newest status reading, when there is one.
-            let reading = state.live_status.read().ok().and_then(|r| r.clone());
-            let stacks = hs
-                .stacks
-                .values()
-                .map(|s| homelab_proto::StackView {
-                    applied_source: s.applied_source.clone(),
-                    name: s
-                        .hostname
-                        .rsplit("-app-")
-                        .next()
-                        .unwrap_or(&s.hostname)
-                        .to_string(),
-                    vmid: s.vmid,
-                    hostname: s.hostname.clone(),
-                    // fix-160: a native stack's units are its apps, also on
-                    // stacks adopted before install-native recorded them.
-                    apps: s
-                        .apps
-                        .iter()
-                        .chain(
-                            s.natives
-                                .iter()
-                                .map(|n| &n.unit)
-                                .filter(|u| !s.apps.contains(u)),
-                        )
-                        .map(|a| {
-                            let (running, restarts) = live_app(reading.as_ref(), s.vmid, a);
-                            homelab_proto::AppView {
-                                name: a.clone(),
-                                running,
-                                restarts,
-                            }
-                        })
-                        .collect(),
-                    drift: false, // computed client-side from applied_hash
-                    applied_hash: s.applied_hash.clone(),
-                    env_sealed: true,
-                    online: reading
-                        .as_ref()
-                        .and_then(|r| r.guests.get(&s.vmid))
-                        .map(|g| g.running)
-                        .unwrap_or(true),
-                    enabled: s.enabled,
-                    usage: reading
-                        .as_ref()
-                        .and_then(|r| r.guests.get(&s.vmid))
-                        .map(|g| homelab_proto::GuestUsage {
-                            cpu_permille: g.cpu_permille,
-                            ram_used_mb: g.mem_used_mb,
-                            ram_max_mb: g.mem_max_mb,
-                            uptime_s: g.uptime_s,
-                        }),
-                })
-                .collect();
-            let fleet = homelab_proto::FleetState {
-                status_measured_at: reading.as_ref().map(|r| r.measured_at),
-                host: homelab_proto::HostView {
-                    home_address: hs.home_address.clone(),
-                    name: "pve-01".into(),
-                    cpu_pct: 0,
-                    // feat-platform-2: was a fixed 0; used over total, both
-                    // from `free -m` (C6).
-                    ram_pct: if cap.0 > 0 {
-                        u64::from(cap.1) * 100 / u64::from(cap.0)
-                    } else {
-                        0
-                    },
-                    disk_pct: df,
-                    tls_fingerprint: fingerprint,
-                    ram_total_mb: cap.0,
-                    ram_used_mb: cap.1,
-                    ram_committed_mb: cap.2,
-                    cores_total: cap.3,
-                    load1_x100: cap.4,
-                },
-                stacks,
-            };
+            let fleet = build_fleet_state(state, &exec).await;
             let _ = state.log_tx.send(ServerMsg::State(Box::new(fleet)));
             RpcResponse {
                 id: req.id,

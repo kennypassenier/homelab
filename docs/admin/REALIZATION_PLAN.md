@@ -193,7 +193,7 @@ Gesigneerde homelab-releases, self-update van het dashboard via homelab, een ech
   close in homelab (seed the vault from the deploy spec on a first install).
 - Step 2: `[[tokens]] name = "admin", scope = "all"` in pve's host.toml
   (backup host.toml.pre-admin-token), host restarted; CT 120 holds an
-  established session to 10.10.10.250:8443, no 401 since.
+  established session to pve:8443, no 401 since.
 - Step 3: deploy key id 164699822 (write) on kennypassenier/homelab; the
   private key is in latch only, for the `edit` milestone.
 - Step 4: `latch put admin/admin/.env --env prod`: the four secrets.

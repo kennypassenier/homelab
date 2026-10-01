@@ -108,7 +108,7 @@ be reused for unrelated semantic meaning.
 | Block/panel titles             | `UPPER_SNAKE_CASE`       | `[ HOST_MESH :: ACTIVE ]`      |
 | Tab bar labels                 | Title Case               | `Host Management`              |
 | Status badges                  | UPPERCASE                | `[ONLINE]`, `[PAUSED]`         |
-| Raw data fields (IPs, names)   | lowercase as-is          | `192.168.1.101`                |
+| Raw data fields (IPs, names)   | lowercase as-is          | `192.0.2.101`                |
 | User-visible prose (hints)     | lowercase                | `[a] add / update ssh alias`   |
 | Error messages                 | Sentence case            | `Alias cannot be empty`        |
 

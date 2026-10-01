@@ -358,7 +358,7 @@ progress).
 One YAML fragment per stack, pushed to the gateway's watched dir; no restarts.
 - **Auto**: unit test — fragment filename/destination constrained to the
   routes dir on vmid 104 only (path-escape attempts refused).
-- **Manual (pilot)**: `curl -H 'Host: sync.kp-soft.dev' http://10.10.10.4`
+- **Manual (pilot)**: `curl -H 'Host: sync.kp-soft.dev' http://the gateway (CT 104)`
   routes to syncthing within seconds of deploy.
 
 ### H2 · OPNsense Kea DHCP reservations — **Could** *(built, then removed)*
@@ -368,8 +368,8 @@ Static IPs in manifests suffice; old project has reference code.
 > again. Kenny asked the question this entry had already answered — "waarom
 > moet ons systeem afweten van opnsense? dat is in principe toch niet nodig?"
 > — and measuring settled it. A container takes its address statically from
-> its own config (`net0: … ip=10.10.10.14/24`) and never asks DHCP. The
-> Trusted subnet's DHCP pool is `10.10.10.100–10.10.10.200` while containers
+> its own config (`net0: … ip=198.51.100.14/24`) and never asks DHCP. The
+> Trusted subnet's DHCP pool is `198.51.100.100–198.51.100.200` while containers
 > live on `.4–.17`, so the router cannot hand one of those addresses to
 > anything else; the collision the reservation guards against does not
 > exist. The reservation list held twelve entries and not one was a container

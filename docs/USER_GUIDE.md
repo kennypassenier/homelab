@@ -6,6 +6,16 @@ What every feature does and how you use it, organised by the feature IDs in
 [DEBUGGING_GUIDE.md](DEBUGGING_GUIDE.md); host procedures in
 [OPERATIONS_RUNBOOK.md](OPERATIONS_RUNBOOK.md).
 
+This repository is public. Documentation below names a machine instead of
+its real internal address (`pve`, `the router`, `CT 109`, `the dashboard
+(CT 120)`, `the workstation`, ...). Where the literal shape of an address is
+the point of an example (a CIDR validator, a trusted-proxy range, a DR
+container spec), it is written in the RFC 5737 documentation range
+(`192.0.2.0/24` or `198.51.100.0/24`) instead of a real one, consistently
+across the docs. The actual addresses live only in `stacks/**` and in code,
+which this repository's commit hook guards against ever gaining a real
+internal address in `docs/**`, `README.md`, `CLAUDE.md` or `captured/**`.
+
 How to read this guide:
 
 - **Feature IDs** (A1, D12, H7, ...) come from `docs/FEATURES.md`. A decision
@@ -34,7 +44,7 @@ things, and each has its own home:
 
 | What | Where it comes from, first match wins | Source |
 |---|---|---|
-| Host address | `HOMELAB_HOST` typed before the command; else `host` in `config/client.toml`, searched upward from the current directory the way git finds its root; else `HOMELAB_HOST` from `~/.config/homelab/env` or `./.env`; else the built-in `10.10.5.250:8443` | `client/src/main.rs:127-137`, `client/src/repo_config.rs:25,63,103` |
+| Host address | `HOMELAB_HOST` typed before the command; else `host` in `config/client.toml`, searched upward from the current directory the way git finds its root; else `HOMELAB_HOST` from `~/.config/homelab/env` or `./.env`; else the built-in `pve:8443` | `client/src/main.rs:127-137`, `client/src/repo_config.rs:25,63,103` |
 | Token | `HOMELAB_TOKEN` in the environment; else `~/.config/homelab/env`; else `./.env` | `client/src/main.rs:49-88,140` |
 | Certificate pin | the pin built into the client from `config/client.toml` at compile time (fix-149), the only certificate trusted; a machine pin or repository pin that disagrees is refused. A client built without one: `~/.config/homelab/pin`; if that is empty, the `pin` in `config/client.toml` is adopted and saved; if both are empty, the first certificate seen is trusted and saved | `client/src/lib.rs:16-18`, `client/src/repo_config.rs:143`, `client/src/main.rs:1101-1155` |
 
@@ -86,7 +96,7 @@ same two lines. A host from before that change says `build not reported`.
 before the command:
 
 ```bash
-HOMELAB_HOST=10.10.5.250:8443 homelab ping
+HOMELAB_HOST=pve:8443 homelab ping
 ```
 
 **When the certificate does not match.** If this machine pinned one
@@ -700,13 +710,13 @@ An example, one firewall rule on `admin`:
 ```
 homelab ui open firewall admin
 homelab ui row add
-homelab ui type rule-peer 10.10.10.4
+homelab ui type rule-peer the gateway (CT 104)
 homelab ui type rule-dport 9999
 homelab ui type rule-note drive test
 homelab ui press save               # the rule is in the table, not written yet
 homelab ui press next               # the plan: the diff, what homelab would change
 homelab ui press next               # the commit step
-homelab ui type edit-subject admin: 10.10.10.4 may reach 9999
+homelab ui type edit-subject admin: the gateway (CT 104) may reach 9999
 homelab ui pick edit-follow none
 homelab ui press confirm            # one commit, pushed; its hash in homelab ui state
 homelab ui close
@@ -1223,8 +1233,8 @@ stack_name: syncthing
 vmid: 108
 hostname: 108-app-syncthing
 network:
-  ip: 10.10.10.8/24
-  gateway: 10.10.10.1
+  ip: 198.51.100.8/24
+  gateway: the router
   bridge: vmbr0
   vlan: 10
 resources:
@@ -1303,7 +1313,7 @@ firewall:
     - comment: the registry cache (docker pulls)
       dir: out             # in | out
       action: ACCEPT       # ACCEPT | DROP | REJECT
-      dest: 10.10.10.17    # one address or a network in CIDR form
+      dest: the registry (CT 117)    # one address or a network in CIDR form
       proto: tcp           # tcp | udp | icmp
       dport: "5000:5003"   # 8080, "8080,8787" or "5000:5003"
       note: registry cache # written after the rule on its own line
@@ -1311,10 +1321,10 @@ firewall:
 
 - The file starts with a line naming the stack file it comes from, then the
   declaration in order. Unless `management_open` gives a reason, three rules
-  follow the declared ones: DNS to 10.10.5.1 (udp and tcp 53) and a drop of
-  the management network 10.10.5.0/24. A declared ACCEPT towards that network
+  follow the declared ones: DNS to the router (udp and tcp 53) and a drop of
+  the management network the management network. A declared ACCEPT towards that network
   comes first and still passes.
-- The validator refuses a network with host bits set (`10.10.10.4/24`), a
+- The validator refuses a network with host bits set (`198.51.100.4/24`), a
   port outside 1 to 65535 or a backwards range, a `dport` without `proto` or
   with `icmp`, a note over more than one line, and a `management_open` reason
   shorter than ten characters, naming the rule and the field.
@@ -2269,8 +2279,8 @@ and the run fails, because catching up would mean rolling the replica back
 When `loki_url` is set in `/etc/homelab/host.toml`, every deploy, native or
 compose, installs Alloy in the container. `loki_url` is the base address
 Alloy pushes to (`/loki/api/v1/push` is added to it); since Loki moved to the
-metrics stack (fix-90, 2026-09-27) it is `http://10.10.10.13:3100`, and it was
-`http://10.10.10.4:3100` while Loki ran on the gateway. Changing it reaches a
+metrics stack (fix-90, 2026-09-27) it is `http://metrics (CT 113):3100`, and it was
+`http://the gateway (CT 104):3100` while Loki ran on the gateway. Changing it reaches a
 container at that stack's next deploy, which renders its Alloy config again.
 That port takes pushes only since fix-93, so the coverage check in
 `homelab check` asks Loki from inside its container instead: set
@@ -2283,7 +2293,7 @@ devices that cannot run a shipper, with `syslog_receivers:` entries of `host`,
 `listen` (port 1024 or higher), `protocol` (`udp`/`tcp`) and `format`
 (`rfc5424`/`rfc3164`), and optionally `allow_from`, a list of sender IP
 addresses whose lines are kept; every other sender's lines are dropped before
-they reach Loki (fix-93; the gateway allows OPNsense's 10.10.10.1 only)
+they reach Loki (fix-93; the gateway allows OPNsense's the router only)
 (`core/src/manifest.rs:95-137,509-563`);
 `stacks/gateway/lxc-compose.yml:144` is the example.
 
@@ -2363,7 +2373,7 @@ How it travels:
   job the dashboard itself ran fills that job's notice instead of adding a
   second one.
 - Alertmanager posts every alert to the dashboard
-  (`http://10.10.10.20:8090/hooks/alertmanager`, bearer
+  (`http://the dashboard (CT 120):8090/hooks/alertmanager`, bearer
   `HOMELAB_ADMIN_ALERTS_TOKEN` from admin.env; the same value in
   `/alertmanager/admin-token` on CT 113), and the urgent ones also to kyu
   as before. A repeat of an alert that still fires adds nothing; a resolved
@@ -2402,7 +2412,7 @@ bearer token and 401 to anyone else (fix-126, `app_router`). Host metrics travel
 WebSocket (C6), not over HTTP.
 
 ```bash
-curl -sk https://10.10.10.250:8443/api/health
+curl -sk https://pve:8443/api/health
 ```
 
 (the address from `config/client.toml`; `-k` because the certificate is
@@ -2634,7 +2644,7 @@ container:
 ```yaml
 extra_routes:
   - filename: manual-routes.yml
-    external: ["https://10.10.5.1", "https://10.10.5.250:8006"]
+    external: ["https://the router", "https://pve:8006"]
 ```
 
 `external` names each backend in the file that is not a stack's own
@@ -3330,7 +3340,7 @@ Real output of one run, against a stand-in for the Kuma API that holds one
 monitor no file declares and one whose address was changed by hand:
 
 ```text
-[seed]   ~ gateway · grafana now points at http://10.10.10.4:3000/api/health
+[seed]   ~ gateway · grafana now points at http://the gateway (CT 104):3000/api/health
 [seed]   - host · drill (no file declares it)
 [seed] 0 added, 37 already existed, 1 corrected, 1 removed, 0 stale
 ```

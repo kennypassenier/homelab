@@ -86,7 +86,7 @@ differences are deliberate and a deploy will apply them.
 1. The live `prometheus.yml` still called the hub `mailbox`. The repo was
    already correct, so a wholesale copy would have regressed it. Kept as
    `kyu`; series scraped before the change keep `job="mailbox"`.
-2. The scrape target `10.10.10.14` (scratch container 190) is dropped, because
+2. The scrape target `CT 190`'s address (later reused by CT 114) is dropped, because
    E5 removes it and it would otherwise fire `HostDown` on the way out.
 
 Both are recorded here rather than discovered during the first deploy.
@@ -211,7 +211,7 @@ it succeeded.
 
 The container drill was deliberately **not started**: the restore carries the
 original hostname and IP, so starting it beside the running almanac would have
-put two of the same service on 10.10.10.12. It was inspected by mounting its
+put two of the same service on almanac (CT 112). It was inspected by mounting its
 volume read-only and then destroyed. That proves the archive is complete and
 how long a restore costs; it does not prove the service comes up, which is
 what M7 covers on a container that can safely be replaced.

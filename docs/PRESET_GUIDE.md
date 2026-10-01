@@ -113,7 +113,7 @@ time:
 | `__STACK__` | the stack name the user typed | `vault-sync` |
 | `__VMID__` | the chosen vmid | `109` |
 | `__HOSTNAME__` | `<vmid>-app-<stack>` | `109-app-vault-sync` |
-| `__IP__` | the derived IP (no CIDR) | `10.10.10.9` |
+| `__IP__` | the derived IP (no CIDR) | `kyu (CT 109)` |
 
 Anything else with underscores (promtail's `__path__`, compose `${ENV_VAR}`)
 is left untouched — only these four exact tokens are substituted.

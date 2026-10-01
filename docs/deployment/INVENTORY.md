@@ -11,21 +11,21 @@ Raw sweep material is not kept: re-run the commands in §9 to refresh.
 
 | VMID | Name | Kind | IP | RAM | Disk | Role | Managed by |
 |---|---|---|---|---|---|---|---|
-| 100 | 100-infra-opnsense | VM | 10.10.5.1 | 4 G | 32 G | router / firewall | **untouchable** |
-| 101 | vm-home-assistant | VM | 10.10.10.2 | 6 G | 32 G | Home Assistant + add-ons | **untouchable lifecycle** (config by API, per-change consent) |
+| 100 | 100-infra-opnsense | VM | the router | 4 G | 32 G | router / firewall | **untouchable** |
+| 101 | vm-home-assistant | VM | Home Assistant (VM 101) | 6 G | 32 G | Home Assistant + add-ons | **untouchable lifecycle** (config by API, per-change consent) |
 | 102 | 102-infra-omadacontroller | LXC | — | — | — | network controller | **untouchable** |
-| 103 | 103-infra-fileserver | LXC | 10.10.10.3 | — | — | fileserver, owns the ZFS subvols | **untouchable** |
-| 104 | lxc-platform-stack | LXC | 10.10.10.4 | 5 G | 30 G | edge + observability | ansible-era, hand-tended |
-| 105 | lxc-downloader-stack | LXC | 10.10.10.5 | 2 G | 10 G | gluetun + qBittorrent | ansible-era, hand-tended |
-| 106 | lxc-media-stack | LXC | 10.10.10.6 | 8 G | 80 G | Jellyfin + arr-suite | ansible-era, hand-tended |
-| 107 | lxc-mqtt-stack | LXC | 10.10.10.7 | 1 G | 8 G | **empty — nothing runs** | to be cleaned up |
-| 108 | 108-app-synctest | LXC | 10.10.10.8 | 1 G | 4 G | syncthing (test stack) | **homelab** |
-| 109 | 109-app-kyu | LXC | 10.10.10.9 | 256 M | 2 G | kyu message hub (native) | **homelab (state is stale — F7)** |
-| 111 | lxc-productivity-stack | LXC | 10.10.10.11 | 2 G | 8 G | Vikunja + SuperSync | ansible-era; off no-touch since 2026-08-29 but never adopted |
-| 112 | 112-app-almanac | LXC | 10.10.10.12 | 512 M | 4 G | almanac calendar gateway (native) | **homelab** |
-| 113 | 113-app-metrics | LXC | 10.10.10.13 | 1 G | 16 G | Prometheus + Alertmanager | **homelab** |
-| 190 | 190-scratch-mailbox | LXC | 10.10.10.14 | 256 M | 2 G | scratch, running | to be cleaned up |
-| 191 | 191-scratch-kyu-runner | LXC | 10.10.10.15 | 512 M | 2 G | scratch, shared with pipeline-v2 | to be cleaned up after coordination |
+| 103 | 103-infra-fileserver | LXC | the fileserver (CT 103) | — | — | fileserver, owns the ZFS subvols | **untouchable** |
+| 104 | lxc-platform-stack | LXC | the gateway (CT 104) | 5 G | 30 G | edge + observability | ansible-era, hand-tended |
+| 105 | lxc-downloader-stack | LXC | the downloader (CT 105) | 2 G | 10 G | gluetun + qBittorrent | ansible-era, hand-tended |
+| 106 | lxc-media-stack | LXC | media (CT 106) | 8 G | 80 G | Jellyfin + arr-suite | ansible-era, hand-tended |
+| 107 | lxc-mqtt-stack | LXC | uptime (CT 107) | 1 G | 8 G | **empty — nothing runs** | to be cleaned up |
+| 108 | 108-app-synctest | LXC | syncthing (CT 108) | 1 G | 4 G | syncthing (test stack) | **homelab** |
+| 109 | 109-app-kyu | LXC | kyu (CT 109) | 256 M | 2 G | kyu message hub (native) | **homelab (state is stale — F7)** |
+| 111 | lxc-productivity-stack | LXC | productivity (CT 111) | 2 G | 8 G | Vikunja + SuperSync | ansible-era; off no-touch since 2026-08-29 but never adopted |
+| 112 | 112-app-almanac | LXC | almanac (CT 112) | 512 M | 4 G | almanac calendar gateway (native) | **homelab** |
+| 113 | 113-app-metrics | LXC | metrics (CT 113) | 1 G | 16 G | Prometheus + Alertmanager | **homelab** |
+| 190 | 190-scratch-mailbox | LXC | CT 190 (address later reused by CT 114) | 256 M | 2 G | scratch, running | to be cleaned up |
+| 191 | 191-scratch-kyu-runner | LXC | CT 191 (address later reused by CT 115) | 512 M | 2 G | scratch, shared with pipeline-v2 | to be cleaned up after coordination |
 | 999 | debian-12-homelab-v1 | LXC | — | — | — | golden template, stopped | replaced by G5 |
 | 9000 | ubuntu-2404-tmpl | VM | — | — | — | VM template, stopped | out of scope |
 
@@ -97,29 +97,29 @@ ignores):
 
 | File | Hostnames → upstream |
 |---|---|
-| `lxc-media-stack.yml` | fin/son/rad/baz/prowl/seerr.kp-soft.dev → 10.10.10.6 |
-| `lxc-downloader-stack.yml` | qbit.kp-soft.dev → 10.10.10.5:8080 |
-| `lxc-productivity-stack.yml` | tasks.kp-soft.dev → 10.10.10.11:3456 |
-| `111-app-supersync.yml` | sp.kp-soft.dev → 10.10.10.11:1900 (needs a Cloudflare Access **bypass**: Bearer token + WebSocket cannot pass interactive login) |
-| `108-app-synctest.yml` | sync.kp-soft.dev → 10.10.10.10:8384 |
-| `112-app-almanac.yml` | almanac.kp-soft.dev → 10.10.10.12:8080, with `/metrics` deliberately rewritten to a 404 |
-| `lxc-mqtt-stack.yml` | TCP `HostSNI(*)` on :1883 → 10.10.10.7:1883 — **points at the empty container** |
-| `manual-homeassistant.yml` | ha.kp-soft.dev → 10.10.10.2:8123 |
-| `manual-terminus.yml` | trmnl.kp-soft.dev → 10.10.10.2:2300 (Kobo dashboard; needs a service-token Access policy) |
-| `manual-routes.yml` | opn.kp-soft.dev → **https**://10.10.5.1, prox.kp-soft.dev → https://10.10.5.250:8006, both `insecureSkipVerify` |
+| `lxc-media-stack.yml` | fin/son/rad/baz/prowl/seerr.kp-soft.dev → media (CT 106) |
+| `lxc-downloader-stack.yml` | qbit.kp-soft.dev → the downloader (CT 105):8080 |
+| `lxc-productivity-stack.yml` | tasks.kp-soft.dev → productivity (CT 111):3456 |
+| `111-app-supersync.yml` | sp.kp-soft.dev → productivity (CT 111):1900 (needs a Cloudflare Access **bypass**: Bearer token + WebSocket cannot pass interactive login) |
+| `108-app-synctest.yml` | sync.kp-soft.dev → the workstation:8384 |
+| `112-app-almanac.yml` | almanac.kp-soft.dev → almanac (CT 112):8080, with `/metrics` deliberately rewritten to a 404 |
+| `lxc-mqtt-stack.yml` | TCP `HostSNI(*)` on :1883 → uptime (CT 107):1883 — **points at the empty container** |
+| `manual-homeassistant.yml` | ha.kp-soft.dev → Home Assistant (VM 101):8123 |
+| `manual-terminus.yml` | trmnl.kp-soft.dev → Home Assistant (VM 101):2300 (Kobo dashboard; needs a service-token Access policy) |
+| `manual-routes.yml` | opn.kp-soft.dev → **https**://the router, prox.kp-soft.dev → https://pve:8006, both `insecureSkipVerify` |
 
 Traefik's own dashboard is routed at traefik.kp-soft.dev; grafana, goaccess
 and uptime-kuma route by docker label.
 
 **Observability.** promtail on 105/106/108/111/113 → Loki at
-`http://10.10.10.4:3100`. Prometheus on CT 113 scrapes node_exporter on
+`http://the gateway (CT 104):3100`. Prometheus on CT 113 scrapes node_exporter on
 eleven hosts (`:9100`), cadvisor on six (`:8081`), pve-exporter (`:9221`) and
 almanac (`:8080`). Alertmanager holds four rules and delivers to a `none`
 receiver. Grafana on CT 104 has both datasources and six provisioned
 dashboards.
 
 **Alerting and notification.** `homelab-host` posts operation results to
-`http://10.10.10.2:8123/api/webhook/homelab-ops-<id>`. Alertmanager has
+`http://Home Assistant (VM 101):8123/api/webhook/homelab-ops-<id>`. Alertmanager has
 no delivery leg — that is what HTTPSwitchboard is for.
 
 > **Superseded (2026-09-26, T64).** This paragraph and the `none` receiver
@@ -201,7 +201,7 @@ Numbered into `REGISTER.md`; the sharp ones:
   Jellyfin, Traefik, Home Assistant, almanac, the arr-suite and the whole
   edge are unwatched, after four weeks of uptime.
 - **F10 · CT 107 is empty but still routed.** `lxc-mqtt-stack.yml` sends TCP
-  :1883 to 10.10.10.7, where nothing listens. Meanwhile CT 104 publishes 1883
+  :1883 to uptime (CT 107), where nothing listens. Meanwhile CT 104 publishes 1883
   itself. Where MQTT actually terminates needs settling before 107 is removed.
 - **F11 · ansible-era configuration lives only inside its container** (§3).
 - **F12 · the Cloudflare tunnel ingress exists only in the Cloudflare Zero

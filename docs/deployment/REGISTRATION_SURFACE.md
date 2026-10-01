@@ -77,7 +77,7 @@ and one `host · drill` no file declares, and one monitor whose address was
 changed):
 
 ```text
-[seed]   ~ gateway · grafana now points at http://10.10.10.4:3000/api/health
+[seed]   ~ gateway · grafana now points at http://the gateway (CT 104):3000/api/health
 [seed]   - host · drill (no file declares it)
 [seed] 0 added, 37 already existed, 1 corrected, 1 removed, 0 stale
 ```

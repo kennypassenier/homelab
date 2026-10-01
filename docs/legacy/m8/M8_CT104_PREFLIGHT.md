@@ -23,7 +23,7 @@ file tree.
 |---|---|
 | hostname | `lxc-platform-stack` (v1 name — A2 refuses it, so a rebuild is the only route) |
 | resources | 4 cores, 5120 MB, 1024 MB swap, 30 G rootfs (5.4 G used) |
-| network | 10.10.10.4/24, vlan 10, `onboot: 1`, `startup: order=5` |
+| network | 198.51.100.4/24, vlan 10, `onboot: 1`, `startup: order=5` |
 | privilege | unprivileged |
 | mounts | **none** — no bind mounts at all, everything lives on the rootfs |
 

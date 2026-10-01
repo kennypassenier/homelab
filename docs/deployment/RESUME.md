@@ -91,7 +91,7 @@ CT 104. CT 104 was aligned by hand on 2026-09-18 with exactly the rendered
 bytes (Kenny's choice), so a deploy from a daemon ≥ 3.52.0 finds it unchanged.
 Note gap-13 before deploying anything large: pve answers VLAN 10 directly
 (`vmbr0.10`, its 2026-09-17 rescue path), so a bulk transfer through the
-firewall stalls; `HOMELAB_HOST=10.10.10.250:8443` stays inside VLAN 10.
+firewall stalls; `HOMELAB_HOST=pve:8443` stays inside VLAN 10.
 
 ## Fleet state after the migration, 2026-09-02 21:00
 
@@ -341,7 +341,7 @@ Host and client both **v3.48.0**. `homelab check`: 0 broken.
 
 **The `.env` files are the working copy, latch is the store.** Refresh one
 from the vault with
-`ssh root@10.10.5.250 'cat /var/lib/homelab/secrets/<stack>/<app>.env' > stacks/<stack>/<app>/.env`
+`ssh root@pve 'cat /var/lib/homelab/secrets/<stack>/<app>.env' > stacks/<stack>/<app>/.env`
 and compare the sha256 on both sides. Handing an app back to latch is one
 deletion: remove its local `.env`, change nothing else — the `latch_secrets:`
 line stays, because it says where the secrets live.

@@ -217,7 +217,7 @@ Set in `~/.env` or CI/CD:
 
 ```bash
 # LXC_API_BASE — URL to LXC daemon (default: http://lxc.local:8080)
-export LXC_API_BASE="http://192.168.1.100:8080"
+export LXC_API_BASE="http://192.0.2.100:8080"
 
 # LATCH_SYNC_TIMEOUT — max seconds to wait for each step (default: 30)
 export LATCH_SYNC_TIMEOUT="60"

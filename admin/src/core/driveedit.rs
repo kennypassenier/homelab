@@ -1561,7 +1561,7 @@ pub fn tile_row_from_values(v: &Values) -> Value {
     if !order.is_empty() {
         m.insert("order".into(), js_number(&order));
     }
-    for k in ["description", "url", "reading"] {
+    for k in ["description", "url", "watch_url", "reading"] {
         let t = text_of(v.get(k)).trim().to_string();
         if !t.is_empty() {
             m.insert(k.into(), json!(t));

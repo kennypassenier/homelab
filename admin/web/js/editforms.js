@@ -82,7 +82,8 @@ const say = (key, w = {}) =>
  *   url?: string | null}} ChecksReadView
  * @typedef {ChecksReadView | {error: string}} ChecksView
  * @typedef {{name: string, group: string, order?: number | null,
- *   description?: string | null, url?: string | null, reading?: string | null,
+ *   description?: string | null, url?: string | null, watch_url?: string | null,
+ *   reading?: string | null,
  *   watch_every?: number | null, down_after?: number | null}} TileFieldsView
  */
 
@@ -690,7 +691,12 @@ export function tileRowFromValues(v) {
   };
   const order = String(v.order ?? "").trim();
   if (order !== "") out.order = Number(order);
-  for (const k of /** @type {const} */ (["description", "url", "reading"])) {
+  for (const k of /** @type {const} */ ([
+    "description",
+    "url",
+    "watch_url",
+    "reading",
+  ])) {
     const t = String(v[k] ?? "").trim();
     if (t) out[k] = t;
   }

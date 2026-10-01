@@ -1360,6 +1360,14 @@
         "required": false
       },
       {
+        "name": "watch_url",
+        "id": "tile-watch-url",
+        "kind": "text",
+        "label": "Watch address",
+        "help": "Optional. The address the minute watch asks instead of the tile's own link, e.g. a health endpoint on the container's own address.",
+        "required": false
+      },
+      {
         "name": "reading",
         "id": "tile-reading",
         "kind": "text",

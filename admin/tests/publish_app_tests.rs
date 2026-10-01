@@ -180,6 +180,7 @@ fn a_tile_is_created_in_the_same_commit_when_asked() {
         order: None,
         description: None,
         url: None,
+        watch_url: None,
         reading: None,
         watch_every: None,
         down_after: None,

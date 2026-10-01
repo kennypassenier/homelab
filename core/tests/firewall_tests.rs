@@ -827,6 +827,7 @@ fn tile(probe: Option<&str>) -> Tile {
         order: 100,
         description: None,
         url: None,
+        watch_url: None,
         reading: None,
         probe: probe.map(str::to_string),
         watch_every: None,

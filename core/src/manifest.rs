@@ -575,15 +575,24 @@ pub struct Tile {
     /// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
     /// plain address the firewall derivation and the dashboard's minute
     /// watch both reach this tile at, resolved by the client at deploy time
-    /// (never by hand) — `url` as-is when it already names this container's
-    /// own address, otherwise the backend `url` behind whichever router in
-    /// this stack's own `traefik-routes.yml` answers for `url`'s host
+    /// (never by hand) from `watch_url` when set, else `url` — the chosen
+    /// address as-is when it already names this container's own address,
+    /// otherwise the backend address behind whichever router in this
+    /// stack's own `traefik-routes.yml` answers for its host
     /// (`client::routes::backend_for_host`). Absent = neither applied: the
     /// tile's host is reached through Traefik by a hostname no route file
     /// here resolves, and it is not watched (the client's spec notes say
     /// why). Never edited in the stack file — the client fills it in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe: Option<String>,
+    /// The address the dashboard's minute watch asks when the tile's own
+    /// page is not the thing to ask (for example an app's health
+    /// endpoint), instead of `url`. Resolved exactly like `url`: the
+    /// address as written when it already names this container's own
+    /// address, otherwise looked up by host in this stack's own route
+    /// files. Absent: `url` is used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watch_url: Option<String>,
     /// Owner decision "default plus per tile" (2026-09-30): how often the
     /// dashboard's minute watch checks this tile, in seconds; absent = the
     /// fleet default (`watch_interval_s`, host.toml). Must be at least 10

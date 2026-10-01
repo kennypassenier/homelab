@@ -484,13 +484,15 @@ fn spec_without_binaries(dir: &Path, notes: &mut Vec<String>) -> Result<DeploySp
     // tile's plain probe address, so the firewall derivation and the
     // dashboard's minute watch both reach it directly — never through
     // Traefik (fix-89 closed that door for a measurement: a Host-header
-    // proxy hop answers for the front door, not the backend). An explicit
-    // `url` that already names this container's own address is used as
-    // written; otherwise the tile's host (its `url`'s host, or the tile's
-    // own key when it has no `url`) is looked up in this stack's own
-    // declared route files. Neither: the tile carries no probe and is not
-    // watched — said here once, rather than discovered later as a silent
-    // gap.
+    // proxy hop answers for the front door, not the backend). The address
+    // resolved is `watch_url` when the tile sets one (for example an app's
+    // own health endpoint, rather than the page the tile opens), else
+    // `url`. An explicit address that already names this container's own
+    // address is used as written; otherwise its host (or the tile's own
+    // key when it has no `url`/`watch_url`) is looked up in this stack's
+    // own declared route files. Neither: the tile carries no probe and is
+    // not watched — said here once, rather than discovered later as a
+    // silent gap.
     let own_ip = stack_file
         .manifest
         .network
@@ -505,8 +507,9 @@ fn spec_without_binaries(dir: &Path, notes: &mut Vec<String>) -> Result<DeploySp
         .collect();
     for (host, t) in stack_file.manifest.tiles.iter_mut() {
         let url = t
-            .url
+            .watch_url
             .clone()
+            .or_else(|| t.url.clone())
             .unwrap_or_else(|| format!("https://{}/", host));
         let url_host = url
             .split_once("://")

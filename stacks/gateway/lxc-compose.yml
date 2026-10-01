@@ -352,6 +352,10 @@ tiles:
     group: "Infrastructure"
     order: 503
     description: "Router and certificates"
+    # This tile's route points at Traefik's internal api service, which has
+    # no backend address to resolve. Traefik's own ping answers on 8090
+    # (the container's own address) instead, so the minute watch asks that.
+    watch_url: "http://10.10.10.4:8090/ping"
   opn.kp-soft.dev:
     name: "OPNsense"
     group: "Infrastructure"

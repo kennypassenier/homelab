@@ -285,9 +285,7 @@ rules:
 
 fn manifest(vmid: u16, stack: &str, spec: Option<FirewallSpec>) -> StackManifest {
     StackManifest {
-        homepage_widgets: Default::default(),
         home_address_whitelist: None,
-        generated_dashboards_command: None,
         tiles: Default::default(),
         log_files: Vec::new(),
         registry_login: None,
@@ -360,9 +358,6 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         state_dir: "/var/lib/homelab".into(),
         now_unix: 1_760_000_000,
         metrics_targets_dir: None,
-        grafana_dashboards_dir: None,
-        homepage_services_file: None,
-        kuma_monitors_file: None,
         loki_url: None,
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
@@ -781,9 +776,7 @@ async fn the_facts_read_every_recorded_stacks_firewall_file() {
     exec.seed_file(&fw_path(116), "[OPTIONS]\nenable: 1\n");
     let inp = FactsInputs {
         watched_backups: vec![],
-        kuma_monitors_file: None,
         state_dir: "/var/lib/homelab".into(),
-        grafana_vmid: 104,
         loki_vmid: None,
         gateway_vmid: 104,
         gateway_routes_dir: "/appdata/gateway/traefik-config/routes".into(),
@@ -791,7 +784,6 @@ async fn the_facts_read_every_recorded_stacks_firewall_file() {
         prometheus_url: None,
         loki_url: None,
         logs_window: "24h".into(),
-        grafana_dashboards_dir: None,
         now_unix: 1_789_704_000,
         watched_fresh: true,
     };

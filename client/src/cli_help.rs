@@ -105,7 +105,6 @@ pub const VERBS: &[Verb] = &[
     v(Local, "runbook", "[out.md]", "write the disaster-recovery runbook from the stacks (docs/DR_RUNBOOK.md by default)", "homelab runbook"),
     v(Local, "testplan", "[out.md]", "regenerate docs/deployment/TEST_PLAN.md from the test suites", "homelab testplan"),
     v(Local, "update-policy", "[doc.md]", "regenerate the policy table in docs/deployment/UPDATE_POLICY.md from the stack files", "homelab update-policy"),
-    v(Local, "dashboard", "<stack> <app>...", "print a stack's Grafana dashboard, the one a deploy writes", "homelab dashboard mystack myapp"),
     v(Local, "export", "stacks/<name> [out.yml]", "write the stack definition as one bundle; .env files are never in it", "homelab export mystack mystack-bundle.yml"),
     v(Local, "import", "<bundle.yml> <new-name> <vmid>", "write a bundle back as a new stack under stacks/, then validate it", "homelab import mystack-bundle.yml newstack 121"),
     v(Local, "help", "", "this list; `homelab <command> --help` for one command", "homelab help"),

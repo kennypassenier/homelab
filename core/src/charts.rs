@@ -19,6 +19,8 @@ pub enum Unit {
     Celsius,
     /// 1 = yes, 0 = no.
     Flag,
+    /// A plain count: a load average, a number of sectors, hours, restarts.
+    Count,
 }
 
 /// One chart: a title, a query and how its numbers read. `legend` names the
@@ -88,6 +90,35 @@ pub fn stack_panels(stack: &str) -> Vec<Panel> {
             Unit::Bytes,
             Some("name"),
         ),
+        p(
+            // replace-grafana parity (2026-10-01): Grafana's "Disk writes
+            // per container" panel, scoped to this stack like every other
+            // per-app panel here rather than fleet-wide.
+            "Disk writes per app",
+            format!(
+                "sum by (name) (rate(container_fs_writes_bytes_total{{stack=\"{s}\",name!=\"\"}}[5m]))"
+            ),
+            Unit::Bytes,
+            Some("name"),
+        ),
+        p(
+            "Network in per app",
+            format!(
+                "sum by (name) (rate(container_network_receive_bytes_total{{stack=\"{s}\",name!=\"\"}}[5m]))"
+            ),
+            Unit::Bytes,
+            Some("name"),
+        ),
+        p(
+            // Grafana's "Container restarts" panel: how many times cadvisor
+            // saw this app's start time change in the last hour.
+            "Restarts (last hour)",
+            format!(
+                "sum by (name) (changes(container_start_time_seconds{{stack=\"{s}\",name!=\"\"}}[1h]))"
+            ),
+            Unit::Count,
+            Some("name"),
+        ),
     ]
 }
 
@@ -136,6 +167,50 @@ pub fn host_panels(host: &str) -> Vec<Panel> {
             "sum by (id) (pve_memory_usage_bytes{id=~\"lxc/.*\"})".to_string(),
             Unit::Bytes,
             Some("id"),
+        ),
+        p(
+            // replace-grafana parity (2026-10-01): "Network in per host".
+            "Network in",
+            format!(
+                "sum by (device) (rate(node_network_receive_bytes_total{{host=\"{h}\",device!~\"lo|veth.*|docker.*|br-.*\"}}[5m]))"
+            ),
+            Unit::Bytes,
+            Some("device"),
+        ),
+        p(
+            // Grafana's "Uptime and load" panel; uptime itself is already
+            // implicit in a host that answers at all, so this carries the
+            // load figure, which isn't derivable from anything else shown.
+            "Load average (5 min)",
+            format!("node_load5{{host=\"{h}\"}}"),
+            Unit::Count,
+            None,
+        ),
+        p(
+            // Distinct from "Temperature (hottest sensor per chip)" above:
+            // that's the motherboard/CPU sensors, this is the drives'.
+            "Drive temperature",
+            "smart_device_temperature_celsius".to_string(),
+            Unit::Celsius,
+            Some("device"),
+        ),
+        p(
+            "Drive pending sectors",
+            "smart_device_pending_sectors".to_string(),
+            Unit::Count,
+            Some("device"),
+        ),
+        p(
+            "Drive reallocated sectors",
+            "smart_device_reallocated_sectors".to_string(),
+            Unit::Count,
+            Some("device"),
+        ),
+        p(
+            "Drive power-on hours",
+            "smart_device_power_on_hours".to_string(),
+            Unit::Count,
+            Some("device"),
         ),
     ]
 }

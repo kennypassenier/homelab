@@ -3,7 +3,7 @@
 //! fleet check, one incident bundle, the templates, ping with where the
 //! address came from, the versions and the update badge, drift per stack,
 //! the apply plan and a stack's deploy plan, and the files a browser
-//! downloads (the runbook, a stack's export bundle, its Grafana dashboard).
+//! downloads (the runbook, a stack's export bundle).
 //!
 //! Every write goes through the action queue (`shell::actions`), so a press
 //! here and a driven press are the same job; these routes only read.
@@ -604,64 +604,6 @@ async fn export(State(c): State<ParityCtx>, UrlPath(stack): UrlPath<String>) -> 
     }
 }
 
-#[derive(Deserialize)]
-struct Apps {
-    #[serde(default)]
-    apps: Option<String>,
-}
-
-/// T2 (`homelab dashboard <stack> <app>…`): the Grafana dashboard a deploy
-/// writes, as a download; the apps default to the stack's own.
-async fn dashboard(
-    State(c): State<ParityCtx>,
-    UrlPath(stack): UrlPath<String>,
-    Query(q): Query<Apps>,
-) -> Response {
-    if !valid_stack_name(&stack) {
-        return refused(
-            StatusCode::BAD_REQUEST,
-            Refusal::new(
-                format!("dashboard {stack:?}"),
-                "not a stack name",
-                "use the name the fleet page shows",
-            ),
-        );
-    }
-    let mut apps: Vec<String> = q
-        .apps
-        .as_deref()
-        .unwrap_or("")
-        .split(',')
-        .map(str::trim)
-        .filter(|a| !a.is_empty())
-        .map(str::to_string)
-        .collect();
-    if apps.is_empty() {
-        let s = c.shared.read().await;
-        apps = s
-            .fleet
-            .as_ref()
-            .and_then(|f| f.stacks.iter().find(|x| x.name == stack))
-            .map(|x| x.apps.iter().map(|a| a.name.clone()).collect())
-            .unwrap_or_default();
-    }
-    if apps.is_empty() || apps.iter().any(|a| !valid_stack_name(a)) {
-        return refused(
-            StatusCode::BAD_REQUEST,
-            Refusal::new(
-                format!("dashboard {stack}"),
-                "a dashboard needs at least one app, each a plain name",
-                "name the apps: ?apps=app-a,app-b",
-            ),
-        );
-    }
-    attachment(
-        &format!("{stack}-dashboard.json"),
-        "application/json",
-        homelab_core::ops::dashboard::dashboard_json(&stack, &apps),
-    )
-}
-
 /// Mounted with `dashboard_routes`: behind the login and both locks.
 pub fn router(c: ParityCtx) -> Router {
     Router::new()
@@ -676,6 +618,5 @@ pub fn router(c: ParityCtx) -> Router {
         .route("/data/plan/{stack}", get(stack_plan))
         .route("/data/download/runbook", get(runbook))
         .route("/data/download/export/{stack}", get(export))
-        .route("/data/download/dashboard/{stack}", get(dashboard))
         .with_state(c)
 }

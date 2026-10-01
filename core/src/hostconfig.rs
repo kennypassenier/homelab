@@ -164,10 +164,6 @@ pub const KEYS: &[KeyInfo] = &[
     k("history_days", "Coverage and monitoring", "History days", "Days of operation history kept.", "90", Kind::Int { min: 1, max: 3650 }, Access::Browser, Apply::Restart),
     k("history_max_mib", "Coverage and monitoring", "History size", "Largest size of the history file in MiB; past it the oldest half goes.", "16", Kind::Int { min: 1, max: 1024 }, Access::Browser, Apply::Restart),
     k("metrics_targets_dir", "Coverage and monitoring", "Prometheus targets directory", "Where per-stack scrape targets are written; empty: off.", "off", Kind::Text, Access::Browser, Apply::Restart),
-    k("grafana_dashboards_dir", "Coverage and monitoring", "Grafana dashboards directory", "Grafana's provisioning directory; empty: off.", "off", Kind::Text, Access::Browser, Apply::Restart),
-    k("grafana_vmid", "Coverage and monitoring", "Grafana container", "The container Grafana runs in.", "the gateway", Kind::Vmid, Access::Browser, Apply::Restart),
-    k("kuma_monitors_file", "Coverage and monitoring", "Uptime Kuma monitors file", "The file the Uptime Kuma seeder reads its generated half from; empty: off.", "off", Kind::Text, Access::Browser, Apply::Restart),
-    k("homepage_services_file", "Coverage and monitoring", "Homepage services file", "Homepage's services.yaml, rendered from the gateway's routes; empty: off.", "off", Kind::Text, Access::Browser, Apply::Restart),
     k("tile_watch_source", "Coverage and monitoring", "Tile watch source address", "The dashboard's own address, from which its once-a-minute tile watch reaches every stack; a deploy derives an inbound firewall rule per stack from its tiles for this source. Empty: no rule is derived.", "off", Kind::Text, Access::Browser, Apply::Restart),
     // ── Gateway and network ─────────────────────────────────────────────
     k("gateway_vmid", "Gateway and network", "Gateway container", "The container Traefik runs in. The dashboard's own route lives there: a wrong value cuts it off from the browser.", "104", Kind::Vmid, Access::Confirm, Apply::Restart),

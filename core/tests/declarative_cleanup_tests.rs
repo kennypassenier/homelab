@@ -26,14 +26,10 @@ use homelab_core::state::{
 
 const NOW: u64 = 1_760_000_000;
 const STATE: &str = "/var/lib/homelab";
-const HOMEPAGE: &str = "/appdata/home/homepage-config/services.yaml";
-const KUMA: &str = "/appdata/uptime/kuma-seeder-config/host-monitors.json";
 
 fn manifest(vmid: u16, stack: &str) -> StackManifest {
     StackManifest {
-        homepage_widgets: Default::default(),
         home_address_whitelist: None,
-        generated_dashboards_command: None,
         tiles: Default::default(),
         log_files: Vec::new(),
         registry_login: None,
@@ -117,9 +113,6 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         state_dir: STATE.into(),
         now_unix: NOW,
         metrics_targets_dir: None,
-        grafana_dashboards_dir: None,
-        homepage_services_file: None,
-        kuma_monitors_file: None,
         loki_url: None,
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
@@ -229,8 +222,8 @@ fn pos(calls: &[String], needle: &str) -> Option<usize> {
 // ── 1 · forget unregisters what destroy unregisters ─────────────────────────
 
 /// `homelab forget` dropped the state record and nothing else, so a stack
-/// forgotten after its container was lost kept its route, its scrape target,
-/// its dashboard, its manual checks, its tile and its host monitor.
+/// forgotten after its container was lost kept its route, its scrape target
+/// and its manual checks.
 /// covers: step-22
 #[tokio::test]
 async fn forget_unregisters_everything_a_destroy_unregisters() {
@@ -254,10 +247,6 @@ async fn forget_unregisters_everything_a_destroy_unregisters() {
     let j = NullJournal;
     let mut c = ctx(&exec, &sink, &j);
     c.metrics_targets_dir = Some("/appdata/metrics/prometheus-config/targets".into());
-    c.grafana_dashboards_dir =
-        Some("/opt/gateway/grafana/provisioning/dashboards-generated".into());
-    c.homepage_services_file = Some(HOMEPAGE.into());
-    c.kuma_monitors_file = Some(KUMA.into());
 
     let report = forget(&c, "drill").await;
     assert!(report.ok, "{:?}", report.error);
@@ -272,7 +261,6 @@ async fn forget_unregisters_everything_a_destroy_unregisters() {
         "the route goes: {:?}",
         exec.calls()
     );
-    assert!(on_gateway("homelab-drill.json"), "the dashboard goes");
     assert!(
         !exec
             .calls_containing("rm -f /appdata/metrics/prometheus-config/targets/drill.json")
@@ -287,12 +275,6 @@ async fn forget_unregisters_everything_a_destroy_unregisters() {
         "the stack's manual checks go with it"
     );
     assert_eq!(after.manual_checks.len(), 1, "another stack's checks stay");
-    let kuma = exec.file(KUMA).expect("host monitors regenerated");
-    assert!(kuma.contains("host · syncthing") && !kuma.contains("host · drill"));
-    assert!(
-        exec.file(HOMEPAGE).is_some(),
-        "the front page is regenerated"
-    );
 }
 
 /// The one guard forget always had stays: a record whose container still
@@ -317,11 +299,11 @@ async fn forget_still_refuses_a_record_whose_container_is_live() {
     assert!(load_state(&exec).await.stacks.contains_key("drill"));
 }
 
-// ── 2 · destroy drops manual checks, regenerates homepage + monitors ────────
+// ── 2 · destroy drops manual checks ─────────────────────────────────────────
 
 /// covers: step-22
 #[tokio::test]
-async fn destroy_drops_the_manual_checks_and_regenerates_the_fleet_files() {
+async fn destroy_drops_the_manual_checks() {
     let exec = MockExecutor::new();
     exec.respond_always(
         "pct config",
@@ -339,28 +321,13 @@ async fn destroy_drops_the_manual_checks_and_regenerates_the_fleet_files() {
     seed_state(&exec, st).await;
     let sink = VecSink::new();
     let j = NullJournal;
-    let mut c = ctx(&exec, &sink, &j);
-    c.homepage_services_file = Some(HOMEPAGE.into());
-    c.kuma_monitors_file = Some(KUMA.into());
+    let c = ctx(&exec, &sink, &j);
 
     let report = destroy(&c, &manifest(119, "drill"), "drill", true).await;
     assert!(report.ok, "{:?}", report.error);
     let after = load_state(&exec).await;
     assert!(after.manual_checks.values().all(|r| r.stack != "drill"));
     assert_eq!(after.manual_checks.len(), 1);
-    let kuma = exec
-        .file(KUMA)
-        .expect("host monitors regenerated after destroy");
-    assert!(kuma.contains("host · syncthing") && !kuma.contains("host · drill"));
-    assert!(
-        exec.file(HOMEPAGE).is_some(),
-        "the front page is regenerated"
-    );
-    // After the route is gone, so the front page no longer lists it.
-    let calls = exec.calls();
-    let route = pos(&calls, "119-app-drill.yml").unwrap();
-    let page = pos(&calls, &format!("write_file {}", HOMEPAGE)).unwrap();
-    assert!(route < page);
 }
 
 // ── 3 · a dropped gateway_route or a changed vmid removes the old route ─────
@@ -658,38 +625,6 @@ async fn the_deploy_removes_files_the_stack_no_longer_declares() {
         .filter(|l| l.contains("removed") && l.contains("/opt/syncthing/syncthing/stale.conf"))
         .collect();
     assert_eq!(said.len(), 1, "one transcript line per removed file");
-}
-
-/// Files the orchestrator writes into a container on behalf of OTHER stacks
-/// (generated dashboards on the gateway) are not the gateway's orphans.
-/// covers: ask-8
-#[tokio::test]
-async fn generated_dashboards_on_the_gateway_are_never_orphans() {
-    let exec = MockExecutor::new();
-    script_existing(&exec, 104, "gateway", "");
-    exec.respond_always(
-        "cd '/opt/gateway' 2>/dev/null && find",
-        CmdOutput::ok(
-            "gateway/docker-compose.yml\n\
-             grafana/provisioning/dashboards-generated/homelab-media.json\n",
-        ),
-    );
-    let sink = VecSink::new();
-    let j = NullJournal;
-    let mut c = ctx(&exec, &sink, &j);
-    c.grafana_dashboards_dir =
-        Some("/opt/gateway/grafana/provisioning/dashboards-generated".into());
-    let mut sp = spec(104, "gateway");
-    sp.gateway_route = None;
-    let report = deploy(&c, &sp).await;
-    assert!(report.ok, "{:?}", report.error);
-    assert!(
-        exec.calls_containing(
-            "rm -f /opt/gateway/grafana/provisioning/dashboards-generated/homelab-media.json"
-        )
-        .is_empty(),
-        "another stack's generated dashboard is not an orphan"
-    );
 }
 
 /// A `rootfs/` file the stack used to place (known from the intent repo's

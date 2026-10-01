@@ -136,9 +136,7 @@ impl Executor for HybridExec {
 
 fn spec(files_content: &str) -> DeploySpec {
     let mut m = homelab_core::manifest::StackManifest {
-        homepage_widgets: Default::default(),
         home_address_whitelist: None,
-        generated_dashboards_command: None,
         tiles: Default::default(),
         log_files: Vec::new(),
         registry_login: None,
@@ -228,9 +226,6 @@ async fn r9_intent_history_against_real_git_two_deploys_two_commits_revert_works
         state_dir: state_dir.clone(),
         now_unix: 1_760_000_000,
         metrics_targets_dir: None,
-        grafana_dashboards_dir: None,
-        homepage_services_file: None,
-        kuma_monitors_file: None,
         loki_url: None,
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
@@ -289,9 +284,6 @@ async fn r9_broken_git_identity_fails_the_deploy_not_silently() {
         state_dir: tmp.path().to_str().unwrap().into(),
         now_unix: 1_760_000_000,
         metrics_targets_dir: None,
-        grafana_dashboards_dir: None,
-        homepage_services_file: None,
-        kuma_monitors_file: None,
         loki_url: None,
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),

@@ -177,10 +177,6 @@ struct FileConfig {
     data_mount_roots: Option<Vec<String>>,
     gateway_vmid: Option<u16>,
     gateway_routes_dir: Option<String>,
-    /// fix-90 (2026-09-27): the container Grafana runs in, where the
-    /// generated dashboards are written. Absent = the gateway, where Grafana
-    /// ran until it moved to the metrics stack.
-    grafana_vmid: Option<u16>,
     /// Route A (Kenny, form J1, 2026-09-02): devices this suite may not
     /// touch, that can nevertheless hand over their own configuration. One
     /// GET per night, straight into restic. Absent = nothing is fetched.
@@ -211,24 +207,12 @@ struct FileConfig {
     /// T1: directory the orchestrator writes per-stack Prometheus discovery
     /// files into. Absent = off, and the scrape list stays hand-maintained.
     metrics_targets_dir: Option<String>,
-    /// T2: Grafana provisioning directory inside the gateway container.
-    /// Absent = off, and dashboards stay hand-made.
-    grafana_dashboards_dir: Option<String>,
-    /// T51: Homepage's `services.yaml` on the host, rendered from the
-    /// gateway's route fragments. Absent = the front page stays hand-made,
-    /// which is how it came to be zero bytes.
-    homepage_services_file: Option<String>,
     /// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
     /// dashboard's own address (CT 120), from which the firewall step of a
     /// deploy derives an inbound rule per stack for every tile that opens on
     /// that stack's own container. Absent or empty = feature off, and no
     /// rule is derived.
     tile_watch_source: Option<String>,
-    /// T49: the file the Uptime Kuma seeder reads its generated half from.
-    /// Absent = the watch list stays whatever a hand-run script last made,
-    /// which is how a monitor came to report Uptime Kuma itself as down from
-    /// an address it had left that morning (F157).
-    kuma_monitors_file: Option<String>,
     /// T69: how long a suspended step waits for an operator before giving
     /// up and answering `Unattended`. Long enough that Kenny can read the
     /// question and decide, short enough that a forgotten window does not
@@ -361,23 +345,12 @@ struct Config {
     registry_cache: Option<homelab_core::ops::registry_cache::CacheCfg>,
     /// T1: where per-stack Prometheus discovery files are written.
     metrics_targets_dir: Option<String>,
-    /// T2: Grafana's provisioning directory inside the gateway container.
-    grafana_dashboards_dir: Option<String>,
-    /// T51: Homepage's `services.yaml` on the host, rendered from the
-    /// gateway's route fragments. Absent = the front page stays hand-made,
-    /// which is how it came to be zero bytes.
-    homepage_services_file: Option<String>,
     /// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
     /// dashboard's own address (CT 120), from which the firewall step of a
     /// deploy derives an inbound rule per stack for every tile that opens on
     /// that stack's own container. Absent or empty = feature off, and no
     /// rule is derived.
     tile_watch_source: Option<String>,
-    /// T49: the file the Uptime Kuma seeder reads its generated half from.
-    /// Absent = the watch list stays whatever a hand-run script last made,
-    /// which is how a monitor came to report Uptime Kuma itself as down from
-    /// an address it had left that morning (F157).
-    kuma_monitors_file: Option<String>,
     /// T69: how long a suspended step waits for an operator before giving
     /// up and answering `Unattended`. Long enough that Kenny can read the
     /// question and decide, short enough that a forgotten window does not
@@ -607,8 +580,6 @@ fn load_config_from(path: String) -> Config {
             if let Some(dir) = file.gateway_routes_dir {
                 sc.gateway_routes_dir = dir;
             }
-            // fix-90: unset, Grafana is on the gateway, wherever that is.
-            sc.grafana_vmid = file.grafana_vmid.unwrap_or(sc.gateway_vmid);
             // fix-120: the daemon always runs with a policy; without the
             // keys it is what the fleet uses today, so nothing is refused
             // that deployed yesterday.
@@ -643,10 +614,7 @@ fn load_config_from(path: String) -> Config {
             }
         },
         metrics_targets_dir: file.metrics_targets_dir,
-        grafana_dashboards_dir: file.grafana_dashboards_dir,
-        homepage_services_file: file.homepage_services_file,
         tile_watch_source: file.tile_watch_source.filter(|s| !s.trim().is_empty()),
-        kuma_monitors_file: file.kuma_monitors_file,
         backup_concurrency: file
             .backup_concurrency
             .unwrap_or_else(default_backup_concurrency),
@@ -1449,8 +1417,8 @@ opnsense_cred_file = "/var/lib/homelab/secrets/opnsense.cred"
     fn correctly_placed_keys_are_clean_and_read() {
         let raw = r#"
 token = "0123456789abcdef0123"
-kuma_monitors_file = "/appdata/uptime/kuma-seeder-config/host-monitors.json"
-homepage_services_file = "/appdata/home/homepage-config/services.yaml"
+metrics_targets_dir = "/appdata/metrics/prometheus-config/targets"
+tile_watch_source = "10.10.10.20"
 
 [registry_cache]
 host = "10.10.10.17"
@@ -1463,16 +1431,16 @@ port = 5003
         assert!(unknown_keys(&t).is_empty(), "{:?}", unknown_keys(&t));
 
         let parsed: FileConfig = t.try_into().unwrap();
-        assert!(parsed.kuma_monitors_file.is_some());
-        assert!(parsed.homepage_services_file.is_some());
+        assert!(parsed.metrics_targets_dir.is_some());
+        assert!(parsed.tile_watch_source.is_some());
     }
 
     /// A plain typo is loud too — the direction that costs a warning rather
     /// than a silence.
     #[test]
     fn a_typo_is_reported() {
-        let t: toml::Table = toml::from_str("kuma_monitor_file = \"/x\"\n").unwrap();
-        assert_eq!(unknown_keys(&t), vec!["kuma_monitor_file".to_string()]);
+        let t: toml::Table = toml::from_str("metrics_target_dir = \"/x\"\n").unwrap();
+        assert_eq!(unknown_keys(&t), vec!["metrics_target_dir".to_string()]);
     }
 
     /// config-four-representations (expert panel, 2026-09-27): the known
@@ -3878,9 +3846,7 @@ port = 5003
         let mut hs = homelab_core::state::HostState::default();
         let mk = |mem: u32| {
             let mut m = homelab_core::manifest::StackManifest {
-                homepage_widgets: Default::default(),
                 home_address_whitelist: None,
-                generated_dashboards_command: None,
                 tiles: Default::default(),
                 log_files: Vec::new(),
                 registry_login: None,
@@ -7296,12 +7262,9 @@ where
         state_dir: state.config.state_dir.clone(),
         now_unix: now,
         metrics_targets_dir: state.config.metrics_targets_dir.clone(),
-        grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
-        homepage_services_file: state.config.homepage_services_file.clone(),
         tile_watch_source: state.config.tile_watch_source.clone(),
         tile_watch_targets,
         tile_watch_watcher,
-        kuma_monitors_file: state.config.kuma_monitors_file.clone(),
         // C1/C2: the same Loki the coverage check already asks about, so
         // there is not a second address to keep in step with the first.
         loki_url: state.config.loki_url.clone(),
@@ -7545,17 +7508,14 @@ async fn gather_live_facts(
                 max_age_hours: w.max_age_hours,
             })
             .collect(),
-        kuma_monitors_file: state.config.kuma_monitors_file.clone(),
         state_dir: state.config.state_dir.clone(),
         gateway_vmid: state.config.safety.gateway_vmid,
-        grafana_vmid: state.config.safety.grafana_vmid,
         gateway_routes_dir: state.config.safety.gateway_routes_dir.clone(),
         no_touch: state.config.safety.no_touch.to_vec(),
         prometheus_url: state.config.prometheus_url.clone(),
         loki_url: state.config.loki_url.clone(),
         loki_vmid: state.config.loki_vmid,
         logs_window: sane_window(&state.config.logs_window),
-        grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
         now_unix: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -8200,13 +8160,10 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     deferred: None,
                 };
             }
-            // The same exclusions the deploy applies: the gateway holds other
-            // stacks' generated dashboards and routes.
-            let keep = homelab_core::ops::deploy::generated_dirs(
-                &state.config.safety,
-                state.config.grafana_dashboards_dir.as_deref(),
-                manifest.vmid,
-            );
+            // The same exclusion the deploy applies: the gateway holds other
+            // stacks' routes.
+            let keep =
+                homelab_core::ops::deploy::generated_dirs(&state.config.safety, manifest.vmid);
             let orphans =
                 homelab_core::ops::deploy::orphan_files_keeping(&exec, &manifest, &spec, &keep)
                     .await;

@@ -15,9 +15,7 @@ const OLD_SECRET: &str = "OLD_PLANTED_SECRET_previous_value";
 
 fn spec_with_secret() -> DeploySpec {
     let manifest = StackManifest {
-        homepage_widgets: Default::default(),
         home_address_whitelist: None,
-        generated_dashboards_command: None,
         tiles: Default::default(),
         log_files: Vec::new(),
         registry_login: None,
@@ -107,9 +105,6 @@ async fn run_deploy(exec: &MockExecutor, sink: &VecSink) -> homelab_core::runner
         state_dir: "/var/lib/homelab".into(),
         now_unix: 1_760_000_000,
         metrics_targets_dir: None,
-        grafana_dashboards_dir: None,
-        homepage_services_file: None,
-        kuma_monitors_file: None,
         loki_url: None,
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
@@ -204,9 +199,6 @@ async fn sec1_shell_metachar_app_name_refused_everywhere() {
             state_dir: "/var/lib/homelab".into(),
             now_unix: 1_760_000_000,
             metrics_targets_dir: None,
-            grafana_dashboards_dir: None,
-            homepage_services_file: None,
-            kuma_monitors_file: None,
             loki_url: None,
             asker: &homelab_core::ask::NOBODY,
             backup: Default::default(),

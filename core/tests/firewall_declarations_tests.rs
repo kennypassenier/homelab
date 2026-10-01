@@ -53,16 +53,16 @@ fn ip_of(m: &StackManifest) -> Ipv4Addr {
 }
 
 /// CT 116's declaration renders to the file on pve (captured byte for byte on
-/// 2026-09-27) with exactly three differences: the provenance line on top,
-/// the rule Kenny added that day letting Uptime Kuma's HTTP monitor in
-/// (form item kp-soft-kuma-firewall: "Kuma HTTP toelaten, firewall in de
-/// repo"), and the Loki push going to the metrics stack (10.10.10.13) instead
-/// of the gateway, where Loki no longer runs since fix-90 (2026-09-28: without
-/// it CT 116's Alloy would push into a closed port). Its first deploy changes
-/// nothing else.
+/// 2026-09-27) with these differences: the provenance line on top, the Loki
+/// push going to the metrics stack (10.10.10.13) instead of the gateway,
+/// where Loki no longer runs since fix-90 (2026-09-28: without it CT 116's
+/// Alloy would push into a closed port), and — since 2026-10-01 — Uptime
+/// Kuma's ping rule gone along with the rest of Uptime Kuma (its HTTP-monitor
+/// rule, added 2026-09-27 by form item kp-soft-kuma-firewall, is gone the
+/// same way: it was never in this captured snapshot to begin with).
 /// covers: fix-89
 #[test]
-fn kp_soft_declares_its_live_firewall_plus_kennys_kuma_rule() {
+fn kp_soft_declares_its_live_firewall_minus_kuma() {
     let live =
         std::fs::read_to_string(repo_root().join("captured/pve-host/firewall/116.fw")).unwrap();
     let icmp = "IN ACCEPT -source 10.10.10.7 -p icmp\n";
@@ -72,14 +72,7 @@ fn kp_soft_declares_its_live_firewall_plus_kennys_kuma_rule() {
     assert!(live.contains(loki_old));
     let want = format!(
         "# Written by homelab from stacks/kp-soft/lxc-compose.yml (fix-88): edit that file, not this one\n{}",
-        live.replace(
-            icmp,
-            &format!(
-                "{}IN ACCEPT -source 10.10.10.7 -p tcp -dport 8080,8787 # Uptime Kuma HTTP monitors (Kenny, 2026-09-27)\n",
-                icmp
-            )
-        )
-        .replace(
+        live.replace(icmp, "").replace(
             loki_old,
             "OUT ACCEPT -dest 10.10.10.13 -p tcp -dport 3100 # Loki push (Alloy), added 2026-09-25\n"
         )
@@ -164,33 +157,23 @@ fn udp(from: &'static str, to: &'static str, ports: &[u16], why: &'static str) -
         .collect()
 }
 
-fn ping(from: &'static str, to: &'static str) -> Flow {
-    Flow {
-        from,
-        to,
-        proto: FwProto::Icmp,
-        port: None,
-        why: "Uptime Kuma ping",
-    }
-}
-
-const DOCKER: [&str; 10] = [
+const DOCKER: [&str; 8] = [
     "10.10.10.4",
     "10.10.10.5",
     "10.10.10.6",
-    "10.10.10.7",
     "10.10.10.8",
     "10.10.10.11",
     "10.10.10.13",
     "10.10.10.14",
-    "10.10.10.15",
     "10.10.10.16",
 ];
 const MEDIA: [u16; 6] = [8096, 8989, 7878, 6767, 9696, 5055];
 
 /// Every flow the 2026-09-27 measurement found (tcpdump on pve's veths for
 /// 29 minutes, conntrack and ss in each container, the Prometheus targets,
-/// the Kuma database, the Traefik routes, the stacks' configuration).
+/// the Traefik routes, the stacks' configuration). Uptime Kuma's and
+/// Homepage's own flows, measured the same day, were removed 2026-10-01 when
+/// both were retired.
 fn measured_flows() -> Vec<Flow> {
     let mut f = Vec::new();
     let all: Vec<&'static str> = DOCKER
@@ -211,9 +194,6 @@ fn measured_flows() -> Vec<Flow> {
         // Alloy pushes to the loki-push front on CT 113.
         if *s != "10.10.10.13" {
             f.extend(tcp(s, "10.10.10.13", &[3100], "Loki push (Alloy)"));
-        }
-        if *s != "10.10.10.7" {
-            f.push(ping("10.10.10.7", s));
         }
     }
     for s in DOCKER {
@@ -264,27 +244,20 @@ fn measured_flows() -> Vec<Flow> {
         "homelab daemon's notifications",
     ));
     f.extend(udp("10.10.10.1", "10.10.10.4", &[1514], "OPNsense syslog"));
-    // Traefik routes and Grafana's datasource.
+    // Traefik routes.
     f.extend(tcp("10.10.10.4", "10.10.10.5", &[8080], "route"));
     f.extend(tcp("10.10.10.4", "10.10.10.6", &MEDIA, "route"));
-    f.extend(tcp("10.10.10.4", "10.10.10.7", &[3001], "route"));
     f.extend(tcp("10.10.10.4", "10.10.10.8", &[8384], "route"));
     f.extend(tcp("10.10.10.4", "10.10.10.9", &[8080], "route"));
     f.extend(tcp("10.10.10.4", "10.10.10.11", &[1900], "route"));
     f.extend(tcp("10.10.10.4", "10.10.10.12", &[8080], "route"));
-    f.extend(tcp(
-        "10.10.10.4",
-        "10.10.10.13",
-        &[9090, 9093],
-        "route, datasource",
-    ));
+    f.extend(tcp("10.10.10.4", "10.10.10.13", &[9090, 9093], "route"));
     f.extend(tcp(
         "10.10.10.4",
         "10.10.10.14",
         &[5006, 8080, 8000],
         "route",
     ));
-    f.extend(tcp("10.10.10.4", "10.10.10.15", &[3000], "route"));
     f.extend(tcp("10.10.10.4", "10.10.10.16", &[8787], "route"));
     f.extend(tcp(
         "10.10.10.4",
@@ -294,40 +267,6 @@ fn measured_flows() -> Vec<Flow> {
     ));
     f.extend(tcp("10.10.10.4", "10.10.5.1", &[443], "route opn"));
     f.extend(tcp("10.10.10.4", "10.10.5.250", &[8006], "route prox"));
-    // Uptime Kuma's HTTP monitors and its one notification.
-    f.extend(tcp("10.10.10.7", "10.10.10.13", &[3000, 3100], "monitor"));
-    f.extend(tcp("10.10.10.4", "10.10.10.13", &[3000], "route grafana"));
-    f.extend(tcp("10.10.10.7", "10.10.10.5", &[8080], "monitor"));
-    f.extend(tcp("10.10.10.7", "10.10.10.6", &MEDIA, "monitor"));
-    f.extend(tcp("10.10.10.7", "10.10.10.8", &[8384], "monitor"));
-    f.extend(tcp(
-        "10.10.10.7",
-        "10.10.10.9",
-        &[8080, 8082, 8083],
-        "monitor",
-    ));
-    f.extend(tcp("10.10.10.7", "10.10.10.11", &[1900], "monitor"));
-    f.extend(tcp("10.10.10.7", "10.10.10.12", &[8080], "monitor"));
-    f.extend(tcp("10.10.10.7", "10.10.10.13", &[9090, 9093], "monitor"));
-    f.extend(tcp(
-        "10.10.10.7",
-        "10.10.10.14",
-        &[5006, 8080, 8000],
-        "monitor",
-    ));
-    f.extend(tcp("10.10.10.7", "10.10.10.15", &[3000], "monitor"));
-    f.extend(tcp(
-        "10.10.10.7",
-        "10.10.10.16",
-        &[8080],
-        "monitor kp-soft · site",
-    ));
-    f.extend(tcp("10.10.10.7", "10.10.10.2", &[8123], "notification"));
-    // The homepage's widgets.
-    f.extend(tcp("10.10.10.15", "10.10.10.6", &MEDIA, "widget"));
-    f.extend(tcp("10.10.10.15", "10.10.10.14", &[8000], "widget"));
-    f.extend(tcp("10.10.10.15", "10.10.10.13", &[3000], "widget"));
-    f.extend(tcp("10.10.10.15", "10.10.5.250", &[8006], "Proxmox widget"));
     // Between the services.
     f.extend(tcp(
         "10.10.10.6",
@@ -458,10 +397,10 @@ fn the_logins_stay_out_of_reach_from_the_neighbours() {
             "{} reaches Traefik's port 80",
             name
         );
-        // The three that declare a management destination (the prox and opn
-        // routes, pve-exporter, the Proxmox widget), and kp-soft, which the
-        // router shuts off from that network itself.
-        if ["gateway", "metrics", "home", "kp-soft"].contains(&name.as_str()) {
+        // The two that declare a management destination (the prox and opn
+        // routes, pve-exporter), and kp-soft, which the router shuts off
+        // from that network itself.
+        if ["gateway", "metrics", "kp-soft"].contains(&name.as_str()) {
             continue;
         }
         let fw = m

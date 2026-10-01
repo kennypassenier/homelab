@@ -182,15 +182,6 @@ function overviewTab(panel, params) {
       },
       "Export bundle",
     ),
-    h(
-      "a",
-      {
-        class: "kp-button",
-        href: `/data/download/dashboard/${enc}`,
-        download: `${params.name}-dashboard.json`,
-      },
-      "Grafana dashboard JSON",
-    ),
   );
   const shellLink = h(
     "a",

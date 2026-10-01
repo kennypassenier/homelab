@@ -254,7 +254,6 @@ async fn run(explicit_host: Option<String>) {
             | "plan"
             | "runbook"
             | "update-policy"
-            | "dashboard"
             | "presets"
             | "export"
             | "import"
@@ -1482,30 +1481,6 @@ async fn run(explicit_host: Option<String>) {
             let ok = rpc_with(&host, &token, Command::SelfUpdateHost { binary_b64 }).await
                 && wait_for_updated_host(&host, &token, None).await;
             std::process::exit(if ok { 0 } else { 1 });
-        }
-        "dashboard" => {
-            // T2's generator, run locally for a stack the orchestrator does
-            // not manage yet. CT 104, 105, 106 and 111 predate this project
-            // and get their dashboard on deploy only once they are adopted
-            // (M8); until then Kenny's four busiest containers would have no
-            // dashboard at all, which is exactly the wrong four to be blind
-            // about.
-            //
-            // Deliberately the same function the deploy calls, so what is
-            // written by hand today is byte-identical to what the deploy
-            // writes later — the adoption replaces the file instead of
-            // fighting it.
-            let stack = args
-                .get(2)
-                .unwrap_or_else(|| die("usage: homelab dashboard <stack> <app>..."));
-            let apps: Vec<String> = args.iter().skip(3).cloned().collect();
-            if apps.is_empty() {
-                die("usage: homelab dashboard <stack> <app>... — name at least one app");
-            }
-            print!(
-                "{}",
-                homelab_core::ops::dashboard::dashboard_json(stack, &apps)
-            );
         }
         // Phase 7's output document, derived from the tests rather than kept
         // beside them — the same reasoning as `runbook`.

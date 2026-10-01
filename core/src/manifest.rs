@@ -20,26 +20,12 @@ pub struct StackManifest {
     #[serde(default)]
     pub storage: Vec<MountSpec>,
     pub apps: Vec<String>,
-    /// app-knowledge (Kenny, 2026-09-30: "Alles verplaatsen"): each app's
-    /// tile on the Homepage front page, keyed by app. It used to be a table
-    /// of seven apps in core/src/ops/homepage.rs, so a new app got a bare
-    /// link until the code learned about it.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub homepage_widgets: BTreeMap<String, HomepageWidget>,
     /// app-knowledge (2026-09-30): the file that keeps the house's own public
     /// address unblocked, and how its owner tests and reloads it. The gateway
     /// stack declares it for CrowdSec; it used to be three constants naming
     /// CrowdSec's path and container in core/src/ops/homeaddress.rs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_address_whitelist: Option<HomeAddressWhitelist>,
-    /// app-knowledge (2026-09-30): a shell command, run in this stack's
-    /// container, that prints the uid of every generated dashboard its
-    /// dashboard app is serving, one per line (the fleet check compares them
-    /// with the ones homelab wrote, F149). The metrics stack declares it for
-    /// Grafana; the credential names and the API used to be in
-    /// core/src/ops/facts.rs.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generated_dashboards_command: Option<String>,
     /// replace-homepage (Kenny, 2026-09-30): this stack's tiles on the
     /// dashboard's start page, keyed by the hostname they open. The stack
     /// that owns a route declares its tile; Homepage and its overlay file
@@ -619,22 +605,6 @@ pub struct Tile {
 
 fn default_tile_order() -> u32 {
     100
-}
-
-/// One app's Homepage widget (app-knowledge).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct HomepageWidget {
-    /// What Homepage calls this widget (`sonarr`, `jellyseerr`, …).
-    pub kind: String,
-    /// Shell that prints the API key and nothing else, run inside the
-    /// container that owns the app; `{dir}` is its config directory. None:
-    /// the key comes from Homepage's own `.env` (`HOMEPAGE_VAR_<APP>`).
-    #[serde(default)]
-    pub key_command: Option<String>,
-    /// Extra lines for the widget block, verbatim.
-    #[serde(default)]
-    pub extra: Vec<String>,
 }
 
 // ── Deploy payload ───────────────────────────────────────────────────────────

@@ -73,17 +73,14 @@ impl Executor for Slow {
 fn inputs() -> FactsInputs {
     FactsInputs {
         watched_backups: vec![],
-        kuma_monitors_file: None,
         state_dir: "/var/lib/homelab".into(),
         gateway_vmid: 104,
-        grafana_vmid: 113,
         gateway_routes_dir: "/appdata/gateway/traefik-config/routes".into(),
         no_touch: vec![100, 101, 102, 103],
         prometheus_url: None,
         loki_url: None,
         loki_vmid: None,
         logs_window: "24h".into(),
-        grafana_dashboards_dir: None,
         now_unix: 1_789_704_000,
         watched_fresh: true,
     }

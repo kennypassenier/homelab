@@ -19,17 +19,14 @@ fn attach(vmid: u16) -> String {
 fn inputs() -> FactsInputs {
     FactsInputs {
         watched_backups: vec![],
-        kuma_monitors_file: None,
         state_dir: "/var/lib/homelab".into(),
         gateway_vmid: 104,
-        grafana_vmid: 104,
         gateway_routes_dir: "/appdata/gateway/traefik-config/routes".into(),
         no_touch: vec![100, 101],
         prometheus_url: None,
         loki_url: None,
         loki_vmid: None,
         logs_window: "24h".into(),
-        grafana_dashboards_dir: None,
         now_unix: 1_789_704_000,
         watched_fresh: true,
     }
@@ -266,28 +263,6 @@ async fn g6_a_watched_backup_is_aged_against_now_and_a_failed_listing_is_an_erro
     );
 }
 
-/// T49: the seeder's verdict is read from the file beside the monitor list;
-/// no configured file means nothing to judge, which is not a finding.
-#[tokio::test]
-async fn g6_the_seed_verdict_comes_from_last_seed_json_beside_the_monitors() {
-    let exec = MockExecutor::new();
-    exec.seed_file(
-        "/appdata/uptime/kuma-seeder-config/last-seed.json",
-        r#"{"at": 1789700400, "judged": true, "stale": ["host · drill"]}"#,
-    );
-    let mut inp = inputs();
-    inp.kuma_monitors_file = Some("/appdata/uptime/kuma-seeder-config/host-monitors.json".into());
-    let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
-    assert_eq!(facts.seed.age_s, Some(3600));
-    assert!(facts.seed.judged);
-    assert_eq!(facts.seed.stale, vec!["host · drill".to_string()]);
-    assert!(facts.seed.error.is_none());
-
-    let (facts, _) = gather_live_facts(&MockExecutor::new(), &inputs(), &[]).await;
-    assert!(facts.seed.judged, "unconfigured = nothing to judge");
-    assert_eq!(facts.seed.age_s, Some(0));
-}
-
 /// Coverage is asked only where an address is configured, per recorded
 /// stack; Prometheus' answer is read for a `1`, and an unconfigured Loki
 /// leaves the logs question unasked rather than answered.
@@ -322,10 +297,6 @@ async fn g6_coverage_asks_prometheus_per_recorded_stack_and_leaves_loki_unasked(
     assert_eq!(
         media.logs_recent, None,
         "Loki was not configured, so not asked"
-    );
-    assert_eq!(
-        media.dashboard_provisioned, None,
-        "Grafana was not configured"
     );
     let kyu = facts.coverage.iter().find(|c| c.stack == "kyu").unwrap();
     assert_eq!(kyu.scraped, Some(false));
@@ -499,47 +470,6 @@ async fn coverage_asks_loki_for_every_stack_without_a_promtail_app() {
     assert_eq!(media.logs_recent, Some(false), "{:?}", exec.calls());
     let kyu = facts.coverage.iter().find(|c| c.stack == "kyu").unwrap();
     assert_eq!(kyu.logs_recent, Some(true), "{:?}", exec.calls());
-}
-
-/// fix-90 (2026-09-27, gateway-shared-no-limits): Grafana runs on the
-/// metrics container now, so the question which generated dashboards it
-/// serves is asked there, not on the gateway.
-/// covers: fix-90
-#[tokio::test]
-async fn fix_90_the_dashboard_question_is_asked_where_grafana_runs() {
-    let exec = MockExecutor::new();
-    exec.seed_file(
-        "/var/lib/homelab/state.json",
-        &serde_json::json!({
-            "schema_version": 1,
-            "stacks": {
-                "media": {"vmid": 106, "hostname": "106-app-media", "apps": ["jellyfin"], "applied_at": 1, "manifest": null},
-                // app-knowledge (2026-09-30): the question is the command the
-                // metrics stack declares, run where that stack runs.
-                "metrics": {"vmid": 113, "hostname": "113-app-metrics", "apps": ["grafana"], "applied_at": 1,
-                    "manifest": serde_yaml::from_str::<serde_json::Value>(
-                        &std::fs::read_to_string(
-                            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks/metrics/lxc-compose.yml"),
-                        ).unwrap(),
-                    ).unwrap()}
-            }
-        })
-        .to_string(),
-    );
-    exec.respond_always("api/search?tag=generated", CmdOutput::ok("homelab-media\n"));
-    let mut inp = inputs();
-    inp.prometheus_url = Some("http://10.10.10.13:9090".into());
-    inp.grafana_dashboards_dir =
-        Some("/opt/metrics/grafana/provisioning/dashboards-generated".into());
-    inp.grafana_vmid = 113;
-    let (facts, _) = gather_live_facts(&exec, &inp, &[]).await;
-    let asked = exec.calls_containing("api/search?tag=generated");
-    assert!(
-        asked.iter().any(|c| c.starts_with(&attach(113))),
-        "{asked:?}"
-    );
-    let media = facts.coverage.iter().find(|c| c.stack == "media").unwrap();
-    assert_eq!(media.dashboard_provisioned, Some(true));
 }
 
 /// fix-93 (expert panel 2026-09-27, loki-unauthenticated-open): the LAN port

@@ -3146,6 +3146,63 @@ retired — four separate apps replaced by four parts of this one dashboard.
   Down notice, its return an Up notice, and a dot on the tile. The host asks
   the dashboard's `watch_url` (host.toml) every minute in turn.
 
+#### visuals (2026-10-01): the fleet-wide graphs
+
+Everything below is derived — no app is named in code, and nothing is
+typed by hand: it comes from the stack files, Prometheus, restic and the
+fleet check's own findings. See `docs/admin/FEATURES.md` for the feature
+text and `docs/admin/REALIZATION_PLAN.md`'s `visuals` milestone for the
+decisions behind each one.
+
+- **Fleet view** (`/app/fleetview`): five sections, each reading its own
+  route so a Prometheus outage only empties the two that need it.
+  - **Topology** (feat-overview-7, `/data/topology`): which container may
+    reach which, drawn as an inline SVG graph (deterministic layout: nodes
+    on a circle, sorted by stack name) from the same firewall declarations
+    `/data/firewall`'s matrix reads (`admin/src/core/topology.rs`). A
+    dashed edge is an *open* target (no firewall in force, so nothing
+    declared stops anyone reaching it); a solid edge names the ports a
+    declared rule permits. No ingress (gateway route) edges yet — route
+    facts are parsed client-side only (F200, `homelab check`), out of
+    scope for this pass.
+  - **Capacity map** (feat-overview-11, `/data/capacity`): CPU, memory and
+    disk side by side for every stack, one Prometheus instant query per
+    metric across the whole fleet (`homelab_core::charts::fleet_capacity_panels`)
+    rather than one call per stack.
+  - **Disk growth** (feat-overview-12, `/data/disk-growth?range=7d&within_days=14`):
+    every stack's root disk and every hypervisor filesystem, fitted over
+    the chosen window with both a plain least-squares line and a robust
+    Theil-Sen line (the median of every pairwise slope — a single
+    log-filled-the-disk-for-an-hour spike cannot move it the way it moves
+    a mean); `homelab_core::diskgrowth::fit`. A row is a **warning** when
+    the robust fit's days-to-full is within `within_days` (default 14).
+  - **Dependencies** (feat-stacks-9, `/data/dependencies`): the same
+    topology's edges, read per stack as "depends on" / "depended on by" —
+    a dependency is a declared (or open) flow, directed.
+  - **Stale images** (feat-stacks-10, `/data/stale-images`): the fleet
+    check's own `noted` findings about a pinned image whose upstream moved
+    on (fix-83, `homelab_core::ops::pins::evaluate_pins`), parsed into a
+    table instead of a sentence — it reads the same run the Health page's
+    fleet check uses (`check_read`), so visiting both never starts the
+    read twice.
+- **Backup calendar** (`/app/backupcalendar`, feat-overview-10): the last
+  35 nights, one cell per day, green when every stack that keeps data has
+  at least one restic snapshot that night, amber for some, red for none.
+  Its own host command (`Command::BackupCalendar`, read-only, asks restic
+  directly through `homelab_core::ops::backup::snapshot_nights_unix`) and
+  its own `SlowRead` (`backup-calendar`, ~1–3 s per repository, so a large
+  fleet takes a while over the network) — kept apart from the Backups page
+  on purpose, so the two can be built in parallel without touching each
+  other's files.
+- **Measured traffic on the topology** (feat-firewall-3): the Firewall
+  page draws the same topology as Fleet view, with a ring around each
+  container sized by its own measured network throughput
+  (`/data/fleet-traffic`, received + transmitted bytes/s,
+  `homelab_core::charts::fleet_traffic_panels`). The fleet has no
+  per-neighbour flow metric (node_exporter counts a container's interface
+  as a whole, not by remote address), so this is each node's own total,
+  not a per-edge measurement — a limitation of the data, not of the graph.
+
 ### App knowledge in the stack files
 
 app-knowledge (Kenny, 2026-09-30: "Alles verplaatsen"): what homelab knows

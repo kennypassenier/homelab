@@ -31,6 +31,9 @@ fn fix_143_the_token_goes_to_curl_on_stdin_never_in_argv() {
         1,
         "{odd}"
     );
+    // The positive twin: the real url is what the "url = " line names —
+    // the token's own embedded line never becomes a second url option.
+    assert!(odd.contains(&format!("url = \"{}\"", url)), "{odd}");
     assert!(!odd.contains("\"https://evil\""), "{odd}");
 }
 

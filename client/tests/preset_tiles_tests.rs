@@ -102,6 +102,10 @@ fn a_tile_with_no_hostname_template_is_not_written() {
     let preset = synth_preset("app", "nginx:latest", tiles);
     scaffold_stack(&tmp, &tmp.join("presets"), &params("nohost", &preset)).unwrap();
     let text = std::fs::read_to_string(tmp.join("nohost/lxc-compose.yml")).unwrap();
+    // The positive twin: this is a real, parseable manifest with no tile,
+    // not an empty file that also has no `tiles:` key.
+    let m: StackManifest = serde_yaml::from_str(&text).unwrap();
+    assert!(m.tiles.is_empty());
     assert!(!text.contains("tiles:"), "{text}");
 }
 

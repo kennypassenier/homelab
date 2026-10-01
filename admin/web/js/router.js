@@ -25,6 +25,7 @@ export const STACK_TABS = /** @type {const} */ ([
  *   {page: "stack", name: string, tab: StackTab} |
  *   {page: "activity"} | {page: "jobs"} | {page: "schedules"} |
  *   {page: "notifications"} | {page: "firewall"} | {page: "settings"} |
+ *   {page: "backups"} | {page: "secrets"} |
  *   {page: "log"} | {page: "shell"} | {page: "apply"} |
  *   {page: "presets"} |
  *   {page: "start"} | {page: "today"} | {page: "doctor"} | {page: "checks"} |
@@ -74,6 +75,18 @@ export const NAV = /** @type {const} */ ([
     group: "Configure",
   },
   {
+    page: "backups",
+    href: "/app/backups",
+    label: "Backups",
+    group: "Configure",
+  },
+  {
+    page: "secrets",
+    href: "/app/secrets",
+    label: "Secrets",
+    group: "Configure",
+  },
+  {
     page: "settings",
     href: "/app/settings",
     label: "Settings",
@@ -106,6 +119,8 @@ const FIXED = {
   schedules: { page: "schedules" },
   notifications: { page: "notifications" },
   firewall: { page: "firewall" },
+  backups: { page: "backups" },
+  secrets: { page: "secrets" },
   settings: { page: "settings" },
   log: { page: "log" },
   shell: { page: "shell" },

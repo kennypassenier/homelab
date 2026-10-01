@@ -266,7 +266,17 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         | Ui { .. }
         | UiAttach
         | UiReply { .. }
-        | UiHold { .. } => return None,
+        | UiHold { .. }
+        // feat-backup-1/3, feat-secrets-1/2: reads and a value write with
+        // no CLI verb of their own — the Backups and Secrets pages are the
+        // only callers, so there is nothing to mirror as a copyable line.
+        // `restore-native` (feat-backup-2) stays dashboard-only the same
+        // way until the CLI grows a native-restore verb.
+        | GetBackups { .. }
+        | BrowseSnapshot { .. }
+        | RestoreNative { .. }
+        | RevealSecret { .. }
+        | SetSecret { .. } => return None,
     }
     Some(parts.join(" "))
 }

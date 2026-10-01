@@ -616,6 +616,42 @@ struct Inner {
     /// Decision "23 constants": [`KEEP_JOBS`] and [`HISTORY_WINDOW_S`],
     /// overridden from `ActConfig` (mount only).
     limits: std::sync::OnceLock<(usize, i64)>,
+    /// feat-secrets-2: a new secret value, staged by `POST
+    /// /data/secrets/{stack}/stage` and taken exactly once by the
+    /// `change-secret` job it is for — never part of `ActionArgs`/`JobView`,
+    /// never logged, expired after [`SECRET_STAGE_TTL`] either way.
+    secret_stage: std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, String)>>,
+}
+
+/// feat-secrets-2: how long a staged secret value waits for the job that
+/// asked for it before it is dropped unused.
+const SECRET_STAGE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// feat-secrets-2: an opaque, single-use token for one staged value — 256
+/// bits from the kernel's own CSPRNG (`/dev/urandom` via `getrandom(2)`,
+/// the same source TLS key material on this host already comes from), so
+/// it cannot be guessed or replayed from one request to the next the way a
+/// counter or a timestamp could.
+fn secret_stage_token() -> String {
+    let mut buf = [0u8; 32];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut buf))
+        .unwrap_or_else(|_| {
+            // No /dev/urandom (a non-Linux test run): fall back to a
+            // process-unique counter mixed with the clock. Not a security
+            // property, only a test-time escape hatch — production is
+            // Linux-on-Proxmox, which always has it.
+            static CTR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let c = CTR.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let t = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0);
+            for (i, b) in buf.iter_mut().enumerate() {
+                *b = ((c.wrapping_add(t)) >> ((i % 8) * 8)) as u8;
+            }
+        });
+    buf.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 /// The action queue.
@@ -657,6 +693,7 @@ impl Actions {
             releases: std::sync::OnceLock::new(),
             reconnect_wait: std::sync::OnceLock::new(),
             limits: std::sync::OnceLock::new(),
+            secret_stage: std::sync::Mutex::new(std::collections::HashMap::new()),
         });
         let worker = Actions {
             inner: inner.clone(),
@@ -694,6 +731,38 @@ impl Actions {
 
     fn keep_jobs(&self) -> usize {
         self.inner.limits.get().map(|l| l.0).unwrap_or(KEEP_JOBS)
+    }
+
+    /// feat-secrets-2: stage a new secret value for one `change-secret`
+    /// job, opaque token back. Never logged by the caller (`shell::secrets`)
+    /// — the body it came from is not even parsed into anything that could
+    /// be. Also sweeps expired entries, so a never-pressed stage does not
+    /// sit in memory forever.
+    pub fn stage_secret(&self, content: String) -> String {
+        let token = secret_stage_token();
+        let mut g = self
+            .inner
+            .secret_stage
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        g.retain(|_, (at, _)| at.elapsed() < SECRET_STAGE_TTL);
+        g.insert(token.clone(), (std::time::Instant::now(), content));
+        token
+    }
+
+    /// feat-secrets-2: the staged value, taken exactly once — a second call
+    /// with the same token (a retried press, a replayed drive step) finds
+    /// nothing, the same way a used ticket does not work twice.
+    fn take_staged_secret(&self, token: &str) -> Option<String> {
+        let mut g = self
+            .inner
+            .secret_stage
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match g.remove(token) {
+            Some((at, content)) if at.elapsed() < SECRET_STAGE_TTL => Some(content),
+            _ => None,
+        }
     }
 
     fn history_window_s(&self) -> i64 {
@@ -1098,6 +1167,22 @@ impl Actions {
             }
             Needs::Apply => return self.apply_material(req).await,
             _ => {}
+        }
+        if req.action == ActionKind::ChangeSecret {
+            let secret: homelab_proto::SecretRef = serde_json::from_str(
+                req.args.secret_ref.as_deref().unwrap_or(""),
+            )
+            .map_err(|_| Refusal::new(what.clone(), "secret_ref did not read", "report this"))?;
+            let content = self
+                .take_staged_secret(req.args.stage_token.as_deref().unwrap_or(""))
+                .ok_or_else(|| {
+                    Refusal::new(
+                        what.clone(),
+                        "the staged value is gone (it expired, or was already used)",
+                        "stage the new value again on the Secrets page and press Save once",
+                    )
+                })?;
+            return Ok(Material::Secret { secret, content });
         }
         if req.action.needs() == Needs::Vmid {
             return match self.fleet_stack(&req.stack) {
@@ -2176,6 +2261,11 @@ pub fn mount(
         publish: publish_for_edit,
     };
     app.dashboard_routes(super::edit::router(edit_ctx.clone()));
+    // feat-backup-1/3: the Backups page's read-only routes.
+    app.dashboard_routes(super::backups::router(host.clone()));
+    // feat-secrets-1/2: the Secrets page (list, reveal, stage); the write
+    // itself rides `ActionKind::ChangeSecret` through `edit_ctx.actions`.
+    app.dashboard_routes(super::secrets::router(edit_ctx.clone()));
     // feat-platform-10: the driver, its catch-up route and its relay; it
     // drives the edit forms through the same editor.
     let driver = super::drive::Driver::with_edit(

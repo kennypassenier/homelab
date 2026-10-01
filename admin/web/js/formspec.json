@@ -89,6 +89,20 @@
       "required": false,
       "danger": true
     },
+    "secret_ref": {
+      "kind": "text",
+      "label": "Secret",
+      "help": "Which secret, picked on the stack's Secrets page — type it by hand only when you already have its exact JSON.",
+      "required": true,
+      "placeholder": "pick on the Secrets page"
+    },
+    "stage_token": {
+      "kind": "text",
+      "label": "Staged value token",
+      "help": "The Secrets page stages the new value and fills this in itself; it is never the value.",
+      "required": true,
+      "placeholder": "set by the Secrets page"
+    },
     "commit": {
       "kind": "choice",
       "label": "Commit",

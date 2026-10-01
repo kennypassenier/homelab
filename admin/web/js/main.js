@@ -13,11 +13,13 @@ import { attachNavMenus, attachNavToggles } from "/static/kp/js/components.js";
 import { navEntries, pageTitle, redirectFor, route } from "./router.js";
 import { current, start, subscribe } from "./store.js";
 import { mount as activity } from "./pages/activity.js";
+import { mount as backups } from "./pages/backups.js";
 import { mount as firewall } from "./pages/firewall.js";
 import { mount as host } from "./pages/host.js";
 import { mount as jobs } from "./pages/jobs.js";
 import { mount as notifications } from "./pages/notifications.js";
 import { mount as schedules } from "./pages/schedules.js";
+import { mount as secrets } from "./pages/secrets.js";
 import { mount as settings } from "./pages/settings.js";
 import { mount as overview } from "./pages/overview.js";
 import { mount as stack } from "./pages/stack.js";
@@ -133,6 +135,12 @@ function render() {
       break;
     case "firewall":
       cleanup = firewall(page);
+      break;
+    case "backups":
+      cleanup = backups(page);
+      break;
+    case "secrets":
+      cleanup = secrets(page);
       break;
     case "settings":
       cleanup = settings(page);

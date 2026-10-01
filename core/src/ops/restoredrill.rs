@@ -6,21 +6,14 @@
 //! four drills this project HAS run were each one-off, done by hand, on a day
 //! somebody happened to think of it.
 //!
-//! The design follows from what the drills themselves taught. On 2026-09-02 a
-//! restore was declared identical to live by comparing two md5 sums that both
-//! belonged to a zero-byte file (F217, F219) — so the verdict here refuses to
-//! be satisfied by empty files, and looks at the LARGEST file that came back
-//! rather than the first. And it rotates rather than always taking the
-//! biggest repository, so every repository gets its turn.
-//!
-//! fix-62 (restore-drill-covers-almost-nothing, 2026-09-27): "over a year"
-//! was never true. One repository per 90 days over about thirty repositories
-//! is one rotation every 7.4 years, and one drill had run in total. A failure
-//! was cleared by the next repository's pass, host-meta and the device
-//! repositories were never drilled, and a torn tar passed the size rule. Now
-//! one repository is drilled every night (a rotation in about a month), each
-//! repository keeps its own record, the host's own repositories are in the
-//! rotation, and a native unit's tar has to list.
+//! The design follows from what the drills themselves taught (F217, F219,
+//! fix-62; story: `docs/deployment/REGISTER.md`): the verdict refuses to be
+//! satisfied by an empty file and looks at the LARGEST file that came back
+//! rather than the first; it rotates rather than always taking the biggest
+//! repository, so every repository gets its turn, drilled every night (a
+//! rotation in about a month); each repository keeps its own record; the
+//! host's own repositories are in the rotation; a native unit's tar has to
+//! list.
 
 use crate::ops::fleetcheck::{Finding, Severity};
 use crate::state::HostState;
@@ -97,11 +90,10 @@ pub fn drill_repos(
     out
 }
 
-/// fix-115 (drill-includes-stateless-native, 2026-09-27): the native units
-/// that have a repository. A unit that keeps nothing (`stateless: true`, no
-/// `data_dirs`) is never backed up, so a drill night spent on it failed on a
-/// repository that does not exist — the drill stack's `drillsvc` whenever
-/// that stack was present.
+/// fix-115: the native units that have a repository. A unit that keeps
+/// nothing (`stateless: true`, no `data_dirs`) is never backed up, so it has
+/// no repository for the drill to rotate over. Story:
+/// `docs/deployment/REGISTER.md`.
 pub fn backed_up_units(natives: &[crate::native::NativeServiceManifest]) -> Vec<String> {
     natives
         .iter()

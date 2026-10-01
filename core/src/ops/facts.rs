@@ -264,10 +264,9 @@ pub async fn gather_live_facts(
 
 /// [`gather_live_facts`], saying what it is doing as it goes.
 ///
-/// fix-104 (long-silences, 2026-09-27): `homelab check` took 41 s with
-/// nothing on the screen after "link up". `progress` is handed one line per
-/// phase and one per container probed; the host sends them to whoever is
-/// watching.
+/// fix-104: `progress` is handed one line per phase and one per container
+/// probed; the host sends them to whoever is watching, so a long wait is
+/// never silent. Story: `docs/deployment/REGISTER.md`.
 pub async fn gather_live_facts_with(
     exec: &dyn Executor,
     inp: &FactsInputs,

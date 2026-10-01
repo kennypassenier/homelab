@@ -1,14 +1,10 @@
 //! Keep the house's own public address in a CrowdSec whitelist on the
 //! gateway.
 //!
-//! fix-94 (Kenny, triage 2026-09-27, crowdsec-home-ip: "Thuisadres
-//! automatisch vrijstellen"). Until fix-45 CrowdSec saw every kp-soft.dev
-//! request as 172.18.0.1, the docker bridge the tunnel delivers through, and
-//! that range is whitelisted — so it could ban nobody, the house included.
-//! Since fix-45 it sees the real visitor, and a request Kenny made from home
-//! on 2026-09-27 was logged as 62.235.8.143: the router's WAN address. A
-//! burst of the house's own traffic can now get the house banned, and the
-//! Traefik bouncer then answers 403 to every name from home.
+//! fix-94: since fix-45 CrowdSec sees the real visitor address, so a burst
+//! of the house's own traffic can get the house banned and the Traefik
+//! bouncer then answers 403 to every name from home. Story:
+//! `docs/deployment/REGISTER.md`.
 //!
 //! The address is dynamic, so it cannot live in the static `whitelists.yaml`
 //! in the repository. The router knows it; the orchestrator already asks the
@@ -82,12 +78,9 @@ pub fn whitelisted_address(yaml: &str) -> Option<Ipv4Addr> {
     None
 }
 
-/// fix-156 (Kenny, 2026-09-28: "why would we ask the router? there are a
-/// lot of free services that give you your public IP"): the house's address
-/// is what a public service sees this host come from. The router read of
-/// fix-94 never worked on pve (the backup key may not read the interfaces,
-/// 403), so the whitelist and the dashboard's second lock had no address.
-/// Measured 2026-09-28 15:43: pve, CT 120 and WSL leave from one address.
+/// fix-156: the house's address is what a public service sees this host
+/// come from, not what the router reports (fix-94's router read never
+/// worked on pve). Story: `docs/deployment/REGISTER.md`.
 pub const PUBLIC_SOURCES: &[(&str, &str)] = &[
     ("cloudflare", "https://cloudflare.com/cdn-cgi/trace"),
     ("ipify", "https://api.ipify.org"),

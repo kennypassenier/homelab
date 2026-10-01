@@ -826,6 +826,13 @@ fn load_config_from(path: String) -> Config {
 /// wrote resolved values the file never said: the compiled no-touch list
 /// merged in, the default drill interval, a token from the environment.
 /// Comments in host.toml are not kept, as before.
+/// fix-134 (config-four-representations, expert panel, 2026-09-27):
+/// `render_settings_toml` used to round-trip the file through `FileConfig`
+/// (parse into the struct, re-serialize the whole struct), which is how
+/// every comment and the human's own key order were lost on the first
+/// settings-tab save. Editing in place with `toml_edit` touches only the
+/// three keys a settings save actually changes — everything else in the
+/// file, comments included, passes through byte-for-byte.
 fn render_settings_toml(
     config: &Config,
     settings: &homelab_proto::HostConfigView,
@@ -833,12 +840,37 @@ fn render_settings_toml(
     // feat-settings-1: the file as it is on disk now, so a key the dashboard
     // changed since the host started (`SetHostConfig`) is not written back
     // to its start-up value by a TUI settings save. The file as read at start
-    // when it cannot be read now.
-    let mut file = current_file_config(&config.config_path).unwrap_or_else(|| config.file.clone());
-    file.backup_hour = settings.backup_hour;
-    file.notify_webhook = settings.notify_webhook.clone();
-    file.retention = Some(settings.retention.clone());
-    toml::to_string_pretty(&file).map_err(|e| e.to_string())
+    // (re-rendered, so still comment-free) when it cannot be read now.
+    let raw = std::fs::read_to_string(&config.config_path)
+        .unwrap_or_else(|_| toml::to_string_pretty(&config.file).unwrap_or_default());
+    let mut doc = raw
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|e| format!("does not parse as TOML: {e}"))?;
+
+    match settings.backup_hour {
+        Some(h) => doc["backup_hour"] = toml_edit::value(i64::from(h)),
+        None => {
+            doc.remove("backup_hour");
+        }
+    }
+    match &settings.notify_webhook {
+        Some(w) => doc["notify_webhook"] = toml_edit::value(w.as_str()),
+        None => {
+            doc.remove("notify_webhook");
+        }
+    }
+    let mut tiers = toml_edit::ArrayOfTables::new();
+    for tier in &settings.retention {
+        let mut table = toml_edit::Table::new();
+        table.insert("every_days", toml_edit::value(i64::from(tier.every_days)));
+        if let Some(span) = tier.span_days {
+            table.insert("span_days", toml_edit::value(i64::from(span)));
+        }
+        tiers.push(table);
+    }
+    doc["retention"] = toml_edit::Item::ArrayOfTables(tiers);
+
+    Ok(doc.to_string())
 }
 
 /// Y1: how many backups actually run at once, given what the config says.
@@ -894,12 +926,6 @@ fn persist_settings(
 ) -> Result<(), String> {
     let raw = render_settings_toml(config, settings)?;
     write_config_file(&config.config_path, &raw)
-}
-
-/// host.toml as it is on disk now, when it reads.
-fn current_file_config(path: &str) -> Option<FileConfig> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    toml::from_str::<FileConfig>(&raw).ok()
 }
 
 /// feat-settings-1: the start-up validation's refusals for a file, without
@@ -2047,6 +2073,55 @@ port = 5003
         want.insert("backup_hour".into(), toml::Value::Integer(5));
         let got: toml::Table = toml::from_str(&rendered).unwrap();
         assert_eq!(got, want, "rendered:\n{rendered}");
+    }
+
+    /// fix-134 (config-four-representations): the round trip through
+    /// `FileConfig` that used to back a settings save cannot carry a
+    /// comment — a struct has no field for one. `config_from_text` deletes
+    /// its temp file the moment `load_config_from` returns, so it cannot
+    /// prove anything about a later read of the same path; this test keeps
+    /// the file on disk across the save, the way a real settings save
+    /// finds it.
+    ///
+    /// covers: fix-134
+    #[test]
+    fn fix_134_a_settings_save_keeps_the_file_s_own_comments() {
+        let raw = "\
+# the token nobody is allowed to rotate without telling Kenny first\n\
+token = \"0123456789abcdef0123\"\n\
+# backed up at 4am because that is when the drive is quietest\n\
+backup_hour = 4\n\
+\n\
+[[retention]]\n\
+every_days = 1\n\
+span_days = 7\n";
+
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "homelab-host-test-fix134-{}-{}.toml",
+            std::process::id(),
+            N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::write(&path, raw).unwrap();
+        let config = load_config_from(path.display().to_string());
+
+        let mut settings = config.initial_settings.clone();
+        settings.backup_hour = Some(5);
+        let rendered = render_settings_toml(&config, &settings).expect("render");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(
+            rendered
+                .contains("# the token nobody is allowed to rotate without telling Kenny first"),
+            "a comment on an untouched key must survive a save:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("# backed up at 4am because that is when the drive is quietest"),
+            "a comment on the CHANGED key must survive too — only the value moves:\n{rendered}"
+        );
+        // And the value changed as asked.
+        let got: toml::Table = toml::from_str(&rendered).unwrap();
+        assert_eq!(got["backup_hour"].as_integer(), Some(5));
     }
 
     /// The dashboard's key table and the file the host reads cannot drift:

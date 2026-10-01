@@ -14,6 +14,15 @@ use crate::sink::Level;
 
 use super::OpCtx;
 
+/// fix-70 (native-uptime-panel-wrong, 2026-10-01): the Debian package's
+/// default `/etc/default/prometheus-node-exporter` ships no
+/// `--collector.systemd.enable-start-time-metrics`, so the collector never
+/// exposed a unit's own start time — only its `ActiveState`. Declared once
+/// here so the template, a test and a human reading this file see the same
+/// flag instead of three copies drifting apart.
+pub const NODE_EXPORTER_ARGS: &str =
+    "ARGS=\"--collector.systemd --collector.systemd.enable-start-time-metrics\"\n";
+
 pub struct TemplateCfg {
     /// The vmid the builder may create AND destroy. Nothing else, ever.
     pub temp_vmid: u16,
@@ -211,6 +220,26 @@ pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationRepo
             return Err(CoreError::Command {
                 rendered: "bake node_exporter".into(),
                 detail: install.stderr,
+            });
+        }
+        // fix-70: baked straight into the template's ARGS file (not a per-stack
+        // setting — node_exporter is one systemd service per container, outside
+        // compose entirely) so every container, present and future, exposes
+        // unit start times without a per-deploy step.
+        let configure = pct_sh(
+            exec,
+            cfg.temp_vmid,
+            &format!(
+                "printf '%s' '{}' > /etc/default/prometheus-node-exporter && systemctl restart prometheus-node-exporter",
+                NODE_EXPORTER_ARGS
+            ),
+            60,
+        )
+        .await?;
+        if !configure.success() {
+            return Err(CoreError::Command {
+                rendered: "configure node_exporter".into(),
+                detail: configure.stderr,
             });
         }
         // cadvisor is a container, so the template only needs its image

@@ -972,7 +972,11 @@ The procedure is DR_RUNBOOK.md Layer 4, "A native stack"
   data directories hold no files while its repository has snapshots, and the
   refusal names this procedure. That is what a rebuilt container looks like
   before this procedure has run; before the guard, one night was enough to
-  make the empty state the latest snapshot. The deploy still starts the unit
+  make the empty state the latest snapshot. The worked example below is read
+  straight out of this file and run against the mock executor by
+  `core/tests/fix_63_op11_runbook_tests.rs`, so an edit here that breaks the
+  sequence (stop before unpack, start after, a vmid that drifts between the
+  lines) fails at commit time rather than at 2am. The deploy still starts the unit
   on empty directories, so the service runs empty until this is done.
 
 Worked example, host, almanac on CT 112:
@@ -1148,6 +1152,14 @@ zfs-replicate` ran with no jobs (`core/src/ops/zfs.rs:432-437`).
    `template: clone:<vmid>` (`core/src/ops/template.rs:317`). Build one
    unprivileged and one `--privileged`: a clone cannot change its privilege
    level (`core/src/ops/template.rs:40-44`).
+4. node_exporter is baked in with
+   `--collector.systemd.enable-start-time-metrics`
+   (`core/src/ops/template.rs::NODE_EXPORTER_ARGS`, fix-70): without it
+   `node_systemd_unit_state` carries no start time, and a native stack's
+   generated "Service uptime" panel (`core/src/charts.rs`) has nothing to
+   subtract from "now". A template built before fix-70 needs a new
+   `template-build` to pick the flag up — an existing clone is not patched
+   in place.
 
 ---
 

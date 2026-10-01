@@ -140,17 +140,11 @@ pub struct TracingExecutor<'a> {
 /// kyu). No reader needs more than the start of a line to know what it was.
 pub const TRACE_LINE_MAX: usize = 300;
 
-/// fix-39, second layer, widened by fix-56 (expert panel,
-/// secret-mask-too-narrow, 2026-09-27): the one masker every transcript line
-/// passes through, ported from the house filter
-/// `dev-procedure/hooks/mask-secrets.sed`.
-///
+/// fix-39, widened by fix-56: the one masker every transcript line passes
+/// through, ported from the house filter `dev-procedure/hooks/mask-secrets.sed`.
 /// `Cmd::quiet` keeps known secret reads out entirely; this catches the paths
-/// nobody marked, such as `docker inspect` printing a container's environment
-/// on 2026-09-01. The fix-39 version knew one shape, upper-case `NAME=value`
-/// unquoted; measured against it, `KYU_TOKEN="abc"`, `export API_KEY='abc'`,
-/// `password=abc`, YAML `KEY: v`, JSON, `postgres://u:p@`,
-/// `Authorization: Bearer` and `?api_key=` all passed in plain text. Now:
+/// nobody marked. What fix-56 widened it to catch, and why, is in
+/// `docs/deployment/REGISTER.md`'s fix-39 and fix-56 rows. Current shape:
 ///
 /// - a name holding TOKEN, SECRET, KEY, PASS, BEARER or CREDENTIAL (any case)
 ///   followed by `=` or `:` loses its value, quoted or not, in env, shell,

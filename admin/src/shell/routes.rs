@@ -594,6 +594,33 @@ async fn disk_growth(State(c): State<ReadCtx>, Query(q): Query<GrowthQuery>) -> 
     .into_response()
 }
 
+/// feat-firewall-3 (measured traffic on the topology): total network
+/// throughput per stack — see `homelab_core::charts::fleet_traffic_panels`
+/// for why this is per-node, not per-edge.
+async fn fleet_traffic(State(c): State<ReadCtx>) -> Response {
+    let Some(prom) = &c.prometheus else {
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the measured traffic",
+            "no Prometheus is configured for this dashboard",
+            "set admin.prometheus_url (or HOMELAB_ADMIN_PROMETHEUS_URL) to Prometheus's address",
+        );
+    };
+    let stacks = fleet_stack_names(&c).await;
+    if stacks.is_empty() {
+        return Json(serde_json::json!({ "panels": [] })).into_response();
+    }
+    let mut out = Vec::new();
+    for p in homelab_core::charts::fleet_traffic_panels(&stacks) {
+        let r = prom.instant(&p.query, p.legend.as_deref()).await;
+        out.push(match r {
+            Ok(series) => serde_json::json!({ "panel": p, "series": series }),
+            Err(e) => serde_json::json!({ "panel": p, "series": [], "error": e }),
+        });
+    }
+    Json(serde_json::json!({ "panels": out, "measured_at": now_s() })).into_response()
+}
+
 pub fn read_router(ctx: ReadCtx) -> Router {
     Router::new()
         .route("/data/host", get(host))
@@ -605,5 +632,6 @@ pub fn read_router(ctx: ReadCtx) -> Router {
         .route("/data/traffic", get(traffic))
         .route("/data/capacity", get(capacity))
         .route("/data/disk-growth", get(disk_growth))
+        .route("/data/fleet-traffic", get(fleet_traffic))
         .with_state(ctx)
 }

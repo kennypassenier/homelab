@@ -237,6 +237,12 @@ struct FileConfig {
     incident_bundle_max_age_days: Option<u64>,
     /// fix-131: at most this many incident bundles are kept. Default 200.
     incident_bundle_max_count: Option<usize>,
+    /// gap-26: `journal.jsonl` is cut back to half of this many bytes once
+    /// it grows past it (`compact_journal_file`). Default 4 MiB
+    /// (`incidents::JOURNAL_MAX_BYTES`) — was a fixed constant with no
+    /// host.toml key and no dashboard row, unlike the incident-bundle
+    /// limits right above it.
+    journal_max_bytes: Option<u64>,
     /// How long one GitHub answer about a pinned upstream stands. Default
     /// 20 hours.
     upstream_max_age_s: Option<u64>,
@@ -370,6 +376,8 @@ struct Config {
     incident_bundle_max_age_days: u64,
     /// [`homelab_core::incidents::BUNDLE_MAX_COUNT`] by default.
     incident_bundle_max_count: usize,
+    /// gap-26: [`homelab_core::incidents::JOURNAL_MAX_BYTES`] by default.
+    journal_max_bytes: u64,
     /// [`homelab_core::ops::pins::UPSTREAM_MAX_AGE_S`] by default.
     upstream_max_age_s: u64,
     /// Y1: how many stack backups the nightly round runs at once. Measured
@@ -638,6 +646,9 @@ fn load_config_from(path: String) -> Config {
         incident_bundle_max_count: file
             .incident_bundle_max_count
             .unwrap_or(homelab_core::incidents::BUNDLE_MAX_COUNT),
+        journal_max_bytes: file
+            .journal_max_bytes
+            .unwrap_or(homelab_core::incidents::JOURNAL_MAX_BYTES as u64),
         upstream_max_age_s: file
             .upstream_max_age_s
             .unwrap_or(homelab_core::ops::pins::UPSTREAM_MAX_AGE_S),
@@ -1943,6 +1954,46 @@ port = 5003
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(removed, 1);
         assert!(old_gone && young_kept);
+    }
+
+    /// gap-26: `journal_max_bytes` used to be the fixed constant
+    /// `incidents::JOURNAL_MAX_BYTES`, with no host.toml key and no
+    /// dashboard row — unlike the incident-bundle limits right beside it.
+    /// Absent, the default still applies; set, host.toml wins.
+    #[test]
+    fn gap_26_journal_max_bytes_defaults_and_follows_host_toml() {
+        let cfg = config_from_text("token = \"0123456789abcdef0123\"\n");
+        assert_eq!(
+            cfg.journal_max_bytes,
+            homelab_core::incidents::JOURNAL_MAX_BYTES as u64
+        );
+        let cfg = config_from_text("token = \"0123456789abcdef0123\"\njournal_max_bytes = 65536\n");
+        assert_eq!(cfg.journal_max_bytes, 65536);
+    }
+
+    /// gap-26: `compact_journal_file` honours the configured limit rather
+    /// than the hardcoded default — a small `max_bytes` cuts a journal the
+    /// default would have left alone.
+    #[test]
+    fn gap_26_compact_journal_file_uses_the_configured_limit() {
+        let dir = std::env::temp_dir().join(format!("homelab-gap26-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let line = "{\"op\":\"deploy\",\"at\":1,\"running\":false}\n";
+        let content = line.repeat(2000); // well under JOURNAL_MAX_BYTES, well over 64 KiB
+        assert!(content.len() < homelab_core::incidents::JOURNAL_MAX_BYTES);
+        let path = dir.join("journal.jsonl");
+        std::fs::write(&path, &content).unwrap();
+        compact_journal_file(&dir.to_string_lossy(), 65536);
+        let cut = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            cut.len() < content.len(),
+            "a 64 KiB configured limit must cut a journal the 4 MiB default would not: \
+             {} -> {}",
+            content.len(),
+            cut.len()
+        );
     }
 
     /// A session over a real socket on a free local port, with `handler` in
@@ -4793,7 +4844,7 @@ async fn main() {
     tighten_private_paths(&config.state_dir);
     // fix-131: bound the daemon's own records before anything runs, so
     // nothing writes the journal while it is cut.
-    compact_journal_file(&config.state_dir);
+    compact_journal_file(&config.state_dir, config.journal_max_bytes);
     prune_incidents(
         &config.state_dir,
         std::time::SystemTime::now()
@@ -5624,6 +5675,21 @@ async fn scheduler_loop(state: AppState) {
         // thing an `await` stuck forever cannot do.
         touch_scheduler_heartbeat(&state);
         spawn_mirror_push(&state); // D5 retry queue: try again every tick
+                                   // password-chain-bus-factor: the standing checks exist whether or
+                                   // not nightly backups are scheduled — a disabled scheduler must not
+                                   // also silence the one question that is on a clock rather than a
+                                   // deploy.
+        {
+            let tick_now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+            record_state(&store, "ensure standing checks", |s| {
+                homelab_core::ops::manualchecks::ensure_standing_checks(s, tick_now)
+            })
+            .await;
+        }
         let (hour, tiers) = {
             let s = state
                 .settings
@@ -6159,8 +6225,9 @@ async fn scheduler_loop(state: AppState) {
             let dir = state.config.state_dir.clone();
             let max_age_days = state.config.incident_bundle_max_age_days;
             let max_count = state.config.incident_bundle_max_count;
+            let journal_max_bytes = state.config.journal_max_bytes;
             let _ = tokio::task::spawn_blocking(move || {
-                compact_journal_file(&dir);
+                compact_journal_file(&dir, journal_max_bytes);
                 prune_incidents(&dir, now, max_age_days, max_count);
             })
             .await;
@@ -9549,15 +9616,16 @@ fn prune_incidents(state_dir: &str, now: u64, max_age_days: u64, max_count: usiz
 /// (`incidents::compact_journal`), written whole through a temp file.
 /// Called only while nothing writes the journal: at start, and under the
 /// operation lock.
-fn compact_journal_file(state_dir: &str) {
+///
+/// gap-26: `max_bytes` used to be the hardcoded `incidents::JOURNAL_MAX_BYTES`
+/// — unlike the incident-bundle limits right beside it in host.toml, this one
+/// had no key and no dashboard row. The caller now passes `config.journal_max_bytes`.
+fn compact_journal_file(state_dir: &str, max_bytes: u64) {
     let path = format!("{}/journal.jsonl", state_dir);
     let Ok(content) = std::fs::read_to_string(&path) else {
         return;
     };
-    let Some(cut) = homelab_core::incidents::compact_journal(
-        &content,
-        homelab_core::incidents::JOURNAL_MAX_BYTES,
-    ) else {
+    let Some(cut) = homelab_core::incidents::compact_journal(&content, max_bytes as usize) else {
         return;
     };
     let tmp = format!("{}.compact.tmp", path);

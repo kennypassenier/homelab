@@ -156,6 +156,7 @@ fn check(stack: &str, app: &str, text: &str) -> (String, ManualCheckRecord) {
             accepted_until: None,
             once: false,
             url: None,
+            recur_days: None,
         },
     )
 }

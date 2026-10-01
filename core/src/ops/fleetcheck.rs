@@ -948,6 +948,11 @@ pub enum HostCapacityMetric {
     Journald,
     /// Prometheus' TSDB against its configured `--storage.tsdb.retention.size`.
     PrometheusTsdb,
+    /// The homelab daemon's own native-backup staging directory
+    /// (`native_backup_staging_dir`, default `/appdata/.backup-staging`)
+    /// against `native_backup_staging_cap_mib` — it is emptied after every
+    /// run, so anything here at all past a run is itself the finding.
+    NativeBackupStaging,
 }
 
 impl HostCapacityMetric {
@@ -959,6 +964,7 @@ impl HostCapacityMetric {
             Self::ZfsPool => "ZFS pool",
             Self::Journald => "pve's journald",
             Self::PrometheusTsdb => "Prometheus' TSDB",
+            Self::NativeBackupStaging => "the native-backup staging directory",
         }
     }
     fn remedy(self) -> &'static str {
@@ -984,6 +990,10 @@ impl HostCapacityMetric {
             Self::PrometheusTsdb => {
                 "retention.size is the ceiling, not a target — either it is doing its job and \
                  this is expected, or retention.time is now too generous for the ceiling"
+            }
+            Self::NativeBackupStaging => {
+                "it is emptied after every run — this means the last run did not finish \
+                 cleanly; check the nightly log, then clear it by hand if it is stale"
             }
         }
     }
@@ -1022,6 +1032,11 @@ pub struct HostCapacityThresholds {
     /// Of Prometheus' configured `--storage.tsdb.retention.size`.
     pub tsdb_warn_pct: u8,
     pub tsdb_critical_pct: u8,
+    /// Of `native_backup_staging_cap_mib` — low on purpose: the directory is
+    /// emptied after every run, so ANY leftover is already worth a look,
+    /// well before it could ever fill the cap.
+    pub native_backup_staging_warn_pct: u8,
+    pub native_backup_staging_critical_pct: u8,
 }
 
 impl Default for HostCapacityThresholds {
@@ -1041,6 +1056,10 @@ impl Default for HostCapacityThresholds {
             journald_critical_pct: 95,
             tsdb_warn_pct: 70,
             tsdb_critical_pct: 90,
+            // 10% of a 10 GiB default cap is already 1 GiB sitting where
+            // nothing should be between runs.
+            native_backup_staging_warn_pct: 10,
+            native_backup_staging_critical_pct: 50,
         }
     }
 }
@@ -1058,6 +1077,10 @@ impl HostCapacityThresholds {
             HostCapacityMetric::ZfsPool => (self.zfs_pool_warn_pct, self.zfs_pool_critical_pct),
             HostCapacityMetric::Journald => (self.journald_warn_pct, self.journald_critical_pct),
             HostCapacityMetric::PrometheusTsdb => (self.tsdb_warn_pct, self.tsdb_critical_pct),
+            HostCapacityMetric::NativeBackupStaging => (
+                self.native_backup_staging_warn_pct,
+                self.native_backup_staging_critical_pct,
+            ),
         }
     }
 }
@@ -1135,6 +1158,11 @@ pub fn parse_prometheus_scalar(json: &str) -> Option<f64> {
     let quoted = after_ts.split_once('"')?.1;
     let (num, _) = quoted.split_once('"')?;
     num.parse().ok()
+}
+
+/// rule-20: `du -sm <dir>` — the first whitespace-separated token, in MiB.
+pub fn parse_du_sm(out: &str) -> Option<u64> {
+    out.lines().next()?.split_whitespace().next()?.parse().ok()
 }
 
 /// rule-20: a finding per host-level capacity reading past its warn or

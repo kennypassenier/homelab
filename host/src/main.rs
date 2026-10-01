@@ -8464,6 +8464,8 @@ async fn gather_live_facts(
         exec,
         state.config.prometheus_url.as_deref(),
         state.config.tsdb_retention_size_mib,
+        state.config.backup.staging_dir.as_deref(),
+        state.config.backup.staging_cap_mib,
     )
     .await;
     facts
@@ -8480,6 +8482,8 @@ async fn gather_host_capacity(
     exec: &dyn Executor,
     prometheus_url: Option<&str>,
     tsdb_retention_size_mib: Option<u64>,
+    native_backup_staging_dir: Option<&str>,
+    native_backup_staging_cap_mib: u64,
 ) -> Vec<homelab_core::ops::fleetcheck::HostCapacityFact> {
     use homelab_core::ops::fleetcheck::{parse_df_pcent, HostCapacityFact, HostCapacityMetric};
     let mut out = Vec::new();
@@ -8588,6 +8592,29 @@ async fn gather_host_capacity(
                     detail: format!(
                         "{} MiB of its {} MiB retention.size ({}%)",
                         used_mib, cap_mib, pct
+                    ),
+                });
+            }
+        }
+    }
+
+    // rule-20 (coordinator, 2026-10-01): the native-backup staging directory
+    // is emptied after every run (backup.rs, DEFAULT_STAGING_DIR) — so
+    // anything found here at all is worth a look well before it could ever
+    // fill its own cap, which is why its thresholds are far lower than
+    // every other reading above.
+    if let Some(dir) = native_backup_staging_dir {
+        if let Ok(o) = exec.run(&Cmd::new("du", &["-sm", dir], 30)).await {
+            if let Some(used_mib) = homelab_core::ops::fleetcheck::parse_du_sm(&o.stdout) {
+                let cap = native_backup_staging_cap_mib.max(1);
+                let pct = ((used_mib * 100) / cap).min(255) as u8;
+                out.push(HostCapacityFact {
+                    metric: HostCapacityMetric::NativeBackupStaging,
+                    subject: dir.to_string(),
+                    used_pct: pct,
+                    detail: format!(
+                        "{} MiB of its {} MiB cap ({}%) — it should be empty between runs",
+                        used_mib, cap, pct
                     ),
                 });
             }

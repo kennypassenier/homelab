@@ -1775,10 +1775,36 @@ fn gap_23_a_stale_or_missing_host_meta_backup_is_broken() {
 // ── rule-20: host-level capacity thresholds ─────────────────────────────────
 
 use homelab_core::ops::fleetcheck::{
-    evaluate_host_capacity, parse_df_pcent, parse_journal_disk_usage_mib, parse_prometheus_scalar,
-    parse_thin_pool_percents, parse_zpool_capacities, HostCapacityFact, HostCapacityMetric,
-    HostCapacityThresholds,
+    evaluate_host_capacity, parse_df_pcent, parse_du_sm, parse_journal_disk_usage_mib,
+    parse_prometheus_scalar, parse_thin_pool_percents, parse_zpool_capacities, HostCapacityFact,
+    HostCapacityMetric, HostCapacityThresholds,
 };
+
+#[test]
+fn rule_20_parse_du_sm_reads_the_first_column() {
+    assert_eq!(parse_du_sm("128\t/appdata/.backup-staging\n"), Some(128));
+    assert_eq!(parse_du_sm(""), None);
+}
+
+/// rule-20 (coordinator, 2026-10-01): the staging directory is emptied
+/// after every run, so its thresholds are deliberately low — 10% of a
+/// small cap is already a leftover worth a look.
+#[test]
+fn rule_20_native_backup_staging_has_its_own_low_thresholds() {
+    let lim = HostCapacityThresholds::default();
+    let fact = |pct: u8| HostCapacityFact {
+        metric: HostCapacityMetric::NativeBackupStaging,
+        subject: "/appdata/.backup-staging".into(),
+        used_pct: pct,
+        detail: format!("{}%", pct),
+    };
+    assert!(evaluate_host_capacity(&[fact(5)], lim).is_empty());
+    let warn = evaluate_host_capacity(&[fact(20)], lim);
+    assert_eq!(warn.len(), 1);
+    assert_eq!(warn[0].severity, Severity::Drift);
+    let critical = evaluate_host_capacity(&[fact(60)], lim);
+    assert_eq!(critical[0].severity, Severity::Broken);
+}
 
 #[test]
 fn rule_20_parse_prometheus_scalar_reads_the_instant_query_shape() {

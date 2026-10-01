@@ -19,13 +19,10 @@ pub fn ensure_cert(dir: &str, hostname: &str) -> std::io::Result<(CertPaths, Str
     let key_path = format!("{}/tls-key.pem", dir);
 
     if !pair_is_whole(&cert_path, &key_path) {
-        // fix-128 (expert panel, tls-first-boot-power-cut, 2026-09-27): a
-        // pair that is not whole is replaced whole. A power cut during the
-        // first boot used to leave a key without its certificate, or an
-        // empty certificate, and the daemon crash-looped on it until
-        // someone deleted the files by hand. No client can hold a pin for a
-        // pair that never served, and a broken pair of a host that did
-        // serve fails the pin loudly, which is the safe way round.
+        // fix-128 (see REGISTER.md): a pair that is not whole is replaced
+        // whole. No client can hold a pin for a pair that never served, and
+        // a broken pair of a host that did serve fails the pin loudly,
+        // which is the safe way round.
         if Path::new(&cert_path).exists() || Path::new(&key_path).exists() {
             eprintln!(
                 "WARNING: {} and {} are not a whole pair — making a new certificate; clients \
@@ -148,10 +145,7 @@ mod tests {
         dir.to_string_lossy().into_owned()
     }
 
-    /// fix-128 (expert panel, tls-first-boot-power-cut, 2026-09-27): a power
-    /// cut during the first boot could leave the key without the
-    /// certificate. The next start then failed `create_new` on the key and
-    /// the daemon crash-looped until someone deleted the file by hand.
+    /// fix-128 (see REGISTER.md): a key without its certificate.
     #[test]
     fn fix_128_a_key_without_its_certificate_is_replaced_by_a_new_pair() {
         let dir = fresh_dir("keyonly");
@@ -165,9 +159,7 @@ mod tests {
         assert!(key.contains("PRIVATE KEY"), "{}", key);
     }
 
-    /// fix-128: the certificate was written with a plain `std::fs::write`, no
-    /// fsync, so a power cut could leave it empty; the daemon then panicked
-    /// on `load tls` at every start.
+    /// fix-128 (see REGISTER.md): an empty certificate.
     #[test]
     fn fix_128_an_empty_certificate_is_replaced_by_a_new_pair() {
         let dir = fresh_dir("emptycert");

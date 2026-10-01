@@ -107,13 +107,11 @@ fn validate_tokens(tokens: &[TokenEntry]) -> Result<(), String> {
 
 /// host.toml as written: the one serde representation of the file.
 ///
-/// config-four-representations (expert panel, 2026-09-27): the same struct is
+/// config-four-representations (see REGISTER.md fix-134): the same struct is
 /// read, checked for keys it does not read (`unknown_keys`), and written
-/// back by a settings save (`render_settings_toml`). There used to be a
-/// second, hand-kept struct for the write and hand-kept key lists for the
-/// check, held in step by tests that scraped this source file. Every field
-/// is optional so that what is written back is only what the file said;
-/// defaults are applied when `Config` is resolved.
+/// back by a settings save (`render_settings_toml`). Every field is optional
+/// so that what is written back is only what the file said; defaults are
+/// applied when `Config` is resolved.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, Default)]
 struct FileConfig {
     token: Option<String>,
@@ -230,7 +228,7 @@ struct FileConfig {
     /// upload over a residential uplink is slow.
     restic_snapshot_timeout_s: Option<u64>,
     /// Seconds a single restore may take. Default 4 h, matching the snapshot
-    /// side — it used to be a hardcoded 1800 (F38).
+    /// side (F38, see REGISTER.md).
     restic_restore_timeout_s: Option<u64>,
     /// fix-113 ADDENDUM (owner + chassis-rs, 2026-10-01): where a
     /// `backup_pause: chassis` native backup stages its local copy before
@@ -272,9 +270,7 @@ struct FileConfig {
     incident_bundle_max_count: Option<usize>,
     /// gap-26: `journal.jsonl` is cut back to half of this many bytes once
     /// it grows past it (`compact_journal_file`). Default 4 MiB
-    /// (`incidents::JOURNAL_MAX_BYTES`) — was a fixed constant with no
-    /// host.toml key and no dashboard row, unlike the incident-bundle
-    /// limits right above it.
+    /// (`incidents::JOURNAL_MAX_BYTES`, see REGISTER.md).
     journal_max_bytes: Option<u64>,
     /// fix-122 (AR15's JSONL ring, Kenny's go 2026-10-01): size cap in bytes
     /// of `logs/host.jsonl`, the daemon's own trace ring — cut back to half
@@ -512,25 +508,12 @@ struct Config {
     file: FileConfig,
 }
 
-/// ── F186: keys the daemon would otherwise ignore in silence. ──────────
-///
-/// `host.toml` is hand-edited, and TOML's rule that bare keys belong to the
-/// table header above them makes one specific mistake invisible: append a
-/// setting at the end of the file and it becomes a field of whatever table
-/// happened to be last. That is not hypothetical. On 2026-09-02 the two
-/// OPNsense keys sat under the final `[[registry_cache.upstreams]]` entry,
-/// so `kea` was None and the whole static-address feature was off, on a host
-/// whose operator had every reason to believe it was on. The file's own
-/// comment warns about the trap; the warning was written after the first
-/// time and did not prevent the second.
-///
-/// Serde ignores unknown fields by default, which is what makes it silent.
-/// The keys it reads are found by reading the file into `FileConfig` and
-/// writing that back: whatever the round trip lost, no field reads
-/// (config-four-representations, 2026-09-27; this replaced hand-kept key
-/// lists that had drifted, see the retention `keep` test). Returned as
-/// dotted paths, e.g. `registry_cache.upstreams[0].opnsense_url`. A file
-/// that does not deserialize returns nothing here; loading it fails loudly.
+/// F186: a misplaced `host.toml` key silently lands under the wrong table
+/// header and serde drops it as unknown — see REGISTER.md. Found by reading
+/// the file into `FileConfig` and writing that back: whatever the round trip
+/// lost, no field reads (config-four-representations). Returned as dotted
+/// paths, e.g. `registry_cache.upstreams[0].opnsense_url`. A file that does
+/// not deserialize returns nothing here; loading it fails loudly.
 fn unknown_keys(raw: &toml::Table) -> Vec<String> {
     fn walk(out: &mut Vec<String>, raw: &toml::Value, read: Option<&toml::Value>, path: &str) {
         match (raw, read) {
@@ -878,20 +861,10 @@ fn load_config_from(path: String) -> Config {
 /// G8: render host.toml for a settings save: the file as it was read, with
 /// only the settings the TUI may change replaced.
 ///
-/// config-four-representations (expert panel, 2026-09-27): this serialises
-/// `FileConfig` itself. It used to fill a separate hand-kept struct from the
-/// resolved `Config`, so every new field had to be added twice, and a field
-/// forgotten there was wiped from host.toml by the next save (F208). It also
-/// wrote resolved values the file never said: the compiled no-touch list
-/// merged in, the default drill interval, a token from the environment.
-/// Comments in host.toml are not kept, as before.
-/// fix-134 (config-four-representations, expert panel, 2026-09-27):
-/// `render_settings_toml` used to round-trip the file through `FileConfig`
-/// (parse into the struct, re-serialize the whole struct), which is how
-/// every comment and the human's own key order were lost on the first
-/// settings-tab save. Editing in place with `toml_edit` touches only the
-/// three keys a settings save actually changes — everything else in the
-/// file, comments included, passes through byte-for-byte.
+/// fix-134 (config-four-representations, see REGISTER.md): edits in place
+/// with `toml_edit`, touching only the three keys a settings save actually
+/// changes — everything else in the file, comments and key order included,
+/// passes through byte-for-byte.
 fn render_settings_toml(
     config: &Config,
     settings: &homelab_proto::HostConfigView,
@@ -1460,11 +1433,8 @@ mod tests {
         assert!(!home_address_after_deploy(115, true, 104));
     }
 
-    /// fix-51 (expert panel, state-writes-race, 2026-09-27): two writers of
-    /// one path shared the temp name `<path>.tmp`. One removed the other's
-    /// half-written temp file, or `create_new` failed with EEXIST, and the
-    /// error was thrown away by `let _ = store.save(..)`. Concurrent writes of
-    /// one path must all succeed and leave one whole version behind.
+    /// fix-51 (see REGISTER.md): concurrent writes of one path must all
+    /// succeed and leave one whole version behind.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn fix_51_concurrent_writes_of_one_path_all_succeed_and_stay_whole() {
         use homelab_core::executor::Executor;
@@ -1499,11 +1469,8 @@ mod tests {
         assert!(leftovers.is_empty(), "no temp files left: {:?}", leftovers);
     }
 
-    /// fix-52 (expert panel, background-tasks-unsupervised, 2026-09-27): the
-    /// scheduler was spawned and its handle dropped, so one panic in it ended
-    /// the nightly backups for good while the daemon kept serving and the
-    /// watchdog kept being fed. A dead scheduler must end the process with a
-    /// failure, so systemd restarts it with a live one.
+    /// fix-52 (see REGISTER.md): a dead scheduler must end the process with
+    /// a failure, so systemd restarts it with a live one.
     #[tokio::test]
     async fn fix_52_a_dead_scheduler_ends_the_daemon_with_a_failure() {
         let scheduler = tokio::spawn(async { panic!("scheduler bug") });
@@ -1958,10 +1925,8 @@ mod tests {
         );
     }
 
-    /// fix-120: a connection refused for its token used to leave no trace at
-    /// all, so a probe from a compromised container or a stolen token tried
-    /// from a new machine was invisible. Every refusal is counted with the
-    /// address it came from, for `homelab doctor`.
+    /// fix-120 (see REGISTER.md): every refusal is counted with the address
+    /// it came from, for `homelab doctor`.
     #[tokio::test]
     async fn fix_120_a_refused_connection_is_counted_with_its_peer() {
         let path = format!("/tmp/homelab-fix120-router-{}.toml", std::process::id());
@@ -1993,10 +1958,7 @@ mod tests {
         );
     }
 
-    /// F186: the exact file that was live on 2026-09-02. Two OPNsense keys
-    /// were appended after the last `[[registry_cache.upstreams]]` table, so
-    /// TOML made them fields of the lscr.io mirror and serde dropped them —
-    /// the daemon ran with `kea: None` and nobody could see why.
+    /// F186: the exact file that was live on 2026-09-02 (see REGISTER.md).
     #[test]
     fn misplaced_keys_are_reported_not_swallowed() {
         let raw = r#"
@@ -2069,11 +2031,8 @@ port = 5003
         assert_eq!(unknown_keys(&t), vec!["metrics_target_dir".to_string()]);
     }
 
-    /// config-four-representations (expert panel, 2026-09-27): the known
-    /// keys were hand-kept lists beside the struct, and they had already
-    /// drifted: `KNOWN_RETENTION` named `keep`, which `RetentionTier` has
-    /// never read, so a `keep = 3` was ignored without a word. The keys are
-    /// now whatever the one struct reads.
+    /// config-four-representations (see REGISTER.md fix-134): the known keys
+    /// are whatever the one struct reads.
     #[test]
     fn a_key_the_struct_does_not_read_is_reported_even_where_a_list_named_it() {
         let raw = "[[retention]]\nevery_days = 1\nspan_days = 7\nkeep = 3\n";
@@ -2081,12 +2040,9 @@ port = 5003
         assert_eq!(unknown_keys(&t), vec!["retention[0].keep".to_string()]);
     }
 
-    /// config-four-representations (expert panel, 2026-09-27): a settings
+    /// config-four-representations (see REGISTER.md fix-134): a settings
     /// save writes back the file it read, changing only what the settings
-    /// tab changed. It used to render a fourth, hand-kept struct from the
-    /// resolved config, which wrote the merged no-touch list, the compiled
-    /// drill interval and the env token into a file that never said them.
-    /// Nested tables write their defaults out (`max_age_hours`,
+    /// tab changed. Nested tables write their defaults out (`max_age_hours`,
     /// `pull_timeout_secs`), so the fixture states them.
     ///
     /// covers: F208
@@ -2148,13 +2104,10 @@ port = 5003
         assert_eq!(got, want, "rendered:\n{rendered}");
     }
 
-    /// fix-134 (config-four-representations): the round trip through
-    /// `FileConfig` that used to back a settings save cannot carry a
-    /// comment — a struct has no field for one. `config_from_text` deletes
-    /// its temp file the moment `load_config_from` returns, so it cannot
-    /// prove anything about a later read of the same path; this test keeps
-    /// the file on disk across the save, the way a real settings save
-    /// finds it.
+    /// fix-134 (see REGISTER.md): `config_from_text` deletes its temp file
+    /// the moment `load_config_from` returns, so it cannot prove anything
+    /// about a later read of the same path; this test keeps the file on
+    /// disk across the save, the way a real settings save finds it.
     ///
     /// covers: fix-134
     #[test]
@@ -2673,10 +2626,8 @@ span_days = 7\n";
         assert!(staging_gone && other_kept);
     }
 
-    /// gap-26: `journal_max_bytes` used to be the fixed constant
-    /// `incidents::JOURNAL_MAX_BYTES`, with no host.toml key and no
-    /// dashboard row — unlike the incident-bundle limits right beside it.
-    /// Absent, the default still applies; set, host.toml wins.
+    /// gap-26: absent, the default (`incidents::JOURNAL_MAX_BYTES`) still
+    /// applies; set, host.toml wins. See REGISTER.md.
     #[test]
     fn gap_26_journal_max_bytes_defaults_and_follows_host_toml() {
         let cfg = config_from_text("token = \"0123456789abcdef0123\"\n");
@@ -4351,13 +4302,8 @@ span_days = 7\n";
         assert!(nightly_plan(4, 4, now, &[], &done).is_empty());
     }
 
-    /// F259 · a watcher pointed at a path no writer writes to.
-    ///
-    /// The live config had exactly this on 2026-09-03: the watcher looked at
-    /// `OPNSense-backups` while the device backup wrote to `opnsense-config`,
-    /// so it would have gone on reporting "holds no files at all" even after
-    /// the backup started working — and whoever read that would have
-    /// concluded the fix had failed.
+    /// F259 · a watcher pointed at a path no writer writes to (see
+    /// REGISTER.md).
     #[test]
     fn f259_a_watcher_that_matches_no_writer_is_named() {
         let dev = homelab_core::ops::devicebackup::DeviceBackup {
@@ -4808,11 +4754,7 @@ impl Executor for RealExecutor {
             if let Some(parent) = p.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| CoreError::State(e.to_string()))?;
             }
-            // fix-51 (expert panel, state-writes-race, 2026-09-27): a temp
-            // name of its own per write. The fixed `<path>.tmp` let two
-            // writers of one path (three nightly backups recording their
-            // notification outcome, or writing the notify header file) remove
-            // each other's temp file or fail on EEXIST.
+            // fix-51 (see REGISTER.md): a temp name of its own per write.
             static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let tmp = format!(
                 "{}.{}.{}.tmp",
@@ -5258,11 +5200,8 @@ impl AuthFailures {
     }
 }
 
-/// fix-121 (expert panel, self-update-acceptance-weak, 2026-09-27): accept a
-/// pending self-update once this daemon has answered an authenticated
-/// request. It used to be accepted after five seconds alive, before the TLS
-/// line had carried anything, so a binary that ran but could not serve a
-/// client was kept and the client could not ship the next fix.
+/// fix-121 (see REGISTER.md): accept a pending self-update once this daemon
+/// has answered an authenticated request.
 ///
 /// Until a request is answered the marker stays armed, so a daemon that dies
 /// or crash-loops meanwhile is rolled back by the OnFailure unit as before.
@@ -5623,11 +5562,8 @@ fn sd_notify(msg: &str) {
 
 /// Run the daemon until something ends it, and say with which exit code.
 ///
-/// fix-52 (expert panel, background-tasks-unsupervised, 2026-09-27): main
-/// used to await the server alone. The scheduler's handle was dropped, so a
-/// panic in it ended every nightly backup for good while the daemon went on
-/// serving and feeding the watchdog; and nothing handled SIGTERM, so
-/// `systemctl stop` or a self-update restart killed a step mid-way.
+/// fix-52 (see REGISTER.md): run the daemon so the scheduler and SIGTERM are
+/// both supervised.
 ///
 /// - The scheduler ending in any way is a failure (exit 1): systemd's
 ///   `Restart=always` brings the daemon back with a live scheduler.
@@ -5729,10 +5665,9 @@ async fn main() {
         }
     }
 
-    // fix-122: config loads first now, so the subscriber can start with
-    // `state_dir` (the ring's home) and `log_level` (its seed filter)
-    // already known, rather than the bootstrap "info"-to-stderr-only that
-    // used to run before it. `load_config` never logs — a parse failure or
+    // fix-122 (see REGISTER.md): config loads first, so the subscriber can
+    // start with `state_dir` (the ring's home) and `log_level` (its seed
+    // filter) already known. `load_config` never logs — a parse failure or
     // a refused value goes to stderr directly and exits — so nothing is
     // lost by moving it ahead of the subscriber.
     let config = load_config();
@@ -6333,15 +6268,10 @@ async fn run_postgres_drill_check(
 }
 
 /// H12: bearer check, extracted for testing.
-/// F259: a watcher pointed at a path no writer writes to watches nothing.
-///
-/// `watched_backups` checks that files keep arriving somewhere;
-/// `device_backups` is what puts them there, at
-/// `<restic_base>/<name>-config`. On 2026-09-03 the two disagreed — the
-/// watcher looked at `gdrive:homelab-backups/OPNSense-backups` while the
-/// writer targeted `.../opnsense-config` — so the watcher would have gone on
-/// reporting "holds no files at all" even after the backup started working,
-/// and whoever read it would have concluded the fix had failed.
+/// F259: a watcher pointed at a path no writer writes to watches nothing
+/// (see REGISTER.md). `watched_backups` checks that files keep arriving
+/// somewhere; `device_backups` is what puts them there, at
+/// `<restic_base>/<name>-config`.
 ///
 /// Returns the watchers whose path matches no configured writer. Deliberately
 /// a warning rather than a refusal: a watcher may legitimately point at
@@ -7100,8 +7030,8 @@ async fn scheduler_loop(state: AppState) {
                 tiers: tiers.clone(),
                 ..state.config.backup.clone()
             };
-            // fix-62: a data pool, not the state dir on pve-root — the
-            // drill's own target used to fill the root disk.
+            // fix-62 (see REGISTER.md): a data pool, not the state dir on
+            // pve-root.
             let target = format!(
                 "{}/restore-drill",
                 state.config.restore_drill_scratch_dir.trim_end_matches('/')
@@ -7427,16 +7357,9 @@ async fn scheduler_loop(state: AppState) {
 /// client so a payload that cannot arrive is refused before it is built.
 pub const MAX_WS_FRAME: usize = 256 * 1024 * 1024;
 
-// Raised from 64 MiB on 2026-09-09 (F303). The old figure was "five times the
-// current binary" — reasoning about the HOST binary, which was the only large
-// payload the link had at the time. A stack deploy carries every native
-// service's program in one message, so the ceiling has to scale with the
-// STACK, not with one program: CT 109 alone ships kyu, kyu-runner and
-// http-switchboard, 71 MiB of binaries and 94.7 MiB once base64-encoded.
-//
-// Headroom, not a solution. The honest fix is to send those programs one at a
-// time instead of in one message — recorded as T85. This number only buys the
-// room to get there without a wall in the middle.
+// Raised from 64 MiB on 2026-09-09 (F303, see REGISTER.md). Headroom, not a
+// solution: the honest fix is to send a stack's programs one at a time
+// instead of in one message — recorded as T85.
 
 async fn ws_upgrade(
     State(state): State<AppState>,
@@ -7572,13 +7495,10 @@ where
         }
     });
 
-    // fix-66 (host-questions-unanswerable, 2026-09-27): requests are READ
-    // continuously and RUN by a worker, one at a time and in arrival order.
-    // Before this the loop ran each request inline, so the next frame was not
-    // read until the current request returned. The TUI sends its answer to a
-    // question over the same connection as the deploy that asked it; that
-    // answer sat unread behind the deploy waiting for it, and every question
-    // ended as Unattended whatever the operator pressed.
+    // fix-66 (see REGISTER.md): requests are READ continuously and RUN by a
+    // worker, one at a time and in arrival order, so an answer sent over the
+    // same connection as the deploy that asked for it is never stuck behind
+    // it.
     //
     // Everything except an answer keeps its order: the TUI tells replies
     // apart by the order it sent the requests in, not by id.
@@ -7888,13 +7808,7 @@ async fn park_after_night(
 
 /// A stack has just been parked by H8, which is the moment it stops being
 /// protected: since fix-59 no automatic update (its nightly backup goes on;
-/// onboot is left alone by the automatic park, gap-22).
-///
-/// It used to be a `tracing::warn!` and nothing else. On 2026-08-31 the
-/// metrics stack parked itself after the run that stopped Alertmanager, and
-/// it stayed out of every nightly protection until Kenny happened to ask why
-/// a dashboard was empty. A stack silently losing its safety net is precisely
-/// the class of silence this project exists to remove.
+/// onboot is left alone by the automatic park, gap-22; see REGISTER.md).
 ///
 /// Decision notify-routing (2026-09-30): a notice in the dashboard's centre,
 /// and pushed at once (push-edge, 2026-09-30): a parked stack loses its
@@ -8282,12 +8196,9 @@ fn exec_allowed(config: &Config, vmid: u16) -> Result<(), homelab_core::error::C
 
 /// Lower-level webhook POST used by notify() and the boot notification.
 ///
-/// G16: this used to be `let _ = exec.run(...)` — a fire-and-forget curl with
-/// the body discarded, so the one path by which Kenny learns that anything is
-/// wrong could itself be broken with nothing anywhere saying so. It now reads
-/// the status, falls back to the second route when the first fails, and
-/// records the outcome in state so an unreachable notification path becomes a
-/// finding instead of a silence.
+/// G16 (F222, see REGISTER.md): reads the status, falls back to the second
+/// route when the first fails, and records the outcome in state so an
+/// unreachable notification path becomes a finding instead of a silence.
 /// fix-126 (TLS to the message hub, owner decision 2026-10-01): the
 /// `--cacert` path for `url`, or the reason it is refused. `Ok(None)` for a
 /// plain `http://` route, which needs no pin (migration is stepwise).
@@ -8414,11 +8325,9 @@ async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) -> R
     if delivered { Ok(()) } else { Err(last) }
 }
 
-/// fix-51 (expert panel, state-writes-race, 2026-09-27): every short
-/// read-modify-write of state.json outside an operation goes through the
-/// store's lock, and a failure is logged instead of dropped. These used to be
-/// `load` then `let _ = store.save(..)`: concurrent callers saved over each
-/// other and nobody heard about a save that failed.
+/// fix-51 (see REGISTER.md): every short read-modify-write of state.json
+/// outside an operation goes through the store's lock, and a failure is
+/// logged instead of dropped.
 async fn record_state<R>(
     store: &homelab_core::state::StateStore<'_>,
     what: &str,
@@ -8647,10 +8556,8 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
-/// fix-104 (long-silences, 2026-09-27): take the operation lock, and when it
-/// is taken, tell whoever is watching what this command waits for before
-/// waiting. A command typed during the nightly batch used to hang with no
-/// word for as long as the batch ran.
+/// fix-104 (see REGISTER.md): take the operation lock, and when it is taken,
+/// tell whoever is watching what this command waits for before waiting.
 async fn lock_ops(state: &AppState) -> tokio::sync::MutexGuard<'_, ()> {
     if let Ok(g) = state.op_lock.try_lock() {
         return g;
@@ -9361,10 +9268,8 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             message: "pong".into(),
             deferred: None,
         },
-        // fix-68: this used to dump raw `pct list` plus the whole of
-        // state.json (1,473 lines live, measured 2026-09-27) for the
-        // operator to read by eye. It now hands back the same fleet
-        // snapshot `homelab ui`/the dashboard use, which the client turns
+        // fix-68 (see REGISTER.md): hands back the same fleet snapshot
+        // `homelab ui`/the dashboard use, which the client turns
         // into a short human table, or prints as-is for `--json`.
         Rpc::Status => {
             let fleet = build_fleet_state(state, &exec).await;
@@ -9529,9 +9434,8 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     deferred: None,
                 };
             }
-            // The configured target and timeout, not the compiled defaults:
-            // this is the path where a hardcoded 1800 s used to kill a large
-            // restore over Google Drive at thirty minutes (F38).
+            // The configured target and timeout, not the compiled defaults
+            // (F38, see REGISTER.md).
             let cfg = state.config.backup.clone();
             let stack_name = manifest.stack_name.clone();
             run_mutating_op_for_stack(state, &exec, req.id, "restore", Some(&stack_name), |ctx| {
@@ -11302,9 +11206,7 @@ fn cleanup_push_staging(state_dir: &str, now: u64) -> usize {
 /// Called only while nothing writes the journal: at start, and under the
 /// operation lock.
 ///
-/// gap-26: `max_bytes` used to be the hardcoded `incidents::JOURNAL_MAX_BYTES`
-/// — unlike the incident-bundle limits right beside it in host.toml, this one
-/// had no key and no dashboard row. The caller now passes `config.journal_max_bytes`.
+/// gap-26: the caller passes `config.journal_max_bytes` (see REGISTER.md).
 fn compact_journal_file(state_dir: &str, max_bytes: u64) {
     let path = format!("{}/journal.jsonl", state_dir);
     let Ok(content) = std::fs::read_to_string(&path) else {

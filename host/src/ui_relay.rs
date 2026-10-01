@@ -389,11 +389,8 @@ mod tests {
         assert!(!r.attached());
     }
 
-    /// fix-158: a second dashboard (a developer's, on the same token) that
-    /// attached and then ended used to leave nobody attached, while CT 120's
-    /// dashboard was still connected. The host remembers every attached
-    /// session, most recent first, and falls back to the next one still
-    /// connected; the last one's end leaves none.
+    /// fix-158 (see REGISTER.md): a second dashboard on the same token ends
+    /// and falls back to the earlier one still connected.
     #[tokio::test]
     async fn fix_158_when_the_attached_dashboard_ends_the_one_before_it_is_attached_again() {
         let r = UiRelay::default();

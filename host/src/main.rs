@@ -1063,12 +1063,19 @@ fn apply_host_config_whole(
         return Err(why.join("; "));
     }
     let text = toml::to_string_pretty(&merged).map_err(|e| e.to_string())?;
-    // Every key `declared` sets, whichever side it takes effect on, since a
-    // whole-file apply does not know which specific keys a hand-edit meant
-    // to change — the same conservative "name it all" `SetHostConfig`
-    // avoids only because it already knows the exact key set.
+    // Only the keys whose value actually moved between the host's current
+    // file and the merged result — not every key `declared` names, which
+    // would call nearly the whole file "restart" on every save and bury
+    // the one key someone actually changed (a whole-file apply has no
+    // `changes` map the way `SetHostConfig` does, so the diff is taken
+    // here instead).
+    let changed: std::collections::BTreeSet<&String> =
+        merged.keys().chain(current_table.keys()).collect();
     let (mut live, mut restart) = (Vec::new(), Vec::new());
-    for key in declared_table.keys() {
+    for key in changed {
+        if merged.get(key) == current_table.get(key) {
+            continue;
+        }
         match homelab_core::hostconfig::key_info(key).map(|k| k.apply) {
             Some(homelab_core::hostconfig::Apply::Live) => live.push(key.clone()),
             _ => restart.push(key.clone()),

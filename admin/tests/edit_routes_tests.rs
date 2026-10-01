@@ -147,6 +147,10 @@ async fn world(tag: &str) -> World {
                     message: serde_json::json!({"sha256": "c".repeat(64), "live": ["backup_hour"], "restart": []}).to_string(),
                     ..Script::ok(&[])
                 },
+                Command::ApplyHostConfig { .. } => Script {
+                    message: serde_json::json!({"sha256": "c".repeat(64), "live": ["backup_hour"], "restart": []}).to_string(),
+                    ..Script::ok(&[])
+                },
                 _ => Script::ok(&[("run", 1)]),
             }
         }),
@@ -476,22 +480,33 @@ async fn feat_settings_1_read_and_write_with_the_session_commands_only() {
     .await;
     assert_eq!(st, StatusCode::OK, "{v}");
     assert_eq!(v["saved"]["live"][0], "backup_hour");
+    assert!(v["committed"]["commit"].as_str().is_some(), "{v}");
     let sent = w.sent.lock().unwrap().clone();
     let names: Vec<&str> = sent.iter().map(|c| c.name()).collect();
+    // fix-110: the change is committed to config/host.toml in the working
+    // copy first (no RPC for that — it is a local git transaction, like a
+    // stack's commit); the dashboard then reads host.toml's sha256 fresh
+    // (not the page's possibly-stale one) and sends the whole file.
     // Never GetConfig/SetConfig: their frames go to every session.
-    assert_eq!(names, vec!["get_host_config", "set_host_config"]);
-    match &sent[1] {
-        Command::SetHostConfig {
-            changes,
+    assert_eq!(
+        names,
+        vec!["get_host_config", "get_host_config", "apply_host_config"]
+    );
+    match &sent[2] {
+        Command::ApplyHostConfig {
+            toml,
             expect_sha256,
         } => {
-            assert_eq!(changes.len(), 1);
-            assert_eq!(changes["backup_hour"], 5);
-            assert_eq!(expect_sha256, &"b".repeat(64));
+            assert!(toml.contains("backup_hour = 5"), "{toml}");
+            assert_eq!(expect_sha256.as_deref(), Some("b".repeat(64).as_str()));
         }
         other => panic!("{other:?}"),
     }
     assert_eq!(w.live.events("host_settings").len(), 1);
+    // The commit landed in the repository's working copy, under
+    // config/host.toml, same as a stack's edit under stacks/<stack>/.
+    let text = std::fs::read_to_string(w.root.join("data/repo/config/host.toml")).unwrap();
+    assert!(text.contains("backup_hour = 5"), "{text}");
 }
 
 /// TUI parity (`homelab import`): a stack's export bundle becomes a new

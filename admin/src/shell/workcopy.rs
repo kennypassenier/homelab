@@ -633,6 +633,144 @@ impl WorkingCopy {
         }
     }
 
+    /// fix-110: `transact`'s single-file twin — `config/host.toml`'s
+    /// declarative commit. `transact` guards every staged path under
+    /// `stacks/<stack>/`; here there is exactly one path, named by the
+    /// caller, so the same push/undo machinery applies without that guard.
+    /// `validate` sees the new text and answers the problems that stop the
+    /// commit (shape only — the host's own apply still runs its own
+    /// cross-field `startup_problems` when it writes the file, since only
+    /// the host knows every rule).
+    pub fn transact_file(
+        &self,
+        change: &FileChange,
+        message: &str,
+        validate: impl FnOnce(&str) -> Vec<String>,
+    ) -> Result<Committed, Refusal> {
+        let what = format!("the commit to {}", change.path);
+        let _g = self.hold();
+        let synced = self.sync_locked();
+        self.set_error(synced.as_ref().err().map(|e| e.why.clone()));
+        synced?;
+        let Some(new_text) = &change.new else {
+            return Err(refusal(&what, "nothing changes", "change something first"));
+        };
+        let now = std::fs::read_to_string(self.repo.join(&change.path)).ok();
+        if now != change.old {
+            return Err(refusal(
+                &what,
+                format!("{} changed since the plan was made", change.path),
+                "make the plan again; it will start from the newest file",
+            ));
+        }
+        let problems = validate(new_text);
+        if !problems.is_empty() {
+            return Err(refusal(
+                &what,
+                problems.join("; "),
+                "correct the edit; nothing was written",
+            ));
+        }
+        let before = self
+            .git(&["rev-parse", "HEAD"])
+            .map_err(|e| refusal(&what, e, "look at the working copy by hand"))?
+            .trim()
+            .to_string();
+        let undo = |me: &Self| {
+            let _ = me.git(&["reset", "--quiet", "--hard", &before]);
+            let _ = me.git(&["clean", "-fdq", "--", &change.path]);
+        };
+        let changes = std::slice::from_ref(change);
+        if let Err(e) = write_changes(&self.repo, changes) {
+            undo(self);
+            return Err(refusal(
+                &what,
+                format!("writing failed: {e}"),
+                "nothing was committed",
+            ));
+        }
+        if let Err(e) = self.git(&["add", "--", &change.path]) {
+            undo(self);
+            return Err(refusal(
+                &what,
+                format!("git add failed: {e}"),
+                "nothing was committed",
+            ));
+        }
+        let staged: Vec<String> = self
+            .git(&["diff", "--cached", "--name-only", "-z"])
+            .unwrap_or_default()
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+            .collect();
+        if staged != [change.path.clone()] {
+            undo(self);
+            return Err(refusal(
+                &what,
+                if staged.is_empty() {
+                    "nothing was staged".to_string()
+                } else {
+                    format!("the staged set holds {} instead", staged.join(", "))
+                },
+                "nothing was committed",
+            ));
+        }
+        let _ = std::fs::create_dir_all(&self.scratch);
+        let msg_file = self
+            .scratch
+            .join(format!("commit-msg-{}", std::process::id()));
+        if let Err(e) = std::fs::write(&msg_file, message) {
+            undo(self);
+            return Err(refusal(
+                &what,
+                format!("the message file: {e}"),
+                "nothing was committed",
+            ));
+        }
+        let committed = self.git(&["commit", "--quiet", "-F", &msg_file.display().to_string()]);
+        let _ = std::fs::remove_file(&msg_file);
+        if let Err(e) = committed {
+            undo(self);
+            return Err(refusal(
+                &what,
+                format!("git commit failed: {e}"),
+                "nothing was committed",
+            ));
+        }
+        let head = self.head().ok_or_else(|| {
+            refusal(
+                &what,
+                "the new commit could not be read",
+                "look at the working copy by hand",
+            )
+        })?;
+        match self.push_locked() {
+            Ok(landed_despite_error) => Ok(Committed {
+                commit: head.commit,
+                subject: head.subject,
+                pushed: true,
+                landed_despite_error,
+            }),
+            Err(PushFail::Refused(e)) => {
+                undo(self);
+                Err(refusal(
+                    &what,
+                    format!("the push was refused and the commit is not on the remote: {e}"),
+                    "the working copy is back where it was; make the plan again",
+                ))
+            }
+            Err(PushFail::Unknown(e)) => Err(refusal(
+                &what,
+                format!("the push failed and whether it landed is unknown: {e}"),
+                format!(
+                    "commit {} stays here, unpushed; the working copy panel offers push, rebase or drop",
+                    &head.commit[..12.min(head.commit.len())]
+                ),
+            )),
+        }
+    }
+
     /// Every text file of `presets/`, keyed `<preset>/<rel>` —
     /// `stack_texts`'s twin for the presets editor (feat-preset-1).
     pub fn preset_texts(&self) -> crate::core::presetedit::PresetTexts {

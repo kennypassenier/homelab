@@ -1673,8 +1673,21 @@ async fn host_settings_save(
     answer(save_host_settings(&c, change, Origin::Manual).await)
 }
 
-/// feat-settings-1: write host.toml, for the route and a driven final
-/// press: the same check, the same session-only command, once.
+/// feat-settings-1 / fix-110: write host.toml, for the route and a driven
+/// final press: the same check, once.
+///
+/// Declarative like a stack (fix-110, 2026-10-01): the change is committed
+/// to `config/host.toml` in the working copy FIRST — the repository is the
+/// record of every non-secret host setting, the same as a stack's files —
+/// and only then applied to the host, from that exact committed text
+/// (`Command::ApplyHostConfig`, not the per-key `SetHostConfig` the TUI's
+/// older settings screen still uses). A host and a repository can then
+/// never silently disagree about what was asked for: `homelab check`
+/// reports it when they do (a push that is refused, or a save made
+/// meanwhile over ssh). If the commit lands but the host refuses or does
+/// not answer, the change still exists in the repository, and the error
+/// says to run `homelab host apply` once the host accepts it — nothing is
+/// lost, only not yet applied.
 ///
 /// Owner decision 2026-09-30 (item 2): when any key just written takes
 /// effect only at the host's next start (`Apply::Restart`), the answer
@@ -1689,20 +1702,68 @@ pub async fn save_host_settings(
     host_new_enough(c)
         .await
         .map_err(|r| (StatusCode::SERVICE_UNAVAILABLE, r))?;
-    let expect = change.expect_sha256.clone();
     let changes = hostsettings::check(change).map_err(|r| (StatusCode::BAD_REQUEST, r))?;
     let keys: Vec<String> = changes.keys().cloned().collect();
+
+    let wc = c.wc.clone();
+    let changes2 = changes.clone();
+    let prepared = blocking(move || -> Result<(FileChange, String), Refusal> {
+        let path = "config/host.toml".to_string();
+        let old = std::fs::read_to_string(wc.repo.join(&path)).ok();
+        let new = homelab_core::hostconfig::merge_changes(old.as_deref().unwrap_or(""), &changes2)
+            .map_err(|e| Refusal::new("the host settings", e, "correct the marked fields"))?;
+        Ok((
+            FileChange {
+                path,
+                old,
+                new: Some(new.clone()),
+            },
+            new,
+        ))
+    })
+    .await
+    .and_then(|r| r);
+    let (fc, new_text) = match prepared {
+        Ok(v) => v,
+        Err(r) => return Err((StatusCode::BAD_REQUEST, r)),
+    };
+    let message = format!(
+        "chore(host): {} [fix-110]\n\nFrom the dashboard's host settings page.\n",
+        keys.join(", ")
+    );
+    let wc = c.wc.clone();
+    let committed = blocking(move || wc.transact_file(&fc, &message, |_| Vec::new()))
+        .await
+        .and_then(|r| r);
+    publish_repo(c).await;
+    let committed = match committed {
+        Ok(committed) => committed,
+        Err(r) => return Err((StatusCode::CONFLICT, r)),
+    };
+
+    // The host's current sha256, fresh — not the page's possibly-stale
+    // `expect_sha256` — so an edit made meanwhile (over ssh, or a TUI
+    // save) is refused rather than silently overwritten.
+    let expect_sha256 = c
+        .host
+        .ask_traced(Command::GetHostConfig, Duration::from_secs(20), None)
+        .await
+        .ok()
+        .filter(|r| r.ok)
+        .and_then(|r| serde_json::from_str::<homelab_proto::HostConfigFile>(&r.message).ok())
+        .map(|f| f.sha256);
     let r = c
         .host
         .ask_traced(
-            Command::SetHostConfig {
-                changes,
-                expect_sha256: expect,
+            Command::ApplyHostConfig {
+                toml: new_text,
+                expect_sha256,
             },
             Duration::from_secs(30),
             None,
         )
         .await;
+    let short = &committed.commit[..12.min(committed.commit.len())];
     match r {
         Ok(r) if r.ok => {
             let saved: serde_json::Value = serde_json::from_str(&r.message).unwrap_or_default();
@@ -1711,22 +1772,25 @@ pub async fn save_host_settings(
                 serde_json::json!({ "saved": saved, "keys": keys }),
             );
             let follow = restart_follow_up(c, &keys, origin);
-            Ok(serde_json::json!({ "saved": saved, "follow": follow }))
+            Ok(serde_json::json!({ "committed": committed, "saved": saved, "follow": follow }))
         }
         Ok(r) => Err((
-            StatusCode::CONFLICT,
+            StatusCode::BAD_GATEWAY,
             Refusal::new(
                 "the host settings",
-                r.message,
-                "nothing was written; correct the change or reload the page",
+                format!(
+                    "committed to the repository as {short}, but the host refused it: {}",
+                    r.message
+                ),
+                "the commit is in the repository; `homelab host apply` once the host accepts it",
             ),
         )),
         Err(e) => Err((
             StatusCode::BAD_GATEWAY,
             Refusal::new(
                 "the host settings",
-                format!("{e}; whether the host wrote it is unknown"),
-                "reload the page: it shows host.toml as it is now",
+                format!("committed to the repository as {short}, but the host did not answer: {e}"),
+                "the commit is in the repository; `homelab host apply` once the host answers",
             ),
         )),
     }

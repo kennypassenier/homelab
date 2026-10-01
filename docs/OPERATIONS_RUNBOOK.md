@@ -240,7 +240,18 @@ names `homelab release-update`. The steps below are the parts it merges.
    stack, app or unit, naming the repositories, `/appdata` and vault paths
    still kept and the `homelab wipe` command for them
    (`core/src/ops/retired.rs:190-219`). `noted` needs nothing today; it is
-   there so kept data is never forgotten (op-6 step 6).
+   there so kept data is never forgotten (op-6 step 6). A third, since
+   2026-10-01 (fix-110): one `drift` line per host.toml key where
+   `config/host.toml` and the host's own running settings disagree —
+   `"host.toml — <key>: config/host.toml declares <a>, the host's host.toml
+   has <b>"` (`evaluate_host_config_drift`,
+   `core/src/ops/fleetcheck.rs:498-528`). The remedy names both routes:
+   `homelab host apply` to make the host match the repository
+   (USER_GUIDE.md, "`homelab host apply`"), or edit `config/host.toml` to
+   match the host and commit that when the
+   host's value is the one to keep. A repository checkout with no
+   `config/host.toml` yet skips this comparison entirely — it is additive,
+   not a requirement.
 2. `homelab doctor`. Host disk, state file, backup age per stack, the Drive
    remote, mirror lag, interrupted operations (`core/src/doctor.rs:45-188`).
 3. `homelab incidents`. One directory per failed operation;

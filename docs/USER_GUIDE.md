@@ -3313,6 +3313,73 @@ output of the finding for that record):
       remedy: kept on purpose until you decide (ask-9); `homelab wipe drill` deletes exactly these after you type the name
 ```
 
+### `homelab host apply`: the host's settings against `config/host.toml`
+
+```bash
+homelab host apply                       # reads ./config/host.toml
+homelab host apply ~/Projects/homelab/config/host.toml
+```
+
+Host settings are declarative, like a stack (fix-110): `config/host.toml`
+holds every non-secret key `homelab_core::hostconfig::KEYS` knows, one row
+per key, seeded with the host's own compiled defaults so an unmodified
+checkout already matches an unmodified host. Secrets (`token`,
+`notify_auth_bearer`, `notify_fallback_auth_bearer`) are never in this file
+— they stay in the host's own vault, set once over ssh.
+
+`homelab host apply` reads the file (the repository's `config/host.toml`
+unless a path is given), refuses early if it does not parse as TOML, reads
+the host's current `host.toml` sha256 (`GetHostConfig`) and sends it whole as
+`Command::ApplyHostConfig` (`client/src/main.rs:671-726`,
+`proto/src/lib.rs:447-466`). The host lays `config/host.toml` over its own
+file with `homelab_core::hostconfig::apply_declared`
+(`core/src/hostconfig.rs:391-414`): every secret key the host already has
+survives untouched, a secret the repository tries to set is refused outright
+(the repository is never where a secret lives), and a key the host has that
+the repository does not declare is dropped — the same "the file is the whole
+picture" rule `homelab apply` already keeps for a stack. The result is
+validated with the same parser `host.toml` has always used
+(`host/src/main.rs:1025-1084`, `apply_host_config_whole`) and written. The
+reply names which changed keys took effect at once (`live`) and which wait
+for the host's next start (`restart`) — only the keys whose value actually
+moved, not every key the file happens to declare:
+
+```text
+▶ host apply :: config/host.toml
+✓ applied
+  live now: backup_hour
+  takes effect at the host's next start: gateway_vmid — `homelab host restart`
+```
+
+`homelab check` and `homelab today` compare `config/host.toml` against the
+host's own running settings, key by key, and report one `Drift` finding per
+key that differs (`evaluate_host_config_drift`,
+`core/src/ops/fleetcheck.rs:498-528`):
+
+```text
+  [drift] host.toml — gateway_vmid: config/host.toml declares 105, the host's host.toml has 104
+      remedy: `homelab host apply` to make the host match the repository, or edit config/host.toml to match the host and commit that
+```
+
+A repository checkout with no `config/host.toml` yet, or an older client
+that never built the comparison, skips it entirely — the same way an empty
+stack-digest list skips the stack-file comparison. A host without the file
+keeps working exactly as before: `config/host.toml` is additive, not a
+requirement the host enforces.
+
+The admin dashboard's host settings page (`/app/settings`) writes the same
+way: a save is committed to `config/host.toml` in the dashboard's working
+copy first — through the same commit/push transaction a stack's edit uses
+(`WorkingCopy::transact_file`, `admin/src/shell/workcopy.rs:644-772`) — and
+only then applied to the host from that committed text
+(`admin/src/shell/edit.rs`, `save_host_settings`). If the commit lands but
+the host refuses it or does not answer, the change still exists in the
+repository and the error says to run `homelab host apply` once the host
+accepts it — nothing already written is lost. The TUI's own settings screen
+is unchanged by this: it still edits only the three keys it always has
+(`backup_hour`, `notify_webhook`, `retention`) over the older `SetConfig`
+command, and does not yet read or write `config/host.toml`.
+
 ### `homelab wipe <name>`: delete what a retired stack, app or unit kept
 
 A destroy, a forget, and a deploy that dropped an app or a native unit keep

@@ -172,10 +172,17 @@ pub struct YesNo {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum YesNoAction {
-    Park { stack: String, enabled: bool },
+    Park {
+        stack: String,
+        enabled: bool,
+    },
     HostUpdate(String),
     DeleteTier(usize),
     Quit,
+    /// fix-107/fix-66 (apply-in-the-tui): the changed stacks `apply` would
+    /// deploy, by name — re-resolved to a spec when `y` answers, same as
+    /// every other stack operation here.
+    Apply(Vec<String>),
 }
 
 /// D6 change-plan preview: what a deploy would do, shown before it runs.
@@ -321,6 +328,13 @@ pub struct Model {
     /// T85: staged-binary commands still on the wire ahead of a deploy. Their
     /// answers feed the focus instead of closing it.
     pub staging_pending: usize,
+    /// fix-107/fix-66 (apply-in-the-tui): deploys still on the wire for the
+    /// SHIFT+L "apply" operation — each stack's own reply feeds the one
+    /// focus window as a line instead of closing it; the window closes when
+    /// this reaches 0.
+    pub apply_pending: usize,
+    /// Whether every deploy `apply` has heard back from so far succeeded.
+    pub apply_all_ok: bool,
 
     /// G8 settings tab: last received host config, edit cursor, dirty flag,
     /// and the webhook text-edit buffer (None = not editing).
@@ -398,6 +412,8 @@ impl Model {
             shell_lines: Vec::new(),
             shell_waiting: false,
             staging_pending: 0,
+            apply_pending: 0,
+            apply_all_ok: true,
             settings: None,
             settings_row: 0,
             settings_dirty: false,
@@ -712,6 +728,37 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                             model.outbox.clear();
                             model.staging_pending = 0;
                             model.status_line = "deploy NOT started — staging failed".into();
+                        }
+                    }
+                    return;
+                }
+                // fix-107/fix-66 (apply-in-the-tui): `apply` queues one
+                // deploy per changed stack; each one's reply feeds the
+                // focus window as a line, and only the last one closes it,
+                // so the operator reads the whole run instead of just the
+                // first stack's result.
+                if model.apply_pending > 0 {
+                    model.apply_pending -= 1;
+                    model.apply_all_ok &= resp.ok;
+                    if let Some(focus) = model.focus.as_mut() {
+                        focus.feed.push(LogRow {
+                            level: if resp.ok {
+                                LogLevel::Info
+                            } else {
+                                LogLevel::Error
+                            },
+                            source: "HOST".into(),
+                            msg: resp.message.clone(),
+                        });
+                        if model.apply_pending == 0 {
+                            focus.done = true;
+                            focus.ok = model.apply_all_ok;
+                            focus.result = if model.apply_all_ok {
+                                "apply complete".into()
+                            } else {
+                                "apply finished with failures — see the feed".into()
+                            };
+                            model.status_line = focus.result.clone();
                         }
                     }
                     return;
@@ -1321,6 +1368,7 @@ fn run_action(model: &mut Model, id: &str) {
         "op.deploy" => start_deploy(model),
         "op.park" => ask_park(model),
         "op.host-update" => ask_host_update(model),
+        "op.apply" => ask_apply(model),
         "op.restore" => {
             if let Some(name) = selected_stack_name(model) {
                 model.confirm = Some(Confirm {
@@ -1538,6 +1586,69 @@ fn ask_park(model: &mut Model) {
     }
 }
 
+/// fix-107/fix-66 (apply-in-the-tui, the "Not built" item both left open):
+/// `homelab apply`'s deploy half, reached from the palette only — there is
+/// no key for it, the same reasoning fix-102 applied to `u`: it can deploy
+/// every changed stack in the repository at once, which is not a thing to
+/// reach for by reflex. Every local stack directory (ephemeral ones
+/// excluded, same as the CLI) whose intent hash differs from what the host
+/// last applied is offered; `y` deploys all of them. Stacks gone from the
+/// host's state entirely (never applied) count as changed too. The destroy
+/// half (`ask-8`'s `DestroyRecorded`) is deliberately not here — CLI_ONLY,
+/// one typed name per destroy.
+fn ask_apply(model: &mut Model) {
+    let Some(fleet) = model.fleet.clone() else {
+        model.status_line = "apply needs a fleet reading first — press r".into();
+        return;
+    };
+    let mut changed: Vec<String> = Vec::new();
+    for (name, dir) in &model.local_stacks {
+        if crate::spec::is_ephemeral(dir) {
+            continue;
+        }
+        let spec = match crate::spec::build_spec(dir) {
+            Ok(s) => s,
+            Err(e) => {
+                model.status_line = format!("apply: {} — {} (nothing deployed)", name, e);
+                return;
+            }
+        };
+        if let Err(e) = homelab_core::manifest::validate(&spec) {
+            model.status_line = format!(
+                "apply: {} — validation failed: {} (nothing deployed)",
+                name, e
+            );
+            return;
+        }
+        let hash = homelab_core::manifest::intent_hash(&spec);
+        let applied = fleet
+            .stacks
+            .iter()
+            .find(|s| s.name == *name)
+            .map(|s| s.applied_hash.as_str());
+        let up_to_date = matches!(applied, Some(h) if !h.is_empty() && h == hash);
+        if !up_to_date {
+            changed.push(name.clone());
+        }
+    }
+    if changed.is_empty() {
+        model.status_line = "apply: every stack already matches its files".into();
+        return;
+    }
+    changed.sort();
+    model.yes_no = Some(YesNo {
+        title: format!("APPLY :: {} stack(s)", changed.len()),
+        prompt: format!(
+            "Deploy {} changed stack(s): {}? Each runs the same deploy `D` does; nothing \
+             in host state with no local directory is touched here — that is \
+             `homelab apply` on the command line.",
+            changed.len(),
+            changed.join(", ")
+        ),
+        action: YesNoAction::Apply(changed),
+    });
+}
+
 /// G2: open the new-stack wizard (key `n`, and the palette since fix-107).
 fn open_wizard(model: &mut Model) {
     let vmid = next_free_vmid(model);
@@ -1593,6 +1704,44 @@ fn run_yes(model: &mut Model, action: YesNoAction) {
             }
         }
         YesNoAction::Quit => model.should_quit = true,
+        // fix-107/fix-66 (apply-in-the-tui): the deploy half of `homelab
+        // apply` — every changed stack, re-resolved from its local
+        // directory now that `y` has answered. The destroy half stays
+        // CLI-only (ask-8's DestroyRecorded: one typed name per destroy,
+        // the same friction as DestroyStack).
+        YesNoAction::Apply(names) => {
+            let mut specs = Vec::new();
+            for name in &names {
+                let Some((_, dir)) = model.local_stacks.iter().find(|(n, _)| n == name) else {
+                    continue;
+                };
+                match crate::spec::build_spec(dir) {
+                    Ok(spec) if homelab_core::manifest::validate(&spec).is_ok() => specs.push(spec),
+                    _ => {
+                        // Not what the plan saw a moment ago; skip it rather
+                        // than deploy something unvalidated. The others
+                        // still run.
+                    }
+                }
+            }
+            if specs.is_empty() {
+                model.status_line = "apply: nothing left to deploy".into();
+                return;
+            }
+            model.focus = Some(Focus {
+                title: format!("APPLY :: {} stack(s)", specs.len()),
+                feed: Vec::new(),
+                scroll: 0,
+                done: false,
+                ok: false,
+                result: String::new(),
+            });
+            model.apply_pending = specs.len();
+            model.apply_all_ok = true;
+            for spec in specs {
+                queue_deploy(model, Box::new(spec));
+            }
+        }
     }
 }
 

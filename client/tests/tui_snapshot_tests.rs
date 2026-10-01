@@ -758,6 +758,170 @@ fn b4_drift_flag_computed_from_applied_hash() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// fix-107/fix-66 (apply-in-the-tui): `homelab apply`'s deploy half, reached
+/// only through the palette ("op.apply") — every local stack whose intent
+/// hash differs from what the host applied is offered; `y` deploys them
+/// all, and each stack's own reply feeds the one focus window instead of
+/// closing it after the first.
+#[test]
+fn fix_107_apply_in_the_tui_deploys_every_changed_stack_after_one_y() {
+    use homelab_proto::{Command, ServerMsg};
+    let tmp = std::env::temp_dir().join(format!("homelab-apply-tui-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+    let presets = homelab_client::scaffold::scan_presets(&presets_dir);
+    let syncthing = presets.iter().find(|p| p.name == "syncthing").unwrap();
+    for (name, vmid) in [("changed-a", 141u16), ("changed-b", 142), ("same-c", 143)] {
+        homelab_client::scaffold::scaffold_stack(
+            &tmp,
+            &presets_dir,
+            &homelab_client::scaffold::StackParams {
+                name,
+                vmid,
+                ram_mb: 512,
+                cores: 1,
+                disk_gb: 4,
+                swap_mb: None,
+                no_data_paths: &[],
+                preset: Some(syncthing),
+            },
+        )
+        .unwrap();
+    }
+    let hash_of = |name: &str| {
+        let spec = homelab_client::spec::build_spec(&tmp.join(name)).unwrap();
+        homelab_core::manifest::intent_hash(&spec)
+    };
+    let same_hash = hash_of("same-c");
+
+    let mut m = ready_model();
+    m.local_stacks = vec![
+        ("changed-a".into(), tmp.join("changed-a")),
+        ("changed-b".into(), tmp.join("changed-b")),
+        ("same-c".into(), tmp.join("same-c")),
+    ];
+    m.fleet = Some(FleetState {
+        status_measured_at: None,
+        host: fleet().host,
+        stacks: vec![
+            StackView {
+                applied_source: None,
+                usage: None,
+                name: "changed-a".into(),
+                vmid: 141,
+                hostname: "141-app-changed-a".into(),
+                apps: vec![],
+                drift: false,
+                applied_hash: String::new(), // never applied
+                env_sealed: true,
+                online: true,
+                enabled: true,
+            },
+            StackView {
+                applied_source: None,
+                usage: None,
+                name: "changed-b".into(),
+                vmid: 142,
+                hostname: "142-app-changed-b".into(),
+                apps: vec![],
+                drift: false,
+                applied_hash: "deadbeef00112233".into(), // stale
+                env_sealed: true,
+                online: true,
+                enabled: true,
+            },
+            StackView {
+                applied_source: None,
+                usage: None,
+                name: "same-c".into(),
+                vmid: 143,
+                hostname: "143-app-same-c".into(),
+                apps: vec![],
+                drift: false,
+                applied_hash: same_hash,
+                env_sealed: true,
+                online: true,
+                enabled: true,
+            },
+        ],
+    });
+
+    m.palette_open = true;
+    m.palette_input = "apply: deploy".into();
+    m.palette_sel = 0;
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        )),
+    );
+    let prompt = m.yes_no.as_ref().expect("apply asks first").prompt.clone();
+    assert!(prompt.contains("changed-a"), "{}", prompt);
+    assert!(prompt.contains("changed-b"), "{}", prompt);
+    assert!(
+        !prompt.contains("same-c"),
+        "unchanged stack offered: {}",
+        prompt
+    );
+
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('y'),
+            crossterm::event::KeyModifiers::NONE,
+        )),
+    );
+    let deployed: Vec<String> = m
+        .outbox
+        .iter()
+        .filter_map(|c| match c {
+            Command::DeployStack(s) => Some(s.manifest.stack_name.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(deployed.len(), 2, "{:?}", deployed);
+    assert!(deployed.contains(&"changed-a".to_string()));
+    assert!(deployed.contains(&"changed-b".to_string()));
+    assert_eq!(m.apply_pending, 2);
+    assert!(m.focus.is_some());
+
+    // Each stack's own reply feeds the focus window; only the last one
+    // closes it, not the first.
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Backend(homelab_client::tui::backend::BackendEvent::Server(
+            ServerMsg::RpcDone(homelab_proto::RpcResponse {
+                id: 1,
+                ok: true,
+                message: "changed-a deployed".into(),
+                deferred: None,
+            }),
+        )),
+    );
+    assert!(
+        !m.focus.as_ref().unwrap().done,
+        "closed after only one of two"
+    );
+    assert_eq!(m.apply_pending, 1);
+    homelab_client::tui::model::update(
+        &mut m,
+        Msg::Backend(homelab_client::tui::backend::BackendEvent::Server(
+            ServerMsg::RpcDone(homelab_proto::RpcResponse {
+                id: 2,
+                ok: true,
+                message: "changed-b deployed".into(),
+                deferred: None,
+            }),
+        )),
+    );
+    assert!(m.focus.as_ref().unwrap().done);
+    assert!(m.focus.as_ref().unwrap().ok);
+    assert_eq!(m.apply_pending, 0);
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 #[test]
 fn d11_bundle_round_trip_excludes_secrets_and_substitutes() {
     let tmp = std::env::temp_dir().join(format!("homelab-bundle-{}", std::process::id()));

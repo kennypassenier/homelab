@@ -3407,6 +3407,14 @@ output of the finding for that record):
       remedy: kept on purpose until you decide (ask-9); `homelab wipe drill` deletes exactly these after you type the name
 ```
 
+**In the TUI** (fix-107/fix-66): the palette's "apply" entry (no key — it
+deploys every changed stack in the repository at once, not a thing to reach
+for by reflex) runs the deploy half above: every local stack directory
+(ephemeral ones excluded, same as the CLI) whose intent hash differs from
+what the host last applied, after one y/N naming each stack. The destroy
+half stays command-line only, the same friction `D`/`SHIFT+D` always had —
+one typed name per destroy (`ask-8`'s `DestroyRecorded`, `CLI_ONLY`).
+
 ### `homelab host apply`: the host's settings against `config/host.toml`
 
 ```bash

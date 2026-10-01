@@ -191,6 +191,16 @@ pub const KEYMAP: &[Binding] = &[
         None,
         Some("op.host-update"),
     ),
+    // fix-107/fix-66 (apply-in-the-tui): `homelab apply`'s deploy half,
+    // palette-only like host update — deploying every changed stack in the
+    // repository at once is not a thing to reach for by reflex.
+    b(
+        "",
+        "apply: deploy every stack whose files changed (asks first; destroy stays CLI-only)",
+        Scope::Stacks,
+        None,
+        Some("op.apply"),
+    ),
     // LOG_STREAM.
     b(
         "LEFT/RIGHT",

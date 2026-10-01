@@ -2912,6 +2912,7 @@ fn the_committed_test_plan_matches_a_fresh_generation() {
     homelab_client::testplan::generate_test_plan(
         &[&root.join("core/tests"), &root.join("client/tests")],
         &root.join("docs/deployment/REALIZATION_PLAN.md"),
+        &root.join("stacks"),
         &out,
     )
     .expect("generation must succeed");

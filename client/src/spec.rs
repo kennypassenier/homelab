@@ -2205,6 +2205,13 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
             .collect::<Vec<_>>()
             .join(", "),
     ));
+    // rule-public-docs: this repository is public; the stack files and
+    // `config/client.toml` just quoted above are real fleet addresses, so
+    // every one of them is replaced before the document is written — by
+    // name when the address belongs to a stack, the host or a gateway, by
+    // an RFC 5737 placeholder otherwise.
+    let addr_map = crate::netredact::build_address_map(stacks_dir, client_host.as_deref());
+    let doc = crate::netredact::redact(&doc, &addr_map);
     std::fs::write(out_path, &doc).map_err(|e| e.to_string())?;
     Ok(included)
 }

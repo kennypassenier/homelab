@@ -321,7 +321,19 @@ fn accepted_limitations(plan: &str) -> Vec<String> {
 }
 
 /// Write the plan. Returns how many suites it described.
-pub fn generate_test_plan(roots: &[&Path], plan_path: &Path, out: &Path) -> Result<usize, String> {
+///
+/// `stacks_dir` is read only to build the rule-public-docs address map (a
+/// test's doc comment can quote a real fleet address, e.g. a 'node-exporter
+/// on 10.10.10.13:9100' comment): every such address is replaced, by name
+/// when it is one the stack files declare, by an RFC 5737 placeholder
+/// otherwise, in the same way `generate_runbook` does it — see
+/// `crate::netredact`.
+pub fn generate_test_plan(
+    roots: &[&Path],
+    plan_path: &Path,
+    stacks_dir: &Path,
+    out: &Path,
+) -> Result<usize, String> {
     let mut crates: Vec<Crate> = Vec::new();
     for root in roots {
         let Ok(rd) = std::fs::read_dir(root) else {
@@ -534,6 +546,13 @@ pub fn generate_test_plan(roots: &[&Path], plan_path: &Path, out: &Path) -> Resu
             d.push('\n');
         }
     }
+    // rule-public-docs: see this function's doc comment.
+    let client_host = crate::repo_config::load(stacks_dir)
+        .ok()
+        .flatten()
+        .and_then(|(_, c)| c.host);
+    let addr_map = crate::netredact::build_address_map(stacks_dir, client_host.as_deref());
+    let d = crate::netredact::redact(&d, &addr_map);
     std::fs::write(out, d).map_err(|e| format!("cannot write {}: {}", out.display(), e))?;
     Ok(suite_count)
 }

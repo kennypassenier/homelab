@@ -1764,6 +1764,7 @@ async fn run(explicit_host: Option<String>) {
             match homelab_client::testplan::generate_test_plan(
                 &[&in_repo("core/tests"), &in_repo("client/tests")],
                 &in_repo("docs/deployment/REALIZATION_PLAN.md"),
+                &stacks_base(),
                 Path::new(&out),
             ) {
                 Ok(n) => println!(

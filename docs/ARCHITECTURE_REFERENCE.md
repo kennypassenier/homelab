@@ -423,9 +423,14 @@ latch call in the workspace is the client's `latch cat`
   `homelab release-update` waits up to 150 s for that and exits non-zero on
   a rollback or no answer.
 - **Rollback.** Putting `.prev` back while the marker exists is the job of a
-  systemd `OnFailure=` unit (`selfupdate.rs:4-7`). That unit and
-  `homelab-host.service` are in neither this repository nor the host-meta
-  snapshot (`backup.rs:1001-1005,1056-1063`).
+  systemd `OnFailure=` unit (`selfupdate.rs:4-7`). That unit,
+  `homelab-host.service` and the rollback script are copied byte for byte
+  into `core/assets/host-units/` and compiled into the binary
+  (`core/src/hostunits.rs`, fix-47, gap-31): every self-update writes any
+  of the three that differ and runs `systemctl daemon-reload` before the
+  restart, and `homelab doctor` has a `host units` line naming any that
+  drifted. A host rebuilt from a released binary gets them back without
+  needing the host-meta snapshot at all.
 
 The update as states: the marker is what separates an accepted binary
 from one the `OnFailure=` unit puts back.

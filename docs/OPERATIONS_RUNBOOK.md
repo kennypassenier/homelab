@@ -916,14 +916,20 @@ No test in this repository exercises this procedure.
 | `/var/lib/homelab/repo` | the intent repo with its history |
 | `/etc/homelab/host.toml` | token and every setting |
 | three SMART collector files | only those present |
+| `/etc/network/interfaces`, `/etc/pve/storage.cfg`, `/etc/pve/jobs.cfg`, `/etc/pve/qemu-server`, `/etc/sysctl.d/99-homelab-swappiness.conf`, `/root/.config/rclone/rclone.conf` | fix-111: the VLAN bridges, Proxmox's storage and job definitions, the VM configurations, the swappiness drop-in, and rclone's own remote — `HOST_META_EXTRAS` in `core/src/ops/backup.rs`, each skipped when absent |
 
 **Repository:** `rclone:gdrive:homelab-backups/host-meta-config`
 (`core/src/ops/backup.rs:94`, `:1010-1021`). It is encrypted with the
 `restic.pw` it contains; see op-17.
 
-**Not in it:** the rclone configuration that holds the Google Drive
-credentials, the `homelab-host` binary, and the systemd units. Nothing in
-the list above names them (`core/src/ops/backup.rs:1056-1065`).
+**Not in it:** the `homelab-host` binary itself. The daemon's systemd units
+(`homelab-host.service`, `homelab-host-rollback.service`,
+`/usr/local/lib/homelab-rollback.sh`) do not need to be: they are compiled
+into the binary (`core/assets/host-units/`, `core/src/hostunits.rs`,
+fix-47) and every self-update writes any that differ, so they come back
+with any binary a rebuilt host installs rather than depending on the
+host-meta snapshot. rclone's own configuration (the Google Drive
+credentials, gap-31) IS in the list above, since fix-111.
 
 **When:** nightly when due (op-1 step 4), and on demand with
 `homelab backup-host-meta` (`host/src/main.rs:3392-3416`).
@@ -1147,7 +1153,7 @@ flowchart LR
 | | vault `/var/lib/homelab/secrets/<stack>/<unit>-config/<file>` (`core/src/ops/deploy.rs:164-180`, `:2297-2318`); a flat `<stack>/<file>` from before fix-37 is still read when no two units share the name (`core/src/ops/deploy.rs:2244-2254`) | container loss | host root disk loss |
 | | the service's own restic repository, when the file lies in `data_dirs` and the service has no `backup_from_newest` (`core/src/ops/native.rs:591-600`): yes for almanac, kyu-runner, http-switchboard; **no for kyu** (`stacks/kyu/service.yml:48`) | host loss | loss of the restic password |
 | | `host-meta-config`, through the vault | host loss | loss of the restic password |
-| Google Drive credentials (rclone) | rclone's configuration on the host only | container loss | host root disk loss: **in no backup this code makes** (`core/src/ops/backup.rs:1056-1065`) |
+| Google Drive credentials (rclone) | rclone's configuration on the host, `/root/.config/rclone/rclone.conf` | container loss | `host-meta-config` (fix-111, gap-31: `HOST_META_EXTRAS` in `core/src/ops/backup.rs`) — host root disk loss is covered the same way as every other host-meta path |
 | Secrets of a retired stack, app or native unit | the vault paths in its retired record: the whole `/var/lib/homelab/secrets/<stack>` for a stack, the app's `.env` or the unit's files for an app or unit (`core/src/ops/retired.rs:59-172`); for a stack also its `/appdata` directories, where a native service's live env file sits, and its repositories | destroy, forget, and the deploy that dropped it: all keep them (`core/src/ops/retired.rs:1-15`) | `homelab wipe <key>`: every recorded vault path, `/appdata` directory and repository goes in one operation (`core/src/ops/retired.rs:408-449`); after that only older `host-meta-config` snapshots still hold the vault copy |
 
 A wipe is the one command that removes several copies of a secret at once
@@ -1172,7 +1178,7 @@ flowchart LR
         end
         tls["TLS key and certificate"]
         toml["host.toml<br/>API token and settings"]
-        rclone["rclone gdrive credentials<br/>in no backup"]
+        rclone["rclone gdrive credentials<br/>HOST_META_EXTRAS, fix-111"]
     end
     subgraph gd["Google Drive"]
         hm[("host-meta-config")]
@@ -1181,6 +1187,7 @@ flowchart LR
     vault -- copied into --> hm
     tls -- copied into --> hm
     toml -- copied into --> hm
+    rclone -- copied into --> hm
     pw == encrypts ==> hm
     pw == encrypts ==> repos
     rclone -. reaches .-> gd

@@ -277,6 +277,7 @@ async fn dashboard_latch_the_golden_template_bakes_latch_through_the_guard() {
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,
+        default_log_rotation: None,
         tile_watch_source: None,
         tile_watch_targets: Vec::new(),
         tile_watch_watcher: None,

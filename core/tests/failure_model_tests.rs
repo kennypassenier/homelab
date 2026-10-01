@@ -98,6 +98,7 @@ async fn ar14_failed_deploy_writes_replayable_bundle() {
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,
+        default_log_rotation: None,
         tile_watch_source: None,
         tile_watch_targets: Vec::new(),
         tile_watch_watcher: None,

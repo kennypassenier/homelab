@@ -110,6 +110,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,
+        default_log_rotation: None,
         tile_watch_source: None,
         tile_watch_targets: Vec::new(),
         tile_watch_watcher: None,
@@ -987,6 +988,7 @@ async fn m1_a_borrowed_directory_is_mounted_but_never_created() {
         mount_point: "/mnt/data/18TB".into(),
         note: Some("the fileserver's dataset".into()),
         rotate: None,
+        no_default_rotate: false,
     }];
     let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
     assert!(report.ok, "deploy failed: {:?}", report.error);
@@ -1033,6 +1035,7 @@ async fn m1_a_missing_borrowed_directory_stops_the_deploy() {
         mount_point: "/mnt/data/18TB".into(),
         note: None,
         rotate: None,
+        no_default_rotate: false,
     }];
     let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
     assert!(!report.ok, "a missing library path must stop the deploy");
@@ -1059,6 +1062,7 @@ fn m1_the_two_kinds_of_directory_cannot_be_confused() {
         mount_point: "/mnt/other".into(),
         note: None,
         rotate: None,
+        no_default_rotate: false,
     }];
     let err = validate(&s).expect_err("must be refused");
     assert!(
@@ -1074,6 +1078,7 @@ fn m1_the_two_kinds_of_directory_cannot_be_confused() {
         mount_point: "/appdata/syncthing/syncthing-config".into(),
         note: None,
         rotate: None,
+        no_default_rotate: false,
     }];
     let err = validate(&s).expect_err("a mount point cannot be claimed twice");
     assert!(format!("{}", err).contains("claimed by both"), "{}", err);
@@ -1085,6 +1090,7 @@ fn m1_the_two_kinds_of_directory_cannot_be_confused() {
         mount_point: "/mnt/media".into(),
         note: None,
         rotate: None,
+        no_default_rotate: false,
     }];
     assert!(validate(&s).is_err());
 
@@ -1095,6 +1101,7 @@ fn m1_the_two_kinds_of_directory_cannot_be_confused() {
         mount_point: "/mnt/data/18TB".into(),
         note: Some("CT 103's dataset, mounted twice on purpose".into()),
         rotate: None,
+        no_default_rotate: false,
     }];
     validate(&ok).expect("a borrowed media directory is valid");
 }
@@ -1153,6 +1160,7 @@ async fn a_missing_mount_is_reattached_on_an_existing_container() {
         mount_point: "/mnt/data/18TB".into(),
         note: None,
         rotate: None,
+        no_default_rotate: false,
     }];
     let report = deploy(&ctx(&exec, &sink, &journal), &sp).await;
     assert!(report.ok, "deploy failed: {:?}", report.error);
@@ -2915,6 +2923,7 @@ async fn fix_120_a_data_mount_outside_the_host_roots_is_refused() {
             mount_point: "/mnt/data".into(),
             note: None,
             rotate: None,
+            no_default_rotate: false,
         }];
         m
     };
@@ -3932,6 +3941,7 @@ fn traefik_logs(rotate: Option<LogRotation>) -> DataMount {
         mount_point: "/mnt/traefik-logs".into(),
         note: None,
         rotate,
+        no_default_rotate: false,
     }
 }
 
@@ -3943,6 +3953,7 @@ fn traefik_rotation() -> LogRotation {
             container: "traefik".into(),
             signal: "USR1".into(),
         }),
+        max_size: None,
     }
 }
 
@@ -3951,7 +3962,7 @@ fn traefik_rotation() -> LogRotation {
 fn fix_24_the_rotation_rule_renames_and_signals_or_falls_back_to_copytruncate() {
     use homelab_core::ops::guards::rotation_policy;
 
-    let with_signal = rotation_policy(&[traefik_logs(Some(traefik_rotation()))]).unwrap();
+    let with_signal = rotation_policy(&[traefik_logs(Some(traefik_rotation()))], None).unwrap();
     assert_eq!(
         with_signal,
         "# written by the homelab deploy from data_mounts[/mnt/traefik-logs].rotate — edits here are overwritten\n\
@@ -3960,14 +3971,54 @@ fn fix_24_the_rotation_rule_renames_and_signals_or_falls_back_to_copytruncate() 
 
     let mut plain = traefik_rotation();
     plain.reopen = None;
-    let fallback = rotation_policy(&[traefik_logs(Some(plain))]).unwrap();
+    let fallback = rotation_policy(&[traefik_logs(Some(plain))], None).unwrap();
     assert!(fallback.contains("copytruncate"), "{fallback}");
     assert!(!fallback.contains("docker kill"), "{fallback}");
 
     assert_eq!(
-        rotation_policy(&[traefik_logs(None)]),
+        rotation_policy(&[traefik_logs(None)], None),
         None,
-        "no rotate, no rule"
+        "no rotate and no fleet default, no rule"
+    );
+}
+
+/// rule-20 (disk-audit, 2026-10-01): a data mount with no `rotate:` of its
+/// own gets the fleet default instead — opt-in rotation left thirteen of
+/// fourteen stacks unguarded. `max_size` rides along as a `maxsize` line.
+#[test]
+fn rule_20_a_mount_with_no_rotate_gets_the_fleet_default() {
+    use homelab_core::ops::guards::{rotation_policy, FleetLogRotationDefault};
+
+    let default = FleetLogRotationDefault {
+        files: "*.log".into(),
+        keep: 5,
+        max_size: "50M".into(),
+    };
+    let out = rotation_policy(&[traefik_logs(None)], Some(&default)).unwrap();
+    assert!(out.contains("/mnt/traefik-logs/*.log {"), "{out}");
+    assert!(out.contains("rotate 5"), "{out}");
+    assert!(out.contains("maxsize 50M"), "{out}");
+    assert!(out.contains("copytruncate"), "no reopen declared: {out}");
+
+    // Its own rotate: wins over the fleet default.
+    let own = rotation_policy(&[traefik_logs(Some(traefik_rotation()))], Some(&default)).unwrap();
+    assert!(own.contains("access.log"), "{own}");
+    assert!(!own.contains("*.log"), "{own}");
+}
+
+/// rule-20: a mount that opts out gets neither its own rule nor the fleet
+/// default — some data mounts genuinely carry no logs worth rotating.
+#[test]
+fn rule_20_a_mount_may_opt_out_of_the_fleet_default() {
+    use homelab_core::ops::guards::{rotation_policy, FleetLogRotationDefault};
+
+    let mut dm = traefik_logs(None);
+    dm.no_default_rotate = true;
+    let default = FleetLogRotationDefault::default();
+    assert_eq!(
+        rotation_policy(&[dm], Some(&default)),
+        None,
+        "opted out: the fleet default is not applied"
     );
 }
 
@@ -4260,6 +4311,7 @@ fn a_path_with_a_quote_a_dotdot_or_an_empty_segment_is_refused() {
             mount_point: "/mnt/media".into(),
             note: None,
             rotate: None,
+            no_default_rotate: false,
         }];
         let err = validate(&s).expect_err(bad);
         assert!(format!("{err}").contains("letters, digits"), "{bad}: {err}");
@@ -4271,6 +4323,7 @@ fn a_path_with_a_quote_a_dotdot_or_an_empty_segment_is_refused() {
         mount_point: "/mnt/data/18TB".into(),
         note: None,
         rotate: None,
+        no_default_rotate: false,
     }];
     validate(&ok).expect("a plain path is valid");
 }

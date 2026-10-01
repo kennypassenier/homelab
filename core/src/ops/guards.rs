@@ -635,21 +635,86 @@ pub fn rotation_path(stack: &str) -> String {
     format!("/etc/logrotate.d/homelab-{}", stack)
 }
 
-/// fix-24: the logrotate rule for every data mount that declares `rotate:`,
-/// or None when the stack declares none. Pure, so the exact bytes are tested.
-pub fn rotation_policy(data_mounts: &[crate::manifest::DataMount]) -> Option<String> {
+/// rule-20 (disk-audit, 2026-10-01): the fleet default applied to a data
+/// mount that declares no `rotate:` of its own and does not opt out
+/// (`DataMount::no_default_rotate`). Kenny's numbers: 50M, keep 5, `*.log` —
+/// generous enough not to lose a day's log, small enough that an app that
+/// never stops writing cannot grow it past a weekend. A host.toml key
+/// (`default_log_rotation`), editable from the dashboard like every other
+/// fleet default.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+pub struct FleetLogRotationDefault {
+    /// File name or glob under the mount, e.g. `*.log`.
+    #[serde(default = "default_fleet_rotate_files")]
+    pub files: String,
+    #[serde(default = "default_fleet_rotate_keep")]
+    pub keep: u32,
+    #[serde(default = "default_fleet_rotate_max_size")]
+    pub max_size: String,
+}
+
+fn default_fleet_rotate_files() -> String {
+    "*.log".into()
+}
+fn default_fleet_rotate_keep() -> u32 {
+    5
+}
+fn default_fleet_rotate_max_size() -> String {
+    "50M".into()
+}
+
+impl Default for FleetLogRotationDefault {
+    fn default() -> Self {
+        Self {
+            files: default_fleet_rotate_files(),
+            keep: default_fleet_rotate_keep(),
+            max_size: default_fleet_rotate_max_size(),
+        }
+    }
+}
+
+/// fix-24 / rule-20: the logrotate rule for every data mount — its own
+/// `rotate:` when it declares one, else the fleet default (`fleet_default`)
+/// unless the mount opts out (`no_default_rotate`) — or None when nothing
+/// applies to any mount. Pure, so the exact bytes are tested.
+pub fn rotation_policy(
+    data_mounts: &[crate::manifest::DataMount],
+    fleet_default: Option<&FleetLogRotationDefault>,
+) -> Option<String> {
     let mut out = String::new();
     for dm in data_mounts {
-        let Some(r) = &dm.rotate else { continue };
+        let owned;
+        let (r, from_default) = match &dm.rotate {
+            Some(r) => (r, false),
+            None if dm.no_default_rotate => continue,
+            None => match fleet_default {
+                Some(d) => {
+                    owned = crate::manifest::LogRotation {
+                        files: d.files.clone(),
+                        keep: d.keep,
+                        reopen: None,
+                        max_size: Some(d.max_size.clone()),
+                    };
+                    (&owned, true)
+                }
+                None => continue,
+            },
+        };
         let path = format!("{}/{}", dm.mount_point.trim_end_matches('/'), r.files);
         out.push_str(&format!(
-            "# written by the homelab deploy from data_mounts[{}].rotate — edits here are overwritten\n",
-            dm.mount_point
+            "# written by the homelab deploy from data_mounts[{}].rotate{} — edits here are overwritten\n",
+            dm.mount_point,
+            if from_default {
+                " (fleet default, default_log_rotation)"
+            } else {
+                ""
+            }
         ));
-        out.push_str(&format!(
-            "{} {{\n    daily\n    rotate {}\n    missingok\n    notifempty\n    compress\n    delaycompress\n",
-            path, r.keep
-        ));
+        out.push_str(&format!("{} {{\n    daily\n    rotate {}\n", path, r.keep));
+        if let Some(size) = &r.max_size {
+            out.push_str(&format!("    maxsize {}\n", size));
+        }
+        out.push_str("    missingok\n    notifempty\n    compress\n    delaycompress\n");
         match &r.reopen {
             Some(o) => out.push_str(&format!(
                 "    sharedscripts\n    postrotate\n        docker kill --signal={} {} >/dev/null 2>&1 || true\n    endscript\n",
@@ -673,9 +738,10 @@ pub async fn apply_rotation(
     vmid: u16,
     stack: &str,
     data_mounts: &[crate::manifest::DataMount],
+    fleet_default: Option<&FleetLogRotationDefault>,
 ) -> Result<bool, CoreError> {
     let path = rotation_path(stack);
-    match rotation_policy(data_mounts) {
+    match rotation_policy(data_mounts, fleet_default) {
         Some(policy) => push_content(exec, vmid, &path, &policy, "644").await,
         None => {
             // A rule whose declaration was removed must go with it, or the

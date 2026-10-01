@@ -152,6 +152,12 @@ pub struct OpCtx<'a> {
     /// every image keeps naming its own origin, which is also what happens
     /// when the cache is configured but does not answer.
     pub registry_cache: Option<registry_cache::CacheCfg>,
+    /// rule-20 (disk-audit, 2026-10-01): the fleet default log rotation —
+    /// applied to a data mount that declares no `rotate:` of its own and
+    /// does not explicitly opt out (`DataMount::no_default_rotate`). None =
+    /// no fleet default, which is the behaviour every stack had before this:
+    /// only an explicit `rotate:` rotates anything.
+    pub default_log_rotation: Option<guards::FleetLogRotationDefault>,
     /// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
     /// dashboard's own address, from which its once-a-minute tile watch
     /// reaches every stack's tiles. None or empty = feature off — the

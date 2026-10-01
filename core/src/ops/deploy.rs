@@ -1380,7 +1380,15 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
 
     // ── fix-24: rotation for logs the stack writes onto a data mount. ────
     step!(runner, exec, ctx, m, "log rotation", {
-        if guards::apply_rotation(exec, m.vmid, &m.stack_name, &m.data_mounts).await? {
+        if guards::apply_rotation(
+            exec,
+            m.vmid,
+            &m.stack_name,
+            &m.data_mounts,
+            ctx.default_log_rotation.as_ref(),
+        )
+        .await?
+        {
             Ok(StepOutcome::Changed)
         } else {
             Ok(StepOutcome::Unchanged)

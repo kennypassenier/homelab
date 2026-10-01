@@ -467,10 +467,19 @@ pub struct DataMount {
     #[serde(default)]
     pub note: Option<String>,
     /// B2 for a log the stack writes OUTSIDE its container (fix-24): the
-    /// deploy installs a logrotate rule for it inside the container. Absent =
-    /// nothing rotates this mount, which is right for data and wrong for logs.
+    /// deploy installs a logrotate rule for it inside the container. Absent
+    /// AND `no_default_rotate` false = the fleet default (`host.toml
+    /// default_log_rotation`) rotates `*.log` under this mount instead,
+    /// rule-20 (disk-audit, 2026-10-01): opt-in rotation meant thirteen of
+    /// fourteen stacks were unguarded, and any app writing a log file
+    /// outside docker's own log driver grew it forever.
     #[serde(default)]
     pub rotate: Option<LogRotation>,
+    /// rule-20: this mount carries no logs worth rotating (e.g. it is all
+    /// application data, not log files) — the fleet default is not applied
+    /// here either. Ignored when `rotate` is set.
+    #[serde(default)]
+    pub no_default_rotate: bool,
 }
 
 /// How a log file on a data mount is rotated (fix-24, Kenny 2026-09-26: "het
@@ -495,6 +504,12 @@ pub struct LogRotation {
     /// new one, which loses nothing.
     #[serde(default)]
     pub reopen: Option<ReopenSignal>,
+    /// rule-20: a `maxsize` cap (e.g. `50M`), on top of the daily rotation —
+    /// a log that writes faster than once a day is still bounded. Absent =
+    /// no size cap, only the daily schedule (unchanged default for every
+    /// `rotate:` declared before this existed).
+    #[serde(default)]
+    pub max_size: Option<String>,
 }
 
 fn default_rotate_keep() -> u32 {
@@ -1195,6 +1210,18 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
                     problems.push(format!(
                         "data_mounts '{}' rotate.reopen.signal '{}' must be a signal name like USR1",
                         dm.mount_point, o.signal
+                    ));
+                }
+            }
+            if let Some(size) = &r.max_size {
+                let valid = size.len() >= 2
+                    && size[..size.len() - 1].chars().all(|c| c.is_ascii_digit())
+                    && matches!(size.chars().last(), Some('k' | 'M' | 'G'));
+                if !valid {
+                    problems.push(format!(
+                        "data_mounts '{}' rotate.max_size '{}' must be a number and a unit, \
+                         e.g. 50M (k, M or G)",
+                        dm.mount_point, size
                     ));
                 }
             }

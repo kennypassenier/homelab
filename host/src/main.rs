@@ -193,6 +193,11 @@ struct FileConfig {
     /// D60: `[registry_cache] host = "10.10.10.17"` plus one `[[registry_cache.upstreams]]`
     /// per mirrored registry. Absent = no cache.
     registry_cache: Option<homelab_core::ops::registry_cache::CacheCfg>,
+    /// rule-20 (disk-audit, 2026-10-01): `[default_log_rotation]` — the
+    /// fleet default a data mount gets when it declares no `rotate:` of its
+    /// own and does not opt out. Absent = no fleet default (today's
+    /// behaviour: only an explicit `rotate:` rotates anything).
+    default_log_rotation: Option<homelab_core::ops::guards::FleetLogRotationDefault>,
     /// Where restic writes. Was a string literal in BackupCfg::default(),
     /// which meant exactly one backup target could ever be addressed while
     /// the scope asks for two (deployment project, F39 / standing rule 27).
@@ -350,6 +355,8 @@ struct Config {
     /// D60: the pull-through cache in the house. Absent = images keep naming
     /// their own origin, which is also what happens when it does not answer.
     registry_cache: Option<homelab_core::ops::registry_cache::CacheCfg>,
+    /// rule-20: the fleet default log rotation; see `FileConfig`.
+    default_log_rotation: Option<homelab_core::ops::guards::FleetLogRotationDefault>,
     /// T1: where per-stack Prometheus discovery files are written.
     metrics_targets_dir: Option<String>,
     /// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
@@ -610,6 +617,8 @@ fn load_config_from(path: String) -> Config {
         // D60: absent from host.toml = no cache, which is the same behaviour
         // the fleet had before there was one.
         registry_cache: file.registry_cache,
+        // rule-20: absent from host.toml = no fleet default, same as before.
+        default_log_rotation: file.default_log_rotation,
         backup: {
             let d = homelab_core::ops::backup::BackupCfg::default();
             homelab_core::ops::backup::BackupCfg {
@@ -7477,6 +7486,7 @@ where
         loki_url: state.config.loki_url.clone(),
         backup: state.config.backup.clone(),
         registry_cache: state.config.registry_cache.clone(),
+        default_log_rotation: state.config.default_log_rotation.clone(),
         asker: &asker,
     };
     let report = op(&ctx).await;

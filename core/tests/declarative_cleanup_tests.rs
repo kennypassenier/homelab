@@ -117,6 +117,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
         registry_cache: None,
+        default_log_rotation: None,
         tile_watch_source: None,
         tile_watch_targets: Vec::new(),
         tile_watch_watcher: None,
@@ -821,6 +822,7 @@ async fn a_mount_the_stack_no_longer_declares_is_detached_and_its_directory_kept
         mount_point: "/mnt/old".into(),
         note: None,
         rotate: None,
+        no_default_rotate: false,
     }];
     let mut st = HostState::default();
     st.stacks.insert("syncthing".into(), record(&before));

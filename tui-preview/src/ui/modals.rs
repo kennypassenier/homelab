@@ -4,7 +4,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Clear, Gauge, Paragraph};
 
-use crate::app::{App, Modal, WizardStep, PRESETS};
+use crate::app::{App, Modal, PRESETS, WizardStep};
 use crate::fx;
 use crate::sim::StepState;
 use crate::theme::THEME;

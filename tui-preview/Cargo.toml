@@ -1,7 +1,17 @@
+# An empty table on purpose (fix-135): without it, cargo's ancestor walk for
+# the workspace root does not stop at the main Cargo.toml's `exclude` entry
+# for this crate — it keeps walking up and, when this checkout sits inside a
+# worktree nested under the main repository's own directory (as the agent
+# worktrees under .claude/worktrees/ do), it can reach the outer repository's
+# workspace next, which does not know this path either. This table makes
+# tui-preview its own root everywhere, matching how it already builds: on
+# its own, from its own directory.
+[workspace]
+
 [package]
 name = "tui-preview"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Interactive mockup of the Homelab v2 cyberpunk TUI, driven entirely by simulated data"
 
 [dependencies]

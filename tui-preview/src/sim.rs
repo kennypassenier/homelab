@@ -379,17 +379,17 @@ impl World {
         // Occasionally flip a media app into a short restart (or brief stop) so
         // the fleet shows real-looking degradation now and then.
         if rng.random_bool(0.004) {
-            if let Some(s) = self.stacks.iter_mut().find(|s| s.name == "media") {
-                if let Some(a) = s.apps.iter_mut().find(|a| a.state == AppState::Running) {
-                    a.state = if rng.random_bool(0.25) {
-                        AppState::Stopped
-                    } else {
-                        AppState::Restarting
-                    };
-                    a.restarts += 1;
-                    if s.status == StackStatus::Online {
-                        s.status = StackStatus::Degraded;
-                    }
+            if let Some(s) = self.stacks.iter_mut().find(|s| s.name == "media")
+                && let Some(a) = s.apps.iter_mut().find(|a| a.state == AppState::Running)
+            {
+                a.state = if rng.random_bool(0.25) {
+                    AppState::Stopped
+                } else {
+                    AppState::Restarting
+                };
+                a.restarts += 1;
+                if s.status == StackStatus::Online {
+                    s.status = StackStatus::Degraded;
                 }
             }
         } else if rng.random_bool(0.06) {

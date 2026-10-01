@@ -142,24 +142,24 @@ fn draw_ticker(f: &mut Frame, app: &App, area: Rect) {
     let w = &app.world;
     let mut segments: Vec<String> = Vec::new();
 
-    if let Some(d) = &w.deploy {
-        if !d.finished {
-            segments.push(format!(
-                "▶ DEPLOY {} step {}/{}",
-                w.stacks[d.stack_idx].name,
-                d.current + 1,
-                d.steps.len()
-            ));
-        }
+    if let Some(d) = &w.deploy
+        && !d.finished
+    {
+        segments.push(format!(
+            "▶ DEPLOY {} step {}/{}",
+            w.stacks[d.stack_idx].name,
+            d.current + 1,
+            d.steps.len()
+        ));
     }
-    if let Some(b) = &w.backup {
-        if !b.finished {
-            segments.push(format!(
-                "▶ BACKUP {} {:.0}%",
-                w.stacks[b.stack_idx].name,
-                b.ratio() * 100.0
-            ));
-        }
+    if let Some(b) = &w.backup
+        && !b.finished
+    {
+        segments.push(format!(
+            "▶ BACKUP {} {:.0}%",
+            w.stacks[b.stack_idx].name,
+            b.ratio() * 100.0
+        ));
     }
     if let Some(alert) = &w.last_alert {
         segments.push(format!("⚠ {}", alert));

@@ -14,6 +14,18 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+/// SAFETY: this file has exactly one `#[test]` fn, so these two wrappers are
+/// never called from more than one thread.
+#[allow(unsafe_code)]
+fn set_env(k: &str, v: &str) {
+    unsafe { std::env::set_var(k, v) }
+}
+
+#[allow(unsafe_code)]
+fn remove_env(k: &str) {
+    unsafe { std::env::remove_var(k) }
+}
+
 fn write(path: &Path, content: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, content).unwrap();
@@ -62,9 +74,9 @@ fn gap_34_build_manifest_and_files_only_never_touch_latch() {
     let _ = std::fs::remove_dir_all(&tmp);
     let log = tmp.join("stub.log");
     install_failing_stub(&tmp.join("bin"), &log);
-    std::env::set_var(
+    set_env(
         "PATH",
-        format!(
+        &format!(
             "{}:{}",
             tmp.join("bin").display(),
             std::env::var("PATH").unwrap_or_default()
@@ -73,7 +85,7 @@ fn gap_34_build_manifest_and_files_only_never_touch_latch() {
     // The point: HOMELAB_LATCH_ENV is deliberately unset. A real build_spec
     // on this stack dir would refuse right here; destroy/resize/prune-orphans
     // must not care.
-    std::env::remove_var("HOMELAB_LATCH_ENV");
+    remove_env("HOMELAB_LATCH_ENV");
 
     let dir = stack_dir(&tmp);
 

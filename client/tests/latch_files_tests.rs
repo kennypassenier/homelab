@@ -7,6 +7,18 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+/// SAFETY: this file has exactly one `#[test]` fn (see the comment above
+/// it), so these two wrappers are never called from more than one thread.
+#[allow(unsafe_code)]
+fn set_env(k: &str, v: &str) {
+    unsafe { std::env::set_var(k, v) }
+}
+
+#[allow(unsafe_code)]
+fn remove_env(k: &str) {
+    unsafe { std::env::remove_var(k) }
+}
+
 fn write(path: &Path, content: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, content).unwrap();
@@ -61,9 +73,9 @@ fn latch_files_are_read_from_latch_and_checked_before_any_call() {
     let _ = std::fs::remove_dir_all(&tmp);
     let log = tmp.join("stub.log");
     install_stub(&tmp.join("bin"), &log);
-    std::env::set_var(
+    set_env(
         "PATH",
-        format!(
+        &format!(
             "{}:{}",
             tmp.join("bin").display(),
             std::env::var("PATH").unwrap_or_default()
@@ -77,15 +89,15 @@ fn latch_files_are_read_from_latch_and_checked_before_any_call() {
     };
 
     // 1. No HOMELAB_LATCH_ENV: refused, naming it, and latch never ran.
-    std::env::remove_var("HOMELAB_LATCH_ENV");
+    remove_env("HOMELAB_LATCH_ENV");
     let dir = stack_dir(&tmp, ENTRY);
     let err = homelab_client::spec::build_spec(&dir).unwrap_err();
     assert!(err.contains("HOMELAB_LATCH_ENV"), "{}", err);
     assert_eq!(calls(), 0);
 
     // 2. The happy path: one call, from the stacks/ root, the stack's path.
-    std::env::set_var("HOMELAB_LATCH_ENV", "prod");
-    std::env::remove_var("LATCH_STUB_MODE");
+    set_env("HOMELAB_LATCH_ENV", "prod");
+    remove_env("LATCH_STUB_MODE");
     let spec = homelab_client::spec::build_spec(&dir).unwrap();
     assert_eq!(spec.secret_files.len(), 1);
     let f = &spec.secret_files[0];
@@ -107,7 +119,7 @@ fn latch_files_are_read_from_latch_and_checked_before_any_call() {
     assert_ne!(before, homelab_core::manifest::intent_hash(&other));
 
     // 3. latch fails or answers nothing: the deploy stops, saying which file.
-    std::env::set_var("LATCH_STUB_MODE", "fail");
+    set_env("LATCH_STUB_MODE", "fail");
     let err = homelab_client::spec::build_spec(&dir).unwrap_err();
     assert!(
         err.contains("lftest/switch/config.toml") && err.contains("not found"),
@@ -115,17 +127,17 @@ fn latch_files_are_read_from_latch_and_checked_before_any_call() {
         err
     );
     // A `${` in a file breaks every --expand of the environment: refused.
-    std::env::set_var("LATCH_STUB_MODE", "template");
+    set_env("LATCH_STUB_MODE", "template");
     let err = homelab_client::spec::build_spec(&dir).unwrap_err();
     assert!(
         err.contains("template") && err.contains("lftest/switch/config.toml"),
         "{}",
         err
     );
-    std::env::set_var("LATCH_STUB_MODE", "empty");
+    set_env("LATCH_STUB_MODE", "empty");
     let err = homelab_client::spec::build_spec(&dir).unwrap_err();
     assert!(err.contains("empty content"), "{}", err);
-    std::env::remove_var("LATCH_STUB_MODE");
+    remove_env("LATCH_STUB_MODE");
 
     // 4. A bad entry is refused before latch is asked anything.
     let n = calls();

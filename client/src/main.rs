@@ -149,7 +149,15 @@ fn load_config_env() {
             }
             let v = v.trim().trim_matches('"').trim_matches('\'');
             if !v.is_empty() {
-                std::env::set_var(k, v);
+                // SAFETY: this runs before the tokio runtime starts (this is
+                // the first thing main() calls), so no other thread exists
+                // yet to observe the write. The one exception to the
+                // workspace's `unsafe_code = "deny"` besides fix-53's
+                // `libc::killpg`.
+                #[allow(unsafe_code)]
+                unsafe {
+                    std::env::set_var(k, v);
+                }
             }
         }
     }

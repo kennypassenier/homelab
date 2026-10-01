@@ -12,6 +12,20 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+/// SAFETY: only `d12_latch_sourced_secrets` below touches the environment
+/// (see its own "one test fn on purpose" comment); the other tests in this
+/// file never read or write these variables, so a concurrent run of them
+/// cannot observe the mutation.
+#[allow(unsafe_code)]
+fn set_env(k: &str, v: &str) {
+    unsafe { std::env::set_var(k, v) }
+}
+
+#[allow(unsafe_code)]
+fn remove_env(k: &str) {
+    unsafe { std::env::remove_var(k) }
+}
+
 fn write(path: &Path, content: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, content).unwrap();
@@ -64,9 +78,9 @@ fn d12_latch_sourced_secrets() {
     let _ = std::fs::remove_dir_all(&tmp);
     let log = tmp.join("stub.log");
     install_stub(&tmp.join("bin"), &log);
-    std::env::set_var(
+    set_env(
         "PATH",
-        format!(
+        &format!(
             "{}:{}",
             tmp.join("bin").display(),
             std::env::var("PATH").unwrap_or_default()
@@ -74,14 +88,14 @@ fn d12_latch_sourced_secrets() {
     );
 
     // 1. Declared but HOMELAB_LATCH_ENV unset → hard error naming the remedy.
-    std::env::remove_var("HOMELAB_LATCH_ENV");
+    remove_env("HOMELAB_LATCH_ENV");
     let dir = stack_dir(&tmp, "latch_secrets: [kyu]\n");
     let err = homelab_client::spec::build_spec(&dir).unwrap_err();
     assert!(err.contains("HOMELAB_LATCH_ENV"), "{}", err);
 
     // 2. Happy path: content arrives in memory, correct argv + cwd.
-    std::env::set_var("HOMELAB_LATCH_ENV", "prod");
-    std::env::remove_var("LATCH_STUB_MODE");
+    set_env("HOMELAB_LATCH_ENV", "prod");
+    remove_env("LATCH_STUB_MODE");
     let spec = homelab_client::spec::build_spec(&dir).unwrap();
     assert_eq!(
         spec.env.get("kyu").map(|s| s.as_str()),
@@ -119,7 +133,7 @@ fn d12_latch_sourced_secrets() {
     //    were still invoked for this app, build_spec would error instead of
     //    returning the on-disk value, so "skipped" is proven twice over — by
     //    the value that comes back AND by the unchanged call log.
-    std::env::set_var("LATCH_STUB_MODE", "fail");
+    set_env("LATCH_STUB_MODE", "fail");
     write(&dir.join("kyu").join(".env"), "KYU_TOKEN=plain\n");
     let before = std::fs::read_to_string(&log).unwrap().lines().count();
     let spec = homelab_client::spec::build_spec(&dir).unwrap();
@@ -134,20 +148,20 @@ fn d12_latch_sourced_secrets() {
         "latch must not be invoked for an app that already has a local .env"
     );
     std::fs::remove_file(dir.join("kyu/.env")).unwrap();
-    std::env::remove_var("LATCH_STUB_MODE");
+    remove_env("LATCH_STUB_MODE");
 
     // 4. latch fails → its stderr (which carries the remedy) reaches the user.
-    std::env::set_var("LATCH_STUB_MODE", "fail");
+    set_env("LATCH_STUB_MODE", "fail");
     let err = homelab_client::spec::build_spec(&dir).unwrap_err();
     assert!(err.contains("commit+push env files first"), "{}", err);
 
     // 5. Empty stdout is not a sealed env — refused with a remedy.
-    std::env::set_var("LATCH_STUB_MODE", "empty");
+    set_env("LATCH_STUB_MODE", "empty");
     let err = homelab_client::spec::build_spec(&dir).unwrap_err();
     assert!(err.contains("empty content"), "{}", err);
 
     // 6. No latch_secrets declared → latch is never invoked at all.
-    std::env::set_var("LATCH_STUB_MODE", "fail");
+    set_env("LATCH_STUB_MODE", "fail");
     let plain = stack_dir(&tmp.join("second"), "");
     write(&plain.join("kyu").join(".env"), "KYU_TOKEN=plain\n");
     let before = std::fs::read_to_string(&log).unwrap().lines().count();
@@ -162,7 +176,7 @@ fn d12_latch_sourced_secrets() {
     // 7. A latch_secrets entry that names no real app is a typo, caught
     // before latch is ever invoked (also what keeps '__' out of the path:
     // manifest app names are validated [a-z0-9-]).
-    std::env::remove_var("LATCH_STUB_MODE");
+    remove_env("LATCH_STUB_MODE");
     let typo = stack_dir(&tmp.join("third"), "latch_secrets: [mailbx]\n");
     let err = homelab_client::spec::build_spec(&typo).unwrap_err();
     assert!(err.contains("no such app"), "{}", err);

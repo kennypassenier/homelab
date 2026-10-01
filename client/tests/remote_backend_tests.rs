@@ -30,7 +30,13 @@ fn test_cert() -> &'static TestCert {
             std::env::temp_dir().join(format!("homelab-remote-backend-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(&home).unwrap();
-        std::env::set_var("HOME", &home);
+        // SAFETY: only reachable through fake_host(), which holds SERIAL for
+        // the whole test (see the file comment); no other thread touches the
+        // environment while this runs.
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("HOME", &home)
+        };
         let mut params = rcgen::CertificateParams::new(vec!["homelab-host".to_string()]).unwrap();
         params.distinguished_name = rcgen::DistinguishedName::new();
         let key = rcgen::KeyPair::generate().unwrap();

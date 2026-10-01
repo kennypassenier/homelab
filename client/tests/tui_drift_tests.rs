@@ -50,7 +50,13 @@ fn fixture() -> &'static Fixture {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
         let path = std::env::var("PATH").unwrap_or_default();
-        std::env::set_var("PATH", format!("{}:{}", bin.display(), path));
+        // SAFETY: only reached through OnceLock::get_or_init, which runs
+        // this closure on exactly one thread even under concurrent callers;
+        // no other thread touches the environment while it runs.
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("PATH", format!("{}:{}", bin.display(), path))
+        };
         let stack = root.join("almanac");
         copy_dir(
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("../stacks/almanac"),

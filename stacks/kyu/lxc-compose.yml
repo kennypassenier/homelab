@@ -257,3 +257,12 @@ tiles:
     group: "Own"
     order: 402
     description: "Message hub"
+  # Kenny, 2026-10-01: kyu-runner must be watched too. It has no page of its
+  # own, so its tile opens its health endpoint, which the minute watch asks
+  # directly (the same address Uptime Kuma probes).
+  kyu-runner.health:
+    name: "Kyu-runner"
+    group: "Own"
+    order: 403
+    description: "Kyu to Home Assistant pump"
+    url: "http://10.10.10.9:8082/healthz"

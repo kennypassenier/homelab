@@ -45,23 +45,6 @@ pub struct TileView {
 /// on its way to the line it prints.
 pub async fn read_tiles(exec: &dyn Executor, state: &HostState) -> Vec<TileView> {
     let mut todo: Vec<(TileView, u16, Option<String>)> = Vec::new();
-    // Found 2026-10-01: a tile routed to a device outside the fleet (Home
-    // Assistant, the router, the hypervisor) resolved a probe on that
-    // device's address; the watcher's firewall opens only the fleet's own
-    // stacks, so those three were reported down. Watch what the fleet
-    // runs: a probe whose host is no managed stack's own ip is dropped,
-    // and its tile shows as not watched.
-    let fleet_ips: std::collections::BTreeSet<&str> = state
-        .stacks
-        .values()
-        .filter_map(|st| st.manifest.as_ref())
-        .map(|m| m.network.ip.split('/').next().unwrap_or(&m.network.ip))
-        .collect();
-    let in_fleet = |probe: &str| {
-        let rest = probe.split("://").nth(1).unwrap_or(probe);
-        let host = rest.split(['/', ':']).next().unwrap_or("");
-        fleet_ips.contains(host)
-    };
     for (stack, st) in &state.stacks {
         let Some(m) = st.manifest.as_ref() else {
             continue;
@@ -75,7 +58,7 @@ pub async fn read_tiles(exec: &dyn Executor, state: &HostState) -> Vec<TileView>
                         .url
                         .clone()
                         .unwrap_or_else(|| format!("https://{}/", host)),
-                    probe: t.probe.clone().filter(|p| in_fleet(p)),
+                    probe: t.probe.clone(),
                     watch_every: t.watch_every,
                     down_after: t.down_after,
                     name: t.name.clone(),

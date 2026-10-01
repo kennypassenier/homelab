@@ -1023,7 +1023,7 @@ fn derive_fleet_tile_targets_collects_every_stack_sorted_by_ip() {
 }
 
 #[test]
-fn with_fresh_target_replaces_only_its_own_entry() {
+fn with_fresh_target_joins_the_fresh_probes() {
     let mut targets: firewall::FleetTileTargets = vec![(
         "10.10.10.21".into(),
         std::collections::BTreeSet::from([9090]),
@@ -1044,17 +1044,38 @@ fn with_fresh_target_replaces_only_its_own_entry() {
             ),
         ]
     );
-    // Disabled: its own entry drops out even though `tiles` still names one.
+    // Disabled: adds nothing, keeps what the state said.
     targets.push((
         "10.10.10.107".into(),
         std::collections::BTreeSet::from([8080]),
     ));
     let disabled = firewall::with_fresh_target(&targets, "10.10.10.107", &tiles, false);
+    assert_eq!(disabled.len(), 2);
+}
+
+#[test]
+fn a_probe_on_a_device_outside_the_fleet_is_a_target_too() {
+    // Kenny, 2026-10-01: "HA, Proxmox en OPN moeten wel gemeten worden".
+    let mut gw = std::collections::BTreeMap::new();
+    gw.insert("ha".into(), tile(Some("http://10.10.10.2:8123/")));
+    gw.insert("opn".into(), tile(Some("https://10.10.10.1/")));
+    let targets = firewall::derive_fleet_tile_targets([("10.10.10.4/24", &gw)]);
     assert_eq!(
-        disabled,
-        vec![(
-            "10.10.10.21".to_string(),
-            std::collections::BTreeSet::from([9090])
-        )]
+        targets,
+        vec![
+            (
+                "10.10.10.1".to_string(),
+                std::collections::BTreeSet::from([443])
+            ),
+            (
+                "10.10.10.2".to_string(),
+                std::collections::BTreeSet::from([8123])
+            ),
+        ]
     );
+    assert_eq!(
+        firewall::probe_target("http://10.10.10.6:8096/web"),
+        Some(("10.10.10.6".to_string(), 8096))
+    );
+    assert_eq!(firewall::probe_target("10.10.10.6:8096"), None);
 }

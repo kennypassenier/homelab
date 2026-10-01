@@ -30,6 +30,8 @@ import { mount as presets } from "./pages/presets.js";
 import { mount as homePage } from "./pages/home.js";
 import { mount as healthPage } from "./pages/health.js";
 import { mount as metricsPage } from "./pages/metrics.js";
+import { mount as fleetviewPage } from "./pages/fleetview.js";
+import { mount as backupCalendarPage } from "./pages/backupcalendar.js";
 import { mountVersions } from "./versions.js";
 
 const page = /** @type {HTMLElement} */ (document.getElementById("page"));
@@ -156,6 +158,12 @@ function render() {
       break;
     case "presets":
       cleanup = presets(page, { navigate });
+      break;
+    case "fleetview":
+      cleanup = fleetviewPage(page);
+      break;
+    case "backupcalendar":
+      cleanup = backupCalendarPage(page);
       break;
     default:
       page.replaceChildren(

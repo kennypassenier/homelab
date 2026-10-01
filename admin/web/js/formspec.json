@@ -250,7 +250,9 @@
     "firewall",
     "settings",
     "shell",
-    "presets"
+    "presets",
+    "fleetview",
+    "backupcalendar"
   ],
   "stack_tabs": [
     "overview",

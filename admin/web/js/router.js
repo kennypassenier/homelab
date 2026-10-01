@@ -28,6 +28,7 @@ export const STACK_TABS = /** @type {const} */ ([
  *   {page: "backups"} | {page: "secrets"} |
  *   {page: "log"} | {page: "shell"} | {page: "apply"} |
  *   {page: "presets"} |
+ *   {page: "fleetview"} | {page: "backupcalendar"} |
  *   {page: "start"} | {page: "today"} | {page: "doctor"} | {page: "checks"} |
  *   {page: "charts"} | {page: "traffic"} | {page: "timeline"} |
  *   {page: "notfound", path: string}} Route
@@ -92,6 +93,21 @@ export const NAV = /** @type {const} */ ([
     label: "Settings",
     group: "Configure",
   },
+  // visuals (feat-overview-7/10/11/12, feat-stacks-9/10): the fleet-wide
+  // graphs, grouped apart from the single-stack and single-purpose pages
+  // above so Configure does not grow a sixth unrelated entry.
+  {
+    page: "fleetview",
+    href: "/app/fleetview",
+    label: "Fleet view",
+    group: "Visuals",
+  },
+  {
+    page: "backupcalendar",
+    href: "/app/backupcalendar",
+    label: "Backup calendar",
+    group: "Visuals",
+  },
 ]);
 
 /** Pages with a fixed address that the bar does not list (the bell opens it). */
@@ -126,6 +142,8 @@ const FIXED = {
   shell: { page: "shell" },
   apply: { page: "apply" },
   presets: { page: "presets" },
+  fleetview: { page: "fleetview" },
+  backupcalendar: { page: "backupcalendar" },
   // 2026-09-30: retired addresses, kept parseable for old links and for
   // Live view's known_page (core::drive checks formspec.json's page list,
   // not this Route); `redirectFor` sends every one of them on to its new

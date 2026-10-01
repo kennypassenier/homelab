@@ -50,6 +50,7 @@ fn almanac(pause: BackupPause) -> NativeServiceManifest {
         backup_from_newest: None,
         backup_pause: pause,
         update_policy: Default::default(),
+        after_restore: None,
         metrics: None,
     }
 }

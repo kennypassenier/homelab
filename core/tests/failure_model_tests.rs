@@ -290,6 +290,44 @@ fn f6_doctor_flags_each_problem_with_remedy() {
         .any(|c| c.name.contains("interrupted") && c.health == Health::Warn));
 }
 
+/// fix-62 (restore-drill-covers-almost-nothing, 2026-10-01): the drill's
+/// scratch directory is now a disk the doctor watches, the same thresholds
+/// as the host disk and the backup staging directory.
+#[test]
+fn fix_62_the_restore_drill_scratch_disk_is_a_doctor_check() {
+    for (free, want) in [(5u64, Health::Fail), (15, Health::Warn), (50, Health::Ok)] {
+        let p = Probes {
+            host_disk_free_pct: Some(90),
+            state_parses: true,
+            restore_scratch_disk_free_pct: Some(free),
+            ..Default::default()
+        };
+        let checks = doctor::diagnose(&p);
+        let line = checks
+            .iter()
+            .find(|c| c.name == "restore drill scratch disk")
+            .expect("a restore drill scratch disk line");
+        assert_eq!(line.health, want, "{}% free", free);
+        if want != Health::Ok {
+            assert!(line.remedy.is_some());
+        }
+    }
+    // Unreadable is a warning with a remedy, not silence.
+    let p = Probes {
+        host_disk_free_pct: Some(90),
+        state_parses: true,
+        restore_scratch_disk_free_pct: None,
+        ..Default::default()
+    };
+    let checks = doctor::diagnose(&p);
+    let line = checks
+        .iter()
+        .find(|c| c.name == "restore drill scratch disk")
+        .expect("a restore drill scratch disk line even when unreadable");
+    assert_eq!(line.health, Health::Warn);
+    assert!(line.remedy.is_some());
+}
+
 /// gap-27: with the Drive token dead the doctor said "local backups still
 /// run". Every repository lives behind rclone on Google Drive, so none runs.
 ///

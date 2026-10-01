@@ -403,7 +403,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 - Unit `kyu`:
   - program `/opt/kyu/bin/kyu`, from the GitHub release `kennypassenier/kyu` (asset `kyu`); update policy auto.
   - unit file `stacks/kyu/kyu/kyu.service` in the repository; the container's copy is `/etc/systemd/system/kyu.service`.
-  - data: repository `rclone:gdrive:homelab-backups/kyu-config`, archive `/kyu-data.tar` holding the newest file matching `/appdata/kyu/kyu-config/kyu.backup-*.db` (the service's own verified copy, refused when older than 26 h), not the live directory. That copy is a complete database: put it back as the live file and delete any `-wal`/`-shm` beside it (the comment above `backup_from_newest` in `stacks/kyu/service.yml` names the file).
+  - data: repository `rclone:gdrive:homelab-backups/kyu-config`, archive `/kyu-data.tar` holding the newest file matching `/appdata/kyu/kyu-config/kyu.backup-*.db` (the service's own verified copy, refused when older than 26 h), not the live directory. fix-146 (2026-10-01): `service.yml`'s `after_restore` now puts that copy back as the live file and deletes any `-wal`/`-shm` beside it automatically, on both restore paths — this is no longer a manual step (op-11 in `docs/OPERATIONS_RUNBOOK.md`).
   - vault copy of kyu (`/appdata/kyu/kyu-config/kyu.env`): `/var/lib/homelab/secrets/kyu/kyu-config/kyu.env`.
   - re-register a running unit after the daemon lost its state (needs the daemon): `homelab adopt stacks/kyu`. Adoption only records a service that is already active; it never starts one.
 - Unit `kyu-runner`:

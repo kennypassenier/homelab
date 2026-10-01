@@ -58,6 +58,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
             no_backup: None,
             host_owner_uid: Some(101000),
             app: None,
+            postgres_check_image: None,
         }],
         apps: vec!["app".into()],
     }
@@ -418,6 +419,7 @@ async fn a_path_declared_empty_is_not_backed_up_and_must_really_be_empty() {
             no_backup: None,
             host_owner_uid: Some(100000),
             app: Some("keeper".into()),
+            postgres_check_image: None,
         },
         homelab_core::manifest::MountSpec {
             host_path: "/appdata/test/hollow-config".into(),
@@ -426,6 +428,7 @@ async fn a_path_declared_empty_is_not_backed_up_and_must_really_be_empty() {
             no_backup: None,
             host_owner_uid: Some(100000),
             app: Some("hollow".into()),
+            postgres_check_image: None,
         },
     ];
 
@@ -1595,6 +1598,7 @@ fn v8_validate_rejects_undeclared_appdata_bind() {
         no_backup: None,
         host_owner_uid: Some(101000),
         app: None,
+        postgres_check_image: None,
     }];
     validate(&ok_spec).unwrap();
 }
@@ -1770,6 +1774,7 @@ async fn e3_restores_the_empty_path_and_leaves_its_full_sibling_alone() {
             no_backup: None,
             host_owner_uid: Some(100000),
             app: Some("alpha".into()),
+            postgres_check_image: None,
         },
         homelab_core::manifest::MountSpec {
             host_path: "/appdata/test/beta-config".into(),
@@ -1778,6 +1783,7 @@ async fn e3_restores_the_empty_path_and_leaves_its_full_sibling_alone() {
             no_backup: None,
             host_owner_uid: Some(100000),
             app: Some("beta".into()),
+            postgres_check_image: None,
         },
     ];
 
@@ -2009,6 +2015,7 @@ fn t40_stateless_must_be_declared_not_inferred() {
         backup_from_newest: None,
         backup_pause: BackupPause::Off,
         update_policy: Default::default(),
+        after_restore: None,
         metrics: None,
         release_repo: None,
         release_asset: None,
@@ -2355,6 +2362,7 @@ async fn d25_backup_writes_one_repo_per_owning_app() {
             no_backup: None,
             host_owner_uid: Some(101000),
             app: Some("alpha".into()),
+            postgres_check_image: None,
         },
         homelab_core::manifest::MountSpec {
             host_path: "/appdata/test/beta-config".into(),
@@ -2363,6 +2371,7 @@ async fn d25_backup_writes_one_repo_per_owning_app() {
             no_backup: None,
             host_owner_uid: Some(101000),
             app: Some("beta".into()),
+            postgres_check_image: None,
         },
     ];
     let exec = MockExecutor::new();
@@ -2507,6 +2516,7 @@ async fn o6_restore_is_per_path_not_per_stack() {
             no_backup: None,
             host_owner_uid: None,
             app: None,
+            postgres_check_image: None,
         },
         homelab_core::manifest::MountSpec {
             host_path: "/appdata/test/beta-config".into(),
@@ -2515,6 +2525,7 @@ async fn o6_restore_is_per_path_not_per_stack() {
             no_backup: None,
             host_owner_uid: None,
             app: None,
+            postgres_check_image: None,
         },
     ];
     let exec = MockExecutor::new();

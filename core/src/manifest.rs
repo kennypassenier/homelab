@@ -449,6 +449,18 @@ pub struct MountSpec {
     /// Absent = the stack owns it (host-level paths with no single app).
     #[serde(default)]
     pub app: Option<String>,
+    /// fix-62 (restore-drill-covers-almost-nothing, 2026-10-01): this
+    /// directory is a Postgres data directory (`PGDATA`); the nightly
+    /// restore drill, on the night this mount's repository is drilled,
+    /// starts a throwaway container from this image against the restored
+    /// copy and checks it reaches "ready to accept connections" before
+    /// destroying it — a restore that comes back with files proves nothing
+    /// about whether Postgres can still open them. The image: the same
+    /// pinned reference the stack's own compose service runs, so the check
+    /// reads the data the way the live service does. Generic by content,
+    /// not by app name — no code here knows which app this is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub postgres_check_image: Option<String>,
 }
 
 /// A bind mount of a directory the orchestrator does not own (M1).
@@ -1067,6 +1079,25 @@ fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
             problems.push(format!(
                 "mount '{}' sets both no_data and no_backup — one says it holds nothing, the \
                  other says it holds something not worth keeping; one of the two is wrong",
+                mount.host_path
+            ));
+        }
+        // fix-62: an empty value would mean the restore drill starts a
+        // throwaway container with no image to pull — a fault the night the
+        // repository is next drilled, not a fault now.
+        if let Some(image) = &mount.postgres_check_image {
+            if image.trim().is_empty() {
+                problems.push(format!(
+                    "mount '{}' sets postgres_check_image but it is empty — remove it or name \
+                     the image",
+                    mount.host_path
+                ));
+            }
+        }
+        if mount.no_data && mount.postgres_check_image.is_some() {
+            problems.push(format!(
+                "mount '{}' sets both no_data and postgres_check_image — no_data says it holds \
+                 nothing to restore and check",
                 mount.host_path
             ));
         }

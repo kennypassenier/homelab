@@ -187,6 +187,20 @@ pub struct NativeServiceManifest {
     /// then reports it as `noted` instead of as drift. Absent = measured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metrics: Option<bool>,
+    /// fix-146 (native-empty-rebuild, 2026-10-01): a shell one-liner run
+    /// INSIDE the container (`pct exec <vmid> -- sh -c "<after_restore>"`)
+    /// once a snapshot is unpacked and before the unit starts — the step a
+    /// person restoring this service would otherwise have to do by hand
+    /// (docs/OPERATIONS_RUNBOOK.md op-11).
+    ///
+    /// Only a unit whose archive is not already its live store needs this —
+    /// `backup_from_newest` (kyu) restores a copy, not the live file, so the
+    /// copy has to be put in place before the service can use it. kyu's is
+    /// the restore note that used to live only in a comment: rename the
+    /// newest `kyu.backup-*.db` to `kyu.db` and drop any stale `-wal`/`-shm`
+    /// beside it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_restore: Option<String>,
 }
 
 impl NativeServiceManifest {
@@ -327,6 +341,20 @@ pub fn validate_native(m: &NativeServiceManifest) -> Result<(), Vec<String>> {
         if m.stateless {
             problems.push(
                 "backup_from_newest is set on a stateless service — one of the two is wrong".into(),
+            );
+        }
+    }
+    // fix-146: an empty string would run as `pct exec <vmid> -- sh -c ""`,
+    // which succeeds and seeds nothing — silently.
+    if let Some(cmd) = &m.after_restore {
+        if cmd.trim().is_empty() {
+            problems.push("after_restore is set but empty — remove it or write the command".into());
+        }
+        if m.stateless {
+            problems.push(
+                "after_restore is set on a stateless service — a restore never unpacks \
+                 anything for it to run against"
+                    .into(),
             );
         }
     }

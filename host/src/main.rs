@@ -137,6 +137,10 @@ struct FileConfig {
     /// the default is 90 days. Kenny's, not the author's — a house that
     /// changes little wants it longer, one being rebuilt wants it shorter.
     restore_drill_interval_s: Option<u64>,
+    /// fix-62 (restore-drill-covers-almost-nothing, 2026-10-01): where the
+    /// nightly restore drill restores a repository to — a data pool, not the
+    /// root disk, same reasoning as `native_backup_staging_dir`.
+    restore_drill_scratch_dir: Option<String>,
     /// G16: the second route, tried when the first one does not answer 2xx.
     ///
     /// Y2 sends notifications through kyu so an HA outage cannot lose them.
@@ -364,6 +368,11 @@ struct Config {
     /// the default is 90 days. Kenny's, not the author's — a house that
     /// changes little wants it longer, one being rebuilt wants it shorter.
     restore_drill_interval_s: u64,
+    /// fix-62: where the nightly restore drill restores a repository to — a
+    /// data pool, not the root disk. "none" is not a valid value (unlike
+    /// staging, the drill always needs somewhere to restore to); an absent
+    /// `host.toml` key falls back to `DEFAULT_DRILL_SCRATCH_DIR`.
+    restore_drill_scratch_dir: String,
     /// G16: the second route, tried when the first one does not answer 2xx.
     ///
     /// Y2 sends notifications through kyu so an HA outage cannot lose them.
@@ -661,6 +670,12 @@ fn load_config_from(path: String) -> Config {
         restore_drill_interval_s: file
             .restore_drill_interval_s
             .unwrap_or(homelab_core::ops::restoredrill::DEFAULT_DRILL_INTERVAL_S),
+        restore_drill_scratch_dir: file
+            .restore_drill_scratch_dir
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| {
+                homelab_core::ops::restoredrill::DEFAULT_DRILL_SCRATCH_DIR.to_string()
+            }),
         notify_fallback_webhook: file.notify_fallback_webhook.clone(),
         notify_fallback_auth_bearer: file.notify_fallback_auth_bearer.clone(),
         notify_tls_cert: file.notify_tls_cert.clone(),
@@ -2402,7 +2417,16 @@ span_days = 7\n";
             "lsd gdrive:homelab-backups",
             CmdOutput::failed(3, "token expired"),
         );
-        let probes = gather_probes(&exec, "/var/lib/homelab", None, None, now, &|_| {}).await;
+        let probes = gather_probes(
+            &exec,
+            "/var/lib/homelab",
+            None,
+            None,
+            homelab_core::ops::restoredrill::DEFAULT_DRILL_SCRATCH_DIR,
+            now,
+            &|_| {},
+        )
+        .await;
         assert_eq!(probes.managed_stacks.len(), 1);
         assert_eq!(probes.managed_stacks[0].backup_age_h, Some(80));
         assert!(probes.managed_stacks[0].container_present);
@@ -6123,6 +6147,7 @@ async fn run_restore_drill(
     cfg: &homelab_core::ops::backup::BackupCfg,
     repo: &str,
     target: &str,
+    pg: Option<&homelab_core::ops::restoredrill::PostgresCheck>,
 ) -> homelab_core::ops::restoredrill::Outcome {
     use homelab_core::ops::restoredrill::{verdict, Outcome};
     let _ = exec.run(&Cmd::new("rm", &["-rf", target], 120)).await;
@@ -6178,13 +6203,115 @@ async fn run_restore_drill(
                         .collect()
                 })
                 .unwrap_or_default();
-            homelab_core::ops::restoredrill::with_archives(verdict(count, largest), &unreadable)
+            // fix-62: every restored SQLite database (found by content, not
+            // by name, so no app is named here) must pass its own integrity
+            // check — a file restic restored without error can still be a
+            // corrupt database. Silent when `sqlite3` is not on the host
+            // (an older template): that is a gap in what this drill can
+            // prove, not a failed drill.
+            let bad_sqlite: Vec<(String, String)> = exec
+                .run(&Cmd::new(
+                    "sh",
+                    &[
+                        "-c",
+                        &format!(
+                            "command -v sqlite3 >/dev/null 2>&1 || exit 0; \
+                             find {} -type f | while read -r f; do \
+                             magic=$(head -c 16 \"$f\" 2>/dev/null); \
+                             case \"$magic\" in \
+                             'SQLite format 3'*) \
+                             out=$(sqlite3 \"$f\" 'PRAGMA integrity_check;' 2>&1); \
+                             [ \"$out\" = ok ] || printf '%s\\t%s\\n' \"$f\" \"$out\" ;; \
+                             esac; done",
+                            target
+                        ),
+                    ],
+                    600,
+                ))
+                .await
+                .map(|o| {
+                    o.stdout
+                        .lines()
+                        .filter_map(|l| l.split_once('\t'))
+                        .map(|(p, why)| (p.to_string(), why.trim().to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            homelab_core::ops::restoredrill::with_sqlite_checks(
+                homelab_core::ops::restoredrill::with_archives(
+                    verdict(count, largest),
+                    &unreadable,
+                ),
+                &bad_sqlite,
+            )
         }
+    };
+    // fix-62: a stack that declares a Postgres dump (`postgres_check_image`
+    // on the mount) gets a throwaway Postgres restore check — only when the
+    // ordinary checks above already passed, because a throwaway container
+    // started against files that are not even readable proves nothing new.
+    let outcome = match (pg, &outcome) {
+        (Some(pg), Outcome::Passed { .. }) => {
+            let ready = run_postgres_drill_check(exec, pg, target).await;
+            homelab_core::ops::restoredrill::with_postgres_check(outcome, ready)
+        }
+        _ => outcome,
     };
     // Always: a drill that leaves a full restore behind fills the disk the
     // backups need.
     let _ = exec.run(&Cmd::new("rm", &["-rf", target], 300)).await;
     outcome
+}
+
+/// fix-62: start a throwaway Postgres container, inside the owning stack's
+/// own container (it already has docker), against the data the drill just
+/// restored, and read whether it reaches "ready to accept connections" —
+/// `restic` returning files without error says nothing about whether
+/// Postgres can still open them. `None`: the check itself could not run
+/// (docker missing, the copy into the container failed) — a gap in what
+/// this drill can prove, not a failed drill; `Some(false)` is a real
+/// failure.
+async fn run_postgres_drill_check(
+    exec: &RealExecutor,
+    pg: &homelab_core::ops::restoredrill::PostgresCheck,
+    target: &str,
+) -> Option<bool> {
+    use homelab_core::executor::shq;
+    const SCRATCH: &str = "/tmp/homelab-pg-drill";
+    let src = format!("{}{}", target, pg.host_path);
+    // The host side reads the data the drill already restored (no second
+    // restic restore) and hands it to the container over tar, the same
+    // direction `restore_native`'s safety copy uses the other way.
+    let copy = format!(
+        "tar -cf - -C {src} . | pct exec {vmid} -- sh -c 'rm -rf {scratch} && mkdir -p \
+         {scratch} && tar -xf - -C {scratch}'",
+        src = shq(&src),
+        vmid = pg.vmid,
+        scratch = SCRATCH,
+    );
+    match exec.run(&Cmd::new("sh", &["-c", &copy], 300)).await {
+        Ok(o) if o.success() => {}
+        _ => return None,
+    }
+    // 0: ready. 1: started but never became ready — a real failure. 2 (or
+    // anything else): docker itself could not run the image at all.
+    let check = format!(
+        "docker rm -f homelab-pg-drill >/dev/null 2>&1; \
+         cid=$(docker run -d --name homelab-pg-drill -v {scratch}:/var/lib/postgresql/data \
+         {image}) || exit 2; \
+         ok=0; \
+         for i in $(seq 1 30); do \
+         docker logs \"$cid\" 2>&1 | grep -q 'database system is ready to accept connections' \
+         && ok=1 && break; sleep 1; done; \
+         docker rm -f \"$cid\" >/dev/null 2>&1; rm -rf {scratch}; [ \"$ok\" = 1 ]",
+        scratch = SCRATCH,
+        image = shq(&pg.image),
+    );
+    match homelab_core::executor::pct_sh(exec, pg.vmid, &check, 60).await {
+        Ok(o) if o.success() => Some(true),
+        Ok(o) if o.code == 1 => Some(false),
+        _ => None,
+    }
 }
 
 /// H12: bearer check, extracted for testing.
@@ -6750,6 +6877,23 @@ async fn scheduler_loop(state: AppState) {
         // fix-62: whose turn it is, read before the loop below consumes the
         // snapshot's stacks.
         let drill_pick = homelab_core::ops::restoredrill::pick(&snapshot, &drill_repos);
+        // fix-62: every stack's vmid and mounts, for `postgres_check` to
+        // find whether tonight's repository is a Postgres data directory —
+        // also read before the loop below consumes `snapshot.stacks`.
+        let pg_stacks: Vec<(u16, Vec<homelab_core::manifest::MountSpec>, String)> = snapshot
+            .stacks
+            .iter()
+            .map(|(name, st)| {
+                (
+                    st.vmid,
+                    st.manifest
+                        .as_ref()
+                        .map(|m| m.storage.clone())
+                        .unwrap_or_default(),
+                    name.clone(),
+                )
+            })
+            .collect();
         // fix-96: every repository with the retention its source keeps, for
         // the second copy and the rotating restic check.
         let copy_policies = homelab_core::ops::secondcopy::repo_policies(
@@ -6936,8 +7080,14 @@ async fn scheduler_loop(state: AppState) {
                     tiers: tiers.clone(),
                     ..state.config.backup.clone()
                 };
-                let target = format!("{}/restore-drill", state.config.state_dir);
-                let outcome = run_restore_drill(&exec, &cfg, &repo, &target).await;
+                // fix-62: a data pool, not the state dir on pve-root — the
+                // drill's own target used to fill the root disk.
+                let target = format!(
+                    "{}/restore-drill",
+                    state.config.restore_drill_scratch_dir.trim_end_matches('/')
+                );
+                let pg = homelab_core::ops::restoredrill::postgres_check(&pg_stacks, &repo);
+                let outcome = run_restore_drill(&exec, &cfg, &repo, &target, pg.as_ref()).await;
                 match &outcome {
                     homelab_core::ops::restoredrill::Outcome::Passed {
                         files,
@@ -8829,6 +8979,7 @@ async fn gather_today(
             &state.config.state_dir,
             state.config.mirror_remote.as_deref(),
             state.config.backup.staging_dir.as_deref(),
+            &state.config.restore_drill_scratch_dir,
             now,
             &|line: &str| progress_line(state, line),
         )
@@ -10982,6 +11133,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 &state.config.state_dir,
                 state.config.mirror_remote.as_deref(),
                 state.config.backup.staging_dir.as_deref(),
+                &state.config.restore_drill_scratch_dir,
                 now,
                 &|line: &str| progress_line(state, line),
             )
@@ -11457,6 +11609,7 @@ async fn gather_probes(
     state_dir: &str,
     mirror_remote: Option<&str>,
     staging_dir: Option<&str>,
+    restore_scratch_dir: &str,
     now_unix: u64,
     progress: &(dyn Fn(&str) + Send + Sync),
 ) -> homelab_core::doctor::Probes {
@@ -11604,6 +11757,23 @@ async fn gather_probes(
         ),
         None => None,
     };
+    // fix-62: free % on the restore drill's scratch directory — always
+    // asked, since a default applies when host.toml names none.
+    let restore_scratch_disk_free_pct = exec
+        .run(&Cmd::new(
+            "df",
+            &["--output=pcent", restore_scratch_dir],
+            20,
+        ))
+        .await
+        .ok()
+        .and_then(|o| {
+            o.stdout
+                .lines()
+                .nth(1)
+                .and_then(|l| l.trim().trim_end_matches('%').parse::<u64>().ok())
+                .map(|used| 100u64.saturating_sub(used))
+        });
     // The daemon's own units, held against the copies this binary carries.
     let mut units = Vec::new();
     for u in homelab_core::hostunits::UNITS {
@@ -11614,6 +11784,7 @@ async fn gather_probes(
         host_units_drift,
         host_disk_free_pct: disk,
         staging_disk_free_pct,
+        restore_scratch_disk_free_pct,
         state_parses,
         managed_stacks,
         offsite_configured,

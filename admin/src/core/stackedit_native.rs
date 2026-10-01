@@ -95,6 +95,11 @@ pub struct NativeEdit {
     pub release_asset: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup_from_newest: Option<String>,
+    /// fix-146: the command run inside the container to re-seed the live
+    /// store after a restore, before the unit starts. Empty string clears
+    /// it, same as every other optional text field here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_restore: Option<String>,
     /// The select sends `false`, `true` or `chassis`, read back the same
     /// way `service.yml` itself does (fix-113, owner decision 2026-10-01).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -249,6 +254,12 @@ pub fn native_ops(old: &NativeServiceManifest, e: &NativeEdit) -> Vec<Op> {
         old.backup_from_newest.as_deref(),
         e.backup_from_newest.as_deref(),
     );
+    set_or_remove(
+        &mut ops,
+        "after_restore",
+        old.after_restore.as_deref(),
+        e.after_restore.as_deref(),
+    );
     if let Some(v) = e.backup_pause.filter(|v| *v != old.backup_pause) {
         ops.push(Op::Set {
             path: path("backup_pause"),
@@ -313,6 +324,7 @@ pub fn add_native_files(stack: &StackManifest, a: &AddNativeEdit) -> (String, St
         backup_from_newest: None,
         backup_pause: BackupPause::Off,
         update_policy: UpdatePolicy::Manual,
+        after_restore: None,
         metrics: None,
     };
     let yml = serde_yaml::to_string(&m).unwrap_or_default();
@@ -409,6 +421,7 @@ mod tests {
             backup_from_newest: None,
             backup_pause: BackupPause::Off,
             update_policy: UpdatePolicy::Manual,
+            after_restore: None,
             metrics: None,
         }
     }
@@ -439,6 +452,7 @@ mod tests {
         let mut old = base();
         old.metrics = Some(false);
         let e = NativeEdit {
+            after_restore: None,
             metrics: Some(MetricsChoice::Measured),
             ..Default::default()
         };

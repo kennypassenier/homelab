@@ -1029,12 +1029,23 @@ pct exec 112 -- systemctl start almanac
   `ls /appdata/almanac/almanac-config/profiles/` with the sources retired
   since the snapshot (DR_RUNBOOK.md Layer 4, `client/src/spec.rs:1143-1149`).
 - **kyu:** its snapshot is the newest of kyu's own nightly copies, not the
-  live database (`stacks/kyu/service.yml:37-48`). Put the copy back as
-  `/appdata/kyu/kyu-config/kyu.db` and delete any `kyu.db-wal` and
-  `kyu.db-shm` beside it (`stacks/kyu/service.yml:43-47`). `kyu.env` is not
-  in that snapshot (op-17, lost-5).
+  live database (`stacks/kyu/service.yml:37-48`). fix-146 (2026-10-01)
+  automated the step this note used to describe by hand: `service.yml`'s
+  `after_restore` runs `mv` of the newest `kyu.backup-*.db` onto
+  `/appdata/kyu/kyu-config/kyu.db` and deletes any stale `kyu.db-wal` /
+  `kyu.db-shm` beside it, inside the container, before the unit starts —
+  both on the automatic empty-rebuild path (`core/src/ops/native.rs`'s
+  `restore_empty_unit`) and on a hand-triggered dashboard restore
+  (`restore_native`). `kyu.env` is still not in that snapshot (op-17,
+  lost-5) and is unaffected by this.
 
-No test in this repository exercises this procedure.
+A unit with no `after_restore` declared, and no `backup_from_newest` either,
+needs nothing here at all: its own snapshot already is its live store, and
+both restore paths start it as soon as the unpack succeeds.
+
+No test in this repository exercises the by-hand form of this procedure;
+`core/tests/deploy_tests.rs` and `core/tests/native_restore_tests.rs` exercise
+the automated `after_restore` step on both restore paths.
 
 ---
 

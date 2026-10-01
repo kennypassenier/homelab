@@ -772,11 +772,38 @@ pub async fn restore_empty_unit(
         }
         Err(e) => return Ok(EmptyUnit::RestoreFailed(e.to_string())),
     }
+    // fix-146: `after_restore` is the generic form of what used to be a
+    // manual step (op-11) — a command that turns whatever the snapshot
+    // unpacked into the live store this unit expects. Run it BEFORE the
+    // caller is told the unit may start; a failure here must hold the unit
+    // back exactly like a failed unpack, because starting it now would run
+    // the service against data the command never finished seeding.
+    if let Some(cmd) = &m.after_restore {
+        let out = util_pct_sh(exec, m.vmid, cmd, 300).await;
+        match out {
+            Ok(o) if o.success() => {}
+            Ok(o) => {
+                return Ok(EmptyUnit::RestoreFailed(format!(
+                    "after_restore failed, rc={} :: {}",
+                    o.code,
+                    crate::executor::trace_line(o.stderr.trim())
+                )))
+            }
+            Err(e) => {
+                return Ok(EmptyUnit::RestoreFailed(format!(
+                    "after_restore failed: {}",
+                    e
+                )))
+            }
+        }
+        return Ok(EmptyUnit::Restored);
+    }
     if let Some(glob) = &m.backup_from_newest {
         return Ok(EmptyUnit::RestoredHold(format!(
-            "its archive is the service's own copy ({}), not a live store: put the newest \
-             copy in place as the live file as the stack file's restore note says \
-             (docs/OPERATIONS_RUNBOOK.md op-11), then start it",
+            "its archive is the service's own copy ({}), not a live store, and this service \
+             declares no after_restore to seed it: put the newest copy in place as the live \
+             file as the stack file's restore note says (docs/OPERATIONS_RUNBOOK.md op-11), \
+             then start it",
             glob
         )));
     }
@@ -959,6 +986,24 @@ pub async fn restore_native(
         }
         Ok(StepOutcome::Changed)
     });
+
+    // fix-146: the same re-seed step the automatic empty-rebuild path runs
+    // (`restore_empty_unit`) — a unit whose archive is not already its live
+    // store (`backup_from_newest`, kyu) needs this before it is safe to
+    // start, and a hand-triggered restore from the dashboard is exactly as
+    // much "a restore" as the automatic one.
+    if let Some(cmd) = &m.after_restore {
+        step!(runner, "re-seed from restore", {
+            let out = util_pct_sh(exec, m.vmid, cmd, 300).await?;
+            if !out.success() {
+                return Err(CoreError::Command {
+                    rendered: "after_restore".into(),
+                    detail: out.stderr.trim().to_string(),
+                });
+            }
+            Ok(StepOutcome::Changed)
+        });
+    }
 
     step!(runner, "start unit", {
         let out = util_pct_sh(

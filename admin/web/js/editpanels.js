@@ -90,7 +90,8 @@ import { attachSwitches, showError } from "/static/kp/js/forms.js";
  *   binary: string, env_file: string | null, data_dirs: string[],
  *   update_cmd: string | null, stateless: boolean, restore_note: string | null,
  *   release_repo: string | null, release_asset: string | null,
- *   backup_from_newest: string | null, backup_pause: boolean | "chassis",
+ *   backup_from_newest: string | null, after_restore: string | null,
+ *   backup_pause: boolean | "chassis",
  *   update_policy: "manual" | "auto" | "self",
  *   metrics: boolean | null}} NativeManifestView
  */
@@ -2145,6 +2146,15 @@ function nativeUnitForm(stack, natives, reload) {
     "",
     { help: "An absolute glob with a '*', e.g. /appdata/…/backup-*.db." },
   );
+  const afterRestore = nativeField(
+    "native-after-restore",
+    "After restore",
+    "",
+    {
+      textarea: true,
+      help: "A shell one-liner run inside the container, after a snapshot is unpacked and before the unit starts, to put the restored data into the shape the live service expects. Empty: nothing runs; a unit with no backup_from_newest usually needs none.",
+    },
+  );
   const backupPause = nativeChoice(
     "native-backup-pause",
     "Pause for the nightly backup",
@@ -2216,6 +2226,7 @@ function nativeUnitForm(stack, natives, reload) {
     releaseRepo.input.value = m?.release_repo ?? "";
     releaseAsset.input.value = m?.release_asset ?? "";
     backupNewest.input.value = m?.backup_from_newest ?? "";
+    afterRestore.input.value = m?.after_restore ?? "";
     backupPause.input.value =
       m?.backup_pause === "chassis"
         ? "chassis"
@@ -2242,6 +2253,7 @@ function nativeUnitForm(stack, natives, reload) {
     release_repo: releaseRepo.input.value,
     release_asset: releaseAsset.input.value,
     backup_from_newest: backupNewest.input.value,
+    after_restore: afterRestore.input.value,
     backup_pause: /** @type {"false" | "true" | "chassis"} */ (
       backupPause.input.value
     ),
@@ -2313,6 +2325,7 @@ function nativeUnitForm(stack, natives, reload) {
     ),
     dataDirs.wrap,
     updateCmd.wrap,
+    afterRestore.wrap,
     restoreNote.wrap,
     h("div", { class: "row-buttons" }, review, " ", removeBtn, " ", status),
   );

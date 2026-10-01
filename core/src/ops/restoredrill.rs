@@ -37,6 +37,13 @@ pub const DEFAULT_DRILL_INTERVAL_S: u64 = 20 * 3600;
 /// The repository that holds the host's own vault, state and TLS material.
 pub const HOST_META_REPO: &str = "host-meta";
 
+/// fix-62: where a repository is restored to for the drill. A data pool, not
+/// the root disk — same reasoning, and the same neighbourhood, as
+/// `backup::DEFAULT_STAGING_DIR`. The drill used to restore under the state
+/// dir on pve-root (47 GB free when this was found; the largest repository,
+/// jellyfin-config, is 8.8 GB).
+pub const DEFAULT_DRILL_SCRATCH_DIR: &str = "/appdata/.restore-scratch";
+
 /// Is a drill due? A drill that has never run is always due — that is the
 /// state this project was in for its whole life.
 pub fn due(last: u64, now: u64, interval_s: u64) -> bool {
@@ -214,6 +221,82 @@ pub fn with_archives(outcome: Outcome, unreadable: &[String]) -> Outcome {
              and proves nothing",
             unreadable.len(),
             unreadable.join(", ")
+        )),
+        other => other,
+    }
+}
+
+/// fix-62: where and how to run a throwaway Postgres restore check for the
+/// repository the drill just restored — the container to run it in and the
+/// image to run, both read off the stack file's own declaration
+/// (`MountSpec::postgres_check_image`). `None` when the repository's owner
+/// is not a Postgres data directory (the common case).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PostgresCheck {
+    pub vmid: u16,
+    /// The absolute host path of the PGDATA directory, the same one the
+    /// drill already restored under its scratch target — so the check reads
+    /// what the drill itself proved came back, not a second restore.
+    pub host_path: String,
+    pub image: String,
+}
+
+/// fix-62: does the repository just drilled need a throwaway Postgres
+/// check, and with what? Scans every stack's mounts for one whose owner is
+/// this repository and that declares `postgres_check_image` — generic by
+/// content (what the mount says about itself), not by app name.
+pub fn postgres_check(
+    stacks: &[(u16, Vec<crate::manifest::MountSpec>, String)],
+    repo: &str,
+) -> Option<PostgresCheck> {
+    for (vmid, mounts, stack_name) in stacks {
+        for m in mounts {
+            if m.owner(stack_name) == repo {
+                if let Some(image) = &m.postgres_check_image {
+                    return Some(PostgresCheck {
+                        vmid: *vmid,
+                        host_path: m.host_path.clone(),
+                        image: image.clone(),
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+/// fix-62: a throwaway Postgres container that never reaches "ready to
+/// accept connections" against the restored data proves the backup copied
+/// files Postgres itself cannot still open — the same shape as
+/// [`with_sqlite_checks`], for the one engine a magic-byte sniff cannot
+/// identify (a Postgres data directory is a folder of many files, not one
+/// file with a header).
+pub fn with_postgres_check(outcome: Outcome, ready: Option<bool>) -> Outcome {
+    match (outcome, ready) {
+        (Outcome::Passed { .. }, Some(false)) => Outcome::Failed(
+            "a throwaway Postgres container never reached \"ready to accept connections\" \
+             against the restored data"
+                .into(),
+        ),
+        (other, _) => other,
+    }
+}
+
+/// fix-62: a restored SQLite database that fails its own `PRAGMA
+/// integrity_check` proves the backup copied a corrupt file, not a usable
+/// one — found generically, by content (every file's own magic bytes), not
+/// by name, so it covers every app's database without naming one.
+/// `(path, what integrity_check said)`.
+pub fn with_sqlite_checks(outcome: Outcome, bad: &[(String, String)]) -> Outcome {
+    match outcome {
+        Outcome::Passed { .. } if !bad.is_empty() => Outcome::Failed(format!(
+            "{} SQLite database(s) failed their own integrity check: {} — a file that restic \
+             restored without error is not the same thing as a database SQLite can still read",
+            bad.len(),
+            bad.iter()
+                .map(|(p, why)| format!("{} ({})", p, why))
+                .collect::<Vec<_>>()
+                .join(", ")
         )),
         other => other,
     }

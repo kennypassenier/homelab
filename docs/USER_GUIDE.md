@@ -2207,6 +2207,12 @@ Two storage flags change this (`core/src/manifest.rs:228-262`):
 stay empty); `no_backup: "<reason>"` means the contents are deliberately not
 kept, and the reason must be at least 10 characters
 (`core/src/manifest.rs:580-604`). Tests: `core/tests/m4_ops_tests.rs:3264,3358`.
+A third, `postgres_check_image: "<pinned image>"` (fix-62), declares this
+mount a Postgres data directory: the restore drill (G14, below) starts a
+throwaway container from that image against the restored copy and checks it
+comes up, in addition to the ordinary file checks. `no_data` and
+`postgres_check_image` on the same mount are refused — one says there is
+nothing to restore and check.
 
 #### E2 · Restore
 
@@ -2333,9 +2339,20 @@ catches up a night a restart interrupted, fix-129) it plans the night (`host/src
    than `restore_drill_interval_s` (default 20 hours, so every night; it was
    90 days until fix-62): the repository drilled longest ago goes first, over
    the stack and native repositories, `host-meta` and each device
-   configuration. It restores into a scratch directory, judges the result by
-   its file count and largest file and by whether every `.tar` in it lists,
-   records the outcome per repository, and deletes the scratch copy
+   configuration. It restores into a scratch directory on a data pool
+   (`restore_drill_scratch_dir`, default `/appdata/.restore-scratch`, emptied
+   before and after every drill — not the root disk, and included in doctor's
+   disk thresholds alongside the host disk and the backup staging directory),
+   judges the result by its file count and largest file, by whether every
+   `.tar` in it lists, and — fix-62 — by whether every restored SQLite
+   database (found by its own magic bytes, not by name) still passes its own
+   `PRAGMA integrity_check`. A mount that declares `postgres_check_image`
+   (the pinned image the stack's own Postgres service runs; paperless-db is
+   the one that does today) also gets a throwaway container started against
+   the restored copy, inside the owning stack's own container, checked for
+   "ready to accept connections" and destroyed — a restore with files in it
+   says nothing about whether Postgres can still open them. Records the
+   outcome per repository, and deletes the scratch copy
    (`core/src/ops/restoredrill.rs`, `run_restore_drill` in
    `host/src/main.rs`). A repository whose drill failed stays a finding until
    that repository passes.
@@ -2603,7 +2620,9 @@ key, audit.log and the incidents directory must be root-only), `privileged
 containers` (`Warn` for one outside `privileged_vmids`; templates and
 no-touch guests are not read), `host-meta backup` (`Warn` over 48 hours or
 never), `restore drill` (`Warn` when overdue or a repository's last drill
-failed), `restic password file` (`Fail` when missing or empty), `gateway
+failed), `restore drill scratch disk` (fix-62; same thresholds as host disk,
+over the restore drill's own scratch directory), `restic password file`
+(`Fail` when missing or empty), `gateway
 route files` (`Warn` naming any file in the gateway's routes directory that
 no stack's deploy recorded — the same judgement `homelab check` carries,
 fix-130) and `Drive space` from `rclone about` (`Warn` under 10 % free,

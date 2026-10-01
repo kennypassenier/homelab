@@ -2029,6 +2029,7 @@ fn the_runbook_names_the_repositories_restic_actually_uses() {
             no_backup: None,
             host_owner_uid: Some(1000),
             app: Some(app.into()),
+            postgres_check_image: None,
         });
     }
     let repos = homelab_core::ops::backup::owner_groups(&m)

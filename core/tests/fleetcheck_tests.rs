@@ -797,6 +797,7 @@ fn a_stack_that_deliberately_keeps_nothing_is_noted_not_broken() {
         no_backup: Some("a pull-through cache: every layer is re-downloadable".into()),
         host_owner_uid: None,
         app: Some("registry".into()),
+        postgres_check_image: None,
     }];
     let mut st = stack(117, "117-app-registry", true, 0); // never backed up
     st.manifest = Some(m);
@@ -829,6 +830,7 @@ fn a_stack_that_deliberately_keeps_nothing_is_noted_not_broken() {
         no_backup: None,
         host_owner_uid: None,
         app: Some("x".into()),
+        postgres_check_image: None,
     }];
     let mut st2 = stack(117, "117-app-registry", true, 0);
     st2.manifest = Some(m2);

@@ -84,6 +84,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
             no_backup: None,
             host_owner_uid: Some(101000),
             app: Some(stack.into()),
+            postgres_check_image: None,
         }],
         apps: vec![stack.into()],
     }

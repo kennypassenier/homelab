@@ -46,6 +46,15 @@ release_asset: kyu
 # is looking at. The reverse of the moving rule, where those three travel
 # together.
 backup_from_newest: /appdata/kyu/kyu-config/kyu.backup-*.db
+# fix-146 (native-empty-rebuild, 2026-10-01): the automation of the RESTORE
+# NOTE above. Runs inside the container, after the archive is unpacked and
+# before the unit starts — on both the automatic empty-rebuild path and a
+# hand-triggered dashboard restore. `ls -t` picks the newest match in case
+# more than one copy ever ends up in the same restored snapshot.
+after_restore: >-
+  f=$(ls -t /appdata/kyu/kyu-config/kyu.backup-*.db 2>/dev/null | head -1) &&
+  mv -f "$f" /appdata/kyu/kyu-config/kyu.db &&
+  rm -f /appdata/kyu/kyu-config/kyu.db-wal /appdata/kyu/kyu-config/kyu.db-shm
 # B1 (UPDATE_POLICY.md, decided 2026-09-19): the orchestrator owns kyu's
 # recurring update. Nightly: fetch the latest release's SHA256SUMS, compare
 # with the installed binary, install under the armed rollback when it differs.

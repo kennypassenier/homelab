@@ -131,6 +131,7 @@ fn mount(host_path: &str, app: Option<&str>) -> MountSpec {
         no_backup: None,
         host_owner_uid: None,
         app: app.map(|s| s.to_string()),
+        postgres_check_image: None,
     }
 }
 
@@ -201,7 +202,10 @@ fn f290_the_list_is_owners_deduplicated_not_mounts() {
 
 // ── fix-62: the drill covered almost nothing ────────────────────────────────
 
-use homelab_core::ops::restoredrill::{all_drill_repos, pick, record, with_archives};
+use homelab_core::ops::restoredrill::{
+    all_drill_repos, pick, postgres_check, record, with_archives, with_postgres_check,
+    with_sqlite_checks,
+};
 
 fn thirty_repos() -> Vec<String> {
     (0..30).map(|i| format!("repo{:02}", i)).collect()
@@ -299,4 +303,98 @@ fn fix_62_an_archive_tar_cannot_read_fails_the_drill() {
         other => panic!("a torn archive passed: {:?}", other),
     }
     assert_eq!(with_archives(passed(), &[]), passed());
+}
+
+/// fix-62: a restored SQLite database that fails its own integrity check
+/// proves the backup copied a corrupt file, however many files came back
+/// and however large the largest one is.
+#[test]
+fn fix_62_a_restored_sqlite_database_that_fails_integrity_check_fails_the_drill() {
+    let bad = [(
+        "/r/jellyfin-config/data/jellyfin.db".to_string(),
+        "*** in database main *** Page 12 is never used".to_string(),
+    )];
+    let out = with_sqlite_checks(passed(), &bad);
+    match out {
+        Outcome::Failed(why) => {
+            assert!(why.contains("jellyfin.db"), "{}", why);
+            assert!(why.contains("Page 12"), "{}", why);
+        }
+        other => panic!("a failed integrity check passed: {:?}", other),
+    }
+    assert_eq!(with_sqlite_checks(passed(), &[]), passed());
+    // A restore that already failed stays failed — the sqlite check only
+    // ever makes a Passed outcome worse, never a Failed one better.
+    let already_failed = Outcome::Failed("the restore itself failed".into());
+    assert_eq!(
+        with_sqlite_checks(already_failed.clone(), &bad),
+        already_failed
+    );
+}
+
+/// fix-62: which repository needs a throwaway Postgres check, found
+/// generically by content (what the mount says about itself), over every
+/// stack — not by naming an app in code.
+#[test]
+fn fix_62_postgres_check_finds_the_declaring_mount_by_owner() {
+    use homelab_core::ops::restoredrill::PostgresCheck;
+    let mut pg_mount = mount(
+        "/appdata/paperwork/paperless-db-config",
+        Some("paperless-db"),
+    );
+    pg_mount.postgres_check_image = Some("postgres:17.11-alpine".into());
+    let stacks = vec![
+        (
+            114u16,
+            vec![
+                mount("/appdata/paperwork/paperless-config", Some("paperless")),
+                pg_mount,
+            ],
+            "paperwork".to_string(),
+        ),
+        (
+            112,
+            vec![mount("/appdata/almanac/almanac-config", None)],
+            "almanac".to_string(),
+        ),
+    ];
+    assert_eq!(
+        postgres_check(&stacks, "paperless-db"),
+        Some(PostgresCheck {
+            vmid: 114,
+            host_path: "/appdata/paperwork/paperless-db-config".into(),
+            image: "postgres:17.11-alpine".into(),
+        })
+    );
+    // An ordinary repository, and a repository that does not exist at all,
+    // both answer None — nothing here guesses.
+    assert_eq!(postgres_check(&stacks, "paperless"), None);
+    assert_eq!(postgres_check(&stacks, "no-such-repo"), None);
+}
+
+/// fix-62: a throwaway Postgres container that never became ready proves
+/// the restored data is not a usable database, however many files restic
+/// restored without error.
+#[test]
+fn fix_62_a_postgres_container_that_never_becomes_ready_fails_the_drill() {
+    let out = with_postgres_check(passed(), Some(false));
+    match out {
+        Outcome::Failed(why) => assert!(why.contains("ready to accept connections"), "{}", why),
+        other => panic!(
+            "a Postgres container that never came up passed: {:?}",
+            other
+        ),
+    }
+    // Ready, and "could not even run the check" (no postgres_check_image on
+    // this repository, or docker was not reachable): both leave a passed
+    // drill passed — the second is a gap in what this drill can prove, not
+    // a failed drill.
+    assert_eq!(with_postgres_check(passed(), Some(true)), passed());
+    assert_eq!(with_postgres_check(passed(), None), passed());
+    // A restore that already failed stays failed.
+    let already_failed = Outcome::Failed("the restore itself failed".into());
+    assert_eq!(
+        with_postgres_check(already_failed.clone(), Some(false)),
+        already_failed
+    );
 }

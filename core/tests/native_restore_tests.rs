@@ -50,6 +50,7 @@ fn almanac(data_dirs: Vec<String>, stateless: bool) -> NativeServiceManifest {
         backup_from_newest: None,
         backup_pause: BackupPause::Off,
         update_policy: Default::default(),
+        after_restore: None,
         metrics: None,
     }
 }
@@ -196,5 +197,53 @@ async fn a_failed_unpack_still_leaves_the_unit_stopped_rather_than_half_restored
     // The positive twin: the unit WAS stopped — "left stopped", not "never
     // touched" — before the unpack failed and the restart never ran.
     assert!(exec.calls().iter().any(|c| c.contains("systemctl stop")));
+    assert!(!exec.calls().iter().any(|c| c.contains("systemctl start")));
+}
+
+// fix-146 (native-empty-rebuild follow-up, 2026-10-01): a hand-triggered
+// restore from the Backups page is exactly as much "a restore" as the
+// automatic empty-rebuild path, so it runs the same `after_restore` step.
+
+#[tokio::test]
+async fn after_restore_runs_between_the_unpack_and_the_start() {
+    let exec = harness();
+    exec.respond_always("mv -f", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut m = almanac(vec!["/appdata/almanac/almanac-config".into()], false);
+    m.after_restore = Some("mv -f /a /b".into());
+    let r = restore_native(
+        &ctx(&exec, &sink, &j),
+        &m,
+        &BackupCfg::default(),
+        "latest",
+        Some("almanac"),
+    )
+    .await;
+    assert!(r.ok, "{:?}", r.error);
+    let calls = exec.calls();
+    let unpack = position(&calls, "restic dump");
+    let seed = position(&calls, "mv -f");
+    let start = position(&calls, "systemctl start");
+    assert!(unpack < seed && seed < start, "wrong order: {:?}", calls);
+}
+
+#[tokio::test]
+async fn a_failed_after_restore_leaves_the_unit_stopped() {
+    let exec = harness();
+    exec.respond_always("mv -f", CmdOutput::failed(1, "no such file"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut m = almanac(vec!["/appdata/almanac/almanac-config".into()], false);
+    m.after_restore = Some("mv -f /a /b".into());
+    let r = restore_native(
+        &ctx(&exec, &sink, &j),
+        &m,
+        &BackupCfg::default(),
+        "latest",
+        Some("almanac"),
+    )
+    .await;
+    assert!(!r.ok);
     assert!(!exec.calls().iter().any(|c| c.contains("systemctl start")));
 }

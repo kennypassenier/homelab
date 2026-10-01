@@ -57,6 +57,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
             no_backup: None,
             host_owner_uid: Some(101000),
             app: Some("syncthing".into()),
+            postgres_check_image: None,
         }],
         apps: vec!["syncthing".into()],
     }
@@ -2717,6 +2718,7 @@ fn registry_like() -> homelab_core::manifest::StackManifest {
         ),
         host_owner_uid: Some(100000),
         app: Some("registry".into()),
+        postgres_check_image: None,
     }];
     m
 }
@@ -3094,6 +3096,7 @@ mod native_from_zero {
             host_path: "/appdata/drill/kyu-config".into(),
             mount_point: "/appdata/drill/kyu-config".into(),
             app: Some("kyu".into()),
+            postgres_check_image: None,
             no_backup: None,
             host_owner_uid: Some(100000),
             no_data: false,
@@ -3144,6 +3147,7 @@ mod native_from_zero {
                 .then(|| "/appdata/drill/kyu-config/kyu.backup-*.db".to_string()),
             backup_pause: homelab_core::native::BackupPause::Off,
             update_policy: Default::default(),
+            after_restore: None,
             metrics: None,
         }
     }
@@ -3223,6 +3227,65 @@ mod native_from_zero {
         assert!(
             sink.lines().iter().any(|l| l.contains("op-11")),
             "and the transcript says what to do"
+        );
+    }
+
+    /// fix-146 (restore-drill-covers-almost-nothing follow-up, 2026-10-01):
+    /// a unit archived from its own copy but with `after_restore` declared
+    /// needs no manual step at all — the command runs inside the container
+    /// before the unit starts.
+    #[tokio::test]
+    async fn fix_146_after_restore_seeds_the_live_file_and_the_unit_starts() {
+        let exec = MockExecutor::new();
+        empty_unit_with_history(&exec);
+        exec.respond_always("mv -f", CmdOutput::ok(""));
+        let mut sp = native_spec();
+        let mut m = kyu_service(true);
+        m.after_restore = Some(
+            "f=$(ls -t /appdata/drill/kyu-config/kyu.backup-*.db | head -1) && \
+             mv -f \"$f\" /appdata/drill/kyu-config/kyu.db"
+                .into(),
+        );
+        sp.native_manifests.insert("kyu".into(), m);
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let _ = deploy(&ctx(&exec, &sink, &j), &sp).await;
+        let calls = exec.calls();
+        let restore = position(&calls, "restic dump latest /kyu-data.tar")
+            .unwrap_or_else(|| panic!("the unit's archive is restored: {:#?}", calls));
+        let seed =
+            position(&calls, "mv -f").unwrap_or_else(|| panic!("after_restore ran: {:#?}", calls));
+        let start = position(&calls, "systemctl enable --now kyu").unwrap_or_else(|| {
+            panic!(
+                "after_restore seeded the live file, so the unit starts with no manual \
+                 step: {:#?}",
+                calls
+            )
+        });
+        assert!(restore < seed, "{:#?}", calls);
+        assert!(seed < start, "{:#?}", calls);
+    }
+
+    /// The same command, failing, must hold the unit back exactly like a
+    /// failed unpack — starting it now would run the service against data
+    /// `after_restore` never finished seeding.
+    #[tokio::test]
+    async fn fix_146_a_failed_after_restore_leaves_the_unit_stopped() {
+        let exec = MockExecutor::new();
+        empty_unit_with_history(&exec);
+        exec.respond_always("mv -f", CmdOutput::failed(1, "no such file"));
+        let mut sp = native_spec();
+        let mut m = kyu_service(true);
+        m.after_restore = Some("mv -f /does/not/exist /appdata/drill/kyu-config/kyu.db".into());
+        sp.native_manifests.insert("kyu".into(), m);
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let _ = deploy(&ctx(&exec, &sink, &j), &sp).await;
+        assert!(
+            exec.calls_containing("systemctl enable --now kyu")
+                .is_empty(),
+            "after_restore failed, so the unit must not start empty-handed: {:?}",
+            exec.calls()
         );
     }
 
@@ -3457,6 +3520,7 @@ mod native_from_zero {
                 host_path: format!("/appdata/drill/{unit}-config"),
                 mount_point: format!("/appdata/drill/{unit}-config"),
                 app: Some(unit.to_string()),
+                postgres_check_image: None,
                 no_backup: None,
                 host_owner_uid: Some(100000),
                 no_data: false,

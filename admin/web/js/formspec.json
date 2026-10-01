@@ -681,6 +681,13 @@
         "help": "An absolute glob with a '*', e.g. /appdata/…/backup-*.db."
       },
       {
+        "name": "after_restore",
+        "id": "native-after-restore",
+        "kind": "textarea",
+        "label": "After restore",
+        "help": "A shell one-liner run inside the container, after a snapshot is unpacked and before the unit starts, to put the restored data into the shape the live service expects (e.g. renaming 'backup from newest' back to its live filename). Empty: nothing runs; a unit with no backup_from_newest usually needs none."
+      },
+      {
         "name": "backup_pause",
         "id": "native-backup-pause",
         "kind": "choice",

@@ -76,6 +76,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
             no_backup: None,
             host_owner_uid: Some(101000),
             app: Some(stack.into()),
+            postgres_check_image: None,
         }],
         apps: vec![stack.into()],
     }
@@ -874,6 +875,7 @@ async fn a_removed_app_keeps_its_vault_copy_and_records_when_it_left() {
         no_backup: None,
         host_owner_uid: Some(101000),
         app: Some("oldapp".into()),
+        postgres_check_image: None,
     });
     let mut st = HostState::default();
     st.stacks.insert("syncthing".into(), record(&before));

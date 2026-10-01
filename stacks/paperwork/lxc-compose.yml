@@ -91,6 +91,15 @@ storage:
     # a healthcheck that passes on a broken server.
     host_owner_uid: 100070
     app: paperless-db
+    # fix-62 (restore-drill-covers-almost-nothing, 2026-10-01): the restore
+    # drill, on the night this repository is drilled, restores this
+    # directory and starts a throwaway container from this image against
+    # the copy — the same digest `paperless-db/docker-compose.yml` runs
+    # live, so the check reads the data the way the service does. A restic
+    # restore that comes back with files proves nothing about whether
+    # Postgres can still open them; `com.homelab.backup.pause=true` on that
+    # service is what makes the restored copy a consistent one to try.
+    postgres_check_image: "postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73"
 
 # Order matters: apps start in this order, so the database precedes the
 # service that needs it.

@@ -157,6 +157,11 @@ pub const KEYS: &[KeyInfo] = &[
     k("second_copy_dataset", "Nightly round and backups", "Second copy dataset", "ZFS dataset holding the second repository set, e.g. HDD4TB/restic; empty: no second copy.", "none", Kind::Text, Access::Browser, Apply::Restart),
     k("integrity_data_read_interval_s", "Nightly round and backups", "Data read interval", "How often a repository's check also reads a slice of its data, in seconds.", "2592000 (30 days)", Kind::Int { min: 3600, max: U32 }, Access::Browser, Apply::Restart),
     k("restore_drill_interval_s", "Nightly round and backups", "Restore drill interval", "How long a passed restore drill counts for, in seconds.", "72000 (20 h)", Kind::Int { min: 3600, max: U32 }, Access::Browser, Apply::Restart),
+    // fix-62 (restore-drill-covers-almost-nothing, 2026-10-01): the drill
+    // used to restore under the state dir on pve-root; a data pool next to
+    // the backup staging directory is the right place for it, same as
+    // staging, for the same reason — not the root disk.
+    k("restore_drill_scratch_dir", "Nightly round and backups", "Restore drill scratch directory", "Where the nightly restore drill restores a repository to, so it can be judged by what actually comes back. A directory on a data pool, not the root disk — emptied before and after every drill, so nothing it leaves behind can fill the disk.", "/appdata/.restore-scratch", Kind::Text, Access::Browser, Apply::Live),
     k("zfs_jobs", "Nightly round and backups", "ZFS replication jobs", "Snapshot and replication jobs: source and target dataset each.", "none", Kind::Table, Access::Browser, Apply::Restart),
     k("device_backups", "Nightly round and backups", "Device backups", "Devices that hand over their own configuration once a night.", "none", Kind::Table, Access::Browser, Apply::Restart),
     k("watched_backups", "Nightly round and backups", "Watched backups", "Backups other devices make that the host watches for age.", "none", Kind::Table, Access::Browser, Apply::Restart),

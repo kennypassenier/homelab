@@ -13,6 +13,7 @@ fn mount(path: &str, app: &str) -> MountSpec {
         no_backup: None,
         host_owner_uid: None,
         app: Some(app.into()),
+        postgres_check_image: None,
     }
 }
 

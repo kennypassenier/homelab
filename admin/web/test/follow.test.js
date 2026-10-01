@@ -334,6 +334,7 @@ test("feat-native-1 / feat-preset-1: the driven forms' field ids are the browser
     "native-release-repo",
     "native-release-asset",
     "native-backup-newest",
+    "native-after-restore",
     "native-backup-pause",
     "native-update-policy",
     "native-metrics",

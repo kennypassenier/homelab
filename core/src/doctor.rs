@@ -49,6 +49,11 @@ pub struct Probes {
     /// finding, it just means chassis-paused backups skip staging.
     /// `Some(None)`: configured but unreadable. `None`: not configured.
     pub staging_disk_free_pct: Option<Option<u64>>,
+    /// fix-62 (restore-drill-covers-almost-nothing, 2026-10-01): free % on
+    /// the restore drill's scratch directory's filesystem — always asked,
+    /// since (unlike staging) the drill always has somewhere configured to
+    /// restore to (a default applies when host.toml names none).
+    pub restore_scratch_disk_free_pct: Option<u64>,
     pub state_parses: bool,
     pub managed_stacks: Vec<StackProbe>,
     pub offsite_configured: bool,
@@ -223,6 +228,37 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
             },
         });
     }
+
+    checks.push(match p.restore_scratch_disk_free_pct {
+        Some(free) if free < 10 => Check {
+            name: "restore drill scratch disk".into(),
+            health: Health::Fail,
+            detail: format!("{}% free", free),
+            remedy: Some(
+                "free space on the restore drill's scratch pool (restore_drill_scratch_dir) \
+                 — the nightly drill cannot restore a repository without room to put it"
+                    .into(),
+            ),
+        },
+        Some(free) if free < 20 => Check {
+            name: "restore drill scratch disk".into(),
+            health: Health::Warn,
+            detail: format!("{}% free", free),
+            remedy: Some("getting tight — the drill restores one repository a night".into()),
+        },
+        Some(free) => Check {
+            name: "restore drill scratch disk".into(),
+            health: Health::Ok,
+            detail: format!("{}% free", free),
+            remedy: None,
+        },
+        None => Check {
+            name: "restore drill scratch disk".into(),
+            health: Health::Warn,
+            detail: "unknown".into(),
+            remedy: Some("could not read the restore drill scratch directory's free space".into()),
+        },
+    });
 
     checks.push(Check {
         name: "state file".into(),

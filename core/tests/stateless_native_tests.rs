@@ -36,6 +36,7 @@ fn unit(name: &str, stateless: bool) -> NativeServiceManifest {
         backup_from_newest: None,
         backup_pause: BackupPause::Off,
         update_policy: Default::default(),
+        after_restore: None,
         metrics: None,
     }
 }

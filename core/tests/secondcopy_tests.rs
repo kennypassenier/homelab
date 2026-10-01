@@ -52,6 +52,7 @@ fn mount(path: &str, app: Option<&str>) -> MountSpec {
         no_backup: None,
         host_owner_uid: None,
         app: app.map(str::to_string),
+        postgres_check_image: None,
     }
 }
 
@@ -141,6 +142,7 @@ fn stack_state(
                 backup_from_newest: None,
                 backup_pause: BackupPause::Off,
                 update_policy: Default::default(),
+                after_restore: None,
                 metrics: None,
             })
             .collect(),

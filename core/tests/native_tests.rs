@@ -46,6 +46,7 @@ fn kyu_manifest() -> NativeServiceManifest {
         backup_from_newest: None,
         backup_pause: BackupPause::Off,
         update_policy: Default::default(),
+        after_restore: None,
         metrics: None,
         release_repo: None,
         release_asset: None,
@@ -1337,6 +1338,43 @@ fn t77_the_copy_glob_is_validated() {
         assert!(why.contains("backup_from_newest"), "{}", why);
     }
     assert!(validate_native(&kyu_with_own_copy()).is_ok());
+}
+
+// ── fix-146 · after_restore ──────────────────────────────────────────────
+
+#[test]
+fn fix_146_after_restore_is_validated() {
+    use homelab_core::native::validate_native;
+    // Empty would run as `sh -c ""` — succeeds and seeds nothing, silently.
+    let m = NativeServiceManifest {
+        after_restore: Some("  ".into()),
+        ..kyu_manifest()
+    };
+    let why = validate_native(&m).expect_err("empty").join("; ");
+    assert!(why.contains("after_restore"), "{}", why);
+
+    // A stateless service never has anything unpacked for the command to
+    // run against.
+    let m = NativeServiceManifest {
+        stateless: true,
+        data_dirs: vec![],
+        after_restore: Some("mv -f /a /b".into()),
+        ..kyu_manifest()
+    };
+    let why = validate_native(&m).expect_err("stateless").join("; ");
+    assert!(why.contains("after_restore"), "{}", why);
+
+    // kyu, as declared in stacks/kyu/service.yml: a real command, on a
+    // service that also declares backup_from_newest.
+    let m = NativeServiceManifest {
+        after_restore: Some(
+            "f=$(ls -t /var/lib/kyu/kyu.backup-*.db | head -1) && mv -f \"$f\" \
+             /var/lib/kyu/kyu.db"
+                .into(),
+        ),
+        ..kyu_with_own_copy()
+    };
+    assert!(validate_native(&m).is_ok());
 }
 
 // ── T85 · binaries travel one per message ──────────────────────────────────

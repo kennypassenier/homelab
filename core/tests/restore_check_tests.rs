@@ -92,6 +92,7 @@ fn spec() -> DeploySpec {
                 no_backup: None,
                 host_owner_uid: Some(101000),
                 app: None,
+                postgres_check_image: None,
             }],
             apps: vec!["app".into()],
         },

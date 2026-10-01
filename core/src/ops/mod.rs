@@ -6,7 +6,7 @@
 /// (rust-code-hygiene, 2026-09-27: there were eleven identical copies).
 /// deploy.rs shadows it with its own, which also marks the stack incomplete.
 macro_rules! step {
-    ($runner:expr, $name:expr, $body:expr) => {
+    ($runner:expr_2021, $name:expr_2021, $body:expr_2021) => {
         match $runner.step($name, || async { $body }).await {
             Ok(o) => o,
             Err(e) => return $runner.finish_err($name, &e),

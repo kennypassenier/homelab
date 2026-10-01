@@ -18,7 +18,7 @@ use crate::state::{StackState, StateStore};
 /// deploy's own `record state` step is the last one, so until now a failure
 /// anywhere before it wrote nothing at all — see `mark_incomplete`.
 macro_rules! step {
-    ($runner:expr, $exec:expr, $ctx:expr, $m:expr, $name:expr, $body:expr) => {
+    ($runner:expr_2021, $exec:expr_2021, $ctx:expr_2021, $m:expr_2021, $name:expr_2021, $body:expr_2021) => {
         match $runner.step($name, || async { $body }).await {
             Ok(outcome) => outcome,
             Err(e) => {
@@ -31,7 +31,7 @@ macro_rules! step {
 
 /// Like `step!`, but the step must prove its own work (S2).
 macro_rules! stepv {
-    ($runner:expr, $exec:expr, $ctx:expr, $m:expr, $name:expr, $body:expr, $verify:expr) => {
+    ($runner:expr_2021, $exec:expr_2021, $ctx:expr_2021, $m:expr_2021, $name:expr_2021, $body:expr_2021, $verify:expr_2021) => {
         match $runner
             .step_verified($name, || async { $body }, || async { $verify })
             .await

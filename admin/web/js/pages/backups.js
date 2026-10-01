@@ -77,7 +77,7 @@ function rows(stack, native, repos) {
  * @returns {Node[]}
  */
 function restoreCell(stack, native, r) {
-  if (!r.newest_snapshot) return ["—"];
+  if (!r.newest_snapshot) return [document.createTextNode("—")];
   const btn = h(
     "button",
     {

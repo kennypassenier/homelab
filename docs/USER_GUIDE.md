@@ -1461,7 +1461,7 @@ a container runs several (`stacks/kyu/kyu-runner/service.yml`)
 | `update_cmd` | its own self-update command; absent means never updated by the host | `core/src/native.rs:48` |
 | `release_repo`, `release_asset` | `owner/name` on GitHub and the asset (default: the unit name) | `core/src/native.rs:64-68,88-90` |
 | `backup_from_newest` | archive the newest file matching this glob instead of `data_dirs` | `core/src/native.rs:79` |
-| `backup_pause` | stop the unit for the length of the nightly tar and start it again afterwards, whatever the snapshot did (fix-113); default off | `core/src/native.rs` |
+| `backup_pause` | how the service is quiesced for the nightly tar (fix-113; default `false`, no quiescing). `true`: the homelab stops the unit itself before the tar and starts it again afterwards, whatever the snapshot did. `chassis`: the chassis-rs kit's own `backup-pause`/`backup-resume` subcommand does it, which can hold writes without a full stop; the homelab falls back to the `true` mechanism when the binary predates the subcommand or cannot quiesce it (owner decision, Kenny 2026-10-01: `stacks/almanac`, `stacks/inbox`) — see "Chassis pause: heartbeat and staging" below | `core/src/native.rs`, `core/src/ops/native.rs::decide_chassis_pause` |
 | `update_policy` | `auto`, `self` or `manual` (default) | `core/src/native.rs` |
 
 The verbs:
@@ -1480,6 +1480,31 @@ of the service files the host recorded at adoption, and on every service of
 the stack in turn (`host/src/main.rs:3441-3555`). A stack the host does not
 know answers `adopt it first`, followed by the adopt command
 (`host/src/main.rs:3121-3124`).
+
+**Chassis pause: heartbeat and staging** (fix-113 ADDENDUM, owner + chassis-rs
+agreement, 2026-10-01). `backup_pause: chassis` never asks the binary to hold
+its pause for a guessed, possibly multi-hour window: it asks for 120 s
+(`backup-native::CHASSIS_PAUSE_FOR_S`) and renews that window every 60 s
+(`CHASSIS_HEARTBEAT_INTERVAL_S`) for as long as work is still running under
+it, so a homelab process that dies mid-backup leaves the service un-paused
+again within two minutes, never parked for hours. What is renewed is kept as
+short as possible: when `native_backup_staging_dir` is set in host.toml, the
+pause covers only a LOCAL tar of the data dirs onto that directory (on pve,
+not inside the container) — the service is resumed the moment that local
+copy lands, and restic then uploads from the staged file with the pause
+already over, so a slow upload (Google Drive, a residential uplink) never
+lengthens it. Before staging, the host checks the directory's free space and
+`native_backup_staging_cap_mib` (default 10 GiB) against the copy's estimated
+size (`du`) plus a 20% margin (`fits_staging`); either too tight skips
+staging for that run and backs up live under the renewed pause instead, the
+same as when no staging directory is configured at all. A staged tar is
+deleted the moment its snapshot is taken (success or failure) and any
+leftover from a run that died mid-copy is cleared at the start of the next
+one — nothing from this accumulates on disk (rule 20). `homelab doctor`
+reports the staging directory's free space as its own finding ("backup
+staging disk") once a staging directory is configured; unconfigured raises
+no finding. Source: `core/src/ops/native.rs` (`fits_staging`,
+`chassis_pause_heartbeat`, `run_under_chassis_heartbeat`), `core/src/doctor.rs`.
 
 Adoption refuses an inactive unit (`adoption never starts services; start it yourself and re-run`),
 a unit that runs a different binary or reads a different env file

@@ -16,7 +16,7 @@
 //!     webhook/incident chain instead of an email nobody reads.
 
 use crate::error::CoreError;
-use crate::executor::{run_ok, shq, Cmd, Executor, TracingExecutor};
+use crate::executor::{Cmd, Executor, TracingExecutor, run_ok, shq};
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::Level;
 

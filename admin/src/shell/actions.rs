@@ -22,8 +22,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use axum::extract::rejection::JsonRejection;
@@ -284,12 +284,11 @@ impl StackFiles for RepoFiles {
         ) {
             return Ok(Material::None);
         }
-        if let Some(wc) = &self.wc {
-            if commit.is_none() {
-                if let Err(r) = wc.sync() {
-                    tracing::warn!(why = %r.why, "the working copy was not brought up to date before {what}");
-                }
-            }
+        if let Some(wc) = &self.wc
+            && commit.is_none()
+            && let Err(r) = wc.sync()
+        {
+            tracing::warn!(why = %r.why, "the working copy was not brought up to date before {what}");
         }
         let _held = self.wc.as_ref().map(|wc| wc.hold());
         if !self.present() {
@@ -383,10 +382,10 @@ impl StackFiles for RepoFiles {
         unit: Option<&str>,
     ) -> Result<(homelab_proto::NativeServiceManifest, String, String), Refusal> {
         let what = format!("install-native {stack}");
-        if let Some(wc) = &self.wc {
-            if let Err(r) = wc.sync() {
-                tracing::warn!(why = %r.why, "the working copy was not brought up to date before {what}");
-            }
+        if let Some(wc) = &self.wc
+            && let Err(r) = wc.sync()
+        {
+            tracing::warn!(why = %r.why, "the working copy was not brought up to date before {what}");
         }
         let _held = self.wc.as_ref().map(|wc| wc.hold());
         if !self.present() {
@@ -405,7 +404,7 @@ impl StackFiles for RepoFiles {
                         services.len()
                     ),
                     "pick the unit in the form",
-                ))
+                ));
             }
         };
         let Some((m, unit_file)) = pick else {
@@ -457,10 +456,10 @@ impl StackFiles for RepoFiles {
     }
 
     fn local_stacks(&self, with_specs: bool) -> Result<LocalStacks, Refusal> {
-        if let Some(wc) = &self.wc {
-            if let Err(r) = wc.sync() {
-                tracing::warn!(why = %r.why, "the working copy was not brought up to date before reading the stacks");
-            }
+        if let Some(wc) = &self.wc
+            && let Err(r) = wc.sync()
+        {
+            tracing::warn!(why = %r.why, "the working copy was not brought up to date before reading the stacks");
         }
         let _held = self.wc.as_ref().map(|wc| wc.hold());
         if !self.present() {
@@ -869,16 +868,16 @@ impl Actions {
                  workstation: homelab install-native stacks/<stack> <tag>",
             )?;
         }
-        if let Ok(jobs) = self.inner.jobs.lock() {
-            if let Some(j) = jobs.iter().find(|j| {
+        if let Ok(jobs) = self.inner.jobs.lock()
+            && let Some(j) = jobs.iter().find(|j| {
                 j.state == JobState::Queued && j.stack == req.stack && j.action == req.action
-            }) {
-                return Err(Refusal::new(
-                    what,
-                    format!("the same action is already queued as job {}", j.job),
-                    "wait for it; the queue runs one action at a time",
-                ));
-            }
+            })
+        {
+            return Err(Refusal::new(
+                what,
+                format!("the same action is already queued as job {}", j.job),
+                "wait for it; the queue runs one action at a time",
+            ));
         }
         Ok(())
     }
@@ -1590,7 +1589,7 @@ impl Actions {
         sent: RpcResponse,
         is_restart: bool,
     ) -> RpcResponse {
-        use homelab_client::release::{after_update, AfterUpdate};
+        use homelab_client::release::{AfterUpdate, after_update};
         let wait = self
             .inner
             .reconnect_wait
@@ -1732,14 +1731,12 @@ impl Actions {
             }
         };
         // The id is sent before the reply, but both can be ready at once.
-        if waiting_for_id {
-            if let Ok(id) = sent_rx.try_recv() {
-                req = Some(id);
-                view.reqs.push(id);
-                self.store(view);
-                for m in std::mem::take(&mut early) {
-                    self.line(m, id, view, tracker);
-                }
+        if waiting_for_id && let Ok(id) = sent_rx.try_recv() {
+            req = Some(id);
+            view.reqs.push(id);
+            self.store(view);
+            for m in std::mem::take(&mut early) {
+                self.line(m, id, view, tracker);
             }
         }
         // Lines that came before the reply may still wait in the channel.
@@ -2053,7 +2050,7 @@ fn preview_line(a: &Actions, req: &ActionRequest, typed: bool) -> Result<String,
         Needs::HostRelease => {
             return Ok(format!("homelab release-update {}", tag())
                 .trim_end()
-                .to_string())
+                .to_string());
         }
         Needs::NativeRelease => {
             let (_, _, dir) = a
@@ -2066,7 +2063,7 @@ fn preview_line(a: &Actions, req: &ActionRequest, typed: bool) -> Result<String,
                 .to_string());
         }
         Needs::Apply => {
-            return actions::cli_override(req, &Material::None).ok_or_else(|| "internal".into())
+            return actions::cli_override(req, &Material::None).ok_or_else(|| "internal".into());
         }
         _ => {}
     }

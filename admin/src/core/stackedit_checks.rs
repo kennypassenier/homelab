@@ -21,7 +21,7 @@ use serde_yaml::{Mapping, Value};
 use homelab_core::checks::{BusyCheck, Check, Layer, ManualCheck, Probe, ServiceChecks};
 
 use super::stackedit::StackTexts;
-use super::yamledit::{path, Item, Op};
+use super::yamledit::{Item, Op, path};
 
 /// The browser's read side (`GET …/edit`): each of the stack's apps, and
 /// its `checks.yml` as parsed JSON — an app with no `checks.yml` yet reads
@@ -206,10 +206,10 @@ pub fn checks_problems(edit: &ChecksEdit) -> Vec<String> {
             out.push(format!("{who}: needs a command"));
         }
     }
-    if let Some(c) = &edit.busy_check {
-        if c.trim().is_empty() {
-            out.push("the busy check needs a command, or remove it".to_string());
-        }
+    if let Some(c) = &edit.busy_check
+        && c.trim().is_empty()
+    {
+        out.push("the busy check needs a command, or remove it".to_string());
     }
     out
 }
@@ -346,7 +346,7 @@ fn seq_ops(
                     n + 1,
                     i + 1,
                     old.len()
-                ))
+                ));
             }
             Some(i) if used.insert(i) => {
                 if old[i] == value {
@@ -360,7 +360,7 @@ fn seq_ops(
                     "{key} {} of the edit points at item {} of the file twice",
                     n + 1,
                     i + 1
-                ))
+                ));
             }
             None => items.push(Item::New(value)),
         }

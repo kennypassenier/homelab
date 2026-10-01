@@ -11,8 +11,8 @@
 use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::firewall::{self, fw_path, render};
 use homelab_core::manifest::*;
-use homelab_core::ops::fleetcheck::{evaluate_firewalls, BootFact, FirewallFact, Severity};
-use homelab_core::ops::{deploy::deploy, OpCtx};
+use homelab_core::ops::fleetcheck::{BootFact, FirewallFact, Severity, evaluate_firewalls};
+use homelab_core::ops::{OpCtx, deploy::deploy};
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::{PipelineEvent, VecSink};
@@ -369,10 +369,8 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
     }
 }
 
-const NET0_OFF: &str =
-    "net0: name=eth0,bridge=vmbr0,firewall=0,gw=10.10.10.1,hwaddr=BC:24:11:BD:24:E3,ip=10.10.10.16/24,tag=10,type=veth\n";
-const NET0_ON: &str =
-    "net0: name=eth0,bridge=vmbr0,firewall=1,gw=10.10.10.1,hwaddr=BC:24:11:BD:24:E3,ip=10.10.10.16/24,tag=10,type=veth\n";
+const NET0_OFF: &str = "net0: name=eth0,bridge=vmbr0,firewall=0,gw=10.10.10.1,hwaddr=BC:24:11:BD:24:E3,ip=10.10.10.16/24,tag=10,type=veth\n";
+const NET0_ON: &str = "net0: name=eth0,bridge=vmbr0,firewall=1,gw=10.10.10.1,hwaddr=BC:24:11:BD:24:E3,ip=10.10.10.16/24,tag=10,type=veth\n";
 
 fn script_existing(exec: &MockExecutor, vmid: u16, stack: &str, net0: &str) {
     exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
@@ -526,10 +524,11 @@ async fn a_new_container_is_created_behind_its_firewall() {
     let sink = VecSink::new();
     let report = deploy(&ctx(&exec, &sink, &NullJournal), &spec(116, "demo", None)).await;
     assert!(report.ok, "{:?}", report.error);
-    assert!(exec
-        .calls_containing("pct create 116")
-        .iter()
-        .all(|c| c.contains("firewall=0")));
+    assert!(
+        exec.calls_containing("pct create 116")
+            .iter()
+            .all(|c| c.contains("firewall=0"))
+    );
     assert_eq!(writes_to(&exec, &fw_path(116)), 0);
 }
 
@@ -762,7 +761,7 @@ fn the_fleet_check_reports_a_firewall_file_that_differs_from_its_declaration() {
 /// covers: fix-88
 #[tokio::test]
 async fn the_facts_read_every_recorded_stacks_firewall_file() {
-    use homelab_core::ops::facts::{gather_live_facts, FactsInputs};
+    use homelab_core::ops::facts::{FactsInputs, gather_live_facts};
     let exec = MockExecutor::new();
     exec.seed_file(
         "/var/lib/homelab/state.json",
@@ -975,9 +974,11 @@ fn watcher_out_rule_is_prepended_before_declared_out_drop() {
         effective.rules[out_positions[0]].dport.as_deref(),
         Some("8080")
     );
-    assert!(out_positions[1..]
-        .iter()
-        .any(|&i| effective.rules[i].action == FwAction::Drop));
+    assert!(
+        out_positions[1..]
+            .iter()
+            .any(|&i| effective.rules[i].action == FwAction::Drop)
+    );
 }
 
 #[test]

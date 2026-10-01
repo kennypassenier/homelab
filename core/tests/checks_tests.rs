@@ -237,7 +237,7 @@ fn a_service_without_checks_is_not_nagged() {
 /// only a person saying yes lets anything continue.
 #[tokio::test]
 async fn a_question_nobody_answers_never_reads_as_permission() {
-    use homelab_core::ask::{Answer, Asker, Question, NOBODY};
+    use homelab_core::ask::{Answer, Asker, NOBODY, Question};
 
     let q = Question {
         op: "deploy-gateway".into(),

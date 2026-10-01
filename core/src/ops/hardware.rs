@@ -83,7 +83,7 @@ pub async fn check_gpu(exec: &dyn Executor, stack: &str) -> Result<GpuDevices, C
                         "stack '{}': could not read the group of {} (got '{}') :: \
                          a wrong gid hands over a device the container cannot open",
                         stack, path, g
-                    )))
+                    )));
                 }
             },
         }

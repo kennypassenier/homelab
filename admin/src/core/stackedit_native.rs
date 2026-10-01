@@ -19,17 +19,16 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
 use super::stackedit::StackTexts;
-use super::yamledit::{path, Item, Op};
+use super::yamledit::{Item, Op, path};
 
 /// The `service.yml` text of one native unit of a stack, wherever it lives.
 pub fn native_path(texts: &StackTexts, unit: &str) -> Option<String> {
-    if let Some(t) = texts.get("service.yml") {
-        if serde_yaml::from_str::<NativeServiceManifest>(t)
+    if let Some(t) = texts.get("service.yml")
+        && serde_yaml::from_str::<NativeServiceManifest>(t)
             .map(|m| m.unit == unit)
             .unwrap_or(false)
-        {
-            return Some("service.yml".to_string());
-        }
+    {
+        return Some("service.yml".to_string());
     }
     let sub = format!("{unit}/service.yml");
     texts.contains_key(&sub).then_some(sub)

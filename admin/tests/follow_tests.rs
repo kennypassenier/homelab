@@ -9,15 +9,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use act_support::{
-    history, shared, temp_dir, until, MemFiles, MockHost, Recorder, Script, TestClock,
+    MemFiles, MockHost, Recorder, Script, TestClock, history, shared, temp_dir, until,
 };
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use homelab_admin::core::actions::{self, ActionKind};
-use homelab_admin::core::drive::{self, check_values, spec, Values};
+use homelab_admin::core::drive::{self, Values, check_values, spec};
 use homelab_admin::shell::actions::{Actions, ActionsDeps};
 use homelab_admin::shell::actions_notify::NotifyCenter;
-use homelab_admin::shell::drive::{router, Driver};
+use homelab_admin::shell::drive::{Driver, router};
 use homelab_core::ops::deployguard::Ancestry;
 use homelab_proto::{Scope, UiStep};
 use serde_json::Value;
@@ -473,10 +473,12 @@ async fn parity_the_driven_line_carries_yes_once_the_name_is_typed() {
     assert!(cli.starts_with("homelab restore media latest"), "{cli}");
     assert!(!cli.contains("--yes"), "{cli}");
     let t = step(&w, typed("act-confirm", "medi")).await;
-    assert!(!t["state"]["form"]["cli"]
-        .as_str()
-        .unwrap()
-        .contains("--yes"));
+    assert!(
+        !t["state"]["form"]["cli"]
+            .as_str()
+            .unwrap()
+            .contains("--yes")
+    );
     let t = step(&w, typed("act-confirm", "media")).await;
     assert_eq!(
         t["state"]["form"]["cli"], "homelab restore media latest --yes",

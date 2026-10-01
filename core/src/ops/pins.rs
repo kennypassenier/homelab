@@ -26,7 +26,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::executor::{pct_sh, Cmd, Executor};
+use crate::executor::{Cmd, Executor, pct_sh};
 use crate::ops::fleetcheck::{Finding, Severity};
 use crate::state::HostState;
 

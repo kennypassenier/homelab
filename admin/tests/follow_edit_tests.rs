@@ -14,7 +14,7 @@ use std::process::Command as Proc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use act_support::{shared, temp_dir, MemFiles, MockHost, RecPusher, Recorder, Script, TestClock};
+use act_support::{MemFiles, MockHost, RecPusher, Recorder, Script, TestClock, shared, temp_dir};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use homelab_admin::core::actions_config::GitConfig;
@@ -22,11 +22,11 @@ use homelab_admin::core::drive::{Field, FieldKind, Values};
 use homelab_admin::core::driveedit;
 use homelab_admin::shell::actions::{Actions, ActionsDeps, CommitInfo};
 use homelab_admin::shell::actions_notify::NotifyCenter;
-use homelab_admin::shell::drive::{router, Driver};
+use homelab_admin::shell::drive::{Driver, router};
 use homelab_admin::shell::edit::EditCtx;
 use homelab_admin::shell::workcopy::WorkingCopy;
 use homelab_proto::{Command, Scope, UiStep};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::ServiceExt as _;
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -1123,11 +1123,13 @@ async fn follow_preset_files_and_removal_each_commit_once() {
     let before = commits(&w);
     ok(&w, press("confirm")).await;
     assert_eq!(commits(&w), before + 1);
-    assert!(git(
-        &w.bare,
-        &["ls-tree", "-r", "--name-only", "main", "presets/mealie/"]
-    )
-    .contains("NOTES.md"));
+    assert!(
+        git(
+            &w.bare,
+            &["ls-tree", "-r", "--name-only", "main", "presets/mealie/"]
+        )
+        .contains("NOTES.md")
+    );
     ok(&w, UiStep::Close).await;
 
     // Delete it.
@@ -1143,11 +1145,13 @@ async fn follow_preset_files_and_removal_each_commit_once() {
     let before = commits(&w);
     ok(&w, press("confirm")).await;
     assert_eq!(commits(&w), before + 1);
-    assert!(!git(
-        &w.bare,
-        &["ls-tree", "-r", "--name-only", "main", "presets/mealie/"]
-    )
-    .contains("NOTES.md"));
+    assert!(
+        !git(
+            &w.bare,
+            &["ls-tree", "-r", "--name-only", "main", "presets/mealie/"]
+        )
+        .contains("NOTES.md")
+    );
     ok(&w, UiStep::Close).await;
 
     // Remove the whole preset.
@@ -1159,9 +1163,11 @@ async fn follow_preset_files_and_removal_each_commit_once() {
     let before = commits(&w);
     ok(&w, press("confirm")).await;
     assert_eq!(commits(&w), before + 1);
-    assert!(git(&w.bare, &["ls-tree", "main", "presets/"])
-        .lines()
-        .all(|l| !l.contains("mealie")));
+    assert!(
+        git(&w.bare, &["ls-tree", "main", "presets/"])
+            .lines()
+            .all(|l| !l.contains("mealie"))
+    );
 }
 
 /// feat-platform-10 (milestone follow), feat-settings-1.
@@ -1364,9 +1370,10 @@ fn follow_the_edit_checks_match_the_browser_cases() {
     // Every edit field's kind reads, and the ids the browser draws are
     // the ids a step names.
     let f: Vec<Field> = driveedit::rule_fields(None);
-    assert!(f
-        .iter()
-        .any(|x| x.id == "rule-peer" && x.kind == FieldKind::Text));
+    assert!(
+        f.iter()
+            .any(|x| x.id == "rule-peer" && x.kind == FieldKind::Text)
+    );
     let body = driveedit::rule_from_values(
         &serde_json::from_value(json!({
             "dir": "in", "action": "ACCEPT", "peer": " 10.10.10.7 ", "proto": "icmp",

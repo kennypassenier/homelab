@@ -3,9 +3,9 @@
 //! stores the answer in restic.
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
-use homelab_core::ops::backup::BackupCfg;
-use homelab_core::ops::devicebackup::{backup_device, DeviceBackup};
 use homelab_core::ops::OpCtx;
+use homelab_core::ops::backup::BackupCfg;
+use homelab_core::ops::devicebackup::{DeviceBackup, backup_device};
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;

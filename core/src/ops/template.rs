@@ -8,7 +8,7 @@
 //! refuses to touch anything else, and the no-touch list applies as always.
 
 use crate::error::CoreError;
-use crate::executor::{pct_sh, run_ok, Cmd, Executor, TracingExecutor};
+use crate::executor::{Cmd, Executor, TracingExecutor, pct_sh, run_ok};
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::Level;
 

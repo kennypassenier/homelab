@@ -74,18 +74,18 @@ impl Backend for RemoteBackend {
             let host_version = loop {
                 match rx.next().await {
                     Some(Ok(Message::Text(t))) => {
-                        if let Ok(sm) = serde_json::from_str::<ServerMsg>(&t) {
-                            if let ServerMsg::Hello { version, .. } = &sm {
-                                let version = version.clone();
-                                let _ = evt_tx
-                                    .send(BackendEvent::Connected {
-                                        version: version.clone(),
-                                        fingerprint,
-                                    })
-                                    .await;
-                                let _ = evt_tx.send(BackendEvent::Server(sm)).await;
-                                break version;
-                            }
+                        if let Ok(sm) = serde_json::from_str::<ServerMsg>(&t)
+                            && let ServerMsg::Hello { version, .. } = &sm
+                        {
+                            let version = version.clone();
+                            let _ = evt_tx
+                                .send(BackendEvent::Connected {
+                                    version: version.clone(),
+                                    fingerprint,
+                                })
+                                .await;
+                            let _ = evt_tx.send(BackendEvent::Server(sm)).await;
+                            break version;
                         }
                     }
                     Some(Ok(_)) => {}

@@ -5,8 +5,8 @@
 //! run into a notice. A missed slot is never caught up.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use axum::extract::rejection::JsonRejection;
@@ -19,7 +19,7 @@ use tokio::sync::Mutex;
 
 use super::actions::{Actions, Clock, Origin, Publish};
 use super::actions_notify::NotifyCenter;
-use super::actions_state::{read_json, write_json, StateError};
+use super::actions_state::{StateError, read_json, write_json};
 use crate::core::actions::Refusal;
 use crate::core::notify::{Draft, Kind};
 use crate::core::schedule::{self, LastRun, Schedule, ScheduleFile, ScheduleInput};

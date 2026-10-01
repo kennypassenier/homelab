@@ -545,23 +545,23 @@ fn rule_label(i: usize, r: &FirewallRule) -> String {
 /// the host refuses it again at its trust boundary.
 pub fn problems(fw: &FirewallSpec) -> Vec<String> {
     let mut out = Vec::new();
-    if let Some(reason) = &fw.management_open {
-        if reason.trim().len() < 10 {
-            out.push(format!(
-                "firewall management_open '{}' is no usable reason — the guard that keeps the \
+    if let Some(reason) = &fw.management_open
+        && reason.trim().len() < 10
+    {
+        out.push(format!(
+            "firewall management_open '{}' is no usable reason — the guard that keeps the \
                  container off the management network may only be dropped with a reason a \
                  person can read a year from now",
-                reason.trim()
-            ));
-        }
+            reason.trim()
+        ));
     }
     for (i, r) in fw.rules.iter().enumerate() {
         let label = rule_label(i, r);
         for (field, v) in [("source", &r.source), ("dest", &r.dest)] {
-            if let Some(v) = v {
-                if let Some(why) = addr_problem(v) {
-                    out.push(format!("{}: {} {}", label, field, why));
-                }
+            if let Some(v) = v
+                && let Some(why) = addr_problem(v)
+            {
+                out.push(format!("{}: {} {}", label, field, why));
             }
         }
         if let Some(ports) = &r.dport {

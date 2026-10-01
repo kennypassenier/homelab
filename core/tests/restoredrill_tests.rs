@@ -3,7 +3,7 @@
 
 use homelab_core::ops::fleetcheck::Severity;
 use homelab_core::ops::restoredrill::{
-    due, evaluate_drill, next_repo, verdict, Outcome, DEFAULT_DRILL_INTERVAL_S,
+    DEFAULT_DRILL_INTERVAL_S, Outcome, due, evaluate_drill, next_repo, verdict,
 };
 use homelab_core::state::HostState;
 

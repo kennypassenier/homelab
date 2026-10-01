@@ -8,14 +8,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use act_support::{
-    history, shared, temp_dir, until, MemFiles, MockHost, RecPusher, Recorder, Script, TestClock,
+    MemFiles, MockHost, RecPusher, Recorder, Script, TestClock, history, shared, temp_dir, until,
 };
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use homelab_admin::core::actions::{validate, ActionArgs, BatchRequest};
-use homelab_admin::core::schedule::{resolve_local, ScheduleInput, When};
+use homelab_admin::core::actions::{ActionArgs, BatchRequest, validate};
+use homelab_admin::core::schedule::{ScheduleInput, When, resolve_local};
 use homelab_admin::shell::actions::{
-    router, Actions, ActionsDeps, CommitInfo, JobState, Origin, Publish,
+    Actions, ActionsDeps, CommitInfo, JobState, Origin, Publish, router,
 };
 use homelab_admin::shell::actions_notify::NotifyCenter;
 use homelab_admin::shell::scheduler::Scheduler;
@@ -115,9 +115,10 @@ async fn feat_stacks_4_a_press_runs_on_the_host_and_its_lines_and_progress_arriv
     // Only this request's lines: the CLI's line (req 1) is not in the job.
     let logs = w.live.events("action_log");
     assert!(!logs.is_empty());
-    assert!(logs
-        .iter()
-        .all(|l| l["req"] == ran[0].0 && l["job"] == done.job));
+    assert!(
+        logs.iter()
+            .all(|l| l["req"] == ran[0].0 && l["job"] == done.job)
+    );
     assert!(logs.iter().any(|l| l["msg"] == "working on up"));
     // feat-ops-6: step n/m with the medians of the two past runs.
     let progress = w.live.events("action_progress");
@@ -229,13 +230,14 @@ async fn feat_stacks_5_one_failure_in_a_batch_does_not_hide_the_others() {
         ),
         (Some(true), Some(2), Some(1))
     );
-    assert!(w
-        .actions
-        .job(jobs[1].job)
-        .unwrap()
-        .message
-        .unwrap()
-        .contains("locked"));
+    assert!(
+        w.actions
+            .job(jobs[1].job)
+            .unwrap()
+            .message
+            .unwrap()
+            .contains("locked")
+    );
 }
 
 #[tokio::test]
@@ -373,10 +375,12 @@ async fn feat_overview_5_new_incidents_become_notices_old_ones_do_not() {
     // Decision notify-routing (2026-09-30): the host pushed the failure
     // itself; the incident is not pushed a second time.
     assert!(w.pusher.sent.lock().unwrap().is_empty());
-    assert!(list["notices"][0]["push"]["why"]
-        .as_str()
-        .unwrap()
-        .contains("host"));
+    assert!(
+        list["notices"][0]["push"]["why"]
+            .as_str()
+            .unwrap()
+            .contains("host")
+    );
     // Snoozed: stored, not pushed, not popped up.
     w.notify.snooze(3_600).await.unwrap();
     w.notify
@@ -459,8 +463,8 @@ async fn arch_schedule_a_due_slot_is_queued_a_missed_one_is_notified() {
     );
     assert_eq!(list["schedules"][0]["schedule"]["last_run"]["slot"], slot);
     // A typed-name action cannot be planned; a schedule can be removed.
-    assert!(s
-        .create(ScheduleInput {
+    assert!(
+        s.create(ScheduleInput {
             stack: "media".into(),
             action: "destroy".into(),
             args: ActionArgs {
@@ -472,7 +476,8 @@ async fn arch_schedule_a_due_slot_is_queued_a_missed_one_is_notified() {
             note: String::new(),
         })
         .await
-        .is_err());
+        .is_err()
+    );
     s.delete(&id).await.unwrap();
     assert!(s.delete(&id).await.is_err());
 }

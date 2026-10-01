@@ -11,12 +11,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use act_support::{
-    history, shared, temp_dir, until, MemFiles, MockHost, Recorder, Script, TestClock,
+    MemFiles, MockHost, Recorder, Script, TestClock, history, shared, temp_dir, until,
 };
-use homelab_admin::core::actions::{validate, ActionArgs, ActionKind, HOST_TARGET};
+use homelab_admin::core::actions::{ActionArgs, ActionKind, HOST_TARGET, validate};
 use homelab_admin::core::actions_config::GitConfig;
-use homelab_admin::core::credentials::{decode_deploy_key, GITHUB_KNOWN_HOSTS};
-use homelab_admin::core::drift::{drift_state, DriftState};
+use homelab_admin::core::credentials::{GITHUB_KNOWN_HOSTS, decode_deploy_key};
+use homelab_admin::core::drift::{DriftState, drift_state};
 use homelab_admin::shell::actions::{Actions, ActionsDeps, JobState, Origin};
 use homelab_admin::shell::actions_notify::NotifyCenter;
 use homelab_admin::shell::hostlog::{After, HostLog};
@@ -90,9 +90,11 @@ fn parity_a_bad_deploy_key_is_refused_without_a_file_or_its_value_in_the_reason(
         p.problems
     );
     assert!(!p.problems[0].contains(secretish), "{:?}", p.problems);
-    assert!(decode_deploy_key("not base64 at all!")
-        .unwrap_err()
-        .contains("not base64"));
+    assert!(
+        decode_deploy_key("not base64 at all!")
+            .unwrap_err()
+            .contains("not base64")
+    );
     assert!(decode_deploy_key("!!!").unwrap_err().contains("not base64"));
     assert!(!decode_deploy_key("!!!").unwrap_err().contains("!!!"));
     // No variable: nothing to do but the host keys.
@@ -230,7 +232,7 @@ fn parity_the_templates_answer_reads_into_two_lists() {
 #[test]
 fn parity_versions_warn_about_an_update_and_an_older_dashboard() {
     use homelab_admin::core::hostversion::{
-        at_least, dashboard_older, update_available, NEXT_RELEASE,
+        NEXT_RELEASE, at_least, dashboard_older, update_available,
     };
     assert_eq!(NEXT_RELEASE, (3, 63, 0));
     assert!(update_available(Some("v3.63.0"), Some("3.62.2")));
@@ -401,12 +403,14 @@ async fn parity_update_host_sends_nothing_for_an_unsigned_release() {
             .is_some_and(|j| j.state == JobState::Refused)
     })
     .await;
-    assert!(actions
-        .job(job.job)
-        .unwrap()
-        .message
-        .unwrap()
-        .contains("not signed"));
+    assert!(
+        actions
+            .job(job.job)
+            .unwrap()
+            .message
+            .unwrap()
+            .contains("not signed")
+    );
     assert!(
         !host.ran().iter().any(|(_, n, _)| n == "self_update_host"),
         "{:?}",

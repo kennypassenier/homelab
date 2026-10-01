@@ -39,7 +39,7 @@ use crate::core::fwmatrix::{self, FleetFirewall};
 use crate::core::hostsettings;
 use crate::core::newstack::{self, NewStack, Taken};
 use crate::core::presetedit;
-use crate::core::stackedit::{self, AddAppFiles, FileChange, StackEdit, StackTexts, MANIFEST};
+use crate::core::stackedit::{self, AddAppFiles, FileChange, MANIFEST, StackEdit, StackTexts};
 use crate::core::stackedit_checks;
 use crate::core::stackedit_files;
 use crate::core::stackedit_latch;
@@ -215,10 +215,10 @@ fn check_dir(dir: &Path, stack: &str, others: &[Other]) -> Checked {
                     problems.push(e.to_string());
                 }
                 let gateway = homelab_core::safety::SafetyConfig::default().gateway_vmid;
-                if m.vmid == gateway {
-                    if let Some(fw) = m.firewall.as_ref().filter(|f| f.enabled) {
-                        problems.extend(homelab_core::firewall::gateway_problems(fw));
-                    }
+                if m.vmid == gateway
+                    && let Some(fw) = m.firewall.as_ref().filter(|f| f.enabled)
+                {
+                    problems.extend(homelab_core::firewall::gateway_problems(fw));
                 }
                 for o in others {
                     if o.vmid == m.vmid {
@@ -236,10 +236,10 @@ fn check_dir(dir: &Path, stack: &str, others: &[Other]) -> Checked {
         }
     }
     for (rel, text) in super::workcopy::read_texts(dir) {
-        if rel.ends_with("docker-compose.yml") || rel.ends_with(".yml") || rel.ends_with(".yaml") {
-            if let Err(e) = serde_yaml::from_str::<serde_yaml::Value>(&text) {
-                problems.push(format!("stacks/{stack}/{rel} does not read as YAML: {e}"));
-            }
+        if (rel.ends_with("docker-compose.yml") || rel.ends_with(".yml") || rel.ends_with(".yaml"))
+            && let Err(e) = serde_yaml::from_str::<serde_yaml::Value>(&text)
+        {
+            problems.push(format!("stacks/{stack}/{rel} does not read as YAML: {e}"));
         }
         if rel.ends_with("service.yml") {
             match serde_yaml::from_str::<homelab_proto::NativeServiceManifest>(&text) {
@@ -302,7 +302,7 @@ async fn applied_changes(
             Err(_) => return serde_json::json!({ "unavailable": "the host's answer did not read" }),
         },
         Ok(r) => {
-            return serde_json::json!({ "unavailable": format!("the host answered: {}", r.message.chars().take(200).collect::<String>()) })
+            return serde_json::json!({ "unavailable": format!("the host answered: {}", r.message.chars().take(200).collect::<String>()) });
         }
         Err(e) => return serde_json::json!({ "unavailable": e }),
     };
@@ -565,7 +565,7 @@ fn follow_up(
         Some("deploy") => ActionKind::DeployCommit,
         Some("resize") => ActionKind::Resize,
         Some(other) => {
-            return serde_json::json!({ "refused": Refusal::new("the follow-up", format!("{other:?} is not deploy or resize"), "pick one the plan offers") })
+            return serde_json::json!({ "refused": Refusal::new("the follow-up", format!("{other:?} is not deploy or resize"), "pick one the plan offers") });
         }
     };
     let args = ActionArgs {
@@ -1955,7 +1955,7 @@ pub async fn revoke_token(
 /// queues `restart-host` so "Save and restart the host" does both in one
 /// press. `null` when nothing written needs it.
 fn restart_follow_up(c: &EditCtx, keys: &[String], origin: Origin) -> serde_json::Value {
-    use homelab_core::hostconfig::{key_info, Apply};
+    use homelab_core::hostconfig::{Apply, key_info};
     let needs_restart = keys
         .iter()
         .any(|k| key_info(k).is_some_and(|i| i.apply == Apply::Restart));

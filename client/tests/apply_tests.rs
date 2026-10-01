@@ -4,7 +4,7 @@
 //! directory is gone is offered for destruction — never destroyed without the
 //! operator typing its name.
 
-use homelab_client::apply::{plan, plan_exit_code, ApplyPlan};
+use homelab_client::apply::{ApplyPlan, plan, plan_exit_code};
 
 /// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift): `apply`
 /// could only act; `apply --plan` prints the plan and answers with an exit
@@ -118,7 +118,7 @@ fn fix_100_an_ephemeral_stack_is_neither_applied_nor_in_the_runbook() {
 /// covers: fix-100
 #[test]
 fn fix_100_apply_deploys_only_after_a_yes() {
-    use homelab_client::apply::{decide, Decision};
+    use homelab_client::apply::{Decision, decide};
     assert_eq!(decide(true, false, None), Decision::Preview);
     assert_eq!(decide(true, true, Some("y")), Decision::Preview);
     assert_eq!(decide(false, true, None), Decision::Deploy);

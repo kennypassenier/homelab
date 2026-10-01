@@ -2,9 +2,9 @@
 //! watched, never pruned, and missed files a host rebuild needs.
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
-use homelab_core::ops::backup::{backup_host_meta, BackupCfg, HOST_META_EXTRAS};
-use homelab_core::ops::fleetcheck::{evaluate_host_meta, Severity, HOST_META_MAX_AGE_S};
 use homelab_core::ops::OpCtx;
+use homelab_core::ops::backup::{BackupCfg, HOST_META_EXTRAS, backup_host_meta};
+use homelab_core::ops::fleetcheck::{HOST_META_MAX_AGE_S, Severity, evaluate_host_meta};
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;

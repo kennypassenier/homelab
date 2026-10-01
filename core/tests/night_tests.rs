@@ -6,7 +6,7 @@
 use homelab_core::manifest::StackManifest;
 use homelab_core::native::NativeServiceManifest;
 use homelab_core::ops::backup::NightBackup;
-use homelab_core::ops::night::{backup_work, stack_night, BackupWork, UpdateWork};
+use homelab_core::ops::night::{BackupWork, UpdateWork, backup_work, stack_night};
 use homelab_core::sink::Level;
 use homelab_core::state::StackState;
 

@@ -23,10 +23,10 @@
 use std::net::Ipv4Addr;
 
 use crate::error::CoreError;
-use crate::executor::{pct_sh, Cmd, Executor};
+use crate::executor::{Cmd, Executor, pct_sh};
+use crate::ops::OpCtx;
 use crate::ops::fleetcheck::{Finding, Severity};
 use crate::ops::util::{push_content, shq};
-use crate::ops::OpCtx;
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::Level;
 use crate::state::{HostState, StateStore};
@@ -72,12 +72,11 @@ pub fn whitelisted_address(yaml: &str) -> Option<Ipv4Addr> {
             in_ip = true;
         } else if t.ends_with(':') {
             in_ip = false;
-        } else if in_ip {
-            if let Some(item) = t.strip_prefix("- ") {
-                if let Ok(a) = item.trim().trim_matches('"').parse() {
-                    return Some(a);
-                }
-            }
+        } else if in_ip
+            && let Some(item) = t.strip_prefix("- ")
+            && let Ok(a) = item.trim().trim_matches('"').parse()
+        {
+            return Some(a);
         }
     }
     None

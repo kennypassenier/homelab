@@ -8,7 +8,7 @@
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::manifest::*;
-use homelab_core::ops::{deploy::deploy, OpCtx};
+use homelab_core::ops::{OpCtx, deploy::deploy};
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;

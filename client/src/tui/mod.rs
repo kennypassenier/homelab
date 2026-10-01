@@ -14,17 +14,17 @@ pub mod view;
 use std::io::stdout;
 use std::time::Duration;
 
+use crossterm::ExecutableCommand;
 use crossterm::event::{Event, EventStream, KeyEventKind};
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use crossterm::ExecutableCommand;
 use futures_util::StreamExt;
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 
 use backend::Backend;
-use model::{update, Model, Msg};
+use model::{Model, Msg, update};
 
 /// `repo`: the repository root the command line found (fix-101), so the TUI
 /// reads the same stacks and presets from any directory.
@@ -88,11 +88,10 @@ pub async fn run(
 
         tokio::select! {
             maybe = events.next() => {
-                if let Some(Ok(Event::Key(key))) = maybe {
-                    if key.kind == KeyEventKind::Press {
+                if let Some(Ok(Event::Key(key))) = maybe
+                    && key.kind == KeyEventKind::Press {
                         update(&mut model, Msg::Key(key));
                     }
-                }
             }
             Some(bev) = evt_rx.recv() => {
                 update(&mut model, Msg::Backend(bev));

@@ -15,7 +15,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Paragraph, Tabs};
 
 use crate::tui::fx::{self, FlickerPhase, FxLevel};
-use crate::tui::model::{palette_matches, Conn, Model, Screen, Tab};
+use crate::tui::model::{Conn, Model, Screen, Tab, palette_matches};
 use crate::tui::theme::THEME;
 
 pub fn draw(f: &mut Frame, model: &Model) {

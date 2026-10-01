@@ -3,7 +3,7 @@
 
 use homelab_core::doctor::{Check, Health};
 use homelab_core::ops::fleetcheck::{Finding, Severity};
-use homelab_core::ops::today::{assemble, open_incidents, render, Level};
+use homelab_core::ops::today::{Level, assemble, open_incidents, render};
 use homelab_core::state::{HostState, StackState};
 
 const NOW: u64 = 1_790_530_000;

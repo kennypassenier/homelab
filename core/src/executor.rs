@@ -63,11 +63,7 @@ fn shell_word(a: &str) -> String {
     let plain = !a.is_empty()
         && a.chars()
             .all(|c| c.is_ascii_alphanumeric() || "_./:=@%+,-".contains(c));
-    if plain {
-        a.to_string()
-    } else {
-        shq(a)
-    }
+    if plain { a.to_string() } else { shq(a) }
 }
 
 /// Single-quote a string for `sh -c`, escaping any quote it contains.

@@ -3,9 +3,9 @@
 
 use homelab_core::doctor::{self, Health, Probes, StackProbe};
 use homelab_core::executor::{CmdOutput, MockExecutor};
-use homelab_core::incidents::{self, commands_script, interrupted_ops, RecordingSink};
+use homelab_core::incidents::{self, RecordingSink, commands_script, interrupted_ops};
 use homelab_core::manifest::*;
-use homelab_core::ops::{deploy::deploy, OpCtx};
+use homelab_core::ops::{OpCtx, deploy::deploy};
 use homelab_core::runner::NullJournal;
 use homelab_core::sink::{NullSink, PipelineEvent, Sink, VecSink};
 
@@ -282,12 +282,16 @@ fn f6_doctor_flags_each_problem_with_remedy() {
             assert!(c.remedy.is_some(), "check '{}' has no remedy", c.name);
         }
     }
-    assert!(checks
-        .iter()
-        .any(|c| c.name.contains("offsite") && c.health == Health::Fail));
-    assert!(checks
-        .iter()
-        .any(|c| c.name.contains("interrupted") && c.health == Health::Warn));
+    assert!(
+        checks
+            .iter()
+            .any(|c| c.name.contains("offsite") && c.health == Health::Fail)
+    );
+    assert!(
+        checks
+            .iter()
+            .any(|c| c.name.contains("interrupted") && c.health == Health::Warn)
+    );
 }
 
 /// fix-62 (restore-drill-covers-almost-nothing, 2026-10-01): the drill's
@@ -506,9 +510,11 @@ fn fix_130_doctor_names_gateway_route_files_no_stack_declares() {
         unowned_route_files: None,
         ..Default::default()
     };
-    assert!(!doctor::diagnose(&unasked)
-        .iter()
-        .any(|c| c.name == "gateway route files"));
+    assert!(
+        !doctor::diagnose(&unasked)
+            .iter()
+            .any(|c| c.name == "gateway route files")
+    );
 }
 
 /// fix-130 (second half, 2026-10-01): the contract documented on

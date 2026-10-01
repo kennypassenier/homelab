@@ -3,7 +3,7 @@
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::manifest::*;
-use homelab_core::ops::backup::{snapshot_nights_unix, BackupCfg};
+use homelab_core::ops::backup::{BackupCfg, snapshot_nights_unix};
 
 fn mount(path: &str, app: &str) -> MountSpec {
     MountSpec {

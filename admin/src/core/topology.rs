@@ -205,10 +205,12 @@ mod tests {
             ),
         ];
         let topo = from_fleet(&fleet);
-        assert!(!topo
-            .edges
-            .iter()
-            .any(|e| e.from == "stranger" && e.to == "app"));
+        assert!(
+            !topo
+                .edges
+                .iter()
+                .any(|e| e.from == "stranger" && e.to == "app")
+        );
     }
 
     #[test]

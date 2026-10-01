@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use homelab_core::error::CoreError;
 use homelab_core::executor::{Cmd, CmdOutput, Executor, MockExecutor};
-use homelab_core::ops::facts::{gather_live_facts, gather_live_facts_with, FactsInputs};
-use homelab_core::ops::pool::{bounded, Done, READ_CONCURRENCY};
+use homelab_core::ops::facts::{FactsInputs, gather_live_facts, gather_live_facts_with};
+use homelab_core::ops::pool::{Done, READ_CONCURRENCY, bounded};
 
 /// The mock with a wall-clock delay on every command and file read, and a
 /// count of what was asked about each container. A delay per call is what
@@ -214,12 +214,16 @@ async fn slow_reads_the_concurrent_gather_equals_the_sequential_one() {
     // Eight in flight: 104..=111 go first and 111, the fastest of them,
     // answers first; the answers really did arrive out of vmid order.
     assert!(counted[0].ends_with(" 111-app"), "{lines:?}");
-    assert!(lines
-        .iter()
-        .any(|l| l == "probing 17 container(s): disk, memory, logs, guards…"));
-    assert!(lines
-        .iter()
-        .any(|l| l == "asking each container about pending updates…"));
+    assert!(
+        lines
+            .iter()
+            .any(|l| l == "probing 17 container(s): disk, memory, logs, guards…")
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l == "asking each container about pending updates…")
+    );
 }
 
 /// The speed-up, measured on the mock with pve's per-call cost: 0.45 s for a

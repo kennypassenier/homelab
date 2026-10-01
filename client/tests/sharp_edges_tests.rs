@@ -1,6 +1,6 @@
 //! small-sharp-edges (expert panel, 2026-09-27).
 
-use homelab_client::version::{template_build_args, TemplateArgs};
+use homelab_client::version::{TemplateArgs, template_build_args};
 
 fn s(v: &[&str]) -> Vec<String> {
     v.iter().map(|x| x.to_string()).collect()

@@ -56,10 +56,18 @@ pub enum Refusal {
 impl Refusal {
     pub fn why(&self) -> &'static str {
         match self {
-            Refusal::NotOpen => "that question is not open any more: it was answered or the host stopped asking",
-            Refusal::OtherStart => "that question was asked by an earlier start of the host; its id now means nothing",
-            Refusal::OtherStep => "the host's open question with that id is about another step; the page showed an older one",
-            Refusal::TimedOut => "the host stopped waiting for this answer; the operation went on without it",
+            Refusal::NotOpen => {
+                "that question is not open any more: it was answered or the host stopped asking"
+            }
+            Refusal::OtherStart => {
+                "that question was asked by an earlier start of the host; its id now means nothing"
+            }
+            Refusal::OtherStep => {
+                "the host's open question with that id is about another step; the page showed an older one"
+            }
+            Refusal::TimedOut => {
+                "the host stopped waiting for this answer; the operation went on without it"
+            }
         }
     }
 }

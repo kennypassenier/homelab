@@ -15,12 +15,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use homelab_proto::{Scope, UiStep};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::core::actions::{ActionKind, Arg, Refusal, SELF_STACK};
 use crate::core::drive::{
-    self, fill, refused, spec, Applied, Choice, Ctx, DriveState, Effect, Family, Field, FieldKind,
-    FormStep, OpenForm, Sources, Values,
+    self, Applied, Choice, Ctx, DriveState, Effect, Family, Field, FieldKind, FormStep, OpenForm,
+    Sources, Values, fill, refused, spec,
 };
 use crate::core::presetedit;
 
@@ -849,13 +849,13 @@ pub fn retention_row_problems(v: &Values) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     let every = text_of(v.get("every_days")).trim().to_string();
     let span = text_of(v.get("span_days")).trim().to_string();
-    if let (Ok(e), Ok(s)) = (every.parse::<i64>(), span.parse::<i64>()) {
-        if s < e {
-            out.insert(
-                "span_days".into(),
-                "Must be at least the keep-one-every span.".into(),
-            );
-        }
+    if let (Ok(e), Ok(s)) = (every.parse::<i64>(), span.parse::<i64>())
+        && s < e
+    {
+        out.insert(
+            "span_days".into(),
+            "Must be at least the keep-one-every span.".into(),
+        );
     }
     out
 }
@@ -935,10 +935,10 @@ pub fn apps_body(fields: &[Field], values: &Values, model: &Value, data: &Value)
     out.insert("kind".into(), json!("apps"));
     let mut remove = Vec::new();
     for f in fields {
-        if let Some(app) = f.name.strip_prefix("apps-remove:") {
-            if values.get(&f.name) == Some(&Value::Bool(true)) {
-                remove.push(json!(app));
-            }
+        if let Some(app) = f.name.strip_prefix("apps-remove:")
+            && values.get(&f.name) == Some(&Value::Bool(true))
+        {
+            remove.push(json!(app));
         }
     }
     if !remove.is_empty() {
@@ -1587,15 +1587,15 @@ pub fn tile_row_problems(v: &Values) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     let we = text_of(v.get("watch_every")).trim().to_string();
     let da = text_of(v.get("down_after")).trim().to_string();
-    if !we.is_empty() && !da.is_empty() {
-        if let (Ok(w), Ok(d)) = (we.parse::<i64>(), da.parse::<i64>()) {
-            if d < w {
-                out.insert(
-                    "down_after".into(),
-                    "Must be at least check every (seconds).".into(),
-                );
-            }
-        }
+    if !we.is_empty()
+        && !da.is_empty()
+        && let (Ok(w), Ok(d)) = (we.parse::<i64>(), da.parse::<i64>())
+        && d < w
+    {
+        out.insert(
+            "down_after".into(),
+            "Must be at least check every (seconds).".into(),
+        );
     }
     out
 }
@@ -2082,20 +2082,20 @@ pub fn tile_problems(values: &Values) -> BTreeMap<String, String> {
         if w.is_empty() || d.is_empty() {
             continue;
         }
-        if let (Ok(wn), Ok(dn)) = (w.parse::<i64>(), d.parse::<i64>()) {
-            if dn < wn {
-                out.insert(
-                    format!("tile_down_after:{key}"),
-                    say(
-                        "tile_down_low",
-                        &[
-                            ("key", &key),
-                            ("watch", &wn.to_string()),
-                            ("down", &dn.to_string()),
-                        ],
-                    ),
-                );
-            }
+        if let (Ok(wn), Ok(dn)) = (w.parse::<i64>(), d.parse::<i64>())
+            && dn < wn
+        {
+            out.insert(
+                format!("tile_down_after:{key}"),
+                say(
+                    "tile_down_low",
+                    &[
+                        ("key", &key),
+                        ("watch", &wn.to_string()),
+                        ("down", &dn.to_string()),
+                    ],
+                ),
+            );
         }
     }
     out
@@ -2389,11 +2389,12 @@ pub fn parse_key(kind: &Value, input: &Value) -> Result<Value, String> {
                 Err(say("key_vmid_list", &[]))
             }
         }
-        "text_list" => Ok(json!(t
-            .split(',')
-            .map(str::trim)
-            .filter(|x| !x.is_empty())
-            .collect::<Vec<_>>())),
+        "text_list" => Ok(json!(
+            t.split(',')
+                .map(str::trim)
+                .filter(|x| !x.is_empty())
+                .collect::<Vec<_>>()
+        )),
         "table" => Ok(json!(t)),
         _ => {
             if t.contains('\n') {
@@ -2902,7 +2903,7 @@ pub fn open(
                         step,
                         format!("{} acts on one stack and none was named", kind.slug()),
                         format!("homelab ui open {}", kind.usage()),
-                    ))
+                    ));
                 }
             };
             let stack = stack_named(Some(stack_part))?;
@@ -3510,10 +3511,10 @@ pub fn after_set(form: &mut OpenForm, name: &str, in_sub: bool) {
                 .retain(|k, _| !k.starts_with("add-app-tile:") || keep.contains(k));
         }
         (EditKind::Firewall, _) => {
-            if let Some(m) = edit(form).model.as_mut() {
-                if m.get(name).is_some() {
-                    m[name] = value;
-                }
+            if let Some(m) = edit(form).model.as_mut()
+                && m.get(name).is_some()
+            {
+                m[name] = value;
             }
         }
         (EditKind::Rollback, "commit") if value != json!("") => {
@@ -3885,7 +3886,7 @@ pub fn row(
                         step,
                         format!("there is no row step {other}"),
                         "row add, or row edit|up|down|delete <number>",
-                    ))
+                    ));
                 }
             }
             Ok(plain())
@@ -4173,7 +4174,7 @@ pub fn row(
                         step,
                         format!("there is no row step {other}"),
                         format!("row add {list}, or row edit|up|down|delete {list}:<number>"),
-                    ))
+                    ));
                 }
             }
             Ok(plain())

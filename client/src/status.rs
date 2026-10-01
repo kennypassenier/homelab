@@ -127,9 +127,11 @@ mod tests {
         assert!(table.contains("down"));
         assert!(table.contains("OFF"));
         // the drift column, not the word "drift" from a comment
-        assert!(table
-            .lines()
-            .any(|l| l.starts_with("paperless") && l.trim_end().ends_with("1/1")));
+        assert!(
+            table
+                .lines()
+                .any(|l| l.starts_with("paperless") && l.trim_end().ends_with("1/1"))
+        );
     }
 
     #[test]

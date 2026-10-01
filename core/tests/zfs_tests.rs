@@ -3,8 +3,8 @@
 //! whenever the chain broke.
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
-use homelab_core::ops::zfs::*;
 use homelab_core::ops::OpCtx;
+use homelab_core::ops::zfs::*;
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;
@@ -452,9 +452,10 @@ async fn a_snapshot_destroyed_on_the_source_by_mistake_stays_on_the_replica() {
         "incremental from the replica's newest snapshot: {}",
         rx[0]
     );
-    assert!(exec
-        .calls_containing(&format!("zfs destroy {r}@homelab-20260825-0215"))
-        .is_empty());
+    assert!(
+        exec.calls_containing(&format!("zfs destroy {r}@homelab-20260825-0215"))
+            .is_empty()
+    );
 }
 
 /// Source retention pruned old snapshots the replica still keeps: the next

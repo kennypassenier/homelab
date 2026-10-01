@@ -2,9 +2,9 @@
 
 use homelab_core::ops::fleetcheck::Severity;
 use homelab_core::ops::manualchecks::{
+    PASSWORD_CHAIN_APP, PASSWORD_CHAIN_RECUR_DAYS, PASSWORD_CHAIN_TEXT, Question, STANDING_STACK,
     answer, ensure_standing, ensure_standing_checks, evaluate_manual, id_for, listing, register,
-    render_listing, Question, PASSWORD_CHAIN_APP, PASSWORD_CHAIN_RECUR_DAYS, PASSWORD_CHAIN_TEXT,
-    STANDING_STACK,
+    render_listing,
 };
 use homelab_core::state::{HostState, StackState};
 
@@ -404,7 +404,7 @@ fn fix_65_a_deliberate_nok_can_be_accepted_until_a_date() {
 /// alarming set changes, and once a week while it stands.
 #[test]
 fn fix_65_the_nightly_report_goes_out_when_the_set_changes_or_weekly() {
-    use homelab_core::ops::fleetcheck::{nightly_report_due, NIGHTLY_REPORT_REPEAT_S};
+    use homelab_core::ops::fleetcheck::{NIGHTLY_REPORT_REPEAT_S, nightly_report_due};
     let now = 1_800_000_000u64;
     assert!(
         nightly_report_due("Broken|media", "", 0, now, NIGHTLY_REPORT_REPEAT_S),

@@ -1,6 +1,6 @@
 //! arch-history: the host's history file.
 
-use homelab_core::history::{parse, prune, select, HistoryEntry, StepTiming};
+use homelab_core::history::{HistoryEntry, StepTiming, parse, prune, select};
 
 fn op(start: u64) -> HistoryEntry {
     HistoryEntry::Op {

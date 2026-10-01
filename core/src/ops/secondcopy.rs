@@ -18,8 +18,8 @@
 //! the data. Fire and theft stay an open risk: every disk is in one case.
 
 use crate::error::CoreError;
-use crate::executor::{run_ok, Cmd, Executor, TracingExecutor};
-use crate::ops::backup::{init_repository, owner_groups, parse_snapshots_json, restic, BackupCfg};
+use crate::executor::{Cmd, Executor, TracingExecutor, run_ok};
+use crate::ops::backup::{BackupCfg, init_repository, owner_groups, parse_snapshots_json, restic};
 use crate::ops::fleetcheck::{Finding, Severity};
 use crate::retention::RetentionTier;
 use crate::runner::{OperationReport, Runner, StepOutcome};

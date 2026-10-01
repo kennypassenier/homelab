@@ -33,7 +33,9 @@ pub fn valid_name(name: &str) -> Result<String, Refusal> {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
     if !ok {
         return Err(refusal(
-            format!("{name:?} is not a preset name (lowercase letters, digits, '-', not starting with '_')"),
+            format!(
+                "{name:?} is not a preset name (lowercase letters, digits, '-', not starting with '_')"
+            ),
             "pick a name like the presets the catalogue already has",
         ));
     }
@@ -77,15 +79,15 @@ fn meta_problems(meta: &PresetMeta) -> Vec<String> {
             meta.ram_mb
         ));
     }
-    if let Some(c) = meta.cores {
-        if !(1..=64).contains(&c) {
-            out.push(format!("cores must be from 1 to 64, not {c}"));
-        }
+    if let Some(c) = meta.cores
+        && !(1..=64).contains(&c)
+    {
+        out.push(format!("cores must be from 1 to 64, not {c}"));
     }
-    if let Some(d) = meta.disk_gb {
-        if !(2..=4096).contains(&d) {
-            out.push(format!("disk must be from 2 to 4096 GB, not {d}"));
-        }
+    if let Some(d) = meta.disk_gb
+        && !(2..=4096).contains(&d)
+    {
+        out.push(format!("disk must be from 2 to 4096 GB, not {d}"));
     }
     out
 }
@@ -388,13 +390,15 @@ mod tests {
         };
         let out = changes(&texts, &edit).unwrap();
         assert_eq!(out.len(), 2);
-        assert!(out
-            .iter()
-            .any(|c| c.path == "presets/demo/myapp/docker-compose.yml" && c.new.is_none()));
-        assert!(out
-            .iter()
-            .any(|c| c.path == "presets/demo/myapp2/docker-compose.yml"
-                && c.new.as_deref() == Some("services: {}")));
+        assert!(
+            out.iter()
+                .any(|c| c.path == "presets/demo/myapp/docker-compose.yml" && c.new.is_none())
+        );
+        assert!(
+            out.iter()
+                .any(|c| c.path == "presets/demo/myapp2/docker-compose.yml"
+                    && c.new.as_deref() == Some("services: {}"))
+        );
 
         texts.insert("demo/myapp2/docker-compose.yml".into(), "x".into());
         assert!(changes(&texts, &edit).is_err());

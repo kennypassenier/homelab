@@ -135,9 +135,11 @@ fn release_build_is_local_in_the_debian_image_and_locked() {
         2,
         "host+client, then the dashboard alone: {builds:?}"
     );
-    assert!(builds
-        .iter()
-        .all(|l| l.contains("--locked") && l.contains("--release")));
+    assert!(
+        builds
+            .iter()
+            .all(|l| l.contains("--locked") && l.contains("--release"))
+    );
     assert!(builds[1].contains("-p homelab-admin") && !builds[0].contains("homelab-admin"));
     assert!(mk.contains("sha256sum homelab-host homelab homelab-admin > SHA256SUMS"));
     let push = mk.find("git push origin HEAD --follow-tags").unwrap();

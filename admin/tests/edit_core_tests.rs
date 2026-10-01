@@ -6,12 +6,12 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use homelab_admin::core::editplan::{self, commit_message, commit_subject, effects, follow_ups};
-use homelab_admin::core::fwmatrix::{matrix, FleetFirewall};
-use homelab_admin::core::hostsettings::{self, check, parse_fragment, toml_fragment, Change};
-use homelab_admin::core::newstack::{ip_for, problems, suggest_vmid, NewStack, Taken};
+use homelab_admin::core::fwmatrix::{FleetFirewall, matrix};
+use homelab_admin::core::hostsettings::{self, Change, check, parse_fragment, toml_fragment};
+use homelab_admin::core::newstack::{NewStack, Taken, ip_for, problems, suggest_vmid};
 use homelab_admin::core::stackedit::{
-    changes, images, mount_value, outside_stack, parse_manifest, raw_path_problem, AddAppFiles,
-    FirewallEdit, RuleEdit, SettingsEdit, StackEdit, StackTexts, TileEdit,
+    AddAppFiles, FirewallEdit, RuleEdit, SettingsEdit, StackEdit, StackTexts, TileEdit, changes,
+    images, mount_value, outside_stack, parse_manifest, raw_path_problem,
 };
 use homelab_admin::core::textdiff::{counts, hunks, unified};
 use homelab_admin::shell::edit::{subject_with_id, version_triple};
@@ -143,10 +143,12 @@ fn feat_firewall_1_add_and_remove_a_rule_keep_the_rest_of_the_file() {
         "{:?}",
         eff[0].detail
     );
-    assert!(eff[0]
-        .detail
-        .iter()
-        .any(|l| l.starts_with("- IN ACCEPT -source 10.10.10.7 -p tcp -dport 8090")));
+    assert!(
+        eff[0]
+            .detail
+            .iter()
+            .any(|l| l.starts_with("- IN ACCEPT -source 10.10.10.7 -p tcp -dport 8090"))
+    );
     assert_eq!(follow_ups(&eff), vec!["deploy"]);
 }
 
@@ -283,14 +285,18 @@ fn feat_stacks_2_an_image_changes_in_its_compose_file() {
 fn feat_stacks_2_the_raw_editor_writes_only_existing_non_secret_files() {
     let t = texts("admin");
     assert!(raw_path_problem("lxc-compose.yml", &t).is_none());
-    assert!(raw_path_problem("admin/.env", &t)
-        .unwrap()
-        .contains("latch"));
+    assert!(
+        raw_path_problem("admin/.env", &t)
+            .unwrap()
+            .contains("latch")
+    );
     assert!(raw_path_problem("../gateway/lxc-compose.yml", &t).is_some());
     assert!(raw_path_problem("/etc/passwd", &t).is_some());
-    assert!(raw_path_problem("new.yml", &t)
-        .unwrap()
-        .contains("existing"));
+    assert!(
+        raw_path_problem("new.yml", &t)
+            .unwrap()
+            .contains("existing")
+    );
     let out = changes(
         "admin",
         &t,
@@ -350,16 +356,18 @@ fn feat_stacks_3_an_app_joins_a_stack_with_its_data_folder() {
         apps: vec!["jobtracker".into()],
         ..files
     };
-    assert!(changes(
-        "kp-soft",
-        &t,
-        &StackEdit::AddApp {
-            preset: "x".into(),
-            tiles: Default::default(),
-        },
-        Some(&again)
-    )
-    .is_err());
+    assert!(
+        changes(
+            "kp-soft",
+            &t,
+            &StackEdit::AddApp {
+                preset: "x".into(),
+                tiles: Default::default(),
+            },
+            Some(&again)
+        )
+        .is_err()
+    );
     assert_eq!(
         mount_value("s", "/appdata/other/x-config", 1)["app"],
         serde_yaml::Value::Null
@@ -522,11 +530,13 @@ fn feat_settings_1_the_page_and_its_checks() {
         parse_fragment("retention", "[[retention]]\nevery_days = 2\n").unwrap(),
         serde_json::json!([{"every_days": 2}])
     );
-    assert!(parse_fragment(
-        "retention",
-        "backup_hour = 3\n[[retention]]\nevery_days = 2\n"
-    )
-    .is_err());
+    assert!(
+        parse_fragment(
+            "retention",
+            "backup_hour = 3\n[[retention]]\nevery_days = 2\n"
+        )
+        .is_err()
+    );
     assert!(parse_fragment("zfs_jobs", "[[retention]]\nevery_days = 2\n").is_err());
     assert_eq!(
         parse_fragment("zfs_jobs", "  ").unwrap(),
@@ -568,11 +578,13 @@ fn feat_settings_1_the_page_and_its_checks() {
     assert!(route(&[]).unwrap_err().why.contains("type its name"));
     assert!(route(&["gateway_vmid"]).is_ok());
     assert!(check(base.clone()).is_err());
-    assert!(check(Change {
-        expect_sha256: "x".into(),
-        ..base
-    })
-    .is_err());
+    assert!(
+        check(Change {
+            expect_sha256: "x".into(),
+            ..base
+        })
+        .is_err()
+    );
 }
 
 #[test]

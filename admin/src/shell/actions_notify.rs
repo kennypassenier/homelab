@@ -14,7 +14,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 use super::actions::{Clock, Publish};
-use super::actions_state::{read_json, write_json, StateError};
+use super::actions_state::{StateError, read_json, write_json};
 use crate::core::notify::{self, Draft, Notice, NotifyFile, PushOutcome, Settings};
 
 /// Where a push goes.
@@ -67,10 +67,10 @@ impl KyuPusher {
                             }
                             Err(e) => {
                                 tracing::error!(
-                                "HOMELAB_ADMIN_NOTIFY_TLS_CERT does not read as a certificate: \
+                                    "HOMELAB_ADMIN_NOTIFY_TLS_CERT does not read as a certificate: \
                                  {e} — notification pushes over https will fail until this is \
                                  fixed"
-                            );
+                                );
                             }
                         }
                     }
@@ -503,11 +503,7 @@ impl NotifyCenter {
             // Decision notify-routing: once the host's own notices arrive,
             // each failure comes with its bundle named in it; a second
             // notice per bundle would say the same thing twice.
-            if s.host_seeded {
-                Vec::new()
-            } else {
-                fresh
-            }
+            if s.host_seeded { Vec::new() } else { fresh }
         };
         let n = fresh.len();
         for name in fresh {
@@ -714,7 +710,7 @@ async fn alertmanager_hook(
                 "alerts",
                 format!("not JSON: {e}"),
                 "send Alertmanager's webhook body",
-            )
+            );
         }
     };
     let stored = center.alerts(&value).await;

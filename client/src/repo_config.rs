@@ -162,10 +162,10 @@ pub fn resolve_host(
     if let Some(h) = explicit_env.filter(|h| !h.trim().is_empty()) {
         return (h, HostSource::Environment);
     }
-    if let Some((path, cfg)) = repo {
-        if let Some(h) = cfg.host.as_deref().filter(|h| !h.trim().is_empty()) {
-            return (h.to_string(), HostSource::RepoConfig(path.to_path_buf()));
-        }
+    if let Some((path, cfg)) = repo
+        && let Some(h) = cfg.host.as_deref().filter(|h| !h.trim().is_empty())
+    {
+        return (h.to_string(), HostSource::RepoConfig(path.to_path_buf()));
     }
     if let Some(h) = machine.filter(|h| !h.trim().is_empty()) {
         return (h, HostSource::MachineConfig);
@@ -218,28 +218,28 @@ pub fn reconcile_pin_built_in(
     let Some(built) = built_in.map(normalise).filter(|b| !b.is_empty()) else {
         return reconcile_pin(machine, repo);
     };
-    if let Some(r) = repo.map(normalise).filter(|r| !r.is_empty()) {
-        if r != built {
-            return Err(format!(
-                "{} names the host certificate {} but this client was built for {} :: \
+    if let Some(r) = repo.map(normalise).filter(|r| !r.is_empty())
+        && r != built
+    {
+        return Err(format!(
+            "{} names the host certificate {} but this client was built for {} :: \
                  either the certificate changed and this client predates it — rebuild it \
                  from the repository (`make install`) or install the release built from it \
                  (`homelab self-install`) — or the repository is not the one this client \
                  came from",
-                REPO_FILE, r, built
-            ));
-        }
+            REPO_FILE, r, built
+        ));
     }
     let machine = machine.map(|m| normalise(&m)).filter(|m| !m.is_empty());
-    if let Some(m) = &machine {
-        if *m != built {
-            return Err(format!(
-                "the host certificate pinned on this machine (~/.config/homelab/pin: {}) is not \
+    if let Some(m) = &machine
+        && *m != built
+    {
+        return Err(format!(
+            "the host certificate pinned on this machine (~/.config/homelab/pin: {}) is not \
                  the one this client was built for ({}) :: delete ~/.config/homelab/pin; the \
                  client pins its own",
-                m, built
-            ));
-        }
+            m, built
+        ));
     }
     Ok(PinDecision {
         pin: Some(built),

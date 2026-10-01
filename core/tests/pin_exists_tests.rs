@@ -14,8 +14,8 @@
 
 use homelab_core::ops::fleetcheck::Severity;
 use homelab_core::ops::pinexists::{
-    evaluate_pin_existence, parse_challenge, parse_digest_header, pinned_digests,
-    rewrite_tag_lines, tagged_images, PinAnswer, PinnedDigest,
+    PinAnswer, PinnedDigest, evaluate_pin_existence, parse_challenge, parse_digest_header,
+    pinned_digests, rewrite_tag_lines, tagged_images,
 };
 
 /// The three shapes the stack files carry: a tag plus digest on ghcr.io, a
@@ -80,9 +80,11 @@ fn gap_37_a_missing_digest_is_broken_and_an_unanswered_one_is_only_noted() {
     assert!(broken.subject.contains("productivity"), "{:?}", broken);
     assert!(broken.what.contains("sha256:dead"), "{:?}", broken);
     assert!(broken.remedy.contains("repin"), "{:?}", broken);
-    assert!(findings
-        .iter()
-        .any(|f| f.severity == Severity::Noted && f.subject.contains("kp-soft")));
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.severity == Severity::Noted && f.subject.contains("kp-soft"))
+    );
 }
 
 /// registry-cache-plaintext (deep-dive answer, 2026-10-01): the header

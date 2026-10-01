@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use homelab_core::error::CoreError;
 use homelab_core::executor::{Cmd, CmdOutput, Executor};
 use homelab_core::manifest::{DeploySpec, FileBlob};
-use homelab_core::ops::{deploy::deploy, OpCtx};
+use homelab_core::ops::{OpCtx, deploy::deploy};
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;
@@ -95,17 +95,15 @@ impl Executor for HybridExec {
                 if rendered.contains("docker ps --format") {
                     return Ok(CmdOutput::ok("app\n"));
                 }
-                if cmd.args.first().map(|a| a.as_str()) == Some("push") {
-                    if let (Some(src), Some(dest)) = (cmd.args.get(2), cmd.args.get(3)) {
-                        if let Ok(content) = std::fs::read_to_string(self.sandbox(src)) {
-                            if let Ok(mut map) = self.pushed.lock() {
-                                map.insert(
-                                    dest.clone(),
-                                    homelab_core::manifest::sha256_hex(content.as_bytes()),
-                                );
-                            }
-                        }
-                    }
+                if cmd.args.first().map(|a| a.as_str()) == Some("push")
+                    && let (Some(src), Some(dest)) = (cmd.args.get(2), cmd.args.get(3))
+                    && let Ok(content) = std::fs::read_to_string(self.sandbox(src))
+                    && let Ok(mut map) = self.pushed.lock()
+                {
+                    map.insert(
+                        dest.clone(),
+                        homelab_core::manifest::sha256_hex(content.as_bytes()),
+                    );
                 }
                 Ok(CmdOutput::ok(""))
             }

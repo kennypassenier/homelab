@@ -221,10 +221,10 @@ impl Default for Settings {
 
 impl Settings {
     pub fn validate(&self) -> Result<(), String> {
-        if let Some(t) = &self.digest_at {
-            if super::schedule::parse_hhmm(t).is_none() {
-                return Err("digest_at is a time HH:MM, 00:00 to 23:59, or null for none".into());
-            }
+        if let Some(t) = &self.digest_at
+            && super::schedule::parse_hhmm(t).is_none()
+        {
+            return Err("digest_at is a time HH:MM, 00:00 to 23:59, or null for none".into());
         }
         if self
             .muted_stacks
@@ -359,7 +359,7 @@ pub struct Route {
 /// operation is pushed by the host at its source, an alert by Alertmanager;
 /// the dashboard itself pushes only a missed schedule of urgent work.
 pub fn draft_urgency(d: &Draft) -> homelab_core::notify::Urgency {
-    use homelab_core::notify::{urgency, Event, Urgency};
+    use homelab_core::notify::{Event, Urgency, urgency};
     match d.kind {
         Kind::ScheduleMissed => urgency(&Event::Op {
             label: d.detail.label.as_deref().unwrap_or(""),
@@ -853,21 +853,21 @@ impl NotifyFile {
     ) -> Option<Notice> {
         self.host_cursor = self.host_cursor.max(n.seq);
         let (d, push) = host_draft(n);
-        if let Some(j) = job {
-            if let Some(x) = self.notices.iter_mut().rev().find(|x| x.job == Some(j)) {
-                // The dashboard's title and push stay; the host adds the rest.
-                x.level = d.detail.level.min(x.level_hint());
-                x.since = d.detail.since;
-                x.consequence = d.detail.consequence;
-                x.remedy = d.detail.remedy;
-                x.link = d.detail.link;
-                x.source = d.detail.source;
-                x.fixes = d.detail.fixes;
-                if !d.body.is_empty() {
-                    x.body = d.body;
-                }
-                return Some(x.clone());
+        if let Some(j) = job
+            && let Some(x) = self.notices.iter_mut().rev().find(|x| x.job == Some(j))
+        {
+            // The dashboard's title and push stay; the host adds the rest.
+            x.level = d.detail.level.min(x.level_hint());
+            x.since = d.detail.since;
+            x.consequence = d.detail.consequence;
+            x.remedy = d.detail.remedy;
+            x.link = d.detail.link;
+            x.source = d.detail.source;
+            x.fixes = d.detail.fixes;
+            if !d.body.is_empty() {
+                x.body = d.body;
             }
+            return Some(x.clone());
         }
         Some(self.add(d, at, push, keep, max_age_days))
     }

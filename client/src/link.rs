@@ -118,11 +118,9 @@ pub async fn connect(
             Pinned::FromRepo(fp)
         });
     }
-    if first_connect {
-        if let Some(fp) = &fingerprint {
-            crate::save_pin(fp);
-            pinned = Some(Pinned::FirstUse(fp.clone()));
-        }
+    if first_connect && let Some(fp) = &fingerprint {
+        crate::save_pin(fp);
+        pinned = Some(Pinned::FirstUse(fp.clone()));
     }
     Ok(Link {
         ws,

@@ -3,7 +3,7 @@
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::manifest::*;
-use homelab_core::ops::{deploy::deploy, OpCtx};
+use homelab_core::ops::{OpCtx, deploy::deploy};
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;
@@ -430,7 +430,7 @@ async fn d10_validator_collects_all_problems() {
 /// into existence to express that.
 #[test]
 fn a_bind_inside_a_declared_mount_is_covered_by_it() {
-    use homelab_core::manifest::{validate, FileBlob};
+    use homelab_core::manifest::{FileBlob, validate};
     let mut s = spec(110, "syncthing");
     s.files.push(FileBlob {
         path: "syncthing/docker-compose.yml".into(),
@@ -512,9 +512,11 @@ async fn a_deploy_installs_the_unit_file_and_starts_a_service_that_is_down() {
         exec.calls_containing("/opt/kyu/kyu")
     );
     assert!(!exec.calls_containing("systemctl daemon-reload").is_empty());
-    assert!(!exec
-        .calls_containing("systemctl enable --now kyu")
-        .is_empty());
+    assert!(
+        !exec
+            .calls_containing("systemctl enable --now kyu")
+            .is_empty()
+    );
 }
 
 /// fix-159: the running kyu of these tests, its unit file as `unit`.
@@ -1055,7 +1057,7 @@ async fn m1_a_missing_borrowed_directory_stops_the_deploy() {
 /// strict rule on `storage:` quietly stops meaning anything.
 #[test]
 fn m1_the_two_kinds_of_directory_cannot_be_confused() {
-    use homelab_core::manifest::{validate, DataMount};
+    use homelab_core::manifest::{DataMount, validate};
     // A borrowed directory under /appdata is a config directory in disguise.
     let mut s = spec(110, "syncthing");
     s.manifest.data_mounts = vec![DataMount {
@@ -2110,11 +2112,13 @@ async fn h1_gateway_route_only_to_the_gateway() {
     });
     let report = deploy(&ctx(&exec, &sink, &journal), &s).await;
     assert!(!report.ok);
-    assert!(report
-        .error
-        .unwrap()
-        .why
-        .contains("gateway routes may only target"));
+    assert!(
+        report
+            .error
+            .unwrap()
+            .why
+            .contains("gateway routes may only target")
+    );
     assert!(exec.calls_containing("pct push 106").is_empty());
 }
 
@@ -2833,7 +2837,7 @@ async fn a_declared_path_that_is_not_there_yet_says_deploy_first() {
 /// among them: the list names four ids, this names a kind.
 #[tokio::test]
 async fn a_vmid_that_is_a_qemu_vm_is_refused_even_when_it_is_not_on_the_list() {
-    use homelab_core::safety::{check_deploy_target, SafetyConfig};
+    use homelab_core::safety::{SafetyConfig, check_deploy_target};
     let exec = MockExecutor::new();
     // 9000 is the Ubuntu template. It is not on the no-touch list.
     exec.respond_always("qm status", CmdOutput::ok("status: stopped"));
@@ -2873,7 +2877,7 @@ fn fix_130_a_stack_whose_every_mount_is_excluded_backs_up_nothing() {
 /// that exceeds it is refused before anything is created.
 #[tokio::test]
 async fn fix_120_a_privileged_container_outside_the_host_policy_is_refused() {
-    use homelab_core::safety::{check_deploy_target, SafetyConfig};
+    use homelab_core::safety::{SafetyConfig, check_deploy_target};
     let exec = MockExecutor::new();
     exec.respond_always("qm status", CmdOutput::failed(2, "no such VM"));
     exec.respond_always("pct config", CmdOutput::failed(2, "no such CT"));
@@ -2910,7 +2914,7 @@ async fn fix_120_a_privileged_container_outside_the_host_policy_is_refused() {
 #[tokio::test]
 async fn fix_120_a_data_mount_outside_the_host_roots_is_refused() {
     use homelab_core::manifest::DataMount;
-    use homelab_core::safety::{check_deploy_target, SafetyConfig};
+    use homelab_core::safety::{SafetyConfig, check_deploy_target};
     let exec = MockExecutor::new();
     exec.respond_always("qm status", CmdOutput::failed(2, "no such VM"));
     exec.respond_always("pct config", CmdOutput::failed(2, "no such CT"));
@@ -2963,7 +2967,7 @@ async fn fix_120_a_data_mount_outside_the_host_roots_is_refused() {
 /// only test touching this function covered the wrong-vmid branch instead.
 #[test]
 fn a_route_filename_may_not_climb_out_of_the_routes_directory() {
-    use homelab_core::safety::{check_gateway_route, SafetyConfig};
+    use homelab_core::safety::{SafetyConfig, check_gateway_route};
     let cfg = SafetyConfig::default();
     let gw = cfg.gateway_vmid;
 
@@ -3005,10 +3009,10 @@ fn the_update_labels_the_code_reads_exist_somewhere_in_the_fleet() {
             let p = e.path();
             if p.is_dir() {
                 compose_files(&p, out);
-            } else if p.file_name().is_some_and(|n| n == "docker-compose.yml") {
-                if let Ok(s) = std::fs::read_to_string(&p) {
-                    out.push(s);
-                }
+            } else if p.file_name().is_some_and(|n| n == "docker-compose.yml")
+                && let Ok(s) = std::fs::read_to_string(&p)
+            {
+                out.push(s);
             }
         }
     }
@@ -3214,9 +3218,11 @@ mod native_from_zero {
         let sink = VecSink::new();
         let j = NullJournal;
         let _ = deploy(&ctx(&exec, &sink, &j), &sp).await;
-        assert!(!exec
-            .calls_containing("restic dump latest /kyu-data.tar")
-            .is_empty());
+        assert!(
+            !exec
+                .calls_containing("restic dump latest /kyu-data.tar")
+                .is_empty()
+        );
         assert!(
             exec.calls_containing("systemctl enable --now kyu")
                 .is_empty(),
@@ -3625,9 +3631,10 @@ mod native_from_zero {
             "{:?}",
             sink.lines()
         );
-        assert!(exec
-            .calls_containing("systemctl enable --now runner")
-            .is_empty());
+        assert!(
+            exec.calls_containing("systemctl enable --now runner")
+                .is_empty()
+        );
     }
 
     /// Expert panel 2026-09-27 (stale-secret-residue-on-pve): flat vault
@@ -3710,10 +3717,11 @@ mod native_from_zero {
         let journal = NullJournal;
         let report = deploy(&ctx(&exec, &sink, &journal), &native_spec()).await;
         assert!(report.ok, "{:?}", report.error);
-        assert!(sink
-            .lines()
-            .iter()
-            .any(|l| l.contains("restored from the vault")));
+        assert!(
+            sink.lines()
+                .iter()
+                .any(|l| l.contains("restored from the vault"))
+        );
     }
 
     #[tokio::test]
@@ -4052,7 +4060,7 @@ fn fix_24_the_rotation_rule_renames_and_signals_or_falls_back_to_copytruncate() 
 /// fourteen stacks unguarded. `max_size` rides along as a `maxsize` line.
 #[test]
 fn rule_20_a_mount_with_no_rotate_gets_the_fleet_default() {
-    use homelab_core::ops::guards::{rotation_policy, FleetLogRotationDefault};
+    use homelab_core::ops::guards::{FleetLogRotationDefault, rotation_policy};
 
     let default = FleetLogRotationDefault {
         files: "*.log".into(),
@@ -4075,7 +4083,7 @@ fn rule_20_a_mount_with_no_rotate_gets_the_fleet_default() {
 /// default — some data mounts genuinely carry no logs worth rotating.
 #[test]
 fn rule_20_a_mount_may_opt_out_of_the_fleet_default() {
-    use homelab_core::ops::guards::{rotation_policy, FleetLogRotationDefault};
+    use homelab_core::ops::guards::{FleetLogRotationDefault, rotation_policy};
 
     let mut dm = traefik_logs(None);
     dm.no_default_rotate = true;
@@ -4354,7 +4362,7 @@ fn script_existing_syncthing(exec: &MockExecutor) {
 /// checks were `starts_with("/appdata/")` and `starts_with('/')`.
 #[test]
 fn a_path_with_a_quote_a_dotdot_or_an_empty_segment_is_refused() {
-    use homelab_core::manifest::{validate, DataMount};
+    use homelab_core::manifest::{DataMount, validate};
     for bad in [
         "/appdata/syncthing/syncthing-config'",
         "/appdata/../etc/syncthing-config",

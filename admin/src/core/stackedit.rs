@@ -12,8 +12,8 @@ use serde_yaml::{Mapping, Value};
 
 use homelab_core::manifest::{FirewallRule, FirewallSpec, FwAction, FwDir, FwProto};
 
-use super::actions::{valid_stack_name, Refusal};
-use super::yamledit::{self, path, EditError, Item, Op, Seg};
+use super::actions::{Refusal, valid_stack_name};
+use super::yamledit::{self, EditError, Item, Op, Seg, path};
 
 /// The stack file every stack has.
 pub const MANIFEST: &str = "lxc-compose.yml";
@@ -415,7 +415,7 @@ pub fn firewall_ops(old: Option<&FirewallSpec>, want: &FirewallEdit) -> Result<V
                     items.len() + 1,
                     i + 1,
                     old.rules.len()
-                ))
+                ));
             }
             Some(i) if used.insert(i) => {
                 if old.rules[i] == rule {
@@ -527,10 +527,10 @@ fn settings_ops(m: &StackManifest, s: &SettingsEdit) -> Vec<Op> {
 pub fn settings_problems(s: &SettingsEdit) -> Vec<String> {
     let mut out = Vec::new();
     let range = |out: &mut Vec<String>, what: &str, v: Option<u64>, lo: u64, hi: u64| {
-        if let Some(v) = v {
-            if !(lo..=hi).contains(&v) {
-                out.push(format!("{what} must be from {lo} to {hi}, not {v}"));
-            }
+        if let Some(v) = v
+            && !(lo..=hi).contains(&v)
+        {
+            out.push(format!("{what} must be from {lo} to {hi}, not {v}"));
         }
     };
     range(&mut out, "cores", s.cores.map(u64::from), 1, 64);
@@ -546,21 +546,21 @@ pub fn settings_problems(s: &SettingsEdit) -> Vec<String> {
         }
     }
     for (key, t) in &s.tiles {
-        if let Some(w) = t.watch_every {
-            if w < 10 {
-                out.push(format!("{key}: check every must be at least 10 s, not {w}"));
-            }
+        if let Some(w) = t.watch_every
+            && w < 10
+        {
+            out.push(format!("{key}: check every must be at least 10 s, not {w}"));
         }
         if let Some(d) = t.down_after {
             if d < 10 {
                 out.push(format!("{key}: down after must be at least 10 s, not {d}"));
             }
-            if let Some(w) = t.watch_every {
-                if d < w {
-                    out.push(format!(
-                        "{key}: down after ({d} s) must be at least check every ({w} s)"
-                    ));
-                }
+            if let Some(w) = t.watch_every
+                && d < w
+            {
+                out.push(format!(
+                    "{key}: down after ({d} s) must be at least check every ({w} s)"
+                ));
             }
         }
     }

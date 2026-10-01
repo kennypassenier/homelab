@@ -2,7 +2,7 @@
 //! security — a silent regression here would make every client accept any
 //! certificate. These tests pin its behavior.
 
-use homelab_client::tls::{fingerprint, PinnedVerifier};
+use homelab_client::tls::{PinnedVerifier, fingerprint};
 use rustls::client::danger::ServerCertVerifier;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 

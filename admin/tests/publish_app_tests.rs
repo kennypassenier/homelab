@@ -3,10 +3,10 @@
 //! fragment, and optionally a tile — all through `stackedit::changes`, the
 //! same plan-then-commit path every other form uses.
 
-use homelab_admin::core::stackedit::{changes, parse_manifest, StackEdit, StackTexts};
+use homelab_admin::core::stackedit::{StackEdit, StackTexts, changes, parse_manifest};
 use homelab_admin::core::stackedit_publish::{
-    gateway_route_state, new_route_file, primary_filename, publish_problems, valid_hostname,
-    PublishAppEdit,
+    PublishAppEdit, gateway_route_state, new_route_file, primary_filename, publish_problems,
+    valid_hostname,
 };
 use homelab_admin::core::stackedit_tiles::TileFields;
 

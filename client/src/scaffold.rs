@@ -590,10 +590,10 @@ pub fn appdata_paths_in(raw: &str) -> Vec<String> {
             .trim()
             .trim_start_matches("- ")
             .trim_matches(['"', '\'']);
-        if let Some(host) = t.split(':').next() {
-            if host.starts_with("/appdata/") {
-                out.push(host.to_string());
-            }
+        if let Some(host) = t.split(':').next()
+            && host.starts_with("/appdata/")
+        {
+            out.push(host.to_string());
         }
     }
     out

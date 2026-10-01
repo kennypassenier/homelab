@@ -2,7 +2,7 @@
 
 use crate::compose::ComposePs;
 use crate::error::CoreError;
-use crate::executor::{pct_sh, run_ok, Cmd, CmdOutput, Executor, Script};
+use crate::executor::{Cmd, CmdOutput, Executor, Script, pct_sh, run_ok};
 
 /// Push literal content to a path inside an LXC. Returns true when the
 /// destination changed (drives conditional restarts — B1).

@@ -3,11 +3,11 @@
 //! ratatui's TestBackend with effects off, and assert on stable structure.
 //! These run with no terminal and no network.
 
-use homelab_client::tui::model::{azerty_tab_index, palette_matches, Model, Msg, Screen, Tab};
+use homelab_client::tui::model::{Model, Msg, Screen, Tab, azerty_tab_index, palette_matches};
 use homelab_client::tui::view;
 use homelab_proto::{AppView, FleetState, HostView, StackView};
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 
 fn fleet() -> FleetState {
     FleetState {
@@ -356,7 +356,7 @@ fn swap_formula_matches_legacy_tiers() {
 
 #[test]
 fn scaffold_has_no_watchtower_and_manual_update_policy() {
-    use homelab_client::scaffold::{scaffold_stack, synthetic_presets, StackParams};
+    use homelab_client::scaffold::{StackParams, scaffold_stack, synthetic_presets};
     let tmp = std::env::temp_dir().join(format!("homelab-nowatch-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
@@ -438,10 +438,11 @@ fn scaffold_writes_a_deployable_stack() {
     .expect("scaffold");
     // Manifest + app compose; no log-shipper sidecar (the deploy installs Alloy).
     assert!(s.files.iter().any(|f| f.ends_with("lxc-compose.yml")));
-    assert!(s
-        .files
-        .iter()
-        .any(|f| f.ends_with("syncthing/docker-compose.yml")));
+    assert!(
+        s.files
+            .iter()
+            .any(|f| f.ends_with("syncthing/docker-compose.yml"))
+    );
     assert!(!s.files.iter().any(|f| f.contains("promtail")));
     // The scaffolded manifest passes the same validator the host uses (D10).
     let spec = homelab_client::spec::build_spec(&tmp.join("demo")).expect("build spec");
@@ -456,7 +457,7 @@ fn scaffold_writes_a_deployable_stack() {
 /// sidecar — a second log shipper, and one past end of life.
 #[test]
 fn scaffold_injects_no_promtail_sidecar() {
-    use homelab_client::scaffold::{scaffold_stack, scan_presets, StackDefaults, StackParams};
+    use homelab_client::scaffold::{StackDefaults, StackParams, scaffold_stack, scan_presets};
     assert!(
         StackDefaults::default().core_apps.is_empty(),
         "the deploy installs the log shipper; no core app should declare one"
@@ -578,7 +579,7 @@ fn preset_templates_substitute_and_apps_list_matches_dirs() {
     // __HOSTNAME__ everywhere, list the APP dir names in the manifest (a
     // stack named differently from its app must still start the right
     // /opt/<stack>/<app> dirs).
-    use homelab_client::scaffold::{scaffold_stack, scan_presets, StackParams};
+    use homelab_client::scaffold::{StackParams, scaffold_stack, scan_presets};
     let tmp = std::env::temp_dir().join(format!("homelab-presetsub-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
@@ -641,7 +642,7 @@ fn manifest_storage_is_derived_from_compose_appdata_binds() {
     // must appear as a manifest storage entry (host dir created + chowned +
     // LXC-mounted at deploy). Without this, scaffolded stacks would write
     // config to the container rootfs — unbacked-up and lost on destroy.
-    use homelab_client::scaffold::{scaffold_stack, scan_presets, StackParams};
+    use homelab_client::scaffold::{StackParams, scaffold_stack, scan_presets};
     let tmp = std::env::temp_dir().join(format!("homelab-storage-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
@@ -951,10 +952,11 @@ fn fix_64_snapshots_in_the_tui_lists_every_repository_from_get_backups() {
         )),
     );
     assert!(m.snapshots_pending);
-    assert!(m
-        .outbox
-        .iter()
-        .any(|c| matches!(c, Command::GetBackups { stack } if *stack == stack_name)));
+    assert!(
+        m.outbox
+            .iter()
+            .any(|c| matches!(c, Command::GetBackups { stack } if *stack == stack_name))
+    );
     assert!(m.focus.as_ref().unwrap().title.contains(&stack_name));
     assert!(!m.focus.as_ref().unwrap().done);
 
@@ -1080,10 +1082,11 @@ fn g4_shell_tab_sends_exec_and_shows_output() {
         Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
     );
     // ExecIn queued for the selected stack's vmid.
-    assert!(m
-        .outbox
-        .iter()
-        .any(|c| matches!(c, Command::ExecIn { vmid: 110, .. })));
+    assert!(
+        m.outbox
+            .iter()
+            .any(|c| matches!(c, Command::ExecIn { vmid: 110, .. }))
+    );
     assert!(m.shell_waiting);
     // Host reply lands in the scrollback.
     homelab_client::tui::model::update(
@@ -1949,7 +1952,7 @@ fn a_host_that_is_behind_is_recognised_as_behind() {
 /// covers: F122
 #[test]
 fn a_payload_the_link_cannot_carry_is_refused_with_a_reason() {
-    use homelab_client::version::{too_large, MAX_WS_FRAME};
+    use homelab_client::version::{MAX_WS_FRAME, too_large};
     assert!(
         too_large(MAX_WS_FRAME).is_none(),
         "exactly at the ceiling is fine"
@@ -2112,7 +2115,7 @@ fn the_scaffold_default_template_is_one_the_fleet_uses() {
 /// the manifest's app list matches the directories on disk.
 #[test]
 fn every_shipped_preset_scaffolds_a_valid_stack() {
-    use homelab_client::scaffold::{scaffold_stack, scan_presets, StackParams};
+    use homelab_client::scaffold::{StackParams, scaffold_stack, scan_presets};
     let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
     let presets = scan_presets(&presets_dir);
     assert!(
@@ -2571,7 +2574,7 @@ fn every_native_service_in_the_repository_is_found_with_its_unit_file() {
 #[test]
 fn a_native_stack_gets_the_native_operation_from_the_same_key() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use homelab_client::tui::model::{update, Msg};
+    use homelab_client::tui::model::{Msg, update};
     use homelab_proto::Command;
 
     let mut m = ready_model();
@@ -2638,10 +2641,11 @@ fn a_native_stack_gets_the_native_operation_from_the_same_key() {
         "CT 109's three services each need their own adoption: {:?}",
         m.outbox
     );
-    assert!(m
-        .outbox
-        .iter()
-        .all(|c| matches!(c, Command::AdoptService(_))));
+    assert!(
+        m.outbox
+            .iter()
+            .all(|c| matches!(c, Command::AdoptService(_)))
+    );
     m.outbox.clear();
     m.focus = None;
 
@@ -2692,7 +2696,7 @@ fn a_native_stack_gets_the_native_operation_from_the_same_key() {
 #[test]
 fn a_waiting_step_is_answerable_from_the_window_the_operator_is_reading() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use homelab_client::tui::model::{update, Msg, PendingAsk};
+    use homelab_client::tui::model::{Msg, PendingAsk, update};
     use homelab_proto::Command;
 
     let mut m = ready_model();
@@ -2796,17 +2800,15 @@ fn every_cli_verb_appears_in_the_usage_text() {
     let mut verbs: Vec<String> = Vec::new();
     for line in src.lines() {
         let t = line.trim();
-        if let Some(rest) = t.strip_prefix('"') {
-            if let Some(name) = rest.split('"').next() {
-                if t.contains("=>")
-                    && !name.is_empty()
-                    && name
-                        .chars()
-                        .all(|c| c.is_ascii_lowercase() || c == '-' || c.is_ascii_digit())
-                {
-                    verbs.push(name.to_string());
-                }
-            }
+        if let Some(rest) = t.strip_prefix('"')
+            && let Some(name) = rest.split('"').next()
+            && t.contains("=>")
+            && !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c == '-' || c.is_ascii_digit())
+        {
+            verbs.push(name.to_string());
         }
     }
     verbs.sort();
@@ -3200,7 +3202,7 @@ fn gap_21_the_waiting_placeholder_names_the_refresh_key() {
 #[test]
 fn gap_19_backup_and_restore_refuse_a_stack_without_its_local_stack_file() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use homelab_client::tui::model::{update, Msg};
+    use homelab_client::tui::model::{Msg, update};
 
     for key in ['B', 'R'] {
         let mut m = ready_model();
@@ -3236,7 +3238,7 @@ fn gap_19_backup_and_restore_refuse_a_stack_without_its_local_stack_file() {
 #[test]
 fn fix_41_deploy_refuses_a_stack_without_its_local_stack_file() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use homelab_client::tui::model::{update, Msg};
+    use homelab_client::tui::model::{Msg, update};
 
     let mut m = ready_model();
     m.tab = homelab_client::tui::model::Tab::Stacks;
@@ -3296,7 +3298,7 @@ fn fix_68_the_ticker_claims_nothing_the_day_s_verdict_has_not_said() {
 #[test]
 fn fix_68_the_day_s_list_fills_the_today_panel_and_leaves_an_open_operation_alone() {
     use homelab_client::tui::backend::BackendEvent;
-    use homelab_client::tui::model::{update, Focus, Msg};
+    use homelab_client::tui::model::{Focus, Msg, update};
     use homelab_core::ops::today::{Item, Level, Today};
     use homelab_proto::{RpcResponse, ServerMsg};
 
@@ -3385,7 +3387,7 @@ fn fix_105_the_header_names_the_client_and_the_host_version() {
 /// covers: fix-106
 #[test]
 fn fix_106_the_tui_starts_calm_and_remembers_f2() {
-    use homelab_client::tui::fx::{load_fx, save_fx, FxLevel};
+    use homelab_client::tui::fx::{FxLevel, load_fx, save_fx};
     assert!(Model::new().fx == FxLevel::Off, "effects on at launch");
     let dir = std::env::temp_dir().join(format!("homelab-fx-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -3472,7 +3474,7 @@ fn fix_107_the_stack_detail_shows_only_what_was_measured() {
 /// covers: fix-107
 #[test]
 fn fix_107_key_map_footer_and_palette_come_from_one_table() {
-    use homelab_client::tui::keys::{footer, palette, KEYMAP};
+    use homelab_client::tui::keys::{KEYMAP, footer, palette};
     let mut m = ready_model();
     press(&mut m, crossterm::event::KeyCode::Char('h'));
     let help = render(&m);

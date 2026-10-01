@@ -19,7 +19,7 @@ use serde::Deserialize;
 use homelab_proto::{Command, SecretRef};
 
 use super::edit::EditCtx;
-use crate::core::actions::{valid_stack_name, Refusal};
+use crate::core::actions::{Refusal, valid_stack_name};
 
 const ASK_TIMEOUT: Duration = Duration::from_secs(30);
 

@@ -14,7 +14,7 @@
 //! written, never the value — see `main.rs`'s `Rpc::RevealSecret` /
 //! `Rpc::SetSecret` handlers.
 
-use homelab_core::ops::secrets::{vault_rel, SecretRef};
+use homelab_core::ops::secrets::{SecretRef, vault_rel};
 
 /// feat-secrets-1: the sealed value, straight from disk. `Err` when nothing
 /// has been sealed yet (a stack declared but never deployed) or the file

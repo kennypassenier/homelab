@@ -9,8 +9,8 @@ use std::process::Command;
 use std::sync::Arc;
 
 use homelab_admin::core::actions_config::GitConfig;
-use homelab_admin::core::stackedit::{changes, FileChange, SettingsEdit, StackEdit};
-use homelab_admin::shell::workcopy::{read_texts, scrub, Unpushed, WorkingCopy};
+use homelab_admin::core::stackedit::{FileChange, SettingsEdit, StackEdit, changes};
+use homelab_admin::shell::workcopy::{Unpushed, WorkingCopy, read_texts, scrub};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -385,7 +385,9 @@ fn arch_edit_txn_an_unknown_push_keeps_the_commit_unpushed() {
     let repo = w.wc.repo.display().to_string();
     receive_pack_wrapper(
         &w,
-        &format!("GIT_CONFIG_GLOBAL=/dev/null git -C '{repo}' config remote.origin.uploadpack /bin/false\nexit 1"),
+        &format!(
+            "GIT_CONFIG_GLOBAL=/dev/null git -C '{repo}' config remote.origin.uploadpack /bin/false\nexit 1"
+        ),
     );
     let e =
         w.wc.transact("kp-soft", &w.memory_edit(3072), "m [feat-stacks-2]", |_| {

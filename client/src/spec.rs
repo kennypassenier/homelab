@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde::Deserialize;
 
@@ -328,48 +328,50 @@ where
     let workers = PIN_ASK_WIDTH.min(refs.len().max(1));
     std::thread::scope(|scope| {
         for _ in 0..workers {
-            scope.spawn(|| loop {
-                let i = next.fetch_add(1, Ordering::SeqCst);
-                let Some(img) = refs.get(i) else { break };
-                let known_dead = dead
-                    .lock()
-                    .map(|d| d.contains(&img.registry))
-                    .unwrap_or(false);
-                if known_dead {
-                    if let Ok(mut n) = notes.lock() {
-                        n.push(format!(
-                            "[digest] {} not resolved :: {} did not answer — left as a tag",
-                            img.reference, img.registry
-                        ))
-                    }
-                    continue;
-                }
-                match resolve(&img.registry, &img.repository, &img.tag) {
-                    Ok(Some(digest)) => {
-                        if let Ok(mut r) = resolved.lock() {
-                            r.insert(img.reference.clone(), digest);
-                        }
-                    }
-                    Ok(None) => {
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, Ordering::SeqCst);
+                    let Some(img) = refs.get(i) else { break };
+                    let known_dead = dead
+                        .lock()
+                        .map(|d| d.contains(&img.registry))
+                        .unwrap_or(false);
+                    if known_dead {
                         if let Ok(mut n) = notes.lock() {
                             n.push(format!(
-                                "[digest] {} answered with no Docker-Content-Digest — left as \
-                                 a tag",
-                                img.reference
-                            ));
+                                "[digest] {} not resolved :: {} did not answer — left as a tag",
+                                img.reference, img.registry
+                            ))
                         }
+                        continue;
                     }
-                    Err(e) => {
-                        if e.ends_with("did not answer") {
-                            if let Ok(mut d) = dead.lock() {
-                                d.insert(img.registry.clone());
+                    match resolve(&img.registry, &img.repository, &img.tag) {
+                        Ok(Some(digest)) => {
+                            if let Ok(mut r) = resolved.lock() {
+                                r.insert(img.reference.clone(), digest);
                             }
                         }
-                        if let Ok(mut n) = notes.lock() {
-                            n.push(format!(
-                                "[digest] {} not resolved :: {} — left as a tag",
-                                img.reference, e
-                            ));
+                        Ok(None) => {
+                            if let Ok(mut n) = notes.lock() {
+                                n.push(format!(
+                                    "[digest] {} answered with no Docker-Content-Digest — left as \
+                                 a tag",
+                                    img.reference
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            if e.ends_with("did not answer")
+                                && let Ok(mut d) = dead.lock()
+                            {
+                                d.insert(img.registry.clone());
+                            }
+                            if let Ok(mut n) = notes.lock() {
+                                n.push(format!(
+                                    "[digest] {} not resolved :: {} — left as a tag",
+                                    img.reference, e
+                                ));
+                            }
                         }
                     }
                 }
@@ -1105,16 +1107,16 @@ fn check_latch_file(f: &LatchFile, natives: &[String]) -> Result<(), String> {
             ));
         }
     }
-    if let Some(u) = &f.restarts {
-        if !natives.contains(u) {
-            return Err(format!(
-                "latch_files: restarts '{}' for {} is not a native unit of this \
+    if let Some(u) = &f.restarts
+        && !natives.contains(u)
+    {
+        return Err(format!(
+            "latch_files: restarts '{}' for {} is not a native unit of this \
                  stack :: natives are [{}]",
-                u,
-                f.dest,
-                natives.join(", ")
-            ));
-        }
+            u,
+            f.dest,
+            natives.join(", ")
+        ));
     }
     Ok(())
 }
@@ -1664,12 +1666,12 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
     let mut pools: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for m in &manifests {
         for dm in &m.data_mounts {
-            if let Some(first) = dm.host_path.trim_start_matches('/').split('/').next() {
-                if !first.is_empty() {
-                    let e = pools.entry(first.to_string()).or_default();
-                    if !e.contains(&m.stack_name) {
-                        e.push(m.stack_name.clone());
-                    }
+            if let Some(first) = dm.host_path.trim_start_matches('/').split('/').next()
+                && !first.is_empty()
+            {
+                let e = pools.entry(first.to_string()).or_default();
+                if !e.contains(&m.stack_name) {
+                    e.push(m.stack_name.clone());
                 }
             }
         }

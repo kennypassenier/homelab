@@ -24,7 +24,7 @@ use super::actions::{Actions, HostPort, JobState};
 use super::actions_notify::NotifyCenter;
 use super::host_link::Shared;
 use crate::core::notify::{Detail, Draft, Kind, Level};
-use crate::core::watch::{step, step_deploying, view, Change, Seen, Target, DOWN_AFTER_S};
+use crate::core::watch::{Change, DOWN_AFTER_S, Seen, Target, step, step_deploying, view};
 
 /// Fallback cadence, unless the host's `watch_interval_s` says otherwise
 /// (decision "default plus per tile", 2026-09-30).

@@ -17,9 +17,9 @@
 //! bent for it and does not need to be.
 
 use crate::error::CoreError;
-use crate::executor::{run_ok, Cmd};
-use crate::ops::backup::{BackupCfg, RESTIC_CACHE_DIR};
+use crate::executor::{Cmd, run_ok};
 use crate::ops::OpCtx;
+use crate::ops::backup::{BackupCfg, RESTIC_CACHE_DIR};
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::Level;
 

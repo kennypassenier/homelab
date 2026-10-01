@@ -10,7 +10,7 @@
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
-use super::yamledit::{path, Item, Op};
+use super::yamledit::{Item, Op, path};
 use homelab_proto::StackManifest;
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
@@ -155,15 +155,15 @@ pub fn problems(m: &StackManifest, e: &LatchEdit) -> Vec<String> {
                     ));
                 }
             }
-            if let Some(u) = &f.restarts {
-                if !m.natives.contains(u) {
-                    out.push(format!(
-                        "latch_files: restarts {u:?} for {} is not a native unit of this stack \
+            if let Some(u) = &f.restarts
+                && !m.natives.contains(u)
+            {
+                out.push(format!(
+                    "latch_files: restarts {u:?} for {} is not a native unit of this stack \
                          :: natives are [{}]",
-                        f.dest,
-                        m.natives.join(", ")
-                    ));
-                }
+                    f.dest,
+                    m.natives.join(", ")
+                ));
             }
         }
     }

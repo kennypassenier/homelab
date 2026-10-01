@@ -1,7 +1,7 @@
 //! fix-30: a huge command-output line never reaches the transcript whole.
 
 use homelab_core::executor::{
-    Cmd, CmdOutput, Executor, MockExecutor, TracingExecutor, TRACE_LINE_MAX,
+    Cmd, CmdOutput, Executor, MockExecutor, TRACE_LINE_MAX, TracingExecutor,
 };
 use homelab_core::sink::VecSink;
 

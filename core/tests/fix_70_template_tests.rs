@@ -8,8 +8,8 @@
 //! rediscovered the next time a dashboard shows nothing.
 
 use homelab_core::executor::MockExecutor;
-use homelab_core::ops::template::{build_template, TemplateCfg, NODE_EXPORTER_ARGS};
 use homelab_core::ops::OpCtx;
+use homelab_core::ops::template::{NODE_EXPORTER_ARGS, TemplateCfg, build_template};
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;
@@ -67,7 +67,9 @@ async fn fix_70_the_template_declares_systemd_start_time_metrics() {
     );
     // The exact flag text is declared once (`NODE_EXPORTER_ARGS`) and used
     // here and in production — this guards against a copy drifting from it.
-    assert!(configured
-        .iter()
-        .any(|c| c.contains(NODE_EXPORTER_ARGS.trim())));
+    assert!(
+        configured
+            .iter()
+            .any(|c| c.contains(NODE_EXPORTER_ARGS.trim()))
+    );
 }

@@ -345,7 +345,9 @@ fn firewall_effects(
         )],
         (Some(_), None) => vec![effect(
             "warning",
-            format!("the declaration is gone: the deploy no longer writes {path}, and the fleet check reports the file it finds there"),
+            format!(
+                "the declaration is gone: the deploy no longer writes {path}, and the fleet check reports the file it finds there"
+            ),
             None,
         )],
         (a, Some(b)) => {
@@ -353,9 +355,15 @@ fn firewall_effects(
             let mut e = effect(
                 "info",
                 if a.is_none() {
-                    format!("the deploy writes {path} and switches firewall=1 on the container's network card: the rules apply from then on")
+                    format!(
+                        "the deploy writes {path} and switches firewall=1 on the container's network card: the rules apply from then on"
+                    )
                 } else {
-                    format!("the deploy rewrites {path}: +{} −{} line(s)", added.len(), removed.len())
+                    format!(
+                        "the deploy rewrites {path}: +{} −{} line(s)",
+                        added.len(),
+                        removed.len()
+                    )
                 },
                 Some("deploy"),
             );
@@ -365,16 +373,18 @@ fn firewall_effects(
                 .chain(removed.iter().map(|l| format!("- {l}")))
                 .collect();
             let mut out = vec![e];
-            if let Some(fw) = new.firewall.as_ref() {
-                if fw.policy_in == homelab_core::manifest::FwAction::Drop
-                    && !fw.rules.iter().any(|r| r.dir == homelab_core::manifest::FwDir::In)
-                {
-                    out.push(effect(
+            if let Some(fw) = new.firewall.as_ref()
+                && fw.policy_in == homelab_core::manifest::FwAction::Drop
+                && !fw
+                    .rules
+                    .iter()
+                    .any(|r| r.dir == homelab_core::manifest::FwDir::In)
+            {
+                out.push(effect(
                         "warning",
                         "inbound policy DROP and no inbound rule: nothing can reach this container, Uptime Kuma and Traefik included",
                         None,
                     ));
-                }
             }
             out
         }

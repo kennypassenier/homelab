@@ -47,7 +47,8 @@ fn fix_35_a_route_without_a_token_sends_no_auth_header() {
     let args = curl_args("{}", "http://ha/api/webhook/<id>", None);
     assert!(args.iter().all(|a| !a.starts_with('@')));
     assert_eq!(args.last().unwrap(), "http://ha/api/webhook/<id>");
-    assert!(args
-        .windows(2)
-        .any(|w| w[0] == "-w" && w[1] == "%{http_code}"));
+    assert!(
+        args.windows(2)
+            .any(|w| w[0] == "-w" && w[1] == "%{http_code}")
+    );
 }

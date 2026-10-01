@@ -18,11 +18,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use chassis::shell::live::Live;
 use futures_util::{SinkExt, StreamExt};
 use homelab_proto::{Command, RpcRequest, RpcResponse, ServerMsg};
-use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
+use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::core::asks::Asks;
-use crate::core::fleet::{fleet_view, FleetView};
+use crate::core::fleet::{FleetView, fleet_view};
 
 /// Where the host lives and how to prove who we are.
 #[derive(Clone)]

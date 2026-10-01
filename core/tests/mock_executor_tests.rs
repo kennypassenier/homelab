@@ -3,7 +3,7 @@
 //! because a command is rendered differently, and a scripted answer that no
 //! longer matches anything must be visible.
 
-use homelab_core::executor::{pct_sh, Cmd, CmdOutput, Executor, MockExecutor};
+use homelab_core::executor::{Cmd, CmdOutput, Executor, MockExecutor, pct_sh};
 
 /// `calls_containing("pct set").is_empty()` passes for `pct  set` in a
 /// host-side `sh -c` script. `ran` reads the recorded program and arguments

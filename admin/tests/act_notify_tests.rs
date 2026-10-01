@@ -3,8 +3,8 @@
 
 use homelab_admin::core::actions_config::from_env;
 use homelab_admin::core::notify::{
-    incident_draft, push_payload, route, set_stack_muted, unread_by_stack, Draft, Kind, NotifyFile,
-    PushOutcome, Settings, KEEP, SNOOZE_MAX_S,
+    Draft, KEEP, Kind, NotifyFile, PushOutcome, SNOOZE_MAX_S, Settings, incident_draft,
+    push_payload, route, set_stack_muted, unread_by_stack,
 };
 
 fn draft(kind: Kind, stack: Option<&str>, ran_s: Option<u64>) -> Draft {
@@ -127,17 +127,19 @@ fn feat_overview_5_the_list_keeps_read_and_unread_and_its_newest() {
 #[test]
 fn feat_overview_5_incidents_already_there_at_the_start_are_not_news() {
     let mut f = NotifyFile::default();
-    assert!(f
-        .new_incidents(&["1800000000-deploy-media".into()])
-        .is_empty());
+    assert!(
+        f.new_incidents(&["1800000000-deploy-media".into()])
+            .is_empty()
+    );
     let fresh = f.new_incidents(&[
         "1800000000-deploy-media".into(),
         "1800000500-backup-home".into(),
     ]);
     assert_eq!(fresh, vec!["1800000500-backup-home"]);
-    assert!(f
-        .new_incidents(&["1800000500-backup-home".into()])
-        .is_empty());
+    assert!(
+        f.new_incidents(&["1800000500-backup-home".into()])
+            .is_empty()
+    );
     let d = incident_draft("1800000500-backup-home");
     assert_eq!(d.kind, Kind::Incident);
     assert!(d.title.contains("backup-home") && d.body.contains("incidents show"));

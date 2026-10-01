@@ -122,15 +122,16 @@ pub async fn check_deploy_target(
 /// `host.toml`, which no RPC can change, so a token holder can run apps but
 /// cannot build a container that is root on the host.
 pub fn check_host_policy(cfg: &SafetyConfig, manifest: &StackManifest) -> Result<(), CoreError> {
-    if let Some(allowed) = &cfg.privileged_vmids {
-        if !manifest.lxc.unprivileged && !allowed.contains(&manifest.vmid) {
-            return Err(CoreError::SafetyAbort(format!(
-                "vmid {} asks for a privileged container, and host.toml's privileged_vmids {:?} \
+    if let Some(allowed) = &cfg.privileged_vmids
+        && !manifest.lxc.unprivileged
+        && !allowed.contains(&manifest.vmid)
+    {
+        return Err(CoreError::SafetyAbort(format!(
+            "vmid {} asks for a privileged container, and host.toml's privileged_vmids {:?} \
                  does not name it — a privileged container is root on the host, so the host \
                  decides (add the vmid there by ssh if it is meant)",
-                manifest.vmid, allowed
-            )));
-        }
+            manifest.vmid, allowed
+        )));
     }
     if let Some(roots) = &cfg.data_mount_roots {
         for dm in &manifest.data_mounts {

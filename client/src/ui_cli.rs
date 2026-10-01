@@ -327,7 +327,7 @@ fn parse_plan(
                     "plan step {} ({line:?}) is not a step that changes the screen: \
                      a plan lists goto, open, type, pick, check, edit, row, press, close and done",
                     i + 1
-                ))
+                ));
             }
             _ => {}
         }
@@ -494,11 +494,7 @@ pub fn render(message: &str) -> Result<String, String> {
             }
         }
     }
-    if refused.is_some() {
-        Err(out)
-    } else {
-        Ok(out)
-    }
+    if refused.is_some() { Err(out) } else { Ok(out) }
 }
 
 /// An edit form's own lines: its table, a dialog on top, the plan and
@@ -599,9 +595,11 @@ mod tests {
         assert_eq!(parse(&words("press confirm")).unwrap().verb(), "press");
         assert_eq!(parse(&[]).unwrap(), UiStep::State);
         assert!(parse(&words("check act-force maybe")).is_err());
-        assert!(parse(&words("fly away"))
-            .unwrap_err()
-            .contains("usage: homelab ui"));
+        assert!(
+            parse(&words("fly away"))
+                .unwrap_err()
+                .contains("usage: homelab ui")
+        );
         assert!(parse(&words("close now")).is_err());
         // The edit forms' steps.
         assert_eq!(
@@ -653,9 +651,11 @@ mod tests {
                 text: "a: 1\nb: 2\n".into()
             }
         );
-        assert!(parse_with(&words("edit raw-text nope"), &read)
-            .unwrap_err()
-            .contains("missing"));
+        assert!(
+            parse_with(&words("edit raw-text nope"), &read)
+                .unwrap_err()
+                .contains("missing")
+        );
     }
 
     /// Kenny, 2026-09-29: control back as soon as the confirmed dialog's
@@ -675,9 +675,11 @@ mod tests {
                 button: "confirm".into()
             })
         );
-        assert!(parse_call(&words("press next --wait"))
-            .unwrap_err()
-            .contains("--wait goes with press confirm only"));
+        assert!(
+            parse_call(&words("press next --wait"))
+                .unwrap_err()
+                .contains("--wait goes with press confirm only")
+        );
         assert!(parse_call(&words("finish now")).is_err());
         assert!(STEPS.contains("finish"));
         assert!(STEPS.contains("press confirm [--wait]"));

@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use homelab_client::updatepolicy::{policy_table, splice, BEGIN, END};
+use homelab_client::updatepolicy::{BEGIN, END, policy_table, splice};
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

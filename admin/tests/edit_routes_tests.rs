@@ -11,13 +11,13 @@ use std::process::Command as Proc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use act_support::{shared, temp_dir, MemFiles, MockHost, RecPusher, Recorder, Script, TestClock};
+use act_support::{MemFiles, MockHost, RecPusher, Recorder, Script, TestClock, shared, temp_dir};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use homelab_admin::core::actions_config::GitConfig;
 use homelab_admin::shell::actions::{Actions, ActionsDeps};
 use homelab_admin::shell::actions_notify::NotifyCenter;
-use homelab_admin::shell::edit::{router, EditCtx};
+use homelab_admin::shell::edit::{EditCtx, router};
 use homelab_admin::shell::workcopy::WorkingCopy;
 use homelab_proto::Command;
 use tower::ServiceExt as _;
@@ -244,10 +244,12 @@ async fn feat_stacks_2_plan_then_commit_then_deploy_that_commit() {
     let (st, v) = call(&w.app, "GET", "/data/stacks/kp-soft/edit", None).await;
     assert_eq!(st, StatusCode::OK, "{v}");
     assert_eq!(v["manifest"]["resources"]["memory_mb"], 2048);
-    assert!(v["texts"]["lxc-compose.yml"]
-        .as_str()
-        .unwrap()
-        .contains("stack_name: kp-soft"));
+    assert!(
+        v["texts"]["lxc-compose.yml"]
+            .as_str()
+            .unwrap()
+            .contains("stack_name: kp-soft")
+    );
     let edit = serde_json::json!({ "kind": "settings", "memory_mb": 3072, "order": 80 });
     let (st, plan) = call(
         &w.app,
@@ -368,11 +370,13 @@ async fn feat_firewall_1_a_bad_rule_is_refused_and_the_matrix_reads_the_repo() {
     let (st, m) = call(&w.app, "GET", "/data/firewall", None).await;
     assert_eq!(st, StatusCode::OK, "{m}");
     assert!(m["matrix"]["rules"].as_array().unwrap().len() > 10);
-    assert!(m["stacks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|s| s["stack"] == "admin" && s["enabled"] == true));
+    assert!(
+        m["stacks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["stack"] == "admin" && s["enabled"] == true)
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -410,10 +414,12 @@ async fn feat_stacks_3_a_new_stack_is_scaffolded_committed_and_only_its_director
     let (st, plan) = call(&w.app, "POST", "/data/stacks-new/plan", Some(req.clone())).await;
     assert_eq!(st, StatusCode::OK, "{plan}");
     assert_eq!(plan["valid"], true, "{plan}");
-    assert!(plan["effects"][0]["what"]
-        .as_str()
-        .unwrap()
-        .contains("creates CT 121"));
+    assert!(
+        plan["effects"][0]["what"]
+            .as_str()
+            .unwrap()
+            .contains("creates CT 121")
+    );
     let (st, v) = call(
         &w.app,
         "POST",
@@ -529,11 +535,13 @@ async fn parity_an_export_bundle_imports_as_a_new_stack() {
     .await;
     assert_eq!(st, StatusCode::OK, "{plan}");
     assert_eq!(plan["valid"], true, "{plan}");
-    assert!(plan["files"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|f| f["path"].as_str().unwrap().starts_with("stacks/uptime2/")));
+    assert!(
+        plan["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|f| f["path"].as_str().unwrap().starts_with("stacks/uptime2/"))
+    );
     assert_eq!(plan["follow_ups"], serde_json::json!(["deploy"]), "{plan}");
     assert_eq!(git(&w.bare, &["rev-list", "--count", "main"]).trim(), "1");
 

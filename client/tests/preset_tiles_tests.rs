@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use homelab_client::scaffold::{
-    scaffold_stack, LoadedPreset, PresetMeta, PresetTile, StackDefaults, StackParams,
+    LoadedPreset, PresetMeta, PresetTile, StackDefaults, StackParams, scaffold_stack,
 };
 use homelab_core::manifest::StackManifest;
 

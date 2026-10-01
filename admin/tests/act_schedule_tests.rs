@@ -3,8 +3,9 @@
 
 use homelab_admin::core::actions::ActionArgs;
 use homelab_admin::core::schedule::{
-    check_input, civil_from_days, days_from_civil, local_label, next_run, offset_at, resolve_local,
-    summer_time, tick, to_local, weekday, Resolved, Schedule, ScheduleFile, ScheduleInput, When,
+    Resolved, Schedule, ScheduleFile, ScheduleInput, When, check_input, civil_from_days,
+    days_from_civil, local_label, next_run, offset_at, resolve_local, summer_time, tick, to_local,
+    weekday,
 };
 
 const JAN1_2026: i64 = 20_454;
@@ -130,24 +131,30 @@ fn feat_stacks_8_times_and_dates_are_checked() {
     for bad in ["24:00", "3:30", "12:60", "noon"] {
         assert!(When::Day { at: bad.into() }.validate().is_err(), "{bad}");
     }
-    assert!(When::Week {
-        days: vec![7],
-        at: "01:00".into()
-    }
-    .validate()
-    .is_err());
-    assert!(When::Week {
-        days: vec![],
-        at: "01:00".into()
-    }
-    .validate()
-    .is_err());
-    assert!(When::Once {
-        date: "2026-02-30".into(),
-        at: "01:00".into()
-    }
-    .validate()
-    .is_err());
+    assert!(
+        When::Week {
+            days: vec![7],
+            at: "01:00".into()
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        When::Week {
+            days: vec![],
+            at: "01:00".into()
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        When::Once {
+            date: "2026-02-30".into(),
+            at: "01:00".into()
+        }
+        .validate()
+        .is_err()
+    );
     let w: When = serde_json::from_str(r#"{"every":"week","days":[5,6],"at":"03:15"}"#).unwrap();
     assert!(w.validate().is_ok());
 }

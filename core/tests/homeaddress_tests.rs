@@ -6,12 +6,12 @@
 //! traffic can never ban the house.
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
-use homelab_core::ops::fleetcheck::{alarming, Severity};
+use homelab_core::ops::OpCtx;
+use homelab_core::ops::fleetcheck::{Severity, alarming};
 use homelab_core::ops::homeaddress::{
     evaluate_home_address, parse_public, sync_home_address, whitelist_yaml, whitelisted_address,
 };
 use homelab_core::ops::util::staging_path;
-use homelab_core::ops::OpCtx;
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;
@@ -240,10 +240,11 @@ async fn the_first_run_writes_the_whitelist() {
     let report = sync_home_address(&ctx(&exec, &sink, &j)).await;
     assert!(report.ok, "{:?}", report.error);
     assert!(exec.calls().iter().any(|c| c.contains("HUP")));
-    assert!(sink
-        .lines()
-        .join("\n")
-        .contains("62.235.8.143 whitelisted (none was before)"));
+    assert!(
+        sink.lines()
+            .join("\n")
+            .contains("62.235.8.143 whitelisted (none was before)")
+    );
 }
 
 /// covers: fix-94
@@ -371,9 +372,11 @@ fn fix_156_a_public_service_answer_is_read_and_checked() {
         parse_public("62.235.8.143\n").unwrap(),
         home("62.235.8.143")
     );
-    assert!(parse_public("ip=192.168.1.10")
-        .unwrap_err()
-        .contains("not a public"));
+    assert!(
+        parse_public("ip=192.168.1.10")
+            .unwrap_err()
+            .contains("not a public")
+    );
     assert!(parse_public("<html>blocked</html>").is_err());
 }
 

@@ -4,13 +4,13 @@
 //! nightly machinery (backup, update supervision) picks it up.
 
 use crate::error::CoreError;
-use crate::executor::{run_ok, Cmd, CmdOutput, Executor, TracingExecutor};
+use crate::executor::{Cmd, CmdOutput, Executor, TracingExecutor, run_ok};
 use crate::native::{BackupPause, NativeServiceManifest};
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::Level;
 
 use super::util::shq;
-use super::{util_pct_sh, OpCtx};
+use super::{OpCtx, util_pct_sh};
 
 /// T77: a service's own nightly copy older than this is not tonight's copy.
 /// 26 h leaves room for a late run without accepting yesterday's file.
@@ -190,14 +190,14 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
                 show.stdout.trim()
             )));
         }
-        if let Some(env_file) = &m.env_file {
-            if !show.stdout.contains(env_file.as_str()) {
-                return Err(CoreError::SafetyAbort(format!(
-                    "unit {} does not read EnvironmentFile {} — fix the stack file to match \
+        if let Some(env_file) = &m.env_file
+            && !show.stdout.contains(env_file.as_str())
+        {
+            return Err(CoreError::SafetyAbort(format!(
+                "unit {} does not read EnvironmentFile {} — fix the stack file to match \
                      reality",
-                    unit, env_file
-                )));
-            }
+                unit, env_file
+            )));
         }
         Ok(StepOutcome::Unchanged)
     });
@@ -323,13 +323,13 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
     step!(runner, "record state", {
         let store = crate::state::StateStore::new(exec, &ctx.state_dir);
         let mut state = store.load().await?;
-        if let Some(existing) = state.stacks.get(&m.stack_name) {
-            if existing.vmid != m.vmid {
-                return Err(CoreError::SafetyAbort(format!(
-                    "stack '{}' already exists on vmid {} — refusing to re-point it to {}",
-                    m.stack_name, existing.vmid, m.vmid
-                )));
-            }
+        if let Some(existing) = state.stacks.get(&m.stack_name)
+            && existing.vmid != m.vmid
+        {
+            return Err(CoreError::SafetyAbort(format!(
+                "stack '{}' already exists on vmid {} — refusing to re-point it to {}",
+                m.stack_name, existing.vmid, m.vmid
+            )));
         }
         // T5: several native services share one container, so adoption adds
         // to the list rather than replacing it. Re-adopting the same unit
@@ -741,7 +741,7 @@ pub async fn restore_empty_unit(
                 "rc={} :: {}",
                 out.code,
                 crate::executor::trace_line(out.stderr.trim())
-            )))
+            )));
         }
         Err(e) => return Ok(EmptyUnit::CheckFailed(e.to_string())),
     };
@@ -768,7 +768,7 @@ pub async fn restore_empty_unit(
                 "rc={} :: {}",
                 o.code,
                 crate::executor::trace_line(o.stderr.trim())
-            )))
+            )));
         }
         Err(e) => return Ok(EmptyUnit::RestoreFailed(e.to_string())),
     }
@@ -787,13 +787,13 @@ pub async fn restore_empty_unit(
                     "after_restore failed, rc={} :: {}",
                     o.code,
                     crate::executor::trace_line(o.stderr.trim())
-                )))
+                )));
             }
             Err(e) => {
                 return Ok(EmptyUnit::RestoreFailed(format!(
                     "after_restore failed: {}",
                     e
-                )))
+                )));
             }
         }
         return Ok(EmptyUnit::Restored);
@@ -1109,7 +1109,7 @@ pub async fn backup_native(
                     "no copy matches {} on {} — the service's own backup has not produced \
                      one; refusing to archive nothing and call it a backup",
                     glob, m.hostname
-                )))
+                )));
             }
         };
         if age > MAX_OWN_COPY_AGE_S {
@@ -1763,10 +1763,10 @@ pub struct ReleaseRefs {
 pub fn parse_latest_release(json: &str, asset: &str) -> Result<ReleaseRefs, String> {
     let v: serde_json::Value =
         serde_json::from_str(json).map_err(|e| format!("release listing is not JSON: {}", e))?;
-    if let Some(msg) = v.get("message").and_then(|m| m.as_str()) {
-        if v.get("tag_name").is_none() {
-            return Err(format!("GitHub answered: {}", msg));
-        }
+    if let Some(msg) = v.get("message").and_then(|m| m.as_str())
+        && v.get("tag_name").is_none()
+    {
+        return Err(format!("GitHub answered: {}", msg));
     }
     let tag = v
         .get("tag_name")
@@ -2002,15 +2002,15 @@ async fn release_install(
         Ok(StepOutcome::Unchanged)
     });
 
-    if let Some(tag) = pinned {
-        if !valid_tag(tag) {
-            return runner.finish_err(
-                "check the tag",
-                &CoreError::Other(format!(
-                    "{tag:?} is not a release tag (letters, digits, dots and dashes)"
-                )),
-            );
-        }
+    if let Some(tag) = pinned
+        && !valid_tag(tag)
+    {
+        return runner.finish_err(
+            "check the tag",
+            &CoreError::Other(format!(
+                "{tag:?} is not a release tag (letters, digits, dots and dashes)"
+            )),
+        );
     }
     let mut refs: Option<ReleaseRefs> = None;
     let asked = match pinned {

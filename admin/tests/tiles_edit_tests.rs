@@ -5,8 +5,8 @@
 //! keeps working exactly as it did; these tests are the fuller form beside
 //! it, writing the same `tiles.<key>.*` paths.
 
-use homelab_admin::core::stackedit::{changes, StackEdit, StackTexts};
-use homelab_admin::core::stackedit_tiles::{tiles_problems, TileFields, TileItemEdit, TilesEdit};
+use homelab_admin::core::stackedit::{StackEdit, StackTexts, changes};
+use homelab_admin::core::stackedit_tiles::{TileFields, TileItemEdit, TilesEdit, tiles_problems};
 
 const BASE: &str = "stack_name: x\nvmid: 150\nhostname: 150-app-x\nnetwork:\n  ip: 10.10.10.50/24\n  gateway: 10.10.10.1\n  bridge: vmbr0\n  vlan: 10\nresources:\n  cores: 1\n  memory_mb: 512\n  swap_mb: 0\n  disk_gb: 8\n  storage: local-lvm\nlxc:\n  template: clone:996\n  unprivileged: true\n  features: nesting=1\n  protection: true\nboot:\n  onboot: true\napps: []\ntiles:\n  old.kp-soft.dev:\n    name: Old\n    group: Apps\n    url: http://10.10.10.50:8080/\n";
 

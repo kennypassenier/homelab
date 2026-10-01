@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use homelab_core::checks::{Healthy, Layer, Probe, ServiceChecks};
 use homelab_core::ops::fleetcheck::Severity;
-use homelab_core::ops::probes::{evaluate, id_for, register, ProbeReading};
+use homelab_core::ops::probes::{ProbeReading, evaluate, id_for, register};
 use homelab_core::state::HostState;
 
 fn missing_files() -> Probe {

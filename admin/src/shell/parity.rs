@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use axum::extract::{Path as UrlPath, Query, State};
-use axum::http::{header, StatusCode};
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -21,9 +21,9 @@ use homelab_proto::Command;
 use serde::Deserialize;
 
 use super::actions::{Actions, HostPort, LocalStacks, StackFiles};
-use super::host_link::{now_s, Shared};
+use super::host_link::{Shared, now_s};
 use super::slow::{RunQuery, SlowRead, WAIT};
-use crate::core::actions::{valid_stack_name, Refusal};
+use crate::core::actions::{Refusal, valid_stack_name};
 use crate::core::drift::drift_state;
 
 /// How long a drift reading is reused (it runs latch once per stack).
@@ -530,7 +530,7 @@ async fn drift(State(c): State<ParityCtx>, Query(q): Query<Fresh>) -> Response {
     let (at, local) = match (reuse, q.fresh) {
         (Some(x), _) => x,
         (None, false) => {
-            return Json(serde_json::json!({ "stacks": {}, "measured_at": null })).into_response()
+            return Json(serde_json::json!({ "stacks": {}, "measured_at": null })).into_response();
         }
         (None, true) => {
             let files = c.files.clone();
@@ -546,7 +546,7 @@ async fn drift(State(c): State<ParityCtx>, Query(q): Query<Fresh>) -> Response {
                     return refused(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Refusal::new("drift", e.to_string(), "report this"),
-                    )
+                    );
                 }
             }
         }

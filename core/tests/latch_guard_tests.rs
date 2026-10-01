@@ -8,7 +8,7 @@
 //! these tests is the production one, not a stand-in.
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
-use homelab_core::ops::guards::{ensure_latch, LATCH_ASSET, LATCH_BIN, LATCH_REPO};
+use homelab_core::ops::guards::{LATCH_ASSET, LATCH_BIN, LATCH_REPO, ensure_latch};
 use homelab_core::ops::native::newest_signed_release;
 use homelab_core::sink::VecSink;
 
@@ -77,9 +77,10 @@ fn dashboard_latch_the_constants_name_the_signed_release() {
 fn dashboard_latch_an_unsigned_newest_release_yields_to_the_newest_signed_one() {
     let r = newest_signed_release(&releases_json(), LATCH_ASSET).unwrap();
     assert_eq!(r.tag, "v2.6.0");
-    assert!(r
-        .asset_url
-        .ends_with("/v2.6.0/latch-x86_64-unknown-linux-gnu"));
+    assert!(
+        r.asset_url
+            .ends_with("/v2.6.0/latch-x86_64-unknown-linux-gnu")
+    );
     assert!(r.sig_url.unwrap().ends_with("/v2.6.0/SHA256SUMS.minisig"));
 }
 
@@ -199,9 +200,11 @@ async fn dashboard_latch_a_download_that_does_not_match_the_signed_list_is_refus
     let e = ensure_latch(&exec, &sink, 120).await.unwrap_err();
     assert!(format!("{e}").contains("CHECKSUM MISMATCH"), "{e}");
     assert_eq!(exec.ran("pct", &["push"]), 0);
-    assert!(!exec
-        .calls_containing("rm -f /var/lib/homelab/staged/latch/latch-120")
-        .is_empty());
+    assert!(
+        !exec
+            .calls_containing("rm -f /var/lib/homelab/staged/latch/latch-120")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -213,9 +216,11 @@ async fn dashboard_latch_a_container_whose_glibc_is_too_old_keeps_no_latch() {
     let e = ensure_latch(&exec, &sink, 120).await.unwrap_err();
     assert!(format!("{e}").contains("glibc 2.39"), "{e}");
     assert_eq!(exec.calls_containing("mv -f").len(), 0);
-    assert!(!exec
-        .calls_containing("rm -f /usr/local/bin/latch.homelab-new")
-        .is_empty());
+    assert!(
+        !exec
+            .calls_containing("rm -f /usr/local/bin/latch.homelab-new")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -256,8 +261,8 @@ async fn dashboard_latch_the_deploy_guard_installs_latch() {
 
 #[tokio::test]
 async fn dashboard_latch_the_golden_template_bakes_latch_through_the_guard() {
-    use homelab_core::ops::template::{build_template, TemplateCfg};
     use homelab_core::ops::OpCtx;
+    use homelab_core::ops::template::{TemplateCfg, build_template};
     use homelab_core::runner::NullJournal;
     let exec = MockExecutor::new();
     exec.respond_always("pct config 999", CmdOutput::failed(2, "does not exist"));

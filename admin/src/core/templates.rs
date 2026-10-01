@@ -27,15 +27,13 @@ pub fn parse(text: &str) -> Templates {
         }
         if let Some(rest) = t.strip_prefix("clone:") {
             let mut parts = rest.split_whitespace();
-            if let (Some(v), name) = (parts.next(), parts.next()) {
-                if let Ok(vmid) = v.parse() {
-                    out.clones.push((vmid, name.unwrap_or("").to_string()));
-                }
+            if let (Some(v), name) = (parts.next(), parts.next())
+                && let Ok(vmid) = v.parse()
+            {
+                out.clones.push((vmid, name.unwrap_or("").to_string()));
             }
-        } else if in_os {
-            if let Some(name) = t.split_whitespace().next() {
-                out.os.push(name.to_string());
-            }
+        } else if in_os && let Some(name) = t.split_whitespace().next() {
+            out.os.push(name.to_string());
         }
     }
     out

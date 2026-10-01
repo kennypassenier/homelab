@@ -6,7 +6,7 @@
 //! v1 check tested for a field called `IsPlaying` that does not exist, so its
 //! one positive case could never fire.
 
-use homelab_core::ops::busy::{interpret, Busy};
+use homelab_core::ops::busy::{Busy, interpret};
 
 /// app-knowledge (2026-09-30): the Jellyfin reading lives in
 /// stacks/media/jellyfin/checks.yml. These fixtures run the part of that

@@ -4,7 +4,7 @@
 //! `release-update [tag]` were missing, `homelab deploy --help` printed the
 //! same list, and a mistyped verb (stauts) printed it too and exited 0.
 
-use homelab_client::cli_help::{suggest, usage, verb_help, VERBS};
+use homelab_client::cli_help::{VERBS, suggest, usage, verb_help};
 
 fn root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn b7_install_source_reads_a_tag_or_a_file() {
-        use super::{install_source, InstallSource};
+        use super::{InstallSource, install_source};
         let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(
             install_source(&a(&[])).unwrap(),
@@ -299,7 +299,7 @@ mod tests {
     /// come back and exits non-zero unless the version it shipped answers.
     #[test]
     fn fix_121_the_wait_after_an_update_tells_accepted_from_rolled_back() {
-        use super::{after_update, AfterUpdate};
+        use super::{AfterUpdate, after_update};
         // Unreachable: restarting, keep waiting.
         assert_eq!(after_update(Some("3.60.0"), false, None), AfterUpdate::Wait);
         // The new version answers: accepted, whether or not the gap was seen.

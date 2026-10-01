@@ -41,11 +41,11 @@ pub fn commands_script(events: &[PipelineEvent]) -> String {
         "#!/bin/sh\n# Replay of the exact commands this operation ran (AR16).\n# Review before executing — this script mutates the host.\nset -x\n",
     );
     for ev in events {
-        if let PipelineEvent::Line { msg, .. } = ev {
-            if let Some(cmd) = msg.trim().strip_prefix("[run ] ") {
-                out.push_str(cmd);
-                out.push('\n');
-            }
+        if let PipelineEvent::Line { msg, .. } = ev
+            && let Some(cmd) = msg.trim().strip_prefix("[run ] ")
+        {
+            out.push_str(cmd);
+            out.push('\n');
         }
     }
     out

@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::actions::Refusal;
-use super::stackedit::{refusal, FileChange, StackTexts, RAW_MAX};
+use super::stackedit::{FileChange, RAW_MAX, StackTexts, refusal};
 
 /// What the Files tab asks to do with a path the raw editor could not:
 /// bring a new one into existence, remove one, or give one another name.

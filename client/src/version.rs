@@ -134,7 +134,7 @@ pub fn template_build_args(rest: &[String]) -> Result<TemplateArgs, String> {
                 out.base_template = Some(base.clone());
             }
             flag if flag.starts_with('-') => {
-                return Err(format!("unknown option '{}' :: {}", flag, usage))
+                return Err(format!("unknown option '{}' :: {}", flag, usage));
             }
             value => positional.push(value),
         }

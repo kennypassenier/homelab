@@ -218,9 +218,10 @@ pub fn evaluate_patch_state(facts: &[PatchFact], threshold_s: u64) -> Vec<Findin
             continue;
         };
         let subject = format!("{} ({})", f.vmid, f.hostname);
-        if let Some(age) = f.reboot_required_age_s {
-            if age > threshold_s {
-                out.push(Finding {
+        if let Some(age) = f.reboot_required_age_s
+            && age > threshold_s
+        {
+            out.push(Finding {
                     severity: Severity::Drift,
                     subject: subject.clone(),
                     what: format!(
@@ -231,7 +232,6 @@ pub fn evaluate_patch_state(facts: &[PatchFact], threshold_s: u64) -> Vec<Findin
                     remedy: "reboot the container outside the backup hour: `pct reboot <vmid>` on                              pve, or restart it from the TUI"
                         .into(),
                 });
-            }
         }
         match f.unattended_stamp_age_s {
             Some(age) if age > threshold_s => out.push(Finding {
@@ -334,11 +334,7 @@ pub fn evaluate_firewalls(
                             if v.len() > 3 {
                                 s.push_str(&format!(" | … {} more", v.len() - 3));
                             }
-                            if s.is_empty() {
-                                "nothing".into()
-                            } else {
-                                s
-                            }
+                            if s.is_empty() { "nothing".into() } else { s }
                         };
                         out.push(Finding {
                             severity: Severity::Drift,
@@ -461,10 +457,10 @@ pub fn evaluate_repo_drift(state: &HostState, live: &LiveFacts) -> Vec<Finding> 
             continue;
         };
         let mut parts: Vec<String> = Vec::new();
-        if let (Some(local), Some(applied)) = (d.manifest.as_ref(), st.manifest.as_ref()) {
-            if serde_json::to_value(local).ok() != serde_json::to_value(applied).ok() {
-                parts.push("lxc-compose.yml differs".into());
-            }
+        if let (Some(local), Some(applied)) = (d.manifest.as_ref(), st.manifest.as_ref())
+            && serde_json::to_value(local).ok() != serde_json::to_value(applied).ok()
+        {
+            parts.push("lxc-compose.yml differs".into());
         }
         if let Some(copy) = live.intent_files.get(&d.stack) {
             let list = |names: Vec<&String>| -> String {

@@ -4,7 +4,7 @@
 //! remedy is stop + redeploy, or accept the change at the next recreate.
 
 use crate::error::CoreError;
-use crate::executor::{run_ok, Cmd, Executor, TracingExecutor};
+use crate::executor::{Cmd, Executor, TracingExecutor, run_ok};
 use crate::manifest::StackManifest;
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::Level;

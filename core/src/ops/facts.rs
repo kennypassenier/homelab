@@ -19,7 +19,7 @@
 //!   fact, because a zero read out of a failed measurement is a false
 //!   finding wearing plausible numbers.
 
-use crate::executor::{shq, Cmd, Executor};
+use crate::executor::{Cmd, Executor, shq};
 use crate::ops::fleetcheck::{
     BootFact, CoverageFact, GrowthFact, LiveFacts, RouteFact, WatchedBackupFact,
 };
@@ -125,10 +125,10 @@ pub fn parse_pct_list(stdout: &str) -> Vec<(u16, String)> {
     let mut out = Vec::new();
     for line in stdout.lines().skip(1) {
         let mut cols = line.split_whitespace();
-        if let (Some(vmid), Some(_status)) = (cols.next(), cols.next()) {
-            if let (Ok(vmid), Some(name)) = (vmid.parse::<u16>(), cols.last()) {
-                out.push((vmid, name.to_string()));
-            }
+        if let (Some(vmid), Some(_status)) = (cols.next(), cols.next())
+            && let (Ok(vmid), Some(name)) = (vmid.parse::<u16>(), cols.last())
+        {
+            out.push((vmid, name.to_string()));
         }
     }
     out
@@ -222,11 +222,10 @@ async fn list_watched(
                 if let Ok(d) = exec
                     .run(&Cmd::new("date", &["-d", &newest, "+%s"], 30))
                     .await
+                    && let Ok(t) = d.stdout.trim().parse::<u64>()
                 {
-                    if let Ok(t) = d.stdout.trim().parse::<u64>() {
-                        newest_unix = Some(t);
-                        fact.newest_age_s = Some(inp.now_unix.saturating_sub(t));
-                    }
+                    newest_unix = Some(t);
+                    fact.newest_age_s = Some(inp.now_unix.saturating_sub(t));
                 }
                 if newest_unix.is_none() {
                     // A file whose time could not be read: not recorded,
@@ -534,16 +533,15 @@ pub async fn gather_live_facts_with(
             30,
         ))
         .await
+        && out.success()
     {
-        if out.success() {
-            facts.route_files = out
-                .stdout
-                .lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty())
-                .map(str::to_string)
-                .collect();
-        }
+        facts.route_files = out
+            .stdout
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect();
     }
 
     // Gateway routes: read every fragment, pull out the address it forwards
@@ -855,8 +853,7 @@ pub async fn gather_live_facts_with(
 /// client's directory names, so anything but a plain stack name is skipped
 /// before it can become a path.
 /// fix-150: what runs inside a container to report its patch state.
-pub const PATCH_PROBE: &str =
-    "apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep -c '^Inst'; \
+pub const PATCH_PROBE: &str = "apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep -c '^Inst'; \
      stat -c %Y /var/run/reboot-required 2>/dev/null || echo -; \
      stat -c %Y /var/lib/apt/periodic/upgrade-stamp 2>/dev/null || echo -; \
      stat -c %Y /etc/hostname 2>/dev/null || echo -";

@@ -6,9 +6,9 @@
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::manifest::*;
-use homelab_core::ops::deploy::deploy;
-use homelab_core::ops::fleetcheck::{evaluate_restore_checks, Severity};
 use homelab_core::ops::OpCtx;
+use homelab_core::ops::deploy::deploy;
+use homelab_core::ops::fleetcheck::{Severity, evaluate_restore_checks};
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;

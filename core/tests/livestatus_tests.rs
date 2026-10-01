@@ -3,7 +3,7 @@
 
 use homelab_core::executor::CmdOutput;
 use homelab_core::mock::MockExecutor;
-use homelab_core::ops::livestatus::{parse_apps, parse_guests, read, Target};
+use homelab_core::ops::livestatus::{Target, parse_apps, parse_guests, read};
 
 const PVESH: &str = r#"[{"cpu":0.0409371412846904,"id":"qemu/100","maxmem":4294967296,"mem":3241291776,"name":"100-infra-opnsense","status":"running","type":"qemu","uptime":5132737,"vmid":100},
 {"cpu":0.012,"id":"lxc/106","maxmem":8589934592,"mem":2147483648,"name":"106-app-media","status":"running","type":"lxc","uptime":3600,"vmid":106},

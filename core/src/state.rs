@@ -131,10 +131,10 @@ fn migrate_legacy_native(stack: &mut serde_json::Value) {
     let list = obj
         .entry("natives")
         .or_insert_with(|| serde_json::Value::Array(Vec::new()));
-    if let Some(list) = list.as_array_mut() {
-        if !list.iter().any(|n| n.get("unit") == one.get("unit")) {
-            list.push(one);
-        }
+    if let Some(list) = list.as_array_mut()
+        && !list.iter().any(|n| n.get("unit") == one.get("unit"))
+    {
+        list.push(one);
     }
 }
 
@@ -503,7 +503,7 @@ impl<'a> StateStore<'a> {
                 return Err(CoreError::State(format!(
                     "state.json exists but cannot be read ({}) — refusing to continue with an empty fleet; fix the file's access before running mutating operations",
                     e
-                )))
+                )));
             }
         };
         // T5: state written before native services became a list.

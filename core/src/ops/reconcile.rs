@@ -72,11 +72,12 @@ pub fn boot_set_args(m: &StackManifest, live: &LiveConfig) -> Vec<String> {
             "0".into()
         });
     }
-    if let Some(want) = m.boot.order {
-        if live.order.is_some() && live.order != Some(want) {
-            args.push("--startup".into());
-            args.push(format!("order={}", want));
-        }
+    if let Some(want) = m.boot.order
+        && live.order.is_some()
+        && live.order != Some(want)
+    {
+        args.push("--startup".into());
+        args.push(format!("order={}", want));
     }
     args
 }
@@ -86,46 +87,42 @@ pub fn boot_set_args(m: &StackManifest, live: &LiveConfig) -> Vec<String> {
 /// it; resources are here because nothing else will say them out loud.
 pub fn divergences(m: &StackManifest, live: &LiveConfig) -> Vec<String> {
     let mut out = Vec::new();
-    if let Some(live_onboot) = live.onboot {
-        if live_onboot != m.boot.onboot {
-            out.push(format!(
-                "starts on boot: {} on the machine, {} in the stack file",
-                yes_no(live_onboot),
-                yes_no(m.boot.onboot)
-            ));
-        }
+    if let Some(live_onboot) = live.onboot
+        && live_onboot != m.boot.onboot
+    {
+        out.push(format!(
+            "starts on boot: {} on the machine, {} in the stack file",
+            yes_no(live_onboot),
+            yes_no(m.boot.onboot)
+        ));
     }
-    if let (Some(live_order), Some(want)) = (live.order, m.boot.order) {
-        if live_order != want {
-            out.push(format!(
-                "boot order: {} on the machine, {} in the stack file",
-                live_order, want
-            ));
-        }
+    if let (Some(live_order), Some(want)) = (live.order, m.boot.order)
+        && live_order != want
+    {
+        out.push(format!(
+            "boot order: {} on the machine, {} in the stack file",
+            live_order, want
+        ));
     }
-    if let Some(mem) = live.memory_mb {
-        if mem != m.resources.memory_mb {
-            out.push(format!(
-                "memory: {} MB on the machine, {} MB in the stack file",
-                mem, m.resources.memory_mb
-            ));
-        }
+    if let Some(mem) = live.memory_mb
+        && mem != m.resources.memory_mb
+    {
+        out.push(format!(
+            "memory: {} MB on the machine, {} MB in the stack file",
+            mem, m.resources.memory_mb
+        ));
     }
-    if let Some(cores) = live.cores {
-        if cores != m.resources.cores {
-            out.push(format!(
-                "cores: {} on the machine, {} in the stack file",
-                cores, m.resources.cores
-            ));
-        }
+    if let Some(cores) = live.cores
+        && cores != m.resources.cores
+    {
+        out.push(format!(
+            "cores: {} on the machine, {} in the stack file",
+            cores, m.resources.cores
+        ));
     }
     out
 }
 
 fn yes_no(b: bool) -> &'static str {
-    if b {
-        "yes"
-    } else {
-        "no"
-    }
+    if b { "yes" } else { "no" }
 }

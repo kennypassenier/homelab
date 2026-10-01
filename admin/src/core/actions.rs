@@ -385,38 +385,76 @@ impl ActionKind {
     pub fn what(self) -> &'static str {
         use ActionKind::*;
         match self {
-            Deploy => "create or reconcile the container; what the files no longer declare is removed, data stays",
-            DeployCommit => "deploy the stack's files as they were at an earlier commit of the working copy",
+            Deploy => {
+                "create or reconcile the container; what the files no longer declare is removed, data stays"
+            }
+            DeployCommit => {
+                "deploy the stack's files as they were at an earlier commit of the working copy"
+            }
             Backup => "a restic snapshot of the stack now",
-            Restore => "restore the stack's data from a snapshot ('latest' unless named); keeps a copy of the current data first",
-            RestoreNative => "restore an adopted service's data from a snapshot ('latest' unless named): stops the unit, keeps a copy of the current data first, unpacks the archive, restarts it",
+            Restore => {
+                "restore the stack's data from a snapshot ('latest' unless named); keeps a copy of the current data first"
+            }
+            RestoreNative => {
+                "restore an adopted service's data from a snapshot ('latest' unless named): stops the unit, keeps a copy of the current data first, unpacks the archive, restarts it"
+            }
             Update => "pull and recreate one app or all, with rollback",
             Resize => "apply the manifest's memory, cores and disk to the running container",
             Enable => "take the stack back into the nightly backup and update, and start-on-boot",
-            Disable => "park the stack: no nightly backup or update, start-on-boot cleared; no container is stopped",
-            Adopt => "take over a hand-built container described by its service.yml; restarts nothing",
+            Disable => {
+                "park the stack: no nightly backup or update, start-on-boot cleared; no container is stopped"
+            }
+            Adopt => {
+                "take over a hand-built container described by its service.yml; restarts nothing"
+            }
             BackupNative => "back up an adopted service now",
             UpdateNative => "update an adopted service the way its own update policy says",
             ReleaseUpdateNative => "install the newest release of each service in the stack",
-            RollbackNative => "put a native service's previous binary back and park the stack's updates",
-            Guards => "apply the runaway guards: log caps, journald limits, logrotate, a weekly prune",
+            RollbackNative => {
+                "put a native service's previous binary back and park the stack's updates"
+            }
+            Guards => {
+                "apply the runaway guards: log caps, journald limits, logrotate, a weekly prune"
+            }
             PruneOrphans => "remove files the repository dropped, without a deploy",
-            Destroy => "back up, then destroy the container; from the host's record when the directory is gone",
+            Destroy => {
+                "back up, then destroy the container; from the host's record when the directory is gone"
+            }
             Forget => "for a container already gone: drop its record and registrations",
-            Wipe => "delete what a retired stack kept: backups, /appdata, vault copies (without confirm: list only)",
+            Wipe => {
+                "delete what a retired stack kept: backups, /appdata, vault copies (without confirm: list only)"
+            }
             Patch => "apt update and dist-upgrade every managed container, one at a time",
             ZfsReplicate => "run the ZFS snapshot and replication jobs now",
-            BackupHostMeta => "snapshot the daemon's own state now: vault, state, TLS, intent repository",
+            BackupHostMeta => {
+                "snapshot the daemon's own state now: vault, state, TLS, intent repository"
+            }
             BackupDevices => "fetch each configured device's own configuration now",
-            Exec => "run one shell command in a container (pct exec), audit-logged on the host; the host refuses unless exec_enabled = true in host.toml",
-            GuardsCt => "apply the runaway guards to any container by its number: log caps, journald limits, logrotate, a weekly prune",
-            TemplateBuild => "bake the golden template (docker and the guards) on a temporary container, then turn it into a Proxmox template",
-            UpdateHost => "install a signed homelab release on the host: the dashboard downloads it and checks its signature and checksum, the host installs it with an armed rollback and restarts, and the dashboard reconnects",
-            AnswerCheck => "record the answer to a manual check: ok, not ok, or a not ok accepted for some days with its reason",
-            InstallNative => "install a chosen release of a native service: the host downloads it, checks its signature and checksum, and installs it with an armed rollback (the latest release when no tag is named)",
-            Apply => "deploy every stack whose files differ from what the host applied; a stack whose directory is gone is destroyed only when its name is typed",
+            Exec => {
+                "run one shell command in a container (pct exec), audit-logged on the host; the host refuses unless exec_enabled = true in host.toml"
+            }
+            GuardsCt => {
+                "apply the runaway guards to any container by its number: log caps, journald limits, logrotate, a weekly prune"
+            }
+            TemplateBuild => {
+                "bake the golden template (docker and the guards) on a temporary container, then turn it into a Proxmox template"
+            }
+            UpdateHost => {
+                "install a signed homelab release on the host: the dashboard downloads it and checks its signature and checksum, the host installs it with an armed rollback and restarts, and the dashboard reconnects"
+            }
+            AnswerCheck => {
+                "record the answer to a manual check: ok, not ok, or a not ok accepted for some days with its reason"
+            }
+            InstallNative => {
+                "install a chosen release of a native service: the host downloads it, checks its signature and checksum, and installs it with an armed rollback (the latest release when no tag is named)"
+            }
+            Apply => {
+                "deploy every stack whose files differ from what the host applied; a stack whose directory is gone is destroyed only when its name is typed"
+            }
             RestartHost => "restarts the host daemon; running jobs are refused while a job runs",
-            ChangeSecret => "write one secret through latch (one .env or one latch_files entry); the other files latch holds for this stack are untouched; redeploy to apply it to the running container",
+            ChangeSecret => {
+                "write one secret through latch (one .env or one latch_files entry); the other files latch holds for this stack are untouched; redeploy to apply it to the running container"
+            }
         }
     }
 
@@ -663,24 +701,24 @@ pub fn validate(stack: &str, action: &str, args: ActionArgs) -> Result<ActionReq
             format!("type {stack:?} exactly to confirm"),
         ));
     }
-    if let Some(s) = &args.snapshot {
-        if !valid_word(s) {
-            return Err(Refusal::new(
-                what,
-                format!("{s:?} is not a snapshot id"),
-                "pick a snapshot from the backup page, or leave it out for 'latest'",
-            ));
-        }
+    if let Some(s) = &args.snapshot
+        && !valid_word(s)
+    {
+        return Err(Refusal::new(
+            what,
+            format!("{s:?} is not a snapshot id"),
+            "pick a snapshot from the backup page, or leave it out for 'latest'",
+        ));
     }
     for (field, v) in [("app", &args.app), ("unit", &args.unit)] {
-        if let Some(v) = v {
-            if !valid_word(v) {
-                return Err(Refusal::new(
-                    what,
-                    format!("{v:?} is not a valid {field} name"),
-                    format!("use the {field} name the stack page shows"),
-                ));
-            }
+        if let Some(v) = v
+            && !valid_word(v)
+        {
+            return Err(Refusal::new(
+                what,
+                format!("{v:?} is not a valid {field} name"),
+                format!("use the {field} name the stack page shows"),
+            ));
         }
     }
     if kind == ActionKind::DeployCommit {
@@ -691,7 +729,7 @@ pub fn validate(stack: &str, action: &str, args: ActionArgs) -> Result<ActionReq
                     what,
                     "deploy-commit needs the commit to deploy (7 to 40 hex characters)",
                     "pick one from GET /data/actions/{stack}/rollback-options",
-                ))
+                ));
             }
         }
     }
@@ -735,7 +773,7 @@ fn validate_parity(kind: ActionKind, what: &str, args: &ActionArgs) -> Result<()
                 return refuse(
                     format!("{} needs the container's number", kind.slug()),
                     "type the vmid, e.g. 105",
-                )
+                );
             }
             Some(v) => match v.parse::<u16>() {
                 Ok(n) if n >= 100 => {}
@@ -743,7 +781,7 @@ fn validate_parity(kind: ActionKind, what: &str, args: &ActionArgs) -> Result<()
                     return refuse(
                         format!("{v:?} is not a container number (100 or more)"),
                         "type the vmid the host page lists, e.g. 105",
-                    )
+                    );
                 }
             },
         }
@@ -763,13 +801,13 @@ fn validate_parity(kind: ActionKind, what: &str, args: &ActionArgs) -> Result<()
             );
         }
     }
-    if let Some(t) = args.tag.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
-        if !valid_tag(t) {
-            return refuse(
-                format!("{t:?} is not a release tag"),
-                "type a tag such as v3.63.0, or leave it empty for the latest release",
-            );
-        }
+    if let Some(t) = args.tag.as_deref().map(str::trim).filter(|t| !t.is_empty())
+        && !valid_tag(t)
+    {
+        return refuse(
+            format!("{t:?} is not a release tag"),
+            "type a tag such as v3.63.0, or leave it empty for the latest release",
+        );
     }
     if kind == TemplateBuild {
         match args
@@ -783,7 +821,7 @@ fn validate_parity(kind: ActionKind, what: &str, args: &ActionArgs) -> Result<()
                 return refuse(
                     "the template's version is a whole number from 1 to 999".into(),
                     "type the next version, e.g. 5 when debian-13-homelab-v4 is the newest",
-                )
+                );
             }
         }
         if let Some(b) = args
@@ -791,13 +829,12 @@ fn validate_parity(kind: ActionKind, what: &str, args: &ActionArgs) -> Result<()
             .as_deref()
             .map(str::trim)
             .filter(|b| !b.is_empty())
+            && !valid_base(b)
         {
-            if !valid_base(b) {
-                return refuse(
-                    format!("{b:?} is not an OS template"),
-                    "pick one from the templates list, or leave it empty for the host's default",
-                );
-            }
+            return refuse(
+                format!("{b:?} is not an OS template"),
+                "pick one from the templates list, or leave it empty for the host's default",
+            );
         }
     }
     if kind == AnswerCheck {
@@ -831,7 +868,7 @@ fn validate_parity(kind: ActionKind, what: &str, args: &ActionArgs) -> Result<()
                         return refuse(
                             "accept needs the number of days (1 to 3650)".into(),
                             "type for how many days the not ok is accepted",
-                        )
+                        );
                     }
                 }
                 if note.is_empty() {
@@ -845,7 +882,7 @@ fn validate_parity(kind: ActionKind, what: &str, args: &ActionArgs) -> Result<()
                 return refuse(
                     "the answer is ok, nok or accept".into(),
                     "pick one of the three",
-                )
+                );
             }
         }
     }

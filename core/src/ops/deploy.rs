@@ -4,9 +4,9 @@
 //! runner (AR3); every side effect through the Executor (AR2).
 
 use crate::error::CoreError;
-use crate::executor::{pct_sh, run_ok, shq, Cmd};
+use crate::executor::{Cmd, pct_sh, run_ok, shq};
 use crate::manifest::{self, DeploySpec};
-use crate::ops::{guards, util::push_content, OpCtx};
+use crate::ops::{OpCtx, guards, util::push_content};
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::safety;
 use crate::sink::{Level, PipelineEvent};
@@ -340,22 +340,22 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         // fix-88: only the host knows which container is the gateway, so
         // the port-80 rule (traefik-lan-host-header-bypass) is checked here,
         // still before anything changes.
-        if let Some(fw) = m.firewall.as_ref().filter(|f| f.enabled) {
-            if m.vmid == ctx.safety.gateway_vmid {
-                // tile-watch: the derived rule counts too — a gateway tile
-                // that opens port 80 on itself is exactly what
-                // traefik-lan-host-header-bypass forbids, derived or not.
-                let effective = crate::firewall::with_tile_watch(
-                    fw,
-                    &m.network.ip,
-                    &m.tiles,
-                    ctx.tile_watch_source.as_deref().unwrap_or(""),
-                    &ctx.tile_watch_targets,
-                );
-                let p = crate::firewall::gateway_problems(&effective);
-                if !p.is_empty() {
-                    return Err(CoreError::Validation(p.join("; ")));
-                }
+        if let Some(fw) = m.firewall.as_ref().filter(|f| f.enabled)
+            && m.vmid == ctx.safety.gateway_vmid
+        {
+            // tile-watch: the derived rule counts too — a gateway tile
+            // that opens port 80 on itself is exactly what
+            // traefik-lan-host-header-bypass forbids, derived or not.
+            let effective = crate::firewall::with_tile_watch(
+                fw,
+                &m.network.ip,
+                &m.tiles,
+                ctx.tile_watch_source.as_deref().unwrap_or(""),
+                &ctx.tile_watch_targets,
+            );
+            let p = crate::firewall::gateway_problems(&effective);
+            if !p.is_empty() {
+                return Err(CoreError::Validation(p.join("; ")));
             }
         }
         Ok(StepOutcome::Unchanged)
@@ -454,20 +454,20 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         }
         Ok(StepOutcome::Unchanged)
     });
-    if let Some(cache) = ctx.registry_cache.as_ref() {
-        if !m.native_only {
-            if cache_up.is_empty() {
-                log_info(format!(
-                    "[cache] {} answered for nothing — every image keeps its own registry",
-                    cache.host
-                ));
-            } else {
-                log_info(format!(
-                    "[cache] pulling via {} for: {}",
-                    cache.host,
-                    cache_up.join(", ")
-                ));
-            }
+    if let Some(cache) = ctx.registry_cache.as_ref()
+        && !m.native_only
+    {
+        if cache_up.is_empty() {
+            log_info(format!(
+                "[cache] {} answered for nothing — every image keeps its own registry",
+                cache.host
+            ));
+        } else {
+            log_info(format!(
+                "[cache] pulling via {} for: {}",
+                cache.host,
+                cache_up.join(", ")
+            ));
         }
     }
 
@@ -496,20 +496,19 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 20,
             ))
             .await;
-        if let Ok(out) = meminfo {
-            if let Some(avail) = memory_available_fraction(&out.stdout) {
-                if avail < MIN_MEMORY_AVAILABLE {
-                    return Err(CoreError::SafetyAbort(format!(
-                        "{} has {:.0}% of its memory available, under the {:.0}% a deploy \
+        if let Ok(out) = meminfo
+            && let Some(avail) = memory_available_fraction(&out.stdout)
+            && avail < MIN_MEMORY_AVAILABLE
+        {
+            return Err(CoreError::SafetyAbort(format!(
+                "{} has {:.0}% of its memory available, under the {:.0}% a deploy \
                          needs :: raise memory_mb in the stack file and run `homelab resize \
                          stacks/{}` first, then deploy",
-                        m.hostname,
-                        avail * 100.0,
-                        MIN_MEMORY_AVAILABLE * 100.0,
-                        m.stack_name
-                    )));
-                }
-            }
+                m.hostname,
+                avail * 100.0,
+                MIN_MEMORY_AVAILABLE * 100.0,
+                m.stack_name
+            )));
         }
         Ok(StepOutcome::Unchanged)
     });
@@ -848,9 +847,17 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     return Err(CoreError::SafetyAbort(format!(
                         "template {} is {}, but stack '{}' asks for {} — pct clone cannot change this, it always inherits the template",
                         tpl_vmid,
-                        if tpl_unpriv { "unprivileged" } else { "privileged" },
+                        if tpl_unpriv {
+                            "unprivileged"
+                        } else {
+                            "privileged"
+                        },
                         m.stack_name,
-                        if m.lxc.unprivileged { "unprivileged" } else { "privileged" },
+                        if m.lxc.unprivileged {
+                            "unprivileged"
+                        } else {
+                            "privileged"
+                        },
                     )));
                 }
                 run_ok(
@@ -1217,29 +1224,27 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // written above, before the container existed, was gone once `pct clone`
     // had made it — CT 116 came up with `firewall=1` and no rules. A new
     // container gets the file written again, now that it exists.
-    if !exists {
-        if let Some(fwspec) = m.firewall.as_ref().filter(|f| f.enabled) {
-            step!(runner, exec, ctx, m, "firewall after create", {
-                let path = crate::firewall::fw_path(m.vmid);
-                let effective = crate::firewall::with_tile_watch(
-                    fwspec,
-                    &m.network.ip,
-                    &m.tiles,
-                    ctx.tile_watch_source.as_deref().unwrap_or(""),
-                    &ctx.tile_watch_targets,
-                );
-                let body = crate::firewall::render(&m.stack_name, &effective);
-                // Unconditionally: what pmxcfs reports for a vmid it has just
-                // created is not something to compare against.
-                exec.write_file(&path, &body, 0o640).await?;
-                log_info(format!(
-                    "[firewall] {} written again after the container was created (creating a \
+    if !exists && let Some(fwspec) = m.firewall.as_ref().filter(|f| f.enabled) {
+        step!(runner, exec, ctx, m, "firewall after create", {
+            let path = crate::firewall::fw_path(m.vmid);
+            let effective = crate::firewall::with_tile_watch(
+                fwspec,
+                &m.network.ip,
+                &m.tiles,
+                ctx.tile_watch_source.as_deref().unwrap_or(""),
+                &ctx.tile_watch_targets,
+            );
+            let body = crate::firewall::render(&m.stack_name, &effective);
+            // Unconditionally: what pmxcfs reports for a vmid it has just
+            // created is not something to compare against.
+            exec.write_file(&path, &body, 0o640).await?;
+            log_info(format!(
+                "[firewall] {} written again after the container was created (creating a \
                      vmid removes its firewall file)",
-                    path
-                ));
-                Ok(StepOutcome::Changed)
-            });
-        }
+                path
+            ));
+            Ok(StepOutcome::Changed)
+        });
     }
 
     // ── tile-watch-watcher-out (found 2026-10-01): this stack's own tiles
@@ -1258,52 +1263,51 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty()),
-    ) {
-        if watcher.stack != m.stack_name {
-            step!(
-                runner,
-                exec,
-                ctx,
-                m,
-                "refresh the tile watcher's firewall",
-                {
-                    let fresh_targets = crate::firewall::with_fresh_target(
-                        &ctx.tile_watch_targets,
-                        &m.network.ip,
-                        &m.tiles,
-                        true,
-                    );
-                    let effective = crate::firewall::with_tile_watch(
-                        &watcher.firewall,
-                        &watcher.own_ip,
-                        &watcher.tiles,
-                        source,
-                        &fresh_targets,
-                    );
-                    let path = crate::firewall::fw_path(watcher.vmid);
-                    let body = crate::firewall::render(&watcher.stack, &effective);
-                    let old = exec.read_file(&path).await.ok();
-                    if old.as_deref() == Some(body.as_str()) {
-                        log_info(format!(
-                            "[firewall] tile watcher {} ({}) unchanged",
-                            path, watcher.stack
-                        ));
-                        return Ok(StepOutcome::Unchanged);
-                    }
-                    exec.write_file(&path, &body, 0o640).await?;
-                    let (added, removed) =
-                        crate::firewall::line_changes(old.as_deref().unwrap_or(""), &body);
+    ) && watcher.stack != m.stack_name
+    {
+        step!(
+            runner,
+            exec,
+            ctx,
+            m,
+            "refresh the tile watcher's firewall",
+            {
+                let fresh_targets = crate::firewall::with_fresh_target(
+                    &ctx.tile_watch_targets,
+                    &m.network.ip,
+                    &m.tiles,
+                    true,
+                );
+                let effective = crate::firewall::with_tile_watch(
+                    &watcher.firewall,
+                    &watcher.own_ip,
+                    &watcher.tiles,
+                    source,
+                    &fresh_targets,
+                );
+                let path = crate::firewall::fw_path(watcher.vmid);
+                let body = crate::firewall::render(&watcher.stack, &effective);
+                let old = exec.read_file(&path).await.ok();
+                if old.as_deref() == Some(body.as_str()) {
                     log_info(format!(
-                        "[firewall] tile watcher {} ({}) refreshed by this deploy's tiles: +{} -{}",
-                        path,
-                        watcher.stack,
-                        added.len(),
-                        removed.len()
+                        "[firewall] tile watcher {} ({}) unchanged",
+                        path, watcher.stack
                     ));
-                    Ok(StepOutcome::Changed)
+                    return Ok(StepOutcome::Unchanged);
                 }
-            );
-        }
+                exec.write_file(&path, &body, 0o640).await?;
+                let (added, removed) =
+                    crate::firewall::line_changes(old.as_deref().unwrap_or(""), &body);
+                log_info(format!(
+                    "[firewall] tile watcher {} ({}) refreshed by this deploy's tiles: +{} -{}",
+                    path,
+                    watcher.stack,
+                    added.len(),
+                    removed.len()
+                ));
+                Ok(StepOutcome::Changed)
+            }
+        );
     }
 
     step!(runner, exec, ctx, m, "wait for systemd", {
@@ -1771,15 +1775,14 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                         // Only a compose the rewrite actually touched can fall
                         // back; recording the untouched ones would make the pull
                         // step re-push identical bytes for every app in the stack.
-                        if rewritten != f.content {
-                            if let Some((app, _)) = f.path.split_once('/') {
-                                if let Ok(mut g) = cache_orig_w.lock() {
-                                    g.insert(
-                                        app.to_string(),
-                                        (dest.clone(), f.content.clone(), perms.clone()),
-                                    );
-                                }
-                            }
+                        if rewritten != f.content
+                            && let Some((app, _)) = f.path.split_once('/')
+                            && let Ok(mut g) = cache_orig_w.lock()
+                        {
+                            g.insert(
+                                app.to_string(),
+                                (dest.clone(), f.content.clone(), perms.clone()),
+                            );
                         }
                         rewritten
                     }
@@ -1789,10 +1792,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 // even known, and keyed by `f.path` (not `dest`) so it reads
                 // the same as `evaluate_repo_drift`'s `StackDigest::files` —
                 // both are "<app>/<file>" against /opt/<stack>.
-                if !rootfs {
-                    if let Ok(mut g) = all_file_hashes_w.lock() {
-                        g.insert(f.path.clone(), manifest::sha256_hex(content.as_bytes()));
-                    }
+                if !rootfs && let Ok(mut g) = all_file_hashes_w.lock() {
+                    g.insert(f.path.clone(), manifest::sha256_hex(content.as_bytes()));
                 }
                 let changed = push_content(exec, m.vmid, &dest, &content, &perms).await?;
                 if changed {
@@ -3052,71 +3053,63 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             // fix-146 (native-empty-rebuild, 2026-09-27): a unit that is not
             // running and whose data is empty gets its newest snapshot back
             // before it starts. A running unit is never written under.
-            if !running {
-                if let Some(nm) = spec.native_manifests.get(unit) {
-                    use crate::ops::native::EmptyUnit;
-                    let found =
-                        crate::ops::native::restore_empty_unit(exec, &ctx.backup, nm).await?;
-                    // fix-147: a check that could not be made is remembered
-                    // until a later one of the same unit succeeds.
-                    match &found {
-                        EmptyUnit::HasData => {}
-                        EmptyUnit::CheckFailed(why) => {
-                            record_restore_checks(
-                                ctx,
-                                &m.stack_name,
-                                &[(unit.clone(), why.clone())],
-                                &[],
-                            )
-                            .await
-                        }
-                        _ => {
-                            record_restore_checks(
-                                ctx,
-                                &m.stack_name,
-                                &[],
-                                std::slice::from_ref(unit),
-                            )
-                            .await
-                        }
+            if !running && let Some(nm) = spec.native_manifests.get(unit) {
+                use crate::ops::native::EmptyUnit;
+                let found = crate::ops::native::restore_empty_unit(exec, &ctx.backup, nm).await?;
+                // fix-147: a check that could not be made is remembered
+                // until a later one of the same unit succeeds.
+                match &found {
+                    EmptyUnit::HasData => {}
+                    EmptyUnit::CheckFailed(why) => {
+                        record_restore_checks(
+                            ctx,
+                            &m.stack_name,
+                            &[(unit.clone(), why.clone())],
+                            &[],
+                        )
+                        .await
                     }
-                    match found {
-                        EmptyUnit::HasData => {}
-                        EmptyUnit::Fresh => log_info(format!(
-                            "[native] {}: data is empty and has no snapshot — fresh",
+                    _ => {
+                        record_restore_checks(ctx, &m.stack_name, &[], std::slice::from_ref(unit))
+                            .await
+                    }
+                }
+                match found {
+                    EmptyUnit::HasData => {}
+                    EmptyUnit::Fresh => log_info(format!(
+                        "[native] {}: data is empty and has no snapshot — fresh",
+                        unit
+                    )),
+                    EmptyUnit::Restored => {
+                        log_info(format!(
+                            "[native] {}: data was empty — the newest snapshot is back",
                             unit
-                        )),
-                        EmptyUnit::Restored => {
-                            log_info(format!(
-                                "[native] {}: data was empty — the newest snapshot is back",
-                                unit
-                            ));
-                            changed = true;
-                        }
-                        EmptyUnit::RestoredHold(why) => {
-                            log_warn(format!(
-                                "[native] {} NOT started: its data was empty and the newest \
+                        ));
+                        changed = true;
+                    }
+                    EmptyUnit::RestoredHold(why) => {
+                        log_warn(format!(
+                            "[native] {} NOT started: its data was empty and the newest \
                                  snapshot was unpacked, but {}",
-                                unit, why
-                            ));
-                            changed = true;
-                            continue;
-                        }
-                        EmptyUnit::CheckFailed(why) => log_warn(format!(
-                            "[native] {}: data is empty and its backup could not be checked \
+                            unit, why
+                        ));
+                        changed = true;
+                        continue;
+                    }
+                    EmptyUnit::CheckFailed(why) => log_warn(format!(
+                        "[native] {}: data is empty and its backup could not be checked \
                              ({}) — starting it EMPTY; if it held data, restore it by hand \
                              (op-11) before the next nightly backup",
-                            unit, why
-                        )),
-                        EmptyUnit::RestoreFailed(why) => {
-                            log_warn(format!(
-                                "[native] AUTO-RESTORE FAILED for {} ({}) — NOT started, so it \
+                        unit, why
+                    )),
+                    EmptyUnit::RestoreFailed(why) => {
+                        log_warn(format!(
+                            "[native] AUTO-RESTORE FAILED for {} ({}) — NOT started, so it \
                                  does not begin again empty; restore it by hand (op-11), then \
                                  deploy again",
-                                unit, why
-                            ));
-                            continue;
-                        }
+                            unit, why
+                        ));
+                        continue;
                     }
                 }
             }
@@ -3186,16 +3179,16 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                         60,
                     )
                     .await;
-                    if let Ok(out) = got {
-                        if !out.stdout.trim().is_empty() {
-                            let vault = format!(
-                                "{}/secrets/{}/{}",
-                                ctx.state_dir,
-                                m.stack_name,
-                                vault_key(f)
-                            );
-                            let _ = exec.write_file(&vault, &out.stdout, 0o600).await;
-                        }
+                    if let Ok(out) = got
+                        && !out.stdout.trim().is_empty()
+                    {
+                        let vault = format!(
+                            "{}/secrets/{}/{}",
+                            ctx.state_dir,
+                            m.stack_name,
+                            vault_key(f)
+                        );
+                        let _ = exec.write_file(&vault, &out.stdout, 0o600).await;
                     }
                 }
                 continue;
@@ -3331,14 +3324,14 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         // broken while the snapshots sit untouched in the repository. The
         // same happens to every stack at once on a rebuilt host. Ask the
         // repository instead: it is the thing that actually knows.
-        if prior.is_none() {
-            if let Some(t) = crate::ops::backup::newest_snapshot_unix(exec, m, &ctx.backup).await {
-                last_backup = t;
-                log_info(format!(
-                    "[state] no record for '{}' — last backup recovered from the repository",
-                    m.stack_name
-                ));
-            }
+        if prior.is_none()
+            && let Some(t) = crate::ops::backup::newest_snapshot_unix(exec, m, &ctx.backup).await
+        {
+            last_backup = t;
+            log_info(format!(
+                "[state] no record for '{}' — last backup recovered from the repository",
+                m.stack_name
+            ));
         }
         state.stacks.insert(
             m.stack_name.clone(),
@@ -3422,13 +3415,13 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         // boot policy alone, and a check that demands more than the deploy is
         // willing to enforce turns into a deploy that can never succeed.
         let live_boot = crate::ops::reconcile::parse(&live);
-        if let Some(on) = live_boot.onboot {
-            if on != m.boot.onboot {
-                wrong.push(format!(
-                    "boot policy is {} where the stack file says {}",
-                    on, m.boot.onboot
-                ));
-            }
+        if let Some(on) = live_boot.onboot
+            && on != m.boot.onboot
+        {
+            wrong.push(format!(
+                "boot policy is {} where the stack file says {}",
+                on, m.boot.onboot
+            ));
         }
         // Every app actually running. `docker compose up -d` returning 0 is
         // not the same as a container that stayed up: a crash loop exits 0

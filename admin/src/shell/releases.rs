@@ -19,9 +19,9 @@ use std::time::{Duration, Instant};
 use chassis::shell::live::Live;
 use tokio::sync::Mutex as AsyncMutex;
 
-use homelab_core::ops::native::{list_releases, ReleaseListItem};
+use homelab_core::ops::native::{ReleaseListItem, list_releases};
 
-use super::host_link::{now_s, Shared};
+use super::host_link::{Shared, now_s};
 
 type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -140,10 +140,10 @@ impl Releases for GitHub {
         Box::pin(async move {
             {
                 let cache = self.list_cache.lock().await;
-                if let Some((at, list)) = cache.get(repo) {
-                    if at.elapsed() < LIST_CACHE_S {
-                        return Ok(list.clone());
-                    }
+                if let Some((at, list)) = cache.get(repo)
+                    && at.elapsed() < LIST_CACHE_S
+                {
+                    return Ok(list.clone());
                 }
             }
             let url = format!("https://api.github.com/repos/{repo}/releases?per_page=30");

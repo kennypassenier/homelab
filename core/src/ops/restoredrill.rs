@@ -251,14 +251,14 @@ pub fn postgres_check(
 ) -> Option<PostgresCheck> {
     for (vmid, mounts, stack_name) in stacks {
         for m in mounts {
-            if m.owner(stack_name) == repo {
-                if let Some(image) = &m.postgres_check_image {
-                    return Some(PostgresCheck {
-                        vmid: *vmid,
-                        host_path: m.host_path.clone(),
-                        image: image.clone(),
-                    });
-                }
+            if m.owner(stack_name) == repo
+                && let Some(image) = &m.postgres_check_image
+            {
+                return Some(PostgresCheck {
+                    vmid: *vmid,
+                    host_path: m.host_path.clone(),
+                    image: image.clone(),
+                });
             }
         }
     }

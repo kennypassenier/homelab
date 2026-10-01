@@ -335,7 +335,7 @@ async fn g6_an_empty_fleet_yields_empty_facts_not_findings() {
 /// covers: step-20
 #[tokio::test]
 async fn step_20_a_service_declared_unmeasured_is_not_asked_and_is_noted() {
-    use homelab_core::ops::fleetcheck::{evaluate_coverage, Severity};
+    use homelab_core::ops::fleetcheck::{Severity, evaluate_coverage};
     let exec = MockExecutor::new();
     exec.seed_file(
         "/var/lib/homelab/state.json",
@@ -553,7 +553,7 @@ async fn fix_142_the_intent_copy_is_read_file_by_file() {
 /// reads the watched backups the host recorded and asks rclone nothing.
 #[tokio::test]
 async fn speed_a_check_with_recorded_backups_asks_no_remote() {
-    use homelab_core::ops::watched::{WatchedRecord, WatchedRecords, WATCHED_BACKUPS_FILE};
+    use homelab_core::ops::watched::{WATCHED_BACKUPS_FILE, WatchedRecord, WatchedRecords};
     let exec = MockExecutor::new();
     let mut rec = WatchedRecords::new();
     rec.insert(
@@ -605,7 +605,7 @@ async fn speed_a_check_with_recorded_backups_asks_no_remote() {
 /// another path): asked once, recorded, and the next check asks nothing.
 #[tokio::test]
 async fn speed_a_check_without_a_record_asks_once_and_records_it() {
-    use homelab_core::ops::watched::{load, WatchedRecord, WatchedRecords, WATCHED_BACKUPS_FILE};
+    use homelab_core::ops::watched::{WATCHED_BACKUPS_FILE, WatchedRecord, WatchedRecords, load};
     let exec = MockExecutor::new();
     exec.respond_always(
         "rclone lsjson --files-only 'gdrive:ok'",
@@ -657,7 +657,7 @@ async fn speed_a_check_without_a_record_asks_once_and_records_it() {
 /// listing that fails is reported that night and never recorded.
 #[tokio::test]
 async fn speed_the_nightly_round_lists_and_records_but_not_a_failure() {
-    use homelab_core::ops::watched::{load, WatchedRecord, WatchedRecords, WATCHED_BACKUPS_FILE};
+    use homelab_core::ops::watched::{WATCHED_BACKUPS_FILE, WatchedRecord, WatchedRecords, load};
     let exec = MockExecutor::new();
     exec.respond_always(
         "rclone lsjson --files-only 'gdrive:ok'",

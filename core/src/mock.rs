@@ -313,16 +313,15 @@ impl Executor for MockExecutor {
         // The app directory is the script's `cd` target, read as a shell
         // would (mock-executor-weak-assertions, 2026-09-27: it was the text
         // between the first two quotes, so it depended on deploy.rs quoting).
-        if rendered.contains("docker compose") {
-            if let Some(dir) = cmd.args.iter().find_map(|a| cd_target(a)) {
-                if let Some(app) = dir.rsplit('/').next() {
-                    let mut up = self.container_running.lock().unwrap();
-                    if rendered.contains("compose up") {
-                        up.insert(app.to_string());
-                    } else if rendered.contains("compose down") {
-                        up.remove(app);
-                    }
-                }
+        if rendered.contains("docker compose")
+            && let Some(dir) = cmd.args.iter().find_map(|a| cd_target(a))
+            && let Some(app) = dir.rsplit('/').next()
+        {
+            let mut up = self.container_running.lock().unwrap();
+            if rendered.contains("compose up") {
+                up.insert(app.to_string());
+            } else if rendered.contains("compose down") {
+                up.remove(app);
             }
         }
         if rendered.contains("docker ps --format") {
@@ -339,12 +338,13 @@ impl Executor for MockExecutor {
                 }
             }
         }
-        if cmd.program == "pct" && cmd.args.first().map(|a| a.as_str()) == Some("push") {
-            if let (Some(src), Some(dest)) = (cmd.args.get(2), cmd.args.get(3)) {
-                let content = self.files.lock().unwrap().get(src).map(|(c, _)| c.clone());
-                if let Some(c) = content {
-                    self.container_files.lock().unwrap().insert(dest.clone(), c);
-                }
+        if cmd.program == "pct"
+            && cmd.args.first().map(|a| a.as_str()) == Some("push")
+            && let (Some(src), Some(dest)) = (cmd.args.get(2), cmd.args.get(3))
+        {
+            let content = self.files.lock().unwrap().get(src).map(|(c, _)| c.clone());
+            if let Some(c) = content {
+                self.container_files.lock().unwrap().insert(dest.clone(), c);
             }
         }
         {

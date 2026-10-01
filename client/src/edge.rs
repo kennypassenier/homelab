@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use homelab_core::ops::edge::{
-    compare_edge, load_capture, project_apps, project_dns, project_tunnel, EdgeIds, EdgeState, API,
+    API, EdgeIds, EdgeState, compare_edge, load_capture, project_apps, project_dns, project_tunnel,
 };
 use homelab_core::ops::fleetcheck::Finding;
 use serde_json::Value;

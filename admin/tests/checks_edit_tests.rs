@@ -2,9 +2,9 @@
 //! have yet, editing one it does, keeping unchanged items' text, and the
 //! validation the browser's form and `stackedit::changes` both apply.
 
-use homelab_admin::core::stackedit::{changes, StackEdit, StackTexts};
+use homelab_admin::core::stackedit::{StackEdit, StackTexts, changes};
 use homelab_admin::core::stackedit_checks::{
-    checks_problems, CheckEdit, ChecksEdit, ManualEdit, ProbeEdit,
+    CheckEdit, ChecksEdit, ManualEdit, ProbeEdit, checks_problems,
 };
 use homelab_core::checks::{Check, Expect, Healthy, Layer, Probe};
 

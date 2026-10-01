@@ -8,7 +8,7 @@
 //! Each test here was written before the code and failed on it first.
 
 use homelab_core::ops::facts::parse_patch_probe;
-use homelab_core::ops::fleetcheck::{evaluate_patch_state, PatchFact, Severity, PATCH_THRESHOLD_S};
+use homelab_core::ops::fleetcheck::{PATCH_THRESHOLD_S, PatchFact, Severity, evaluate_patch_state};
 
 const NOW: u64 = 1_790_600_000;
 const DAY: u64 = 86_400;

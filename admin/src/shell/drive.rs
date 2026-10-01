@@ -28,8 +28,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use homelab_proto::{Command, Scope, ServerMsg, UiStep, UI_HOLD_MAX_S, UI_RELAY_WAIT_S};
-use serde_json::{json, Value};
+use homelab_proto::{Command, Scope, ServerMsg, UI_HOLD_MAX_S, UI_RELAY_WAIT_S, UiStep};
+use serde_json::{Value, json};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::time::Instant;
 
@@ -185,19 +185,18 @@ impl Driver {
             a.left_ms = d.saturating_duration_since(Instant::now()).as_millis() as u64;
         }
         if let Some(f) = s.form.as_mut() {
-            if let Some(j) = f.job.as_mut() {
-                if let Some(v) = self.inner.actions.job(j.job) {
-                    *j = job_ref(&v);
-                }
+            if let Some(j) = f.job.as_mut()
+                && let Some(v) = self.inner.actions.job(j.job)
+            {
+                *j = job_ref(&v);
             }
             // A batch's final press answered `{batch}`: the batch as it
             // stands now rides along, so `ui finish` can follow it.
-            if let Some(r) = f.edit.as_mut().and_then(|e| e.result.as_mut()) {
-                if let Some(b) = r.get("batch").and_then(Value::as_u64) {
-                    if let Some(v) = self.inner.actions.batch_view(b) {
-                        r["progress"] = v;
-                    }
-                }
+            if let Some(r) = f.edit.as_mut().and_then(|e| e.result.as_mut())
+                && let Some(b) = r.get("batch").and_then(Value::as_u64)
+                && let Some(v) = self.inner.actions.batch_view(b)
+            {
+                r["progress"] = v;
             }
         }
         s
@@ -221,40 +220,37 @@ impl Driver {
         // open re-reads that unit's release list, the same re-fetch the
         // browser's own listener does when the unit field changes — so a
         // later `ui pick act-tag <tag>` is checked against the right repo.
-        if let UiStep::Pick { field, value } = step {
-            if field.as_str() == "act-unit" {
-                if let Some(stack) = self.open_form_stack("install-native") {
-                    if let Ok(v) = self
-                        .inner
-                        .actions
-                        .release_options(&stack, Some(value.as_str()))
-                        .await
-                    {
-                        return Sources {
-                            releases: strings(&v["releases"], Some("value")),
-                            ..Sources::default()
-                        };
-                    }
-                }
-            }
+        if let UiStep::Pick { field, value } = step
+            && field.as_str() == "act-unit"
+            && let Some(stack) = self.open_form_stack("install-native")
+            && let Ok(v) = self
+                .inner
+                .actions
+                .release_options(&stack, Some(value.as_str()))
+                .await
+        {
+            return Sources {
+                releases: strings(&v["releases"], Some("value")),
+                ..Sources::default()
+            };
         }
-        if let UiStep::Open { form, target } = step {
-            if let Some(kind) = EditKind::from_form(form) {
-                // Owner decision 2026-09-30: `open batch <action>` with no
-                // stacks named previews the fleet table's own selection.
-                let selected;
-                let target = match (kind, target.as_deref()) {
-                    (EditKind::Batch, None) => {
-                        selected = self.lock().selected.join(",");
-                        Some(selected.as_str())
-                    }
-                    (_, t) => t,
-                };
-                return Sources {
-                    edit: self.edit_read(kind, form, target).await,
-                    ..Sources::default()
-                };
-            }
+        if let UiStep::Open { form, target } = step
+            && let Some(kind) = EditKind::from_form(form)
+        {
+            // Owner decision 2026-09-30: `open batch <action>` with no
+            // stacks named previews the fleet table's own selection.
+            let selected;
+            let target = match (kind, target.as_deref()) {
+                (EditKind::Batch, None) => {
+                    selected = self.lock().selected.join(",");
+                    Some(selected.as_str())
+                }
+                (_, t) => t,
+            };
+            return Sources {
+                edit: self.edit_read(kind, form, target).await,
+                ..Sources::default()
+            };
         }
         // TUI parity: the host-wide forms whose choices come from the host.
         if let UiStep::Open { form, .. } = step {
@@ -263,13 +259,13 @@ impl Driver {
                     return Sources {
                         checks: self.check_ids().await,
                         ..Sources::default()
-                    }
+                    };
                 }
                 "template-build" => {
                     return Sources {
                         templates: self.os_templates().await,
                         ..Sources::default()
-                    }
+                    };
                 }
                 // dashboard-latest: update-host's tag dropdown, the
                 // homelab repository's own release list.
@@ -310,20 +306,20 @@ impl Driver {
             ..Sources::default()
         };
         let args = ActionKind::from_slug(form).map(|k| k.args()).unwrap_or(&[]);
-        if args.iter().any(|a| matches!(a, Arg::Unit | Arg::Commit)) {
-            if let Ok(v) = self.inner.actions.rollback_options(stack.clone()).await {
-                out.units = strings(&v["native_units"], None);
-                out.commits = strings(&v["commits"], Some("commit"));
-            }
+        if args.iter().any(|a| matches!(a, Arg::Unit | Arg::Commit))
+            && let Ok(v) = self.inner.actions.rollback_options(stack.clone()).await
+        {
+            out.units = strings(&v["native_units"], None);
+            out.commits = strings(&v["commits"], Some("commit"));
         }
         // dashboard-latest: install-native's tag dropdown. The unit is not
         // picked yet at `open` time; a single-service stack still resolves
         // (its release_repo needs no unit named), a multi-service one waits
         // for the Pick branch above.
-        if args.contains(&Arg::Tag) {
-            if let Ok(v) = self.inner.actions.release_options(stack, None).await {
-                out.releases = strings(&v["releases"], Some("value"));
-            }
+        if args.contains(&Arg::Tag)
+            && let Ok(v) = self.inner.actions.release_options(stack, None).await
+        {
+            out.releases = strings(&v["releases"], Some("value"));
         }
         out
     }
@@ -456,11 +452,10 @@ impl Driver {
                         confirm: kind.confirm().then(|| s.to_string()),
                         ..Default::default()
                     };
-                    if let Ok(req) = act::validate(s, action, args) {
-                        if self.inner.actions.preview_of(req, false).await.1.is_some() {
+                    if let Ok(req) = act::validate(s, action, args)
+                        && self.inner.actions.preview_of(req, false).await.1.is_some() {
                             guarded += 1;
                         }
-                    }
                 }
                 json!({ "guarded": guarded })
             }

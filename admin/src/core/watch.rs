@@ -128,20 +128,22 @@ fn state_of(s: &Seen) -> &'static str {
 /// The watch's state for the start page: per key, up, flaky, down or
 /// deploying.
 pub fn view(targets: &[Target], seen: &BTreeMap<String, Seen>) -> serde_json::Value {
-    serde_json::json!(targets
-        .iter()
-        .map(|t| {
-            let s = seen.get(&t.key).cloned().unwrap_or_default();
-            serde_json::json!({
-                "key": t.key,
-                "name": t.name,
-                "stack": t.stack,
-                "failing_since": s.failing_since,
-                "down": s.down_told,
-                "state": state_of(&s),
-                "checked_at": s.checked_at,
-                "why": s.why,
+    serde_json::json!(
+        targets
+            .iter()
+            .map(|t| {
+                let s = seen.get(&t.key).cloned().unwrap_or_default();
+                serde_json::json!({
+                    "key": t.key,
+                    "name": t.name,
+                    "stack": t.stack,
+                    "failing_since": s.failing_since,
+                    "down": s.down_told,
+                    "state": state_of(&s),
+                    "checked_at": s.checked_at,
+                    "why": s.why,
+                })
             })
-        })
-        .collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    )
 }

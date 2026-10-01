@@ -7,13 +7,13 @@
 use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::manifest::*;
 use homelab_core::native::{BackupPause, NativeServiceManifest};
+use homelab_core::ops::OpCtx;
 use homelab_core::ops::backup::BackupCfg;
 use homelab_core::ops::fleetcheck::Severity;
 use homelab_core::ops::secondcopy::{
-    check_repo, copy_all, data_subset, evaluate_copies, parse_dataset, pick, repo_policies,
-    Dataset, RepoPolicy, DATA_SUBSETS,
+    DATA_SUBSETS, Dataset, RepoPolicy, check_repo, copy_all, data_subset, evaluate_copies,
+    parse_dataset, pick, repo_policies,
 };
-use homelab_core::ops::OpCtx;
 use homelab_core::retention::RetentionTier;
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
@@ -382,11 +382,13 @@ async fn one_failing_repository_does_not_stop_the_others_and_is_remembered() {
         "kyu is still copied after actual failed"
     );
     let st = state_json(&exec);
-    assert!(st.second_copies["actual"]
-        .last_error
-        .as_deref()
-        .unwrap()
-        .contains("unable to open repository"));
+    assert!(
+        st.second_copies["actual"]
+            .last_error
+            .as_deref()
+            .unwrap()
+            .contains("unable to open repository")
+    );
     assert_eq!(st.second_copies["kyu"].last_ok, NOW);
 }
 
@@ -461,16 +463,19 @@ async fn a_check_covers_both_copies_and_a_failure_on_one_still_checks_the_other(
     let checks = exec.calls_containing("restic check");
     assert_eq!(checks.len(), 2, "{:?}", checks);
     assert!(checks.iter().all(|c| c.contains("--read-data-subset=3/10")));
-    assert!(checks
-        .iter()
-        .any(|c| c.contains("RESTIC_REPOSITORY=/HDD4TB/restic/kyu-config")));
+    assert!(
+        checks
+            .iter()
+            .any(|c| c.contains("RESTIC_REPOSITORY=/HDD4TB/restic/kyu-config"))
+    );
     let st = state_json(&exec);
     let rec = &st.integrity["kyu"];
-    assert!(rec
-        .drive_error
-        .as_deref()
-        .unwrap()
-        .contains("contains errors"));
+    assert!(
+        rec.drive_error
+            .as_deref()
+            .unwrap()
+            .contains("contains errors")
+    );
     assert_eq!(rec.local_error, None);
     assert_eq!(rec.last_check, NOW);
     assert_eq!(rec.last_data_read, NOW);

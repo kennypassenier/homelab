@@ -13,7 +13,7 @@ use serde_yaml::{Mapping, Value};
 
 use super::actions::valid_stack_name;
 use super::stackedit::StackTexts;
-use super::yamledit::{path, Item, Op};
+use super::yamledit::{Item, Op, path};
 use homelab_proto::StackManifest;
 
 /// What the Apps tab asks for. Every list is `None` = leave that list
@@ -144,13 +144,13 @@ pub fn problems(m: &StackManifest, e: &AppsEdit) -> Vec<String> {
                     d.host_path
                 ));
             }
-            if let Some(r) = &d.rotate {
-                if r.files.is_empty() || r.files.contains('/') {
-                    out.push(format!(
-                        "data_mounts {}: rotate files must be a name or glob, not a path",
-                        d.host_path
-                    ));
-                }
+            if let Some(r) = &d.rotate
+                && (r.files.is_empty() || r.files.contains('/'))
+            {
+                out.push(format!(
+                    "data_mounts {}: rotate files must be a name or glob, not a path",
+                    d.host_path
+                ));
             }
         }
     }
@@ -238,7 +238,7 @@ fn seq_op<T>(
                     "{key}: entry {} points at row {} of the file, which has {old_len}",
                     items.len() + 1,
                     i + 1
-                ))
+                ));
             }
             Some(i) if used.insert(i) => {
                 if unchanged(e, i) {
@@ -377,29 +377,29 @@ pub fn apply(
             ops.push(op);
         }
     }
-    if let Some(list) = &e.data_mounts {
-        if let Some(op) = seq_op(
+    if let Some(list) = &e.data_mounts
+        && let Some(op) = seq_op(
             "data_mounts",
             m.data_mounts.len(),
             list,
             |d| d.origin,
             |d, i| m.data_mounts.get(i).is_some_and(|o| data_mount_eq(d, o)),
             data_mount_value,
-        )? {
-            ops.push(op);
-        }
+        )?
+    {
+        ops.push(op);
     }
-    if let Some(list) = &e.log_files {
-        if let Some(op) = seq_op(
+    if let Some(list) = &e.log_files
+        && let Some(op) = seq_op(
             "log_files",
             m.log_files.len(),
             list,
             |l| l.origin,
             |l, i| m.log_files.get(i).is_some_and(|o| log_file_eq(l, o)),
             log_file_value,
-        )? {
-            ops.push(op);
-        }
+        )?
+    {
+        ops.push(op);
     }
     Ok((ops, files))
 }

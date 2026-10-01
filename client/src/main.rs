@@ -333,10 +333,8 @@ async fn run(explicit_host: Option<String>) {
                     if !reply.ok {
                         ui_print(&reply, json);
                     }
-                    if !json {
-                        if let Ok(text) = homelab_client::ui_cli::render(&reply.message) {
-                            print!("{text}");
-                        }
+                    if !json && let Ok(text) = homelab_client::ui_cli::render(&reply.message) {
+                        print!("{text}");
                     }
                     ui_finish(&host, &token, json).await
                 }
@@ -877,7 +875,10 @@ async fn run(explicit_host: Option<String>) {
                     }) {
                         Ok(()) => println!(
                             "{}✓ imported{} — {} (vmid {}) :: add .env files if the apps need secrets, then deploy",
-                            C_GREEN, C_RESET, dest.display(), vmid
+                            C_GREEN,
+                            C_RESET,
+                            dest.display(),
+                            vmid
                         ),
                         Err(e) => die(&format!("imported but invalid: {}", e)),
                     }
@@ -1304,12 +1305,11 @@ async fn run(explicit_host: Option<String>) {
             // arch-deploy-guard: not over a deploy this tree has not seen.
             if !force {
                 let (ok, fleet) = rpc_collect(&host, &token, Command::GetState).await;
-                if let (true, Some(fleet)) = (ok, fleet) {
-                    if let Err(e) =
+                if let (true, Some(fleet)) = (ok, fleet)
+                    && let Err(e) =
                         deploy_guard(Path::new(dir), &spec.manifest.stack_name, &fleet, false)
-                    {
-                        die(&e);
-                    }
+                {
+                    die(&e);
                 }
             }
             let ok = deploy_spec(&host, &token, spec).await;
@@ -1997,7 +1997,7 @@ async fn host_version(host: &str, token: &str) -> Option<String> {
 /// return as soon as the restart was scheduled, and a rollback was visible
 /// only in a notification.
 async fn wait_for_updated_host(host: &str, token: &str, expected: Option<String>) -> bool {
-    use homelab_client::release::{after_update, AfterUpdate};
+    use homelab_client::release::{AfterUpdate, after_update};
     // The old daemon may finish a running operation first (up to 60 s,
     // fix-52), then the restart and a possible rollback follow.
     const WAIT_S: u64 = 150;
@@ -2104,7 +2104,7 @@ fn ui_print(reply: &homelab_proto::RpcResponse, json: bool) -> ! {
 /// once instead of after fix-163's 30 s. A failed job still lets go, and
 /// the process then ends with 1 (after `done` answered).
 async fn ui_finish(host: &str, token: &str, json: bool) -> UiStep {
-    use homelab_client::ui_cli::{finish_next, FinishNext};
+    use homelab_client::ui_cli::{FinishNext, finish_next};
     let mut last = String::new();
     let mut misses = 0;
     loop {
@@ -2120,7 +2120,9 @@ async fn ui_finish(host: &str, token: &str, json: bool) -> UiStep {
             // A job that restarts the dashboard drops the line for a moment.
             misses += 1;
             if misses >= 30 {
-                die("ui finish: the host did not answer for a minute; `homelab ui state` shows where it is");
+                die(
+                    "ui finish: the host did not answer for a minute; `homelab ui state` shows where it is",
+                );
             }
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             continue;
@@ -2363,10 +2365,8 @@ async fn rpc_exchange(
                 }
                 // Only on ping: which door was knocked on, and who said so.
                 // The rest of the verbs stay quiet about it.
-                if is_ping {
-                    if let Some(src) = HOST_SOURCE.get() {
-                        println!("{}  via {} ({}){}", C_DIM, host, src, C_RESET);
-                    }
+                if is_ping && let Some(src) = HOST_SOURCE.get() {
+                    println!("{}  via {} ({}){}", C_DIM, host, src, C_RESET);
                 }
                 // The client refuses to send a mutating command to an older
                 // host, and says which command fixes it (the 2026-08-31
@@ -2500,7 +2500,7 @@ async fn rpc_exchange(
 /// fix-103 (check-output-buries-problem, 2026-09-27): the fleet check with
 /// the summary first and each severity group in its own colour.
 fn print_check(msg: &str, ok: bool) {
-    use homelab_client::output::{check_tones, Tone};
+    use homelab_client::output::{Tone, check_tones};
     for (i, (tone, line)) in check_tones(msg).into_iter().enumerate() {
         let color = match tone {
             Tone::Broken => C_RED,
@@ -2589,7 +2589,7 @@ fn deploy_guard(
     fleet: &homelab_proto::FleetState,
     force: bool,
 ) -> Result<(), String> {
-    use homelab_core::ops::deployguard::{applied_commit, decide, Ancestry};
+    use homelab_core::ops::deployguard::{Ancestry, applied_commit, decide};
     let applied = fleet
         .stacks
         .iter()

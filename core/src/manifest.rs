@@ -1059,17 +1059,17 @@ fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
     // directory is genuinely reproducible — so the guard is that the reason
     // has to exist and be readable by a person a year from now.
     for mount in &m.storage {
-        if let Some(reason) = &mount.no_backup {
-            if reason.trim().len() < 10 {
-                problems.push(format!(
-                    "mount '{}' is marked no_backup with no usable reason ('{}') — a flag that \
+        if let Some(reason) = &mount.no_backup
+            && reason.trim().len() < 10
+        {
+            problems.push(format!(
+                "mount '{}' is marked no_backup with no usable reason ('{}') — a flag that \
                      switches backups off is the kind somebody sets on the wrong thing and \
                      discovers years later, so the reason is the only thing standing between a \
                      deliberate choice and a silent gap",
-                    mount.host_path,
-                    reason.trim()
-                ));
-            }
+                mount.host_path,
+                reason.trim()
+            ));
         }
         // Both at once is a contradiction: no_data says there is nothing to
         // back up, no_backup says there is something and it does not matter.
@@ -1085,14 +1085,14 @@ fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
         // fix-62: an empty value would mean the restore drill starts a
         // throwaway container with no image to pull — a fault the night the
         // repository is next drilled, not a fault now.
-        if let Some(image) = &mount.postgres_check_image {
-            if image.trim().is_empty() {
-                problems.push(format!(
-                    "mount '{}' sets postgres_check_image but it is empty — remove it or name \
+        if let Some(image) = &mount.postgres_check_image
+            && image.trim().is_empty()
+        {
+            problems.push(format!(
+                "mount '{}' sets postgres_check_image but it is empty — remove it or name \
                      the image",
-                    mount.host_path
-                ));
-            }
+                mount.host_path
+            ));
         }
         if mount.no_data && mount.postgres_check_image.is_some() {
             problems.push(format!(
@@ -1105,13 +1105,13 @@ fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
     // Owner decision "default plus per tile" (2026-09-30): a tile's own
     // watch timing, when it sets one.
     for (host, t) in &m.tiles {
-        if let Some(every) = t.watch_every {
-            if every < 10 {
-                problems.push(format!(
-                    "tile '{}' sets watch_every to {} — it must be at least 10 seconds",
-                    host, every
-                ));
-            }
+        if let Some(every) = t.watch_every
+            && every < 10
+        {
+            problems.push(format!(
+                "tile '{}' sets watch_every to {} — it must be at least 10 seconds",
+                host, every
+            ));
         }
         if let Some(down_after) = t.down_after {
             let every = t.watch_every.unwrap_or(down_after);

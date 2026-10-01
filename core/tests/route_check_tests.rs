@@ -12,9 +12,9 @@
 //! Each test here was written before the code and failed on it first.
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
-use homelab_core::ops::facts::{gather_live_facts, FactsInputs};
-use homelab_core::ops::fleetcheck::{evaluate_route_owners, Severity};
-use homelab_core::routes::{fleet_route_problems, RouteFacts};
+use homelab_core::ops::facts::{FactsInputs, gather_live_facts};
+use homelab_core::ops::fleetcheck::{Severity, evaluate_route_owners};
+use homelab_core::routes::{RouteFacts, fleet_route_problems};
 use homelab_core::state::{HostState, StackState};
 
 fn strings(v: &[&str]) -> Vec<String> {
@@ -243,12 +243,16 @@ fn the_nightly_check_names_route_files_no_stack_declares() {
     let findings = evaluate_route_owners(&st, &on_disk);
     let subjects: Vec<&str> = findings.iter().map(|f| f.subject.as_str()).collect();
     assert_eq!(findings.len(), 2, "{:?}", findings);
-    assert!(subjects
-        .iter()
-        .any(|s| s.contains("manual-homeassistant.yml")));
-    assert!(subjects
-        .iter()
-        .any(|s| s.contains("108-app-synctest.yml.bak-20260830-200124")));
+    assert!(
+        subjects
+            .iter()
+            .any(|s| s.contains("manual-homeassistant.yml"))
+    );
+    assert!(
+        subjects
+            .iter()
+            .any(|s| s.contains("108-app-synctest.yml.bak-20260830-200124"))
+    );
     assert!(findings.iter().all(|f| f.severity == Severity::Drift));
     assert!(
         findings.iter().all(|f| f.remedy.contains("never removes")),
@@ -262,7 +266,7 @@ fn the_nightly_check_names_route_files_no_stack_declares() {
 /// covers: fix-92
 #[test]
 fn the_full_round_carries_the_route_owner_check() {
-    use homelab_core::ops::fleetcheck::{evaluate, GrowthLimits, LiveFacts};
+    use homelab_core::ops::fleetcheck::{GrowthLimits, LiveFacts, evaluate};
     let live = LiveFacts {
         route_files: vec!["manual-x.yml".into()],
         ..Default::default()

@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use homelab_core::ops::edge::*;
 use homelab_core::ops::fleetcheck::Severity;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 fn captured_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../captured/gateway")

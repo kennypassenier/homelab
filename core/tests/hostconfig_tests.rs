@@ -1,8 +1,8 @@
 //! feat-settings-1: the host.toml key table the dashboard and the host share.
 
 use homelab_core::hostconfig::{
-    apply_declared, check_shape, check_value, is_secret, key_info, merge_changes, redact,
-    valid_window, Access, KEYS,
+    Access, KEYS, apply_declared, check_shape, check_value, is_secret, key_info, merge_changes,
+    redact, valid_window,
 };
 use serde_json::json;
 
@@ -82,9 +82,11 @@ fn fix_110_check_shape_has_no_access_gate() {
     assert!(check_shape("nope", &json!(1)).is_err());
     // check_value still refuses the same key on shape alone for an editable
     // one, and on access for a locked one.
-    assert!(check_value("listen", &json!("0.0.0.0:8443"))
-        .unwrap_err()
-        .contains("ssh"));
+    assert!(
+        check_value("listen", &json!("0.0.0.0:8443"))
+            .unwrap_err()
+            .contains("ssh")
+    );
 }
 
 /// fix-110: `merge_changes` is the same TOML surgery the host's

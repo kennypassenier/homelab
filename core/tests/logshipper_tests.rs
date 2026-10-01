@@ -1,6 +1,6 @@
 //! C1/C2 · the replacement for a log shipper that reached end of life.
 
-use homelab_core::ops::logshipper::{config, install_script, permissions_script, CONFIG_PATH};
+use homelab_core::ops::logshipper::{CONFIG_PATH, config, install_script, permissions_script};
 
 fn cfg() -> String {
     config(
@@ -197,7 +197,7 @@ mod push_endpoint {
 
 /// "The service started" is not "the logs are shipping".
 mod delivery_verdict {
-    use homelab_core::ops::logshipper::{delivery, Delivery};
+    use homelab_core::ops::logshipper::{Delivery, delivery};
 
     const DROPPING: &str = r#"
 # HELP loki_write_sent_bytes_total
@@ -494,7 +494,7 @@ fn alloy_gets_read_search_capability_for_the_root_only_docker_directory() {
 /// actually list the container log directory?
 #[test]
 fn readability_is_read_from_the_probe_output() {
-    use homelab_core::ops::logshipper::{readability, Readability};
+    use homelab_core::ops::logshipper::{Readability, readability};
     assert_eq!(readability("readable\n"), Readability::Readable);
     assert_eq!(readability("denied\n"), Readability::Denied);
     assert_eq!(readability("no-docker\n"), Readability::NoDocker);

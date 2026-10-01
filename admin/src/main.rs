@@ -358,18 +358,18 @@ async fn main() -> std::process::ExitCode {
         }
     };
     // milestone act: actions, schedules and notifications.
-    if config.is_some() {
-        if let Err(e) = homelab_admin::shell::actions::mount(
+    if config.is_some()
+        && let Err(e) = homelab_admin::shell::actions::mount(
             &mut app,
             host_client.clone(),
             live.clone(),
             shared.clone(),
             demo_host,
             hooks.clone(),
-        ) {
-            eprintln!("homelab-admin: {e}");
-            return std::process::ExitCode::FAILURE;
-        }
+        )
+    {
+        eprintln!("homelab-admin: {e}");
+        return std::process::ExitCode::FAILURE;
     }
     app.dashboard_routes(routes::router(
         shared.clone(),

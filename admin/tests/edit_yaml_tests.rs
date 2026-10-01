@@ -1,7 +1,7 @@
 //! feat-stacks-2, feat-firewall-1: comment-keeping edits of the real stack
 //! files (read from the repository, so a new layout there is tried here).
 
-use homelab_admin::core::yamledit::{edit, path, value_at, EditError, Item, Op};
+use homelab_admin::core::yamledit::{EditError, Item, Op, edit, path, value_at};
 use serde_yaml::Value;
 
 fn stack_file(name: &str) -> String {
@@ -110,13 +110,17 @@ fn feat_stacks_2_a_trailing_comment_on_the_line_stays() {
 fn feat_firewall_1_a_rule_is_added_changed_and_removed_with_its_comments() {
     let text = stack_file("kp-soft");
     let n = rules_len(&text);
-    let new_rule = yaml("{dir: in, action: ACCEPT, source: 10.10.10.20, proto: tcp, dport: '8080', note: the dashboard}");
+    let new_rule = yaml(
+        "{dir: in, action: ACCEPT, source: 10.10.10.20, proto: tcp, dport: '8080', note: the dashboard}",
+    );
     // Remove the last rule (ssh from the desktop), change the first one's
     // note, add one at the end.
     let mut items: Vec<Item> = (0..n - 1).map(Item::Keep).collect();
     items[0] = Item::Retext(
         0,
-        yaml("{comment: the rescue address, dir: out, action: DROP, dest: 10.10.10.250, note: never}"),
+        yaml(
+            "{comment: the rescue address, dir: out, action: DROP, dest: 10.10.10.250, note: never}",
+        ),
     );
     items.push(Item::New(new_rule));
     let out = edit(

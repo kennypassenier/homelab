@@ -10,7 +10,7 @@ use chassis::shell::live::Live;
 use homelab_admin::core::asks::{AnswerRequest, Asks, Refusal};
 use homelab_admin::core::config::from_table;
 use homelab_admin::core::guests::parse_status;
-use homelab_admin::core::logs::{logql, parse_answer, window, LogQuery, MAX_LIMIT, MAX_SINCE_S};
+use homelab_admin::core::logs::{LogQuery, MAX_LIMIT, MAX_SINCE_S, logql, parse_answer, window};
 use homelab_admin::shell::host_link::{Shared, Snapshot};
 use homelab_admin::shell::routes::answer_ask;
 use homelab_proto::{Command, RpcResponse};

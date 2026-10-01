@@ -3,9 +3,9 @@
 //! backup and update at the wrong thing.
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
-use homelab_core::native::{validate_native, BackupPause, NativeServiceManifest};
-use homelab_core::ops::native::adopt;
+use homelab_core::native::{BackupPause, NativeServiceManifest, validate_native};
 use homelab_core::ops::OpCtx;
+use homelab_core::ops::native::adopt;
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;
@@ -1451,7 +1451,7 @@ fn b1_the_latest_release_is_reduced_to_tag_and_two_urls_and_refused_without_sums
 /// every entry's signed state read from its own assets.
 #[test]
 fn dashboard_latest_the_release_list_filters_drafts_keeps_order_and_reads_signed() {
-    use homelab_core::ops::native::{list_releases, ReleaseListItem};
+    use homelab_core::ops::native::{ReleaseListItem, list_releases};
     let json = format!(
         r#"[
   {{"tag_name":"v2.8.0","draft":true,"prerelease":false,"assets":[{},{}]}},
@@ -1493,7 +1493,7 @@ fn asset(tag: &str, name: &str) -> String {
 
 #[test]
 fn b1_auto_policy_needs_a_release_repo() {
-    use homelab_core::native::{validate_native, UpdatePolicy};
+    use homelab_core::native::{UpdatePolicy, validate_native};
     let m = NativeServiceManifest {
         update_policy: UpdatePolicy::Auto,
         ..kyu_manifest()
@@ -1504,11 +1504,13 @@ fn b1_auto_policy_needs_a_release_repo() {
         "{}",
         why
     );
-    assert!(validate_native(&NativeServiceManifest {
-        update_policy: UpdatePolicy::Auto,
-        ..install_manifest()
-    })
-    .is_ok());
+    assert!(
+        validate_native(&NativeServiceManifest {
+            update_policy: UpdatePolicy::Auto,
+            ..install_manifest()
+        })
+        .is_ok()
+    );
 }
 
 /// fix-58 (native-update-ignores-manual-policy, 2026-09-27): `manual` means

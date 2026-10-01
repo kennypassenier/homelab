@@ -10,7 +10,7 @@ use homelab_proto::StackManifest;
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
-use super::yamledit::{path, Op};
+use super::yamledit::{Op, path};
 
 /// A field left out is left as it is — the same rule `SettingsEdit` uses.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
@@ -124,43 +124,43 @@ fn valid_storage_id(s: &str) -> bool {
 /// (`edit::check_dir`).
 pub fn problems(s: &SettingsExtEdit) -> Vec<String> {
     let mut out = Vec::new();
-    if let Some(ip) = &s.ip {
-        if !valid_cidr(ip) {
-            out.push(format!(
-                "network ip {ip:?} must be CIDR, e.g. 10.10.10.10/24"
-            ));
-        }
+    if let Some(ip) = &s.ip
+        && !valid_cidr(ip)
+    {
+        out.push(format!(
+            "network ip {ip:?} must be CIDR, e.g. 10.10.10.10/24"
+        ));
     }
-    if let Some(gw) = &s.gateway {
-        if !valid_ip(gw) {
-            out.push(format!("gateway {gw:?} must be an address like 10.10.10.1"));
-        }
+    if let Some(gw) = &s.gateway
+        && !valid_ip(gw)
+    {
+        out.push(format!("gateway {gw:?} must be an address like 10.10.10.1"));
     }
-    if let Some(b) = &s.bridge {
-        if !valid_bridge(b) {
-            out.push(format!(
-                "bridge {b:?} must be 1 to 15 letters, digits, '-' or '_', like vmbr0"
-            ));
-        }
+    if let Some(b) = &s.bridge
+        && !valid_bridge(b)
+    {
+        out.push(format!(
+            "bridge {b:?} must be 1 to 15 letters, digits, '-' or '_', like vmbr0"
+        ));
     }
-    if let Some(v) = s.vlan {
-        if !(1..=4094).contains(&v) {
-            out.push(format!("vlan {v} must be 1 to 4094"));
-        }
+    if let Some(v) = s.vlan
+        && !(1..=4094).contains(&v)
+    {
+        out.push(format!("vlan {v} must be 1 to 4094"));
     }
-    if let Some(st) = &s.storage {
-        if !valid_storage_id(st) {
-            out.push(format!(
-                "storage {st:?} must be letters, digits, '-' or '_', like local-lvm"
-            ));
-        }
+    if let Some(st) = &s.storage
+        && !valid_storage_id(st)
+    {
+        out.push(format!(
+            "storage {st:?} must be letters, digits, '-' or '_', like local-lvm"
+        ));
     }
-    if let Some(tz) = &s.timezone {
-        if !valid_timezone(tz) {
-            out.push(format!(
-                "timezone {tz:?} must be \"host\" or an IANA zone like Europe/Amsterdam"
-            ));
-        }
+    if let Some(tz) = &s.timezone
+        && !valid_timezone(tz)
+    {
+        out.push(format!(
+            "timezone {tz:?} must be \"host\" or an IANA zone like Europe/Amsterdam"
+        ));
     }
     if let Some(tiers) = &s.retention {
         for t in tiers {
@@ -261,20 +261,20 @@ pub fn ops(m: &StackManifest, s: &SettingsExtEdit) -> Vec<Op> {
 /// The change in a few words, for the commit subject.
 pub fn describe(s: &SettingsExtEdit, m: &StackManifest) -> Vec<String> {
     let mut parts = Vec::new();
-    if let Some(v) = &s.ip {
-        if *v != m.network.ip {
-            parts.push(format!("address {v}"));
-        }
+    if let Some(v) = &s.ip
+        && *v != m.network.ip
+    {
+        parts.push(format!("address {v}"));
     }
-    if let Some(v) = &s.gateway {
-        if *v != m.network.gateway {
-            parts.push(format!("gateway {v}"));
-        }
+    if let Some(v) = &s.gateway
+        && *v != m.network.gateway
+    {
+        parts.push(format!("gateway {v}"));
     }
-    if let Some(v) = &s.bridge {
-        if *v != m.network.bridge {
-            parts.push(format!("bridge {v}"));
-        }
+    if let Some(v) = &s.bridge
+        && *v != m.network.bridge
+    {
+        parts.push(format!("bridge {v}"));
     }
     if let Some(v) = s.vlan.filter(|v| m.network.vlan != Some(*v)) {
         parts.push(format!("vlan {v}"));
@@ -297,15 +297,15 @@ pub fn describe(s: &SettingsExtEdit, m: &StackManifest) -> Vec<String> {
             if v { "on" } else { "off" }
         ));
     }
-    if let Some(v) = &s.storage {
-        if *v != m.resources.storage {
-            parts.push(format!("storage {v} (rebuild needed)"));
-        }
+    if let Some(v) = &s.storage
+        && *v != m.resources.storage
+    {
+        parts.push(format!("storage {v} (rebuild needed)"));
     }
-    if let Some(v) = &s.timezone {
-        if *v != m.lxc.timezone {
-            parts.push(format!("timezone {v} (rebuild needed)"));
-        }
+    if let Some(v) = &s.timezone
+        && *v != m.lxc.timezone
+    {
+        parts.push(format!("timezone {v} (rebuild needed)"));
     }
     if let Some(v) = s.on_demand.filter(|v| *v != m.on_demand) {
         parts.push(format!("on demand {}", if v { "on" } else { "off" }));
@@ -446,8 +446,10 @@ apps: []
             }]
         );
         let words = describe(&edit, &m);
-        assert!(words
-            .iter()
-            .any(|w| w.contains("timezone Europe/Amsterdam (rebuild needed)")));
+        assert!(
+            words
+                .iter()
+                .any(|w| w.contains("timezone Europe/Amsterdam (rebuild needed)"))
+        );
     }
 }

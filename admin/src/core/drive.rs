@@ -16,7 +16,7 @@ use homelab_proto::{Scope, UiStep};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::core::actions::{ActionArgs, ActionKind, Arg, Refusal, HOST_TARGET, SELF_STACK};
+use crate::core::actions::{ActionArgs, ActionKind, Arg, HOST_TARGET, Refusal, SELF_STACK};
 use crate::core::driveedit::{EditCall, EditKind, EditState};
 use crate::core::drivelive::{self, Announce, Plan};
 
@@ -237,10 +237,10 @@ pub struct Field {
 /// checked, not sent), its `change_when` words laid on while that holds.
 pub fn shown_field<'a>(f: &'a Field, values: &Values) -> Option<std::borrow::Cow<'a, Field>> {
     let holds = |field: &str, value: &str| values.get(field).and_then(Value::as_str) == Some(value);
-    if let Some(w) = &f.show_when {
-        if !holds(&w.field, &w.value) {
-            return None;
-        }
+    if let Some(w) = &f.show_when
+        && !holds(&w.field, &w.value)
+    {
+        return None;
     }
     match &f.change_when {
         Some(c) if holds(&c.field, &c.value) => {
@@ -911,10 +911,10 @@ impl OpenForm {
     }
 
     fn field<'a>(&'a self, step: &UiStep, id: &str) -> Result<(&'a Field, &'a str), Refusal> {
-        if let Some(sub) = self.edit.as_ref().and_then(|e| e.sub.as_ref()) {
-            if let Some(f) = sub.fields.iter().find(|f| f.id == id) {
-                return Ok((f, sub.kind.as_str()));
-            }
+        if let Some(sub) = self.edit.as_ref().and_then(|e| e.sub.as_ref())
+            && let Some(f) = sub.fields.iter().find(|f| f.id == id)
+        {
+            return Ok((f, sub.kind.as_str()));
         }
         for s in &self.desc.steps {
             if let Some(f) = s.fields.iter().find(|f| f.id == id) {
@@ -1178,10 +1178,10 @@ impl DriveState {
             return Ok(plain);
         }
         let applied = self.apply_step(step, cx)?;
-        if drivelive::holds(step) {
-            if let Some(p) = self.plan.as_mut() {
-                p.advance(step);
-            }
+        if drivelive::holds(step)
+            && let Some(p) = self.plan.as_mut()
+        {
+            p.advance(step);
         }
         Ok(applied)
     }
@@ -1557,20 +1557,20 @@ impl DriveState {
                         held: Some(r),
                     });
                 }
-                if let Some(g) = &form.guard {
-                    if form.values.get("force") != Some(&Value::Bool(true)) {
-                        let r = Refusal::new(
-                            form.title.clone(),
-                            "the deploy guard refuses this deploy",
-                            "pull the working copy first, or homelab ui check act-force on if undoing the host's last deploy is the point",
-                        );
-                        form.run_error = Some(r.clone());
-                        let _ = g;
-                        return Ok(Applied {
-                            effect: Effect::None,
-                            held: Some(r),
-                        });
-                    }
+                if let Some(g) = &form.guard
+                    && form.values.get("force") != Some(&Value::Bool(true))
+                {
+                    let r = Refusal::new(
+                        form.title.clone(),
+                        "the deploy guard refuses this deploy",
+                        "pull the working copy first, or homelab ui check act-force on if undoing the host's last deploy is the point",
+                    );
+                    form.run_error = Some(r.clone());
+                    let _ = g;
+                    return Ok(Applied {
+                        effect: Effect::None,
+                        held: Some(r),
+                    });
                 }
                 form.run_error = None;
                 Ok(Applied {

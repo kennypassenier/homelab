@@ -4,7 +4,7 @@
 //! protection flag deliberately before removal. Every step is journaled (B5).
 
 use crate::error::CoreError;
-use crate::executor::{run_ok, Cmd, Executor, TracingExecutor};
+use crate::executor::{Cmd, Executor, TracingExecutor, run_ok};
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::Level;
 

@@ -3,7 +3,7 @@
 //! 2026-09-30) and "default plus per tile" (2026-09-30).
 
 use homelab_admin::core::watch::{
-    step, step_deploying, too_soon, view, Seen, Target, DOWN_AFTER_S,
+    DOWN_AFTER_S, Seen, Target, step, step_deploying, too_soon, view,
 };
 
 fn target(key: &str, stack: Option<&str>) -> Target {
@@ -21,13 +21,15 @@ fn a_failure_becomes_down_only_past_down_after_s() {
     assert!(step(&mut s, 0, Err("no answer".into()), DOWN_AFTER_S).is_none());
     assert!(!s.down_told);
     // Just short of the threshold: still no notice.
-    assert!(step(
-        &mut s,
-        DOWN_AFTER_S - 1,
-        Err("no answer".into()),
-        DOWN_AFTER_S
-    )
-    .is_none());
+    assert!(
+        step(
+            &mut s,
+            DOWN_AFTER_S - 1,
+            Err("no answer".into()),
+            DOWN_AFTER_S
+        )
+        .is_none()
+    );
     assert!(!s.down_told);
     // At the threshold: a Down notice, once.
     let c = step(&mut s, DOWN_AFTER_S, Err("no answer".into()), DOWN_AFTER_S);

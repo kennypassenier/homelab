@@ -6,9 +6,9 @@
 
 use homelab_core::manifest::StackManifest;
 use homelab_core::ops::fleetcheck::{
+    BootFact, CoverageFact, GrowthFact, GrowthLimits, LiveFacts, RouteFact, Severity, StackDigest,
     evaluate, evaluate_boot, evaluate_coverage, evaluate_growth, evaluate_host_config_drift,
-    evaluate_host_meta, evaluate_repo_drift, BootFact, CoverageFact, GrowthFact, GrowthLimits,
-    LiveFacts, RouteFact, Severity, StackDigest,
+    evaluate_host_meta, evaluate_repo_drift,
 };
 use homelab_core::state::{HostState, StackState};
 
@@ -681,7 +681,7 @@ fn a_swapping_container_on_a_short_host_is_not_told_to_take_more_memory() {
 /// you find broken on the day you need it.
 #[test]
 fn a_watched_backup_that_stopped_is_a_finding() {
-    use homelab_core::ops::fleetcheck::{evaluate_watched_backups, Severity, WatchedBackupFact};
+    use homelab_core::ops::fleetcheck::{Severity, WatchedBackupFact, evaluate_watched_backups};
 
     let fresh = WatchedBackupFact {
         name: "opnsense-config".into(),
@@ -854,7 +854,7 @@ fn a_stack_that_deliberately_keeps_nothing_is_noted_not_broken() {
 /// that notification is the one that has to be believed when it IS real.
 #[test]
 fn a_deliberate_decision_never_raises_the_alarm_but_is_never_hidden_either() {
-    use homelab_core::ops::fleetcheck::{alarming, Finding};
+    use homelab_core::ops::fleetcheck::{Finding, alarming};
 
     let noted = Finding {
         severity: Severity::Noted,
@@ -896,7 +896,7 @@ fn a_deliberate_decision_never_raises_the_alarm_but_is_never_hidden_either() {
 /// been written since S2; until now nothing read it.
 mod incomplete_deploys {
     use super::*;
-    use homelab_core::ops::fleetcheck::{evaluate_incomplete, Severity};
+    use homelab_core::ops::fleetcheck::{Severity, evaluate_incomplete};
 
     fn state_with(step: Option<&str>) -> HostState {
         let mut st = HostState::default();
@@ -980,8 +980,8 @@ fn the_full_round_carries_the_manual_checks() {
 /// G16 · the notification path can be broken, and until now nothing said so.
 mod notification_health {
     use super::*;
-    use homelab_core::notify::{route, verdict, Delivery};
-    use homelab_core::ops::fleetcheck::{evaluate_notify, Severity};
+    use homelab_core::notify::{Delivery, route, verdict};
+    use homelab_core::ops::fleetcheck::{Severity, evaluate_notify};
 
     #[test]
     fn only_a_2xx_counts_as_delivered() {
@@ -1149,7 +1149,7 @@ fn the_full_round_carries_the_second_copy_and_the_checks() {
 // releases with ones near Kenny's 95 MB/min preference: the same 943 films go
 // from 4.1 TB to roughly 10 TB, and nothing would have said a word.
 
-use homelab_core::ops::fleetcheck::{evaluate_pools, PoolFact};
+use homelab_core::ops::fleetcheck::{PoolFact, evaluate_pools};
 
 fn pool(pct: u8, free_gb: u64) -> PoolFact {
     PoolFact {
@@ -1420,7 +1420,7 @@ fn fix_26_a_directory_owned_by_someone_else_than_declared_is_drift() {
 /// covers: gap-32
 #[test]
 fn gap_32_noted_findings_alone_do_not_make_the_check_fail() {
-    use homelab_core::ops::fleetcheck::{check_passes, Finding, Severity};
+    use homelab_core::ops::fleetcheck::{Finding, Severity, check_passes};
     let noted = Finding {
         severity: Severity::Noted,
         subject: "registry".into(),
@@ -1450,7 +1450,7 @@ fn gap_32_noted_findings_alone_do_not_make_the_check_fail() {
 /// covers: fix-103
 #[test]
 fn fix_103_the_check_leads_with_a_summary_and_the_broken_items() {
-    use homelab_core::ops::fleetcheck::{render, Finding};
+    use homelab_core::ops::fleetcheck::{Finding, render};
     let f = |severity, subject: &str| Finding {
         severity,
         subject: subject.into(),
@@ -1901,9 +1901,9 @@ fn gap_23_a_stale_or_missing_host_meta_backup_is_broken() {
 // ── rule-20: host-level capacity thresholds ─────────────────────────────────
 
 use homelab_core::ops::fleetcheck::{
-    evaluate_host_capacity, parse_df_pcent, parse_du_sm, parse_journal_disk_usage_mib,
-    parse_prometheus_scalar, parse_thin_pool_percents, parse_zpool_capacities, HostCapacityFact,
-    HostCapacityMetric, HostCapacityThresholds,
+    HostCapacityFact, HostCapacityMetric, HostCapacityThresholds, evaluate_host_capacity,
+    parse_df_pcent, parse_du_sm, parse_journal_disk_usage_mib, parse_prometheus_scalar,
+    parse_thin_pool_percents, parse_zpool_capacities,
 };
 
 #[test]

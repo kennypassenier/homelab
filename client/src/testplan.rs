@@ -191,11 +191,9 @@ fn package_name(tests_dir: &Path) -> String {
             in_package = t == "[package]";
             continue;
         }
-        if in_package {
-            if let Some(v) = t.strip_prefix("name") {
-                let v = v.trim_start().trim_start_matches('=').trim();
-                return v.trim_matches('"').to_string();
-            }
+        if in_package && let Some(v) = t.strip_prefix("name") {
+            let v = v.trim_start().trim_start_matches('=').trim();
+            return v.trim_matches('"').to_string();
         }
     }
     tests_dir
@@ -215,10 +213,10 @@ fn count_unit_tests(dir: &Path) -> usize {
         let p = e.path();
         if p.is_dir() {
             n += count_unit_tests(&p);
-        } else if p.extension().is_some_and(|x| x == "rs") {
-            if let Ok(src) = std::fs::read_to_string(&p) {
-                n += src.lines().filter(|l| is_test_attr(l.trim())).count();
-            }
+        } else if p.extension().is_some_and(|x| x == "rs")
+            && let Ok(src) = std::fs::read_to_string(&p)
+        {
+            n += src.lines().filter(|l| is_test_attr(l.trim())).count();
         }
     }
     n
@@ -456,11 +454,11 @@ pub fn generate_test_plan(
     for c in &crates {
         d.push_str(&format!("cargo test -p {}\n", c.package));
     }
-    if let Some(c) = crates.first() {
-        if let Some(s) = c.suites.first() {
-            d.push_str("# one suite, named after its file\n");
-            d.push_str(&format!("cargo test -p {} --test {}\n", c.package, s.stem));
-        }
+    if let Some(c) = crates.first()
+        && let Some(s) = c.suites.first()
+    {
+        d.push_str("# one suite, named after its file\n");
+        d.push_str(&format!("cargo test -p {} --test {}\n", c.package, s.stem));
     }
     d.push_str("```\n\n");
 

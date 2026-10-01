@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use homelab_core::checks::ServiceChecks;
-use homelab_core::manifest::{validate_manifest, StackManifest};
+use homelab_core::manifest::{StackManifest, validate_manifest};
 
 fn stacks_dir() -> PathBuf {
     // core/tests/ -> repo root

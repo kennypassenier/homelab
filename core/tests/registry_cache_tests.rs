@@ -1,6 +1,6 @@
 //! D60: the image rewrite that points a pull at the cache in the house.
 
-use homelab_core::ops::registry_cache::{rewrite_compose, split_registry, CacheCfg, CacheUpstream};
+use homelab_core::ops::registry_cache::{CacheCfg, CacheUpstream, rewrite_compose, split_registry};
 
 fn cfg() -> CacheCfg {
     CacheCfg {

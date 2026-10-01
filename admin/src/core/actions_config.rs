@@ -152,14 +152,14 @@ pub fn remote_problem(r: &str) -> Option<String> {
                 .into(),
         );
     }
-    if let Some(rest) = r.strip_prefix("ssh://") {
-        if rest.split('/').next().is_some_and(|auth| {
+    if let Some(rest) = r.strip_prefix("ssh://")
+        && rest.split('/').next().is_some_and(|auth| {
             auth.contains(':')
                 && auth.contains('@')
                 && auth.split('@').next().is_some_and(|u| u.contains(':'))
-        }) {
-            return Some("HOMELAB_ADMIN_GIT_REMOTE must not carry a password".into());
-        }
+        })
+    {
+        return Some("HOMELAB_ADMIN_GIT_REMOTE must not carry a password".into());
     }
     None
 }
@@ -202,10 +202,10 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
         .unwrap_or_else(|| data_dir.join("repo"));
     let notify_url = non_empty("HOMELAB_ADMIN_NOTIFY_URL");
     let notify_token = non_empty("HOMELAB_ADMIN_NOTIFY_TOKEN");
-    if let Some(u) = &notify_url {
-        if !(u.starts_with("http://") || u.starts_with("https://")) {
-            why.push("HOMELAB_ADMIN_NOTIFY_URL must be an http(s) URL".to_string());
-        }
+    if let Some(u) = &notify_url
+        && !(u.starts_with("http://") || u.starts_with("https://"))
+    {
+        why.push("HOMELAB_ADMIN_NOTIFY_URL must be an http(s) URL".to_string());
     }
     if notify_token.is_some() && notify_url.is_none() {
         why.push("HOMELAB_ADMIN_NOTIFY_TOKEN is set without HOMELAB_ADMIN_NOTIFY_URL".into());

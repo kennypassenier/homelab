@@ -326,7 +326,7 @@ pub fn judge(r: &Reading) -> Verdict {
                         "'{}' expects a number and read '{}' before",
                         r.name,
                         r.before.trim()
-                    ))
+                    ));
                 }
             };
             let after: i64 = match r.after.trim().parse() {
@@ -336,7 +336,7 @@ pub fn judge(r: &Reading) -> Verdict {
                         "'{}' expects a number and read '{}' after",
                         r.name,
                         r.after.trim()
-                    ))
+                    ));
                 }
             };
             if after >= before {

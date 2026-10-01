@@ -5,8 +5,8 @@ mod act_support;
 
 use act_support::{manifest, native, spec};
 use homelab_admin::core::actions::{
-    self, catalog, commands, restarts_dashboard, validate, validate_batch, ActionArgs, ActionKind,
-    BatchRequest, Material, HOST_TARGET,
+    self, ActionArgs, ActionKind, BatchRequest, HOST_TARGET, Material, catalog, commands,
+    restarts_dashboard, validate, validate_batch,
 };
 use homelab_proto::Command;
 
@@ -309,20 +309,24 @@ fn feat_stacks_5_a_batch_is_checked_whole_before_anything_runs() {
     })
     .unwrap_err();
     assert!(one_bad.what.contains("media"), "{one_bad}");
-    assert!(validate_batch(BatchRequest {
-        action: "patch".into(),
-        stacks: vec![HOST_TARGET.into()],
-        args: ActionArgs::default(),
-        confirms: Default::default(),
-    })
-    .is_err());
-    assert!(validate_batch(BatchRequest {
-        action: "backup".into(),
-        stacks: vec![],
-        args: ActionArgs::default(),
-        confirms: Default::default(),
-    })
-    .is_err());
+    assert!(
+        validate_batch(BatchRequest {
+            action: "patch".into(),
+            stacks: vec![HOST_TARGET.into()],
+            args: ActionArgs::default(),
+            confirms: Default::default(),
+        })
+        .is_err()
+    );
+    assert!(
+        validate_batch(BatchRequest {
+            action: "backup".into(),
+            stacks: vec![],
+            args: ActionArgs::default(),
+            confirms: Default::default(),
+        })
+        .is_err()
+    );
 }
 
 #[test]
@@ -547,12 +551,14 @@ fn parity_a_check_answer_follows_the_cli_rules() {
         ..Default::default()
     };
     assert!(validate(HOST_TARGET, "answer-check", a("ok", None, None)).is_ok());
-    assert!(validate(
-        HOST_TARGET,
-        "answer-check",
-        a("nok", None, Some("broken again"))
-    )
-    .is_ok());
+    assert!(
+        validate(
+            HOST_TARGET,
+            "answer-check",
+            a("nok", None, Some("broken again"))
+        )
+        .is_ok()
+    );
     for (args, why) in [
         (a("maybe", None, None), "ok, nok or accept"),
         (a("accept", None, Some("reason")), "number of days"),

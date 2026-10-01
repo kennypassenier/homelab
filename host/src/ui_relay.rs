@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
-use homelab_proto::{Scope, ServerMsg, UiStep, UI_HOLD_MAX_S, UI_RELAY_WAIT_S};
+use homelab_proto::{Scope, ServerMsg, UI_HOLD_MAX_S, UI_RELAY_WAIT_S, UiStep};
 use tokio::sync::{mpsc, oneshot};
 
 /// How long a step waits for the dashboard's answer, unless the dashboard
@@ -301,7 +301,10 @@ impl UiRelay {
                         "the dashboard held the step ({n}) and did not answer within {} s",
                         allowed.as_secs()
                     ),
-                    None => format!("the dashboard did not answer within {} s", allowed.as_secs()),
+                    None => format!(
+                        "the dashboard did not answer within {} s",
+                        allowed.as_secs()
+                    ),
                 };
                 (
                     false,
@@ -335,10 +338,12 @@ mod tests {
         assert!(!ok);
         let v: serde_json::Value = serde_json::from_str(&msg).unwrap();
         assert_eq!(v["refusal"]["what"], "ui state");
-        assert!(v["refusal"]["fix"]
-            .as_str()
-            .unwrap()
-            .contains("homelab-admin"));
+        assert!(
+            v["refusal"]["fix"]
+                .as_str()
+                .unwrap()
+                .contains("homelab-admin")
+        );
     }
 
     #[tokio::test]

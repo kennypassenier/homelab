@@ -80,7 +80,9 @@ pub fn stack_panels(stack: &str) -> Vec<Panel> {
             // Percent of the container's own cores: node_exporter inside an
             // LXC sees only the cores Proxmox gave it (measured 2026-09-30:
             // CT 120 counts 1, CT 106 counts 6).
-            format!("100 * sum by (name) (rate(container_cpu_usage_seconds_total{{stack=\"{s}\",name!=\"\"}}[5m])) / scalar(count(node_cpu_seconds_total{{stack=\"{s}\",mode=\"idle\"}}))"),
+            format!(
+                "100 * sum by (name) (rate(container_cpu_usage_seconds_total{{stack=\"{s}\",name!=\"\"}}[5m])) / scalar(count(node_cpu_seconds_total{{stack=\"{s}\",mode=\"idle\"}}))"
+            ),
             Unit::Percent,
             Some("name"),
         ),
@@ -136,7 +138,9 @@ pub fn fleet_capacity_panels(stacks: &[String]) -> Vec<Panel> {
     vec![
         p(
             "CPU used",
-            format!("100 * avg by (stack) (rate(node_cpu_seconds_total{{stack=~\"{list}\",mode!=\"idle\"}}[5m]))"),
+            format!(
+                "100 * avg by (stack) (rate(node_cpu_seconds_total{{stack=~\"{list}\",mode!=\"idle\"}}[5m]))"
+            ),
             Unit::Percent,
             Some("stack"),
         ),
@@ -235,7 +239,9 @@ pub fn host_panels(host: &str) -> Vec<Panel> {
     vec![
         p(
             "CPU used",
-            format!("100 * (1 - avg(rate(node_cpu_seconds_total{{host=\"{h}\",mode=\"idle\"}}[5m])))"),
+            format!(
+                "100 * (1 - avg(rate(node_cpu_seconds_total{{host=\"{h}\",mode=\"idle\"}}[5m])))"
+            ),
             Unit::Percent,
             None,
         ),

@@ -5,7 +5,7 @@
 //! first-class, gated operation.
 
 use crate::error::CoreError;
-use crate::executor::{run_ok, shq, Cmd, Executor, TracingExecutor};
+use crate::executor::{Cmd, Executor, TracingExecutor, run_ok, shq};
 use crate::manifest::StackManifest;
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::{Level, PipelineEvent};

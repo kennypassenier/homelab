@@ -590,14 +590,14 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
             ServerMsg::Log {
                 level, source, msg, ..
             } => {
-                if let Some(focus) = model.focus.as_mut() {
-                    if !focus.done {
-                        focus.feed.push(LogRow {
-                            level,
-                            source: source.clone(),
-                            msg: msg.clone(),
-                        });
-                    }
+                if let Some(focus) = model.focus.as_mut()
+                    && !focus.done
+                {
+                    focus.feed.push(LogRow {
+                        level,
+                        source: source.clone(),
+                        msg: msg.clone(),
+                    });
                 }
                 model.push_log(level, source, msg);
             }
@@ -683,14 +683,13 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                 // its reply can arrive in the middle of anything — an open
                 // deploy window, a pending plan. It is recognised by its
                 // shape, first, and never taken for another request's reply.
-                if model.today_pending {
-                    if let Ok(t) =
+                if model.today_pending
+                    && let Ok(t) =
                         serde_json::from_str::<homelab_core::ops::today::Today>(&resp.message)
-                    {
-                        model.today = Some(t);
-                        model.today_pending = false;
-                        return;
-                    }
+                {
+                    model.today = Some(t);
+                    model.today_pending = false;
+                    return;
                 }
                 if let Some(spec) = model.plan_pending.take() {
                     // D6: the host answered GetApplied with the applied files.
@@ -800,18 +799,18 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                     }
                     return;
                 }
-                if let Some(focus) = model.focus.as_mut() {
-                    if !focus.done {
-                        focus.done = true;
-                        focus.ok = resp.ok;
-                        focus.result = resp.message.clone();
-                        model.status_line = if resp.ok {
-                            "deploy complete".into()
-                        } else {
-                            "deploy FAILED — see focus feed".into()
-                        };
-                        return;
-                    }
+                if let Some(focus) = model.focus.as_mut()
+                    && !focus.done
+                {
+                    focus.done = true;
+                    focus.ok = resp.ok;
+                    focus.result = resp.message.clone();
+                    model.status_line = if resp.ok {
+                        "deploy complete".into()
+                    } else {
+                        "deploy FAILED — see focus feed".into()
+                    };
+                    return;
                 }
                 // fix-102: a reply with no window open ends the operation
                 // that was sent to the background (replies come in order).
@@ -983,13 +982,12 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         _ => {
             // AZERTY-friendly tab selection: digits 1-4 AND their unshifted
             // symbols on a Belgian/French AZERTY row (& é " ').
-            if let KeyCode::Char(c) = key.code {
-                if let Some(idx) = azerty_tab_index(c) {
-                    if idx < Tab::ALL.len() {
-                        model.switch_tab(Tab::ALL[idx]);
-                        return;
-                    }
-                }
+            if let KeyCode::Char(c) = key.code
+                && let Some(idx) = azerty_tab_index(c)
+                && idx < Tab::ALL.len()
+            {
+                model.switch_tab(Tab::ALL[idx]);
+                return;
             }
             tab_key(model, key);
         }
@@ -1590,37 +1588,37 @@ fn ask_park(model: &mut Model) {
     // H8 (light): toggle the selected stack's enabled flag.
     // fix-102: it sits next to `r` and parking lasts, so the
     // cost is stated and `y` is needed.
-    if let Some(fleet) = &model.fleet {
-        if let Some(s) = fleet.stacks.get(model.selected_stack) {
-            let (title, prompt) = if s.enabled {
-                (
-                    format!("PARK {}", s.name),
-                    format!(
-                        "Park {}? No nightly backup and no nightly update, and \
+    if let Some(fleet) = &model.fleet
+        && let Some(s) = fleet.stacks.get(model.selected_stack)
+    {
+        let (title, prompt) = if s.enabled {
+            (
+                format!("PARK {}", s.name),
+                format!(
+                    "Park {}? No nightly backup and no nightly update, and \
                          onboot is cleared: after a power cut it stays down. \
                          Running containers are not touched.",
-                        s.name
-                    ),
-                )
-            } else {
-                (
-                    format!("UNPARK {}", s.name),
-                    format!(
-                        "Unpark {}? Nightly backups and updates resume, and it \
+                    s.name
+                ),
+            )
+        } else {
+            (
+                format!("UNPARK {}", s.name),
+                format!(
+                    "Unpark {}? Nightly backups and updates resume, and it \
                          starts again after a power cut.",
-                        s.name
-                    ),
-                )
-            };
-            model.yes_no = Some(YesNo {
-                title,
-                prompt,
-                action: YesNoAction::Park {
-                    stack: s.name.clone(),
-                    enabled: !s.enabled,
-                },
-            });
-        }
+                    s.name
+                ),
+            )
+        };
+        model.yes_no = Some(YesNo {
+            title,
+            prompt,
+            action: YesNoAction::Park {
+                stack: s.name.clone(),
+                enabled: !s.enabled,
+            },
+        });
     }
 }
 
@@ -1754,12 +1752,13 @@ fn run_yes(model: &mut Model, action: YesNoAction) {
             model.release_update_requested = Some(tag);
         }
         YesNoAction::DeleteTier(idx) => {
-            if let Some(cfg) = model.settings.as_mut() {
-                if idx < cfg.retention.len() && cfg.retention.len() > 1 {
-                    cfg.retention.remove(idx);
-                    model.settings_row = model.settings_row.min(settings_rows(cfg) - 1);
-                    model.settings_dirty = true;
-                }
+            if let Some(cfg) = model.settings.as_mut()
+                && idx < cfg.retention.len()
+                && cfg.retention.len() > 1
+            {
+                cfg.retention.remove(idx);
+                model.settings_row = model.settings_row.min(settings_rows(cfg) - 1);
+                model.settings_dirty = true;
             }
         }
         YesNoAction::Quit => model.should_quit = true,

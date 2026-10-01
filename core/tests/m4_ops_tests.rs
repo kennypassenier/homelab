@@ -2,9 +2,9 @@
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::manifest::*;
-use homelab_core::ops::backup::{backup, restore, BackupCfg};
-use homelab_core::ops::destroy::destroy;
 use homelab_core::ops::OpCtx;
+use homelab_core::ops::backup::{BackupCfg, backup, restore};
+use homelab_core::ops::destroy::destroy;
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;
@@ -205,10 +205,11 @@ async fn e1_backup_runs_init_quiesce_snapshot_resume_retention() {
         "snapshot before retention listing"
     );
     // Snapshot targets the /appdata path.
-    assert!(exec
-        .calls_containing("/appdata/test/test-config")
-        .iter()
-        .any(|c| c.contains("restic backup")));
+    assert!(
+        exec.calls_containing("/appdata/test/test-config")
+            .iter()
+            .any(|c| c.contains("restic backup"))
+    );
     // Tiered retention: with no snapshots listed, nothing is forgotten
     // (fail-safe: malformed/empty listing keeps everything).
     assert!(exec.calls_containing("restic forget").is_empty());
@@ -566,11 +567,13 @@ async fn e2_restore_fails_when_app_not_running_after() {
     )
     .await;
     assert!(!report.ok);
-    assert!(report
-        .error
-        .unwrap()
-        .why
-        .contains("not running after restore"));
+    assert!(
+        report
+            .error
+            .unwrap()
+            .why
+            .contains("not running after restore")
+    );
 }
 
 // ── fix-64: a restore asks first and keeps what it overwrites ──────────────
@@ -894,7 +897,7 @@ async fn d9_update_unknown_app_refused() {
 
 // ── H5: host self-update ────────────────────────────────────────────────────
 
-use homelab_core::ops::selfupdate::{self_update, SelfUpdateCfg};
+use homelab_core::ops::selfupdate::{SelfUpdateCfg, self_update};
 
 #[tokio::test]
 async fn h5_selfupdate_verifies_before_touching_current() {
@@ -1030,7 +1033,7 @@ async fn the_journal_cap_ships_with_the_binary_and_restarts_journald_once() {
 /// same as the daemon's own units.
 #[tokio::test]
 async fn rule_20_pve_gets_apt_autoclean_and_logrotate_from_a_self_update() {
-    use homelab_core::ops::guards::{logrotate_policy, APT_AUTOCLEAN};
+    use homelab_core::ops::guards::{APT_AUTOCLEAN, logrotate_policy};
     let exec = MockExecutor::new();
     exec.respond_always("--selfcheck", CmdOutput::ok("3.70.0\n"));
     // No rsyslog fragment on this pve: `test -f` fails.
@@ -1080,7 +1083,7 @@ async fn rule_20_pve_skips_its_own_logrotate_rule_when_rsyslog_already_rotates()
 /// Doctor names a unit on pve that differs from the one the binary carries.
 #[test]
 fn doctor_reports_host_units_that_drifted() {
-    use homelab_core::doctor::{diagnose, Health, Probes};
+    use homelab_core::doctor::{Health, Probes, diagnose};
     let p = Probes {
         host_units_drift: Some(vec!["/etc/systemd/system/homelab-host.service".into()]),
         state_parses: true,
@@ -1182,7 +1185,7 @@ async fn g8_tiered_retention_forgets_by_explicit_id() {
 
 #[test]
 fn b4_intent_hash_changes_with_any_file_edit() {
-    use homelab_core::manifest::{intent_hash, DeploySpec, FileBlob};
+    use homelab_core::manifest::{DeploySpec, FileBlob, intent_hash};
     let base = DeploySpec {
         secret_files: Vec::new(),
         source: None,
@@ -1370,7 +1373,7 @@ async fn d5_mirror_push_failure_is_an_error_not_a_panic() {
 
 // ── B8: golden template ─────────────────────────────────────────────────────
 
-use homelab_core::ops::template::{build_template, TemplateCfg};
+use homelab_core::ops::template::{TemplateCfg, build_template};
 
 #[tokio::test]
 async fn b8_template_build_owns_only_its_temp_vmid() {
@@ -1514,11 +1517,13 @@ async fn c4_shrink_refused_while_running() {
     m.resources.cores = 1;
     let report = hot_apply(&ctx(&exec, &sink, &j), &m).await;
     assert!(!report.ok);
-    assert!(report
-        .error
-        .unwrap()
-        .why
-        .contains("shrink refused while running"));
+    assert!(
+        report
+            .error
+            .unwrap()
+            .why
+            .contains("shrink refused while running")
+    );
     assert!(exec.calls_containing("pct set 108 --memory").is_empty());
 }
 
@@ -1566,7 +1571,7 @@ async fn c4_no_touch_and_hostname_guarded() {
 
 #[test]
 fn v8_validate_rejects_undeclared_appdata_bind() {
-    use homelab_core::manifest::{validate, DeploySpec, FileBlob};
+    use homelab_core::manifest::{DeploySpec, FileBlob, validate};
     let mut m = manifest(108, "test");
     m.storage.clear(); // nothing declared
     let spec = DeploySpec {
@@ -1888,10 +1893,11 @@ async fn e3_nonempty_dirs_skip_restore_and_restic_failure_never_blocks() {
         "restic failure must not block: {:?}",
         report.error
     );
-    assert!(sink
-        .lines()
-        .iter()
-        .any(|l| l.contains("AUTO-RESTORE FAILED")));
+    assert!(
+        sink.lines()
+            .iter()
+            .any(|l| l.contains("AUTO-RESTORE FAILED"))
+    );
 }
 
 /// fix-54 (expert panel, auto-restore-error-as-fresh, 2026-09-27): any
@@ -1973,10 +1979,11 @@ async fn fix_54_a_snapshot_check_that_fails_is_not_read_as_fresh() {
     let report = deploy(&c, &deploy_spec(manifest(108, "test"))).await;
     assert!(report.ok, "{:?}", report.error);
     assert!(!sink.lines().iter().any(|l| l.contains("— fresh")));
-    assert!(sink
-        .lines()
-        .iter()
-        .any(|l| l.contains("could not be checked")));
+    assert!(
+        sink.lines()
+            .iter()
+            .any(|l| l.contains("could not be checked"))
+    );
     // restic's own "repository does not exist" is a fresh start.
     let exec = MockExecutor::new();
     deploy_mocks(&exec);
@@ -1988,10 +1995,12 @@ async fn fix_54_a_snapshot_check_that_fails_is_not_read_as_fresh() {
     let report = deploy(&ctx(&exec, &sink, &j), &deploy_spec(manifest(108, "test"))).await;
     assert!(report.ok, "{:?}", report.error);
     assert!(sink.lines().iter().any(|l| l.contains("— fresh")));
-    assert!(!sink
-        .lines()
-        .iter()
-        .any(|l| l.contains("could not be checked")));
+    assert!(
+        !sink
+            .lines()
+            .iter()
+            .any(|l| l.contains("could not be checked"))
+    );
 }
 
 /// T40: `data_dirs` may only be empty when the service says so. kyu-runner is
@@ -2000,7 +2009,7 @@ async fn fix_54_a_snapshot_check_that_fails_is_not_read_as_fresh() {
 /// forced a fabricated directory that would then be backed up for nothing.
 #[test]
 fn t40_stateless_must_be_declared_not_inferred() {
-    use homelab_core::native::{validate_native, BackupPause, NativeServiceManifest};
+    use homelab_core::native::{BackupPause, NativeServiceManifest, validate_native};
     let base = NativeServiceManifest {
         restore_note: None,
         stack_name: "kyu".into(),
@@ -2051,9 +2060,11 @@ fn t40_stateless_must_be_declared_not_inferred() {
         ..base
     };
     let problems = validate_native(&confused).expect_err("contradiction must be refused");
-    assert!(problems
-        .iter()
-        .any(|p| p.contains("one of the two is wrong")));
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("one of the two is wrong"))
+    );
 }
 
 /// T1: a stack becomes a scrape target because it was deployed, not because
@@ -2233,7 +2244,7 @@ async fn o9_stop_first_happens_between_the_pull_and_the_up() {
 /// it wrong produces a container that fails on permissions much later.
 #[tokio::test]
 async fn o2_two_templates_differ_in_privilege_and_in_name() {
-    use homelab_core::ops::template::{build_template, TemplateCfg};
+    use homelab_core::ops::template::{TemplateCfg, build_template};
     for unprivileged in [true, false] {
         let exec = MockExecutor::new();
         exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
@@ -2281,7 +2292,7 @@ async fn o2_two_templates_differ_in_privilege_and_in_name() {
 /// somebody noticed, which is the failure this removes.
 #[tokio::test]
 async fn o2_the_template_bakes_the_observability_agents() {
-    use homelab_core::ops::template::{build_template, TemplateCfg};
+    use homelab_core::ops::template::{TemplateCfg, build_template};
     let exec = MockExecutor::new();
     exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
     exec.respond_always("pct config", CmdOutput::failed(2, "does not exist"));
@@ -2351,7 +2362,7 @@ async fn t1_discovery_is_off_when_unconfigured() {
 /// "gedoe met backups" Kenny asked to be rid of.
 #[tokio::test]
 async fn d25_backup_writes_one_repo_per_owning_app() {
-    use homelab_core::ops::backup::{backup, BackupCfg};
+    use homelab_core::ops::backup::{BackupCfg, backup};
     let mut m = manifest(108, "test");
     m.apps = vec!["alpha".into(), "beta".into()];
     m.storage = vec![
@@ -2464,7 +2475,7 @@ async fn o5_clone_refuses_a_privilege_level_the_template_cannot_give() {
 /// fails if anyone pins it back to a constant.
 #[tokio::test]
 async fn f38_restore_honours_the_configured_timeout() {
-    use homelab_core::ops::backup::{restore, BackupCfg};
+    use homelab_core::ops::backup::{BackupCfg, restore};
     let exec = MockExecutor::new();
     exec.respond_always("qm status", CmdOutput::failed(2, "no such vm"));
     exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test"));
@@ -2647,15 +2658,19 @@ async fn d3_removed_app_is_stopped_and_deleted_but_config_kept() {
         "and its /opt dir removed"
     );
     // Config dirs under /appdata are never touched by GC.
-    assert!(!exec
-        .calls()
-        .iter()
-        .any(|c| c.contains("rm") && c.contains("/appdata/")));
+    assert!(
+        !exec
+            .calls()
+            .iter()
+            .any(|c| c.contains("rm") && c.contains("/appdata/"))
+    );
     // The surviving app was untouched by GC.
-    assert!(!exec
-        .calls_containing("rm -rf '/opt/test/app'")
-        .iter()
-        .any(|_| true));
+    assert!(
+        !exec
+            .calls_containing("rm -rf '/opt/test/app'")
+            .iter()
+            .any(|_| true)
+    );
 }
 
 #[tokio::test]
@@ -2677,9 +2692,10 @@ async fn h6_appdata_routes_dir_written_host_side() {
     let report = deploy(&c, &spec).await;
     assert!(report.ok, "{:?}", report.error);
     // Written directly on the host, NOT pushed into the gateway container.
-    assert!(exec
-        .file("/appdata/platform/traefik-config/routes/108-app-test.yml")
-        .is_some());
+    assert!(
+        exec.file("/appdata/platform/traefik-config/routes/108-app-test.yml")
+            .is_some()
+    );
     assert!(exec.calls_containing("pct push 104").is_empty());
 }
 
@@ -2907,9 +2923,11 @@ async fn h14_every_destroy_step_is_journaled_running_then_done() {
             assert!(pair[1].2 == "done" || pair[1].2 == "failed");
         }
     }
-    assert!(records
-        .iter()
-        .any(|r| r.1 == "destroy container" && r.2 == "done"));
+    assert!(
+        records
+            .iter()
+            .any(|r| r.1 == "destroy container" && r.2 == "done")
+    );
 }
 
 #[tokio::test]
@@ -4141,7 +4159,7 @@ async fn gap_33_patch_refuses_a_vmid_whose_hostname_is_not_the_stack_s() {
 /// covers: gap-33
 #[tokio::test]
 async fn gap_33_requested_guards_check_the_hostname_and_skip_docker_on_a_native_stack() {
-    use homelab_core::ops::guards::{apply_for_managed, ManagedTarget};
+    use homelab_core::ops::guards::{ManagedTarget, apply_for_managed};
     let targets = vec![
         ManagedTarget {
             name: "kyu".into(),

@@ -12,12 +12,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use homelab_core::ops::fleetcheck::Finding;
 use homelab_core::ops::pinexists::{
-    evaluate_pin_existence, parse_challenge, pinned_digests, PinAnswer, PinnedDigest,
+    PinAnswer, PinnedDigest, evaluate_pin_existence, parse_challenge, pinned_digests,
 };
 
 const ACCEPT: &str = "application/vnd.oci.image.index.v1+json, \
@@ -203,27 +203,29 @@ where
     let workers = width.max(1).min(firsts.len());
     std::thread::scope(|scope| {
         for _ in 0..workers {
-            scope.spawn(|| loop {
-                let slot = next.fetch_add(1, Ordering::SeqCst);
-                let Some(&i) = firsts.get(slot) else { break };
-                let p = &pins[i];
-                let known_dead = dead
-                    .lock()
-                    .map(|d| d.contains(&p.registry))
-                    .unwrap_or(false);
-                let a = if known_dead {
-                    PinAnswer::NotAsked(format!("{} did not answer", p.registry))
-                } else {
-                    let a = ask(p);
-                    if matches!(&a, PinAnswer::NotAsked(w) if w.ends_with("did not answer")) {
-                        if let Ok(mut d) = dead.lock() {
+            scope.spawn(|| {
+                loop {
+                    let slot = next.fetch_add(1, Ordering::SeqCst);
+                    let Some(&i) = firsts.get(slot) else { break };
+                    let p = &pins[i];
+                    let known_dead = dead
+                        .lock()
+                        .map(|d| d.contains(&p.registry))
+                        .unwrap_or(false);
+                    let a = if known_dead {
+                        PinAnswer::NotAsked(format!("{} did not answer", p.registry))
+                    } else {
+                        let a = ask(p);
+                        if matches!(&a, PinAnswer::NotAsked(w) if w.ends_with("did not answer"))
+                            && let Ok(mut d) = dead.lock()
+                        {
                             d.insert(p.registry.clone());
                         }
+                        a
+                    };
+                    if let Ok(mut r) = results[slot].lock() {
+                        *r = Some(a);
                     }
-                    a
-                };
-                if let Ok(mut r) = results[slot].lock() {
-                    *r = Some(a);
                 }
             });
         }

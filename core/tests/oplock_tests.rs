@@ -2,7 +2,7 @@
 //! operation holds the host's single operation lock waited with no word —
 //! during the nightly round, for the whole backup batch.
 
-use homelab_core::oplock::{waiting_message, Holder};
+use homelab_core::oplock::{Holder, waiting_message};
 
 const NOW: u64 = 1_790_000_000;
 

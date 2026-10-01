@@ -6,7 +6,7 @@ mod act_support;
 
 use act_support::{manifest, native, spec};
 use homelab_admin::core::actions_cli::cli_line;
-use homelab_client::cli_args::{parse, split, Invocation};
+use homelab_client::cli_args::{Invocation, parse, split};
 use homelab_client::repo_config::stack_name;
 use homelab_proto::Command;
 
@@ -298,13 +298,15 @@ fn feat_stacks_7_a_word_with_spaces_is_quoted_and_comes_back_whole() {
         ]
     );
     // A word with a quote in it is not offered as a line at all.
-    assert!(cli_line(
-        &Command::ForgetStack {
-            stack: "it's".into()
-        },
-        false
-    )
-    .is_none());
+    assert!(
+        cli_line(
+            &Command::ForgetStack {
+                stack: "it's".into()
+            },
+            false
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -368,9 +370,11 @@ fn feat_stacks_7_the_cli_parser_keeps_the_verbs_old_rules() {
             app: Some("sonarr".into()),
         }
     );
-    assert!(parse(&split("deploy --force"))
-        .unwrap_err()
-        .contains("usage"));
+    assert!(
+        parse(&split("deploy --force"))
+            .unwrap_err()
+            .contains("usage")
+    );
     assert!(parse(&split("guards abc")).is_err());
     assert!(parse(&split("wipe --yes")).is_err());
     assert!(parse(&split("backup")).unwrap_err().contains("usage"));

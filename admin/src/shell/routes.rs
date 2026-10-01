@@ -16,7 +16,7 @@ use serde::Deserialize;
 
 use std::sync::Arc;
 
-use super::host_link::{now_s, publish_asks, HostClient, Shared};
+use super::host_link::{HostClient, Shared, now_s, publish_asks};
 use super::loki::Loki;
 use super::slow::{RunQuery, SlowRead, WAIT};
 use crate::core::asks::AnswerRequest;
@@ -241,7 +241,7 @@ async fn charts(State(c): State<ReadCtx>, Query(q): Query<ChartQuery>) -> Respon
                 "the host charts",
                 "no charts_host is configured",
                 "set admin.charts_host (or HOMELAB_ADMIN_CHARTS_HOST) to the hypervisor's host label in Prometheus",
-            )
+            );
         }
     };
     let end = now_s();
@@ -339,7 +339,7 @@ where
                 WHAT,
                 refusal.why(),
                 "nothing was sent; the page shows the questions that are open now",
-            )
+            );
         }
     };
     match send(command).await {

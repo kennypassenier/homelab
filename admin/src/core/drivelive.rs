@@ -20,8 +20,8 @@
 use homelab_proto::UiStep;
 use serde::Serialize;
 
-use crate::core::actions::{ActionKind, Refusal, HOST_TARGET};
-use crate::core::drive::{action_form, DriveState, Family};
+use crate::core::actions::{ActionKind, HOST_TARGET, Refusal};
+use crate::core::drive::{DriveState, Family, action_form};
 use crate::core::driveedit::EditKind;
 
 /// How long a step is announced before it is taken, unless the dashboard's

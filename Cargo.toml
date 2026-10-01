@@ -10,7 +10,7 @@ exclude = ["tui-preview"]
 version = "3.69.0"
 rust-version = "1.97"
 license = "MIT OR Apache-2.0"
-edition = "2021"
+edition = "2024"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -32,8 +32,11 @@ base64 = "0.22"
 rcgen = "0.13"
 tokio-tungstenite = "0.29"
 
-# One `unsafe` block exists (fix-53: `libc::killpg` in the host executor),
-# allowed where it stands; anything else is refused. `forbid` would not let
-# that one block opt out.
+# `unsafe` is refused everywhere except the handful of sites that opt out
+# with their own `#[allow(unsafe_code)]` + SAFETY comment: fix-53's
+# `libc::killpg` in the host executor, and fix-135's edition-2024
+# `env::set_var`/`remove_var` call sites in the client (the std library
+# made both unsafe; the workspace still denies unsafe by default).
+# `forbid` would not let any of those opt out.
 [workspace.lints.rust]
 unsafe_code = "deny"

@@ -15,7 +15,7 @@
 //!   not `apply`.
 
 use crate::error::CoreError;
-use crate::executor::{run_ok, Cmd, Executor, TracingExecutor};
+use crate::executor::{Cmd, Executor, TracingExecutor, run_ok};
 use crate::manifest::StackManifest;
 use crate::native::NativeServiceManifest;
 use crate::ops::fleetcheck::{Finding, Severity};
@@ -275,19 +275,19 @@ pub fn wipe_plan(state: &HostState, key: &str, state_dir: &str) -> Result<WipePl
             key
         ));
     }
-    if r.kind != RetiredKind::Stack {
-        if let Some(st) = state.stacks.get(&r.stack) {
-            let back = st.apps.contains(&r.name)
-                || st
-                    .manifest
-                    .as_ref()
-                    .is_some_and(|m| m.natives.contains(&r.name));
-            if back {
-                return Err(format!(
-                    "'{}' is back in stack '{}' — refusing to delete what it uses",
-                    r.name, r.stack
-                ));
-            }
+    if r.kind != RetiredKind::Stack
+        && let Some(st) = state.stacks.get(&r.stack)
+    {
+        let back = st.apps.contains(&r.name)
+            || st
+                .manifest
+                .as_ref()
+                .is_some_and(|m| m.natives.contains(&r.name));
+        if back {
+            return Err(format!(
+                "'{}' is back in stack '{}' — refusing to delete what it uses",
+                r.name, r.stack
+            ));
         }
     }
     // What every managed stack still uses.

@@ -25,7 +25,7 @@ use serde::Serialize;
 
 use crate::core::actions::Refusal;
 use crate::core::actions_config::GitConfig;
-use crate::core::stackedit::{outside_stack, FileChange, StackTexts, RAW_MAX};
+use crate::core::stackedit::{FileChange, RAW_MAX, StackTexts, outside_stack};
 
 /// What the status panel shows.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1216,35 +1216,35 @@ pub fn provision_credentials(git: &GitConfig, key_b64: Option<&str>) -> Provisio
     if !is_ssh(&git.remote) {
         return out;
     }
-    if !git.key.exists() {
-        if let Some(b64) = key_b64.filter(|v| !v.trim().is_empty()) {
-            match crate::core::credentials::decode_deploy_key(b64) {
-                Ok(bytes) => {
-                    if let Some(parent) = git.key.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    let written = std::fs::OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .mode(0o600)
-                        .open(&git.key)
-                        .and_then(|mut f| {
-                            f.write_all(&bytes)?;
-                            f.sync_all()
-                        });
-                    match written {
-                        Ok(()) => out.key_written = true,
-                        Err(e) => {
-                            let _ = std::fs::remove_file(&git.key);
-                            out.problems.push(format!(
-                                "the deploy key could not be written to {}: {e}",
-                                git.key.display()
-                            ));
-                        }
+    if !git.key.exists()
+        && let Some(b64) = key_b64.filter(|v| !v.trim().is_empty())
+    {
+        match crate::core::credentials::decode_deploy_key(b64) {
+            Ok(bytes) => {
+                if let Some(parent) = git.key.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let written = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(&git.key)
+                    .and_then(|mut f| {
+                        f.write_all(&bytes)?;
+                        f.sync_all()
+                    });
+                match written {
+                    Ok(()) => out.key_written = true,
+                    Err(e) => {
+                        let _ = std::fs::remove_file(&git.key);
+                        out.problems.push(format!(
+                            "the deploy key could not be written to {}: {e}",
+                            git.key.display()
+                        ));
                     }
                 }
-                Err(why) => out.problems.push(why),
             }
+            Err(why) => out.problems.push(why),
         }
     }
     if !git.known_hosts.exists() && crate::core::credentials::is_github_ssh(&git.remote) {

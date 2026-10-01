@@ -1,6 +1,6 @@
 //! feat-ops-6: "step n/m, expected x" from step marks and the host's history.
 
-use homelab_admin::core::actions_progress::{expectation, median, Tracker};
+use homelab_admin::core::actions_progress::{Tracker, expectation, median};
 use homelab_core::history::{HistoryEntry, StepTiming};
 use homelab_proto::StepMark;
 

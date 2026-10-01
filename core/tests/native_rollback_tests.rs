@@ -5,10 +5,10 @@
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::native::{BackupPause, NativeServiceManifest};
+use homelab_core::ops::OpCtx;
 use homelab_core::ops::native::{
     drop_stale_rollback_script, keep_one_previous_script, rollback_native, update_native,
 };
-use homelab_core::ops::OpCtx;
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;

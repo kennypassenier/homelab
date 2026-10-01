@@ -15,8 +15,8 @@ use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::manifest::*;
 use homelab_core::native::NativeServiceManifest;
 use homelab_core::ops::destroy::{destroy, destroy_recorded, forget};
-use homelab_core::ops::fleetcheck::{evaluate, GrowthLimits, LiveFacts, Severity};
-use homelab_core::ops::{deploy::deploy, OpCtx};
+use homelab_core::ops::fleetcheck::{GrowthLimits, LiveFacts, Severity, evaluate};
+use homelab_core::ops::{OpCtx, deploy::deploy};
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::{PipelineEvent, VecSink};
@@ -522,19 +522,21 @@ fn the_fleet_check_reports_a_stack_in_state_without_a_stack_file() {
         stack_files: Vec::new(),
         ..live
     };
-    assert!(!evaluate(
-        &st,
-        &blind,
-        NOW,
-        u64::MAX,
-        GrowthLimits::default(),
-        None,
-        u64::MAX,
-        u64::MAX,
-        homelab_core::ops::fleetcheck::HostCapacityThresholds::default()
-    )
-    .iter()
-    .any(|f| f.what.contains("no stack file")));
+    assert!(
+        !evaluate(
+            &st,
+            &blind,
+            NOW,
+            u64::MAX,
+            GrowthLimits::default(),
+            None,
+            u64::MAX,
+            u64::MAX,
+            homelab_core::ops::fleetcheck::HostCapacityThresholds::default()
+        )
+        .iter()
+        .any(|f| f.what.contains("no stack file"))
+    );
 }
 
 // ── 6 · destroy works from the manifest recorded in state ───────────────────
@@ -620,12 +622,14 @@ async fn the_deploy_removes_files_the_stack_no_longer_declares() {
             .len(),
         1
     );
-    assert!(exec
-        .calls_containing("rm -f /opt/syncthing/syncthing/.env")
-        .is_empty());
-    assert!(exec
-        .calls_containing("rm -f /opt/syncthing/syncthing/docker-compose.yml")
-        .is_empty());
+    assert!(
+        exec.calls_containing("rm -f /opt/syncthing/syncthing/.env")
+            .is_empty()
+    );
+    assert!(
+        exec.calls_containing("rm -f /opt/syncthing/syncthing/docker-compose.yml")
+            .is_empty()
+    );
     let said: Vec<String> = lines(&sink)
         .into_iter()
         .filter(|l| l.contains("removed") && l.contains("/opt/syncthing/syncthing/stale.conf"))
@@ -676,12 +680,14 @@ async fn a_dropped_rootfs_unit_is_disabled_then_removed_then_reloaded() {
         "a script is not a unit"
     );
     let said = lines(&sink);
-    assert!(said
-        .iter()
-        .any(|l| l.contains("removed") && l.contains("/etc/systemd/system/old-backup.timer")));
-    assert!(said
-        .iter()
-        .any(|l| l.contains("removed") && l.contains("/usr/local/bin/old-script")));
+    assert!(
+        said.iter()
+            .any(|l| l.contains("removed") && l.contains("/etc/systemd/system/old-backup.timer"))
+    );
+    assert!(
+        said.iter()
+            .any(|l| l.contains("removed") && l.contains("/usr/local/bin/old-script"))
+    );
 }
 
 // ── 8 · a native unit dropped from natives: ─────────────────────────────────
@@ -744,10 +750,12 @@ async fn a_native_unit_dropped_from_the_stack_is_stopped_and_unregistered_with_i
     let unit = pos(&calls, "rm -f /etc/systemd/system/oldsvc.service").expect("unit file removed");
     let prog = pos(&calls, "rm -f /usr/local/bin/oldsvc").expect("program removed");
     assert!(stop < unit && stop < prog);
-    assert!(calls
-        .iter()
-        .skip(unit)
-        .any(|c| c.contains("systemctl daemon-reload")));
+    assert!(
+        calls
+            .iter()
+            .skip(unit)
+            .any(|c| c.contains("systemctl daemon-reload"))
+    );
     assert!(
         exec.calls_containing("/var/lib/oldsvc").is_empty(),
         "data kept"
@@ -899,12 +907,14 @@ async fn a_removed_app_keeps_its_vault_copy_and_records_when_it_left() {
     let j = NullJournal;
     let report = deploy(&ctx(&exec, &sink, &j), &spec(110, "syncthing")).await;
     assert!(report.ok, "{:?}", report.error);
-    assert!(exec
-        .calls_containing("secrets/syncthing/oldapp.env")
-        .is_empty());
-    assert!(exec
-        .file("/var/lib/homelab/secrets/syncthing/oldapp.env")
-        .is_some());
+    assert!(
+        exec.calls_containing("secrets/syncthing/oldapp.env")
+            .is_empty()
+    );
+    assert!(
+        exec.file("/var/lib/homelab/secrets/syncthing/oldapp.env")
+            .is_some()
+    );
     assert!(
         exec.calls_containing("oldapp-config")
             .iter()
@@ -1199,9 +1209,10 @@ async fn wipe_deletes_the_repositories_directories_and_vault_then_the_record() {
     assert!(!after.retired.contains_key("drill"));
     assert!(after.stacks.contains_key("other"));
     let said = lines(&sink);
-    assert!(said
-        .iter()
-        .any(|l| l.contains("drill-config") && l.contains("deleted")));
+    assert!(
+        said.iter()
+            .any(|l| l.contains("drill-config") && l.contains("deleted"))
+    );
 }
 
 /// covers: ask-9
@@ -1254,9 +1265,10 @@ async fn a_removed_apps_files_are_left_for_the_garbage_collector() {
     let j = NullJournal;
     let report = deploy(&ctx(&exec, &sink, &j), &spec(110, "syncthing")).await;
     assert!(report.ok, "{:?}", report.error);
-    assert!(exec
-        .calls_containing("rm -f /opt/syncthing/oldapp/docker-compose.yml")
-        .is_empty());
+    assert!(
+        exec.calls_containing("rm -f /opt/syncthing/oldapp/docker-compose.yml")
+            .is_empty()
+    );
     assert_eq!(
         exec.calls_containing("cd '/opt/syncthing/oldapp' && docker compose down")
             .len(),

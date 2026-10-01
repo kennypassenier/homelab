@@ -57,7 +57,7 @@ pub mod watched;
 pub mod zfs;
 
 use crate::error::CoreError;
-use crate::executor::{pct_sh, CmdOutput, Executor};
+use crate::executor::{CmdOutput, Executor, pct_sh};
 use crate::runner::Journal;
 use crate::safety::SafetyConfig;
 use crate::sink::Sink;

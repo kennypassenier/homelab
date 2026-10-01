@@ -333,7 +333,7 @@ fn f301_a_service_file_at_the_stack_root_is_still_found() {
 /// binaries hit the identical reset — same fault, one caller over.
 #[test]
 fn f303_the_link_refuses_an_oversized_payload_in_words() {
-    use homelab_client::version::{too_large, MAX_WS_FRAME};
+    use homelab_client::version::{MAX_WS_FRAME, too_large};
 
     // The ceiling and the "not a network fault" wording are F122's test in
     // tui_snapshot_tests; this one covers only what F303 added.

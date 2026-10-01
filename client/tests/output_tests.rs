@@ -1,6 +1,6 @@
 //! What the command line prints, as opposed to what it asks the host.
 
-use homelab_client::output::{check_tones, Tone};
+use homelab_client::output::{Tone, check_tones};
 
 /// check-output-buries-problem (expert panel, 2026-09-27): the whole check
 /// was printed in red, `noted` ("nothing to do") included, so nine red lines

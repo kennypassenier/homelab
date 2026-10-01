@@ -3,7 +3,7 @@
 //! configs are only pushed (and services only restarted) on content change.
 
 use crate::error::CoreError;
-use crate::executor::{pct_sh, run_ok, shq, Cmd, Executor};
+use crate::executor::{Cmd, Executor, pct_sh, run_ok, shq};
 use crate::ops::util::push_content;
 use crate::sink::{Level, PipelineEvent, Sink};
 
@@ -58,8 +58,7 @@ pub const DOCKER_DAEMON_JSON: &str = r#"{
 /// `manual` service meant the next fresh container got whatever gcr.io called
 /// latest, and nothing recorded which. The template pre-pulls this same
 /// reference; moving it is an edit of this line and of the compose below.
-pub const CADVISOR_IMAGE: &str =
-    "gcr.io/cadvisor/cadvisor:v0.55.1@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57";
+pub const CADVISOR_IMAGE: &str = "gcr.io/cadvisor/cadvisor:v0.55.1@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57";
 
 pub const CADVISOR_COMPOSE: &str = r#"services:
   cadvisor:
@@ -724,11 +723,7 @@ pub fn rotation_policy(
         }
         out.push_str("}\n");
     }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
+    if out.is_empty() { None } else { Some(out) }
 }
 
 /// fix-24: install (or remove) the stack's rotation rule. Returns true when

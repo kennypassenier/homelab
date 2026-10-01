@@ -3,10 +3,10 @@
 //! cleanup, and the fleet-wide retention whatever the stack file said.
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
-use homelab_core::native::{validate_native, BackupPause, NativeServiceManifest};
-use homelab_core::ops::backup::BackupCfg;
-use homelab_core::ops::native::{backup_native, decide_chassis_pause, ChassisPauseOutcome};
+use homelab_core::native::{BackupPause, NativeServiceManifest, validate_native};
 use homelab_core::ops::OpCtx;
+use homelab_core::ops::backup::BackupCfg;
+use homelab_core::ops::native::{ChassisPauseOutcome, backup_native, decide_chassis_pause};
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;
@@ -400,12 +400,16 @@ mod chassis_pause_backup_native {
         .await;
         assert!(r.ok, "{:?}", r.error);
         let calls = exec.calls();
-        assert!(!exec
-            .calls_containing("systemctl stop almanac.service")
-            .is_empty());
-        assert!(!exec
-            .calls_containing("systemctl start almanac.service")
-            .is_empty());
+        assert!(
+            !exec
+                .calls_containing("systemctl stop almanac.service")
+                .is_empty()
+        );
+        assert!(
+            !exec
+                .calls_containing("systemctl start almanac.service")
+                .is_empty()
+        );
         assert!(
             exec.calls_containing("backup-resume").is_empty(),
             "{:?}",

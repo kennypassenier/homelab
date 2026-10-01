@@ -7,7 +7,7 @@ use std::time::Duration;
 use chassis::shell::live::Live;
 use homelab_proto::{Command, RpcResponse, ServerMsg};
 
-use super::host_link::{now_s, Asked, HostAsks, Shared};
+use super::host_link::{Asked, HostAsks, Shared, now_s};
 use crate::core::fleet::fleet_view;
 
 /// The version the demo host says Hello with: the release every gate in

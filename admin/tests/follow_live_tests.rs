@@ -10,14 +10,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use act_support::{
-    history, shared, temp_dir, until, MemFiles, MockHost, Recorder, Script, TestClock,
+    MemFiles, MockHost, Recorder, Script, TestClock, history, shared, temp_dir, until,
 };
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use homelab_admin::core::drivelive::Control;
 use homelab_admin::shell::actions::{Actions, ActionsDeps};
 use homelab_admin::shell::actions_notify::NotifyCenter;
-use homelab_admin::shell::drive::{router, Driver, LiveTiming};
+use homelab_admin::shell::drive::{Driver, LiveTiming, router};
 use homelab_proto::{Scope, UiStep};
 use serde_json::Value;
 use tokio::task::JoinHandle;
@@ -142,9 +142,11 @@ async fn follow_live_a_step_is_announced_and_held_for_the_countdown() {
     let r = send(&w, goto("/nowhere"), &holds).await.unwrap();
     assert_eq!(r["ok"], false);
     assert!(t1.elapsed() < Duration::from_millis(100));
-    assert!(w.live.events("drive")[before..]
-        .iter()
-        .all(|e| e["kind"] != "announce"));
+    assert!(
+        w.live.events("drive")[before..]
+            .iter()
+            .all(|e| e["kind"] != "announce")
+    );
 
     // Typing is played letter by letter by the tabs: no countdown.
     let opened = send(
@@ -287,19 +289,22 @@ async fn follow_live_stop_ends_the_sequence_and_a_stopped_press_never_runs() {
     w.driver.control(Control::Stop, "the viewer kenny").unwrap();
     let r = pressed.await.unwrap();
     assert_eq!(r["ok"], false);
-    assert!(r["refusal"]["why"]
-        .as_str()
-        .unwrap()
-        .starts_with("stopped by the viewer kenny"));
+    assert!(
+        r["refusal"]["why"]
+            .as_str()
+            .unwrap()
+            .starts_with("stopped by the viewer kenny")
+    );
     assert!(r["state"]["form"].is_null() && r["state"]["active"] == false);
     tokio::time::sleep(Duration::from_secs(30)).await;
     assert_eq!(deploys(&w), 0, "{:?}", w.host.ran());
     // Every tab closes the dialog as on `done`.
-    assert!(w
-        .live
-        .events("drive")
-        .iter()
-        .any(|e| e["step"]["do"] == "done" && e["applied"] == true));
+    assert!(
+        w.live
+            .events("drive")
+            .iter()
+            .any(|e| e["step"]["do"] == "done" && e["applied"] == true)
+    );
 
     // Refused until `done`, at once and without an announcement.
     let r = send(&w, goto("/jobs"), &holds).await.unwrap();
@@ -414,7 +419,7 @@ async fn follow_live_the_control_route_pauses_and_refuses_when_nobody_drives() {
 fn fix_163_release_is_due_30_s_after_the_confirmed_job_ends() {
     use homelab_admin::core::actions::ActionKind;
     use homelab_admin::core::drive::{
-        action_form, DriveState, JobRef, OpenForm, Sources, RELEASE_AFTER_JOB_S,
+        DriveState, JobRef, OpenForm, RELEASE_AFTER_JOB_S, Sources, action_form,
     };
     assert_eq!(RELEASE_AFTER_JOB_S, 30);
     let mut form = OpenForm::new(

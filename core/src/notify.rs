@@ -230,10 +230,12 @@ mod tests {
     /// `notify_tls_cert` happens to name, which a typo can point anywhere.
     #[test]
     fn cert_fingerprint_refuses_invalid_base64() {
-        assert!(cert_fingerprint(
-            "-----BEGIN CERTIFICATE-----\nnot-base64!!!\n-----END CERTIFICATE-----\n"
-        )
-        .is_err());
+        assert!(
+            cert_fingerprint(
+                "-----BEGIN CERTIFICATE-----\nnot-base64!!!\n-----END CERTIFICATE-----\n"
+            )
+            .is_err()
+        );
     }
 }
 
@@ -290,10 +292,10 @@ pub fn route<'a>(primary: Option<&'a str>, fallback: Option<&'a str>) -> Vec<&'a
     if let Some(p) = primary {
         v.push(p);
     }
-    if let Some(f) = fallback {
-        if Some(f) != primary {
-            v.push(f);
-        }
+    if let Some(f) = fallback
+        && Some(f) != primary
+    {
+        v.push(f);
     }
     v
 }
@@ -380,14 +382,14 @@ pub fn curl_args_pinned(
         args.push("-H".into());
         args.push(format!("@{}", path));
     }
-    if url.starts_with("https://") {
-        if let Some(cacert) = cacert_path {
-            // --cacert alone, not --cacert plus the system bundle: the
-            // whole point is trusting only the pinned certificate, not
-            // widening what is trusted.
-            args.push("--cacert".into());
-            args.push(cacert.into());
-        }
+    if url.starts_with("https://")
+        && let Some(cacert) = cacert_path
+    {
+        // --cacert alone, not --cacert plus the system bundle: the
+        // whole point is trusting only the pinned certificate, not
+        // widening what is trusted.
+        args.push("--cacert".into());
+        args.push(cacert.into());
     }
     args.push("-d".into());
     args.push(payload.into());

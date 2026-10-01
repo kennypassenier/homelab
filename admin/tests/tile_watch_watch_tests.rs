@@ -14,11 +14,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use act_support::{
-    shared, temp_dir, Behaviour, MemFiles, MockHost, RecPusher, Recorder, Script, TestClock,
+    Behaviour, MemFiles, MockHost, RecPusher, Recorder, Script, TestClock, shared, temp_dir,
 };
 use homelab_admin::shell::actions::{Actions, ActionsDeps, HostPort};
 use homelab_admin::shell::actions_notify::NotifyCenter;
-use homelab_admin::shell::watch::{round, snapshot, Watched};
+use homelab_admin::shell::watch::{Watched, round, snapshot};
 use homelab_proto::Command;
 
 /// A no-op `Actions` queue: these tests only read [`Actions::jobs`].

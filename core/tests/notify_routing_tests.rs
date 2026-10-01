@@ -5,10 +5,10 @@
 
 use homelab_core::error::OperatorError;
 use homelab_core::notify::{
-    click_url, explain_event, explain_fleet_check, explain_op, next_seq, notices_after, op_kind,
-    op_stack, parse_notices, prune_notices, push_payload, push_short, push_status_short, urgency,
-    Event, HostNotice, OpFacts, OpKind, BACKUP_OPS, DEPLOY_OPS, DISK_ALERTS, PIPELINE_ALERTS,
-    SERVICE_DOWN_ALERTS, UPDATE_OPS,
+    BACKUP_OPS, DEPLOY_OPS, DISK_ALERTS, Event, HostNotice, OpFacts, OpKind, PIPELINE_ALERTS,
+    SERVICE_DOWN_ALERTS, UPDATE_OPS, click_url, explain_event, explain_fleet_check, explain_op,
+    next_seq, notices_after, op_kind, op_stack, parse_notices, prune_notices, push_payload,
+    push_short, push_status_short, urgency,
 };
 use homelab_core::ops::fleetcheck::{Finding, Severity};
 
@@ -285,9 +285,10 @@ fn notify_detail_a_failed_deploy_says_what_since_consequence_and_the_command() {
     assert!(e.remedy.contains("check the image tag"), "{}", e.remedy);
     assert!(e.remedy.contains("`homelab deploy media`"), "{}", e.remedy);
     assert!(e.remedy.contains("Deploy"), "the dashboard button");
-    assert!(e
-        .remedy
-        .contains("homelab incidents show 1800000000-deploy-media"));
+    assert!(
+        e.remedy
+            .contains("homelab incidents show 1800000000-deploy-media")
+    );
 }
 
 #[test]

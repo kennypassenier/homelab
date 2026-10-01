@@ -1,7 +1,7 @@
 //! arch-exposure: the two locks before the login, decided without I/O.
 
 use homelab_admin::core::access::{
-    check_claims, from_home, parse_jwks, parse_jwt, Claims, Refusal,
+    Claims, Refusal, check_claims, from_home, parse_jwks, parse_jwt,
 };
 
 fn b64(s: &str) -> String {
@@ -109,7 +109,7 @@ fn arch_exposure_the_signature_is_checked_against_the_key() {
     use aws_lc_rs::encoding::AsDer;
     use aws_lc_rs::rsa::{KeyPair, KeySize};
     use aws_lc_rs::signature::{KeyPair as _, RSA_PKCS1_SHA256};
-    use homelab_admin::core::access::{verify_rs256, RsaKey};
+    use homelab_admin::core::access::{RsaKey, verify_rs256};
 
     fn public(kp: &KeyPair) -> RsaKey {
         // The SubjectPublicKeyInfo DER holds the modulus and exponent; the

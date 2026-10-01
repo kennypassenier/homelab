@@ -6,9 +6,9 @@
 
 use homelab_admin::core::actions::ActionKind;
 use homelab_admin::core::notify::{
-    alert_drafts, digest, digest_due, fix_for, host_draft, push_payload, route, today_lines,
-    DigestRecord, Draft, FixSource, Kind, Level, NotifyFile, PushOutcome, Settings, DIGEST_LATE_S,
-    KEEP,
+    DIGEST_LATE_S, DigestRecord, Draft, FixSource, KEEP, Kind, Level, NotifyFile, PushOutcome,
+    Settings, alert_drafts, digest, digest_due, fix_for, host_draft, push_payload, route,
+    today_lines,
 };
 use homelab_core::notify::HostNotice;
 use homelab_core::ops::fleetcheck::{Finding, Severity};
@@ -25,13 +25,17 @@ fn draft(kind: Kind, label: Option<&str>) -> Draft {
 fn notify_routing_the_dashboard_pushes_only_the_urgent() {
     let s = Settings::default();
     // A missed backup schedule is a backup that did not happen.
-    assert!(route(&s, &draft(Kind::ScheduleMissed, Some("backup")), 0)
-        .push
-        .is_ok());
+    assert!(
+        route(&s, &draft(Kind::ScheduleMissed, Some("backup")), 0)
+            .push
+            .is_ok()
+    );
     // A missed "enable" is not urgent.
-    assert!(route(&s, &draft(Kind::ScheduleMissed, Some("enable")), 0)
-        .push
-        .is_err());
+    assert!(
+        route(&s, &draft(Kind::ScheduleMissed, Some("enable")), 0)
+            .push
+            .is_err()
+    );
     // The host pushes a failed operation itself; the dashboard never doubles it.
     let why = route(&s, &draft(Kind::ActionFailed, None), 0)
         .push
@@ -49,10 +53,12 @@ fn notify_routing_the_dashboard_pushes_only_the_urgent() {
         push: false,
         ..Default::default()
     };
-    assert!(route(&off, &draft(Kind::ScheduleMissed, Some("backup")), 0)
-        .push
-        .unwrap_err()
-        .contains("off"));
+    assert!(
+        route(&off, &draft(Kind::ScheduleMissed, Some("backup")), 0)
+            .push
+            .unwrap_err()
+            .contains("off")
+    );
 }
 
 #[test]
@@ -98,14 +104,16 @@ fn fix_a_failed_operation_offers_its_own_action_again() {
     assert!(op("deploy-media", "deploy", true, Some("media")).is_none());
     assert!(op("release-update-kyu", "release-update-native", false, None).is_none());
     assert!(op("destroy-x", "destroy", false, Some("x")).is_none());
-    assert!(fix_for(&FixSource::Op {
-        op: "backup-media",
-        label: "scheduled-backup",
-        ok: false,
-        deferred: true,
-        stack: Some("media"),
-    })
-    .is_none());
+    assert!(
+        fix_for(&FixSource::Op {
+            op: "backup-media",
+            label: "scheduled-backup",
+            ok: false,
+            deferred: true,
+            stack: Some("media"),
+        })
+        .is_none()
+    );
 }
 
 #[test]
@@ -135,12 +143,14 @@ fn fix_a_remedy_that_names_a_command_the_dashboard_runs() {
     })
     .unwrap();
     assert_eq!((f.action.as_str(), f.stack.as_str()), ("deploy", "admin"));
-    assert!(fix_for(&FixSource::Alert {
-        alertname: "TraefikServerErrors",
-        host: None,
-        remedy: "read its logs tab",
-    })
-    .is_none());
+    assert!(
+        fix_for(&FixSource::Alert {
+            alertname: "TraefikServerErrors",
+            host: None,
+            remedy: "read its logs tab",
+        })
+        .is_none()
+    );
 }
 
 /// Every fix names an action the dashboard has, with a label to show.
@@ -367,14 +377,15 @@ fn alerts_become_notices_firing_and_resolved() {
         .unwrap();
     assert!(!first.read);
     // Alertmanager repeats a firing alert every 12 h: one notice, not two.
-    assert!(f
-        .add_alert(
+    assert!(
+        f.add_alert(
             alert_drafts(&am("firing", "HostDown", "critical", "fp1"))[0].clone(),
             2_000,
             KEEP,
             i64::MAX,
         )
-        .is_none());
+        .is_none()
+    );
     // Resolved: stored as read, and the firing one no longer waits.
     let resolved = alert_drafts(&am("resolved", "HostDown", "critical", "fp1"));
     assert_eq!(resolved[0].draft.kind, Kind::AlertResolved);
@@ -384,14 +395,15 @@ fn alerts_become_notices_firing_and_resolved() {
     assert!(r.read && r.fixes.is_empty());
     assert_eq!(f.unread(), 0);
     // Firing again after it resolved is news again.
-    assert!(f
-        .add_alert(
+    assert!(
+        f.add_alert(
             alert_drafts(&am("firing", "HostDown", "critical", "fp1"))[0].clone(),
             4_000,
             KEEP,
             i64::MAX,
         )
-        .is_some());
+        .is_some()
+    );
     assert!(alert_drafts(&serde_json::json!({"alerts": "nope"})).is_empty());
 }
 

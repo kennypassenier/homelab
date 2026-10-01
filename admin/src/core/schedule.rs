@@ -166,15 +166,15 @@ impl When {
         if parse_hhmm(at).is_none() {
             return Err(format!("{at:?} is not a time; write HH:MM, 00:00 to 23:59"));
         }
-        if let When::Week { days, .. } = self {
-            if days.is_empty() || days.iter().any(|d| *d > 6) {
-                return Err("days are 0 (Monday) to 6 (Sunday), at least one".into());
-            }
+        if let When::Week { days, .. } = self
+            && (days.is_empty() || days.iter().any(|d| *d > 6))
+        {
+            return Err("days are 0 (Monday) to 6 (Sunday), at least one".into());
         }
-        if let When::Once { date, .. } = self {
-            if parse_date(date).is_none() {
-                return Err(format!("{date:?} is not a date; write YYYY-MM-DD"));
-            }
+        if let When::Once { date, .. } = self
+            && parse_date(date).is_none()
+        {
+            return Err(format!("{date:?} is not a date; write YYYY-MM-DD"));
         }
         Ok(())
     }
@@ -196,10 +196,10 @@ impl When {
         // can still lie after `after` near a clock change. Eight days cover
         // any weekly pattern.
         for day in today - 1..=today + 8 {
-            if let When::Week { days, .. } = self {
-                if !days.contains(&weekday(day)) {
-                    continue;
-                }
+            if let When::Week { days, .. } = self
+                && !days.contains(&weekday(day))
+            {
+                continue;
             }
             let (y, m, d) = civil_from_days(day);
             let t = resolve_local(y, m, d, hh, mm).instant();

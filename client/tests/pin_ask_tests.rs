@@ -2,11 +2,11 @@
 //! the registries 8 at a time, keeps the order, asks an identical reference
 //! once and stops asking a registry that did not answer.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use homelab_client::pinexists::{answer_pins, PIN_ASK_WIDTH};
+use homelab_client::pinexists::{PIN_ASK_WIDTH, answer_pins};
 use homelab_core::ops::pinexists::{PinAnswer, PinnedDigest};
 
 fn pin(registry: &str, n: usize) -> PinnedDigest {

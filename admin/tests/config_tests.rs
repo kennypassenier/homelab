@@ -95,7 +95,7 @@ fn arch_exposure_the_stacks_settings_keep_the_locks_on() {
 /// real one still does, to a host at least as new as itself.
 #[test]
 fn fix_158_a_dashboard_without_locks_never_attaches_for_ui_steps() {
-    use homelab_admin::shell::host_link::{greeting, LinkConfig};
+    use homelab_admin::shell::host_link::{LinkConfig, greeting};
     use homelab_proto::Command;
     let base = format!(
         "[admin]\nhost = \"10.10.10.250:8443\"\nhost_token = \"0123456789abcdef0123\"\n{ACCESS}"
@@ -113,9 +113,10 @@ fn fix_158_a_dashboard_without_locks_never_attaches_for_ui_steps() {
     assert!(!attaches(&real, "3.0.0"), "nor to a host older than itself");
     // Both still ask to read beside the queue.
     let g = greeting(&LinkConfig::from_admin(&dev), own);
-    assert!(g
-        .iter()
-        .any(|cmd| matches!(cmd, Command::SessionOptions { .. })));
+    assert!(
+        g.iter()
+            .any(|cmd| matches!(cmd, Command::SessionOptions { .. }))
+    );
 }
 
 /// dashboard-latch (Kenny, 2026-09-29, form "Latch"): the dashboard deploys

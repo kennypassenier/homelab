@@ -11,8 +11,8 @@ use crate::manifest::StackManifest;
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::Level;
 
-use super::util::shq;
 use super::OpCtx;
+use super::util::shq;
 
 /// One captured container image: `sha256:<id>` plus the `repo:tag` it ran as.
 #[derive(Debug, Clone)]
@@ -658,13 +658,12 @@ pub async fn update(
             let mut healthy = verify_app(exec, vmid, &stack, app).await?;
             if healthy {
                 let after = capture_app(exec, vmid, &stack, app).await?;
-                if images_changed(&captured, &after) {
-                    if let Err(why) =
+                if images_changed(&captured, &after)
+                    && let Err(why) =
                         settle(exec, vmid, &stack, app, &ran_before, &services).await?
-                    {
-                        settle_why = Some(why);
-                        healthy = false;
-                    }
+                {
+                    settle_why = Some(why);
+                    healthy = false;
                 }
             }
             if healthy {

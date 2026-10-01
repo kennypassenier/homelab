@@ -1,6 +1,6 @@
 //! arch-deploy-guard: a deploy may not silently undo another writer's deploy.
 
-use homelab_core::ops::deployguard::{applied_commit, decide, Ancestry};
+use homelab_core::ops::deployguard::{Ancestry, applied_commit, decide};
 
 #[test]
 fn arch_deploy_guard_reads_the_commit_from_the_summary() {

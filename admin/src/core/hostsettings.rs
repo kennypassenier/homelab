@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use homelab_core::hostconfig::{self, Access, KeyInfo, Kind, KEYS};
+use homelab_core::hostconfig::{self, Access, KEYS, KeyInfo, Kind};
 use homelab_proto::HostConfigFile;
 use serde::{Deserialize, Serialize};
 

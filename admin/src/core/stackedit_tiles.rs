@@ -106,10 +106,10 @@ pub fn tiles_problems(edit: &TilesEdit) -> Vec<String> {
                 k.to_string()
             }
         };
-        if let Some(o) = &item.origin {
-            if !seen_origins.insert(o.as_str()) {
-                out.push(format!("{}: listed twice", who(o)));
-            }
+        if let Some(o) = &item.origin
+            && !seen_origins.insert(o.as_str())
+        {
+            out.push(format!("{}: listed twice", who(o)));
         }
         if item.delete {
             if item.origin.is_none() {
@@ -130,13 +130,13 @@ pub fn tiles_problems(edit: &TilesEdit) -> Vec<String> {
         if item.tile.group.trim().is_empty() {
             out.push(format!("{}: needs a group", item.key));
         }
-        if let Some(w) = item.tile.watch_every {
-            if w < 10 {
-                out.push(format!(
-                    "{}: check every must be at least 10 s, not {w}",
-                    item.key
-                ));
-            }
+        if let Some(w) = item.tile.watch_every
+            && w < 10
+        {
+            out.push(format!(
+                "{}: check every must be at least 10 s, not {w}",
+                item.key
+            ));
         }
         if let Some(d) = item.tile.down_after {
             if d < 10 {
@@ -145,13 +145,13 @@ pub fn tiles_problems(edit: &TilesEdit) -> Vec<String> {
                     item.key
                 ));
             }
-            if let Some(w) = item.tile.watch_every {
-                if d < w {
-                    out.push(format!(
-                        "{}: down after ({d} s) must be at least check every ({w} s)",
-                        item.key
-                    ));
-                }
+            if let Some(w) = item.tile.watch_every
+                && d < w
+            {
+                out.push(format!(
+                    "{}: down after ({d} s) must be at least check every ({w} s)",
+                    item.key
+                ));
             }
         }
     }

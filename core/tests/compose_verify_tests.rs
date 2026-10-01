@@ -6,8 +6,8 @@
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::manifest::*;
-use homelab_core::ops::update::{settle_script, update};
 use homelab_core::ops::OpCtx;
+use homelab_core::ops::update::{settle_script, update};
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;

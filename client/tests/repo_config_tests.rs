@@ -8,8 +8,8 @@
 //! only its token.
 
 use homelab_client::repo_config::{
-    find_repo_file, load, reconcile_pin, resolve_host, ClientConfig, HostSource, DEFAULT_HOST,
-    REPO_FILE,
+    ClientConfig, DEFAULT_HOST, HostSource, REPO_FILE, find_repo_file, load, reconcile_pin,
+    resolve_host,
 };
 use std::path::{Path, PathBuf};
 

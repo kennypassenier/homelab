@@ -6,8 +6,8 @@
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::manifest::*;
-use homelab_core::ops::backup::{backup, restore_app, restore_with, BackupCfg};
 use homelab_core::ops::OpCtx;
+use homelab_core::ops::backup::{BackupCfg, backup, restore_app, restore_with};
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::VecSink;
@@ -177,9 +177,10 @@ async fn latest_is_the_newest_night_every_repository_has() {
         "paperless goes back to the night actual also has, not its own newest: {:?}",
         done
     );
-    assert!(done
-        .iter()
-        .any(|c| c.contains(ACTUAL) && c.contains("restore a1full")));
+    assert!(
+        done.iter()
+            .any(|c| c.contains(ACTUAL) && c.contains("restore a1full"))
+    );
 }
 
 #[tokio::test]

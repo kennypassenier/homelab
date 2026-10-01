@@ -12,9 +12,9 @@
 use std::collections::BTreeMap;
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
-use homelab_core::ops::fleetcheck::{check_passes, evaluate, GrowthLimits, LiveFacts, Severity};
+use homelab_core::ops::fleetcheck::{GrowthLimits, LiveFacts, Severity, check_passes, evaluate};
 use homelab_core::ops::pins::{
-    apply, evaluate_pins, gather, is_behind, RunningImage, UpstreamRelease, UPSTREAM_MAX_AGE_S,
+    RunningImage, UPSTREAM_MAX_AGE_S, UpstreamRelease, apply, evaluate_pins, gather, is_behind,
 };
 use homelab_core::state::{HostState, StackState};
 
@@ -196,11 +196,13 @@ async fn fix_83_github_is_asked_once_a_night_and_never_waited_on_twice() {
         skipped.checked_at, NOW,
         "and is not asked again tonight either"
     );
-    assert!(state.upstream_releases["github.com/cloudflare/cloudflared"]
-        .error
-        .as_deref()
-        .unwrap_or("")
-        .contains("timed out"));
+    assert!(
+        state.upstream_releases["github.com/cloudflare/cloudflared"]
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .contains("timed out")
+    );
     const { assert!(UPSTREAM_MAX_AGE_S >= 12 * 3600 && UPSTREAM_MAX_AGE_S < 24 * 3600) };
 }
 

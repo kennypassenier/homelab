@@ -11,20 +11,20 @@ use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use axum::Router;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
-use axum::Router;
 use futures_util::{SinkExt, StreamExt};
 use tokio::process::Command;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 use tracing::{error, info};
 
 use homelab_core::error::CoreError;
 use homelab_core::executor::{Cmd, CmdOutput, Executor};
-use homelab_core::ops::{deploy::deploy, OpCtx};
+use homelab_core::ops::{OpCtx, deploy::deploy};
 use homelab_core::runner::Journal;
 use homelab_core::safety::SafetyConfig;
 use homelab_core::sink::{PipelineEvent, Sink};
@@ -624,7 +624,10 @@ fn load_config_from(path: String) -> Config {
         std::process::exit(1);
     }
     if file.status_interval_s.is_some_and(|s| s < 10) {
-        eprintln!("FATAL: {}: status_interval_s must be at least 10 (each reading runs one probe per container)", path);
+        eprintln!(
+            "FATAL: {}: status_interval_s must be at least 10 (each reading runs one probe per container)",
+            path
+        );
         std::process::exit(1);
     }
     // fix-122: the runtime debug toggle, checked the same way at start as it
@@ -989,10 +992,10 @@ fn persist_settings(
 /// before it is written. `load_config_from` exits on the same list.
 fn startup_problems(file: &FileConfig) -> Vec<String> {
     let mut out = Vec::new();
-    if let Some(t) = &file.token {
-        if t.len() < 16 {
-            out.push("token must be at least 16 characters".into());
-        }
+    if let Some(t) = &file.token
+        && t.len() < 16
+    {
+        out.push("token must be at least 16 characters".into());
     }
     if file.status_interval_s.is_some_and(|s| s < 10) {
         out.push(
@@ -1003,10 +1006,10 @@ fn startup_problems(file: &FileConfig) -> Vec<String> {
     if let Err(e) = validate_tokens(file.tokens.as_deref().unwrap_or_default()) {
         out.push(e);
     }
-    if let Some(l) = &file.listen {
-        if l.parse::<SocketAddr>().is_err() {
-            out.push(format!("listen {:?} must be host:port", l));
-        }
+    if let Some(l) = &file.listen
+        && l.parse::<SocketAddr>().is_err()
+    {
+        out.push(format!("listen {:?} must be host:port", l));
     }
     if file.backup_hour.is_some_and(|h| h > 23) {
         out.push("backup_hour must be 0-23".into());
@@ -1014,13 +1017,14 @@ fn startup_problems(file: &FileConfig) -> Vec<String> {
     if file.retention.as_ref().is_some_and(|r| r.is_empty()) {
         out.push("retention needs at least one tier".into());
     }
-    if let Some(level) = &file.log_level {
-        if !level.trim().is_empty() && tracing_subscriber::EnvFilter::try_new(level).is_err() {
-            out.push(format!(
-                "log_level {:?} is not a tracing/EnvFilter directive (e.g. \"info\", \"debug\")",
-                level
-            ));
-        }
+    if let Some(level) = &file.log_level
+        && !level.trim().is_empty()
+        && tracing_subscriber::EnvFilter::try_new(level).is_err()
+    {
+        out.push(format!(
+            "log_level {:?} is not a tracing/EnvFilter directive (e.g. \"info\", \"debug\")",
+            level
+        ));
     }
     for job in file.zfs_jobs.iter().flatten() {
         if let Some(p) = homelab_core::ops::zfs::job_problems(job) {
@@ -2442,9 +2446,11 @@ span_days = 7\n";
         assert!(!probes.offsite_token_valid, "expired token must show");
         // And the diagnosis flags both problems.
         let checks = homelab_core::doctor::diagnose(&probes);
-        assert!(checks
-            .iter()
-            .any(|c| c.health != homelab_core::doctor::Health::Ok));
+        assert!(
+            checks
+                .iter()
+                .any(|c| c.health != homelab_core::doctor::Health::Ok)
+        );
     }
 
     /// The daemon's shared state around `config`, as `main` builds it.
@@ -2858,10 +2864,10 @@ span_days = 7\n";
             .unwrap();
         let answered = tokio::time::timeout(Duration::from_secs(10), async {
             while let Some(Ok(frame)) = rx.next().await {
-                if let WsMsg::Text(t) = frame {
-                    if let Ok(ServerMsg::RpcDone(r)) = serde_json::from_str::<ServerMsg>(&t) {
-                        return r.id == 7 && r.ok;
-                    }
+                if let WsMsg::Text(t) = frame
+                    && let Ok(ServerMsg::RpcDone(r)) = serde_json::from_str::<ServerMsg>(&t)
+                {
+                    return r.id == 7 && r.ok;
                 }
             }
             false
@@ -3187,10 +3193,12 @@ span_days = 7\n";
         );
         assert_eq!(n[1]["since"], 95);
         assert_eq!(n[1]["incident"], "100-backup-home");
-        assert!(n[1]["remedy"]
-            .as_str()
-            .unwrap()
-            .contains("`homelab backup home`"));
+        assert!(
+            n[1]["remedy"]
+                .as_str()
+                .unwrap()
+                .contains("`homelab backup home`")
+        );
         let first = n[0]["seq"].as_u64().unwrap();
         assert_eq!(v["last_seq"], n[1]["seq"]);
         let after = handle_rpc(
@@ -3328,8 +3336,8 @@ span_days = 7\n";
         token: &str,
         commands: Vec<(u64, Rpc)>,
     ) -> Vec<(u64, bool, String)> {
-        use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
         use tokio_tungstenite::tungstenite::Message as WsMsg;
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
         let mut request = format!("ws://{}/ws", addr).into_client_request().unwrap();
         request.headers_mut().insert(
             "Authorization",
@@ -3349,12 +3357,12 @@ span_days = 7\n";
         let mut out = Vec::new();
         let _ = tokio::time::timeout(Duration::from_secs(10), async {
             while let Some(Ok(frame)) = rx.next().await {
-                if let WsMsg::Text(t) = frame {
-                    if let Ok(ServerMsg::RpcDone(r)) = serde_json::from_str::<ServerMsg>(&t) {
-                        out.push((r.id, r.ok, r.message));
-                        if out.len() == n {
-                            return;
-                        }
+                if let WsMsg::Text(t) = frame
+                    && let Ok(ServerMsg::RpcDone(r)) = serde_json::from_str::<ServerMsg>(&t)
+                {
+                    out.push((r.id, r.ok, r.message));
+                    if out.len() == n {
+                        return;
                     }
                 }
             }
@@ -3424,8 +3432,8 @@ span_days = 7\n";
     /// the state but not drive; a step never waits behind the queue.
     #[tokio::test]
     async fn follow_ui_steps_are_relayed_to_the_attached_dashboard_by_scope() {
-        use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
         use tokio_tungstenite::tungstenite::Message as WsMsg;
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
         let (state, _dir) = scoped_state("ui");
         let addr = serve_state_on_loopback(state, naming_handler).await;
         // The dashboard: attaches, then answers every step with what it saw.
@@ -4104,13 +4112,10 @@ span_days = 7\n";
             "path withheld: {:?}",
             routes
         );
-        assert!(plaintext_bearer_routes(
-            Some("https://kyu.example/publish"),
-            Some("tok"),
-            None,
-            None
-        )
-        .is_empty());
+        assert!(
+            plaintext_bearer_routes(Some("https://kyu.example/publish"), Some("tok"), None, None)
+                .is_empty()
+        );
         assert!(
             plaintext_bearer_routes(Some("http://127.0.0.1:8080/x"), Some("tok"), None, None)
                 .is_empty(),
@@ -4494,24 +4499,26 @@ span_days = 7\n";
         assert!(plan.is_empty());
 
         // Outside the night window (fix-129: 04:00-06:00): nothing at all.
-        assert!(nightly_plan(
-            4,
-            7,
-            now,
-            &[("a".into(), true, stale)],
-            &NightlyState {
-                last_restore_drill: now,
-                last_integrity_check: now,
-                restore_drill_interval_s: 90 * 24 * 3600,
-                last_host_meta: 0,
-                last_zfs: now,
-                zfs_configured: false,
-                devices_configured: false,
-                second_copy_configured: false,
-                last_second_copy: 0,
-            }
-        )
-        .is_empty());
+        assert!(
+            nightly_plan(
+                4,
+                7,
+                now,
+                &[("a".into(), true, stale)],
+                &NightlyState {
+                    last_restore_drill: now,
+                    last_integrity_check: now,
+                    restore_drill_interval_s: 90 * 24 * 3600,
+                    last_host_meta: 0,
+                    last_zfs: now,
+                    zfs_configured: false,
+                    devices_configured: false,
+                    second_copy_configured: false,
+                    last_second_copy: 0,
+                }
+            )
+            .is_empty()
+        );
 
         // H8: a parked stack sits out, but the host-meta backup does not
         // depend on any stack being active.
@@ -4839,10 +4846,10 @@ impl Executor for RealExecutor {
             }
             // fix-51: the rename is only durable once the directory entry
             // is; without this a power cut can bring the old file back.
-            if let Some(parent) = p.parent() {
-                if let Ok(d) = std::fs::File::open(parent) {
-                    let _ = d.sync_all();
-                }
+            if let Some(parent) = p.parent()
+                && let Ok(d) = std::fs::File::open(parent)
+            {
+                let _ = d.sync_all();
             }
             Ok(())
         })
@@ -4916,11 +4923,11 @@ impl Sink for BroadcastSink {
                 }
             }
             PipelineEvent::StepFinished { step, changed, .. } => {
-                if let Ok(mut t) = self.timings.lock() {
-                    if let Some(open) = t.iter_mut().rev().find(|x| x.end == 0 && &x.step == step) {
-                        open.end = unix_now();
-                        open.changed = *changed;
-                    }
+                if let Ok(mut t) = self.timings.lock()
+                    && let Some(open) = t.iter_mut().rev().find(|x| x.end == 0 && &x.step == step)
+                {
+                    open.end = unix_now();
+                    open.changed = *changed;
                 }
             }
             _ => {}
@@ -5002,12 +5009,12 @@ impl Sink for BroadcastSink {
                 total,
             },
         };
-        if matches!(msg, ServerMsg::Log { .. }) {
-            if let Ok(mut ring) = self.recent.lock() {
-                ring.push_back(msg.clone());
-                while ring.len() > self.recent_cap {
-                    ring.pop_front();
-                }
+        if matches!(msg, ServerMsg::Log { .. })
+            && let Ok(mut ring) = self.recent.lock()
+        {
+            ring.push_back(msg.clone());
+            while ring.len() > self.recent_cap {
+                ring.pop_front();
             }
         }
         let _ = self.log_tx.send(msg);
@@ -6160,7 +6167,7 @@ async fn run_restore_drill(
     target: &str,
     pg: Option<&homelab_core::ops::restoredrill::PostgresCheck>,
 ) -> homelab_core::ops::restoredrill::Outcome {
-    use homelab_core::ops::restoredrill::{verdict, Outcome};
+    use homelab_core::ops::restoredrill::{Outcome, verdict};
     let _ = exec.run(&Cmd::new("rm", &["-rf", target], 120)).await;
     let restored = homelab_core::ops::backup::restore_into(exec, cfg, repo, target).await;
     let outcome = match restored {
@@ -6609,19 +6616,18 @@ fn record_history(state: &AppState, entry: &homelab_core::history::HistoryEntry)
     let big = std::fs::metadata(&path)
         .map(|m| m.len() as usize > state.config.history_max_bytes)
         .unwrap_or(false);
-    if big {
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            if let Some(kept) = homelab_core::history::prune(
-                &text,
-                unix_now(),
-                state.config.history_max_age_s,
-                state.config.history_max_bytes / 2,
-            ) {
-                let tmp = format!("{}.tmp", path);
-                if std::fs::write(&tmp, kept).is_ok() {
-                    let _ = std::fs::rename(&tmp, &path);
-                }
-            }
+    if big
+        && let Ok(text) = std::fs::read_to_string(&path)
+        && let Some(kept) = homelab_core::history::prune(
+            &text,
+            unix_now(),
+            state.config.history_max_age_s,
+            state.config.history_max_bytes / 2,
+        )
+    {
+        let tmp = format!("{}.tmp", path);
+        if std::fs::write(&tmp, kept).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
         }
     }
 }
@@ -6805,10 +6811,10 @@ async fn scheduler_loop(state: AppState) {
         // thing an `await` stuck forever cannot do.
         touch_scheduler_heartbeat(&state);
         spawn_mirror_push(&state); // D5 retry queue: try again every tick
-                                   // password-chain-bus-factor: the standing checks exist whether or
-                                   // not nightly backups are scheduled — a disabled scheduler must not
-                                   // also silence the one question that is on a clock rather than a
-                                   // deploy.
+        // password-chain-bus-factor: the standing checks exist whether or
+        // not nightly backups are scheduled — a disabled scheduler must not
+        // also silence the one question that is on a clock rather than a
+        // deploy.
         {
             let tick_now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -6840,7 +6846,9 @@ async fn scheduler_loop(state: AppState) {
             Err(_) => None,
         };
         let Some(local_hour) = local_hour else {
-            tracing::error!("scheduler: cannot determine local hour ('date' failed) — nightly run skipped THIS TICK; investigate");
+            tracing::error!(
+                "scheduler: cannot determine local hour ('date' failed) — nightly run skipped THIS TICK; investigate"
+            );
             continue;
         };
         if !in_night_window(hour, local_hour) {
@@ -7085,37 +7093,37 @@ async fn scheduler_loop(state: AppState) {
         // 2026-09-02 a hand-run drill declared a restore identical to live by
         // comparing two md5 sums that both belonged to a zero-byte file, and
         // a drill that can be satisfied by empty files rehearses nothing.
-        if plan.contains(&NightlyTask::RestoreDrill) {
-            if let Some(repo) = drill_pick.clone() {
-                let cfg = homelab_core::ops::backup::BackupCfg {
-                    tiers: tiers.clone(),
-                    ..state.config.backup.clone()
-                };
-                // fix-62: a data pool, not the state dir on pve-root — the
-                // drill's own target used to fill the root disk.
-                let target = format!(
-                    "{}/restore-drill",
-                    state.config.restore_drill_scratch_dir.trim_end_matches('/')
-                );
-                let pg = homelab_core::ops::restoredrill::postgres_check(&pg_stacks, &repo);
-                let outcome = run_restore_drill(&exec, &cfg, &repo, &target, pg.as_ref()).await;
-                match &outcome {
-                    homelab_core::ops::restoredrill::Outcome::Passed {
-                        files,
-                        largest_bytes,
-                    } => info!(
-                        "restore drill: {} came back with {} file(s), largest {} bytes",
-                        repo, files, largest_bytes
-                    ),
-                    homelab_core::ops::restoredrill::Outcome::Failed(why) => {
-                        tracing::error!("restore drill: {} proved nothing :: {}", repo, why)
-                    }
+        if plan.contains(&NightlyTask::RestoreDrill)
+            && let Some(repo) = drill_pick.clone()
+        {
+            let cfg = homelab_core::ops::backup::BackupCfg {
+                tiers: tiers.clone(),
+                ..state.config.backup.clone()
+            };
+            // fix-62: a data pool, not the state dir on pve-root — the
+            // drill's own target used to fill the root disk.
+            let target = format!(
+                "{}/restore-drill",
+                state.config.restore_drill_scratch_dir.trim_end_matches('/')
+            );
+            let pg = homelab_core::ops::restoredrill::postgres_check(&pg_stacks, &repo);
+            let outcome = run_restore_drill(&exec, &cfg, &repo, &target, pg.as_ref()).await;
+            match &outcome {
+                homelab_core::ops::restoredrill::Outcome::Passed {
+                    files,
+                    largest_bytes,
+                } => info!(
+                    "restore drill: {} came back with {} file(s), largest {} bytes",
+                    repo, files, largest_bytes
+                ),
+                homelab_core::ops::restoredrill::Outcome::Failed(why) => {
+                    tracing::error!("restore drill: {} proved nothing :: {}", repo, why)
                 }
-                record_state(&store, "restore drill", |sn| {
-                    homelab_core::ops::restoredrill::record(sn, &drill_repos, &repo, &outcome, now)
-                })
-                .await;
             }
+            record_state(&store, "restore drill", |sn| {
+                homelab_core::ops::restoredrill::record(sn, &drill_repos, &repo, &outcome, now)
+            })
+            .await;
         }
 
         // Route A: the devices this suite may not touch, asked for their own
@@ -7160,63 +7168,63 @@ async fn scheduler_loop(state: AppState) {
         // repository copied into the second repository set, after all of
         // tonight's backups and before the ZFS replication below, so the
         // replica on HDD18TB carries tonight's copy too.
-        if plan.contains(&NightlyTask::SecondCopy) {
-            if let Some(ds) = state.config.second_copy_dataset.clone() {
-                let cfg = state.config.backup.clone();
-                let repos = copy_policies.clone();
-                let report = run_mutating_op(&state, &exec, 0, "second-copy", |ctx| {
-                    Box::pin(async move {
-                        homelab_core::ops::secondcopy::copy_all(ctx, &cfg, &ds, &repos).await
-                    })
+        if plan.contains(&NightlyTask::SecondCopy)
+            && let Some(ds) = state.config.second_copy_dataset.clone()
+        {
+            let cfg = state.config.backup.clone();
+            let repos = copy_policies.clone();
+            let report = run_mutating_op(&state, &exec, 0, "second-copy", |ctx| {
+                Box::pin(async move {
+                    homelab_core::ops::secondcopy::copy_all(ctx, &cfg, &ds, &repos).await
                 })
-                .await;
-                if !report.ok {
-                    tracing::error!(
-                        "scheduler: the second copy did not complete — the repositories it names \
+            })
+            .await;
+            if !report.ok {
+                tracing::error!(
+                    "scheduler: the second copy did not complete — the repositories it names \
                          exist on Google Drive only tonight"
-                    );
-                }
+                );
             }
         }
 
         // fix-96: one repository checked per night, both copies; once a month
         // per repository the check also reads a slice of the data. Read after
         // the copy above, which records which repositories have a copy yet.
-        if plan.contains(&NightlyTask::IntegrityCheck) {
-            if let Ok(fresh) = store.load().await {
-                let names: Vec<String> = copy_policies.iter().map(|p| p.repo.clone()).collect();
-                if let Some(repo) = homelab_core::ops::secondcopy::pick(&fresh, &names) {
-                    let subset = homelab_core::ops::secondcopy::data_subset(
-                        &fresh,
-                        &repo,
-                        now,
-                        state.config.integrity_data_read_interval_s,
-                    );
-                    let local = state
-                        .config
-                        .second_copy_dataset
-                        .clone()
-                        .filter(|_| homelab_core::ops::secondcopy::check_local(&fresh, &repo));
-                    let cfg = state.config.backup.clone();
-                    let report = run_mutating_op(&state, &exec, 0, "restic-check", |ctx| {
-                        Box::pin(async move {
-                            homelab_core::ops::secondcopy::check_repo(
-                                ctx,
-                                &cfg,
-                                &repo,
-                                local.as_deref(),
-                                subset,
-                            )
-                            .await
-                        })
+        if plan.contains(&NightlyTask::IntegrityCheck)
+            && let Ok(fresh) = store.load().await
+        {
+            let names: Vec<String> = copy_policies.iter().map(|p| p.repo.clone()).collect();
+            if let Some(repo) = homelab_core::ops::secondcopy::pick(&fresh, &names) {
+                let subset = homelab_core::ops::secondcopy::data_subset(
+                    &fresh,
+                    &repo,
+                    now,
+                    state.config.integrity_data_read_interval_s,
+                );
+                let local = state
+                    .config
+                    .second_copy_dataset
+                    .clone()
+                    .filter(|_| homelab_core::ops::secondcopy::check_local(&fresh, &repo));
+                let cfg = state.config.backup.clone();
+                let report = run_mutating_op(&state, &exec, 0, "restic-check", |ctx| {
+                    Box::pin(async move {
+                        homelab_core::ops::secondcopy::check_repo(
+                            ctx,
+                            &cfg,
+                            &repo,
+                            local.as_deref(),
+                            subset,
+                        )
+                        .await
                     })
-                    .await;
-                    if !report.ok {
-                        tracing::error!(
-                            "scheduler: restic check found a problem — {}",
-                            report.message
-                        );
-                    }
+                })
+                .await;
+                if !report.ok {
+                    tracing::error!(
+                        "scheduler: restic check found a problem — {}",
+                        report.message
+                    );
                 }
             }
         }
@@ -7231,7 +7239,9 @@ async fn scheduler_loop(state: AppState) {
             if report.ok {
                 record_state(&store, "last_zfs", |s| s.last_zfs = now).await;
             } else {
-                tracing::error!("scheduler: ZFS replication FAILED — investigate; the old cron script used to fail silently, this one does not");
+                tracing::error!(
+                    "scheduler: ZFS replication FAILED — investigate; the old cron script used to fail silently, this one does not"
+                );
             }
         }
 
@@ -7264,10 +7274,10 @@ async fn scheduler_loop(state: AppState) {
         // 2026-10-01): once a night, like the integrity check — this used
         // to run only from the workstation (`homelab check`), so a night
         // nobody ran it went unwatched.
-        if let Ok(fresh) = store.load().await {
-            if homelab_core::ops::restoredrill::due(fresh.last_edge_check, now, 24 * 3600) {
-                run_nightly_edge_check(&state, &exec, now).await;
-            }
+        if let Ok(fresh) = store.load().await
+            && homelab_core::ops::restoredrill::due(fresh.last_edge_check, now, 24 * 3600)
+        {
+            run_nightly_edge_check(&state, &exec, now).await;
         }
 
         // Y4: after the night's work, hold the record against the machine.
@@ -7861,7 +7871,8 @@ async fn park_after_night(
     if parked {
         tracing::warn!(
             "scheduler: nightly update for {} FAILED — automatic updates parked, backups continue (H8, fix-59); investigate, then resume with `homelab enable {}`",
-            name, name
+            name,
+            name
         );
     }
     if parked {
@@ -8126,19 +8137,18 @@ fn record_notice(state: &AppState, n: &homelab_core::notify::HostNotice) {
     let big = std::fs::metadata(&path)
         .map(|m| m.len() as usize > state.config.history_max_bytes)
         .unwrap_or(false);
-    if big {
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            if let Some(kept) = homelab_core::notify::prune_notices(
-                &text,
-                unix_now(),
-                state.config.history_max_age_s,
-                state.config.history_max_bytes / 2,
-            ) {
-                let tmp = format!("{}.tmp", path);
-                if std::fs::write(&tmp, kept).is_ok() {
-                    let _ = std::fs::rename(&tmp, &path);
-                }
-            }
+    if big
+        && let Ok(text) = std::fs::read_to_string(&path)
+        && let Some(kept) = homelab_core::notify::prune_notices(
+            &text,
+            unix_now(),
+            state.config.history_max_age_s,
+            state.config.history_max_bytes / 2,
+        )
+    {
+        let tmp = format!("{}.tmp", path);
+        if std::fs::write(&tmp, kept).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
         }
     }
 }
@@ -8401,11 +8411,7 @@ async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) -> R
         }
     }
     record_notify_outcome(state, exec, delivered, &last).await;
-    if delivered {
-        Ok(())
-    } else {
-        Err(last)
-    }
+    if delivered { Ok(()) } else { Err(last) }
 }
 
 /// fix-51 (expert panel, state-writes-race, 2026-09-27): every short
@@ -8495,7 +8501,7 @@ async fn fetch_live_edge(
     header_file: &str,
     ids: &homelab_core::ops::edge::EdgeIds,
 ) -> Result<homelab_core::ops::edge::EdgeState, String> {
-    use homelab_core::ops::edge::{project_apps, project_dns, project_tunnel, EdgeState};
+    use homelab_core::ops::edge::{EdgeState, project_apps, project_dns, project_tunnel};
     let tunnel = edge_get(
         exec,
         header_file,
@@ -8699,10 +8705,10 @@ impl<'a> BusyMark<'a> {
 
     /// One more item of a batch is finished.
     fn step(state: &AppState) {
-        if let Ok(mut b) = state.busy.lock() {
-            if let Some(h) = b.as_mut() {
-                h.done += 1;
-            }
+        if let Ok(mut b) = state.busy.lock()
+            && let Some(h) = b.as_mut()
+        {
+            h.done += 1;
         }
     }
 }
@@ -9121,21 +9127,20 @@ async fn gather_host_capacity(
     native_backup_staging_dir: Option<&str>,
     native_backup_staging_cap_mib: u64,
 ) -> Vec<homelab_core::ops::fleetcheck::HostCapacityFact> {
-    use homelab_core::ops::fleetcheck::{parse_df_pcent, HostCapacityFact, HostCapacityMetric};
+    use homelab_core::ops::fleetcheck::{HostCapacityFact, HostCapacityMetric, parse_df_pcent};
     let mut out = Vec::new();
 
     if let Ok(o) = exec
         .run(&Cmd::new("df", &["--output=pcent", "/"], 15))
         .await
+        && let Some(pct) = parse_df_pcent(&o.stdout)
     {
-        if let Some(pct) = parse_df_pcent(&o.stdout) {
-            out.push(HostCapacityFact {
-                metric: HostCapacityMetric::PveRoot,
-                subject: "pve".into(),
-                used_pct: pct,
-                detail: format!("{}% full", pct),
-            });
-        }
+        out.push(HostCapacityFact {
+            metric: HostCapacityMetric::PveRoot,
+            subject: "pve".into(),
+            used_pct: pct,
+            detail: format!("{}% full", pct),
+        });
     }
 
     // The default Proxmox thin pool: volume group `pve`, logical volume
@@ -9153,23 +9158,21 @@ async fn gather_host_capacity(
             15,
         ))
         .await
-    {
-        if let Some((data, meta)) =
+        && let Some((data, meta)) =
             homelab_core::ops::fleetcheck::parse_thin_pool_percents(&o.stdout)
-        {
-            out.push(HostCapacityFact {
-                metric: HostCapacityMetric::ThinPoolData,
-                subject: "local-lvm".into(),
-                used_pct: data,
-                detail: format!("{}% full (data)", data),
-            });
-            out.push(HostCapacityFact {
-                metric: HostCapacityMetric::ThinPoolMeta,
-                subject: "local-lvm".into(),
-                used_pct: meta,
-                detail: format!("{}% full (metadata)", meta),
-            });
-        }
+    {
+        out.push(HostCapacityFact {
+            metric: HostCapacityMetric::ThinPoolData,
+            subject: "local-lvm".into(),
+            used_pct: data,
+            detail: format!("{}% full (data)", data),
+        });
+        out.push(HostCapacityFact {
+            metric: HostCapacityMetric::ThinPoolMeta,
+            subject: "local-lvm".into(),
+            used_pct: meta,
+            detail: format!("{}% full (metadata)", meta),
+        });
     }
 
     if let Ok(o) = exec
@@ -9193,20 +9196,18 @@ async fn gather_host_capacity(
     if let Ok(o) = exec
         .run(&Cmd::new("journalctl", &["--disk-usage"], 15))
         .await
-    {
-        if let Some(used_mib) =
+        && let Some(used_mib) =
             homelab_core::ops::fleetcheck::parse_journal_disk_usage_mib(&o.stdout)
-        {
-            // hostunits::JOURNALD_CAP: SystemMaxUse=2G.
-            let cap_mib: u64 = 2048;
-            let pct = ((used_mib * 100) / cap_mib).min(255) as u8;
-            out.push(HostCapacityFact {
-                metric: HostCapacityMetric::Journald,
-                subject: "pve".into(),
-                used_pct: pct,
-                detail: format!("{} MiB of its {} MiB cap ({}%)", used_mib, cap_mib, pct),
-            });
-        }
+    {
+        // hostunits::JOURNALD_CAP: SystemMaxUse=2G.
+        let cap_mib: u64 = 2048;
+        let pct = ((used_mib * 100) / cap_mib).min(255) as u8;
+        out.push(HostCapacityFact {
+            metric: HostCapacityMetric::Journald,
+            subject: "pve".into(),
+            used_pct: pct,
+            detail: format!("{} MiB of its {} MiB cap ({}%)", used_mib, cap_mib, pct),
+        });
     }
 
     if let (Some(base), Some(cap_mib)) = (prometheus_url, tsdb_retention_size_mib) {
@@ -9217,20 +9218,19 @@ async fn gather_host_capacity(
         if let Ok(o) = exec
             .run(&Cmd::new("curl", &["-s", "-m", "10", &q], 20))
             .await
+            && let Some(bytes) = homelab_core::ops::fleetcheck::parse_prometheus_scalar(&o.stdout)
         {
-            if let Some(bytes) = homelab_core::ops::fleetcheck::parse_prometheus_scalar(&o.stdout) {
-                let used_mib = (bytes / 1024.0 / 1024.0).round() as u64;
-                let pct = ((used_mib * 100) / cap_mib.max(1)).min(255) as u8;
-                out.push(HostCapacityFact {
-                    metric: HostCapacityMetric::PrometheusTsdb,
-                    subject: "Prometheus".into(),
-                    used_pct: pct,
-                    detail: format!(
-                        "{} MiB of its {} MiB retention.size ({}%)",
-                        used_mib, cap_mib, pct
-                    ),
-                });
-            }
+            let used_mib = (bytes / 1024.0 / 1024.0).round() as u64;
+            let pct = ((used_mib * 100) / cap_mib.max(1)).min(255) as u8;
+            out.push(HostCapacityFact {
+                metric: HostCapacityMetric::PrometheusTsdb,
+                subject: "Prometheus".into(),
+                used_pct: pct,
+                detail: format!(
+                    "{} MiB of its {} MiB retention.size ({}%)",
+                    used_mib, cap_mib, pct
+                ),
+            });
         }
     }
 
@@ -9239,22 +9239,21 @@ async fn gather_host_capacity(
     // anything found here at all is worth a look well before it could ever
     // fill its own cap, which is why its thresholds are far lower than
     // every other reading above.
-    if let Some(dir) = native_backup_staging_dir {
-        if let Ok(o) = exec.run(&Cmd::new("du", &["-sm", dir], 30)).await {
-            if let Some(used_mib) = homelab_core::ops::fleetcheck::parse_du_sm(&o.stdout) {
-                let cap = native_backup_staging_cap_mib.max(1);
-                let pct = ((used_mib * 100) / cap).min(255) as u8;
-                out.push(HostCapacityFact {
-                    metric: HostCapacityMetric::NativeBackupStaging,
-                    subject: dir.to_string(),
-                    used_pct: pct,
-                    detail: format!(
-                        "{} MiB of its {} MiB cap ({}%) — it should be empty between runs",
-                        used_mib, cap, pct
-                    ),
-                });
-            }
-        }
+    if let Some(dir) = native_backup_staging_dir
+        && let Ok(o) = exec.run(&Cmd::new("du", &["-sm", dir], 30)).await
+        && let Some(used_mib) = homelab_core::ops::fleetcheck::parse_du_sm(&o.stdout)
+    {
+        let cap = native_backup_staging_cap_mib.max(1);
+        let pct = ((used_mib * 100) / cap).min(255) as u8;
+        out.push(HostCapacityFact {
+            metric: HostCapacityMetric::NativeBackupStaging,
+            subject: dir.to_string(),
+            used_pct: pct,
+            detail: format!(
+                "{} MiB of its {} MiB cap ({}%) — it should be empty between runs",
+                used_mib, cap, pct
+            ),
+        });
     }
 
     out
@@ -9971,7 +9970,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                             ok: false,
                             message: format!("state unreadable: {}", e),
                             deferred: None,
-                        }
+                        };
                     }
                 };
                 match homelab_core::ops::retired::wipe_plan(
@@ -10094,7 +10093,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                             ok: false,
                             message: format!("state unreadable: {}", e),
                             deferred: None,
-                        }
+                        };
                     }
                 };
             let findings = homelab_core::ops::fleetcheck::evaluate(
@@ -10790,15 +10789,15 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         }
         Rpc::SetConfig(view) => {
             // Validate before persisting.
-            if let Some(h) = view.backup_hour {
-                if h > 23 {
-                    return RpcResponse {
-                        id: req.id,
-                        ok: false,
-                        message: "backup_hour must be 0-23".into(),
-                        deferred: None,
-                    };
-                }
+            if let Some(h) = view.backup_hour
+                && h > 23
+            {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: "backup_hour must be 0-23".into(),
+                    deferred: None,
+                };
             }
             if view.retention.is_empty() {
                 return RpcResponse {
@@ -10948,7 +10947,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         ok: false,
                         message: e,
                         deferred: None,
-                    }
+                    };
                 }
             };
             match issue_token_in(&raw, &name, scope, &plain)
@@ -11090,7 +11089,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         ok: false,
                         message: format!("bad binary payload: {}", e),
                         deferred: None,
-                    }
+                    };
                 }
             };
             let cfg = homelab_core::ops::selfupdate::SelfUpdateCfg::default();
@@ -11263,7 +11262,7 @@ fn prune_incidents(state_dir: &str, now: u64, max_age_days: u64, max_count: usiz
 /// partway). Best-effort and silent on an empty/missing directory: a state
 /// dir with nothing staged is the common case, not a fault.
 fn cleanup_push_staging(state_dir: &str, now: u64) -> usize {
-    use homelab_core::ops::util::{stale_push_staging, STALE_PUSH_STAGING_MAX_AGE_S};
+    use homelab_core::ops::util::{STALE_PUSH_STAGING_MAX_AGE_S, stale_push_staging};
     let entries: Vec<(String, u64)> = std::fs::read_dir(state_dir)
         .into_iter()
         .flatten()
@@ -11577,33 +11576,33 @@ async fn gather_security_probes(
     // fix-130 (second half): judged the same way the fleet check judges it
     // (`fleetcheck::unowned_route_files`) — only when both the listing and
     // the state parsed; an unreadable gateway is no fact, not an empty one.
-    if let (Some(hs), Ok(out)) = (&hs, &routes_out) {
-        if out.success() {
-            let on_disk: Vec<String> = out
-                .stdout
-                .lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty())
-                .map(str::to_string)
-                .collect();
-            probes.unowned_route_files = Some(homelab_core::ops::fleetcheck::unowned_route_files(
-                hs, &on_disk,
-            ));
-        }
+    if let (Some(hs), Ok(out)) = (&hs, &routes_out)
+        && out.success()
+    {
+        let on_disk: Vec<String> = out
+            .stdout
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect();
+        probes.unowned_route_files = Some(homelab_core::ops::fleetcheck::unowned_route_files(
+            hs, &on_disk,
+        ));
     }
 
     probes.password_file_ok = password_out.ok().map(|o| o.success());
 
-    if let Some(Ok(out)) = about_out {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&out.stdout) {
-            let n = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
-            if n("total") > 0 {
-                probes.drive = Some(DriveSpace {
-                    total: n("total"),
-                    free: n("free"),
-                    trashed: n("trashed"),
-                });
-            }
+    if let Some(Ok(out)) = about_out
+        && let Ok(v) = serde_json::from_str::<serde_json::Value>(&out.stdout)
+    {
+        let n = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+        if n("total") > 0 {
+            probes.drive = Some(DriveSpace {
+                total: n("total"),
+                free: n("free"),
+                trashed: n("trashed"),
+            });
         }
     }
 }

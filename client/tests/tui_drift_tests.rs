@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use homelab_client::tui::backend::BackendEvent;
-use homelab_client::tui::model::{update, Model, Msg, Screen};
+use homelab_client::tui::model::{Model, Msg, Screen, update};
 use homelab_proto::{FleetState, HostView, ServerMsg, StackView};
 
 struct Fixture {
@@ -177,10 +177,11 @@ fn fix_69_the_computed_hash_sets_the_badge_and_its_lines_go_to_the_log() {
         },
     );
     assert!(m.fleet.as_ref().unwrap().stacks[0].drift);
-    assert!(m
-        .logs
-        .iter()
-        .any(|l| l.source == "LOCAL" && l.msg == "[env] almanac <- latch"));
+    assert!(
+        m.logs
+            .iter()
+            .any(|l| l.source == "LOCAL" && l.msg == "[env] almanac <- latch")
+    );
     update(
         &mut m,
         Msg::LocalHash {

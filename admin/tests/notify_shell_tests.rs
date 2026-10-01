@@ -7,11 +7,11 @@ mod act_support;
 
 use std::sync::Arc;
 
-use act_support::{temp_dir, RecPusher, Recorder, TestClock};
+use act_support::{RecPusher, Recorder, TestClock, temp_dir};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use homelab_admin::core::notify::{DigestLine, Level, PushOutcome};
-use homelab_admin::shell::actions_notify::{hooks_router, HookSlot, NotifyCenter};
+use homelab_admin::shell::actions_notify::{HookSlot, NotifyCenter, hooks_router};
 use homelab_core::notify::HostNotice;
 use tower::ServiceExt as _;
 
@@ -223,10 +223,12 @@ async fn the_digest_goes_out_once_at_nine_only_when_something_waits() {
     assert_eq!(sent.len(), 1);
     let p: serde_json::Value = serde_json::from_str(&sent[0]).unwrap();
     assert_eq!(p["click_url"], "https://dash.example/notifications");
-    assert!(p["error"]
-        .as_str()
-        .unwrap()
-        .contains("backup of media failed"));
+    assert!(
+        p["error"]
+            .as_str()
+            .unwrap()
+            .contains("backup of media failed")
+    );
     assert_eq!(p["ok"], false, "so Home Assistant pushes it");
     // Once a day.
     clock.advance(600);

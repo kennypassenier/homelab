@@ -33,7 +33,10 @@ gate_tree_before=$(gate_tree_fingerprint)
 rm -f "$(git rev-parse --absolute-git-dir)/gate-pass"
 gate_stamp_ok=0
 if [ "${GATE_SUITE:-}" = full ] && [ "${GATE_FULL:-0}" = 1 ]; then
-  gate_suite_cmd=(cargo test --workspace)
+  # --no-fail-fast: one full run reports every failure, so only the
+  # failures need a rerun (2026-10-01: a fail-fast gate stopped at the first
+  # red binary twice and the rest of the suite never ran).
+  gate_suite_cmd=(cargo test --workspace --no-fail-fast)
   if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
     gate_stamp_ok=1
   fi

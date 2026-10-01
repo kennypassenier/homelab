@@ -4,7 +4,7 @@
   "type": "module",
   "description": "The admin dashboard's browser code: plain ES modules, no build step. These tools only check it (tech-js-checks).",
   "scripts": {
-    "check": "tsc -p jsconfig.json && prettier --check . && node --test test/",
+    "check": "tsc -p jsconfig.json && prettier --check . && node --import ./test/support/kp-register.mjs --test test/",
     "format": "prettier --write .",
     "lint": "tsc -p jsconfig.json && prettier --check ."
   },

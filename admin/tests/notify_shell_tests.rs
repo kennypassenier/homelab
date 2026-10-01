@@ -33,7 +33,7 @@ fn notice(seq: u64, ok: bool, req: Option<u64>) -> HostNotice {
         what: String::new(),
         consequence: "c".into(),
         remedy: "Run it again: `homelab backup media`.".into(),
-        page: "/app/stacks/media".into(),
+        page: "/stacks/media".into(),
         urgent: !ok,
         routed: "r".into(),
         push: if ok {
@@ -94,7 +94,7 @@ async fn host_notices_start_from_now_then_arrive_once_and_merge_into_jobs() {
     assert_eq!(n["kind"], "host_event");
     assert_eq!(n["level"], "critical");
     assert_eq!(n["since"], 990);
-    assert_eq!(n["link"], "/app/stacks/media");
+    assert_eq!(n["link"], "/stacks/media");
     assert_eq!(n["fixes"][0]["action"], "backup");
     assert_eq!(n["push"]["state"], "by_sender");
     assert!(pusher.sent.lock().unwrap().is_empty(), "the host pushed it");
@@ -135,7 +135,7 @@ fn alert_body(status: &str) -> String {
             "labels": {"alertname": "FilesystemAlmostFull", "severity": "warning", "device": "/dev/sda1"},
             "annotations": {"summary": "/dev/sda1 is over 90% full", "description": "d",
                 "consequence": "writes fail", "remedy": "free space",
-                "click_url": "https://admin.kp-soft.dev/app/checks"},
+                "click_url": "https://admin.kp-soft.dev/checks"},
             "startsAt": "2026-09-30T07:00:00.123Z",
             "fingerprint": "abc"
         }]
@@ -183,7 +183,7 @@ async fn the_alertmanager_hook_takes_its_own_token_and_stores_alerts() {
     assert_eq!(n["level"], "critical", "a disk almost full is urgent");
     assert_eq!(n["since"], 1_790_751_600);
     assert_eq!(n["consequence"], "writes fail");
-    assert_eq!(n["link"], "/app/checks");
+    assert_eq!(n["link"], "/health?block=checks");
     assert_eq!(n["push"]["who"], "Alertmanager");
     let (_, body) = post(app.clone(), Some("Bearer s3cret"), alert_body("resolved")).await;
     assert_eq!(body, r#"{"stored":1}"#);
@@ -222,7 +222,7 @@ async fn the_digest_goes_out_once_at_nine_only_when_something_waits() {
     let sent = pusher.sent.lock().unwrap().clone();
     assert_eq!(sent.len(), 1);
     let p: serde_json::Value = serde_json::from_str(&sent[0]).unwrap();
-    assert_eq!(p["click_url"], "https://dash.example/app/notifications");
+    assert_eq!(p["click_url"], "https://dash.example/notifications");
     assert!(p["error"]
         .as_str()
         .unwrap()

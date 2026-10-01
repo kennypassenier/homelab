@@ -2635,7 +2635,7 @@ pub fn open(
             } else {
                 "settings"
             };
-            let page = format!("/app/stacks/{stack}/{tab}");
+            let page = format!("/stacks/{stack}/{tab}");
             let plan_steps = |first: FormStep| {
                 vec![
                     first,
@@ -2979,7 +2979,7 @@ pub fn open(
                         fields: Vec::new(),
                     },
                 ],
-                format!("/app/stacks/{stack}/settings"),
+                format!("/stacks/{stack}/settings"),
             )
         }
         EditKind::Checks | EditKind::PublishApp => {
@@ -3089,7 +3089,7 @@ pub fn open(
                             label: "Checks".into(),
                             fields,
                         }),
-                        format!("/app/stacks/{stack}/checks"),
+                        format!("/stacks/{stack}/checks"),
                     )
                 }
                 _ => {
@@ -3104,7 +3104,7 @@ pub fn open(
                             label: "Publish".into(),
                             fields,
                         }),
-                        format!("/app/stacks/{stack}/apps"),
+                        format!("/stacks/{stack}/apps"),
                     )
                 }
             }
@@ -3157,7 +3157,7 @@ pub fn open(
                         fields: Vec::new(),
                     },
                 ],
-                "/app/settings".to_string(),
+                "/settings".to_string(),
             )
         }
         EditKind::Batch => {
@@ -3254,7 +3254,9 @@ pub fn open(
                     label: "Review and run".into(),
                     fields: batch_fields(ak, &list),
                 }],
-                "/app/".to_string(),
+                // A batch action is opened from the Overview page's own
+                // selection (drive.rs's Select step requires it).
+                "/overview".to_string(),
             )
         }
         EditKind::Import => {
@@ -3345,7 +3347,7 @@ pub fn open(
                         fields: Vec::new(),
                     },
                 ],
-                "/app/presets".to_string(),
+                "/presets".to_string(),
             )
         }
         EditKind::NewPreset => {
@@ -3377,7 +3379,7 @@ pub fn open(
                         fields: Vec::new(),
                     },
                 ],
-                "/app/presets".to_string(),
+                "/presets".to_string(),
             )
         }
         EditKind::Rollback => {
@@ -3419,7 +3421,7 @@ pub fn open(
                     label: "Choose".into(),
                     fields,
                 }],
-                format!("/app/stacks/{stack}"),
+                format!("/stacks/{stack}"),
             )
         }
     };

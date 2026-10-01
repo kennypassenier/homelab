@@ -532,7 +532,7 @@ function drawActionDialog(form, values, sources, driven) {
           "a",
           {
             class: "kp-button",
-            href: `/app/jobs?job=${job}`,
+            href: `/jobs?job=${job}`,
             "data-close-on-nav": "",
           },
           "Open in Jobs",
@@ -968,7 +968,7 @@ export function mountBatchPanel(batch, jobs) {
           { "data-job": String(r.job) },
           badge(b2),
           ` ${r.stack} `,
-          h("a", { href: `/app/jobs?job=${r.job}` }, `job ${r.job}`),
+          h("a", { href: `/jobs?job=${r.job}` }, `job ${r.job}`),
           ...(r.message
             ? [h("span", { class: "measured" }, ` · ${r.message}`)]
             : []),

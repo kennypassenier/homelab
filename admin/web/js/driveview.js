@@ -396,9 +396,8 @@ export function targetOf(step) {
       // checks/publish take "<stack>/<app>"; the page is the stack's own.
       const stackPart = step.target?.split("/")[0];
       if (tab && stackPart)
-        return { kind: "link", path: `/app/stacks/${stackPart}/${tab}` };
-      if (form === "host-settings")
-        return { kind: "link", path: "/app/settings" };
+        return { kind: "link", path: `/stacks/${stackPart}/${tab}` };
+      if (form === "host-settings") return { kind: "link", path: "/settings" };
       if (form.startsWith("batch") || form === "new-stack" || form === "import")
         return { kind: "none" };
       return { kind: "action", action: form };

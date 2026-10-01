@@ -1,5 +1,5 @@
 // One stack's page (feat-stacks-1) with its tabs: overview, apps, history,
-// logs and checks. The tab is in the path (/app/stacks/media/logs), what a
+// logs and checks. The tab is in the path (/stacks/media/logs), what a
 // tab filters on is in the query string (feat-overview-8).
 
 import { mountActionsArea } from "../actionsarea.js";
@@ -86,7 +86,7 @@ export function mount(root, params) {
     })),
   );
   root.replaceChildren(
-    h("p", { class: "crumb" }, h("a", { href: "/app/" }, "← Overview")),
+    h("p", { class: "crumb" }, h("a", { href: "/" }, "← Overview")),
     h("div", { class: "title-row" }, title, h("span", null, state, flags)),
     missing,
     tabs,
@@ -185,7 +185,7 @@ function overviewTab(panel, params) {
   );
   const shellLink = h(
     "a",
-    { class: "kp-button", href: "/app/shell" },
+    { class: "kp-button", href: "/shell" },
     "Open the shell",
   );
   links.append(shellLink);
@@ -217,7 +217,7 @@ function overviewTab(panel, params) {
     const d = stackDetail(f, params.name);
     if (!f || !d) return;
     const s = f.stacks.find((x) => x.name === params.name);
-    shellLink.setAttribute("href", `/app/shell?vmid=${s?.vmid ?? ""}`);
+    shellLink.setAttribute("href", `/shell?vmid=${s?.vmid ?? ""}`);
     fillFacts(facts, [
       ...d.facts,
       {

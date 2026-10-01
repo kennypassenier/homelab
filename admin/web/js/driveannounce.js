@@ -208,8 +208,8 @@ export function findTarget(step, ctl, s) {
       const links = [
         ...document.querySelectorAll(`#nav a[href="${href}"]`),
         ...document.querySelectorAll(`#page a[href="${href}"]`),
-        ...(t.path.startsWith("/app/stacks/")
-          ? document.querySelectorAll('#nav a[href^="/app/stacks"]')
+        ...(t.path.startsWith("/stacks/")
+          ? document.querySelectorAll('#nav a[href^="/stacks"]')
           : []),
       ].map((x) => /** @type {HTMLElement} */ (x));
       return links.find(visible) ?? onScreen(links[0] ?? null);

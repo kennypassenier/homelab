@@ -154,10 +154,7 @@ fn feat_ops_8_the_push_is_the_hosts_payload_from_homelab_admin() {
     assert_eq!(p["ok"], false);
     // Decision notify-detail: the short version, title and what to do.
     assert_eq!(p["error"], "t — b");
-    assert_eq!(
-        p["click_url"],
-        "https://admin.kp-soft.dev/app/notifications"
-    );
+    assert_eq!(p["click_url"], "https://admin.kp-soft.dev/notifications");
     let ok: serde_json::Value = serde_json::from_str(&push_payload(
         &draft(Kind::ActionDone, None, Some(900)),
         "3.62.2",

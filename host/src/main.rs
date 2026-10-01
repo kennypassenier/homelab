@@ -2922,7 +2922,7 @@ port = 5003
         assert_eq!(n.len(), 2, "{}", r.message);
         assert_eq!(n[0]["push"], "centre only");
         assert_eq!(n[0]["req"], 4);
-        assert_eq!(n[0]["page"], "/app/stacks/media");
+        assert_eq!(n[0]["page"], "/stacks/media");
         assert_eq!(n[1]["urgent"], true);
         assert!(
             n[1]["push"]

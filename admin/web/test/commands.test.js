@@ -1,4 +1,7 @@
-// feat-overview-3: the palette's entries are a registry.
+// feat-overview-3, nav-decisions: the palette's entries are a registry;
+// `pageCommands` renders from the page registry (pages.js), the same one
+// the nav bar does, so this primes it with `setPages` instead of a
+// hand-written page list.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -9,6 +12,45 @@ import {
   stackCommands,
   themeCommands,
 } from "../js/commands.js";
+import { setPages } from "../js/pages.js";
+
+setPages({
+  app: "admin",
+  brand: { title: "Homelab", href: "/overview" },
+  home: "/",
+  pages: [
+    {
+      id: "home",
+      title: "Apps",
+      path: "/",
+      group: null,
+      order: 0,
+      nav: true,
+      source: "app",
+      render: "app",
+    },
+    {
+      id: "host",
+      title: "Host",
+      path: "/host",
+      group: null,
+      order: 0,
+      nav: true,
+      source: "app",
+      render: "app",
+    },
+    {
+      id: "activity",
+      title: "Activity",
+      path: "/activity",
+      group: null,
+      order: 0,
+      nav: true,
+      source: "app",
+      render: "app",
+    },
+  ],
+});
 
 /** @type {import("../js/fleet.js").Fleet} */
 const fleet = /** @type {any} */ ({
@@ -45,7 +87,7 @@ test("pages, every stack with each tab, and the themes", () => {
   assert.equal(all.find((c) => c.id === "page:host")?.keys, "g h");
   assert.equal(
     all.find((c) => c.id === "stack:media:logs")?.href,
-    "/app/stacks/media/logs",
+    "/stacks/media/logs",
   );
   assert.equal(
     all.find((c) => c.id === "stack:media:overview")?.hint,

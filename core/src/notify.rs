@@ -430,16 +430,20 @@ pub fn cert_fingerprint(pem: &str) -> Result<String, String> {
 pub const DEFAULT_DASHBOARD_URL: &str = "";
 
 /// The dashboard pages a notice links to (admin/web/js/router.js).
+///
+/// nav-decisions (chassis-rs 3.1.0, 2026-10-01): every page lives at the
+/// root now (the web app mounts at `/`; `/app/…` from before is a 308
+/// chassis answers, never a path this crate should mint).
 pub mod page {
-    pub const NOTIFICATIONS: &str = "/app/notifications";
-    pub const HOST: &str = "/app/host";
-    pub const CHECKS: &str = "/app/checks";
-    pub const TODAY: &str = "/app/today";
-    pub const JOBS: &str = "/app/jobs";
+    pub const NOTIFICATIONS: &str = "/notifications";
+    pub const HOST: &str = "/host";
+    pub const CHECKS: &str = "/health?block=checks";
+    pub const TODAY: &str = "/health?block=today";
+    pub const JOBS: &str = "/jobs";
 
     /// One stack's page.
     pub fn stack(name: &str) -> String {
-        format!("/app/stacks/{}", name)
+        format!("/stacks/{}", name)
     }
 }
 

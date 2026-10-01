@@ -723,7 +723,7 @@ test("every stack's edit tabs and a new stack are palette commands, the open sta
       "edit:firewall:gateway",
     ],
   );
-  assert.equal(list[2].href, "/app/stacks/media/firewall");
+  assert.equal(list[2].href, "/stacks/media/firewall");
   list[0].run?.();
   assert.equal(opened, 1);
 });

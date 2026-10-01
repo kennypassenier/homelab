@@ -215,3 +215,23 @@ measurement or is closed by what replaced it:
 | fix-139 | the release workflow had not run on GitHub | obsolete: the GitHub release job is gone (local release build, 2026-09-28) |
 | gap-35 | the host reported every stack online and every app running | replaced by feat-platform-2 (real status); to measure on the dashboard once Kenny is in |
 | fix-44, fix-74, fix-113, fix-122, fix-123, fix-130, fix-92 | see each row | to measure one by one, read-only first |
+
+### nav-decisions, chassis-rs 3.1.0 (Kenny, 2026-10-01)
+
+Not a numbered feature: adopting chassis-rs's page registry (feat-pages-1)
+per Kenny's navigation decisions. main.rs registers every dashboard page
+through `app.page(...)` instead of the single hand-written `nav_entry`;
+`app.kit_pages_in_webapp()` draws the kit's own pages (Status, Clients,
+Passkeys) inside this app's bar, from new SPA views
+(admin/web/js/pages/{status,clients,passkeys}.js) reading
+`GET /api/kit/status|clients|passkeys`. The web app mounts at the root
+(chassis-rs 3.1.0's default): every `/app/...` address in the dashboard —
+routes, links, notifications, the scheduler, Live view's drive paths, the
+command palette — moved to its root path; an old `/app/...` link gets a
+308 from the kit. The "Home" tile page is renamed "Apps" and is the root
+`/`; Overview moved to `/overview`, hidden from the nav, reached from the
+"Homelab" brand link. The SPA's nav bar and command palette now render
+from `GET /api/kit/pages` (pages.js) instead of a hand-written list, so a
+page registered in Rust shows up in both without touching the frontend.
+Built against mocks/unit tests only, per the owner's "tests only after
+release go"; not yet measured live.

@@ -609,7 +609,7 @@ no second way in: the steps travel on the same TLS line as every other verb.
 
 | Step | What it does |
 |---|---|
-| `homelab ui goto <path>` | shows a page: `/app/stacks/media`, `stacks/media/logs`, `/app/jobs` |
+| `homelab ui goto <path>` | shows a page: `/stacks/media`, `stacks/media/logs`, `/jobs` |
 | `homelab ui open <action> [stack]` | opens an action's dialog (`deploy media`; a host-wide action such as `patch` takes no stack) |
 | `homelab ui open <edit form> …` | opens an edit form (below): `settings <stack>`, `raw <stack>`, `add-app <stack>`, `firewall <stack>`, `new-stack`, `host-settings`, `batch <action> [<stack>,<stack>]`, `rollback <stack>`, `import` |
 | `homelab ui select <stack>,<stack>` | owner decision 2026-09-30: ticks those rows in the Overview page's fleet table, exactly as a click would (refused off the Overview page, or naming a stack the fleet has not) |
@@ -725,7 +725,7 @@ homelab ui close
 An example session, a deploy of `media`:
 
 ```
-homelab ui goto /app/stacks/media
+homelab ui goto /stacks/media
 homelab ui open deploy media        # the review step: the CLI line, the deploy guard
 homelab ui press confirm            # the deploy runs once, on the dashboard's side
 homelab ui state                    # job 1790… running · step 2/3 … then done · complete
@@ -807,8 +807,8 @@ workstation), `testplan` and `update-policy` (repository documents), and
 
 | TUI / CLI | In the dashboard | `homelab ui` |
 |---|---|---|
-| `homelab today` | **Today** page: the verdict first, then every item with its remedy | `goto /app/today` |
-| `homelab check`, TUI `c` | **Today** page, "Run the fleet check": every finding with its remedy (the Cloudflare edge and the registries' pins stay on a workstation: they need its token) | `goto /app/today` |
+| `homelab today` | **Today** page: the verdict first, then every item with its remedy | `goto /health?block=today` |
+| `homelab check`, TUI `c` | **Today** page, "Run the fleet check": every finding with its remedy (the Cloudflare edge and the registries' pins stay on a workstation: they need its token) | `goto /health?block=today` |
 | `homelab checks answer <id> ok\|nok\|accept <days> <reason>` | an **Answer…** button on each manual check (Checks page, a stack's Checks tab); the form `answer-check` | `open answer-check`, `pick act-check <id>`, `pick act-verdict ok\|nok\|accept`, `type act-days 30`, `type act-note <reason>` |
 | `homelab incidents show <name>` | a **Show** button on each incident (Activity page, a stack's History tab): the bundle's text, secrets masked | — (a read) |
 | `homelab exec <vmid> <cmd>`, TUI SHELL | the form `exec` (one step, no typed name: Kenny, "we hebben genoeg security"; the host still refuses unless `exec_enabled = true`), and the **Shell** page, one line at a time, Up recalls | `open exec`, `type act-vmid 105`, `type act-command df -h`, `press confirm` (a token of scope `all`) |
@@ -819,11 +819,11 @@ workstation), `testplan` and `update-policy` (repository documents), and
 | `homelab apply` | **Apply** page (the plan per stack, each diff on request) and the form `apply` | `open apply`, `type act-destroy drill` |
 | `homelab runbook`, `export` | downloads: the runbook on the Host page, a stack's export bundle on its overview | — |
 | `homelab import <bundle.yml> <new-name> <vmid>` | **Import…** on the Overview and Presets pages: a bundle pasted or uploaded becomes a new stack through the plan and the commit every edit ends in (a bundle carrying a `.env` is refused) | `open import`, `edit import-bundle <file>`, `type import-name uptime2`, `type import-vmid 197`, `press next` (the plan), `press next`, `type edit-subject …`, `press confirm` |
-| `homelab presets` | **Presets** page | `goto /app/presets` |
+| `homelab presets` | **Presets** page | `goto /presets` |
 | `homelab guards <vmid>` | the form `guards-ct`: any container by its number (a stack's Apply guards still uses its own) | `open guards-ct`, `type act-vmid 104` |
 | `homelab ping` | **Host** page, "The line to the host": the round trip, the address and where it was set, the pinned certificate, the host's TLS fingerprint | — |
 | TUI `[CHANGED]` `[NOENV]` `[OFF]` | the Flags column of the fleet table and the badges beside a stack's state; drift and env on its overview. `[CHANGED]` needs **Compare with the files** (it runs latch once per stack for the secrets the host's hash covers, so it runs when asked, and a reading is reused for five minutes); until then drift says "not compared yet" | — |
-| TUI LOG_STREAM, DATA_TRANSFERS | **Live log** page: every line of every operation, whoever started it (this dashboard, a CLI or TUI session, the nightly round), filtered per stack, level and text; follow the tail or scroll back; the transfers' byte counters on top | `goto /app/log` |
+| TUI LOG_STREAM, DATA_TRANSFERS | **Live log** page: every line of every operation, whoever started it (this dashboard, a CLI or TUI session, the nightly round), filtered per stack, level and text; follow the tail or scroll back; the transfers' byte counters on top | `goto /log` |
 
 **Update the host.** The dashboard downloads the release's `homelab-host`,
 `SHA256SUMS` and `SHA256SUMS.minisig` from GitHub itself (the repository is
@@ -890,7 +890,7 @@ Tests: `admin/tests/parity_tests.rs`, `admin/tests/act_actions_tests.rs`
 
 **Status:** Built, not yet measured live (needs the next release).
 
-`/app/backups` lists every stack's restic repositories: a compose stack has
+`/backups` lists every stack's restic repositories: a compose stack has
 one per app that owns data (D25); a native (adopted) service has exactly
 one, named after the unit. Each row is read straight from the host
 (`GetBackups`, `core::ops::backup::backup_status`/`repo_status_of`) — newest
@@ -924,7 +924,7 @@ steps, and the failed-unpack case).
 
 **Status:** Built, not yet measured live (needs the next release).
 
-`/app/secrets` lists what a chosen stack declares in `latch_secrets` and
+`/secrets` lists what a chosen stack declares in `latch_secrets` and
 `latch_files` — read from the dashboard's own working copy of
 `lxc-compose.yml` (`admin::core::stackedit_latch::current`), the same source
 the stack editor's latch form already reads. No value is fetched ahead of a
@@ -2464,7 +2464,7 @@ and Grafana" (2026-09-30, `docs/admin/DECISIONS.md`); they need the host
 release, the admin release and a deploy of the metrics stack that carry it.
 
 **Everything lands in the dashboard's notification centre** (the bell, page
-`/app/notifications`), with its history: the host's operations (every
+`/notifications`), with its history: the host's operations (every
 deploy, backup, update, self-update, …, success or failure), the boot notice,
 a stack parked after a failed night, the nightly fleet check's report, every
 Alertmanager alert (firing and resolved), and the dashboard's own actions and
@@ -2514,7 +2514,7 @@ How it travels:
   ```json
   {"source": "homelab-host", "op": "<op>", "label": "<label>", "ok": false,
    "error": "<title> — <what to do>", "version": "<host version>",
-   "click_url": "https://admin.kp-soft.dev/app/stacks/<stack>"}
+   "click_url": "https://admin.kp-soft.dev/stacks/<stack>"}
   ```
 
   The link's address is `dashboard_url` in host.toml (default
@@ -3189,24 +3189,28 @@ drops them all. 18 probes replaced or complemented manual questions on
 2026-09-30; each was run once for real, through `lxc-attach` as the host
 runs it, and read healthy.
 
-### The dashboard: Start, Charts, Traffic and the minute watch
+### The dashboard: Apps, Metrics and the minute watch
 
 Kenny, 2026-09-30 ("Vervangen" four times; one place to look) and "Alle vier
 meteen" (2026-10-01): Homepage, Grafana, GoAccess and Uptime Kuma are
 retired — four separate apps replaced by four parts of this one dashboard.
+nav-decisions (chassis-rs 3.1.0, 2026-10-01): the tile page is now called
+**Apps** (it was Home, briefly, after the "Start" rename below) and sits
+at the dashboard's root `/`; the fleet Overview moved to `/overview`
+(reached from the "Homelab" brand link, not a bar entry).
 
-- **Start** (`/app/start`): one tile per service, grouped, from the stacks'
+- **Apps** (`/`): one tile per service, grouped, from the stacks'
   `tiles:` (keyed by the hostname a tile opens, or an id with `url:`; name,
   group, order, description, and an optional `reading` command whose lines
   show on the tile). The host reads them from the deployed manifests
   (`Command::Tiles`); nothing in the code names an app.
-- **Charts** (`/app/charts`): the hypervisor's panels, or one stack's, over
-  1h to 30d, from Prometheus (`admin.prometheus_url`,
-  `admin.charts_host`); the panels are `core::charts`.
-- **Traffic** (`/app/traffic`): requests per hostname and per status, and
-  the busiest hostnames and client addresses, from the proxy's access log in
-  Loki (`admin.traffic_job`); a stack ships a log file to Loki with
-  `log_files: [{path, job}]`.
+- **Metrics** (`/metrics`, System and Traffic tabs — Charts and Traffic
+  merged into one page 2026-09-30): the hypervisor's panels or one stack's
+  over 1h to 30d, from Prometheus (`admin.prometheus_url`,
+  `admin.charts_host`, the panels are `core::charts`); and requests per
+  hostname and per status, and the busiest hostnames and client addresses,
+  from the proxy's access log in Loki (`admin.traffic_job`; a stack ships a
+  log file to Loki with `log_files: [{path, job}]`).
 - **The minute watch**: the dashboard asks each routed tile through Traefik
   on the house network (`HOMELAB_ADMIN_WATCH_VIA`), each enabled container
   and the host every minute; five minutes without an answer is an urgent
@@ -3221,7 +3225,7 @@ fleet check's own findings. See `docs/admin/FEATURES.md` for the feature
 text and `docs/admin/REALIZATION_PLAN.md`'s `visuals` milestone for the
 decisions behind each one.
 
-- **Fleet view** (`/app/fleetview`): five sections, each reading its own
+- **Fleet view** (`/fleetview`): five sections, each reading its own
   route so a Prometheus outage only empties the two that need it.
   - **Topology** (feat-overview-7, `/data/topology`): which container may
     reach which, drawn as an inline SVG graph (deterministic layout: nodes
@@ -3252,7 +3256,7 @@ decisions behind each one.
     table instead of a sentence — it reads the same run the Health page's
     fleet check uses (`check_read`), so visiting both never starts the
     read twice.
-- **Backup calendar** (`/app/backupcalendar`, feat-overview-10): the last
+- **Backup calendar** (`/backupcalendar`, feat-overview-10): the last
   35 nights, one cell per day, green when every stack that keeps data has
   at least one restic snapshot that night, amber for some, red for none.
   Its own host command (`Command::BackupCalendar`, read-only, asks restic

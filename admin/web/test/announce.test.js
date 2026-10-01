@@ -18,7 +18,7 @@ const state = (o = {}) => ({
   active: true,
   by: "wsl",
   seq: 4,
-  page: "/app/",
+  page: "/",
   form: null,
   last_at: 1000,
   idle_s: 600,
@@ -31,7 +31,7 @@ const state = (o = {}) => ({
 
 const announce = (left = 3000, countdown = true) => ({
   id: 1,
-  step: { do: "goto", path: "/app/jobs" },
+  step: { do: "goto", path: "/jobs" },
   text: "go to the jobs page",
   countdown,
   total_ms: countdown ? 3000 : 0,
@@ -146,9 +146,9 @@ test("follow_live_the_plan_marks_done_current_and_changed", () => {
 });
 
 test("follow_live_a_step_is_marked_on_its_target", () => {
-  assert.deepEqual(targetOf({ do: "goto", path: "/app/jobs" }), {
+  assert.deepEqual(targetOf({ do: "goto", path: "/jobs" }), {
     kind: "link",
-    path: "/app/jobs",
+    path: "/jobs",
   });
   assert.deepEqual(targetOf({ do: "open", form: "deploy", target: "media" }), {
     kind: "action",
@@ -156,7 +156,7 @@ test("follow_live_a_step_is_marked_on_its_target", () => {
   });
   assert.deepEqual(
     targetOf({ do: "open", form: "firewall", target: "admin" }),
-    { kind: "link", path: "/app/stacks/admin/firewall" },
+    { kind: "link", path: "/stacks/admin/firewall" },
   );
   assert.deepEqual(targetOf({ do: "pick", field: "act-app" }), {
     kind: "field",
@@ -171,7 +171,7 @@ test("follow_live_a_step_is_marked_on_its_target", () => {
 });
 
 test("follow_live_an_announcement_marks_but_is_no_step", () => {
-  const local = { seq: 4, page: "/app/", form: null };
+  const local = { seq: 4, page: "/", form: null };
   const s = state({ announce: announce() });
   const ev = /** @type {import("../js/driveview.js").DriveEvent} */ ({
     kind: "announce",
@@ -183,7 +183,7 @@ test("follow_live_an_announcement_marks_but_is_no_step", () => {
   });
   const p = plan(local, ev, true);
   assert.deepEqual(p.ops, [
-    { op: "highlight", step: { do: "goto", path: "/app/jobs" } },
+    { op: "highlight", step: { do: "goto", path: "/jobs" } },
   ]);
   assert.equal(p.local, local);
   assert.deepEqual(plan(local, { ...ev, kind: "control" }, true).ops, []);

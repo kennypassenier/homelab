@@ -297,11 +297,7 @@ export function mount(root) {
                 ...(r.job
                   ? [
                       " ",
-                      h(
-                        "a",
-                        { href: `/app/jobs?job=${r.job}` },
-                        `job ${r.job}`,
-                      ),
+                      h("a", { href: `/jobs?job=${r.job}` }, `job ${r.job}`),
                     ]
                   : []),
               ),

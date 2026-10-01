@@ -237,7 +237,7 @@
   },
   "pages": [
     "",
-    "home",
+    "overview",
     "health",
     "metrics",
     "host",
@@ -248,11 +248,16 @@
     "schedules",
     "notifications",
     "firewall",
+    "backups",
+    "secrets",
     "settings",
     "shell",
     "presets",
     "fleetview",
-    "backupcalendar"
+    "backupcalendar",
+    "status",
+    "clients",
+    "passkeys"
   ],
   "stack_tabs": [
     "overview",

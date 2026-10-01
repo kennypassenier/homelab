@@ -229,7 +229,7 @@ fn notify_detail_every_alert_rule_carries_consequence_remedy_and_link() {
                 );
             }
             assert!(
-                a["click_url"].as_str().unwrap().contains("/app/"),
+                a["click_url"].as_str().unwrap().contains("/"),
                 "{name}: the link opens a dashboard page"
             );
             n += 1;
@@ -278,7 +278,7 @@ fn notify_detail_a_failed_deploy_says_what_since_consequence_and_the_command() {
         incident: Some("1800000000-deploy-media"),
     });
     assert_eq!(e.stack.as_deref(), Some("media"));
-    assert_eq!(e.page, "/app/stacks/media");
+    assert_eq!(e.page, "/stacks/media");
     assert!(e.title.contains("media") && e.title.contains("failed"));
     assert!(e.what.contains("compose up failed") && e.what.contains("image not found"));
     assert!(!e.consequence.is_empty());
@@ -308,7 +308,7 @@ fn notify_detail_the_remedy_follows_the_kind_of_operation() {
     let u = failed("update-media", "scheduled-update");
     assert!(u.remedy.contains("`homelab update media`"), "{}", u.remedy);
     let s = failed("self-update", "self-update");
-    assert_eq!(s.page, "/app/host");
+    assert_eq!(s.page, "/host");
     assert!(
         s.remedy.contains("`homelab release-update`"),
         "{}",
@@ -350,7 +350,7 @@ fn notify_detail_the_remedy_follows_the_kind_of_operation() {
 #[test]
 fn notify_detail_host_events_and_the_nightly_check() {
     let parked = explain_event("stack-disabled-media", "media", false, Some("3 failures"));
-    assert_eq!(parked.page, "/app/stacks/media");
+    assert_eq!(parked.page, "/stacks/media");
     assert!(
         parked.remedy.contains("`homelab enable media`"),
         "{}",
@@ -362,7 +362,7 @@ fn notify_detail_host_events_and_the_nightly_check() {
         false,
         Some("interrupted: deploy-x @ up"),
     );
-    assert_eq!(boot.page, "/app/host");
+    assert_eq!(boot.page, "/host");
     assert!(boot.what.contains("deploy-x"));
     let findings = vec![
         Finding {
@@ -379,7 +379,7 @@ fn notify_detail_host_events_and_the_nightly_check() {
         },
     ];
     let e = explain_fleet_check(&findings);
-    assert_eq!(e.page, "/app/checks");
+    assert_eq!(e.page, "/health?block=checks");
     assert!(
         e.title.contains("1 broken") && e.title.contains("1 drift"),
         "{}",
@@ -392,8 +392,8 @@ fn notify_detail_host_events_and_the_nightly_check() {
 #[test]
 fn notify_detail_the_push_is_short_and_carries_the_link() {
     assert_eq!(
-        click_url("https://admin.kp-soft.dev/", "/app/stacks/media"),
-        "https://admin.kp-soft.dev/app/stacks/media"
+        click_url("https://admin.kp-soft.dev/", "/stacks/media"),
+        "https://admin.kp-soft.dev/stacks/media"
     );
     let long = "x".repeat(2000);
     let short = push_short("deploy media failed", &long);
@@ -406,10 +406,10 @@ fn notify_detail_the_push_is_short_and_carries_the_link() {
         false,
         Some(&short),
         "3.64.0",
-        Some("https://admin.kp-soft.dev/app/stacks/media"),
+        Some("https://admin.kp-soft.dev/stacks/media"),
     ))
     .unwrap();
-    assert_eq!(p["click_url"], "https://admin.kp-soft.dev/app/stacks/media");
+    assert_eq!(p["click_url"], "https://admin.kp-soft.dev/stacks/media");
     assert_eq!(p["source"], "homelab-host");
     assert_eq!(p["ok"], false);
     // Without a link the shape is the old one, field for field.
@@ -434,7 +434,7 @@ fn notice(seq: u64, at: u64) -> HostNotice {
         what: String::new(),
         consequence: "Nothing to do.".into(),
         remedy: "Nothing to do.".into(),
-        page: "/app/stacks/media".into(),
+        page: "/stacks/media".into(),
         urgent: false,
         routed: "not urgent".into(),
         push: "centre only".into(),

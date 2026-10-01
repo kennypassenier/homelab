@@ -2721,7 +2721,7 @@ function drawFirewall(panel, stack, e, reload) {
         "p",
         { class: "measured" },
         `Written by the deploy to /etc/pve/firewall/${m.vmid}.fw from stacks/${stack}/lxc-compose.yml. `,
-        h("a", { href: "/app/firewall" }, "The fleet's matrix"),
+        h("a", { href: "/firewall" }, "The fleet's matrix"),
       ),
       h(
         "label",

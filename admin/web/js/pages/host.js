@@ -155,9 +155,9 @@ export function mount(root, ctx) {
     h(
       "p",
       { class: "actions-row host-links" },
-      h("a", { class: "kp-button", href: "/app/shell" }, "Open the shell"),
-      h("a", { class: "kp-button", href: "/app/log" }, "Live log"),
-      h("a", { class: "kp-button", href: "/app/presets" }, "Presets"),
+      h("a", { class: "kp-button", href: "/shell" }, "Open the shell"),
+      h("a", { class: "kp-button", href: "/log" }, "Live log"),
+      h("a", { class: "kp-button", href: "/presets" }, "Presets"),
       h(
         "a",
         {
@@ -174,7 +174,7 @@ export function mount(root, ctx) {
       "p",
       { class: "measured" },
       "Read-only here; ",
-      h("a", { href: "/app/settings" }, "the Settings page"),
+      h("a", { href: "/settings" }, "the Settings page"),
       " changes them.",
     ),
     settingsT.wrap,

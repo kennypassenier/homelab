@@ -776,14 +776,14 @@ test("notify-detail: level, what to do, the page and the Fix button", () => {
     since: 90,
     consequence: "It may run the old version.",
     remedy: "Run it again: `homelab deploy media`.",
-    link: "/app/stacks/media",
+    link: "/stacks/media",
     fixes: [{ action: "deploy", stack: "media", label: "Deploy" }],
   };
   const [r] = noticeRows([n]);
   assert.deepEqual(r.level, { label: "urgent", tone: "bad" });
   assert.equal(r.kind.label, "host");
   assert.equal(r.since, 90);
-  assert.equal(r.link, "/app/stacks/media");
+  assert.equal(r.link, "/stacks/media");
   assert.equal(r.push, "pushed by the host");
   assert.equal(fixLabel(r.fixes[0]), "Fix: Deploy");
   assert.equal(toastOf(n).tone, "error");

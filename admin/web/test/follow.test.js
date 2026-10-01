@@ -22,7 +22,7 @@ import {
   plan,
   readFollow,
 } from "../js/driveview.js";
-import { NAV, OTHER_PAGES, STACK_TABS } from "../js/router.js";
+import { DRIVABLE_PATHS, STACK_TABS } from "../js/router.js";
 import SPEC from "../js/formspec.json" with { type: "json" };
 import CASES from "./formspec-cases.json" with { type: "json" };
 
@@ -33,7 +33,7 @@ const state = (o = {}) => ({
   active: true,
   by: "wsl",
   seq: 3,
-  page: "/app/stacks/media",
+  page: "/stacks/media",
   form: {
     id: "action:deploy",
     action: "deploy",
@@ -74,9 +74,9 @@ const ev = (seq, step, s, applied = true) => ({
 });
 
 test("a tab that is off never changes: no operation for any event", () => {
-  const local = { seq: 2, page: "/app/jobs", form: null };
+  const local = { seq: 2, page: "/jobs", form: null };
   for (const step of [
-    { do: "goto", path: "/app/stacks/media" },
+    { do: "goto", path: "/stacks/media" },
     { do: "open", form: "deploy", target: "media" },
     { do: "type", field: "act-confirm", text: "media" },
     { do: "press", button: "confirm" },
@@ -95,20 +95,20 @@ test("a tab that is off never changes: no operation for any event", () => {
 });
 
 test("a tab that follows animates the next step and catches up after a gap", () => {
-  const before = { seq: 2, page: "/app/jobs", form: null };
+  const before = { seq: 2, page: "/jobs", form: null };
   const opened = plan(
     before,
     ev(3, { do: "open", form: "deploy", target: "media" }, state()),
     true,
   );
   assert.deepEqual(opened.ops, [
-    { op: "goto", path: "/app/stacks/media" },
+    { op: "goto", path: "/stacks/media" },
     { op: "open", action: "deploy", stack: "media" },
     { op: "sync" },
   ]);
   assert.deepEqual(opened.local, {
     seq: 3,
-    page: "/app/stacks/media",
+    page: "/stacks/media",
     form: { action: "deploy", stack: "media" },
   });
   const typed = plan(
@@ -130,12 +130,12 @@ test("a tab that follows animates the next step and catches up after a gap", () 
   ]);
   // A tab that turns on mid-drive (or missed an event) catches up at once.
   const late = plan(
-    { seq: -1, page: "/app/", form: null },
+    { seq: -1, page: "/", form: null },
     ev(5, { do: "press", button: "confirm" }, state({ seq: 5 })),
     true,
   );
   assert.deepEqual(late.ops, [
-    { op: "goto", path: "/app/stacks/media" },
+    { op: "goto", path: "/stacks/media" },
     { op: "open", action: "deploy", stack: "media" },
     { op: "set", name: "force", id: "act-force", value: false },
     { op: "sync" },
@@ -145,7 +145,7 @@ test("a tab that follows animates the next step and catches up after a gap", () 
     catchUp(
       {
         seq: 0,
-        page: "/app/stacks/media",
+        page: "/stacks/media",
         form: { action: "backup", stack: "media" },
       },
       state(),
@@ -200,10 +200,7 @@ test("the form description is one file: the browser's checks match the cases the
     assert.deepEqual(got, c.errors, JSON.stringify(c));
   }
   // The pages a driven `goto` may name are the router's.
-  const pages = [...NAV, ...OTHER_PAGES]
-    .map((n) => n.href.replace(/^\/app\/?/, ""))
-    .sort();
-  assert.deepEqual([...SPEC.pages].sort(), pages);
+  assert.deepEqual([...SPEC.pages].sort(), [...DRIVABLE_PATHS].sort());
   assert.deepEqual(
     SPEC.stack_tabs,
     STACK_TABS.map((t) => t.tab),
@@ -213,7 +210,7 @@ test("the form description is one file: the browser's checks match the cases the
 /** An edit form's state, as the dashboard's server sends it. */
 const editState = (/** @type {Partial<DriveState>} */ o = {}) =>
   state({
-    page: "/app/stacks/admin/firewall",
+    page: "/stacks/admin/firewall",
     form: {
       .../** @type {import("../js/driveview.js").DriveForm} */ (state().form),
       id: "edit:firewall:admin",
@@ -239,9 +236,9 @@ const editState = (/** @type {Partial<DriveState>} */ o = {}) =>
   });
 
 test("an edit form catches up by opening its own editor and syncing it", () => {
-  const ops = catchUp({ seq: -1, page: "/app/", form: null }, editState());
+  const ops = catchUp({ seq: -1, page: "/", form: null }, editState());
   assert.deepEqual(ops, [
-    { op: "goto", path: "/app/stacks/admin/firewall" },
+    { op: "goto", path: "/stacks/admin/firewall" },
     { op: "open", action: "firewall", stack: "admin", edit: true },
     { op: "sync" },
   ]);
@@ -250,7 +247,7 @@ test("an edit form catches up by opening its own editor and syncing it", () => {
 test("row, edit and a typed field name the field by its id", () => {
   const local = {
     seq: 3,
-    page: "/app/stacks/admin/firewall",
+    page: "/stacks/admin/firewall",
     form: { action: "firewall", stack: "admin" },
   };
   const s = editState();
@@ -271,7 +268,7 @@ test("row, edit and a typed field name the field by its id", () => {
 test("a press that hands over to another form closes this one and opens that", () => {
   const local = {
     seq: 3,
-    page: "/app/stacks/media",
+    page: "/stacks/media",
     form: { action: "rollback", stack: "media" },
   };
   const ops = animate(local, { do: "press", button: "next" }, state());

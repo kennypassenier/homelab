@@ -80,9 +80,7 @@ export function mount(root, ctx) {
         t.label,
       );
       b.addEventListener("click", () =>
-        ctx.navigate(
-          `/app/metrics${setParams(location.search, { tab: t.tab })}`,
-        ),
+        ctx.navigate(`/metrics${setParams(location.search, { tab: t.tab })}`),
       );
       return b;
     }),
@@ -106,7 +104,7 @@ export function mount(root, ctx) {
   if (tab === "system") fillStacks();
   pick.addEventListener("change", () =>
     ctx.navigate(
-      `/app/metrics${setParams(location.search, { stack: pick.value })}`,
+      `/metrics${setParams(location.search, { stack: pick.value })}`,
     ),
   );
 
@@ -124,7 +122,7 @@ export function mount(root, ctx) {
         r,
       );
       b.addEventListener("click", () =>
-        ctx.navigate(`/app/metrics${setParams(location.search, { range: r })}`),
+        ctx.navigate(`/metrics${setParams(location.search, { range: r })}`),
       );
       return b;
     }),

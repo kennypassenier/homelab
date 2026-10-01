@@ -151,7 +151,7 @@ async fn feat_stacks_4_a_press_runs_on_the_host_and_its_lines_and_progress_arriv
     assert!(w.pusher.sent.lock().unwrap().is_empty());
     let n = &w.notify.snapshot().await["notices"][0];
     assert_eq!(n["level"], "ok");
-    assert_eq!(n["link"], "/app/stacks/media");
+    assert_eq!(n["link"], "/stacks/media");
 }
 
 #[tokio::test]

@@ -1,8 +1,8 @@
 // The refusal page's alarm (Kenny, 2026-09-28: "Gemiste kans … het Alarm
 // component niet te gebruiken bij de weigering"). The guard answers 403 with
 // a page whose <main id="refusal"> carries the three lines as data; this
-// raises kp-themes' Alarm with them. Served from /app/refused/, which the
-// guard lets through, like /static/.
+// raises kp-themes' Alarm with them. Served at `/refused.js`
+// (`access::REFUSAL_SCRIPT`), before any lock, like `/static/`.
 
 import { showAlarm } from "/static/kp/js/alarm.js";
 

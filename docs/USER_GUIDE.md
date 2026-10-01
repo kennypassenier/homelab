@@ -960,6 +960,48 @@ has been staged by hand.
 Tests: `core/src/ops/secrets.rs` (`vault_rel`, `latch_rel_path`),
 `host/src/secrets.rs` (`latch_put` refuses without `HOMELAB_LATCH_ENV`).
 
+#### feat-settings-1 · Settings page (host.toml on pve)
+
+**Status:** Built.
+
+`/app/settings` lists every `host.toml` key the dashboard may show
+(`core/src/hostconfig.rs::KEYS`), grouped, with its current value, how it
+is changed ("Here", "Here with the name typed", "Here (secret,
+write-only)", or an ssh-only reason) and whether it takes effect live or
+needs the host to restart. Editable keys open a row form; Save stages
+every change, Review shows the diff, and Confirm writes `host.toml` in one
+shot — a key marked `Apply::Restart` queues "Save and restart the host"
+automatically. The whole page needs a token of scope `all`
+(`admin/web/js/pages/settings.js`, `admin/src/shell/edit.rs::save_host_settings`).
+
+**Per-machine tokens (fix-120, owner decision 2026-10-01).** Below the
+host.toml table, a second panel lists every machine's token by name and
+scope. "Issue token" asks for a name (what `homelab doctor` and the audit
+log will call that machine) and a scope (read / operate / all), then
+shows the plaintext exactly once — copy it into that machine's
+`HOMELAB_TOKEN` at once, it cannot be shown again. Revoke removes one
+entry immediately; the legacy single token (shown as "legacy") cannot be
+revoked here — see OPERATIONS_RUNBOOK's migration note for retiring it
+over ssh. The same is available from the command line:
+`homelab token issue|list|revoke`.
+
+**TLS pin fields (fix-126, owner decision 2026-10-01).** "Pinned hub
+certificate" and "Pinned hub fingerprint" under Notifications hold the
+path and SHA-256 of the certificate an `https://` notification route to
+kyu is pinned to; both are ordinary (non-secret) fields, edited "Here",
+because the fingerprint itself is what proves trust — the path and hash
+are not sensitive on their own. See OPERATIONS_RUNBOOK's TLS-to-kyu
+section for how to pin a route.
+
+**Cloudflare read-only token (fix-143, owner decision 2026-10-01).** Under
+a new "Nightly checks" group, "Cloudflare read-only token" is a
+write-only field ("Here (secret, write-only)"): typing a value and saving
+sets or replaces it, the page never shows what is currently set beyond
+"set"/"not set". This lets the host's own nightly round compare the
+Cloudflare edge against `captured/gateway/` the way `homelab check`
+already does from the workstation; left unset, the nightly line reads
+"not configured", which is a normal, unbroken state.
+
 #### A5 · Secrets vault on the host
 
 **Status:** Built.

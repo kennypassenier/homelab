@@ -1698,7 +1698,9 @@ td.stack-flags {
   border-radius: 50%;
   margin-inline-end: 8px;
   vertical-align: middle;
-  background: var(--border);
+  /* "Not watched": visible as a deliberate grey on light and dark grounds,
+     not a missing dot (screenshot review 2026-10-01). */
+  background: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
 }
 /* Status colours mean the same in every theme (Kenny, 2026-10-01: in Dark
    the chart hues made "up" pink and "failing" purple). Fixed hues, not the

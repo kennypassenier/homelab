@@ -507,7 +507,7 @@ function logsTab(panel, params) {
       {
         label: "Level",
         sort: "text",
-        order: "error,warn,warning,info,informational,notice,debug,—",
+        order: "critical,error,warn,info,debug,trace,—",
         filter: "choice",
       },
       { label: "Line", sort: "text", cls: "wide" },

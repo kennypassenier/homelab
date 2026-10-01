@@ -306,6 +306,13 @@ pub enum Command {
         /// request unchanged.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         json: bool,
+        /// fix-110: `config/host.toml` as the client's working copy reads
+        /// it (non-secret keys only), so the check can compare it with the
+        /// host's own running settings. `None` from a client with no such
+        /// file (an older client, the nightly round, or a repository not
+        /// yet carrying it) skips the comparison — backwards compatible.
+        #[serde(default)]
+        host_config: Option<std::collections::BTreeMap<String, serde_json::Value>>,
     },
     /// fix-68: doctor, the fleet check (with its manual checks) and the open
     /// incident bundles as one list and one verdict. The reply's message is
@@ -315,6 +322,9 @@ pub enum Command {
         /// fix-142: as in `FleetCheck`.
         #[serde(default)]
         digests: Vec<homelab_core::ops::fleetcheck::StackDigest>,
+        /// fix-110: as in `FleetCheck`.
+        #[serde(default)]
+        host_config: Option<std::collections::BTreeMap<String, serde_json::Value>>,
     },
     /// H8 (light): flip a stack's enabled flag. Disabled = nightly scheduler
     /// skips it + onboot cleared; enabled = back in rotation + onboot per
@@ -407,6 +417,25 @@ pub enum Command {
     SetHostConfig {
         changes: std::collections::BTreeMap<String, serde_json::Value>,
         expect_sha256: String,
+    },
+    /// fix-110 (homelab-admin, 2026-10-01): declarative host settings — the
+    /// repository's `config/host.toml` sent whole, the way `homelab apply`
+    /// sends a stack's files. `toml` holds every non-secret key the
+    /// repository declares (any secret key in it is refused: a secret lives
+    /// in the host's own vault, never in the repository). The host lays it
+    /// over its own host.toml, keeping only the secret keys it already has
+    /// and dropping anything the repository does not declare, validates the
+    /// result with the same parser `host.toml` has always used, and writes
+    /// it. `expect_sha256`, when given, must match the host.toml
+    /// `GetHostConfig` last answered — an edit made meanwhile (over ssh, or
+    /// a TUI save) is refused, never overwritten; `None` skips the check
+    /// (the nightly round and a first `homelab host apply` on a host nobody
+    /// has read yet have nothing to compare against). Answered as JSON
+    /// [`HostConfigSaved`], exactly like `SetHostConfig`.
+    ApplyHostConfig {
+        toml: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expect_sha256: Option<String>,
     },
     /// feat-platform-10 (milestone follow): one step of driving the
     /// dashboard's open tabs (`homelab ui <step>`). The host hands it to the
@@ -640,7 +669,8 @@ impl Command {
             | DestroyRecorded { .. }
             | WipeRetired { .. }
             | PruneOrphans { .. }
-            | SetHostConfig { .. } => Scope::All,
+            | SetHostConfig { .. }
+            | ApplyHostConfig { .. } => Scope::All,
         }
     }
 
@@ -699,6 +729,7 @@ impl Command {
             Notices { .. } => "notices",
             GetHostConfig => "get_host_config",
             SetHostConfig { .. } => "set_host_config",
+            ApplyHostConfig { .. } => "apply_host_config",
             Ui { .. } => "ui",
             UiAttach => "ui_attach",
             UiReply { .. } => "ui_reply",

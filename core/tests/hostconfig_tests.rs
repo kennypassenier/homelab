@@ -1,7 +1,8 @@
 //! feat-settings-1: the host.toml key table the dashboard and the host share.
 
 use homelab_core::hostconfig::{
-    check_value, is_secret, key_info, redact, valid_window, Access, KEYS,
+    apply_declared, check_shape, check_value, is_secret, key_info, merge_changes, redact,
+    valid_window, Access, KEYS,
 };
 use serde_json::json;
 
@@ -66,4 +67,73 @@ fn feat_settings_1_a_scoped_token_keeps_its_name_not_its_hash() {
         &json!([{"name": "admin", "scope": "all", "sha256": "ab".repeat(32)}]),
     );
     assert_eq!(v, json!([{"name": "admin", "scope": "all"}]));
+}
+
+/// fix-110: `check_shape` is `check_value` without the access gate — a
+/// locked or ssh-only key is still shape-checked, but no longer refused for
+/// who is asking, since the caller (`homelab host apply`,
+/// `config/host.toml`'s declarative commit) already decided it may change.
+#[test]
+fn fix_110_check_shape_has_no_access_gate() {
+    assert!(check_shape("listen", &json!("0.0.0.0:8443")).is_ok());
+    assert!(check_shape("listen", &json!(1)).is_err());
+    assert!(check_shape("no_touch", &json!([100, 101])).is_ok());
+    assert!(check_shape("no_touch", &json!("100")).is_err());
+    assert!(check_shape("nope", &json!(1)).is_err());
+    // check_value still refuses the same key on shape alone for an editable
+    // one, and on access for a locked one.
+    assert!(check_value("listen", &json!("0.0.0.0:8443"))
+        .unwrap_err()
+        .contains("ssh"));
+}
+
+/// fix-110: `merge_changes` is the same TOML surgery the host's
+/// `SetHostConfig` does, minus the access gate, factored out so the
+/// dashboard's declarative commit of `config/host.toml` can build the same
+/// new text the host will later apply.
+#[test]
+fn fix_110_merge_changes_sets_and_removes_keys() {
+    let raw = "backup_concurrency = 3\ngateway_vmid = 104\n";
+    let mut changes = std::collections::BTreeMap::new();
+    changes.insert("backup_concurrency".to_string(), json!(5));
+    changes.insert("gateway_vmid".to_string(), serde_json::Value::Null);
+    let text = merge_changes(raw, &changes).unwrap();
+    let table: toml::Table = toml::from_str(&text).unwrap();
+    assert_eq!(
+        table.get("backup_concurrency").unwrap().as_integer(),
+        Some(5)
+    );
+    assert!(table.get("gateway_vmid").is_none());
+
+    assert!(merge_changes(raw, &std::collections::BTreeMap::new()).is_err());
+    let mut bad = std::collections::BTreeMap::new();
+    bad.insert("backup_concurrency".to_string(), json!(-1));
+    assert!(merge_changes(raw, &bad).is_err());
+}
+
+/// fix-110: `apply_declared` lays `config/host.toml` over the host's own
+/// file, keeping the host's secrets and dropping anything the repository
+/// does not declare — and refuses a repository file that (wrongly) sets a
+/// secret itself.
+#[test]
+fn fix_110_apply_declared_keeps_secrets_and_drops_the_undeclared() {
+    let current: toml::Table = toml::from_str(
+        "token = \"s3cret-on-the-host\"\ngateway_vmid = 104\nmirror_remote = \"old\"\n",
+    )
+    .unwrap();
+    let declared: toml::Table = toml::from_str("gateway_vmid = 105\n").unwrap();
+    let merged = apply_declared(&declared, &current).unwrap();
+    assert_eq!(
+        merged.get("token").and_then(|v| v.as_str()),
+        Some("s3cret-on-the-host"),
+        "the host's secret survives an apply that never mentions it"
+    );
+    assert_eq!(merged.get("gateway_vmid").unwrap().as_integer(), Some(105));
+    assert!(
+        merged.get("mirror_remote").is_none(),
+        "a key the repository does not declare is dropped, like an undeclared stack file"
+    );
+
+    let bad_declared: toml::Table = toml::from_str("token = \"leaked\"\n").unwrap();
+    assert!(apply_declared(&bad_declared, &current).is_err());
 }

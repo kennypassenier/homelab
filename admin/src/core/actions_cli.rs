@@ -263,6 +263,7 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         | Tiles { .. }
         | GetHostConfig
         | SetHostConfig { .. }
+        | ApplyHostConfig { .. }
         | Ui { .. }
         | UiAttach
         | UiReply { .. }

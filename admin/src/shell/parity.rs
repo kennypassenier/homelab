@@ -154,6 +154,26 @@ fn stack_side(
     (files, digests, None)
 }
 
+/// fix-110: `config/host.toml` as the dashboard's working copy reads it
+/// (non-secret keys only), for `Today`/`FleetCheck` to compare against the
+/// host's running settings. `None` when the working copy has no such file.
+fn host_config_side(
+    repo: &std::path::Path,
+) -> Option<std::collections::BTreeMap<String, serde_json::Value>> {
+    let raw = std::fs::read_to_string(repo.join("config/host.toml")).ok()?;
+    let table: toml::Table = toml::from_str(&raw).ok()?;
+    let mut out = std::collections::BTreeMap::new();
+    for (key, value) in &table {
+        if homelab_core::hostconfig::is_secret(key) {
+            continue;
+        }
+        if let Ok(v) = serde_json::to_value(value) {
+            out.insert(key.clone(), v);
+        }
+    }
+    Some(out)
+}
+
 // ── today, the fleet check ───────────────────────────────────────────────
 
 /// A failed host read as the slow read's answer: `{what, why, fix}`, 502.
@@ -184,6 +204,7 @@ async fn today_with_files(
     host: &Arc<dyn HostPort>,
     repo: &std::path::Path,
 ) -> Result<(homelab_core::ops::today::Today, usize, Option<String>), String> {
+    let host_config = host_config_side(repo);
     let repo = repo.to_path_buf();
     let (stack_files, digests, skipped) = tokio::task::spawn_blocking(move || stack_side(&repo))
         .await
@@ -194,6 +215,7 @@ async fn today_with_files(
             Command::Today {
                 stack_files,
                 digests,
+                host_config,
             },
             Duration::from_secs(180),
             None,
@@ -264,6 +286,7 @@ async fn fleet_check(State(c): State<ParityCtx>, Query(q): Query<RunQuery>) -> R
 }
 
 async fn read_fleet_check(c: ParityCtx) -> (StatusCode, serde_json::Value) {
+    let host_config = host_config_side(&c.repo);
     let repo = c.repo.clone();
     let (stack_files, digests, skipped) = tokio::task::spawn_blocking(move || stack_side(&repo))
         .await
@@ -275,6 +298,7 @@ async fn read_fleet_check(c: ParityCtx) -> (StatusCode, serde_json::Value) {
             stack_files,
             digests,
             json: true,
+            host_config,
         },
         180,
     )

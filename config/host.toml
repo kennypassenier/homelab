@@ -1,0 +1,96 @@
+# fix-110: the host's declarative, non-secret settings — homelab-core's
+# `hostconfig::KEYS` table, one row per key, is the single description of
+# what each of these means, who may change it and when it takes effect.
+#
+# Every key here is seeded with the host's own compiled default, so an
+# unmodified checkout already matches an unmodified host. A key the host
+# treats as "unset = its default" is left out here on purpose, for the same
+# reason host.toml itself leaves it out — adding it with its own default
+# value would say nothing a comment could not.
+#
+# Secrets never live here (`token`, `notify_auth_bearer`,
+# `notify_fallback_auth_bearer`): they stay in the host's own vault, set
+# once over ssh, and `homelab host apply` never sends or overwrites them.
+#
+# `homelab host apply` sends this file to the host, which validates it with
+# the same parser host.toml has always used and writes it back whole,
+# keeping only the secret keys the host already holds. `homelab check`
+# reports when this file and the host's running settings disagree.
+#
+# This file was seeded with the compiled defaults on 2026-10-01 (fix-110);
+# it has not yet been reconciled with pve's live host.toml, so every key
+# pve has set to something other than its default will show as drift until
+# that reconciliation lands.
+
+# ── Access to the host ────────────────────────────────────────────────────
+# arch-self: listen and state_dir can cut the dashboard off from the host,
+# so they stay ssh-only in practice even though they are declared here.
+listen = "0.0.0.0:8443"
+state_dir = "/var/lib/homelab"
+exec_enabled = false
+
+# ── Nightly round and backups ───────────────────────────────────────────────
+# backup_hour is left unset: "off" is the compiled default (no nightly round
+# runs until an hour is chosen).
+backup_concurrency = 3
+restic_base = "rclone:gdrive:homelab-backups"
+restic_password_file = "/var/lib/homelab/secrets/restic.pw"
+restic_snapshot_timeout_s = 14400
+restic_restore_timeout_s = 14400
+integrity_data_read_interval_s = 2592000
+restore_drill_interval_s = 72000
+
+[[retention]]
+every_days = 1
+span_days = 7
+
+[[retention]]
+every_days = 14
+span_days = 60
+
+[[retention]]
+every_days = 60
+
+# ── Notifications ───────────────────────────────────────────────────────────
+# notify_webhook, notify_fallback_webhook, dashboard_url and watch_url are
+# left unset: their compiled default is "off" (no notice sent, no link, not
+# watched).
+watch_interval_s = 60
+watch_down_after_s = 300
+ask_timeout_s = 120
+
+# ── Coverage and monitoring ─────────────────────────────────────────────────
+# prometheus_url, loki_url, loki_vmid, metrics_targets_dir,
+# grafana_dashboards_dir, grafana_vmid, kuma_monitors_file,
+# homepage_services_file and tile_watch_source are left unset: each one's
+# compiled default is "not asked" / "off".
+logs_window = "24h"
+status_interval_s = 60
+recent_lines = 2000
+history_days = 90
+history_max_mib = 16
+
+# ── Gateway and network ─────────────────────────────────────────────────────
+gateway_vmid = 104
+gateway_routes_dir = "/opt/traefik-config/routes"
+# registry_cache is left unset: the compiled default is no pull-through cache.
+
+# ── Thresholds and limits ───────────────────────────────────────────────────
+patch_threshold_s = 604800
+backup_max_age_s = 172800
+host_meta_max_age_s = 172800
+nightly_report_repeat_s = 604800
+incident_bundle_max_age_days = 90
+incident_bundle_max_count = 200
+upstream_max_age_s = 72000
+
+# ── Safety (ssh-only; declared here for `homelab check`, changed only over
+#    ssh — see `homelab_core::hostconfig::Access::SshOnly`) ─────────────────
+no_touch = [100, 101, 102, 103]
+privileged_vmids = [105, 106]
+data_mount_roots = [
+    "/HDD18TB/subvol-103-disk-0",
+    "/HDD12TB/subvol-103-disk-0",
+    "/HDD4TB/jellyfin-metadata",
+    "/HDD2TB/logs/traefik",
+]

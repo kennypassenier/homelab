@@ -200,6 +200,13 @@ pub fn is_secret(key: &str) -> bool {
 /// Why `value` is not a value for `key`, or Ok. `null` is always allowed
 /// for an editable key: it removes the key, and the host takes its default.
 /// Tables are checked by the host against its own types.
+///
+/// Browser-only gate (`Access::editable`) plus the shape check
+/// ([`check_shape`]). A caller whose own path already decided a key may be
+/// changed — `homelab host apply` reading `config/host.toml`, or the
+/// dashboard's declarative commit of it — checks shape alone, since that
+/// whole-file apply is the ssh-equivalent path `Locked`/`SshOnly` keys name
+/// as their real route (arch-self; fix-110).
 pub fn check_value(key: &str, value: &serde_json::Value) -> Result<(), String> {
     let Some(info) = key_info(key) else {
         return Err(format!("{key} is not a setting the host reads"));
@@ -213,6 +220,15 @@ pub fn check_value(key: &str, value: &serde_json::Value) -> Result<(), String> {
             _ => format!("{key} is a secret and is changed over ssh only"),
         });
     }
+    check_shape(key, value)
+}
+
+/// Why `value` is not shaped like `key`'s kind, or Ok — without the access
+/// gate `check_value` adds. `null` is always allowed: it removes the key.
+pub fn check_shape(key: &str, value: &serde_json::Value) -> Result<(), String> {
+    let Some(info) = key_info(key) else {
+        return Err(format!("{key} is not a setting the host reads"));
+    };
     if value.is_null() {
         return Ok(());
     }
@@ -296,4 +312,105 @@ pub fn redact(key: &str, value: &serde_json::Value) -> serde_json::Value {
         }
     }
     value.clone()
+}
+
+/// JSON as a TOML value; `null` inside a value has no TOML form (only a
+/// whole key may be null, meaning "remove it", which the caller handles
+/// before reaching here). Shared by the host's per-key `SetHostConfig` and
+/// `config/host.toml`'s whole-file apply (fix-110), so both read the same
+/// JSON the dashboard and `homelab host apply` send.
+pub fn json_to_toml(v: &serde_json::Value) -> Result<toml::Value, String> {
+    Ok(match v {
+        serde_json::Value::Null => return Err("null inside a value has no TOML form".into()),
+        serde_json::Value::Bool(b) => toml::Value::Boolean(*b),
+        serde_json::Value::Number(n) => match n.as_i64() {
+            Some(i) => toml::Value::Integer(i),
+            None => toml::Value::Float(n.as_f64().ok_or("not a number")?),
+        },
+        serde_json::Value::String(s) => toml::Value::String(s.clone()),
+        serde_json::Value::Array(a) => {
+            toml::Value::Array(a.iter().map(json_to_toml).collect::<Result<_, _>>()?)
+        }
+        serde_json::Value::Object(o) => {
+            let mut t = toml::Table::new();
+            for (k, x) in o {
+                if !x.is_null() {
+                    t.insert(k.clone(), json_to_toml(x)?);
+                }
+            }
+            toml::Value::Table(t)
+        }
+    })
+}
+
+/// fix-110: `raw` (a TOML document) with `changes` applied (a key → null
+/// removes it), shape-checked key by key with [`check_shape`] — not
+/// [`check_value`]'s access gate, which the caller's own path already
+/// decided (see `check_value`'s doc). Returns the new pretty-printed TOML
+/// text, or every reason it is refused. Pure: parsing and type-checking
+/// only, no file I/O and no `FileConfig`/`startup_problems` validation —
+/// the host runs those itself before it writes anything, since only the
+/// host knows the full set of fields and their cross-field rules.
+pub fn merge_changes(
+    raw: &str,
+    changes: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> Result<String, String> {
+    if changes.is_empty() {
+        return Err("no change was sent".into());
+    }
+    let mut why = Vec::new();
+    for (key, value) in changes {
+        if let Err(e) = check_shape(key, value) {
+            why.push(e);
+        }
+    }
+    if !why.is_empty() {
+        return Err(why.join("; "));
+    }
+    let mut table: toml::Table = if raw.trim().is_empty() {
+        toml::Table::new()
+    } else {
+        toml::from_str(raw).map_err(|e| format!("does not parse as TOML: {e}"))?
+    };
+    for (key, value) in changes {
+        if value.is_null() {
+            table.remove(key);
+        } else {
+            let v = json_to_toml(value).map_err(|e| format!("{key}: {e}"))?;
+            table.insert(key.clone(), v);
+        }
+    }
+    toml::to_string_pretty(&table).map_err(|e| e.to_string())
+}
+
+/// fix-110: `declared` (the non-secret table `config/host.toml` holds) laid
+/// over `current` (the host's own host.toml, parsed), keeping every secret
+/// key `current` already sets untouched — `declared` must never carry one
+/// (checked here), since the repository is not where a secret lives. A key
+/// `current` sets that `declared` does not is dropped: the repository is
+/// the whole declarative picture for everything but secrets, the same rule
+/// `homelab apply` already keeps for a stack's files. Returns the merged
+/// table, or why `declared` cannot be applied. Pure.
+pub fn apply_declared(
+    declared: &toml::Table,
+    current: &toml::Table,
+) -> Result<toml::Table, String> {
+    let secret_in_repo: Vec<&str> = declared
+        .keys()
+        .map(String::as_str)
+        .filter(|k| is_secret(k))
+        .collect();
+    if !secret_in_repo.is_empty() {
+        return Err(format!(
+            "config/host.toml sets {} — a secret, which must never be in the repository",
+            secret_in_repo.join(", ")
+        ));
+    }
+    let mut merged = declared.clone();
+    for (key, value) in current {
+        if is_secret(key) {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    Ok(merged)
 }

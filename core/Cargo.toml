@@ -19,6 +19,10 @@ tokio = { version = "1", features = ["sync"] }
 # The long reads (check, doctor, today) run their per-container and per-route
 # questions a bounded number at a time (`ops::pool`). Combinators only, no I/O.
 futures-util.workspace = true
+# fix-110: `hostconfig::merge_changes`/`apply_declared` read and write TOML
+# directly — host.toml's own format, shared with the host and the dashboard
+# so all three build the same text from the same JSON changes.
+toml.workspace = true
 
 [features]
 # mock-executor-weak-assertions (expert panel, 2026-09-27): the scripted

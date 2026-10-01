@@ -876,6 +876,27 @@ fn json_to_toml(v: &serde_json::Value) -> Result<toml::Value, String> {
     })
 }
 
+/// fix-110: the non-secret keys host.toml sets right now, as JSON — for the
+/// fleet check's comparison with `config/host.toml` (`evaluate_host_config_drift`).
+/// Unlike `host_config_view` this never fails: an unreadable or unparsable
+/// file is simply "sets nothing", which is also true of a host that has
+/// never had one.
+fn live_host_config_table(raw: &str) -> std::collections::BTreeMap<String, serde_json::Value> {
+    let mut out = std::collections::BTreeMap::new();
+    let Ok(table) = toml::from_str::<toml::Table>(raw) else {
+        return out;
+    };
+    for (key, v) in &table {
+        if homelab_core::hostconfig::is_secret(key) {
+            continue;
+        }
+        if let Ok(json) = serde_json::to_value(v) {
+            out.insert(key.clone(), homelab_core::hostconfig::redact(key, &json));
+        }
+    }
+    out
+}
+
 /// feat-settings-1: host.toml as `GetHostConfig` answers it, from the file's
 /// text (pure: the caller reads the file).
 fn host_config_view(path: &str, raw: &str) -> Result<homelab_proto::HostConfigFile, String> {
@@ -998,6 +1019,76 @@ fn apply_host_config_changes(
     let text = toml::to_string_pretty(&table).map_err(|e| e.to_string())?;
     let (mut live, mut restart) = (Vec::new(), Vec::new());
     for key in changes.keys() {
+        match homelab_core::hostconfig::key_info(key).map(|k| k.apply) {
+            Some(homelab_core::hostconfig::Apply::Live) => live.push(key.clone()),
+            _ => restart.push(key.clone()),
+        }
+    }
+    Ok((
+        text.clone(),
+        homelab_proto::HostConfigSaved {
+            sha256: homelab_core::manifest::sha256_hex(text.as_bytes()),
+            live,
+            restart,
+        },
+    ))
+}
+
+/// fix-110: the new text of host.toml with `declared` (`config/host.toml`,
+/// the repository's whole non-secret table) laid over `raw` (the host's own
+/// current file), or every reason it is refused — the whole-file twin of
+/// [`apply_host_config_changes`]. Pure. Refused the same way: a file that
+/// moved since it was read (`expect_sha256`, when given), `declared`
+/// setting a secret key (never allowed in the repository), a value of the
+/// wrong shape, a key the host does not read, and anything the start-up
+/// validation would stop the host for.
+fn apply_host_config_whole(
+    raw: &str,
+    declared: &str,
+    expect_sha256: Option<&str>,
+) -> Result<(String, homelab_proto::HostConfigSaved), String> {
+    if let Some(expect) = expect_sha256 {
+        let now = homelab_core::manifest::sha256_hex(raw.as_bytes());
+        if now != expect {
+            return Err(
+                "host.toml changed since config/host.toml was read (over ssh, or a TUI \
+                 settings save); read it again and redo `homelab host apply`"
+                    .into(),
+            );
+        }
+    }
+    let declared_table: toml::Table = toml::from_str(declared)
+        .map_err(|e| format!("config/host.toml does not parse as TOML: {e}"))?;
+    let current_table: toml::Table = if raw.trim().is_empty() {
+        toml::Table::new()
+    } else {
+        toml::from_str(raw).map_err(|e| format!("host.toml does not parse as TOML: {e}"))?
+    };
+    let merged = homelab_core::hostconfig::apply_declared(&declared_table, &current_table)?;
+    let file: FileConfig = merged
+        .clone()
+        .try_into()
+        .map_err(|e| format!("the new host.toml is not a valid host config: {e}"))?;
+    let stray = unknown_keys(&merged);
+    let mut why: Vec<String> = if stray.is_empty() {
+        Vec::new()
+    } else {
+        vec![format!(
+            "config/host.toml sets {} — the host does not read it; check the spelling",
+            stray.join(", ")
+        )]
+    };
+    why.extend(startup_problems(&file));
+    if !why.is_empty() {
+        return Err(why.join("; "));
+    }
+    let text = toml::to_string_pretty(&merged).map_err(|e| e.to_string())?;
+    // Every key `declared` sets, whichever side it takes effect on, since a
+    // whole-file apply does not know which specific keys a hand-edit meant
+    // to change — the same conservative "name it all" `SetHostConfig`
+    // avoids only because it already knows the exact key set.
+    let (mut live, mut restart) = (Vec::new(), Vec::new());
+    for key in declared_table.keys() {
         match homelab_core::hostconfig::key_info(key).map(|k| k.apply) {
             Some(homelab_core::hostconfig::Apply::Live) => live.push(key.clone()),
             _ => restart.push(key.clone()),
@@ -7455,6 +7546,7 @@ async fn gather_today(
     state: &AppState,
     stack_files: &[(String, u16)],
     digests: Vec<homelab_core::ops::fleetcheck::StackDigest>,
+    host_config: Option<std::collections::BTreeMap<String, serde_json::Value>>,
 ) -> homelab_core::ops::today::Today {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -7484,6 +7576,11 @@ async fn gather_today(
         gather_live_facts(exec, state, stack_files, false)
     );
     live.digests = digests;
+    // fix-110: as `Rpc::FleetCheck`, for the `homelab today` path.
+    live.declared_host_config = host_config;
+    live.live_host_config = live_host_config_table(
+        &std::fs::read_to_string(&state.config.config_path).unwrap_or_default(),
+    );
     let incidents: Vec<String> = std::fs::read_dir(format!("{}/incidents", state.config.state_dir))
         .map(|rd| {
             let mut names: Vec<String> = rd
@@ -8389,10 +8486,16 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             stack_files,
             digests,
             json,
+            host_config,
         } => {
             let mut live = gather_live_facts(&exec, state, &stack_files, false).await;
             // fix-142: what the client's files say, for the repository comparison.
             live.digests = digests;
+            // fix-110: as above, for config/host.toml against this host's own.
+            live.declared_host_config = host_config;
+            live.live_host_config = live_host_config_table(
+                &std::fs::read_to_string(&state.config.config_path).unwrap_or_default(),
+            );
             let snapshot =
                 match homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir)
                     .load()
@@ -8443,11 +8546,12 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         Rpc::Today {
             stack_files,
             digests,
+            host_config,
         } => RpcResponse {
             id: req.id,
             ok: true,
             message: serde_json::to_string(
-                &gather_today(&exec, state, &stack_files, digests).await,
+                &gather_today(&exec, state, &stack_files, digests, host_config).await,
             )
             .unwrap_or_default(),
             deferred: None,
@@ -8948,6 +9052,47 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         "host.toml changed via the dashboard: {}",
                         changes.keys().cloned().collect::<Vec<_>>().join(", ")
                     );
+                    RpcResponse {
+                        id: req.id,
+                        ok: true,
+                        message: serde_json::to_string(&saved).unwrap_or_default(),
+                        deferred: None,
+                    }
+                }
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e,
+                    deferred: None,
+                },
+            }
+        }
+        // fix-110: `config/host.toml` sent whole — `homelab host apply`, or
+        // the dashboard's declarative commit of it. Same outcome shape as
+        // `SetHostConfig`: the G8 keys go live immediately, the rest waits
+        // for the host's next start.
+        Rpc::ApplyHostConfig {
+            toml: declared,
+            expect_sha256,
+        } => {
+            let path = state.config.config_path.clone();
+            let raw = std::fs::read_to_string(&path).unwrap_or_default();
+            let outcome = apply_host_config_whole(&raw, &declared, expect_sha256.as_deref())
+                .and_then(|(text, saved)| write_config_file(&path, &text).map(|()| (text, saved)));
+            match outcome {
+                Ok((text, saved)) => {
+                    if let Ok(file) = toml::from_str::<FileConfig>(&text) {
+                        let mut live = state
+                            .settings
+                            .write()
+                            .unwrap_or_else(PoisonError::into_inner);
+                        live.backup_hour = file.backup_hour;
+                        live.notify_webhook = file.notify_webhook;
+                        live.retention = file
+                            .retention
+                            .unwrap_or_else(homelab_core::retention::default_tiers);
+                    }
+                    info!("host.toml applied from config/host.toml (fix-110)");
                     RpcResponse {
                         id: req.id,
                         ok: true,

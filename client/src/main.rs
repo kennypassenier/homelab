@@ -501,6 +501,7 @@ async fn run(explicit_host: Option<String>) {
                     json: false,
                     stack_files,
                     digests,
+                    host_config: declared_host_config(),
                 },
             )
             .await;
@@ -592,6 +593,7 @@ async fn run(explicit_host: Option<String>) {
                 Command::Today {
                     stack_files,
                     digests,
+                    host_config: declared_host_config(),
                 },
             )
             .await
@@ -663,8 +665,68 @@ async fn run(explicit_host: Option<String>) {
                     && wait_for_updated_host(&host, &token, None).await;
                 std::process::exit(if ok { 0 } else { 1 });
             }
+            // fix-110 (homelab-admin, 2026-10-01): host settings declarative
+            // like a stack — `config/host.toml` sent whole, the host keeps
+            // its own secrets and writes it. The repository's path unless
+            // one is given.
+            Some("apply") => {
+                let path = args
+                    .get(3)
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| in_repo("config/host.toml"));
+                let toml = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                    die(&format!(
+                        "{} :: {e} — `homelab host apply` reads a repository's config/host.toml; \
+                         run this inside the repository, or pass the path",
+                        path.display()
+                    ))
+                });
+                if let Err(e) = toml.parse::<toml::Table>() {
+                    die(&format!("{} does not read as TOML: {e}", path.display()));
+                }
+                println!("{}▶ host apply :: {}{}", C_CYAN, path.display(), C_RESET);
+                // The same optimistic-concurrency guard a dashboard save
+                // uses: read host.toml's current sha256 first, so an edit
+                // made meanwhile (over ssh, or a TUI save) is refused
+                // rather than silently overwritten.
+                let expect_sha256 = rpc_reply(&host, &token, Command::GetHostConfig)
+                    .await
+                    .filter(|r| r.ok)
+                    .and_then(|r| {
+                        serde_json::from_str::<homelab_proto::HostConfigFile>(&r.message).ok()
+                    })
+                    .map(|f| f.sha256);
+                let r = rpc_reply(
+                    &host,
+                    &token,
+                    Command::ApplyHostConfig {
+                        toml,
+                        expect_sha256,
+                    },
+                )
+                .await;
+                match r {
+                    Some(r) if r.ok => {
+                        let saved: homelab_proto::HostConfigSaved =
+                            serde_json::from_str(&r.message).unwrap_or_default();
+                        println!("{}✓ applied{}", C_GREEN, C_RESET);
+                        if !saved.live.is_empty() {
+                            println!("  live now: {}", saved.live.join(", "));
+                        }
+                        if !saved.restart.is_empty() {
+                            println!(
+                                "  takes effect at the host's next start: {} — `homelab host restart`",
+                                saved.restart.join(", ")
+                            );
+                        }
+                        std::process::exit(0);
+                    }
+                    Some(r) => die(&r.message),
+                    None => die("the host did not answer"),
+                }
+            }
             other => die(&format!(
-                "usage: homelab host restart (got {:?})",
+                "usage: homelab host restart | homelab host apply [path] (got {:?})",
                 other.unwrap_or("nothing")
             )),
         },
@@ -2202,6 +2264,39 @@ fn stack_digests(stack_files: &[(String, u16)]) -> Vec<homelab_core::ops::fleetc
         }
     }
     out
+}
+
+/// fix-110: `config/host.toml` as this working copy reads it, for the fleet
+/// check to compare with the host's own running settings. `None` when the
+/// repository has no such file (an older checkout, or one that has not
+/// taken the coordinator's reconciliation yet) — `homelab check` then skips
+/// the comparison, same as an older client talking to a newer host.
+fn declared_host_config() -> Option<std::collections::BTreeMap<String, serde_json::Value>> {
+    let path = in_repo("config/host.toml");
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let table: toml::Table = toml::from_str(&raw)
+        .inspect_err(|e| {
+            eprintln!(
+                "{}  {} does not read as TOML: {} — the host-settings comparison is skipped{}",
+                C_YELLOW,
+                path.display(),
+                e,
+                C_RESET
+            )
+        })
+        .ok()?;
+    let mut out = std::collections::BTreeMap::new();
+    for (key, value) in &table {
+        // A secret must never have been in this file; dropped defensively
+        // rather than sent, in case one was pasted in by hand.
+        if homelab_core::hostconfig::is_secret(key) {
+            continue;
+        }
+        if let Ok(v) = serde_json::to_value(value) {
+            out.insert(key.clone(), v);
+        }
+    }
+    Some(out)
 }
 
 /// arch-deploy-guard: may this tree deploy `stack` over what the host runs?

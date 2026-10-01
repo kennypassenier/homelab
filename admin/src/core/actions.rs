@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use homelab_proto::{Command, DeploySpec, NativeServiceManifest, Scope, StackManifest};
+use homelab_proto::{Command, DeploySpec, NativeServiceManifest, Scope, SecretRef, StackManifest};
 use serde::{Deserialize, Serialize};
 
 /// The target name of the four host-wide actions. Stack names are
@@ -48,6 +48,10 @@ pub enum ActionKind {
     DeployCommit,
     Backup,
     Restore,
+    /// feat-backup-2: the native-unit twin of `Restore` (a native stack has
+    /// no `lxc-compose.yml` manifest to read, so it is its own action with
+    /// its own `Needs`, like `BackupNative` beside `Backup`).
+    RestoreNative,
     Update,
     Resize,
     Enable,
@@ -91,6 +95,13 @@ pub enum ActionKind {
     /// restarts `homelab-host.service` so a `host.toml` change marked
     /// `Apply::Restart` takes effect without a second host update.
     RestartHost,
+    /// feat-secrets-2: change one secret, writing through latch. The new
+    /// value never travels as an `Arg` (nothing a job's history or a
+    /// "copy as CLI command" preview would then carry it) — the shell
+    /// resolves it from a short-lived stage by its one-time token, straight
+    /// into the `Material` this command is built from. See
+    /// `admin::shell::secrets`.
+    ChangeSecret,
 }
 
 /// What the shell has to read before the command can be built.
@@ -151,6 +162,13 @@ pub enum Arg {
     Note,
     /// apply: the gone stacks to destroy, each name typed, comma-separated.
     Destroy,
+    /// feat-secrets-1/2: which secret (`SecretRef`, as JSON), from the
+    /// Secrets page's own list.
+    SecretRef,
+    /// feat-secrets-2: the one-time token the staging endpoint returned for
+    /// the new value (`POST /data/secrets/{stack}/stage`) — never the
+    /// value itself.
+    StageToken,
 }
 
 /// One row of the catalog the page draws its buttons from.
@@ -177,6 +195,7 @@ impl ActionKind {
         ActionKind::DeployCommit,
         ActionKind::Backup,
         ActionKind::Restore,
+        ActionKind::RestoreNative,
         ActionKind::Update,
         ActionKind::Resize,
         ActionKind::Enable,
@@ -203,6 +222,7 @@ impl ActionKind {
         ActionKind::InstallNative,
         ActionKind::Apply,
         ActionKind::RestartHost,
+        ActionKind::ChangeSecret,
     ];
 
     /// The name in a URL: `deploy`, `backup-native`, ...
@@ -213,6 +233,7 @@ impl ActionKind {
             DeployCommit => "deploy-commit",
             Backup => "backup",
             Restore => "restore",
+            RestoreNative => "restore-native",
             Update => "update",
             Resize => "resize",
             Enable => "enable",
@@ -239,6 +260,7 @@ impl ActionKind {
             InstallNative => "install-native",
             Apply => "apply",
             RestartHost => "restart-host",
+            ChangeSecret => "change-secret",
         }
     }
 
@@ -272,7 +294,7 @@ impl ActionKind {
             // A destroy reads the manifest when the directory is there and
             // falls back to the host's record (DestroyRecorded) when not.
             Destroy => Needs::Manifest,
-            Adopt => Needs::NativeManifest,
+            Adopt | RestoreNative => Needs::NativeManifest,
             Guards => Needs::Vmid,
             UpdateHost => Needs::HostRelease,
             InstallNative => Needs::NativeRelease,
@@ -287,6 +309,8 @@ impl ActionKind {
             Deploy => &[Arg::Force],
             DeployCommit => &[Arg::Commit, Arg::Force],
             Restore => &[Arg::Confirm, Arg::Snapshot, Arg::App, Arg::SkipSafetyCopy],
+            RestoreNative => &[Arg::Confirm, Arg::Snapshot],
+            ChangeSecret => &[Arg::SecretRef, Arg::StageToken],
             Update => &[Arg::App],
             RollbackNative => &[Arg::Unit],
             PruneOrphans | Forget => &[Arg::Confirm],
@@ -307,7 +331,10 @@ impl ActionKind {
     /// Must the stack name be typed? (Wipe asks only for the real run.)
     pub fn confirm(self) -> bool {
         use ActionKind::*;
-        matches!(self, Restore | PruneOrphans | Destroy | Forget)
+        matches!(
+            self,
+            Restore | RestoreNative | PruneOrphans | Destroy | Forget
+        )
     }
 
     /// arch-self: what the dashboard never does to its own stack.
@@ -323,6 +350,7 @@ impl ActionKind {
             DeployCommit => "Deploy an earlier commit",
             Backup => "Back up",
             Restore => "Restore",
+            RestoreNative => "Restore (native)",
             Update => "Update",
             Resize => "Resize",
             Enable => "Enable",
@@ -349,6 +377,7 @@ impl ActionKind {
             InstallNative => "Install a release",
             Apply => "Apply the repository",
             RestartHost => "Restart the host",
+            ChangeSecret => "Change a secret",
         }
     }
 
@@ -360,6 +389,7 @@ impl ActionKind {
             DeployCommit => "deploy the stack's files as they were at an earlier commit of the working copy",
             Backup => "a restic snapshot of the stack now",
             Restore => "restore the stack's data from a snapshot ('latest' unless named); keeps a copy of the current data first",
+            RestoreNative => "restore an adopted service's data from a snapshot ('latest' unless named): stops the unit, keeps a copy of the current data first, unpacks the archive, restarts it",
             Update => "pull and recreate one app or all, with rollback",
             Resize => "apply the manifest's memory, cores and disk to the running container",
             Enable => "take the stack back into the nightly backup and update, and start-on-boot",
@@ -386,6 +416,7 @@ impl ActionKind {
             InstallNative => "install a chosen release of a native service: the host downloads it, checks its signature and checksum, and installs it with an armed rollback (the latest release when no tag is named)",
             Apply => "deploy every stack whose files differ from what the host applied; a stack whose directory is gone is destroyed only when its name is typed",
             RestartHost => "restarts the host daemon; running jobs are refused while a job runs",
+            ChangeSecret => "write one secret through latch (one .env or one latch_files entry); the other files latch holds for this stack are untouched; redeploy to apply it to the running container",
         }
     }
 
@@ -393,9 +424,8 @@ impl ActionKind {
     pub fn scope(self) -> Scope {
         use ActionKind::*;
         match self {
-            PruneOrphans | Destroy | Forget | Wipe | Exec | UpdateHost | Apply | RestartHost => {
-                Scope::All
-            }
+            PruneOrphans | Destroy | Forget | Wipe | Exec | UpdateHost | Apply | RestartHost
+            | ChangeSecret => Scope::All,
             _ => Scope::Operate,
         }
     }
@@ -466,6 +496,15 @@ pub struct ActionArgs {
     /// apply: the names typed, comma-separated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destroy: Option<String>,
+    /// feat-secrets-2: which secret, as `SecretRef` JSON (the Secrets page
+    /// sends back exactly what it listed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_ref: Option<String>,
+    /// feat-secrets-2: the one-time staging token for the new value — never
+    /// the value (arch-secrets-no-args, this module's own doc comment on
+    /// `ActionKind::ChangeSecret`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_token: Option<String>,
 }
 
 impl ActionArgs {
@@ -508,6 +547,8 @@ impl ActionArgs {
             (self.days.is_some(), Arg::Days),
             (self.note.is_some(), Arg::Note),
             (self.destroy.is_some(), Arg::Destroy),
+            (self.secret_ref.is_some(), Arg::SecretRef),
+            (self.stage_token.is_some(), Arg::StageToken),
         ];
         v.extend(opt.into_iter().filter(|(on, _)| *on).map(|(_, a)| a));
         v
@@ -808,6 +849,24 @@ fn validate_parity(kind: ActionKind, what: &str, args: &ActionArgs) -> Result<()
             }
         }
     }
+    if kind == ChangeSecret {
+        let sref = args.secret_ref.as_deref().unwrap_or("");
+        if serde_json::from_str::<SecretRef>(sref).is_err() {
+            return refuse(
+                "change-secret needs secret_ref: the exact entry the Secrets page listed".into(),
+                "pick the secret from the stack's Secrets page; do not type it by hand",
+            );
+        }
+        let token = args.stage_token.as_deref().unwrap_or("");
+        if !valid_word(token) {
+            return refuse(
+                "change-secret needs stage_token: the id POST /data/secrets/{stack}/stage \
+                 returned for the new value"
+                    .into(),
+                "stage the new value first, then send the token it returns",
+            );
+        }
+    }
     if kind == Apply {
         let names = args.destroy_names();
         let mut seen = std::collections::BTreeSet::new();
@@ -859,6 +918,13 @@ pub enum Material {
         deploy: Vec<DeploySpec>,
         destroy: Vec<String>,
     },
+    /// feat-secrets-2: which secret, and its new value — resolved by the
+    /// shell from the staged token right before the command is built, held
+    /// only for that moment (never part of `ActionArgs`/`JobView`).
+    Secret {
+        secret: SecretRef,
+        content: String,
+    },
 }
 
 fn wrong_material(req: &ActionRequest) -> Refusal {
@@ -898,6 +964,21 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
             deploy_commands(*spec)
         }
         (Backup, Material::Manifest(m)) => vec![Command::BackupStack(manifest(&m)?)],
+        (RestoreNative, Material::Native(m)) => {
+            if m.stack_name != req.stack {
+                return Err(name_mismatch(req, &m.stack_name));
+            }
+            vec![Command::RestoreNative {
+                stack,
+                snapshot: a.snapshot.clone().unwrap_or_else(|| "latest".into()),
+                confirm: a.confirm.clone(),
+            }]
+        }
+        (ChangeSecret, Material::Secret { secret, content }) => vec![Command::SetSecret {
+            stack,
+            secret,
+            content,
+        }],
         (Restore, Material::Manifest(m)) => vec![Command::RestoreStack {
             manifest: manifest(&m)?,
             snapshot: a.snapshot.clone().unwrap_or_else(|| "latest".into()),

@@ -1690,6 +1690,134 @@ td.stack-flags {
   gap: 4px;
 }
 
+/* feat-overview-10: the backup calendar. */
+.backup-cal__legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85em;
+  color: var(--muted-foreground);
+  margin-block-end: 8px;
+}
+.backup-cal__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(2.2rem, 1fr));
+  gap: 4px;
+  max-width: 28rem;
+}
+.backup-cal__head {
+  font-size: 0.75em;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+.backup-cal__cell {
+  aspect-ratio: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 0.75em;
+  width: 1.1em;
+  height: 1.1em;
+}
+.backup-cal__grid .backup-cal__cell {
+  width: auto;
+  height: auto;
+}
+.backup-cal__cell--ok {
+  background: var(--chart-3, #3aa675);
+  color: var(--background);
+}
+.backup-cal__cell--warn {
+  background: var(--chart-2, #e8a33d);
+  color: var(--background);
+}
+.backup-cal__cell--bad {
+  background: var(--destructive);
+  color: var(--destructive-foreground, var(--background));
+}
+.backup-cal__cell--muted {
+  background: var(--border);
+  color: var(--muted-foreground);
+}
+.backup-cal__cell--pad {
+  background: transparent;
+}
+
+/* feat-overview-7 / feat-firewall-3: the topology graph. */
+.topology {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.topology figcaption {
+  font-weight: 600;
+  margin-block-end: 6px;
+}
+.topology__svg {
+  width: 100%;
+  max-width: 480px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+.topology__edge {
+  fill: none;
+  stroke: var(--chart-1, var(--primary));
+  stroke-width: 1.4;
+  opacity: 0.7;
+}
+.topology__edge--open {
+  stroke: var(--muted-foreground);
+  stroke-dasharray: 3 3;
+  opacity: 0.5;
+}
+.topology__dot {
+  fill: var(--primary);
+  stroke: var(--background);
+  stroke-width: 1.5;
+}
+.topology__node:focus-visible .topology__dot {
+  outline: 2px solid var(--ring, var(--primary));
+}
+.topology__traffic-ring {
+  fill: none;
+  stroke: var(--chart-2, #e8a33d);
+  stroke-width: 2;
+  opacity: 0.6;
+}
+.topology__label {
+  font-size: 10px;
+  fill: var(--foreground);
+}
+.topology__legend {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 0.85em;
+  color: var(--muted-foreground);
+}
+.topology__key::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 3px;
+  margin-inline-end: 6px;
+  vertical-align: middle;
+  background: var(--chart-1, var(--primary));
+}
+.topology__key--open::before {
+  background: var(--muted-foreground);
+}
+.topology__key--traffic::before {
+  background: var(--chart-2, #e8a33d);
+}
+
 /* replace-kuma (2026-09-30): the minute watch's dot on a tile. */
 .start-dot {
   display: inline-block;
@@ -1698,19 +1826,55 @@ td.stack-flags {
   border-radius: 50%;
   margin-inline-end: 8px;
   vertical-align: middle;
-  background: var(--border);
+  /* "Not watched": visible as a deliberate grey on light and dark grounds,
+     not a missing dot (screenshot review 2026-10-01). */
+  background: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+}
+/* Status colours mean the same in every theme (Kenny, 2026-10-01: in Dark
+   the chart hues made "up" pink and "failing" purple). Fixed hues, not the
+   theme's chart palette; a thin ring keeps a dot visible on any ground. */
+.start-dot {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 25%, transparent);
 }
 .start-dot--up {
-  background: var(--chart-3, #3aa675);
+  background: #2fa86a;
 }
 .start-dot--flaky {
-  background: var(--chart-2, #e8a33d);
+  background: #e3a21a;
 }
 .start-dot--down {
-  background: var(--destructive);
+  background: #e5484d;
 }
 /* Decision "deploys are known outages" (2026-09-30): a known outage, not a
    fault — an accent colour, never the up/down/flaky ones. */
 .start-dot--deploying {
-  background: var(--primary);
+  background: #3e8ed0;
+}
+.start-legend {
+  margin-block-start: 24px;
+  padding: 12px 16px;
+}
+.start-legend__title {
+  font-size: 0.95rem;
+  margin: 0 0 8px;
+}
+.start-legend__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9em;
+  color: var(--muted-foreground);
+}
+.start-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.start-legend .kp-swatch.start-dot {
+  inline-size: 10px;
+  block-size: 10px;
+  margin: 0;
 }

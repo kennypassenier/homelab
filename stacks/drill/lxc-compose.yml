@@ -92,11 +92,6 @@ firewall:
       note: Prometheus (node exporter)
     - dir: in
       action: ACCEPT
-      source: 10.10.10.7
-      proto: icmp
-      note: Uptime Kuma ping
-    - dir: in
-      action: ACCEPT
       source: 10.10.10.10
       proto: tcp
       dport: "22"

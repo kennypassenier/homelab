@@ -16,6 +16,7 @@ import {
 import { matrixRows, ruleRows, stackState } from "../fwview.js";
 import { stackHref } from "../router.js";
 import { listen } from "../store.js";
+import { topologyFigure } from "../topology.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 
 /**
@@ -73,6 +74,7 @@ export function mount(root) {
     ],
   });
   const matrixWrap = h("div", { id: "fw-matrix" });
+  const topoWrap = h("div", { id: "fw-topology" }, h("p", null, "Loading…"));
   root.replaceChildren(
     h("div", { class: "title-row" }, h("h1", null, "Firewall")),
     h(
@@ -89,6 +91,13 @@ export function mount(root) {
       "Read row to column: the ports the row's container may open on the column's, where both firewalls let it through (first match, as Proxmox reads them). \"open\": the column's container has no firewall in force.",
     ),
     matrixWrap,
+    h("h2", null, "Topology, with measured traffic"),
+    h(
+      "p",
+      { class: "measured" },
+      "feat-firewall-3: the same declared flows as the matrix above, drawn as a graph; the ring around a container is its own measured network throughput (received + transmitted) — the fleet has no per-neighbour flow metric, only each container's own total.",
+    ),
+    topoWrap,
     h("h2", null, "All rules"),
     rules.wrap,
     h("p", null, ago),
@@ -203,10 +212,41 @@ export function mount(root) {
     }
     setAgo(ago, Date.now() / 1000);
   };
+
+  const loadTopology = async () => {
+    const [t, traf] = await Promise.all([
+      fetchJson("/data/topology", "the topology", abort.signal),
+      fetchJson("/data/fleet-traffic", "the measured traffic", abort.signal),
+    ]);
+    if (abort.signal.aborted) return;
+    if (!t.ok) {
+      topoWrap.replaceChildren(h("p", { class: "chart__error" }, t.error.why));
+      return;
+    }
+    /** @type {Map<string, number> | undefined} */
+    let traffic;
+    if (traf.ok) {
+      traffic = new Map();
+      for (const p of traf.body.panels ?? []) {
+        for (const s of p.series ?? []) {
+          if (!s.points?.length) continue;
+          traffic.set(s.label, (traffic.get(s.label) ?? 0) + s.points[0][1]);
+        }
+      }
+    }
+    topoWrap.replaceChildren(
+      topologyFigure(t.body.topology, {
+        traffic,
+        caption: "Topology, with measured traffic",
+      }),
+    );
+  };
+
   const retry = () => void load().catch(() => {});
   root.addEventListener("kp-datatable-retry", retry);
   const off = listen("repo", retry);
   retry();
+  void loadTopology().catch(() => {});
   return () => {
     abort.abort();
     off();

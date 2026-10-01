@@ -340,7 +340,7 @@ WantedBy=multi-user.target
 
 ### Trigger Manual Sync (from CLIENT)
 ```bash
-curl -X POST http://10.10.10.104:8080/sync/trigger \
+curl -X POST http://198.51.100.104:8080/sync/trigger \
   -H "Authorization: Bearer ${LXC_API_TOKEN}"
 ```
 Note: While automatic sync runs every 30 minutes, CLIENT can trigger immediate sync via API.
@@ -355,7 +355,7 @@ Response:
 
 ### Get Sync Status
 ```bash
-curl http://10.10.10.104:8080/sync/status \
+curl http://198.51.100.104:8080/sync/status \
   -H "Authorization: Bearer ${LXC_API_TOKEN}"
 ```
 

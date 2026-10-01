@@ -128,13 +128,13 @@ whole fleet is described in this repo and managed by this orchestrator.
 
 ## Decisions taken at the gate
 
-- **CT 107** (`lxc-mqtt-stack`, 10.10.10.7) runs nothing but sshd and the
+- **CT 107** (`lxc-mqtt-stack`, uptime (CT 107)) runs nothing but sshd and the
   metrics agent — no docker, no mosquitto. It gets cleaned up.
-- **CT 111** (`lxc-productivity-stack`, 10.10.10.11) runs Vikunja and
+- **CT 111** (`lxc-productivity-stack`, productivity (CT 111)) runs Vikunja and
   SuperSync with Postgres. It is kept and integrated.
-- **CT 190 and CT 191**, the kyu/kyu-runner scratch containers holding
-  10.10.10.14 and .15, are cleaned up after coordinating with the
-  notification-pipeline-v2 project, which shares 191.
+- **CT 190 and CT 191**, the kyu/kyu-runner scratch containers holding the
+  addresses CT 114 and CT 115 would later reuse, are cleaned up after
+  coordinating with the notification-pipeline-v2 project, which shares 191.
 - **This project's documents** live in `docs/deployment/` in this repo, so
   the repo's own gates and commit hooks run over them.
 

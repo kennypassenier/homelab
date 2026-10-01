@@ -24,7 +24,7 @@ restore is a PUT of the JSON beside this file.
 
     curl -X PUT -H "X-Api-Key: $KEY" -H "Content-Type: application/json" \
       --data @radarr-qualityprofiles.json \
-      http://10.10.10.6:7878/api/v3/qualityprofile/4
+      http://media (CT 106):7878/api/v3/qualityprofile/4
 
 The file holds an array; restore one profile by sending that profile's own
 object. Run it from CT 106 or the Proxmox host — the API keys live in each

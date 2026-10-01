@@ -6,8 +6,9 @@
 
 use homelab_core::manifest::StackManifest;
 use homelab_core::ops::fleetcheck::{
-    evaluate, evaluate_boot, evaluate_coverage, evaluate_growth, evaluate_repo_drift, BootFact,
-    CoverageFact, GrowthFact, GrowthLimits, LiveFacts, RouteFact, Severity, StackDigest,
+    evaluate, evaluate_boot, evaluate_coverage, evaluate_growth, evaluate_host_meta,
+    evaluate_repo_drift, BootFact, CoverageFact, GrowthFact, GrowthLimits, LiveFacts, RouteFact,
+    Severity, StackDigest,
 };
 use homelab_core::state::{HostState, StackState};
 
@@ -62,17 +63,9 @@ fn check(state: &HostState, live: &LiveFacts) -> Vec<homelab_core::ops::fleetche
     if s.last_host_meta == 0 {
         s.last_host_meta = NOW;
     }
-    // Same treatment for the seeder: a fixture that says nothing about it
-    // would otherwise report "never ran" in every test here. The tests that
-    // ARE about it call `evaluate_seed` directly.
-    let mut l = live.clone();
-    if l.seed.age_s.is_none() && l.seed.error.is_none() {
-        l.seed.age_s = Some(0);
-        l.seed.judged = true;
-    }
     evaluate(
         &s,
-        &l,
+        live,
         NOW,
         homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
         GrowthLimits::default(),
@@ -109,7 +102,6 @@ fn y4_a_healthy_fleet_is_silent() {
     let live = LiveFacts {
         probe_readings: Vec::new(),
         patch: Vec::new(),
-        seed: Default::default(),
         digests: vec![],
         intent_files: Default::default(),
         pools: vec![],
@@ -400,57 +392,11 @@ fn a_stack_with_no_prometheus_target_is_reported() {
         stack: "paperwork".into(),
         scraped: Some(false),
         logs_recent: Some(true),
-        dashboard_provisioned: None,
         unmeasured_by_choice: false,
     }]);
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].severity, Severity::Drift);
     assert!(out[0].what.contains("not being measured"));
-}
-
-/// The deploy writing a dashboard is not the same question as Grafana having
-/// it, and for seven weeks only the first was asked.
-///
-/// The finding names the reader, not the writer: the file WAS written, every
-/// time, into a directory Grafana does not mount. "Wrote it" was true and
-/// useless.
-/// covers: F149
-#[test]
-fn a_dashboard_grafana_never_received_is_reported() {
-    let out = evaluate_coverage(&[CoverageFact {
-        stack: "media".into(),
-        scraped: Some(true),
-        logs_recent: Some(true),
-        dashboard_provisioned: Some(false),
-        unmeasured_by_choice: false,
-    }]);
-    assert_eq!(out.len(), 1);
-    assert!(
-        out[0].what.contains("Grafana does not have"),
-        "the finding must name the reader: {}",
-        out[0].what
-    );
-}
-
-/// And the unasked question must stay unasked. A host with no dashboards
-/// directory configured, or a gateway that did not answer, produces `None` —
-/// which must never become thirteen findings about a Grafana that is simply
-/// down.
-/// covers: F149
-#[test]
-fn an_unasked_dashboard_question_is_never_a_finding() {
-    let out = evaluate_coverage(&[CoverageFact {
-        stack: "media".into(),
-        scraped: Some(true),
-        logs_recent: Some(true),
-        dashboard_provisioned: None,
-        unmeasured_by_choice: false,
-    }]);
-    assert!(
-        out.is_empty(),
-        "None means not asked, not failed: {:?}",
-        out
-    );
 }
 
 /// Logs that go nowhere look exactly like a quiet service — which is why the
@@ -467,7 +413,6 @@ fn a_stack_whose_logs_never_arrive_is_reported() {
         stack: "media".into(),
         scraped: Some(true),
         logs_recent: Some(false),
-        dashboard_provisioned: None,
         unmeasured_by_choice: false,
     }]);
     assert_eq!(out.len(), 1);
@@ -494,14 +439,12 @@ fn an_unasked_question_is_never_a_finding() {
             stack: "kyu".into(),
             scraped: Some(true),
             logs_recent: None,
-            dashboard_provisioned: None,
             unmeasured_by_choice: false,
         },
         CoverageFact {
             stack: "almanac".into(),
             scraped: None,
             logs_recent: None,
-            dashboard_provisioned: None,
             unmeasured_by_choice: false,
         },
     ]);
@@ -515,7 +458,6 @@ fn a_covered_stack_is_silent() {
         stack: "home".into(),
         scraped: Some(true),
         logs_recent: Some(true),
-        dashboard_provisioned: None,
         unmeasured_by_choice: false,
     }]);
     assert!(out.is_empty(), "{:?}", out);
@@ -525,9 +467,7 @@ fn a_covered_stack_is_silent() {
 
 fn boot_manifest(vmid: u16, onboot: bool, order: u16, mem: u32, cores: u16) -> StackManifest {
     let mut m = homelab_core::manifest::StackManifest {
-        homepage_widgets: Default::default(),
         home_address_whitelist: None,
-        generated_dashboards_command: None,
         tiles: Default::default(),
         log_files: Vec::new(),
         registry_login: None,
@@ -555,6 +495,7 @@ fn boot_manifest(vmid: u16, onboot: bool, order: u16, mem: u32, cores: u16) -> S
             storage: "local-lvm".into(),
         },
         lxc: homelab_core::manifest::LxcSpec {
+            timezone: "host".into(),
             template: "clone:998".into(),
             unprivileged: true,
             features: "nesting=1,keyctl=1".into(),
@@ -1189,117 +1130,6 @@ fn the_full_round_carries_the_second_copy_and_the_checks() {
     }
 }
 
-/// T49 · a monitor that outlives its stack, reported where somebody sees it.
-mod seeder_verdict {
-    use super::*;
-    use homelab_core::ops::fleetcheck::{evaluate_seed, SeedFact, Severity};
-
-    const DAY: u64 = 86400;
-
-    fn ran(age: u64) -> SeedFact {
-        SeedFact {
-            age_s: Some(age),
-            judged: true,
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn a_recent_run_with_nothing_stale_says_nothing() {
-        assert!(evaluate_seed(&ran(600), 26 * 3600).is_empty());
-    }
-
-    /// The case Kenny found by noticing ping errors on a Grafana panel: a
-    /// drill container destroyed hours earlier, still pinged every minute.
-    #[test]
-    fn a_monitor_for_a_stack_that_is_gone_is_named() {
-        let f = SeedFact {
-            stale: vec!["host · drill".into()],
-            ..ran(600)
-        };
-        let out = evaluate_seed(&f, 26 * 3600);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].severity, Severity::Drift);
-        assert!(out[0].what.contains("host · drill"), "{}", out[0].what);
-        // Since 2026-09-27 the seeder removes the monitors it owns; one that
-        // is still listed here was left on purpose, and the remedy says why.
-        assert!(
-            out[0].remedy.contains("truncated"),
-            "the remedy must say why the seeder left it: {}",
-            out[0].remedy
-        );
-    }
-
-    #[test]
-    fn a_seeder_that_stopped_running_is_broken_not_quiet() {
-        let f = evaluate_seed(&ran(3 * DAY), 26 * 3600);
-        assert_eq!(f.len(), 1);
-        assert_eq!(f[0].severity, Severity::Broken);
-        assert!(f[0].what.contains("72 h ago"), "{}", f[0].what);
-    }
-
-    #[test]
-    fn one_that_has_never_run_says_so_rather_than_looking_healthy() {
-        let f = evaluate_seed(&SeedFact::default(), 26 * 3600);
-        assert!(f.iter().any(|x| x.what.contains("never recorded a run")));
-    }
-
-    /// F175's lesson, kept: without a list to compare against, "nothing
-    /// stale" is not an all-clear.
-    #[test]
-    fn a_run_that_judged_nothing_does_not_read_as_all_clear() {
-        let f = SeedFact {
-            age_s: Some(60),
-            judged: false,
-            ..Default::default()
-        };
-        let out = evaluate_seed(&f, 26 * 3600);
-        assert_eq!(out.len(), 1);
-        assert!(
-            out[0].what.contains("judged nothing stale"),
-            "{}",
-            out[0].what
-        );
-    }
-
-    #[test]
-    fn an_unreadable_status_file_is_a_finding_not_a_silence() {
-        let f = SeedFact {
-            error: Some("no such file".into()),
-            ..Default::default()
-        };
-        let out = evaluate_seed(&f, 26 * 3600);
-        assert_eq!(out[0].severity, Severity::Broken);
-        assert!(out[0].what.contains("no such file"), "{}", out[0].what);
-    }
-
-    #[test]
-    fn the_full_round_carries_it() {
-        let live = LiveFacts {
-            seed: SeedFact {
-                stale: vec!["host · drill".into()],
-                ..ran(600)
-            },
-            ..Default::default()
-        };
-        let findings = evaluate(
-            &HostState::default(),
-            &live,
-            NOW,
-            homelab_core::ops::fleetcheck::DEFAULT_BACKUP_MAX_AGE_S,
-            GrowthLimits::default(),
-            None,
-            homelab_core::ops::fleetcheck::PATCH_THRESHOLD_S,
-            homelab_core::ops::fleetcheck::HOST_META_MAX_AGE_S,
-        );
-        assert!(
-            findings.iter().any(|f| f.subject == "uptime kuma"),
-            "or the reader is wired to nothing again: {:?}",
-            findings
-        );
-    }
-}
-
 // ── R13: the pools the libraries actually live on ──────────────────────────
 //
 // Every other disk number this suite reads is a container's own rootfs. CT
@@ -1854,4 +1684,44 @@ fn fix_142_a_stack_without_a_manifest_compares_its_files_only() {
         ..Default::default()
     };
     assert!(evaluate_repo_drift(&st, &live).is_empty());
+}
+
+/// gap-23: the host-meta repository — the vault holding `restic.pw`, the
+/// state snapshot and the TLS material — is the one a lost host rebuilds
+/// from, so a backup that quietly stopped is the single worst silent
+/// failure this project can have. fix-111 wired `evaluate_host_meta` into
+/// `evaluate`'s own round; this is the direct test of the function itself,
+/// which had none.
+#[test]
+fn gap_23_a_stale_or_missing_host_meta_backup_is_broken() {
+    let never = HostState {
+        last_host_meta: 0,
+        ..Default::default()
+    };
+    let findings = evaluate_host_meta(&never, NOW, 24 * 3600);
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].severity, Severity::Broken);
+    assert_eq!(findings[0].subject, "host-meta");
+    assert!(
+        findings[0].what.to_lowercase().contains("never"),
+        "{}",
+        findings[0].what
+    );
+
+    let stale = HostState {
+        last_host_meta: NOW - 48 * 3600,
+        ..Default::default()
+    };
+    let findings = evaluate_host_meta(&stale, NOW, 24 * 3600);
+    assert_eq!(findings.len(), 1, "older than the max age is broken too");
+    assert_eq!(findings[0].severity, Severity::Broken);
+
+    let fresh = HostState {
+        last_host_meta: NOW - 3600,
+        ..Default::default()
+    };
+    assert!(
+        evaluate_host_meta(&fresh, NOW, 24 * 3600).is_empty(),
+        "a backup inside the window is not a finding"
+    );
 }

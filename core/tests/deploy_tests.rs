@@ -10,9 +10,7 @@ use homelab_core::sink::VecSink;
 
 fn manifest(vmid: u16, stack: &str) -> StackManifest {
     StackManifest {
-        homepage_widgets: Default::default(),
         home_address_whitelist: None,
-        generated_dashboards_command: None,
         tiles: Default::default(),
         log_files: Vec::new(),
         registry_login: None,
@@ -40,6 +38,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
             storage: "local-lvm".into(),
         },
         lxc: LxcSpec {
+            timezone: "host".into(),
             template: "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst".into(),
             unprivileged: true,
             features: "nesting=1,keyctl=1".into(),
@@ -107,9 +106,6 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         state_dir: "/var/lib/homelab".into(),
         now_unix: 1_760_000_000,
         metrics_targets_dir: None,
-        grafana_dashboards_dir: None,
-        homepage_services_file: None,
-        kuma_monitors_file: None,
         loki_url: None,
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
@@ -2520,55 +2516,6 @@ async fn storage_a_directory_the_app_does_not_mount_is_skipped() {
     assert!(
         exec.calls_containing("homelab-write-probe").is_empty(),
         "and it must not have probed at all"
-    );
-}
-
-/// gap-14 as amended by app-knowledge (Kenny, 2026-09-30): a stack's address
-/// comes only from its stack file. A stack with no manifest in state (an
-/// adoption from before every stack was deployed from its file) gets no
-/// monitor rather than an address guessed from its vmid; since 2026-09-30
-/// all 15 stacks in state carry one.
-#[tokio::test]
-async fn gap14_the_monitor_list_carries_adopted_native_stacks() {
-    let exec = MockExecutor::new();
-    script_fresh(&exec);
-    exec.seed_file(
-        "/var/lib/homelab/state.json",
-        &serde_json::json!({
-            "schema_version": 1,
-            "stacks": {
-                "kyu": {
-                    "vmid": 109, "hostname": "109-app-kyu", "apps": [], "applied_at": 1,
-                    "manifest": null,
-                    "natives": [{
-                        "stack_name": "kyu", "vmid": 109, "hostname": "109-app-kyu",
-                        "unit": "kyu", "binary": "/opt/kyu/bin/kyu",
-                        "data_dirs": ["/appdata/kyu/kyu-config"]
-                    }]
-                }
-            }
-        })
-        .to_string(),
-    );
-    let sink = VecSink::new();
-    let journal = NullJournal;
-    let mut c = ctx(&exec, &sink, &journal);
-    c.kuma_monitors_file = Some("/appdata/uptime/kuma-seeder-config/host-monitors.json".into());
-    let sp = spec(110, "syncthing");
-    let report = deploy(&c, &sp).await;
-    assert!(report.ok, "{:?}", report.error);
-    let body = exec
-        .file("/appdata/uptime/kuma-seeder-config/host-monitors.json")
-        .expect("the monitor list is written");
-    assert!(
-        !body.contains("host · kyu"),
-        "no address is guessed for a stack without a manifest: {}",
-        body
-    );
-    assert!(
-        body.contains("host · syncthing"),
-        "and the deployed stack still is: {}",
-        body
     );
 }
 

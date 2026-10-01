@@ -261,6 +261,7 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         | History { .. }
         | Notices { .. }
         | Tiles { .. }
+        | BackupCalendar { .. }
         | GetHostConfig
         | SetHostConfig { .. }
         | Ui { .. }
@@ -274,7 +275,17 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         // token in the reply this function has no way to show.
         | TokenIssue { .. }
         | TokenList
-        | TokenRevoke { .. } => return None,
+        | TokenRevoke { .. }
+        // feat-backup-1/3, feat-secrets-1/2: reads and a value write with
+        // no CLI verb of their own — the Backups and Secrets pages are the
+        // only callers, so there is nothing to mirror as a copyable line.
+        // `restore-native` (feat-backup-2) stays dashboard-only the same
+        // way until the CLI grows a native-restore verb.
+        | GetBackups { .. }
+        | BrowseSnapshot { .. }
+        | RestoreNative { .. }
+        | RevealSecret { .. }
+        | SetSecret { .. } => return None,
     }
     Some(parts.join(" "))
 }

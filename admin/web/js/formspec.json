@@ -89,6 +89,20 @@
       "required": false,
       "danger": true
     },
+    "secret_ref": {
+      "kind": "text",
+      "label": "Secret",
+      "help": "Which secret, picked on the stack's Secrets page — type it by hand only when you already have its exact JSON.",
+      "required": true,
+      "placeholder": "pick on the Secrets page"
+    },
+    "stage_token": {
+      "kind": "text",
+      "label": "Staged value token",
+      "help": "The Secrets page stages the new value and fills this in itself; it is never the value.",
+      "required": true,
+      "placeholder": "set by the Secrets page"
+    },
     "commit": {
       "kind": "choice",
       "label": "Commit",
@@ -236,7 +250,9 @@
     "firewall",
     "settings",
     "shell",
-    "presets"
+    "presets",
+    "fleetview",
+    "backupcalendar"
   ],
   "stack_tabs": [
     "overview",
@@ -417,6 +433,15 @@
         "kind": "check",
         "label": "VPN device",
         "help": "Gives the container /dev/net/tun. Only takes effect at a rebuild."
+      },
+      {
+        "name": "timezone",
+        "id": "edit-lxc-timezone",
+        "kind": "text",
+        "label": "Timezone",
+        "help": "Passed to pct create --timezone; \"host\" inherits the Proxmox host's timezone. Only takes effect at a rebuild.",
+        "required": false,
+        "pattern": "[A-Za-z0-9_/+\\-]{1,64}"
       },
       {
         "name": "storage",
@@ -1357,6 +1382,14 @@
         "kind": "text",
         "label": "Opens at",
         "help": "Blank: https://<hostname>/.",
+        "required": false
+      },
+      {
+        "name": "watch_url",
+        "id": "tile-watch-url",
+        "kind": "text",
+        "label": "Watch address",
+        "help": "Optional. The address the minute watch asks instead of the tile's own link, e.g. a health endpoint on the container's own address.",
         "required": false
       },
       {

@@ -62,7 +62,8 @@ export const GROUPS = /** @type {const} */ ([
     group: "Deploy and update",
     actions: ["deploy", "update", "resize", "guards"],
   },
-  { group: "Backups", actions: ["backup", "restore"] },
+  { group: "Backups", actions: ["backup", "restore", "restore-native"] },
+  { group: "Secrets", actions: ["change-secret"] },
   { group: "Parking", actions: ["enable", "disable"] },
   {
     group: "Native services",

@@ -218,42 +218,6 @@ async fn unregister(
         .await
         .map_err(|e| ("remove metrics discovery", e))?;
 
-    // T66: the dashboard was the half that was missing — a destroyed stack
-    // left a panel behind showing a container that no longer exists, which
-    // reads as "everything is down" rather than "this is gone".
-    runner
-        .step("remove grafana dashboard", || async {
-            let Some(dir) = ctx.grafana_dashboards_dir.as_deref() else {
-                return Ok(StepOutcome::Unchanged);
-            };
-            let path = crate::ops::dashboard::dashboard_file(dir, stack_name);
-            // In GRAFANA'S container, not on the Proxmox host. The directory
-            // is a path inside that container — the deploy writes it with
-            // `pct push` — and a bare `rm -f` here ran on the host, where it
-            // does not exist, and exited 0. The step reported "changed" and
-            // removed nothing for as long as it existed (F162). `rm -f` on a
-            // missing path SUCCEEDS, so the step could not have discovered
-            // this on its own. That container was the gateway until fix-90
-            // (2026-09-27) moved Grafana to the metrics stack.
-            let _ = exec
-                .run(&Cmd::new(
-                    "pct",
-                    &[
-                        "exec",
-                        &ctx.safety.grafana_vmid.to_string(),
-                        "--",
-                        "rm",
-                        "-f",
-                        &path,
-                    ],
-                    30,
-                ))
-                .await;
-            Ok(StepOutcome::Changed)
-        })
-        .await
-        .map_err(|e| ("remove grafana dashboard", e))?;
-
     runner
         .step("remove gateway route", || async {
             let mut files = vec![format!("{}-app-{}.yml", vmid, stack_name)];
@@ -329,14 +293,6 @@ async fn unregister(
         .await
         .map_err(|e| ("update state", e))?;
 
-    // T51 + T49: rendered from the fleet as it now is, AFTER the route and
-    // the record are gone — both files are read from exactly those.
-    runner
-        .step("fleet files", || async {
-            Ok(crate::ops::fleetfiles::regenerate_after_removal(ctx, exec).await)
-        })
-        .await
-        .map_err(|e| ("fleet files", e))?;
     Ok(())
 }
 
@@ -345,8 +301,8 @@ async fn unregister(
 ///
 /// step-22: this used to remove the state record and nothing else, so a
 /// stack forgotten after its container was lost kept its route, scrape
-/// target, dashboard, manual checks, front-page tile and host monitor. It
-/// now runs the same unregister steps a destroy runs.
+/// target and manual checks. It now runs the same unregister steps a destroy
+/// runs.
 ///
 /// The one guard it always had stays first: only a record whose container no
 /// longer answers to that hostname may be forgotten. A live one being

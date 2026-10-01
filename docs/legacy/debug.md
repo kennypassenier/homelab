@@ -39,14 +39,14 @@ enabled: false
 ### 1.3 Stream HOST logs from CLIENT machine
 
 ```bash
-curl -fsSL http://10.10.5.250:8080/api/health
+curl -fsSL http://pve:8080/api/health
 ```
 
 If auth is enabled:
 
 ```bash
 TOKEN="$(grep '^LXC_API_TOKEN=' ~/Projects/homelab/config/.env | cut -d '=' -f2-)"
-curl -fsSL -H "Authorization: Bearer ${TOKEN}" http://10.10.5.250:8080/api/metrics | jq .
+curl -fsSL -H "Authorization: Bearer ${TOKEN}" http://pve:8080/api/metrics | jq .
 ```
 
 ## 2) HOST Debug (Proxmox)

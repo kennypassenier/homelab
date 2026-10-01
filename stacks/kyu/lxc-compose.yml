@@ -66,7 +66,7 @@ resources:
   storage: local-lvm
 
 lxc:
-  # 998 is the unprivileged golden template. It bakes docker in, which this
+  # 996 is the unprivileged golden template. It bakes docker in, which this
   # container does not need and will not be given — see native_only above.
   template: clone:996
   unprivileged: true
@@ -242,21 +242,10 @@ firewall:
       note: the homelab daemon's notifications from pve
     - dir: in
       action: ACCEPT
-      source: 10.10.10.7
-      proto: icmp
-      note: Uptime Kuma ping
-    - dir: in
-      action: ACCEPT
-      source: 10.10.10.7
-      proto: tcp
-      dport: "8080,8082,8083"
-      note: Uptime Kuma HTTP monitors
-    - dir: in
-      action: ACCEPT
       source: 10.10.10.10
       proto: tcp
       dport: "22,8080"
-      note: Kenny's desktop (ssh and the web ports the homepage tiles link to)
+      note: Kenny's desktop (ssh and the web ports the dashboard tiles link to)
 
 # replace-homepage (Kenny, 2026-09-30): this stack's tiles on the dashboard's
 # start page, keyed by the hostname they open (or an id with `url:`). Moved
@@ -267,3 +256,12 @@ tiles:
     group: "Own"
     order: 402
     description: "Message hub"
+  # Kenny, 2026-10-01: kyu-runner must be watched too. It has no page of its
+  # own, so its tile opens its health endpoint, which the minute watch asks
+  # directly (the same address Uptime Kuma probes).
+  kyu-runner.health:
+    name: "Kyu-runner"
+    group: "Own"
+    order: 403
+    description: "Kyu to Home Assistant pump"
+    url: "http://10.10.10.9:8082/healthz"

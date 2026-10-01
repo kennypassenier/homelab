@@ -31,6 +31,7 @@ use homelab_core::sink::{PipelineEvent, Sink};
 
 use homelab_proto::{Command as Rpc, RpcRequest, RpcResponse, ServerMsg};
 
+mod secrets;
 mod tls;
 mod ui_relay;
 
@@ -195,10 +196,6 @@ struct FileConfig {
     data_mount_roots: Option<Vec<String>>,
     gateway_vmid: Option<u16>,
     gateway_routes_dir: Option<String>,
-    /// fix-90 (2026-09-27): the container Grafana runs in, where the
-    /// generated dashboards are written. Absent = the gateway, where Grafana
-    /// ran until it moved to the metrics stack.
-    grafana_vmid: Option<u16>,
     /// Route A (Kenny, form J1, 2026-09-02): devices this suite may not
     /// touch, that can nevertheless hand over their own configuration. One
     /// GET per night, straight into restic. Absent = nothing is fetched.
@@ -229,24 +226,12 @@ struct FileConfig {
     /// T1: directory the orchestrator writes per-stack Prometheus discovery
     /// files into. Absent = off, and the scrape list stays hand-maintained.
     metrics_targets_dir: Option<String>,
-    /// T2: Grafana provisioning directory inside the gateway container.
-    /// Absent = off, and dashboards stay hand-made.
-    grafana_dashboards_dir: Option<String>,
-    /// T51: Homepage's `services.yaml` on the host, rendered from the
-    /// gateway's route fragments. Absent = the front page stays hand-made,
-    /// which is how it came to be zero bytes.
-    homepage_services_file: Option<String>,
     /// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
     /// dashboard's own address (CT 120), from which the firewall step of a
     /// deploy derives an inbound rule per stack for every tile that opens on
     /// that stack's own container. Absent or empty = feature off, and no
     /// rule is derived.
     tile_watch_source: Option<String>,
-    /// T49: the file the Uptime Kuma seeder reads its generated half from.
-    /// Absent = the watch list stays whatever a hand-run script last made,
-    /// which is how a monitor came to report Uptime Kuma itself as down from
-    /// an address it had left that morning (F157).
-    kuma_monitors_file: Option<String>,
     /// T69: how long a suspended step waits for an operator before giving
     /// up and answering `Unattended`. Long enough that Kenny can read the
     /// question and decide, short enough that a forgotten window does not
@@ -270,6 +255,12 @@ struct FileConfig {
     incident_bundle_max_age_days: Option<u64>,
     /// fix-131: at most this many incident bundles are kept. Default 200.
     incident_bundle_max_count: Option<usize>,
+    /// gap-26: `journal.jsonl` is cut back to half of this many bytes once
+    /// it grows past it (`compact_journal_file`). Default 4 MiB
+    /// (`incidents::JOURNAL_MAX_BYTES`) — was a fixed constant with no
+    /// host.toml key and no dashboard row, unlike the incident-bundle
+    /// limits right above it.
+    journal_max_bytes: Option<u64>,
     /// How long one GitHub answer about a pinned upstream stands. Default
     /// 20 hours.
     upstream_max_age_s: Option<u64>,
@@ -397,23 +388,12 @@ struct Config {
     registry_cache: Option<homelab_core::ops::registry_cache::CacheCfg>,
     /// T1: where per-stack Prometheus discovery files are written.
     metrics_targets_dir: Option<String>,
-    /// T2: Grafana's provisioning directory inside the gateway container.
-    grafana_dashboards_dir: Option<String>,
-    /// T51: Homepage's `services.yaml` on the host, rendered from the
-    /// gateway's route fragments. Absent = the front page stays hand-made,
-    /// which is how it came to be zero bytes.
-    homepage_services_file: Option<String>,
     /// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
     /// dashboard's own address (CT 120), from which the firewall step of a
     /// deploy derives an inbound rule per stack for every tile that opens on
     /// that stack's own container. Absent or empty = feature off, and no
     /// rule is derived.
     tile_watch_source: Option<String>,
-    /// T49: the file the Uptime Kuma seeder reads its generated half from.
-    /// Absent = the watch list stays whatever a hand-run script last made,
-    /// which is how a monitor came to report Uptime Kuma itself as down from
-    /// an address it had left that morning (F157).
-    kuma_monitors_file: Option<String>,
     /// T69: how long a suspended step waits for an operator before giving
     /// up and answering `Unattended`. Long enough that Kenny can read the
     /// question and decide, short enough that a forgotten window does not
@@ -432,6 +412,8 @@ struct Config {
     incident_bundle_max_age_days: u64,
     /// [`homelab_core::incidents::BUNDLE_MAX_COUNT`] by default.
     incident_bundle_max_count: usize,
+    /// gap-26: [`homelab_core::incidents::JOURNAL_MAX_BYTES`] by default.
+    journal_max_bytes: u64,
     /// [`homelab_core::ops::pins::UPSTREAM_MAX_AGE_S`] by default.
     upstream_max_age_s: u64,
     /// Y1: how many stack backups the nightly round runs at once. Measured
@@ -646,8 +628,6 @@ fn load_config_from(path: String) -> Config {
             if let Some(dir) = file.gateway_routes_dir {
                 sc.gateway_routes_dir = dir;
             }
-            // fix-90: unset, Grafana is on the gateway, wherever that is.
-            sc.grafana_vmid = file.grafana_vmid.unwrap_or(sc.gateway_vmid);
             // fix-120: the daemon always runs with a policy; without the
             // keys it is what the fleet uses today, so nothing is refused
             // that deployed yesterday.
@@ -682,10 +662,7 @@ fn load_config_from(path: String) -> Config {
             }
         },
         metrics_targets_dir: file.metrics_targets_dir,
-        grafana_dashboards_dir: file.grafana_dashboards_dir,
-        homepage_services_file: file.homepage_services_file,
         tile_watch_source: file.tile_watch_source.filter(|s| !s.trim().is_empty()),
-        kuma_monitors_file: file.kuma_monitors_file,
         backup_concurrency: file
             .backup_concurrency
             .unwrap_or_else(default_backup_concurrency),
@@ -708,6 +685,9 @@ fn load_config_from(path: String) -> Config {
         incident_bundle_max_count: file
             .incident_bundle_max_count
             .unwrap_or(homelab_core::incidents::BUNDLE_MAX_COUNT),
+        journal_max_bytes: file
+            .journal_max_bytes
+            .unwrap_or(homelab_core::incidents::JOURNAL_MAX_BYTES as u64),
         upstream_max_age_s: file
             .upstream_max_age_s
             .unwrap_or(homelab_core::ops::pins::UPSTREAM_MAX_AGE_S),
@@ -1361,6 +1341,36 @@ mod tests {
         assert_eq!(code, 0);
     }
 
+    /// fix-52 residual (2026-10-01): the 10 s ping only ever proved that its
+    /// own loop was still scheduled, not that the scheduler was making any
+    /// progress — a nightly round wedged inside one `await` (not a panic,
+    /// which the test above already covers) kept being fed forever. Now the
+    /// ping is withheld once the scheduler's heartbeat is older than
+    /// `SCHEDULER_WATCHDOG_STALE_S`, so systemd's `WatchdogSec` eventually
+    /// restarts a daemon whose scheduler stopped making progress.
+    #[test]
+    fn fix_52_residual_a_stale_scheduler_heartbeat_withholds_the_watchdog_ping() {
+        let stale_after = super::SCHEDULER_WATCHDOG_STALE_S;
+        // A heartbeat from a few seconds ago: still alive.
+        assert!(super::scheduler_is_alive(1_000_000, 999_990, stale_after));
+        // Exactly at the edge still counts.
+        assert!(super::scheduler_is_alive(
+            1_000_000,
+            1_000_000 - stale_after,
+            stale_after
+        ));
+        // One second past the edge: the scheduler has made no progress in
+        // longer than the tolerance, so the ping must stop.
+        assert!(!super::scheduler_is_alive(
+            1_000_000,
+            1_000_000 - stale_after - 1,
+            stale_after
+        ));
+        // A heartbeat from "the future" (clock skew on a fresh AppState,
+        // or `now` ticking backwards) never reads as stale.
+        assert!(super::scheduler_is_alive(1_000_000, 1_000_100, stale_after));
+    }
+
     /// fix-53 (expert panel, timeout-leaves-container-work-running,
     /// 2026-09-27): a timeout killed only the direct child (`pct`), not what
     /// it had started (`lxc-attach` and the script), so a "timed out" step
@@ -1794,8 +1804,8 @@ opnsense_cred_file = "/var/lib/homelab/secrets/opnsense.cred"
     fn correctly_placed_keys_are_clean_and_read() {
         let raw = r#"
 token = "0123456789abcdef0123"
-kuma_monitors_file = "/appdata/uptime/kuma-seeder-config/host-monitors.json"
-homepage_services_file = "/appdata/home/homepage-config/services.yaml"
+metrics_targets_dir = "/appdata/metrics/prometheus-config/targets"
+tile_watch_source = "10.10.10.20"
 
 [registry_cache]
 host = "10.10.10.17"
@@ -1808,16 +1818,16 @@ port = 5003
         assert!(unknown_keys(&t).is_empty(), "{:?}", unknown_keys(&t));
 
         let parsed: FileConfig = t.try_into().unwrap();
-        assert!(parsed.kuma_monitors_file.is_some());
-        assert!(parsed.homepage_services_file.is_some());
+        assert!(parsed.metrics_targets_dir.is_some());
+        assert!(parsed.tile_watch_source.is_some());
     }
 
     /// A plain typo is loud too — the direction that costs a warning rather
     /// than a silence.
     #[test]
     fn a_typo_is_reported() {
-        let t: toml::Table = toml::from_str("kuma_monitor_file = \"/x\"\n").unwrap();
-        assert_eq!(unknown_keys(&t), vec!["kuma_monitor_file".to_string()]);
+        let t: toml::Table = toml::from_str("metrics_target_dir = \"/x\"\n").unwrap();
+        assert_eq!(unknown_keys(&t), vec!["metrics_target_dir".to_string()]);
     }
 
     /// config-four-representations (expert panel, 2026-09-27): the known
@@ -2289,6 +2299,46 @@ port = 5003
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(removed, 1);
         assert!(old_gone && young_kept);
+    }
+
+    /// gap-26: `journal_max_bytes` used to be the fixed constant
+    /// `incidents::JOURNAL_MAX_BYTES`, with no host.toml key and no
+    /// dashboard row — unlike the incident-bundle limits right beside it.
+    /// Absent, the default still applies; set, host.toml wins.
+    #[test]
+    fn gap_26_journal_max_bytes_defaults_and_follows_host_toml() {
+        let cfg = config_from_text("token = \"0123456789abcdef0123\"\n");
+        assert_eq!(
+            cfg.journal_max_bytes,
+            homelab_core::incidents::JOURNAL_MAX_BYTES as u64
+        );
+        let cfg = config_from_text("token = \"0123456789abcdef0123\"\njournal_max_bytes = 65536\n");
+        assert_eq!(cfg.journal_max_bytes, 65536);
+    }
+
+    /// gap-26: `compact_journal_file` honours the configured limit rather
+    /// than the hardcoded default — a small `max_bytes` cuts a journal the
+    /// default would have left alone.
+    #[test]
+    fn gap_26_compact_journal_file_uses_the_configured_limit() {
+        let dir = std::env::temp_dir().join(format!("homelab-gap26-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let line = "{\"op\":\"deploy\",\"at\":1,\"running\":false}\n";
+        let content = line.repeat(2000); // well under JOURNAL_MAX_BYTES, well over 64 KiB
+        assert!(content.len() < homelab_core::incidents::JOURNAL_MAX_BYTES);
+        let path = dir.join("journal.jsonl");
+        std::fs::write(&path, &content).unwrap();
+        compact_journal_file(&dir.to_string_lossy(), 65536);
+        let cut = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            cut.len() < content.len(),
+            "a 64 KiB configured limit must cut a journal the 4 MiB default would not: \
+             {} -> {}",
+            content.len(),
+            cut.len()
+        );
     }
 
     /// A session over a real socket on a free local port, with `handler` in
@@ -4223,9 +4273,7 @@ port = 5003
         let mut hs = homelab_core::state::HostState::default();
         let mk = |mem: u32| {
             let mut m = homelab_core::manifest::StackManifest {
-                homepage_widgets: Default::default(),
                 home_address_whitelist: None,
-                generated_dashboards_command: None,
                 tiles: Default::default(),
                 log_files: Vec::new(),
                 registry_login: None,
@@ -4253,6 +4301,7 @@ port = 5003
                     storage: "s".into(),
                 },
                 lxc: homelab_core::manifest::LxcSpec {
+                    timezone: "host".into(),
                     template: "t".into(),
                     unprivileged: true,
                     features: String::new(),
@@ -4667,6 +4716,26 @@ struct AppState {
     /// once — host.toml marks `tokens` `Apply::Restart` for the generic
     /// settings path, but this dedicated one does not wait for a restart.
     tokens: Arc<std::sync::RwLock<Vec<TokenEntry>>>,
+    /// fix-52 residual: unix seconds of the scheduler's last sign of
+    /// progress — touched when a tick wakes and after each stack's night
+    /// work. The watchdog feeder refuses to send `WATCHDOG=1` once this
+    /// goes stale, so a scheduler wedged inside a single await (not a
+    /// panic, which `supervise()` already catches) is still noticed.
+    scheduler_heartbeat: Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// fix-52 residual: how long the scheduler may go without a heartbeat touch
+/// before the watchdog feeder stops pinging systemd. Idle ticks are 20
+/// minutes apart (`SCHEDULER_FIRST_CHECK_S` then `20 * 60`) and a single
+/// stack's backup or update can legitimately run long, so this has to clear
+/// both with margin — it is not a tight liveness check, it is "a hung
+/// nightly round is eventually noticed" rather than "never".
+const SCHEDULER_WATCHDOG_STALE_S: u64 = 3600;
+
+/// fix-52 residual: the decision the watchdog-feeder loop makes every tick.
+/// Pure so it is unit-tested without a real systemd socket.
+fn scheduler_is_alive(now: u64, heartbeat: u64, stale_after_s: u64) -> bool {
+    now.saturating_sub(heartbeat) <= stale_after_s
 }
 
 impl AppState {
@@ -4709,6 +4778,15 @@ impl AppState {
                     .unwrap_or(0),
                 std::process::id()
             ),
+            // fix-52 residual: fresh as of construction, so the watchdog
+            // feeder does not see a stale scheduler before it has had its
+            // first chance to tick.
+            scheduler_heartbeat: Arc::new(std::sync::atomic::AtomicU64::new(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            )),
         }
     }
 
@@ -4721,6 +4799,17 @@ impl AppState {
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
     }
+}
+
+/// fix-52 residual: stamp the scheduler's heartbeat with the current time.
+fn touch_scheduler_heartbeat(state: &AppState) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    state
+        .scheduler_heartbeat
+        .store(now, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// T69: a question waiting for its answer.
@@ -4969,7 +5058,11 @@ fn rpc_stack(command: &Rpc) -> Option<String> {
         | Rpc::ForgetStack { stack }
         | Rpc::DestroyRecorded { stack, .. }
         | Rpc::SetStackEnabled { stack, .. }
-        | Rpc::GetApplied { stack } => Some(stack.clone()),
+        | Rpc::GetApplied { stack }
+        | Rpc::GetBackups { stack }
+        | Rpc::RestoreNative { stack, .. }
+        | Rpc::RevealSecret { stack, .. }
+        | Rpc::SetSecret { stack, .. } => Some(stack.clone()),
         Rpc::InstallNative { manifest, .. }
         | Rpc::InstallNativeRelease { manifest, .. }
         | Rpc::AdoptService(manifest) => Some(manifest.stack_name.clone()),
@@ -5113,7 +5206,7 @@ async fn main() {
     tighten_private_paths(&config.state_dir);
     // fix-131: bound the daemon's own records before anything runs, so
     // nothing writes the journal while it is cut.
-    compact_journal_file(&config.state_dir);
+    compact_journal_file(&config.state_dir, config.journal_max_bytes);
     prune_incidents(
         &config.state_dir,
         std::time::SystemTime::now()
@@ -5222,6 +5315,8 @@ async fn main() {
         handle
     };
     let op_lock = state.op_lock.clone();
+    // fix-52 residual: taken before `state` moves into `app_router`.
+    let scheduler_heartbeat = state.scheduler_heartbeat.clone();
 
     let app = app_router(state);
 
@@ -5283,13 +5378,38 @@ async fn main() {
 
     // B7: tell systemd we're ready, then feed its watchdog. If this loop
     // ever stops (deadlock/hang), systemd kills and restarts the daemon.
+    //
+    // fix-52 residual: a ping every 10 s used to prove only that THIS loop
+    // was still scheduled, which says nothing about the scheduler — a
+    // nightly round wedged inside one `await` (not a panic; `supervise()`
+    // already turns a panic or a dead task into exit 1) kept being fed
+    // forever. Now the ping is withheld once the scheduler's own heartbeat
+    // goes stale, so systemd's `WatchdogSec` eventually restarts a daemon
+    // whose scheduler stopped making progress, not just one whose process
+    // stopped existing.
     sd_notify("READY=1");
-    tokio::spawn(async {
-        loop {
-            tokio::time::sleep(Duration::from_secs(10)).await;
-            sd_notify("WATCHDOG=1");
-        }
-    });
+    {
+        let heartbeat = scheduler_heartbeat;
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let last = heartbeat.load(std::sync::atomic::Ordering::Relaxed);
+                if scheduler_is_alive(now, last, SCHEDULER_WATCHDOG_STALE_S) {
+                    sd_notify("WATCHDOG=1");
+                } else {
+                    tracing::error!(
+                        "scheduler heartbeat is {} s old — withholding WATCHDOG=1 so systemd \
+                         restarts a daemon whose nightly round has stalled",
+                        now.saturating_sub(last)
+                    );
+                }
+            }
+        });
+    }
 
     let code = supervise(
         // fix-120: with the peer address, so a refused connection says where
@@ -5913,7 +6033,25 @@ async fn scheduler_loop(state: AppState) {
     loop {
         tokio::time::sleep(wait).await;
         wait = Duration::from_secs(20 * 60);
+        // fix-52 residual: the loop woke up on its own, which is the one
+        // thing an `await` stuck forever cannot do.
+        touch_scheduler_heartbeat(&state);
         spawn_mirror_push(&state); // D5 retry queue: try again every tick
+                                   // password-chain-bus-factor: the standing checks exist whether or
+                                   // not nightly backups are scheduled — a disabled scheduler must not
+                                   // also silence the one question that is on a clock rather than a
+                                   // deploy.
+        {
+            let tick_now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+            record_state(&store, "ensure standing checks", |s| {
+                homelab_core::ops::manualchecks::ensure_standing_checks(s, tick_now)
+            })
+            .await;
+        }
         let (hour, tiers) = {
             let s = state
                 .settings
@@ -6041,6 +6179,8 @@ async fn scheduler_loop(state: AppState) {
             .collect();
         let backup_done =
             run_backup_batch(&state, &exec, backup_jobs, state.config.backup_concurrency).await;
+        // fix-52 residual: the batch — which can run for hours — returned.
+        touch_scheduler_heartbeat(&state);
 
         // fix-138 (expert panel, host-monolith-untested, 2026-09-27): what
         // each stack's night does is decided by `ops::night::stack_night`,
@@ -6124,6 +6264,9 @@ async fn scheduler_loop(state: AppState) {
             if night.settle_park {
                 park_after_night(&state, &exec, &store, &name, update_ok, now).await;
             }
+            // fix-52 residual: this stack's update work (which can itself
+            // run long) finished without the loop ever stalling on it.
+            touch_scheduler_heartbeat(&state);
         }
 
         // H10: the host's own crown jewels — the secrets vault (holding the
@@ -6454,8 +6597,9 @@ async fn scheduler_loop(state: AppState) {
             let dir = state.config.state_dir.clone();
             let max_age_days = state.config.incident_bundle_max_age_days;
             let max_count = state.config.incident_bundle_max_count;
+            let journal_max_bytes = state.config.journal_max_bytes;
             let _ = tokio::task::spawn_blocking(move || {
-                compact_journal_file(&dir);
+                compact_journal_file(&dir, journal_max_bytes);
                 prune_incidents(&dir, now, max_age_days, max_count);
             })
             .await;
@@ -7860,12 +8004,9 @@ where
         state_dir: state.config.state_dir.clone(),
         now_unix: now,
         metrics_targets_dir: state.config.metrics_targets_dir.clone(),
-        grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
-        homepage_services_file: state.config.homepage_services_file.clone(),
         tile_watch_source: state.config.tile_watch_source.clone(),
         tile_watch_targets,
         tile_watch_watcher,
-        kuma_monitors_file: state.config.kuma_monitors_file.clone(),
         // C1/C2: the same Loki the coverage check already asks about, so
         // there is not a second address to keep in step with the first.
         loki_url: state.config.loki_url.clone(),
@@ -8109,17 +8250,14 @@ async fn gather_live_facts(
                 max_age_hours: w.max_age_hours,
             })
             .collect(),
-        kuma_monitors_file: state.config.kuma_monitors_file.clone(),
         state_dir: state.config.state_dir.clone(),
         gateway_vmid: state.config.safety.gateway_vmid,
-        grafana_vmid: state.config.safety.grafana_vmid,
         gateway_routes_dir: state.config.safety.gateway_routes_dir.clone(),
         no_touch: state.config.safety.no_touch.to_vec(),
         prometheus_url: state.config.prometheus_url.clone(),
         loki_url: state.config.loki_url.clone(),
         loki_vmid: state.config.loki_vmid,
         logs_window: sane_window(&state.config.logs_window),
-        grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
         now_unix: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -8764,13 +8902,10 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     deferred: None,
                 };
             }
-            // The same exclusions the deploy applies: the gateway holds other
-            // stacks' generated dashboards and routes.
-            let keep = homelab_core::ops::deploy::generated_dirs(
-                &state.config.safety,
-                state.config.grafana_dashboards_dir.as_deref(),
-                manifest.vmid,
-            );
+            // The same exclusion the deploy applies: the gateway holds other
+            // stacks' routes.
+            let keep =
+                homelab_core::ops::deploy::generated_dirs(&state.config.safety, manifest.vmid);
             let orphans =
                 homelab_core::ops::deploy::orphan_files_keeping(&exec, &manifest, &spec, &keep)
                     .await;
@@ -9162,6 +9297,43 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
+        // feat-overview-10 (homelab-admin, 2026-10-01): the dashboard's
+        // backup calendar, its own query reading restic directly (not
+        // through state.json's cached `last_backup`, which only ever holds
+        // the newest night — a calendar needs every one of them).
+        Rpc::BackupCalendar { stacks } => {
+            let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+            let st = store.load().await.unwrap_or_default();
+            let cfg = state.config.backup.clone();
+            let wanted: Vec<&String> = if stacks.is_empty() {
+                st.stacks.keys().collect()
+            } else {
+                stacks.iter().collect()
+            };
+            let mut by_stack = serde_json::Map::new();
+            let mut skipped = Vec::new();
+            for name in wanted {
+                let Some(entry) = st.stacks.get(name) else {
+                    skipped.push(format!("{name}: not a known stack"));
+                    continue;
+                };
+                let Some(m) = entry.manifest.as_ref() else {
+                    skipped.push(format!("{name}: no manifest on record"));
+                    continue;
+                };
+                if m.backs_up_nothing() {
+                    continue;
+                }
+                let times = homelab_core::ops::backup::snapshot_nights_unix(&exec, m, &cfg).await;
+                by_stack.insert(name.clone(), serde_json::json!(times));
+            }
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: serde_json::json!({ "stacks": by_stack, "skipped": skipped }).to_string(),
+                deferred: None,
+            }
+        }
         Rpc::ListManualChecks { json } => {
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
             let st = store.load().await.unwrap_or_default();
@@ -9385,6 +9557,230 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 ok: true,
                 message: serde_json::to_string(&files).unwrap_or_else(|_| "[]".into()),
                 deferred: None,
+            }
+        }
+        // feat-backup-1: per-repository status (D25's owning-app repos for
+        // a compose stack, one per unit for a native stack), joined with
+        // the restore-drill verdict the nightly drill already recorded.
+        Rpc::GetBackups { stack } => {
+            let store =
+                homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
+            let snapshot = store.load().await.unwrap_or_default();
+            let Some(st) = snapshot.stacks.get(&stack) else {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("no such stack '{}'", stack),
+                    deferred: None,
+                };
+            };
+            let tiers = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retention
+                .clone();
+            let cfg = homelab_core::ops::backup::BackupCfg {
+                tiers,
+                ..state.config.backup.clone()
+            };
+            let (native, statuses) = if let Some(m) = &st.manifest {
+                (
+                    false,
+                    homelab_core::ops::backup::backup_status(
+                        &exec,
+                        m,
+                        &cfg,
+                        &snapshot.restore_drills,
+                    )
+                    .await,
+                )
+            } else {
+                let mut v = Vec::new();
+                for n in &st.natives {
+                    v.push(
+                        homelab_core::ops::backup::repo_status_of(
+                            &exec,
+                            &cfg,
+                            &snapshot.restore_drills,
+                            n.unit.clone(),
+                        )
+                        .await,
+                    );
+                }
+                (true, v)
+            };
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: serde_json::json!({ "native": native, "repos": statuses }).to_string(),
+                deferred: None,
+            }
+        }
+        // feat-backup-3: read-only, never stops anything.
+        Rpc::BrowseSnapshot {
+            owner,
+            snapshot,
+            path,
+        } => {
+            let tiers = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retention
+                .clone();
+            let cfg = homelab_core::ops::backup::BackupCfg {
+                tiers,
+                ..state.config.backup.clone()
+            };
+            match homelab_core::ops::backup::browse_snapshot(&exec, &cfg, &owner, &snapshot, &path)
+                .await
+            {
+                Ok(entries) => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: serde_json::to_string(&entries).unwrap_or_else(|_| "[]".into()),
+                    deferred: None,
+                },
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e.to_string(),
+                    deferred: None,
+                },
+            }
+        }
+        Rpc::RestoreNative {
+            stack,
+            snapshot,
+            confirm,
+        } => match native_from_state(&state.config.state_dir, &stack).await {
+            Ok((services, _)) => {
+                let cfg = state.config.backup.clone();
+                let mut resp = RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: format!("no services on stack '{}'", stack),
+                    deferred: None,
+                };
+                for m in services {
+                    let cfg = cfg.clone();
+                    let snap = snapshot.clone();
+                    let confirm = confirm.clone();
+                    let r = run_mutating_op_for_stack(
+                        state,
+                        &exec,
+                        req.id,
+                        "restore-native",
+                        Some(&stack),
+                        |ctx| {
+                            Box::pin(async move {
+                                homelab_core::ops::native::restore_native(
+                                    ctx,
+                                    &m,
+                                    &cfg,
+                                    &snap,
+                                    confirm.as_deref(),
+                                )
+                                .await
+                            })
+                        },
+                    )
+                    .await;
+                    let failed = !r.ok;
+                    if resp.ok || failed {
+                        resp = r;
+                    }
+                    if failed {
+                        break;
+                    }
+                }
+                resp
+            }
+            Err(msg) => RpcResponse {
+                id: req.id,
+                ok: false,
+                message: msg,
+                deferred: None,
+            },
+        },
+        // feat-secrets-1: the value, read straight from the host's own
+        // vault (never a process, never traced). Audited before the read,
+        // naming what was asked for, never the value.
+        Rpc::RevealSecret { stack, secret } => {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let audit = format!("{} reveal-secret stack={} secret={:?}\n", ts, stack, secret);
+            if let Err(e) = append_audit(&format!("{}/audit.log", state.config.state_dir), &audit) {
+                tracing::warn!("audit.log: could not record the reveal :: {}", e);
+            }
+            match crate::secrets::reveal(&state.config.state_dir, &stack, &secret).await {
+                Ok(content) => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: content,
+                    deferred: None,
+                },
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e,
+                    deferred: None,
+                },
+            }
+        }
+        // feat-secrets-2: through latch, exactly the one relative path a
+        // deploy would read back — the rest of latch is untouched. Audited
+        // before the write, never the value; `latch_put` itself never goes
+        // through `Executor`/`Cmd` either (core::ops::secrets).
+        Rpc::SetSecret {
+            stack,
+            secret,
+            content,
+        } => {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let rel = homelab_core::ops::secrets::latch_rel_path(&stack, &secret);
+            let audit = format!(
+                "{} set-secret stack={} secret={:?} rel={}\n",
+                ts, stack, secret, rel
+            );
+            if let Err(e) = append_audit(&format!("{}/audit.log", state.config.state_dir), &audit) {
+                tracing::warn!("audit.log: could not record the write :: {}", e);
+            }
+            let env = std::env::var("HOMELAB_LATCH_ENV").unwrap_or_default();
+            let project_root = format!("{}/repo", state.config.state_dir);
+            let result = tokio::task::spawn_blocking(move || {
+                crate::secrets::latch_put(&project_root, &env, &rel, &content)
+            })
+            .await;
+            match result {
+                Ok(Ok(())) => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: format!(
+                        "{} written in latch; the other files latch holds for this stack are \
+                         untouched; redeploy the stack for the running container to pick it up",
+                        homelab_core::ops::secrets::latch_rel_path(&stack, &secret)
+                    ),
+                    deferred: None,
+                },
+                Ok(Err(e)) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e,
+                    deferred: None,
+                },
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("internal: {e}"),
+                    deferred: None,
+                },
             }
         }
         Rpc::GetConfig => {
@@ -9914,15 +10310,16 @@ fn prune_incidents(state_dir: &str, now: u64, max_age_days: u64, max_count: usiz
 /// (`incidents::compact_journal`), written whole through a temp file.
 /// Called only while nothing writes the journal: at start, and under the
 /// operation lock.
-fn compact_journal_file(state_dir: &str) {
+///
+/// gap-26: `max_bytes` used to be the hardcoded `incidents::JOURNAL_MAX_BYTES`
+/// — unlike the incident-bundle limits right beside it in host.toml, this one
+/// had no key and no dashboard row. The caller now passes `config.journal_max_bytes`.
+fn compact_journal_file(state_dir: &str, max_bytes: u64) {
     let path = format!("{}/journal.jsonl", state_dir);
     let Ok(content) = std::fs::read_to_string(&path) else {
         return;
     };
-    let Some(cut) = homelab_core::incidents::compact_journal(
-        &content,
-        homelab_core::incidents::JOURNAL_MAX_BYTES,
-    ) else {
+    let Some(cut) = homelab_core::incidents::compact_journal(&content, max_bytes as usize) else {
         return;
     };
     let tmp = format!("{}.compact.tmp", path);

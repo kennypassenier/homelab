@@ -167,8 +167,9 @@ firewall:
     VLAN 10 that no OPNsense rule can (F183). Every rule below comes from a
     measurement of 2026-09-20: ss on the container (no neighbour connections),
     the containers' own configuration (almanac, registry cache), the gateway
-    route (8080, 8787), the Prometheus targets (8081, 9100) and the Uptime Kuma
-    ping. Kenny approved it on 2026-09-20 ("Klopt").
+    route (8080, 8787) and the Prometheus targets (8081, 9100).
+    Kenny approved it on 2026-09-20 ("Klopt"). Uptime Kuma's rules, added
+    2026-09-27, were retired with Uptime Kuma on 2026-10-01.
   policy_in: DROP
   policy_out: ACCEPT
   # The management guard (DNS to 10.10.5.1, drop 10.10.5.0/24) would be three
@@ -211,7 +212,7 @@ firewall:
       dest: 10.10.10.0/24
     - comment: |-
         4 · who may reach the container: Traefik (site, JobTracker), Prometheus
-            (cadvisor, node exporter), Uptime Kuma (ping), Kenny's desktop (ssh)
+            (cadvisor, node exporter), Kenny's desktop (ssh)
       dir: in
       action: ACCEPT
       source: 10.10.10.4
@@ -222,20 +223,6 @@ firewall:
       source: 10.10.10.13
       proto: tcp
       dport: "8081,9100"
-    - dir: in
-      action: ACCEPT
-      source: 10.10.10.7
-      proto: icmp
-    # Kenny, 2026-09-27 (form item kp-soft-kuma-firewall: "Kuma HTTP toelaten,
-    # firewall in de repo"): Uptime Kuma's declared monitor `kp-soft · site`
-    # (http://10.10.10.16:8080/up) could never pass while only its ping was
-    # let in.
-    - dir: in
-      action: ACCEPT
-      source: 10.10.10.7
-      proto: tcp
-      dport: "8080,8787"
-      note: Uptime Kuma HTTP monitors (Kenny, 2026-09-27)
     - dir: in
       action: ACCEPT
       source: 10.10.10.10

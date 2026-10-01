@@ -563,7 +563,7 @@ Findings these tests pin:
 
 Tests:
 
-- `kp_soft_declares_its_live_firewall_plus_kennys_kuma_rule`: CT 116's declaration renders to the file on pve (captured byte for byte on 2026-09-27) with exactly three differences: the provenance line on top, the rule Kenny added that day letting Uptime Kuma's HTTP monitor in (form item kp-soft-kuma-firewall: "Kuma HTTP toelaten, firewall in de repo"), and the Loki push going to the metrics stack (10.10.10.13) instead of the gateway, where Loki no longer runs since fix-90 (2026-09-28: without it CT 116's Alloy would push into a closed port). *(pins fix-89)*
+- `kp_soft_declares_its_live_firewall_plus_kennys_kuma_rule`: CT 116's declaration renders to the file on pve (captured byte for byte on 2026-09-27) with exactly three differences: the provenance line on top, the rule Kenny added that day letting Uptime Kuma's HTTP monitor in (form item kp-soft-kuma-firewall: "Kuma HTTP toelaten, firewall in de repo"), and the Loki push going to the metrics stack (metrics (CT 113)) instead of the gateway, where Loki no longer runs since fix-90 (2026-09-28: without it CT 116's Alloy would push into a closed port). *(pins fix-89)*
 - `every_stack_declares_a_firewall_and_only_kp_soft_enables_it`: Every compose stack declares a firewall, and only kp-soft's and admin's are switched on. *(pins fix-89)*
 - `the_gateway_declaration_opens_port_80_to_nobody`: traefik-lan-host-header-bypass: the gateway's declaration opens port 80 to nobody, so switching it on closes the Host-header route to the Proxmox and OPNsense logins. *(pins fix-89)*
 - `every_measured_flow_passes_the_declared_firewalls_at_both_ends`: Every measured flow passes the declared firewall at both ends, read the way Proxmox reads it — including the declarations not yet enabled, which is the point: they are switched on later, one at a time, and must not break a real connection on that day. *(pins fix-89)*
@@ -583,7 +583,7 @@ Findings these tests pin:
 Tests:
 
 - `the_renderer_reproduces_the_hand_made_116_fw_byte_for_byte`: The renderer reproduces the hand-made 116.fw byte for byte (the captured copy was compared with pve's by `cmp` on 2026-09-27 and is identical), plus one provenance line. *(pins fix-88)*
-- `the_management_network_is_closed_after_the_declared_rules_unless_opened_with_a_reason`: Without `management_open`, the renderer appends the management guard after the declared rules: DNS to the router, nothing else on 10.10.5.0/24. *(pins fix-88)*
+- `the_management_network_is_closed_after_the_declared_rules_unless_opened_with_a_reason`: Without `management_open`, the renderer appends the management guard after the declared rules: DNS to the router, nothing else on the management network. *(pins fix-88)*
 - `a_declaration_proxmox_would_misread_is_refused_with_the_rule_named`: A declaration the renderer cannot honour is refused before anything is written, each problem naming the rule and the field, with the remedy. *(pins fix-88)*
 - `the_gateway_may_not_open_port_80_to_its_neighbours`: traefik-lan-host-header-bypass: Traefik answers a forged Host header with the Proxmox and OPNsense logins (measured from CT 107, 2026-09-27). *(pins fix-88)*
 - `a_deploy_writes_the_firewall_only_when_it_changed_and_says_so`: Written only when the rendering differs from what pve holds, and the transcript says which: unchanged, or exactly which lines came and went. *(pins fix-88)*
@@ -595,7 +595,7 @@ Tests:
 - `the_fleet_check_reports_a_firewall_file_that_differs_from_its_declaration`: `homelab check` holds every managed container's `.fw` on pve against its declaration: a hand edit, a missing file, a NIC with the flag off and a file the repository does not declare are each a finding with a remedy; declarations kept for the rollout are noted in one line. *(pins fix-88)*
 - `the_facts_read_every_recorded_stacks_firewall_file`: The gatherer reads each recorded stack's file off pve, and says absent when there is none. *(pins fix-88)*
 - `tile_watch_derives_a_rule_from_a_tile_whose_probe_is_the_container_s_own_address`
-- `tile_watch_strips_the_cidr_suffix_of_own_ip`: The manifest's own `network.ip` is CIDR (`10.10.10.116/24`); the derivation must strip it before comparing against a probe's bare host, or every tile on the container's own address would be (silently) missed — exactly the bug this test guards against.
+- `tile_watch_strips_the_cidr_suffix_of_own_ip`: The manifest's own `network.ip` is CIDR (`198.51.100.116/24`); the derivation must strip it before comparing against a probe's bare host, or every tile on the container's own address would be (silently) missed — exactly the bug this test guards against.
 - `tile_watch_defaults_the_port_by_the_probe_s_scheme`
 - `tile_watch_skips_a_tile_with_no_probe`: No `probe` at all: the client found no own-IP url and no route in the stack's own file resolved the tile's hostname — the tile is simply not counted, not treated as an error.
 - `tile_watch_skips_a_probe_on_another_container`: A probe that resolved to some OTHER container's address is not this firewall's business either.
@@ -623,11 +623,11 @@ Tests:
 
 `core/tests/fix_162_tests.rs` · 1 test · `cargo test -p homelab-core --test fix_162_tests`
 
-fix-162: CT 120's firewall (policy_in DROP, in force since the rollout of 2026-09-29 ~02:45) let Traefik, Uptime Kuma and Kenny's desktop in but not Prometheus on CT 113, so node-exporter on 10.10.10.20:9100 timed out and HostDown fired from 00:43 UTC while the dashboard itself answered. kp-soft's firewall had the rule; admin's did not.
+fix-162: CT 120's firewall (policy_in DROP, in force since the rollout of 2026-09-29 ~02:45) let Traefik, Uptime Kuma and Kenny's desktop in but not Prometheus on CT 113, so node-exporter on the dashboard (CT 120):9100 timed out and HostDown fired from 00:43 UTC while the dashboard itself answered. kp-soft's firewall had the rule; admin's did not.
 
 Tests:
 
-- `fix_162_every_dropping_firewall_lets_prometheus_scrape_node_exporter`: Every stack whose container firewall drops inbound traffic and that is measured lets Prometheus (CT 113, 10.10.10.13) reach node-exporter on 9100.
+- `fix_162_every_dropping_firewall_lets_prometheus_scrape_node_exporter`: Every stack whose container firewall drops inbound traffic and that is measured lets Prometheus (CT 113, metrics (CT 113)) reach node-exporter on 9100.
 
 ### fleetcheck_tests
 
@@ -1503,7 +1503,7 @@ Tests:
 
 - `a_hostname_claimed_by_two_route_files_is_refused`: The copy-paste scenario from the finding: a new stack copies media's route as its example and keeps `fin.kp-soft.dev`. *(pins fix-92)*
 - `a_hostname_repeated_inside_one_file_is_fine`: One file may name its own host in several routers — almanac's blocks `/metrics` with a second router on the same host. *(pins fix-92)*
-- `a_backend_that_is_no_stacks_address_needs_an_external_declaration`: A backend that is no stack's address is refused unless the file declares it external — which is what keeps a route to the management network (10.10.5.0/24: pve, OPNsense) from appearing unannounced. *(pins fix-92)*
+- `a_backend_that_is_no_stacks_address_needs_an_external_declaration`: A backend that is no stack's address is refused unless the file declares it external — which is what keeps a route to the management network (the management network: pve, OPNsense) from appearing unannounced. *(pins fix-92)*
 - `a_backend_on_a_managed_stacks_address_passes`: A backend on a managed stack's address passes, its own or another's. *(pins fix-92)*
 - `an_external_declaration_the_file_does_not_use_is_refused`: An external declaration the file does not route to is stale: it would wave through a backend nobody meant. *(pins fix-92)*
 - `the_same_route_file_declared_by_two_stacks_is_refused`: Two stacks declaring the same file name would overwrite each other on the gateway. *(pins fix-92)*

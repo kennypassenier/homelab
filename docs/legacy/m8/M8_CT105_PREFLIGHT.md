@@ -62,7 +62,7 @@ might one day be pointed at is a change with no upside.
 | Tree ownership | uid 1000, mode 777 |
 | Container | privileged, 2 cores, 2048 MB, 512 MB swap, 10 G rootfs, onboot, order 99 |
 | WebUI | port 8080, published by gluetun |
-| VPN | Surfshark WireGuard via `ch-zur.prod.surfshark.com`, address 10.14.0.2/32 |
+| VPN | Surfshark WireGuard via `ch-zur.prod.surfshark.com`, address 198.51.100.2/32 (RFC 5737 placeholder; provider-assigned, not the home network) |
 
 **The VPN key is already safe:** `downloader/gluetun/.env` in the vault holds
 `GLUETUN_WIREGUARD_PRIVATE_KEY`, verified byte-identical to the value the

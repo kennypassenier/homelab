@@ -15,7 +15,7 @@
 | Protocol crate | `proto/` | WS JSON: RpcRequest{Ping,Status,DeployStack}, ServerMsg{Hello,Log,RpcDone}; StackManifest (lxc-compose v2, intent-only), FileBlob, env map (secrets channel), GatewayRoute. |
 | HOST daemon (merged architecture) | `host/` | axum WS on :8443, required bearer token; deploy pipeline: safety gates → /appdata storage → pct create/start → wait systemd → docker bootstrap (get.docker.com) → local git commit (/var/lib/homelab/repo) → pct push files + .env (0600, vault copy in /var/lib/homelab/secrets) → compose pull/up → verify (compose ps + diagnostics) → gateway route push → state.json. **No destroy path exists.** NO_TOUCH list hardcoded: 100,101,102,103 (narrowed 2026-08-30); QEMU-vmid check protects all VMs (incl. template 9000); existing CT reused only when hostname == `{vmid}-app-{stack}`. |
 | CLIENT CLI | `client/` (binary `homelab`) | `homelab ping|status|deploy stacks/<name>`; reads manifest+files, `.env` files go over the secrets channel; streams HOST logs live; env `HOMELAB_HOST`/`HOMELAB_TOKEN` (auto-read from `.env`? no — export or `set -a; . ./.env; set +a`). |
-| Syncthing stack definition | `stacks/syncthing/` | Per vault note §4: vmid 110, `110-app-syncthing`, 10.10.10.10, 512MB/1c/4G, onboot order=50, unprivileged+nesting; data on host `/appdata/syncthing/syncthing-config` (owner 101000); apps: syncthing + promtail (Loki 10.10.10.4); traefik fragment `sync.kp-soft.dev` → 8384 (GUI only, sync protocol stays LAN). |
+| Syncthing stack definition | `stacks/syncthing/` | Per vault note §4: vmid 110, `110-app-syncthing`, the workstation, 512MB/1c/4G, onboot order=50, unprivileged+nesting; data on host `/appdata/syncthing/syncthing-config` (owner 101000); apps: syncthing + promtail (Loki the gateway (CT 104)); traefik fragment `sync.kp-soft.dev` → 8384 (GUI only, sync protocol stays LAN). |
 | Debian-compatible binary | `target-debian/release/homelab-host` (gitignored) | Built in `rust:1-bookworm` Docker. Rebuild: `docker run --rm -v "$PWD":/w -w /w -v homelab-cargo-cache:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/w/target-debian rust:1-bookworm cargo build --release -p homelab-host` |
 | API token | local `.env` (gitignored, 0600) | Also staged at the session scratchpad as `host.env` for scp — regenerate if stale: `openssl rand -hex 32`. |
 
@@ -25,8 +25,8 @@ Every step below touches the Proxmox host. In order:
 
 1. **Install HOST** (was blocked mid-flight; nothing landed):
    ```bash
-   scp target-debian/release/homelab-host root@10.10.5.250:/usr/local/bin/homelab-host
-   scp <env-file> root@10.10.5.250:/etc/homelab/host.env   # mkdir -p /etc/homelab first; chmod 600
+   scp target-debian/release/homelab-host root@pve:/usr/local/bin/homelab-host
+   scp <env-file> root@pve:/etc/homelab/host.env   # mkdir -p /etc/homelab first; chmod 600
    ```
    Unit file `/etc/systemd/system/homelab-host.service`:
    ```ini
@@ -49,10 +49,10 @@ Every step below touches the Proxmox host. In order:
    transcript. Pre-verified on 2026-08-10: template `debian-12-standard_12.12-1`
    present, vmid 110 free on both pct and qm, 57G free on pve-root.
 4. **Verify**:
-   - `pct status 110` running; GUI at `http://10.10.10.10:8384`
-   - traefik: `curl -H 'Host: sync.kp-soft.dev' http://10.10.10.4` (fragment is
+   - `pct status 110` running; GUI at `http://the workstation:8384`
+   - traefik: `curl -H 'Host: sync.kp-soft.dev' http://the gateway (CT 104)` (fragment is
      picked up by the file-provider watch — no traefik restart)
-   - Loki: `curl 'http://10.10.10.4:3100/loki/api/v1/label/stack/values'`
+   - Loki: `curl 'http://the gateway (CT 104):3100/loki/api/v1/label/stack/values'`
      should now include `syncthing`
    - Reboot-safety: `pct config 110` shows `onboot: 1`, `startup: order=50`
 5. **Syncthing app setup** (manual, one-time): set a GUI password, add the

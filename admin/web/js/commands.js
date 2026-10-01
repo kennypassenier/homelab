@@ -82,6 +82,8 @@ const PAGE_KEYS = {
   schedules: "g s",
   notifications: "g n",
   firewall: "g f",
+  backups: "g b",
+  secrets: "g c",
   settings: "g e",
   log: "g l",
   apply: "g p",

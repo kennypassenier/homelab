@@ -66,6 +66,8 @@ pub struct TileFields {
     #[serde(default)]
     pub url: Option<String>,
     #[serde(default)]
+    pub watch_url: Option<String>,
+    #[serde(default)]
     pub reading: Option<String>,
     #[serde(default)]
     pub watch_every: Option<u64>,
@@ -80,6 +82,7 @@ fn tile_of(f: &TileFields) -> Tile {
         order: f.order.unwrap_or(100),
         description: f.description.clone(),
         url: f.url.clone(),
+        watch_url: f.watch_url.clone(),
         reading: f.reading.clone(),
         probe: None,
         watch_every: f.watch_every,
@@ -314,6 +317,7 @@ fn field_ops(ops: &mut Vec<Op>, key: &str, now: &Tile, want: &TileFields) {
         };
     text_field(ops, "description", &now.description, &want.description);
     text_field(ops, "url", &now.url, &want.url);
+    text_field(ops, "watch_url", &now.watch_url, &want.watch_url);
     text_field(ops, "reading", &now.reading, &want.reading);
     let num_field = |ops: &mut Vec<Op>, field: &str, now: Option<u64>, want: Option<u64>| {
         if now != want {

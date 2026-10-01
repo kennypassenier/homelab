@@ -5413,7 +5413,10 @@ impl homelab_core::ask::Asker for LiveAsker<'_> {
 /// stays test-only: it pins the ANSI-free, span-carrying shape of a single
 /// journald line without the ring's file I/O getting in the way.
 #[cfg(test)]
-fn journal_subscriber<W>(writer: W, default_filter: &str) -> impl tracing::Subscriber + Send + Sync
+fn journal_subscriber<W>(
+    writer: W,
+    default_filter: &str,
+) -> impl tracing::Subscriber + Send + Sync + use<W>
 where
     W: for<'a> tracing_subscriber::fmt::MakeWriter<'a> + Send + Sync + 'static,
 {

@@ -35,10 +35,13 @@ fn fix_144_the_table_says_what_each_stack_file_says() {
         assert!(t.contains(row), "missing `{row}` in:\n{t}");
     }
     // One label decides for an app with several services (update.rs asks
-    // the first container), so a mixed app is said out loud.
+    // the first container), so a mixed app is said out loud. gateway's
+    // goaccess sidecar was the other mixed app until it was retired
+    // 2026-10-01 with Homepage, GoAccess and Uptime Kuma; paperless-db
+    // (postgres `manual`, redis `auto`) still is one.
     assert!(
         t.lines()
-            .any(|l| l.contains("| gateway | goaccess |") && l.contains("mixed")),
+            .any(|l| l.contains("| paperwork | paperless-db |") && l.contains("mixed")),
         "{t}"
     );
 }

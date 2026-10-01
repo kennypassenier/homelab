@@ -213,8 +213,8 @@ when the daemon reports success.
 
 ### Verbs that need no token
 
-`help`, `plan`, `runbook`, `dashboard`, `presets`, `export`, `import`, `new`,
-`testplan`, `self-install` and `tui --offline`. Everything else stops with
+`help`, `plan`, `runbook`, `update-policy`, `presets`, `export`, `import`,
+`new`, `testplan`, `self-install` and `tui --offline`. Everything else stops with
 `HOMELAB_TOKEN is not set` and where to put it when there is no token
 (`needs_token` in `client/src/main.rs`).
 
@@ -228,7 +228,7 @@ and for a stack with `natives` they fetch each service's release through `gh`
 | `homelab plan stacks/<name>` | validate a stack locally and print what a deploy would send |
 | `homelab presets` | list the preset catalog |
 | `homelab runbook [out.md]` | write the disaster-recovery runbook from `stacks/` (default `docs/DR_RUNBOOK.md`) |
-| `homelab dashboard <stack> <app>...` | print a stack's dashboard JSON, the same function a deploy uses |
+| `homelab update-policy [doc.md]` | regenerate the policy table in `docs/deployment/UPDATE_POLICY.md` from the stack files (default `docs/deployment/UPDATE_POLICY.md`) |
 | `homelab export stacks/<name> [out.yml]` | write the stack definition as one YAML bundle; `.env` files are never in it |
 | `homelab import <bundle.yml> <new-name> <vmid>` | write a bundle back as a new stack under `stacks/`, renaming its identity, then validate it |
 

@@ -1017,7 +1017,7 @@ fn g4_shell_tab_sends_exec_and_shows_output() {
     let mut m = ready_model();
     homelab_client::tui::model::update(
         &mut m,
-        Msg::Key(KeyEvent::new(KeyCode::Char('6'), KeyModifiers::NONE)),
+        Msg::Key(KeyEvent::new(KeyCode::Char('5'), KeyModifiers::NONE)),
     );
     assert!(matches!(m.tab, Tab::Shell));
     // Typing digits must NOT switch tabs while in the shell.
@@ -1308,6 +1308,57 @@ const CLI_ONLY: &[(&str, &str)] = &[
         "ReleaseUpdateNative",
         "the nightly round's own release update, run by hand only to prove it — \
          the TUI's update key is the supervised self-update (B1)",
+    ),
+    (
+        "BackupCalendar",
+        "feat-overview-10: the dashboard's own backup-calendar page reads this \
+         straight through the host; the TUI has no calendar view",
+    ),
+    (
+        "TokenIssue",
+        "fix-120 (per-machine tokens, owner decision 2026-10-01): `homelab token \
+         issue` and the dashboard's token page send this; a token is shown once \
+         and typed into another machine's env, not a thing to reach for from \
+         the stack list",
+    ),
+    (
+        "TokenList",
+        "fix-120: `homelab token list` and the dashboard's token page; the TUI \
+         has no token management screen",
+    ),
+    (
+        "TokenRevoke",
+        "fix-120: `homelab token revoke` and the dashboard's token page — \
+         revoking is typed by name, the same friction as DestroyStack",
+    ),
+    (
+        "ApplyHostConfig",
+        "fix-110 / tui-host-settings (Kenny, 2026-10-01): `homelab host apply` \
+         and the dashboard's host-settings page lay `config/host.toml` over the \
+         host's own file; the TUI's SETTINGS tab was removed and writes no \
+         host config",
+    ),
+    (
+        "BrowseSnapshot",
+        "the dashboard's Backups page browses a snapshot's files before a \
+         restore; the TUI's snapshots list names the repository and age, not \
+         a file browser",
+    ),
+    (
+        "RestoreNative",
+        "the dashboard's restore action for a native service (ActionKind::\
+         RestoreNative); the TUI has no restore flow of its own, native or \
+         compose",
+    ),
+    (
+        "RevealSecret",
+        "the dashboard's secrets page reveals one value on request, audited by \
+         the host; the TUI never shows a secret's plaintext",
+    ),
+    (
+        "SetSecret",
+        "the dashboard's secrets page writes a changed value; the TUI has no \
+         secrets screen to write one from",
     ),
 ];
 
@@ -2367,6 +2418,12 @@ fn every_stack_manifest_agrees_with_the_directories_beside_it() {
             // fix-91: `routes/` holds the stack's extra route files, bound
             // for the gateway; the deploy never ships it into the container.
             .filter(|e| e.file_name() != "routes")
+            // `rootfs/` is the other on-disk convention with no app or
+            // native entry of its own (core::manifest::ROOTFS_PREFIX): its
+            // tree maps onto the container's `/` directly (e.g.
+            // `rootfs/etc/systemd/system/x.timer`), so it is never an app
+            // or native directory to begin with.
+            .filter(|e| e.file_name() != "rootfs")
             .filter(|e| {
                 std::fs::read_dir(e.path())
                     .map(|mut rd| rd.next().is_some())
@@ -2443,7 +2500,11 @@ fn every_stack_manifest_agrees_with_the_directories_beside_it() {
             );
         }
     }
-    assert!(checked >= 10, "only {} stacks checked", checked);
+    // A floor, not a count: it exists so a sweep that finds nothing
+    // silently passes instead of failing. Was 10 while stacks/home and
+    // stacks/uptime still carried compose apps; retiring Homepage and
+    // Uptime Kuma (2026-10-01) left 9 stacks with a non-empty `apps` list.
+    assert!(checked >= 9, "only {} stacks checked", checked);
 }
 
 // ── T71: the native-service family, reachable from the TUI ─────────────────
@@ -2970,25 +3031,17 @@ fn bottom_row(out: &str) -> String {
 /// lowercase for plain keys, SHIFT+ for capitals, as the help screen does.
 #[test]
 fn a_key_named_on_screen_is_the_key_that_does_it() {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let mut m = ready_model();
     m.host_version = "2.6.0".into();
     homelab_client::tui::model::update(&mut m, Msg::ReleaseTag(Some("v9.9.9".into())));
     let out = render(&m);
-    assert!(out.contains("available — press u"), "ticker: {}", out);
-    assert!(!out.contains("press U"));
+    // fix-102 removed the bare `u` key (see
+    // fix_102_the_host_update_key_is_gone_the_palette_asks_first); the
+    // ticker names the way that still reaches it instead of a key the
+    // screen no longer binds.
+    assert!(out.contains("available — CTRL+K"), "ticker: {}", out);
+    assert!(!out.contains("press u"), "ticker: {}", out);
     assert!(!out.contains("beschikbaar"), "English interface");
-    // The key the ticker names does what the ticker says, after its y/N
-    // question (fix-102).
-    homelab_client::tui::model::update(
-        &mut m,
-        Msg::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE)),
-    );
-    homelab_client::tui::model::update(
-        &mut m,
-        Msg::Key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)),
-    );
-    assert_eq!(m.release_update_requested.as_deref(), Some("v9.9.9"));
 
     let m = ready_model();
     let foot = bottom_row(&render(&m));
@@ -3443,7 +3496,7 @@ fn fix_107_key_map_footer_and_palette_come_from_one_table() {
     let mut m = ready_model();
     press(&mut m, crossterm::event::KeyCode::Char('h'));
     let help = render(&m);
-    assert!(help.contains("1-6"), "{}", help);
+    assert!(help.contains("1-5"), "{}", help);
     assert!(!help.contains("1-4"), "{}", help);
     for b in KEYMAP.iter().filter(|b| b.shown_on(Tab::Dashboard)) {
         assert!(help.contains(b.key), "help lacks {}: {}", b.key, help);
@@ -3544,24 +3597,13 @@ fn fix_102_parking_a_stack_says_what_it_costs_and_waits_for_y() {
     )));
 }
 
-/// `u` started a host self-update at once, one Shift away from SHIFT+U
-/// (update the selected stack).
-/// covers: fix-102
-#[test]
-fn fix_102_the_host_update_key_asks_first() {
-    use crossterm::event::KeyCode;
-    let mut m = ready_model();
-    m.host_version = "2.6.0".into();
-    homelab_client::tui::model::update(&mut m, Msg::ReleaseTag(Some("v9.9.9".into())));
-    press(&mut m, KeyCode::Char('u'));
-    assert!(m.release_update_requested.is_none(), "u updated the host");
-    assert!(render(&m).contains("restarts itself"));
-    press(&mut m, KeyCode::Esc);
-    assert!(m.release_update_requested.is_none());
-    press(&mut m, KeyCode::Char('u'));
-    press(&mut m, KeyCode::Char('y'));
-    assert_eq!(m.release_update_requested.as_deref(), Some("v9.9.9"));
-}
+// `u` used to start a host self-update at once, one Shift away from
+// SHIFT+U (update the selected stack); this test pressed it directly and
+// read the ask-first dialog off the result. fix-102 then removed the bare
+// key altogether rather than re-arming it (comment above
+// `fix_102_the_host_update_key_is_gone_the_palette_asks_first`), which
+// fully supersedes this test: it covers both that `u` now does nothing and
+// that the palette's "op.host-update" still asks first.
 
 // fix-102's retention-tier-delete-asks-first coverage moved with the
 // SETTINGS tab itself: fix-110 / tui-host-settings (Kenny, 2026-10-01)

@@ -93,7 +93,10 @@ mod tests {
             hostname: format!("110-app-{name}"),
             apps: vec![AppView {
                 name: "app".into(),
-                running: online,
+                // deliberately independent of `online`: online tracks
+                // whether the host/vmid answers at all, not whether a
+                // container the last known state remembers is running.
+                running: true,
                 restarts: 0,
             }],
             drift,

@@ -51,10 +51,8 @@ fails while this section is stale.
 | downloader | qbittorrent | qbittorrent | `manual` | `lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.14-ls474@sha256:a00b6a597a38…` |  |
 | gateway | cloudflared | cloudflared | `manual` | `cloudflare/cloudflared:2026.8.3@sha256:51c9cefcb456…` |  |
 | gateway | crowdsec | crowdsec | `manual` | `crowdsecurity/crowdsec:v1.8.1@sha256:0f2523fa61ef…` |  |
-| gateway | goaccess | goaccess | `manual` | `allinurl/goaccess:1.11@sha256:95fd6193c6c5…` | mixed: the update reads one label for the whole app, the first container's |
-| gateway | goaccess | goaccess-report | `auto` | `nginx:alpine` | mixed: the update reads one label for the whole app, the first container's |
+| gateway | socket-proxy | socket-proxy | `manual` | `tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6…` |  |
 | gateway | traefik | traefik | `manual` | `traefik:v3.7.12@sha256:9c2a54d87f76…` |  |
-| home | homepage | homepage | `auto` | `ghcr.io/gethomepage/homepage:v2.1.2` |  |
 | kp-soft | jobtracker | jobtracker | `auto` | `ghcr.io/kennypassenier/jobtracker:latest` |  |
 | kp-soft | kp-soft | kp-soft | `manual` | `ghcr.io/kennypassenier/kp-soft:v0.4.0@sha256:b9fd7be0bd3e…` |  |
 | media | bazarr | bazarr | `auto` | `lscr.io/linuxserver/bazarr:latest` |  |
@@ -66,7 +64,6 @@ fails while this section is stale.
 | media | seerr | seerr | `auto` | `ghcr.io/seerr-team/seerr:latest` |  |
 | media | sonarr | sonarr | `auto` | `lscr.io/linuxserver/sonarr:latest` |  |
 | metrics | alertmanager | alertmanager | `manual` | `prom/alertmanager:v0.34.0@sha256:690c7b525f43…` |  |
-| metrics | grafana | grafana | `manual` | `grafana/grafana:13.2.1@sha256:f772d434e8fa…` |  |
 | metrics | loki | loki | `manual` | `grafana/loki:3.7.8@sha256:1107dd5274e0…` |  |
 | metrics | loki-push | loki-push | `auto` | `nginx:alpine` |  |
 | metrics | prometheus | prometheus | `manual` | `prom/prometheus:v3.14.0@sha256:5ce7540c3c00…` |  |
@@ -83,8 +80,6 @@ fails while this section is stale.
 | registry | registry | cache-gcr | `manual` | `registry:2.8.3@sha256:a3d8aaa63ed8…` |  |
 | registry | registry | cache-lscr | `manual` | `registry:2.8.3@sha256:a3d8aaa63ed8…` |  |
 | syncthing | syncthing | syncthing | `auto` | `syncthing/syncthing:latest` |  |
-| uptime | kuma-seeder | kuma-seeder | `auto` | `python:3.12-slim` |  |
-| uptime | uptime-kuma | uptime-kuma | `auto` | `louislam/uptime-kuma:latest` |  |
 
 ### Native services (`update_policy` in `service.yml`)
 

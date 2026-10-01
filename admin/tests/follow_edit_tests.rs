@@ -885,6 +885,9 @@ async fn follow_the_raw_editor_creates_renames_and_deletes_a_file() {
     ok(&w, press("confirm")).await;
     assert_eq!(commits(&w), 4);
     let ls = git(&w.bare, &["ls-tree", "-r", "--name-only", "main"]);
+    // The positive twin: the delete removed the one file, not the whole
+    // tree — the stack's own compose file is still there.
+    assert!(ls.contains("stacks/kp-soft/lxc-compose.yml"), "{ls}");
     assert!(!ls.contains("renamed-note.yml"), "{ls}");
     ok(&w, UiStep::Close).await;
 

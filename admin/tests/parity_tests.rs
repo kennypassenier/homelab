@@ -83,10 +83,17 @@ fn parity_a_bad_deploy_key_is_refused_without_a_file_or_its_value_in_the_reason(
         "nothing written for a value that is not a key"
     );
     assert_eq!(p.problems.len(), 1);
+    // The positive twin: the refusal still says WHY, just not the value.
+    assert!(
+        p.problems[0].contains("does not decode to a private key"),
+        "{:?}",
+        p.problems
+    );
     assert!(!p.problems[0].contains(secretish), "{:?}", p.problems);
     assert!(decode_deploy_key("not base64 at all!")
         .unwrap_err()
         .contains("not base64"));
+    assert!(decode_deploy_key("!!!").unwrap_err().contains("not base64"));
     assert!(!decode_deploy_key("!!!").unwrap_err().contains("!!!"));
     // No variable: nothing to do but the host keys.
     let dir = temp_dir("cred-none");
@@ -136,9 +143,12 @@ fn parity_the_log_stream_carries_every_line_masked_and_filterable() {
     assert_eq!(all.len(), 3);
     assert_eq!(all[0].by.as_deref(), Some("wsl"));
     assert_eq!(all[1].by, None, "the nightly round's line has no session");
+    // The positive twin: the line is masked, not dropped.
+    assert!(all[2].msg.contains("<redacted>"), "{}", all[2].msg);
     assert!(!all[2].msg.contains("abcdef0123456789"), "{}", all[2].msg);
     let pushed = live.events("host_log");
     assert_eq!(pushed.len(), 3);
+    assert!(pushed[2].to_string().contains("<redacted>"));
     assert!(!pushed[2].to_string().contains("abcdef0123456789"));
     let media = h.lines(&After {
         after: 0,

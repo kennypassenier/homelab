@@ -91,6 +91,8 @@ mod tests {
         assert!(d[1].disabled, "an unsigned release is not selectable");
         assert!(d[1].label.contains("unsigned"));
         assert!(!d[2].disabled);
+        // The positive twin: a signed release's label is just its tag.
+        assert_eq!(d[2].label, "v1.9.0");
         assert!(!d[2].label.contains("unsigned"));
         assert!(!d[3].disabled);
     }

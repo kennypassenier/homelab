@@ -69,6 +69,9 @@ fn arch_exposure_the_stacks_settings_keep_the_locks_on() {
         "/../stacks/admin/admin/admin.service"
     );
     let unit = std::fs::read_to_string(path).unwrap();
+    // The positive twin: the unit was actually read, not an empty file
+    // that would also pass the check below.
+    assert!(unit.contains("Environment="), "{unit}");
     assert!(!unit.contains("LOCKS"), "no variable may name the locks");
     let mut env: std::collections::BTreeMap<String, String> = unit
         .lines()

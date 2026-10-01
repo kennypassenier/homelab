@@ -684,6 +684,9 @@ async fn feat_stacks_files_create_delete_rename_and_checks_schema() {
     .await;
     assert_eq!(st, StatusCode::OK, "{v}");
     let ls = git(&w.bare, &["ls-tree", "-r", "--name-only", "main"]);
+    // The positive twin: the delete removed the one file, not the whole
+    // tree — the stack's own compose file is still there.
+    assert!(ls.contains("stacks/kp-soft/lxc-compose.yml"), "{ls}");
     assert!(!ls.contains("renamed-note.yml"), "{ls}");
 
     let (st, v) = call(

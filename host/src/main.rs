@@ -8732,6 +8732,43 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
+        // feat-overview-10 (homelab-admin, 2026-10-01): the dashboard's
+        // backup calendar, its own query reading restic directly (not
+        // through state.json's cached `last_backup`, which only ever holds
+        // the newest night — a calendar needs every one of them).
+        Rpc::BackupCalendar { stacks } => {
+            let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+            let st = store.load().await.unwrap_or_default();
+            let cfg = state.config.backup.clone();
+            let wanted: Vec<&String> = if stacks.is_empty() {
+                st.stacks.keys().collect()
+            } else {
+                stacks.iter().collect()
+            };
+            let mut by_stack = serde_json::Map::new();
+            let mut skipped = Vec::new();
+            for name in wanted {
+                let Some(entry) = st.stacks.get(name) else {
+                    skipped.push(format!("{name}: not a known stack"));
+                    continue;
+                };
+                let Some(m) = entry.manifest.as_ref() else {
+                    skipped.push(format!("{name}: no manifest on record"));
+                    continue;
+                };
+                if m.backs_up_nothing() {
+                    continue;
+                }
+                let times = homelab_core::ops::backup::snapshot_nights_unix(&exec, m, &cfg).await;
+                by_stack.insert(name.clone(), serde_json::json!(times));
+            }
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: serde_json::json!({ "stacks": by_stack, "skipped": skipped }).to_string(),
+                deferred: None,
+            }
+        }
         Rpc::ListManualChecks { json } => {
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
             let st = store.load().await.unwrap_or_default();

@@ -338,6 +338,18 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         bare: bool,
     },
+    /// feat-overview-10 (homelab-admin, 2026-10-01): every restic snapshot
+    /// time for the named stacks (every managed docker stack when empty),
+    /// for the dashboard's own backup calendar — its own query, separate
+    /// from the backup page's reads, so the two pages cannot collide.
+    /// Read-only; JSON `{"stacks": {"<name>": [unix, …]}, "skipped":
+    /// ["<name>: why"]}`. Reaches the repositories over the network
+    /// (rclone), so it can take a while on a slow link — the caller treats
+    /// it like `FleetCheck`.
+    BackupCalendar {
+        #[serde(default)]
+        stacks: Vec<String>,
+    },
     /// G17: the questions only a person can answer, as the host has them on
     /// record. Read-only; the deploy is what puts them there.
     ListManualChecks {
@@ -658,6 +670,7 @@ impl Command {
             | Today { .. }
             | ListManualChecks { .. }
             | Tiles { .. }
+            | BackupCalendar { .. }
             | SessionOptions { .. }
             | CurrentOp
             | History { .. }
@@ -755,6 +768,7 @@ impl Command {
             BackupDevices => "backup_devices",
             ListManualChecks { .. } => "list_manual_checks",
             Tiles { .. } => "tiles",
+            BackupCalendar { .. } => "backup_calendar",
             AnswerManualCheck { .. } => "answer_manual_check",
             SessionOptions { .. } => "session_options",
             CurrentOp => "current_op",

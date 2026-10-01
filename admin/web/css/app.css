@@ -1690,6 +1690,61 @@ td.stack-flags {
   gap: 4px;
 }
 
+/* feat-overview-10: the backup calendar. */
+.backup-cal__legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85em;
+  color: var(--muted-foreground);
+  margin-block-end: 8px;
+}
+.backup-cal__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(2.2rem, 1fr));
+  gap: 4px;
+  max-width: 28rem;
+}
+.backup-cal__head {
+  font-size: 0.75em;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+.backup-cal__cell {
+  aspect-ratio: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 0.75em;
+  width: 1.1em;
+  height: 1.1em;
+}
+.backup-cal__grid .backup-cal__cell {
+  width: auto;
+  height: auto;
+}
+.backup-cal__cell--ok {
+  background: var(--chart-3, #3aa675);
+  color: var(--background);
+}
+.backup-cal__cell--warn {
+  background: var(--chart-2, #e8a33d);
+  color: var(--background);
+}
+.backup-cal__cell--bad {
+  background: var(--destructive);
+  color: var(--destructive-foreground, var(--background));
+}
+.backup-cal__cell--muted {
+  background: var(--border);
+  color: var(--muted-foreground);
+}
+.backup-cal__cell--pad {
+  background: transparent;
+}
+
 /* feat-overview-7 / feat-firewall-3: the topology graph. */
 .topology {
   margin: 0;

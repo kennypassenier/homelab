@@ -285,6 +285,37 @@ pub(crate) async fn newest_snapshot_unix(
     newest
 }
 
+/// feat-overview-10: every snapshot time across a stack's per-app
+/// repositories, unix seconds, one entry per snapshot (not deduplicated by
+/// night — the calendar groups them itself). A repository that does not
+/// exist yet, or that fails to answer, is left out rather than failing the
+/// whole stack: the calendar then simply shows nothing for that night,
+/// which is the same fail-safe direction as [`newest_snapshot_unix`].
+pub async fn snapshot_nights_unix(
+    exec: &dyn Executor,
+    m: &StackManifest,
+    cfg: &BackupCfg,
+) -> Vec<u64> {
+    let mut out = Vec::new();
+    for (owner, _paths) in owner_groups(m) {
+        let Ok(res) = exec
+            .run(&restic_cmd(cfg, &owner, &["snapshots", "--json"], 120))
+            .await
+        else {
+            continue;
+        };
+        if !res.success() {
+            continue;
+        }
+        out.extend(
+            parse_snapshots_json(&res.stdout)
+                .into_iter()
+                .map(|(_, t)| t),
+        );
+    }
+    out
+}
+
 /// D25: group the manifest's storage paths by the app that owns them, in
 /// manifest order. A path with no declared owner belongs to the stack, which
 /// keeps host-level paths (and every manifest written before the field

@@ -44,6 +44,11 @@ pub struct ParityCtx {
     /// (`shell::slow`).
     today_read: Arc<SlowRead>,
     check_read: Arc<SlowRead>,
+    /// feat-overview-10: the backup calendar's own read of restic, over the
+    /// network, which can take as long as the fleet check — its own
+    /// `SlowRead` so the calendar page never blocks on (or restarts) the
+    /// Health page's run, and the other way round.
+    backup_calendar_read: Arc<SlowRead>,
     /// Decision "23 constants": [`DRIFT_REUSE_S`] by default,
     /// `HOMELAB_ADMIN_DRIFT_REUSE_S` in `mount()`.
     drift_reuse_s: u64,
@@ -93,7 +98,12 @@ impl ParityCtx {
             scratch,
             drift: Arc::new(Mutex::new(None)),
             today_read: SlowRead::announced("today", "today", publish.clone()),
-            check_read: SlowRead::announced("the fleet check", "fleet-check", publish),
+            check_read: SlowRead::announced("the fleet check", "fleet-check", publish.clone()),
+            backup_calendar_read: SlowRead::announced(
+                "the backup calendar",
+                "backup-calendar",
+                publish,
+            ),
             drift_reuse_s,
         }
     }
@@ -302,6 +312,77 @@ async fn read_fleet_check(c: ParityCtx) -> (StatusCode, serde_json::Value) {
         },
         Err(e) => gateway_value("the fleet check", e),
     }
+}
+
+/// feat-overview-10 (backup calendar): every snapshot night, per stack, read
+/// straight from restic through the host — its own `BackupCalendar`
+/// command and its own `SlowRead`, kept apart from the Backups page's own
+/// reads so the two merge cleanly.
+async fn backup_calendar(State(c): State<ParityCtx>, Query(q): Query<RunQuery>) -> Response {
+    let read = c.backup_calendar_read.clone();
+    read.read(q.run, WAIT, move || read_backup_calendar(c))
+        .await
+}
+
+async fn read_backup_calendar(c: ParityCtx) -> (StatusCode, serde_json::Value) {
+    match ask(&c, Command::BackupCalendar { stacks: Vec::new() }, 180).await {
+        Ok(r) => match serde_json::from_str::<serde_json::Value>(&r.message) {
+            Ok(v) => (
+                StatusCode::OK,
+                serde_json::json!({
+                    "stacks": v["stacks"],
+                    "skipped": v["skipped"],
+                    "measured_at": now_s(),
+                }),
+            ),
+            Err(_) => gateway_value(
+                "the backup calendar",
+                format!(
+                    "the host answered text, not JSON: {}",
+                    r.message.chars().take(200).collect::<String>()
+                ),
+            ),
+        },
+        Err(e) => gateway_value("the backup calendar", e),
+    }
+}
+
+/// feat-stacks-10 (overview of stale docker images): the same fleet-check
+/// run the Health page uses (`c.check_read`, shared so visiting both pages
+/// does not start the ~90 s read twice), its findings filtered down to the
+/// ones fix-83's pin check writes (`crate::core::stale_images`).
+async fn stale_images(State(c): State<ParityCtx>, Query(q): Query<RunQuery>) -> Response {
+    let read = c.check_read.clone();
+    let resp = read.read(q.run, WAIT, move || read_fleet_check(c)).await;
+    // read_fleet_check's own 202/error shapes (still running, or the host
+    // could not be reached) pass straight through unfiltered; only a
+    // finished 200 answer has `findings` to filter.
+    let status = resp.status();
+    if status != StatusCode::OK {
+        return resp;
+    }
+    let bytes = match axum::body::to_bytes(resp.into_body(), usize::MAX).await {
+        Ok(b) => b,
+        Err(_) => {
+            let (status, body) = gateway_value(
+                "stale images",
+                "the fleet check's answer did not read".to_string(),
+            );
+            return (status, Json(body)).into_response();
+        }
+    };
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+    let findings: Vec<crate::core::stale_images::FindingLike> =
+        serde_json::from_value(body["findings"].clone()).unwrap_or_default();
+    let rows = crate::core::stale_images::from_findings(&findings);
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "images": rows,
+            "measured_at": body["measured_at"],
+        })),
+    )
+        .into_response()
 }
 
 // ── one incident, the templates, ping, versions ─────────────────────────
@@ -609,6 +690,8 @@ pub fn router(c: ParityCtx) -> Router {
     Router::new()
         .route("/data/today", get(today))
         .route("/data/fleet-check", get(fleet_check))
+        .route("/data/stale-images", get(stale_images))
+        .route("/data/backup-calendar", get(backup_calendar))
         .route("/data/incidents/{name}", get(incident))
         .route("/data/templates", get(templates))
         .route("/data/ping", get(ping))

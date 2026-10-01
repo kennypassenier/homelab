@@ -261,6 +261,7 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         | History { .. }
         | Notices { .. }
         | Tiles { .. }
+        | BackupCalendar { .. }
         | GetHostConfig
         | SetHostConfig { .. }
         | Ui { .. }

@@ -1,11 +1,9 @@
-//! Gateway route files as the repository declares them (fix-91, expert panel
-//! routes-outside-repo-unvalidated, 2026-09-27).
+//! Gateway route files as the repository declares them (fix-91).
 //!
 //! Which hostnames of the house are on the internet is decided by the route
-//! files in the gateway's routes directory. Until fix-91 four of them were
-//! written by hand on CT 104 and named nowhere in the repository, so the
-//! repository could not answer that question. Every route file is now
-//! declared by a stack, and this is the shape the client reads them into.
+//! files in the gateway's routes directory. Every route file is declared by
+//! a stack, and this is the shape the client reads them into. Story:
+//! `docs/deployment/REGISTER.md`.
 
 /// One route file a stack declares: its `gateway_route` or one of its
 /// `extra_routes`.

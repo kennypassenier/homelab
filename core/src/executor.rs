@@ -529,14 +529,11 @@ impl Script {
 
 /// Run a shell script inside an LXC via `pct exec`.
 ///
-/// fix-53 (expert panel, timeout-leaves-container-work-running, 2026-09-27):
-/// the script runs under the container's own `timeout` with the same limit.
-/// The host's timeout only ends the wait for `pct`; without this a timed-out
-/// `docker compose pull` kept running inside the container next to whatever
-/// the step did next. GNU `timeout` signals its whole process group, so the
-/// script's children go too, and `-k 10` follows a TERM that is ignored with
-/// a KILL. Measured 2026-09-27: every running container has GNU coreutils
-/// `timeout` (9.1 or 9.7).
+/// fix-53: the script runs under the container's own `timeout` with the
+/// same limit, so a timeout ends the work inside the container, not just
+/// the host's wait for `pct`. GNU `timeout` signals its whole process
+/// group, so the script's children go too, and `-k 10` follows a TERM that
+/// is ignored with a KILL. Story: `docs/deployment/REGISTER.md`.
 pub async fn pct_sh(
     exec: &dyn Executor,
     vmid: u16,

@@ -115,32 +115,23 @@ pub struct StackManifest {
     /// step that exists only in someone's memory.
     #[serde(default)]
     pub registry_login: Option<RegistryLogin>,
-    /// gap-11 (2026-09-18): syslog receivers the log shipper opens for
-    /// devices that cannot run a shipper of their own. OPNsense is the case:
-    /// a firewall ships nothing but syslog, and the gateway container is
-    /// where its lines land (`10.10.10.4:1514`).
+    /// gap-11: syslog receivers the log shipper opens for devices that
+    /// cannot run a shipper of their own. OPNsense is the case: a firewall
+    /// ships nothing but syslog, and the gateway container is where its
+    /// lines land (`10.10.10.4:1514`).
     ///
     /// Declared here rather than hard-wired to the gateway in code for the
     /// same reason `retention` is: the port and the host label are a
     /// contract with a device outside this repository, and a contract typed
     /// into a Rust file is one nobody finds when the device is reconfigured.
-    /// The first version of this receiver was a second file beside the
-    /// rendered one on CT 104, with Alloy switched to directory mode by hand
-    /// so it would be loaded; the orchestrator knew nothing about either.
+    /// Story: `docs/deployment/REGISTER.md`.
     #[serde(default)]
     pub syslog_receivers: Vec<SyslogReceiver>,
     /// fix-88: this container's Proxmox firewall, written by the deploy to
-    /// `/etc/pve/firewall/<vmid>.fw` (expert panel 2026-09-27,
-    /// flat-vlan-no-east-west-control and traefik-lan-host-header-bypass).
-    ///
-    /// Every container shared one flat VLAN with nothing between them: a
-    /// shell in any one of them reached every neighbour's ports, the Proxmox
-    /// and OPNsense logins directly, and the same logins again through
-    /// Traefik with a forged Host header (measured from CT 107: 200 on all
-    /// four). The only per-container ruleset was CT 116's, written by hand on
-    /// pve and known to no file here. Kenny's rule (2026-09-27): everything
-    /// declarative, nothing hand-made the repository does not know — so the
-    /// ruleset lives in the stack file and the deploy writes it.
+    /// `/etc/pve/firewall/<vmid>.fw`. Kenny's rule: everything declarative,
+    /// nothing hand-made the repository does not know — so the ruleset lives
+    /// in the stack file and the deploy writes it. Story:
+    /// `docs/deployment/REGISTER.md`.
     ///
     /// Absent = the repository declares no firewall for this container, and
     /// the fleet check reports any `.fw` file found for it on pve. Skipped
@@ -494,13 +485,9 @@ pub struct DataMount {
     pub no_default_rotate: bool,
 }
 
-/// How a log file on a data mount is rotated (fix-24, Kenny 2026-09-26: "het
-/// Homelab Rust project legt alle logrotaties vast").
-///
-/// Traefik's access log on CT 104 was rotated by a rule someone added by hand
-/// on 2026-08-10; the rebuild of CT 104 on 2026-09-01 did not carry it, and
-/// the file grew for 25 days with nothing saying so. A rule the deploy writes
-/// cannot be lost by a rebuild.
+/// How a log file on a data mount is rotated (fix-24): a rule the deploy
+/// writes cannot be lost by a rebuild the way a hand-added one was. Story:
+/// `docs/deployment/REGISTER.md`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct LogRotation {

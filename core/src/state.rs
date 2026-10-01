@@ -220,12 +220,10 @@ pub struct HostState {
     pub last_fleet_report_fp: String,
     #[serde(default)]
     pub last_fleet_report_at: u64,
-    /// fix-59 (failed-update-parks-backups, 2026-09-27): stacks whose
-    /// automatic updates a failed nightly update parked, with the unix time
-    /// it happened. Only updates: a parked stack keeps its nightly backup.
-    /// The old park set `enabled = false`, which stopped the backups too, so
-    /// one bad upstream image meant no backup until somebody typed `homelab
-    /// enable`. `homelab enable <stack>` clears the entry.
+    /// fix-59: stacks whose automatic updates a failed nightly update
+    /// parked, with the unix time it happened. Only updates: a parked
+    /// stack keeps its nightly backup (story: `docs/deployment/REGISTER.md`).
+    /// `homelab enable <stack>` clears the entry.
     #[serde(default)]
     pub updates_parked: BTreeMap<String, u64>,
     /// ask-8 / ask-9: what a stack, app or native unit left behind when it
@@ -491,10 +489,8 @@ impl<'a> StateStore<'a> {
     /// every other stack permanently (hardening H7). The corrupt content is
     /// preserved next to the original before failing.
     ///
-    /// fix-50 (expert panel, state-load-error-empty-fleet, 2026-09-27): the
-    /// same holds for a file that exists and cannot be READ. Every read error
-    /// used to count as "missing", so an EACCES, EIO or EMFILE loaded the
-    /// empty fleet this comment warns about. Only `NotFound` is fresh now.
+    /// fix-50: the same holds for a file that exists and cannot be READ —
+    /// only `NotFound` counts as fresh. Story: `docs/deployment/REGISTER.md`.
     pub async fn load(&self) -> Result<HostState, CoreError> {
         let raw = match self.exec.read_file(&self.path).await {
             Ok(raw) => raw,

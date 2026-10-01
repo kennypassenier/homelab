@@ -103,11 +103,11 @@ CLIENT currently cares about:
 - `LXC_API_IP`
 - optional `LATCH_AUTO_SYNC=1` to auto-run latch commit/push in Makefile build/release flows
 - optional `LATCH_SYNC_REQUIRED=0` to fail build/release when latch sync fails (set `1` for strict mode)
-- `OPNSENSE_BASE_URL` (for example `https://10.10.5.1`)
+- `OPNSENSE_BASE_URL` (for example `https://the router`)
 - `OPNSENSE_API_KEY`
 - `OPNSENSE_API_SECRET`
 - optional `OPNSENSE_TLS_INSECURE=true` for lab-only self-signed HTTPS
-- optional `HOST_IP` for Proxmox HOST metrics API targeting (default `10.10.5.250`)
+- optional `HOST_IP` for Proxmox HOST metrics API targeting (default `pve`)
 
 ### HOST metrics API quick checks
 
@@ -116,14 +116,14 @@ Use these checks from CLIENT or HOST to validate Host Management telemetry.
 When `LXC_API_TOKEN` is empty (no auth required):
 
 ```bash
-HOST_IP="10.10.5.250"
+HOST_IP="pve"
 curl -fsSL "http://${HOST_IP}:8080/api/metrics"
 ```
 
 When `LXC_API_TOKEN` is set (Bearer required):
 
 ```bash
-HOST_IP="10.10.5.250"
+HOST_IP="pve"
 TOKEN="$(grep '^LXC_API_TOKEN=' config/.env | cut -d '=' -f2-)"
 curl -fsSL \
   -H "Authorization: Bearer ${TOKEN}" \
@@ -447,7 +447,7 @@ Both HOST and LXC daemons expose latch version and update status via their API e
 ### HOST latch version
 
 ```bash
-HOST_IP="10.10.5.250"
+HOST_IP="pve"
 curl -fsSL "http://${HOST_IP}:8080/api/version"
 # Response: {"component":"host-daemon","version":"0.1.x","latch_version":"1.0.0"}
 ```
@@ -457,7 +457,7 @@ If `latch_version` is `null`, the latch binary is not installed or not in PATH.
 ### LXC latch status
 
 ```bash
-LXC_IP="10.10.10.101"
+LXC_IP="198.51.100.101"
 curl -fsSL "http://${LXC_IP}:8080/api/secrets/keyring"
 # Response includes:
 #   latch_available: bool

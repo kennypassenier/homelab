@@ -113,7 +113,7 @@ time:
 | `__STACK__` | the stack name the user typed | `vault-sync` |
 | `__VMID__` | the chosen vmid | `109` |
 | `__HOSTNAME__` | `<vmid>-app-<stack>` | `109-app-vault-sync` |
-| `__IP__` | the derived IP (no CIDR) | `10.10.10.9` |
+| `__IP__` | the derived IP (no CIDR) | `kyu (CT 109)` |
 
 Anything else with underscores (promtail's `__path__`, compose `${ENV_VAR}`)
 is left untouched — only these four exact tokens are substituted.
@@ -243,7 +243,7 @@ already there.
 |---|---|---|---|
 | **Golden image** | `homelab template-build` (`core/src/ops/template.rs`) | Every container needs it, and it is identical everywhere | docker, the runaway guards, unattended-upgrades, node_exporter, cadvisor |
 | **Core app** | `presets/_core/<app>/` | Every container needs it, but its configuration differs per container | none today (promtail until 2026-09-26) |
-| **Preset** | `presets/<name>/` | You want it sometimes | jellyfin, syncthing, uptime-kuma |
+| **Preset** | `presets/<name>/` | You want it sometimes | jellyfin, syncthing, mealie |
 
 **The trade-off that decides it.** Something in the golden image is free at
 deploy time — a clone already has it — but changing it means rebuilding the

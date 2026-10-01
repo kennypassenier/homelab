@@ -25,8 +25,10 @@ export const STACK_TABS = /** @type {const} */ ([
  *   {page: "stack", name: string, tab: StackTab} |
  *   {page: "activity"} | {page: "jobs"} | {page: "schedules"} |
  *   {page: "notifications"} | {page: "firewall"} | {page: "settings"} |
+ *   {page: "backups"} | {page: "secrets"} |
  *   {page: "log"} | {page: "shell"} | {page: "apply"} |
  *   {page: "presets"} |
+ *   {page: "fleetview"} | {page: "backupcalendar"} |
  *   {page: "start"} | {page: "today"} | {page: "doctor"} | {page: "checks"} |
  *   {page: "charts"} | {page: "traffic"} | {page: "timeline"} |
  *   {page: "notfound", path: string}} Route
@@ -74,10 +76,37 @@ export const NAV = /** @type {const} */ ([
     group: "Configure",
   },
   {
+    page: "backups",
+    href: "/app/backups",
+    label: "Backups",
+    group: "Configure",
+  },
+  {
+    page: "secrets",
+    href: "/app/secrets",
+    label: "Secrets",
+    group: "Configure",
+  },
+  {
     page: "settings",
     href: "/app/settings",
     label: "Settings",
     group: "Configure",
+  },
+  // visuals (feat-overview-7/10/11/12, feat-stacks-9/10): the fleet-wide
+  // graphs, grouped apart from the single-stack and single-purpose pages
+  // above so Configure does not grow a sixth unrelated entry.
+  {
+    page: "fleetview",
+    href: "/app/fleetview",
+    label: "Fleet view",
+    group: "Visuals",
+  },
+  {
+    page: "backupcalendar",
+    href: "/app/backupcalendar",
+    label: "Backup calendar",
+    group: "Visuals",
   },
 ]);
 
@@ -106,11 +135,15 @@ const FIXED = {
   schedules: { page: "schedules" },
   notifications: { page: "notifications" },
   firewall: { page: "firewall" },
+  backups: { page: "backups" },
+  secrets: { page: "secrets" },
   settings: { page: "settings" },
   log: { page: "log" },
   shell: { page: "shell" },
   apply: { page: "apply" },
   presets: { page: "presets" },
+  fleetview: { page: "fleetview" },
+  backupcalendar: { page: "backupcalendar" },
   // 2026-09-30: retired addresses, kept parseable for old links and for
   // Live view's known_page (core::drive checks formspec.json's page list,
   // not this Route); `redirectFor` sends every one of them on to its new

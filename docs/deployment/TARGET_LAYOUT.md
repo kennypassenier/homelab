@@ -23,7 +23,7 @@ made the reordering unnecessary.
 | 108 | `syncthing` | syncthing | **amended 2026-09-01 (D68)** — stays where it is |
 | 113 | `metrics` | prometheus, alertmanager, pve-exporter, grafana, loki | **amended 2026-09-01 (D68)** — stays where it is; absorbs grafana and loki from 104 (stack files 2026-09-27, fix-90) |
 | 109 | `messaging` | kyu, kyu-runner, http-switchboard | two services added |
-| **110** | *(reserved, unusable)* | — | 10.10.10.10 is Kenny's workstation |
+| **110** | *(reserved, unusable)* | — | that address is Kenny's workstation |
 | 111 | `productivity` | supersync, postgres | vikunja dropped |
 | 112 | `almanac` | almanac | unchanged |
 | ~~113~~ | ~~`syncthing`~~ | — | superseded by the D68 amendment above |
@@ -68,8 +68,8 @@ outside this house.
   container and removed the need to renumber anything he uses.
 - **CT 108's identity.** Settled: syncthing is production and moves to 113
   under its own name. The tiebreaker was that `sync.kp-soft.dev` had been
-  broken all along — the route pointed at 10.10.10.10, which is Kenny's
-  workstation, where nothing listens on 8384. Syncing itself was never
+  broken all along — the route pointed at the workstation's address, where
+  nothing listens on 8384. Syncing itself was never
   affected: the desktop dials out. The route is repaired to the container
   (Kenny, B4).
 - **vmid 110.** Permanently reserved and unusable, because that address
@@ -141,7 +141,7 @@ must. Nothing needs a code change in any project — three configuration lines.
 |---|---|---|---|
 | 8080 | kyu | unchanged default | — |
 | 8081 | cadvisor | baked into the golden template (O2), fleet-wide | homelab |
-| 8082 | kyu-runner `/healthz` | `healthz_listen = "10.10.10.9:8082"` | `kyu-runner/deploy/config.toml` |
+| 8082 | kyu-runner `/healthz` | `healthz_listen = "kyu (CT 109):8082"` | `kyu-runner/deploy/config.toml` |
 | 8083 | http-switchboard | `--listen 0.0.0.0:8083` in the unit's ExecStart | homelab-written unit |
 | 8083 | http-switchboard healthcheck | `--healthcheck http://127.0.0.1:8083/healthz` — **the argument is not optional here**: without it the check probes 8080, which is kyu, and a dead switchboard reports itself healthy | homelab-written unit |
 | 9100 | node_exporter | baked into the golden template | homelab |
@@ -239,7 +239,7 @@ The reasoning that decided it, in the order it mattered:
    administration. supersync is a sync service. They share a purpose with
    each other and none with it.
 
-vmid 114 and 10.10.10.14 were free because CT 190 and 191 were destroyed on
+vmid 114 and its address were free because CT 190 and 191 were destroyed on
 2026-08-31 (D40). The container follows the prefix + vmid − 100 address
 convention like every other stack.
 

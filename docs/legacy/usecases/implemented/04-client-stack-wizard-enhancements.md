@@ -105,7 +105,7 @@ CLIENT stack creation wizard should collect ALL information needed for HOST to p
 │   ○ Static IP                                               │
 │   ○ DHCP (no reservation)                                   │
 │                                                             │
-│ Reserved IPv4: [10.10.10.104]                               │
+│ Reserved IPv4: [198.51.100.104]                            │
 │ MAC address: [02:42:ac:11:34:7a] (auto-generated)          │
 │                                                             │
 │ ℹ DHCP reservation syncs to OPNsense automatically         │
@@ -133,7 +133,7 @@ CLIENT stack creation wizard should collect ALL information needed for HOST to p
 │ Security: unprivileged, nesting                             │
 │ Hardware: TUN=auto-detect, GPU=disabled                     │
 │ Boot: autostart=true, order=90                              │
-│ Network: DHCP reserved 10.10.10.104                         │
+│ Network: DHCP reserved 198.51.100.104                      │
 │ Apps: promtail, watchtower, jellyfin, sonarr, radarr        │
 │                                                             │
 │ ⚠ VMID will be assigned automatically by HOST               │
@@ -242,7 +242,7 @@ fn handle_stack_creation_wizard(&mut self) -> Result<()> {
     let ip_mode = self.prompt_select("IP mode", &ip_mode_options)?;
     
     let reserved_ipv4 = if matches!(ip_mode, IpMode::DhcpReserved | IpMode::Static) {
-        Some(self.prompt_string("IP address", "10.10.10.104")?)
+        Some(self.prompt_string("IP address", "198.51.100.104")?)
     } else {
         None
     };

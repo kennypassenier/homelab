@@ -52,7 +52,7 @@ Last updated: 2026-06-12
 ```json
 {
   "hostname": "proxmox",
-  "ip": "10.10.5.250",
+  "ip": "pve",
   "uptime_secs": 12345,
   "lxc_runtime": [
     {

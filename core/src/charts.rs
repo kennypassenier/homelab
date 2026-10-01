@@ -19,6 +19,8 @@ pub enum Unit {
     Celsius,
     /// 1 = yes, 0 = no.
     Flag,
+    /// A plain count: a load average, a number of sectors, hours, restarts.
+    Count,
 }
 
 /// One chart: a title, a query and how its numbers read. `legend` names the
@@ -88,6 +90,140 @@ pub fn stack_panels(stack: &str) -> Vec<Panel> {
             Unit::Bytes,
             Some("name"),
         ),
+        p(
+            // replace-grafana parity (2026-10-01): Grafana's "Disk writes
+            // per container" panel, scoped to this stack like every other
+            // per-app panel here rather than fleet-wide.
+            "Disk writes per app",
+            format!(
+                "sum by (name) (rate(container_fs_writes_bytes_total{{stack=\"{s}\",name!=\"\"}}[5m]))"
+            ),
+            Unit::Bytes,
+            Some("name"),
+        ),
+        p(
+            "Network in per app",
+            format!(
+                "sum by (name) (rate(container_network_receive_bytes_total{{stack=\"{s}\",name!=\"\"}}[5m]))"
+            ),
+            Unit::Bytes,
+            Some("name"),
+        ),
+        p(
+            // Grafana's "Container restarts" panel: how many times cadvisor
+            // saw this app's start time change in the last hour.
+            "Restarts (last hour)",
+            format!(
+                "sum by (name) (changes(container_start_time_seconds{{stack=\"{s}\",name!=\"\"}}[1h]))"
+            ),
+            Unit::Count,
+            Some("name"),
+        ),
+    ]
+}
+
+/// feat-overview-11 (capacity map): CPU, memory and disk for every stack at
+/// once, one query per metric across the whole fleet (a regex over
+/// `stack=~"a|b|c"`) rather than one call per stack — the same panels
+/// [`stack_panels`] draws per container, read together so the capacity map
+/// costs three Prometheus calls, not `3 * len(stacks)`.
+pub fn fleet_capacity_panels(stacks: &[String]) -> Vec<Panel> {
+    let list = stacks
+        .iter()
+        .map(|s| s.replace('"', ""))
+        .collect::<Vec<_>>()
+        .join("|");
+    vec![
+        p(
+            "CPU used",
+            format!("100 * avg by (stack) (rate(node_cpu_seconds_total{{stack=~\"{list}\",mode!=\"idle\"}}[5m]))"),
+            Unit::Percent,
+            Some("stack"),
+        ),
+        p(
+            "Memory used",
+            format!(
+                "(node_memory_MemTotal_bytes{{stack=~\"{list}\"}} - node_memory_MemAvailable_bytes{{stack=~\"{list}\"}}) / node_memory_MemTotal_bytes{{stack=~\"{list}\"}} * 100"
+            ),
+            Unit::Percent,
+            Some("stack"),
+        ),
+        p(
+            "Disk used (root filesystem)",
+            format!(
+                "100 - (node_filesystem_avail_bytes{{stack=~\"{list}\",mountpoint=\"/\"}} / node_filesystem_size_bytes{{stack=~\"{list}\",mountpoint=\"/\"}} * 100)"
+            ),
+            Unit::Percent,
+            Some("stack"),
+        ),
+    ]
+}
+
+/// feat-overview-12 (disk-growth prediction): percent-used history for the
+/// root filesystem of every stack at once, over `range` — the series
+/// [`crate::diskgrowth::fit`] reads. One regex query across the fleet, like
+/// [`fleet_capacity_panels`].
+pub fn fleet_disk_growth_query(stacks: &[String]) -> Panel {
+    let list = stacks
+        .iter()
+        .map(|s| s.replace('"', ""))
+        .collect::<Vec<_>>()
+        .join("|");
+    p(
+        "Disk used (root filesystem)",
+        format!(
+            "100 - (node_filesystem_avail_bytes{{stack=~\"{list}\",mountpoint=\"/\"}} / node_filesystem_size_bytes{{stack=~\"{list}\",mountpoint=\"/\"}} * 100)"
+        ),
+        Unit::Percent,
+        Some("stack"),
+    )
+}
+
+/// feat-overview-12: the same prediction, for every filesystem of the
+/// hypervisor itself (where capacity usually matters most: a ZFS pool, not
+/// one container's root disk).
+pub fn host_disk_growth_query(host: &str) -> Panel {
+    let h = host.replace('"', "");
+    p(
+        "Disk used per filesystem",
+        format!(
+            "100 - (node_filesystem_avail_bytes{{host=\"{h}\",fstype=~\"zfs|ext4|xfs\",mountpoint!~\".*/subvol-.*\"}} / node_filesystem_size_bytes{{host=\"{h}\",fstype=~\"zfs|ext4|xfs\",mountpoint!~\".*/subvol-.*\"}} * 100)"
+        ),
+        Unit::Percent,
+        Some("mountpoint"),
+    )
+}
+
+/// feat-firewall-3 (measured traffic on the topology): total network
+/// throughput per stack, bytes/s, received and transmitted. There is no
+/// per-neighbour flow metric in this fleet (node_exporter counts a
+/// container's interface as a whole, not by remote address), so the
+/// topology shows each node's own measured traffic rather than claiming a
+/// precision the data does not have — a decision recorded in
+/// docs/admin/REALIZATION_PLAN.md's visuals note.
+pub fn fleet_traffic_panels(stacks: &[String]) -> Vec<Panel> {
+    let list = stacks
+        .iter()
+        .map(|s| s.replace('"', ""))
+        .collect::<Vec<_>>()
+        .join("|");
+    vec![
+        p(
+            "Received",
+            format!(
+                "sum by (stack) (rate(node_network_receive_bytes_total{{stack=~\"{list}\",device!=\"lo\"}}[5m]))"
+            ),
+            Unit::Bytes,
+            Some("stack"),
+        ),
+        p(
+            "Transmitted",
+            format!(
+                "sum by (stack) (rate(node_network_transmit_bytes_total{{stack=~\"{list}\",device!=\"lo\"}}[5m]))"
+            ),
+            Unit::Bytes,
+            Some("stack"),
+        ),
     ]
 }
 
@@ -137,5 +273,95 @@ pub fn host_panels(host: &str) -> Vec<Panel> {
             Unit::Bytes,
             Some("id"),
         ),
+        p(
+            // replace-grafana parity (2026-10-01): "Network in per host".
+            "Network in",
+            format!(
+                "sum by (device) (rate(node_network_receive_bytes_total{{host=\"{h}\",device!~\"lo|veth.*|docker.*|br-.*\"}}[5m]))"
+            ),
+            Unit::Bytes,
+            Some("device"),
+        ),
+        p(
+            // Grafana's "Uptime and load" panel; uptime itself is already
+            // implicit in a host that answers at all, so this carries the
+            // load figure, which isn't derivable from anything else shown.
+            "Load average (5 min)",
+            format!("node_load5{{host=\"{h}\"}}"),
+            Unit::Count,
+            None,
+        ),
+        p(
+            // Distinct from "Temperature (hottest sensor per chip)" above:
+            // that's the motherboard/CPU sensors, this is the drives'.
+            "Drive temperature",
+            "smart_device_temperature_celsius".to_string(),
+            Unit::Celsius,
+            Some("device"),
+        ),
+        p(
+            "Drive pending sectors",
+            "smart_device_pending_sectors".to_string(),
+            Unit::Count,
+            Some("device"),
+        ),
+        p(
+            "Drive reallocated sectors",
+            "smart_device_reallocated_sectors".to_string(),
+            Unit::Count,
+            Some("device"),
+        ),
+        p(
+            "Drive power-on hours",
+            "smart_device_power_on_hours".to_string(),
+            Unit::Count,
+            Some("device"),
+        ),
     ]
+}
+
+#[cfg(test)]
+mod visuals_query_tests {
+    use super::*;
+
+    #[test]
+    fn fleet_capacity_panels_covers_cpu_memory_disk_with_one_query_each() {
+        let stacks = vec!["gateway".to_string(), "media".to_string()];
+        let panels = fleet_capacity_panels(&stacks);
+        assert_eq!(panels.len(), 3);
+        for panel in &panels {
+            assert!(panel.query.contains("gateway|media"), "{}", panel.query);
+            assert_eq!(panel.legend.as_deref(), Some("stack"));
+            assert_eq!(panel.unit, Unit::Percent);
+        }
+    }
+
+    #[test]
+    fn fleet_disk_growth_query_is_a_percent_query_with_quotes_stripped() {
+        let stacks = vec!["a\"b".to_string(), "c".to_string()];
+        let panel = fleet_disk_growth_query(&stacks);
+        assert!(
+            !panel.query.contains("a b|c"),
+            "quote should be dropped not replaced with space"
+        );
+        assert!(panel.query.contains("ab|c"), "{}", panel.query);
+        assert_eq!(panel.unit, Unit::Percent);
+    }
+
+    #[test]
+    fn host_disk_growth_query_excludes_lxc_subvolumes() {
+        let panel = host_disk_growth_query("pve");
+        assert!(panel.query.contains("subvol"));
+        assert!(panel.query.contains("host=\"pve\""));
+    }
+
+    #[test]
+    fn fleet_traffic_panels_has_received_and_transmitted_per_stack() {
+        let stacks = vec!["gateway".to_string()];
+        let panels = fleet_traffic_panels(&stacks);
+        assert_eq!(panels.len(), 2);
+        assert!(panels[0].query.contains("receive"));
+        assert!(panels[1].query.contains("transmit"));
+        assert!(panels.iter().all(|p| p.legend.as_deref() == Some("stack")));
+    }
 }

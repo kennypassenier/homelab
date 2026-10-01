@@ -338,6 +338,18 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         bare: bool,
     },
+    /// feat-overview-10 (homelab-admin, 2026-10-01): every restic snapshot
+    /// time for the named stacks (every managed docker stack when empty),
+    /// for the dashboard's own backup calendar — its own query, separate
+    /// from the backup page's reads, so the two pages cannot collide.
+    /// Read-only; JSON `{"stacks": {"<name>": [unix, …]}, "skipped":
+    /// ["<name>: why"]}`. Reaches the repositories over the network
+    /// (rclone), so it can take a while on a slow link — the caller treats
+    /// it like `FleetCheck`.
+    BackupCalendar {
+        #[serde(default)]
+        stacks: Vec<String>,
+    },
     /// G17: the questions only a person can answer, as the host has them on
     /// record. Read-only; the deploy is what puts them there.
     ListManualChecks {
@@ -408,6 +420,30 @@ pub enum Command {
         changes: std::collections::BTreeMap<String, serde_json::Value>,
         expect_sha256: String,
     },
+    /// fix-120 (per-machine tokens, owner decision 2026-10-01): mint a new
+    /// `[[tokens]]` entry at `scope`, named `name` (must be unique, not
+    /// "legacy"), and write it to host.toml at once — unlike `tokens`
+    /// itself, which `SetHostConfig` refuses (arch-self), this is its own
+    /// narrow, scope-`All`-only action. Answered as JSON [`TokenIssued`];
+    /// the plaintext token is in that one reply and nowhere else — never
+    /// logged, never re-readable.
+    TokenIssue {
+        name: String,
+        scope: Scope,
+    },
+    /// fix-120: every token the host currently trusts, name and scope only
+    /// — never a hash, never a plaintext token. Answered as JSON
+    /// `Vec<TokenView>`, the legacy single `token` included as `"legacy"`
+    /// when one is set.
+    TokenList,
+    /// fix-120: remove the `[[tokens]]` entry named `name`, at once, so the
+    /// token stops working without touching any other machine's. Refused
+    /// for `"legacy"` (the single `token` key; cleared over ssh, see
+    /// OPERATIONS_RUNBOOK's migration note) and for a name that is not
+    /// there.
+    TokenRevoke {
+        name: String,
+    },
     /// feat-platform-10 (milestone follow): one step of driving the
     /// dashboard's open tabs (`homelab ui <step>`). The host hands it to the
     /// session that sent `UiAttach` and answers with that session's
@@ -437,7 +473,65 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         note: Option<String>,
     },
+    /// feat-backup-1: per-repository backup status of one stack (a compose
+    /// stack has one per owning app, D25; a native stack has exactly one,
+    /// named after the unit) — last snapshot, its age and size, and the last
+    /// restore-drill verdict recorded for that repository. Read-only.
+    GetBackups {
+        stack: String,
+    },
+    /// feat-backup-3: list the files one snapshot holds under `path` ("" =
+    /// the snapshot root), read-only. `owner` is a repository name from
+    /// `GetBackups` (the owning app, or the native unit).
+    BrowseSnapshot {
+        owner: String,
+        snapshot: String,
+        #[serde(default)]
+        path: String,
+    },
+    /// feat-backup-2: restore a native (adopted) service from a snapshot
+    /// (default "latest"). Unpacks the archive `restic dump` emits straight
+    /// into the container with `tar`, the same pipeline the auto-restore of
+    /// an empty unit already uses (`native::restore_empty_unit`) — see
+    /// `native::restore_native` for the gated, chosen-snapshot version.
+    RestoreNative {
+        stack: String,
+        snapshot: String,
+        /// fix-64-equivalent: the stack name as typed; refused without it,
+        /// same rule as `RestoreStack::confirm`.
+        #[serde(default)]
+        confirm: Option<String>,
+    },
+    /// feat-secrets-1: the content of one secret, read from the host's own
+    /// vault (the value a deploy last sealed there — `ops::deploy`'s
+    /// `{state_dir}/secrets/...`), never from a process the transcript or
+    /// journal could echo. Every call is audit-logged on the host (the
+    /// request, never the value). `confirm` carries the stack name typed by
+    /// the viewer requesting the reveal, so an empty confirm (an old client)
+    /// is refused rather than silently handed the value.
+    RevealSecret {
+        stack: String,
+        secret: SecretRef,
+    },
+    /// feat-secrets-2: change ONE secret, writing through latch exactly as
+    /// `homelab deploy` reads one (`latch put <stack>/<app>/.env --env …` or
+    /// `latch put <stack>/<from> --env …`), from the host's own intent repo
+    /// checkout. The sibling files in latch are untouched — only this one
+    /// relative path is written. `content` is never logged: the host side
+    /// hands it to `latch put` on stdin and the line it runs is traced with
+    /// the secret value itself stripped, not merely masked.
+    SetSecret {
+        stack: String,
+        secret: SecretRef,
+        content: String,
+    },
 }
+
+// feat-secrets-1/2: `SecretRef` is a domain type (core has no I/O of its
+// own but every other wire type that is also domain-shaped lives there —
+// see the `pub use homelab_core::...` block above), defined in
+// `homelab_core::ops::secrets` and re-exported here for the wire.
+pub use homelab_core::ops::secrets::SecretRef;
 
 /// Live view: the longest one `UiHold` may ask the host to wait. The
 /// dashboard's own longest pause (`HOMELAB_ADMIN_LIVE_MAX_PAUSE_S`, at most
@@ -600,11 +694,15 @@ impl Command {
             | Today { .. }
             | ListManualChecks { .. }
             | Tiles { .. }
+            | BackupCalendar { .. }
             | SessionOptions { .. }
             | CurrentOp
             | History { .. }
             | Notices { .. }
-            | GetHostConfig => Scope::Read,
+            | GetHostConfig
+            | TokenList
+            | GetBackups { .. }
+            | BrowseSnapshot { .. } => Scope::Read,
             Ui { step } => step.scope(),
             DeployStack(_)
             | StageNativeBinary { .. }
@@ -630,7 +728,9 @@ impl Command {
             | AnswerManualCheck { .. }
             | UiAttach
             | UiReply { .. }
-            | UiHold { .. } => Scope::Operate,
+            | UiHold { .. }
+            | RestoreNative { .. }
+            | RevealSecret { .. } => Scope::Operate,
             DestroyStack { .. }
             | SelfUpdateHost { .. }
             | RestartHost
@@ -640,7 +740,10 @@ impl Command {
             | DestroyRecorded { .. }
             | WipeRetired { .. }
             | PruneOrphans { .. }
-            | SetHostConfig { .. } => Scope::All,
+            | SetHostConfig { .. }
+            | TokenIssue { .. }
+            | TokenRevoke { .. }
+            | SetSecret { .. } => Scope::All,
         }
     }
 
@@ -692,6 +795,7 @@ impl Command {
             BackupDevices => "backup_devices",
             ListManualChecks { .. } => "list_manual_checks",
             Tiles { .. } => "tiles",
+            BackupCalendar { .. } => "backup_calendar",
             AnswerManualCheck { .. } => "answer_manual_check",
             SessionOptions { .. } => "session_options",
             CurrentOp => "current_op",
@@ -699,10 +803,18 @@ impl Command {
             Notices { .. } => "notices",
             GetHostConfig => "get_host_config",
             SetHostConfig { .. } => "set_host_config",
+            TokenIssue { .. } => "token_issue",
+            TokenList => "token_list",
+            TokenRevoke { .. } => "token_revoke",
             Ui { .. } => "ui",
             UiAttach => "ui_attach",
             UiReply { .. } => "ui_reply",
             UiHold { .. } => "ui_hold",
+            GetBackups { .. } => "get_backups",
+            BrowseSnapshot { .. } => "browse_snapshot",
+            RestoreNative { .. } => "restore_native",
+            RevealSecret { .. } => "reveal_secret",
+            SetSecret { .. } => "set_secret",
         }
     }
 
@@ -753,6 +865,25 @@ pub struct HostConfigSaved {
     pub live: Vec<String>,
     /// Changed keys that take effect at the host's next start.
     pub restart: Vec<String>,
+}
+
+/// fix-120: what `TokenList` answers for one `[[tokens]]` entry (or the
+/// legacy single `token`, named `"legacy"`) — never a hash, never a
+/// plaintext token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenView {
+    pub name: String,
+    pub scope: Scope,
+}
+
+/// fix-120: what `TokenIssue` answers. `token` is the plaintext bearer the
+/// new machine must save (e.g. into `HOMELAB_TOKEN`) — this is the only
+/// place it is ever sent; the host keeps only its SHA-256.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenIssued {
+    pub name: String,
+    pub scope: Scope,
+    pub token: String,
 }
 
 /// A stack as the TUI sees it — structured, not free text.

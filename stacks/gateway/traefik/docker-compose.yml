@@ -13,6 +13,9 @@ services:
     command:
       - "--api.dashboard=true"
       - "--api.insecure=false"
+      # Kenny, 2026-10-01: the "Upgrade to Traefik Hub" banner is an ad for
+      # the paid product; nothing here uses it.
+      - "--api.disabledashboardad=true"
       - "--entrypoints.web.address=:80"
       # The tunnel's requests reach :80 through docker's bridge, so every
       # visitor arrived as 172.18.0.1 (measured 2026-09-27: 462 of 464
@@ -20,8 +23,16 @@ services:
       # could ban nobody. X-Forwarded-For is trusted from docker's own range
       # only: nothing outside CT 104 can send from it.
       - "--entrypoints.web.forwardedHeaders.trustedIPs=172.16.0.0/12"
-      # Docker provider, for the containers on this machine.
+      # Docker provider, for the containers on this machine — but never
+      # against the real socket (traefik-docker-socket, expert panel
+      # 2026-09-27). Traefik used to hold /var/run/docker.sock itself for
+      # this one provider, `:ro` and all, which does not limit the API an
+      # attacker on the other end can call: an RCE here or in the Yaegi
+      # plugin below became root on CT 104. `socket-proxy` is the only
+      # container that still touches the real socket, answers a narrow,
+      # read-only slice of it, and is reachable only on gateway_net.
       - "--providers.docker=true"
+      - "--providers.docker.endpoint=tcp://socket-proxy:2375"
       - "--providers.docker.network=gateway_net"
       - "--providers.docker.exposedbydefault=false"
       # File provider: every stack renders its own route fragment here.
@@ -60,7 +71,6 @@ services:
     environment:
       - TZ=Europe/Brussels
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - /appdata/gateway/traefik-config:/etc/traefik
       # Same directory, mounted twice on purpose: Traefik writes its logs
       # here and CrowdSec and GoAccess read them. 141 of the 142 MB in

@@ -33,9 +33,6 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         state_dir: "/var/lib/homelab".into(),
         now_unix: NOW,
         metrics_targets_dir: None,
-        grafana_dashboards_dir: None,
-        homepage_services_file: None,
-        kuma_monitors_file: None,
         loki_url: None,
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
@@ -63,9 +60,7 @@ fn manifest(
     retention: Option<Vec<RetentionTier>>,
 ) -> StackManifest {
     StackManifest {
-        homepage_widgets: Default::default(),
         home_address_whitelist: None,
-        generated_dashboards_command: None,
         tiles: Default::default(),
         log_files: Vec::new(),
         firewall: None,
@@ -93,6 +88,7 @@ fn manifest(
             storage: "local-lvm".into(),
         },
         lxc: LxcSpec {
+            timezone: "host".into(),
             template: "debian-12".into(),
             unprivileged: true,
             features: "nesting=1".into(),

@@ -4,7 +4,7 @@ Written 2026-08-31, the day kp-soft was deployed and the same day it was
 taken back off the edge. Kenny asked for these findings to be written down so
 the migration does not rediscover them.
 
-kp-soft runs on **CT 116, 10.10.10.16:8080**, reachable only from the LAN. It
+kp-soft runs on **CT 116, kp-soft (CT 116):8080**, reachable only from the LAN. It
 has **no gateway route at all** — deliberately, see below. The goal remains
 `https://kp-soft.dev`: public, no interactive login in front of it.
 
@@ -24,7 +24,7 @@ PATCH https://website.kp-soft.dev/settings/theme
       resource_metadata=".../.well-known/cloudflare-access-protected-resource/settings/theme"
     server: cloudflare
 
-PATCH http://10.10.10.16:8080/settings/theme      (same request, edge skipped)
+PATCH http://kp-soft (CT 116):8080/settings/theme      (same request, edge skipped)
   → HTTP 419                                       Laravel's own CSRF answer
 ```
 
@@ -47,7 +47,7 @@ one hostname stops working the moment it answers on another.
 Found by the kp-soft session on 2026-08-31, not by this one — it is the
 reason "temporary hostname" is not a free choice here. Concretely:
 
-- Passkeys registered on `10.10.10.16:8080` will not work on `kp-soft.dev`.
+- Passkeys registered on `kp-soft (CT 116):8080` will not work on `kp-soft.dev`.
 - Passkeys registered on `website.kp-soft.dev` would not have worked either.
 - Therefore: **do not ask anyone to register a passkey before the final
   address is live.** Password and magic-link logins survive the move; passkeys
@@ -85,7 +85,7 @@ to Cloudflare.
 
 3. **This side**, which is one commit and one deploy:
    - restore `stacks/kp-soft/traefik-routes.yml` with
-     `Host(`kp-soft.dev`)` → `http://10.10.10.16:8080`;
+     `Host(`kp-soft.dev`)` → `http://kp-soft (CT 116):8080`;
    - restore the `gateway_route` block in `stacks/kp-soft/lxc-compose.yml`
      (`filename: 116-app-kp-soft.yml`, `gateway_vmid: 104`);
    - change `APP_URL` to `https://kp-soft.dev` in **latch**, under
@@ -95,7 +95,7 @@ to Cloudflare.
 
      The rule, from the kp-soft session: **`APP_URL` must be exactly what
      stands in the address bar, scheme and port included.** Today that is
-     `http://10.10.10.16:8080`; after the move it is `https://kp-soft.dev`
+     `http://kp-soft (CT 116):8080`; after the move it is `https://kp-soft.dev`
      with no port. Not cosmetic — the WebAuthn relying-party id comes from it;
    - update the Homepage entry in `stacks/home/homepage/services.yaml` back
      to the https name — it is currently the one deliberate `http://` link on

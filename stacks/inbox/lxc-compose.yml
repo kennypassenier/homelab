@@ -89,17 +89,6 @@ firewall:
     - comment: "who may reach the container"
       dir: in
       action: ACCEPT
-      source: 10.10.10.7
-      proto: icmp
-      note: Uptime Kuma ping
-    - dir: in
-      action: ACCEPT
-      source: 10.10.10.7
-      proto: tcp
-      dport: "8080"
-      note: Uptime Kuma HTTP monitor
-    - dir: in
-      action: ACCEPT
       source: 10.10.10.10
       proto: tcp
       dport: "22,8080"

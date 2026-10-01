@@ -122,57 +122,66 @@ pub fn with_tile_watch(
 /// from. `(ip, ports)`, sorted by ip, `ip` CIDR-stripped.
 pub type FleetTileTargets = Vec<(String, std::collections::BTreeSet<u16>)>;
 
-/// [`FleetTileTargets`] from every applied stack's own ip and tiles —
-/// callers pass only the stacks whose firewall is actually enabled (an IN
-/// rule that is never applied opens nothing for the watcher to reach
-/// either). Walks the same shape `core::ops::tiles::read_tiles` does, so a
-/// caller already holding `HostState` can feed this straight from
-/// `state.stacks`.
+/// [`FleetTileTargets`] from every applied stack's tiles: one entry per
+/// probe HOST, wherever it is — a stack's own container or a device a
+/// gateway route reaches (Kenny, 2026-10-01: "HA, Proxmox en OPN moeten
+/// wel gemeten worden door ons"). Each probe opens exactly its host and
+/// port in the watcher's OUT rules, nothing wider. The `&str` of each
+/// stack is unused now and kept so callers walk `state.stacks` unchanged.
 pub fn derive_fleet_tile_targets<'a>(
     stacks: impl IntoIterator<Item = (&'a str, &'a std::collections::BTreeMap<String, Tile>)>,
 ) -> FleetTileTargets {
-    let mut out: FleetTileTargets = Vec::new();
-    for (own_ip, tiles) in stacks {
-        let own_ip = own_ip.split('/').next().unwrap_or(own_ip);
-        let mut ports: std::collections::BTreeSet<u16> = std::collections::BTreeSet::new();
+    let mut by_host: std::collections::BTreeMap<String, std::collections::BTreeSet<u16>> =
+        std::collections::BTreeMap::new();
+    for (_own_ip, tiles) in stacks {
         for t in tiles.values() {
-            if let Some(probe) = t.probe.as_deref() {
-                if let Some(port) = tile_port_on(probe, own_ip) {
-                    ports.insert(port);
-                }
+            if let Some((host, port)) = t.probe.as_deref().and_then(probe_target) {
+                by_host.entry(host).or_default().insert(port);
             }
         }
-        if !ports.is_empty() {
-            out.push((own_ip.to_string(), ports));
-        }
     }
-    out.sort();
-    out
+    by_host.into_iter().collect()
 }
 
-/// `targets` with `own_ip`'s own entry replaced by what its OWN `tiles` say
-/// right now (`enabled` false drops it; the deploy passes true, since the
-/// watcher must reach a target whether or not that target has a firewall) — so a deploy in progress can fold its own,
-/// still-being-written manifest into a fleet target list read from state
-/// a moment earlier, without a second state load. Used to keep the
-/// watcher's firewall in step with the very deploy that is changing it.
+/// `targets` joined with the probes of a manifest a deploy is writing right
+/// now — so the watcher's OUT rules already include a tile that this very
+/// deploy adds, without a second state load. A tile this deploy removes
+/// stays in the watcher's rules until the next op reads the state again
+/// (an extra, narrow allow, never a missing one). `enabled` false adds
+/// nothing.
 pub fn with_fresh_target(
     targets: &FleetTileTargets,
-    own_ip: &str,
+    _own_ip: &str,
     tiles: &std::collections::BTreeMap<String, Tile>,
     enabled: bool,
 ) -> FleetTileTargets {
-    let own_ip = own_ip.split('/').next().unwrap_or(own_ip);
-    let mut out: FleetTileTargets = targets
-        .iter()
-        .filter(|(ip, _)| ip != own_ip)
-        .cloned()
-        .collect();
+    let mut by_host: std::collections::BTreeMap<String, std::collections::BTreeSet<u16>> =
+        targets.iter().cloned().collect();
     if enabled {
-        out.extend(derive_fleet_tile_targets(std::iter::once((own_ip, tiles))));
+        for (h, ports) in derive_fleet_tile_targets(std::iter::once(("", tiles))) {
+            by_host.entry(h).or_default().extend(ports);
+        }
     }
-    out.sort();
-    out
+    by_host.into_iter().collect()
+}
+
+/// A probe URL's host and port (explicit, else 443/80 by scheme); None for
+/// a URL without a scheme or an unknown scheme without a port.
+pub fn probe_target(url: &str) -> Option<(String, u16)> {
+    let (scheme, rest) = url.split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((h, p)) if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) => {
+            (h, p.parse::<u16>().ok())
+        }
+        _ => (authority, None),
+    };
+    let port = port.or(match scheme {
+        "https" => Some(443),
+        "http" => Some(80),
+        _ => None,
+    })?;
+    (!host.is_empty()).then(|| (host.to_string(), port))
 }
 
 /// Everything a deploy needs to re-render and write the WATCHER's own

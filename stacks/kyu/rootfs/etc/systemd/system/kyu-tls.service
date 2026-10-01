@@ -1,0 +1,36 @@
+[Unit]
+Description=kyu — TLS terminator in front of the message hub
+Documentation=https://github.com/kennypassenier/kyu
+After=kyu.service network-online.target
+Requires=kyu.service
+Wants=network-online.target
+
+# Same shape as kyu-backup.timer: a crashed terminator should be as loud as
+# a failed backup, not a silent fallback to nobody being able to send
+# notifications over https.
+OnFailure=kyu-alert@%n.service
+
+[Service]
+Type=simple
+Environment=KYU_TLS_DIR=/appdata/kyu/tls
+# Regenerates the certificate only when it is missing or near expiry
+# (kyu-tls-cert is idempotent); runs before every start, including a
+# restart, so a certificate is always in place before socat opens the port.
+ExecStartPre=/usr/local/bin/kyu-tls-cert
+# fix-126 (TLS to the message hub, owner decision 2026-10-01): terminates
+# TLS on :8443 with the self-signed certificate kyu-tls-cert maintains, and
+# forwards the plaintext connection to the hub's own :8080 — the hub itself
+# is unchanged (its own project is not touched), this sits in front of it.
+# `verify=0`: nothing is asked of the CLIENT's certificate, only the
+# server's — a sender authenticates with its bearer token, the same as the
+# plain-http route it is migrating from.
+ExecStart=/usr/bin/socat -d -d \
+    OPENSSL-LISTEN:8443,reuseaddr,fork,cert=/appdata/kyu/tls/hub.pem,key=/appdata/kyu/tls/hub.key,verify=0 \
+    TCP:127.0.0.1:8080
+Restart=on-failure
+RestartSec=5
+# The nightly round reaches it through the same loopback kyu-backup and
+# kyu-alert already use; no network namespace change is needed.
+
+[Install]
+WantedBy=multi-user.target

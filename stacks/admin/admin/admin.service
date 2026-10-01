@@ -76,11 +76,13 @@ Environment=HOMELAB_ADMIN_LIVE_ANNOUNCE_MS=5000
 #Environment=HOMELAB_ADMIN_LIVE_MAX_PAUSE_MAX_S=3600
 #Environment=HOMELAB_ADMIN_DRIVE_IDLE_S=600
 #Environment=HOMELAB_ADMIN_RELEASE_AFTER_JOB_S=30
-# arch-exposure: the Access application every kp-soft.dev name sits behind
-# ("*.kp-soft.dev", read from the Access API 2026-09-28); not secrets, both
-# are in every token Access issues.
+# arch-exposure: the Access application this name sits behind. Since
+# 2026-10-01 (Kenny's Cloudflare form: admin pages apart, 8 h, Google with
+# MFA, Kenny only) that is "Homelab admin" (prox, opn, traefik, admin), no
+# longer the "*.kp-soft.dev" app. Not secrets: both are in every token Access
+# issues.
 Environment=HOMELAB_ADMIN_ACCESS_TEAM_DOMAIN=mendax1.cloudflareaccess.com
-Environment=HOMELAB_ADMIN_ACCESS_AUD=e76eb55877d9f58d4f7194e5248419251ac0528a1c9082f090799de91b22221b
+Environment=HOMELAB_ADMIN_ACCESS_AUD=e071551f0cb5f8aeec566a7eeeb336024529688b81e576d58cba64de30810d39
 # dashboard-latch (Kenny, 2026-09-29, form "Latch"): a deploy of a stack with
 # latch_secrets runs `latch cat --env $HOMELAB_LATCH_ENV --expand` (the
 # client's spec code, in this process; the child inherits this environment).

@@ -77,20 +77,11 @@ storage:
     # sent while it was down. Its configuration is in the repository.
     no_backup: "Loki log chunks and index; not restored, configuration is in the repository"
     app: loki
-  # fix-90: Grafana's database (users, preferences, anything made in the
-  # browser), moved from /appdata/gateway/grafana-config. Backed up: the
-  # repository is named after the app (D25), so `grafana-config` keeps its
-  # whole history across the move. 101000 is the image's uid 1000 on the host.
-  - host_path: /appdata/metrics/grafana-config
-    mount_point: /appdata/metrics/grafana-config
-    host_owner_uid: 101000
-    app: grafana
 # alertmanager was deployed by hand on 2026-08-30 and was missing here, so a
-# deploy of this stack would not have started it. Loki before Grafana: the
-# datasource Grafana provisions at start should already answer. loki-push is
+# deploy of this stack would not have started it. loki-push is
 # Loki's front on the LAN port (fix-93): pushes and /ready, nothing else.
-apps: [prometheus, alertmanager, pve-exporter, loki, loki-push, grafana]
-latch_secrets: [pve-exporter, grafana]
+apps: [prometheus, alertmanager, pve-exporter, loki, loki-push]
+latch_secrets: [pve-exporter]
 # latch-files (2026-09-30): the bearer Alertmanager sends to the dashboard's
 # /hooks/alertmanager, the same value as HOMELAB_ADMIN_ALERTS_TOKEN in the
 # admin stack's admin.env. Alertmanager reads a credentials_file on every
@@ -183,14 +174,8 @@ firewall:
       action: ACCEPT
       source: 10.10.10.4
       proto: tcp
-      dport: "3000,9090,9093"
-      note: Traefik routes grafana, prom and alerts
-    - dir: in
-      action: ACCEPT
-      source: 10.10.10.15
-      proto: tcp
-      dport: "3000"
-      note: Homepage's Grafana widget
+      dport: "9090,9093"
+      note: Traefik routes prom and alerts
     - dir: in
       action: ACCEPT
       source: 10.10.10.250
@@ -205,43 +190,15 @@ firewall:
       note: the dashboard's logs (Loki) and charts (Prometheus, replace-grafana)
     - dir: in
       action: ACCEPT
-      source: 10.10.10.7
-      proto: icmp
-      note: Uptime Kuma ping
-    - dir: in
-      action: ACCEPT
-      source: 10.10.10.7
-      proto: tcp
-      dport: "3000,3100,9090,9093"
-      note: Uptime Kuma HTTP monitors (grafana and loki since fix-90)
-    - dir: in
-      action: ACCEPT
       source: 10.10.10.10
       proto: tcp
-      dport: "22,3000,9090,9093"
-      note: Kenny's desktop (ssh and the web ports the homepage tiles link to)
-
-# app-knowledge (Kenny, 2026-09-30): the uids of the generated dashboards
-# Grafana serves, one per line, for the fleet check's comparison with the
-# ones homelab wrote (F149). The credential is read from Grafana's own .env
-# at the moment of asking and reaches curl through -K -, never argv. It fails
-# when Grafana does not answer, so a Grafana that is down is "not asked", not
-# "every dashboard missing". Tried 2026-09-30: 11 uids.
-generated_dashboards_command: |
-  U=$(sed -n 's/^GRAFANA_GF_ADMIN_USER=//p' /opt/metrics/grafana/.env)
-  P=$(sed -n 's/^GRAFANA_GF_ADMIN_PASSWORD=//p' /opt/metrics/grafana/.env)
-  S=$(printf 'user = "%s:%s"\n' "$U" "$P" | curl -sf -m 15 -K - 'http://127.0.0.1:3000/api/search?tag=generated&limit=500') || exit 1
-  printf '%s' "$S" | jq -r '.[].uid'
+      dport: "22,9090,9093"
+      note: Kenny's desktop (ssh and the web ports the dashboard tiles link to)
 
 # replace-homepage (Kenny, 2026-09-30): this stack's tiles on the dashboard's
 # start page, keyed by the hostname they open (or an id with `url:`). Moved
 # here from Homepage's services-overlay.yml; groups follow their lowest order.
 tiles:
-  grafana.kp-soft.dev:
-    name: "Grafana"
-    group: "Infrastructure"
-    order: 502
-    description: "Charts"
   prom.kp-soft.dev:
     name: "Prometheus"
     group: "Infrastructure"
@@ -252,9 +209,3 @@ tiles:
     group: "Infrastructure"
     order: 507
     description: "Alerts"
-  loki-explore:
-    name: "Loki"
-    group: "Infrastructure"
-    order: 508
-    description: "Logs"
-    url: "https://grafana.kp-soft.dev/explore"

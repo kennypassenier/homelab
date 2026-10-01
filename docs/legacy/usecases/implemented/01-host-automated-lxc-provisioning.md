@@ -55,7 +55,7 @@ deploy:
 network:
   bridge: "vmbr0"
   ip_mode: "dhcp-reserved"
-  reserved_ipv4: "10.10.10.104"
+  reserved_ipv4: "198.51.100.104"
 
 boot:
   autostart: true

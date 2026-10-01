@@ -16,12 +16,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use homelab_core::ops::edge::{
-    compare_edge, load_capture, project_apps, project_dns, project_tunnel, EdgeIds, EdgeState,
+    compare_edge, load_capture, project_apps, project_dns, project_tunnel, EdgeIds, EdgeState, API,
 };
 use homelab_core::ops::fleetcheck::Finding;
 use serde_json::Value;
-
-const API: &str = "https://api.cloudflare.com/client/v4";
 
 /// Where the read-only token lives: `edge_token_file` in config/client.toml,
 /// with `~` for the home directory. None: not configured.

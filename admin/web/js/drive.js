@@ -212,6 +212,10 @@ export function mountFollow(region, ctx) {
   const run = async (op, s) => {
     switch (op.op) {
       case "goto":
+        // Kenny, 2026-10-01: Live view went to the next page while the
+        // last dialog was still open on screen. A page change always
+        // closes the dialog first, the way a person would.
+        ctl?.close();
         ctx.navigate(op.path);
         await sleep(250);
         return;

@@ -78,8 +78,20 @@ export function mountVersions(root) {
       location.reload();
       return;
     }
-    // A dialog or a field in use: say so, and reload on the viewer's word.
+    // A dialog or a field in use: say so, and reload on the viewer's word —
+    // or by itself once the dialog has closed and nothing is being typed
+    // (Kenny, 2026-10-01: after Live view installed a new dashboard from a
+    // dialog, the banner stayed up although the dialog was long closed).
     if (outdated) return;
+    const retry = setInterval(() => {
+      const busy = document.activeElement?.matches(
+        "input:not([type=checkbox]):not([type=radio]), textarea, select",
+      );
+      if (!document.querySelector("dialog[open]") && !busy) {
+        clearInterval(retry);
+        location.reload();
+      }
+    }, 2000);
     const b = h(
       "button",
       { type: "button", class: "kp-button kp-button--primary" },

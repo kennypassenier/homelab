@@ -31,6 +31,7 @@ use homelab_core::sink::{PipelineEvent, Sink};
 
 use homelab_proto::{Command as Rpc, RpcRequest, RpcResponse, ServerMsg};
 
+mod secrets;
 mod tls;
 mod ui_relay;
 
@@ -147,6 +148,24 @@ struct FileConfig {
     /// Credential for that second route, when it needs one. The HA webhook
     /// does not; something else might.
     notify_fallback_auth_bearer: Option<String>,
+    /// fix-126 (TLS to the message hub, owner decision 2026-10-01): the
+    /// LAN-only self-signed certificate (PEM) an `https://` route is pinned
+    /// to — the host's own copy, for curl's `--cacert`. Required once any
+    /// notify route is `https://` (`startup_problems`); absent otherwise.
+    notify_tls_cert: Option<String>,
+    /// The SHA-256 of that certificate's DER form, lowercase hex. Checked
+    /// against the file on disk at every start: a mismatch means the file
+    /// changed since it was pinned (the hub's certificate was regenerated,
+    /// or the file is the wrong one), and is refused the same way a
+    /// changed host certificate refuses the client (`reconcile_pin`).
+    notify_tls_fingerprint: Option<String>,
+    /// fix-143 (Cloudflare nightly comparison, owner decision 2026-10-01):
+    /// the read-only Cloudflare API token the host's nightly edge check
+    /// uses, mirroring the workstation's `~/.config/cloudflare/kp-soft.token`
+    /// (`client/src/edge.rs`). A secret: changed over ssh or the dashboard's
+    /// secret field, never shown back. Absent = the nightly comparison
+    /// reports "not configured", not broken.
+    cloudflare_token: Option<String>,
     /// Where the coverage check asks whether a stack is measured and whether
     /// its logs arrive. Unset means the question is not asked at all, which
     /// is deliberate: an unasked question must never become a finding.
@@ -177,10 +196,6 @@ struct FileConfig {
     data_mount_roots: Option<Vec<String>>,
     gateway_vmid: Option<u16>,
     gateway_routes_dir: Option<String>,
-    /// fix-90 (2026-09-27): the container Grafana runs in, where the
-    /// generated dashboards are written. Absent = the gateway, where Grafana
-    /// ran until it moved to the metrics stack.
-    grafana_vmid: Option<u16>,
     /// Route A (Kenny, form J1, 2026-09-02): devices this suite may not
     /// touch, that can nevertheless hand over their own configuration. One
     /// GET per night, straight into restic. Absent = nothing is fetched.
@@ -217,24 +232,12 @@ struct FileConfig {
     /// T1: directory the orchestrator writes per-stack Prometheus discovery
     /// files into. Absent = off, and the scrape list stays hand-maintained.
     metrics_targets_dir: Option<String>,
-    /// T2: Grafana provisioning directory inside the gateway container.
-    /// Absent = off, and dashboards stay hand-made.
-    grafana_dashboards_dir: Option<String>,
-    /// T51: Homepage's `services.yaml` on the host, rendered from the
-    /// gateway's route fragments. Absent = the front page stays hand-made,
-    /// which is how it came to be zero bytes.
-    homepage_services_file: Option<String>,
     /// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
     /// dashboard's own address (CT 120), from which the firewall step of a
     /// deploy derives an inbound rule per stack for every tile that opens on
     /// that stack's own container. Absent or empty = feature off, and no
     /// rule is derived.
     tile_watch_source: Option<String>,
-    /// T49: the file the Uptime Kuma seeder reads its generated half from.
-    /// Absent = the watch list stays whatever a hand-run script last made,
-    /// which is how a monitor came to report Uptime Kuma itself as down from
-    /// an address it had left that morning (F157).
-    kuma_monitors_file: Option<String>,
     /// T69: how long a suspended step waits for an operator before giving
     /// up and answering `Unattended`. Long enough that Kenny can read the
     /// question and decide, short enough that a forgotten window does not
@@ -258,6 +261,12 @@ struct FileConfig {
     incident_bundle_max_age_days: Option<u64>,
     /// fix-131: at most this many incident bundles are kept. Default 200.
     incident_bundle_max_count: Option<usize>,
+    /// gap-26: `journal.jsonl` is cut back to half of this many bytes once
+    /// it grows past it (`compact_journal_file`). Default 4 MiB
+    /// (`incidents::JOURNAL_MAX_BYTES`) — was a fixed constant with no
+    /// host.toml key and no dashboard row, unlike the incident-bundle
+    /// limits right above it.
+    journal_max_bytes: Option<u64>,
     /// How long one GitHub answer about a pinned upstream stands. Default
     /// 20 hours.
     upstream_max_age_s: Option<u64>,
@@ -340,6 +349,24 @@ struct Config {
     /// Credential for that second route, when it needs one. The HA webhook
     /// does not; something else might.
     notify_fallback_auth_bearer: Option<String>,
+    /// fix-126 (TLS to the message hub, owner decision 2026-10-01): the
+    /// LAN-only self-signed certificate (PEM) an `https://` route is pinned
+    /// to — the host's own copy, for curl's `--cacert`. Required once any
+    /// notify route is `https://` (`startup_problems`); absent otherwise.
+    notify_tls_cert: Option<String>,
+    /// The SHA-256 of that certificate's DER form, lowercase hex. Checked
+    /// against the file on disk at every start: a mismatch means the file
+    /// changed since it was pinned (the hub's certificate was regenerated,
+    /// or the file is the wrong one), and is refused the same way a
+    /// changed host certificate refuses the client (`reconcile_pin`).
+    notify_tls_fingerprint: Option<String>,
+    /// fix-143 (Cloudflare nightly comparison, owner decision 2026-10-01):
+    /// the read-only Cloudflare API token the host's nightly edge check
+    /// uses, mirroring the workstation's `~/.config/cloudflare/kp-soft.token`
+    /// (`client/src/edge.rs`). A secret: changed over ssh or the dashboard's
+    /// secret field, never shown back. Absent = the nightly comparison
+    /// reports "not configured", not broken.
+    cloudflare_token: Option<String>,
     /// Where the coverage check asks whether a stack is measured and whether
     /// its logs arrive. Unset means the question is not asked at all, which
     /// is deliberate: an unasked question must never become a finding.
@@ -367,23 +394,12 @@ struct Config {
     registry_cache: Option<homelab_core::ops::registry_cache::CacheCfg>,
     /// T1: where per-stack Prometheus discovery files are written.
     metrics_targets_dir: Option<String>,
-    /// T2: Grafana's provisioning directory inside the gateway container.
-    grafana_dashboards_dir: Option<String>,
-    /// T51: Homepage's `services.yaml` on the host, rendered from the
-    /// gateway's route fragments. Absent = the front page stays hand-made,
-    /// which is how it came to be zero bytes.
-    homepage_services_file: Option<String>,
     /// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
     /// dashboard's own address (CT 120), from which the firewall step of a
     /// deploy derives an inbound rule per stack for every tile that opens on
     /// that stack's own container. Absent or empty = feature off, and no
     /// rule is derived.
     tile_watch_source: Option<String>,
-    /// T49: the file the Uptime Kuma seeder reads its generated half from.
-    /// Absent = the watch list stays whatever a hand-run script last made,
-    /// which is how a monitor came to report Uptime Kuma itself as down from
-    /// an address it had left that morning (F157).
-    kuma_monitors_file: Option<String>,
     /// T69: how long a suspended step waits for an operator before giving
     /// up and answering `Unattended`. Long enough that Kenny can read the
     /// question and decide, short enough that a forgotten window does not
@@ -402,6 +418,8 @@ struct Config {
     incident_bundle_max_age_days: u64,
     /// [`homelab_core::incidents::BUNDLE_MAX_COUNT`] by default.
     incident_bundle_max_count: usize,
+    /// gap-26: [`homelab_core::incidents::JOURNAL_MAX_BYTES`] by default.
+    journal_max_bytes: u64,
     /// [`homelab_core::ops::pins::UPSTREAM_MAX_AGE_S`] by default.
     upstream_max_age_s: u64,
     /// Y1: how many stack backups the nightly round runs at once. Measured
@@ -587,6 +605,9 @@ fn load_config_from(path: String) -> Config {
             .unwrap_or(homelab_core::ops::restoredrill::DEFAULT_DRILL_INTERVAL_S),
         notify_fallback_webhook: file.notify_fallback_webhook.clone(),
         notify_fallback_auth_bearer: file.notify_fallback_auth_bearer.clone(),
+        notify_tls_cert: file.notify_tls_cert.clone(),
+        notify_tls_fingerprint: file.notify_tls_fingerprint.clone(),
+        cloudflare_token: file.cloudflare_token.clone(),
         prometheus_url: file.prometheus_url.clone(),
         loki_url: file.loki_url.clone(),
         loki_vmid: file.loki_vmid,
@@ -613,8 +634,6 @@ fn load_config_from(path: String) -> Config {
             if let Some(dir) = file.gateway_routes_dir {
                 sc.gateway_routes_dir = dir;
             }
-            // fix-90: unset, Grafana is on the gateway, wherever that is.
-            sc.grafana_vmid = file.grafana_vmid.unwrap_or(sc.gateway_vmid);
             // fix-120: the daemon always runs with a policy; without the
             // keys it is what the fleet uses today, so nothing is refused
             // that deployed yesterday.
@@ -655,10 +674,7 @@ fn load_config_from(path: String) -> Config {
             }
         },
         metrics_targets_dir: file.metrics_targets_dir,
-        grafana_dashboards_dir: file.grafana_dashboards_dir,
-        homepage_services_file: file.homepage_services_file,
         tile_watch_source: file.tile_watch_source.filter(|s| !s.trim().is_empty()),
-        kuma_monitors_file: file.kuma_monitors_file,
         backup_concurrency: file
             .backup_concurrency
             .unwrap_or_else(default_backup_concurrency),
@@ -681,6 +697,9 @@ fn load_config_from(path: String) -> Config {
         incident_bundle_max_count: file
             .incident_bundle_max_count
             .unwrap_or(homelab_core::incidents::BUNDLE_MAX_COUNT),
+        journal_max_bytes: file
+            .journal_max_bytes
+            .unwrap_or(homelab_core::incidents::JOURNAL_MAX_BYTES as u64),
         upstream_max_age_s: file
             .upstream_max_age_s
             .unwrap_or(homelab_core::ops::pins::UPSTREAM_MAX_AGE_S),
@@ -735,6 +754,34 @@ fn load_config_from(path: String) -> Config {
              network segment can read it; an https:// route closes this",
             route
         );
+    }
+    // fix-126: an https:// route is already refused at start without a pin
+    // (`startup_problems`); this is the one check that needs the file on
+    // disk, so it runs here instead — a mismatch means the hub's
+    // certificate changed (or notify_tls_cert points at the wrong file) and
+    // is as loud as a client refusing a changed host certificate.
+    if let (Some(path), Some(want)) = (&cfg.notify_tls_cert, &cfg.notify_tls_fingerprint) {
+        match std::fs::read_to_string(path).map(|pem| homelab_core::notify::cert_fingerprint(&pem))
+        {
+            Ok(Ok(got)) if &got != want => {
+                tracing::error!(
+                    "notify_tls_cert {} does not match notify_tls_fingerprint ({}; the file is \
+                     {}) — notifications over https will be refused until this is fixed: either \
+                     the hub's certificate changed (read its fingerprint again and update \
+                     notify_tls_fingerprint) or notify_tls_cert is the wrong file",
+                    path,
+                    want,
+                    got
+                );
+            }
+            Ok(Err(e)) => {
+                tracing::error!("notify_tls_cert {} is not a valid certificate: {}", path, e);
+            }
+            Err(e) => {
+                tracing::error!("notify_tls_cert {} could not be read: {}", path, e);
+            }
+            Ok(Ok(_)) => {}
+        }
     }
     cfg
 }
@@ -859,6 +906,28 @@ fn startup_problems(file: &FileConfig) -> Vec<String> {
         if let Some(p) = homelab_core::ops::zfs::job_problems(job) {
             out.push(format!("zfs_jobs {} → {}: {}", job.source, job.target, p));
         }
+    }
+    // fix-126 (TLS to the message hub, owner decision 2026-10-01): an
+    // `https://` notify route with no pin would fall back to curl's system
+    // CA bundle, which a LAN self-signed certificate never passes — refused
+    // here, at the config, rather than discovered as "every notification
+    // fails" at 04:00. `http://` stays accepted unconditionally (migration
+    // is stepwise); the actual fingerprint-on-disk match is a boot-time
+    // warning (`load_config_from`), not refused here, since it needs to
+    // read the file.
+    let https_route = [
+        file.notify_webhook.as_deref(),
+        file.notify_fallback_webhook.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|u| u.starts_with("https://"));
+    if https_route && (file.notify_tls_cert.is_none() || file.notify_tls_fingerprint.is_none()) {
+        out.push(
+            "an https:// notify route needs notify_tls_cert and notify_tls_fingerprint — the \
+             LAN hub's certificate is self-signed, so curl trusts nothing unless it is pinned"
+                .into(),
+        );
     }
     out
 }
@@ -1046,6 +1115,100 @@ fn write_config_file(path: &str, raw: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// fix-120: a fresh per-machine bearer, 32 random bytes as lowercase hex.
+/// `/dev/urandom` rather than a new crate dependency: this is the one place
+/// the host needs cryptographic randomness.
+fn random_token() -> Result<String, String> {
+    use std::io::Read as _;
+    let mut f = std::fs::File::open("/dev/urandom").map_err(|e| format!("/dev/urandom: {}", e))?;
+    let mut buf = [0u8; 32];
+    f.read_exact(&mut buf)
+        .map_err(|e| format!("/dev/urandom: {}", e))?;
+    Ok(buf.iter().map(|b| format!("{:02x}", b)).collect())
+}
+
+/// fix-120: the `[[tokens]]` list out of raw host.toml text, read-modify-
+/// write helpers share this so neither duplicates the parse.
+fn read_tokens(raw: &str) -> Result<(toml::Table, Vec<TokenEntry>), String> {
+    let table: toml::Table = if raw.trim().is_empty() {
+        toml::Table::new()
+    } else {
+        toml::from_str(raw).map_err(|e| format!("host.toml does not parse as TOML: {}", e))?
+    };
+    let file: FileConfig = table
+        .clone()
+        .try_into()
+        .map_err(|e| format!("host.toml is not a valid host config: {}", e))?;
+    Ok((table, file.tokens.unwrap_or_default()))
+}
+
+/// fix-120: `tokens` written back into `table` and the whole file
+/// re-rendered, after `validate_tokens` has already passed.
+fn write_tokens(mut table: toml::Table, tokens: &[TokenEntry]) -> Result<String, String> {
+    if tokens.is_empty() {
+        table.remove("tokens");
+    } else {
+        table.insert(
+            "tokens".into(),
+            toml::Value::try_from(tokens).map_err(|e| e.to_string())?,
+        );
+    }
+    toml::to_string_pretty(&table).map_err(|e| e.to_string())
+}
+
+/// fix-120 (per-machine tokens, owner decision 2026-10-01): the current
+/// `[[tokens]]` list plus a new entry named `name` at `scope`, whose SHA-256
+/// is of `plain_token` — pure, so the random token itself is handed in and
+/// tested separately. Refuses an empty or duplicate name, `"legacy"`, and
+/// anything `validate_tokens` would refuse at start.
+fn issue_token_in(
+    raw: &str,
+    name: &str,
+    scope: homelab_proto::Scope,
+    plain_token: &str,
+) -> Result<(String, Vec<TokenEntry>), String> {
+    let (table, mut tokens) = read_tokens(raw)?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("a token needs a name".into());
+    }
+    use sha2::{Digest, Sha256};
+    let sha256: String = Sha256::digest(plain_token.as_bytes())
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
+    tokens.push(TokenEntry {
+        name: name.to_string(),
+        scope,
+        sha256,
+    });
+    validate_tokens(&tokens)?;
+    let text = write_tokens(table, &tokens)?;
+    Ok((text, tokens))
+}
+
+/// fix-120: the current `[[tokens]]` list with `name` removed, or the
+/// reason it is refused: `"legacy"` is the single `token` key, cleared over
+/// ssh instead (OPERATIONS_RUNBOOK's migration note), and a name that is
+/// not there is refused rather than silently a no-op.
+fn revoke_token_in(raw: &str, name: &str) -> Result<(String, Vec<TokenEntry>), String> {
+    if name == "legacy" {
+        return Err(
+            "\"legacy\" is the single `token` key, not a [[tokens]] entry — clear `token` over \
+             ssh once every machine has its own named token"
+                .into(),
+        );
+    }
+    let (table, mut tokens) = read_tokens(raw)?;
+    let before = tokens.len();
+    tokens.retain(|t| t.name != name);
+    if tokens.len() == before {
+        return Err(format!("no token named {:?}", name));
+    }
+    let text = write_tokens(table, &tokens)?;
+    Ok((text, tokens))
+}
+
 #[cfg(test)]
 mod tests {
     /// fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci): the
@@ -1188,6 +1351,36 @@ mod tests {
         .await
         .expect("the drain wait is bounded");
         assert_eq!(code, 0);
+    }
+
+    /// fix-52 residual (2026-10-01): the 10 s ping only ever proved that its
+    /// own loop was still scheduled, not that the scheduler was making any
+    /// progress — a nightly round wedged inside one `await` (not a panic,
+    /// which the test above already covers) kept being fed forever. Now the
+    /// ping is withheld once the scheduler's heartbeat is older than
+    /// `SCHEDULER_WATCHDOG_STALE_S`, so systemd's `WatchdogSec` eventually
+    /// restarts a daemon whose scheduler stopped making progress.
+    #[test]
+    fn fix_52_residual_a_stale_scheduler_heartbeat_withholds_the_watchdog_ping() {
+        let stale_after = super::SCHEDULER_WATCHDOG_STALE_S;
+        // A heartbeat from a few seconds ago: still alive.
+        assert!(super::scheduler_is_alive(1_000_000, 999_990, stale_after));
+        // Exactly at the edge still counts.
+        assert!(super::scheduler_is_alive(
+            1_000_000,
+            1_000_000 - stale_after,
+            stale_after
+        ));
+        // One second past the edge: the scheduler has made no progress in
+        // longer than the tolerance, so the ping must stop.
+        assert!(!super::scheduler_is_alive(
+            1_000_000,
+            1_000_000 - stale_after - 1,
+            stale_after
+        ));
+        // A heartbeat from "the future" (clock skew on a fresh AppState,
+        // or `now` ticking backwards) never reads as stale.
+        assert!(super::scheduler_is_alive(1_000_000, 1_000_100, stale_after));
     }
 
     /// fix-53 (expert panel, timeout-leaves-container-work-running,
@@ -1376,6 +1569,168 @@ mod tests {
         }
     }
 
+    /// fix-120: `random_token` makes a 64-hex-char token and never repeats
+    /// (a weak source would have shown up as a collision across a thousand
+    /// draws).
+    #[test]
+    fn fix_120_random_token_is_64_hex_and_does_not_repeat() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..1000 {
+            let t = random_token().unwrap();
+            assert_eq!(t.len(), 64, "{}", t);
+            assert!(t.bytes().all(|b| b.is_ascii_hexdigit()), "{}", t);
+            assert!(seen.insert(t), "random_token repeated");
+        }
+    }
+
+    /// fix-120: issuing a token adds exactly one `[[tokens]]` entry, whose
+    /// SHA-256 is of the plaintext handed in — never the plaintext itself.
+    #[test]
+    fn fix_120_issue_token_adds_one_entry_hashed_not_plain() {
+        let (text, tokens) =
+            issue_token_in("", "wsl", homelab_proto::Scope::Operate, "a-fresh-token").unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].name, "wsl");
+        assert_eq!(tokens[0].scope, homelab_proto::Scope::Operate);
+        use sha2::{Digest, Sha256};
+        let want: String = Sha256::digest(b"a-fresh-token")
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
+        assert_eq!(tokens[0].sha256, want);
+        assert!(!text.contains("a-fresh-token"), "{}", text);
+        assert!(text.contains(&want), "{}", text);
+        // Issuing a second, differently-named token keeps the first.
+        let (_, tokens2) =
+            issue_token_in(&text, "ct120", homelab_proto::Scope::All, "another-token").unwrap();
+        assert_eq!(tokens2.len(), 2);
+    }
+
+    /// fix-120: a duplicate name, an empty name and the reserved name
+    /// "legacy" are refused rather than silently applied.
+    #[test]
+    fn fix_120_issue_token_refuses_bad_names() {
+        assert!(issue_token_in("", "", homelab_proto::Scope::Read, "x").is_err());
+        assert!(issue_token_in("", "legacy", homelab_proto::Scope::Read, "x").is_err());
+        let (text, _) = issue_token_in("", "wsl", homelab_proto::Scope::Read, "x").unwrap();
+        assert!(issue_token_in(&text, "wsl", homelab_proto::Scope::All, "y").is_err());
+    }
+
+    /// fix-120: revoking removes only the named entry, and leaves the rest
+    /// untouched — the whole point of per-machine tokens is that revoking
+    /// one never affects another.
+    #[test]
+    fn fix_120_revoke_token_removes_only_that_one() {
+        let (text, _) = issue_token_in("", "wsl", homelab_proto::Scope::Operate, "a").unwrap();
+        let (text, _) = issue_token_in(&text, "ct120", homelab_proto::Scope::All, "b").unwrap();
+        let (text, tokens) = revoke_token_in(&text, "wsl").unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].name, "ct120");
+        assert!(!text.contains("\"wsl\""), "{}", text);
+    }
+
+    /// fix-120: revoking a name that is not there, or "legacy" (the single
+    /// `token` key, not a `[[tokens]]` entry), is refused.
+    #[test]
+    fn fix_120_revoke_token_refuses_unknown_and_legacy() {
+        assert!(revoke_token_in("", "legacy").is_err());
+        assert!(revoke_token_in("", "nobody").is_err());
+    }
+
+    /// fix-126: an `https://` notify route with no pin configured is
+    /// refused at start, before any notification is ever attempted —
+    /// `http://` stays accepted (migration is stepwise).
+    #[test]
+    fn fix_126_an_https_notify_route_with_no_pin_is_refused_at_start() {
+        let raw = "token = \"0123456789abcdef0123\"\nnotify_webhook = \"https://kyu.lan/x\"\n";
+        let file: FileConfig = toml::from_str(raw).unwrap();
+        let problems = startup_problems(&file);
+        assert!(
+            problems.iter().any(|p| p.contains("notify_tls_cert")),
+            "{:?}",
+            problems
+        );
+
+        let raw_http = "token = \"0123456789abcdef0123\"\nnotify_webhook = \"http://kyu.lan/x\"\n";
+        let file_http: FileConfig = toml::from_str(raw_http).unwrap();
+        assert!(
+            startup_problems(&file_http)
+                .iter()
+                .all(|p| !p.contains("notify_tls_cert")),
+            "plain http must not need a pin"
+        );
+    }
+
+    /// fix-126: `pinned_cacert` hands back the path only when the file on
+    /// disk hashes to the configured fingerprint — a stale pin (the hub's
+    /// certificate was regenerated since) is refused rather than silently
+    /// trusting whatever is on disk now, and a plain `http://` url needs no
+    /// pin at all.
+    #[test]
+    fn fix_126_pinned_cacert_checks_the_file_against_the_fingerprint() {
+        use sha2::{Digest, Sha256};
+        let path = std::env::temp_dir().join(format!(
+            "homelab-host-test-cert-{}-{}.pem",
+            std::process::id(),
+            line!()
+        ));
+        let pem = "-----BEGIN CERTIFICATE-----\naGVsbG8=\n-----END CERTIFICATE-----\n";
+        std::fs::write(&path, pem).unwrap();
+        let good: String = Sha256::digest(b"hello")
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
+
+        let raw = format!(
+            "token = \"0123456789abcdef0123\"\nnotify_tls_cert = \"{}\"\nnotify_tls_fingerprint = \"{}\"\n",
+            path.display(),
+            good
+        );
+        let cfg = config_from_text(&raw);
+        assert_eq!(
+            pinned_cacert(&cfg, "https://kyu.lan/x").unwrap(),
+            Some(path.display().to_string())
+        );
+        // http:// needs no pin at all, even with one configured.
+        assert_eq!(pinned_cacert(&cfg, "http://kyu.lan/x").unwrap(), None);
+
+        let raw_wrong = format!(
+            "token = \"0123456789abcdef0123\"\nnotify_tls_cert = \"{}\"\nnotify_tls_fingerprint = \"deadbeef\"\n",
+            path.display()
+        );
+        let cfg_wrong = config_from_text(&raw_wrong);
+        assert!(pinned_cacert(&cfg_wrong, "https://kyu.lan/x").is_err());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// fix-143: no `cloudflare_token` is reported as "not configured", not
+    /// as a failure — the nightly round must never turn an unasked question
+    /// into a finding, same rule `prometheus_url`/`loki_url` already
+    /// follow.
+    #[tokio::test]
+    async fn fix_143_the_nightly_edge_check_reports_not_configured_without_a_token() {
+        let dir = std::env::temp_dir().join(format!("homelab-fix143-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let raw = format!(
+            "token = \"0123456789abcdef0123\"\nstate_dir = \"{}\"\n",
+            dir.display()
+        );
+        let cfg = config_from_text(&raw);
+        let state_dir = cfg.state_dir.clone();
+        let app = AppState::new(cfg, tokio::sync::broadcast::channel(16).0);
+        let exec = RealExecutor;
+        run_nightly_edge_check(&app, &exec, 1_800_000_000).await;
+        let store = homelab_core::state::StateStore::new(&exec, &state_dir);
+        let s = store.load().await.unwrap();
+        assert_eq!(s.last_edge_check, 1_800_000_000);
+        assert_eq!(s.last_edge_findings, 0);
+        assert_eq!(
+            s.last_edge_error.as_deref(),
+            Some("not configured (no cloudflare_token in host.toml)")
+        );
+    }
+
     /// fix-120: a connection refused for its token used to leave no trace at
     /// all, so a probe from a compromised container or a stolen token tried
     /// from a new machine was invisible. Every refusal is counted with the
@@ -1461,8 +1816,8 @@ opnsense_cred_file = "/var/lib/homelab/secrets/opnsense.cred"
     fn correctly_placed_keys_are_clean_and_read() {
         let raw = r#"
 token = "0123456789abcdef0123"
-kuma_monitors_file = "/appdata/uptime/kuma-seeder-config/host-monitors.json"
-homepage_services_file = "/appdata/home/homepage-config/services.yaml"
+metrics_targets_dir = "/appdata/metrics/prometheus-config/targets"
+tile_watch_source = "10.10.10.20"
 
 [registry_cache]
 host = "10.10.10.17"
@@ -1475,16 +1830,16 @@ port = 5003
         assert!(unknown_keys(&t).is_empty(), "{:?}", unknown_keys(&t));
 
         let parsed: FileConfig = t.try_into().unwrap();
-        assert!(parsed.kuma_monitors_file.is_some());
-        assert!(parsed.homepage_services_file.is_some());
+        assert!(parsed.metrics_targets_dir.is_some());
+        assert!(parsed.tile_watch_source.is_some());
     }
 
     /// A plain typo is loud too — the direction that costs a warning rather
     /// than a silence.
     #[test]
     fn a_typo_is_reported() {
-        let t: toml::Table = toml::from_str("kuma_monitor_file = \"/x\"\n").unwrap();
-        assert_eq!(unknown_keys(&t), vec!["kuma_monitor_file".to_string()]);
+        let t: toml::Table = toml::from_str("metrics_target_dir = \"/x\"\n").unwrap();
+        assert_eq!(unknown_keys(&t), vec!["metrics_target_dir".to_string()]);
     }
 
     /// config-four-representations (expert panel, 2026-09-27): the known
@@ -1956,6 +2311,46 @@ port = 5003
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(removed, 1);
         assert!(old_gone && young_kept);
+    }
+
+    /// gap-26: `journal_max_bytes` used to be the fixed constant
+    /// `incidents::JOURNAL_MAX_BYTES`, with no host.toml key and no
+    /// dashboard row — unlike the incident-bundle limits right beside it.
+    /// Absent, the default still applies; set, host.toml wins.
+    #[test]
+    fn gap_26_journal_max_bytes_defaults_and_follows_host_toml() {
+        let cfg = config_from_text("token = \"0123456789abcdef0123\"\n");
+        assert_eq!(
+            cfg.journal_max_bytes,
+            homelab_core::incidents::JOURNAL_MAX_BYTES as u64
+        );
+        let cfg = config_from_text("token = \"0123456789abcdef0123\"\njournal_max_bytes = 65536\n");
+        assert_eq!(cfg.journal_max_bytes, 65536);
+    }
+
+    /// gap-26: `compact_journal_file` honours the configured limit rather
+    /// than the hardcoded default — a small `max_bytes` cuts a journal the
+    /// default would have left alone.
+    #[test]
+    fn gap_26_compact_journal_file_uses_the_configured_limit() {
+        let dir = std::env::temp_dir().join(format!("homelab-gap26-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let line = "{\"op\":\"deploy\",\"at\":1,\"running\":false}\n";
+        let content = line.repeat(2000); // well under JOURNAL_MAX_BYTES, well over 64 KiB
+        assert!(content.len() < homelab_core::incidents::JOURNAL_MAX_BYTES);
+        let path = dir.join("journal.jsonl");
+        std::fs::write(&path, &content).unwrap();
+        compact_journal_file(&dir.to_string_lossy(), 65536);
+        let cut = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            cut.len() < content.len(),
+            "a 64 KiB configured limit must cut a journal the 4 MiB default would not: \
+             {} -> {}",
+            content.len(),
+            cut.len()
+        );
     }
 
     /// A session over a real socket on a free local port, with `handler` in
@@ -3890,9 +4285,7 @@ port = 5003
         let mut hs = homelab_core::state::HostState::default();
         let mk = |mem: u32| {
             let mut m = homelab_core::manifest::StackManifest {
-                homepage_widgets: Default::default(),
                 home_address_whitelist: None,
-                generated_dashboards_command: None,
                 tiles: Default::default(),
                 log_files: Vec::new(),
                 registry_login: None,
@@ -3920,6 +4313,7 @@ port = 5003
                     storage: "s".into(),
                 },
                 lxc: homelab_core::manifest::LxcSpec {
+                    timezone: "host".into(),
                     template: "t".into(),
                     unprivileged: true,
                     features: String::new(),
@@ -4328,6 +4722,32 @@ struct AppState {
     /// Decision notify-routing: the newest notice's `seq`, read back from
     /// notices.jsonl at start so it only grows.
     notice_seq: Arc<std::sync::Mutex<u64>>,
+    /// fix-120: the `[[tokens]]` list in force right now. Starts as
+    /// `config.tokens` (what host.toml said at start) and is overwritten in
+    /// place by `TokenIssue`/`TokenRevoke`, so a newly issued token works at
+    /// once — host.toml marks `tokens` `Apply::Restart` for the generic
+    /// settings path, but this dedicated one does not wait for a restart.
+    tokens: Arc<std::sync::RwLock<Vec<TokenEntry>>>,
+    /// fix-52 residual: unix seconds of the scheduler's last sign of
+    /// progress — touched when a tick wakes and after each stack's night
+    /// work. The watchdog feeder refuses to send `WATCHDOG=1` once this
+    /// goes stale, so a scheduler wedged inside a single await (not a
+    /// panic, which `supervise()` already catches) is still noticed.
+    scheduler_heartbeat: Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// fix-52 residual: how long the scheduler may go without a heartbeat touch
+/// before the watchdog feeder stops pinging systemd. Idle ticks are 20
+/// minutes apart (`SCHEDULER_FIRST_CHECK_S` then `20 * 60`) and a single
+/// stack's backup or update can legitimately run long, so this has to clear
+/// both with margin — it is not a tight liveness check, it is "a hung
+/// nightly round is eventually noticed" rather than "never".
+const SCHEDULER_WATCHDOG_STALE_S: u64 = 3600;
+
+/// fix-52 residual: the decision the watchdog-feeder loop makes every tick.
+/// Pure so it is unit-tested without a real systemd socket.
+fn scheduler_is_alive(now: u64, heartbeat: u64, stale_after_s: u64) -> bool {
+    now.saturating_sub(heartbeat) <= stale_after_s
 }
 
 impl AppState {
@@ -4347,6 +4767,7 @@ impl AppState {
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             settings: Arc::new(std::sync::RwLock::new(config.initial_settings.clone())),
+            tokens: Arc::new(std::sync::RwLock::new(config.tokens.clone())),
             config,
             log_tx,
             op_lock: Arc::new(Mutex::new(())),
@@ -4369,8 +4790,38 @@ impl AppState {
                     .unwrap_or(0),
                 std::process::id()
             ),
+            // fix-52 residual: fresh as of construction, so the watchdog
+            // feeder does not see a stale scheduler before it has had its
+            // first chance to tick.
+            scheduler_heartbeat: Arc::new(std::sync::atomic::AtomicU64::new(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            )),
         }
     }
+
+    /// fix-120: a snapshot of the tokens in force right now, for the
+    /// runtime paths that authenticate a connection — never `config.tokens`
+    /// directly, which stays frozen at what host.toml said at start.
+    fn live_tokens(&self) -> Vec<TokenEntry> {
+        self.tokens
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+/// fix-52 residual: stamp the scheduler's heartbeat with the current time.
+fn touch_scheduler_heartbeat(state: &AppState) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    state
+        .scheduler_heartbeat
+        .store(now, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// T69: a question waiting for its answer.
@@ -4493,7 +4944,7 @@ async fn version_endpoint(
     if identify(
         headers.get("authorization").and_then(|v| v.to_str().ok()),
         &state.config.token,
-        &state.config.tokens,
+        &state.live_tokens(),
     )
     .is_some()
     {
@@ -4619,7 +5070,11 @@ fn rpc_stack(command: &Rpc) -> Option<String> {
         | Rpc::ForgetStack { stack }
         | Rpc::DestroyRecorded { stack, .. }
         | Rpc::SetStackEnabled { stack, .. }
-        | Rpc::GetApplied { stack } => Some(stack.clone()),
+        | Rpc::GetApplied { stack }
+        | Rpc::GetBackups { stack }
+        | Rpc::RestoreNative { stack, .. }
+        | Rpc::RevealSecret { stack, .. }
+        | Rpc::SetSecret { stack, .. } => Some(stack.clone()),
         Rpc::InstallNative { manifest, .. }
         | Rpc::InstallNativeRelease { manifest, .. }
         | Rpc::AdoptService(manifest) => Some(manifest.stack_name.clone()),
@@ -4763,7 +5218,7 @@ async fn main() {
     tighten_private_paths(&config.state_dir);
     // fix-131: bound the daemon's own records before anything runs, so
     // nothing writes the journal while it is cut.
-    compact_journal_file(&config.state_dir);
+    compact_journal_file(&config.state_dir, config.journal_max_bytes);
     prune_incidents(
         &config.state_dir,
         std::time::SystemTime::now()
@@ -4872,6 +5327,8 @@ async fn main() {
         handle
     };
     let op_lock = state.op_lock.clone();
+    // fix-52 residual: taken before `state` moves into `app_router`.
+    let scheduler_heartbeat = state.scheduler_heartbeat.clone();
 
     let app = app_router(state);
 
@@ -4933,13 +5390,38 @@ async fn main() {
 
     // B7: tell systemd we're ready, then feed its watchdog. If this loop
     // ever stops (deadlock/hang), systemd kills and restarts the daemon.
+    //
+    // fix-52 residual: a ping every 10 s used to prove only that THIS loop
+    // was still scheduled, which says nothing about the scheduler — a
+    // nightly round wedged inside one `await` (not a panic; `supervise()`
+    // already turns a panic or a dead task into exit 1) kept being fed
+    // forever. Now the ping is withheld once the scheduler's own heartbeat
+    // goes stale, so systemd's `WatchdogSec` eventually restarts a daemon
+    // whose scheduler stopped making progress, not just one whose process
+    // stopped existing.
     sd_notify("READY=1");
-    tokio::spawn(async {
-        loop {
-            tokio::time::sleep(Duration::from_secs(10)).await;
-            sd_notify("WATCHDOG=1");
-        }
-    });
+    {
+        let heartbeat = scheduler_heartbeat;
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let last = heartbeat.load(std::sync::atomic::Ordering::Relaxed);
+                if scheduler_is_alive(now, last, SCHEDULER_WATCHDOG_STALE_S) {
+                    sd_notify("WATCHDOG=1");
+                } else {
+                    tracing::error!(
+                        "scheduler heartbeat is {} s old — withholding WATCHDOG=1 so systemd \
+                         restarts a daemon whose nightly round has stalled",
+                        now.saturating_sub(last)
+                    );
+                }
+            }
+        });
+    }
 
     let code = supervise(
         // fix-120: with the peer address, so a refused connection says where
@@ -5563,7 +6045,25 @@ async fn scheduler_loop(state: AppState) {
     loop {
         tokio::time::sleep(wait).await;
         wait = Duration::from_secs(20 * 60);
+        // fix-52 residual: the loop woke up on its own, which is the one
+        // thing an `await` stuck forever cannot do.
+        touch_scheduler_heartbeat(&state);
         spawn_mirror_push(&state); // D5 retry queue: try again every tick
+                                   // password-chain-bus-factor: the standing checks exist whether or
+                                   // not nightly backups are scheduled — a disabled scheduler must not
+                                   // also silence the one question that is on a clock rather than a
+                                   // deploy.
+        {
+            let tick_now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+            record_state(&store, "ensure standing checks", |s| {
+                homelab_core::ops::manualchecks::ensure_standing_checks(s, tick_now)
+            })
+            .await;
+        }
         let (hour, tiers) = {
             let s = state
                 .settings
@@ -5691,6 +6191,8 @@ async fn scheduler_loop(state: AppState) {
             .collect();
         let backup_done =
             run_backup_batch(&state, &exec, backup_jobs, state.config.backup_concurrency).await;
+        // fix-52 residual: the batch — which can run for hours — returned.
+        touch_scheduler_heartbeat(&state);
 
         // fix-138 (expert panel, host-monolith-untested, 2026-09-27): what
         // each stack's night does is decided by `ops::night::stack_night`,
@@ -5774,6 +6276,9 @@ async fn scheduler_loop(state: AppState) {
             if night.settle_park {
                 park_after_night(&state, &exec, &store, &name, update_ok, now).await;
             }
+            // fix-52 residual: this stack's update work (which can itself
+            // run long) finished without the loop ever stalling on it.
+            touch_scheduler_heartbeat(&state);
         }
 
         // H10: the host's own crown jewels — the secrets vault (holding the
@@ -5976,6 +6481,16 @@ async fn scheduler_loop(state: AppState) {
             }
         }
 
+        // fix-143 (Cloudflare nightly comparison, owner decision
+        // 2026-10-01): once a night, like the integrity check — this used
+        // to run only from the workstation (`homelab check`), so a night
+        // nobody ran it went unwatched.
+        if let Ok(fresh) = store.load().await {
+            if homelab_core::ops::restoredrill::due(fresh.last_edge_check, now, 24 * 3600) {
+                run_nightly_edge_check(&state, &exec, now).await;
+            }
+        }
+
         // Y4: after the night's work, hold the record against the machine.
         // Unconditional, because the findings this exists for are precisely
         // the ones that produce no failure of their own: a stack whose
@@ -6094,8 +6609,9 @@ async fn scheduler_loop(state: AppState) {
             let dir = state.config.state_dir.clone();
             let max_age_days = state.config.incident_bundle_max_age_days;
             let max_count = state.config.incident_bundle_max_count;
+            let journal_max_bytes = state.config.journal_max_bytes;
             let _ = tokio::task::spawn_blocking(move || {
-                compact_journal_file(&dir);
+                compact_journal_file(&dir, journal_max_bytes);
                 prune_incidents(&dir, now, max_age_days, max_count);
             })
             .await;
@@ -6127,7 +6643,7 @@ async fn ws_upgrade(
     let Some(who) = identify(
         headers.get("authorization").and_then(|v| v.to_str().ok()),
         &state.config.token,
-        &state.config.tokens,
+        &state.live_tokens(),
     ) else {
         log_refused(&state, peer, "/api/ws");
         return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
@@ -6968,6 +7484,39 @@ fn exec_allowed(config: &Config, vmid: u16) -> Result<(), homelab_core::error::C
 /// the status, falls back to the second route when the first fails, and
 /// records the outcome in state so an unreachable notification path becomes a
 /// finding instead of a silence.
+/// fix-126 (TLS to the message hub, owner decision 2026-10-01): the
+/// `--cacert` path for `url`, or the reason it is refused. `Ok(None)` for a
+/// plain `http://` route, which needs no pin (migration is stepwise).
+/// Re-checked at every send, not only at boot: the certificate file can be
+/// rewritten — a regenerated hub certificate — without the host restarting,
+/// and a stale pin must stop the send, not weaken into trusting whatever is
+/// on disk now.
+fn pinned_cacert(cfg: &Config, url: &str) -> Result<Option<String>, String> {
+    if !url.starts_with("https://") {
+        return Ok(None);
+    }
+    let path = cfg
+        .notify_tls_cert
+        .as_deref()
+        .ok_or("https:// route with no notify_tls_cert configured")?;
+    let want = cfg
+        .notify_tls_fingerprint
+        .as_deref()
+        .ok_or("https:// route with no notify_tls_fingerprint configured")?;
+    let pem =
+        std::fs::read_to_string(path).map_err(|e| format!("notify_tls_cert {}: {}", path, e))?;
+    let got = homelab_core::notify::cert_fingerprint(&pem)
+        .map_err(|e| format!("notify_tls_cert {}: {}", path, e))?;
+    if got != want {
+        return Err(format!(
+            "notify_tls_cert {} does not match notify_tls_fingerprint ({} on disk, {} \
+             configured) — the hub's certificate changed, or this is the wrong file",
+            path, got, want
+        ));
+    }
+    Ok(Some(path.to_string()))
+}
+
 async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) -> Result<(), String> {
     let primary = state
         .settings
@@ -7008,7 +7557,27 @@ async fn notify_raw(state: &AppState, exec: &RealExecutor, payload: String) -> R
             }
             None => None,
         };
-        let owned = homelab_core::notify::curl_args(&payload, url, header_file.as_deref());
+        // fix-126: the pin is re-checked here, not only at boot — the
+        // certificate file can be rewritten (a regenerated hub certificate)
+        // without the host restarting.
+        let cacert = match pinned_cacert(&state.config, url) {
+            Ok(c) => c,
+            Err(e) => {
+                last = e;
+                tracing::warn!(
+                    "notification route {} refused: {}",
+                    homelab_core::notify::route_for_log(url),
+                    last
+                );
+                continue;
+            }
+        };
+        let owned = homelab_core::notify::curl_args_pinned(
+            &payload,
+            url,
+            header_file.as_deref(),
+            cacert.as_deref(),
+        );
         let args: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
         let out = exec.run(&Cmd::new("curl", &args, 10)).await;
         let (ran, code) = match &out {
@@ -7084,6 +7653,146 @@ async fn record_notify_outcome(state: &AppState, exec: &RealExecutor, delivered:
             st.last_notify_failed = now;
             st.last_notify_error = Some(why.to_string());
         }
+    })
+    .await;
+}
+
+/// fix-143 (Cloudflare nightly comparison, owner decision 2026-10-01): one
+/// GET against the Cloudflare API, through the Executor rather than
+/// `std::process::Command` directly (unlike `client/src/edge.rs`, which runs
+/// on the workstation and is free to shell out itself) and with the token in
+/// a 0600 header file rather than on curl's argv (fix-35's own pattern,
+/// reused rather than the client's `-K -` on stdin, which `Executor` has no
+/// way to feed).
+async fn edge_get(
+    exec: &RealExecutor,
+    header_file: &str,
+    path: &str,
+) -> Result<serde_json::Value, String> {
+    let url = format!("{}{}", homelab_core::ops::edge::API, path);
+    let args = [
+        "-sS",
+        "--fail",
+        "-m",
+        "20",
+        "-H",
+        &format!("@{}", header_file),
+        &url,
+    ];
+    let out = exec
+        .run(&Cmd::new("curl", &args, 25))
+        .await
+        .map_err(|e| format!("GET {}: {}", path, e))?;
+    if !out.success() {
+        return Err(format!("GET {}: curl exited {}", path, out.code));
+    }
+    let v: serde_json::Value =
+        serde_json::from_str(&out.stdout).map_err(|e| format!("GET {}: {}", path, e))?;
+    if v.get("success") != Some(&serde_json::Value::Bool(true)) {
+        return Err(format!("GET {}: the API did not answer success", path));
+    }
+    Ok(v.get("result").cloned().unwrap_or(serde_json::Value::Null))
+}
+
+/// fix-143: the live edge, projected like the capture — the host's own copy
+/// of `client/src/edge.rs::fetch_live`.
+async fn fetch_live_edge(
+    exec: &RealExecutor,
+    header_file: &str,
+    ids: &homelab_core::ops::edge::EdgeIds,
+) -> Result<homelab_core::ops::edge::EdgeState, String> {
+    use homelab_core::ops::edge::{project_apps, project_dns, project_tunnel, EdgeState};
+    let tunnel = edge_get(
+        exec,
+        header_file,
+        &format!("/accounts/{}/cfd_tunnel/{}", ids.account_id, ids.tunnel_id),
+    )
+    .await?;
+    let config = edge_get(
+        exec,
+        header_file,
+        &format!(
+            "/accounts/{}/cfd_tunnel/{}/configurations",
+            ids.account_id, ids.tunnel_id
+        ),
+    )
+    .await?;
+    let apps = edge_get(
+        exec,
+        header_file,
+        &format!("/accounts/{}/access/apps", ids.account_id),
+    )
+    .await?;
+    let dns = edge_get(
+        exec,
+        header_file,
+        &format!("/zones/{}/dns_records", ids.zone_id),
+    )
+    .await?;
+    Ok(EdgeState {
+        tunnels: serde_json::Value::Array(vec![project_tunnel(&tunnel, &config)]),
+        apps: project_apps(&apps),
+        dns: project_dns(&dns),
+    })
+}
+
+/// fix-143: the nightly half of the Cloudflare edge comparison — the same
+/// `core::ops::edge` logic `homelab check` already runs from the
+/// workstation, run here too so a flipped Access app is noticed even on a
+/// night nobody ran the CLI. `cloudflare_token` absent is reported as "not
+/// configured", never as a failure: an unasked question must never become a
+/// finding (the same rule `prometheus_url`/`loki_url` follow).
+async fn run_nightly_edge_check(state: &AppState, exec: &RealExecutor, now: u64) {
+    let store = homelab_core::state::StateStore::new(exec, &state.config.state_dir);
+    let Some(token) = state.config.cloudflare_token.clone() else {
+        record_state(&store, "edge check", |s| {
+            s.last_edge_check = now;
+            s.last_edge_findings = 0;
+            s.last_edge_error = Some("not configured (no cloudflare_token in host.toml)".into());
+        })
+        .await;
+        return;
+    };
+    let captured_dir = std::path::Path::new(&state.config.state_dir).join("repo/captured/gateway");
+    let (findings, error) = match homelab_core::ops::edge::load_capture(&captured_dir) {
+        Ok((ids, captured)) => {
+            let header_file = format!("{}/secrets/cloudflare.header", state.config.state_dir);
+            let header = format!("authorization: Bearer {}\n", token.trim());
+            match exec.write_file(&header_file, &header, 0o600).await {
+                Ok(()) => match fetch_live_edge(exec, &header_file, &ids).await {
+                    Ok(live) => (
+                        homelab_core::ops::edge::compare_edge(&captured, &live),
+                        None,
+                    ),
+                    Err(e) => (
+                        Vec::new(),
+                        Some(format!("the Cloudflare API did not answer: {e}")),
+                    ),
+                },
+                Err(e) => (
+                    Vec::new(),
+                    Some(format!("cannot write the header file: {e}")),
+                ),
+            }
+        }
+        Err(e) => (Vec::new(), Some(format!("the capture does not read: {e}"))),
+    };
+    if let Some(e) = &error {
+        tracing::warn!("edge check: not compared — {}", e);
+    } else if !findings.is_empty() {
+        tracing::warn!(
+            "edge check: {} finding(s) against captured/gateway/ — {}",
+            findings.len(),
+            homelab_core::ops::fleetcheck::render(&findings)
+        );
+    } else {
+        info!("edge check: Cloudflare agrees with captured/gateway/");
+    }
+    let count = findings.len();
+    record_state(&store, "edge check", |s| {
+        s.last_edge_check = now;
+        s.last_edge_findings = count;
+        s.last_edge_error = error;
     })
     .await;
 }
@@ -7307,12 +8016,9 @@ where
         state_dir: state.config.state_dir.clone(),
         now_unix: now,
         metrics_targets_dir: state.config.metrics_targets_dir.clone(),
-        grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
-        homepage_services_file: state.config.homepage_services_file.clone(),
         tile_watch_source: state.config.tile_watch_source.clone(),
         tile_watch_targets,
         tile_watch_watcher,
-        kuma_monitors_file: state.config.kuma_monitors_file.clone(),
         // C1/C2: the same Loki the coverage check already asks about, so
         // there is not a second address to keep in step with the first.
         loki_url: state.config.loki_url.clone(),
@@ -7557,17 +8263,14 @@ async fn gather_live_facts(
                 max_age_hours: w.max_age_hours,
             })
             .collect(),
-        kuma_monitors_file: state.config.kuma_monitors_file.clone(),
         state_dir: state.config.state_dir.clone(),
         gateway_vmid: state.config.safety.gateway_vmid,
-        grafana_vmid: state.config.safety.grafana_vmid,
         gateway_routes_dir: state.config.safety.gateway_routes_dir.clone(),
         no_touch: state.config.safety.no_touch.to_vec(),
         prometheus_url: state.config.prometheus_url.clone(),
         loki_url: state.config.loki_url.clone(),
         loki_vmid: state.config.loki_vmid,
         logs_window: sane_window(&state.config.logs_window),
-        grafana_dashboards_dir: state.config.grafana_dashboards_dir.clone(),
         now_unix: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -8212,13 +8915,10 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     deferred: None,
                 };
             }
-            // The same exclusions the deploy applies: the gateway holds other
-            // stacks' generated dashboards and routes.
-            let keep = homelab_core::ops::deploy::generated_dirs(
-                &state.config.safety,
-                state.config.grafana_dashboards_dir.as_deref(),
-                manifest.vmid,
-            );
+            // The same exclusion the deploy applies: the gateway holds other
+            // stacks' routes.
+            let keep =
+                homelab_core::ops::deploy::generated_dirs(&state.config.safety, manifest.vmid);
             let orphans =
                 homelab_core::ops::deploy::orphan_files_keeping(&exec, &manifest, &spec, &keep)
                     .await;
@@ -8610,6 +9310,43 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
+        // feat-overview-10 (homelab-admin, 2026-10-01): the dashboard's
+        // backup calendar, its own query reading restic directly (not
+        // through state.json's cached `last_backup`, which only ever holds
+        // the newest night — a calendar needs every one of them).
+        Rpc::BackupCalendar { stacks } => {
+            let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+            let st = store.load().await.unwrap_or_default();
+            let cfg = state.config.backup.clone();
+            let wanted: Vec<&String> = if stacks.is_empty() {
+                st.stacks.keys().collect()
+            } else {
+                stacks.iter().collect()
+            };
+            let mut by_stack = serde_json::Map::new();
+            let mut skipped = Vec::new();
+            for name in wanted {
+                let Some(entry) = st.stacks.get(name) else {
+                    skipped.push(format!("{name}: not a known stack"));
+                    continue;
+                };
+                let Some(m) = entry.manifest.as_ref() else {
+                    skipped.push(format!("{name}: no manifest on record"));
+                    continue;
+                };
+                if m.backs_up_nothing() {
+                    continue;
+                }
+                let times = homelab_core::ops::backup::snapshot_nights_unix(&exec, m, &cfg).await;
+                by_stack.insert(name.clone(), serde_json::json!(times));
+            }
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: serde_json::json!({ "stacks": by_stack, "skipped": skipped }).to_string(),
+                deferred: None,
+            }
+        }
         Rpc::ListManualChecks { json } => {
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
             let st = store.load().await.unwrap_or_default();
@@ -8835,6 +9572,230 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
+        // feat-backup-1: per-repository status (D25's owning-app repos for
+        // a compose stack, one per unit for a native stack), joined with
+        // the restore-drill verdict the nightly drill already recorded.
+        Rpc::GetBackups { stack } => {
+            let store =
+                homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
+            let snapshot = store.load().await.unwrap_or_default();
+            let Some(st) = snapshot.stacks.get(&stack) else {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("no such stack '{}'", stack),
+                    deferred: None,
+                };
+            };
+            let tiers = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retention
+                .clone();
+            let cfg = homelab_core::ops::backup::BackupCfg {
+                tiers,
+                ..state.config.backup.clone()
+            };
+            let (native, statuses) = if let Some(m) = &st.manifest {
+                (
+                    false,
+                    homelab_core::ops::backup::backup_status(
+                        &exec,
+                        m,
+                        &cfg,
+                        &snapshot.restore_drills,
+                    )
+                    .await,
+                )
+            } else {
+                let mut v = Vec::new();
+                for n in &st.natives {
+                    v.push(
+                        homelab_core::ops::backup::repo_status_of(
+                            &exec,
+                            &cfg,
+                            &snapshot.restore_drills,
+                            n.unit.clone(),
+                        )
+                        .await,
+                    );
+                }
+                (true, v)
+            };
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: serde_json::json!({ "native": native, "repos": statuses }).to_string(),
+                deferred: None,
+            }
+        }
+        // feat-backup-3: read-only, never stops anything.
+        Rpc::BrowseSnapshot {
+            owner,
+            snapshot,
+            path,
+        } => {
+            let tiers = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retention
+                .clone();
+            let cfg = homelab_core::ops::backup::BackupCfg {
+                tiers,
+                ..state.config.backup.clone()
+            };
+            match homelab_core::ops::backup::browse_snapshot(&exec, &cfg, &owner, &snapshot, &path)
+                .await
+            {
+                Ok(entries) => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: serde_json::to_string(&entries).unwrap_or_else(|_| "[]".into()),
+                    deferred: None,
+                },
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e.to_string(),
+                    deferred: None,
+                },
+            }
+        }
+        Rpc::RestoreNative {
+            stack,
+            snapshot,
+            confirm,
+        } => match native_from_state(&state.config.state_dir, &stack).await {
+            Ok((services, _)) => {
+                let cfg = state.config.backup.clone();
+                let mut resp = RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: format!("no services on stack '{}'", stack),
+                    deferred: None,
+                };
+                for m in services {
+                    let cfg = cfg.clone();
+                    let snap = snapshot.clone();
+                    let confirm = confirm.clone();
+                    let r = run_mutating_op_for_stack(
+                        state,
+                        &exec,
+                        req.id,
+                        "restore-native",
+                        Some(&stack),
+                        |ctx| {
+                            Box::pin(async move {
+                                homelab_core::ops::native::restore_native(
+                                    ctx,
+                                    &m,
+                                    &cfg,
+                                    &snap,
+                                    confirm.as_deref(),
+                                )
+                                .await
+                            })
+                        },
+                    )
+                    .await;
+                    let failed = !r.ok;
+                    if resp.ok || failed {
+                        resp = r;
+                    }
+                    if failed {
+                        break;
+                    }
+                }
+                resp
+            }
+            Err(msg) => RpcResponse {
+                id: req.id,
+                ok: false,
+                message: msg,
+                deferred: None,
+            },
+        },
+        // feat-secrets-1: the value, read straight from the host's own
+        // vault (never a process, never traced). Audited before the read,
+        // naming what was asked for, never the value.
+        Rpc::RevealSecret { stack, secret } => {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let audit = format!("{} reveal-secret stack={} secret={:?}\n", ts, stack, secret);
+            if let Err(e) = append_audit(&format!("{}/audit.log", state.config.state_dir), &audit) {
+                tracing::warn!("audit.log: could not record the reveal :: {}", e);
+            }
+            match crate::secrets::reveal(&state.config.state_dir, &stack, &secret).await {
+                Ok(content) => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: content,
+                    deferred: None,
+                },
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e,
+                    deferred: None,
+                },
+            }
+        }
+        // feat-secrets-2: through latch, exactly the one relative path a
+        // deploy would read back — the rest of latch is untouched. Audited
+        // before the write, never the value; `latch_put` itself never goes
+        // through `Executor`/`Cmd` either (core::ops::secrets).
+        Rpc::SetSecret {
+            stack,
+            secret,
+            content,
+        } => {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let rel = homelab_core::ops::secrets::latch_rel_path(&stack, &secret);
+            let audit = format!(
+                "{} set-secret stack={} secret={:?} rel={}\n",
+                ts, stack, secret, rel
+            );
+            if let Err(e) = append_audit(&format!("{}/audit.log", state.config.state_dir), &audit) {
+                tracing::warn!("audit.log: could not record the write :: {}", e);
+            }
+            let env = std::env::var("HOMELAB_LATCH_ENV").unwrap_or_default();
+            let project_root = format!("{}/repo", state.config.state_dir);
+            let result = tokio::task::spawn_blocking(move || {
+                crate::secrets::latch_put(&project_root, &env, &rel, &content)
+            })
+            .await;
+            match result {
+                Ok(Ok(())) => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: format!(
+                        "{} written in latch; the other files latch holds for this stack are \
+                         untouched; redeploy the stack for the running container to pick it up",
+                        homelab_core::ops::secrets::latch_rel_path(&stack, &secret)
+                    ),
+                    deferred: None,
+                },
+                Ok(Err(e)) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e,
+                    deferred: None,
+                },
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("internal: {e}"),
+                    deferred: None,
+                },
+            }
+        }
         Rpc::GetConfig => {
             let view = state
                 .settings
@@ -8965,6 +9926,98 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         id: req.id,
                         ok: true,
                         message: serde_json::to_string(&saved).unwrap_or_default(),
+                        deferred: None,
+                    }
+                }
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e,
+                    deferred: None,
+                },
+            }
+        }
+        // fix-120 (per-machine tokens, owner decision 2026-10-01): mint,
+        // list and revoke `[[tokens]]` entries. The scope-all audit line
+        // above already named who issued or revoked.
+        Rpc::TokenIssue { name, scope } => {
+            let path = state.config.config_path.clone();
+            let raw = std::fs::read_to_string(&path).unwrap_or_default();
+            let plain = match random_token() {
+                Ok(t) => t,
+                Err(e) => {
+                    return RpcResponse {
+                        id: req.id,
+                        ok: false,
+                        message: e,
+                        deferred: None,
+                    }
+                }
+            };
+            match issue_token_in(&raw, &name, scope, &plain)
+                .and_then(|(text, tokens)| write_config_file(&path, &text).map(|()| tokens))
+            {
+                Ok(tokens) => {
+                    *state.tokens.write().unwrap_or_else(PoisonError::into_inner) = tokens;
+                    info!(name = %name, scope = ?scope, "token issued");
+                    let issued = homelab_proto::TokenIssued {
+                        name,
+                        scope,
+                        token: plain,
+                    };
+                    RpcResponse {
+                        id: req.id,
+                        ok: true,
+                        message: serde_json::to_string(&issued).unwrap_or_default(),
+                        deferred: None,
+                    }
+                }
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e,
+                    deferred: None,
+                },
+            }
+        }
+        Rpc::TokenList => {
+            let mut views: Vec<homelab_proto::TokenView> = state
+                .live_tokens()
+                .into_iter()
+                .map(|t| homelab_proto::TokenView {
+                    name: t.name,
+                    scope: t.scope,
+                })
+                .collect();
+            if !state.config.token.is_empty() {
+                views.insert(
+                    0,
+                    homelab_proto::TokenView {
+                        name: "legacy".into(),
+                        scope: homelab_proto::Scope::All,
+                    },
+                );
+            }
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: serde_json::to_string(&views).unwrap_or_default(),
+                deferred: None,
+            }
+        }
+        Rpc::TokenRevoke { name } => {
+            let path = state.config.config_path.clone();
+            let raw = std::fs::read_to_string(&path).unwrap_or_default();
+            match revoke_token_in(&raw, &name)
+                .and_then(|(text, tokens)| write_config_file(&path, &text).map(|()| tokens))
+            {
+                Ok(tokens) => {
+                    *state.tokens.write().unwrap_or_else(PoisonError::into_inner) = tokens;
+                    info!(name = %name, "token revoked");
+                    RpcResponse {
+                        id: req.id,
+                        ok: true,
+                        message: format!("token {:?} revoked", name),
                         deferred: None,
                     }
                 }
@@ -9271,15 +10324,16 @@ fn prune_incidents(state_dir: &str, now: u64, max_age_days: u64, max_count: usiz
 /// (`incidents::compact_journal`), written whole through a temp file.
 /// Called only while nothing writes the journal: at start, and under the
 /// operation lock.
-fn compact_journal_file(state_dir: &str) {
+///
+/// gap-26: `max_bytes` used to be the hardcoded `incidents::JOURNAL_MAX_BYTES`
+/// — unlike the incident-bundle limits right beside it in host.toml, this one
+/// had no key and no dashboard row. The caller now passes `config.journal_max_bytes`.
+fn compact_journal_file(state_dir: &str, max_bytes: u64) {
     let path = format!("{}/journal.jsonl", state_dir);
     let Ok(content) = std::fs::read_to_string(&path) else {
         return;
     };
-    let Some(cut) = homelab_core::incidents::compact_journal(
-        &content,
-        homelab_core::incidents::JOURNAL_MAX_BYTES,
-    ) else {
+    let Some(cut) = homelab_core::incidents::compact_journal(&content, max_bytes as usize) else {
         return;
     };
     let tmp = format!("{}.compact.tmp", path);

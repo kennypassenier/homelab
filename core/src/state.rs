@@ -240,6 +240,21 @@ pub struct HostState {
     /// last known value, and since when.
     #[serde(default)]
     pub home_address_error: Option<String>,
+    /// fix-143 (Cloudflare nightly comparison, owner decision 2026-10-01):
+    /// unix time of the last nightly edge comparison the HOST ran (the one
+    /// `homelab check` runs from the workstation is unaffected and keeps its
+    /// own rhythm). 0 = never — not configured counts as never too, so
+    /// setting `cloudflare_token` later runs it at the first opportunity.
+    #[serde(default)]
+    pub last_edge_check: u64,
+    /// How many findings that comparison reported, 0 meaning it agreed.
+    #[serde(default)]
+    pub last_edge_findings: usize,
+    /// Why the comparison could not run at all (no token, the API did not
+    /// answer, the capture does not read). None when it ran, whatever it
+    /// found — this is "not compared", never counted as a finding itself.
+    #[serde(default)]
+    pub last_edge_error: Option<String>,
     /// fix-83 (manual-images-latest-unpinned, 2026-09-27): per stack, per
     /// container, the image and digest each `manual` container ran when the
     /// nightly round last looked. The stack file says what SHOULD run; this
@@ -415,6 +430,16 @@ pub struct ManualCheckRecord {
     /// checks-link (2026-09-30): where the application is opened.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// password-chain-bus-factor (owner decision "Alleen de
+    /// 90-dagen-controle", 2026-10-01): for a STANDING check only (one that
+    /// is not registered by any stack's deploy, `manualchecks::ensure_standing`)
+    /// — how many days after it was last answered it is due again,
+    /// whatever the answer was. `checks-interval` (2026-09-30) deliberately
+    /// removed this for ordinary per-app checks; a standing check is a
+    /// different thing by design, asked on a clock because nothing a deploy
+    /// does ever reopens it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recur_days: Option<u64>,
 }
 
 /// fix-51 (expert panel, state-writes-race, 2026-09-27): the lock that

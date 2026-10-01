@@ -1482,45 +1482,62 @@ async fn import_commit(
 
 // ── feat-firewall-2 ─────────────────────────────────────────────────────
 
+/// The fleet's firewall declarations, the editable summary rows the
+/// firewall page shows, and the working copy's head commit (if any) they
+/// were read at.
+type FleetFirewallRead = (
+    Vec<FleetFirewall>,
+    Vec<serde_json::Value>,
+    Option<super::workcopy::CommitRef>,
+);
+
+/// Shared by every reader that needs the fleet's firewall declarations
+/// (feat-firewall-2's matrix, feat-overview-7's topology, feat-stacks-9's
+/// dependencies): one pass over the working copy's stack manifests.
+fn fleet_firewall(wc: &WorkingCopy) -> Result<FleetFirewallRead, Refusal> {
+    if !wc.present() {
+        return Err(Refusal::new(
+            "the fleet's firewall declarations",
+            "the dashboard has no working copy of the homelab repository yet",
+            "the working copy panel says why; it clones at start once the deploy key is there",
+        ));
+    }
+    let mut fleet = Vec::new();
+    let mut summaries = Vec::new();
+    for name in wc.stack_names() {
+        let Ok(texts) = wc.stack_texts(&name) else {
+            continue;
+        };
+        let Some(Ok(m)) = texts.get(MANIFEST).map(|t| stackedit::parse_manifest(t)) else {
+            continue;
+        };
+        let Ok(ip) = bare_ip(&m.network.ip).parse() else {
+            continue;
+        };
+        summaries.push(serde_json::json!({
+            "stack": name, "vmid": m.vmid, "ip": bare_ip(&m.network.ip),
+            "declared": m.firewall.is_some(),
+            "enabled": m.firewall.as_ref().is_some_and(|f| f.enabled),
+            "policy_in": m.firewall.as_ref().map(|f| stackedit::action_word(f.policy_in)),
+            "policy_out": m.firewall.as_ref().map(|f| stackedit::action_word(f.policy_out)),
+            "rules": m.firewall.as_ref().map(|f| f.rules.len()).unwrap_or(0),
+            "management_open": m.firewall.as_ref().and_then(|f| f.management_open.clone()),
+        }));
+        fleet.push(FleetFirewall {
+            stack: name,
+            vmid: m.vmid,
+            ip,
+            firewall: m.firewall,
+        });
+    }
+    let head = wc.status().head;
+    Ok((fleet, summaries, head))
+}
+
 async fn firewall(State(c): State<EditCtx>) -> Response {
     let wc = c.wc.clone();
     let read = blocking(move || {
-        if !wc.present() {
-            return Err(Refusal::new(
-                "the firewall page",
-                "the dashboard has no working copy of the homelab repository yet",
-                "the working copy panel says why; it clones at start once the deploy key is there",
-            ));
-        }
-        let mut fleet = Vec::new();
-        let mut summaries = Vec::new();
-        for name in wc.stack_names() {
-            let Ok(texts) = wc.stack_texts(&name) else {
-                continue;
-            };
-            let Some(Ok(m)) = texts.get(MANIFEST).map(|t| stackedit::parse_manifest(t)) else {
-                continue;
-            };
-            let Ok(ip) = bare_ip(&m.network.ip).parse() else {
-                continue;
-            };
-            summaries.push(serde_json::json!({
-                "stack": name, "vmid": m.vmid, "ip": bare_ip(&m.network.ip),
-                "declared": m.firewall.is_some(),
-                "enabled": m.firewall.as_ref().is_some_and(|f| f.enabled),
-                "policy_in": m.firewall.as_ref().map(|f| stackedit::action_word(f.policy_in)),
-                "policy_out": m.firewall.as_ref().map(|f| stackedit::action_word(f.policy_out)),
-                "rules": m.firewall.as_ref().map(|f| f.rules.len()).unwrap_or(0),
-                "management_open": m.firewall.as_ref().and_then(|f| f.management_open.clone()),
-            }));
-            fleet.push(FleetFirewall {
-                stack: name,
-                vmid: m.vmid,
-                ip,
-                firewall: m.firewall,
-            });
-        }
-        let head = wc.status().head;
+        let (fleet, summaries, head) = fleet_firewall(&wc)?;
         Ok((fwmatrix::matrix(&fleet), summaries, head))
     })
     .await
@@ -1529,6 +1546,46 @@ async fn firewall(State(c): State<EditCtx>) -> Response {
         Ok((m, summaries, head)) => {
             Json(serde_json::json!({ "matrix": m, "stacks": summaries, "head": head }))
                 .into_response()
+        }
+        Err(r) => refusal(StatusCode::CONFLICT, r),
+    }
+}
+
+// ── feat-overview-7 / feat-stacks-9 ──────────────────────────────────────
+
+/// feat-overview-7 (topology: which container talks to which): the same
+/// firewall declarations feat-firewall-2 reads, turned into nodes and
+/// edges (`crate::core::topology`). The firewall page overlays measured
+/// traffic on this same shape (feat-firewall-3); this route stays the
+/// plain, undecorated graph so the Overview page costs no Prometheus call.
+async fn topology(State(c): State<EditCtx>) -> Response {
+    let wc = c.wc.clone();
+    let read = blocking(move || {
+        let (fleet, _summaries, head) = fleet_firewall(&wc)?;
+        Ok((crate::core::topology::from_fleet(&fleet), head))
+    })
+    .await
+    .and_then(|r| r);
+    match read {
+        Ok((t, head)) => Json(serde_json::json!({ "topology": t, "head": head })).into_response(),
+        Err(r) => refusal(StatusCode::CONFLICT, r),
+    }
+}
+
+/// feat-stacks-9 (dependencies between stacks): the topology's edges, read
+/// per stack as "depends on" / "depended on by".
+async fn dependencies(State(c): State<EditCtx>) -> Response {
+    let wc = c.wc.clone();
+    let read = blocking(move || {
+        let (fleet, _summaries, head) = fleet_firewall(&wc)?;
+        let topo = crate::core::topology::from_fleet(&fleet);
+        Ok((crate::core::topology::dependencies(&topo), head))
+    })
+    .await
+    .and_then(|r| r);
+    match read {
+        Ok((rows, head)) => {
+            Json(serde_json::json!({ "dependencies": rows, "head": head })).into_response()
         }
         Err(r) => refusal(StatusCode::CONFLICT, r),
     }
@@ -1675,6 +1732,160 @@ pub async fn save_host_settings(
     }
 }
 
+// ── fix-120 (per-machine tokens, owner decision 2026-10-01) ────────────────
+//
+// Issuing and revoking are their own commands rather than going through
+// `SetHostConfig` — `tokens` is `Access::Locked` there on purpose
+// (arch-self: the dashboard's own token must not be able to loosen what it
+// may do). Both still need scope `All`, so a read- or operate-scope
+// dashboard session is refused by the host itself, the same as any other
+// scope-all command.
+
+async fn tokens_list(State(c): State<EditCtx>) -> Response {
+    answer(read_tokens(&c).await)
+}
+
+/// The tokens the host currently trusts, name and scope only.
+pub async fn read_tokens(c: &EditCtx) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+    let r = c
+        .host
+        .ask_traced(Command::TokenList, Duration::from_secs(20), None)
+        .await;
+    match r {
+        Ok(r) if r.ok => match serde_json::from_str::<Vec<homelab_proto::TokenView>>(&r.message) {
+            Ok(tokens) => Ok(serde_json::json!({ "tokens": tokens })),
+            Err(e) => Err((
+                StatusCode::BAD_GATEWAY,
+                Refusal::new(
+                    "the tokens",
+                    format!("the host's answer did not read: {e}"),
+                    "update the host and the dashboard to the same release",
+                ),
+            )),
+        },
+        Ok(r) => Err((
+            StatusCode::BAD_GATEWAY,
+            Refusal::new("the tokens", r.message, "look at host.toml on pve"),
+        )),
+        Err(e) => Err((
+            StatusCode::BAD_GATEWAY,
+            Refusal::new(
+                "the tokens",
+                e,
+                "check that the host answers (homelab ping)",
+            ),
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct IssueTokenBody {
+    pub name: String,
+    pub scope: homelab_proto::Scope,
+}
+
+async fn tokens_issue(
+    State(c): State<EditCtx>,
+    b: Result<Json<IssueTokenBody>, JsonRejection>,
+) -> Response {
+    let b = match body(b, "a new token") {
+        Ok(b) => b,
+        Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
+    };
+    answer(issue_token(&c, b.name, b.scope).await)
+}
+
+/// Mint a new `[[tokens]]` entry. `token` is in this one answer and nowhere
+/// else — the host keeps only its SHA-256, and this function never logs it.
+pub async fn issue_token(
+    c: &EditCtx,
+    name: String,
+    scope: homelab_proto::Scope,
+) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+    let r = c
+        .host
+        .ask_traced(
+            Command::TokenIssue { name, scope },
+            Duration::from_secs(20),
+            None,
+        )
+        .await;
+    match r {
+        Ok(r) if r.ok => match serde_json::from_str::<homelab_proto::TokenIssued>(&r.message) {
+            Ok(issued) => {
+                c.publish
+                    .publish("tokens", serde_json::json!({ "issued": issued.name }));
+                Ok(serde_json::json!({ "issued": issued }))
+            }
+            Err(e) => Err((
+                StatusCode::BAD_GATEWAY,
+                Refusal::new(
+                    "a new token",
+                    format!("the host's answer did not read: {e}"),
+                    "the token was written to host.toml; read it again over ssh if this page \
+                     could not show it",
+                ),
+            )),
+        },
+        Ok(r) => Err((
+            StatusCode::BAD_REQUEST,
+            Refusal::new("a new token", r.message, "pick another name"),
+        )),
+        Err(e) => Err((
+            StatusCode::BAD_GATEWAY,
+            Refusal::new(
+                "a new token",
+                e,
+                "check that the host answers (homelab ping)",
+            ),
+        )),
+    }
+}
+
+async fn tokens_revoke(State(c): State<EditCtx>, UrlPath(name): UrlPath<String>) -> Response {
+    answer(revoke_token(&c, name).await)
+}
+
+/// Remove one `[[tokens]]` entry by name. Refused for `"legacy"` (the
+/// single `token` key; see OPERATIONS_RUNBOOK's migration note) and for a
+/// name that is not there.
+pub async fn revoke_token(
+    c: &EditCtx,
+    name: String,
+) -> Result<serde_json::Value, (StatusCode, Refusal)> {
+    let r = c
+        .host
+        .ask_traced(
+            Command::TokenRevoke { name: name.clone() },
+            Duration::from_secs(20),
+            None,
+        )
+        .await;
+    match r {
+        Ok(r) if r.ok => {
+            c.publish
+                .publish("tokens", serde_json::json!({ "revoked": name }));
+            Ok(serde_json::json!({ "revoked": name }))
+        }
+        Ok(r) => Err((
+            StatusCode::BAD_REQUEST,
+            Refusal::new(
+                "revoke a token",
+                r.message,
+                "`homelab token list` (or this page) shows the current names",
+            ),
+        )),
+        Err(e) => Err((
+            StatusCode::BAD_GATEWAY,
+            Refusal::new(
+                "revoke a token",
+                e,
+                "check that the host answers (homelab ping)",
+            ),
+        )),
+    }
+}
+
 /// Owner decision 2026-09-30 (item 2): a key just written whose
 /// `Apply::Restart` means the host only reads it at its next start;
 /// queues `restart-host` so "Save and restart the host" does both in one
@@ -1722,9 +1933,13 @@ pub fn router(ctx: EditCtx) -> Router {
         .route("/data/stacks-import/plan", post(import_plan))
         .route("/data/stacks-import/commit", post(import_commit))
         .route("/data/firewall", get(firewall))
+        .route("/data/topology", get(topology))
+        .route("/data/dependencies", get(dependencies))
         .route(
             "/data/host-settings",
             get(host_settings).put(host_settings_save),
         )
+        .route("/data/tokens", get(tokens_list).post(tokens_issue))
+        .route("/data/tokens/{name}", axum::routing::delete(tokens_revoke))
         .with_state(ctx)
 }

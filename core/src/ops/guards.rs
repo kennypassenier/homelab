@@ -115,6 +115,28 @@ pub const LOGROTATE_POLICY: &str = r#"/var/log/syslog /var/log/messages /var/log
 }
 "#;
 
+/// double-ingestion-logrotate (panel finding, 2026-10-01): the `rsyslog`
+/// package ships its own `/etc/logrotate.d/rsyslog`, which already rotates
+/// `/var/log/syslog`, `/var/log/auth.log` and `/var/log/messages` with the
+/// identical `rsyslog-rotate` postrotate hook `LOGROTATE_POLICY` calls.
+/// logrotate refuses two fragments that name the same path outright
+/// ("duplicate log entry for ...") and exits non-zero every day it runs —
+/// the second half of this finding, independent of what Alloy ingests.
+///
+/// Measuring this once per guards run (`test -f /etc/logrotate.d/rsyslog`)
+/// and writing nothing when it answers is simpler and safer than trying to
+/// subtract paths from one stanza: it leaves `/etc/logrotate.d/homelab`
+/// doing exactly what it always did on a container that has no rsyslog
+/// (nothing else rotates the file there), and doing nothing at all on one
+/// that does, where it was never anything but a duplicate.
+pub fn logrotate_policy(rsyslog_logrotate_present: bool) -> Option<&'static str> {
+    if rsyslog_logrotate_present {
+        None
+    } else {
+        Some(LOGROTATE_POLICY)
+    }
+}
+
 pub const APT_AUTOCLEAN: &str =
     "APT::Periodic::AutocleanInterval \"7\";\nAPT::Periodic::CleanInterval \"7\";\n";
 
@@ -255,6 +277,14 @@ pub async fn apply(
 
     // 3. Classic syslog rotation.
     ensure_package(exec, vmid, "logrotate", "logrotate").await?;
+    // double-ingestion-logrotate: when the rsyslog package is present it
+    // already shipped /etc/logrotate.d/rsyslog, rotating the same paths
+    // this policy would — two fragments naming one path is a logrotate
+    // error, not a harmless overlap.
+    let rsyslog_logrotate_present = pct_sh(exec, vmid, "test -f /etc/logrotate.d/rsyslog", 10)
+        .await
+        .map(|o| o.success())
+        .unwrap_or(false);
 
     // sqlite3, because a service's own health checks (J1) run at this level
     // and several of them ask the application's database what it holds. The
@@ -265,14 +295,22 @@ pub async fn apply(
     // latch (dashboard-latch): verified from its signed release when it is
     // missing, left alone when it is there.
     ensure_latch(exec, sink, vmid).await?;
-    push_content(
-        exec,
-        vmid,
-        "/etc/logrotate.d/homelab",
-        LOGROTATE_POLICY,
-        "644",
-    )
-    .await?;
+    match logrotate_policy(rsyslog_logrotate_present) {
+        Some(policy) => {
+            push_content(exec, vmid, "/etc/logrotate.d/homelab", policy, "644").await?;
+        }
+        None => {
+            // A container that had this rule from before rsyslog arrived
+            // (or before this guard existed) must not keep rotating a path
+            // rsyslog's own fragment now also claims.
+            pct_sh(exec, vmid, "rm -f /etc/logrotate.d/homelab", 10).await?;
+            log(
+                "[guard] /etc/logrotate.d/rsyslog already rotates syslog/auth.log/messages — \
+                 the homelab rule is not written (double-ingestion-logrotate)"
+                    .into(),
+            );
+        }
+    }
 
     // 4. Weekly docker prune timer — only where there is docker to prune.
     if docker {
@@ -651,5 +689,26 @@ pub async fn apply_rotation(
             .await?;
             Ok(out.stdout.contains("removed"))
         }
+    }
+}
+
+#[cfg(test)]
+mod double_ingestion_logrotate_tests {
+    //! double-ingestion-logrotate (panel finding, 2026-10-01): `rsyslog`
+    //! ships `/etc/logrotate.d/rsyslog`, rotating `/var/log/syslog`,
+    //! `/var/log/auth.log` and `/var/log/messages` — the same paths
+    //! `LOGROTATE_POLICY` names. logrotate refuses two fragments naming one
+    //! path ("duplicate log entry"), so this project's own rule must step
+    //! aside on a container that has rsyslog's.
+    use super::*;
+
+    #[test]
+    fn no_rsyslog_fragment_present_writes_the_homelab_policy() {
+        assert_eq!(logrotate_policy(false), Some(LOGROTATE_POLICY));
+    }
+
+    #[test]
+    fn an_rsyslog_fragment_present_means_the_homelab_policy_is_not_written() {
+        assert_eq!(logrotate_policy(true), None);
     }
 }

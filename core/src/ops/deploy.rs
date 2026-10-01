@@ -156,25 +156,13 @@ pub async fn orphan_files(
 }
 
 /// Directories inside container `vmid` that the orchestrator fills on behalf
-/// of OTHER stacks: on the gateway the route fragments (H1), and in Grafana's
-/// container the generated dashboards (T2). Their files are in no stack's
-/// file list, so without this a deploy of either container would take them
-/// for its own orphans and remove every other stack's route or dashboard.
-/// The two were one container until Grafana moved to the metrics stack
-/// (fix-90, 2026-09-27).
-pub fn generated_dirs(
-    safety: &crate::safety::SafetyConfig,
-    grafana_dashboards_dir: Option<&str>,
-    vmid: u16,
-) -> Vec<String> {
+/// of OTHER stacks: on the gateway, the route fragments (H1). Their files
+/// are in no stack's file list, so without this a deploy of the gateway
+/// would take them for its own orphans and remove every other stack's route.
+pub fn generated_dirs(safety: &crate::safety::SafetyConfig, vmid: u16) -> Vec<String> {
     let mut v = Vec::new();
     if vmid == safety.gateway_vmid {
         v.push(safety.gateway_routes_dir.clone());
-    }
-    if vmid == safety.grafana_vmid {
-        if let Some(d) = grafana_dashboards_dir {
-            v.push(d.to_string());
-        }
     }
     v
 }
@@ -905,8 +893,10 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     desc,
                     "--tags".into(),
                     "homelab".into(),
+                    // T62: declared (default `host`), same as the `pct
+                    // create` path.
                     "--timezone".into(),
-                    "host".into(),
+                    m.lxc.timezone.clone(),
                 ];
                 if let Some(order) = m.boot.order {
                     set_args.push("--startup".into());
@@ -987,14 +977,15 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 m.lxc.features.clone(),
                 "--onboot".into(),
                 if m.boot.onboot { "1" } else { "0" }.into(),
-                // Managed containers are recognizable in the Proxmox UI and
-                // inherit the host timezone.
+                // Managed containers are recognizable in the Proxmox UI.
                 "--description".into(),
                 format!("managed by homelab v2 :: stack {}", m.stack_name),
                 "--tags".into(),
                 "homelab".into(),
+                // T62: declared (default `host`), not hardcoded — a stack
+                // that needs a different zone can say so.
                 "--timezone".into(),
-                "host".into(),
+                m.lxc.timezone.clone(),
             ];
             if let Some(order) = m.boot.order {
                 args.push("--startup".into());
@@ -2439,9 +2430,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // ── step-22: a route the stack no longer declares goes. The file is
     // named `<vmid>-app-<stack>.yml`, so dropping `gateway_route:` or moving
     // to another vmid left the old one behind: still routing a hostname to a
-    // container that is gone or no longer this stack, and still on the front
-    // page, which is rendered from these files. Only when the stack had a
-    // record: a stack deployed for the first time has nothing of its own to
+    // container that is gone or no longer this stack. Only when the stack had
+    // a record: a stack deployed for the first time has nothing of its own to
     // take away.
     // fix-41: only the route file a deploy of this stack recorded writing is
     // retired, when the stack no longer declares it or now writes another
@@ -2491,107 +2481,6 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         });
     }
 
-    // ── T2: the stack brings its own dashboard. Written into Grafana's
-    // provisioning directory in Grafana's container (the gateway until
-    // fix-90 moved Grafana to the metrics stack), where the watcher picks it up
-    // within ten seconds. Provisioned dashboards are files, not database
-    // rows: they survive a rebuild of that container and they diff in review.
-    // Best-effort, like the discovery file — Grafana being down is not a
-    // reason to fail a deploy.
-    if let Some(dir) = ctx.grafana_dashboards_dir.as_deref() {
-        step!(runner, exec, ctx, m, "grafana dashboard", {
-            let dest = crate::ops::dashboard::dashboard_file(dir, &m.stack_name);
-            // B3: a stack with no compose apps runs systemd units, and the
-            // cadvisor panels can only ever be empty there.
-            let native = m.apps.is_empty() && !m.natives.is_empty();
-            let body = crate::ops::dashboard::dashboard_json_for(
-                &m.stack_name,
-                if native { &m.natives } else { &m.apps },
-                native,
-            );
-            match push_content(exec, ctx.safety.grafana_vmid, &dest, &body, "644").await {
-                Ok(changed) => {
-                    if changed {
-                        log_info(format!("[t2] {} (provisioning watcher reloads)", dest));
-                    }
-                    // Kenny, 2026-09-02: two dashboards with the same uid, one
-                    // generated and one a stale copy of an earlier generation,
-                    // and Grafana keeps whichever provider loaded first. That
-                    // is why six stacks appeared in "Homelab (generated)" and
-                    // seven did not — nondeterministically. The generated one
-                    // is the truth, so its predecessor goes with it.
-                    if let Some(parent) = dest.rsplit_once('/').map(|(d, _)| d) {
-                        if let Some(grandparent) = parent.rsplit_once('/').map(|(d, _)| d) {
-                            let old =
-                                format!("{}/dashboards/homelab-{}.json", grandparent, m.stack_name);
-                            if old != dest {
-                                let _ = pct_sh(
-                                    exec,
-                                    ctx.safety.grafana_vmid,
-                                    &format!("rm -f {}", crate::ops::util::shq(&old)),
-                                    30,
-                                )
-                                .await;
-                            }
-                        }
-                    }
-                    Ok(if changed {
-                        StepOutcome::Changed
-                    } else {
-                        StepOutcome::Unchanged
-                    })
-                }
-                Err(e) => {
-                    log_info(format!(
-                        "[t2] could not write {} ({}) — this stack has no generated dashboard yet",
-                        dest, e
-                    ));
-                    Ok(StepOutcome::Unchanged)
-                }
-            }
-        });
-    }
-
-    // ── T51: the front page, rendered from the routes this orchestrator
-    // has already written for the whole fleet.
-    //
-    // Fleet-wide rather than per stack, because Homepage keeps one file — so
-    // this step reads every route fragment in the gateway's route directory
-    // rather than only the one it just wrote. Best-effort, like the discovery
-    // file and the dashboard: a front page is a convenience, and a deploy
-    // that fails over it would be a deploy that fails over nothing.
-    if let Some(dest) = ctx.homepage_services_file.as_deref() {
-        step!(runner, exec, ctx, m, "homepage services", {
-            crate::ops::fleetfiles::write_homepage_services(ctx, exec, dest).await
-        });
-    }
-
-    // ── T49: the watch list, rendered from the fleet the same way T51
-    // renders the front page and T1 the scrape targets.
-    //
-    // Fleet-wide for the same reason: Uptime Kuma has one monitor set, so
-    // this reads every stack in host state rather than only the one just
-    // deployed. It writes a FILE and stops there — the seeder in the uptime
-    // stack is what talks to Uptime Kuma, because the protocol behind that
-    // API is not one its authors offer as a public interface, and
-    // reimplementing it in Rust is exactly the thing that breaks silently on
-    // an update (Kenny, forms R13 and V2 — D87).
-    //
-    // Best-effort like its two siblings: a monitor list is a convenience,
-    // and a deploy that fails over it would be a deploy that fails over
-    // nothing.
-    if let Some(dest) = ctx.kuma_monitors_file.as_deref() {
-        step!(runner, exec, ctx, m, "uptime monitors", {
-            crate::ops::fleetfiles::write_host_monitors(
-                ctx,
-                exec,
-                dest,
-                Some((m.stack_name.as_str(), m.network.ip.as_str())),
-            )
-            .await
-        });
-    }
-
     // ── D3: garbage-collect apps removed from intent — stop + remove their
     // compose project and /opt dir; /appdata config dirs are kept.
     //
@@ -2612,7 +2501,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         if m.native_only {
             return Ok(StepOutcome::Unchanged);
         }
-        let keep = generated_dirs(&ctx.safety, ctx.grafana_dashboards_dir.as_deref(), m.vmid);
+        let keep = generated_dirs(&ctx.safety, m.vmid);
         // An app that left the stack is the garbage collector's below: its
         // compose file has to still be there when `docker compose down` runs
         // in its directory, or its containers keep running with nothing left

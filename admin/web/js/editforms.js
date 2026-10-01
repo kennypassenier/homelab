@@ -38,7 +38,7 @@ const say = (key, w = {}) =>
  * @typedef {{ip: string, gateway: string, bridge: string,
  *   vlan?: number | null}} NetworkView
  * @typedef {{template: string, unprivileged: boolean, features: string,
- *   protection: boolean, gpu: boolean, vpn: boolean}} LxcView
+ *   protection: boolean, gpu: boolean, vpn: boolean, timezone: string}} LxcView
  * @typedef {{host_path: string, mount_point: string, no_data: boolean,
  *   no_backup?: string | null, host_owner_uid?: number | null,
  *   app?: string | null}} StorageView
@@ -82,7 +82,8 @@ const say = (key, w = {}) =>
  *   url?: string | null}} ChecksReadView
  * @typedef {ChecksReadView | {error: string}} ChecksView
  * @typedef {{name: string, group: string, order?: number | null,
- *   description?: string | null, url?: string | null, reading?: string | null,
+ *   description?: string | null, url?: string | null, watch_url?: string | null,
+ *   reading?: string | null,
  *   watch_every?: number | null, down_after?: number | null}} TileFieldsView
  */
 
@@ -338,6 +339,7 @@ export function settingsExtForm(stack, m) {
     unprivileged: m.lxc?.unprivileged ?? true,
     gpu: m.lxc?.gpu ?? false,
     vpn: m.lxc?.vpn ?? false,
+    timezone: m.lxc?.timezone ?? "host",
     storage: m.resources?.storage ?? "",
     on_demand: m.on_demand ?? false,
   };
@@ -690,7 +692,12 @@ export function tileRowFromValues(v) {
   };
   const order = String(v.order ?? "").trim();
   if (order !== "") out.order = Number(order);
-  for (const k of /** @type {const} */ (["description", "url", "reading"])) {
+  for (const k of /** @type {const} */ ([
+    "description",
+    "url",
+    "watch_url",
+    "reading",
+  ])) {
     const t = String(v[k] ?? "").trim();
     if (t) out[k] = t;
   }
@@ -1455,7 +1462,8 @@ export function checkNewStep(w, step, v, taken) {
  *   {type: "text_list"} | {type: "window"} | {type: "table"}} KeyKind
  * @typedef {{key: string, group: string, label: string, help: string,
  *   default: string, kind: KeyKind,
- *   access: "browser" | "confirm" | "locked" | "ssh_only" | "secret",
+ *   access: "browser" | "confirm" | "locked" | "ssh_only" | "secret" |
+ *     "dashboard_secret",
  *   apply: "live" | "restart", set: boolean, value: unknown,
  *   toml: string | null}} HostField
  */
@@ -1467,17 +1475,28 @@ export const ACCESS = /** @type {const} */ ({
   locked: "ssh only (can cut the dashboard off)",
   ssh_only: "ssh only (safety policy)",
   secret: "ssh only (secret)",
+  // fix-143: a write-only field, set or replaced here, never read back —
+  // the same "never sent" promise as `secret`, minus the ssh requirement.
+  dashboard_secret: "Here (secret, write-only)",
 });
 
+/** fix-143: `dashboard_secret` is a secret that may still be WRITTEN here.
+ * @param {HostField} f */
+export const isSecret = (f) =>
+  f.access === "secret" || f.access === "dashboard_secret";
+
 /** @param {HostField} f */
-export const editable = (f) => f.access === "browser" || f.access === "confirm";
+export const editable = (f) =>
+  f.access === "browser" ||
+  f.access === "confirm" ||
+  f.access === "dashboard_secret";
 
 /**
  * A key's value as the table shows it.
  * @param {HostField} f
  */
 export function valueText(f) {
-  if (f.access === "secret") return f.set ? "set (hidden)" : "not set";
+  if (isSecret(f)) return f.set ? "set (hidden)" : "not set";
   if (!f.set) return `default: ${f.default}`;
   const v = f.value;
   if (f.kind.type === "table") {

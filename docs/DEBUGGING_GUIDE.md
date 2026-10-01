@@ -459,7 +459,7 @@ reaches curl through a mode-600 header file,
 ### Logs in Loki
 
 Every managed container ships its logs to Loki on CT 113
-(`http://10.10.10.13:3100`; on CT 104 until fix-90 moved it on 2026-09-27)
+(`http://metrics (CT 113):3100`; on CT 104 until fix-90 moved it on 2026-09-27)
 through Grafana Alloy, from a config the deploy
 renders (`core/src/ops/logshipper.rs`). Grafana's Explore view reads the same
 data. That LAN address is `loki-push`, an nginx front that passes on pushes
@@ -470,15 +470,15 @@ job, over `metrics_net`, or yours from inside CT 113 on the loopback port:
 ssh pve 'pct exec 113 -- curl -s -G http://127.0.0.1:3101/loki/api/v1/query --data-urlencode "query=sum by (job) (count_over_time({job=~\".+\"}[1h]))"'
 ```
 
-A 403 from `10.10.10.13:3100` on a read is the front doing its job, not
-Loki being down; `curl -s 10.10.10.13:3100/ready` still answers `ready`.
+A 403 from `metrics (CT 113):3100` on a read is the front doing its job, not
+Loki being down; `curl -s metrics (CT 113):3100/ready` still answers `ready`.
 Deleting lines through the API is off (`deletion_mode: disabled`). Three jobs arrive, with these labels:
 
 | `job` | What | Labels |
 |---|---|---|
 | `docker` | every container's stdout and stderr | `stack`, `host`, `container_name`, `stream` (`stdout`/`stderr`), `filename` |
 | `systemd-journal` | the journal of each container; on the native stacks (kyu, almanac) this IS the service log | `stack`, `host`, `unit` |
-| `syslog` | devices that send syslog to the gateway (OPNsense, from 10.10.10.1; since fix-93 a line from any other sender is dropped by the receiver's `allow_from`), and `/var/log/syslog` on a container that has one | `stack`, `host`, `app`, `level`, `facility` |
+| `syslog` | devices that send syslog to the gateway (OPNsense, from the router; since fix-93 a line from any other sender is dropped by the receiver's `allow_from`), and `/var/log/syslog` on a container that has one | `stack`, `host`, `app`, `level`, `facility` |
 
 Five queries that answer most questions (paste into Grafana → Explore → Loki):
 

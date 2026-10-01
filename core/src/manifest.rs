@@ -20,26 +20,12 @@ pub struct StackManifest {
     #[serde(default)]
     pub storage: Vec<MountSpec>,
     pub apps: Vec<String>,
-    /// app-knowledge (Kenny, 2026-09-30: "Alles verplaatsen"): each app's
-    /// tile on the Homepage front page, keyed by app. It used to be a table
-    /// of seven apps in core/src/ops/homepage.rs, so a new app got a bare
-    /// link until the code learned about it.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub homepage_widgets: BTreeMap<String, HomepageWidget>,
     /// app-knowledge (2026-09-30): the file that keeps the house's own public
     /// address unblocked, and how its owner tests and reloads it. The gateway
     /// stack declares it for CrowdSec; it used to be three constants naming
     /// CrowdSec's path and container in core/src/ops/homeaddress.rs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_address_whitelist: Option<HomeAddressWhitelist>,
-    /// app-knowledge (2026-09-30): a shell command, run in this stack's
-    /// container, that prints the uid of every generated dashboard its
-    /// dashboard app is serving, one per line (the fleet check compares them
-    /// with the ones homelab wrote, F149). The metrics stack declares it for
-    /// Grafana; the credential names and the API used to be in
-    /// core/src/ops/facts.rs.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generated_dashboards_command: Option<String>,
     /// replace-homepage (Kenny, 2026-09-30): this stack's tiles on the
     /// dashboard's start page, keyed by the hostname they open. The stack
     /// that owns a route declares its tile; Homepage and its overlay file
@@ -382,6 +368,13 @@ pub struct LxcSpec {
     /// Proxmox protection flag: hypervisor refuses destroy while set.
     #[serde(default)]
     pub protection: bool,
+    /// T62: the container's timezone, applied at `pct create` time. Default
+    /// `host` inherits the Proxmox host's timezone (CET/CEST), which is what
+    /// every managed container ran on before this field existed and what a
+    /// fresh deploy must keep reproducing — logs correlate against
+    /// Loki/Grafana timestamps that assume host time.
+    #[serde(default = "default_timezone")]
+    pub timezone: String,
     /// H4: pass the host GPU (/dev/dri) into the container (VAAPI).
     #[serde(default)]
     pub gpu: bool,
@@ -395,6 +388,9 @@ fn yes() -> bool {
 }
 fn default_features() -> String {
     "nesting=1,keyctl=1".into()
+}
+fn default_timezone() -> String {
+    "host".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -575,15 +571,24 @@ pub struct Tile {
     /// tile-watch (owner decision "Afgeleid uit de tegels", 2026-09-30): the
     /// plain address the firewall derivation and the dashboard's minute
     /// watch both reach this tile at, resolved by the client at deploy time
-    /// (never by hand) — `url` as-is when it already names this container's
-    /// own address, otherwise the backend `url` behind whichever router in
-    /// this stack's own `traefik-routes.yml` answers for `url`'s host
+    /// (never by hand) from `watch_url` when set, else `url` — the chosen
+    /// address as-is when it already names this container's own address,
+    /// otherwise the backend address behind whichever router in this
+    /// stack's own `traefik-routes.yml` answers for its host
     /// (`client::routes::backend_for_host`). Absent = neither applied: the
     /// tile's host is reached through Traefik by a hostname no route file
     /// here resolves, and it is not watched (the client's spec notes say
     /// why). Never edited in the stack file — the client fills it in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe: Option<String>,
+    /// The address the dashboard's minute watch asks when the tile's own
+    /// page is not the thing to ask (for example an app's health
+    /// endpoint), instead of `url`. Resolved exactly like `url`: the
+    /// address as written when it already names this container's own
+    /// address, otherwise looked up by host in this stack's own route
+    /// files. Absent: `url` is used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watch_url: Option<String>,
     /// Owner decision "default plus per tile" (2026-09-30): how often the
     /// dashboard's minute watch checks this tile, in seconds; absent = the
     /// fleet default (`watch_interval_s`, host.toml). Must be at least 10
@@ -600,22 +605,6 @@ pub struct Tile {
 
 fn default_tile_order() -> u32 {
     100
-}
-
-/// One app's Homepage widget (app-knowledge).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct HomepageWidget {
-    /// What Homepage calls this widget (`sonarr`, `jellyseerr`, …).
-    pub kind: String,
-    /// Shell that prints the API key and nothing else, run inside the
-    /// container that owns the app; `{dir}` is its config directory. None:
-    /// the key comes from Homepage's own `.env` (`HOMEPAGE_VAR_<APP>`).
-    #[serde(default)]
-    pub key_command: Option<String>,
-    /// Extra lines for the widget block, verbatim.
-    #[serde(default)]
-    pub extra: Vec<String>,
 }
 
 // ── Deploy payload ───────────────────────────────────────────────────────────

@@ -837,6 +837,152 @@ pub fn decide_chassis_pause(
     }
 }
 
+/// feat-backup-2: `restore_empty_unit`'s pipeline, gated and chosen rather
+/// than automatic-and-always-latest: the operator picks a snapshot from the
+/// Backups page and confirms by typing the stack's name (the same gate
+/// `backup::restore_confirmed` gives the compose path). Unlike
+/// `restore_empty_unit` this stops the unit first (a live restore under a
+/// running service would interleave the unpack with its own writes) and
+/// takes a safety copy of the current data directories on the HOST first,
+/// mirroring the compose path's `pre_restore_dir` — so a restore that turns
+/// out wrong is not the second data loss of the day.
+pub async fn restore_native(
+    ctx: &OpCtx<'_>,
+    m: &NativeServiceManifest,
+    cfg: &crate::ops::backup::BackupCfg,
+    snapshot: &str,
+    confirm: Option<&str>,
+) -> OperationReport {
+    let op = format!("restore-{}", m.stack_name);
+    let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    let texec = TracingExecutor::new(ctx.exec, ctx.sink);
+    let exec: &dyn Executor = &texec;
+
+    runner.log(
+        Level::Warn,
+        format!(
+            "[restore] {} (native unit {}) from snapshot '{}'",
+            m.stack_name, m.unit, snapshot
+        ),
+    );
+
+    step!(runner, "safety gates", {
+        crate::ops::backup::restore_confirmed(&m.stack_name, confirm)?;
+        super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
+        Ok(StepOutcome::Unchanged)
+    });
+
+    if m.stateless || m.data_dirs.is_empty() {
+        runner.log(
+            Level::Info,
+            format!("[restore] {} declares no data — nothing to restore", m.unit),
+        );
+        return runner.finish_ok();
+    }
+
+    step!(runner, "stop unit", {
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!("systemctl stop {}", shq(&m.unit)),
+            60,
+        )
+        .await?;
+        if !out.success() {
+            return Err(CoreError::Command {
+                rendered: format!("systemctl stop {}", m.unit),
+                detail: out.stderr.trim().to_string(),
+            });
+        }
+        Ok(StepOutcome::Changed)
+    });
+
+    // fix-64's rule, repeated for the native path: the data about to be
+    // overwritten is copied aside on the HOST before anything is unpacked
+    // over it, into the same `pre-restore/` area the compose restore uses.
+    let safety_copy_dest = format!(
+        "{}/pre-restore/{}-{}",
+        ctx.state_dir, m.stack_name, ctx.now_unix
+    );
+    step!(runner, "safety copy", {
+        let dest = safety_copy_dest.clone();
+        let dirs = m
+            .data_dirs
+            .iter()
+            .map(|d| shq(d))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let script = format!(
+            "mkdir -p {dest} && pct exec {vmid} -- tar -cf - {dirs} | tar -xf - -C {dest}",
+            dest = shq(&dest),
+            vmid = m.vmid,
+            dirs = dirs,
+        );
+        let out = exec.run(&Cmd::new("sh", &["-c", &script], 1800)).await?;
+        if !out.success() {
+            return Err(CoreError::Command {
+                rendered: "safety copy of the current data".into(),
+                detail: out.stderr.trim().to_string(),
+            });
+        }
+        Ok(StepOutcome::Changed)
+    });
+    runner.log(
+        Level::Info,
+        format!(
+            "[restore] current data copied aside to {}",
+            safety_copy_dest
+        ),
+    );
+
+    step!(runner, "unpack snapshot", {
+        let script = format!(
+            "set -o pipefail; env RESTIC_REPOSITORY={base}/{unit}-config \
+             RESTIC_PASSWORD_FILE={pw} RESTIC_CACHE_DIR={cache} restic dump {snap} \
+             /{unit}-data.tar | pct exec {vmid} -- tar -xf - -C /",
+            base = cfg.restic_base,
+            unit = m.unit,
+            pw = cfg.password_file,
+            cache = crate::ops::backup::RESTIC_CACHE_DIR,
+            snap = snapshot,
+            vmid = m.vmid,
+        );
+        let out = exec
+            .run(&Cmd::new("sh", &["-c", &script], cfg.restore_timeout_s))
+            .await?;
+        if !out.success() {
+            return Err(CoreError::Command {
+                rendered: format!("restic dump {} | tar -x", snapshot),
+                detail: out.stderr.trim().to_string(),
+            });
+        }
+        Ok(StepOutcome::Changed)
+    });
+
+    step!(runner, "start unit", {
+        let out = util_pct_sh(
+            exec,
+            m.vmid,
+            &format!("systemctl start {}", shq(&m.unit)),
+            60,
+        )
+        .await?;
+        if !out.success() {
+            return Err(CoreError::Command {
+                rendered: format!("systemctl start {}", m.unit),
+                detail: out.stderr.trim().to_string(),
+            });
+        }
+        Ok(StepOutcome::Changed)
+    });
+
+    runner.log(
+        Level::Info,
+        format!("[restore] {} restored and restarted", m.unit),
+    );
+    runner.finish_ok()
+}
+
 /// C7 nightly backup for a native stack. The data lives INSIDE the
 /// container (adoption never restarts a service, so a bind-mount to
 /// /appdata was never an option); the snapshot therefore streams

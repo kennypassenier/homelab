@@ -1,0 +1,71 @@
+# traefik-docker-socket (expert panel 2026-09-27): Traefik held the real
+# docker socket, read-only in name only (`:ro` on the mount does not limit
+# the API an attacker on the other end can call), for exactly one thing —
+# the docker provider, used only to read the CrowdSec bouncer middleware
+# label off this stack's own containers. An RCE in Traefik or in the Yaegi
+# plugin it runs on every request became root on CT 104, which holds the
+# tunnel token, the bouncer key and (until fix-90 moved them) Grafana and
+# Loki.
+#
+# This proxy is the only container that still touches /var/run/docker.sock.
+# It answers a deliberately narrow slice of the docker API — CONTAINERS=1,
+# everything else 0 — over plain HTTP on the internal gateway_net only (no
+# published port), and refuses every write (POST=0, the image's own
+# default). Traefik's docker provider points at this container instead of
+# the socket; nothing else in this stack, or any other stack, reaches it.
+services:
+  socket-proxy:
+    # Pinned by digest like every other manual-class image here (the
+    # policy label below). `0.3.0` is the project's latest tagged release;
+    # resolved 2026-10-01 from Docker Hub.
+    image: tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    container_name: socket-proxy
+    networks:
+      - gateway_net
+    # No `ports:` — gateway_net only. Traefik reaches it as
+    # `tcp://socket-proxy:2375`, and nothing outside this docker network can.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - TZ=Europe/Brussels
+      # Least privilege: read-only (the image refuses every write unless an
+      # ALLOW_ "verb" flag turns it on, none do here), and only the one
+      # endpoint Traefik's docker provider actually calls.
+      - CONTAINERS=1
+      - EVENTS=1
+      - PING=1
+      - VERSION=1
+      # Everything else this proxy could expose, explicit rather than
+      # relying on the image's own defaults staying narrow across upgrades.
+      - SERVICES=0
+      - TASKS=0
+      - NETWORKS=0
+      - NODES=0
+      - PLUGINS=0
+      - VOLUMES=0
+      - IMAGES=0
+      - INFO=0
+      - EXEC=0
+      - BUILD=0
+      - COMMIT=0
+      - CONFIGS=0
+      - DISTRIBUTION=0
+      - POST=0
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      - "com.homelab.update.policy=manual"
+      - "com.homelab.update.upstream=github.com/Tecnativa/docker-socket-proxy"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:2375/_ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  gateway_net:
+    external: true
+    name: gateway_net

@@ -68,8 +68,8 @@ firewall:
   comment: |-
     CT 120 (admin), the dashboard. In force from its first deploy
     (arch-firewall, 2026-09-28). In: Traefik on CT 104 (the tunnel's only
-    way in), Uptime Kuma on CT 107, and Alertmanager on CT 113 (alerts into
-    the notification centre, 2026-09-30). Out: the host's API on
+    way in), the host's own /healthz watch (replace-kuma), and Alertmanager
+    on CT 113 (alerts into the notification centre, 2026-09-30). Out: the host's API on
     10.10.10.250:8443 (the one exception to "never pve's rescue address from
     a container"), Loki and Prometheus on CT 113, DNS on the router, and the
     internet for GitHub (working copy, latch) and Cloudflare (Access keys).
@@ -109,17 +109,6 @@ firewall:
       proto: tcp
       dport: "8090"
       note: the host watches the dashboard's /healthz every minute (replace-kuma)
-    - dir: in
-      action: ACCEPT
-      source: 10.10.10.7
-      proto: icmp
-      note: Uptime Kuma ping
-    - dir: in
-      action: ACCEPT
-      source: 10.10.10.7
-      proto: tcp
-      dport: "8090"
-      note: Uptime Kuma HTTP monitor (/healthz)
     - dir: in
       action: ACCEPT
       source: 10.10.10.10

@@ -11,9 +11,7 @@ use homelab_core::sink::VecSink;
 
 fn manifest(vmid: u16, stack: &str) -> StackManifest {
     StackManifest {
-        homepage_widgets: Default::default(),
         home_address_whitelist: None,
-        generated_dashboards_command: None,
         tiles: Default::default(),
         log_files: Vec::new(),
         registry_login: None,
@@ -41,6 +39,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
             storage: "local-lvm".into(),
         },
         lxc: LxcSpec {
+            timezone: "host".into(),
             template: "debian-12".into(),
             unprivileged: true,
             features: "nesting=1".into(),
@@ -73,9 +72,6 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         state_dir: "/var/lib/homelab".into(),
         now_unix: 1_760_000_000,
         metrics_targets_dir: None,
-        grafana_dashboards_dir: None,
-        homepage_services_file: None,
-        kuma_monitors_file: None,
         loki_url: None,
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
@@ -179,61 +175,6 @@ async fn c2_destroy_happy_path_lifts_protection_then_destroys() {
         serde_json::from_str(&exec.file("/var/lib/homelab/state.json").unwrap_or_default())
             .unwrap();
     assert!(!state.stacks.contains_key("test"));
-}
-
-/// The dashboard a destroy removes lives on the GATEWAY, so the removal has
-/// to happen there.
-///
-/// It did not. The step ran a bare `rm -f` on the Proxmox host for a path that
-/// only exists inside CT 104, and `rm -f` on a missing path exits 0 — so the
-/// step reported "changed" and removed nothing, every time, for as long as it
-/// existed. Found by the destroy drill on 2026-09-01: the throwaway stack was
-/// destroyed and its dashboard was still on the gateway afterwards (F162).
-///
-/// The discovery file beside it is the contrast that makes this readable: that
-/// one IS on the host, so its bare `rm -f` is right. Same-looking lines, two
-/// different machines.
-/// covers: F162
-#[tokio::test]
-async fn c2_destroy_removes_the_dashboard_on_the_gateway_not_the_host() {
-    let exec = MockExecutor::new();
-    exec.respond_always(
-        "pct config",
-        CmdOutput::ok("hostname: 108-app-test\nprotection: 1\n"),
-    );
-    let sink = VecSink::new();
-    let j = NullJournal;
-    let mut c = ctx(&exec, &sink, &j);
-    c.grafana_dashboards_dir =
-        Some("/opt/gateway/grafana/provisioning/dashboards-generated".into());
-    c.metrics_targets_dir = Some("/appdata/metrics/prometheus-config/targets".into());
-    let report = destroy(&c, &manifest(108, "test"), "test", true).await;
-    assert!(report.ok, "{:?}", report.error);
-
-    let removed_on_gateway = exec
-        .calls_containing("homelab-test.json")
-        .into_iter()
-        .any(|c| c.contains("pct exec") && c.contains(&c2_gateway_vmid().to_string()));
-    assert!(
-        removed_on_gateway,
-        "the dashboard must be removed inside the gateway container, not on the \
-         Proxmox host where the path does not exist: {:?}",
-        exec.calls_containing("homelab-test.json")
-    );
-
-    // And the discovery file, which really is on the host, stays a plain rm.
-    let discovery: Vec<String> = exec.calls_containing("targets/test.json");
-    assert!(
-        discovery.iter().any(|c| !c.contains("pct exec")),
-        "the metrics discovery file lives on the host and must not be routed \
-         through the gateway: {:?}",
-        discovery
-    );
-}
-
-/// The gateway vmid the test context uses, named so the assertion above reads.
-fn c2_gateway_vmid() -> u16 {
-    homelab_core::safety::SafetyConfig::default().gateway_vmid
 }
 
 // ── E1/E2: backup and restore ───────────────────────────────────────────────
@@ -445,48 +386,6 @@ async fn e1_backup_with_nothing_to_pause_starts_nothing() {
         exec.calls_containing("docker stop").is_empty(),
         "and none may be stopped"
     );
-}
-
-/// Every stack dashboard carries its own errors-only section, because Kenny
-/// asked for it on every one rather than only on the fleet-wide page — and
-/// because a stack deployed next month must get it without anyone
-/// remembering to add it.
-#[test]
-fn every_stack_dashboard_has_an_errors_section() {
-    let json = homelab_core::ops::dashboard::dashboard_json(
-        "media",
-        &["jellyfin".to_string(), "sonarr".to_string()],
-    );
-    let v: serde_json::Value = serde_json::from_str(&json).expect("valid json");
-    let panels = v["panels"].as_array().expect("panels");
-    let titles: Vec<&str> = panels.iter().filter_map(|p| p["title"].as_str()).collect();
-    for want in ["Errors in range", "Errors by container", "Error lines"] {
-        assert!(titles.contains(&want), "missing '{}' in {:?}", want, titles);
-    }
-    // The log panels must read Loki, not the Prometheus datasource the four
-    // resource panels use.
-    let loki: Vec<&serde_json::Value> = panels
-        .iter()
-        .filter(|p| p["datasource"]["uid"] == "loki")
-        .collect();
-    assert_eq!(loki.len(), 3, "three panels should read Loki");
-
-    // The level=info exclusion is load-bearing, not tidiness: Loki logs every
-    // query it runs, those queries contain the word "error", and without this
-    // Loki counts its own search for errors as an error.
-    for p in &loki {
-        let expr = p["targets"][0]["expr"].as_str().unwrap_or("");
-        assert!(
-            expr.contains("!= \"level=info\""),
-            "the info exclusion must survive: {}",
-            expr
-        );
-        assert!(
-            expr.contains("stack=\"media\""),
-            "a stack dashboard must only show its own errors: {}",
-            expr
-        );
-    }
 }
 
 /// A restic run over a directory that exists and is empty succeeds, writes a
@@ -2370,78 +2269,6 @@ async fn o2_the_template_bakes_the_observability_agents() {
     );
 }
 
-/// T2: a stack brings its own dashboard. The ones that exist today were built
-/// by hand and lived in no repository until 2026-08-30, so a Grafana rebuild
-/// would have taken them — and adding a stack meant remembering to open
-/// Grafana, which is the step nobody remembers.
-#[tokio::test]
-async fn t2_deploy_provisions_a_dashboard_for_the_stack() {
-    use homelab_core::ops::deploy::deploy;
-    let exec = MockExecutor::new();
-    deploy_mocks(&exec);
-    let sink = VecSink::new();
-    let j = NullJournal;
-    let mut c = ctx(&exec, &sink, &j);
-    c.grafana_dashboards_dir = Some("/opt/grafana/provisioning/dashboards".into());
-    let report = deploy(&c, &deploy_spec(manifest(108, "test"))).await;
-    assert!(report.ok, "{:?}", report.error);
-    assert!(
-        !exec
-            .calls_containing("/opt/grafana/provisioning/dashboards/homelab-test.json")
-            .is_empty(),
-        "the dashboard must be pushed to the gateway: {:?}",
-        exec.calls_containing("grafana")
-    );
-}
-
-/// The generated document has to be worth provisioning: real panels, the
-/// Prometheus datasource by uid, and every query scoped to this stack so two
-/// stacks never show each other's numbers.
-#[test]
-fn t2_the_generated_dashboard_is_scoped_and_stable() {
-    use homelab_core::ops::dashboard::dashboard_json;
-    let body = dashboard_json("media", &["jellyfin".to_string(), "sonarr".to_string()]);
-    assert!(body.contains("\"uid\": \"homelab-media\""), "{}", body);
-    assert!(body.contains("\"uid\": \"prometheus\""), "{}", body);
-    // Assert what the sentence says, rather than a count that has to be
-    // edited every time a panel is added. The count version broke the moment
-    // the errors section arrived — which is the test doing its job, but it
-    // was checking a number instead of the property it was written for.
-    let v: serde_json::Value = serde_json::from_str(&body).expect("valid json");
-    let exprs: Vec<String> = v["panels"]
-        .as_array()
-        .expect("panels")
-        .iter()
-        .flat_map(|p| p["targets"].as_array().cloned().unwrap_or_default())
-        .filter_map(|t| t["expr"].as_str().map(|e| e.to_string()))
-        .collect();
-    assert!(
-        !exprs.is_empty(),
-        "a dashboard with no queries is decoration"
-    );
-    for e in &exprs {
-        assert!(
-            e.contains("stack=\"media\""),
-            "every query must be scoped to this stack, this one is not: {}",
-            e
-        );
-    }
-    assert!(
-        body.contains("jellyfin, sonarr"),
-        "the description should say what is in the stack: {}",
-        body
-    );
-    assert!(
-        body.contains("change the generator, not the dashboard"),
-        "an overwritten file must say so on its face"
-    );
-    // Byte-stable, or the fleet check reports drift after every deploy.
-    assert_eq!(
-        body,
-        dashboard_json("media", &["jellyfin".to_string(), "sonarr".to_string()])
-    );
-}
-
 /// T1: with no directory configured the feature is simply off, and a deploy
 /// neither writes nor complains.
 #[tokio::test]
@@ -2990,9 +2817,6 @@ async fn h14_every_destroy_step_is_journaled_running_then_done() {
             state_dir: "/var/lib/homelab".into(),
             now_unix: 1_760_000_000,
             metrics_targets_dir: None,
-            grafana_dashboards_dir: None,
-            homepage_services_file: None,
-            kuma_monitors_file: None,
             loki_url: None,
             asker: &homelab_core::ask::NOBODY,
             backup: Default::default(),
@@ -3037,9 +2861,6 @@ async fn h14_failed_step_leaves_running_then_failed_trail() {
             state_dir: "/var/lib/homelab".into(),
             now_unix: 1_760_000_000,
             metrics_targets_dir: None,
-            grafana_dashboards_dir: None,
-            homepage_services_file: None,
-            kuma_monitors_file: None,
             loki_url: None,
             asker: &homelab_core::ask::NOBODY,
             backup: Default::default(),
@@ -3352,50 +3173,6 @@ async fn a_failed_backup_stops_the_destroy() {
     assert!(report.ok, "{:?}", report.error);
     assert!(exec2.calls_containing("restic backup").is_empty());
     assert_eq!(exec2.calls_containing("pct destroy 108 --purge").len(), 1);
-}
-
-/// T66 · whatever a deploy registers, a destroy has to unregister.
-///
-/// The dashboard was the half that was missing. A destroyed stack left its
-/// Grafana panel behind, showing a container that no longer exists — which
-/// reads as "everything is down" rather than "this is gone", and nothing
-/// distinguishes the two. The Prometheus target and the Traefik route were
-/// already removed; only this one was not.
-#[tokio::test]
-async fn t66_destroy_removes_the_dashboard_the_deploy_wrote() {
-    let exec = MockExecutor::new();
-    exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test\n"));
-    exec.respond_always("pct status", CmdOutput::ok("status: stopped"));
-    let sink = VecSink::new();
-    let j = NullJournal;
-    let mut c = ctx(&exec, &sink, &j);
-    c.grafana_dashboards_dir = Some("/opt/grafana/provisioning/dashboards".into());
-    c.metrics_targets_dir = Some("/opt/prometheus/targets".into());
-
-    let report = destroy(&c, &manifest(108, "test"), "test", true).await;
-    assert!(report.ok, "destroy failed: {:?}", report.error);
-
-    let removed = exec.calls_containing("homelab-test.json");
-    assert_eq!(
-        removed.len(),
-        1,
-        "the dashboard this stack's deploy wrote must be removed exactly once: {:?}",
-        removed
-    );
-    assert!(
-        removed[0].contains("rm"),
-        "and removed, not merely mentioned: {}",
-        removed[0]
-    );
-    // The two that already worked must keep working.
-    assert_eq!(
-        exec.calls_containing("test.json")
-            .iter()
-            .filter(|c| c.contains("/opt/prometheus/targets"))
-            .count(),
-        1,
-        "the Prometheus target is still removed"
-    );
 }
 
 // ── T69: the deploy must OBEY the answer, not merely know it ───────────────
@@ -4339,69 +4116,4 @@ async fn gap_33_requested_guards_check_the_hostname_and_skip_docker_on_a_native_
         .unwrap();
     assert!(exec.calls_containing("systemctl restart docker").is_empty());
     assert!(exec.calls_containing("daemon.json").is_empty());
-}
-
-/// fix-90 (2026-09-27, gateway-shared-no-limits): Grafana left the gateway
-/// for the metrics container. The generated dashboard is written and removed
-/// where Grafana runs, and a deploy of either container keeps the directory
-/// it holds for other stacks — routes on the gateway, dashboards on Grafana's.
-/// covers: fix-90
-#[tokio::test]
-async fn fix_90_the_dashboard_is_written_where_grafana_runs() {
-    use homelab_core::ops::deploy::{deploy, generated_dirs};
-    let dir = "/opt/metrics/grafana/provisioning/dashboards-generated";
-    let exec = MockExecutor::new();
-    deploy_mocks(&exec);
-    let sink = VecSink::new();
-    let j = NullJournal;
-    let mut c = ctx(&exec, &sink, &j);
-    c.grafana_dashboards_dir = Some(dir.into());
-    c.safety.grafana_vmid = 113;
-    let report = deploy(&c, &deploy_spec(manifest(108, "test"))).await;
-    assert!(report.ok, "{:?}", report.error);
-    let pushed = exec.calls_containing(&format!("{dir}/homelab-test.json"));
-    assert!(
-        pushed.iter().any(|c| c.starts_with("pct push 113 ")),
-        "pushed into Grafana's container: {pushed:?}"
-    );
-    assert!(
-        !pushed.iter().any(|c| c.contains(" 104 ")),
-        "not into the gateway: {pushed:?}"
-    );
-
-    let exec = MockExecutor::new();
-    exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test\n"));
-    exec.respond_always("pct status", CmdOutput::ok("status: stopped"));
-    let mut c = ctx(&exec, &sink, &j);
-    c.grafana_dashboards_dir = Some(dir.into());
-    c.safety.grafana_vmid = 113;
-    let report = destroy(&c, &manifest(108, "test"), "test", true).await;
-    assert!(report.ok, "{:?}", report.error);
-    let removed = exec.calls_containing("homelab-test.json");
-    assert!(
-        removed
-            .iter()
-            .any(|c| c.starts_with("pct exec 113 -- rm -f")),
-        "{removed:?}"
-    );
-
-    let safety = homelab_core::safety::SafetyConfig {
-        grafana_vmid: 113,
-        ..Default::default()
-    };
-    assert_eq!(
-        generated_dirs(&safety, Some(dir), 113),
-        vec![dir.to_string()]
-    );
-    assert_eq!(
-        generated_dirs(&safety, Some(dir), 104),
-        vec![safety.gateway_routes_dir.clone()]
-    );
-    // Unset, Grafana is where it always was: on the gateway.
-    let old = homelab_core::safety::SafetyConfig::default();
-    assert_eq!(old.grafana_vmid, old.gateway_vmid);
-    assert_eq!(
-        generated_dirs(&old, Some(dir), 104),
-        vec![old.gateway_routes_dir.clone(), dir.to_string()]
-    );
 }

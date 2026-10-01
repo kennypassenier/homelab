@@ -2,8 +2,8 @@
 //! die ze beheert" — "ALLES staat in de declaratieve files vanaf nu").
 //!
 //! Everything homelab knows about an app lives in that app's stack files:
-//! its tiles (`homepage_widgets`), its busy check, its probes, its secret
-//! files, its restore note. This guard reads every stack and app name the
+//! its tiles, its busy check, its probes, its secret files, its restore
+//! note. This guard reads every stack and app name the
 //! repository declares and fails when one appears in the code, outside
 //! comments and tests. A new app then needs its files, never a code change.
 //!
@@ -30,24 +30,12 @@ const PLATFORM: &[(&str, &str)] = &[
         "registry",
         "the registry cache homelab pulls through, host.toml",
     ),
-    (
-        "uptime",
-        "the monitor list homelab writes, kuma_monitors_file",
-    ),
     ("loki", "the log store homelab queries, loki_url"),
-    (
-        "grafana",
-        "the dashboards homelab writes, grafana_dashboards_dir",
-    ),
     (
         "prometheus",
         "the metrics store homelab queries, prometheus_url",
     ),
     ("traefik", "the route format homelab writes for every stack"),
-    (
-        "homepage",
-        "the front-page file homelab writes, homepage_services_file",
-    ),
     (
         "alertmanager",
         "the alert webhook format the dashboard receives",
@@ -149,7 +137,7 @@ fn app_knowledge_no_declared_app_or_stack_is_named_in_the_code() {
     assert!(
         hits.is_empty(),
         "the code names an app or stack the stack files declare; put what it knows in \
-         that app's files instead (homepage_widgets, busy_check, probes, latch_files, \
+         that app's files instead (tiles, busy_check, probes, latch_files, \
          restore_note, ...):\n{}",
         hits.join("\n")
     );

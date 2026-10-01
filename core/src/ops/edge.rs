@@ -18,6 +18,11 @@ use serde_json::{json, Map, Value};
 
 use crate::ops::fleetcheck::{Finding, Severity};
 
+/// fix-143: the Cloudflare API base, shared by the client (its own token,
+/// `~/.config/cloudflare/kp-soft.token`) and the host's nightly run (its own
+/// `cloudflare_token` in host.toml, owner decision 2026-10-01).
+pub const API: &str = "https://api.cloudflare.com/client/v4";
+
 /// The edge as the capture holds it and as the API reads, projected alike.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EdgeState {

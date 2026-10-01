@@ -7,7 +7,7 @@ migration proves nothing about what the migration did (D61).
 
 | | |
 |---|---|
-| Container | `lxc-productivity-stack`, vmid 111, 10.10.10.11, unprivileged |
+| Container | `lxc-productivity-stack`, vmid 111, productivity (CT 111), unprivileged |
 | Resources | 2 cores, 2048 MB RAM, 512 MB swap, 8 G rootfs, onboot, startup order 99 |
 | Apps | vikunja, supersync, supersync-postgres, cadvisor, promtail |
 | Reachable | `tasks.kp-soft.dev` → :3456 · `sp.kp-soft.dev` → :1900, both HTTP 200 |
@@ -33,7 +33,7 @@ migration proves nothing about what the migration did (D61).
       disagreed on where `PG_VERSION` belongs, a locale collation difference,
       so the comparison was redone under `LC_ALL=C` and matched exactly.
 - [x] `sp.kp-soft.dev` answers 200 through Traefik, at the same address, and
-      SuperSync answers 200 directly on 10.10.10.11:1900.
+      SuperSync answers 200 directly on productivity (CT 111):1900.
 - [x] Same vmid, same IP, same hostname convention, `protection` on, `onboot`
       on, boot order applied, the database bind-mounted from the host.
 - [x] First restic backup of `supersync-db-config`: 1323 files,
@@ -56,7 +56,7 @@ of the vzdump's own `pct.conf` rather than from memory:
 | features | `nesting=1,keyctl=1` | same |
 | unprivileged | 1 | same |
 | onboot | 1 | same |
-| vmid · IP | 111 · 10.10.10.11 | same |
+| vmid · IP | 111 · productivity (CT 111) | same |
 | **startup order** | 99 | **70** |
 | **hostname** | lxc-productivity-stack | **111-app-productivity** |
 | **tags** | none | **homelab** |

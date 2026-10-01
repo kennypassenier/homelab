@@ -16,7 +16,6 @@ pub enum Scope {
     Stacks,
     Logs,
     Doctor,
-    Settings,
     Shell,
 }
 
@@ -42,7 +41,6 @@ impl Binding {
             Scope::Stacks => matches!(tab, Tab::Dashboard | Tab::Stacks),
             Scope::Logs => tab == Tab::Logs,
             Scope::Doctor => tab == Tab::Doctor,
-            Scope::Settings => tab == Tab::Settings,
             Scope::Shell => tab == Tab::Shell,
         }
     }
@@ -68,8 +66,8 @@ const fn b(
 /// then palette, help and quit.
 pub const KEYMAP: &[Binding] = &[
     b(
-        "1-6/TAB",
-        "switch tab (AZERTY: & é \" ' ( §; SHIFT+TAB goes back)",
+        "1-5/TAB",
+        "switch tab (AZERTY: & é \" ' (; SHIFT+TAB goes back)",
         Scope::AllButShell,
         Some("tabs"),
         None,
@@ -230,44 +228,6 @@ pub const KEYMAP: &[Binding] = &[
         Some("re-run"),
         Some("doctor"),
     ),
-    // SETTINGS.
-    b("UP/DOWN", "field", Scope::Settings, Some("field"), None),
-    b("LEFT/RIGHT", "value", Scope::Settings, Some("value"), None),
-    b(
-        "a",
-        "add a retention tier",
-        Scope::Settings,
-        Some("add tier"),
-        None,
-    ),
-    b(
-        "d",
-        "delete the retention tier (asks first)",
-        Scope::Settings,
-        Some("del tier"),
-        None,
-    ),
-    b(
-        "ENTER",
-        "edit the webhook",
-        Scope::Settings,
-        Some("edit webhook"),
-        None,
-    ),
-    b(
-        "SHIFT+S",
-        "save the settings to the host",
-        Scope::Settings,
-        Some("save"),
-        None,
-    ),
-    b(
-        "r",
-        "reload the settings from the host",
-        Scope::Settings,
-        Some("reload"),
-        None,
-    ),
     // SHELL.
     b(
         "type+ENTER",
@@ -342,7 +302,6 @@ fn tab_id(t: Tab) -> &'static str {
         Tab::Stacks => "tab.stacks",
         Tab::Logs => "tab.logs",
         Tab::Doctor => "tab.doctor",
-        Tab::Settings => "tab.settings",
         Tab::Shell => "tab.shell",
     }
 }

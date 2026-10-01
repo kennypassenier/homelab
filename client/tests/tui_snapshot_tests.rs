@@ -516,59 +516,12 @@ fn palette_fuzzy_matches() {
     assert!(m.len() >= 2);
 }
 
+// fix-110 / tui-host-settings (Kenny, 2026-10-01): the SETTINGS tab is gone —
+// host settings are declarative now (`config/host.toml`, the admin
+// dashboard's host settings page, `homelab host apply`), so the TUI no
+// longer requests or edits a `HostConfigView`. The fifth tab is SHELL.
 #[test]
-fn settings_tab_renders_config_and_edits() {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use homelab_proto::{Command, HostConfigView, ServerMsg};
-
-    let mut m = ready_model();
-    // Switching to SETTINGS requests the config from the host.
-    homelab_client::tui::model::update(
-        &mut m,
-        Msg::Key(KeyEvent::new(KeyCode::Char('5'), KeyModifiers::NONE)),
-    );
-    assert!(matches!(m.tab, Tab::Settings));
-    assert!(m.outbox.iter().any(|c| matches!(c, Command::GetConfig)));
-
-    // Config arrives → rendered with all fields + self-contained explanations.
-    homelab_client::tui::model::update(
-        &mut m,
-        Msg::Backend(homelab_client::tui::backend::BackendEvent::Server(
-            ServerMsg::Config(Box::new(HostConfigView {
-                backup_hour: Some(4),
-                notify_webhook: None,
-                retention: homelab_core::retention::default_tiers(),
-                log_level: "info".to_string(),
-            })),
-        )),
-    );
-    let out = render(&m);
-    assert!(out.contains("HOST_SETTINGS"));
-    assert!(out.contains("04:00"));
-    assert!(out.contains("every"), "tier rows visible");
-    assert!(out.contains("forever"), "unbounded tier visible");
-    assert!(out.contains("in sync with host"));
-
-    // LEFT on the hour row edits the value and marks dirty; SHIFT+S saves.
-    homelab_client::tui::model::update(
-        &mut m,
-        Msg::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)),
-    );
-    assert!(m.settings_dirty);
-    let out = render(&m);
-    assert!(out.contains("03:00"));
-    assert!(out.contains("unsaved changes"));
-    m.outbox.clear();
-    homelab_client::tui::model::update(
-        &mut m,
-        Msg::Key(KeyEvent::new(KeyCode::Char('S'), KeyModifiers::SHIFT)),
-    );
-    assert!(m.outbox.iter().any(|c| matches!(c, Command::SetConfig(_))));
-    assert!(!m.settings_dirty);
-}
-
-#[test]
-fn settings_azerty_fifth_tab_key() {
+fn azerty_fifth_tab_key() {
     assert_eq!(azerty_tab_index('('), Some(4));
     assert_eq!(azerty_tab_index('5'), Some(4));
 }
@@ -1217,12 +1170,24 @@ const CLI_ONLY: &[(&str, &str)] = &[
     (
         "GetHostConfig",
         "feat-settings-1 (homelab-admin): every host.toml key for the dashboard's \
-         settings page, answered to that session only; the TUI keeps GetConfig",
+         settings page, answered to that session only; the TUI has no settings screen",
     ),
     (
         "SetHostConfig",
         "feat-settings-1 (homelab-admin): the dashboard's settings page writes \
-         host.toml with the start-up checks; the TUI keeps SetConfig",
+         host.toml with the start-up checks; the TUI has no settings screen",
+    ),
+    (
+        "GetConfig",
+        "fix-110 / tui-host-settings (Kenny, 2026-10-01): host settings moved to \
+         `config/host.toml`, the admin dashboard and `homelab host apply`; the TUI's \
+         SETTINGS tab was removed, the CLI's `homelab config` still sends this",
+    ),
+    (
+        "SetConfig",
+        "fix-110 / tui-host-settings (Kenny, 2026-10-01): same decision as GetConfig — \
+         the TUI no longer writes host settings; the daemon still serves SetConfig for \
+         whatever client still uses it",
     ),
     (
         "RollbackNative",
@@ -3598,50 +3563,17 @@ fn fix_102_the_host_update_key_asks_first() {
     assert_eq!(m.release_update_requested.as_deref(), Some("v9.9.9"));
 }
 
-/// Settings `d` deleted a retention tier with no question.
-/// covers: fix-102
-#[test]
-fn fix_102_deleting_a_retention_tier_asks_first() {
-    use crossterm::event::KeyCode;
-    use homelab_proto::{HostConfigView, ServerMsg};
-    let mut m = ready_model();
-    press(&mut m, KeyCode::Char('5'));
-    homelab_client::tui::model::update(
-        &mut m,
-        Msg::Backend(homelab_client::tui::backend::BackendEvent::Server(
-            ServerMsg::Config(Box::new(HostConfigView {
-                backup_hour: Some(4),
-                notify_webhook: None,
-                retention: homelab_core::retention::default_tiers(),
-                log_level: "info".to_string(),
-            })),
-        )),
-    );
-    let tiers = m.settings.as_ref().unwrap().retention.len();
-    press(&mut m, KeyCode::Down);
-    press(&mut m, KeyCode::Char('d'));
-    assert_eq!(m.settings.as_ref().unwrap().retention.len(), tiers);
-    press(&mut m, KeyCode::Char('n'));
-    assert_eq!(m.settings.as_ref().unwrap().retention.len(), tiers);
-    press(&mut m, KeyCode::Char('d'));
-    press(&mut m, KeyCode::Char('y'));
-    assert_eq!(m.settings.as_ref().unwrap().retention.len(), tiers - 1);
-}
+// fix-102's retention-tier-delete-asks-first coverage moved with the
+// SETTINGS tab itself: fix-110 / tui-host-settings (Kenny, 2026-10-01)
+// removed the tab, so there is no TUI retention editor left to delete a
+// tier from; `core/src/retention.rs` still covers the retention logic.
 
-/// `q` quit with unsaved settings, and while an operation sent to the
-/// background still ran (it could then not answer a host question).
+/// `q` quit while an operation sent to the background still ran (it could
+/// then not answer a host question).
 /// covers: fix-102
 #[test]
 fn fix_102_quit_asks_when_something_would_be_lost() {
     use crossterm::event::KeyCode;
-    let mut m = ready_model();
-    m.settings_dirty = true;
-    press(&mut m, KeyCode::Char('q'));
-    assert!(!m.should_quit, "q dropped unsaved settings");
-    assert!(render(&m).contains("not saved"));
-    press(&mut m, KeyCode::Char('y'));
-    assert!(m.should_quit);
-
     let mut m = ready_model();
     m.focus = Some(homelab_client::tui::model::Focus {
         title: "DEPLOY syncthing".into(),

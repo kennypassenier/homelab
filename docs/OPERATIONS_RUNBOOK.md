@@ -152,10 +152,11 @@ power cut) still runs what is due instead of skipping the night. Without a
 start (`host/src/main.rs:1854-1860`). `homelab config` prints the hour as
 `nightly run : HH:00`, or `off` (`client/src/main.rs:1242-1246`).
 
-To change the hour: TUI, Settings tab (key `5`), first row, Left/Right,
-then `S` to save. The host writes it to `host.toml` and uses it from the
-next tick, no restart (`client/src/tui/model.rs:945-1010`,
-`host/src/main.rs:4064-4102`).
+To change the hour: the admin dashboard's host settings page, or edit
+`backup_hour` in `config/host.toml` and run `homelab host apply` (fix-110;
+the TUI's old SETTINGS tab was removed 2026-10-01). The host writes it to
+`host.toml` and uses it from the next tick, no restart
+(`host/src/main.rs:4064-4102`).
 
 **Which stacks.** A stack is due when it is enabled and its last backup is
 at least 20 hours old (`host/src/main.rs:1952-1954`, `:2008-2013`).
@@ -1517,17 +1518,17 @@ homelab ping
 If that adds nothing, the host may take its token from the environment:
 `systemctl show homelab-host -p Environment` on the host.
 
-**lost-3b · `host.toml` gone, daemon still running.** The daemon holds the
-whole configuration in memory and a settings save writes all of it back,
-token included (`host/src/main.rs:524-652`, `:702-723`; guarded by the test
-`settings_render_keeps_every_config_field`, `host/src/main.rs:963-1069`).
-Nothing needs the restic password.
-
-1. Host: `mkdir -p /etc/homelab`.
-2. TUI: Settings tab (`5`), `S`. Expect `"settings saved and applied"`
-   (`host/src/main.rs:4084-4094`).
-3. Host: `grep -c '^token' /etc/homelab/host.toml` prints 1.
-4. Workstation: `homelab backup-host-meta`.
+**lost-3b · `host.toml` gone, daemon still running.** The daemon still
+holds the whole configuration in memory, token included
+(`host/src/main.rs:524-652`, `:702-723`; guarded by the test
+`settings_render_keeps_every_config_field`, `host/src/main.rs:963-1069`),
+and `Rpc::SetConfig` would still write it all back — but fix-110 /
+tui-host-settings (Kenny, 2026-10-01) removed the TUI's SETTINGS tab, the
+only client that ever sent it. `homelab host apply` writes only the
+non-secret keys from `config/host.toml` and does not carry the token, so it
+cannot rebuild the file alone. Until a CLI verb sends `SetConfig` again,
+treat this the same as lost-3c below (restore from the host-meta backup)
+even though the daemon is still up.
 
 **lost-3c · `host.toml` gone and the daemon restarted.** It will not start:
 `"FATAL: token must be set (>=16 chars) via <path> or HOMELAB_TOKEN"`

@@ -20,17 +20,15 @@ pub enum Tab {
     Stacks,
     Logs,
     Doctor,
-    Settings,
     Shell,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 6] = [
+    pub const ALL: [Tab; 5] = [
         Tab::Dashboard,
         Tab::Stacks,
         Tab::Logs,
         Tab::Doctor,
-        Tab::Settings,
         Tab::Shell,
     ];
     pub fn title(self) -> &'static str {
@@ -39,7 +37,6 @@ impl Tab {
             Tab::Stacks => "STACKS",
             Tab::Logs => "LOG_STREAM",
             Tab::Doctor => "DOCTOR",
-            Tab::Settings => "SETTINGS",
             Tab::Shell => "SHELL",
         }
     }
@@ -161,9 +158,9 @@ pub enum DriftState {
 }
 
 /// fix-102 (tui-single-keys-no-confirm, 2026-09-27): a single key whose
-/// consequence lasts — park a stack, update the host, drop a retention tier,
-/// quit with something unsaved or running — states that consequence and
-/// waits for `y`. Any other key keeps things as they are.
+/// consequence lasts — park a stack, update the host, quit with something
+/// unsaved or running — states that consequence and waits for `y`. Any
+/// other key keeps things as they are.
 pub struct YesNo {
     pub title: String,
     pub prompt: String,
@@ -177,7 +174,6 @@ pub enum YesNoAction {
         enabled: bool,
     },
     HostUpdate(String),
-    DeleteTier(usize),
     Quit,
     /// fix-107/fix-66 (apply-in-the-tui): the changed stacks `apply` would
     /// deploy, by name — re-resolved to a spec when `y` answers, same as
@@ -336,13 +332,6 @@ pub struct Model {
     /// Whether every deploy `apply` has heard back from so far succeeded.
     pub apply_all_ok: bool,
 
-    /// G8 settings tab: last received host config, edit cursor, dirty flag,
-    /// and the webhook text-edit buffer (None = not editing).
-    pub settings: Option<homelab_proto::HostConfigView>,
-    pub settings_row: usize,
-    pub settings_dirty: bool,
-    pub settings_editing_webhook: Option<String>,
-
     /// fix-69: local stacks whose intent hash the run loop is asked to
     /// compute off the UI thread, and the last hash computed per stack.
     pub local_hash_requested: Vec<(String, std::path::PathBuf)>,
@@ -418,10 +407,6 @@ impl Model {
             staging_pending: 0,
             apply_pending: 0,
             apply_all_ok: true,
-            settings: None,
-            settings_row: 0,
-            settings_dirty: false,
-            settings_editing_webhook: None,
             local_hash_requested: Vec::new(),
             local_hashes: std::collections::HashMap::new(),
             today: None,
@@ -475,9 +460,6 @@ impl Model {
             self.flicker = 4;
             if tab == Tab::Doctor {
                 self.outbox.push(Command::Doctor { json: false });
-            }
-            if tab == Tab::Settings && self.settings.is_none() {
-                self.outbox.push(Command::GetConfig);
             }
         }
     }
@@ -671,12 +653,11 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
             }
             // feat-platform-10: UI steps go to the attached dashboard only;
             // the TUI never attaches, so it never sees one.
-            ServerMsg::Ui { .. } | ServerMsg::UiNote { .. } => {}
-            ServerMsg::Config(view) => {
-                model.settings = Some(*view);
-                model.settings_dirty = false;
-                model.settings_row = 0;
-            }
+            // G8 host settings are edited in the admin dashboard (or
+            // `homelab host apply`) since fix-110; the TUI no longer tracks
+            // a config view, but a stray frame is still ignored rather than
+            // breaking the match.
+            ServerMsg::Ui { .. } | ServerMsg::UiNote { .. } | ServerMsg::Config(_) => {}
             ServerMsg::RpcDone(resp) => {
                 // fix-68: the day's verdict runs beside the host's queue, so
                 // its reply can arrive in the middle of anything — an open
@@ -935,12 +916,6 @@ fn on_key(model: &mut Model, key: crossterm::event::KeyEvent) {
         return;
     }
 
-    // G8: webhook text-edit swallows every key (digits would switch tabs).
-    if model.tab == Tab::Settings && model.settings_editing_webhook.is_some() {
-        settings_webhook_edit_key(model, key);
-        return;
-    }
-
     // G4: the shell tab owns most keys (typing digits must not switch tabs);
     // TAB/CTRL+K/F2 still work via the global handler below.
     if model.tab == Tab::Shell {
@@ -1124,123 +1099,8 @@ fn tab_key(model: &mut Model, key: crossterm::event::KeyEvent) {
                 model.outbox.push(Command::Doctor { json: false });
             }
         }
-        Tab::Settings => settings_key(model, key),
         // Shell keys are fully handled before tab_key is reached.
         Tab::Shell => {}
-    }
-}
-
-// ── G8 settings tab logic ───────────────────────────────────────────────────
-
-/// Row layout: 0 = backup hour; 1 + 2i / 2 + 2i = tier i every/span;
-/// last = webhook. Total rows = 2 + tiers*2.
-fn settings_rows(cfg: &homelab_proto::HostConfigView) -> usize {
-    2 + cfg.retention.len() * 2
-}
-
-const EVERY_PRESETS: &[u32] = &[1, 2, 3, 7, 14, 21, 30, 45, 60, 90, 120, 180];
-const SPAN_PRESETS: &[u32] = &[7, 14, 21, 30, 60, 90, 120, 180, 365, 730];
-
-fn step_preset(presets: &[u32], current: u32, dir: i32) -> u32 {
-    let pos = presets.iter().position(|p| *p >= current).unwrap_or(0);
-    let next = (pos as i32 + dir).clamp(0, presets.len() as i32 - 1) as usize;
-    presets[next]
-}
-
-fn settings_key(model: &mut Model, key: crossterm::event::KeyEvent) {
-    use crossterm::event::KeyCode;
-    let Some(cfg) = model.settings.as_mut() else {
-        if matches!(key.code, KeyCode::Char('r') | KeyCode::Enter) {
-            model.outbox.push(Command::GetConfig);
-        }
-        return;
-    };
-    let rows = settings_rows(cfg);
-    let webhook_row = rows - 1;
-    let row = model.settings_row;
-    match key.code {
-        KeyCode::Up => model.settings_row = row.saturating_sub(1),
-        KeyCode::Down => model.settings_row = (row + 1).min(rows - 1),
-        KeyCode::Left | KeyCode::Right => {
-            let dir: i32 = if key.code == KeyCode::Left { -1 } else { 1 };
-            if row == 0 {
-                // off, 0..23 cycle.
-                cfg.backup_hour = match (cfg.backup_hour, dir) {
-                    (None, 1) => Some(0),
-                    (None, _) => Some(23),
-                    (Some(0), -1) => None,
-                    (Some(23), 1) => None,
-                    (Some(h), 1) => Some(h + 1),
-                    (Some(h), _) => Some(h - 1),
-                };
-            } else if row < webhook_row {
-                let tier_idx = (row - 1) / 2;
-                let is_every = (row - 1).is_multiple_of(2);
-                if let Some(t) = cfg.retention.get_mut(tier_idx) {
-                    if is_every {
-                        t.every_days = step_preset(EVERY_PRESETS, t.every_days, dir);
-                    } else {
-                        // span cycles presets and 'forever' (None) at the top end.
-                        t.span_days = match (t.span_days, dir) {
-                            (None, -1) => Some(*SPAN_PRESETS.last().unwrap()),
-                            (None, _) => None,
-                            (Some(v), 1) if v >= *SPAN_PRESETS.last().unwrap() => None,
-                            (Some(v), d) => Some(step_preset(SPAN_PRESETS, v, d)),
-                        };
-                    }
-                }
-            }
-            model.settings_dirty = true;
-        }
-        KeyCode::Char('a') => {
-            // Add a tier before any unbounded tail tier.
-            let insert_at = cfg
-                .retention
-                .iter()
-                .position(|t| t.span_days.is_none())
-                .unwrap_or(cfg.retention.len());
-            cfg.retention.insert(
-                insert_at,
-                homelab_proto::RetentionTier {
-                    every_days: 30,
-                    span_days: Some(90),
-                },
-            );
-            model.settings_dirty = true;
-        }
-        KeyCode::Char('d') => {
-            // fix-102: a tier gone from the plan lets the next prune drop
-            // the snapshots only it kept, once saved; so it asks first.
-            if row >= 1 && row < webhook_row && cfg.retention.len() > 1 {
-                let tier_idx = (row - 1) / 2;
-                let t = &cfg.retention[tier_idx];
-                let span = t
-                    .span_days
-                    .map(|d| format!("for {} days", d))
-                    .unwrap_or_else(|| "forever".into());
-                model.yes_no = Some(YesNo {
-                    title: format!("DELETE RETENTION TIER {}", tier_idx + 1),
-                    prompt: format!(
-                        "Delete tier {} (a snapshot every {} days, kept {})? Once saved, the \
-                         next prune may drop the snapshots only this tier kept.",
-                        tier_idx + 1,
-                        t.every_days,
-                        span
-                    ),
-                    action: YesNoAction::DeleteTier(tier_idx),
-                });
-            }
-        }
-        KeyCode::Enter if row == webhook_row => {
-            model.settings_editing_webhook = Some(cfg.notify_webhook.clone().unwrap_or_default());
-        }
-        KeyCode::Char('S') => {
-            model.outbox.push(Command::SetConfig(Box::new(cfg.clone())));
-            model.settings_dirty = false;
-            model.status_line = "settings sent to host".into();
-        }
-        KeyCode::Char('r') => model.outbox.push(Command::GetConfig),
-        _ => {}
     }
 }
 
@@ -1304,29 +1164,6 @@ fn shell_key(model: &mut Model, key: crossterm::event::KeyEvent) {
     }
 }
 
-fn settings_webhook_edit_key(model: &mut Model, key: crossterm::event::KeyEvent) {
-    use crossterm::event::KeyCode;
-    let Some(buf) = model.settings_editing_webhook.as_mut() else {
-        return;
-    };
-    match key.code {
-        KeyCode::Esc => model.settings_editing_webhook = None,
-        KeyCode::Enter => {
-            let text = buf.trim().to_string();
-            if let Some(cfg) = model.settings.as_mut() {
-                cfg.notify_webhook = if text.is_empty() { None } else { Some(text) };
-                model.settings_dirty = true;
-            }
-            model.settings_editing_webhook = None;
-        }
-        KeyCode::Backspace => {
-            buf.pop();
-        }
-        KeyCode::Char(c) => buf.push(c),
-        _ => {}
-    }
-}
-
 // fix-107: the palette is drawn from the one key table, `tui::keys`.
 pub fn palette_matches(input: &str) -> Vec<usize> {
     let q = input.to_lowercase();
@@ -1380,7 +1217,6 @@ fn run_action(model: &mut Model, id: &str) {
         "tab.stacks" => model.switch_tab(Tab::Stacks),
         "tab.logs" => model.switch_tab(Tab::Logs),
         "tab.doctor" => model.switch_tab(Tab::Doctor),
-        "tab.settings" => model.switch_tab(Tab::Settings),
         "tab.shell" => model.switch_tab(Tab::Shell),
         "refresh" => {
             model.outbox.push(Command::GetState);
@@ -1750,16 +1586,6 @@ fn run_yes(model: &mut Model, action: YesNoAction) {
             });
             model.release_update_requested = Some(tag);
         }
-        YesNoAction::DeleteTier(idx) => {
-            if let Some(cfg) = model.settings.as_mut()
-                && idx < cfg.retention.len()
-                && cfg.retention.len() > 1
-            {
-                cfg.retention.remove(idx);
-                model.settings_row = model.settings_row.min(settings_rows(cfg) - 1);
-                model.settings_dirty = true;
-            }
-        }
         YesNoAction::Quit => model.should_quit = true,
         // fix-107/fix-66 (apply-in-the-tui): the deploy half of `homelab
         // apply` — every changed stack, re-resolved from its local
@@ -1802,16 +1628,13 @@ fn run_yes(model: &mut Model, action: YesNoAction) {
     }
 }
 
-/// fix-102: `q` quits at once unless that would lose something: settings not
-/// yet saved, or an operation sent to the background whose questions and
-/// result nobody would then see.
+/// fix-102: `q` quits at once unless that would lose something: an
+/// operation sent to the background whose questions and result nobody
+/// would then see.
 fn ask_quit(model: &mut Model) {
     let mut lost: Vec<&str> = Vec::new();
     if model.background_op || model.staging_pending > 0 {
         lost.push("an operation is still running and nobody would see its result");
-    }
-    if model.settings_dirty {
-        lost.push("settings changes are not saved (SHIFT+S saves them)");
     }
     if lost.is_empty() {
         model.should_quit = true;

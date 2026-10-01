@@ -6,7 +6,6 @@ mod dashboard;
 mod doctor;
 mod focus;
 mod logs;
-mod settings;
 mod shell;
 mod splash;
 mod stacks;
@@ -69,7 +68,6 @@ pub fn draw(f: &mut Frame, model: &Model) {
             Tab::Stacks => stacks::draw(f, model, rows[1]),
             Tab::Logs => logs::draw(f, model, rows[1]),
             Tab::Doctor => doctor::draw(f, model, rows[1]),
-            Tab::Settings => settings::draw(f, model, rows[1]),
             Tab::Shell => shell::draw(f, model, rows[1]),
         },
     }
@@ -841,6 +839,11 @@ fn draw_help(f: &mut Frame, tab: Tab) {
         })
         .chain(std::iter::once(Line::from(Span::styled(
             "  CTRL+K lists every action by name; other tabs have their own keys",
+            THEME.muted_style(),
+        ))))
+        .chain(std::iter::once(Line::from(Span::styled(
+            "  host settings (nightly hour, retention, webhook): the admin \
+             dashboard, or `homelab host apply` (fix-110)",
             THEME.muted_style(),
         ))))
         .collect();

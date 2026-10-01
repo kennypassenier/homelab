@@ -266,19 +266,6 @@ impl Backend for DemoBackend {
                                     },
                                 ))).await;
                             }
-                            Some(Command::GetConfig) => {
-                                let _ = evt_tx
-                                    .send(BackendEvent::Server(ServerMsg::Config(Box::new(
-                                        homelab_proto::HostConfigView {
-                                            backup_hour: Some(4),
-                                            notify_webhook: None,
-                                            retention:
-                                                homelab_core::retention::default_tiers(),
-                                            log_level: "info".to_string(),
-                                        },
-                                    ))))
-                                    .await;
-                            }
                             Some(_) => {
                                 let _ = evt_tx.send(BackendEvent::Server(ServerMsg::RpcDone(
                                     homelab_proto::RpcResponse {

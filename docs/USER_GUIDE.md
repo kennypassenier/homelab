@@ -237,10 +237,14 @@ capital letter as `SHIFT+<letter>` (`client/src/tui/view/mod.rs:670-718`).
 | STACKS | `2` or `é` | STACK_REGISTRY: per-stack detail, drift and parked badges |
 | LOG_STREAM | `3` or `"` | the live operation feed (F2) |
 | DOCTOR | `4` or `'` | SELF_DIAGNOSIS (F6) |
-| SETTINGS | `5` or `(` | nightly hour, retention tiers, webhook (G8) |
-| SHELL | `6` or `§` | line-based remote commands (G4) |
+| SHELL | `5` or `(` | line-based remote commands (G4) |
 
 Source: `client/src/tui/model.rs:36-45,751-761`.
+
+There is no SETTINGS tab (removed, Kenny 2026-10-01, fix-110): host
+settings — nightly hour, retention tiers, webhook — are edited on the
+admin dashboard's host settings page or in `config/host.toml`, applied
+with `homelab host apply`. See G8 below.
 
 | Key | Anywhere outside a modal | Source |
 |---|---|---|
@@ -1028,7 +1032,8 @@ again (`core/src/ops/deploy.rs:1140-1151`). `*.env` is in `.gitignore`
 **Status:** Built.
 
 Off until `exec_enabled = true` is set in `/etc/homelab/host.toml` on the host
-(`host/src/main.rs:435`); it is deliberately not in the SETTINGS tab
+(`host/src/main.rs:435`); it is deliberately not one of the keys the admin
+dashboard's host settings page or `config/host.toml` can set
 (`host/src/main.rs:175-177`). While off, every call answers
 `remote exec is disabled (set exec_enabled = true in host.toml to allow it)`
 (`core/src/safety.rs:121`). Every call is appended to
@@ -2541,7 +2546,8 @@ How it travels:
 
 - The host writes every event to `<state_dir>/notices.jsonl` (0600, pruned
   with the history's limits) and pushes only an urgent one to the
-  **webhook** set in the SETTINGS tab (G8), with `notify_auth_bearer`, then
+  **webhook** set via `config/host.toml`/the admin dashboard (G8), with
+  `notify_auth_bearer`, then
   `notify_fallback_webhook` when the first does not answer 2xx. The payload
   keeps its shape (`core/src/notify.rs`) and adds `click_url`:
 
@@ -2750,14 +2756,14 @@ the TUI against a built-in fake host (`client/src/main.rs:141,155-157`).
 
 #### G8 · Settings and tiered retention
 
-**Status:** Built.
-
-The SETTINGS tab edits three things on the host: the nightly hour (`off` or
-0 to 23), the retention tiers, and the notification webhook. Keys are in 1.4.
-`SHIFT+S` sends them; the host refuses an hour above 23 and an empty tier
-list, otherwise writes them into `host.toml` and applies them at once:
-`settings saved and applied` (`host/src/main.rs:4064-4102`,
-`client/src/tui/view/settings.rs:42`).
+**Status:** Built. The TUI's own SETTINGS tab was removed (Kenny,
+2026-10-01 — "weghalen uit de TUI"): it wrote the nightly hour, retention
+tiers and webhook straight to the host, bypassing the repository, which
+made `homelab check` report drift it could not explain. Host settings are
+declarative now (fix-110): edit them on the admin dashboard's host
+settings page, or edit `config/host.toml` and run `homelab host apply`,
+either of which commits the change to the repository before it reaches the
+host.
 
 A tier keeps one snapshot per `every_days` within its span; tiers follow each
 other from new to old, and a tier without a span lasts forever. The newest
@@ -2765,13 +2771,7 @@ snapshot is never forgotten (`core/src/retention.rs:10-114`, test
 `core/src/retention.rs:175`). The default is daily for 7 days, every 14 days
 up to 60 days later, then every 60 days forever (`core/src/retention.rs:20-37`).
 
-**Worked example: add a quarterly tier.** On SETTINGS, press `a`: a tier
-"every 30 days, for 90 days" is inserted before the tier that lasts forever
-(`client/src/tui/model.rs:979-994`). Move to its rows with `DOWN` and use
-`LEFT`/`RIGHT` to step through the allowed values (every: 1, 2, 3, 7, 14, 21,
-30, 45, 60, 90, 120, 180; span: 7 to 730 days, then forever,
-`client/src/tui/model.rs:925-926`). Press `SHIFT+S`. To read the result from
-the command line:
+To read the current settings from the command line:
 
 ```bash
 homelab config

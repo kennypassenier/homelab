@@ -274,22 +274,22 @@ drill via the new credentials; the OLD pre-v2 restic repos in the Drive root
 remain the last-resort recovery layer during migration. Scheduler armed:
 `backup_hour = 4` in host.toml ("scheduler armed" in the journal).
 
-### A15 · SETTINGS tab (G8) — offline
-1. `homelab tui --offline` → press `5` (AZERTY: `(`).
-- **Pass:** HOST_SETTINGS renders: NIGHTLY RUN hour (◂ 04:00 ▸), retention
-  tiers ("every Xd for Y days / forever"), WEBHOOK row, sync indicator.
-  `UP/DOWN` moves fields, `LEFT/RIGHT` edits values, `a`/`d` adds/removes a
-  tier, `ENTER` on WEBHOOK opens a text editor (keys are swallowed while
-  editing), `SHIFT+S` saves (demo acks).
+### A15 · SETTINGS tab (G8) — REMOVED 2026-10-01
+The TUI's SETTINGS tab (keyed `5`/`(`) is gone — fix-110 / tui-host-settings
+(Kenny, 2026-10-01: "weghalen uit de TUI"). It wrote `backup_hour`,
+`notify_webhook` and `retention` straight to the host, bypassing the
+repository and making `homelab check` report drift it could not explain.
+Host settings are declarative now; see B18.
 
 ### B18 · Settings round-trip (G8) — live
 ```bash
 homelab config
 ```
 - **Pass:** prints nightly run / webhook / retention tiers as stored on the
-  host. In the TUI: edit a value, SHIFT+S → "settings saved and applied";
-  `ssh root@pve cat /etc/homelab/host.toml` shows the change +
-  `[[retention]]` tables; the scheduler uses the new hour without a restart.
+  host. Edit `config/host.toml` (directly or via the admin dashboard's host
+  settings page) and run `homelab host apply`: `ssh root@pve cat
+  /etc/homelab/host.toml` shows the change + `[[retention]]` tables; the
+  scheduler uses the new hour without a restart.
 
 ### B19 · Failure-path webhooks (F3) — LIVE-PROVEN 2026-08-11
 Three events beyond per-op notifications, all captured live against a local
@@ -301,8 +301,9 @@ webhook catcher:
   is automatically rolled back (the daemon can't report its own death).
 - `daemon-failed` — sent when the daemon crash-loops and systemd gives up
   (proven with a 6×SIGKILL drill; daemon recovered with reset-failed+start).
-To arm for real: set the webhook URL in the SETTINGS tab (or host.toml) to
-an HA webhook automation.
+To arm for real: set the webhook URL in `config/host.toml` (via the admin
+dashboard's host settings page, or directly + `homelab host apply`) to an
+HA webhook automation.
 
 ### B21 · Release-driven host update (H7) — LIVE-PROVEN 2026-08-12
 First official release v3.0.0: `make release VERSION=3.0.0` → CI gate →

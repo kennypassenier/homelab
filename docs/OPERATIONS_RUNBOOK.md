@@ -276,7 +276,7 @@ Workstation, repository root, unless stated.
    ```text
    mealie           512 MiB  Recipes + meal planning  [mealie]
    syncthing        512 MiB  Obsidian vault peer  [syncthing]
-   uptime-kuma      512 MiB  Uptime monitoring  [uptime-kuma]
+   actual           512 MiB  Envelope budgeting  [actual]
    ```
 
 2. **Scaffold.**
@@ -474,11 +474,10 @@ say what runs, B when you want to remove one stack by its path.
    (`core/src/ops/destroy.rs:432-437`); remove its container by hand, then
    `homelab forget <name>`.
 4. **Point of no return:** `pct destroy --purge`. Then the metrics target,
-   the Grafana dashboard, the gateway route, the state record and its manual
-   checks go, and the front page and the Uptime Kuma host list are
-   rewritten without it; the seeder removes the host monitor within its hour
-   (`core/src/ops/destroy.rs:176-332`, `core/src/ops/fleetfiles.rs:236-271`,
-   `stacks/uptime/kuma-seeder/docker-compose.yml`).
+   the gateway route, the state record and its manual checks go
+   (`core/src/ops/destroy.rs`; Homepage, Grafana, GoAccess and Uptime Kuma,
+   which this bullet used to name as readers of the generated fleet files,
+   were retired 2026-10-01, superseded by the admin dashboard).
 5. What survives: `/appdata/<name>/`, the vault
    `/var/lib/homelab/secrets/<name>/`, the restic repositories and the
    intent repo history. The destroy records them in state as retired
@@ -1526,7 +1525,4 @@ Found while writing this runbook. Each line says what to believe.
 | Doctor remedy for Drive | fixed in v3.58.4 (gap-27) | says no backup can be written until the token is refreshed |
 | `stacks/almanac/lxc-compose.yml` | fixed in v3.58.4 (gap-28) | points at op-11; `homelab restore` refuses a native stack |
 | Doc comment in `core/src/ops/native.rs` | fixed in v3.58.4 | says `<unit>-config` |
-| Module docstring of `stacks/uptime/kuma-seeder/seed.py:22-26` | "Nothing here ever deletes a monitor" | since `0ffae9c` the seeder removes every monitor no file declares (`seed.py:327-331`); believe the code |
-| Comment at `seed.py:304-305` | "a hand-made one is only ever reported" | a hand-made monitor that no file declares is removed like any other (`plan_owned`, `seed.py:259`; test `step_21_the_seeder_keeps_uptime_kuma_equal_to_the_files`) |
-| Comment in `stacks/uptime/kuma-seeder/docker-compose.yml` | "a monitor whose name exists is left exactly as it is" | the seeder corrects its URL or hostname when the file says otherwise (`seed.py:250-256`, `:321-326`) |
 | Manual checks after a deploy | "Questions that disappeared from the stack files are dropped" (`core/src/ops/manualchecks.rs:48-49`) | only while the stack still has a `manual:` line; with none left the deploy skips the registration and the old questions stay until destroy or forget (`core/src/ops/deploy.rs:2944`) |

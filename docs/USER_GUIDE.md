@@ -817,7 +817,7 @@ workstation), `testplan` and `update-policy` (repository documents), and
 | `homelab release-update [tag]`, TUI `u` | **Update the host** (the form `update-host`); a banner on every page when a newer release is out | `open update-host`, `type act-tag v3.63.0` |
 | `homelab install-native stacks/<s>[/<unit>] [tag]` | the form `install-native` on a stack (Native services) | `open install-native kyu`, `pick act-unit kyu-runner`, `type act-tag v1.0.2` |
 | `homelab apply` | **Apply** page (the plan per stack, each diff on request) and the form `apply` | `open apply`, `type act-destroy drill` |
-| `homelab runbook`, `export`, `dashboard` | downloads: the runbook on the Host page, a stack's export bundle and Grafana dashboard JSON on its overview | — |
+| `homelab runbook`, `export` | downloads: the runbook on the Host page, a stack's export bundle on its overview | — |
 | `homelab import <bundle.yml> <new-name> <vmid>` | **Import…** on the Overview and Presets pages: a bundle pasted or uploaded becomes a new stack through the plan and the commit every edit ends in (a bundle carrying a `.env` is refused) | `open import`, `edit import-bundle <file>`, `type import-name uptime2`, `type import-vmid 197`, `press next` (the plan), `press next`, `type edit-subject …`, `press confirm` |
 | `homelab presets` | **Presets** page | `goto /app/presets` |
 | `homelab guards <vmid>` | the form `guards-ct`: any container by its number (a stack's Apply guards still uses its own) | `open guards-ct`, `type act-vmid 104` |
@@ -1045,20 +1045,21 @@ A deploy is only green after three checks:
 
 Only then does the log say `Sync complete` (`core/src/ops/deploy.rs:2699-2707`).
 
-**Worked example: a `checks.yml`.** From `stacks/home/homepage/checks.yml`,
-shortened:
+**Worked example: a `checks.yml`.** From
+`stacks/registry/registry/checks.yml`, shortened:
 
 ```yaml
 checks:
-  - name: "diensten op de startpagina"
+  - name: "images die de cache vasthoudt"
     command: >-
-      docker exec homepage sh -c 'grep -c "href:" /app/config/services.yaml'
+      curl -s -m 15 http://127.0.0.1:5000/v2/_catalog |
+      grep -o '"[a-z0-9./_-]*"' | wc -l
     expect: never_decreases
     layer: application
     blind_spot: >-
-      Counts what the page is configured to show, not what it renders ...
+      Counts what Docker Hub's mirror holds. ...
 manual:
-  - "Kijk of de startpagina de diensten toont die je verwacht. ..."
+  - "Kijk na een uitrol of er `[cache] … did not deliver` in het logboek staat. ..."
 ```
 
 The dashboard's Files card (the stack page's Settings tab, replacing the old
@@ -1369,11 +1370,9 @@ The host then runs, in order: `confirm`, `no-touch check`, `hostname guard`,
 `backup before destroy`, `stop container`, `lift protection`,
 `destroy container` (`pct destroy --purge`), and then the same unregister
 steps `homelab forget` runs: `remove metrics discovery`,
-`remove grafana dashboard`, `remove gateway route`, `update state` and
-`fleet files` (`core/src/ops/destroy.rs:35-199`, `:207-332`). `update state`
-drops the stack's record and its manual checks and records the stack as
-retired; `fleet files` rewrites the front page and the Uptime Kuma host list
-without it (`core/src/ops/fleetfiles.rs:236-271`).
+`remove gateway route` and `update state`
+(`core/src/ops/destroy.rs:35-199`, `:207-332`). `update state` drops the
+stack's record and its manual checks and records the stack as retired.
 
 **What a destroy keeps.** The stack's `/appdata` directories, its vault
 directory `/var/lib/homelab/secrets/<stack>` and its restic repositories stay,
@@ -1653,7 +1652,6 @@ steps in this order (`core/src/ops/deploy.rs`, the `step!` calls from line
 | `verify health` | B3 |
 | `gateway route` | H1, when the stack has a route |
 | `retire gateway route` | removes the old route file when the stack dropped `gateway_route:` or moved vmid (H1) |
-| `grafana dashboard`, `homepage services`, `uptime monitors` | fleet-wide generated files, each only when configured on the host |
 | `orphan files` | removes files under `/opt/<stack>/` the repository no longer has (D3) |
 | `garbage collect` | D3 |
 | `log shipper` | F1, when configured |
@@ -1898,11 +1896,11 @@ The paths and the vmid above are examples.
 Name the apps in the stack file and choose the latch environment:
 
 ```yaml
-latch_secrets: [homepage]
+latch_secrets: [traefik]
 ```
 
 ```bash
-HOMELAB_LATCH_ENV=prod homelab deploy stacks/home
+HOMELAB_LATCH_ENV=prod homelab deploy stacks/gateway
 ```
 
 `HOMELAB_LATCH_ENV` can also live in `~/.config/homelab/env` or `./.env`
@@ -1914,8 +1912,8 @@ and keeps the result in memory (`client/src/spec.rs:334-412`). A local
 (`client/src/spec.rs:96-120,316-332`):
 
 ```text
-[env] homepage <- latch
-[env] homepage <- local .env (latch skipped)
+[env] traefik <- latch
+[env] traefik <- local .env (latch skipped)
 ```
 
 Refusals, all before anything is sent (`client/src/spec.rs:346-408`):
@@ -2324,7 +2322,7 @@ Assistant, as before):
 
 | Urgent | What counts |
 |---|---|
-| A service not answering for more than 5 minutes | the alerts `HostDown`, `TargetDown` (Uptime Kuma notifies Home Assistant on its own) |
+| A service not answering for more than 5 minutes | the alerts `HostDown`, `TargetDown`; the dashboard's own minute watch (below, "The dashboard") sends its own urgent Down notice after five minutes |
 | A failed backup | a failed `backup`, `scheduled-backup`, `backup-native`, `host-meta-backup`, `device-backup`, `second-copy`, `restic-check`, `zfs-replicate` |
 | A disk almost full or failing | `FilesystemAlmostFull`, `PveStorageAlmostFull`, `HypervisorRootFillingUp`, `DiskPendingSectors`, `DiskSmartFailed`, `ZpoolNotOnline`, `DriveMissing` |
 | A failed update or deploy | a failed `deploy`, `install-native`, `update`, `update-native`, `release-update-native`, `self-update`, `patch`, `rollback-native` (and their `scheduled-` forms) |
@@ -2388,21 +2386,17 @@ How it travels:
 #### F4 · Metrics stack
 
 **Status:** Built as an ordinary stack. `stacks/metrics` runs prometheus,
-alertmanager, pve-exporter, loki and grafana (`stacks/metrics/lxc-compose.yml`;
-loki and grafana since fix-90, 2026-09-27, before that on the gateway). With
+alertmanager, pve-exporter and loki (`stacks/metrics/lxc-compose.yml`; loki
+since fix-90, 2026-09-27, before that on the gateway). With
 `metrics_targets_dir` set on the host, every deploy writes the stack's
 Prometheus target file and destroy and forget remove it
-(`core/src/ops/deploy.rs:521-544`, `core/src/ops/destroy.rs:218-228`). With
-`grafana_dashboards_dir` set, every deploy writes the stack's generated Grafana
-dashboard into the container Grafana runs in, and destroy and forget remove
-it. `grafana_vmid` in `host.toml` names that container; unset it is the
-gateway (`gateway_vmid`), where Grafana ran until fix-90. After the move the
-two lines read `grafana_vmid = 113` and
-`grafana_dashboards_dir = "/opt/metrics/grafana/provisioning/dashboards-generated"`
-(`core/src/ops/deploy.rs:1994-2046`, `core/src/ops/destroy.rs:233-262`).
-`homelab dashboard <stack> <app>...` prints the same dashboard JSON locally,
-without a token, for a container not yet under management
-(`client/src/main.rs:856-879`).
+(`core/src/ops/deploy.rs:521-544`, `core/src/ops/destroy.rs:218-228`).
+
+Grafana ran in this stack until owner decision "Alle vier meteen"
+(2026-10-01): the admin dashboard's own Metrics page (below, "The
+dashboard") reads this Prometheus directly, so no separate dashboard app,
+no generated dashboard JSON and no `grafana_vmid`/`grafana_dashboards_dir`
+host.toml keys exist any more.
 
 #### F5 · Health API
 
@@ -3042,9 +3036,11 @@ drops them all. 18 probes replaced or complemented manual questions on
 2026-09-30; each was run once for real, through `lxc-attach` as the host
 runs it, and read healthy.
 
-### The dashboard in place of Homepage, Grafana, GoAccess and Uptime Kuma
+### The dashboard: Start, Charts, Traffic and the minute watch
 
-Kenny, 2026-09-30 ("Vervangen" four times; one place to look).
+Kenny, 2026-09-30 ("Vervangen" four times; one place to look) and "Alle vier
+meteen" (2026-10-01): Homepage, Grafana, GoAccess and Uptime Kuma are
+retired — four separate apps replaced by four parts of this one dashboard.
 
 - **Start** (`/app/start`): one tile per service, grouped, from the stacks'
   `tiles:` (keyed by the hostname a tile opens, or an id with `url:`; name,
@@ -3069,11 +3065,9 @@ Kenny, 2026-09-30 ("Vervangen" four times; one place to look).
 app-knowledge (Kenny, 2026-09-30: "Alles verplaatsen"): what homelab knows
 about a particular app is declared in that app's stack files, not in code.
 
-- **Front-page tiles**: `homepage_widgets:` in `lxc-compose.yml`, keyed by
-  app, with `kind` (Homepage's widget name), an optional `key_command`
-  (prints the app's API key, run in its container, `{dir}` = its config
-  directory; without it the key comes from Homepage's own
-  `HOMEPAGE_VAR_<APP>`) and optional `extra` lines.
+- **Front-page tiles**: `tiles:` in `lxc-compose.yml`, keyed by the hostname
+  a tile opens (or an id with `url:`); see "The dashboard" above. The stack
+  that owns a route declares its own tile.
 - **"Is anybody using it"** (O10): `busy_check: {command: …}` in the app's
   `checks.yml`. Asked before an update or a nightly backup stops the app:
   nothing on stdout means idle, a line per user means in use, and a failing
@@ -3082,9 +3076,6 @@ about a particular app is declared in that app's stack files, not in code.
 - **The house's address on an allow list** (fix-94):
   `home_address_whitelist: {file, test, reload}` in `lxc-compose.yml`; the
   gateway stack declares it for CrowdSec.
-- **Generated dashboards** (F149): `generated_dashboards_command:` in
-  `lxc-compose.yml` prints the uid of every generated dashboard the stack's
-  dashboard app serves; the metrics stack declares it for Grafana.
 - **A restore note** for a native unit: `restore_note:` in its
   `service.yml`, printed under the unit in the DR runbook.
 - **The edge token**: `edge_token_file` in `config/client.toml`.
@@ -3095,23 +3086,15 @@ A guard test (`core/tests/app_knowledge_guard_tests.rs`) reads every stack
 and app name under `stacks/` and fails when one appears in the code outside
 comments and tests.
 
-```yaml
-# lxc-compose.yml
-homepage_widgets:
-  sonarr:
-    kind: sonarr
-    key_command: "sed -n 's|.*<ApiKey>\\(.*\\)</ApiKey>.*|\\1|p' {dir}/config.xml"
-```
-
 ### `homelab forget <stack>`: drop a stale record and its registrations
 
 For a stack whose container is already gone (removed by hand, or lost).
 Refused while any container in `pct list` still carries the recorded
 hostname, with `this record is current, not stale`. Otherwise it runs the
 same unregister steps as a destroy, without touching any container: route,
-metrics target, dashboard, state record and manual checks, then the front
-page and the Uptime Kuma host list (`forget` and `unregister` in
-`core/src/ops/destroy.rs:207-403`). It records the stack as retired, so its
+metrics target, state record and manual checks
+(`forget` and `unregister` in `core/src/ops/destroy.rs:207-403`). It
+records the stack as retired, so its
 backups, `/appdata` and vault are kept and named by `homelab check`. It runs
 as the operation `forget` under the operation lock
 (`host/src/main.rs:3638-3644`). Tests:
@@ -3246,136 +3229,7 @@ run it from the repository root (`client/src/main.rs:882-898`).
 
 ---
 
-## 4 · The front page and the watch list
-
-Two fleet-wide files are generated rather than maintained, both by
-`core/src/ops/fleetfiles.rs`: Homepage's `services.yaml` and the Uptime Kuma
-seeder's `host-monitors.json`. Every deploy writes both, and since
-2026-09-27 a destroy and a forget rewrite both too, so a removed stack leaves
-the front page and the watch list without waiting for another deploy
-(`regenerate_after_removal`, `core/src/ops/fleetfiles.rs:236-271`).
-
-The Homepage dashboard's `services.yaml`: when `homepage_services_file` is set
-in `host.toml`, every deploy of any stack reads every route fragment in the
-gateway's routes directory and rewrites the file with one tile per
-destination (`core/src/ops/fleetfiles.rs:32-175`, called from
-`core/src/ops/deploy.rs:2056-2060`). A service with a route appears by
-itself; a service without one does not. The
-generated file starts with a comment saying that edits to it are overwritten
-on the next deploy (`core/src/ops/homepage.rs:362-373`).
-
-What you decide lives in one file, `stacks/home/homepage/services-overlay.yml`,
-joined to the generated list on `href` (`core/src/ops/homepage.rs:194-308`).
-From that file:
-
-```yaml
-group_order: [Media, Papierwerk, Huis, Eigen, Infrastructuur]
-
-- href: https://fin.kp-soft.dev/
-  group: Media
-  name: Jellyfin
-  extra: |
-    icon: jellyfin.svg
-    description: Films en series
-```
-
-| Key | Effect | Source |
-|---|---|---|
-| `group_order` | these headings first, in this order; the rest alphabetically | `core/src/ops/homepage.rs:502-512` |
-| `href` | the join key; a trailing `/` does not matter | `core/src/ops/homepage.rs:231-236` |
-| `group` | the heading; without a block the stack's name is used | `core/src/ops/homepage.rs:436-438` |
-| `name` | the tile's name; default the router's name | `core/src/ops/homepage.rs:439-441` |
-| `hide: true` | keeps this route off the page | `core/src/ops/homepage.rs:224-228,429-432` |
-| `extra: \|` | lines handed to Homepage as they are, indented four spaces | `core/src/ops/homepage.rs:217-218,445-466` |
-
-**Widgets.** For `jellyfin`, `sonarr`, `radarr`, `prowlarr`, `bazarr`, `seerr`
-and `paperless` the widget is generated. Its API key is read from the app's
-own configuration on every deploy, except for paperless, which reads
-`HOMEPAGE_VAR_PAPERLESS` from Homepage's own environment
-(`core/src/ops/homepage.rs:137-188`, `core/src/ops/fleetfiles.rs:110-149`). A
-`widget:` written under `extra` wins over the generated one
-(`core/src/ops/homepage.rs:445-466`).
-
-**Recipes.**
-
-- *Change a description or icon*: edit the block's `extra`, then
-  `homelab deploy stacks/home`. The host reads the overlay from its own intent
-  repository (`core/src/ops/fleetfiles.rs:75-109`), so the change takes effect
-  when `stacks/home` is deployed; `stacks/home` uses latch (D12).
-- *Move a service to another heading*: change `group`; add a new heading to
-  `group_order` or it sorts alphabetically after the named ones.
-- *A tile appears under a lowercase heading with a plain link*: that route has
-  no block yet (`core/src/ops/homepage.rs:468-476`). Add one with its `href`.
-- *A link to something with no route*: a block whose `href` joins nothing is
-  kept, under its `group` or `Overig` (`core/src/ops/homepage.rs:482-500`).
-
-**Reading the deploy log.** The step logs
-`[t51] overlay: <n> entr(y/ies) from <path>`,
-`[t51] widget keys read from the applications themselves: <n>` and
-`[t51] <file> — <n> stack(s) on the front page`
-(`core/src/ops/fleetfiles.rs:98-105`, `:150-167`). A drop in the key count
-means an app moved its configuration.
-
-### The watch list in Uptime Kuma
-
-Uptime Kuma holds exactly the monitors the files declare, and nothing else
-(step-21, Kenny 2026-09-27: even a hand-made monitor is declared in a file).
-Two files declare them:
-
-- `host · <stack>`, one ping per stack in host state, generated into
-  `host-monitors.json` when `kuma_monitors_file` is set in `host.toml`
-  (`core/src/ops/fleetfiles.rs:183-229`);
-- `APPLICATION_MONITORS` in `stacks/uptime/kuma-seeder/seed.py:57-95`, one
-  HTTP check per service endpoint, written by hand because which path a
-  service answers on is knowledge no manifest holds. The hub's own `kyu`
-  monitor, made by hand in Kuma before the seeder existed, is declared there
-  under the same name so its history stays (`seed.py:74-77`).
-
-The `kuma-seeder` app in the uptime stack runs every
-`SEED_INTERVAL_SECONDS=3600` (`stacks/uptime/kuma-seeder/docker-compose.yml`).
-Each run adds what is missing, tags every declared monitor `homelab-seeder`,
-corrects a monitor whose URL or hostname differs from its file entry, and
-removes every monitor no file declares (`seed_once`,
-`stacks/uptime/kuma-seeder/seed.py:274-374`). It removes nothing when the
-generated list is missing, or when more than `max(3, a quarter of all
-monitors)` would go at once; then it warns
-`the desired list looks truncated, so nothing is removed` and the fleet check
-reports the leftovers as `drift` on `uptime kuma` (`seed.py:241-264`,
-`core/src/ops/fleetcheck.rs:1045-1059`). `APPLICATION_MONITORS` is read when
-the seeder process starts (`seed.py:377-399`); a deploy of `stacks/uptime`
-that changes `seed.py` restarts the seeder app, because a changed file under
-an app whose compose file did not change gets `docker compose restart`
-(`core/src/ops/deploy.rs:1688-1714`).
-
-**Recipes.**
-
-- *Watch a new endpoint*: add a `(name, url, accepted codes)` line to
-  `APPLICATION_MONITORS` and `homelab deploy stacks/uptime`; the transcript
-  says `[config] kuma-seeder restarted`, and the new monitor appears on that
-  run.
-- *Stop watching something*: delete its line; the seeder removes the monitor.
-  A monitor added in the Kuma UI and not declared is removed on the next run
-  as well.
-- *A stack's host monitor*: nothing to do. Deploy adds it, destroy and forget
-  remove it.
-
-Real output of one run, against a stand-in for the Kuma API that holds one
-monitor no file declares and one whose address was changed by hand:
-
-```text
-[seed]   ~ gateway · grafana now points at http://the gateway (CT 104):3000/api/health
-[seed]   - host · drill (no file declares it)
-[seed] 0 added, 37 already existed, 1 corrected, 1 removed, 0 stale
-```
-
-The verdict also goes to `last-seed.json` (fields `added`, `skipped`,
-`stale`, `removed`, `corrected`, `refused`, `judged`; `seed.py:354-365`),
-which the fleet check reads. More, including the truncation refusal, in
-[deployment/REGISTRATION_SURFACE.md](deployment/REGISTRATION_SURFACE.md).
-
----
-
-## 5 · Where the code and FEATURES.md part ways
+## 4 · Where the code and FEATURES.md part ways
 
 Measured by reading the code for this guide; each item names the line that
 shows it.

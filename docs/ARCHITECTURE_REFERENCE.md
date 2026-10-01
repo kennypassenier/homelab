@@ -255,9 +255,8 @@ join all three:
   gateway's generated directories out, `:146-158`), undeclared mounts
   (`:782-848`).
 - *Destroy and forget share one `unregister`* (`core/src/ops/destroy.rs:207-332`):
-  metrics target, dashboard, route, state record and manual checks, then the
-  fleet-wide files rendered again from what remains
-  (`core/src/ops/fleetfiles.rs:236-271`). `destroy_recorded` (`:414-446`)
+  metrics target, route, state record and manual checks.
+  `destroy_recorded` (`:414-446`)
   runs the ordinary destroy from the manifest in state, so `homelab apply`
   (`client/src/apply.rs`, `client/src/main.rs:704-827`) can remove a stack
   whose directory is gone with every gate intact.
@@ -269,14 +268,16 @@ join all three:
   `:260-355`), deletes them. `DestroyRecorded` and `WipeRetired` are
   command-line only (`CLI_ONLY` in `client/tests/tui_snapshot_tests.rs`).
 
-The Uptime Kuma seeder follows the same rule outside the Rust code: it
-removes every monitor no file declares, with a refusal when more than a
-quarter would go at once (`plan_owned`, `stacks/uptime/kuma-seeder/seed.py:241-264`).
+The Uptime Kuma seeder used to follow the same rule outside the Rust code,
+removing every monitor no file declares with a refusal when more than a
+quarter would go at once; Uptime Kuma itself was retired 2026-10-01,
+superseded by the admin dashboard's own watch list, and the seeder went
+with it.
 The full surface, one row per registration, is
 [deployment/REGISTRATION_SURFACE.md](deployment/REGISTRATION_SURFACE.md).
 
 **Presets are data.** `presets/<name>/` holds `preset.yml` and app
-directories (10 presets). The scaffolder derives the manifest's `storage:`
+directories (9 presets). The scaffolder derives the manifest's `storage:`
 from every `/appdata/` bind in the compose files, so a data path is written
 in one place (`client/src/scaffold.rs:473-500`). Default swap is
 `clamp(RAM / 4, 512, 2048)` MB (`:79-81`, `:91-93`).
@@ -383,8 +384,7 @@ until `homelab wipe` (`core/src/ops/retired.rs:1-15`). The `pct push` staging fi
 
 **Credentials in argv.** `/proc/<pid>/cmdline` is world-readable. The device
 backup gives curl its credential file with `-K`
-(`core/src/ops/devicebackup.rs:44-56,148-153`); the Grafana read pipes it to
-`curl -K -` (`core/src/ops/facts.rs:189-196`); a registry token goes to
+(`core/src/ops/devicebackup.rs:44-56,148-153`); a registry token goes to
 `--password-stdin` (`core/src/ops/deploy.rs:1196-1200`). The guard,
 `core/tests/argv_secret_tests.rs` (fix-32), scans `core/src`, `host/src`,
 `client/src`, `stacks` and `presets` for one shape: `curl -u "$..."` or

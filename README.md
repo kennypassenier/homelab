@@ -149,7 +149,6 @@ metrics         1024 MiB  Prometheus + cadvisor + pve-exporter  [cadvisor, prome
 recyclarr        512 MiB  Quality profiles for Sonarr and Radarr from the TRaSH guides  [recyclarr]
 rust-service    1024 MiB  Your own Rust service + RabbitMQ (template — edit the image first)  [myservice, rabbitmq]
 syncthing        512 MiB  Obsidian vault peer  [syncthing]
-uptime-kuma      512 MiB  Uptime monitoring  [uptime-kuma]
 custom          1024 MiB  Empty stack — add apps later  [no apps]
 ```
 

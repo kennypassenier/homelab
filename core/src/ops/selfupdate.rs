@@ -111,6 +111,53 @@ pub async fn self_update(ctx: &OpCtx<'_>, cfg: &SelfUpdateCfg) -> OperationRepor
         }
     });
 
+    // rule-20 (disk-audit, 2026-10-01): pve gets the same apt-cache and
+    // logrotate hygiene `guards::apply` already pushes to every managed
+    // container — before this it never got `APT_AUTOCLEAN` at all (only the
+    // CTs did, via `apply`/`apply_for_managed`), so its apt cache grew
+    // (1.9G, measured) on every `apt upgrade` and nothing ever cleaned it.
+    // Run from self-update, like the rest of `hostunits::UNITS`, so a
+    // self-update is also how pve picks these up — no separate "apply pve
+    // guards" path to forget to run.
+    step!(runner, "pve apt + logrotate hygiene", {
+        let mut changed = false;
+        let apt_path = "/etc/apt/apt.conf.d/60homelab-clean";
+        if exec.read_file(apt_path).await.ok().as_deref() != Some(crate::ops::guards::APT_AUTOCLEAN)
+        {
+            exec.write_file(apt_path, crate::ops::guards::APT_AUTOCLEAN, 0o644)
+                .await?;
+            changed = true;
+        }
+        // Same double-ingestion-logrotate guard CTs get: pve may carry its
+        // own rsyslog package with its own `/etc/logrotate.d/rsyslog`
+        // fragment, and logrotate refuses two fragments naming one path.
+        let rsyslog_present = exec
+            .run(&Cmd::new("test", &["-f", "/etc/logrotate.d/rsyslog"], 10))
+            .await
+            .map(|o| o.success())
+            .unwrap_or(false);
+        let logrotate_path = "/etc/logrotate.d/homelab";
+        match crate::ops::guards::logrotate_policy(rsyslog_present) {
+            Some(policy) => {
+                if exec.read_file(logrotate_path).await.ok().as_deref() != Some(policy) {
+                    exec.write_file(logrotate_path, policy, 0o644).await?;
+                    changed = true;
+                }
+            }
+            None => {
+                if exec.read_file(logrotate_path).await.is_ok() {
+                    run_ok(exec, &Cmd::new("rm", &["-f", logrotate_path], 10)).await?;
+                    changed = true;
+                }
+            }
+        }
+        Ok(if changed {
+            StepOutcome::Changed
+        } else {
+            StepOutcome::Unchanged
+        })
+    });
+
     // Armed BEFORE the restart: if the new binary never comes up, the
     // OnFailure unit sees this marker and restores `prev`.
     step!(runner, "arm rollback marker", {

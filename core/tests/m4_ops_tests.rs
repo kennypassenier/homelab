@@ -1019,6 +1019,60 @@ async fn the_journal_cap_ships_with_the_binary_and_restarts_journald_once() {
     assert!(again.calls_containing("systemd-journald").is_empty());
 }
 
+/// rule-20 (disk-audit, 2026-10-01): pve itself gets the same apt-cache and
+/// logrotate hygiene `guards::apply` already pushes to every managed
+/// container — before this only the CTs got `APT_AUTOCLEAN`, and pve's own
+/// apt cache (1.9G, measured) was never cleaned. Both ride a self-update,
+/// same as the daemon's own units.
+#[tokio::test]
+async fn rule_20_pve_gets_apt_autoclean_and_logrotate_from_a_self_update() {
+    use homelab_core::ops::guards::{logrotate_policy, APT_AUTOCLEAN};
+    let exec = MockExecutor::new();
+    exec.respond_always("--selfcheck", CmdOutput::ok("3.70.0\n"));
+    // No rsyslog fragment on this pve: `test -f` fails.
+    exec.respond_always("test -f /etc/logrotate.d/rsyslog", CmdOutput::failed(1, ""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = self_update(&ctx(&exec, &sink, &j), &SelfUpdateCfg::default()).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(
+        exec.file("/etc/apt/apt.conf.d/60homelab-clean").as_deref(),
+        Some(APT_AUTOCLEAN)
+    );
+    // No rsyslog fragment: pve gets the homelab logrotate rule.
+    assert_eq!(
+        exec.file("/etc/logrotate.d/homelab").as_deref(),
+        logrotate_policy(false)
+    );
+}
+
+/// Same double-ingestion-logrotate guard as the containers: when pve already
+/// carries rsyslog's own `/etc/logrotate.d/rsyslog` fragment, the homelab
+/// rule is not written (and is removed if it was from before).
+#[tokio::test]
+async fn rule_20_pve_skips_its_own_logrotate_rule_when_rsyslog_already_rotates() {
+    let exec = MockExecutor::new();
+    exec.respond_always("--selfcheck", CmdOutput::ok("3.70.0\n"));
+    exec.seed_file(
+        "/etc/logrotate.d/rsyslog",
+        "# shipped by the rsyslog package\n",
+    );
+    exec.seed_file(
+        "/etc/logrotate.d/homelab",
+        "# a rule from before rsyslog arrived\n",
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = self_update(&ctx(&exec, &sink, &j), &SelfUpdateCfg::default()).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert_eq!(
+        exec.calls_containing("rm -f /etc/logrotate.d/homelab")
+            .len(),
+        1,
+        "the stale homelab rule is removed now that rsyslog's own fragment rotates the same paths"
+    );
+}
+
 /// Doctor names a unit on pve that differs from the one the binary carries.
 #[test]
 fn doctor_reports_host_units_that_drifted() {

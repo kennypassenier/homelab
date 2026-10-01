@@ -165,3 +165,56 @@ pub async fn write_file_owned_like_dir(
 /// The one quoting helper lives with the executor; re-exported here because
 /// the operations already import it from `util`.
 pub(crate) use crate::executor::shq;
+
+/// rule-20 (disk-audit, 2026-10-01): how old an orphaned `push-staging-*`
+/// file must be before the cleanup removes it. A legitimate one lives for
+/// the few seconds between `write_file` and the `pct push` + `rm -f` that
+/// follow it in `push_content_staged`; that `rm` only runs on the success
+/// path, so a push the daemon never finished (died mid-step, the container
+/// was unreachable) leaves its staging file behind for good — `push-staging-118-*`
+/// files from 2026-09-02 were still there a month later. An hour is far
+/// longer than any push takes, so nothing a push still owns is ever swept.
+pub const STALE_PUSH_STAGING_MAX_AGE_S: u64 = 3600;
+
+/// The names, from a `(name, mtime_unix)` listing of the state dir, that
+/// match `push-staging-<vmid>-<digest>` (`staging_path`) and are at least
+/// `max_age_s` old. Pure: the daemon supplies the directory listing and the
+/// clock, so this is tested without touching a filesystem.
+pub fn stale_push_staging(entries: &[(String, u64)], now: u64, max_age_s: u64) -> Vec<String> {
+    entries
+        .iter()
+        .filter(|(name, mtime)| {
+            name.starts_with("push-staging-") && now.saturating_sub(*mtime) >= max_age_s
+        })
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
+#[cfg(test)]
+mod stale_push_staging_tests {
+    //! rule-20: orphaned `push-staging-*` files, left behind since
+    //! 2026-09-02 by pushes the daemon never finished, are swept once they
+    //! are old enough that no push still owns them.
+    use super::*;
+
+    #[test]
+    fn a_file_older_than_the_threshold_is_stale() {
+        let entries = vec![("push-staging-118-abcd1234".to_string(), 1_000u64)];
+        assert_eq!(
+            stale_push_staging(&entries, 1_000 + 3600, 3600),
+            vec!["push-staging-118-abcd1234".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_fresh_file_from_a_push_in_progress_is_kept() {
+        let entries = vec![("push-staging-118-abcd1234".to_string(), 1_000u64)];
+        assert!(stale_push_staging(&entries, 1_060, 3600).is_empty());
+    }
+
+    #[test]
+    fn a_file_that_is_not_push_staging_is_never_touched() {
+        let entries = vec![("staged-host".to_string(), 0u64)];
+        assert!(stale_push_staging(&entries, 10_000_000, 3600).is_empty());
+    }
+}

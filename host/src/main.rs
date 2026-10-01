@@ -1956,6 +1956,28 @@ port = 5003
         assert!(old_gone && young_kept);
     }
 
+    /// rule-20: `cleanup_push_staging` removes a `push-staging-*` file it
+    /// finds on disk (the age judgement itself is
+    /// `util::stale_push_staging_tests`, pure) and leaves anything else in
+    /// the state dir alone.
+    #[test]
+    fn rule_20_orphaned_push_staging_files_are_removed_from_disk() {
+        let dir = std::env::temp_dir().join(format!("homelab-rule20-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let staging = dir.join("push-staging-118-abcd1234");
+        let other = dir.join("state.json");
+        std::fs::write(&staging, "stale compose content").unwrap();
+        std::fs::write(&other, "{}").unwrap();
+        // max_age_s is baked into the call via `now`, well past any file's
+        // mtime — the threshold itself is covered in core's pure tests.
+        let removed = cleanup_push_staging(&dir.to_string_lossy(), u64::MAX / 2);
+        let (staging_gone, other_kept) = (!staging.exists(), other.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(removed, 1);
+        assert!(staging_gone && other_kept);
+    }
+
     /// gap-26: `journal_max_bytes` used to be the fixed constant
     /// `incidents::JOURNAL_MAX_BYTES`, with no host.toml key and no
     /// dashboard row — unlike the incident-bundle limits right beside it.
@@ -4854,6 +4876,14 @@ async fn main() {
         config.incident_bundle_max_age_days,
         config.incident_bundle_max_count,
     );
+    // rule-20: the previous run's orphaned push-staging files, if any.
+    cleanup_push_staging(
+        &config.state_dir,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    );
 
     // AR13: surface any operation the previous run left mid-flight.
     let mut interrupted: Vec<String> = Vec::new();
@@ -7502,6 +7532,10 @@ where
         incident,
     )
     .await;
+    // rule-20: this operation's own leftovers, success or not — a push that
+    // failed partway is exactly the case `push_content_staged`'s own cleanup
+    // never reaches (that `rm` is only on its success path).
+    cleanup_push_staging(&state.config.state_dir, now);
     if report.ok {
         spawn_mirror_push(state); // D5, best-effort + detached
     }
@@ -9644,6 +9678,48 @@ fn prune_incidents(state_dir: &str, now: u64, max_age_days: u64, max_count: usiz
         info!(
             "incidents: removed {} bundle(s) older than {} days or beyond the newest {}",
             removed, max_age_days, max_count
+        );
+    }
+    removed
+}
+
+/// rule-20: remove `push-staging-*` files under the state dir that
+/// `util::stale_push_staging` judges orphaned — left behind by a push the
+/// daemon never finished. Called at start (the previous run's leftovers)
+/// and after every mutating operation (that operation's own, if it failed
+/// partway). Best-effort and silent on an empty/missing directory: a state
+/// dir with nothing staged is the common case, not a fault.
+fn cleanup_push_staging(state_dir: &str, now: u64) -> usize {
+    use homelab_core::ops::util::{stale_push_staging, STALE_PUSH_STAGING_MAX_AGE_S};
+    let entries: Vec<(String, u64)> = std::fs::read_dir(state_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_file())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let mtime = e
+                .metadata()
+                .ok()?
+                .modified()
+                .ok()?
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_secs();
+            Some((name, mtime))
+        })
+        .collect();
+    let mut removed = 0;
+    for name in stale_push_staging(&entries, now, STALE_PUSH_STAGING_MAX_AGE_S) {
+        match std::fs::remove_file(format!("{}/{}", state_dir, name)) {
+            Ok(()) => removed += 1,
+            Err(e) => tracing::warn!("push-staging cleanup: could not remove {} :: {}", name, e),
+        }
+    }
+    if removed > 0 {
+        info!(
+            "push-staging cleanup: removed {} orphaned file(s) older than {}s",
+            removed, STALE_PUSH_STAGING_MAX_AGE_S
         );
     }
     removed

@@ -186,7 +186,27 @@ export function mount(root) {
   );
   const body = h("div", { class: "start" });
   const strip = h("div", { class: "health-strip-slot" });
-  root.replaceChildren(h("h1", null, "Home"), status, body, strip);
+  // Kenny, 2026-10-01: the dots need a legend; one quiet line under the
+  // heading, the same dots and words as their tooltips.
+  const legend = h(
+    "p",
+    { class: "start-legend", "aria-label": "What the dots mean" },
+    ...[
+      ["up", "answers"],
+      ["flaky", "failing, under the down threshold"],
+      ["down", "down"],
+      ["deploying", "deploying"],
+      ["", "not watched"],
+    ].map(([k, words]) =>
+      h(
+        "span",
+        { class: "start-legend__item" },
+        h("span", { class: `start-dot${k ? ` start-dot--${k}` : ""}` }),
+        words,
+      ),
+    ),
+  );
+  root.replaceChildren(h("h1", null, "Home"), legend, status, body, strip);
   const abort = new AbortController();
   (async () => {
     const [r, w] = await Promise.all([

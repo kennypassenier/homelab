@@ -1714,3 +1714,15 @@ td.stack-flags {
 .start-dot--deploying {
   background: var(--primary);
 }
+.start-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0 0 12px;
+  font-size: 0.85em;
+  color: var(--muted-foreground);
+}
+.start-legend__item {
+  display: inline-flex;
+  align-items: center;
+}

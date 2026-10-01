@@ -4,8 +4,8 @@
 //! nightly machinery (backup, update supervision) picks it up.
 
 use crate::error::CoreError;
-use crate::executor::{run_ok, Cmd, Executor, TracingExecutor};
-use crate::native::NativeServiceManifest;
+use crate::executor::{run_ok, Cmd, CmdOutput, Executor, TracingExecutor};
+use crate::native::{BackupPause, NativeServiceManifest};
 use crate::runner::{OperationReport, Runner, StepOutcome};
 use crate::sink::Level;
 
@@ -15,6 +15,126 @@ use super::{util_pct_sh, OpCtx};
 /// T77: a service's own nightly copy older than this is not tonight's copy.
 /// 26 h leaves room for a late run without accepting yesterday's file.
 pub const MAX_OWN_COPY_AGE_S: u64 = 26 * 3600;
+
+/// chassis-rs `backup-pause --for <secs>`: the dead-man switch's own range
+/// (the kit refuses outside 1..21600).
+pub const MAX_CHASSIS_PAUSE_FOR_S: u64 = 21600;
+
+/// fix-113 ADDENDUM (owner + chassis-rs agreement, 2026-10-01): "no guessed
+/// N" — every `backup-pause --for` call, first and every renewal, asks for
+/// this short a window. A run that dies mid-copy leaves the service
+/// un-paused again within this long, never parked for hours on a guess.
+pub const CHASSIS_PAUSE_FOR_S: u64 = 120;
+
+/// How often the pause is renewed while work (the local copy, or — with no
+/// staging — the tar-to-restic pipe itself) is still running under it.
+pub const CHASSIS_HEARTBEAT_INTERVAL_S: u64 = 60;
+
+/// The safety margin `fits_staging` asks of a staged copy's estimated size
+/// before it trusts the estimate against free space and the cap.
+const STAGING_SAFETY_MARGIN_PCT: u64 = 20;
+
+/// fix-113 ADDENDUM: whether a staged local copy of `estimated_bytes` is
+/// trusted to fit `free_bytes` of disk and the `cap_mib` staging cap, both
+/// after a 20% margin on the estimate. Pure — the `du`/`df` readings that
+/// feed it are the only I/O, done by the caller.
+pub fn fits_staging(estimated_bytes: u64, free_bytes: u64, cap_mib: u64) -> bool {
+    let needed = estimated_bytes.saturating_mul(100 + STAGING_SAFETY_MARGIN_PCT) / 100;
+    let cap_bytes = cap_mib.saturating_mul(1024 * 1024);
+    needed <= free_bytes && needed <= cap_bytes
+}
+
+/// fix-113 ADDENDUM: `du -scb` over every data dir, inside the container —
+/// `None` when it cannot be read (no `du`, or a dir does not exist), in
+/// which case the caller skips staging rather than guessing a size.
+async fn estimate_data_bytes(exec: &dyn Executor, vmid: u16, data_dirs: &[String]) -> Option<u64> {
+    if data_dirs.is_empty() {
+        return Some(0);
+    }
+    let dirs = data_dirs
+        .iter()
+        .map(|d| shq(d))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let script = format!("du -scb {} 2>/dev/null | tail -1 | cut -f1", dirs);
+    let out = util_pct_sh(exec, vmid, &script, 60).await.ok()?;
+    out.success()
+        .then(|| out.stdout.trim().parse::<u64>().ok())?
+}
+
+/// fix-113 ADDENDUM: free bytes on the filesystem holding `dir` (created
+/// first if missing) on THIS host — the staging directory is never inside
+/// the container. `None` when it cannot be read.
+async fn staging_free_bytes(exec: &dyn Executor, dir: &str) -> Option<u64> {
+    let script = format!(
+        "mkdir -p {d} && df -B1 --output=avail {d} | tail -1",
+        d = shq(dir)
+    );
+    let out = exec.run(&Cmd::new("sh", &["-c", &script], 30)).await.ok()?;
+    out.success()
+        .then(|| out.stdout.trim().parse::<u64>().ok())?
+}
+
+/// fix-113 ADDENDUM: deletes a staged tar — called before trusting a free-
+/// space reading (a leftover from a run that died between writing it and
+/// deleting it again, rule 20) and after every staged snapshot, success or
+/// failure, so one is never left behind for the next run to find.
+async fn remove_staging_file(exec: &dyn Executor, path: &str) {
+    let _ = exec
+        .run(&Cmd::new(
+            "sh",
+            &["-c", &format!("rm -f {}", shq(path))],
+            30,
+        ))
+        .await;
+}
+
+/// fix-113 ADDENDUM: renews the chassis pause every
+/// [`CHASSIS_HEARTBEAT_INTERVAL_S`] while the work it is racing against
+/// ([`run_under_chassis_heartbeat`]) is still running. Bounded by
+/// `max_renewals` so it can only ever LOSE that race, never win it: once
+/// exhausted it parks on a future that never completes rather than ending
+/// the race early and leaving the other side cut off mid-copy.
+async fn chassis_pause_heartbeat(exec: &dyn Executor, vmid: u16, binary: &str, max_renewals: u64) {
+    for _ in 0..max_renewals {
+        exec.sleep_ms(CHASSIS_HEARTBEAT_INTERVAL_S * 1000).await;
+        let _ = util_pct_sh(
+            exec,
+            vmid,
+            &format!("{} backup-pause --for {}", shq(binary), CHASSIS_PAUSE_FOR_S),
+            30,
+        )
+        .await;
+    }
+    std::future::pending::<()>().await;
+}
+
+/// fix-113 ADDENDUM: runs `cmd` while the chassis pause is renewed
+/// underneath it, so work that outlives the first `--for 120` window is not
+/// cut off mid-write. `cmd`'s own `timeout_s` bounds how many renewals the
+/// heartbeat is allowed (`+2` of headroom) — comfortably more than the
+/// heartbeat could ever need before `cmd` itself resolves (success, failure
+/// or its own timeout), so the heartbeat branch structurally cannot win the
+/// race in [`futures_util::future::select`] (which polls the first future —
+/// `cmd` — before the second on every poll, so a `cmd` that is already done,
+/// as every scripted `MockExecutor` response is, never triggers a single
+/// renewal: every existing test exercises this exact path unchanged).
+async fn run_under_chassis_heartbeat(
+    exec: &dyn Executor,
+    vmid: u16,
+    binary: &str,
+    cmd: &Cmd,
+) -> Result<CmdOutput, CoreError> {
+    let max_renewals = cmd.timeout_s / CHASSIS_HEARTBEAT_INTERVAL_S + 2;
+    let work = Box::pin(run_ok(exec, cmd));
+    let heartbeat = Box::pin(chassis_pause_heartbeat(exec, vmid, binary, max_renewals));
+    match futures_util::future::select(work, heartbeat).await {
+        futures_util::future::Either::Left((out, _heartbeat)) => out,
+        futures_util::future::Either::Right(((), _work)) => {
+            unreachable!("chassis_pause_heartbeat never completes before cmd's own timeout")
+        }
+    }
+}
 
 /// Adopt an existing container as a managed native-service stack. Never
 /// starts, stops or restarts anything — a running production service is
@@ -662,6 +782,61 @@ pub async fn restore_empty_unit(
     Ok(EmptyUnit::Restored)
 }
 
+/// fix-113 (owner decision, 2026-10-01): what `backup_native` does after
+/// running `<binary> backup-pause --for <secs>` in `BackupPause::Chassis`
+/// mode, decided from its exit code (chassis-rs commit 722249b) and, only
+/// for exit 3, whether the unit is active — a pure function so each branch
+/// is a test, not a live run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChassisPauseOutcome {
+    /// Exit 0: the binary itself quiesced the service (a listener answered,
+    /// or it stopped the unit, or the unit was not running) — its stdout
+    /// first word says which. Resume afterwards with `backup-resume`.
+    Paused(String),
+    /// Exit 2 (a binary built before `backup-pause` existed: clap's own
+    /// "unrecognized subcommand") or exit 3 with the unit active (no
+    /// listener and the binary could not stop it either): fall back to the
+    /// `BackupPause::Unit` mechanism — the homelab stops the unit itself.
+    FallBackToStop,
+    /// Exit 3 with the unit not active: nothing is running, so there is
+    /// nothing to pause and nothing to resume.
+    NothingRunning,
+    /// Exit 1, or any code outside 0..=3: fail loudly — the unit started
+    /// again on its own (exit 1) or the binary said something this build
+    /// does not understand. Nothing was archived.
+    Failed(String),
+}
+
+/// See [`ChassisPauseOutcome`]. `unit_active` is read only for exit 3 — the
+/// one code whose meaning depends on it — so a caller need not probe the
+/// unit for the other three.
+pub fn decide_chassis_pause(
+    exit_code: i32,
+    stdout: &str,
+    unit_active: bool,
+) -> ChassisPauseOutcome {
+    let stdout = stdout.trim();
+    match exit_code {
+        0 => ChassisPauseOutcome::Paused(stdout.to_string()),
+        2 => ChassisPauseOutcome::FallBackToStop,
+        3 => {
+            if unit_active {
+                ChassisPauseOutcome::FallBackToStop
+            } else {
+                ChassisPauseOutcome::NothingRunning
+            }
+        }
+        1 => ChassisPauseOutcome::Failed(format!(
+            "backup-pause failed (exit 1) — the unit started again on its own: {}",
+            stdout
+        )),
+        other => ChassisPauseOutcome::Failed(format!(
+            "backup-pause exited {} (expected 0, 1, 2 or 3): {}",
+            other, stdout
+        )),
+    }
+}
+
 /// C7 nightly backup for a native stack. The data lives INSIDE the
 /// container (adoption never restarts a service, so a bind-mount to
 /// /appdata was never an option); the snapshot therefore streams
@@ -829,27 +1004,231 @@ pub async fn backup_native(
         Ok(StepOutcome::Unchanged)
     });
 
-    // fix-113: a service declared `backup_pause` is stopped for the tar, so
+    // fix-113: a service declared `backup_pause` is quiesced for the tar, so
     // its store is not archived mid-write. Stopping first and failing loudly
     // when it will not stop: a tar of a store still being written is the
     // torn backup this exists to prevent.
     let unit = format!("{}.service", m.unit);
-    if m.backup_pause {
-        step!(runner, "pause the service", {
-            let out = util_pct_sh(exec, m.vmid, &format!("systemctl stop {}", unit), 120).await?;
-            if !out.success() {
-                return Err(CoreError::Other(format!(
-                    "{} would not stop for its backup ({}) — nothing was archived",
-                    unit,
-                    out.stderr.trim()
-                )));
-            }
-            Ok(StepOutcome::Changed)
-        });
+    // Whether the resume phase has anything to do: `Unit` always does (it
+    // always stopped the unit); `Chassis` does whenever the pause phase
+    // actually quiesced or stopped something (`Paused` or the stop
+    // fallback) — not when nothing was running to begin with, which is the
+    // one case with nothing to put back.
+    let mut needs_resume = false;
+    // `Chassis` / `Paused` only: the binary itself is what quiesced things,
+    // so it is also what un-quiesces them, ahead of the homelab's own
+    // "is it active" check. The stop fallback below is symmetrical with
+    // `Unit` instead — the homelab did its own `systemctl stop`, so its own
+    // `systemctl start` undoes it, the same resume `Unit` always used.
+    let mut chassis_resume = false;
+    // Set inside the step closures (which may not call `runner.log`
+    // themselves — logging here, after `step!` returns, is the pattern the
+    // rest of this function already uses for `own_copy`).
+    let mut pause_note: Option<String> = None;
+    // fix-113 ADDENDUM: where the LOCAL staged copy landed, when staging was
+    // used — set only inside `BackupPause::Chassis`'s `Paused` arm. Its
+    // presence is what tells the "snapshot" step to read a file instead of
+    // the container, and the final cleanup to remove it; its absence with
+    // `chassis_resume` true is what tells "snapshot" to hold the pause open
+    // (renewed) across the tar-to-restic pipe itself.
+    let mut staged_file: Option<String> = None;
+    // fix-113: whatever the "resume the service" step below logs — set
+    // there, or (ADDENDUM) right after a staged local copy, which resumes
+    // long before that step runs.
+    let mut resume_note: Option<String> = None;
+    match m.backup_pause {
+        BackupPause::Off => {}
+        BackupPause::Unit => {
+            step!(runner, "pause the service", {
+                let out =
+                    util_pct_sh(exec, m.vmid, &format!("systemctl stop {}", unit), 120).await?;
+                if !out.success() {
+                    return Err(CoreError::Other(format!(
+                        "{} would not stop for its backup ({}) — nothing was archived",
+                        unit,
+                        out.stderr.trim()
+                    )));
+                }
+                Ok(StepOutcome::Changed)
+            });
+            needs_resume = true;
+        }
+        BackupPause::Chassis => {
+            step!(runner, "pause the service (chassis)", {
+                let out = util_pct_sh(
+                    exec,
+                    m.vmid,
+                    &format!(
+                        "{} backup-pause --for {}",
+                        shq(&m.binary),
+                        CHASSIS_PAUSE_FOR_S
+                    ),
+                    60,
+                )
+                .await?;
+                // Exit 3 ("impossible") only decides anything once we also
+                // know whether the unit is still active.
+                let unit_active = if out.code == 3 {
+                    let probe =
+                        util_pct_sh(exec, m.vmid, &format!("systemctl is-active {}", unit), 30)
+                            .await?;
+                    probe.stdout.trim() == "active"
+                } else {
+                    false
+                };
+                match decide_chassis_pause(out.code, &out.stdout, unit_active) {
+                    ChassisPauseOutcome::Paused(mode) => {
+                        pause_note = Some(format!("backup-pause: {}", mode));
+                        // fix-113 ADDENDUM (owner + chassis-rs, 2026-10-01):
+                        // the pause is held open, renewed, only for a LOCAL
+                        // copy — never for restic's own upload. When a
+                        // staging directory is configured and the copy is
+                        // estimated to fit it (`fits_staging`), tar it there
+                        // under the renewed pause, resume the SERVICE the
+                        // moment that local copy is done (right here, not
+                        // after the possibly-slow upload), and leave
+                        // `staged_file` for the "snapshot" step below to read
+                        // from instead of the container.
+                        if let Some(dir) = &cfg.staging_dir {
+                            let _ = exec
+                                .run(&Cmd::new(
+                                    "sh",
+                                    &["-c", &format!("mkdir -p {}", shq(dir))],
+                                    30,
+                                ))
+                                .await;
+                            let stage_path = format!("{}/{}-stage.tar", dir, m.unit);
+                            // rule 20: a leftover from a run that died
+                            // between writing this file and deleting it
+                            // again, cleared at the start of THIS run before
+                            // the free-space reading below is trusted.
+                            remove_staging_file(exec, &stage_path).await;
+                            let estimate = estimate_data_bytes(exec, m.vmid, &m.data_dirs).await;
+                            let free = staging_free_bytes(exec, dir).await;
+                            let use_staging = matches!(
+                                (estimate, free),
+                                (Some(e), Some(f)) if fits_staging(e, f, cfg.staging_cap_mib)
+                            );
+                            if use_staging {
+                                let dirs = m
+                                    .data_dirs
+                                    .iter()
+                                    .map(|d| shq(d))
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                let tar_script = format!(
+                                    "set -o pipefail; pct exec {} -- tar -cf - {} > {}",
+                                    m.vmid,
+                                    dirs,
+                                    shq(&stage_path)
+                                );
+                                let tar_cmd =
+                                    Cmd::new("sh", &["-c", &tar_script], cfg.snapshot_timeout_s);
+                                let tar_result =
+                                    run_under_chassis_heartbeat(exec, m.vmid, &m.binary, &tar_cmd)
+                                        .await;
+                                // Resume before anything else, success or
+                                // failure — a torn local copy must not leave
+                                // the service paused while this run decides
+                                // what to do about it.
+                                let resume_out = util_pct_sh(
+                                    exec,
+                                    m.vmid,
+                                    &format!("{} backup-resume", shq(&m.binary)),
+                                    60,
+                                )
+                                .await;
+                                match tar_result {
+                                    Ok(_) => {
+                                        resume_note = resume_out
+                                            .as_ref()
+                                            .ok()
+                                            .map(|o| format!("backup-resume: {}", o.stdout.trim()));
+                                        staged_file = Some(stage_path);
+                                        return Ok(StepOutcome::Changed);
+                                    }
+                                    Err(e) => {
+                                        remove_staging_file(exec, &stage_path).await;
+                                        return Err(CoreError::Other(format!(
+                                            "{} local staging copy failed ({}) — resume: \
+                                             {:?}; nothing was archived",
+                                            unit,
+                                            e,
+                                            resume_out.map(|o| o.stdout)
+                                        )));
+                                    }
+                                }
+                            }
+                        }
+                        // No staging dir configured, or the copy did not
+                        // fit: back up live under the renewed pause (the
+                        // "snapshot" step below renews it across the whole
+                        // tar-to-restic pipe).
+                        needs_resume = true;
+                        chassis_resume = true;
+                        Ok(StepOutcome::Changed)
+                    }
+                    ChassisPauseOutcome::FallBackToStop => {
+                        pause_note = Some(format!(
+                            "backup-pause could not quiesce it (rc={}) — falling back to \
+                             stopping the unit",
+                            out.code
+                        ));
+                        let stop =
+                            util_pct_sh(exec, m.vmid, &format!("systemctl stop {}", unit), 120)
+                                .await?;
+                        if !stop.success() {
+                            return Err(CoreError::Other(format!(
+                                "{} would not stop for its backup ({}) — nothing was archived",
+                                unit,
+                                stop.stderr.trim()
+                            )));
+                        }
+                        needs_resume = true;
+                        Ok(StepOutcome::Changed)
+                    }
+                    ChassisPauseOutcome::NothingRunning => {
+                        pause_note = Some("backup-pause: not running, nothing to pause".into());
+                        Ok(StepOutcome::Unchanged)
+                    }
+                    ChassisPauseOutcome::Failed(why) => Err(CoreError::Other(format!(
+                        "{} backup-pause: {} — nothing was archived",
+                        unit, why
+                    ))),
+                }
+            });
+        }
+    }
+    if let Some(note) = &pause_note {
+        runner.log(Level::Info, format!("[backup] {} {}", unit, note));
     }
 
     let snapshot_result = runner
         .step("snapshot", || async {
+            // fix-113 ADDENDUM: a staged local copy already landed on this
+            // host (and the service is already resumed) — read it instead of
+            // the container, so this step's own duration (restic's upload)
+            // never touches the pause.
+            if let Some(stage_path) = &staged_file {
+                let script = format!(
+                    "set -o pipefail; cat {} | \
+                 env RESTIC_REPOSITORY={}/{}-config RESTIC_PASSWORD_FILE={} \
+                 RESTIC_CACHE_DIR={} \
+                 restic backup --stdin --stdin-filename {}-data.tar",
+                    shq(stage_path),
+                    cfg.restic_base,
+                    m.unit,
+                    cfg.password_file,
+                    crate::ops::backup::RESTIC_CACHE_DIR,
+                    m.unit
+                );
+                crate::executor::run_ok(
+                    exec,
+                    &Cmd::new("sh", &["-c", &script], cfg.snapshot_timeout_s),
+                )
+                .await?;
+                return Ok(StepOutcome::Changed);
+            }
             let dirs = match &own_copy {
                 Some(f) => shq(f),
                 None => m
@@ -886,20 +1265,41 @@ pub async fn backup_native(
                 crate::ops::backup::RESTIC_CACHE_DIR,
                 m.unit
             );
-            crate::executor::run_ok(
-                exec,
-                &Cmd::new("sh", &["-c", &script], cfg.snapshot_timeout_s),
-            )
-            .await?;
+            let cmd = Cmd::new("sh", &["-c", &script], cfg.snapshot_timeout_s);
+            if chassis_resume {
+                // fix-113 ADDENDUM: no staging (disabled, or the copy did
+                // not fit) — the pause is held open and renewed across the
+                // tar AND the restic upload together, since there is no
+                // separate local phase to shorten it with.
+                run_under_chassis_heartbeat(exec, m.vmid, &m.binary, &cmd).await?;
+            } else {
+                crate::executor::run_ok(exec, &cmd).await?;
+            }
             Ok(StepOutcome::Changed)
         })
         .await;
 
+    // fix-113 ADDENDUM: a staged tar must not survive the run (rule 20) —
+    // removed here regardless of whether the snapshot step above succeeded.
+    if let Some(stage_path) = &staged_file {
+        remove_staging_file(exec, stage_path).await;
+    }
+
     // fix-113: the paused service is started again whatever the snapshot
     // did, as `backup` resumes what it quiesced: a backup that leaves a
     // service off is worse than one that fails.
-    if m.backup_pause {
+    if needs_resume {
         step!(runner, "resume the service", {
+            if chassis_resume {
+                let out = util_pct_sh(
+                    exec,
+                    m.vmid,
+                    &format!("{} backup-resume", shq(&m.binary)),
+                    60,
+                )
+                .await?;
+                resume_note = Some(format!("backup-resume: {}", out.stdout.trim()));
+            }
             let out = util_pct_sh(
                 exec,
                 m.vmid,
@@ -919,6 +1319,9 @@ pub async fn backup_native(
             }
             Ok(StepOutcome::Changed)
         });
+    }
+    if let Some(note) = &resume_note {
+        runner.log(Level::Info, format!("[backup] {} {}", unit, note));
     }
     if let Err(e) = snapshot_result {
         return runner.finish_err("snapshot", &e);

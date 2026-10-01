@@ -4,7 +4,7 @@
 //! no verb to go back to one.
 
 use homelab_core::executor::{CmdOutput, MockExecutor};
-use homelab_core::native::NativeServiceManifest;
+use homelab_core::native::{BackupPause, NativeServiceManifest};
 use homelab_core::ops::native::{
     drop_stale_rollback_script, keep_one_previous_script, rollback_native, update_native,
 };
@@ -55,7 +55,7 @@ fn kyu() -> NativeServiceManifest {
         release_repo: None,
         release_asset: None,
         backup_from_newest: None,
-        backup_pause: false,
+        backup_pause: BackupPause::Off,
         update_policy: Default::default(),
         metrics: None,
     }

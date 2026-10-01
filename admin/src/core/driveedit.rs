@@ -1898,7 +1898,7 @@ pub fn native_body(fields: &[Field], values: &Values) -> Value {
         "release_repo": s("release_repo"),
         "release_asset": s("release_asset"),
         "backup_from_newest": s("backup_from_newest"),
-        "backup_pause": b("backup_pause"),
+        "backup_pause": s("backup_pause"),
         "update_policy": s("update_policy"),
         "metrics": s("metrics"),
     })
@@ -1931,7 +1931,16 @@ pub fn add_native_body(fields: &[Field], values: &Values) -> Value {
 pub fn native_current(name: &str, m: &Value) -> Value {
     match name {
         "data_dirs" => json!(strings(&m["data_dirs"]).join("\n")),
-        "stateless" | "backup_pause" => json!(m[name].as_bool().unwrap_or(false)),
+        "stateless" => json!(m[name].as_bool().unwrap_or(false)),
+        // fix-113 (owner decision, 2026-10-01): `backup_pause` reads from
+        // the manifest as a bool (false/true) or the string "chassis" —
+        // `NativeServiceManifest`'s own `BackupPause::Serialize` shape — and
+        // the select wants it back as one of those three strings.
+        "backup_pause" => json!(match m[name].as_str() {
+            Some("chassis") => "chassis",
+            _ if m[name].as_bool() == Some(true) => "true",
+            _ => "false",
+        }),
         "update_policy" => json!(m[name].as_str().unwrap_or("manual")),
         "metrics" => json!(if m["metrics"] == json!(false) {
             "not_measured"

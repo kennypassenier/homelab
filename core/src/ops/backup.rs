@@ -205,6 +205,19 @@ pub struct BackupCfg {
     /// large restore over Google Drive died at thirty minutes, on the one
     /// operation you least want to find broken (deployment project, F38).
     pub restore_timeout_s: u64,
+    /// fix-113 ADDENDUM (owner + chassis-rs, 2026-10-01): where a
+    /// `backup_pause: chassis` native backup tars its data dirs LOCALLY
+    /// before restic uploads them, so the chassis pause only has to last as
+    /// long as a disk-to-disk copy — never a slow upload. `None`: always tar
+    /// straight to restic under a renewed pause (no staging; the only
+    /// behaviour possible before this field existed). A directory on a data
+    /// pool, not the root disk — `native_backup_staging_dir` in host.toml.
+    pub staging_dir: Option<String>,
+    /// Largest one staged tar may be, in MiB, BEFORE the 20% safety margin
+    /// `fits_staging` adds on top. A copy that would not fit, after the
+    /// margin, against either this cap or the directory's free space skips
+    /// staging for that run rather than shrinking the margin to fit.
+    pub staging_cap_mib: u64,
 }
 
 impl Default for BackupCfg {
@@ -215,6 +228,8 @@ impl Default for BackupCfg {
             tiers: crate::retention::default_tiers(),
             snapshot_timeout_s: 4 * 3600,
             restore_timeout_s: 4 * 3600,
+            staging_dir: None,
+            staging_cap_mib: 10 * 1024,
         }
     }
 }

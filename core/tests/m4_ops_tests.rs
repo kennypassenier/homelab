@@ -2040,7 +2040,7 @@ async fn fix_54_a_snapshot_check_that_fails_is_not_read_as_fresh() {
 /// forced a fabricated directory that would then be backed up for nothing.
 #[test]
 fn t40_stateless_must_be_declared_not_inferred() {
-    use homelab_core::native::{validate_native, NativeServiceManifest};
+    use homelab_core::native::{validate_native, BackupPause, NativeServiceManifest};
     let base = NativeServiceManifest {
         restore_note: None,
         stack_name: "kyu".into(),
@@ -2053,7 +2053,7 @@ fn t40_stateless_must_be_declared_not_inferred() {
         update_cmd: None,
         stateless: false,
         backup_from_newest: None,
-        backup_pause: false,
+        backup_pause: BackupPause::Off,
         update_policy: Default::default(),
         metrics: None,
         release_repo: None,
@@ -2070,7 +2070,7 @@ fn t40_stateless_must_be_declared_not_inferred() {
     let stateless = NativeServiceManifest {
         stateless: true,
         backup_from_newest: None,
-        backup_pause: false,
+        backup_pause: BackupPause::Off,
         update_policy: Default::default(),
         release_repo: None,
         release_asset: None,
@@ -2082,7 +2082,7 @@ fn t40_stateless_must_be_declared_not_inferred() {
     let confused = NativeServiceManifest {
         stateless: true,
         backup_from_newest: None,
-        backup_pause: false,
+        backup_pause: BackupPause::Off,
         update_policy: Default::default(),
         release_repo: None,
         release_asset: None,

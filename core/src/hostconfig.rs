@@ -144,6 +144,10 @@ pub const KEYS: &[KeyInfo] = &[
     k("device_backups", "Nightly round and backups", "Device backups", "Devices that hand over their own configuration once a night.", "none", Kind::Table, Access::Browser, Apply::Restart),
     k("watched_backups", "Nightly round and backups", "Watched backups", "Backups other devices make that the host watches for age.", "none", Kind::Table, Access::Browser, Apply::Restart),
     k("mirror_remote", "Nightly round and backups", "Intent mirror remote", "Git remote the host mirrors its intent repository to; empty: off.", "off", Kind::Text, Access::Browser, Apply::Restart),
+    // fix-113 ADDENDUM (owner + chassis-rs, 2026-10-01): where a
+    // `backup_pause: chassis` native backup stages its local copy.
+    k("native_backup_staging_dir", "Nightly round and backups", "Chassis backup staging directory", "Where a chassis-paused native backup (backup_pause: chassis) tars its data locally before restic uploads it, so the write-pause only lasts as long as the local copy, not the upload. A directory on a data pool, not the root disk. Empty: no staging — chassis-paused backups tar straight to restic under a renewed pause.", "none: no staging", Kind::Text, Access::Browser, Apply::Live),
+    k("native_backup_staging_cap_mib", "Nightly round and backups", "Chassis backup staging cap", "Largest one staged tar may be, in MiB, before a 20% safety margin; a copy that would not fit (that margin, or the directory's free space) skips staging for that run and backs up live under the renewed pause instead.", "10240 (10 GiB)", Kind::Int { min: 1, max: U32 }, Access::Browser, Apply::Live),
     // ── Notifications ───────────────────────────────────────────────────
     k("notify_webhook", "Notifications", "Notification webhook", "Where the host posts a notification after each operation; empty: off.", "off", Kind::Url, Access::Browser, Apply::Live),
     k("notify_auth_bearer", "Notifications", "Webhook token", "The bearer token sent with it. A secret: changed over ssh only.", "none", Kind::Text, Access::Secret, Apply::Restart),

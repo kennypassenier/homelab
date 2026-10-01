@@ -110,7 +110,7 @@ data_mounts:
         container: traefik
         signal: USR1
 
-apps: [traefik, cloudflared, crowdsec]
+apps: [socket-proxy, traefik, cloudflared, crowdsec]
 
 latch_secrets: [traefik, cloudflared]
 

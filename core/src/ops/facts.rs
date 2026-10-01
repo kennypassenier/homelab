@@ -21,7 +21,7 @@
 
 use crate::executor::{shq, Cmd, Executor};
 use crate::ops::fleetcheck::{
-    BootFact, CoverageFact, GrowthFact, LiveFacts, RouteFact, SeedFact, WatchedBackupFact,
+    BootFact, CoverageFact, GrowthFact, LiveFacts, RouteFact, WatchedBackupFact,
 };
 
 /// A backup made outside this suite that it nevertheless watches (O1).
@@ -38,12 +38,8 @@ pub struct WatchedBackupSpec {
 #[derive(Debug, Clone)]
 pub struct FactsInputs {
     pub watched_backups: Vec<WatchedBackupSpec>,
-    pub kuma_monitors_file: Option<String>,
     pub state_dir: String,
     pub gateway_vmid: u16,
-    /// Where Grafana runs, and so where the dashboard question is asked
-    /// (fix-90: the metrics container since 2026-09-27, the gateway before).
-    pub grafana_vmid: u16,
     pub gateway_routes_dir: String,
     pub no_touch: Vec<u16>,
     pub prometheus_url: Option<String>,
@@ -54,7 +50,6 @@ pub struct FactsInputs {
     /// `loki_url` from the host, as before.
     pub loki_vmid: Option<u16>,
     pub logs_window: String,
-    pub grafana_dashboards_dir: Option<String>,
     /// Now, in seconds since the epoch. Core never reads a clock.
     pub now_unix: u64,
     /// true = list every watched backup on its remote and record the answer
@@ -184,38 +179,6 @@ pub fn parse_growth(vmid: u16, hostname: &str, stdout: &str) -> Option<GrowthFac
         }
     }
     probed.then_some(g)
-}
-
-/// The uids of the generated dashboards the dashboard app is serving, asked
-/// with the command its stack declares (`generated_dashboards_command`,
-/// app-knowledge 2026-09-30): one uid per line.
-///
-/// The command reads the app's credential at the moment of asking — a
-/// credential handed to a check goes stale without telling anybody (F131).
-///
-/// `None` means the question could not be asked at all — never an empty
-/// answer, so a dashboard app that is down does not turn every stack into a
-/// finding.
-pub async fn generated_dashboard_uids(
-    exec: &dyn Executor,
-    vmid: u16,
-    command: &str,
-) -> Option<Vec<String>> {
-    let out = exec
-        .run(&crate::executor::attach_sh(vmid, command, 60))
-        .await
-        .ok()?;
-    if !out.success() {
-        return None;
-    }
-    Some(
-        out.stdout
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .map(str::to_string)
-            .collect(),
-    )
 }
 
 /// List one watched backup on its remote: the fact, and the record to keep
@@ -375,48 +338,6 @@ pub async fn gather_live_facts_with(
         facts
     };
 
-    // T49: the seeder's verdict, read from the file it writes beside the
-    // generated monitor list. Same directory, so there is no second setting
-    // to keep in step with the first.
-    let seed_fut = async {
-        match inp.kuma_monitors_file.as_deref() {
-            None => SeedFact {
-                judged: true,
-                age_s: Some(0),
-                ..Default::default()
-            },
-            Some(monitors) => {
-                let dir = monitors.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
-                let path = format!("{}/last-seed.json", dir);
-                match exec.read_file(&path).await {
-                    Err(e) => SeedFact {
-                        error: Some(format!("{}: {}", path, e)),
-                        ..Default::default()
-                    },
-                    Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
-                        Err(e) => SeedFact {
-                            error: Some(format!("{} is not JSON: {}", path, e)),
-                            ..Default::default()
-                        },
-                        Ok(v) => SeedFact {
-                            stale: v["stale"]
-                                .as_array()
-                                .map(|a| {
-                                    a.iter()
-                                        .filter_map(|x| x.as_str().map(str::to_string))
-                                        .collect()
-                                })
-                                .unwrap_or_default(),
-                            age_s: v["at"].as_u64().map(|at| inp.now_unix.saturating_sub(at)),
-                            judged: v["judged"].as_bool().unwrap_or(false),
-                            error: None,
-                        },
-                    },
-                }
-            }
-        }
-    };
-
     // The stacks the host has recorded — read once, used twice below.
     let snapshot_fut = async {
         crate::state::StateStore::new(exec, &inp.state_dir)
@@ -424,11 +345,10 @@ pub async fn gather_live_facts_with(
             .await
             .ok()
     };
-    // Four independent reads, overlapped; polled in the order they used to
+    // Three independent reads, overlapped; polled in the order they used to
     // run, so a scripted executor sees the same sequence.
-    let (watched, seed, host_memory, snapshot) = futures_util::join!(
+    let (watched, host_memory, snapshot) = futures_util::join!(
         watched_fut,
-        seed_fut,
         // F184: the host's own numbers, so a per-container remedy cannot
         // advise memory the machine does not have.
         read_host_memory(exec),
@@ -436,7 +356,6 @@ pub async fn gather_live_facts_with(
     );
 
     let mut facts = LiveFacts {
-        seed,
         stack_files: stack_files.to_vec(),
         watched_backups: watched,
         host_memory,
@@ -820,22 +739,10 @@ pub async fn gather_live_facts_with(
     // Is each stack's safety net actually attached? Both questions are
     // skipped when their address is not configured: an unasked question must
     // never become a finding.
-    progress("asking Prometheus, Loki and Grafana about each stack…");
+    progress("asking Prometheus and Loki about each stack…");
     let prom = inp.prometheus_url.as_deref();
     let loki = inp.loki_url.as_deref();
     let window = &inp.logs_window;
-    let provisioned_fut = async {
-        let declared = snapshot.as_ref().and_then(|st| {
-            st.stacks.values().find_map(|s| {
-                let m = s.manifest.as_ref()?;
-                Some((m.vmid, m.generated_dashboards_command.clone()?))
-            })
-        });
-        match (inp.grafana_dashboards_dir.as_deref(), declared) {
-            (Some(_), Some((vmid, cmd))) => generated_dashboard_uids(exec, vmid, &cmd).await,
-            _ => None,
-        }
-    };
     // ops::pool: one future per recorded stack, a few at a time, and within a
     // stack the Prometheus and the Loki question side by side.
     let asked: Vec<(&String, &crate::state::StackState)> =
@@ -924,14 +831,7 @@ pub async fn gather_live_facts_with(
             .collect(),
         crate::ops::pool::READ_CONCURRENCY,
     );
-    let (provisioned, coverage) = futures_util::join!(provisioned_fut, coverage_fut);
-    facts.coverage = coverage;
-    if let Some(uids) = provisioned.as_ref() {
-        for c in &mut facts.coverage {
-            let uid = format!("homelab-{}", c.stack);
-            c.dashboard_provisioned = Some(uids.iter().any(|u| u == &uid));
-        }
-    }
+    facts.coverage = coverage_fut.await;
     // fix-142: the intent copy of every stack the client named, for the
     // repository comparison. Nothing is read when no stack files came (the
     // nightly round).

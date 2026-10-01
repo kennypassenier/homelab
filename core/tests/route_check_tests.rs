@@ -295,9 +295,7 @@ async fn the_gatherer_lists_every_file_in_the_routes_directory() {
     );
     let inp = FactsInputs {
         watched_backups: vec![],
-        kuma_monitors_file: None,
         state_dir: "/var/lib/homelab".into(),
-        grafana_vmid: 104,
         loki_vmid: None,
         gateway_vmid: 104,
         gateway_routes_dir: "/appdata/gateway/traefik-config/routes".into(),
@@ -305,7 +303,6 @@ async fn the_gatherer_lists_every_file_in_the_routes_directory() {
         prometheus_url: None,
         loki_url: None,
         logs_window: "24h".into(),
-        grafana_dashboards_dir: None,
         now_unix: 1_789_704_000,
         watched_fresh: true,
     };

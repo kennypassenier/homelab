@@ -748,6 +748,7 @@ test("the settings-ext form sends only what changed; retention is a row table, n
       "edit-lxc-unprivileged",
       "edit-lxc-gpu",
       "edit-lxc-vpn",
+      "edit-lxc-timezone",
       "edit-resources-storage",
       "edit-on-demand",
     ],

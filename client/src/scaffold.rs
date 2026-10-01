@@ -26,6 +26,11 @@ pub struct StackDefaults {
     pub template: String,
     pub storage: String,
     pub features: String,
+    /// T62: `pct create --timezone`. "host" inherits the Proxmox host's
+    /// timezone (CET/CEST) and is left out of the scaffolded file — a stack
+    /// is only written with an explicit `timezone:` line when this default
+    /// itself is overridden to something else.
+    pub timezone: String,
     pub unprivileged: bool,
     /// Default startup order for application stacks (platform=5, mqtt=20 are
     /// per-stack overrides; role default is 99).
@@ -72,6 +77,7 @@ impl Default for StackDefaults {
             template: "clone:996".into(),
             storage: "local-lvm".into(),
             features: "nesting=1,keyctl=1".into(),
+            timezone: "host".into(),
             unprivileged: true,
             boot_order: 99,
             default_cores: 2,
@@ -400,6 +406,11 @@ pub fn scaffold_stack_with(
         protection = d.protection,
         hw = {
             let mut hw = String::new();
+            // T62: the default ("host") is left implicit, matching every
+            // existing stack file that relies on it rather than stating it.
+            if d.timezone != "host" {
+                hw.push_str(&format!("\n  timezone: \"{}\"", d.timezone));
+            }
             if preset.map(|pr| pr.meta.gpu).unwrap_or(false) {
                 hw.push_str("\n  gpu: true");
             }

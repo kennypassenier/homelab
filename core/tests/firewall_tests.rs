@@ -285,9 +285,7 @@ rules:
 
 fn manifest(vmid: u16, stack: &str, spec: Option<FirewallSpec>) -> StackManifest {
     StackManifest {
-        homepage_widgets: Default::default(),
         home_address_whitelist: None,
-        generated_dashboards_command: None,
         tiles: Default::default(),
         log_files: Vec::new(),
         registry_login: None,
@@ -315,6 +313,7 @@ fn manifest(vmid: u16, stack: &str, spec: Option<FirewallSpec>) -> StackManifest
             storage: "local-lvm".into(),
         },
         lxc: LxcSpec {
+            timezone: "host".into(),
             template: "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst".into(),
             unprivileged: true,
             features: "nesting=1,keyctl=1".into(),
@@ -359,9 +358,6 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         state_dir: "/var/lib/homelab".into(),
         now_unix: 1_760_000_000,
         metrics_targets_dir: None,
-        grafana_dashboards_dir: None,
-        homepage_services_file: None,
-        kuma_monitors_file: None,
         loki_url: None,
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),
@@ -780,9 +776,7 @@ async fn the_facts_read_every_recorded_stacks_firewall_file() {
     exec.seed_file(&fw_path(116), "[OPTIONS]\nenable: 1\n");
     let inp = FactsInputs {
         watched_backups: vec![],
-        kuma_monitors_file: None,
         state_dir: "/var/lib/homelab".into(),
-        grafana_vmid: 104,
         loki_vmid: None,
         gateway_vmid: 104,
         gateway_routes_dir: "/appdata/gateway/traefik-config/routes".into(),
@@ -790,7 +784,6 @@ async fn the_facts_read_every_recorded_stacks_firewall_file() {
         prometheus_url: None,
         loki_url: None,
         logs_window: "24h".into(),
-        grafana_dashboards_dir: None,
         now_unix: 1_789_704_000,
         watched_fresh: true,
     };
@@ -827,6 +820,7 @@ fn tile(probe: Option<&str>) -> Tile {
         order: 100,
         description: None,
         url: None,
+        watch_url: None,
         reading: None,
         probe: probe.map(str::to_string),
         watch_every: None,
@@ -1023,7 +1017,7 @@ fn derive_fleet_tile_targets_collects_every_stack_sorted_by_ip() {
 }
 
 #[test]
-fn with_fresh_target_replaces_only_its_own_entry() {
+fn with_fresh_target_joins_the_fresh_probes() {
     let mut targets: firewall::FleetTileTargets = vec![(
         "10.10.10.21".into(),
         std::collections::BTreeSet::from([9090]),
@@ -1044,17 +1038,38 @@ fn with_fresh_target_replaces_only_its_own_entry() {
             ),
         ]
     );
-    // Disabled: its own entry drops out even though `tiles` still names one.
+    // Disabled: adds nothing, keeps what the state said.
     targets.push((
         "10.10.10.107".into(),
         std::collections::BTreeSet::from([8080]),
     ));
     let disabled = firewall::with_fresh_target(&targets, "10.10.10.107", &tiles, false);
+    assert_eq!(disabled.len(), 2);
+}
+
+#[test]
+fn a_probe_on_a_device_outside_the_fleet_is_a_target_too() {
+    // Kenny, 2026-10-01: "HA, Proxmox en OPN moeten wel gemeten worden".
+    let mut gw = std::collections::BTreeMap::new();
+    gw.insert("ha".into(), tile(Some("http://10.10.10.2:8123/")));
+    gw.insert("opn".into(), tile(Some("https://10.10.10.1/")));
+    let targets = firewall::derive_fleet_tile_targets([("10.10.10.4/24", &gw)]);
     assert_eq!(
-        disabled,
-        vec![(
-            "10.10.10.21".to_string(),
-            std::collections::BTreeSet::from([9090])
-        )]
+        targets,
+        vec![
+            (
+                "10.10.10.1".to_string(),
+                std::collections::BTreeSet::from([443])
+            ),
+            (
+                "10.10.10.2".to_string(),
+                std::collections::BTreeSet::from([8123])
+            ),
+        ]
     );
+    assert_eq!(
+        firewall::probe_target("http://10.10.10.6:8096/web"),
+        Some(("10.10.10.6".to_string(), 8096))
+    );
+    assert_eq!(firewall::probe_target("10.10.10.6:8096"), None);
 }

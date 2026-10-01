@@ -228,6 +228,18 @@ pub fn effects(
             None,
         ));
     }
+    // T62: same as `unprivileged`/`gpu`/`vpn`/`storage` above — set only at
+    // `pct create`.
+    if old.lxc.timezone != new.lxc.timezone {
+        out.push(effect(
+            "warning",
+            format!(
+                "timezone {} → {}: only a rebuild of CT {} applies it; a deploy leaves the running container as it is",
+                old.lxc.timezone, new.lxc.timezone, new.vmid
+            ),
+            None,
+        ));
+    }
     if old.network.ip != new.network.ip
         || old.network.gateway != new.network.gateway
         || old.network.bridge != new.network.bridge

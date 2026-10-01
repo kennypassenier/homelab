@@ -6,6 +6,16 @@ What every feature does and how you use it, organised by the feature IDs in
 [DEBUGGING_GUIDE.md](DEBUGGING_GUIDE.md); host procedures in
 [OPERATIONS_RUNBOOK.md](OPERATIONS_RUNBOOK.md).
 
+This repository is public. Documentation below names a machine instead of
+its real internal address (`pve`, `the router`, `CT 109`, `the dashboard
+(CT 120)`, `the workstation`, ...). Where the literal shape of an address is
+the point of an example (a CIDR validator, a trusted-proxy range, a DR
+container spec), it is written in the RFC 5737 documentation range
+(`192.0.2.0/24` or `198.51.100.0/24`) instead of a real one, consistently
+across the docs. The actual addresses live only in `stacks/**` and in code,
+which this repository's commit hook guards against ever gaining a real
+internal address in `docs/**`, `README.md`, `CLAUDE.md` or `captured/**`.
+
 How to read this guide:
 
 - **Feature IDs** (A1, D12, H7, ...) come from `docs/FEATURES.md`. A decision
@@ -34,7 +44,7 @@ things, and each has its own home:
 
 | What | Where it comes from, first match wins | Source |
 |---|---|---|
-| Host address | `HOMELAB_HOST` typed before the command; else `host` in `config/client.toml`, searched upward from the current directory the way git finds its root; else `HOMELAB_HOST` from `~/.config/homelab/env` or `./.env`; else the built-in `10.10.5.250:8443` | `client/src/main.rs:127-137`, `client/src/repo_config.rs:25,63,103` |
+| Host address | `HOMELAB_HOST` typed before the command; else `host` in `config/client.toml`, searched upward from the current directory the way git finds its root; else `HOMELAB_HOST` from `~/.config/homelab/env` or `./.env`; else the built-in `pve:8443` | `client/src/main.rs:127-137`, `client/src/repo_config.rs:25,63,103` |
 | Token | `HOMELAB_TOKEN` in the environment; else `~/.config/homelab/env`; else `./.env` | `client/src/main.rs:49-88,140` |
 | Certificate pin | the pin built into the client from `config/client.toml` at compile time (fix-149), the only certificate trusted; a machine pin or repository pin that disagrees is refused. A client built without one: `~/.config/homelab/pin`; if that is empty, the `pin` in `config/client.toml` is adopted and saved; if both are empty, the first certificate seen is trusted and saved | `client/src/lib.rs:16-18`, `client/src/repo_config.rs:143`, `client/src/main.rs:1101-1155` |
 
@@ -86,7 +96,7 @@ same two lines. A host from before that change says `build not reported`.
 before the command:
 
 ```bash
-HOMELAB_HOST=10.10.5.250:8443 homelab ping
+HOMELAB_HOST=pve:8443 homelab ping
 ```
 
 **When the certificate does not match.** If this machine pinned one
@@ -670,10 +680,10 @@ repository and the host, on the same pages and dialogs a click uses:
 | `settings <stack>` | the Settings tab's form | `settings` (`edit-cores`, `edit-memory-mb`, …, `edit-image-<app>-<service>`, and for each tile the stack declares `edit-tile-watch-<slug>`/`edit-tile-down-<slug>`) → `plan` → `commit` (`edit-subject`, `edit-note`, `edit-follow`); `confirm` commits and pushes, then queues the follow-up |
 | `raw <stack>` | the Settings tab's Files card (open, edit, create, delete, rename any text file of the stack) | `op` (`files-op`, picked: `edit`, `create`, `delete` or `rename`) → `file` (`raw-file`, and `raw-text` with `edit`, for `edit` and `create`; `files-new-path` typed for `create`; `files-rename-to` typed for `rename`) → `plan` → `commit` |
 | `add-app <stack>` | "Add an app" | `app` (`add-app-preset`) → `plan` → `commit`; feat-tiles-3: one optional hostname per app the chosen preset brings in (`add-app-tile-<app>`, blank = no tile), folded into the same commit as the app itself (`StackEdit::AddApp.tiles`, applied alongside `apps:`/`storage:` on the same staged manifest) — not a second commit after the fact, the same one-commit shape `new-stack`'s Tile step above has |
-| `settings-ext <stack>` | the Settings tab's "Network & hardware" card (feat-stacks-9: `network.*`, `lxc.unprivileged`/`gpu`/`vpn`, `resources.storage`, `on_demand`, `retention`) | `settings_ext` (`edit-network-ip`, `edit-network-gateway`, `edit-network-bridge`, `edit-network-vlan`, `edit-lxc-unprivileged`, `edit-lxc-gpu`, `edit-lxc-vpn`, `edit-resources-storage`, `edit-on-demand`, plus a `retention` row table — `row add retention`/`row edit\|up\|down\|delete retention:<n>`, the same origin-less full-list shape the backend always took; an empty table clears the stack's own tiers back to the fleet default) → `plan` → `commit`. `unprivileged`, `gpu`, `vpn` and the storage id only ever take effect at a rebuild of the container; the plan says so. |
+| `settings-ext <stack>` | the Settings tab's "Network & hardware" card (feat-stacks-9: `network.*`, `lxc.unprivileged`/`gpu`/`vpn`/`timezone`, `resources.storage`, `on_demand`, `retention`) | `settings_ext` (`edit-network-ip`, `edit-network-gateway`, `edit-network-bridge`, `edit-network-vlan`, `edit-lxc-unprivileged`, `edit-lxc-gpu`, `edit-lxc-vpn`, `edit-lxc-timezone`, `edit-resources-storage`, `edit-on-demand`, plus a `retention` row table — `row add retention`/`row edit\|up\|down\|delete retention:<n>`, the same origin-less full-list shape the backend always took; an empty table clears the stack's own tiers back to the fleet default) → `plan` → `commit`. `unprivileged`, `gpu`, `vpn`, `timezone` and the storage id only ever take effect at a rebuild of the container; the plan says so. |
 | `apps <stack>` | the Settings tab's "Apps & storage" card (feat-stacks-10: remove/add-blank an app, and `storage:`/`data_mounts:`/`log_files:` as kp datatables with an Add/Edit dialog each, the Firewall tab's rule table generalised) | `apps` (`apps-remove-<app>` checkboxes, `apps-add-blank` comma-separated names) → each list's own Add/Edit dialog behind `row add <list>` / `row edit <list>:<n>` (`list` one of `storage`, `data_mounts`, `log_files`; fields `storage-host-path`/`storage-mount-point`/`storage-app`/`storage-no-data`/`storage-no-backup`/`storage-host-owner-uid`, `mount-host-path`/`mount-mount-point`/`mount-note`/`mount-rotate-files`/`mount-rotate-keep`/`mount-rotate-container`/`mount-rotate-signal`, `logfile-path`/`logfile-job`), `row up`/`row down`/`row delete <list>:<n>` to reorder or drop a row → `plan` → `commit`. Removing an app drops it from `apps:`, its whole directory and any storage/data_mounts row naming it as `app:` — data already on the container is untouched, only the declaration goes. |
 | `latch <stack>` | the Settings tab's "Latch" card (feat-stacks-11: `latch_secrets`, `latch_files` as a kp datatable + dialog) | `latch` (`latch-secret-<app>` checkboxes) → the `latch_files` row dialog behind `row add latch_files` / `row edit latch_files:<n>` (fields `latchfile-from`/`latchfile-dest`/`latchfile-mode`/`latchfile-owner`/`latchfile-restarts`), `row up`/`row down`/`row delete latch_files:<n>` → `plan` → `commit`. A value containing `${` is refused before anything is sent, in the row dialog itself: `latch --expand` parses every file it is handed, so one unresolvable placeholder would break every stack's secrets, not only this one's. |
-| `tiles <stack>` | the Settings tab's "Tiles" card (feat-tiles-1: create, rename or delete any entry of a stack's `tiles:` map, every field, as a kp datatable + dialog) | `tiles` (no scalar fields of its own) → the tile row dialog behind `row add tiles` / `row edit tiles:<n>` (fields `tile-key`, `tile-name`, `tile-group`, `tile-order`, `tile-description`, `tile-url`, `tile-reading`, `tile-watch-every`, `tile-down-after`), `row up`/`row down`/`row delete tiles:<n>` → `plan` → `commit`. `probe` is never written here: the client fills it in at deploy time, per `Tile::probe`'s own doc. The Settings tab's own two per-tile watch fields (`edit-tile-watch-<slug>`/`edit-tile-down-<slug>`, above) keep working exactly as before and write the same `tiles.<key>.{watch_every,down_after}` path, so a quick watch-seconds change does not need this card at all. Renaming a tile's hostname keeps its history; deleting an existing one sends an explicit tombstone (`tilesBody`/`tiles_drive_body`) rather than merely dropping the row, since `tiles:` is a sparse change list, not a full-list rebuild like the other row tables here. |
+| `tiles <stack>` | the Settings tab's "Tiles" card (feat-tiles-1: create, rename or delete any entry of a stack's `tiles:` map, every field, as a kp datatable + dialog) | `tiles` (no scalar fields of its own) → the tile row dialog behind `row add tiles` / `row edit tiles:<n>` (fields `tile-key`, `tile-name`, `tile-group`, `tile-order`, `tile-description`, `tile-url`, `tile-watch-url`, `tile-reading`, `tile-watch-every`, `tile-down-after`), `row up`/`row down`/`row delete tiles:<n>` → `plan` → `commit`. `probe` is never written here: the client fills it in at deploy time, per `Tile::probe`'s own doc. The Settings tab's own two per-tile watch fields (`edit-tile-watch-<slug>`/`edit-tile-down-<slug>`, above) keep working exactly as before and write the same `tiles.<key>.{watch_every,down_after}` path, so a quick watch-seconds change does not need this card at all. Renaming a tile's hostname keeps its history; deleting an existing one sends an explicit tombstone (`tilesBody`/`tiles_drive_body`) rather than merely dropping the row, since `tiles:` is a sparse change list, not a full-list rebuild like the other row tables here. |
 | `checks <stack>/<app>` | the Checks tab's edit section (feat-checks-1: one app's whole `checks.yml` — the measured checks, the manual questions, the nightly probes, the busy check and the link — checks/manual/probes each a kp datatable + dialog) | `checks` (`checks-app` picks the app, fixed for the session by the CLI target; `checks-busy`, `checks-url` plain text, always sent as the whole wanted value, blank = none) → each list's own row dialog behind `row add <list>` / `row edit <list>:<n>` (`list` one of `checks`, `manual`, `probes`; fields `check-name`/`check-command`/`check-expect`/`check-layer`/`check-blind-spot`, `manual-text`/`manual-once`, `probe-name`/`probe-command`/`probe-healthy-kind`/`probe-healthy-value`/`probe-layer`/`probe-blind-spot`), `row up`/`row down`/`row delete <list>:<n>` → `plan` → `commit`. An app with no `checks.yml` yet gets one created on Review and commit; a check or probe below the Application layer is refused without a blind spot, the same rule `checks.yml`'s own comments state. The Checks tab still shows the manual-answers table above this section unchanged. |
 | `publish <stack>/<app>` | the Apps tab's "Publish…" dialog, opened per app (feat-publish-1: a hostname and the app's container port, turned into `gateway_route`/`extra_routes` plus the router/service/loadBalancer fragment in `traefik-routes.yml`, optionally a tile) | opened directly (a click-opened dialog, not a page already showing it — the same shape `open preset`/`open new-stack` use), fields `publish-hostname`, `publish-port`, `publish-external` (this backend is not one of the fleet's own managed stacks), `publish-separate-file` (keep this route in a file of its own under `routes/` instead of extending `traefik-routes.yml`), `publish-create-tile`, `publish-tile-name`, `publish-tile-group` → `plan` → `commit`. A stack's first publish becomes its `gateway_route` (content in `stacks/<stack>/traefik-routes.yml`, the filename derived as `<gateway_vmid>-app-<stack>.yml`, the only name `gateway_route.filename` may have); every publish after that adds another router and service to the same file, unless "keep in a file of its own" is ticked, which appends an `extra_routes` entry under `stacks/<stack>/routes/` instead. A tile, if asked for, is keyed by the same hostname as the route. |
 | `firewall <stack>` | the Firewall tab | `rules` (`fw-enabled`, `fw-policy-in`, `fw-policy-out`, `fw-management-open`, `fw-comment`, and `row …` with the rule dialog's `rule-dir`, `rule-action`, `rule-peer`, `rule-proto`, `rule-dport`, `rule-note`, `rule-comment`) → `plan` → `commit` |
@@ -700,13 +710,13 @@ An example, one firewall rule on `admin`:
 ```
 homelab ui open firewall admin
 homelab ui row add
-homelab ui type rule-peer 10.10.10.4
+homelab ui type rule-peer the gateway (CT 104)
 homelab ui type rule-dport 9999
 homelab ui type rule-note drive test
 homelab ui press save               # the rule is in the table, not written yet
 homelab ui press next               # the plan: the diff, what homelab would change
 homelab ui press next               # the commit step
-homelab ui type edit-subject admin: 10.10.10.4 may reach 9999
+homelab ui type edit-subject admin: the gateway (CT 104) may reach 9999
 homelab ui pick edit-follow none
 homelab ui press confirm            # one commit, pushed; its hash in homelab ui state
 homelab ui close
@@ -807,7 +817,7 @@ workstation), `testplan` and `update-policy` (repository documents), and
 | `homelab release-update [tag]`, TUI `u` | **Update the host** (the form `update-host`); a banner on every page when a newer release is out | `open update-host`, `type act-tag v3.63.0` |
 | `homelab install-native stacks/<s>[/<unit>] [tag]` | the form `install-native` on a stack (Native services) | `open install-native kyu`, `pick act-unit kyu-runner`, `type act-tag v1.0.2` |
 | `homelab apply` | **Apply** page (the plan per stack, each diff on request) and the form `apply` | `open apply`, `type act-destroy drill` |
-| `homelab runbook`, `export`, `dashboard` | downloads: the runbook on the Host page, a stack's export bundle and Grafana dashboard JSON on its overview | — |
+| `homelab runbook`, `export` | downloads: the runbook on the Host page, a stack's export bundle on its overview | — |
 | `homelab import <bundle.yml> <new-name> <vmid>` | **Import…** on the Overview and Presets pages: a bundle pasted or uploaded becomes a new stack through the plan and the commit every edit ends in (a bundle carrying a `.env` is refused) | `open import`, `edit import-bundle <file>`, `type import-name uptime2`, `type import-vmid 197`, `press next` (the plan), `press next`, `type edit-subject …`, `press confirm` |
 | `homelab presets` | **Presets** page | `goto /app/presets` |
 | `homelab guards <vmid>` | the form `guards-ct`: any container by its number (a stack's Apply guards still uses its own) | `open guards-ct`, `type act-vmid 104` |
@@ -875,6 +885,80 @@ to the real host.
 Tests: `admin/tests/parity_tests.rs`, `admin/tests/act_actions_tests.rs`
 (`parity_*`), `admin/tests/follow_tests.rs` (`parity_*`),
 `core/tests/native_tests.rs` (`parity_*`), `admin/web/test/parity.test.js`.
+
+#### feat-backup-1/2/3 · Backups page
+
+**Status:** Built, not yet measured live (needs the next release).
+
+`/app/backups` lists every stack's restic repositories: a compose stack has
+one per app that owns data (D25); a native (adopted) service has exactly
+one, named after the unit. Each row is read straight from the host
+(`GetBackups`, `core::ops::backup::backup_status`/`repo_status_of`) — newest
+snapshot, its age and size, the repository's own snapshot count, and the
+last restore-drill verdict for that repository (never drilled, passed, or
+failed with its reason). Nothing here starts a backup or a restore by
+itself.
+
+**Restore.** The Restore… button on a repository with a snapshot opens the
+existing `restore` (compose) or `restore-native` dialog with that snapshot
+pre-filled, so picking a snapshot and running the restore are one motion.
+`restore-native` (feat-backup-2) is `RestoreNative`'s own action: gated the
+same way `restore` is (the stack name must be typed, fix-64's rule, mirrored
+in `core::ops::native::restore_native`) — it stops the unit, copies the
+current data aside on the host first (`pre-restore/<stack>-<ts>`, never
+removed automatically), unpacks the chosen snapshot with `restic dump | tar
+-x`, and restarts the unit. A failed unpack leaves the unit stopped rather
+than restarted over a half-written directory.
+
+**Browse a snapshot (feat-backup-3).** Read-only, from `BrowseSnapshot`
+(`core::ops::backup::browse_snapshot`, `restic ls --json` parsed by
+`parse_snapshot_ls`): expand a snapshot's file list inline on the page,
+descend into a directory with `?path=`, nothing here restores a single
+file — that stays a whole-repository restore, named above.
+
+Tests: `core/ops/backup.rs`'s own unit tests (`parse_snapshot_ls`),
+`core/tests/native_restore_tests.rs` (`restore_native`'s gate, order of
+steps, and the failed-unpack case).
+
+#### feat-secrets-1/2 · Secrets page
+
+**Status:** Built, not yet measured live (needs the next release).
+
+`/app/secrets` lists what a chosen stack declares in `latch_secrets` and
+`latch_files` — read from the dashboard's own working copy of
+`lxc-compose.yml` (`admin::core::stackedit_latch::current`), the same source
+the stack editor's latch form already reads. No value is fetched ahead of a
+click.
+
+**Reveal.** Pressing Reveal on one row asks the host for that one value
+(`RevealSecret`, read straight from the host's vault —
+`{state_dir}/secrets/<stack>/…`, never through a traced process) and shows
+it inline; Hide (or leaving the page) drops it from the page without asking
+the host again. Every reveal is one audit-log line on the host naming WHICH
+secret was read, never the value.
+
+**Change a secret (feat-secrets-2).** Change… opens a small form on the same
+row: the new value is staged first (`POST /data/secrets/stage`, held in
+memory on the host for five minutes, taken exactly once) and the write
+itself rides `ActionKind::ChangeSecret` — the same job/audit/progress
+machinery every other dashboard write gets, driven with the secret
+reference and the one-time stage token, never the value itself (it never
+becomes a job argument, a "copy as CLI command" line, or a `homelab ui`
+step's field). The host writes it with `latch put <stack>/<app>/.env --env
+<env>` (or the matching `latch_files` path) from its own intent-repo
+checkout — the exact file the next deploy reads, nothing else in latch is
+touched. Redeploy the stack for the running container to pick it up.
+`HOMELAB_LATCH_ENV` must be set on the host (the same variable the nightly
+deploy uses) or the write is refused with that remedy.
+
+Not drivable with `homelab ui` as a scripted preset the way other actions
+are (Reveal and the staged value are deliberately a page-only, click-through
+flow); the dialog itself still opens and plays through `open
+change-secret`/`type act-secret_ref …`/`type act-stage_token …` once a value
+has been staged by hand.
+
+Tests: `core/src/ops/secrets.rs` (`vault_rel`, `latch_rel_path`),
+`host/src/secrets.rs` (`latch_put` refuses without `HOMELAB_LATCH_ENV`).
 
 #### A5 · Secrets vault on the host
 
@@ -1035,20 +1119,21 @@ A deploy is only green after three checks:
 
 Only then does the log say `Sync complete` (`core/src/ops/deploy.rs:2699-2707`).
 
-**Worked example: a `checks.yml`.** From `stacks/home/homepage/checks.yml`,
-shortened:
+**Worked example: a `checks.yml`.** From
+`stacks/registry/registry/checks.yml`, shortened:
 
 ```yaml
 checks:
-  - name: "diensten op de startpagina"
+  - name: "images die de cache vasthoudt"
     command: >-
-      docker exec homepage sh -c 'grep -c "href:" /app/config/services.yaml'
+      curl -s -m 15 http://127.0.0.1:5000/v2/_catalog |
+      grep -o '"[a-z0-9./_-]*"' | wc -l
     expect: never_decreases
     layer: application
     blind_spot: >-
-      Counts what the page is configured to show, not what it renders ...
+      Counts what Docker Hub's mirror holds. ...
 manual:
-  - "Kijk of de startpagina de diensten toont die je verwacht. ..."
+  - "Kijk na een uitrol of er `[cache] … did not deliver` in het logboek staat. ..."
 ```
 
 The dashboard's Files card (the stack page's Settings tab, replacing the old
@@ -1123,10 +1208,22 @@ per app. The capture lives only for the duration of one update.
 
 **Status:** Built (daemon side).
 
-The daemon sends `READY=1` at start and `WATCHDOG=1` every 10 seconds
-(`host/src/main.rs:1893-1901`). The unit settings that act on it
-(`WatchdogSec`, restart) are part of the host installation, not of this
-repository's code.
+The daemon sends `READY=1` at start, then `WATCHDOG=1` every 10 seconds —
+but only while the nightly scheduler's own heartbeat is fresh. fix-52
+(background-tasks-unsupervised) made a panicked or killed scheduler end the
+process (`supervise()`); its residual gap was a scheduler wedged inside one
+`await` forever, which the 10-second loop could not see because it proved
+only that itself was still scheduled. `scheduler_loop` now stamps a shared
+heartbeat when a tick wakes, after the nightly backup batch returns, and
+after each stack's night work; the ping loop withholds `WATCHDOG=1` once
+that heartbeat is older than `SCHEDULER_WATCHDOG_STALE_S` (one hour —
+longer than any single backup or update should legitimately take, so a
+hung round is noticed rather than fed forever). The unit itself
+(`WatchdogSec=30`, `Type=notify`, `OnFailure=homelab-host-rollback.service`)
+ships from this repository (`core/assets/host-units/homelab-host.service`,
+`core/src/hostunits.rs`) and is installed by every self-update. Test:
+`fix_52_residual_a_stale_scheduler_heartbeat_withholds_the_watchdog_ping`
+(`host/src/main.rs`).
 
 #### B8 · Golden template
 
@@ -1223,8 +1320,8 @@ stack_name: syncthing
 vmid: 108
 hostname: 108-app-syncthing
 network:
-  ip: 10.10.10.8/24
-  gateway: 10.10.10.1
+  ip: 198.51.100.8/24
+  gateway: the router
   bridge: vmbr0
   vlan: 10
 resources:
@@ -1303,7 +1400,7 @@ firewall:
     - comment: the registry cache (docker pulls)
       dir: out             # in | out
       action: ACCEPT       # ACCEPT | DROP | REJECT
-      dest: 10.10.10.17    # one address or a network in CIDR form
+      dest: the registry (CT 117)    # one address or a network in CIDR form
       proto: tcp           # tcp | udp | icmp
       dport: "5000:5003"   # 8080, "8080,8787" or "5000:5003"
       note: registry cache # written after the rule on its own line
@@ -1311,10 +1408,10 @@ firewall:
 
 - The file starts with a line naming the stack file it comes from, then the
   declaration in order. Unless `management_open` gives a reason, three rules
-  follow the declared ones: DNS to 10.10.5.1 (udp and tcp 53) and a drop of
-  the management network 10.10.5.0/24. A declared ACCEPT towards that network
+  follow the declared ones: DNS to the router (udp and tcp 53) and a drop of
+  the management network the management network. A declared ACCEPT towards that network
   comes first and still passes.
-- The validator refuses a network with host bits set (`10.10.10.4/24`), a
+- The validator refuses a network with host bits set (`198.51.100.4/24`), a
   port outside 1 to 65535 or a backwards range, a `dport` without `proto` or
   with `icmp`, a note over more than one line, and a `management_open` reason
   shorter than ten characters, naming the rule and the field.
@@ -1359,11 +1456,9 @@ The host then runs, in order: `confirm`, `no-touch check`, `hostname guard`,
 `backup before destroy`, `stop container`, `lift protection`,
 `destroy container` (`pct destroy --purge`), and then the same unregister
 steps `homelab forget` runs: `remove metrics discovery`,
-`remove grafana dashboard`, `remove gateway route`, `update state` and
-`fleet files` (`core/src/ops/destroy.rs:35-199`, `:207-332`). `update state`
-drops the stack's record and its manual checks and records the stack as
-retired; `fleet files` rewrites the front page and the Uptime Kuma host list
-without it (`core/src/ops/fleetfiles.rs:236-271`).
+`remove gateway route` and `update state`
+(`core/src/ops/destroy.rs:35-199`, `:207-332`). `update state` drops the
+stack's record and its manual checks and records the stack as retired.
 
 **What a destroy keeps.** The stack's `/appdata` directories, its vault
 directory `/var/lib/homelab/secrets/<stack>` and its restic repositories stay,
@@ -1643,7 +1738,6 @@ steps in this order (`core/src/ops/deploy.rs`, the `step!` calls from line
 | `verify health` | B3 |
 | `gateway route` | H1, when the stack has a route |
 | `retire gateway route` | removes the old route file when the stack dropped `gateway_route:` or moved vmid (H1) |
-| `grafana dashboard`, `homepage services`, `uptime monitors` | fleet-wide generated files, each only when configured on the host |
 | `orphan files` | removes files under `/opt/<stack>/` the repository no longer has (D3) |
 | `garbage collect` | D3 |
 | `log shipper` | F1, when configured |
@@ -1888,11 +1982,11 @@ The paths and the vmid above are examples.
 Name the apps in the stack file and choose the latch environment:
 
 ```yaml
-latch_secrets: [homepage]
+latch_secrets: [traefik]
 ```
 
 ```bash
-HOMELAB_LATCH_ENV=prod homelab deploy stacks/home
+HOMELAB_LATCH_ENV=prod homelab deploy stacks/gateway
 ```
 
 `HOMELAB_LATCH_ENV` can also live in `~/.config/homelab/env` or `./.env`
@@ -1904,8 +1998,8 @@ and keeps the result in memory (`client/src/spec.rs:334-412`). A local
 (`client/src/spec.rs:96-120,316-332`):
 
 ```text
-[env] homepage <- latch
-[env] homepage <- local .env (latch skipped)
+[env] traefik <- latch
+[env] traefik <- local .env (latch skipped)
 ```
 
 Refusals, all before anything is sent (`client/src/spec.rs:346-408`):
@@ -2269,8 +2363,8 @@ and the run fails, because catching up would mean rolling the replica back
 When `loki_url` is set in `/etc/homelab/host.toml`, every deploy, native or
 compose, installs Alloy in the container. `loki_url` is the base address
 Alloy pushes to (`/loki/api/v1/push` is added to it); since Loki moved to the
-metrics stack (fix-90, 2026-09-27) it is `http://10.10.10.13:3100`, and it was
-`http://10.10.10.4:3100` while Loki ran on the gateway. Changing it reaches a
+metrics stack (fix-90, 2026-09-27) it is `http://metrics (CT 113):3100`, and it was
+`http://the gateway (CT 104):3100` while Loki ran on the gateway. Changing it reaches a
 container at that stack's next deploy, which renders its Alloy config again.
 That port takes pushes only since fix-93, so the coverage check in
 `homelab check` asks Loki from inside its container instead: set
@@ -2283,7 +2377,7 @@ devices that cannot run a shipper, with `syslog_receivers:` entries of `host`,
 `listen` (port 1024 or higher), `protocol` (`udp`/`tcp`) and `format`
 (`rfc5424`/`rfc3164`), and optionally `allow_from`, a list of sender IP
 addresses whose lines are kept; every other sender's lines are dropped before
-they reach Loki (fix-93; the gateway allows OPNsense's 10.10.10.1 only)
+they reach Loki (fix-93; the gateway allows OPNsense's the router only)
 (`core/src/manifest.rs:95-137,509-563`);
 `stacks/gateway/lxc-compose.yml:144` is the example.
 
@@ -2314,7 +2408,7 @@ Assistant, as before):
 
 | Urgent | What counts |
 |---|---|
-| A service not answering for more than 5 minutes | the alerts `HostDown`, `TargetDown` (Uptime Kuma notifies Home Assistant on its own) |
+| A service not answering for more than 5 minutes | the alerts `HostDown`, `TargetDown`; the dashboard's own minute watch (below, "The dashboard") sends its own urgent Down notice after five minutes |
 | A failed backup | a failed `backup`, `scheduled-backup`, `backup-native`, `host-meta-backup`, `device-backup`, `second-copy`, `restic-check`, `zfs-replicate` |
 | A disk almost full or failing | `FilesystemAlmostFull`, `PveStorageAlmostFull`, `HypervisorRootFillingUp`, `DiskPendingSectors`, `DiskSmartFailed`, `ZpoolNotOnline`, `DriveMissing` |
 | A failed update or deploy | a failed `deploy`, `install-native`, `update`, `update-native`, `release-update-native`, `self-update`, `patch`, `rollback-native` (and their `scheduled-` forms) |
@@ -2363,7 +2457,7 @@ How it travels:
   job the dashboard itself ran fills that job's notice instead of adding a
   second one.
 - Alertmanager posts every alert to the dashboard
-  (`http://10.10.10.20:8090/hooks/alertmanager`, bearer
+  (`http://the dashboard (CT 120):8090/hooks/alertmanager`, bearer
   `HOMELAB_ADMIN_ALERTS_TOKEN` from admin.env; the same value in
   `/alertmanager/admin-token` on CT 113), and the urgent ones also to kyu
   as before. A repeat of an alert that still fires adds nothing; a resolved
@@ -2378,21 +2472,17 @@ How it travels:
 #### F4 · Metrics stack
 
 **Status:** Built as an ordinary stack. `stacks/metrics` runs prometheus,
-alertmanager, pve-exporter, loki and grafana (`stacks/metrics/lxc-compose.yml`;
-loki and grafana since fix-90, 2026-09-27, before that on the gateway). With
+alertmanager, pve-exporter and loki (`stacks/metrics/lxc-compose.yml`; loki
+since fix-90, 2026-09-27, before that on the gateway). With
 `metrics_targets_dir` set on the host, every deploy writes the stack's
 Prometheus target file and destroy and forget remove it
-(`core/src/ops/deploy.rs:521-544`, `core/src/ops/destroy.rs:218-228`). With
-`grafana_dashboards_dir` set, every deploy writes the stack's generated Grafana
-dashboard into the container Grafana runs in, and destroy and forget remove
-it. `grafana_vmid` in `host.toml` names that container; unset it is the
-gateway (`gateway_vmid`), where Grafana ran until fix-90. After the move the
-two lines read `grafana_vmid = 113` and
-`grafana_dashboards_dir = "/opt/metrics/grafana/provisioning/dashboards-generated"`
-(`core/src/ops/deploy.rs:1994-2046`, `core/src/ops/destroy.rs:233-262`).
-`homelab dashboard <stack> <app>...` prints the same dashboard JSON locally,
-without a token, for a container not yet under management
-(`client/src/main.rs:856-879`).
+(`core/src/ops/deploy.rs:521-544`, `core/src/ops/destroy.rs:218-228`).
+
+Grafana ran in this stack until owner decision "Alle vier meteen"
+(2026-10-01): the admin dashboard's own Metrics page (below, "The
+dashboard") reads this Prometheus directly, so no separate dashboard app,
+no generated dashboard JSON and no `grafana_vmid`/`grafana_dashboards_dir`
+host.toml keys exist any more.
 
 #### F5 · Health API
 
@@ -2402,7 +2492,7 @@ bearer token and 401 to anyone else (fix-126, `app_router`). Host metrics travel
 WebSocket (C6), not over HTTP.
 
 ```bash
-curl -sk https://10.10.10.250:8443/api/health
+curl -sk https://pve:8443/api/health
 ```
 
 (the address from `config/client.toml`; `-k` because the certificate is
@@ -2634,7 +2724,7 @@ container:
 ```yaml
 extra_routes:
   - filename: manual-routes.yml
-    external: ["https://10.10.5.1", "https://10.10.5.250:8006"]
+    external: ["https://the router", "https://pve:8006"]
 ```
 
 `external` names each backend in the file that is not a stack's own
@@ -2689,10 +2779,33 @@ the devices (W1), then passes them in when it creates the container
 borrows (media libraries) are `data_mounts`, see C1.
 
 **Dashboard:** the stack page's Settings tab, "Network & hardware" card
-(feat-stacks-9) edits `network.*`, `lxc.unprivileged`/`gpu`/`vpn` and
-`resources.storage` the same way; the plan warns that these four only ever
-apply at a rebuild (`pct create`/`pct clone` are the only places Proxmox
+(feat-stacks-9) edits `network.*`, `lxc.unprivileged`/`gpu`/`vpn`/`timezone`
+and `resources.storage` the same way; the plan warns that these five only
+ever apply at a rebuild (`pct create`/`pct clone` are the only places Proxmox
 reads them), same shape as the existing protection warning.
+
+#### T62 · LXC timezone
+
+**Status:** Built. `lxc.timezone` (default `"host"`, `core/src/manifest.rs`)
+is passed to `pct create --timezone` the same way `features` is
+(`core/src/ops/deploy.rs`); it is create-time only, like `unprivileged`,
+`gpu` and `vpn` — a deploy of a running container never changes it. `"host"`
+inherits the Proxmox host's own timezone (CET/CEST), which is what every
+container ran on before this field existed, so a stack file leaves it out
+unless it needs something else:
+
+```yaml
+lxc:
+  timezone: "Europe/Amsterdam"   # default: host (omit to inherit the host's)
+```
+
+Drift is covered automatically: the fleet check compares the whole declared
+`lxc:` block against the host's last-applied manifest
+(`core/src/ops/fleetcheck.rs`), the same way it already does for `features`
+and `protection` — no per-field code needed for a new field here.
+
+**Dashboard:** same "Network & hardware" card as `unprivileged`/`gpu`/`vpn`
+above (`edit-lxc-timezone`), same rebuild-only warning.
 
 #### H5 · Host self-update with rollback
 
@@ -3009,9 +3122,11 @@ drops them all. 18 probes replaced or complemented manual questions on
 2026-09-30; each was run once for real, through `lxc-attach` as the host
 runs it, and read healthy.
 
-### The dashboard in place of Homepage, Grafana, GoAccess and Uptime Kuma
+### The dashboard: Start, Charts, Traffic and the minute watch
 
-Kenny, 2026-09-30 ("Vervangen" four times; one place to look).
+Kenny, 2026-09-30 ("Vervangen" four times; one place to look) and "Alle vier
+meteen" (2026-10-01): Homepage, Grafana, GoAccess and Uptime Kuma are
+retired — four separate apps replaced by four parts of this one dashboard.
 
 - **Start** (`/app/start`): one tile per service, grouped, from the stacks'
   `tiles:` (keyed by the hostname a tile opens, or an id with `url:`; name,
@@ -3031,16 +3146,71 @@ Kenny, 2026-09-30 ("Vervangen" four times; one place to look).
   Down notice, its return an Up notice, and a dot on the tile. The host asks
   the dashboard's `watch_url` (host.toml) every minute in turn.
 
+#### visuals (2026-10-01): the fleet-wide graphs
+
+Everything below is derived — no app is named in code, and nothing is
+typed by hand: it comes from the stack files, Prometheus, restic and the
+fleet check's own findings. See `docs/admin/FEATURES.md` for the feature
+text and `docs/admin/REALIZATION_PLAN.md`'s `visuals` milestone for the
+decisions behind each one.
+
+- **Fleet view** (`/app/fleetview`): five sections, each reading its own
+  route so a Prometheus outage only empties the two that need it.
+  - **Topology** (feat-overview-7, `/data/topology`): which container may
+    reach which, drawn as an inline SVG graph (deterministic layout: nodes
+    on a circle, sorted by stack name) from the same firewall declarations
+    `/data/firewall`'s matrix reads (`admin/src/core/topology.rs`). A
+    dashed edge is an *open* target (no firewall in force, so nothing
+    declared stops anyone reaching it); a solid edge names the ports a
+    declared rule permits. No ingress (gateway route) edges yet — route
+    facts are parsed client-side only (F200, `homelab check`), out of
+    scope for this pass.
+  - **Capacity map** (feat-overview-11, `/data/capacity`): CPU, memory and
+    disk side by side for every stack, one Prometheus instant query per
+    metric across the whole fleet (`homelab_core::charts::fleet_capacity_panels`)
+    rather than one call per stack.
+  - **Disk growth** (feat-overview-12, `/data/disk-growth?range=7d&within_days=14`):
+    every stack's root disk and every hypervisor filesystem, fitted over
+    the chosen window with both a plain least-squares line and a robust
+    Theil-Sen line (the median of every pairwise slope — a single
+    log-filled-the-disk-for-an-hour spike cannot move it the way it moves
+    a mean); `homelab_core::diskgrowth::fit`. A row is a **warning** when
+    the robust fit's days-to-full is within `within_days` (default 14).
+  - **Dependencies** (feat-stacks-9, `/data/dependencies`): the same
+    topology's edges, read per stack as "depends on" / "depended on by" —
+    a dependency is a declared (or open) flow, directed.
+  - **Stale images** (feat-stacks-10, `/data/stale-images`): the fleet
+    check's own `noted` findings about a pinned image whose upstream moved
+    on (fix-83, `homelab_core::ops::pins::evaluate_pins`), parsed into a
+    table instead of a sentence — it reads the same run the Health page's
+    fleet check uses (`check_read`), so visiting both never starts the
+    read twice.
+- **Backup calendar** (`/app/backupcalendar`, feat-overview-10): the last
+  35 nights, one cell per day, green when every stack that keeps data has
+  at least one restic snapshot that night, amber for some, red for none.
+  Its own host command (`Command::BackupCalendar`, read-only, asks restic
+  directly through `homelab_core::ops::backup::snapshot_nights_unix`) and
+  its own `SlowRead` (`backup-calendar`, ~1–3 s per repository, so a large
+  fleet takes a while over the network) — kept apart from the Backups page
+  on purpose, so the two can be built in parallel without touching each
+  other's files.
+- **Measured traffic on the topology** (feat-firewall-3): the Firewall
+  page draws the same topology as Fleet view, with a ring around each
+  container sized by its own measured network throughput
+  (`/data/fleet-traffic`, received + transmitted bytes/s,
+  `homelab_core::charts::fleet_traffic_panels`). The fleet has no
+  per-neighbour flow metric (node_exporter counts a container's interface
+  as a whole, not by remote address), so this is each node's own total,
+  not a per-edge measurement — a limitation of the data, not of the graph.
+
 ### App knowledge in the stack files
 
 app-knowledge (Kenny, 2026-09-30: "Alles verplaatsen"): what homelab knows
 about a particular app is declared in that app's stack files, not in code.
 
-- **Front-page tiles**: `homepage_widgets:` in `lxc-compose.yml`, keyed by
-  app, with `kind` (Homepage's widget name), an optional `key_command`
-  (prints the app's API key, run in its container, `{dir}` = its config
-  directory; without it the key comes from Homepage's own
-  `HOMEPAGE_VAR_<APP>`) and optional `extra` lines.
+- **Front-page tiles**: `tiles:` in `lxc-compose.yml`, keyed by the hostname
+  a tile opens (or an id with `url:`); see "The dashboard" above. The stack
+  that owns a route declares its own tile.
 - **"Is anybody using it"** (O10): `busy_check: {command: …}` in the app's
   `checks.yml`. Asked before an update or a nightly backup stops the app:
   nothing on stdout means idle, a line per user means in use, and a failing
@@ -3049,9 +3219,6 @@ about a particular app is declared in that app's stack files, not in code.
 - **The house's address on an allow list** (fix-94):
   `home_address_whitelist: {file, test, reload}` in `lxc-compose.yml`; the
   gateway stack declares it for CrowdSec.
-- **Generated dashboards** (F149): `generated_dashboards_command:` in
-  `lxc-compose.yml` prints the uid of every generated dashboard the stack's
-  dashboard app serves; the metrics stack declares it for Grafana.
 - **A restore note** for a native unit: `restore_note:` in its
   `service.yml`, printed under the unit in the DR runbook.
 - **The edge token**: `edge_token_file` in `config/client.toml`.
@@ -3062,23 +3229,15 @@ A guard test (`core/tests/app_knowledge_guard_tests.rs`) reads every stack
 and app name under `stacks/` and fails when one appears in the code outside
 comments and tests.
 
-```yaml
-# lxc-compose.yml
-homepage_widgets:
-  sonarr:
-    kind: sonarr
-    key_command: "sed -n 's|.*<ApiKey>\\(.*\\)</ApiKey>.*|\\1|p' {dir}/config.xml"
-```
-
 ### `homelab forget <stack>`: drop a stale record and its registrations
 
 For a stack whose container is already gone (removed by hand, or lost).
 Refused while any container in `pct list` still carries the recorded
 hostname, with `this record is current, not stale`. Otherwise it runs the
 same unregister steps as a destroy, without touching any container: route,
-metrics target, dashboard, state record and manual checks, then the front
-page and the Uptime Kuma host list (`forget` and `unregister` in
-`core/src/ops/destroy.rs:207-403`). It records the stack as retired, so its
+metrics target, state record and manual checks
+(`forget` and `unregister` in `core/src/ops/destroy.rs:207-403`). It
+records the stack as retired, so its
 backups, `/appdata` and vault are kept and named by `homelab check`. It runs
 as the operation `forget` under the operation lock
 (`host/src/main.rs:3638-3644`). Tests:
@@ -3213,136 +3372,7 @@ run it from the repository root (`client/src/main.rs:882-898`).
 
 ---
 
-## 4 · The front page and the watch list
-
-Two fleet-wide files are generated rather than maintained, both by
-`core/src/ops/fleetfiles.rs`: Homepage's `services.yaml` and the Uptime Kuma
-seeder's `host-monitors.json`. Every deploy writes both, and since
-2026-09-27 a destroy and a forget rewrite both too, so a removed stack leaves
-the front page and the watch list without waiting for another deploy
-(`regenerate_after_removal`, `core/src/ops/fleetfiles.rs:236-271`).
-
-The Homepage dashboard's `services.yaml`: when `homepage_services_file` is set
-in `host.toml`, every deploy of any stack reads every route fragment in the
-gateway's routes directory and rewrites the file with one tile per
-destination (`core/src/ops/fleetfiles.rs:32-175`, called from
-`core/src/ops/deploy.rs:2056-2060`). A service with a route appears by
-itself; a service without one does not. The
-generated file starts with a comment saying that edits to it are overwritten
-on the next deploy (`core/src/ops/homepage.rs:362-373`).
-
-What you decide lives in one file, `stacks/home/homepage/services-overlay.yml`,
-joined to the generated list on `href` (`core/src/ops/homepage.rs:194-308`).
-From that file:
-
-```yaml
-group_order: [Media, Papierwerk, Huis, Eigen, Infrastructuur]
-
-- href: https://fin.kp-soft.dev/
-  group: Media
-  name: Jellyfin
-  extra: |
-    icon: jellyfin.svg
-    description: Films en series
-```
-
-| Key | Effect | Source |
-|---|---|---|
-| `group_order` | these headings first, in this order; the rest alphabetically | `core/src/ops/homepage.rs:502-512` |
-| `href` | the join key; a trailing `/` does not matter | `core/src/ops/homepage.rs:231-236` |
-| `group` | the heading; without a block the stack's name is used | `core/src/ops/homepage.rs:436-438` |
-| `name` | the tile's name; default the router's name | `core/src/ops/homepage.rs:439-441` |
-| `hide: true` | keeps this route off the page | `core/src/ops/homepage.rs:224-228,429-432` |
-| `extra: \|` | lines handed to Homepage as they are, indented four spaces | `core/src/ops/homepage.rs:217-218,445-466` |
-
-**Widgets.** For `jellyfin`, `sonarr`, `radarr`, `prowlarr`, `bazarr`, `seerr`
-and `paperless` the widget is generated. Its API key is read from the app's
-own configuration on every deploy, except for paperless, which reads
-`HOMEPAGE_VAR_PAPERLESS` from Homepage's own environment
-(`core/src/ops/homepage.rs:137-188`, `core/src/ops/fleetfiles.rs:110-149`). A
-`widget:` written under `extra` wins over the generated one
-(`core/src/ops/homepage.rs:445-466`).
-
-**Recipes.**
-
-- *Change a description or icon*: edit the block's `extra`, then
-  `homelab deploy stacks/home`. The host reads the overlay from its own intent
-  repository (`core/src/ops/fleetfiles.rs:75-109`), so the change takes effect
-  when `stacks/home` is deployed; `stacks/home` uses latch (D12).
-- *Move a service to another heading*: change `group`; add a new heading to
-  `group_order` or it sorts alphabetically after the named ones.
-- *A tile appears under a lowercase heading with a plain link*: that route has
-  no block yet (`core/src/ops/homepage.rs:468-476`). Add one with its `href`.
-- *A link to something with no route*: a block whose `href` joins nothing is
-  kept, under its `group` or `Overig` (`core/src/ops/homepage.rs:482-500`).
-
-**Reading the deploy log.** The step logs
-`[t51] overlay: <n> entr(y/ies) from <path>`,
-`[t51] widget keys read from the applications themselves: <n>` and
-`[t51] <file> — <n> stack(s) on the front page`
-(`core/src/ops/fleetfiles.rs:98-105`, `:150-167`). A drop in the key count
-means an app moved its configuration.
-
-### The watch list in Uptime Kuma
-
-Uptime Kuma holds exactly the monitors the files declare, and nothing else
-(step-21, Kenny 2026-09-27: even a hand-made monitor is declared in a file).
-Two files declare them:
-
-- `host · <stack>`, one ping per stack in host state, generated into
-  `host-monitors.json` when `kuma_monitors_file` is set in `host.toml`
-  (`core/src/ops/fleetfiles.rs:183-229`);
-- `APPLICATION_MONITORS` in `stacks/uptime/kuma-seeder/seed.py:57-95`, one
-  HTTP check per service endpoint, written by hand because which path a
-  service answers on is knowledge no manifest holds. The hub's own `kyu`
-  monitor, made by hand in Kuma before the seeder existed, is declared there
-  under the same name so its history stays (`seed.py:74-77`).
-
-The `kuma-seeder` app in the uptime stack runs every
-`SEED_INTERVAL_SECONDS=3600` (`stacks/uptime/kuma-seeder/docker-compose.yml`).
-Each run adds what is missing, tags every declared monitor `homelab-seeder`,
-corrects a monitor whose URL or hostname differs from its file entry, and
-removes every monitor no file declares (`seed_once`,
-`stacks/uptime/kuma-seeder/seed.py:274-374`). It removes nothing when the
-generated list is missing, or when more than `max(3, a quarter of all
-monitors)` would go at once; then it warns
-`the desired list looks truncated, so nothing is removed` and the fleet check
-reports the leftovers as `drift` on `uptime kuma` (`seed.py:241-264`,
-`core/src/ops/fleetcheck.rs:1045-1059`). `APPLICATION_MONITORS` is read when
-the seeder process starts (`seed.py:377-399`); a deploy of `stacks/uptime`
-that changes `seed.py` restarts the seeder app, because a changed file under
-an app whose compose file did not change gets `docker compose restart`
-(`core/src/ops/deploy.rs:1688-1714`).
-
-**Recipes.**
-
-- *Watch a new endpoint*: add a `(name, url, accepted codes)` line to
-  `APPLICATION_MONITORS` and `homelab deploy stacks/uptime`; the transcript
-  says `[config] kuma-seeder restarted`, and the new monitor appears on that
-  run.
-- *Stop watching something*: delete its line; the seeder removes the monitor.
-  A monitor added in the Kuma UI and not declared is removed on the next run
-  as well.
-- *A stack's host monitor*: nothing to do. Deploy adds it, destroy and forget
-  remove it.
-
-Real output of one run, against a stand-in for the Kuma API that holds one
-monitor no file declares and one whose address was changed by hand:
-
-```text
-[seed]   ~ gateway · grafana now points at http://10.10.10.4:3000/api/health
-[seed]   - host · drill (no file declares it)
-[seed] 0 added, 37 already existed, 1 corrected, 1 removed, 0 stale
-```
-
-The verdict also goes to `last-seed.json` (fields `added`, `skipped`,
-`stale`, `removed`, `corrected`, `refused`, `judged`; `seed.py:354-365`),
-which the fleet check reads. More, including the truncation refusal, in
-[deployment/REGISTRATION_SURFACE.md](deployment/REGISTRATION_SURFACE.md).
-
----
-
-## 5 · Where the code and FEATURES.md part ways
+## 4 · Where the code and FEATURES.md part ways
 
 Measured by reading the code for this guide; each item names the line that
 shows it.
@@ -3362,8 +3392,8 @@ shows it.
 | 11 | Fixed in v3.58.4 (gap-19): without a local `stacks/` directory, TUI backup and restore now refuse instead of acting on a manifest with no storage (section 1.3) | `client/src/tui/model.rs`, `start_stack_op` |
 | 12 | Fixed in v3.58.4 (gap-20): after the wizard the status line names `homelab deploy stacks/<name>`, since SHIFT+D acts on the fleet list | `client/src/tui/model.rs` |
 | 13 | Fixed in v3.58.4 (gap-21): the placeholders name `r` | `client/src/tui/view/stacks.rs`, `client/src/tui/view/doctor.rs` |
-| 14 | `homelab new` and `homelab testplan` need a token although they never connect | `client/src/main.rs:144-150` |
-| 15 | `resize`, `prune-orphans` and `destroy` of a stack whose directory exists need latch for stacks with `latch_secrets` although they send no secret; `apply` builds every stack, so it needs latch for all of them | `client/src/main.rs:487,1039,1100`, `:740-741` |
+| 14 | Fixed (gap-34): `homelab new` and `homelab testplan` need no token — both are local-only and never connect | `client/src/main.rs` (the `needs_token` list) |
+| 15 | Fixed (gap-34): `resize` and `destroy` send only the manifest (`build_manifest`, no latch call) and `prune-orphans` sends only the files (`build_spec_files_only`) — none of the three asks latch for a stack's secrets any more, whatever `latch_secrets`/`latch_files` it declares; `apply` still builds every stack's full spec, which is correct — it deploys them | `client/src/main.rs`, `client/src/spec.rs` (`build_manifest`, `build_spec_files_only`) |
 | 16 | Fixed in v3.58.4 (gap-29): the help line for `export\|import` says it writes or reads a stack-definition bundle | `client/src/main.rs` |
 | 17 | Fixed in v3.58.4 (gap-33): `homelab patch` and requested guards check the A2 hostname guard, and requested guards skip the docker guards on a native stack | `core/src/ops/patch.rs`, `core/src/ops/guards.rs` (`apply_for_managed`) |
-| 18 | The DASHBOARD's online dot and app states are not measured: the host reports every recorded stack online and every app running | `host/src/main.rs:4216-4229` |
+| 18 | Fixed (gap-35, feat-platform-2, fix-160): the host reads real guest and app state on a timer (`pvesh get /cluster/resources` per guest, `docker inspect` and `systemctl is-active` per app/native unit inside it) and the dashboard's online dot and app states reflect that reading, not a recorded default | `core/src/ops/livestatus.rs` |

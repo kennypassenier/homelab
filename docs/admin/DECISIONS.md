@@ -25,7 +25,7 @@ techkeuze", answers 12:12). Phase 4 decisions follow below once frozen.
 | tech-chassis-dep | Depend on a released chassis-rs only: `tag = "v2.3.0"`. Implementation (Phase 5 onwards) waits for that release; Phase 4 can proceed. **Released 2026-09-28** (v2.3.0 = ba7223a): pin `tag = "v2.3.0"`, features `core`, `webapp`, `live`. |
 | tech-risk-class | **Recoverable, with a local-first twist** (Kenny's own answer): a small subset at commit time, including the crucial security tests; the full suite runs locally on Kenny's machine before a release, not on GitHub Actions. Fewer, larger commits: development speed matters as much as the tests. |
 | tech-platforms | Linux (Garuda), Windows, and an Android smartphone; Chrome and Firefox on each. Every page must work at phone width. |
-| tech-envs | Four environments, approved as listed: CT 120 (Debian 13, LAN reach to `homelab-host` 10.10.10.250:8443, own latch credential, data under `/appdata/admin/admin-config`); the development machine (WSL and Garuda: Kenny's full token, cargo, node 26, Playwright browsers in `~/.cache/ms-playwright`); GitHub CI (no LAN, no host, no credentials, mocks only); Kenny's browsers (own theme choice, reduced motion, time zone Europe/Brussels vs UTC in CI, local storage). Phase 7 tests every difference. |
+| tech-envs | Four environments, approved as listed: CT 120 (Debian 13, LAN reach to `homelab-host` pve:8443, own latch credential, data under `/appdata/admin/admin-config`); the development machine (WSL and Garuda: Kenny's full token, cargo, node 26, Playwright browsers in `~/.cache/ms-playwright`); GitHub CI (no LAN, no host, no credentials, mocks only); Kenny's browsers (own theme choice, reduced motion, time zone Europe/Brussels vs UTC in CI, local storage). Phase 7 tests every difference. |
 
 ### The security subset at commit time (tech-risk-class)
 
@@ -133,7 +133,7 @@ firewall admits inbound only from CT 104. No Caddy, no Cloudflare write token,
 no OPNsense change. Accepted cost: without internet at home the dashboard is
 unreachable; the CLI keeps working (S4). HYPOTHESIS measured before the login
 is built: Secure cookie and passkeys work through the chain (Traefik trusts
-forwarded headers from 172.16.0.0/12).
+forwarded headers from the docker bridge network).
 
 HYPOTHESIS still open: latch as a daemon subprocess in an unprivileged LXC,
 measured in a throwaway container before the secrets work starts.
@@ -173,7 +173,7 @@ Placed as milestone `follow`, after `edit`, because the wizards arrive in
 | Item | Kenny's answer | What it means |
 |---|---|---|
 | follow-name | Live view | The toggle, badge and driven-dialog button say "Live view". |
-| loki-read | Read route for CT 120 only | `stacks/metrics/loki-push/nginx.conf` admits GET `/loki/api/v1/query_range` from 10.10.10.20 alone; everything else stays 403 (fix-93 kept). |
+| loki-read | Read route for CT 120 only | `stacks/metrics/loki-push/nginx.conf` admits GET `/loki/api/v1/query_range` from the dashboard (CT 120) alone; everything else stays 403 (fix-93 kept). |
 | demo-host | Only in test builds | The simulated host is behind the Cargo feature `demo-host`; `make release` builds without it. |
 | dash-exec | Own answer: "wel, zonder bevestiging, we hebben genoeg security" | `exec` is in the dashboard as a command field, no typed confirmation; the host still refuses unless `exec_enabled = true`. |
 | dash-host-update | release-update yes, self-update no | An "Update host" action runs release-update and reconnects; self-update stays CLI. |

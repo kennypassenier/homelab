@@ -2,7 +2,9 @@
 
 use homelab_core::ops::fleetcheck::Severity;
 use homelab_core::ops::manualchecks::{
-    answer, evaluate_manual, id_for, listing, register, render_listing, Question,
+    answer, ensure_standing, ensure_standing_checks, evaluate_manual, id_for, listing, register,
+    render_listing, Question, PASSWORD_CHAIN_APP, PASSWORD_CHAIN_RECUR_DAYS, PASSWORD_CHAIN_TEXT,
+    STANDING_STACK,
 };
 use homelab_core::state::{HostState, StackState};
 
@@ -436,5 +438,91 @@ fn fix_65_the_nightly_report_goes_out_when_the_set_changes_or_weekly() {
             NIGHTLY_REPORT_REPEAT_S
         ),
         "and a standing problem is repeated weekly"
+    );
+}
+
+/// password-chain-bus-factor (owner decision "Alleen de 90-dagen-controle",
+/// 2026-10-01): a standing check — one no deploy ever registers or reopens
+/// — is due again `recur_days` after it was last answered, whatever the
+/// answer was. This is the opposite of `checks-interval`'s rule for an
+/// ordinary per-app check (answered ok and not `once` stays silent until a
+/// deploy changes the stack), which is exactly why it needs its own field
+/// (`recur_days`) rather than reusing that one's age logic.
+#[test]
+fn password_chain_bus_factor_a_standing_check_recurs_on_its_own_clock() {
+    let now = 2_000_000_000u64;
+    let mut st = HostState::default();
+
+    // Registering it twice (two nightly ticks) must not disturb an answer.
+    ensure_standing_checks(&mut st, now);
+    ensure_standing_checks(&mut st, now + 3600);
+    assert_eq!(st.manual_checks.len(), 1, "idempotent: one record, not two");
+
+    let id = id_for(STANDING_STACK, PASSWORD_CHAIN_APP, PASSWORD_CHAIN_TEXT);
+    assert!(st.manual_checks.contains_key(&id));
+
+    // Never answered: due, same as any unanswered check — aggregated under
+    // STANDING_STACK, which is not a real stack name an app-knowledge scan
+    // would ever see deployed.
+    let findings = evaluate_manual(&st, now);
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.subject == STANDING_STACK && f.severity == Severity::Drift),
+        "{:?}",
+        findings
+    );
+
+    // Answered ok: silent immediately after.
+    assert!(answer(&mut st, &id, true, "", now));
+    assert!(evaluate_manual(&st, now).is_empty());
+
+    // Just under the recurrence window: still silent.
+    let almost = now + (PASSWORD_CHAIN_RECUR_DAYS * 86400) - 1;
+    assert!(
+        evaluate_manual(&st, almost).is_empty(),
+        "not due a second early"
+    );
+
+    // At the window: due again, with no deploy involved at all.
+    let due = now + PASSWORD_CHAIN_RECUR_DAYS * 86400;
+    let findings = evaluate_manual(&st, due);
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.subject == STANDING_STACK && f.severity == Severity::Drift),
+        "a standing check must become due on its own clock: {:?}",
+        findings
+    );
+
+    // Answering it again resets the clock.
+    assert!(answer(&mut st, &id, true, "", due));
+    assert!(evaluate_manual(&st, due).is_empty());
+    assert!(evaluate_manual(&st, due + PASSWORD_CHAIN_RECUR_DAYS * 86400 - 1).is_empty());
+
+    // A non-standing check (recur_days unset) is unaffected by this logic —
+    // the ordinary "answered ok, no deploy since" rule still applies.
+    let mut st2 = state_with_stack(now);
+    register(&mut st2, "media", &[q("media", "looks right?")], now);
+    let other_id = id_for("media", "media", "looks right?");
+    assert!(answer(&mut st2, &other_id, true, "", now));
+    assert!(
+        evaluate_manual(&st2, now + 10 * PASSWORD_CHAIN_RECUR_DAYS * 86400).is_empty(),
+        "an ordinary per-app check must not gain an age limit from this feature"
+    );
+
+    // `ensure_standing` itself never clobbers an existing answer (the same
+    // idempotence `register` gives a deploy's questions).
+    ensure_standing(
+        &mut st,
+        PASSWORD_CHAIN_APP,
+        PASSWORD_CHAIN_TEXT,
+        90,
+        due + 1,
+    );
+    assert_eq!(
+        st.manual_checks.get(&id).and_then(|r| r.ok),
+        Some(true),
+        "re-ensuring must not reset the answer"
     );
 }

@@ -96,12 +96,6 @@ pub const PRESETS: &[Preset] = &[
         ram: 1024,
     },
     Preset {
-        name: "Uptime Kuma",
-        desc: "Uptime monitoring",
-        apps: &[("uptime-kuma", "louislam/uptime-kuma:1")],
-        ram: 512,
-    },
-    Preset {
         name: "Custom",
         desc: "Empty stack — add apps later",
         apps: &[],

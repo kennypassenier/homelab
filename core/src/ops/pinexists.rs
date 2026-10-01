@@ -84,6 +84,24 @@ pub fn pinned_digests(compose: &str) -> Vec<PinnedDigest> {
     out
 }
 
+/// registry-cache-plaintext (deep-dive answer, 2026-10-01): the digest from
+/// a registry's `Docker-Content-Digest` response header, read off the full
+/// raw header block `curl -D -` returns (one `Key: Value` per line, any
+/// case, either line ending). Used to resolve a TAG to a digest at the
+/// source registry before a deploy ever reaches the pull-through cache on
+/// 10.10.10.17 — so the cache can serve the bytes, but only the bytes whose
+/// hash matches what the source said, because docker verifies a digest
+/// client-side however it was fetched.
+pub fn parse_digest_header(headers: &str) -> Option<String> {
+    headers.lines().find_map(|l| {
+        let (k, v) = l.split_once(':')?;
+        k.trim()
+            .eq_ignore_ascii_case("docker-content-digest")
+            .then(|| v.trim().to_string())
+            .filter(|d| d.starts_with("sha256:"))
+    })
+}
+
 /// `(realm, service)` from a registry's `WWW-Authenticate: Bearer …` header.
 pub fn parse_challenge(header: &str) -> Option<(String, String)> {
     let rest = header.trim().strip_prefix("Bearer ")?;
@@ -134,4 +152,74 @@ pub fn evaluate_pin_existence(answers: &[(PinnedDigest, PinAnswer)]) -> Vec<Find
         }
     }
     out
+}
+
+/// registry-cache-plaintext: one `image:` line of a compose file that names
+/// a TAG and no digest — the shape that needs resolving before a deploy, so
+/// whatever the pull-through cache hands back is checked against a hash the
+/// source registry gave for that tag a moment ago. `latest` and any other
+/// tag are treated the same; refusing to resolve `latest` would just leave
+/// the one tag most likely to drift unpinned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaggedImage {
+    pub registry: String,
+    pub repository: String,
+    pub tag: String,
+    /// The exact text after `image:` on this line, unquoted/untrimmed only
+    /// of surrounding whitespace — what `rewrite_tag_line` matches on.
+    pub reference: String,
+}
+
+/// Every tag-only `image:` line in a compose file, in file order. A line
+/// already pinned by digest (`@sha256:…`) or naming no tag at all (bare
+/// `image: redis`, which docker reads as `:latest`) IS included — `:latest`
+/// is implicit precisely where resolving matters most.
+pub fn tagged_images(compose: &str) -> Vec<TaggedImage> {
+    let mut out = Vec::new();
+    for line in compose.lines() {
+        let Some(rest) = line.trim().strip_prefix("image:") else {
+            continue;
+        };
+        let reference = rest.trim().trim_matches('"').trim_matches('\'').to_string();
+        if reference.is_empty() || reference.contains('@') {
+            continue;
+        }
+        let (registry, path) = crate::ops::registry_cache::split_registry(&reference);
+        let (repository, tag) = match path.rsplit_once(':') {
+            Some((repo, t)) if !t.contains('/') => (repo.to_string(), t.to_string()),
+            _ => (path, "latest".to_string()),
+        };
+        out.push(TaggedImage {
+            registry,
+            repository,
+            tag,
+            reference,
+        });
+    }
+    out
+}
+
+/// Append `@<digest>` to every `image:` line in `compose` whose reference is
+/// in `resolved` (reference -> digest). Lines not resolved (registry did not
+/// answer, private repository, offline) are left exactly as written — a
+/// best-effort pin, never a reason to fail the deploy over a registry
+/// having a bad evening (the same stance D60 takes toward the cache itself).
+pub fn rewrite_tag_lines(
+    compose: &str,
+    resolved: &std::collections::BTreeMap<String, String>,
+) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for line in compose.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("image:") {
+            let reference = rest.trim().trim_matches('"').trim_matches('\'').to_string();
+            if let Some(digest) = resolved.get(&reference) {
+                let indent = &line[..line.len() - trimmed.len()];
+                out.push(format!("{}image: {}@{}", indent, reference, digest));
+                continue;
+            }
+        }
+        out.push(line.to_string());
+    }
+    out.join("\n") + if compose.ends_with('\n') { "\n" } else { "" }
 }

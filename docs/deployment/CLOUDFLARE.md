@@ -15,7 +15,7 @@ answer "what was it?" — and to notice when the answer changed.*
 ```
 CNAME *.kp-soft.dev  -> b027d052-9f97-43e5-9272-eeb336d3266e.cfargotunnel.com  (proxied)
 CNAME kp-soft.dev    -> b027d052-9f97-43e5-9272-eeb336d3266e.cfargotunnel.com  (proxied)
-tunnel ingress:  *.kp-soft.dev -> http://10.10.10.4:80   ; everything else -> 404
+tunnel ingress:  *.kp-soft.dev -> http://the gateway (CT 104):80   ; everything else -> 404
 ```
 
 That is the complete list. There are exactly two DNS records, one tunnel, one

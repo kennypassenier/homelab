@@ -77,6 +77,7 @@ pub fn register(state: &mut HostState, stack: &str, questions: &[Question], now:
                 accepted_until: None,
                 once: false,
                 url: None,
+                recur_days: None,
             });
         // Not the answer: whether it is asked once and where the app is can
         // change with the stack file, and follow it.
@@ -112,6 +113,60 @@ pub fn answer(state: &mut HostState, id: &str, ok: bool, note: &str, now: u64) -
         }
         None => false,
     }
+}
+
+/// password-chain-bus-factor: the stack name a STANDING check (one not
+/// registered by any deploy) is filed under — never a real stack, so it can
+/// never collide with one (app-knowledge's guard only names real stacks and
+/// apps, and this is neither).
+pub const STANDING_STACK: &str = "standing";
+
+/// The one standing check this project has (owner decision "Alleen de
+/// 90-dagen-controle", 2026-10-01): has anyone actually confirmed, inside
+/// the last `PASSWORD_CHAIN_RECUR_DAYS`, that the restic password chain
+/// still opens the backups — the password itself, its only independent copy
+/// in Bitwarden, and (D5) the mirror remote credential. Nothing here can
+/// measure that; it can only ask, and ask again.
+pub const PASSWORD_CHAIN_APP: &str = "backups";
+pub const PASSWORD_CHAIN_TEXT: &str = "has the restic password chain (the password itself, \
+    its copy in Bitwarden, and the mirror remote credential) been opened and confirmed working \
+    in the last 90 days";
+pub const PASSWORD_CHAIN_RECUR_DAYS: u64 = 90;
+
+/// Make sure a standing check's record exists, without touching an existing
+/// answer — the same idempotence `register` gives a deploy's questions, so
+/// calling this every nightly tick is free once the check has been created.
+pub fn ensure_standing(state: &mut HostState, app: &str, text: &str, recur_days: u64, now: u64) {
+    let id = id_for(STANDING_STACK, app, text);
+    state
+        .manual_checks
+        .entry(id)
+        .or_insert_with(|| ManualCheckRecord {
+            stack: STANDING_STACK.to_string(),
+            app: app.to_string(),
+            text: text.to_string(),
+            registered_at: now,
+            answered_at: None,
+            ok: None,
+            note: String::new(),
+            answered_hash: None,
+            accepted_until: None,
+            once: false,
+            url: None,
+            recur_days: Some(recur_days),
+        });
+}
+
+/// Every standing check this project asks. Called once per nightly tick;
+/// `ensure_standing` is a no-op once each already exists.
+pub fn ensure_standing_checks(state: &mut HostState, now: u64) {
+    ensure_standing(
+        state,
+        PASSWORD_CHAIN_APP,
+        PASSWORD_CHAIN_TEXT,
+        PASSWORD_CHAIN_RECUR_DAYS,
+        now,
+    );
 }
 
 /// fix-65 (nightly-report-always-red, 2026-09-27): record a deliberate "not
@@ -202,6 +257,18 @@ pub fn evaluate_manual(state: &HostState, now: u64) -> Vec<Finding> {
                 .or_default()
                 .push(labelled(r)),
             (Some(true), Some(_)) if r.once => {}
+            // password-chain-bus-factor: a standing check is due again
+            // `recur_days` after it was last answered, whatever the answer
+            // was — on a clock, since no deploy ever reopens it.
+            (_, Some(at))
+                if r.recur_days
+                    .is_some_and(|d| now.saturating_sub(at) >= d * 86400) =>
+            {
+                pending
+                    .entry(r.stack.clone())
+                    .or_default()
+                    .push(labelled(r))
+            }
             (_, Some(at)) if files_changed(at) => {
                 if r.answered_hash.is_some() {
                     *reopened.entry(r.stack.clone()).or_default() += 1;

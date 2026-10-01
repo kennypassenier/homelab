@@ -1,7 +1,7 @@
 # homelab v2
 
 Two-binary Rust homelab orchestrator: CLIENT (CLI + TUI) on the desktop,
-HOST daemon on Proxmox (10.10.5.250), one TLS-pinned WS line between them.
+HOST daemon on Proxmox (pve), one TLS-pinned WS line between them.
 
 This project follows the dev procedure in `~/Projects/dev-procedure/`
 (`/project-flow`). Standing rules apply to every change:

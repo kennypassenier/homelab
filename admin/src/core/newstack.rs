@@ -61,6 +61,7 @@ impl NewStackTile {
             order: None,
             description: self.description.clone(),
             url: None,
+            watch_url: None,
             reading: None,
             watch_every: self.watch_every,
             down_after: self.down_after,

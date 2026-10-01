@@ -149,7 +149,6 @@ metrics         1024 MiB  Prometheus + cadvisor + pve-exporter  [cadvisor, prome
 recyclarr        512 MiB  Quality profiles for Sonarr and Radarr from the TRaSH guides  [recyclarr]
 rust-service    1024 MiB  Your own Rust service + RabbitMQ (template — edit the image first)  [myservice, rabbitmq]
 syncthing        512 MiB  Obsidian vault peer  [syncthing]
-uptime-kuma      512 MiB  Uptime monitoring  [uptime-kuma]
 custom          1024 MiB  Empty stack — add apps later  [no apps]
 ```
 
@@ -172,10 +171,10 @@ host that serves a made-up fleet and plays a scripted deploy
 
 | Order | Source | Example |
 |---|---|---|
-| 1 | `HOMELAB_HOST` already in the environment when the command starts | `HOMELAB_HOST=10.10.5.250:8443 homelab ping` |
+| 1 | `HOMELAB_HOST` already in the environment when the command starts | `HOMELAB_HOST=pve:8443 homelab ping` |
 | 2 | `host` in `config/client.toml`, searched upward from the current directory the way git finds its root | this repository's copy |
 | 3 | `HOMELAB_HOST` from `~/.config/homelab/env` or `./.env` | |
-| 4 | the built-in default, `10.10.5.250:8443` | |
+| 4 | the built-in default, `pve:8443` | |
 
 A `config/client.toml` that exists but does not parse is an error, never a
 silent fall-through to the next source. Its only keys are `host` and `pin`.

@@ -16,7 +16,6 @@ macro_rules! step {
 
 pub mod backup;
 pub mod busy;
-pub mod dashboard;
 pub mod deploy;
 pub mod deployguard;
 pub mod destroy;
@@ -26,16 +25,13 @@ pub mod edge;
 pub mod enable;
 pub mod facts;
 pub mod fleetcheck;
-pub mod fleetfiles;
 pub mod guards;
 pub mod hardware;
 pub mod homeaddress;
-pub mod homepage;
 pub mod livestatus;
 pub mod logshipper;
 pub mod manualchecks;
 pub mod mirror;
-pub mod monitors;
 pub mod native;
 pub mod night;
 pub mod patch;
@@ -50,6 +46,7 @@ pub mod restarthost;
 pub mod restoredrill;
 pub mod retired;
 pub mod secondcopy;
+pub mod secrets;
 pub mod selfupdate;
 pub mod template;
 pub mod tiles;
@@ -131,21 +128,6 @@ pub struct OpCtx<'a> {
     /// are written. None = feature off, and the scrape list stays whatever
     /// somebody last typed into prometheus.yml.
     pub metrics_targets_dir: Option<String>,
-    /// T2: Grafana's provisioning directory, as a path INSIDE the gateway
-    /// container. None = feature off, and dashboards stay hand-made.
-    pub grafana_dashboards_dir: Option<String>,
-    /// T51: Homepage's `services.yaml`, as a path on the PROXMOX HOST — it
-    /// lives under `/appdata`, like every other app's configuration. None =
-    /// feature off and the front page stays hand-made, which is how it came
-    /// to be zero bytes.
-    pub homepage_services_file: Option<String>,
-    /// T49: the file the Uptime Kuma seeder reads its generated half from,
-    /// as a path on the PROXMOX HOST — it lives under `/appdata`, which the
-    /// uptime container has bind-mounted. None = feature off, and the watch
-    /// list stays whatever a hand-run script last created, which is how a
-    /// monitor came to spend eight hours reporting Uptime Kuma itself as
-    /// down from an address it had left that morning.
-    pub kuma_monitors_file: Option<String>,
     /// C1/C2: where the log shipper pushes. Unset means no shipper is
     /// installed at all, which is deliberate — a deploy that cannot know
     /// where Loki is must not guess an address and report success.

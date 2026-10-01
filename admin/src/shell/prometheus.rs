@@ -34,6 +34,38 @@ impl Prometheus {
         &self.base
     }
 
+    /// feat-overview-11 (capacity map): one `query` (instant, now), answered
+    /// the same shape as [`Prometheus::range`] but with one point per
+    /// series — so the capacity map and the charts page read the same
+    /// `{label, points: [[t, v]]}` shape.
+    pub async fn instant(
+        &self,
+        query: &str,
+        legend: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        let url = format!("{}/api/v1/query", self.base);
+        let res = self
+            .http
+            .get(&url)
+            .query(&[("query", query)])
+            .send()
+            .await
+            .map_err(|e| format!("Prometheus at {} did not answer: {e}", self.base))?;
+        let status = res.status();
+        let body: serde_json::Value = res
+            .json()
+            .await
+            .map_err(|e| format!("Prometheus's answer did not read: {e}"))?;
+        if !status.is_success() {
+            return Err(format!(
+                "Prometheus answered HTTP {}: {}",
+                status.as_u16(),
+                body["error"].as_str().unwrap_or("")
+            ));
+        }
+        Ok(instant_series(&body, legend))
+    }
+
     /// One `query_range`, answered as `[{label, points: [[t, v], …]}]`, the
     /// series told apart by the value of `legend` (or numbered).
     pub async fn range(
@@ -71,6 +103,42 @@ impl Prometheus {
         }
         Ok(series(&body, legend))
     }
+}
+
+/// A `vector` answer (one `[unix, value]` per series) in the same shape
+/// [`series`] gives a `matrix` answer, so a caller that wants either can
+/// treat them alike.
+pub fn instant_series(body: &serde_json::Value, legend: Option<&str>) -> Vec<serde_json::Value> {
+    body["data"]["result"]
+        .as_array()
+        .map(|rs| {
+            rs.iter()
+                .enumerate()
+                .map(|(i, r)| {
+                    let label = legend
+                        .and_then(|l| r["metric"][l].as_str())
+                        .map(str::to_string)
+                        .unwrap_or_else(|| {
+                            if rs.len() == 1 {
+                                String::new()
+                            } else {
+                                format!("series {}", i + 1)
+                            }
+                        });
+                    let points: Vec<serde_json::Value> = r["value"]
+                        .as_array()
+                        .and_then(|p| {
+                            let t = p.first()?.as_f64()?;
+                            let v: f64 = p.get(1)?.as_str()?.parse().ok()?;
+                            v.is_finite().then(|| serde_json::json!([t, v]))
+                        })
+                        .into_iter()
+                        .collect();
+                    serde_json::json!({ "label": label, "points": points })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// A `matrix` answer as series of `[unix, value]` points.

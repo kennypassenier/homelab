@@ -74,8 +74,6 @@ pub struct LiveFacts {
     /// today the router's own nightly upload to Google Drive. Empty = none
     /// declared, which is what every fleet had before this existed.
     pub watched_backups: Vec<WatchedBackupFact>,
-    /// T49: the seeder's last verdict about the watch list.
-    pub seed: SeedFact,
     /// R13: how full the pools are that the stacks keep their data on. Empty
     /// when no stack declares a data mount, which is what every fleet looked
     /// like before this existed.
@@ -694,15 +692,6 @@ pub struct CoverageFact {
     /// merely quiet — a check that alarms on healthy silence is a check that
     /// gets switched off, and then the real silence goes unnoticed too.
     pub logs_recent: Option<bool>,
-    /// Grafana holds the dashboard this stack's deploy generated.
-    ///
-    /// Not "the file was written" — the deploy has believed that for weeks.
-    /// It wrote seven dashboards into `/opt/grafana/provisioning/dashboards`
-    /// while Grafana mounted `/opt/gateway/grafana/provisioning`, reported
-    /// success every time, and its only failure message reads "this stack has
-    /// no generated dashboard yet" (F149). So the reader is asked, not the
-    /// writer: does Grafana list a dashboard with this stack's uid.
-    pub dashboard_provisioned: Option<bool>,
     /// Its service.yml says `metrics: false`: deliberately not measured, so
     /// Prometheus is not asked and the check notes it (Phase 9, inbox).
     pub unmeasured_by_choice: bool,
@@ -1359,9 +1348,6 @@ pub fn evaluate(
     out.extend(crate::ops::homeaddress::evaluate_home_address(state));
     // fix-83: a pinned manual app whose upstream released something newer.
     out.extend(crate::ops::pins::evaluate_pins(state));
-    // A seeder that ran more than a day ago has stopped keeping the watch
-    // list in step, which is the same window the backups use.
-    out.extend(evaluate_seed(&live.seed, 26 * 3600));
     out.extend(crate::ops::restoredrill::evaluate_drill(
         state,
         now_unix,
@@ -1619,84 +1605,6 @@ pub fn evaluate_notify(state: &HostState, now: u64) -> Vec<Finding> {
     }]
 }
 
-/// T49: what the Uptime Kuma seeder concluded on its last run.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SeedFact {
-    /// Monitors watching a stack the fleet no longer has.
-    pub stale: Vec<String>,
-    /// How long ago the seeder last ran, in seconds. None = never, or the
-    /// status file could not be read.
-    pub age_s: Option<u64>,
-    /// Whether it had a generated list to judge against. Without one it
-    /// judges nothing, which is right and must not read as "all clear".
-    pub judged: bool,
-    /// The file could not be read or understood.
-    pub error: Option<String>,
-}
-
-/// A monitor that outlives its stack, reported where somebody sees it.
-///
-/// The seeder has always said this in its own log — it is deliberately
-/// report-only, because deleting somebody's monitor is the irreversible
-/// direction (Kenny, form H2b). What it did not have was a reader. On
-/// 2026-09-02 Kenny found a monitor still pinging a drill container that had
-/// been destroyed hours earlier, and he found it by noticing ping errors on a
-/// Grafana panel. The seeder had been saying so every minute since.
-pub fn evaluate_seed(fact: &SeedFact, max_age_s: u64) -> Vec<Finding> {
-    let mut out = Vec::new();
-    if let Some(e) = &fact.error {
-        out.push(Finding {
-            severity: Severity::Broken,
-            subject: "uptime seeder".into(),
-            what: format!("said nothing about the watch list ({})", e),
-            remedy: "check the seeder that reads `kuma_monitors_file` (host.toml) — while \
-                     this stands, a monitor can outlive its stack with nothing saying so"
-                .into(),
-        });
-        return out;
-    }
-    match fact.age_s {
-        None => out.push(Finding {
-            severity: Severity::Broken,
-            subject: "uptime seeder".into(),
-            what: "has never recorded a run".into(),
-            remedy: "the watch list is not being kept in step with the fleet".into(),
-        }),
-        Some(age) if age > max_age_s => out.push(Finding {
-            severity: Severity::Broken,
-            subject: "uptime seeder".into(),
-            what: format!("last ran {} h ago", age / 3600),
-            remedy: "a new stack arrives unwatched until this runs again".into(),
-        }),
-        _ => {}
-    }
-    if !fact.judged {
-        out.push(Finding {
-            severity: Severity::Drift,
-            subject: "uptime seeder".into(),
-            what: "ran without a generated monitor list, so it judged nothing stale".into(),
-            remedy: "check that the deploy writes the host-monitors file, then let the seeder \
-                     run again"
-                .into(),
-        });
-    } else if !fact.stale.is_empty() {
-        out.push(Finding {
-            severity: Severity::Drift,
-            subject: "uptime kuma".into(),
-            what: format!(
-                "{} monitor(s) watch a stack the fleet no longer has: {}",
-                fact.stale.len(),
-                fact.stale.join(", ")
-            ),
-            remedy: "the seeder left them because the generated list looked truncated \
-                     (`refused` in last-seed.json): check that list, or remove them in \
-                     Uptime Kuma"
-                .into(),
-        });
-    }
-    out
-}
-
 pub fn evaluate_incomplete(state: &HostState) -> Vec<Finding> {
     let mut out = Vec::new();
     for (name, st) in &state.stacks {
@@ -1741,14 +1649,6 @@ pub fn evaluate_coverage(facts: &[CoverageFact]) -> Vec<Finding> {
                 subject: c.stack.clone(),
                 what: "no Prometheus target answers for this stack — it is not being measured".into(),
                 remedy: "check /appdata/metrics/prometheus-config/targets/<stack>.json exists and that Prometheus reads that directory".into(),
-            });
-        }
-        if c.dashboard_provisioned == Some(false) {
-            out.push(Finding {
-                severity: Severity::Drift,
-                subject: c.stack.clone(),
-                what: "Grafana does not have this stack's generated dashboard — the deploy wrote it somewhere Grafana never reads".into(),
-                remedy: "check that `grafana_dashboards_dir` in host.toml is a directory the Grafana container mounts".into(),
             });
         }
         if c.logs_recent == Some(false) {

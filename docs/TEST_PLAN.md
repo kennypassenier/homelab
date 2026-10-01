@@ -122,7 +122,7 @@ homelab plan stacks/syncthing      # validates locally, no network
 
 **Prerequisites (one-time, Proxmox host — after the demo):**
 1. HOST daemon installed as a systemd service with its TLS cert + token
-   (see docs/legacy/v2-build/V2_PILOT_HANDOFF.md). Confirm: `curl -k https://10.10.5.250:8443/api/health`.
+   (see docs/legacy/v2-build/V2_PILOT_HANDOFF.md). Confirm: `curl -k https://pve:8443/api/health`.
 2. Old zombie `host-daemon.service` stopped/disabled.
 3. `~/Projects/homelab/.env` has HOMELAB_HOST + HOMELAB_TOKEN.
 
@@ -181,7 +181,7 @@ homelab ...backup 108        # once the backup verb lands (M4)
   auto-restore refills it; syncthing returns with its config.
 
 ### B8 · Traefik route (H1) + Loki (F1)
-- **Pass:** `curl -H 'Host: <route>' http://10.10.10.4` reaches syncthing;
+- **Pass:** `curl -H 'Host: <route>' http://the gateway (CT 104)` reaches syncthing;
   Loki label query includes the test stack within minutes.
 
 ### B9 · Gated destroy (C2, when it lands in M4)
@@ -288,7 +288,7 @@ homelab config
 ```
 - **Pass:** prints nightly run / webhook / retention tiers as stored on the
   host. In the TUI: edit a value, SHIFT+S → "settings saved and applied";
-  `ssh root@10.10.5.250 cat /etc/homelab/host.toml` shows the change +
+  `ssh root@pve cat /etc/homelab/host.toml` shows the change +
   `[[retention]]` tables; the scheduler uses the new hour without a restart.
 
 ### B19 · Failure-path webhooks (F3) — LIVE-PROVEN 2026-08-11
@@ -354,7 +354,7 @@ latch project link remains for real use.
 ### B26 · Metrics stack live (F4) — LIVE-PROVEN 2026-08-29
 CT 113 (`113-app-metrics`) deployed from the stack definition: Prometheus
 (90d retention) + pve-exporter + promtail. All targets up: kyu
-(10.10.10.9:8080, `kyu_sweeper_age_ms` scraping), pve (25 `pve_up`
+(kyu (CT 109):8080, `kyu_sweeper_age_ms` scraping), pve (25 `pve_up`
 series — the whole park), prometheus itself. The pve-exporter credentials
 travelled via latch (D12's first production use): PVEAuditor token created
 on the host, staged on tmpfs, committed to latch env prod, never a readable
@@ -456,7 +456,7 @@ homelab import <bundle.yml> <new-name> <vmid>
 ### B24 · Kea DHCP reservation (H2) — needs OPNsense API creds
 1. Create an API key on OPNsense (System → Access → Users → API keys) and
    put `key:secret` in /var/lib/homelab/secrets/opnsense (0600); add to
-   host.toml: `opnsense_url = "https://10.10.10.1"` and
+   host.toml: `opnsense_url = "https://the router"` and
    `opnsense_cred_file = "/var/lib/homelab/secrets/opnsense"`; restart.
 2. Deploy a NEW container (e.g. rebuild 108).
 - **Pass:** transcript shows "[kea] reserved <ip> for <mac>"; the

@@ -67,9 +67,9 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `pve-management-on-container-vlan` · **Status:** open · **Effort:** M · **Kind:** needs a decision from Kenny (pve)
 - **Reviewers:** security, network
-- **Evidence:** `config/client.toml:15` points clients at `10.10.10.250:8443` (rescue leg on VLAN 10, gap-13). Daemon listens on `0.0.0.0:8443` (`host/src/main.rs:420-425`). `captured/pve-host/firewall/host.fw` has `enable: 0`. OPNsense's T57 rule does not apply to the on-link 10.10.10.250 (F183); only CT 116's `116.fw` drops it. Live firewall state not measured (`nft list ruleset; pve-firewall status`).
+- **Evidence:** `config/client.toml:15` points clients at `pve:8443` (rescue leg on VLAN 10, gap-13). Daemon listens on `0.0.0.0:8443` (`host/src/main.rs:420-425`). `captured/pve-host/firewall/host.fw` has `enable: 0`. OPNsense's T57 rule does not apply to the on-link pve (F183); only CT 116's `116.fw` drops it. Live firewall state not measured (`nft list ruleset; pve-firewall status`).
 - **Failure scenario:** A compromised Jellyfin, FlareSolverr or *arr container talks directly to pve's SSH, Proxmox login and the orchestrator daemon, without passing OPNsense, and can ARP-spoof between the desktop and pve. The T57 goal 'a container must not reach the host' was undone for every guest but one.
-- **Recommendation:** Either a pve host firewall with an explicit admin allowlist (22/8006/8443 only from 10.10.10.10 and the management net, drop the rest of 10.10.10.0/24), or remove the rescue leg and bind the daemon to 10.10.5.250. Either way add `OUT DROP -dest 10.10.10.250` to every guest.
+- **Recommendation:** Either a pve host firewall with an explicit admin allowlist (22/8006/8443 only from the workstation and the management net, drop the rest of the container subnet), or remove the rescue leg and bind the daemon to pve. Either way add `OUT DROP -dest pve` to every guest.
 
 ### Privileged CT 105 (qBittorrent) and CT 106 (Jellyfin, *arr) process hostile internet content
 
@@ -84,7 +84,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 - **Key:** `crowdsec-blind-to-internet` · **Status:** open · **Effort:** S · **Kind:** live change on a machine (CT 104 (gateway))
 - **Reviewers:** network, security
 - **Note:** network rated HIGH, security MEDIUM (pending the one measurement).
-- **Evidence:** Predicted from config, not measured: tunnel ingress `http://10.10.10.4:80` from cloudflared on `gateway_net`; Traefik has no `forwardedHeaders.trustedIPs` (`stacks/gateway/traefik/docker-compose.yml:10-41`); bouncer labels set no trusted-IP option (`:64-66`); `stacks/gateway/crowdsec/whitelists.yaml:9-10` whitelists 10/8 and 172.16/12. Measurement: `jq -r .ClientHost /mnt/traefik-logs/access.log | sort | uniq -c | sort -rn | head` on CT 104.
+- **Evidence:** Predicted from config, not measured: tunnel ingress `http://the gateway (CT 104):80` from cloudflared on `gateway_net`; Traefik has no `forwardedHeaders.trustedIPs` (`stacks/gateway/traefik/docker-compose.yml:10-41`); bouncer labels set no trusted-IP option (`:64-66`); `stacks/gateway/crowdsec/whitelists.yaml:9-10` whitelists 10/8 and 172.16/12. Measurement: `jq -r .ClientHost /mnt/traefik-logs/access.log | sort | uniq -c | sort -rn | head` on CT 104.
 - **Failure scenario:** `sp.kp-soft.dev` (no Access) gets brute-forced and CrowdSec never bans anyone; meanwhile CrowdSec's fail-closed 403 has taken the whole house down twice (F140). Every backend sees one client IP, so per-IP login throttles become one shared bucket and a stranger can lock out a named user.
 - **Recommendation:** Measure first. Then trust the `gateway_net` subnet in Traefik and the bouncer, use `CF-Connecting-IP`, and pin the `gateway_net` subnet in the deploy. Run the A8 smoke test through the tunnel. Do this before the apex `kp-soft.dev` goes public. Or drop CrowdSec and stop calling it protection.
 
@@ -101,7 +101,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `traefik-lan-host-header-bypass` · **Status:** open · **Effort:** M · **Kind:** live change on a machine (CT 104 (gateway) + Cloudflare tunnel)
 - **Reviewers:** network
-- **Evidence:** Traefik publishes `80:80` on all interfaces because the tunnel targets the LXC address (`captured/gateway/cloudflare-tunnel.json`), not `http://traefik:80` as the compose comment claims. Routing is Host-only. Hand-written routes `opn`/`prox` point at 10.10.5.1 and 10.10.5.250:8006 (INVENTORY.md:109, F295). Predicted, not tried: `curl -H 'Host: prox.kp-soft.dev' http://10.10.10.4/` from a guest.
+- **Evidence:** Traefik publishes `80:80` on all interfaces because the tunnel targets the LXC address (`captured/gateway/cloudflare-tunnel.json`), not `http://traefik:80` as the compose comment claims. Routing is Host-only. Hand-written routes `opn`/`prox` point at the router and pve:8006 (INVENTORY.md:109, F295). Predicted, not tried: `curl -H 'Host: prox.kp-soft.dev' http://the gateway (CT 104)/` from a guest.
 - **Failure scenario:** A compromised container on VLAN 10 sends one request with a forged Host header and gets the Proxmox and OPNsense logins from CT 104's position, undoing the OPNsense rule that blocks it, plus the Traefik API map, Alertmanager silences and the *arr apps.
 - **Recommendation:** Point the tunnel ingress at `http://traefik:80` and publish Traefik as `127.0.0.1:80:80`; move the Kuma traefik monitor to the ping entrypoint; add an `ipAllowList` on any management router kept. Fix the cloudflared comment and KP_SOFT_MIGRATION step 1.
 
@@ -109,9 +109,9 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `loki-unauthenticated-open` · **Status:** open · **Effort:** M · **Kind:** live change on a machine (CT 104 (gateway))
 - **Reviewers:** logging, network
-- **Evidence:** `stacks/gateway/loki/loki-config.yaml`: `auth_enabled: false`; `docker-compose.yml`: `3100:3100`; `captured/pve-host/firewall/116.fw` allows CT 116 to 10.10.10.4:3100. Compactor has `delete_request_store: filesystem` and no `deletion_mode` (effective default not measured). Syslog receiver on `0.0.0.0:1514/udp` accepts any sender.
+- **Evidence:** `stacks/gateway/loki/loki-config.yaml`: `auth_enabled: false`; `docker-compose.yml`: `3100:3100`; `captured/pve-host/firewall/116.fw` allows CT 116 to the gateway (CT 104):3100. Compactor has `delete_request_store: filesystem` and no `deletion_mode` (effective default not measured). Syslog receiver on `0.0.0.0:1514/udp` accepts any sender.
 - **Failure scenario:** The container strangers can reach (CT 116), or any other compromised guest, reads every stack's logs and OPNsense's syslog, pushes forged lines, and asks Loki to delete the evidence of its own intrusion.
-- **Recommendation:** Stop publishing 3100 to everyone; expose a push-only path (`POST /loki/api/v1/push`) to the fleet and keep query on `gateway_net` for Grafana. Set `deletion_mode: disabled`. Consider per-stack tenant headers. Allow only 10.10.5.1 to 1514.
+- **Recommendation:** Stop publishing 3100 to everyone; expose a push-only path (`POST /loki/api/v1/push`) to the fleet and keep query on `gateway_net` for Grafana. Set `deletion_mode: disabled`. Consider per-stack tenant headers. Allow only the router to 1514.
 
 ### The nightly alert is red every night by design: manual checks reopen on every deploy and a deliberate 'nok' cannot be accepted
 
@@ -373,8 +373,8 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `registry-cache-plaintext` · **Status:** open · **Effort:** M · **Kind:** live change on a machine (CT 117 (registry) + CT 105/106)
 - **Reviewers:** security
-- **Evidence:** Deploys rewrite images to the pull-through cache on 10.10.10.17 (`core/src/ops/registry_cache.rs:1-20`); docker daemons get `insecure-registries` (`core/src/ops/guards.rs:209`); most images not digest-pinned.
-- **Failure scenario:** A container that ARP-spoofs 10.10.10.17, or a compromise of CT 117, serves a modified image the next time CT 105 or CT 106 pulls a tag.
+- **Evidence:** Deploys rewrite images to the pull-through cache on the registry (CT 117) (`core/src/ops/registry_cache.rs:1-20`); docker daemons get `insecure-registries` (`core/src/ops/guards.rs:209`); most images not digest-pinned.
+- **Failure scenario:** A container that ARP-spoofs the registry (CT 117), or a compromise of CT 117, serves a modified image the next time CT 105 or CT 106 pulls a tag.
 - **Recommendation:** TLS on the cache with a small house CA distributed by the guards step, or run the privileged stacks without the cache; pin the images of 105 and 106 by digest.
 
 ### A healthy native update deletes every local rollback copy after a 10-second health window
@@ -432,7 +432,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 - **Key:** `pve-exporter-forwards-token` · **Status:** open · **Effort:** S · **Kind:** live change on a machine (CT 113 (metrics) + pve)
 - **Reviewers:** security, network
 - **Evidence:** `stacks/metrics/pve-exporter/docker-compose.yml:12,14`: `PVE_VERIFY_SSL=false`, publishes `9221:9221`; `/pve?target=` is caller-controlled (`checks.yml:7`). Token role only described as 'PVEAuditor suffices', not verified (`pveum user token permissions`).
-- **Failure scenario:** Anyone on the LAN calls `http://10.10.10.13:9221/pve?target=<attacker>` and receives the exporter's PVE token, giving at least a full read of the hypervisor configuration.
+- **Failure scenario:** Anyone on the LAN calls `http://metrics (CT 113):9221/pve?target=<attacker>` and receives the exporter's PVE token, giving at least a full read of the hypervisor configuration.
 - **Recommendation:** Do not publish 9221 (Prometheus reaches it on `metrics_net`); verify the token is a privilege-separated PVEAuditor token; give the exporter the PVE CA instead of `verify_ssl=false`.
 
 ### The workstation root SSH key to pve and every container has no passphrase and is synced across three OSes
@@ -441,7 +441,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 - **Reviewers:** security
 - **Evidence:** Measured locally: `ssh-keygen -y -P ""` succeeds on `~/.secrets/ssh/id_ed25519`; `~/.ssh/config` uses it for `User root` on pve and every CT; `~/.secrets` is a Syncthing folder shared by Garuda, WSL and Windows.
 - **Failure scenario:** User-level malware on any of the three OSes gets root on the hypervisor, bypassing pin, token and every guard.
-- **Recommendation:** Add a passphrase and use ssh-agent, or an `ed25519-sk` FIDO2 key for pve; add `from="10.10.10.10"` in pve's `authorized_keys`.
+- **Recommendation:** Add a passphrase and use ssh-agent, or an `ed25519-sk` FIDO2 key for pve; add `from="the workstation"` in pve's `authorized_keys`.
 
 ### The public repository publishes the Access allowlist (including a third party's email) and the attack map
 
@@ -623,18 +623,18 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `flat-vlan-no-east-west-control` · **Status:** open · **Effort:** L · **Kind:** code fix Claude can do alone
 - **Reviewers:** network
-- **Evidence:** All 15 stacks on `vmbr0` VLAN 10, 10.10.10.0/24, with HA (10.10.10.2) and the workstation (10.10.10.10). Only `116.fw` exists. Published on 0.0.0.0 with no or weak auth: Loki 3100, syslog 1514, Grafana 3000 (F6 parked), GoAccess 7880/7881, FlareSolverr 8191 (in a privileged container), pve-exporter 9221, Alertmanager 9093.
+- **Evidence:** All 15 stacks on `vmbr0` VLAN 10, the container subnet, with HA (Home Assistant (VM 101)) and the workstation (the workstation). Only `116.fw` exists. Published on 0.0.0.0 with no or weak auth: Loki 3100, syslog 1514, Grafana 3000 (F6 parked), GoAccess 7880/7881, FlareSolverr 8191 (in a privileged container), pve-exporter 9221, Alertmanager 9093.
 - **Failure scenario:** One compromised container anywhere inherits all of the above plus HA's API and the workstation, none of it crossing OPNsense or logged.
-- **Recommendation:** Let the orchestrator generate a per-guest firewall from the stack file (inbound: route ports, Prometheus, Kuma, an explicit `consumers:` list; default drop; outbound drop 10.10.10.250). Set GoAccess `--no-query-string`, bind Grafana/Loki/GoAccess narrowly, drop FlareSolverr's host publish.
+- **Recommendation:** Let the orchestrator generate a per-guest firewall from the stack file (inbound: route ports, Prometheus, Kuma, an explicit `consumers:` list; default drop; outbound drop pve). Set GoAccess `--no-query-string`, bind Grafana/Loki/GoAccess narrowly, drop FlareSolverr's host publish.
 
 ### Half the internet exposure lives in hand-written route files on CT 104, and route content is never validated
 
 - **Key:** `routes-outside-repo-unvalidated` · **Status:** open · **Effort:** M · **Kind:** live change on a machine (CT 104 (gateway))
 - **Reviewers:** network, security
 - **Note:** The step-22 retirement of almanac's hand-written route is a separate item, fixed by fix-41.
-- **Evidence:** Not in the repo: `manual-routes.yml` (opn, prox), `manual-homeassistant.yml`, `manual-terminus.yml`, `112-app-almanac.yml` (INVENTORY.md:105-109); kyu's route location unrecorded. `check_gateway_route` / `manifest.rs:848` validate only the filename; no Host uniqueness, no backend-is-own-IP check, nothing stops a 10.10.5.0/24 backend. Duplicate routers across files caused F115.
+- **Evidence:** Not in the repo: `manual-routes.yml` (opn, prox), `manual-homeassistant.yml`, `manual-terminus.yml`, `112-app-almanac.yml` (INVENTORY.md:105-109); kyu's route location unrecorded. `check_gateway_route` / `manifest.rs:848` validate only the filename; no Host uniqueness, no backend-is-own-IP check, nothing stops a management-network backend. Duplicate routers across files caused F115.
 - **Failure scenario:** The repo cannot answer 'what is on the internet?', and a stack file can publish any hostname to any internal address without objection.
-- **Recommendation:** Bring every route into a stack (`stacks/almanac/traefik-routes.yml`, `stacks/kyu/...`, ha/trmnl in a gateway-owned file with an explicit external backend); plan-time validation (unique Host, backend = own IP unless `external: true`, no 10.10.5.0/24 without a flag); a nightly check listing unowned route files.
+- **Recommendation:** Bring every route into a stack (`stacks/almanac/traefik-routes.yml`, `stacks/kyu/...`, ha/trmnl in a gateway-owned file with an explicit external backend); plan-time validation (unique Host, backend = own IP unless `external: true`, no management-network backend without a flag); a nightly check listing unowned route files.
 
 ### Step-22 route retirement would delete almanac's hand-written route file `112-app-almanac.yml`
 
@@ -997,7 +997,7 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 - **Key:** `apps-trust-local-callers` · **Status:** open · **Effort:** S · **Kind:** live change on a machine (CT 106, CT 105, syncthing CT)
 - **Reviewers:** network
 - **Note:** network rated this LOW-MEDIUM pending verification.
-- **Evidence:** Every proxied request reaches its backend from 10.10.10.4. Candidates: *arr `AuthenticationRequired=DisabledForLocalAddresses`, qBittorrent subnet whitelist, Syncthing without GUI password (route 'answers 200', `stacks/syncthing/lxc-compose.yml:83`). Not read (needs ssh).
+- **Evidence:** Every proxied request reaches its backend from the gateway (CT 104). Candidates: *arr `AuthenticationRequired=DisabledForLocalAddresses`, qBittorrent subnet whitelist, Syncthing without GUI password (route 'answers 200', `stacks/syncthing/lxc-compose.yml:83`). Not read (needs ssh).
 - **Failure scenario:** Passing Access is enough to control Sonarr or Syncthing (which holds the Obsidian vault) without any app login.
 - **Recommendation:** Verify the three settings; require app auth for every proxied app regardless of source.
 
@@ -1005,11 +1005,11 @@ Severity is the highest rating any reviewer gave unless noted; disagreements are
 
 - **Key:** `network-small-items` · **Status:** open · **Effort:** S · **Kind:** live change on a machine (CT 104 (gateway), CT 116 (kp-soft))
 - **Reviewers:** network
-- **Evidence:** kp-soft `TRUSTED_PROXIES=10.10.10.0/24`, safe only while `116.fw` admits just .4; Traefik ping `8090:8080` on all interfaces; `insecureSkipVerify` on opn/prox backends; CrowdSec whitelist `100.64.0.0/10` for unused Tailscale; apex `kp-soft.dev` will be a second Access-less name.
+- **Evidence:** kp-soft `TRUSTED_PROXIES=198.51.100.0/24`, safe only while `116.fw` admits just .4; Traefik ping `8090:8080` on all interfaces; `insecureSkipVerify` on opn/prox backends; CrowdSec whitelist `100.64.0.0/10` for unused Tailscale; apex `kp-soft.dev` will be a second Access-less name.
 - **Failure scenario:** Rolling back CT 116's firewall (one `firewall=0`) silently widens who kp-soft trusts as a proxy.
-- **Recommendation:** Narrow `TRUSTED_PROXIES` to `10.10.10.4/32`; publish ping on 127.0.0.1; drop the Tailscale range; fix CrowdSec before the apex goes public and Host-anchor the apex router.
+- **Recommendation:** Narrow `TRUSTED_PROXIES` to `198.51.100.4/32`; publish ping on 127.0.0.1; drop the Tailscale range; fix CrowdSec before the apex goes public and Host-anchor the apex router.
 
-### Kenny's workstation (10.10.10.10) lives in the server VLAN
+### Kenny's workstation (the workstation) lives in the server VLAN
 
 - **Key:** `workstation-in-server-vlan` · **Status:** open · **Effort:** M · **Kind:** needs a decision from Kenny (OPNsense + workstation)
 - **Reviewers:** network

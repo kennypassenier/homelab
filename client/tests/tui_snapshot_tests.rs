@@ -211,9 +211,7 @@ fn plan_modal_previews_changes() {
     use homelab_proto::{BootSpec, DeploySpec, LxcSpec, NetworkSpec, ResourceSpec, StackManifest};
     let mut m = ready_model();
     let manifest = StackManifest {
-        homepage_widgets: Default::default(),
         home_address_whitelist: None,
-        generated_dashboards_command: None,
         tiles: Default::default(),
         log_files: Vec::new(),
         registry_login: None,
@@ -241,6 +239,7 @@ fn plan_modal_previews_changes() {
             storage: "local-lvm".into(),
         },
         lxc: LxcSpec {
+            timezone: "host".into(),
             template: "debian-12".into(),
             unprivileged: true,
             features: "nesting=1".into(),
@@ -1474,9 +1473,7 @@ fn d6_plan_diff_skip_update_and_line_previews() {
         mode: None,
     };
     let mut m = homelab_proto::StackManifest {
-        homepage_widgets: Default::default(),
         home_address_whitelist: None,
-        generated_dashboards_command: None,
         tiles: Default::default(),
         log_files: Vec::new(),
         registry_login: None,
@@ -1504,6 +1501,7 @@ fn d6_plan_diff_skip_update_and_line_previews() {
             storage: "s".into(),
         },
         lxc: homelab_proto::LxcSpec {
+            timezone: "host".into(),
             template: "t".into(),
             unprivileged: true,
             features: String::new(),
@@ -1731,9 +1729,7 @@ fn a_payload_the_link_cannot_carry_is_refused_with_a_reason() {
 fn the_runbook_names_the_repositories_restic_actually_uses() {
     use homelab_core::manifest::*;
     let mut m = StackManifest {
-        homepage_widgets: Default::default(),
         home_address_whitelist: None,
-        generated_dashboards_command: None,
         tiles: Default::default(),
         log_files: Vec::new(),
         registry_login: None,
@@ -1761,6 +1757,7 @@ fn the_runbook_names_the_repositories_restic_actually_uses() {
             storage: "local-lvm".into(),
         },
         lxc: LxcSpec {
+            timezone: "host".into(),
             template: "clone:997".into(),
             unprivileged: false,
             features: "nesting=1,keyctl=1".into(),

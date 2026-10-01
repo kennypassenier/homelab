@@ -37,9 +37,7 @@ const KYU_ROUTE: &str = "http:\n  routers:\n    kyu:\n      rule: \"Host(`kyu.kp
 
 fn manifest(vmid: u16, stack: &str) -> StackManifest {
     StackManifest {
-        homepage_widgets: Default::default(),
         home_address_whitelist: None,
-        generated_dashboards_command: None,
         tiles: Default::default(),
         log_files: Vec::new(),
         registry_login: None,
@@ -67,6 +65,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
             storage: "local-lvm".into(),
         },
         lxc: LxcSpec {
+            timezone: "host".into(),
             template: "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst".into(),
             unprivileged: true,
             features: "nesting=1,keyctl=1".into(),
@@ -131,9 +130,6 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
         state_dir: STATE.into(),
         now_unix: NOW,
         metrics_targets_dir: None,
-        grafana_dashboards_dir: None,
-        homepage_services_file: None,
-        kuma_monitors_file: None,
         loki_url: None,
         asker: &homelab_core::ask::NOBODY,
         backup: Default::default(),

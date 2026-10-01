@@ -49,18 +49,48 @@ export function logsUrl(stack, s, limit = 1000) {
   return `/data/logs?${p}`;
 }
 
+/** Spellings of one level that sources use interchangeably (syslog's
+ * "informational", Go's "warning", "err"), folded to one name so a table or
+ * a filter never shows the same level twice (Kenny, 2026-10-01). */
+/** @type {Record<string, string>} */
+const LEVEL_ALIASES = {
+  information: "info",
+  informational: "info",
+  inf: "info",
+  notice: "info",
+  warning: "warn",
+  wrn: "warn",
+  err: "error",
+  eror: "error",
+  crit: "critical",
+  fatal: "critical",
+  alert: "critical",
+  emerg: "critical",
+  emergency: "critical",
+  panic: "critical",
+  dbg: "debug",
+  trc: "trace",
+};
+
+/**
+ * One canonical lower-case name per level; empty stays empty.
+ * @param {string | null | undefined} level
+ * @returns {string}
+ */
+export function canonicalLevel(level) {
+  const l = (level ?? "").trim().toLowerCase();
+  return LEVEL_ALIASES[l] ?? l;
+}
+
 /**
  * A level as a badge tone.
  * @param {string} level
  * @returns {"ok" | "warn" | "bad" | ""}
  */
 export function levelTone(level) {
-  const l = level.toLowerCase();
-  if (
-    ["error", "err", "critical", "crit", "fatal", "alert", "emerg"].includes(l)
-  )
-    return "bad";
-  if (["warn", "warning"].includes(l)) return "warn";
+  const l = canonicalLevel(level);
+  if (l === "error" || l === "critical") return "bad";
+  if (l === "warn") return "warn";
   if (l === "") return "";
   return "ok";
 }
@@ -111,7 +141,7 @@ export function logRows(lines, opts) {
       ms: l.ts_ms,
       time: lineTime(l.ts_ms, opts),
       source: l.source || "—",
-      level: l.level || "—",
+      level: canonicalLevel(l.level) || "—",
       tone: levelTone(l.level),
       stream: l.stream,
       line: l.line,

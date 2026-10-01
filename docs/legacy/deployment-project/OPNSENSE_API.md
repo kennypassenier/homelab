@@ -41,8 +41,8 @@ this project keeps finding — so it is not optional.
 ↳ *CT 116 = the container running the kp-soft.dev site, the only one strangers
 can reach.*
 
-A firewall rule that blocks traffic FROM `10.10.10.16` TO the rest of
-`10.10.10.0/24`, with an exception for what the site genuinely needs.
+A firewall rule that blocks traffic FROM `kp-soft (CT 116)` TO the rest of
+the container subnet, with an exception for what the site genuinely needs.
 
 Privilege needed: **Firewall: Rules** (`page-firewall-rules`) plus
 **Firewall: Apply** — a rule that is saved but never applied protects nothing,
@@ -81,7 +81,7 @@ transcript shows the curl command with `$(cat …)` unexpanded.
 Then in `/etc/homelab/host.toml`:
 
 ```toml
-opnsense_url = "https://10.10.10.1"
+opnsense_url = "https://the router"
 opnsense_cred_file = "/var/lib/homelab/secrets/opnsense.cred"
 ```
 

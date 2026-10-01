@@ -14,7 +14,8 @@
 
 use homelab_core::ops::fleetcheck::Severity;
 use homelab_core::ops::pinexists::{
-    evaluate_pin_existence, parse_challenge, pinned_digests, PinAnswer, PinnedDigest,
+    evaluate_pin_existence, parse_challenge, parse_digest_header, pinned_digests,
+    rewrite_tag_lines, tagged_images, PinAnswer, PinnedDigest,
 };
 
 /// The three shapes the stack files carry: a tag plus digest on ghcr.io, a
@@ -82,4 +83,82 @@ fn gap_37_a_missing_digest_is_broken_and_an_unanswered_one_is_only_noted() {
     assert!(findings
         .iter()
         .any(|f| f.severity == Severity::Noted && f.subject.contains("kp-soft")));
+}
+
+/// registry-cache-plaintext (deep-dive answer, 2026-10-01): the header
+/// block `curl -D -` returns is read case-insensitively, by line, CRLF or
+/// LF, and a digest-shaped value is required — `parse_digest_header` is the
+/// one piece standing between a registry's `HEAD` response and trusting a
+/// string as a content digest.
+#[test]
+fn registry_cache_plaintext_parse_digest_header_reads_the_header_case_insensitively() {
+    let headers = "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.docker.distribution.manifest.v2+json\r\nDocker-Content-Digest: sha256:deadbeef\r\n\r\n";
+    assert_eq!(
+        parse_digest_header(headers),
+        Some("sha256:deadbeef".to_string())
+    );
+    // lower-case header name, LF only.
+    let headers = "HTTP/1.1 200 OK\ndocker-content-digest: sha256:cafe\n";
+    assert_eq!(
+        parse_digest_header(headers),
+        Some("sha256:cafe".to_string())
+    );
+    // No such header at all.
+    assert_eq!(parse_digest_header("HTTP/1.1 404 Not Found\r\n"), None);
+    // A header present but not digest-shaped (a registry misbehaving) is
+    // rejected rather than trusted.
+    assert_eq!(
+        parse_digest_header("Docker-Content-Digest: not-a-digest\r\n"),
+        None
+    );
+}
+
+/// registry-cache-plaintext: `tagged_images` finds every tag-only
+/// `image:` line (including an implicit `:latest`), skips anything already
+/// pinned by digest, and splits registry/repository/tag the same way the
+/// pull-through cache rewrite does.
+#[test]
+fn registry_cache_plaintext_tagged_images_finds_only_unpinned_references() {
+    let compose = "services:\n  a:\n    image: ghcr.io/kp/app:1.2.3\n  \
+                   b:\n    image: redis\n  \
+                   c:\n    image: ghcr.io/kp/pinned@sha256:aaaa\n  \
+                   d:\n    image: 10.10.10.17/library/traefik:v3\n";
+    let images = tagged_images(compose);
+    assert_eq!(images.len(), 3, "{:?}", images);
+    let app = images.iter().find(|i| i.repository == "kp/app").unwrap();
+    assert_eq!(app.registry, "ghcr.io");
+    assert_eq!(app.tag, "1.2.3");
+    assert_eq!(app.reference, "ghcr.io/kp/app:1.2.3");
+    let redis = images
+        .iter()
+        .find(|i| i.repository == "library/redis" || i.repository == "redis")
+        .unwrap();
+    assert_eq!(redis.tag, "latest", "a bare image name means :latest");
+    assert!(
+        images.iter().all(|i| i.repository != "kp/pinned"),
+        "an already-digest-pinned line is not re-resolved: {:?}",
+        images
+    );
+}
+
+/// registry-cache-plaintext: `rewrite_tag_lines` appends `@<digest>` only to
+/// lines whose exact reference was resolved, leaves every other `image:`
+/// line untouched (including one that could not be resolved), and preserves
+/// indentation and the file's trailing newline.
+#[test]
+fn registry_cache_plaintext_rewrite_tag_lines_only_touches_resolved_references() {
+    let compose = "services:\n  a:\n    image: ghcr.io/kp/app:1\n  \
+                   b:\n    image: redis:7\n";
+    let mut resolved = std::collections::BTreeMap::new();
+    resolved.insert("ghcr.io/kp/app:1".to_string(), "sha256:aaaa".to_string());
+    let out = rewrite_tag_lines(compose, &resolved);
+    assert_eq!(
+        out,
+        "services:\n  a:\n    image: ghcr.io/kp/app:1@sha256:aaaa\n  \
+         b:\n    image: redis:7\n"
+    );
+
+    // No match: byte-for-byte unchanged, trailing newline preserved.
+    let unresolved = rewrite_tag_lines(compose, &std::collections::BTreeMap::new());
+    assert_eq!(unresolved, compose);
 }

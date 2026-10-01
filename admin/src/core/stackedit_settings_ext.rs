@@ -35,6 +35,10 @@ pub struct SettingsExtEdit {
     pub gpu: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vpn: Option<bool>,
+    /// T62: same as `unprivileged`/`gpu`/`vpn` — applied by `pct create`
+    /// only, so a deploy of a running container leaves it exactly as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storage: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -97,6 +101,15 @@ fn valid_bridge(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
 }
 
+/// A timezone argument to `pct create --timezone`: `host`, or an IANA zone
+/// name (`Europe/Amsterdam`, `UTC`) — letters, digits, `/`, `+`, `-`, `_`.
+fn valid_timezone(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'+' | b'-' | b'_'))
+}
+
 /// A Proxmox storage id: letters, digits, `-` and `_`.
 fn valid_storage_id(s: &str) -> bool {
     !s.is_empty()
@@ -139,6 +152,13 @@ pub fn problems(s: &SettingsExtEdit) -> Vec<String> {
         if !valid_storage_id(st) {
             out.push(format!(
                 "storage {st:?} must be letters, digits, '-' or '_', like local-lvm"
+            ));
+        }
+    }
+    if let Some(tz) = &s.timezone {
+        if !valid_timezone(tz) {
+            out.push(format!(
+                "timezone {tz:?} must be \"host\" or an IANA zone like Europe/Amsterdam"
             ));
         }
     }
@@ -198,6 +218,7 @@ pub fn ops(m: &StackManifest, s: &SettingsExtEdit) -> Vec<Op> {
     set_str("network.gateway", &m.network.gateway, &s.gateway);
     set_str("network.bridge", &m.network.bridge, &s.bridge);
     set_str("resources.storage", &m.resources.storage, &s.storage);
+    set_str("lxc.timezone", &m.lxc.timezone, &s.timezone);
     if let Some(v) = s.vlan.filter(|v| m.network.vlan != Some(*v)) {
         ops.push(Op::Set {
             path: path("network.vlan"),
@@ -279,6 +300,11 @@ pub fn describe(s: &SettingsExtEdit, m: &StackManifest) -> Vec<String> {
     if let Some(v) = &s.storage {
         if *v != m.resources.storage {
             parts.push(format!("storage {v} (rebuild needed)"));
+        }
+    }
+    if let Some(v) = &s.timezone {
+        if *v != m.lxc.timezone {
+            parts.push(format!("timezone {v} (rebuild needed)"));
         }
     }
     if let Some(v) = s.on_demand.filter(|v| *v != m.on_demand) {
@@ -392,5 +418,36 @@ apps: []
         assert!(!valid_bridge(""));
         assert!(valid_storage_id("local-lvm"));
         assert!(!valid_storage_id("local lvm"));
+    }
+
+    #[test]
+    fn timezone_charset() {
+        assert!(valid_timezone("host"));
+        assert!(valid_timezone("Europe/Amsterdam"));
+        assert!(valid_timezone("Etc/GMT+1"));
+        assert!(!valid_timezone(""));
+        assert!(!valid_timezone("not a zone"));
+    }
+
+    #[test]
+    fn timezone_edit_emits_a_rebuild_warning() {
+        let m = manifest();
+        assert_eq!(m.lxc.timezone, "host");
+        let edit = SettingsExtEdit {
+            timezone: Some("Europe/Amsterdam".into()),
+            ..Default::default()
+        };
+        let got = ops(&m, &edit);
+        assert_eq!(
+            got,
+            vec![Op::Set {
+                path: path("lxc.timezone"),
+                value: Value::from("Europe/Amsterdam"),
+            }]
+        );
+        let words = describe(&edit, &m);
+        assert!(words
+            .iter()
+            .any(|w| w.contains("timezone Europe/Amsterdam (rebuild needed)")));
     }
 }

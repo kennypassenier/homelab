@@ -41,12 +41,6 @@ pub struct SafetyConfig {
     pub no_touch: Vec<u16>,
     pub gateway_vmid: u16,
     pub gateway_routes_dir: String,
-    /// The container Grafana runs in, where the generated dashboards are
-    /// written and asked about. It was the gateway until Grafana moved to
-    /// the metrics stack (fix-90, 2026-09-27, gateway-shared-no-limits);
-    /// host.toml's `grafana_vmid` names it, and unset it follows
-    /// `gateway_vmid`, where Grafana ran before.
-    pub grafana_vmid: u16,
     /// fix-120: the vmids a deploy may create as a PRIVILEGED container. A
     /// privileged container is root on the host, and a stack file is
     /// something anyone holding the API token can send, so it may not ask for
@@ -65,7 +59,6 @@ impl Default for SafetyConfig {
             no_touch: DEFAULT_NO_TOUCH.to_vec(),
             gateway_vmid: 104,
             gateway_routes_dir: "/opt/traefik-config/routes".into(),
-            grafana_vmid: 104,
             privileged_vmids: None,
             data_mount_roots: None,
         }

@@ -415,6 +415,16 @@ pub struct ManualCheckRecord {
     /// checks-link (2026-09-30): where the application is opened.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// password-chain-bus-factor (owner decision "Alleen de
+    /// 90-dagen-controle", 2026-10-01): for a STANDING check only (one that
+    /// is not registered by any stack's deploy, `manualchecks::ensure_standing`)
+    /// — how many days after it was last answered it is due again,
+    /// whatever the answer was. `checks-interval` (2026-09-30) deliberately
+    /// removed this for ordinary per-app checks; a standing check is a
+    /// different thing by design, asked on a clock because nothing a deploy
+    /// does ever reopens it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recur_days: Option<u64>,
 }
 
 /// fix-51 (expert panel, state-writes-race, 2026-09-27): the lock that

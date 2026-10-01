@@ -285,6 +285,37 @@ pub(crate) async fn newest_snapshot_unix(
     newest
 }
 
+/// feat-overview-10: every snapshot time across a stack's per-app
+/// repositories, unix seconds, one entry per snapshot (not deduplicated by
+/// night — the calendar groups them itself). A repository that does not
+/// exist yet, or that fails to answer, is left out rather than failing the
+/// whole stack: the calendar then simply shows nothing for that night,
+/// which is the same fail-safe direction as [`newest_snapshot_unix`].
+pub async fn snapshot_nights_unix(
+    exec: &dyn Executor,
+    m: &StackManifest,
+    cfg: &BackupCfg,
+) -> Vec<u64> {
+    let mut out = Vec::new();
+    for (owner, _paths) in owner_groups(m) {
+        let Ok(res) = exec
+            .run(&restic_cmd(cfg, &owner, &["snapshots", "--json"], 120))
+            .await
+        else {
+            continue;
+        };
+        if !res.success() {
+            continue;
+        }
+        out.extend(
+            parse_snapshots_json(&res.stdout)
+                .into_iter()
+                .map(|(_, t)| t),
+        );
+    }
+    out
+}
+
 /// D25: group the manifest's storage paths by the app that owns them, in
 /// manifest order. A path with no declared owner belongs to the stack, which
 /// keeps host-level paths (and every manifest written before the field
@@ -848,7 +879,7 @@ pub fn run_tag(now_unix: u64) -> String {
 
 /// fix-112: one snapshot as a restore sees it — its ids, its time, and the
 /// night it belongs to when it carries a `run-<unix>` tag.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SnapRun {
     pub id: String,
     pub short_id: String,
@@ -1765,4 +1796,248 @@ pub fn snapshot_is_empty(stdout: &str) -> bool {
         return files == 0 && bytes == 0;
     }
     false
+}
+
+// ── feat-backup-1/2/3: status, snapshot list, snapshot browse ─────────────
+
+/// feat-backup-1: one repository's status on the Backups page — D25's
+/// owning-app repository, its newest snapshot, how many it holds, its size
+/// on the remote, and the last restore-drill verdict recorded for it
+/// (`state::DrillRecord`, keyed the same way the drill itself keys it: by
+/// repository name).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct RepoStatus {
+    /// D25: the owning app (compose) or unit (native) — the restic
+    /// repository is named `<base>/<owner>-config`.
+    pub owner: String,
+    /// None when the repository does not exist yet (a stack never backed
+    /// up) or could not be read — `error` then says why.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub newest_snapshot: Option<SnapRun>,
+    pub snapshot_count: usize,
+    /// feat-backup-2: every snapshot of this repository, newest first — the
+    /// restore dialog's own picker reads this (one round trip, no separate
+    /// "list snapshots" call); the Backups page itself only ever shows
+    /// `newest_snapshot`.
+    pub snapshots: Vec<SnapRun>,
+    /// `restic stats latest --json`'s `total_size`; None when that call
+    /// failed (the status as a whole is not failed for it — a size is a
+    /// nicety, not a safety fact).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drill: Option<crate::state::DrillRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// feat-backup-1: `restic snapshots --json` for one repository, parsed and
+/// newest-first — the data both the status card and the restore snapshot
+/// picker read.
+pub async fn list_snapshots(
+    exec: &dyn Executor,
+    cfg: &BackupCfg,
+    owner: &str,
+) -> Result<Vec<SnapRun>, CoreError> {
+    let out = exec
+        .run(&restic_cmd(cfg, owner, &["snapshots", "--json"], 120))
+        .await?;
+    // exit 10: repository does not exist (never backed up) — an empty list,
+    // not an error; anything else that fails IS an error, same rule
+    // `restore_empty_unit` already uses for this exact distinction.
+    if !out.success() {
+        if out.code == 10 {
+            return Ok(Vec::new());
+        }
+        return Err(CoreError::Other(format!(
+            "restic snapshots for '{}' failed (exit {}): {}",
+            owner,
+            out.code,
+            out.stderr.trim()
+        )));
+    }
+    let mut snaps = parse_snapshot_runs(&out.stdout);
+    snaps.sort_by_key(|s| std::cmp::Reverse(s.time));
+    Ok(snaps)
+}
+
+/// feat-backup-1: one repository's size on the remote, from `restic stats`.
+/// `None` on any failure — a status page shows "unknown" rather than
+/// refusing to show the rest of the row.
+async fn repo_size_bytes(exec: &dyn Executor, cfg: &BackupCfg, owner: &str) -> Option<u64> {
+    let out = exec
+        .run(&restic_cmd(cfg, owner, &["stats", "latest", "--json"], 120))
+        .await
+        .ok()?;
+    if !out.success() {
+        return None;
+    }
+    serde_json::from_str::<serde_json::Value>(out.stdout.trim())
+        .ok()?
+        .get("total_size")
+        .and_then(|n| n.as_u64())
+}
+
+/// feat-backup-1: every repository a stack's manifest declares (D25's
+/// `owner_groups`), with its status. One repository's failure to answer
+/// does not hide the others — their `error` field says so individually.
+pub async fn backup_status(
+    exec: &dyn Executor,
+    m: &StackManifest,
+    cfg: &BackupCfg,
+    drills: &std::collections::BTreeMap<String, crate::state::DrillRecord>,
+) -> Vec<RepoStatus> {
+    let mut out = Vec::new();
+    for (owner, _paths) in owner_groups(m) {
+        out.push(repo_status_of(exec, cfg, drills, owner).await);
+    }
+    out
+}
+
+/// feat-backup-1: the same, for one already-known repository name (a native
+/// unit, whose "manifest" is `NativeServiceManifest`, not `StackManifest`,
+/// so it cannot go through `owner_groups`).
+pub async fn repo_status_of(
+    exec: &dyn Executor,
+    cfg: &BackupCfg,
+    drills: &std::collections::BTreeMap<String, crate::state::DrillRecord>,
+    owner: String,
+) -> RepoStatus {
+    match list_snapshots(exec, cfg, &owner).await {
+        Ok(snaps) => RepoStatus {
+            newest_snapshot: snaps.first().cloned(),
+            snapshot_count: snaps.len(),
+            size_bytes: repo_size_bytes(exec, cfg, &owner).await,
+            drill: drills.get(&owner).cloned(),
+            error: None,
+            owner,
+            snapshots: snaps,
+        },
+        Err(e) => RepoStatus {
+            newest_snapshot: None,
+            snapshot_count: 0,
+            size_bytes: None,
+            drill: drills.get(&owner).cloned(),
+            error: Some(e.to_string()),
+            owner,
+            snapshots: Vec::new(),
+        },
+    }
+}
+
+/// feat-backup-3: one entry `restic ls --json` reports — a file or a
+/// directory under the browsed path, read-only.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SnapshotEntry {
+    pub name: String,
+    pub path: String,
+    /// "file" or "dir", restic's own `struct_type`/`type` vocabulary.
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mtime: Option<String>,
+}
+
+/// feat-backup-3: parse `restic ls <id> --json [path]`'s newline-delimited
+/// output into the entries directly under `path` (not every descendant —
+/// restic `ls` without `--recursive` already stops there, this only drops
+/// the leading `snapshot` summary line `ls` also emits).
+pub fn parse_snapshot_ls(raw: &str) -> Vec<SnapshotEntry> {
+    #[derive(serde::Deserialize)]
+    struct Node {
+        #[serde(default)]
+        struct_type: String,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        path: String,
+        #[serde(default, rename = "type")]
+        node_type: String,
+        #[serde(default)]
+        size: Option<u64>,
+        #[serde(default)]
+        mtime: Option<String>,
+    }
+    raw.lines()
+        .filter_map(|l| serde_json::from_str::<Node>(l.trim()).ok())
+        .filter(|n| n.struct_type == "node")
+        .map(|n| SnapshotEntry {
+            name: n.name,
+            path: n.path,
+            kind: n.node_type,
+            size: n.size,
+            mtime: n.mtime,
+        })
+        .collect()
+}
+
+/// feat-backup-3: list one snapshot's files under `path` ("" = root),
+/// read-only — never writes, never stops a container.
+pub async fn browse_snapshot(
+    exec: &dyn Executor,
+    cfg: &BackupCfg,
+    owner: &str,
+    snapshot: &str,
+    path: &str,
+) -> Result<Vec<SnapshotEntry>, CoreError> {
+    let target = if path.is_empty() {
+        "/".to_string()
+    } else if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{path}")
+    };
+    let out = exec
+        .run(&restic_cmd(
+            cfg,
+            owner,
+            &["ls", "--json", snapshot, &target],
+            120,
+        ))
+        .await?;
+    if !out.success() {
+        return Err(CoreError::Other(format!(
+            "restic ls {} {} for '{}' failed (exit {}): {}",
+            snapshot,
+            target,
+            owner,
+            out.code,
+            out.stderr.trim()
+        )));
+    }
+    Ok(parse_snapshot_ls(&out.stdout))
+}
+
+#[cfg(test)]
+mod backup_status_tests {
+    use super::*;
+
+    #[test]
+    fn empty_summary_is_empty_entries() {
+        assert!(parse_snapshot_ls("").is_empty());
+    }
+
+    #[test]
+    fn parses_node_lines_and_skips_the_snapshot_summary_line() {
+        let raw = "{\"struct_type\":\"snapshot\",\"id\":\"abc\"}\n\
+                    {\"struct_type\":\"node\",\"name\":\"a.txt\",\"path\":\"/a.txt\",\"type\":\"file\",\"size\":12}\n\
+                    {\"struct_type\":\"node\",\"name\":\"sub\",\"path\":\"/sub\",\"type\":\"dir\"}\n";
+        let entries = parse_snapshot_ls(raw);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "a.txt");
+        assert_eq!(entries[0].kind, "file");
+        assert_eq!(entries[0].size, Some(12));
+        assert_eq!(entries[1].kind, "dir");
+        assert_eq!(entries[1].size, None);
+    }
+
+    #[test]
+    fn malformed_lines_are_skipped_not_fatal() {
+        let raw = "not json\n{\"struct_type\":\"node\",\"name\":\"ok\",\"path\":\"/ok\",\"type\":\"file\"}\n";
+        let entries = parse_snapshot_ls(raw);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "ok");
+    }
 }

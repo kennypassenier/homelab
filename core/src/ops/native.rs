@@ -1046,11 +1046,8 @@ pub async fn backup_native(
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
 
-    // fix-115 (drill-includes-stateless-native, 2026-09-27): a unit that
-    // declares it keeps nothing has nothing to archive. The tar of no
-    // directory failed every night it was tried, which failed the whole
-    // stack's night and held back its updates; and the repository it would
-    // have created is one the drill then rehearsed for nothing.
+    // fix-115: a unit that declares it keeps nothing has nothing to archive.
+    // Story: docs/deployment/REGISTER.md.
     if m.stateless && m.data_dirs.is_empty() && m.backup_from_newest.is_none() {
         runner.log(
             Level::Info,
@@ -1131,13 +1128,10 @@ pub async fn backup_native(
         );
     }
 
-    // fix-63 (native-rebuild-starts-empty, 2026-09-27): after a rebuild the
-    // unit starts with empty data directories until somebody restores them
-    // by hand, and a tar of an empty directory is never zero bytes, so
-    // nothing refused to archive it. One night later the empty state was the
-    // latest snapshot and retention began pruning the real history. Empty
-    // directories are archived only into a repository without history — a
-    // new service — and refused over one that has some.
+    // fix-63: empty directories are archived only into a repository without
+    // history — a new service — and refused over one that has some, so an
+    // empty rebuild can never become the latest snapshot of a service with
+    // real history. Story: docs/deployment/REGISTER.md.
     step!(runner, "empty data over history", {
         if own_copy.is_some() || m.data_dirs.is_empty() {
             return Ok(StepOutcome::Unchanged);
@@ -1432,14 +1426,9 @@ pub async fn backup_native(
             };
             // pipefail is load-bearing: without it a dead `pct exec tar` still
             // yields a "successful" empty snapshot — a backup that lies.
-            // F171: RESTIC_CACHE_DIR was missing here while `backup.rs` has set
-            // it for every compose stack since it was written. This path builds
-            // the same environment by hand, and hand-built copies drift: without
-            // a cache directory restic finds neither $XDG_CACHE_HOME nor $HOME
-            // in the host's service environment, warns about it on every single
-            // run, and re-fetches metadata from Google Drive that it should have
-            // had locally. Measured 2026-09-02 in the T12 drill — the warning
-            // was in the output of every native backup and nobody had read it.
+            // F171: the same restic cache constant `backup.rs` uses for every
+            // compose stack, so this hand-built environment does not drift
+            // from it. Story: docs/deployment/REGISTER.md.
             let script = format!(
                 "set -o pipefail; pct exec {} -- tar -cf - {} | \
              env RESTIC_REPOSITORY={}/{}-config RESTIC_PASSWORD_FILE={} \
@@ -2307,12 +2296,10 @@ pub async fn update_native(
         Ok(StepOutcome::Unchanged)
     });
 
-    // fix-116 (native-update-copies-binary-nightly, 2026-09-27): the binary
-    // was copied aside and the service's own update run every night for every
-    // service, 40 MB for kyu on CT 109's small rootfs, even when the latest
-    // release was the one installed. The release is asked first, as
-    // `release_update` does, and a service already on it is left alone. When
-    // the release cannot be read the service's own update decides, as before.
+    // fix-116: the release is asked first, as `release_update` does, and a
+    // service already on it is left alone — no copy, no update run. When
+    // the release cannot be read the service's own update decides, as
+    // before. Story: docs/deployment/REGISTER.md.
     if let Some(repo) = &m.release_repo {
         match latest_listed_sha(exec, repo, m.asset_name()).await {
             Ok((tag, listed)) if !before.is_empty() && listed.eq_ignore_ascii_case(&before) => {

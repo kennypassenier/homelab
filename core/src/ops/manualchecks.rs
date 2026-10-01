@@ -169,12 +169,10 @@ pub fn ensure_standing_checks(state: &mut HostState, now: u64) {
     );
 }
 
-/// fix-65 (nightly-report-always-red, 2026-09-27): record a deliberate "not
-/// ok" that is accepted until `until`, with the reason. kp-soft.dev's `nok`
-/// (D56) is by design and was Broken every night, which kept the nightly
-/// report red and taught its reader to ignore it. An accepted answer is
-/// Noted until its date and Broken again after, so the acceptance cannot
-/// quietly become permanent.
+/// fix-65: record a deliberate "not ok" that is accepted until `until`,
+/// with the reason. An accepted answer is Noted until its date and Broken
+/// again after, so the acceptance cannot quietly become permanent. Story:
+/// `docs/deployment/REGISTER.md`.
 pub fn accept(state: &mut HostState, id: &str, until: u64, reason: &str, now: u64) -> bool {
     if !answer(state, id, false, reason, now) {
         return false;

@@ -297,12 +297,9 @@ pub fn judge(r: &Reading) -> Verdict {
     match r.expect {
         Expect::MustBePresent => Verdict::Ok,
         Expect::MustMatch => {
-            // fix-151 (2026-09-28): no reading before — the app did not exist
-            // on this container yet (Loki and Grafana arriving on CT 113) —
-            // is nothing to match against; the first reading is the
-            // baseline, as it is for `NeverDecreases` below. Asking the
-            // operator about '' → 'ready' cost every first deploy of a moved
-            // app a 120 s wait and an "incomplete" record.
+            // fix-151: no reading before is nothing to match against; the
+            // first reading is the baseline, as it is for `NeverDecreases`
+            // below. Story: docs/deployment/REGISTER.md.
             if r.before.trim().is_empty() || r.before.trim() == r.after.trim() {
                 Verdict::Ok
             } else {

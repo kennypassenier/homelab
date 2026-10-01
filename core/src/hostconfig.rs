@@ -298,10 +298,8 @@ pub const KEYS: &[KeyInfo] = &[
         Access::Browser,
         Apply::Restart,
     ),
-    // fix-62 (restore-drill-covers-almost-nothing, 2026-10-01): the drill
-    // used to restore under the state dir on pve-root; a data pool next to
-    // the backup staging directory is the right place for it, same as
-    // staging, for the same reason — not the root disk.
+    // fix-62: a data pool, not the root disk — same reason as the backup
+    // staging directory. Story: docs/deployment/REGISTER.md.
     k(
         "restore_drill_scratch_dir",
         "Nightly round and backups",

@@ -56,12 +56,10 @@ pub enum AutoScope {
     Only(Vec<String>),
 }
 
-/// fix-117: the scope from each container's `(policy, service)`. The policy
-/// used to be read from the app's FIRST container and applied to all of it:
-/// `stacks/paperwork/paperless-db` labels postgres `manual` and redis `auto`,
-/// so depending on container order Postgres got the nightly recreate its
-/// label forbids, or redis never updated. A service whose name cannot be
-/// passed to compose as it is makes a mixed app skip rather than guess.
+/// fix-117: the scope from each container's `(policy, service)`, read per
+/// container rather than from the app's first one. A service whose name
+/// cannot be passed to compose as it is makes a mixed app skip rather than
+/// guess. Story: `docs/deployment/REGISTER.md`.
 pub fn auto_scope(policies: &[(String, String)]) -> AutoScope {
     let auto: Vec<&(String, String)> = policies.iter().filter(|(p, _)| p == "auto").collect();
     if auto.is_empty() {
@@ -110,11 +108,9 @@ async fn service_policies(
         .collect())
 }
 
-/// fix-118 (compose-update-verify-weak, 2026-09-27): F300, ported from the
-/// native units. The verify after `up -d` asked "did one service start",
-/// read once, right away: a two-service app with a crashed Postgres, or a
-/// container in a restart loop that is `running` for part of every cycle,
-/// passed as a good update. This asks whether the app STAYS up:
+/// fix-118 (F300, ported from the native units; story:
+/// `docs/deployment/REGISTER.md`): this asks whether the app STAYS up, not
+/// just whether it started:
 ///
 /// - every service in `want` (the ones that ran before the update) is
 ///   running within 30 s,
@@ -528,12 +524,11 @@ pub async fn update(
                 600,
             )
             .await?;
-            // gap-25: the exit status counts. A failed pull used to be
-            // followed by `up` on the old image, a passing verify, and a
-            // report saying the app was updated. It is not an error either:
-            // a registry that is down for an hour must not park every stack
-            // (H8) and stop its backups, so the app is left running as it
-            // was and the transcript says it was not updated.
+            // gap-25: the exit status counts, but is not treated as an
+            // error either — a registry that is down for an hour must not
+            // park every stack (H8) and stop its backups, so the app is
+            // left running as it was and the transcript says it was not
+            // updated. Story: docs/deployment/REGISTER.md.
             if !out.success() {
                 *pull_failed.lock().unwrap() = Some(out.stderr.trim().to_string());
                 return Ok(StepOutcome::Unchanged);

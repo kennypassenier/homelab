@@ -51,10 +51,8 @@ pub fn commands_script(events: &[PipelineEvent]) -> String {
     out
 }
 
-/// fix-125 (expert panel, bundles-audit-world-readable, 2026-09-27): the
-/// mode of every bundle file. They were 0644, readable by any local account
-/// on pve, and they hold transcripts that carried secrets until those were
-/// masked on 2026-09-27.
+/// fix-125: bundle files hold transcripts that can carry secrets, so they are
+/// private rather than the default mode. Story: `docs/deployment/REGISTER.md`.
 pub const PRIVATE: u32 = 0o600;
 
 /// Write a bundle under `<state_dir>/incidents/<ts>-<op>/`. Returns the
@@ -128,11 +126,10 @@ pub async fn write_bundle(
 
 // ── Retention (fix-131) ─────────────────────────────────────────────────────
 
-/// fix-131 (expert panel, orchestrator-logs-only-on-pve, 2026-09-27):
-/// bundles older than this many days are removed. Nothing pruned them (90
-/// on pve that day, the oldest from the first deploys), and they are in no
-/// backup, so a limit is the difference between a record and a slow leak.
-/// Generous on purpose: a quarter covers every failure worth reading back.
+/// fix-131: bundles older than this many days are removed so they cannot
+/// leak disk forever (they are in no backup). Generous on purpose: a
+/// quarter covers every failure worth reading back. Story:
+/// `docs/deployment/REGISTER.md`.
 pub const BUNDLE_MAX_AGE_DAYS: u64 = 90;
 /// fix-131: at most this many bundles are kept, newest first, so a
 /// crash-looping night cannot fill the disk inside the age limit.

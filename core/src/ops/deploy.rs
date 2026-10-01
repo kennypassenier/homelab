@@ -555,11 +555,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         let mut check_ok: Vec<String> = Vec::new();
         for mount in &m.storage {
             // An app that declares it keeps nothing is empty BY DESIGN, so
-            // "empty, therefore restore it" is exactly the wrong conclusion.
-            // Without this the gateway asked Google Drive about
-            // cloudflared-config on every single deploy — and a stale
-            // snapshot would have been restored into a directory whose whole
-            // point is that it stays empty (F154, seen live 2026-09-01).
+            // "empty, therefore restore it" is exactly the wrong conclusion
+            // (F154, story: docs/deployment/REGISTER.md).
             if mount.no_data {
                 continue;
             }
@@ -591,16 +588,13 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     120,
                 ))
                 .await;
-            // fix-54 (expert panel, auto-restore-error-as-fresh, 2026-09-27):
-            // only two answers mean "nothing to restore": an empty snapshot
-            // list, and restic's own "repository does not exist" (exit 10
-            // since restic 0.17; pve runs 0.18). Every other failure (Drive
-            // unreachable, an expired rclone token, a wrong password, the
-            // 120 s timeout) used to read as "fresh" at Info level, so a
-            // rebuild could start an app on an empty directory and that
-            // night's backup would make the empty state `latest`. Such a
-            // path is now a loud warning; the deploy still goes on, because
-            // backup-target trouble never blocks a deploy (E3 spec).
+            // fix-54: only two answers mean "nothing to restore": an empty
+            // snapshot list, and restic's own "repository does not exist"
+            // (exit 10 since restic 0.17; pve runs 0.18). Every other
+            // failure (Drive unreachable, an expired rclone token, a wrong
+            // password, the 120 s timeout) is a loud warning; the deploy
+            // still goes on, because backup-target trouble never blocks a
+            // deploy (E3 spec). Story: docs/deployment/REGISTER.md.
             let listed = match &has_snapshot {
                 Ok(out) if out.success() => Ok(out.stdout.trim().to_string()),
                 Ok(out) if out.code == 10 => Ok(String::new()),
@@ -1219,11 +1213,10 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         })
     });
 
-    // fix-154 (2026-09-28 07:09, the Debian 13 rebuild of kp-soft): Proxmox
-    // drops a vmid's firewall file when it creates that vmid, so the file
-    // written above, before the container existed, was gone once `pct clone`
-    // had made it — CT 116 came up with `firewall=1` and no rules. A new
-    // container gets the file written again, now that it exists.
+    // fix-154: Proxmox drops a vmid's firewall file when it creates that
+    // vmid, so the file written above, before the container existed, is
+    // gone once `pct clone` has made it. A new container gets the file
+    // written again, now that it exists. Story: docs/deployment/REGISTER.md.
     if !exists && let Some(fwspec) = m.firewall.as_ref().filter(|f| f.enabled) {
         step!(runner, exec, ctx, m, "firewall after create", {
             let path = crate::firewall::fw_path(m.vmid);
@@ -1633,9 +1626,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             .await?;
         }
         run_ok(exec, &Cmd::new("git", &["-C", &repo, "add", "-A"], 30)).await?;
-        // fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci):
-        // the message said only `deploy <stack>`, so the history could not
-        // say which commit went live or that some files were in none.
+        // fix-141: names which commit went live and whether files in the
+        // stack directory were uncommitted. Story: docs/deployment/REGISTER.md.
         let msg = match spec.source.as_ref() {
             Some(src) => format!(
                 "deploy {} ({})\n\n{}",
@@ -2027,12 +2019,9 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 _ => 900,
             };
             let cmd = format!("cd {} && docker compose pull -q", dir);
-            // gap-12 (Kenny, 2026-09-19: "alleen wat ontbreekt"): a deploy
-            // fetches only what the container does not have. Pulling every
-            // app on every deploy lifted five `manual`-policy apps on the
-            // gateway to whatever `latest` meant that day, with none of the
-            // health check and rollback the nightly update has. Updating
-            // stays where the rollback is; a deploy deploys.
+            // gap-12: a deploy fetches only what the container does not
+            // have. Updating stays where the rollback is; a deploy deploys.
+            // Story: docs/deployment/REGISTER.md.
             //
             // The container is asked per image the compose file names (after
             // the cache rewrite, so the name asked about is the name `up -d`
@@ -3114,13 +3103,12 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 }
             }
             if running {
-                // fix-159 (2026-09-29): a running unit whose unit file, drop-in
-                // or env file this deploy changed restarts, or the change waits
-                // for an unrelated restart: HOMELAB_ADMIN_LIVE_ANNOUNCE_MS set
-                // at 05:41 took effect at the 13:28 reinstall. Through the
-                // health check updates and rollbacks use (restart, wait for
-                // active, NRestarts across a window), said before it happens.
-                // Unchanged: left running, as adoption leaves it.
+                // fix-159: a running unit whose unit file, drop-in or env
+                // file this deploy changed restarts, through the health
+                // check updates and rollbacks use (restart, wait for
+                // active, NRestarts across a window), said before it
+                // happens. Unchanged: left running, as adoption leaves it.
+                // Story: docs/deployment/REGISTER.md.
                 // latch-files: a secret file that names this unit in
                 // `restarts` (a config it reads by path, not by systemd).
                 let declared = spec.secret_files.iter().any(|f| {

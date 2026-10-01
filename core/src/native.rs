@@ -15,11 +15,9 @@ use serde::{Deserialize, Serialize};
 /// kyu-runner are the orchestrator's; http-switchboard stays manual while it
 /// sits on the alert path; almanac updates itself.
 ///
-/// fix-58 (native-update-ignores-manual-policy, 2026-09-27): `manual` used to
-/// stop only the release update, and the nightly round still ran the unit's
-/// own `update_cmd` for every service — so the manual http-switchboard updated
-/// itself every night anyway. `manual` now means nothing runs, and a service
-/// that updates itself through its own verb says so with `self`.
+/// fix-58: `manual` means nothing runs, and a service that updates itself
+/// through its own verb says so with `self`. Story:
+/// `docs/deployment/REGISTER.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum UpdatePolicy {
@@ -214,12 +212,10 @@ impl NativeServiceManifest {
     /// test instead of an assumption.
     pub fn nightly_updates(&self) -> NightlyUpdates {
         // fix-58: the policy gates both paths; `manual` gets neither.
-        // fix-148 (native-update-mechanism, Kenny 2026-09-27, form "Keuzes
-        // helpers"): one mechanism per policy. `auto` used to run both the
-        // signed release update and the unit's own `update_cmd`, two paths to
-        // the same binary with different checks (the kit's own verb does not
-        // check the ecosystem signature, fix-29). `auto` is the signed release
-        // update only; the unit's own verb runs only under `self`.
+        // fix-148: one mechanism per policy — `auto` is the signed release
+        // update only (the kit's own verb does not check the ecosystem
+        // signature, fix-29); the unit's own verb runs only under `self`.
+        // Story: docs/deployment/REGISTER.md.
         NightlyUpdates {
             release: self.update_policy == UpdatePolicy::Auto,
             own_cmd: self.update_policy == UpdatePolicy::OwnVerb,

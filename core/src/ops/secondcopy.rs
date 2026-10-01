@@ -2,11 +2,7 @@
 //! copy of every repository, and a check that the copies can be read.
 //!
 //! Every restic repository lived in one place, `rclone:gdrive:homelab-backups`,
-//! and nothing ever ran `restic check` on it. A locked or full Google account,
-//! a pruning bug like F285, or one corrupt pack would each have left /appdata
-//! (20 GB on the NVMe, measured 2026-09-27) with no copy anyone could restore
-//! from, and the corruption would have surfaced at the one restore that
-//! mattered.
+//! and nothing ever ran `restic check` on it. Story: `docs/deployment/REGISTER.md`.
 //!
 //! Kenny's choice (deep-dive, `lokale-kopie-hdd4tb`): after each night's
 //! backups, `restic copy` every repository into a twin on a dataset of the

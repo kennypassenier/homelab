@@ -7,11 +7,9 @@ use std::collections::HashMap;
 /// One event, exactly as POSTed to the webhook — and the ONLY place a
 /// payload is built.
 ///
-/// F86: the nightly fleet check used to hand-build its own JSON with no
-/// `source` and no `label`, which made the most important report of the day
-/// the one event a filter on `source` would silently drop. The boot notice
-/// hand-built a third variant. Three shapes for one contract is how a
-/// consumer ends up parsing the two it happens to have seen.
+/// F86: every caller builds its payload through here, never by hand, so a
+/// `source`/`label` filter never silently drops one of them. Story:
+/// `docs/deployment/REGISTER.md`.
 pub fn op_payload(op: &str, label: &str, ok: bool, error: Option<&str>, version: &str) -> String {
     op_payload_from("homelab-host", op, label, ok, error, version)
 }
@@ -42,11 +40,10 @@ pub fn op_payload_from(
 /// fix-57: the most error text one notification carries.
 pub const NOTIFY_ERROR_MAX: usize = 1024;
 
-/// fix-57 (expert panel, error-detail-unmasked-to-phone, 2026-09-27): what
-/// a notification says about a failure. The reason can be kilobytes of app
-/// output; it went whole to Home Assistant's event log, the logbook and the
-/// phone, and unmasked. Masked here whatever the caller did, and cut to
-/// [`NOTIFY_ERROR_MAX`] bytes with a pointer to where the whole text is.
+/// fix-57: what a notification says about a failure. The reason can be
+/// kilobytes of app output, so it is masked here whatever the caller did
+/// and cut to [`NOTIFY_ERROR_MAX`] bytes with a pointer to where the whole
+/// text is. Story: `docs/deployment/REGISTER.md`.
 pub fn notify_error_text(error: &str) -> String {
     let masked = error
         .lines()
@@ -300,11 +297,9 @@ pub fn route<'a>(primary: Option<&'a str>, fallback: Option<&'a str>) -> Vec<&'a
     v
 }
 
-/// fix-123 (expert panel, webhook-id-in-warn-line, 2026-09-27): a route as
-/// a log line may show it: scheme, host and port, never the path, query or
-/// credentials. `notification route <url> failed` put the Home Assistant
-/// webhook id, which fix-25 treats as a secret, into the pve journal on
-/// every failed delivery.
+/// fix-123: a route as a log line may show it: scheme, host and port,
+/// never the path, query or credentials (fix-25 treats a webhook id as a
+/// secret). Story: `docs/deployment/REGISTER.md`.
 pub fn route_for_log(url: &str) -> String {
     let Some((scheme, rest)) = url.split_once("://") else {
         return "<not a URL>".into();
@@ -332,11 +327,9 @@ pub fn header_file_content(token: &str) -> String {
 
 /// The curl arguments for one notification POST.
 ///
-/// fix-35: the bearer token used to travel as `-H "authorization: Bearer
-/// <token>"`, which put it in curl's argv, readable by every process on the
-/// host through `/proc/<pid>/cmdline` for as long as curl ran. It now goes
-/// through a 0600 header file that curl reads with `-H @<path>`; argv only
-/// ever names the path.
+/// fix-35: the bearer token goes through a 0600 header file that curl reads
+/// with `-H @<path>`; argv only ever names the path, never the token.
+/// Story: `docs/deployment/REGISTER.md`.
 pub fn curl_args(payload: &str, url: &str, header_file: Option<&str>) -> Vec<String> {
     curl_args_pinned(payload, url, header_file, None)
 }

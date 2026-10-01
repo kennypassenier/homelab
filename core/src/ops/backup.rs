@@ -57,13 +57,9 @@ impl NightBackup {
     /// May tonight's automatic updates of this stack run? Only after a backup
     /// that happened.
     ///
-    /// fix-60 (updates-run-after-failed-backup, 2026-09-27): the scheduler
-    /// updated every stack after the backup batch whatever the backup did.
-    /// A backup that stood aside because somebody was watching a film, or one
-    /// that failed, left the *arr apps to migrate their databases with no
-    /// copy from that night to go back to. The update waits for a night with
-    /// a backup; a stack that keeps standing aside is escalated by the
-    /// backup-age check, not updated blind.
+    /// fix-60: the update waits for a night with a backup; a stack that
+    /// keeps standing aside is escalated by the backup-age check, not
+    /// updated blind. Story: `docs/deployment/REGISTER.md`.
     pub fn allows_update(&self) -> bool {
         matches!(self, NightBackup::Done)
     }
@@ -1205,16 +1201,15 @@ fn restore_groups(
 
 /// E2 for one app of a stack (`app`), or the whole stack (None).
 ///
-/// fix-112 (restore-stale-files-mixed-nights, 2026-09-27): three changes.
-/// Only the named app is stopped and restored, so rolling back one broken
-/// Sonarr no longer rolls back Radarr and Jellyfin. A stack with several
-/// repositories restores one NIGHT across all of them (the `run-<unix>` tag
-/// every backup writes), never each repository's own newest: a night whose
-/// backup failed half way used to pair a newer database with older media.
-/// And with the safety copy taken, each target is emptied before restic
-/// writes into it, because a restore over a non-empty directory leaves every
-/// file the snapshot does not have (newer Postgres WAL segments beside a
-/// restored cluster is a corrupt database that "restored successfully").
+/// fix-112: three changes (story: `docs/deployment/REGISTER.md`). Only the
+/// named app is stopped and restored, so rolling back one broken Sonarr no
+/// longer rolls back Radarr and Jellyfin. A stack with several repositories
+/// restores one NIGHT across all of them (the `run-<unix>` tag every backup
+/// writes), never each repository's own newest. And with the safety copy
+/// taken, each target is emptied before restic writes into it, because a
+/// restore over a non-empty directory leaves every file the snapshot does
+/// not have (newer Postgres WAL segments beside a restored cluster is a
+/// corrupt database that "restored successfully").
 pub async fn restore_app(
     ctx: &OpCtx<'_>,
     m: &StackManifest,

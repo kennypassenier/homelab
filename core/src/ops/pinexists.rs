@@ -1,12 +1,6 @@
-//! gap-37 (2026-09-28, found by fix-153; Kenny: "Dus in het vervolg eerst
-//! checken of de image bestaat ipv er maar van uit te gaan"): does every
-//! pinned image digest in the stack files still resolve in its registry?
-//!
-//! supersync's digest, pinned when the stack was written (M8), had been
-//! removed from ghcr.io. The old container had the image locally, so no
-//! deploy ever pulled it again, and the first real pull was the Debian 13
-//! rebuild: supersync was down until it was repinned. fix-83 asks whether a
-//! NEWER release exists; nothing asked whether the pinned one still does.
+//! gap-37: does every pinned image digest in the stack files still resolve
+//! in its registry? fix-83 asks whether a NEWER release exists; this asks
+//! whether the pinned one still does. Story: `docs/deployment/REGISTER.md`.
 //!
 //! The pure halves live here (reading the pins, reading the registry's auth
 //! challenge, turning answers into findings); the client asks the

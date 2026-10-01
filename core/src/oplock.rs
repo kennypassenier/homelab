@@ -1,10 +1,8 @@
-//! fix-104 (long-silences, 2026-09-27): who holds the host's operation lock.
+//! fix-104: who holds the host's operation lock.
 //!
-//! Mutations run strictly one at a time (AR12). A command typed while another
-//! operation held the lock waited with no word: during the nightly round
-//! that is the whole backup batch, so a command typed at 02:30 hung for an
-//! unknown time. The host records what holds the lock, and a command that
-//! has to wait is told at once.
+//! Mutations run strictly one at a time (AR12). The host records what holds
+//! the lock, and a command that has to wait is told at once. Story:
+//! `docs/deployment/REGISTER.md`.
 
 /// What holds the operation lock right now.
 #[derive(Debug, Clone, PartialEq, Eq)]

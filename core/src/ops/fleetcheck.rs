@@ -415,16 +415,12 @@ pub struct StackDigest {
     pub files: std::collections::BTreeMap<String, String>,
 }
 
-/// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift): the
-/// repository against what the host applied.
+/// fix-142: the repository against what the host applied. Story:
+/// `docs/deployment/REGISTER.md`.
 ///
-/// The check used to receive only `(dir, vmid)` pairs; whether the files
-/// matched what was deployed was computed only by the TUI's badge and inside
-/// `apply`, which then acted on it. An edited but undeployed stack, or a
-/// declared one never deployed, stayed invisible until something deployed
-/// it. Now each difference is a Drift finding naming what differs:
-/// the manifest (compared through the host's own type), and every
-/// container-bound file changed, new or gone against the host's intent copy.
+/// Each difference is a Drift finding naming what differs: the manifest
+/// (compared through the host's own type), and every container-bound file
+/// changed, new or gone against the host's intent copy.
 ///
 /// Only what was asked: no digests (an older client, or the nightly round,
 /// which has no repository) means no comparison; a stack whose intent copy
@@ -668,9 +664,9 @@ pub fn owner_facts(transcript: &str, declared: &[(String, u32, String)]) -> Vec<
     out
 }
 
-/// fix-26: Drift per mismatch. Not Broken: the service may run fine today —
-/// kyu-runner did, until the restart on 2026-09-26 — and the finding is
-/// there to be read before that restart, not after.
+/// fix-26: Drift per mismatch. Not Broken: the service may run fine today,
+/// and the finding is there to be read before a restart surfaces it. Story:
+/// `docs/deployment/REGISTER.md`.
 pub fn evaluate_owners(facts: &[OwnerFact]) -> Vec<Finding> {
     facts
         .iter()
@@ -1423,12 +1419,10 @@ pub fn check_passes(findings: &[Finding]) -> bool {
 
 /// The check as text, for `homelab check`, the TUI and the nightly log.
 ///
-/// fix-103 (check-output-buries-problem, 2026-09-27): live, the header read
-/// `9 finding(s)`, two of them `noted` with nothing to do, and the only
-/// `broken` item was seventh because the list was sorted by subject. A
-/// summary line comes first, then each severity as its own group, the one
-/// that needs action on top. The `[broken]`/`[drift]`/`[noted]` tags stay on
-/// every item, so a client can colour it and a grep still finds it.
+/// fix-103: a summary line comes first, then each severity as its own
+/// group, the one that needs action on top. The `[broken]`/`[drift]`/
+/// `[noted]` tags stay on every item, so a client can colour it and a grep
+/// still finds it. Story: `docs/deployment/REGISTER.md`.
 pub fn render(findings: &[Finding]) -> String {
     if findings.is_empty() {
         return "fleet check: repo and reality agree".into();

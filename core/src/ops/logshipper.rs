@@ -23,16 +23,13 @@
 //! split promtail forced — a sidecar for stacks that run containers and
 //! nothing for the ones that do not.
 //!
-//! **Why one file, and never directory mode (gap-11, 2026-09-18).** Alloy's
-//! packaged unit runs `alloy run $CONFIG_FILE`, and `CONFIG_FILE` may name a
-//! directory, in which case every `*.alloy` in it is loaded. That is how the
-//! OPNsense syslog receiver first existed: a second file beside the rendered
-//! one on CT 104, and `/etc/default/alloy` switched to the directory by hand.
-//! It worked, and it was invisible — the deploy compares one file against
-//! what it renders, so a file it never wrote is a file it never notices, and
-//! a receiver that survives a deploy by accident is one that stops surviving
-//! the day the sweep in `orphan files` learns about `/etc/alloy`. Folded into
-//! the rendered file instead, declared in the stack manifest
+//! **Why one file, and never directory mode (gap-11; story:
+//! `docs/deployment/REGISTER.md`).** Alloy's packaged unit runs
+//! `alloy run $CONFIG_FILE`, and `CONFIG_FILE` may name a directory, in
+//! which case every `*.alloy` in it is loaded — and the deploy compares one
+//! file against what it renders, so a file it never wrote is a file it
+//! never notices. Folded into the rendered file instead, declared in the
+//! stack manifest
 //! (`syslog_receivers:`), and the deploy puts the unit back to reading the
 //! one file it renders. The other reason is smaller but real: the package's
 //! own `/etc/default/alloy` is a conffile, and a hand-edited conffile is a
@@ -401,9 +398,10 @@ pub fn single_file_mode_script() -> String {
 /// Idempotent by design: it is run by every deploy, and a deploy that
 /// reinstalled a package every time would be a deploy nobody dares repeat.
 ///
-/// fix-152 (2026-09-28): the package lists are refreshed before the first
-/// install. CT 118's lists dated from the template build and apt asked for a
-/// libssh2 that deb.debian.org no longer had (404); Alloy was never installed.
+/// fix-152: the package lists are refreshed before the first install, so a
+/// container whose lists are stale from its template build does not fail
+/// to fetch a package that has since moved. Story:
+/// `docs/deployment/REGISTER.md`.
 pub fn install_script() -> String {
     format!(
         "set -e; \

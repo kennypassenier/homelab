@@ -1,12 +1,9 @@
 //! fix-83: what each pinned `manual` app runs, and whether upstream moved on.
 //!
-//! Expert panel finding manual-images-latest-unpinned, Kenny's answer
-//! "vastzetten-plus-melding" (2026-09-27). fix-82 pinned every `manual` image
-//! to the version and digest it ran, so a rebuild can no longer jump ahead.
-//! The same pin also means nothing ever moves by itself, and before this the
-//! only way to learn that traefik, cloudflared and grafana were each a
-//! release behind was a person looking (the panel's measurement was the first
-//! time anyone did).
+//! fix-82 pinned every `manual` image to the version and digest it ran, so a
+//! rebuild can no longer jump ahead — and the same pin also means nothing
+//! ever moves by itself without this module looking. Story:
+//! `docs/deployment/REGISTER.md`.
 //!
 //! So the nightly round does two things here. It reads, per compose stack,
 //! which digest every `manual` container actually runs and keeps that in host

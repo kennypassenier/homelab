@@ -36,6 +36,7 @@
 //! | `HOMELAB_ADMIN_KEEP_JOBS` | 200 | jobs kept for `GET /data/actions/jobs` and a reload |
 //! | `HOMELAB_ADMIN_HISTORY_WINDOW_S` | 15552000 (180 d) | history read for a job's expected duration |
 //! | `HOMELAB_ADMIN_NOTIFY_KEEP` | 500 | newest notices kept; older ones fall off |
+//! | `HOMELAB_ADMIN_NOTIFY_MAX_AGE_DAYS` | 180 | notices older than this fall off too, whatever the count (rule-20) |
 //! | `HOMELAB_ADMIN_NOTIFY_SNOOZE_MAX_S` | 604800 (7 d) | the longest snooze |
 //! | `HOMELAB_ADMIN_NOTIFY_DIGEST_LATE_S` | 10800 (3 h) | how late the daily digest may still go out |
 //! | `HOMELAB_ADMIN_HOSTLOG_RING` | 2000 | host-log lines kept for a page that opens mid-operation |
@@ -85,6 +86,10 @@ pub struct ActConfig {
     pub history_window_s: i64,
     /// Newest notices kept in the notification centre.
     pub notify_keep: usize,
+    /// rule-20 (disk-audit, 2026-10-01): a notice older than this many days
+    /// falls off too, whatever `notify_keep` would otherwise still hold —
+    /// the store had a count cap and no age cap before this.
+    pub notify_max_age_days: i64,
     /// The longest snooze, in seconds.
     pub notify_snooze_max_s: i64,
     /// How late the daily digest may still go out, in seconds.
@@ -274,6 +279,13 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
             1,
             &mut why,
         ) as usize,
+        notify_max_age_days: number(
+            lookup,
+            "NOTIFY_MAX_AGE_DAYS",
+            crate::core::notify::MAX_AGE_DAYS as u64,
+            1,
+            &mut why,
+        ) as i64,
         notify_snooze_max_s: number(
             lookup,
             "NOTIFY_SNOOZE_MAX_S",

@@ -257,10 +257,11 @@ fn host_notices_merge_into_the_dashboards_own_notice_of_that_job() {
         950,
         PushOutcome::Skipped { why: "x".into() },
         KEEP,
+        i64::MAX,
     );
     // The job that sent request 77 is job 3: the host's words fill that notice.
     let merged = f
-        .import_host(&host_notice(5, true), Some(3), 1_001, KEEP)
+        .import_host(&host_notice(5, true), Some(3), 1_001, KEEP, i64::MAX)
         .unwrap();
     assert_eq!(merged.id, own.id);
     assert_eq!(f.notices.len(), 1);
@@ -273,11 +274,46 @@ fn host_notices_merge_into_the_dashboards_own_notice_of_that_job() {
     assert_eq!(f.host_cursor, 5);
     // Without a job of its own it is a notice of its own.
     let n = f
-        .import_host(&host_notice(6, false), None, 1_002, KEEP)
+        .import_host(&host_notice(6, false), None, 1_002, KEEP, i64::MAX)
         .unwrap();
     assert_eq!(f.notices.len(), 2);
     assert_eq!(n.kind, Kind::HostEvent);
     assert_eq!(f.host_cursor, 6);
+}
+
+/// rule-20 (disk-audit, 2026-10-01): a notice older than `max_age_days`
+/// falls off even while the store is nowhere near `keep` — the store had a
+/// count cap and no age cap before this.
+#[test]
+fn rule_20_notices_older_than_max_age_days_fall_off() {
+    let mut f = NotifyFile::default();
+    let day = 86_400;
+    f.add(
+        draft(Kind::ActionDone, Some("old")),
+        0,
+        PushOutcome::Sent,
+        KEEP,
+        10, // max_age_days
+    );
+    let recent = f.add(
+        draft(Kind::ActionDone, Some("new")),
+        5 * day,
+        PushOutcome::Sent,
+        KEEP,
+        10,
+    );
+    // "now" (`at` of the add that triggers the prune) is 20 days past the
+    // first notice and 15 past the second — only the second is inside the
+    // 10-day window.
+    let _ = f.add(
+        draft(Kind::ActionDone, Some("trigger")),
+        20 * day,
+        PushOutcome::Sent,
+        KEEP,
+        10,
+    );
+    let ids: Vec<_> = f.notices.iter().map(|n| n.id).collect();
+    assert_eq!(ids, vec![recent.id, 3], "{:?}", ids);
 }
 
 fn am(status: &str, name: &str, severity: &str, fp: &str) -> serde_json::Value {
@@ -326,7 +362,9 @@ fn alerts_become_notices_firing_and_resolved() {
     assert!(matches!(warn[0].push, PushOutcome::Skipped { .. }));
 
     let mut f = NotifyFile::default();
-    let first = f.add_alert(firing[0].clone(), 1_000, KEEP).unwrap();
+    let first = f
+        .add_alert(firing[0].clone(), 1_000, KEEP, i64::MAX)
+        .unwrap();
     assert!(!first.read);
     // Alertmanager repeats a firing alert every 12 h: one notice, not two.
     assert!(f
@@ -334,12 +372,15 @@ fn alerts_become_notices_firing_and_resolved() {
             alert_drafts(&am("firing", "HostDown", "critical", "fp1"))[0].clone(),
             2_000,
             KEEP,
+            i64::MAX,
         )
         .is_none());
     // Resolved: stored as read, and the firing one no longer waits.
     let resolved = alert_drafts(&am("resolved", "HostDown", "critical", "fp1"));
     assert_eq!(resolved[0].draft.kind, Kind::AlertResolved);
-    let r = f.add_alert(resolved[0].clone(), 3_000, KEEP).unwrap();
+    let r = f
+        .add_alert(resolved[0].clone(), 3_000, KEEP, i64::MAX)
+        .unwrap();
     assert!(r.read && r.fixes.is_empty());
     assert_eq!(f.unread(), 0);
     // Firing again after it resolved is news again.
@@ -348,6 +389,7 @@ fn alerts_become_notices_firing_and_resolved() {
             alert_drafts(&am("firing", "HostDown", "critical", "fp1"))[0].clone(),
             4_000,
             KEEP,
+            i64::MAX,
         )
         .is_some());
     assert!(alert_drafts(&serde_json::json!({"alerts": "nope"})).is_empty());
@@ -394,13 +436,19 @@ fn daily_digest_at_nine_only_when_something_waits_worst_first() {
     assert!(digest(&f.notices, &[]).is_none(), "all clear: nothing");
     let mut ok = Draft::new(Kind::HostEvent, "deploy-a", "deploy a: done", "");
     ok.detail.level = Level::Ok;
-    f.add(ok, 1, PushOutcome::Skipped { why: "x".into() }, KEEP);
+    f.add(
+        ok,
+        1,
+        PushOutcome::Skipped { why: "x".into() },
+        KEEP,
+        i64::MAX,
+    );
     let mut crit = Draft::new(Kind::HostEvent, "backup-b", "backup b failed", "");
     crit.detail.level = Level::Critical;
-    f.add(crit, 2, PushOutcome::Sent, KEEP);
+    f.add(crit, 2, PushOutcome::Sent, KEEP, i64::MAX);
     let mut done = Draft::new(Kind::Alert, "x", "read already", "");
     done.detail.level = Level::Critical;
-    let n = f.add(done, 3, PushOutcome::Sent, KEEP);
+    let n = f.add(done, 3, PushOutcome::Sent, KEEP, i64::MAX);
     f.mark(Some(&[n.id]), true);
     let today = today_lines(&Today {
         items: vec![Item {

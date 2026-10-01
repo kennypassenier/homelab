@@ -24,6 +24,10 @@ use serde::{Deserialize, Serialize};
 pub const NOTIFY_SCHEMA: u32 = 1;
 /// The newest notices kept; older ones fall off.
 pub const KEEP: usize = 500;
+/// rule-20 (disk-audit, 2026-10-01): a notice older than this falls off too,
+/// whatever `KEEP` would otherwise still hold — the store had a count cap
+/// and no age cap before this.
+pub const MAX_AGE_DAYS: u32 = 180;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -435,8 +439,18 @@ impl NotifyFile {
     }
 
     /// Store a notice; the oldest fall off past `keep` (`KEEP` is the
-    /// default, overridden by `HOMELAB_ADMIN_NOTIFY_KEEP`).
-    pub fn add(&mut self, d: Draft, at: i64, push: PushOutcome, keep: usize) -> Notice {
+    /// default, overridden by `HOMELAB_ADMIN_NOTIFY_KEEP`), and anything
+    /// older than `max_age_days` falls off too (`MAX_AGE_DAYS`,
+    /// `HOMELAB_ADMIN_NOTIFY_MAX_AGE_DAYS`) — rule-20: the store had a count
+    /// cap and no age cap before this.
+    pub fn add(
+        &mut self,
+        d: Draft,
+        at: i64,
+        push: PushOutcome,
+        keep: usize,
+        max_age_days: i64,
+    ) -> Notice {
         let n = Notice {
             id: self.next_id,
             at,
@@ -462,6 +476,10 @@ impl NotifyFile {
         if self.notices.len() > keep {
             let cut = self.notices.len() - keep;
             self.notices.drain(..cut);
+        }
+        if max_age_days > 0 {
+            let oldest_kept = at.saturating_sub(max_age_days.saturating_mul(86_400));
+            self.notices.retain(|x| x.at >= oldest_kept);
         }
         n
     }
@@ -831,6 +849,7 @@ impl NotifyFile {
         job: Option<u64>,
         at: i64,
         keep: usize,
+        max_age_days: i64,
     ) -> Option<Notice> {
         self.host_cursor = self.host_cursor.max(n.seq);
         let (d, push) = host_draft(n);
@@ -850,7 +869,7 @@ impl NotifyFile {
                 return Some(x.clone());
             }
         }
-        Some(self.add(d, at, push, keep))
+        Some(self.add(d, at, push, keep, max_age_days))
     }
 }
 
@@ -1019,19 +1038,25 @@ impl NotifyFile {
     /// One alert into the list. A repeat of an alert that still fires adds
     /// nothing; a resolved one is stored read, and the firing notice it ends
     /// no longer waits.
-    pub fn add_alert(&mut self, a: AlertDraft, at: i64, keep: usize) -> Option<Notice> {
+    pub fn add_alert(
+        &mut self,
+        a: AlertDraft,
+        at: i64,
+        keep: usize,
+        max_age_days: i64,
+    ) -> Option<Notice> {
         let key = a.draft.detail.key.clone().unwrap_or_default();
         let open = self.alert_open(&key);
         if a.firing {
             if open.is_some() {
                 return None;
             }
-            return Some(self.add(a.draft, at, a.push, keep));
+            return Some(self.add(a.draft, at, a.push, keep, max_age_days));
         }
         if let Some(i) = open {
             self.notices[i].read = true;
         }
-        let mut n = self.add(a.draft, at, a.push, keep);
+        let mut n = self.add(a.draft, at, a.push, keep, max_age_days);
         if let Some(x) = self.notices.iter_mut().rev().find(|x| x.id == n.id) {
             x.read = true;
         }

@@ -86,12 +86,14 @@ fn feat_overview_5_the_list_keeps_read_and_unread_and_its_newest() {
         10,
         PushOutcome::Sent,
         KEEP,
+        i64::MAX,
     );
     let b = f.add(
         draft(Kind::ActionFailed, Some("home"), None),
         11,
         PushOutcome::Skipped { why: "x".into() },
         KEEP,
+        i64::MAX,
     );
     assert_eq!((a.id, b.id), (1, 2));
     // Owner decision 2026-09-30 (item 3): the table's push column is a
@@ -111,6 +113,7 @@ fn feat_overview_5_the_list_keeps_read_and_unread_and_its_newest() {
             100 + i as i64,
             PushOutcome::Sent,
             KEEP,
+            i64::MAX,
         );
     }
     assert_eq!(f.notices.len(), KEEP);

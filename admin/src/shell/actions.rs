@@ -2255,6 +2255,7 @@ pub fn mount(
         keep: cfg.notify_keep,
         snooze_max_s: cfg.notify_snooze_max_s,
         digest_late_s: cfg.notify_digest_late_s,
+        max_age_days: cfg.notify_max_age_days,
     });
     let scheduler = super::scheduler::Scheduler::load(
         cfg.schedules_file(),

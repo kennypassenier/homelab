@@ -170,6 +170,9 @@ pub struct NotifyLimits {
     pub keep: usize,
     pub snooze_max_s: i64,
     pub digest_late_s: i64,
+    /// rule-20 (disk-audit, 2026-10-01): a notice older than this many days
+    /// falls off too, whatever `keep` would otherwise still hold.
+    pub max_age_days: i64,
 }
 
 impl Default for NotifyLimits {
@@ -178,6 +181,7 @@ impl Default for NotifyLimits {
             keep: notify::KEEP,
             snooze_max_s: notify::SNOOZE_MAX_S,
             digest_late_s: notify::DIGEST_LATE_S,
+            max_age_days: notify::MAX_AGE_DAYS as i64,
         }
     }
 }
@@ -258,7 +262,8 @@ impl NotifyCenter {
         };
         let (notice, unread) = {
             let mut s = self.state.lock().await;
-            let n = s.add(draft, now, push, self.limits().keep);
+            let lim = self.limits();
+            let n = s.add(draft, now, push, lim.keep, lim.max_age_days);
             self.save(&s);
             (n, s.unread())
         };
@@ -313,7 +318,8 @@ impl NotifyCenter {
                     continue;
                 }
                 let job = n.req.and_then(job_of);
-                if let Some(x) = s.import_host(n, job, now, self.limits().keep) {
+                let lim = self.limits();
+                if let Some(x) = s.import_host(n, job, now, lim.keep, lim.max_age_days) {
                     out.push(x);
                 }
             }
@@ -337,7 +343,8 @@ impl NotifyCenter {
         {
             let mut s = self.state.lock().await;
             for a in notify::alert_drafts(body) {
-                if let Some(n) = s.add_alert(a, now, self.limits().keep) {
+                let lim = self.limits();
+                if let Some(n) = s.add_alert(a, now, lim.keep, lim.max_age_days) {
                     out.push(n);
                 }
             }

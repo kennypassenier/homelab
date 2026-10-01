@@ -1,6 +1,25 @@
 //! Doctor / self-diagnosis (F6): each check is a pure function over injected
 //! probe data, so the whole health matrix is unit-testable. The host gathers
 //! the probes; core decides healthy/warn/fail and the remediation hint.
+//!
+//! ## First run, on a host with nothing deployed yet (fix-130)
+//!
+//! A host right after its daemon starts for the first time — `managed_stacks`
+//! empty, no host-meta snapshot, no restore drill, no probes read yet —
+//! reports [`Health::Warn`] at worst from that emptiness, never
+//! [`Health::Fail`]: "never snapshotted" and "never proved a restore" are
+//! facts about a clock that has not ticked yet, not about anything broken.
+//! The one thing doctor still fails hard on before a single stack exists is
+//! the restic password file: bootstrapping it is a one-time manual step that
+//! has to happen before the first backup can be written at all, and a
+//! daemon that cannot report that plainly would let someone deploy for days
+//! before finding out backups were never possible. `managed_stacks` being
+//! empty also means every per-stack line (`stack <name> backup`,
+//! `stack <name> env`) is silent rather than printed as a Fail about a stack
+//! that is not there yet — an unasked question is never a finding, the same
+//! rule probes and manual checks hold. See
+//! `fix_130_a_fresh_host_with_nothing_deployed_never_fails` for the case
+//! this pins.
 
 use serde::{Deserialize, Serialize};
 
@@ -60,6 +79,13 @@ pub struct Probes {
     pub password_file_ok: Option<bool>,
     /// Google Drive's space, from `rclone about`.
     pub drive: Option<DriveSpace>,
+    /// fix-130 (second half, 2026-10-01): names from the gateway's routes
+    /// directory that no stack's deploy recorded — the same judgement the
+    /// fleet check carries (`fleetcheck::unowned_route_files`), read here so
+    /// `homelab doctor`/`today` says it too without waiting for a nightly
+    /// round. `None` when the gateway could not be listed; `Some(vec![])`
+    /// when it could and every file is owned.
+    pub unowned_route_files: Option<Vec<String>>,
 }
 
 /// fix-130: how the daemon faces the network.
@@ -509,6 +535,24 @@ fn security_and_recovery(p: &Probes) -> Vec<Check> {
                 "missing or empty".into(),
                 "no backup can be written or read without it: restore it from Bitwarden \
                  into the configured restic_password_file, 0600",
+            )
+        });
+    }
+
+    if let Some(unowned) = &p.unowned_route_files {
+        checks.push(if unowned.is_empty() {
+            ok(
+                "gateway route files",
+                "every file in the routes directory is declared by a stack".into(),
+            )
+        } else {
+            bad(
+                "gateway route files",
+                Health::Warn,
+                format!("no stack declares: {}", unowned.join(", ")),
+                "declare it in the stack it belongs to (gateway_route, or extra_routes to keep \
+                 its name) and deploy that stack, or delete it by hand on the gateway; homelab \
+                 never removes a route file no deploy wrote",
             )
         });
     }

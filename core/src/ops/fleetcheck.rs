@@ -122,6 +122,24 @@ pub struct LiveFacts {
     pub live_host_config: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
+/// fix-92 / fix-130: every name in the gateway's routes directory that no
+/// stack's deploy recorded. Pure so `homelab doctor` (which wants the bare
+/// names, not a `Finding`) and the fleet check (which wants one) can share a
+/// single judgement.
+pub fn unowned_route_files(state: &HostState, on_disk: &[String]) -> Vec<String> {
+    let owned: std::collections::BTreeSet<&str> = state
+        .stacks
+        .values()
+        .flat_map(|s| s.route_file.iter().chain(s.extra_route_files.iter()))
+        .map(String::as_str)
+        .collect();
+    on_disk
+        .iter()
+        .filter(|f| !owned.contains(f.as_str()))
+        .cloned()
+        .collect()
+}
+
 /// fix-92 (routes-outside-repo-unvalidated, 2026-09-27): a file in the
 /// gateway's routes directory that no stack's deploy recorded.
 ///
@@ -135,15 +153,8 @@ pub struct LiveFacts {
 /// file somebody put there and nobody owns. Drift, not Broken: nothing fails
 /// because of it. Homelab never removes such a file itself (fix-41).
 pub fn evaluate_route_owners(state: &HostState, on_disk: &[String]) -> Vec<Finding> {
-    let owned: std::collections::BTreeSet<&str> = state
-        .stacks
-        .values()
-        .flat_map(|s| s.route_file.iter().chain(s.extra_route_files.iter()))
-        .map(String::as_str)
-        .collect();
-    on_disk
-        .iter()
-        .filter(|f| !owned.contains(f.as_str()))
+    unowned_route_files(state, on_disk)
+        .into_iter()
         .map(|f| Finding {
             severity: Severity::Drift,
             subject: format!("gateway route file {}", f),

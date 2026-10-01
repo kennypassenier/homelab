@@ -433,6 +433,97 @@ fn fix_130_doctor_reports_exposure_files_privilege_host_meta_drill_and_space() {
     }
 }
 
+/// fix-130 (second half, 2026-10-01): doctor's "gateway route files" line —
+/// Ok when every file on the gateway is declared by a stack, Warn naming
+/// the ones that are not. `None` (the gateway could not be listed) prints
+/// no line at all, same as every other probe here.
+#[test]
+fn fix_130_doctor_names_gateway_route_files_no_stack_declares() {
+    let clean = Probes {
+        state_parses: true,
+        unowned_route_files: Some(vec![]),
+        ..Default::default()
+    };
+    let line = doctor::diagnose(&clean)
+        .into_iter()
+        .find(|c| c.name == "gateway route files")
+        .expect("a gateway route files line");
+    assert_eq!(line.health, Health::Ok);
+
+    let dirty = Probes {
+        state_parses: true,
+        unowned_route_files: Some(vec!["manual-homeassistant.yml".into()]),
+        ..Default::default()
+    };
+    let line = doctor::diagnose(&dirty)
+        .into_iter()
+        .find(|c| c.name == "gateway route files")
+        .expect("a gateway route files line");
+    assert_eq!(line.health, Health::Warn);
+    assert!(line.detail.contains("manual-homeassistant.yml"));
+    assert!(line.remedy.unwrap().contains("never removes"));
+
+    let unasked = Probes {
+        state_parses: true,
+        unowned_route_files: None,
+        ..Default::default()
+    };
+    assert!(!doctor::diagnose(&unasked)
+        .iter()
+        .any(|c| c.name == "gateway route files"));
+}
+
+/// fix-130 (second half, 2026-10-01): the contract documented on
+/// `homelab_core::doctor` — a host right after its daemon's first start,
+/// nothing deployed yet, never backed up, never drilled — reports at worst
+/// Warn from that emptiness. The one thing that still fails hard before a
+/// single stack exists is the restic password file, because without it no
+/// backup can ever be written once something IS deployed.
+#[test]
+fn fix_130_a_fresh_host_with_nothing_deployed_never_fails_from_emptiness_alone() {
+    let fresh = Probes {
+        state_parses: true,
+        managed_stacks: vec![],
+        offsite_configured: false,
+        host_units_drift: None,
+        failed_auth: None,
+        exposure: None,
+        loose_files: Some(vec![]),
+        privileged: Some(doctor::Privileged::default()),
+        host_meta: Some(doctor::Freshness { age_h: None }),
+        restore_drill: Some(doctor::DrillProbe {
+            age_h: None,
+            interval_h: 90 * 24,
+            failing: vec![],
+        }),
+        unowned_route_files: Some(vec![]),
+        password_file_ok: Some(true),
+        drive: None,
+        ..Default::default()
+    };
+    let checks = doctor::diagnose(&fresh);
+    assert_eq!(doctor::overall(&checks), Health::Warn, "{:?}", checks);
+    assert!(
+        !checks.iter().any(|c| c.health == Health::Fail),
+        "nothing deployed yet must never fail: {:?}",
+        checks
+    );
+    // No per-stack line at all — an unasked question is never a finding.
+    assert!(!checks.iter().any(|c| c.name.starts_with("stack ")));
+
+    // The one thing doctor still fails on before anything is deployed: a
+    // restic password file that is missing or empty, because the first
+    // deploy's first backup depends on it.
+    let unprotected = Probes {
+        password_file_ok: Some(false),
+        ..fresh
+    };
+    assert_eq!(
+        doctor::overall(&doctor::diagnose(&unprotected)),
+        Health::Fail
+    );
+}
+
 /// fix-131 (expert panel, orchestrator-logs-only-on-pve, 2026-09-27):
 /// nothing pruned the incident bundles (90 on pve that day). Bundles older
 /// than the age limit go, and past the count limit the oldest go; a name

@@ -1270,9 +1270,10 @@ on purpose. Before `homelab wipe` of a stack whose service might come back,
 check the list it prints (op-6 step 6): a vault copy on it is the copy lost-5a
 restores from, and after the wipe lost-5c (host-meta) is the only way back.
 
-Everything offsite hangs on one password. Nothing in the code checks that
-the password file exists: `homelab doctor` has no probe for it
-(`core/src/doctor.rs:45-188`, `host/src/main.rs:4286-4396`).
+Everything offsite hangs on one password. `homelab doctor`'s `restic
+password file` line checks that the file exists and is not empty (`Fail`
+when it is missing or empty); it never reads the password itself
+(`core/src/doctor.rs`, `host/src/main.rs:4286-4396`).
 
 The same dependency as a picture: the password sits inside the host-meta copy it encrypts, so the offline copy is the only way back in:
 

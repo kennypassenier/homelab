@@ -2369,6 +2369,10 @@ span_days = 7\n";
             "about gdrive:",
             CmdOutput::ok(r#"{"total":107374182400,"used":90000000000,"trashed":2147483648,"free":17374182400}"#),
         );
+        exec.respond_always(
+            "ls -1A '/opt/traefik-config/routes'",
+            CmdOutput::ok("104-app-gateway.yml\nmanual-leftover.yml\n"),
+        );
         let pc = ProbeContext {
             listen: "0.0.0.0:8443".into(),
             exec_enabled: false,
@@ -2378,6 +2382,8 @@ span_days = 7\n";
             no_touch: vec![100, 101, 102, 103],
             drill_interval_s: 90 * 86_400,
             state_dir: "/var/lib/homelab".into(),
+            gateway_vmid: 104,
+            gateway_routes_dir: "/opt/traefik-config/routes".into(),
         };
         // As `gather_probes` leaves it when the gdrive remote exists.
         let mut probes = homelab_core::doctor::Probes {
@@ -2414,6 +2420,15 @@ span_days = 7\n";
         assert_eq!(
             probes.exposure.map(|e| e.listen),
             Some("0.0.0.0:8443".into())
+        );
+        // fix-130 (second half): no stack is recorded in this state, so
+        // every file the gateway lists is unowned.
+        assert_eq!(
+            probes.unowned_route_files,
+            Some(vec![
+                "104-app-gateway.yml".to_string(),
+                "manual-leftover.yml".to_string()
+            ])
         );
     }
 
@@ -10942,6 +10957,11 @@ struct ProbeContext {
     no_touch: Vec<u16>,
     drill_interval_s: u64,
     state_dir: String,
+    /// fix-130 (second half): where to read the gateway's routes directory,
+    /// to name any file in it that no stack declares (the same judgement the
+    /// fleet check carries, `fleetcheck::unowned_route_files`).
+    gateway_vmid: u16,
+    gateway_routes_dir: String,
 }
 
 impl ProbeContext {
@@ -10955,6 +10975,8 @@ impl ProbeContext {
             no_touch: config.safety.no_touch.clone(),
             drill_interval_s: config.restore_drill_interval_s,
             state_dir: config.state_dir.clone(),
+            gateway_vmid: config.safety.gateway_vmid,
+            gateway_routes_dir: config.safety.gateway_routes_dir.clone(),
         }
     }
 }
@@ -11021,14 +11043,23 @@ async fn gather_security_probes(
             None
         }
     };
-    // ops::pool: five independent reads, overlapped; polled in the order
+    // fix-130 (second half): the same `ls -1A` the fleet check runs, so
+    // doctor can name an unowned route file without waiting for a nightly
+    // round. Any extension counts — a `.bak` is still a file nobody owns.
+    let routes_cmd = homelab_core::executor::attach_sh(
+        pc.gateway_vmid,
+        &format!("ls -1A '{}'", pc.gateway_routes_dir),
+        30,
+    );
+    // ops::pool: six independent reads, overlapped; polled in the order
     // they used to run.
-    let (stat_out, privileged_out, state_raw, password_out, about_out) = futures_util::join!(
+    let (stat_out, privileged_out, state_raw, password_out, about_out, routes_out) = futures_util::join!(
         exec.run(&stat_cmd),
         exec.run(&privileged_cmd),
         exec.read_file(&state_path),
         exec.run(&password_cmd),
-        about_fut
+        about_fut,
+        exec.run(&routes_cmd)
     );
 
     if let Ok(out) = stat_out {
@@ -11061,23 +11092,40 @@ async fn gather_security_probes(
     }
 
     // Host-meta and the restore drill, from the record.
-    if let Ok(raw) = state_raw {
-        if let Ok(hs) = serde_json::from_str::<homelab_core::state::HostState>(&raw) {
-            let age = |t: u64| (t > 0).then(|| now_unix.saturating_sub(t) / 3600);
-            probes.host_meta = Some(Freshness {
-                age_h: age(hs.last_host_meta),
-            });
-            probes.restore_drill = Some(DrillProbe {
-                age_h: age(hs.last_restore_drill),
-                interval_h: pc.drill_interval_s / 3600,
-                failing: hs
-                    .restore_drills
-                    .iter()
-                    .filter_map(|(repo, r)| {
-                        r.last_error.as_ref().map(|e| format!("{}: {}", repo, e))
-                    })
-                    .collect(),
-            });
+    let hs: Option<homelab_core::state::HostState> = state_raw
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok());
+    if let Some(hs) = &hs {
+        let age = |t: u64| (t > 0).then(|| now_unix.saturating_sub(t) / 3600);
+        probes.host_meta = Some(Freshness {
+            age_h: age(hs.last_host_meta),
+        });
+        probes.restore_drill = Some(DrillProbe {
+            age_h: age(hs.last_restore_drill),
+            interval_h: pc.drill_interval_s / 3600,
+            failing: hs
+                .restore_drills
+                .iter()
+                .filter_map(|(repo, r)| r.last_error.as_ref().map(|e| format!("{}: {}", repo, e)))
+                .collect(),
+        });
+    }
+
+    // fix-130 (second half): judged the same way the fleet check judges it
+    // (`fleetcheck::unowned_route_files`) — only when both the listing and
+    // the state parsed; an unreadable gateway is no fact, not an empty one.
+    if let (Some(hs), Ok(out)) = (&hs, &routes_out) {
+        if out.success() {
+            let on_disk: Vec<String> = out
+                .stdout
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(str::to_string)
+                .collect();
+            probes.unowned_route_files = Some(homelab_core::ops::fleetcheck::unowned_route_files(
+                hs, &on_disk,
+            ));
         }
     }
 
@@ -11281,5 +11329,6 @@ async fn gather_probes(
         restore_drill: None,
         password_file_ok: None,
         drive: None,
+        unowned_route_files: None,
     }
 }

@@ -2586,9 +2586,23 @@ key, audit.log and the incidents directory must be root-only), `privileged
 containers` (`Warn` for one outside `privileged_vmids`; templates and
 no-touch guests are not read), `host-meta backup` (`Warn` over 48 hours or
 never), `restore drill` (`Warn` when overdue or a repository's last drill
-failed), `restic password file` (`Fail` when missing or empty) and `Drive
-space` from `rclone about` (`Warn` under 10 % free, `Fail` under 5 %, with
-what the trash holds). Output (`host/src/main.rs`, `Rpc::Doctor`):
+failed), `restic password file` (`Fail` when missing or empty), `gateway
+route files` (`Warn` naming any file in the gateway's routes directory that
+no stack's deploy recorded — the same judgement `homelab check` carries,
+fix-130) and `Drive space` from `rclone about` (`Warn` under 10 % free,
+`Fail` under 5 %, with what the trash holds).
+
+On a host right after its daemon's first start — nothing deployed yet, no
+backup, no host-meta snapshot, no restore drill — doctor reports at worst
+`Warn` from that emptiness alone; a stack that does not exist yet has no
+`stack <name> backup`/`env` line at all (an unasked question is never a
+finding), and "never snapshotted"/"never proved a restore" are read as
+facts about a clock that has not ticked yet. The one check that still fails
+hard before anything is deployed is the restic password file: it is a
+one-time manual step that has to happen before the first backup can be
+written at all, so doctor says plainly when it is missing rather than
+waiting for the first deploy to find out. Output (`host/src/main.rs`,
+`Rpc::Doctor`):
 
 ```text
 doctor: <Ok|Warn|Fail>

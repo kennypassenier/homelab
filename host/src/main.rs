@@ -370,6 +370,13 @@ struct FileConfig {
     /// How long `watch_url` (or, by fleet default, a tile) may fail before
     /// it counts as down. Default 300.
     watch_down_after_s: Option<u64>,
+    /// fix-184 (2026-10-02): the stack `watch_url` answers for, declared
+    /// here rather than guessed — while the host runs install-native,
+    /// update-native, deploy or an adopt on this one stack, `watch_url`'s
+    /// own down notice is suppressed, the same as it already is for a
+    /// self-update or a host restart. Unset: no stack's own deploy ever
+    /// suppresses it, only a self-update or host restart does.
+    watch_stack: Option<String>,
     /// rule-20 (disk-audit, 2026-10-01): `[capacity_thresholds]` — warn and
     /// critical percentages for pve's root fs, the local-lvm thin pool, every
     /// ZFS pool, pve's journald and Prometheus' TSDB. Absent = the audit's
@@ -538,6 +545,8 @@ struct Config {
     /// How long `watch_url` (or, by fleet default, a tile) may fail before
     /// it counts as down.
     watch_down_after_s: u64,
+    /// fix-184: the stack `watch_url` answers for; see `FileConfig`.
+    watch_stack: Option<String>,
     /// rule-20: warn/critical thresholds for pve's own capacity readings.
     capacity_thresholds: homelab_core::ops::fleetcheck::HostCapacityThresholds,
     /// rule-20: Prometheus' own TSDB cap, in MiB; None = not asked.
@@ -831,6 +840,7 @@ fn load_config_from(path: String) -> Config {
         watch_url: file.watch_url.clone().filter(|u| !u.trim().is_empty()),
         watch_interval_s: file.watch_interval_s.unwrap_or(60),
         watch_down_after_s: file.watch_down_after_s.unwrap_or(300),
+        watch_stack: file.watch_stack.clone().filter(|s| !s.trim().is_empty()),
         initial_settings: homelab_proto::HostConfigView {
             backup_hour: file.backup_hour,
             notify_webhook: file.notify_webhook,
@@ -2283,6 +2293,90 @@ span_days = 7\n";
             .expect("a failed request refuses the save");
         assert!(why.contains("10.10.10.20:8080/health"), "{why}");
         assert!(why.contains("firewall"), "{why}");
+    }
+
+    /// fix-184: the down notice must wait for the full `down_after_s` of
+    /// unbroken failure; a single failed probe (elapsed 0, or anything short
+    /// of the threshold) must not declare down.
+    #[test]
+    fn fix_184_down_notice_waits_for_the_full_threshold() {
+        // One failed probe, measured the instant it failed: elapsed is 0.
+        assert!(!super::watch_should_declare_down(0, 300));
+        // Still short of five minutes.
+        assert!(!super::watch_should_declare_down(299, 300));
+        // Exactly, and past, the threshold.
+        assert!(super::watch_should_declare_down(300, 300));
+        assert!(super::watch_should_declare_down(301, 300));
+    }
+
+    /// fix-184: a planned operation on the stack `watch_url` is declared for
+    /// suppresses the down timer; an operation on any other stack, or no
+    /// operation at all, does not — and the check never hardcodes which
+    /// stack that is, it only compares against `watch_stack`.
+    #[test]
+    fn fix_184_outage_expected_is_declared_not_hardcoded() {
+        let holder_for = |stack: &str| homelab_core::oplock::Holder {
+            what: "deploy".to_string(),
+            started_unix: 0,
+            done: 0,
+            total: 0,
+            stack: Some(stack.to_string()),
+        };
+        // Nothing running: never a known outage.
+        assert!(!super::outage_expected_for(None, Some("dashboard-stack")));
+        // The declared stack is deploying: suppressed.
+        let busy = holder_for("dashboard-stack");
+        assert!(super::outage_expected_for(
+            Some(&busy),
+            Some("dashboard-stack")
+        ));
+        // Some unrelated stack is deploying: not suppressed — this is the
+        // generic form a hardcoded `"admin"` literal could never express for
+        // an arbitrary configured name.
+        let other = holder_for("some-other-stack");
+        assert!(!super::outage_expected_for(
+            Some(&other),
+            Some("dashboard-stack")
+        ));
+        // No watch_stack declared at all: a stack-scoped op never suppresses
+        // (only a host-wide self-update/restart does).
+        assert!(!super::outage_expected_for(Some(&busy), None));
+        // The host's own update or restart always suppresses, regardless of
+        // watch_stack.
+        let self_update = homelab_core::oplock::Holder {
+            what: "self-update".to_string(),
+            started_unix: 0,
+            done: 0,
+            total: 0,
+            stack: None,
+        };
+        assert!(super::outage_expected_for(Some(&self_update), None));
+        assert!(super::outage_expected_for(
+            Some(&self_update),
+            Some("dashboard-stack")
+        ));
+    }
+
+    /// fix-184: the recovery notice is urgent (reaches `notify_webhook`)
+    /// only when the outage it closes was itself pushed out; a recovery
+    /// after a down notice that stayed centre-only (too short-lived, or
+    /// damped) must not suddenly become the first urgent push of the pair.
+    #[test]
+    fn fix_184_recovery_is_urgent_only_if_the_outage_was_pushed() {
+        let down = super::watch_facts(false, 0, "http://10.10.10.20/health", false);
+        assert!(down.urgency.urgent, "going down is always urgent");
+
+        let recovery_after_push = super::watch_facts(true, 0, "http://10.10.10.20/health", true);
+        assert!(
+            recovery_after_push.urgency.urgent,
+            "a recovery closing a pushed outage may be pushed"
+        );
+
+        let recovery_without_push = super::watch_facts(true, 0, "http://10.10.10.20/health", false);
+        assert!(
+            !recovery_without_push.urgency.urgent,
+            "a recovery after an outage nobody was pushed about stays centre-only"
+        );
     }
 
     /// SetHostConfig: a change lands with every other key kept; a file that
@@ -8148,24 +8242,53 @@ async fn notify_auto_disabled(state: &AppState, exec: &RealExecutor, stack: &str
 /// minutes without an answer is an urgent notice (pushed at once, since the
 /// dashboard that would show it is the thing that is gone), and its return
 /// another.
-/// Decision "deploys are known outages" (Kenny, 2026-09-30): true while the
-/// admin stack is being deployed, or the host itself is updating or
-/// restarting — the dashboard is expected to be briefly unreachable, so the
-/// host's own watch of it must not start (or advance) the down timer then.
+/// Decision "deploys are known outages" (Kenny, 2026-09-30): true while a
+/// planned, single-stack operation (deploy, install-native, update-native,
+/// adopt, patch, ...) is running on the one stack `watch_url` is declared
+/// to answer for, or the host itself is updating or restarting — the
+/// watched target is expected to be briefly unreachable, so the host's own
+/// watch of it must not start (or advance) the down timer then.
+///
+/// fix-184 (2026-10-02): pulled out of [`dashboard_outage_expected`] so it
+/// takes the holder and the declared stack as plain values — no app name is
+/// hardcoded here; which stack counts is purely `watch_stack` (host.toml),
+/// the same declaration `watch_url` itself lives beside.
+fn outage_expected_for(
+    holder: Option<&homelab_core::oplock::Holder>,
+    watch_stack: Option<&str>,
+) -> bool {
+    holder.is_some_and(|h| {
+        (watch_stack.is_some() && h.stack.as_deref() == watch_stack)
+            || matches!(h.what.as_str(), "self-update" | "restart-host")
+    })
+}
+
 fn dashboard_outage_expected(state: &AppState) -> bool {
     let Ok(b) = state.busy.lock() else {
         return false;
     };
-    b.as_ref().is_some_and(|h| {
-        h.stack.as_deref() == Some("admin")
-            || matches!(h.what.as_str(), "self-update" | "restart-host")
-    })
+    outage_expected_for(b.as_ref(), state.config.watch_stack.as_deref())
+}
+
+/// fix-184: the down notice fires once failure has lasted `down_after_s`
+/// without a break — never on the first failed probe. Before this was
+/// pulled out as its own named check, the same rule lived inline at the
+/// `watch_dashboard` call site (now line 8233-8235 below); this makes it
+/// one thing the test below can call directly instead of driving the whole
+/// loop with a fake clock.
+fn watch_should_declare_down(elapsed_failing_s: u64, down_after_s: u64) -> bool {
+    elapsed_failing_s >= down_after_s
 }
 
 async fn watch_dashboard(state: AppState, url: String) {
     let mut t = tokio::time::interval(Duration::from_secs(state.config.watch_interval_s));
     let mut failing_since: Option<u64> = None;
     let mut told = false;
+    // fix-184: whether the down notice that `told` remembers was actually
+    // pushed out (urgent, and not swallowed by the 20 h damper) — the
+    // recovery notice is urgent in turn only when this is true, never on
+    // its own (see `watch_facts`).
+    let mut down_pushed = false;
     loop {
         t.tick().await;
         if dashboard_outage_expected(&state) {
@@ -8173,6 +8296,8 @@ async fn watch_dashboard(state: AppState, url: String) {
             // from zero once the deploy, update or restart has ended, same
             // as a tile the dashboard's own watch treats as "deploying".
             failing_since = None;
+            told = false;
+            down_pushed = false;
             continue;
         }
         let out = RealExecutor
@@ -8187,19 +8312,37 @@ async fn watch_dashboard(state: AppState, url: String) {
         if ok {
             failing_since = None;
             if std::mem::take(&mut told) {
-                publish_notice(&state, &RealExecutor, watch_facts(true, now, &url)).await;
+                publish_notice(
+                    &state,
+                    &RealExecutor,
+                    watch_facts(true, now, &url, down_pushed),
+                )
+                .await;
             }
+            down_pushed = false;
             continue;
         }
         let since = *failing_since.get_or_insert(now);
-        if !told && now.saturating_sub(since) >= state.config.watch_down_after_s {
+        if !told
+            && watch_should_declare_down(now.saturating_sub(since), state.config.watch_down_after_s)
+        {
             told = true;
-            publish_notice(&state, &RealExecutor, watch_facts(false, since, &url)).await;
+            down_pushed = publish_notice(
+                &state,
+                &RealExecutor,
+                watch_facts(false, since, &url, false),
+            )
+            .await;
         }
     }
 }
 
-fn watch_facts(ok: bool, since: u64, url: &str) -> NoticeFacts {
+/// `down_was_pushed` matters only for `ok: true` (a recovery): the dashboard
+/// centre always gets the notice, but it is urgent — reaches
+/// `notify_webhook` — only when the outage it closes was itself pushed out;
+/// an outage that never left the centre (too short, or damped) does not get
+/// a loop-closing push either (fix-184).
+fn watch_facts(ok: bool, since: u64, url: &str, down_was_pushed: bool) -> NoticeFacts {
     NoticeFacts {
         op: "watch-dashboard".into(),
         label: "watch".into(),
@@ -8234,11 +8377,20 @@ fn watch_facts(ok: bool, since: u64, url: &str) -> NoticeFacts {
             },
             page: homelab_core::notify::page::HOST.into(),
         },
-        // Urgent both ways: its loss is "a service that does not answer", and
-        // its return goes where the loss went.
-        urgency: homelab_core::notify::urgency(&homelab_core::notify::Event::Alert {
-            alertname: homelab_core::notify::SERVICE_DOWN_ALERTS[0],
-        }),
+        // fix-184: going down is always urgent ("a service does not
+        // answer"); coming back is urgent only when the outage itself was
+        // actually pushed — otherwise this recovery closes nothing anyone
+        // outside the centre ever saw go down.
+        urgency: if ok && !down_was_pushed {
+            homelab_core::notify::Urgency {
+                urgent: false,
+                why: "not urgent: the outage was never pushed",
+            }
+        } else {
+            homelab_core::notify::urgency(&homelab_core::notify::Event::Alert {
+                alertname: homelab_core::notify::SERVICE_DOWN_ALERTS[0],
+            })
+        },
         incident: None,
         req: None,
         by: None,
@@ -8274,8 +8426,13 @@ fn notices_path(state_dir: &str) -> String {
 /// the short text and the link to the dashboard page. The damper (H13)
 /// still keeps one failure from paging every night; it now judges pushes
 /// only, so the centre keeps every occurrence.
-async fn publish_notice(state: &AppState, exec: &RealExecutor, f: NoticeFacts) {
+/// Returns whether this notice actually left the centre as an urgent push
+/// (`notify_webhook`), as opposed to staying "centre only" or being
+/// swallowed by the 20 h damper — fix-184's `watch_dashboard` uses this to
+/// decide whether a later recovery is itself allowed to push.
+async fn publish_notice(state: &AppState, exec: &RealExecutor, f: NoticeFacts) -> bool {
     let now = unix_now();
+    let mut pushed_out = false;
     let push = if !f.urgency.urgent {
         "centre only".to_string()
     } else if !state
@@ -8286,6 +8443,7 @@ async fn publish_notice(state: &AppState, exec: &RealExecutor, f: NoticeFacts) {
     {
         "not pushed again: the same failure went out within 20 h".to_string()
     } else {
+        pushed_out = true;
         let url = homelab_core::notify::click_url(&state.config.dashboard_url, &f.ex.page);
         let short = homelab_core::notify::push_short(&f.ex.title, &f.ex.remedy);
         let payload = homelab_core::notify::push_payload(
@@ -8337,6 +8495,7 @@ async fn publish_notice(state: &AppState, exec: &RealExecutor, f: NoticeFacts) {
         findings: f.findings,
     };
     record_notice(state, &notice);
+    pushed_out
 }
 
 /// Append one notice (0600) and prune the file by the history's limits.

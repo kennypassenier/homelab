@@ -57,7 +57,11 @@ restore_drill_interval_s = 72000
 
 # ── Notifications ───────────────────────────────────────────────────────────
 # notify_webhook, notify_fallback_webhook and watch_url are left unset:
-# their compiled default is "off" (no notice sent, not watched).
+# their compiled default is "off" (no notice sent, not watched). watch_stack
+# (fix-184) names the stack watch_url answers for, e.g. "admin" — while the
+# host deploys, installs, updates or adopts that one stack, watch_url's own
+# down notice is suppressed, the same as a self-update or host restart
+# already is. Unset: only a self-update or host restart suppresses it.
 dashboard_url = "https://admin.kp-soft.dev"
 watch_interval_s = 60
 watch_down_after_s = 300

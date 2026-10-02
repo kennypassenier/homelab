@@ -96,7 +96,7 @@ gateway_route:
 # The management network stays closed except DNS to 10.10.5.1 (the guard the
 # renderer appends) and what an ACCEPT below names.
 firewall:
-  enabled: false
+  enabled: true
   comment: |-
     CT 108 (syncthing), Syncthing.
     Declared from the flows measured 2026-09-27 (fix-89): tcpdump on pve's veths,

@@ -253,6 +253,39 @@ async fn list_watched(
     (fact, learned)
 }
 
+/// fix-88 / fix-207: each recorded stack's `/etc/pve/firewall/<vmid>.fw`,
+/// read whole off pmxcfs; a file that cannot be read counts as absent.
+/// Pulled out of [`gather_live_facts_with`] so a caller that wants only
+/// this (fix-207: the admin dashboard's topology and firewall page) need
+/// not pay for the rest of the fact gather — pools, owners, routes, a
+/// `pct list` — on every page load.
+pub async fn gather_firewall_facts(
+    exec: &dyn Executor,
+    state: &crate::state::HostState,
+    no_touch: &[u16],
+) -> Vec<crate::ops::fleetcheck::FirewallFact> {
+    let targets: Vec<(&String, u16)> = state
+        .stacks
+        .iter()
+        .filter(|(_, st)| !no_touch.contains(&st.vmid))
+        .map(|(name, st)| (name, st.vmid))
+        .collect();
+    crate::ops::pool::bounded(
+        targets
+            .into_iter()
+            .map(|(name, vmid)| async move {
+                crate::ops::fleetcheck::FirewallFact {
+                    stack: name.clone(),
+                    vmid,
+                    content: exec.read_file(&crate::firewall::fw_path(vmid)).await.ok(),
+                }
+            })
+            .collect(),
+        crate::ops::pool::READ_CONCURRENCY,
+    )
+    .await
+}
+
 /// Read off the machine everything `fleetcheck` judges.
 pub async fn gather_live_facts(
     exec: &dyn Executor,
@@ -459,29 +492,12 @@ pub async fn gather_live_facts_with(
     // the check compares bytes with the declaration's rendering. A file that
     // cannot be read counts as absent: the declaration says it should exist,
     // and the finding then says so.
-    let fw_targets: Vec<(&String, u16)> = snapshot
-        .as_ref()
-        .map(|s| {
-            s.stacks
-                .iter()
-                .filter(|(_, st)| !inp.no_touch.contains(&st.vmid))
-                .map(|(name, st)| (name, st.vmid))
-                .collect()
-        })
-        .unwrap_or_default();
-    let firewalls_fut = crate::ops::pool::bounded(
-        fw_targets
-            .into_iter()
-            .map(|(name, vmid)| async move {
-                crate::ops::fleetcheck::FirewallFact {
-                    stack: name.clone(),
-                    vmid,
-                    content: exec.read_file(&crate::firewall::fw_path(vmid)).await.ok(),
-                }
-            })
-            .collect(),
-        crate::ops::pool::READ_CONCURRENCY,
-    );
+    let firewalls_fut = async {
+        match snapshot.as_ref() {
+            Some(s) => gather_firewall_facts(exec, s, &inp.no_touch).await,
+            None => Vec::new(),
+        }
+    };
 
     let pct_list_cmd = Cmd::new("pct", &["list"], 30);
     let ((big_logs, pools), owners, firewalls, listed) = futures_util::join!(

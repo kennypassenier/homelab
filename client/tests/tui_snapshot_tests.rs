@@ -1321,6 +1321,13 @@ const CLI_ONLY: &[(&str, &str)] = &[
          `homelab wipe <key>` (which lists without --yes), the TUI has no retired view",
     ),
     (
+        "GetFirewallLive",
+        "fix-207: the dashboard's topology and firewall page ask this alone, so \
+         a page load does not pay for the whole fleet check's fact gather; the \
+         TUI has no topology view and `homelab check`/`FleetCheck` already \
+         covers the same ground (plus everything else) from the command line",
+    ),
+    (
         "BackupCalendar",
         "feat-overview-10: the dashboard's own backup-calendar page reads this \
          straight through the host; the TUI has no calendar view",

@@ -256,3 +256,148 @@ test("invariants: the kit's Status and Clients pages are switched off, Passkeys 
     await browser.close();
   }
 });
+
+// fix-207 (Kenny, Dutch): "gebruik voor elke stack een andere kleur, dan
+// kan ik duidelijk zien wie welke verbinding heeft met wie. Zet het bij in
+// de legende en als ik hover over de naam of het bolletje van een stack,
+// dan moeten enkel die zijn lijnen getoond worden, de anderen vallen dan
+// even weg." The demo host's working copy (scripts/invariants-run.sh's
+// fixture repo: admin, kp-soft, gateway) always has at least two stacks
+// with an edge between them, so these three cases always have something
+// to isolate.
+
+test("invariants: the topology's legend gives every stack its own colour", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/fleetview`);
+    await page.waitForSelector(".topology__stack-key", { timeout: 10000 });
+    const hues = await page
+      .locator(".topology__stack-key")
+      .evaluateAll((els) =>
+        els.map((el) => el.style.getPropertyValue("--stack-hue")),
+      );
+    assert.ok(
+      hues.length >= 2,
+      `expected at least two stacks, got ${hues.length}`,
+    );
+    assert.equal(
+      new Set(hues).size,
+      hues.length,
+      `every stack's legend swatch must have its own hue, got ${hues}`,
+    );
+    // Each node's own hue (in the graph) matches its legend entry.
+    const nodeHues = await page
+      .locator(".topology__node")
+      .evaluateAll((els) =>
+        els.map((el) => [
+          el.getAttribute("data-stack"),
+          el.style.getPropertyValue("--stack-hue"),
+        ]),
+      );
+    const byStack = Object.fromEntries(
+      await page
+        .locator(".topology__stack-key")
+        .evaluateAll((els) =>
+          els.map((el) => [
+            el.textContent.trim(),
+            el.style.getPropertyValue("--stack-hue"),
+          ]),
+        ),
+    );
+    for (const [stack, hue] of nodeHues) {
+      assert.equal(
+        byStack[stack],
+        hue,
+        `${stack}'s node hue must match its legend swatch`,
+      );
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: hovering a stack in the topology isolates its own edges, leaving restores them", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/fleetview`);
+    await page.waitForSelector(".topology__stack-key", { timeout: 10000 });
+    const stacks = await page
+      .locator(".topology__stack-key")
+      .evaluateAll((els) => els.map((el) => el.textContent.trim()));
+    assert.ok(
+      stacks.length >= 2,
+      "need at least two stacks to prove isolation",
+    );
+    const target = stacks[0];
+    const before = await page.locator(".topology__edge--dim").count();
+    assert.equal(before, 0, "nothing is dimmed before any hover");
+    await page
+      .locator(".topology__stack-key", { hasText: target })
+      .first()
+      .hover();
+    await page.waitForTimeout(50);
+    const edgeStates = await page
+      .locator(".topology__edge")
+      .evaluateAll((els) =>
+        els.map((el) => ({
+          from: el.getAttribute("data-from"),
+          to: el.getAttribute("data-to"),
+          dim: el.classList.contains("topology__edge--dim"),
+        })),
+      );
+    for (const e of edgeStates) {
+      const touches = e.from === target || e.to === target;
+      assert.equal(
+        e.dim,
+        !touches,
+        `edge ${e.from}->${e.to} dim=${e.dim} but touches ${target}=${touches}`,
+      );
+    }
+    // Leaving restores every edge.
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(50);
+    assert.equal(
+      await page.locator(".topology__edge--dim").count(),
+      0,
+      "leaving the stack must restore every edge",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: a stack whose firewall the host enforces is shown as enforced even when the repository disagrees", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    // scripts/invariants-run.sh's fixture declares "gateway" with its
+    // firewall off; the demo host (admin/src/shell/demo.rs) always answers
+    // that the first such stack is enforced on pve anyway, with the
+    // mismatch flagged — Kenny's own "5 van de 11" case.
+    await page.goto(`${BASE}/fleetview`);
+    await page.waitForSelector(".topology__node", { timeout: 10000 });
+    const mismatchRings = await page
+      .locator(".topology__fw-ring--mismatch")
+      .count();
+    assert.ok(
+      mismatchRings > 0,
+      "no node shows a host/repository firewall mismatch on the topology",
+    );
+    // Same source, the firewall page's table: the row reads "in force",
+    // not "declared but off", for the stack the host enforces.
+    await page.goto(`${BASE}/firewall`);
+    await page.waitForSelector("table", { timeout: 10000 });
+    const bodyText = await page.locator("body").innerText();
+    assert.ok(
+      bodyText.includes("in force (repo differs)"),
+      "the firewall table never shows a host-enforced-but-repo-disagrees row",
+    );
+  } finally {
+    await browser.close();
+  }
+});

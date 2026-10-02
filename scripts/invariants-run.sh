@@ -27,6 +27,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# fix-207: the topology/firewall/dependencies pages read the working copy
+# (homelab_admin::shell::workcopy::WorkingCopy), not the demo host's made-up
+# fleet — so a smoke that pins those pages needs a real (if tiny) working
+# copy to clone. A local path is a supported remote (arch-edit-txn, "a
+# local path works too (tests)"), so this builds a one-commit fixture repo
+# from three real stack manifests — one firewall on, one off, one with no
+# firewall block at all — and points HOMELAB_ADMIN_GIT_REMOTE at it. Only
+# `lxc-compose.yml` is copied (never a stack's `.env`), so no secret ever
+# enters this throwaway repo.
+fixture_repo="$workdir/fixture-repo"
+mkdir -p "$fixture_repo/stacks/admin" "$fixture_repo/stacks/kp-soft" "$fixture_repo/stacks/gateway"
+cp "$root/stacks/admin/lxc-compose.yml" "$fixture_repo/stacks/admin/lxc-compose.yml"
+cp "$root/stacks/kp-soft/lxc-compose.yml" "$fixture_repo/stacks/kp-soft/lxc-compose.yml"
+cp "$root/stacks/gateway/lxc-compose.yml" "$fixture_repo/stacks/gateway/lxc-compose.yml"
+git init -q -b main "$fixture_repo"
+git -C "$fixture_repo" -c user.email=invariants@example.com -c user.name=invariants \
+  add -A
+git -C "$fixture_repo" -c user.email=invariants@example.com -c user.name=invariants \
+  commit -q -m "fixture: three stacks for the invariants smoke"
+
 # A free-ish high port, so two runs on one machine (a dev shell and a CI
 # box, say) do not collide on 8090 (the service's own default).
 port=18099
@@ -56,7 +76,10 @@ HOMELAB_ADMIN_TOKEN="$token" \
 HOMELAB_ADMIN_SECRET_KEY="$secret_key" \
 HOMELAB_ADMIN_PUBLIC_URL="https://localhost:$port" \
 HOMELAB_ADMIN_DEMO_HOST=1 \
-HOMELAB_ADMIN_DEMO_STACKS="films,notes,oldstack" \
+HOMELAB_ADMIN_DEMO_STACKS="admin,kp-soft,gateway" \
+HOMELAB_ADMIN_DATA_DIR="$workdir/admin-data" \
+HOMELAB_ADMIN_GIT_REMOTE="$fixture_repo" \
+HOMELAB_ADMIN_GIT_BRANCH="main" \
   "$target_dir"/debug/homelab-admin \
     --config "$workdir/admin.toml" \
     --state-dir "$workdir/state" \

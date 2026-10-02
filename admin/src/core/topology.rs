@@ -17,15 +17,28 @@
 //! No app names: everything here is `stack`, `vmid`, `ip` and the protocol
 //! words the firewall module already has.
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 
 use super::fwmatrix::{FleetFirewall, Matrix};
+use homelab_core::ops::fleetcheck::FirewallLiveStatus;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Node {
     pub stack: String,
     pub vmid: u16,
     pub ip: String,
+    /// fix-207: whether Proxmox is actually enforcing this stack's firewall
+    /// right now — `None` when the dashboard could not ask the host (an
+    /// older host, or the link down), so the page can tell "off" from
+    /// "unknown" instead of quietly falling back to the repository.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_enforced: Option<bool>,
+    /// fix-207: whether that live state matches what the repository
+    /// declares. `None` alongside `live_enforced`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_matches_repo: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -57,6 +70,8 @@ pub fn from_matrix(fleet: &[FleetFirewall], matrix: &Matrix) -> Topology {
             stack: f.stack.clone(),
             vmid: f.vmid,
             ip: f.ip.to_string(),
+            live_enforced: None,
+            live_matches_repo: None,
         })
         .collect();
     let edges = matrix
@@ -79,6 +94,23 @@ pub fn from_matrix(fleet: &[FleetFirewall], matrix: &Matrix) -> Topology {
 
 pub fn from_fleet(fleet: &[FleetFirewall]) -> Topology {
     from_matrix(fleet, &super::fwmatrix::matrix(fleet))
+}
+
+/// fix-207 (Kenny: "Firewalls: 5 van de 11 staan aan … waarom zie ik dat
+/// dan niet op de topology van fleet view?"): stamp each node with what the
+/// host actually enforces, read separately from the working copy's
+/// declaration. Pure, so it is testable without a host: a topology built
+/// from the repository, held against a map of live answers keyed by stack.
+/// A stack missing from `live` (the host did not answer about it) keeps
+/// `None` on both fields — unknown, not "off".
+pub fn with_live(mut topo: Topology, live: &BTreeMap<String, FirewallLiveStatus>) -> Topology {
+    for n in &mut topo.nodes {
+        if let Some(s) = live.get(&n.stack) {
+            n.live_enforced = Some(s.enforced);
+            n.live_matches_repo = Some(s.matches_repo);
+        }
+    }
+    topo
 }
 
 /// feat-stacks-9: what each stack reaches (its outbound dependencies) and
@@ -213,6 +245,36 @@ mod tests {
                 .iter()
                 .any(|e| e.from == "stranger" && e.to == "app")
         );
+    }
+
+    #[test]
+    fn with_live_stamps_only_the_stacks_the_host_answered_about() {
+        let fleet = vec![
+            stack("gateway", 104, "10.10.10.4", None),
+            stack(
+                "app",
+                110,
+                "10.10.10.10",
+                Some(fw_in_from("10.10.10.4", 8080)),
+            ),
+        ];
+        let topo = from_fleet(&fleet);
+        let mut live = std::collections::BTreeMap::new();
+        live.insert(
+            "app".to_string(),
+            FirewallLiveStatus {
+                enforced: true,
+                matches_repo: false,
+            },
+        );
+        let topo = with_live(topo, &live);
+        let app = topo.nodes.iter().find(|n| n.stack == "app").unwrap();
+        assert_eq!(app.live_enforced, Some(true));
+        assert_eq!(app.live_matches_repo, Some(false));
+        // The host said nothing about "gateway": unknown, not "off".
+        let gateway = topo.nodes.iter().find(|n| n.stack == "gateway").unwrap();
+        assert_eq!(gateway.live_enforced, None);
+        assert_eq!(gateway.live_matches_repo, None);
     }
 
     #[test]

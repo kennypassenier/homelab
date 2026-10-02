@@ -128,6 +128,50 @@ pub async fn run_demo(
                         Command::ListManualChecks { .. } => serde_json::json!({ "now": now_s(), "checks": [] }).to_string(),
                         Command::ListTemplates => "clonable golden templates (fast):\nclone:996  debian-13-homelab-v4\n\nOS templates (full bootstrap):\n  local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst\n".into(),
                         Command::GetApplied { .. } => "[]".into(),
+                        // fix-207: the demo host's stand-in for "what pve
+                        // actually enforces" — made up, but made up the way
+                        // Kenny's own fleet looks: the repository's own
+                        // declaration for most stacks, with the first stack
+                        // (sorted) that declares no firewall (or declares
+                        // one switched off) shown as enforced anyway and
+                        // flagged as not matching the repository, so the
+                        // invariants smoke can pin that the dashboard shows
+                        // live state over a stale repository rather than
+                        // the other way round.
+                        Command::GetFirewallLive { stack_files } => {
+                            let declared_on = |name: &str| {
+                                homelab_client::spec::build_manifest(
+                                    &repo.join("stacks").join(name),
+                                )
+                                .ok()
+                                .and_then(|m| m.firewall)
+                                .is_some_and(|f| f.enabled)
+                            };
+                            let mut off_first: Vec<&str> = stack_files
+                                .iter()
+                                .map(|(s, _)| s.as_str())
+                                .filter(|s| !declared_on(s))
+                                .collect();
+                            off_first.sort();
+                            let override_stack = off_first.first().copied();
+                            let statuses: std::collections::BTreeMap<_, _> = stack_files
+                                .iter()
+                                .map(|(name, _vmid)| {
+                                    let on = declared_on(name);
+                                    let (enforced, matches_repo) =
+                                        if Some(name.as_str()) == override_stack {
+                                            (true, false)
+                                        } else {
+                                            (on, true)
+                                        };
+                                    (
+                                        name.clone(),
+                                        serde_json::json!({ "enforced": enforced, "matches_repo": matches_repo }),
+                                    )
+                                })
+                                .collect();
+                            serde_json::json!({ "statuses": statuses }).to_string()
+                        }
                         Command::Ping => "pong (demo host)".into(),
                         Command::GetHostConfig => serde_json::to_string(&homelab_proto::HostConfigFile {
                             path: "/etc/homelab/host.toml (demo host)".into(),

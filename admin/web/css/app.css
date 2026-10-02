@@ -1896,34 +1896,77 @@ td.stack-flags {
   display: block;
   margin: 0 auto;
 }
+/* fix-207: one hue per stack (admin/web/js/topology.js's `stackHues`,
+   evenly spaced in sorted order), carried on each edge/node/legend entry
+   as the `--stack-hue` custom property; `light-dark()` picks the
+   lightness that reads on the theme's own `color-scheme` (every kp-themes
+   theme sets it) without a media query or a per-theme override. */
 .topology__edge {
   fill: none;
-  stroke: var(--chart-1, var(--primary));
-  stroke-width: 1.4;
-  opacity: 0.7;
+  stroke: light-dark(
+    hsl(var(--stack-hue, 210) 65% 42%),
+    hsl(var(--stack-hue, 210) 70% 64%)
+  );
+  stroke-width: 1.6;
+  opacity: 0.75;
+  transition: opacity 0.15s ease;
 }
 .topology__edge--open {
-  stroke: var(--muted-foreground);
   stroke-dasharray: 3 3;
-  opacity: 0.5;
+  opacity: 0.55;
+}
+/* Kenny, 2026-10-02 (Dutch): "als ik hover over de naam of het bolletje
+   van een stack, dan moeten enkel die zijn lijnen getoond worden, de
+   anderen vallen dan even weg" — everything not touching the isolated
+   stack fades near to nothing rather than disappearing outright, so the
+   layout never jumps. */
+.topology__edge--dim {
+  opacity: 0.06;
 }
 .topology__dot {
-  fill: var(--primary);
+  fill: light-dark(
+    hsl(var(--stack-hue, 210) 65% 42%),
+    hsl(var(--stack-hue, 210) 70% 64%)
+  );
   stroke: var(--background);
   stroke-width: 1.5;
+  transition: opacity 0.15s ease;
 }
 .topology__node:focus-visible .topology__dot {
   outline: 2px solid var(--ring, var(--primary));
+}
+.topology__node--dim .topology__dot,
+.topology__node--dim .topology__label,
+.topology__node--dim .topology__fw-ring,
+.topology__node--dim .topology__traffic-ring {
+  opacity: 0.2;
 }
 .topology__traffic-ring {
   fill: none;
   stroke: var(--chart-2, #e8a33d);
   stroke-width: 2;
   opacity: 0.6;
+  transition: opacity 0.15s ease;
+}
+/* fix-207: the live firewall ring — what pve actually enforces right now,
+   drawn only when the dashboard got an answer from the host at all. */
+.topology__fw-ring {
+  fill: none;
+  stroke-width: 2;
+  opacity: 0.85;
+  transition: opacity 0.15s ease;
+}
+.topology__fw-ring--enforced {
+  stroke: var(--chart-3, #3aa675);
+}
+.topology__fw-ring--mismatch {
+  stroke: var(--chart-2, #e8a33d);
+  stroke-dasharray: 2 2;
 }
 .topology__label {
   font-size: 10px;
   fill: var(--foreground);
+  transition: opacity 0.15s ease;
 }
 .topology__legend {
   list-style: none;
@@ -1949,6 +1992,57 @@ td.stack-flags {
 }
 .topology__key--traffic::before {
   background: var(--chart-2, #e8a33d);
+}
+.topology__key--fw-enforced::before {
+  background: var(--chart-3, #3aa675);
+}
+.topology__key--fw-mismatch::before {
+  background: var(--chart-2, #e8a33d);
+}
+/* fix-207 / colour-per-stack: the legend's stack grid — rule 6 (web pages
+   use grid structures), auto-filling so a two-stack fleet and a
+   twenty-stack one both line up evenly instead of ragged flex wrapping. */
+.topology__stack-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 4px 10px;
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+  font-size: 0.85em;
+}
+.topology__stack-key {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.topology__stack-key:hover,
+.topology__stack-key:focus-visible {
+  border-color: var(--border);
+  background: var(--muted, rgba(128, 128, 128, 0.08));
+}
+.topology__stack-key:focus-visible {
+  outline: 2px solid var(--ring, var(--primary));
+  outline-offset: 1px;
+}
+.topology__stack-swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: light-dark(
+    hsl(var(--stack-hue, 210) 65% 42%),
+    hsl(var(--stack-hue, 210) 70% 64%)
+  );
 }
 
 /* replace-kuma (2026-09-30): the minute watch's dot on a tile. */

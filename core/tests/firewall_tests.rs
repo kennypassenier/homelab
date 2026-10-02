@@ -11,7 +11,9 @@
 use homelab_core::executor::{CmdOutput, MockExecutor};
 use homelab_core::firewall::{self, fw_path, render};
 use homelab_core::manifest::*;
-use homelab_core::ops::fleetcheck::{BootFact, FirewallFact, Severity, evaluate_firewalls};
+use homelab_core::ops::fleetcheck::{
+    BootFact, FirewallFact, Severity, evaluate_firewalls, firewall_live_status,
+};
 use homelab_core::ops::{OpCtx, deploy::deploy};
 use homelab_core::runner::NullJournal;
 use homelab_core::safety::SafetyConfig;
@@ -755,6 +757,69 @@ fn the_fleet_check_reports_a_firewall_file_that_differs_from_its_declaration() {
     assert_eq!(f.len(), 1, "{:?}", f);
     assert_eq!(f[0].severity, Severity::Noted);
     assert!(f[0].what.contains("kp-soft"), "{:?}", f[0]);
+}
+
+/// fix-207: the dashboard's topology/firewall page reads this, not
+/// `evaluate_firewalls`'s prose — it needs a plain bool per stack, not a
+/// sentence. Exercises the same cases `evaluate_firewalls` above does, so
+/// the two never disagree about what "matches" means.
+#[test]
+fn firewall_live_status_reports_enforced_and_match_independently() {
+    let decl = fw(KP_SOFT_116);
+    let rendered = render("kp-soft", &decl);
+    let fact = |content: Option<&str>| FirewallFact {
+        stack: "kp-soft".into(),
+        vmid: 116,
+        content: content.map(str::to_string),
+    };
+
+    // Declared and enabled, pve matches byte for byte: enforced, matches.
+    let st = state_with("kp-soft", 116, Some(decl.clone()));
+    let live = firewall_live_status(&st, &[fact(Some(&rendered))], None);
+    let s = live["kp-soft"];
+    assert!(s.enforced, "{:?}", s);
+    assert!(s.matches_repo, "{:?}", s);
+
+    // Kenny's own case: pve enforces it (switched on by hand or by a
+    // deploy the repository's working copy has not caught up with yet),
+    // the repository here declares nothing at all. The dashboard must
+    // still show it as enforced, with the mismatch flagged.
+    let bare = state_with("kp-soft", 116, None);
+    let live = firewall_live_status(&bare, &[fact(Some(&rendered))], None);
+    let s = live["kp-soft"];
+    assert!(s.enforced, "live file has enable: 1 — {:?}", s);
+    assert!(!s.matches_repo, "repo declares nothing — {:?}", s);
+
+    // Declared and enabled here, but pve has nothing: not enforced, and
+    // that disagrees with the repository too.
+    let live = firewall_live_status(&st, &[fact(None)], None);
+    let s = live["kp-soft"];
+    assert!(!s.enforced, "{:?}", s);
+    assert!(!s.matches_repo, "{:?}", s);
+
+    // Neither side has anything: both agree there is nothing in force.
+    let live = firewall_live_status(&bare, &[fact(None)], None);
+    let s = live["kp-soft"];
+    assert!(!s.enforced, "{:?}", s);
+    assert!(s.matches_repo, "{:?}", s);
+
+    // Declared but switched off for the rollout (Noted, not Drift, in
+    // `evaluate_firewalls`), nothing on pve: both sides agree it is off.
+    let mut off = decl.clone();
+    off.enabled = false;
+    let st_off = state_with("kp-soft", 116, Some(off));
+    let live = firewall_live_status(&st_off, &[fact(None)], None);
+    let s = live["kp-soft"];
+    assert!(!s.enforced, "{:?}", s);
+    assert!(s.matches_repo, "{:?}", s);
+
+    // A hand edit changes the ports but keeps it in force: enforced, but
+    // not a match.
+    let edited = rendered.replace("-dport 22", "-dport 2222");
+    let live = firewall_live_status(&st, &[fact(Some(&edited))], None);
+    let s = live["kp-soft"];
+    assert!(s.enforced, "{:?}", s);
+    assert!(!s.matches_repo, "{:?}", s);
 }
 
 /// The gatherer reads each recorded stack's file off pve, and says absent

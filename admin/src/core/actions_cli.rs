@@ -254,6 +254,7 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         | SelfUpdateHost { .. }
         | GetState
         | GetApplied { .. }
+        | GetFirewallLive { .. }
         | SetConfig(_)
         | Answer { .. }
         | SessionOptions { .. }

@@ -11078,6 +11078,50 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
+        // fix-207: the live firewall status alone — no pct exec, no
+        // pools/owners/routes, no `pct list` — for a dashboard page that
+        // only wants to know what pve is actually enforcing right now.
+        Rpc::GetFirewallLive { stack_files } => {
+            let store =
+                homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
+            match store.load().await {
+                Ok(snapshot) => {
+                    let facts = homelab_core::ops::facts::gather_firewall_facts(
+                        &exec,
+                        &snapshot,
+                        &state.config.safety.no_touch,
+                    )
+                    .await;
+                    let statuses = homelab_core::ops::fleetcheck::firewall_live_status(
+                        &snapshot,
+                        &facts,
+                        state.config.tile_watch_source.as_deref(),
+                    );
+                    // Only what the caller named: the host may track stacks
+                    // the dashboard's working copy does not (yet), and
+                    // answering about those would be noise it never asked
+                    // for.
+                    let wanted: std::collections::HashSet<&str> =
+                        stack_files.iter().map(|(s, _)| s.as_str()).collect();
+                    let statuses: std::collections::BTreeMap<_, _> = statuses
+                        .into_iter()
+                        .filter(|(stack, _)| wanted.contains(stack.as_str()))
+                        .collect();
+                    RpcResponse {
+                        id: req.id,
+                        ok: true,
+                        message: serde_json::json!({ "statuses": statuses }).to_string(),
+                        deferred: None,
+                    }
+                }
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("state unreadable: {}", e),
+                    deferred: None,
+                },
+            }
+        }
         // feat-backup-1: per-repository status (D25's owning-app repos for
         // a compose stack, one per unit for a native stack), joined with
         // the restore-drill verdict the nightly drill already recorded.

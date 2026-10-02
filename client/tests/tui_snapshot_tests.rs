@@ -24,6 +24,7 @@ fn fleet() -> FleetState {
             ram_committed_mb: 38400,
             cores_total: 12,
             load1_x100: 285,
+            disk_detail: None,
         },
         stacks: vec![
             StackView {

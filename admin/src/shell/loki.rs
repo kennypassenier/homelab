@@ -41,17 +41,35 @@ impl Loki {
         Ok(crate::shell::prometheus::series(&v, legend))
     }
 
-    /// An instant metric query: `[(label value, number)]`, largest first.
+    /// An "instant" metric read, as [`Loki::metric_range`] with a one-second
+    /// window ending at `at` (fix-221: the Loki gateway's one read endpoint
+    /// — `stacks/metrics/loki-push/nginx.conf` — allows `query_range` only;
+    /// `query` (the real instant endpoint) answers everything, including
+    /// this dashboard, with a bare HTTP 403, since Kenny's decision "one
+    /// read endpoint for the dashboard" never carved out a second door).
+    /// This is exact, not an approximation: every query this function is
+    /// given already carries its own lookback inside the query text itself
+    /// (`count_over_time(...[{span}s])`), so `query_range` evaluating that
+    /// expression at one instant (the end of a 1 s window) returns the same
+    /// number `query` would have — `query_range` is a superset of `query`,
+    /// a series of instants rather than one, and taking the LAST point
+    /// (closest to `at`) reduces it back to one.
     pub async fn metric_now(
         &self,
         query: &str,
         at: u64,
         label: &str,
     ) -> Result<Vec<(String, f64)>, String> {
+        let start = at.saturating_sub(1);
         let v = self
             .get(
-                "query",
-                &[("query", query.to_string()), ("time", at.to_string())],
+                "query_range",
+                &[
+                    ("query", query.to_string()),
+                    ("start", start.to_string()),
+                    ("end", at.to_string()),
+                    ("step", "1s".to_string()),
+                ],
             )
             .await?;
         let mut out: Vec<(String, f64)> = v["data"]["result"]
@@ -60,7 +78,8 @@ impl Loki {
                 rs.iter()
                     .filter_map(|r| {
                         let k = r["metric"][label].as_str().unwrap_or("").to_string();
-                        let n: f64 = r["value"][1].as_str()?.parse().ok()?;
+                        let last = r["values"].as_array()?.last()?;
+                        let n: f64 = last[1].as_str()?.parse().ok()?;
                         Some((k, n))
                     })
                     .collect()
@@ -85,13 +104,37 @@ impl Loki {
             .await
             .map_err(|e| format!("Loki's answer broke off: {e}"))?;
         if !status.is_success() {
-            return Err(format!(
-                "Loki answered HTTP {}: {}",
-                status.as_u16(),
-                body.chars().take(200).collect::<String>()
-            ));
+            return Err(upstream_reason("Loki", status, &body));
         }
         serde_json::from_str(&body).map_err(|e| format!("Loki's answer did not read: {e}"))
+    }
+}
+
+/// fix-221: an upstream's error page (nginx's, Traefik's, Loki's own HTML
+/// 400 page) never reaches the browser as page text — only the status and a
+/// short reason do. A body that is not HTML is still shown, truncated, same
+/// as before.
+fn upstream_reason(service: &str, status: reqwest::StatusCode, body: &str) -> String {
+    let trimmed = body.trim_start();
+    let looks_like_html = trimmed
+        .get(..15)
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase()
+        .starts_with("<!doctype html")
+        || trimmed
+            .get(..5)
+            .unwrap_or(trimmed)
+            .to_ascii_lowercase()
+            .starts_with("<html")
+        || body.to_ascii_lowercase().contains("<html");
+    if looks_like_html {
+        format!("{service} refused the query (HTTP {})", status.as_u16())
+    } else {
+        format!(
+            "{service} answered HTTP {}: {}",
+            status.as_u16(),
+            body.chars().take(200).collect::<String>()
+        )
     }
 }
 
@@ -117,6 +160,23 @@ impl Loki {
             http,
             max_since_s: c.logs_max_since_s,
             max_limit: c.logs_max_limit,
+        })
+    }
+
+    /// A client for a given base (feat-platform-10's demo metrics server;
+    /// also this module's own tests) rather than the project config.
+    pub fn new(
+        base: String,
+        timeout: Duration,
+        max_since_s: u64,
+        max_limit: usize,
+    ) -> Option<Self> {
+        let http = reqwest::Client::builder().timeout(timeout).build().ok()?;
+        Some(Loki {
+            base,
+            http,
+            max_since_s,
+            max_limit,
         })
     }
 
@@ -150,11 +210,10 @@ impl Loki {
             .await
             .map_err(|e| format!("Loki's answer broke off: {e}"))?;
         if !status.is_success() {
-            return Err(format!(
-                "Loki at {} answered HTTP {}: {}",
-                self.base,
-                status.as_u16(),
-                body.chars().take(200).collect::<String>()
+            return Err(upstream_reason(
+                &format!("Loki at {}", self.base),
+                status,
+                &body,
             ));
         }
         let lines = logs::parse_answer(&body, limit)?;

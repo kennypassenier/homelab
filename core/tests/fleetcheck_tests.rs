@@ -2153,6 +2153,58 @@ fn rule_20_parse_journal_disk_usage_converts_to_mib() {
     assert_eq!(parse_journal_disk_usage_mib("nothing useful here\n"), None);
 }
 
+// ── fix-222: which disk "root" and "local-lvm" actually are ─────────────────
+
+use homelab_core::ops::fleetcheck::{
+    parse_blockdev_bytes, parse_du_top, parse_lv_size_gb, parse_pv_name, whole_disk_device,
+};
+
+#[test]
+fn fix_222_parse_lv_size_gb_reads_the_plain_or_estimated_figure() {
+    assert_eq!(parse_lv_size_gb("  50.00g\n"), Some(50.0));
+    assert_eq!(parse_lv_size_gb("  <219.95g\n"), Some(219.95));
+    assert_eq!(parse_lv_size_gb(""), None);
+}
+
+#[test]
+fn fix_222_parse_pv_name_reads_the_first_pv() {
+    assert_eq!(parse_pv_name("  /dev/sda3\n"), Some("/dev/sda3".into()));
+    assert_eq!(parse_pv_name(""), None);
+}
+
+#[test]
+fn fix_222_whole_disk_device_strips_the_partition_number() {
+    assert_eq!(whole_disk_device("/dev/sda3"), "/dev/sda");
+    assert_eq!(whole_disk_device("/dev/nvme0n1p3"), "/dev/nvme0n1");
+    assert_eq!(whole_disk_device("/dev/mmcblk0p1"), "/dev/mmcblk0");
+    assert_eq!(whole_disk_device("/dev/sdb"), "/dev/sdb");
+}
+
+#[test]
+fn fix_222_parse_blockdev_bytes_converts_to_gib() {
+    assert_eq!(
+        parse_blockdev_bytes("1000204886016\n"),
+        Some(931.5133895874023)
+    );
+    assert_eq!(parse_blockdev_bytes(""), None);
+}
+
+#[test]
+fn fix_222_parse_du_top_drops_root_itself_and_sorts_largest_first() {
+    let out = "10485760\t/\n4194304\t/var\n6291456\t/usr\n1048576\t/home\n";
+    let top = parse_du_top(out, 2);
+    assert_eq!(
+        top,
+        vec![("/usr".to_string(), 6.0), ("/var".to_string(), 4.0)]
+    );
+}
+
+#[test]
+fn fix_222_parse_du_top_caps_at_n_even_with_more_rows() {
+    let out = "3145728\t/a\n2097152\t/b\n1048576\t/c\n";
+    assert_eq!(parse_du_top(out, 1), vec![("/a".to_string(), 3.0)]);
+}
+
 /// rule-20: a reading under warn is silent, warn is Drift, critical is
 /// Broken — the shape every other evaluator in this module uses.
 #[test]

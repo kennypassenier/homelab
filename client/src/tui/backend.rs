@@ -307,6 +307,7 @@ fn demo_fleet() -> ServerMsg {
             ram_committed_mb: 38400, // sum of ceilings > total (normal for LXC)
             cores_total: 12,
             load1_x100: 285, // load average 2.85
+            disk_detail: None,
         },
         // app-knowledge (2026-09-30): the demo fleet is made up, so no real
         // stack or app is named in code.

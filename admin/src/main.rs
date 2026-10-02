@@ -163,6 +163,33 @@ async fn main() -> std::process::ExitCode {
     // Doctor reads for about a minute on pve (fix-68), so the pages wait up
     // to two for an answer.
     let (host_client, host_asks) = host_link::HostClient::new(std::time::Duration::from_secs(120));
+    // feat-platform-10: a demo host inside this process instead of the real
+    // line, for the browser tests; nothing is sent anywhere. Only a build
+    // with the `demo-host` feature has one (Kenny: "Only in test builds").
+    let demo_host = match demo_requested() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("homelab-admin: {e}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    // fix-220: the demo host's own made-up Prometheus/Loki (never a real
+    // metrics stack — spawn_demo_metrics starts one inside this process),
+    // so the charts and traffic pages have something to draw in the browser
+    // tests, and the invariants suite can prove the dashboard never shows a
+    // raw id as a chart series label, against the actual humanizing code
+    // path rather than asserting on it directly. Only fills in what the
+    // demo build's own config did NOT already set.
+    #[cfg_attr(not(feature = "demo-host"), allow(unused_mut))]
+    let mut config = config;
+    #[cfg(feature = "demo-host")]
+    if demo_host && let Some(c) = config.as_mut() {
+        let base = homelab_admin::shell::demo::spawn_demo_metrics().await;
+        c.prometheus_url.get_or_insert_with(|| base.clone());
+        c.loki_url.get_or_insert_with(|| base.clone());
+        c.charts_host.get_or_insert_with(|| "demo".into());
+        c.traffic_job.get_or_insert_with(|| "demo-traffic".into());
+    }
     // feat-overview-2, feat-ops-2, feat-ops-4: host facts, the host's
     // questions and the logs from Loki.
     app.dashboard_routes(routes::read_router(routes::ReadCtx {
@@ -176,16 +203,6 @@ async fn main() -> std::process::ExitCode {
             .and_then(|c| c.traffic_job.clone())
             .filter(|j| !j.trim().is_empty()),
     }));
-    // feat-platform-10: a demo host inside this process instead of the real
-    // line, for the browser tests; nothing is sent anywhere. Only a build
-    // with the `demo-host` feature has one (Kenny: "Only in test builds").
-    let demo_host = match demo_requested() {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("homelab-admin: {e}");
-            return std::process::ExitCode::FAILURE;
-        }
-    };
     // milestone act: actions, schedules and notifications.
     if config.is_some()
         && let Err(e) = homelab_admin::shell::actions::mount(

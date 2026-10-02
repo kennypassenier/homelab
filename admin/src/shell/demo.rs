@@ -4,6 +4,9 @@
 
 use std::time::Duration;
 
+use axum::extract::Query;
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
 use chassis::shell::live::Live;
 use homelab_proto::{Command, RpcResponse, ServerMsg};
 
@@ -13,6 +16,156 @@ use crate::core::fleet::fleet_view;
 /// The version the demo host says Hello with: the release every gate in
 /// this dashboard asks for, so every page works against it.
 pub const DEMO_VERSION: &str = "3.63.0";
+
+/// fix-220 (Kenny, 2026-10-02): a made-up Prometheus and Loki, answering
+/// this process's own loopback, for the charts/traffic e2e smoke — the real
+/// Prometheus/Loki clients, pointed here instead of a real metrics stack, so
+/// the invariants suite exercises the actual humanizing code path
+/// (`homelab_core::charts::humanize`) rather than asserting on it directly.
+/// Deliberately includes the raw ids Kenny saw on the live host (a firewall
+/// bridge, a hwmon PCI chip id, a Proxmox cgroup id) so a chart series label
+/// matching a raw-id pattern is a real, provable regression, not a claim.
+/// `demo-host` only, same as [`run_demo`] — no real metrics stack is ever
+/// contacted when this is in use.
+pub async fn spawn_demo_metrics() -> String {
+    let app = axum::Router::new()
+        .route("/api/v1/query_range", get(prom_query))
+        .route("/api/v1/query", get(prom_query))
+        .route("/loki/api/v1/query_range", get(loki_query_range))
+        .route(
+            "/loki/api/v1/query",
+            get(|| async {
+                // fix-221: the real gateway (stacks/metrics/loki-push/nginx.conf)
+                // answers this path with a bare 403 for everyone but Grafana;
+                // the demo mirrors that so a regression (an instant query
+                // Loki call creeping back in) fails the same way live does.
+                (
+                    axum::http::StatusCode::FORBIDDEN,
+                    "<html><head><title>403 Forbidden</title></head><body><center>403 Forbidden</center><hr><center>nginx</center></body></html>",
+                )
+                    .into_response()
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("demo metrics: bind a loopback port");
+    let addr = listener.local_addr().expect("demo metrics: local_addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://{addr}")
+}
+
+#[derive(serde::Deserialize)]
+struct PromQ {
+    query: String,
+}
+
+/// One made-up `matrix`/`vector` answer, chosen by matching a fragment of
+/// the query text — the same thing a real Prometheus would answer for that
+/// `by (...)` clause, with one point per series (good enough for both
+/// `query` and `query_range`: `panelEl` only ever reads the last point).
+async fn prom_query(Query(q): Query<PromQ>) -> Response {
+    axum::Json(demo_metric_body(&q.query)).into_response()
+}
+
+async fn loki_query_range(Query(q): Query<PromQ>) -> Response {
+    axum::Json(demo_metric_body(&q.query)).into_response()
+}
+
+/// Deliberately raw ids (fix-220's whole-screen invariant proves the
+/// dashboard never shows one of these as a series label):
+/// - `fwbr117i0` / `veth117i0` — a guest's own firewall bridge and virtual
+///   NIC, vmid 117 embedded by Proxmox's own naming.
+/// - `0000:00:01_0_0000:01:00_0` — an hwmon chip id, the sysfs PCI path with
+///   `/` and `.` turned into `_` (exactly what Kenny saw live).
+/// - `lxc/117` — a Proxmox cgroup id, same vmid.
+///
+/// One SMART drive answers "not ok" (`sdb`) so the health table has both
+/// states to show, not one flat "ok" line.
+fn demo_metric_body(query: &str) -> serde_json::Value {
+    let at = now_s();
+    let series = |pairs: &[(&str, f64)]| -> serde_json::Value {
+        let result: Vec<serde_json::Value> = pairs
+            .iter()
+            .map(|(label, v)| {
+                serde_json::json!({
+                    "metric": { metric_key(query): label },
+                    "value": [at, v.to_string()],
+                    "values": [[at, v.to_string()]],
+                })
+            })
+            .collect();
+        serde_json::json!({ "status": "success", "data": { "resultType": "matrix", "result": result } })
+    };
+    if query.contains("node_hwmon_temp_celsius") {
+        return series(&[
+            ("0000:00:01_0_0000:01:00_0", 46.0),
+            ("0000:00:02_0_0000:02:00_0", 52.0),
+        ]);
+    }
+    if query.contains("smart_device_health_ok") {
+        return series(&[("sda", 1.0), ("sdb", 0.0)]);
+    }
+    if query.contains("smart_device_pending_sectors") {
+        return series(&[("sda", 0.0), ("sdb", 12.0)]);
+    }
+    if query.contains("smart_device_reallocated_sectors") {
+        return series(&[("sda", 0.0), ("sdb", 3.0)]);
+    }
+    if query.contains("smart_device_temperature_celsius") {
+        return series(&[("sda", 34.0), ("sdb", 41.0)]);
+    }
+    if query.contains("smart_device_power_on_hours") {
+        return series(&[("sda", 8760.0), ("sdb", 12000.0)]);
+    }
+    if query.contains("pve_memory_usage_bytes") {
+        return series(&[("lxc/117", 2_147_483_648.0), ("lxc/118", 1_073_741_824.0)]);
+    }
+    if query.contains("node_network_receive_bytes_total") {
+        return series(&[
+            ("vmbr0", 120_000.0),
+            ("fwbr117i0", 4_200.0),
+            ("veth118i0", 1_800.0),
+        ]);
+    }
+    if query.contains("node_load") {
+        return series(&[("", 1.25)]);
+    }
+    if query.contains("RequestHost") {
+        return series(&[("demo.kp-soft.dev", 42.0), ("films.kp-soft.dev", 7.0)]);
+    }
+    if query.contains("DownstreamStatus") {
+        return series(&[("200", 44.0), ("404", 3.0), ("500", 1.0)]);
+    }
+    // CPU/memory/disk and anything else: one plain series, no legend.
+    series(&[("", 12.5)])
+}
+
+/// The `by (...)` label this query groups on, read straight out of the
+/// query text — the same label the real admin passes as `legend`, so the
+/// made-up `metric` map always carries the field `routes.rs` asks for.
+fn metric_key(query: &str) -> &'static str {
+    if query.contains("smart_device") {
+        "device"
+    } else if query.contains("by (chip)") {
+        "chip"
+    } else if query.contains("by (device)") {
+        "device"
+    } else if query.contains("by (id)") {
+        "id"
+    } else if query.contains("by (name)") {
+        "name"
+    } else if query.contains("RequestHost") {
+        "RequestHost"
+    } else if query.contains("DownstreamStatus") {
+        "DownstreamStatus"
+    } else if query.contains("node_filesystem") {
+        "mountpoint"
+    } else {
+        "stack"
+    }
+}
 
 /// feat-platform-10: a host that lives in this process, for the browser
 /// tests (`HOMELAB_ADMIN_DEMO_HOST=1`). The real line is never opened: the
@@ -42,6 +195,23 @@ pub async fn run_demo(
             cores_total: 16,
             load1_x100: 80,
             home_address: None,
+            // fix-222 (Kenny, 2026-10-02: "is dat de 1TB SSD die erin
+            // zit?"): made-up but realistic — a 1 TB SSD (the whole-disk
+            // figure a `blockdev --getsize64` read would give), with root
+            // and local-lvm as two of its partitions.
+            disk_detail: Some(homelab_proto::HostDiskDetail {
+                root_lv_size_gb: 96.0,
+                root_disk_device: "/dev/sda".into(),
+                root_disk_total_gb: 931.5,
+                thin_pool_size_gb: 780.0,
+                top_dirs: vec![
+                    ("/var".into(), 42.0),
+                    ("/usr".into(), 18.0),
+                    ("/home".into(), 6.0),
+                    ("/opt".into(), 3.0),
+                ],
+                measured_at: now_s(),
+            }),
         },
         stacks: stacks
             .iter()

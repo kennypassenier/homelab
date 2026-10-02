@@ -10,10 +10,14 @@ import { agoText, humanDuration } from "./format.js";
  *   ram_used_mb?: number | null, ram_max_mb?: number | null,
  *   hostname?: string, apps?: App[], uptime_s?: number | null,
  *   applied_source?: string | null, env_sealed?: boolean}} Stack
+ * @typedef {{root_lv_size_gb: number, root_disk_device: string,
+ *   root_disk_total_gb: number, thin_pool_size_gb: number,
+ *   top_dirs: [string, number][], measured_at: number}} HostDiskDetail
  * @typedef {{name: string, cpu_pct: number | null, ram_used_mb: number,
  *   ram_total_mb: number, disk_pct: number, ram_committed_mb?: number,
  *   cores_total?: number, load1_x100?: number,
- *   tls_fingerprint?: string}} Host
+ *   tls_fingerprint?: string,
+ *   disk_detail?: HostDiskDetail | null}} Host
  * @typedef {{measured_at: number, host: Host, stacks: Stack[],
  *   counts: {stacks: number, online: number, parked: number}}} Fleet
  */

@@ -78,6 +78,14 @@ export function hostBars(fleet) {
   // fix-175: no /proc/stat delta yet, or the reading pair was untrustworthy
   // — an empty bar and "not measured yet", never a fabricated "0%".
   const cpu = h.cpu_pct ?? 0;
+  // fix-222 (Kenny, 2026-10-02: "is dat de 1TB SSD die erin zit?"): once the
+  // host has read which disk root lives on, the bar says so directly
+  // instead of leaving Kenny to guess from a bare percentage.
+  const d = h.disk_detail;
+  const diskValue =
+    d && d.root_disk_device
+      ? `${h.disk_pct}% used — ${d.root_disk_device}, ${d.root_disk_total_gb.toFixed(0)} GB total`
+      : `${h.disk_pct}% used`;
   return [
     {
       label: "CPU",
@@ -89,8 +97,45 @@ export function hostBars(fleet) {
       pct: ram,
       value: `${humanMb(h.ram_used_mb)} of ${humanMb(h.ram_total_mb)}`,
     },
-    { label: "Root disk", pct: h.disk_pct, value: `${h.disk_pct}% used` },
+    { label: "Root disk", pct: h.disk_pct, value: diskValue },
   ];
+}
+
+/**
+ * fix-222: which disk "root" and "local-lvm" actually are — read from the
+ * host's own `disk_detail` (gathered on the host, never over ssh from the
+ * client); `null` before the host's first gather or from a host too old to
+ * send it.
+ * @param {import("./fleet.js").Fleet} fleet
+ * @returns {Fact[]}
+ */
+export function diskDetailFacts(fleet) {
+  const d = fleet.host.disk_detail;
+  if (!d) return [{ label: "Root volume (pve/root)", value: "not read yet" }];
+  return [
+    {
+      label: "Root volume (pve/root)",
+      value: `${d.root_lv_size_gb.toFixed(0)} GB, on ${d.root_disk_device || "an unknown disk"}${d.root_disk_total_gb ? ` (${d.root_disk_total_gb.toFixed(0)} GB total)` : ""}`,
+    },
+    {
+      label: "local-lvm thin pool (pve/data)",
+      value: `${d.thin_pool_size_gb.toFixed(0)} GB — every LXC/VM's own disk is carved from here`,
+    },
+  ];
+}
+
+/**
+ * fix-222: the root filesystem's biggest directories, largest first, as the
+ * host's own `du -x --max-depth=2 /` already sorted them.
+ * @param {import("./fleet.js").Fleet} fleet
+ * @returns {{path: string, gb: string}[]}
+ */
+export function topDirRows(fleet) {
+  const d = fleet.host.disk_detail;
+  return (d?.top_dirs ?? []).map(([path, gb]) => ({
+    path,
+    gb: `${gb.toFixed(1)} GB`,
+  }));
 }
 
 /**

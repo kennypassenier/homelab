@@ -20,7 +20,14 @@ import {
   td,
 } from "../dom.js";
 import { humanDuration } from "../format.js";
-import { guestRows, hostBars, hostChecks, hostFacts } from "../host.js";
+import {
+  diskDetailFacts,
+  guestRows,
+  hostBars,
+  hostChecks,
+  hostFacts,
+  topDirRows,
+} from "../host.js";
 import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
@@ -36,6 +43,17 @@ const GUESTS_EVERY_S = 30;
 export function mount(root, ctx) {
   const bars = h("div", { id: "host-bars" });
   const facts = h("dl", { class: "facts", id: "host-facts" });
+  const diskFacts = h("dl", { class: "facts", id: "host-disk-facts" });
+  const topDirs = tableBlock({
+    remember: "host-top-dirs",
+    caption: "Biggest directories on root",
+    search: "Search directories",
+    nothing: "Not read yet.",
+    columns: [
+      { label: "Directory", sort: "text" },
+      { label: "Size", sort: "number" },
+    ],
+  });
   const liveAgo = agoEl("measured", null, { live: true });
   const guestsAgo = agoEl("read");
   const guests = tableBlock({
@@ -152,6 +170,23 @@ export function mount(root, ctx) {
     ),
     h(
       "section",
+      { class: "kp-card", "aria-label": "Disk" },
+      h("h2", null, "Disk"),
+      h(
+        "p",
+        { class: "section-head__desc measured" },
+        // fix-222 (Kenny, 2026-10-02): "root disk 48%" said nothing about
+        // which disk that is or what is on it — this names the volume, the
+        // physical disk behind it, the local-lvm pool beside it, and the
+        // biggest directories using the space.
+        "Which disk the root filesystem lives on, the local-lvm pool every container's own disk is carved from, and what is using the space.",
+      ),
+      diskFacts,
+      h("h3", null, "Biggest directories on root"),
+      topDirs.wrap,
+    ),
+    h(
+      "section",
       { class: "kp-card", "aria-label": "Facts" },
       h("h2", null, "Facts"),
       h(
@@ -236,10 +271,12 @@ export function mount(root, ctx) {
   const unbindS = bindTableUrl(settingsTable, "hosttoml");
   const guestTable = dataTable(guests.wrap);
   const checksTable = dataTable(checks.wrap);
+  const topDirsTable = dataTable(topDirs.wrap);
   // Read on request: no empty table that looks like a load before that.
   checks.wrap.hidden = true;
   const unbindG = bindTableUrl(guestTable, "guests");
   const unbindC = bindTableUrl(checksTable, "hostchecks");
+  const unbindTD = bindTableUrl(topDirsTable, "hosttopdirs");
   const abort = new AbortController();
 
   const render = () => {
@@ -251,6 +288,11 @@ export function mount(root, ctx) {
       facts,
       hostFacts(f, { version: s.hostVersion, build: s.hostBuild }),
     );
+    fillFacts(diskFacts, diskDetailFacts(f));
+    topDirs.tbody.replaceChildren(
+      ...topDirRows(f).map((r) => h("tr", null, td(r.path), td(r.gb, "num"))),
+    );
+    topDirsTable?.refresh();
     setAgo(liveAgo, f.measured_at);
     paintLine();
   };
@@ -490,6 +532,7 @@ export function mount(root, ctx) {
     unbindG();
     unbindC();
     unbindS();
+    unbindTD();
     root.removeEventListener("kp-datatable-retry", retry);
     detach();
   };

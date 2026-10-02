@@ -1867,6 +1867,11 @@ td.stack-flags {
   font-weight: 600;
   margin-block-end: 6px;
 }
+.chart__desc {
+  margin: 0 0 8px;
+  font-size: 0.85em;
+  color: var(--muted-foreground);
+}
 .chart__svg {
   width: 100%;
   height: auto;
@@ -1879,39 +1884,24 @@ td.stack-flags {
   font-size: 11px;
   fill: var(--muted-foreground);
 }
+/* fix-220 (Kenny, 2026-10-02: "amper van elkaar te distinguieren"): one hue
+   per series, evenly spaced (`charts.js`'s `seriesHues`), the same pattern
+   `--stack-hue` gives the topology's legend — enough separation for any
+   number of series, not just the first 6. `--dim` (hover/focus isolation,
+   mirroring `.topology__edge--dim`) fades every series but the one pointed
+   at. */
 .chart__line {
   fill: none;
   stroke-width: 1.6;
+  stroke: light-dark(
+    hsl(var(--chart-hue, 210) 65% 42%),
+    hsl(var(--chart-hue, 210) 70% 64%)
+  );
+  opacity: 0.9;
+  transition: opacity 0.15s ease;
 }
-.chart__line--0,
-.chart__key--0::before {
-  stroke: var(--chart-1, var(--primary));
-  background: var(--chart-1, var(--primary));
-}
-.chart__line--1,
-.chart__key--1::before {
-  stroke: var(--chart-2, #e8a33d);
-  background: var(--chart-2, #e8a33d);
-}
-.chart__line--2,
-.chart__key--2::before {
-  stroke: var(--chart-3, #3aa675);
-  background: var(--chart-3, #3aa675);
-}
-.chart__line--3,
-.chart__key--3::before {
-  stroke: var(--chart-4, #c75b9b);
-  background: var(--chart-4, #c75b9b);
-}
-.chart__line--4,
-.chart__key--4::before {
-  stroke: var(--chart-5, #5b8fd6);
-  background: var(--chart-5, #5b8fd6);
-}
-.chart__line--5,
-.chart__key--5::before {
-  stroke: var(--muted-foreground);
-  background: var(--muted-foreground);
+.chart__line--dim {
+  opacity: 0.15;
 }
 .chart__legend {
   list-style: none;
@@ -1922,6 +1912,12 @@ td.stack-flags {
   gap: 4px 14px;
   font-size: 0.85em;
 }
+.chart__key {
+  transition: opacity 0.15s ease;
+}
+.chart__key--dim {
+  opacity: 0.4;
+}
 .chart__key::before {
   content: "";
   display: inline-block;
@@ -1929,6 +1925,16 @@ td.stack-flags {
   height: 3px;
   margin-inline-end: 6px;
   vertical-align: middle;
+  background: light-dark(
+    hsl(var(--chart-hue, 210) 65% 42%),
+    hsl(var(--chart-hue, 210) 70% 64%)
+  );
+}
+/* fix-220: Drive health draws as a status table, not a line chart — every
+   healthy drive used to read the same constant value and overlap into what
+   looked like one line. */
+.chart--health .chart__health-table {
+  margin-top: 4px;
 }
 .chart__empty,
 .chart__error {

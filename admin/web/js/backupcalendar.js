@@ -105,3 +105,84 @@ export function calendarWeeks(daysOldestFirst) {
   }
   return weeks;
 }
+
+// ── fix-177: per-stack progressive loading ──────────────────────────────
+// One request per stack (the page already knows the fleet's stack names,
+// `current().fleet.stacks`), run concurrently, so one slow or hung
+// repository times out alone instead of an all-stacks call's budget
+// swallowing every stack that already answered. Pure reducers, so the
+// progress bar, the per-stack error list and the final merge are testable
+// without a DOM or a network.
+
+/**
+ * `ok`: read, with its snapshot times (possibly none yet, still a stack
+ * the calendar should expect a night from). `empty`: read, but the host
+ * has nothing to say about it (it backs up nothing, or isn't a stack it
+ * knows) — not an error, just a stack the calendar leaves out entirely,
+ * same as the old all-stacks answer silently never naming it. `failed`:
+ * the read itself did not finish (network, timeout, the host down) —
+ * named under the progress bar, never folded into "no backup that night".
+ * @typedef {{status: "pending"} | {status: "ok", times: number[]} |
+ *   {status: "empty"} | {status: "failed", reason: string}} StackResult
+ */
+
+/**
+ * `results` with one more stack's outcome folded in.
+ * @param {Record<string, StackResult>} results
+ * @param {string} name
+ * @param {StackResult} outcome
+ * @returns {Record<string, StackResult>}
+ */
+export function withStackResult(results, name, outcome) {
+  return { ...results, [name]: outcome };
+}
+
+/**
+ * The progress bar's numbers and the failures to name under it. A stack
+ * still "pending" counts toward `total` but not `loaded`, so the bar fills
+ * as each one settles — ok or failed, either way "read".
+ * @param {Record<string, StackResult>} results
+ * @returns {{total: number, loaded: number, pct: number, done: boolean,
+ *   failed: {stack: string, reason: string}[]}}
+ */
+export function calendarProgress(results) {
+  const names = Object.keys(results);
+  const total = names.length;
+  let loaded = 0;
+  /** @type {{stack: string, reason: string}[]} */
+  const failed = [];
+  for (const name of names) {
+    const r = results[name];
+    if (r.status === "pending") continue;
+    loaded += 1;
+    if (r.status === "failed") failed.push({ stack: name, reason: r.reason });
+  }
+  failed.sort((a, b) => a.stack.localeCompare(b.stack));
+  return {
+    total,
+    loaded,
+    pct: total ? Math.round((loaded / total) * 100) : 0,
+    done: total > 0 && loaded === total,
+    failed,
+  };
+}
+
+/**
+ * The stacks whose data is trustworthy enough to count toward a night's
+ * ratio: read successfully, even with zero snapshots ever (a stack `calendarDays`
+ * is told to expect, at a flat "bad" every night until it backs up once). A
+ * stack that failed to read is left out of `expected` entirely — "not
+ * read" is its own state (named in `calendarProgress().failed`), never
+ * folded into "no backup that night", which every other night would wrongly
+ * repeat for a reason that has nothing to do with backups.
+ * @param {Record<string, StackResult>} results
+ * @returns {{stacks: Record<string, number[]>, expected: string[]}}
+ */
+export function calendarInputs(results) {
+  /** @type {Record<string, number[]>} */
+  const stacks = {};
+  for (const [name, r] of Object.entries(results)) {
+    if (r.status === "ok") stacks[name] = r.times;
+  }
+  return { stacks, expected: Object.keys(stacks).sort() };
+}

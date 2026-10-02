@@ -1,8 +1,15 @@
 // feat-overview-10 (backup calendar): the pure day-grouping and week-grid
-// logic, driven without a browser.
+// logic, driven without a browser. fix-177 adds the per-stack progress and
+// merge reducers the same way: no DOM, no network.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { calendarDays, calendarWeeks } from "../js/backupcalendar.js";
+import {
+  calendarDays,
+  calendarInputs,
+  calendarProgress,
+  calendarWeeks,
+  withStackResult,
+} from "../js/backupcalendar.js";
 
 const UTC = "UTC";
 // 2026-09-20 is a Sunday (UTC midday, so a local-midnight day boundary
@@ -78,4 +85,98 @@ test("calendarWeeks pads the first and last week to 7 cells, Monday first", () =
 
 test("calendarWeeks of an empty day list is an empty grid", () => {
   assert.deepEqual(calendarWeeks([]), []);
+});
+
+// ── fix-177: per-stack progress and merge ────────────────────────────────
+
+test("withStackResult folds one outcome in without touching the rest", () => {
+  /** @type {Record<string, import("../js/backupcalendar.js").StackResult>} */
+  const a = { gateway: { status: "pending" } };
+  const b = withStackResult(a, "media", { status: "pending" });
+  assert.deepEqual(
+    a,
+    { gateway: { status: "pending" } },
+    "the input is untouched",
+  );
+  assert.deepEqual(b, {
+    gateway: { status: "pending" },
+    media: { status: "pending" },
+  });
+});
+
+test("calendarProgress: nothing settled yet is 0%, not done", () => {
+  const p = calendarProgress({
+    gateway: { status: "pending" },
+    media: { status: "pending" },
+  });
+  assert.deepEqual(p, { total: 2, loaded: 0, pct: 0, done: false, failed: [] });
+});
+
+test("calendarProgress: ok, empty and failed all count as loaded", () => {
+  const p = calendarProgress({
+    gateway: { status: "ok", times: [1] },
+    media: { status: "empty" },
+    backups: {
+      status: "failed",
+      reason: "no answer from the host within 170 s",
+    },
+    jellyfin: { status: "pending" },
+  });
+  assert.equal(p.total, 4);
+  assert.equal(p.loaded, 3);
+  assert.equal(p.pct, 75);
+  assert.equal(p.done, false);
+  assert.deepEqual(p.failed, [
+    { stack: "backups", reason: "no answer from the host within 170 s" },
+  ]);
+});
+
+test("calendarProgress: every stack settled is done, and failures sort by name", () => {
+  const p = calendarProgress({
+    zulu: { status: "failed", reason: "timeout" },
+    alpha: { status: "failed", reason: "host down" },
+  });
+  assert.equal(p.done, true);
+  assert.deepEqual(
+    p.failed.map((f) => f.stack),
+    ["alpha", "zulu"],
+  );
+});
+
+test("calendarProgress of no stacks at all is 0%, not done (nothing to wait for)", () => {
+  assert.deepEqual(calendarProgress({}), {
+    total: 0,
+    loaded: 0,
+    pct: 0,
+    done: false,
+    failed: [],
+  });
+});
+
+test("calendarInputs: only ok stacks count toward expected, times carried through", () => {
+  const { stacks, expected } = calendarInputs({
+    gateway: { status: "ok", times: [1, 2] },
+    media: { status: "ok", times: [] },
+    backups: { status: "failed", reason: "timeout" },
+    syncthing: { status: "empty" },
+    jellyfin: { status: "pending" },
+  });
+  assert.deepEqual(stacks, { gateway: [1, 2], media: [] });
+  assert.deepEqual(expected, ["gateway", "media"]);
+});
+
+test("calendarInputs: a failed stack never drags a night's ratio down", () => {
+  const SUN_20 = Date.UTC(2026, 8, 20, 12) / 1000;
+  const { stacks, expected } = calendarInputs({
+    gateway: { status: "ok", times: [SUN_20] },
+    backups: {
+      status: "failed",
+      reason: "no answer from the host within 170 s",
+    },
+  });
+  const days = calendarDays(stacks, expected, 1, SUN_20, UTC);
+  // Only "gateway" was trustworthy, and it backed up: ok, not warn or bad —
+  // "backups" not reading is not the same as "backups" not backing up.
+  assert.equal(days[0].tone, "ok");
+  assert.deepEqual(days[0].expected, ["gateway"]);
 });

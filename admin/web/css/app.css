@@ -1757,6 +1757,37 @@ td.stack-flags {
 .backup-cal__cell--pad {
   background: transparent;
 }
+/* fix-177: the grid's shape (headers, 35 cells, the week padding) is laid
+ * out at once; a cell waiting on its stack's own read is this modifier
+ * instead of a tone, so nothing resizes when the real colour lands — only
+ * the cell's own background changes, reusing kp-themes' own skeleton pulse
+ * (`kp-pulse`, kp-themes.css) rather than a hand-rolled animation. */
+.backup-cal__cell--skeleton {
+  background: var(--muted);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .backup-cal__cell--skeleton {
+    animation: kp-pulse 1600ms ease-in-out infinite;
+  }
+}
+/* fix-177: the progress bar and the per-stack failure list sit between the
+ * legend and the grid from the first paint, empty until there is something
+ * to say, so their arrival never shifts the grid below them. */
+.backup-cal__progress {
+  max-width: 28rem;
+  margin-block-end: 8px;
+}
+.backup-cal__errors {
+  max-width: 28rem;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85em;
+  color: var(--destructive);
+}
+.backup-cal__error + .backup-cal__error {
+  margin-block-start: 2px;
+}
 
 /* feat-overview-7 / feat-firewall-3: the topology graph. */
 .topology {

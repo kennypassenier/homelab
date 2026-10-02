@@ -1939,6 +1939,7 @@ fn rule_20_native_backup_staging_has_its_own_low_thresholds() {
         subject: "/appdata/.backup-staging".into(),
         used_pct: pct,
         detail: format!("{}%", pct),
+        cap_configured: true,
     };
     assert!(evaluate_host_capacity(&[fact(5)], lim).is_empty());
     let warn = evaluate_host_capacity(&[fact(20)], lim);
@@ -2012,6 +2013,7 @@ fn rule_20_evaluate_host_capacity_uses_warn_and_critical() {
         subject: "pve".into(),
         used_pct: pct,
         detail: format!("{}%", pct),
+        cap_configured: true,
     };
     assert!(evaluate_host_capacity(&[fact(50)], lim).is_empty());
     let warn = evaluate_host_capacity(&[fact(75)], lim);
@@ -2034,18 +2036,21 @@ fn rule_20_each_metric_has_its_own_thresholds() {
             subject: "local-lvm".into(),
             used_pct: 55,
             detail: "55%".into(),
+            cap_configured: true,
         },
         HostCapacityFact {
             metric: HostCapacityMetric::ThinPoolData,
             subject: "local-lvm".into(),
             used_pct: 55,
             detail: "55%".into(),
+            cap_configured: true,
         },
         HostCapacityFact {
             metric: HostCapacityMetric::ZfsPool,
             subject: "HDD12TB".into(),
             used_pct: 79,
             detail: "79%".into(),
+            cap_configured: true,
         },
     ];
     let findings = evaluate_host_capacity(&facts, lim);
@@ -2060,7 +2065,11 @@ fn rule_20_each_metric_has_its_own_thresholds() {
     );
 }
 
-/// rule-20: wired into the full round, same as every other reading.
+/// rule-20: wired into the full round, same as every other reading. Uses
+/// the no-cap case (fix-181) rather than a plain high percentage: a bare
+/// 97% of a *configured* cap is this suite's own false-alarm case
+/// (`fix_181_a_capped_journal_near_its_cap_is_not_broken` below) and would
+/// no longer prove the wiring.
 #[test]
 fn rule_20_evaluate_fans_out_to_host_capacity() {
     let st = HostState::default();
@@ -2070,6 +2079,7 @@ fn rule_20_evaluate_fans_out_to_host_capacity() {
             subject: "pve".into(),
             used_pct: 97,
             detail: "97% of its 2G cap".into(),
+            cap_configured: false,
         }],
         ..Default::default()
     };
@@ -2080,5 +2090,158 @@ fn rule_20_evaluate_fans_out_to_host_capacity() {
             .any(|f| f.subject == "pve" && f.severity == Severity::Broken),
         "evaluate() must fan out to it, or the reader is wired to nothing again: {:?}",
         findings
+    );
+}
+
+// ── fix-181a: a capped journal sits near its cap by design ─────────────────
+//
+// `homelab today` reported "pve's journald is 1946 MiB of its 2048 MiB cap
+// (95%)" as `[broken]` on 2026-10-02. journald rotates its own oldest
+// entries to stay under `SystemMaxUse`, so sitting close to a configured
+// cap is the healthy steady state, not drift heading toward a wall — unlike
+// every other rule-20 reading, which really is a wall. Broken means the cap
+// itself is missing, or usage has actually gone past it (not rotating).
+
+fn journald(used_pct: u8, cap_configured: bool) -> HostCapacityFact {
+    HostCapacityFact {
+        metric: HostCapacityMetric::Journald,
+        subject: "pve".into(),
+        used_pct,
+        detail: format!("{used_pct}% of its 2048 MiB cap"),
+        cap_configured,
+    }
+}
+
+/// The exact finding from 2026-10-02: 1946 of 2048 MiB (95%) with the cap in
+/// place. Before fix-181 this was `[broken]` at the 95% critical threshold;
+/// it must now say nothing at all.
+#[test]
+fn fix_181_a_capped_journal_near_its_cap_is_not_broken() {
+    let lim = HostCapacityThresholds::default();
+    assert!(
+        evaluate_host_capacity(&[journald(95, true)], lim).is_empty(),
+        "a capped, rotating journal near its cap is healthy by design"
+    );
+    // Even sitting exactly at the cap (100%) is still journald doing its
+    // job, not a failure — it is not allowed to grow past it.
+    assert!(evaluate_host_capacity(&[journald(100, true)], lim).is_empty());
+}
+
+/// No `SystemMaxUse` drop-in at all: unbounded growth risk, rule-20's own
+/// intent ("nothing balloons") — always Broken, regardless of how much is
+/// in use right now.
+#[test]
+fn fix_181_a_no_cap_configured_is_broken() {
+    let lim = HostCapacityThresholds::default();
+    let findings = evaluate_host_capacity(&[journald(10, false)], lim);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].severity, Severity::Broken);
+    assert!(
+        findings[0].what.contains("no SystemMaxUse cap"),
+        "{}",
+        findings[0].what
+    );
+}
+
+/// A cap is configured but usage is past it anyway: journald is not
+/// rotating within it, which is the one real failure mode left.
+#[test]
+fn fix_181_a_cap_configured_but_exceeded_is_broken() {
+    let lim = HostCapacityThresholds::default();
+    let findings = evaluate_host_capacity(&[journald(140, true)], lim);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].severity, Severity::Broken);
+    assert!(
+        findings[0].what.contains("over its own cap"),
+        "{}",
+        findings[0].what
+    );
+}
+
+// ── fix-181b: host.toml drift must compare EFFECTIVE values ─────────────────
+//
+// `homelab today`/`check` reported e.g. "incident_bundle_max_age_days:
+// config/host.toml declares 90, the host's host.toml has its compiled
+// default (unset)" even though 90 IS the compiled default — a key left
+// unset on either side must count as that default, not as a difference
+// from whatever the other side spells out.
+
+#[test]
+fn fix_181_b_declaring_the_compiled_default_is_not_drift() {
+    let live = LiveFacts {
+        declared_host_config: Some(std::collections::BTreeMap::from([
+            // hostconfig::KEYS default: "90".
+            (
+                "incident_bundle_max_age_days".to_string(),
+                serde_json::json!(90),
+            ),
+            // hostconfig::KEYS default: "200".
+            (
+                "incident_bundle_max_count".to_string(),
+                serde_json::json!(200),
+            ),
+            // hostconfig::KEYS default: "2592000 (30 days)".
+            (
+                "integrity_data_read_interval_s".to_string(),
+                serde_json::json!(2_592_000),
+            ),
+            // hostconfig::KEYS default: "info".
+            ("log_level".to_string(), serde_json::json!("info")),
+            // hostconfig::KEYS default: "4194304 (4 MiB)".
+            (
+                "log_ring_max_bytes".to_string(),
+                serde_json::json!(4_194_304),
+            ),
+        ])),
+        live_host_config: std::collections::BTreeMap::new(),
+        ..Default::default()
+    };
+    let got = evaluate_host_config_drift(&live);
+    assert!(
+        got.is_empty(),
+        "declaring the compiled default is not drift: {got:?}"
+    );
+}
+
+/// The other direction still must fire: a declared value that genuinely
+/// differs from both the default and what the host runs is real drift.
+#[test]
+fn fix_181_b_a_real_difference_from_the_default_still_reports() {
+    let live = LiveFacts {
+        declared_host_config: Some(std::collections::BTreeMap::from([(
+            "incident_bundle_max_age_days".to_string(),
+            serde_json::json!(30),
+        )])),
+        live_host_config: std::collections::BTreeMap::new(),
+        ..Default::default()
+    };
+    let got = evaluate_host_config_drift(&live);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].severity, Severity::Drift);
+    assert!(got[0].what.contains("incident_bundle_max_age_days"));
+}
+
+/// A retired key (no longer in `hostconfig::KEYS` at all, e.g. the old Kuma
+/// seeder config path) that the host's own host.toml still sets gets its
+/// own message naming `homelab host apply` as the fix, not the generic
+/// "declares X, host has Y" drift wording.
+#[test]
+fn fix_181_b_a_retired_key_still_on_the_host_gets_its_own_message() {
+    let live = LiveFacts {
+        declared_host_config: Some(std::collections::BTreeMap::new()),
+        live_host_config: std::collections::BTreeMap::from([(
+            "kuma_monitors_file".to_string(),
+            serde_json::json!("/appdata/uptime/kuma-seeder-config/host-monitors.json"),
+        )]),
+        ..Default::default()
+    };
+    let got = evaluate_host_config_drift(&live);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].severity, Severity::Drift);
+    assert!(got[0].what.contains("retired key"), "{}", got[0].what);
+    assert!(
+        got[0].remedy.contains("homelab host apply"),
+        "{}",
+        got[0].remedy
     );
 }

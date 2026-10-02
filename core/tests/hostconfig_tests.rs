@@ -1,10 +1,47 @@
 //! feat-settings-1: the host.toml key table the dashboard and the host share.
 
 use homelab_core::hostconfig::{
-    Access, KEYS, apply_declared, check_shape, check_value, is_host_held, is_secret, key_info,
-    merge_changes, redact, valid_window,
+    Access, KEYS, apply_declared, check_shape, check_value, default_effective, is_host_held,
+    is_secret, key_info, merge_changes, redact, valid_window,
 };
 use serde_json::json;
+
+/// fix-181: the generic per-`Kind` rule that reads a key's own `default`
+/// text as a comparable value — an int's is the leading number (the rest,
+/// like "(30 days)", is documentation), a bool's is literal, a one-word
+/// text default is itself, and a sentinel for "unset" ("none", "off") or
+/// anything with more structure than one token (a table, a sentence) has
+/// no single value to assert and stays `None`.
+#[test]
+fn fix_181_default_effective_reads_the_keys_table_generically() {
+    assert_eq!(
+        default_effective("incident_bundle_max_age_days"),
+        Some(json!(90))
+    );
+    assert_eq!(
+        default_effective("incident_bundle_max_count"),
+        Some(json!(200))
+    );
+    assert_eq!(
+        default_effective("integrity_data_read_interval_s"),
+        Some(json!(2_592_000)),
+        "the trailing \"(30 days)\" is documentation, not part of the value"
+    );
+    assert_eq!(default_effective("log_level"), Some(json!("info")));
+    assert_eq!(
+        default_effective("log_ring_max_bytes"),
+        Some(json!(4_194_304))
+    );
+    assert_eq!(default_effective("exec_enabled"), Some(json!(false)));
+    // Sentinels for "nothing set" give nothing new to compare against.
+    assert_eq!(default_effective("second_copy_dataset"), None);
+    assert_eq!(default_effective("backup_hour"), None);
+    // Multi-token prose or a table default has no single value either.
+    assert_eq!(default_effective("prometheus_url"), None);
+    assert_eq!(default_effective("retention"), None);
+    // An unknown (e.g. retired) key has no row to read a default from.
+    assert_eq!(default_effective("kuma_monitors_file"), None);
+}
 
 #[test]
 fn feat_settings_1_arch_self_keys_are_never_editable() {

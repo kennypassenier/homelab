@@ -858,6 +858,49 @@ pub fn is_host_held(key: &str) -> bool {
     key_info(key).is_some_and(|k| matches!(k.access, Access::HostHeld))
 }
 
+/// fix-181: the value the host actually runs with when `key` is unset,
+/// where that value is unambiguous enough to compare against a declared
+/// one — used by `evaluate_host_config_drift` so a key left at its default
+/// on one side and spelled out to the same effect on the other reads as
+/// "no difference", not as drift.
+///
+/// One rule per `Kind`, not one case per key (`KEYS` already carries that
+/// distinction): a number's default is the leading number in its `default`
+/// text (the rest is documentation — "2592000 (30 days)"), a bool's is its
+/// literal `"true"`/`"false"`, and a single-word text default is itself
+/// ("info", "/var/lib/homelab") — unless that word is a sentinel for "not
+/// set" ("none", "off"), which is already what `None` means and gives
+/// nothing new to compare against. Anything with more structure than one
+/// token (a table, a list, a sentence like "not asked" or "the fleet's
+/// own") has no single value worth asserting here, so it is left alone and
+/// the comparison falls back to the raw presence check it always had.
+pub fn default_effective(key: &str) -> Option<serde_json::Value> {
+    let info = key_info(key)?;
+    match info.kind {
+        Kind::Bool => match info.default {
+            "true" => Some(serde_json::Value::Bool(true)),
+            "false" => Some(serde_json::Value::Bool(false)),
+            _ => None,
+        },
+        Kind::Int { .. } | Kind::Vmid => {
+            let token = info.default.split_whitespace().next()?;
+            let n: u64 = token.parse().ok()?;
+            Some(serde_json::Value::Number(n.into()))
+        }
+        Kind::Text | Kind::Url | Kind::Window => {
+            let token = info.default.trim();
+            if token.is_empty() || token.contains(char::is_whitespace) {
+                return None;
+            }
+            if matches!(token, "none" | "off") {
+                return None;
+            }
+            Some(serde_json::Value::String(token.to_string()))
+        }
+        _ => None,
+    }
+}
+
 /// Why `value` is not a value for `key`, or Ok. `null` is always allowed
 /// for an editable key: it removes the key, and the host takes its default.
 /// Tables are checked by the host against its own types.

@@ -23,7 +23,7 @@
 
 use std::collections::VecDeque;
 use std::future::Future;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use axum::Json;
@@ -34,6 +34,35 @@ use tokio::sync::watch;
 
 use super::actions::Publish;
 use super::host_link::now_s;
+
+/// fix-181: one process-wide "we are shutting down" flag, set the moment
+/// chassis's own graceful-shutdown signal fires (SIGTERM or Ctrl-C) — the
+/// same signal `chassis::shell::lifecycle` races the drain against
+/// (tokio multiplexes a signal to every listener, so this one more
+/// subscriber changes nothing about the kit's own handling of it). Lazily
+/// started by the first `SlowRead` built, so a binary that never makes one
+/// (no admin dashboard route uses it) spawns nothing extra.
+///
+/// Why this exists: a `SlowRead` answer can wait up to `WAIT` (20 s) for a
+/// run to finish, which is longer than the shutdown bound
+/// (`shutdown_timeout_ms`, 10 s by default). Without this, every request
+/// parked in that wait when SIGTERM arrives sits there regardless, and
+/// `chassis::shell::lifecycle::bounded` logs "shutdown exceeded its bound;
+/// exiting 0 anyway (norm N1)" on every restart even though nothing is
+/// actually wrong — it is simply waiting out a poll interval that outlives
+/// the shutdown bound by design.
+fn shutdown_flag() -> watch::Receiver<bool> {
+    static CELL: OnceLock<watch::Receiver<bool>> = OnceLock::new();
+    CELL.get_or_init(|| {
+        let (tx, rx) = watch::channel(false);
+        tokio::spawn(async move {
+            chassis::shell::lifecycle::wait_for_stop_signal().await;
+            let _ = tx.send(true);
+        });
+        rx
+    })
+    .clone()
+}
 
 /// How long one request waits for a run before it answers "still running":
 /// under the chassis request timeout (30 s) and every proxy's.
@@ -93,6 +122,9 @@ pub struct SlowRead {
     state: Mutex<State>,
     /// The id of the newest finished run.
     done: watch::Sender<u64>,
+    /// fix-181: becomes `true` once SIGTERM/Ctrl-C arrives, so `read` can
+    /// stop waiting at once instead of riding out `wait` regardless.
+    shutdown: watch::Receiver<bool>,
 }
 
 impl SlowRead {
@@ -121,6 +153,7 @@ impl SlowRead {
                 ..State::default()
             }),
             done: watch::Sender::new(0),
+            shutdown: shutdown_flag(),
         })
     }
 
@@ -185,7 +218,28 @@ impl SlowRead {
             }
         };
         // The watch holds the newest finished id; runs finish in order.
-        let _ = tokio::time::timeout(wait, rx.wait_for(|d| *d >= id)).await;
+        // fix-181: raced against the shutdown flag, not just the clock — a
+        // request parked here when SIGTERM arrives answers at once instead
+        // of riding out the rest of `wait` (up to 20 s, longer than the
+        // 10 s shutdown bound) and forcing chassis to log a false "shutdown
+        // exceeded its bound" on every restart.
+        let mut shutdown = self.shutdown.clone();
+        tokio::select! {
+            _ = tokio::time::timeout(wait, rx.wait_for(|d| *d >= id)) => {}
+            _ = shutdown.wait_for(|down| *down) => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({
+                        "running": true,
+                        "restarting": true,
+                        "run": id,
+                        "started_at": started,
+                        "why": "the dashboard is restarting; read again shortly",
+                    })),
+                )
+                    .into_response();
+            }
+        }
         let s = self.lock();
         if let Some(f) = s.finished.iter().find(|f| f.id == id) {
             return (f.status, Json(f.body())).into_response();
@@ -261,5 +315,97 @@ impl SlowRead {
             })),
         )
             .into_response()
+    }
+
+    /// fix-181 test seam: a `SlowRead` wired to a shutdown flag the test
+    /// drives itself, instead of `shutdown_flag()`'s real SIGTERM/Ctrl-C
+    /// listener — sending an actual signal would hit the whole test binary,
+    /// not one test.
+    #[cfg(test)]
+    fn with_shutdown(what: impl Into<String>, shutdown: watch::Receiver<bool>) -> Arc<Self> {
+        let what = what.into();
+        Arc::new(SlowRead {
+            key: what.clone(),
+            what,
+            publish: None,
+            state: Mutex::new(State {
+                next: 1,
+                ..State::default()
+            }),
+            done: watch::Sender::new(0),
+            shutdown,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// fix-181: `homelab-admin` logged "shutdown exceeded its bound;
+    /// exiting 0 anyway (norm N1) timeout_ms=10000 still_open=\"in-flight
+    /// requests\"" on every restart, because a request parked in
+    /// `SlowRead::read`'s wait (up to 20 s) outlives the 10 s shutdown
+    /// bound regardless of the signal. The wait must end at once once
+    /// shutdown starts, not ride out the rest of `wait`.
+    #[tokio::test]
+    async fn fix_181_c_shutdown_ends_the_wait_before_the_poll_interval_does() {
+        let (tx, rx) = watch::channel(false);
+        let read = SlowRead::with_shutdown("test", rx);
+
+        // A run that would not finish on its own inside this test, so the
+        // only way `read` returns promptly is the shutdown branch of the
+        // `select!`, not the run finishing or `wait` elapsing.
+        let fut = read.read(None, Duration::from_secs(20), || async {
+            tokio::time::sleep(Duration::from_secs(3600)).await;
+            (StatusCode::OK, serde_json::json!({}))
+        });
+        tokio::pin!(fut);
+
+        // Let the request actually reach the wait before shutdown starts.
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        tx.send(true).unwrap();
+
+        let resp = tokio::time::timeout(Duration::from_millis(500), fut)
+            .await
+            .expect(
+                "the request did not return promptly after shutdown — it is riding out `wait` \
+                 instead, which is exactly the false N1 alarm",
+            );
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// Shutdown already under way before the request even starts waiting
+    /// (the common case: SIGTERM arrived, then a long-poll client's next
+    /// request lands) must not wait at all either.
+    #[tokio::test]
+    async fn fix_181_c_shutdown_already_true_answers_at_once() {
+        let (tx, rx) = watch::channel(false);
+        tx.send(true).unwrap();
+        let read = SlowRead::with_shutdown("test", rx);
+
+        let fut = read.read(None, Duration::from_secs(20), || async {
+            tokio::time::sleep(Duration::from_secs(3600)).await;
+            (StatusCode::OK, serde_json::json!({}))
+        });
+        let resp = tokio::time::timeout(Duration::from_millis(200), fut)
+            .await
+            .expect("a request starting after shutdown already began must not wait either");
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// The ordinary path — no shutdown — must still behave as before:
+    /// answers once the run finishes, well inside `wait`.
+    #[tokio::test]
+    async fn shutdown_wiring_does_not_change_the_ordinary_path() {
+        let (_tx, rx) = watch::channel(false);
+        let read = SlowRead::with_shutdown("test", rx);
+
+        let resp = read
+            .read(None, Duration::from_secs(1), || async {
+                (StatusCode::OK, serde_json::json!({"ok": true}))
+            })
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 }

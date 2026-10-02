@@ -5058,6 +5058,16 @@ struct AppState {
     auth_failures: Arc<AuthFailures>,
     /// feat-platform-2: the newest reading of every container's real status.
     live_status: Arc<std::sync::RwLock<Option<homelab_core::ops::livestatus::LiveStatus>>>,
+    /// fix-175: the host's own busy share of all CPUs, computed in
+    /// `status_loop` from the delta between two `/proc/stat` samples taken
+    /// `status_interval_s` apart. `None` before the first poll has a
+    /// predecessor to compare against, or when the pair cannot be trusted
+    /// (see `homelab_core::ops::hostcpu::cpu_pct`) — reported as "unknown",
+    /// never as 0.
+    host_cpu_pct: Arc<std::sync::RwLock<Option<u64>>>,
+    /// fix-175: the `/proc/stat` sample `status_loop` took last time, kept
+    /// so the next tick can take the delta.
+    host_cpu_prev: Arc<std::sync::RwLock<Option<homelab_core::ops::hostcpu::CpuSnapshot>>>,
     /// feat-platform-3: the newest operation lines, for `CurrentOp`.
     recent: Arc<std::sync::Mutex<std::collections::VecDeque<ServerMsg>>>,
     /// arch-host-link: this start of the host, stamped on every question.
@@ -5148,6 +5158,8 @@ impl AppState {
             )),
             auth_failures: Arc::new(AuthFailures::default()),
             live_status: Arc::new(std::sync::RwLock::new(None)),
+            host_cpu_pct: Arc::new(std::sync::RwLock::new(None)),
+            host_cpu_prev: Arc::new(std::sync::RwLock::new(None)),
             recent: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
             boot_id: format!(
                 "{}-{}",
@@ -6725,7 +6737,9 @@ async fn build_fleet_state(state: &AppState, exec: &RealExecutor) -> homelab_pro
         host: homelab_proto::HostView {
             home_address: hs.home_address.clone(),
             name: "pve-01".into(),
-            cpu_pct: 0,
+            // fix-175: was a fixed 0; now the `status_loop` /proc/stat
+            // delta (None before the first poll has a predecessor).
+            cpu_pct: state.host_cpu_pct.read().ok().and_then(|p| *p),
             // feat-platform-2: was a fixed 0; used over total, both
             // from `free -m` (C6).
             ram_pct: if cap.0 > 0 {
@@ -6767,6 +6781,22 @@ async fn status_loop(state: AppState) {
         }
         if let Ok(mut slot) = state.live_status.write() {
             *slot = Some(reading);
+        }
+        // fix-175: the host's own CPU, same cadence as the guest reading —
+        // busy share since the previous poll, from two /proc/stat samples.
+        // The first poll of this daemon's life has no previous sample, so
+        // it stores one and reports unknown rather than a fabricated 0.
+        if let Ok(stat) = exec.read_file("/proc/stat").await
+            && let Some(curr) = homelab_core::ops::hostcpu::parse_proc_stat(&stat)
+        {
+            let prev = state.host_cpu_prev.read().ok().and_then(|p| *p);
+            let pct = prev.and_then(|p| homelab_core::ops::hostcpu::cpu_pct(&p, &curr));
+            if let Ok(mut slot) = state.host_cpu_pct.write() {
+                *slot = pct.map(u64::from);
+            }
+            if let Ok(mut slot) = state.host_cpu_prev.write() {
+                *slot = Some(curr);
+            }
         }
         tokio::time::sleep(Duration::from_secs(state.config.status_interval_s)).await;
     }

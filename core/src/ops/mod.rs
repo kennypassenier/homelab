@@ -28,6 +28,7 @@ pub mod fleetcheck;
 pub mod guards;
 pub mod hardware;
 pub mod homeaddress;
+pub mod hostcpu;
 pub mod livestatus;
 pub mod logshipper;
 pub mod manualchecks;

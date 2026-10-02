@@ -21,7 +21,10 @@ pub struct FleetView {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct HostSummary {
     pub name: String,
-    pub cpu_pct: u64,
+    /// fix-175: `None` before the host's status loop has a second
+    /// `/proc/stat` sample to diff against, or when the pair could not be
+    /// trusted. No longer a fixed 0.
+    pub cpu_pct: Option<u64>,
     pub ram_used_mb: u32,
     pub ram_total_mb: u32,
     pub disk_pct: u64,

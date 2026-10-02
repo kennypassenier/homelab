@@ -110,6 +110,17 @@ test("the host page's facts and bars read in the units a person reads", () => {
   assert.equal(pct(1, 0), null);
 });
 
+// fix-175: host CPU is unknown before the host's status loop has a second
+// /proc/stat sample to diff against — never a fabricated "0%".
+test("the CPU bar says 'not measured yet' instead of a fabricated 0%", () => {
+  const f = { ...fleet, host: { ...fleet.host, cpu_pct: null } };
+  assert.deepEqual(hostBars(f)[0], {
+    label: "CPU",
+    pct: 0,
+    value: "not measured yet",
+  });
+});
+
 test("the containers table names each guest's stack and flags a stopped one", () => {
   const rows = guestRows(
     [

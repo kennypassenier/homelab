@@ -80,9 +80,18 @@ test("the host card reads RAM in GB and stacks as online of all", () => {
   const card = Object.fromEntries(
     hostCard(fleet).map((x) => [x.label, x.value]),
   );
+  assert.equal(card.CPU, "7%");
   assert.equal(card.RAM, "16.0 GB of 31.1 GB");
   assert.equal(card["Stacks online"], "2 of 2");
   assert.equal(card.Disk, "47% used");
+});
+
+// fix-175: no fabricated "0%" before the host has a second /proc/stat
+// sample to diff against.
+test("the host card says 'not measured yet' when the host has no CPU reading", () => {
+  const f = { ...fleet, host: { ...fleet.host, cpu_pct: null } };
+  const card = Object.fromEntries(hostCard(f).map((x) => [x.label, x.value]));
+  assert.equal(card.CPU, "not measured yet");
 });
 
 test("a stack page reads its facts and apps from the snapshot", () => {

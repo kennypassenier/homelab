@@ -78,7 +78,7 @@ fn fleet(applied_hash: &str) -> ServerMsg {
         host: HostView {
             home_address: None,
             name: "pve-01".into(),
-            cpu_pct: 0,
+            cpu_pct: None,
             ram_pct: 0,
             disk_pct: 0,
             tls_fingerprint: String::new(),

@@ -8,10 +8,16 @@ use homelab_proto::FleetState;
 /// cheap to test without a link.
 pub fn render_table(fleet: &FleetState) -> String {
     let mut out = String::new();
+    let cpu = match fleet.host.cpu_pct {
+        // fix-175: no second /proc/stat sample yet (daemon just started),
+        // or the pair could not be trusted — say so, not a fabricated 0%.
+        Some(p) => format!("{p}%"),
+        None => "unknown".to_string(),
+    };
     out.push_str(&format!(
-        "HOST {} :: cpu {}% ram {}%/{} MiB disk {}% load {:.2}\n",
+        "HOST {} :: cpu {} ram {}%/{} MiB disk {}% load {:.2}\n",
         fleet.host.name,
-        fleet.host.cpu_pct,
+        cpu,
         fleet.host.ram_pct,
         fleet.host.ram_total_mb,
         fleet.host.disk_pct,
@@ -70,7 +76,7 @@ mod tests {
         FleetState {
             host: HostView {
                 name: "pve-01".into(),
-                cpu_pct: 3,
+                cpu_pct: Some(3),
                 ram_pct: 40,
                 disk_pct: 55,
                 tls_fingerprint: "abc".into(),
@@ -139,5 +145,16 @@ mod tests {
         let f = fleet(vec![]);
         let table = render_table(&f);
         assert!(table.contains("no stacks managed"));
+    }
+
+    // fix_175_host_cpu_unknown_before_first_poll: no `/proc/stat` delta yet
+    // renders "unknown", never a fabricated "0%".
+    #[test]
+    fn fix_175_host_cpu_unknown_before_first_poll() {
+        let mut f = fleet(vec![]);
+        f.host.cpu_pct = None;
+        let table = render_table(&f);
+        assert!(table.contains("cpu unknown"));
+        assert!(!table.contains("cpu 0%"));
     }
 }

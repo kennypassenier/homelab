@@ -148,10 +148,42 @@ function paintFailures(ul, failed) {
   );
 }
 
+/** fix-180: how long a stack may stay "not read yet" before it is named. */
+const UNREAD_GIVE_UP_MS = 180_000;
+
+/**
+ * Backoff between asks for a stack the host has not read yet: 2 s, 4 s,
+ * 8 s, then every 10 s.
+ * @param {number} attempt 0-based
+ */
+export function unreadRetryMs(attempt) {
+  return Math.min(10_000, 2_000 * 2 ** attempt);
+}
+
+/**
+ * @param {number} ms
+ * @param {AbortSignal} signal
+ * @returns {Promise<void>}
+ */
+function sleep(ms, signal) {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
+
 /**
  * @param {HTMLElement} root
  * @returns {() => void}
  */
+
 export function mount(root) {
   const now = Math.floor(Date.now() / 1000);
   const shape = gridShape(now);
@@ -247,17 +279,41 @@ export function mount(root) {
         /** @type {import("../backupcalendar.js").StackResult} */
         let outcome;
         try {
-          const qs = force ? "&refresh=1" : "";
-          const r = await slowRead(
-            `/data/backup-calendar?stack=${encodeURIComponent(name)}${qs}`,
-            `${name}'s backup calendar`,
-            abort.signal,
-          );
-          if (!r.ok) outcome = { status: "failed", reason: r.error.why };
-          else {
+          // fix-180: a stack the host's snapshot cache has not read yet
+          // answers at once with no `measured_at`; that is "not read yet",
+          // never "no backups", so it stays pending and is asked again
+          // (the host is reading it in the background) until it has been
+          // read or UNREAD_GIVE_UP_MS has passed.
+          const started = Date.now();
+          for (let attempt = 0; ; attempt++) {
+            const qs = force && attempt === 0 ? "&refresh=1" : "";
+            const r = await slowRead(
+              `/data/backup-calendar?stack=${encodeURIComponent(name)}${qs}`,
+              `${name}'s backup calendar`,
+              abort.signal,
+            );
+            if (!r.ok) {
+              outcome = { status: "failed", reason: r.error.why };
+              break;
+            }
+            const read = r.body.measured_at?.[name] ?? null;
+            if (read === null && Date.now() - started < UNREAD_GIVE_UP_MS) {
+              await sleep(unreadRetryMs(attempt), abort.signal);
+              if (abort.signal.aborted) return;
+              continue;
+            }
+            if (read === null) {
+              outcome = {
+                status: "failed",
+                reason:
+                  "the host has not read this stack's restic repository yet; press Refresh in a minute",
+              };
+              break;
+            }
+            measuredAt[name] = read;
             const times = r.body.stacks?.[name];
-            measuredAt[name] = r.body.measured_at?.[name] ?? null;
             outcome = times ? { status: "ok", times } : { status: "empty" };
+            break;
           }
         } catch (e) {
           if (abort.signal.aborted) return;

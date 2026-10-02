@@ -70,7 +70,7 @@ services:
     # fix-82 (manual-images-latest-unpinned, 2026-09-27): the version and
     # digest CT 105 ran that day (the tag is linuxserver's own build tag);
     # moving it is an edit of this line.
-    image: lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.14-ls474@sha256:a00b6a597a3832a1814cde0ef60abc55c94644f3f80902c3432f6af6de8d4a96
+    image: lscr.io/linuxserver/qbittorrent:5.2.4@sha256:b522f9f4b769f8f36d49d22d5eb6a92e9aa18904c6a1830b1439df511ec21983
     container_name: qbittorrent
     network_mode: "service:gluetun"
     depends_on:

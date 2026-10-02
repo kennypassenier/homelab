@@ -40,5 +40,9 @@ health:
     interval: 10s
     threshold: 3
 proxy:
-  remoteurl: https://lscr.io
+  # registry v3 cannot follow lscr.io: lscr.io answers with a token realm on
+  # ghcr.io, and every versioned tag came back "manifest unknown" (measured
+  # 2026-10-02 on 3.1.2; 2.8.3 fetched the same tag). lscr.io is only a
+  # front for ghcr.io/linuxserver/*, so the cache asks ghcr.io directly.
+  remoteurl: https://ghcr.io
   ttl: 168h

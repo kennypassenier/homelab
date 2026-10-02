@@ -23,7 +23,7 @@
 x-cache: &cache
   # fix-82 (manual-images-latest-unpinned, 2026-09-27): the digest CT 117
   # ran that day beside the tag it already had.
-  image: registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+  image: registry:3.1.2@sha256:ddf754342cfc8acc51a56d5d0ab6af06826461864460636d8bd5c546dab2a7b8
   restart: unless-stopped
   environment: &cache-env
     REGISTRY_STORAGE_DELETE_ENABLED: "true"
@@ -50,7 +50,7 @@ services:
       # NOT — registry 2.8.3 ignores REGISTRY_PROXY_TTL with a warning and
       # starts with no expiry at all. Keeping both in one place means they
       # cannot disagree.
-      - ./dockerhub.yml:/etc/docker/registry/config.yml:ro
+      - ./dockerhub.yml:/etc/distribution/config.yml:ro
     ports:
       - "5000:5000"
 
@@ -67,7 +67,7 @@ services:
       # NOT — registry 2.8.3 ignores REGISTRY_PROXY_TTL with a warning and
       # starts with no expiry at all. Keeping both in one place means they
       # cannot disagree.
-      - ./ghcr.yml:/etc/docker/registry/config.yml:ro
+      - ./ghcr.yml:/etc/distribution/config.yml:ro
     ports:
       - "5001:5000"
 
@@ -84,7 +84,7 @@ services:
       # NOT — registry 2.8.3 ignores REGISTRY_PROXY_TTL with a warning and
       # starts with no expiry at all. Keeping both in one place means they
       # cannot disagree.
-      - ./gcr.yml:/etc/docker/registry/config.yml:ro
+      - ./gcr.yml:/etc/distribution/config.yml:ro
     ports:
       - "5002:5000"
 
@@ -101,7 +101,7 @@ services:
       # NOT — registry 2.8.3 ignores REGISTRY_PROXY_TTL with a warning and
       # starts with no expiry at all. Keeping both in one place means they
       # cannot disagree.
-      - ./lscr.yml:/etc/docker/registry/config.yml:ro
+      - ./lscr.yml:/etc/distribution/config.yml:ro
     ports:
       - "5003:5000"
 

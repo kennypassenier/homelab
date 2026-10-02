@@ -17,5 +17,5 @@
 set -eu
 for name in dockerhub ghcr gcr lscr; do
     echo "== cache-$name =="
-    docker exec "cache-$name" registry garbage-collect --delete-untagged=false /etc/docker/registry/config.yml
+    docker exec "cache-$name" registry garbage-collect --delete-untagged=false /etc/distribution/config.yml
 done

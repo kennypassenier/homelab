@@ -48,11 +48,11 @@ fails while this section is stale.
 | Stack | App | Service | Policy | Image | Note |
 |---|---|---|---|---|---|
 | downloader | qbittorrent | gluetun | `manual` | `qmcgaw/gluetun@sha256:89e3cbe22e0d…` |  |
-| downloader | qbittorrent | qbittorrent | `manual` | `lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.14-ls474@sha256:a00b6a597a38…` |  |
-| gateway | cloudflared | cloudflared | `manual` | `cloudflare/cloudflared:2026.8.3@sha256:51c9cefcb456…` |  |
+| downloader | qbittorrent | qbittorrent | `manual` | `lscr.io/linuxserver/qbittorrent:5.2.4@sha256:b522f9f4b769…` |  |
+| gateway | cloudflared | cloudflared | `manual` | `cloudflare/cloudflared:2026.9.3@sha256:072c067d25cc…` |  |
 | gateway | crowdsec | crowdsec | `manual` | `crowdsecurity/crowdsec:v1.8.1@sha256:0f2523fa61ef…` |  |
 | gateway | socket-proxy | socket-proxy | `manual` | `tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6…` |  |
-| gateway | traefik | traefik | `manual` | `traefik:v3.7.12@sha256:9c2a54d87f76…` |  |
+| gateway | traefik | traefik | `manual` | `traefik:v3.7.13@sha256:24841fe2de73…` |  |
 | kp-soft | jobtracker | jobtracker | `auto` | `ghcr.io/kennypassenier/jobtracker:latest` |  |
 | kp-soft | kp-soft | kp-soft | `manual` | `ghcr.io/kennypassenier/kp-soft:v0.4.0@sha256:b9fd7be0bd3e…` |  |
 | media | bazarr | bazarr | `auto` | `lscr.io/linuxserver/bazarr:latest` |  |
@@ -68,17 +68,17 @@ fails while this section is stale.
 | metrics | loki-push | loki-push | `auto` | `nginx:alpine` |  |
 | metrics | prometheus | prometheus | `manual` | `prom/prometheus:v3.15.0@sha256:efd719c99d83…` |  |
 | metrics | pve-exporter | pve-exporter | `manual` | `prompve/prometheus-pve-exporter:3.10.0@sha256:4867684c0a93…` |  |
-| paperwork | actual | actual | `manual` | `actualbudget/actual-server:25.12.0@sha256:7f38b450cc3b…` |  |
-| paperwork | paperless | paperless | `manual` | `ghcr.io/paperless-ngx/paperless-ngx:3.1.0@sha256:49eba766581b…` |  |
+| paperwork | actual | actual | `manual` | `actualbudget/actual-server:26.9.0@sha256:552beab3dec8…` |  |
+| paperwork | paperless | paperless | `manual` | `ghcr.io/paperless-ngx/paperless-ngx:3.2.1@sha256:5fa76604a81d…` |  |
 | paperwork | paperless-db | paperless-db | `manual` | `postgres:17.11-alpine@sha256:18cfe3ef5e68…` | mixed: the update reads one label for the whole app, the first container's |
 | paperwork | paperless-db | paperless-redis | `auto` | `redis:7-alpine` | mixed: the update reads one label for the whole app, the first container's |
 | paperwork | stirling | stirling | `auto` | `stirlingtools/stirling-pdf:2.14.3` |  |
 | productivity | supersync | supersync | `manual` | `ghcr.io/super-productivity/supersync@sha256:d12077be6c00…` |  |
 | productivity | supersync-db | supersync-db | `manual` | `postgres:16.15-alpine@sha256:cf78e76683b9…` |  |
-| registry | registry | cache-dockerhub | `manual` | `registry:2.8.3@sha256:a3d8aaa63ed8…` |  |
-| registry | registry | cache-ghcr | `manual` | `registry:2.8.3@sha256:a3d8aaa63ed8…` |  |
-| registry | registry | cache-gcr | `manual` | `registry:2.8.3@sha256:a3d8aaa63ed8…` |  |
-| registry | registry | cache-lscr | `manual` | `registry:2.8.3@sha256:a3d8aaa63ed8…` |  |
+| registry | registry | cache-dockerhub | `manual` | `registry:3.1.2@sha256:ddf754342cfc…` |  |
+| registry | registry | cache-ghcr | `manual` | `registry:3.1.2@sha256:ddf754342cfc…` |  |
+| registry | registry | cache-gcr | `manual` | `registry:3.1.2@sha256:ddf754342cfc…` |  |
+| registry | registry | cache-lscr | `manual` | `registry:3.1.2@sha256:ddf754342cfc…` |  |
 | syncthing | syncthing | syncthing | `auto` | `syncthing/syncthing:latest` |  |
 
 ### Native services (`update_policy` in `service.yml`)

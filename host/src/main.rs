@@ -9430,7 +9430,18 @@ async fn gather_today(
                 state.config.host_meta_max_age_s,
                 state.config.capacity_thresholds,
             );
-            homelab_core::ops::today::assemble(&checks, &findings, &incidents, &snapshot, now)
+            let mut t =
+                homelab_core::ops::today::assemble(&checks, &findings, &incidents, &snapshot, now);
+            // fix-step-plan-nested: step-counter faults, journalled by the
+            // runner instead of failing the op.
+            let journal =
+                std::fs::read_to_string(format!("{}/journal.jsonl", state.config.state_dir))
+                    .unwrap_or_default();
+            homelab_core::ops::today::add_plan_violations(
+                &mut t,
+                &homelab_core::ops::today::plan_violations(&journal, now),
+            );
+            t
         }
         Err(e) => {
             let mut t =

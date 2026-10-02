@@ -22,6 +22,10 @@ use crate::state::HostState;
 /// for the morning after.
 pub const UNTRACKED_INCIDENT_WINDOW_S: u64 = 24 * 3600;
 
+/// How long a step-counter fault (a plan violation) stays on the list: a
+/// week, so one seen overnight is still there when someone next looks.
+pub const PLAN_VIOLATION_WINDOW_S: u64 = 7 * 24 * 3600;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Level {
     /// Not doing its job right now.
@@ -100,6 +104,37 @@ pub fn open_incidents(names: &[String], state: &HostState, now: u64) -> Vec<Stri
         }
     }
     out
+}
+
+/// fix-step-plan-nested: the plan violations the operation journal
+/// (`journal.jsonl`, one JSON object per line) recorded within
+/// [`PLAN_VIOLATION_WINDOW_S`] of `now`, oldest first. Lines that do not
+/// parse are skipped: the journal is read, never judged, here.
+pub fn plan_violations(journal: &str, now: u64) -> Vec<String> {
+    journal
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["step"] == crate::runner::PLAN_VIOLATION_STEP)
+        .filter(|v| now.saturating_sub(v["ts"].as_u64().unwrap_or(0)) < PLAN_VIOLATION_WINDOW_S)
+        .filter_map(|v| v["status"].as_str().map(str::to_string))
+        .collect()
+}
+
+/// Adds one attention item per plan violation. The op itself ran normally;
+/// only the step counter it announced was wrong, so this is a code fault to
+/// report, never a broken service.
+pub fn add_plan_violations(today: &mut Today, violations: &[String]) {
+    for v in violations {
+        today.items.push(Item {
+            level: Level::Attention,
+            source: "step counter".into(),
+            what: v.clone(),
+            remedy: "the operation itself ran normally; its announced step plan was wrong — \
+                     file it against the op named here"
+                .into(),
+        });
+    }
+    today.items.sort_by_key(|i| i.level);
 }
 
 /// Merge the three readings into one list, most severe first. Noted findings

@@ -12,6 +12,10 @@ pub trait Journal: Send + Sync {
     fn record(&self, op: &str, step: &str, status: &str);
 }
 
+/// The journal step name a plan violation is recorded under; Health reads
+/// these back (`ops::today::plan_violations`).
+pub const PLAN_VIOLATION_STEP: &str = "plan violation";
+
 pub struct NullJournal;
 impl Journal for NullJournal {
     fn record(&self, _op: &str, _step: &str, _status: &str) {}
@@ -72,15 +76,16 @@ pub struct Runner<'a> {
     /// already ran cannot be half-undone by panicking on the NEXT step's
     /// mark. So in a release build this is recorded rather than panicked:
     /// the violation is logged at error level immediately (op, step, n/m),
-    /// every remaining step still runs exactly as it would have, and
-    /// `finish_ok` downgrades the final report to a failure carrying this
-    /// text — the same `ok: false` shape every other op failure already
-    /// takes, which is what gets this in front of a human (incident bundle,
-    /// job status) without inventing a second failure channel. In a
-    /// debug/test build it panics immediately instead: the bug is caught at
-    /// the mark that caused it, in the test that exercises that op, rather
-    /// than shipped to be found by a client months later the way the LIVE
-    /// kyu counter was.
+    /// every remaining step still runs exactly as it would have, and the
+    /// op's own outcome is reported unchanged. A counting bug is not an op
+    /// failure: reporting it as one would fire the urgent "failed" push and
+    /// the nightly auto-disable over a run that did everything right. The
+    /// violation is journalled as a [`PLAN_VIOLATION_STEP`] entry instead,
+    /// which Health's Today list shows as an attention item
+    /// (`ops::today::plan_violations`). In a debug/test build it panics
+    /// immediately: the bug is caught at the mark that caused it, in the test
+    /// that exercises that op, rather than shipped to be found by a client
+    /// the way the live kyu counter was.
     plan_violation: Option<String>,
 }
 
@@ -121,6 +126,7 @@ impl<'a> Runner<'a> {
                 panic!("{msg}");
             }
             self.log(Level::Error, msg.clone());
+            self.journal.record(&self.op, PLAN_VIOLATION_STEP, &msg);
             self.plan_violation = Some(msg);
         }
         self.marks += 1;
@@ -266,29 +272,8 @@ impl<'a> Runner<'a> {
 
     pub fn finish_ok(self) -> OperationReport {
         self.journal.record(&self.op, "-", "complete");
-        // fix-step-plan-nested: every step this run marked already executed
-        // (or was legitimately skipped) exactly as it would have — a plan
-        // violation never aborted it mid-flight. What changes here is only
-        // whether the FINISHED report counts as a success: a violation means
-        // the client's step counter cannot be trusted for this run, which is
-        // a bug worth a human's attention the same way any other op failure
-        // is (incident bundle, job status) — "ran fine" would hide it.
-        if let Some(violation) = self.plan_violation {
-            return OperationReport {
-                op: self.op,
-                steps: self.steps,
-                ok: false,
-                error: Some(OperatorError {
-                    what: "plan violation".to_string(),
-                    why: violation,
-                    remedy: "every mutating step already ran to completion; this is a counting \
-                             bug in the op's own announced plan, not damage — file it against \
-                             the op named above"
-                        .to_string(),
-                }),
-                deferred: None,
-            };
-        }
+        // fix-step-plan-nested: a recorded plan violation does not change
+        // the outcome (see `plan_violation`); it is already in the journal.
         OperationReport {
             op: self.op,
             steps: self.steps,
@@ -498,25 +483,21 @@ mod tests {
         r.skip("a-name-that-was-never-planned");
     }
 
-    /// fix-step-plan-nested: debug/test builds panic (above); this test
-    /// proves the NON-panicking shape the coordinator decided on for a
-    /// release build directly against the production-path method, by
-    /// checking what `finish_ok` would do once a violation is recorded —
-    /// `cfg!(debug_assertions)` makes the panic branch untestable here, so
-    /// this drives `plan_violation` by hand the way a release build's
-    /// `check_mark` would have set it, and asserts the SAME downgrade:
-    /// `ok: false`, a `plan violation` error, no panic, no aborted op.
+    /// fix-step-plan-nested: debug/test builds panic (above). This drives
+    /// `plan_violation` by hand the way a release build's `check_mark` sets
+    /// it (`cfg!(debug_assertions)` makes that branch unreachable here) and
+    /// asserts the decided shape: the op's own outcome stands — a counting
+    /// bug must never turn a good run into a failed one (urgent push,
+    /// nightly auto-disable).
     #[test]
-    fn finish_ok_downgrades_to_failed_when_a_violation_was_recorded() {
+    fn a_recorded_violation_keeps_the_ops_own_outcome() {
         let sink = VecSink::new();
         let journal = NullJournal;
         let mut r = Runner::new("release-shaped", &sink, &journal);
         r.plan(&["only-step"]);
         r.plan_violation = Some("plan violation in op 'release-shaped': test-injected".into());
         let report = r.finish_ok();
-        assert!(!report.ok, "a recorded violation must never report success");
-        let err = report.error.expect("a violation produces an error");
-        assert_eq!(err.what, "plan violation");
-        assert!(err.why.contains("test-injected"));
+        assert!(report.ok, "a counting bug must not fail the op");
+        assert!(report.error.is_none());
     }
 }

@@ -133,3 +133,34 @@ fn fix_68_an_incident_is_open_until_its_stack_succeeds_again() {
     assert_eq!(today.verdict(), "3 things need you");
     assert!(today.items.iter().all(|i| i.level == Level::Broken));
 }
+
+/// fix-step-plan-nested: a plan violation in the journal becomes one
+/// attention item on Health for a week, never a broken one; other journal
+/// lines and older violations stay off the list.
+#[test]
+fn plan_violations_from_the_journal_are_attention_items_for_a_week() {
+    use homelab_core::ops::today::{PLAN_VIOLATION_WINDOW_S, add_plan_violations, plan_violations};
+    let journal = [
+        format!(r#"{{"ts":{},"op":"deploy-kyu","step":"pull","status":"ok"}}"#, NOW - HOUR),
+        format!(
+            r#"{{"ts":{},"op":"deploy-kyu","step":"plan violation","status":"plan violation in op 'deploy-kyu': mark 'x' at n=19 m=18"}}"#,
+            NOW - HOUR
+        ),
+        format!(
+            r#"{{"ts":{},"op":"old","step":"plan violation","status":"too old"}}"#,
+            NOW - PLAN_VIOLATION_WINDOW_S - 1
+        ),
+        "not json".to_string(),
+    ]
+    .join("\n");
+    let found = plan_violations(&journal, NOW);
+    assert_eq!(
+        found,
+        vec!["plan violation in op 'deploy-kyu': mark 'x' at n=19 m=18".to_string()]
+    );
+    let mut t = assemble(&[], &[], &[], &HostState::default(), NOW);
+    add_plan_violations(&mut t, &found);
+    assert_eq!(t.items.len(), 1);
+    assert_eq!(t.items[0].level, Level::Attention);
+    assert_eq!(t.items[0].source, "step counter");
+}

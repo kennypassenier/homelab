@@ -35,6 +35,12 @@ are not style preferences; ignoring them costs him the ability to steer.
    Second half: while a form is unanswered I start no new live action on the
    machines; code, tests and documents continue.
 
+4. **New infrastructure on Kenny's PC needs his approval first** (Kenny,
+   2026-10-02): a second WSL distro, a VM, a Windows or systemd service, a
+   scheduled task, and kernel, binfmt, mount or network settings are proposed
+   in ONE form saying what, why and the risks, and built only after his go.
+   Every helper brief carries this rule.
+
 Both failures look identical from his side: he answered, and then had to
 argue with the answer.
 

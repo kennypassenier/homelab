@@ -24,7 +24,14 @@ homelab-core = { path = "../core" }
 # arch-crates: the client library (link, tls) without the terminal UI.
 homelab-client = { path = "../client", default-features = false }
 # tech-chassis-dep: a released chassis-rs only, never a rev or a path.
-chassis = { git = "https://github.com/kennypassenier/chassis-rs", tag = "v3.1.0", default-features = false, features = ["core", "webapp", "live", "passkeys", "request-guard"] }
+# fix-15 prep (chassis-3.2.0 branch): pinned to the pre-release commit so
+# App::brand_title can be used ahead of the v3.2.0 tag. No `version` key
+# here on purpose: chassis-rs's own Cargo.toml still says 3.1.0 until
+# `chassis release` bumps it at tag time, so a "3.2.0" requirement would
+# fail to resolve against this commit. Switch back once chassis-rs v3.2.0
+# is released: see the one-line change in the branch's commit message /
+# report.
+chassis = { git = "https://github.com/kennypassenier/chassis-rs", rev = "b3b28b2bcfb8f65df6fc17fb6542633a58ae90b1", default-features = false, features = ["core", "webapp", "live", "passkeys", "request-guard"] }
 axum = "0.8"
 tokio.workspace = true
 serde.workspace = true

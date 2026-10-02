@@ -353,6 +353,7 @@ async fn main() -> std::process::ExitCode {
         .page(Page::new("shell", "Shell", "/shell").hidden())
         .page(Page::new("presets", "Presets", "/presets").hidden())
         .brand("/overview")
+        .brand_title("Homelab")
         .kit_pages_in_webapp();
     app.dashboard_routes(live.router("/events"));
     // Doctor reads for about a minute on pve (fix-68), so the pages wait up

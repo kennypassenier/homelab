@@ -33,15 +33,23 @@ gate_tree_before=$(gate_tree_fingerprint)
 rm -f "$(git rev-parse --absolute-git-dir)/gate-pass"
 gate_stamp_ok=0
 if [ "${GATE_SUITE:-}" = full ] && [ "${GATE_FULL:-0}" = 1 ]; then
-  # --no-fail-fast: one full run reports every failure, so only the
-  # failures need a rerun (2026-10-01: a fail-fast gate stopped at the first
-  # red binary twice and the rest of the suite never ran).
-  gate_suite_cmd=(cargo test --workspace --no-fail-fast)
+  # fix-187 (Kenny, 2026-10-02: "drie keer dezelfde testrun is dom" struck
+  # again — the full suite ran four times for one release because every fix
+  # commit changes the tree and voids the stamp). .githooks/gate-carry.sh
+  # decides, on its own: rerun the whole workspace (--no-fail-fast reports
+  # every failure in one pass, 2026-10-01) or just the tests that were
+  # failing plus the crates that changed since the last recorded run —
+  # naming which, and why, on its own stdout. GATE_CARRY_MODE=full (`make
+  # gate-full`) skips the decision and always runs everything, same as
+  # before this existed.
+  gate_suite_cmd=(.githooks/gate-carry.sh rust)
+  gate_admin_tests_cmd=(.githooks/gate-carry.sh node)
   if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
     gate_stamp_ok=1
   fi
 else
   gate_suite_cmd=(.githooks/test-subset.sh)
+  gate_admin_tests_cmd=(sh -c 'cd admin/web && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && node --import ./test/support/kp-register.mjs --test test/')
 fi
 # Kenny, 2026-09-16, standing rule 49 (commit-floor and rust-suite):
 # format and lint always run, and the suite is skipped when no Rust
@@ -83,8 +91,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 # (fix-144, update-policy-doc-drift): a hand edit there is caught too.
 # Rule 7 as amended 2026-09-28: the commit runs the subset in
 # .githooks/test-subset.sh (every security suite included); `make gate`
-# (GATE_SUITE=full, and so `make release`) runs the whole suite through this
-# same script, so the two can no longer drift apart.
+# (GATE_SUITE=full, and so `make release`) runs the whole suite — or,
+# since fix-187, a carried subset of it — through this same gate_glob, so
+# the three can no longer drift apart.
 gate_glob suite '*.rs' 'Cargo.toml' 'Cargo.lock' '*/Cargo.toml' \
   'stacks/*' 'templates/*' 'presets/*' 'config/*' 'proto/*' 'core/assets/*' \
   'docs/DR_RUNBOOK.md' 'docs/deployment/TEST_PLAN.md' 'docs/deployment/UPDATE_POLICY.md' \
@@ -101,9 +110,9 @@ gate_glob admin-web 'admin/web/*' -- \
   sh -c 'cd admin/web && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && npm run --silent lint'
 # Its node --test view-model tests wait for the release (Kenny, 2026-09-30:
 # tests run only after his release go); gate-cache skips them at commit
-# and `make gate` (GATE_FULL=1) runs them.
-gate_glob admin-web-tests 'admin/web/*' -- \
-  sh -c 'cd admin/web && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && node --import ./test/support/kp-register.mjs --test test/'
+# and `make gate` (GATE_FULL=1) runs them — in full, or carried (fix-187),
+# exactly like the Rust suite above.
+gate_glob admin-web-tests 'admin/web/*' -- "${gate_admin_tests_cmd[@]}"
 
 gate_cache_done
 

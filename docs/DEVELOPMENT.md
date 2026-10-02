@@ -90,11 +90,57 @@ gates on push, so a bypassed commit does not get to hide.
 ## 4 · The everyday commands
 
 ```bash
-make gate                    # the hooks' gates.sh with the whole suite; stamps .git/gate-pass
+make gate                    # the hooks' gates.sh, no cache skips; stamps .git/gate-pass
+make gate-full                # make gate, but always the whole suite (skips the carry decision below)
 make test                    # tests only
 make build                   # debug build of the workspace
 make host-binary             # release build of the host daemon for Debian 12
 ```
+
+### Why `make gate` no longer always means "run everything" (fix-187)
+
+Before 2026-10-02, `make gate` was `cargo test --workspace --no-fail-fast`
+plus the admin/web node tests, full stop. A fix commit after a red gate
+changes the tree, the `.git/gate-pass` stamp is gone, and `make release`
+ran the whole thing again — measured 2026-10-01: the full suite ran four
+times for one release. Standing rule 7: tests run once per release, then
+only the failures are rerun.
+
+`.githooks/gate-carry.sh` now makes that decision, separately for the Rust
+suite and the admin/web node tests, each time `make gate` reaches them. It
+keeps its own record per family under `.git/gate-carry/<rust|node>/`
+(never in the tree): the tree the last run saw, the toolchain, and which
+tests were failing. On the next `make gate` it reruns:
+
+- **in full**, naming the reason, when: there is no earlier recorded run
+  (or the toolchain changed); `Cargo.lock`, the workspace `Cargo.toml`,
+  `rust-toolchain.toml`, the `Makefile`, anything under `.githooks/`, or
+  `.claude/hooks/gates.sh` itself changed since that run (editing the gate
+  is exactly the case a stale carry must not paper over); or a changed
+  crate is **foundational** — depended on (directly or transitively) by at
+  least half of the other workspace crates, computed from `cargo metadata`
+  each time rather than a hand-kept list (`core` and `proto` both qualify
+  today; `host`, `client`, `admin` do not).
+- **carried**, otherwise: exactly the tests that were failing last time
+  (rerun by name, `cargo test -p <crate> -- --exact <name>…`), plus every
+  test binary of a crate whose sources changed since the last recorded run
+  (`cargo test -p <crate> --no-fail-fast`), plus fmt/clippy/the admin/web
+  lint, which always run. The node suite runs the same way, scoped to
+  `admin/web`; it is skipped outright when nothing under `admin/web`
+  changed and nothing was failing.
+
+A run — full or carried, green or red — always updates its family's
+record, so a red carry still narrows tomorrow's diff; only a run where
+everything passed leaves `.git/gate-pass` stamped. `make gate` names which
+kind of run it did, and on what base, on its own stdout; `make release`
+repeats that line for the run its own gate call used. `make gate-full` (or
+`GATE_CARRY_MODE=full make gate`) skips the decision and always runs
+everything — reach for it after touching the carry logic itself, or
+whenever you want the full suite's own word regardless of what moved.
+
+The selection logic (which tests get named, the foundational-crate
+fallback) has its own tests in `core/tests/gate_carry_tests.rs`, run with
+`cargo test -p homelab-core --test gate_carry_tests`.
 
 ## 5 · Releasing
 
@@ -102,16 +148,18 @@ make host-binary             # release build of the host daemon for Debian 12
 make release VERSION=3.2.0
 ```
 
-Runs the full gate locally, stamps the workspace version, commits, tags
-`v3.2.0` and pushes. It refuses on a dirty working tree or an existing tag.
-The gate runs once per release: a green `make gate` on a clean checkout
-stamps its tree and toolchain (`rustc -V`, `node -v`) in `.git/gate-pass`
-through the shared `gate-stamp` helper (`.githooks/gate-stamp` finds it in
-the workstation repository), and `make release` skips its own gate when the
-clean HEAD tree and toolchain equal that stamp. The version-bump commit
-skips the pre-commit gates when every changed line is an x.y.z `version =`
-line in `Cargo.toml` or `Cargo.lock`. Without the helper both skips are off;
-the commit-msg ID check still runs.
+Runs the gate locally (full or carried, see §4), stamps the workspace
+version, commits, tags `v3.2.0` and pushes. It refuses on a dirty working
+tree or an existing tag. The gate's own pass/fail runs once per release: a
+green `make gate` on a clean checkout stamps its tree and toolchain
+(`rustc -V`, `node -v`) in `.git/gate-pass` through the shared `gate-stamp`
+helper (`.githooks/gate-stamp` finds it in the workstation repository), and
+`make release` skips its own gate call when the clean HEAD tree and
+toolchain equal that stamp — printing which kind of run produced it (full
+or carried, and from what base) either way. The version-bump commit skips
+the pre-commit gates when every changed line is an x.y.z `version =` line
+in `Cargo.toml` or `Cargo.lock`. Without the helper both skips are off; the
+commit-msg ID check still runs.
 GitHub then re-runs the gate — a red gate blocks the release — and
 publishes `homelab-host`, `homelab` and `SHA256SUMS` as a GitHub Release.
 

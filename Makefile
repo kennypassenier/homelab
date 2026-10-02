@@ -10,12 +10,16 @@
 # TUI when the update badge appears.
 # ============================================================================
 
-.PHONY: help build test gate check advisories secrets secrets-staged msrv scanners admin-full release-binaries fmt clippy release host-binary hooks install diagrams
+.PHONY: help build test gate gate-full check advisories secrets secrets-staged msrv scanners admin-full release-binaries fmt clippy release host-binary hooks install diagrams
 
 help:
 	@echo "make build            debug build of the whole workspace"
 	@echo "make test             run all tests"
-	@echo "make gate             full local gate: fmt + clippy -D warnings + tests"
+	@echo "make gate             local gate: fmt + clippy -D warnings + the tests that moved"
+	@echo "                      since the last recorded run (fix-187) — full on the first"
+	@echo "                      run, after Cargo.lock/toolchain/gate changes, or when a"
+	@echo "                      foundational crate (core, proto) changed"
+	@echo "make gate-full        make gate, but always the whole suite (no carry)"
 	@echo "make check            gate + advisories + secrets + msrv (what CI ran until 2026-09-29)"
 	@echo "make hooks            wire the git-native commit gates (once per clone)"
 	@echo "make host-binary      release build of homelab-host for Debian 12 (via docker)"
@@ -49,10 +53,21 @@ diagrams:
 	scripts/check-diagrams.sh
 
 # One gate, one script (2026-09-29): `make gate` is the commit hook's
-# .claude/hooks/gates.sh with the whole test suite and no cache skips, so a
-# green run on a clean checkout stamps .git/gate-pass for `make release`.
+# .claude/hooks/gates.sh with no cache skips, so a green run on a clean
+# checkout stamps .git/gate-pass for `make release`. Since fix-187 (Kenny,
+# 2026-10-02: "tests run once per release, then only the failures are
+# rerun" — four full runs for one release on 2026-10-01 is what this
+# closes) the test step itself is .githooks/gate-carry.sh: it reruns
+# everything only the first time, after Cargo.lock/the toolchain/the gate's
+# own definition changes, or when a crate most of the workspace depends on
+# (core, proto) changed; otherwise it reruns exactly the tests that were
+# failing plus the crates that actually changed, and says which on its own
+# stdout. `make gate-full` (or GATE_CARRY_MODE=full) skips that decision.
 gate:
 	GATE_FULL=1 GATE_SUITE=full .claude/hooks/gates.sh
+
+gate-full:
+	GATE_CARRY_MODE=full GATE_FULL=1 GATE_SUITE=full .claude/hooks/gates.sh
 
 # What .github/workflows/ci.yml ran on every push until 2026-09-29, when
 # Kenny moved every build and check to his own machine ("alle builds lokaal").
@@ -165,6 +180,12 @@ else
 	@# één": skip the gate when `make gate` already passed on this clean tree
 	@# with this toolchain (.githooks/gate-stamp fresh; no helper = run it).
 	@if .githooks/gate-stamp fresh; then echo "gate already passed for this tree (stamp $$(git rev-parse --short 'HEAD^{tree}')), not running it again"; else $(MAKE) gate; fi
+	@# fix-187: name what the gate that just stamped (or was already fresh)
+	@# actually ran — a full run, or a carried one and its base — so a
+	@# release never looks like it ran the whole suite when it carried.
+	@for f in rust node; do \
+		if [ -f .git/gate-carry/$$f/last-run.txt ]; then echo "gate ($$f): $$(head -1 .git/gate-carry/$$f/last-run.txt)"; fi; \
+	done
 	@sed -i 's/^version = ".*"/version = "$(VERSION)"/' Cargo.toml
 	@cargo update --workspace --quiet 2>/dev/null || cargo check --workspace --quiet
 	@if ! git diff --quiet; then \

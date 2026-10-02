@@ -110,3 +110,16 @@ test("fix-216: a single-repository stack (most native services) resolves without
   assert.equal(resolveSnapshotOwner(repos, "")?.owner, "kyu");
   assert.equal(resolveSnapshotOwner(repos, "anything-unmatched")?.owner, "kyu");
 });
+
+test("fix-223: the kind of backup the host tagged is shown; an untagged one stays null", () => {
+  const now = 1_790_000_000;
+  const rows = snapshotPickerRows(
+    [
+      { id: "a", short_id: "a", time: now - DAY, trigger: "nightly" },
+      { id: "b", short_id: "b", time: now - 2 * DAY },
+    ],
+    now,
+  );
+  assert.equal(rows[0].kind, "nightly");
+  assert.equal(rows[1].kind, null);
+});

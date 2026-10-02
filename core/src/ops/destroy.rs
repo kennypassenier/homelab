@@ -243,7 +243,13 @@ async fn destroy_impl<'a>(
         scope.skip(VERIFY_RESTORE_STEP);
     } else {
         let mut backup_scope = scope.child(format!("backup-{}", stack_name));
-        crate::ops::backup::backup_impl(ctx, manifest, &ctx.backup, &mut backup_scope)
+        // fix-223: this backup is the safety copy taken right before the
+        // container is destroyed — tagged as such, not as a manual backup.
+        let backup_cfg = crate::ops::backup::BackupCfg {
+            trigger: crate::ops::backup::BackupTrigger::PreDestroy,
+            ..ctx.backup.clone()
+        };
+        crate::ops::backup::backup_impl(ctx, manifest, &backup_cfg, &mut backup_scope)
             .await
             .map_err(|f| {
                 let why = crate::error::OperatorError::from_core(&f.step, &f.err).why;

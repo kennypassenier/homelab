@@ -588,6 +588,12 @@ pub enum Command {
         /// same rule as `RestoreStack::confirm`.
         #[serde(default)]
         confirm: Option<String>,
+        /// fix-223: which unit of a multi-unit native stack to restore.
+        /// `None` (the old shape, and what an older client still sends) =
+        /// every unit of the stack, from the same snapshot — today's
+        /// behaviour unchanged.
+        #[serde(default)]
+        unit: Option<String>,
     },
     /// feat-secrets-1: the content of one secret, read from the host's own
     /// vault (the value a deploy last sealed there — `ops::deploy`'s

@@ -49,6 +49,15 @@ pub enum Invocation {
         stack: String,
         unit: Option<String>,
     },
+    /// fix-223: restore a native (adopted) service from a snapshot; `unit`
+    /// restricts it to one service of a multi-unit stack, same
+    /// `<stack>/<unit>` shape `rollback-native` already uses.
+    RestoreNative {
+        stack: String,
+        snapshot: String,
+        unit: Option<String>,
+        yes: bool,
+    },
     Guards {
         vmid: u16,
     },
@@ -88,6 +97,9 @@ fn usage(verb: &str) -> String {
         "update-native" => "usage: homelab update-native <stack>".into(),
         "release-update-native" => "usage: homelab release-update-native <stack>".into(),
         "rollback-native" => "usage: homelab rollback-native <stack>[/<unit>]".into(),
+        "restore-native" => {
+            "usage: homelab restore-native <stack>[/<unit>] [snapshot] [--yes]".into()
+        }
         "guards" => "usage: homelab guards <vmid>".into(),
         "forget" => "usage: homelab forget <stack>".into(),
         "destroy" => "usage: homelab destroy stacks/<name>".into(),
@@ -139,6 +151,18 @@ pub fn parse(args: &[String]) -> Result<Option<Invocation>, String> {
         "rollback-native" => {
             let (stack, unit) = crate::stack_and_unit(&first()?);
             Invocation::RollbackNative { stack, unit }
+        }
+        "restore-native" => {
+            let (stack, unit) = crate::stack_and_unit(&first()?);
+            Invocation::RestoreNative {
+                stack,
+                snapshot: words
+                    .get(1)
+                    .map(|w| w.to_string())
+                    .unwrap_or_else(|| "latest".into()),
+                unit,
+                yes: has("--yes"),
+            }
         }
         "guards" => Invocation::Guards {
             vmid: words
@@ -197,4 +221,37 @@ pub fn split(line: &str) -> Vec<String> {
         out.push(cur);
     }
     out
+}
+
+#[cfg(test)]
+mod fix_223_tests {
+    use super::*;
+
+    fn args(s: &str) -> Vec<String> {
+        s.split_whitespace().map(String::from).collect()
+    }
+
+    /// fix-223: `restore-native kyu/kyu-runner` restores that one unit;
+    /// a bare stack keeps restoring every unit, as before.
+    #[test]
+    fn fix_223_restore_native_takes_an_optional_unit() {
+        assert_eq!(
+            parse(&args("restore-native kyu/kyu-runner 5ebbc732 --yes")).unwrap(),
+            Some(Invocation::RestoreNative {
+                stack: "kyu".into(),
+                snapshot: "5ebbc732".into(),
+                unit: Some("kyu-runner".into()),
+                yes: true,
+            })
+        );
+        assert_eq!(
+            parse(&args("restore-native kyu")).unwrap(),
+            Some(Invocation::RestoreNative {
+                stack: "kyu".into(),
+                snapshot: "latest".into(),
+                unit: None,
+                yes: false,
+            })
+        );
+    }
 }

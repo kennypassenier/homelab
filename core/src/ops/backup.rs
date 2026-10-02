@@ -219,6 +219,12 @@ pub struct BackupCfg {
     /// margin, against either this cap or the directory's free space skips
     /// staging for that run rather than shrinking the margin to fit.
     pub staging_cap_mib: u64,
+    /// fix-223: why THIS run is happening — tagged onto every snapshot it
+    /// takes (`trigger:<kind>`). The caller sets this before invoking
+    /// `backup`/`backup_native`/`backup_impl`; it is not resolved from
+    /// context here because the same `BackupCfg` is shared across a batch of
+    /// stacks whose call sites already know which trigger they are.
+    pub trigger: BackupTrigger,
 }
 
 impl Default for BackupCfg {
@@ -231,6 +237,7 @@ impl Default for BackupCfg {
             restore_timeout_s: 4 * 3600,
             staging_dir: Some(DEFAULT_STAGING_DIR.to_string()),
             staging_cap_mib: 10 * 1024,
+            trigger: BackupTrigger::default(),
         }
     }
 }
@@ -778,7 +785,16 @@ pub(crate) async fn backup_impl<'a>(
                 // fix-112: every repository of one stack's night carries the
                 // same tag, so a restore can take one night across all of
                 // them instead of each repository's own newest.
-                let mut args = vec!["backup", "--quiet", "--json", "--tag", &run_tag];
+                let trigger_tag = cfg.trigger.tag();
+                let mut args = vec![
+                    "backup",
+                    "--quiet",
+                    "--json",
+                    "--tag",
+                    &run_tag,
+                    "--tag",
+                    trigger_tag,
+                ];
                 for p in paths {
                     args.push(p.as_str());
                 }
@@ -945,6 +961,63 @@ pub fn run_tag(now_unix: u64) -> String {
     format!("run-{}", now_unix)
 }
 
+/// fix-223: why a particular restic backup ran, tagged onto the snapshot
+/// itself (`trigger:<kind>`) next to the existing `run-<unix>` tag, so the
+/// restore picker can show what kind of backup each snapshot is — not only
+/// when it ran. Enumerated from the call sites that actually invoke
+/// `backup`/`backup_native` today: the nightly round
+/// (`host/src/main.rs::run_backup_batch`), an operator's on-demand backup
+/// (`Rpc::BackupStack`/`Rpc::BackupNative`), and the safety backup `destroy`
+/// takes before removing a container (`core/src/ops/destroy.rs`). There is
+/// no pre-update backup anywhere in the codebase today, so no tag for one
+/// exists either — adding one would be guessing at a trigger that does not
+/// run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BackupTrigger {
+    /// The nightly scheduled round.
+    Nightly,
+    /// An operator asked for it on demand — the CLI or the admin dashboard's
+    /// "Back up" / "Back up (native)" action.
+    #[default]
+    Manual,
+    /// Taken automatically, immediately before `destroy` removes the
+    /// container (`destroy_impl`, core/src/ops/destroy.rs).
+    PreDestroy,
+}
+
+impl BackupTrigger {
+    /// The tag value stored on the snapshot: `restic backup --tag <this>`.
+    pub fn tag(self) -> &'static str {
+        match self {
+            BackupTrigger::Nightly => "trigger:nightly",
+            BackupTrigger::Manual => "trigger:manual",
+            BackupTrigger::PreDestroy => "trigger:pre-destroy",
+        }
+    }
+
+    /// The word the picker shows for this trigger.
+    pub fn label(self) -> &'static str {
+        match self {
+            BackupTrigger::Nightly => "nightly",
+            BackupTrigger::Manual => "manual",
+            BackupTrigger::PreDestroy => "pre-destroy",
+        }
+    }
+
+    /// Parse a `trigger:<kind>` tag value back into its kind. `None` for
+    /// anything that is not one of the kinds above, including an unrelated
+    /// tag — the caller decides what an unrecognised value means (today:
+    /// "kind not recorded", same as no tag at all).
+    pub fn parse_tag(tag: &str) -> Option<Self> {
+        match tag.strip_prefix("trigger:")? {
+            "nightly" => Some(BackupTrigger::Nightly),
+            "manual" => Some(BackupTrigger::Manual),
+            "pre-destroy" => Some(BackupTrigger::PreDestroy),
+            _ => None,
+        }
+    }
+}
+
 /// fix-112: one snapshot as a restore sees it — its ids, its time, and the
 /// night it belongs to when it carries a `run-<unix>` tag.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -953,11 +1026,34 @@ pub struct SnapRun {
     pub short_id: String,
     pub time: u64,
     pub run: Option<u64>,
+    /// fix-223: restic's own `summary.total_bytes_processed` (restic ≥
+    /// 0.17 includes a `summary` object per snapshot in `snapshots --json`;
+    /// verified against restic 0.19.1). `None` for a snapshot an older
+    /// restic took, or one restic's own JSON never gave a summary for — the
+    /// picker shows "size not recorded" rather than guessing. This is NOT a
+    /// second `restic stats` round trip: it is read from the same
+    /// `snapshots --json` call `list_snapshots` already makes.
+    pub size_bytes: Option<u64>,
+    /// fix-223: restic's own `summary.total_files_processed`, same
+    /// availability rule as `size_bytes`.
+    pub file_count: Option<u64>,
+    /// fix-223: the `trigger:<kind>` tag's kind (`"nightly"`, `"manual"`,
+    /// `"pre-destroy"`), parsed back from the tags array. `None` for an
+    /// older snapshot taken before this existed, or an unrecognised tag
+    /// value — the picker shows "kind not recorded" rather than guessing.
+    pub trigger: Option<String>,
 }
 
 /// fix-112: `restic snapshots --json`, with the night tag. Malformed input
 /// gives an empty list, which the resolution below refuses.
 pub fn parse_snapshot_runs(raw: &str) -> Vec<SnapRun> {
+    #[derive(serde::Deserialize)]
+    struct Summary {
+        #[serde(default)]
+        total_files_processed: Option<u64>,
+        #[serde(default)]
+        total_bytes_processed: Option<u64>,
+    }
     #[derive(serde::Deserialize)]
     struct Snap {
         id: String,
@@ -965,6 +1061,10 @@ pub fn parse_snapshot_runs(raw: &str) -> Vec<SnapRun> {
         time: String,
         #[serde(default)]
         tags: Option<Vec<String>>,
+        // fix-223: restic ≥ 0.17 only; absent entirely on an older restic
+        // or an older snapshot, which is exactly "not recorded".
+        #[serde(default)]
+        summary: Option<Summary>,
     }
     let Ok(snaps) = serde_json::from_str::<Vec<Snap>>(raw.trim()) else {
         return Vec::new();
@@ -973,16 +1073,26 @@ pub fn parse_snapshot_runs(raw: &str) -> Vec<SnapRun> {
         .into_iter()
         .filter_map(|s| {
             let time = humantime_to_unix(&s.time)?;
-            let run = s
-                .tags
-                .unwrap_or_default()
+            let tags = s.tags.unwrap_or_default();
+            let run = tags
                 .iter()
                 .find_map(|t| t.strip_prefix("run-")?.parse::<u64>().ok());
+            let trigger = tags
+                .iter()
+                .find_map(|t| BackupTrigger::parse_tag(t))
+                .map(|t| t.label().to_string());
+            let (size_bytes, file_count) = match s.summary {
+                Some(sum) => (sum.total_bytes_processed, sum.total_files_processed),
+                None => (None, None),
+            };
             Some(SnapRun {
                 id: s.id,
                 short_id: s.short_id,
                 time,
                 run,
+                size_bytes,
+                file_count,
+                trigger,
             })
         })
         .collect()

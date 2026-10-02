@@ -1536,13 +1536,14 @@ pub async fn backup_native(
                     "set -o pipefail; cat {} | \
                  env RESTIC_REPOSITORY={}/{}-config RESTIC_PASSWORD_FILE={} \
                  RESTIC_CACHE_DIR={} \
-                 restic backup --stdin --stdin-filename {}-data.tar",
+                 restic backup --stdin --stdin-filename {}-data.tar --tag {}",
                     shq(stage_path),
                     cfg.restic_base,
                     m.unit,
                     cfg.password_file,
                     crate::ops::backup::RESTIC_CACHE_DIR,
-                    m.unit
+                    m.unit,
+                    cfg.trigger.tag()
                 );
                 crate::executor::run_ok(
                     exec,
@@ -1569,7 +1570,7 @@ pub async fn backup_native(
                 "set -o pipefail; pct exec {} -- tar -cf - {} | \
              env RESTIC_REPOSITORY={}/{}-config RESTIC_PASSWORD_FILE={} \
              RESTIC_CACHE_DIR={} \
-             restic backup --stdin --stdin-filename {}-data.tar",
+             restic backup --stdin --stdin-filename {}-data.tar --tag {}",
                 // D25: named after the SERVICE, not the stack. T5 puts several
                 // services on one container, and a per-stack repository would
                 // fold them into one — so moving any of them elsewhere would
@@ -1580,7 +1581,8 @@ pub async fn backup_native(
                 m.unit,
                 cfg.password_file,
                 crate::ops::backup::RESTIC_CACHE_DIR,
-                m.unit
+                m.unit,
+                cfg.trigger.tag()
             );
             let cmd = Cmd::new("sh", &["-c", &script], cfg.snapshot_timeout_s);
             if chassis_resume {

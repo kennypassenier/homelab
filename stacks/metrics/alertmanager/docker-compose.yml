@@ -2,7 +2,7 @@ services:
   alertmanager:
     # fix-82 (manual-images-latest-unpinned, 2026-09-27): the version and
     # digest CT 113 ran that day; moving it is an edit of this line.
-    image: prom/alertmanager:v0.34.0@sha256:690c7b525f4367aa91f73e2f91c632206d32e97c6384bdbf2fb7a861b420340d
+    image: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
     container_name: alertmanager
     restart: unless-stopped
     command:

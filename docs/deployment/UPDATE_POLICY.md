@@ -63,10 +63,10 @@ fails while this section is stale.
 | media | recyclarr | recyclarr | `manual` | `ghcr.io/recyclarr/recyclarr:8.7.2@sha256:6e69e009e1cd…` |  |
 | media | seerr | seerr | `auto` | `ghcr.io/seerr-team/seerr:latest` |  |
 | media | sonarr | sonarr | `auto` | `lscr.io/linuxserver/sonarr:latest` |  |
-| metrics | alertmanager | alertmanager | `manual` | `prom/alertmanager:v0.34.0@sha256:690c7b525f43…` |  |
+| metrics | alertmanager | alertmanager | `manual` | `prom/alertmanager:v0.34.1@sha256:e9733bafb1bd…` |  |
 | metrics | loki | loki | `manual` | `grafana/loki:3.7.8@sha256:1107dd5274e0…` |  |
 | metrics | loki-push | loki-push | `auto` | `nginx:alpine` |  |
-| metrics | prometheus | prometheus | `manual` | `prom/prometheus:v3.14.0@sha256:5ce7540c3c00…` |  |
+| metrics | prometheus | prometheus | `manual` | `prom/prometheus:v3.15.0@sha256:efd719c99d83…` |  |
 | metrics | pve-exporter | pve-exporter | `manual` | `prompve/prometheus-pve-exporter:3.10.0@sha256:4867684c0a93…` |  |
 | paperwork | actual | actual | `manual` | `actualbudget/actual-server:25.12.0@sha256:7f38b450cc3b…` |  |
 | paperwork | paperless | paperless | `manual` | `ghcr.io/paperless-ngx/paperless-ngx:3.1.0@sha256:49eba766581b…` |  |

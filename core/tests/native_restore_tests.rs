@@ -251,3 +251,67 @@ async fn a_failed_after_restore_leaves_the_unit_stopped() {
     assert!(!r.ok);
     assert!(!exec.calls().iter().any(|c| c.contains("systemctl start")));
 }
+
+// ── fix-171 round 3: restore_native's own plan, known from the manifest
+// (stateless/data_dirs/after_restore) before anything runs.
+
+fn plan_and_marks(
+    events: &[homelab_core::sink::PipelineEvent],
+) -> (usize, std::collections::BTreeSet<String>) {
+    use homelab_core::sink::PipelineEvent;
+    let plan_len = events
+        .iter()
+        .find_map(|e| match e {
+            PipelineEvent::Plan { steps, .. } => Some(steps.len()),
+            _ => None,
+        })
+        .expect("a plan was announced");
+    let mut names = std::collections::BTreeSet::new();
+    for e in events {
+        match e {
+            PipelineEvent::StepStarted { step, .. } | PipelineEvent::StepSkipped { step, .. } => {
+                names.insert(step.clone());
+            }
+            _ => {}
+        }
+    }
+    (plan_len, names)
+}
+
+#[tokio::test]
+async fn fix_171_a_stateless_unit_marks_only_safety_gates() {
+    let exec = harness();
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let r = restore_native(
+        &ctx(&exec, &sink, &j),
+        &almanac(vec![], true),
+        &BackupCfg::default(),
+        "latest",
+        Some("almanac"),
+    )
+    .await;
+    assert!(r.ok, "{:?}", r.error);
+    let (m, names) = plan_and_marks(&sink.events());
+    assert_eq!(m, 1, "only safety gates was ever going to run");
+    assert_eq!(names.len(), m);
+}
+
+#[tokio::test]
+async fn fix_171_a_full_restore_reaches_its_announced_plan() {
+    let exec = harness();
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let r = restore_native(
+        &ctx(&exec, &sink, &j),
+        &almanac(vec!["/appdata/almanac/almanac-config".into()], false),
+        &BackupCfg::default(),
+        "a1b2c3",
+        Some("almanac"),
+    )
+    .await;
+    assert!(r.ok, "{:?}", r.error);
+    let (m, names) = plan_and_marks(&sink.events());
+    assert_eq!(m, 5, "safety gates, stop, copy, unpack, start");
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}

@@ -41,6 +41,16 @@ impl Default for SelfUpdateCfg {
 
 pub async fn self_update(ctx: &OpCtx<'_>, cfg: &SelfUpdateCfg) -> OperationReport {
     let mut runner = Runner::new("self-update", ctx.sink, ctx.journal);
+    // fix-171 round 3: fixed and unconditional.
+    runner.plan(&[
+        "selfcheck candidate",
+        "backup current",
+        "install candidate",
+        "install host units",
+        "pve apt + logrotate hygiene",
+        "arm rollback marker",
+        "schedule restart",
+    ]);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
 

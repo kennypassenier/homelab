@@ -1313,3 +1313,33 @@ async fn a_stack_that_drops_its_last_manual_question_loses_it() {
         "another stack's question stays"
     );
 }
+
+/// fix-171 round 3: wipe's fixed plan is announced and reached.
+#[tokio::test]
+async fn fix_171_wipe_reaches_its_announced_plan() {
+    let exec = MockExecutor::new();
+    seed_state(&exec, state_with_retired_drill()).await;
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = homelab_core::ops::retired::wipe(&ctx(&exec, &sink, &j), "drill", "drill").await;
+    assert!(report.ok, "{:?}", report.error);
+    let events = sink.events();
+    let m = events
+        .iter()
+        .find_map(|e| match e {
+            PipelineEvent::Plan { steps, .. } => Some(steps.len()),
+            _ => None,
+        })
+        .expect("a plan was announced");
+    let mut names = std::collections::BTreeSet::new();
+    for e in &events {
+        match e {
+            PipelineEvent::StepStarted { step, .. } | PipelineEvent::StepSkipped { step, .. } => {
+                names.insert(step.clone());
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(m, 5);
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}

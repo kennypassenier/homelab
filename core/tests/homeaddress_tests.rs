@@ -424,3 +424,57 @@ fn fix_156_no_address_is_broken_a_last_known_one_is_noted() {
     };
     assert_eq!(evaluate_home_address(&kept)[0].severity, Severity::Noted);
 }
+
+/// fix-171 round 3: this op's one possible step is announced before it
+/// runs, and nothing is announced on the paths that never touch it.
+#[tokio::test]
+async fn fix_171_a_changed_address_announces_its_one_step_plan() {
+    let exec = MockExecutor::new();
+    seed_gateway(&exec).await;
+    exec.respond_always(
+        &format!("cat '{}'", WHITELIST_FILE),
+        CmdOutput::ok(&whitelist_yaml(home("62.235.8.100"))),
+    );
+    exec.respond_always(
+        "cdn-cgi/trace",
+        CmdOutput::ok("fl=1\nh=cloudflare.com\nip=62.235.8.143\nts=1\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = sync_home_address(&ctx(&exec, &sink, &j)).await;
+    assert!(report.ok, "{:?}", report.error);
+    let events = sink.events();
+    let m = events
+        .iter()
+        .find_map(|e| match e {
+            homelab_core::sink::PipelineEvent::Plan { steps, .. } => Some(steps.len()),
+            _ => None,
+        })
+        .expect("a plan was announced");
+    assert_eq!(m, 1);
+}
+
+#[tokio::test]
+async fn fix_171_an_unchanged_address_announces_no_plan() {
+    let exec = MockExecutor::new();
+    seed_gateway(&exec).await;
+    exec.respond_always(
+        &format!("cat '{}'", WHITELIST_FILE),
+        CmdOutput::ok(&whitelist_yaml(home("62.235.8.143"))),
+    );
+    exec.respond_always(
+        "cdn-cgi/trace",
+        CmdOutput::ok("fl=1\nh=cloudflare.com\nip=62.235.8.143\nts=1\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = sync_home_address(&ctx(&exec, &sink, &j)).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        !sink
+            .events()
+            .iter()
+            .any(|e| matches!(e, homelab_core::sink::PipelineEvent::Plan { .. })),
+        "nothing was ever attempted, so no plan was announced"
+    );
+}

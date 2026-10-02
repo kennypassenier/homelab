@@ -139,9 +139,25 @@ async fn run_under_chassis_heartbeat(
 /// Adopt an existing container as a managed native-service stack. Never
 /// starts, stops or restarts anything — a running production service is
 /// exactly what must stay untouched while the homelab takes ownership.
+/// fix-171 round 3: adoption's own fixed step plan, announced before its
+/// first step. Every step here is unconditional — a precondition that does
+/// not hold (no env file to seal) makes the step a no-op, never an absent
+/// one — so this list is the same for every run, like `INSTALL_STEPS`.
+pub const ADOPT_STEPS: &[&str] = &[
+    "validate manifest",
+    "guard target",
+    "verify service",
+    "verify paths",
+    "tag as managed",
+    "describe",
+    "seal env file",
+    "record state",
+];
+
 pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationReport {
     let op = format!("adopt-{}", m.stack_name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    runner.plan(ADOPT_STEPS);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
 
@@ -903,6 +919,22 @@ pub async fn restore_native(
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
 
+    // fix-171 round 3: known from the manifest alone, before anything runs —
+    // a unit that declares no data never gets past "safety gates", and
+    // `after_restore` is a fixed field of the manifest, not a runtime
+    // decision.
+    let mut steps: Vec<&str> = vec!["safety gates"];
+    if !(m.stateless || m.data_dirs.is_empty()) {
+        steps.push("stop unit");
+        steps.push("safety copy");
+        steps.push("unpack snapshot");
+        if m.after_restore.is_some() {
+            steps.push("re-seed from restore");
+        }
+        steps.push("start unit");
+    }
+    runner.plan(&steps);
+
     runner.log(
         Level::Warn,
         format!(
@@ -1075,6 +1107,30 @@ pub async fn backup_native(
         );
         return runner.finish_ok();
     }
+
+    // fix-171 round 3: the pause step's own name, and whether a resume step
+    // can ever follow it, are both decided by `m.backup_pause` — a fixed
+    // field of the manifest, known before anything runs. Whether "resume
+    // the service" actually fires (Chassis can find nothing running to
+    // pause) is a live decision, so a run that skips it still marks it.
+    let mut steps: Vec<&str> = vec![
+        "guard target",
+        "init repo",
+        "find the service's own newest copy",
+        "empty data over history",
+        "clear stale locks",
+    ];
+    match m.backup_pause {
+        BackupPause::Off => {}
+        BackupPause::Unit => steps.push("pause the service"),
+        BackupPause::Chassis => steps.push("pause the service (chassis)"),
+    }
+    steps.push("snapshot");
+    if !matches!(m.backup_pause, BackupPause::Off) {
+        steps.push("resume the service");
+    }
+    steps.push("retention");
+    runner.plan(&steps);
 
     step!(runner, "guard target", {
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
@@ -1517,6 +1573,13 @@ pub async fn backup_native(
             }
             Ok(StepOutcome::Changed)
         });
+    } else if matches!(m.backup_pause, BackupPause::Chassis) {
+        // fix-171 round 3: "resume the service" is in the plan whenever
+        // pausing is possible at all (BackupPause != Off), but Chassis can
+        // decide there was nothing running to pause (`NothingRunning`) — a
+        // live decision the manifest alone cannot predict. Marked skipped
+        // rather than left silent, so n still reaches the announced m.
+        runner.skip("resume the service");
     }
     if let Some(note) = &resume_note {
         runner.log(Level::Info, format!("[backup] {} {}", unit, note));
@@ -1948,6 +2011,39 @@ async fn latest_listed_sha(
 /// path a client install takes. The unit file comes from the container
 /// itself: it is the one systemd is running, and a rebuild put it there
 /// from the repository.
+/// fix-171 round 3 ("exactly the kyu install where Kenny saw the counter
+/// climb"): `release_update`'s own fixed step plan — unpinned, and the unit
+/// file always read from the container (never given). Every one of
+/// `release_install`'s early exits (no release_repo, unsigned release, the
+/// binary already current) is a legitimate reason to stop, not a defect, so
+/// each one skip-marks whatever of this list it does not reach rather than
+/// leaving the run's total to climb mid-flight. The one case that marks
+/// nothing at all is "no release_repo declared" — nothing is ever attempted,
+/// so nothing needs a plan.
+pub const RELEASE_UPDATE_STEPS: &[&str] = &[
+    "guard target",
+    "ask GitHub for the latest release",
+    "read the checksum list",
+    "compare with the installed binary",
+    "download and verify the asset",
+    "read the unit file from the container",
+];
+
+/// A stack's native services may each declare their own `release_repo`; a
+/// multi-unit release-update (kyu's three) must announce the FULL sum of
+/// every unit's plan before the first one even starts (fix-171 round 3,
+/// point 2) — mirroring `admin::shell::actions::execute`'s own
+/// `Tracker::set_total` for a batch of deploys. A unit with no
+/// `release_repo` contributes nothing: `release_update` marks nothing for
+/// it either.
+pub fn release_update_plan_len(m: &NativeServiceManifest) -> usize {
+    if m.release_repo.is_some() {
+        RELEASE_UPDATE_STEPS.len()
+    } else {
+        0
+    }
+}
+
 pub async fn release_update(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationReport {
     release_install(ctx, m, None, None).await
 }
@@ -1992,6 +2088,9 @@ async fn release_install(
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let Some(repo) = m.release_repo.clone() else {
+        // fix-171 round 3: nothing is ever attempted here, so there is
+        // nothing to plan either — the same "zero marks, no plan needed"
+        // shape as `backup_native`'s stateless early return.
         runner.log(
             Level::Info,
             format!(
@@ -2002,6 +2101,28 @@ async fn release_install(
         return runner.finish_ok();
     };
     let asset = m.release_asset.clone().unwrap_or_else(|| m.unit.clone());
+
+    // fix-171 round 3: this run's own fixed plan — `pinned` and
+    // `unit_from_repo` are both arguments, known before anything runs, so
+    // the one step whose NAME varies ("ask GitHub for release X" vs "...the
+    // latest release") and the one step that may not even exist this call
+    // ("read the unit file from the container", never attempted when the
+    // caller already has it) are both decided up front. What is NOT known
+    // up front — whether the release turns out unsigned, or the binary
+    // turns out already current — is handled by skip-marking the rest of
+    // this same list rather than by a plan that shrinks mid-run.
+    let asked = match pinned {
+        None => "ask GitHub for the latest release".to_string(),
+        Some(t) => format!("ask GitHub for release {t}"),
+    };
+    let mut steps: Vec<&str> = vec!["guard target", asked.as_str()];
+    steps.push("read the checksum list");
+    steps.push("compare with the installed binary");
+    steps.push("download and verify the asset");
+    if unit_from_repo.is_none() {
+        steps.push("read the unit file from the container");
+    }
+    runner.plan(&steps);
 
     step!(runner, "guard target", {
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
@@ -2019,10 +2140,6 @@ async fn release_install(
         );
     }
     let mut refs: Option<ReleaseRefs> = None;
-    let asked = match pinned {
-        None => "ask GitHub for the latest release".to_string(),
-        Some(t) => format!("ask GitHub for release {t}"),
-    };
     step!(runner, asked.as_str(), {
         let url = match pinned {
             None => format!("https://api.github.com/repos/{}/releases/latest", repo),
@@ -2057,6 +2174,16 @@ async fn release_install(
     // fix-29: an unsigned release is not installed. Not an error: the author
     // signs after uploading, and the next night tries again.
     let Some(sig_url) = refs.sig_url.clone() else {
+        // fix-171 round 3: an unsigned release is a legitimate reason to
+        // stop, in BOTH branches below — not a step that crashed — so the
+        // rest of the announced plan is marked skipped rather than left
+        // for n to fall permanently short of m.
+        runner.skip("read the checksum list");
+        runner.skip("compare with the installed binary");
+        runner.skip("download and verify the asset");
+        if unit_from_repo.is_none() {
+            runner.skip("read the unit file from the container");
+        }
         if pinned.is_some() {
             return runner.finish_err(
                 "read the checksum list",
@@ -2126,6 +2253,12 @@ async fn release_install(
         Ok(StepOutcome::Unchanged)
     });
     if current {
+        // fix-171 round 3: already on the wanted binary is success, not
+        // failure — the two remaining planned steps are marked skipped.
+        runner.skip("download and verify the asset");
+        if unit_from_repo.is_none() {
+            runner.skip("read the unit file from the container");
+        }
         runner.log(
             Level::Info,
             format!(
@@ -2295,6 +2428,20 @@ pub async fn update_native(
         return runner.finish_ok();
     };
 
+    // fix-171 round 3: `m.update_cmd` is a manifest field, so by this point
+    // the run is committed to the full fixed plan — whether it stops early
+    // because the release is already current (a live GitHub decision) is
+    // handled by skip-marking the rest, below.
+    runner.plan(&[
+        "guard target",
+        "read the installed binary",
+        "preserve binary",
+        "run self-update",
+        "restart if changed",
+        "keep one previous binary",
+        "drop the kit's own rollback copy",
+    ]);
+
     step!(runner, "guard target", {
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
         Ok(StepOutcome::Unchanged)
@@ -2320,6 +2467,13 @@ pub async fn update_native(
     if let Some(repo) = &m.release_repo {
         match latest_listed_sha(exec, repo, m.asset_name()).await {
             Ok((tag, listed)) if !before.is_empty() && listed.eq_ignore_ascii_case(&before) => {
+                // fix-171 round 3: already current is success, not a crash —
+                // the four remaining planned steps are marked skipped.
+                runner.skip("preserve binary");
+                runner.skip("run self-update");
+                runner.skip("restart if changed");
+                runner.skip("keep one previous binary");
+                runner.skip("drop the kit's own rollback copy");
                 runner.log(
                     Level::Info,
                     format!(
@@ -2521,6 +2675,15 @@ pub async fn rollback_native(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> Oper
     let unit = format!("{}.service", m.unit);
     let prev = format!("{}.homelab-prev", m.binary);
     let swap = format!("{}.homelab-rollback", m.binary);
+
+    // fix-171 round 3: fixed and unconditional, like `destroy::STEPS`.
+    runner.plan(&[
+        "guard target",
+        "a previous binary is kept",
+        "roll back",
+        "keep the other as previous",
+        "park automatic updates",
+    ]);
 
     step!(runner, "guard target", {
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;

@@ -50,6 +50,15 @@ pub struct Runner<'a> {
     pub sink: &'a dyn Sink,
     pub journal: &'a dyn Journal,
     steps: Vec<StepReport>,
+    /// fix-171 round 3 ("make it impossible to forget"): set by `plan()`,
+    /// checked by `step()` and `skip()`. A mark emitted before the plan is
+    /// announced is exactly the bug this whole fix exists to prevent — the
+    /// client's `m` would start `None` and climb — so in debug/test builds
+    /// it panics right here, at the mark that forgot to plan, rather than
+    /// surviving to be caught later (if at all) by a test on the client
+    /// side reading the wire. Release builds stay fail-open (a missed plan
+    /// degrades the step counter; it must never crash the host).
+    planned: bool,
 }
 
 impl<'a> Runner<'a> {
@@ -59,6 +68,7 @@ impl<'a> Runner<'a> {
             sink,
             journal,
             steps: Vec::new(),
+            planned: false,
         }
     }
 
@@ -79,6 +89,7 @@ impl<'a> Runner<'a> {
     /// must still be marked, with `skip` (below), so `n` reaches `m`
     /// exactly when the operation finishes.
     pub fn plan(&mut self, steps: &[&str]) {
+        self.planned = true;
         self.sink.emit(PipelineEvent::Plan {
             op: self.op.clone(),
             steps: steps.iter().map(|s| s.to_string()).collect(),
@@ -91,6 +102,12 @@ impl<'a> Runner<'a> {
     /// retires). One mark, not a start/finish pair, matching `plan`'s
     /// count 1-for-1 whether the step ran or not.
     pub fn skip(&self, name: &str) {
+        debug_assert!(
+            self.planned,
+            "[{}] skip(\"{}\") before plan() — every step mark must be preceded by this op's \
+             own announced plan (fix-171)",
+            self.op, name
+        );
         self.journal.record(&self.op, name, "skipped");
         self.sink.emit(PipelineEvent::StepSkipped {
             op: self.op.clone(),
@@ -106,6 +123,12 @@ impl<'a> Runner<'a> {
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = Result<StepOutcome, CoreError>>,
     {
+        debug_assert!(
+            self.planned,
+            "[{}] step(\"{}\") before plan() — every step mark must be preceded by this op's \
+             own announced plan (fix-171)",
+            self.op, name
+        );
         self.journal.record(&self.op, name, "running");
         self.sink.emit(PipelineEvent::StepStarted {
             op: self.op.clone(),
@@ -214,5 +237,36 @@ impl<'a> Runner<'a> {
                 _ => None,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sink::VecSink;
+
+    /// fix-171 round 3 ("make it impossible to forget"): a step mark before
+    /// the plan is announced panics in a debug/test build — the guard that
+    /// backs every op's own test in `core/tests/step_plan_tests.rs` and the
+    /// per-op tests across `core/tests/*`, so a NEW op that forgets to call
+    /// `plan()` fails the moment its own test runs it, rather than shipping
+    /// a step counter that starts at `None` and climbs.
+    #[test]
+    #[should_panic(expected = "before plan()")]
+    fn a_step_mark_before_plan_panics() {
+        let sink = VecSink::new();
+        let journal = NullJournal;
+        let r = Runner::new("forgot-the-plan", &sink, &journal);
+        r.skip("whatever");
+    }
+
+    /// The positive twin: a plan announced first never panics.
+    #[test]
+    fn a_step_mark_after_plan_does_not_panic() {
+        let sink = VecSink::new();
+        let journal = NullJournal;
+        let mut r = Runner::new("remembered-the-plan", &sink, &journal);
+        r.plan(&["whatever"]);
+        r.skip("whatever");
     }
 }

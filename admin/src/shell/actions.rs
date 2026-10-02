@@ -1634,6 +1634,43 @@ impl Actions {
                 .sum();
             tracker.set_total(total);
         }
+        // fix-171 round 3 (Kenny: "release_install over a stack's several
+        // natives, e.g. kyu's three, must announce the full sum up front"):
+        // `ReleaseUpdateNative` is ONE command on the wire, but the host
+        // fans it out into one `release_update` per native service of the
+        // stack, each with its OWN plan announcement (same req id). Left
+        // alone, `Tracker::on_plan` only ADDS each one as it arrives — the
+        // dashboard's total would climb from unit to unit exactly like the
+        // bug this whole fix exists to kill. `release_update`'s own plan is
+        // now fixed per unit (`native::RELEASE_UPDATE_STEPS`; a unit with
+        // no `release_repo` contributes nothing), so the sum is knowable
+        // from the working copy before the request is even sent — the same
+        // shape as the deploy/destroy batch above, just counted from the
+        // stack's native services instead of from this job's own command
+        // list.
+        if let [Command::ReleaseUpdateNative { stack }] = commands.as_slice() {
+            let files = self.inner.files.clone();
+            let stack = stack.clone();
+            let total = tokio::task::spawn_blocking(move || {
+                let per_unit = homelab_core::ops::native::RELEASE_UPDATE_STEPS.len();
+                files
+                    .native_units(&stack)
+                    .iter()
+                    .filter(|u| {
+                        files
+                            .native_release(&stack, Some(u))
+                            .map(|(m, _, _)| m.release_repo.is_some())
+                            .unwrap_or(false)
+                    })
+                    .count()
+                    * per_unit
+            })
+            .await
+            .unwrap_or(0);
+            if total > 0 {
+                tracker.set_total(total);
+            }
+        }
         let mut last = None;
         for command in commands {
             let r = self.follow(command, view, &mut tracker).await?;

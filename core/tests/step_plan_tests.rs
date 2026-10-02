@@ -453,3 +453,25 @@ async fn update_skips_the_rest_of_an_apps_steps_when_its_policy_gate_says_skip()
         }
     }
 }
+
+// ── fix-171 round 3: the remaining single-purpose ops, each with a fixed,
+// unconditional plan. ───────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn restart_host_announces_its_one_step_plan() {
+    use homelab_core::ops::restarthost::restart_host;
+    let exec = MockExecutor::new();
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let report = restart_host(&ctx(&exec, &sink, &journal)).await;
+    assert!(report.ok, "{:?}", report.error);
+    let events = sink.events();
+    let m = events
+        .iter()
+        .find_map(|e| match e {
+            PipelineEvent::Plan { steps, .. } => Some(steps.len()),
+            _ => None,
+        })
+        .expect("a plan was announced");
+    assert_eq!(m, 1);
+}

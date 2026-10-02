@@ -197,3 +197,34 @@ fn the_unit_to_roll_back_is_named_or_the_only_one() {
     );
     assert!(select_unit(&two, Some("almanac")).is_err());
 }
+
+/// fix-171 round 3: rollback_native's fixed plan is announced and reached.
+#[tokio::test]
+async fn fix_171_rollback_native_reaches_its_announced_plan() {
+    let exec = harness();
+    exec.respond_always("cmp -s", CmdOutput::ok("yes\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let r = rollback_native(&ctx(&exec, &sink, &j), &kyu()).await;
+    assert!(r.ok, "{:?}", r.error);
+    let events = sink.events();
+    let m = events
+        .iter()
+        .find_map(|e| match e {
+            homelab_core::sink::PipelineEvent::Plan { steps, .. } => Some(steps.len()),
+            _ => None,
+        })
+        .expect("a plan was announced");
+    let mut names = std::collections::BTreeSet::new();
+    for e in &events {
+        match e {
+            homelab_core::sink::PipelineEvent::StepStarted { step, .. }
+            | homelab_core::sink::PipelineEvent::StepSkipped { step, .. } => {
+                names.insert(step.clone());
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(m, 5);
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}

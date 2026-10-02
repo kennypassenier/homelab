@@ -444,9 +444,30 @@ pub fn owner_groups(m: &StackManifest) -> Vec<(String, Vec<String>)> {
 }
 
 /// E1: snapshot a stack's /appdata paths, quiescing paused containers.
+/// fix-171 round 3: `backup`'s own fixed step plan — unconditional, like
+/// `deploy::STEPS` and `destroy::STEPS`: every precondition failure here
+/// (an owner conflict, a busy app, a stale declared-empty path) is a
+/// command that FAILS the step, and a failed step already aborts the whole
+/// operation without needing the rest of the plan marked — the same pattern
+/// every other op in this file already follows.
+pub const BACKUP_STEPS: &[&str] = &[
+    "safety gates",
+    "owner conflict",
+    "in use?",
+    "declared-empty paths",
+    "declared paths exist",
+    "init repos",
+    "clear stale locks",
+    "quiesce",
+    "snapshot",
+    "resume",
+    "retention",
+];
+
 pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> OperationReport {
     let op = format!("backup-{}", m.stack_name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    runner.plan(BACKUP_STEPS);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     // D25: one repository per owning app, so an app that moves to another
@@ -1223,6 +1244,23 @@ pub async fn restore_app(
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
 
+    // fix-171 round 3: known from `safety_copy` alone (a plain argument),
+    // before anything runs. "restore data" is always in the plan too, even
+    // on the branch where the safety copy fails and it never runs — that
+    // branch marks it skipped (below) rather than leaving it absent.
+    let mut steps: Vec<&str> = vec!["safety gates", "native units", "validate snapshot"];
+    if safety_copy {
+        steps.push("room for a safety copy");
+    }
+    steps.push("quiesce stack");
+    if safety_copy {
+        steps.push("safety copy");
+    }
+    steps.push("restore data");
+    steps.push("resume stack");
+    steps.push("verify health");
+    runner.plan(&steps);
+
     runner.log(
         Level::Warn,
         format!("[restore] {} from snapshot '{}'", m.stack_name, snapshot),
@@ -1502,7 +1540,13 @@ pub async fn restore_app(
     // human notices. That is a self-inflicted outage on the one operation
     // you run when something is already wrong.
     let restore_result = match &copy_result {
-        Err(_) => Ok(StepOutcome::Unchanged),
+        Err(_) => {
+            // fix-171 round 3: the safety copy failed, so "restore data"
+            // never runs — marked skipped rather than left as a silent
+            // gap, even though the operation as a whole still fails below.
+            runner.skip("restore data");
+            Ok(StepOutcome::Unchanged)
+        }
         Ok(copied) => {
             let copied = *copied;
             runner
@@ -1636,8 +1680,12 @@ pub const HOST_META_EXTRAS: &[&str] = &[
 /// H10 hardening: snapshot the host's own critical metadata — the secrets
 /// vault, state.json, and TLS material — into a dedicated `host-meta` repo.
 /// Without this, losing the host disk loses the keys needed for recovery.
+/// fix-171 round 3: fixed and unconditional.
+pub const HOST_META_BACKUP_STEPS: &[&str] = &["init repo", "host extras", "snapshot", "retention"];
+
 pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationReport {
     let mut runner = Runner::new("host-meta-backup", ctx.sink, ctx.journal);
+    runner.plan(HOST_META_BACKUP_STEPS);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let secrets = format!("{}/secrets", ctx.state_dir);

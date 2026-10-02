@@ -188,3 +188,36 @@ async fn a_pinned_public_key_is_what_verifies_the_connection() {
         "a pinned connection is verified — the warning is for the unpinned case"
     );
 }
+
+/// fix-171 round 3: backup_device's fixed plan is announced and reached.
+#[tokio::test]
+async fn fix_171_backup_device_reaches_its_announced_plan() {
+    let exec = MockExecutor::new();
+    exec.respond_always("restic stats", CmdOutput::ok("{\"total_size\":114688}"));
+    exec.respond_always("curl", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let c = ctx(&exec, &sink, &j);
+    let report = backup_device(&c, &dev(None), &BackupCfg::default()).await;
+    assert!(report.ok, "{:?}", report.error);
+    let events = sink.events();
+    let m = events
+        .iter()
+        .find_map(|e| match e {
+            homelab_core::sink::PipelineEvent::Plan { steps, .. } => Some(steps.len()),
+            _ => None,
+        })
+        .expect("a plan was announced");
+    let mut names = std::collections::BTreeSet::new();
+    for e in &events {
+        match e {
+            homelab_core::sink::PipelineEvent::StepStarted { step, .. }
+            | homelab_core::sink::PipelineEvent::StepSkipped { step, .. } => {
+                names.insert(step.clone());
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(m, 3);
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}

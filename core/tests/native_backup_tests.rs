@@ -629,3 +629,97 @@ mod chassis_pause_addendum {
         );
     }
 }
+
+// ── fix-171 round 3: backup_native's own plan, reached exactly for every
+// backup_pause variant — including Chassis's NothingRunning branch, where
+// "resume the service" is planned but never runs.
+
+fn plan_and_marks(
+    events: &[homelab_core::sink::PipelineEvent],
+) -> (usize, std::collections::BTreeSet<String>) {
+    use homelab_core::sink::PipelineEvent;
+    let plan_len = events
+        .iter()
+        .find_map(|e| match e {
+            PipelineEvent::Plan { steps, .. } => Some(steps.len()),
+            _ => None,
+        })
+        .expect("a plan was announced");
+    let mut names = std::collections::BTreeSet::new();
+    for e in events {
+        match e {
+            PipelineEvent::StepStarted { step, .. } | PipelineEvent::StepSkipped { step, .. } => {
+                names.insert(step.clone());
+            }
+            _ => {}
+        }
+    }
+    (plan_len, names)
+}
+
+#[tokio::test]
+async fn fix_171_backup_native_off_reaches_its_announced_plan() {
+    let exec = harness();
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let r = backup_native(
+        &ctx(&exec, &sink, &j),
+        &almanac(BackupPause::Off),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(r.ok, "{:?}", r.error);
+    let (m, names) = plan_and_marks(&sink.events());
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}
+
+#[tokio::test]
+async fn fix_171_backup_native_unit_pause_reaches_its_announced_plan() {
+    let exec = harness();
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let r = backup_native(
+        &ctx(&exec, &sink, &j),
+        &almanac(BackupPause::Unit),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(r.ok, "{:?}", r.error);
+    let (m, names) = plan_and_marks(&sink.events());
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}
+
+/// fix-171 round 3: Chassis's `NothingRunning` outcome means "resume the
+/// service" is in the plan but never runs — it must still be marked skipped.
+#[tokio::test]
+async fn fix_171_backup_native_chassis_nothing_running_skips_resume() {
+    let exec = harness();
+    // exit 3 and an inactive unit together decide `NothingRunning`
+    // (`decide_chassis_pause`).
+    exec.respond_first("is-active", CmdOutput::failed(3, "inactive"));
+    exec.respond_always(
+        "backup-pause --for",
+        CmdOutput::failed(3, "nothing to pause"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let r = backup_native(
+        &ctx(&exec, &sink, &j),
+        &almanac(BackupPause::Chassis),
+        &BackupCfg::default(),
+    )
+    .await;
+    assert!(r.ok, "{:?}", r.error);
+    let events = sink.events();
+    let (m, names) = plan_and_marks(&events);
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            homelab_core::sink::PipelineEvent::StepSkipped { step, .. }
+            if step == "resume the service"
+        )),
+        "resume the service must be an explicit skip, not absent: {:?}",
+        events
+    );
+}

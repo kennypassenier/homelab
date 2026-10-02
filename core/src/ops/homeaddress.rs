@@ -285,6 +285,10 @@ pub async fn sync_home_address(ctx: &OpCtx<'_>) -> OperationReport {
     }
 
     const STEP: &str = "whitelist the home address";
+    // fix-171 round 3: this is the only step this op can ever mark, and it
+    // is reached only here — every earlier return above marks nothing at
+    // all, so no plan was owed yet.
+    runner.plan(&[STEP]);
     match runner
         .step(STEP, || write_and_reload(exec, gw, &wl, &before, &want))
         .await

@@ -119,3 +119,66 @@ async fn an_unreachable_github_falls_back_to_the_supervised_update() {
         exec.calls()
     );
 }
+
+/// fix-171 round 3: already running the listed release is a legitimate
+/// early stop, not a crash — the four steps this run never reaches
+/// ("preserve binary" through "drop the kit's own rollback copy") must be
+/// marked skipped so n still reaches the announced m.
+#[tokio::test]
+async fn fix_171_an_installed_release_still_reaches_its_announced_plan() {
+    let exec = harness("aaaa");
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let r = update_native(&ctx(&exec, &sink, &j), &kyu(), None).await;
+    assert!(r.ok, "{:?}", r.error);
+    let events = sink.events();
+    let m = events
+        .iter()
+        .find_map(|e| match e {
+            homelab_core::sink::PipelineEvent::Plan { steps, .. } => Some(steps.len()),
+            _ => None,
+        })
+        .expect("a plan was announced");
+    let mut names = std::collections::BTreeSet::new();
+    for e in &events {
+        match e {
+            homelab_core::sink::PipelineEvent::StepStarted { step, .. }
+            | homelab_core::sink::PipelineEvent::StepSkipped { step, .. } => {
+                names.insert(step.clone());
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(m, 7);
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}
+
+/// fix-171 round 3: the full, unconditional path reaches the same plan.
+#[tokio::test]
+async fn fix_171_a_full_update_reaches_its_announced_plan() {
+    let exec = harness("bbbb");
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let r = update_native(&ctx(&exec, &sink, &j), &kyu(), None).await;
+    assert!(r.ok, "{:?}", r.error);
+    let events = sink.events();
+    let m = events
+        .iter()
+        .find_map(|e| match e {
+            homelab_core::sink::PipelineEvent::Plan { steps, .. } => Some(steps.len()),
+            _ => None,
+        })
+        .expect("a plan was announced");
+    let mut names = std::collections::BTreeSet::new();
+    for e in &events {
+        match e {
+            homelab_core::sink::PipelineEvent::StepStarted { step, .. }
+            | homelab_core::sink::PipelineEvent::StepSkipped { step, .. } => {
+                names.insert(step.clone());
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(m, 7);
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}

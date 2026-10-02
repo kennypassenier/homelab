@@ -157,6 +157,23 @@ pub enum Command {
     GetApplied {
         stack: String,
     },
+    /// fix-207: whether Proxmox is actually enforcing each named stack's
+    /// firewall right now, read straight off `/etc/pve/firewall/<vmid>.fw`
+    /// — the same file fix-88's fleet check already reads, but on its own,
+    /// so a dashboard page can ask for it without paying for the whole
+    /// fact gather (`FleetCheck`) on every load. The dashboard's topology
+    /// and firewall page otherwise show only the repository's declaration,
+    /// which can run well ahead of (or behind) what is switched on on pve
+    /// (Kenny: "Firewalls: 5 van de 11 staan aan … waarom zie ik dat dan
+    /// niet op de topology van fleet view?"). Answers `{"statuses": {stack
+    /// => homelab_core::ops::fleetcheck::FirewallLiveStatus}}`, one entry
+    /// per stack the host could read a file for.
+    /// Not sent by a dashboard older than fix-207; a host older than
+    /// fix-207 has no arm for it and answers "unknown command", which the
+    /// caller reads as "no live data" and falls back to the repository.
+    GetFirewallLive {
+        stack_files: Vec<(String, u16)>,
+    },
     /// G8: read the host's runtime settings.
     GetConfig,
     /// G8: replace the host's runtime settings (persisted to host.toml).
@@ -783,6 +800,7 @@ impl Command {
             | GetState
             | ListTemplates
             | GetApplied { .. }
+            | GetFirewallLive { .. }
             | GetConfig
             | FleetCheck { .. }
             | Today { .. }
@@ -868,6 +886,7 @@ impl Command {
             ApplyResources(_) => "apply_resources",
             ListTemplates => "list_templates",
             GetApplied { .. } => "get_applied",
+            GetFirewallLive { .. } => "get_firewall_live",
             GetConfig => "get_config",
             SetConfig(_) => "set_config",
             BackupHostMeta => "backup_host_meta",

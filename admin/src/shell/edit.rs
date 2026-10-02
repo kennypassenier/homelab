@@ -1562,16 +1562,71 @@ fn fleet_firewall(wc: &WorkingCopy) -> Result<FleetFirewallRead, Refusal> {
     Ok((fleet, summaries, head, natives, gateway_vmids, named))
 }
 
+/// fix-207: ask the host what it actually enforces for the named stacks,
+/// keyed by stack name. `None` when an older host has no arm for the
+/// command, the link is down, or its answer does not parse — every one of
+/// those means "the dashboard could not learn this", never "off", so every
+/// caller falls back to showing the repository alone rather than guessing.
+async fn fetch_firewall_live(
+    c: &EditCtx,
+    fleet: &[FleetFirewall],
+) -> Option<BTreeMap<String, homelab_core::ops::fleetcheck::FirewallLiveStatus>> {
+    if fleet.is_empty() {
+        return None;
+    }
+    let stack_files: Vec<(String, u16)> = fleet.iter().map(|f| (f.stack.clone(), f.vmid)).collect();
+    let r = c
+        .host
+        .ask_traced(
+            Command::GetFirewallLive { stack_files },
+            Duration::from_secs(15),
+            None,
+        )
+        .await
+        .ok()?;
+    if !r.ok {
+        return None;
+    }
+    #[derive(Deserialize)]
+    struct Body {
+        statuses: BTreeMap<String, homelab_core::ops::fleetcheck::FirewallLiveStatus>,
+    }
+    serde_json::from_str::<Body>(&r.message)
+        .ok()
+        .map(|b| b.statuses)
+}
+
 async fn firewall(State(c): State<EditCtx>) -> Response {
     let wc = c.wc.clone();
     let read = blocking(move || {
         let (fleet, summaries, head, ..) = fleet_firewall(&wc)?;
-        Ok((fwmatrix::matrix(&fleet), summaries, head))
+        Ok((fwmatrix::matrix(&fleet), summaries, head, fleet))
     })
     .await
     .and_then(|r| r);
     match read {
-        Ok((m, summaries, head)) => {
+        Ok((m, mut summaries, head, fleet)) => {
+            if let Some(live) = fetch_firewall_live(&c, &fleet).await {
+                // fix-207: patch each stack's row with what pve actually
+                // enforces, so the "Firewall" column (and anything that
+                // reuses this same read, e.g. the firewall page's table)
+                // shows the deployed truth, not only the working copy's
+                // declaration.
+                for row in &mut summaries {
+                    let Some(stack) = row.get("stack").and_then(|v| v.as_str()) else {
+                        continue;
+                    };
+                    if let Some(s) = live.get(stack)
+                        && let Some(obj) = row.as_object_mut()
+                    {
+                        obj.insert("live_enforced".into(), serde_json::json!(s.enforced));
+                        obj.insert(
+                            "live_matches_repo".into(),
+                            serde_json::json!(s.matches_repo),
+                        );
+                    }
+                }
+            }
             Json(serde_json::json!({ "matrix": m, "stacks": summaries, "head": head }))
                 .into_response()
         }
@@ -1596,12 +1651,21 @@ async fn topology(State(c): State<EditCtx>) -> Response {
         Ok((
             crate::core::topology::from_fleet_declared(&fleet, &natives, &gateway_vmids, &named),
             head,
+            fleet,
         ))
     })
     .await
     .and_then(|r| r);
     match read {
-        Ok((t, head)) => Json(serde_json::json!({ "topology": t, "head": head })).into_response(),
+        Ok((mut t, head, fleet)) => {
+            // fix-207: the repository-only shape stays the fallback; a live
+            // answer from the host only ever adds the two optional fields
+            // per node, never changes a node or edge the repository found.
+            if let Some(live) = fetch_firewall_live(&c, &fleet).await {
+                t = crate::core::topology::with_live(t, &live);
+            }
+            Json(serde_json::json!({ "topology": t, "head": head })).into_response()
+        }
         Err(r) => refusal(StatusCode::CONFLICT, r),
     }
 }

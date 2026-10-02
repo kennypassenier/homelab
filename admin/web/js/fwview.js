@@ -13,13 +13,28 @@
  *   unguarded: string[]}} Matrix
  * @typedef {{stack: string, vmid: number, ip: string, declared: boolean,
  *   enabled: boolean, policy_in: string | null, policy_out: string | null,
- *   rules: number, management_open: string | null}} StackFw
+ *   rules: number, management_open: string | null,
+ *   live_enforced?: boolean, live_matches_repo?: boolean}} StackFw
  */
 
 /**
+ * fix-207 (Kenny: "Firewalls: 5 van de 11 staan aan … waarom zie ik dat
+ * dan niet op de topology van fleet view?"): once the dashboard has an
+ * answer from the host about what pve actually enforces, that answer
+ * wins over the repository's own declaration — the repository is shown
+ * only when the host did not say (`live_enforced` is `undefined`, an
+ * older host or the link down).
  * @param {StackFw} s
  */
 export function stackState(s) {
+  if (s.live_enforced === true) {
+    return s.live_matches_repo === false
+      ? { label: "in force (repo differs)", tone: "warn" }
+      : { label: "in force", tone: "ok" };
+  }
+  if (s.live_enforced === false && s.live_matches_repo === false) {
+    return { label: "declared, not enforced", tone: "bad" };
+  }
   if (!s.declared) return { label: "none declared", tone: "bad" };
   if (!s.enabled) return { label: "declared but off", tone: "warn" };
   return { label: "in force", tone: "ok" };

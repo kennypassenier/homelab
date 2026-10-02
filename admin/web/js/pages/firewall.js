@@ -39,7 +39,8 @@ export function mount(root) {
       {
         label: "Firewall",
         sort: "text",
-        order: "none declared,declared but off,in force",
+        order:
+          "none declared,declared but off,declared, not enforced,in force (repo differs),in force",
         filter: "choice",
       },
       { label: "Inbound", sort: "text", filter: "choice" },

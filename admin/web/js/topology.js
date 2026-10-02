@@ -8,6 +8,17 @@
 // deterministic layout — nodes on a circle, in sorted stack order, so the
 // same fleet always draws the same picture and a diff between two days is
 // just which edges moved, not which point moved where.
+//
+// fix-207 (Kenny, Dutch): "gebruik voor elke stack een andere kleur, dan
+// kan ik duidelijk zien wie welke verbinding heeft met wie. Zet het bij in
+// de legende en als ik hover over de naam of het bolletje van een stack,
+// dan moeten enkel die zijn lijnen getoond worden, de anderen vallen dan
+// even weg." — every stack gets its own hue (evenly spaced around the
+// wheel, in the same sorted order the layout already uses, so the colour
+// a stack gets never depends on which other stacks happen to exist this
+// time); every edge is tinted by the stack it leaves FROM; hovering or
+// focusing a node's dot, its label, or its legend entry isolates that
+// stack's edges, and leaving restores the full graph.
 
 import { h } from "./dom.js";
 
@@ -50,6 +61,24 @@ function layout(nodes) {
 }
 
 /**
+ * fix-207: one hue per stack, evenly spaced around the wheel in sorted
+ * order — the same order the layout already uses — so the colour a stack
+ * gets is deterministic and never collides with a neighbour's.
+ * @param {{stack: string}[]} nodes
+ * @returns {Map<string, number>}
+ */
+export function stackHues(nodes) {
+  const sorted = [...new Set(nodes.map((n) => n.stack))].sort((a, b) =>
+    a.localeCompare(b),
+  );
+  const hues = new Map();
+  sorted.forEach((stack, i) => {
+    hues.set(stack, Math.round((360 * i) / Math.max(sorted.length, 1)));
+  });
+  return hues;
+}
+
+/**
  * fix-203: `kind` tells nodes apart generically — `docker` (a compose
  * stack), `native` (declares at least one `natives` unit), `gateway`
  * (whichever vmid some OTHER stack's own `gateway_route.gateway_vmid`
@@ -57,11 +86,48 @@ function layout(nodes) {
  * to no fleet stack at all — a house device, Home Assistant, pve — labelled
  * by its bare IP since nothing here is allowed to know its name).
  * @typedef {{stack: string, vmid: number, ip: string,
- *   kind: "docker"|"native"|"gateway"|"external"}} TopoNode
+ *   kind: "docker"|"native"|"gateway"|"external",
+ *   live_enforced?: boolean, live_matches_repo?: boolean}} TopoNode
  * @typedef {{from: string, to: string,
  *   kind: "declared"|"planned"|"open"|"named"|"route", detail: string[]}} TopoEdge
  * @typedef {{nodes: TopoNode[], edges: TopoEdge[]}} Topology
  */
+
+/**
+ * Dim every edge and node that does not touch `stack` (`null` restores
+ * everything). Walks the live DOM rather than captured arrays, so it
+ * works the same from a node, a label or a legend entry.
+ * @param {SVGElement} root
+ * @param {string | null} stack
+ */
+function isolate(root, stack) {
+  for (const e of root.querySelectorAll(".topology__edge")) {
+    const match =
+      stack == null ||
+      e.getAttribute("data-from") === stack ||
+      e.getAttribute("data-to") === stack;
+    e.classList.toggle("topology__edge--dim", !match);
+  }
+  for (const n of root.querySelectorAll(".topology__node")) {
+    const match = stack == null || n.getAttribute("data-stack") === stack;
+    n.classList.toggle("topology__node--dim", !match);
+  }
+}
+
+/**
+ * Wires hover and keyboard focus on one element so it isolates `stack` in
+ * `root` while active. Shared by a node and its legend entry, so the two
+ * behave identically.
+ * @param {Element} el
+ * @param {SVGElement} root
+ * @param {string} stack
+ */
+function wireIsolate(el, root, stack) {
+  el.addEventListener("mouseenter", () => isolate(root, stack));
+  el.addEventListener("mouseleave", () => isolate(root, null));
+  el.addEventListener("focus", () => isolate(root, stack));
+  el.addEventListener("blur", () => isolate(root, null));
+}
 
 /**
  * @param {Topology} topo
@@ -73,6 +139,7 @@ function layout(nodes) {
  */
 export function topologyEl(topo, opts = {}) {
   const pos = layout(topo.nodes);
+  const hues = stackHues(topo.nodes);
   const root = svg("svg", {
     viewBox: `0 0 ${SIZE} ${SIZE}`,
     class: "topology__svg",
@@ -98,6 +165,9 @@ export function topologyEl(topo, opts = {}) {
     const line = svg("path", {
       d: `M ${a.x} ${a.y} Q ${bow.x} ${bow.y} ${b.x} ${b.y}`,
       class: `topology__edge topology__edge--${e.kind}`,
+      "data-from": e.from,
+      "data-to": e.to,
+      style: `--stack-hue: ${hues.get(e.from) ?? 0}`,
     });
     line.append(
       svg("title", {}, `${e.from} → ${e.to}: ${e.detail.join(", ") || e.kind}`),
@@ -108,10 +178,13 @@ export function topologyEl(topo, opts = {}) {
   for (const n of topo.nodes) {
     const p = pos.get(n.stack);
     if (!p) continue;
+    const hue = hues.get(n.stack) ?? 0;
     const g = svg("g", {
       class: "topology__node",
+      "data-stack": n.stack,
       tabindex: "0",
       role: "button",
+      style: `--stack-hue: ${hue}`,
       "aria-label": `${n.stack} (vmid ${n.vmid}, ${n.ip})`,
     });
     const traffic = opts.traffic?.get(n.stack) ?? 0;
@@ -123,6 +196,31 @@ export function topologyEl(topo, opts = {}) {
           cy: String(p.y),
           r: String(ringR),
           class: "topology__traffic-ring",
+        }),
+      );
+    }
+    // fix-207: a ring around the dot for what the host actually enforces,
+    // independent of `n.live_enforced === undefined` (no live answer —
+    // nothing drawn, the dot alone still shows the repository's shape).
+    if (n.live_enforced === true) {
+      g.append(
+        svg("circle", {
+          cx: String(p.x),
+          cy: String(p.y),
+          r: String(NODE_R + 4),
+          class:
+            n.live_matches_repo === false
+              ? "topology__fw-ring topology__fw-ring--mismatch"
+              : "topology__fw-ring topology__fw-ring--enforced",
+        }),
+      );
+    } else if (n.live_enforced === false && n.live_matches_repo === false) {
+      g.append(
+        svg("circle", {
+          cx: String(p.x),
+          cy: String(p.y),
+          r: String(NODE_R + 4),
+          class: "topology__fw-ring topology__fw-ring--mismatch",
         }),
       );
     }
@@ -147,15 +245,26 @@ export function topologyEl(topo, opts = {}) {
         n.stack,
       ),
     );
+    const live =
+      n.live_enforced == null
+        ? ""
+        : n.live_enforced
+          ? n.live_matches_repo === false
+            ? " · the host enforces this firewall now; the repository disagrees"
+            : " · the host enforces this firewall now"
+          : n.live_matches_repo === false
+            ? " · the host is NOT enforcing this firewall, though the repository disagrees"
+            : "";
     g.append(
       svg(
         "title",
         {},
         n.kind === "external"
           ? `${n.stack} · outside the fleet`
-          : `${n.stack} · ${n.kind ?? "docker"} · vmid ${n.vmid} · ${n.ip}`,
+          : `${n.stack} · ${n.kind ?? "docker"} · vmid ${n.vmid} · ${n.ip}${live}`,
       ),
     );
+    wireIsolate(g, root, n.stack);
     if (opts.onSelect) {
       g.addEventListener("click", () => opts.onSelect?.(n.stack));
       g.addEventListener("keydown", (e) => {
@@ -168,6 +277,36 @@ export function topologyEl(topo, opts = {}) {
     root.append(g);
   }
   return root;
+}
+
+/**
+ * The legend's per-stack swatches, each wired to isolate its stack on the
+ * given svg (fix-207): one grid entry per stack, in the same sorted order
+ * (and the same hues) the graph itself uses.
+ * @param {Topology} topo
+ * @param {SVGElement} svgRoot
+ */
+function stackLegend(topo, svgRoot) {
+  const hues = stackHues(topo.nodes);
+  const sorted = [...topo.nodes].sort((a, b) => a.stack.localeCompare(b.stack));
+  return h(
+    "ul",
+    { class: "topology__stack-legend", "aria-label": "Stacks" },
+    ...sorted.map((n) => {
+      const btn = h(
+        "button",
+        {
+          type: "button",
+          class: "topology__stack-key",
+          style: `--stack-hue: ${hues.get(n.stack) ?? 0}`,
+        },
+        h("span", { class: "topology__stack-swatch", "aria-hidden": "true" }),
+        n.stack,
+      );
+      wireIsolate(btn, svgRoot, n.stack);
+      return h("li", null, btn);
+    }),
+  );
 }
 
 /**
@@ -184,11 +323,12 @@ export function topologyFigure(topo, opts = {}) {
       "No stacks with a working copy to draw yet.",
     );
   }
+  const svgEl = topologyEl(topo, opts);
   return h(
     "figure",
     { class: "topology" },
     h("figcaption", null, opts.caption ?? "Topology"),
-    topologyEl(topo, opts),
+    svgEl,
     h(
       "ul",
       { class: "topology__legend topology__legend--edges" },
@@ -226,6 +366,20 @@ export function topologyFigure(topo, opts = {}) {
             ),
           ]
         : []),
+      ...(topo.nodes.some((n) => n.live_enforced != null)
+        ? [
+            h(
+              "li",
+              { class: "topology__key topology__key--fw-enforced" },
+              "firewall enforced on the host now",
+            ),
+            h(
+              "li",
+              { class: "topology__key topology__key--fw-mismatch" },
+              "host and repository disagree",
+            ),
+          ]
+        : []),
     ),
     h(
       "ul",
@@ -251,5 +405,6 @@ export function topologyFigure(topo, opts = {}) {
         "outside the fleet",
       ),
     ),
+    stackLegend(topo, svgEl),
   );
 }

@@ -27,37 +27,31 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# A free-ish high port, so two runs on one machine (a dev shell and a CI
-# box, say) do not collide on 8090 (the service's own default).
-port=18099
-listen="127.0.0.1:$port"
-base_url="http://$listen"
-token="invariants-$(date +%s)-$$"
-secret_key="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-
-cat > "$workdir/admin.toml" <<EOF
-[admin]
-host = "10.10.10.250:8443"
-host_token = "0000000000000000"
-access_team_domain = "example.cloudflareaccess.com"
-access_aud = "e76eb5aa00000000000000000000000000000000000000000000000000000000"
-dev_without_locks = true
-EOF
-mkdir -p "$workdir/state"
-
+# fix-207: the topology/firewall/dependencies pages read the working copy
+# (homelab_admin::shell::workcopy::WorkingCopy), not the demo host's made-up
+# fleet — so a smoke that pins those pages needs a real (if tiny) working
+# copy to clone. A local path is a supported remote (arch-edit-txn, "a
+# local path works too (tests)"), so this builds a one-commit fixture repo
+# from three real stack manifests — one firewall on, one off, one with no
+# firewall block at all — and points HOMELAB_ADMIN_GIT_REMOTE at it. Only
+# `lxc-compose.yml` is copied (never a stack's `.env`), so no secret ever
+# enters this throwaway repo.
+fixture_repo="$workdir/fixture-repo"
+mkdir -p "$fixture_repo/stacks/admin" "$fixture_repo/stacks/kp-soft" "$fixture_repo/stacks/gateway"
+cp "$root/stacks/admin/lxc-compose.yml" "$fixture_repo/stacks/admin/lxc-compose.yml"
+cp "$root/stacks/kp-soft/lxc-compose.yml" "$fixture_repo/stacks/kp-soft/lxc-compose.yml"
+cp "$root/stacks/gateway/lxc-compose.yml" "$fixture_repo/stacks/gateway/lxc-compose.yml"
 # fix-203: a throwaway working copy fixture for the fleet view's topology —
-# `WorkingCopy::present()` only needs a `.git` marker and a `stacks/` dir
-# (read-only routes never run a git command at all), so this costs no real
-# clone, no network and no credentials. Two made-up stacks (never real app
+# it shares fix-207's local fixture repository above, so it costs no
+# network and no credentials. Two made-up stacks (never real app
 # names): `beta-demo`'s address is named directly in `alpha-demo`'s own
 # manifest, outside any firewall declaration, which is exactly the
 # `every_flow_the_stack_files_name_passes_the_declared_firewalls`-style
 # signal `admin/src/core/topology.rs::addresses_named_in` now reads —
 # proving the invariant "an edge for a stack whose file names another
 # stack's address" without touching a real stack file.
-repo="$workdir/repo"
-mkdir -p "$repo/.git" "$repo/stacks/alpha-demo" "$repo/stacks/beta-demo"
-cat > "$repo/stacks/beta-demo/lxc-compose.yml" <<'EOF'
+mkdir -p "$fixture_repo/stacks/alpha-demo" "$fixture_repo/stacks/beta-demo"
+cat > "$fixture_repo/stacks/beta-demo/lxc-compose.yml" <<'EOF'
 stack_name: beta-demo
 vmid: 901
 hostname: 901-app-beta-demo
@@ -73,7 +67,7 @@ lxc:
 boot: {}
 apps: []
 EOF
-cat > "$repo/stacks/alpha-demo/lxc-compose.yml" <<'EOF'
+cat > "$fixture_repo/stacks/alpha-demo/lxc-compose.yml" <<'EOF'
 stack_name: alpha-demo
 vmid: 902
 hostname: 902-app-alpha-demo
@@ -93,6 +87,30 @@ apps: []
 upstream: "10.10.10.91:8080"
 EOF
 
+git init -q -b main "$fixture_repo"
+git -C "$fixture_repo" -c user.email=invariants@example.com -c user.name=invariants \
+  add -A
+git -C "$fixture_repo" -c user.email=invariants@example.com -c user.name=invariants \
+  commit -q -m "fixture: three stacks for the invariants smoke"
+
+# A free-ish high port, so two runs on one machine (a dev shell and a CI
+# box, say) do not collide on 8090 (the service's own default).
+port=18099
+listen="127.0.0.1:$port"
+base_url="http://$listen"
+token="invariants-$(date +%s)-$$"
+secret_key="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+
+cat > "$workdir/admin.toml" <<EOF
+[admin]
+host = "10.10.10.250:8443"
+host_token = "0000000000000000"
+access_team_domain = "example.cloudflareaccess.com"
+access_aud = "e76eb5aa00000000000000000000000000000000000000000000000000000000"
+dev_without_locks = true
+EOF
+mkdir -p "$workdir/state"
+
 echo "invariants: building homelab-admin --features demo-host"
 cargo build -p homelab-admin --features demo-host --quiet
 # The binary lands in cargo's target directory, which a global
@@ -104,8 +122,10 @@ HOMELAB_ADMIN_TOKEN="$token" \
 HOMELAB_ADMIN_SECRET_KEY="$secret_key" \
 HOMELAB_ADMIN_PUBLIC_URL="https://localhost:$port" \
 HOMELAB_ADMIN_DEMO_HOST=1 \
-HOMELAB_ADMIN_DEMO_STACKS="films,notes,oldstack" \
-HOMELAB_ADMIN_REPO="$repo" \
+HOMELAB_ADMIN_DEMO_STACKS="films,notes,oldstack,admin,kp-soft,gateway" \
+HOMELAB_ADMIN_DATA_DIR="$workdir/admin-data" \
+HOMELAB_ADMIN_GIT_REMOTE="$fixture_repo" \
+HOMELAB_ADMIN_GIT_BRANCH="main" \
   "$target_dir"/debug/homelab-admin \
     --config "$workdir/admin.toml" \
     --state-dir "$workdir/state" \

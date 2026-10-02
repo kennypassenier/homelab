@@ -274,6 +274,78 @@ pub struct FirewallFact {
     pub content: Option<String>,
 }
 
+/// fix-207: one stack's firewall as Proxmox is actually enforcing it right
+/// now, independent of what the repository declares — what the dashboard's
+/// topology and firewall page need to answer Kenny's "why does the
+/// topology not show that 5 of 11 are on".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct FirewallLiveStatus {
+    /// Whether the live `/etc/pve/firewall/<vmid>.fw` has `enable: 1` —
+    /// Proxmox is applying this stack's rules right now, whatever the
+    /// repository's working copy currently declares.
+    pub enforced: bool,
+    /// Whether the live file matches what the manifest declares (the same
+    /// comparison [`evaluate_firewalls`] makes to report drift). `false`
+    /// means the repository and pve disagree, in either direction.
+    pub matches_repo: bool,
+}
+
+/// fix-207: the live status for every stack `files` was read for, keyed by
+/// stack and vmid, pure given the facts and the state the deploy already
+/// has. Reuses the exact comparison [`evaluate_firewalls`] reports as
+/// Drift, so the two can never disagree about what "matches" means.
+pub fn firewall_live_status(
+    state: &HostState,
+    files: &[FirewallFact],
+    tile_watch_source: Option<&str>,
+) -> std::collections::BTreeMap<String, FirewallLiveStatus> {
+    let fleet_targets = crate::ops::tiles::fleet_tile_watch_targets(state);
+    files
+        .iter()
+        .map(|f| {
+            let manifest = state.stacks.get(&f.stack).and_then(|s| s.manifest.as_ref());
+            let decl = manifest.and_then(|m| m.firewall.as_ref());
+            let content = f.content.as_deref();
+            let enforced = content.is_some_and(|c| c.lines().any(|l| l.trim() == "enable: 1"));
+            let matches_repo = match (decl, content) {
+                (Some(d), content) if d.enabled => {
+                    let effective = manifest
+                        .map(|m| {
+                            crate::firewall::with_tile_watch(
+                                d,
+                                &m.network.ip,
+                                &m.tiles,
+                                tile_watch_source.unwrap_or(""),
+                                &fleet_targets,
+                            )
+                        })
+                        .unwrap_or_else(|| d.clone());
+                    let want = crate::firewall::render(&f.stack, &effective);
+                    content
+                        .map(|have| {
+                            let (extra, missing) = crate::firewall::line_changes(&want, have);
+                            extra.is_empty() && missing.is_empty()
+                        })
+                        .unwrap_or(false)
+                }
+                // Nothing declared enabled, and pve shows nothing either:
+                // the two agree there is no firewall in force here.
+                (_, None) => true,
+                // Pve has a file but nothing here declares it enabled: an
+                // undeclared or disabled-in-the-repo ruleset.
+                (_, Some(_)) => false,
+            };
+            (
+                f.stack.clone(),
+                FirewallLiveStatus {
+                    enforced,
+                    matches_repo,
+                },
+            )
+        })
+        .collect()
+}
+
 /// fix-88: every recorded stack's firewall file on pve, held against the
 /// declaration the stack's last deploy recorded.
 ///

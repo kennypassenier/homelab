@@ -349,10 +349,24 @@ cmd_node() {
 # directly against fixtures) vs executed: only dispatch when run as a
 # command, so `source gate-carry.sh` loads the functions and nothing else.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  # Rule 5 (Kenny, 2026-10-02): every test run reports how long it took,
+  # measured, per run (the line above it already says full, carried or
+  # skipped).
+  timed() {  # timed LABEL CMD...
+    local start=$SECONDS rc=0
+    "${@:2}" || rc=$?
+    local d=$((SECONDS - start))
+    if [ "$d" -ge 60 ]; then
+      echo "gate-carry: $1 took $((d / 60)) min $((d % 60)) s (exit $rc)"
+    else
+      echo "gate-carry: $1 took $d s (exit $rc)"
+    fi
+    return "$rc"
+  }
   case "${1:-}" in
-    rust) cmd_rust ;;
-    node) cmd_node ;;
-    full) GATE_CARRY_MODE=full; force_full=full; cmd_rust; rc1=$?; cmd_node; rc2=$?; [ "$rc1" = 0 ] && [ "$rc2" = 0 ] ;;
+    rust) timed "rust tests" cmd_rust ;;
+    node) timed "node tests" cmd_node ;;
+    full) GATE_CARRY_MODE=full; force_full=full; timed "rust tests" cmd_rust; rc1=$?; timed "node tests" cmd_node; rc2=$?; [ "$rc1" = 0 ] && [ "$rc2" = 0 ] ;;
     *) sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 fi

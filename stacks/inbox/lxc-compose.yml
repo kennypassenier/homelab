@@ -63,7 +63,7 @@ apps: []
 natives: [inbox]
 
 firewall:
-  enabled: false
+  enabled: true
   comment: |-
     CT 118 (inbox), one native chassis-rs service on :8080.
     Declared from what the container showed on 2026-09-27 21:03 local (fix-89

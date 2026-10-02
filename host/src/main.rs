@@ -12343,32 +12343,36 @@ async fn gather_probes(
                 .and_then(|l| l.trim().trim_end_matches('%').parse::<u64>().ok())
                 .map(|used| 100u64.saturating_sub(used))
         });
+    // fix-205: both directories are made on first use, so on a host that
+    // has not used them yet `df` on the directory itself fails and the
+    // doctor reported "unknown" every night. The free space that matters is
+    // the filesystem the directory WILL be made on: `df` the nearest
+    // existing ancestor.
+    fn df_nearest(dir: &str) -> Cmd {
+        let quoted = dir.replace('\'', "'\\''");
+        let script = format!(
+            "d='{quoted}'; while [ ! -e \"$d\" ] && [ \"$d\" != / ]; do d=$(dirname \"$d\"); done; \
+             df --output=pcent \"$d\""
+        );
+        Cmd::new("sh", &["-c", &script], 20)
+    }
     // fix-113 ADDENDUM: free % on the chassis backup staging directory —
     // only asked when one is configured; `None` outer = not configured, so
     // `diagnose` raises no finding over a feature nobody turned on.
     let staging_disk_free_pct = match staging_dir {
-        Some(dir) => Some(
-            exec.run(&Cmd::new("df", &["--output=pcent", dir], 20))
-                .await
-                .ok()
-                .and_then(|o| {
-                    o.stdout
-                        .lines()
-                        .nth(1)
-                        .and_then(|l| l.trim().trim_end_matches('%').parse::<u64>().ok())
-                        .map(|used| 100u64.saturating_sub(used))
-                }),
-        ),
+        Some(dir) => Some(exec.run(&df_nearest(dir)).await.ok().and_then(|o| {
+            o.stdout
+                .lines()
+                .nth(1)
+                .and_then(|l| l.trim().trim_end_matches('%').parse::<u64>().ok())
+                .map(|used| 100u64.saturating_sub(used))
+        })),
         None => None,
     };
     // fix-62: free % on the restore drill's scratch directory — always
     // asked, since a default applies when host.toml names none.
     let restore_scratch_disk_free_pct = exec
-        .run(&Cmd::new(
-            "df",
-            &["--output=pcent", restore_scratch_dir],
-            20,
-        ))
+        .run(&df_nearest(restore_scratch_dir))
         .await
         .ok()
         .and_then(|o| {

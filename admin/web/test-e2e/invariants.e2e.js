@@ -256,3 +256,27 @@ test("invariants: the kit's Status and Clients pages are switched off, Passkeys 
     await browser.close();
   }
 });
+
+test("invariants: a table's data loads once; live updates never duplicate its rows", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/backups`);
+    await page.locator("table tbody tr").first().waitFor({ timeout: 15000 });
+    // Several live updates arrive meanwhile (fix-204: each one used to
+    // start another full read whose rows piled onto the table).
+    await page.waitForTimeout(12000);
+    const keys = await page.$$eval("table tbody tr", (trs) =>
+      trs.map((tr) => tr.textContent?.trim() ?? ""),
+    );
+    const dupes = keys.filter((k, i) => k !== "" && keys.indexOf(k) !== i);
+    assert.deepEqual(
+      dupes,
+      [],
+      `rows shown more than once: ${dupes.join(" | ")}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});

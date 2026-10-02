@@ -272,9 +272,42 @@ export function mount(root) {
     table.tbody.replaceChildren(...out);
     table.ready();
   };
-  const retry = () => void load().catch(() => {});
+  // fix-204 (Kenny, 2026-10-02: "zes keer zfs … nu zeven, data moet maar
+  // één keer laden"): the store notifies on every live update, and each
+  // notice started a whole new read on top of the running one, so rows
+  // piled up. Now one read at a time; a store notice only reloads when the
+  // set of stacks itself changed, and a retry asked for during a read runs
+  // once after it.
+  let running = false;
+  let again = false;
+  let lastNames = "";
+  const namesKey = () =>
+    (current().fleet?.stacks ?? [])
+      .map((s) => s.name)
+      .sort()
+      .join(",");
+  const retry = () => {
+    if (running) {
+      again = true;
+      return;
+    }
+    running = true;
+    lastNames = namesKey();
+    void load()
+      .catch(() => {})
+      .finally(() => {
+        running = false;
+        if (again && !abort.signal.aborted) {
+          again = false;
+          retry();
+        }
+      });
+  };
+  const onStore = () => {
+    if (namesKey() !== lastNames) retry();
+  };
   root.addEventListener("kp-datatable-retry", retry);
-  const off = subscribe(retry);
+  const off = subscribe(onStore);
   retry();
   return () => {
     abort.abort();

@@ -11,6 +11,7 @@ import { batchActions } from "../actionforms.js";
 import {
   badgeCell,
   bindTableUrl,
+  errorBox,
   h,
   fetchJson,
   fillStatGrid,
@@ -109,6 +110,7 @@ export function mount(root, ctx) {
     { type: "button", class: "kp-button", id: "drift-compare" },
     "Compare with the files",
   );
+  const driftError = h("div", { class: "drift-error" });
   root.replaceChildren(
     h(
       "div",
@@ -116,6 +118,7 @@ export function mount(root, ctx) {
       h("h1", null, "Overview"),
       h("span", { class: "actions-row" }, compareBtn, importBtn, newStack),
     ),
+    driftError,
     h(
       "section",
       { class: "kp-card host", "aria-label": "Host", id: "host" },
@@ -207,13 +210,17 @@ export function mount(root, ctx) {
   /** @param {boolean} fresh */
   const readDrift = async (fresh) => {
     compareBtn.disabled = true;
+    driftError.replaceChildren();
     const r = await fetchJson(
       `/data/drift${fresh ? "?fresh=1" : ""}`,
       "drift",
       abort.signal,
     );
     compareBtn.disabled = false;
-    if (!r.ok) return;
+    if (!r.ok) {
+      driftError.replaceChildren(errorBox(r.error));
+      return;
+    }
     drift = r.body.stacks ?? {};
     render();
   };

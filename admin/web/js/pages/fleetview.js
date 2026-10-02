@@ -229,18 +229,14 @@ export function mount(root) {
     deps.ready();
   })().catch(() => {});
 
-  void (async () => {
-    const r = await slowRead(
-      "/data/stale-images",
-      "stale images",
-      abort.signal,
-    );
-    if (abort.signal.aborted) return;
-    if (!r.ok) {
-      stale.failed(r.error);
-      return;
-    }
-    const rows = (r.body.images ?? []).map((/** @type {any} */ x) =>
+  /**
+   * One `/data/stale-images` answer, painted — the dashboard's kept last
+   * answer (fix-179: it used to go blank on every visit while a fresh run
+   * was still on its way) or the finished new one, the same rows either way.
+   * @param {any} body
+   */
+  const paintStale = (body) => {
+    const rows = (body.images ?? []).map((/** @type {any} */ x) =>
       h(
         "tr",
         { "data-kp-row-key": x.where_ },
@@ -252,9 +248,27 @@ export function mount(root) {
       ),
     );
     stale.tbody.replaceChildren(...rows);
+    if (body.measured_at)
+      staleStatus.textContent = `measured ${formatDateTime(body.measured_at)} (reuses the fleet check's own run)`;
+  };
+
+  void (async () => {
+    const r = await slowRead(
+      "/data/stale-images",
+      "stale images",
+      abort.signal,
+      (last) => {
+        paintStale(last);
+        stale.ready({ refresh: false });
+      },
+    );
+    if (abort.signal.aborted) return;
+    if (!r.ok) {
+      stale.failed(r.error);
+      return;
+    }
+    paintStale(r.body);
     stale.ready();
-    if (r.body.measured_at)
-      staleStatus.textContent = `measured ${formatDateTime(r.body.measured_at)} (reuses the fleet check's own run)`;
   })().catch(() => {});
 
   return () => {

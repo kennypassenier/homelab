@@ -107,10 +107,11 @@ export async function send(method, url, body, what = url) {
     location.assign("/login");
     return { ok: false, status: 401, error: routeError(what, 401, null) };
   }
+  const text = r.status === 204 ? "" : await r.text().catch(() => "");
   /** @type {any} */
   let parsed = null;
   try {
-    parsed = r.status === 204 ? null : await r.json();
+    parsed = text ? JSON.parse(text) : null;
   } catch {
     parsed = null;
   }
@@ -118,7 +119,7 @@ export async function send(method, url, body, what = url) {
     return {
       ok: false,
       status: r.status,
-      error: routeError(what, r.status, parsed),
+      error: routeError(what, r.status, parsed, text),
     };
   return { ok: true, status: r.status, body: parsed };
 }

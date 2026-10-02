@@ -5,13 +5,32 @@
 // opens the existing Restore/Restore (native) action dialog with it
 // pre-filled; browsing a snapshot expands its file list inline, read-only.
 
-import { badgeCell, fetchJson, h, tableBlock, td } from "../dom.js";
+import {
+  badgeCell,
+  fetchJson,
+  h,
+  progressGroup,
+  tableBlock,
+  td,
+} from "../dom.js";
 import { humanDuration } from "../format.js";
 import { humanMb } from "../fleet.js";
 import { openAction } from "../actiondialog.js";
+import { stackReadProgress, withStackResult } from "../perstack.js";
 import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
+
+const NOTHING = "No stack has a backup repository yet.";
+
+/**
+ * fix-179: `ok`, with the raw fields `rows` builds a repository table from;
+ * `failed`: the read itself did not finish — named under the progress bar
+ * and never folded into "this stack has no repository" the way a plain
+ * `if (r.ok) out.push(...)` used to.
+ * @typedef {{status: "pending"} | {status: "ok", native: boolean,
+ *   repos: any[]} | {status: "failed", reason: string}} StackResult
+ */
 
 /**
  * @param {number | null | undefined} unixSeconds
@@ -107,7 +126,7 @@ export function mount(root) {
     caption: "Every repository of every stack",
     search: "Search stacks or repositories",
     state: "loading",
-    nothing: "No stack has a backup repository yet.",
+    nothing: NOTHING,
     pageSize: 50,
     pageSizes: "25,50,100,250",
     columns: [
@@ -121,6 +140,11 @@ export function mount(root) {
       { label: "", sort: "none" },
     ],
   });
+  const progressWrap = h("div", { class: "backups__progress" });
+  const failures = h("ul", {
+    class: "backups__errors",
+    "aria-live": "polite",
+  });
   root.replaceChildren(
     h("div", { class: "title-row" }, h("h1", null, "Backups")),
     h(
@@ -128,35 +152,117 @@ export function mount(root) {
       null,
       "Each stack's restic repositories (one per app that keeps data; a native service has one of its own), read from the host. Pick Restore to choose a snapshot and bring the stack's data back to it.",
     ),
+    progressWrap,
+    failures,
     table.wrap,
   );
   const detach = attachDataTables(root);
   const abort = new AbortController();
 
+  /**
+   * The progress bar and the failed-stack list, redrawn from `results`
+   * (fix-179: a stack that could not be read is named here, with its
+   * reason, never silently dropped from the table the way an `if (r.ok)`
+   * push once did).
+   * @param {Record<string, StackResult>} results
+   */
+  const repaint = (results) => {
+    const progress = stackReadProgress(results);
+    progressWrap.replaceChildren(
+      ...(progress.total
+        ? [
+            progressGroup([
+              {
+                label: "Stacks read",
+                pct: progress.pct,
+                value: `${progress.loaded} of ${progress.total}`,
+              },
+            ]),
+          ]
+        : []),
+    );
+    failures.replaceChildren(
+      ...progress.failed.map((f) =>
+        h(
+          "li",
+          { class: "kp-alert kp-alert--destructive" },
+          h("strong", null, f.stack),
+          `: could not be read — ${f.reason}`,
+        ),
+      ),
+    );
+    return progress;
+  };
+
   const load = async () => {
+    progressWrap.replaceChildren();
+    failures.replaceChildren();
+    const names = (current().fleet?.stacks ?? []).map((s) => s.name);
+    if (names.length === 0) {
+      table.setNothing(NOTHING);
+      table.tbody.replaceChildren();
+      table.ready();
+      return;
+    }
     table.loading({
-      words: "Reading each stack's backup status from the host…",
+      words: `Reading each stack's backup status from the host — 0 of ${names.length} so far…`,
     });
-    const stacks = current().fleet?.stacks ?? [];
-    /** @type {Node[]} */
-    const out = [];
-    await Promise.all(
-      stacks.map(async (s) => {
-        const r = await fetchJson(
-          `/data/backups/${encodeURIComponent(s.name)}`,
-          `${s.name}'s backups`,
-          abort.signal,
-        );
-        if (r.ok) {
-          out.push(
-            ...rows(s.name, r.body?.native === true, r.body?.repos ?? []),
+
+    /** @type {Record<string, StackResult>} */
+    let results = Object.fromEntries(
+      names.map((n) => [n, { status: "pending" }]),
+    );
+    repaint(results);
+
+    await Promise.allSettled(
+      names.map(async (name) => {
+        /** @type {StackResult} */
+        let outcome;
+        try {
+          const r = await fetchJson(
+            `/data/backups/${encodeURIComponent(name)}`,
+            `${name}'s backups`,
+            abort.signal,
           );
+          outcome = r.ok
+            ? {
+                status: "ok",
+                native: r.body?.native === true,
+                repos: r.body?.repos ?? [],
+              }
+            : {
+                status: "failed",
+                reason: r.error.fix
+                  ? `${r.error.why} — ${r.error.fix}`
+                  : r.error.why,
+              };
+        } catch (e) {
+          if (abort.signal.aborted) return;
+          outcome = { status: "failed", reason: String(e) };
         }
+        if (abort.signal.aborted) return;
+        results = withStackResult(results, name, outcome);
+        const progress = repaint(results);
+        if (!abort.signal.aborted)
+          table.loading({
+            words: `Reading each stack's backup status from the host — ${progress.loaded} of ${progress.total} so far…`,
+          });
       }),
     );
-    if (out.length === 0) {
-      table.loading({ words: "" });
+    if (abort.signal.aborted) return;
+
+    /** @type {Node[]} */
+    const out = [];
+    for (const name of names) {
+      const r = results[name];
+      if (r.status === "ok") out.push(...rows(name, r.native, r.repos));
     }
+    const progress = repaint(results);
+    table.setNothing(
+      out.length === 0 && progress.failed.length > 0
+        ? "No stack could be read — see the errors above."
+        : NOTHING,
+    );
     table.tbody.replaceChildren(...out);
     table.ready();
   };

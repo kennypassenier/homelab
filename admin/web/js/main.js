@@ -23,6 +23,7 @@ import { mount as firewall } from "./pages/firewall.js";
 import { mount as host } from "./pages/host.js";
 import { mount as jobs } from "./pages/jobs.js";
 import { mount as notifications } from "./pages/notifications.js";
+import { mount as retired } from "./pages/retired.js";
 import { mount as schedules } from "./pages/schedules.js";
 import { mount as secrets } from "./pages/secrets.js";
 import { mount as settings } from "./pages/settings.js";
@@ -172,6 +173,9 @@ function render() {
       break;
     case "backups":
       cleanup = backups(page);
+      break;
+    case "retired":
+      cleanup = retired(page);
       break;
     case "secrets":
       cleanup = secrets(page);

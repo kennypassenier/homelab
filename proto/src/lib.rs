@@ -534,6 +534,13 @@ pub enum Command {
         #[serde(default)]
         force: bool,
     },
+    /// feat-retired-1: every `HostState::retired` entry, structured for the
+    /// dashboard's Retired page — what it was, when and by which kind of
+    /// operation it left, what it kept, and what a wipe of it would still
+    /// keep because a managed stack uses it (`ops::retired::retired_rows`).
+    /// Read-only; `homelab wipe <key>` (`WipeRetired`) is the only thing
+    /// that deletes anything.
+    GetRetired,
     /// feat-backup-3: list the files one snapshot holds under `path` ("" =
     /// the snapshot root), read-only. `owner` is a repository name from
     /// `GetBackups` (the owning app, or the native unit).
@@ -780,6 +787,7 @@ impl Command {
             | GetHostConfig
             | TokenList
             | GetBackups { .. }
+            | GetRetired
             | BrowseSnapshot { .. } => Scope::Read,
             Ui { step, .. } => step.scope(),
             DeployStack(_)
@@ -891,6 +899,7 @@ impl Command {
             UiReply { .. } => "ui_reply",
             UiHold { .. } => "ui_hold",
             GetBackups { .. } => "get_backups",
+            GetRetired => "get_retired",
             BrowseSnapshot { .. } => "browse_snapshot",
             RestoreNative { .. } => "restore_native",
             RevealSecret { .. } => "reveal_secret",

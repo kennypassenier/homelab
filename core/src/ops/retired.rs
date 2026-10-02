@@ -14,6 +14,8 @@
 //!   typed. Nothing automatic calls it: not the nightly round, not a deploy,
 //!   not `apply`.
 
+use serde::Serialize;
+
 use crate::error::CoreError;
 use crate::executor::{Cmd, Executor, TracingExecutor, run_ok};
 use crate::manifest::StackManifest;
@@ -214,6 +216,54 @@ pub fn evaluate_retired(state: &HostState) -> Vec<Finding> {
                  these after you type the name",
                 key
             ),
+        })
+        .collect()
+}
+
+/// One retired entry as the dashboard's Retired page lists it (feat-retired-1,
+/// Kenny 2026-10-02: "delete backups of services we no longer use" from the
+/// dashboard, not only the CLI). Everything [`evaluate_retired`] says about
+/// one entry, structured instead of rendered into a sentence, plus what a
+/// wipe of it would actually delete versus keep because a managed stack
+/// still uses it.
+#[derive(Debug, Clone, Serialize)]
+pub struct RetiredRow {
+    /// The `HostState::retired` key (`stack`, or `stack/app`, `stack/unit`).
+    pub key: String,
+    pub kind: RetiredKind,
+    pub stack: String,
+    pub name: String,
+    pub vmid: u16,
+    pub retired_at: u64,
+    pub repos: Vec<String>,
+    pub appdata: Vec<String>,
+    pub vault: Vec<String>,
+    /// What [`wipe_plan`] says is still in use (so a wipe would keep it);
+    /// empty when the record is stale and `wipe_plan` refuses outright —
+    /// that refusal belongs to the actual wipe attempt, not this listing.
+    #[serde(default)]
+    pub in_use: Vec<String>,
+}
+
+/// Every retired entry, for the dashboard's Retired page. Zero I/O (AR1):
+/// `state` is a snapshot already loaded by the caller.
+pub fn retired_rows(state: &HostState, state_dir: &str) -> Vec<RetiredRow> {
+    state
+        .retired
+        .iter()
+        .map(|(key, r)| RetiredRow {
+            key: key.clone(),
+            kind: r.kind,
+            stack: r.stack.clone(),
+            name: r.name.clone(),
+            vmid: r.vmid,
+            retired_at: r.retired_at,
+            repos: r.repos.clone(),
+            appdata: r.appdata.clone(),
+            vault: r.vault.clone(),
+            in_use: wipe_plan(state, key, state_dir)
+                .map(|p| p.in_use)
+                .unwrap_or_default(),
         })
         .collect()
 }

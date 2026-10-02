@@ -15,6 +15,7 @@ pub mod loki;
 pub mod parity;
 pub mod prometheus;
 pub mod releases;
+pub mod retired;
 pub mod routes;
 pub mod scheduler;
 pub mod secrets;

@@ -1316,7 +1316,14 @@ impl DriveState {
                             format!("homelab ui open {form} <stack>"),
                         ));
                     };
-                    if !cx.stacks.iter().any(|s| s == t) {
+                    // feat-retired-1: a wipe's target left the fleet on
+                    // purpose (that is what retired it); it is never in
+                    // `cx.stacks`, so the membership check below is for
+                    // every OTHER action only. The key's shape is checked
+                    // when the form is actually sent (`actions::validate`);
+                    // a stale or misspelled key surfaces there, same as a
+                    // click from the Retired page would.
+                    if !kind.targets_retired() && !cx.stacks.iter().any(|s| s == t) {
                         return Err(refused(
                             step,
                             format!("the fleet has no stack {t}"),

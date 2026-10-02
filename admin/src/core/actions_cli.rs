@@ -283,6 +283,7 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         // `restore-native` (feat-backup-2) stays dashboard-only the same
         // way until the CLI grows a native-restore verb.
         | GetBackups { .. }
+        | GetRetired
         | BrowseSnapshot { .. }
         | RestoreNative { .. }
         | RevealSecret { .. }

@@ -11181,6 +11181,54 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
+        // feat-retired-1: every retired entry for the dashboard's Retired
+        // page, each repository's snapshot count/size/newest filled in from
+        // the same snapshot cache `GetBackups` reads (fix-180) — never a
+        // fresh restic call, so this never blocks on Google Drive.
+        Rpc::GetRetired => {
+            let store =
+                homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
+            let snapshot = store.load().await.unwrap_or_default();
+            let rows = homelab_core::ops::retired::retired_rows(&snapshot, &state.config.state_dir);
+            let out: Vec<serde_json::Value> = rows
+                .into_iter()
+                .map(|r| {
+                    let repos: Vec<serde_json::Value> = r
+                        .repos
+                        .iter()
+                        .map(|repo| {
+                            let cached = state.snapshot_cache.get(repo);
+                            serde_json::json!({
+                                "name": repo,
+                                "in_use": r.in_use.contains(repo),
+                                "snapshot_count": cached.as_ref().map(|c| c.snapshots.len()),
+                                "size_bytes": cached.as_ref().and_then(|c| c.size_bytes),
+                                "newest_snapshot": cached.as_ref().and_then(|c| c.snapshots.first().cloned()),
+                                "measured_at": cached.as_ref().map(|c| c.measured_at),
+                            })
+                        })
+                        .collect();
+                    serde_json::json!({
+                        "key": r.key,
+                        "kind": r.kind,
+                        "stack": r.stack,
+                        "name": r.name,
+                        "vmid": r.vmid,
+                        "retired_at": r.retired_at,
+                        "repos": repos,
+                        "appdata": r.appdata,
+                        "vault": r.vault,
+                        "in_use": r.in_use,
+                    })
+                })
+                .collect();
+            RpcResponse {
+                id: req.id,
+                ok: true,
+                message: serde_json::json!({ "retired": out }).to_string(),
+                deferred: None,
+            }
+        }
         // feat-backup-3: read-only, never stops anything.
         Rpc::BrowseSnapshot {
             owner,

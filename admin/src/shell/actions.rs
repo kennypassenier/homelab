@@ -2400,6 +2400,8 @@ pub fn mount(
     app.dashboard_routes(super::edit::router(edit_ctx.clone()));
     // feat-backup-1/3: the Backups page's read-only routes.
     app.dashboard_routes(super::backups::router(host.clone()));
+    // feat-retired-1: the Retired page's one read-only route.
+    app.dashboard_routes(super::retired::router(host.clone()));
     // feat-secrets-1/2: the Secrets page (list, reveal, stage); the write
     // itself rides `ActionKind::ChangeSecret` through `edit_ctx.actions`.
     app.dashboard_routes(super::secrets::router(edit_ctx.clone()));

@@ -122,6 +122,7 @@ async fn main() -> std::process::ExitCode {
         .page(Page::new("schedules", "Schedules", "/schedules").group("Operations"))
         .page(Page::new("firewall", "Firewall", "/firewall").group("Configure"))
         .page(Page::new("backups", "Backups", "/backups").group("Configure"))
+        .page(Page::new("retired", "Retired", "/retired").group("Configure"))
         .page(Page::new("secrets", "Secrets", "/secrets").group("Configure"))
         .page(Page::new("settings", "Settings", "/settings").group("Configure"))
         .page(Page::new("fleetview", "Fleet view", "/fleetview").group("Visuals"))

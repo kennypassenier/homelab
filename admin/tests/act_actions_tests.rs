@@ -305,6 +305,43 @@ fn feat_stacks_4_a_wipe_without_a_name_only_lists() {
     ));
 }
 
+/// covers: feat-retired-1 — the Retired page's Wipe button sends a compound
+/// key (`stack/app`, `stack/unit`) for an app or native unit retired out of
+/// a stack that still exists; `valid_stack_name` alone would refuse it, so
+/// `Wipe` gets its own key check (`valid_retired_key`).
+#[test]
+fn feat_retired_1_wipe_accepts_a_compound_stack_app_key() {
+    let req = validate(
+        "jellyfin/sonarr",
+        "wipe",
+        ActionArgs {
+            confirm: Some("jellyfin/sonarr".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        commands(&req, Material::None).unwrap().as_slice(),
+        [Command::WipeRetired { name, confirm: Some(c) }]
+            if name == "jellyfin/sonarr" && c == "jellyfin/sonarr"
+    ));
+    // A second slash, or a bare slash, is not a retired key's shape.
+    for bad in [
+        "jellyfin/sonarr/extra",
+        "/sonarr",
+        "jellyfin/",
+        "jellyfin//sonarr",
+    ] {
+        assert!(
+            validate(bad, "wipe", ActionArgs::default()).is_err(),
+            "{bad} should be refused"
+        );
+    }
+    // No other action accepts the compound shape — a stack name stays a
+    // stack name everywhere else.
+    assert!(validate("jellyfin/sonarr", "backup", ActionArgs::default()).is_err());
+}
+
 #[test]
 fn feat_stacks_5_a_batch_is_checked_whole_before_anything_runs() {
     let ok = validate_batch(BatchRequest {

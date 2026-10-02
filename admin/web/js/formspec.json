@@ -249,6 +249,7 @@
     "notifications",
     "firewall",
     "backups",
+    "retired",
     "secrets",
     "settings",
     "shell",

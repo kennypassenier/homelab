@@ -38,7 +38,7 @@ export const STACK_TABS = /** @type {const} */ ([
  *   {page: "stack", name: string, tab: StackTab} |
  *   {page: "activity"} | {page: "jobs"} | {page: "schedules"} |
  *   {page: "notifications"} | {page: "firewall"} | {page: "settings"} |
- *   {page: "backups"} | {page: "secrets"} |
+ *   {page: "backups"} | {page: "retired"} | {page: "secrets"} |
  *   {page: "log"} | {page: "shell"} | {page: "apply"} |
  *   {page: "presets"} |
  *   {page: "fleetview"} | {page: "backupcalendar"} |
@@ -74,6 +74,7 @@ const PATH_TO_PAGE = {
   notifications: "notifications",
   firewall: "firewall",
   backups: "backups",
+  retired: "retired",
   secrets: "secrets",
   settings: "settings",
   log: "log",
@@ -136,6 +137,7 @@ const FALLBACK_TITLE = /** @type {Record<string, string>} */ ({
   schedules: "Schedules",
   firewall: "Firewall",
   backups: "Backups",
+  retired: "Retired",
   secrets: "Secrets",
   settings: "Settings",
   fleetview: "Fleet view",

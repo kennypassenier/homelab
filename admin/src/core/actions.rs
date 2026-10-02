@@ -343,6 +343,17 @@ impl ActionKind {
         matches!(self, Destroy | Forget | Wipe)
     }
 
+    /// feat-retired-1: this action's target is a `HostState::retired` key
+    /// (`stack`, or `stack/app`, `stack/unit`), never a live stack — the
+    /// whole point of `Wipe` is to act on something that left the fleet.
+    /// Everywhere else "the stack" means a managed one; this is the one
+    /// exception both `validate` (the key format) and the Live-view driver
+    /// (`drive::Applied` for `UiStep::Open`, which otherwise refuses a
+    /// target absent from the fleet) need to know about.
+    pub fn targets_retired(self) -> bool {
+        self == ActionKind::Wipe
+    }
+
     pub fn label(self) -> &'static str {
         use ActionKind::*;
         match self {
@@ -627,6 +638,17 @@ pub fn valid_stack_name(s: &str) -> bool {
         && !s.starts_with('-')
 }
 
+/// feat-retired-1: a `Wipe` target — a stack name on its own (a whole stack
+/// retired by destroy or forget), or `stack/name` (an app or native unit
+/// retired out of a stack that still exists), exactly the two shapes
+/// `HostState::retired` keys on (`ops::retired::retire_stack/app/unit`).
+pub fn valid_retired_key(s: &str) -> bool {
+    match s.split_once('/') {
+        Some((stack, name)) => valid_stack_name(stack) && valid_word(name),
+        None => valid_stack_name(s),
+    }
+}
+
 fn valid_word(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 128
@@ -655,6 +677,14 @@ pub fn validate(stack: &str, action: &str, args: ActionArgs) -> Result<ActionReq
                 format!("{} on {stack}", kind.slug()),
                 "this action is for the whole host, not one stack",
                 format!("send it to /data/actions/{HOST_TARGET}/{}", kind.slug()),
+            ));
+        }
+    } else if kind.targets_retired() {
+        if !valid_retired_key(stack) {
+            return Err(Refusal::new(
+                format!("{} on {stack:?}", kind.slug()),
+                "a retired key is a stack name, or stack/app, stack/unit",
+                "pick the key from the Retired page, or the stack's own Wipe button",
             ));
         }
     } else if !valid_stack_name(stack) {

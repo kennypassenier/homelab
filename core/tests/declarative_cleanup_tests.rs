@@ -1177,6 +1177,58 @@ fn the_wipe_plan_lists_exactly_what_goes_and_what_is_still_in_use() {
     assert!(homelab_core::ops::retired::wipe_plan(&st, "ghost", STATE).is_err());
 }
 
+/// covers: feat-retired-1 — the Retired page's row list carries the same
+/// in-use split `wipe_plan` works out, keyed and named so the page needs no
+/// second lookup.
+#[test]
+fn retired_rows_carries_key_kind_and_the_wipe_plans_in_use_split() {
+    let st = state_with_retired_drill();
+    let rows = homelab_core::ops::retired::retired_rows(&st, STATE);
+    assert_eq!(rows.len(), 1, "{:?}", rows);
+    let row = &rows[0];
+    assert_eq!(row.key, "drill");
+    assert_eq!(row.kind, RetiredKind::Stack);
+    assert_eq!(row.stack, "drill");
+    assert_eq!(row.vmid, 119);
+    // Unfiltered — the record's own repos/appdata, same as `evaluate_retired`
+    // names them; `in_use` below is where the split from `wipe_plan` lives.
+    assert_eq!(
+        row.repos,
+        vec!["drill-config".to_string(), "shared-config".to_string()]
+    );
+    assert_eq!(
+        row.appdata,
+        vec![
+            "/appdata/drill/drill-config".to_string(),
+            "/appdata/other/shared-config".to_string()
+        ]
+    );
+    assert_eq!(
+        row.in_use,
+        vec![
+            "shared-config".to_string(),
+            "/appdata/other/shared-config".to_string()
+        ]
+    );
+}
+
+/// covers: feat-retired-1 — a record whose stack is managed again (stale,
+/// `wipe_plan` refuses) still shows up with an empty `in_use`, not a panic
+/// or a dropped row: the page is a listing, the refusal is the wipe's.
+#[test]
+fn retired_rows_keeps_a_stale_record_with_empty_in_use() {
+    let mut st = HostState::default();
+    st.retired.insert("back".into(), retired_drill());
+    st.stacks
+        .insert("drill".into(), record(&manifest(119, "drill")));
+    // retired_drill()'s own `stack` field says "drill", which is managed
+    // again here, so `wipe_plan` refuses outright.
+    let rows = homelab_core::ops::retired::retired_rows(&st, STATE);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].key, "back");
+    assert!(rows[0].in_use.is_empty());
+}
+
 /// covers: ask-9
 #[tokio::test]
 async fn wipe_deletes_the_repositories_directories_and_vault_then_the_record() {

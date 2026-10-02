@@ -3668,6 +3668,26 @@ an `rclone:` remote (`core/src/ops/retired.rs:260-292`, `:413-419`). Tests:
 what is kept and why is in
 [deployment/REGISTRATION_SURFACE.md](deployment/REGISTRATION_SURFACE.md).
 
+**The dashboard's Retired page** (feat-retired-1, Kenny 2026-10-02: "is there
+a way, from the admin dashboard, to delete backups of services we no longer
+use?") lists every one of these entries — Configure → Retired — each row
+showing what it was (stack, app or native unit), when and by which operation
+it was retired, and what it keeps: its restic repositories (snapshot count,
+size and newest snapshot, read from the host's own snapshot cache, fix-180
+— never a fresh restic call), its `/appdata` directories and its vault
+copies. A row's "Wipe…" button opens the same wipe dialog as the stack
+page's own Retire group: first the preview (what the wipe without `confirm`
+already lists, including anything `KEPT` because a managed stack still uses
+it), then the typed name, same as the CLI. After a wipe the row disappears
+and the job shows on the Jobs page. This page exists because the stack's own
+Retire group is reachable only from that stack's page — gone the moment the
+stack itself is destroyed, which is exactly when a wipe becomes wanted
+(`admin/src/shell/retired.rs`, `GetRetired` in `proto/src/lib.rs`,
+`ops::retired::retired_rows` in `core/src/ops/retired.rs`). Live view's
+`homelab ui open wipe <key>` opens the same dialog on a key that is not a
+live stack too (`core::drive`'s `ActionKind::targets_retired`), which the
+dashboard's other `ui open <action> <stack>` forms refuse.
+
 ### `homelab backup-host-meta` and `homelab backup-devices`
 
 `backup-host-meta` takes the host's own backup (see E4 step 3) now instead of

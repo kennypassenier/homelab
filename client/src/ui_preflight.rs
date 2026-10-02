@@ -35,6 +35,18 @@ pub fn unpushed_refusal(unpushed: &[String]) -> Option<String> {
     ))
 }
 
+/// fix-200 (Kenny via the coordinator, 2026-10-02): the dashboard reads only
+/// what it deploys from — stack files, host settings, presets, templates.
+/// Unpushed commits that touch nothing of that (a correction note, the
+/// register) change nothing the press would act on, so they never force a
+/// detour through the CLI. `files`: `git diff --name-only @{u}..HEAD`.
+pub fn unpushed_touches_deploy_input(files: &[String]) -> bool {
+    const READ_BY_THE_DASHBOARD: &[&str] = &["stacks/", "config/", "presets/", "templates/"];
+    files
+        .iter()
+        .any(|f| READ_BY_THE_DASHBOARD.iter().any(|p| f.starts_with(p)))
+}
+
 /// Refuse the press when a stack involved fails the same validation
 /// `homelab apply --plan` runs. `errors`: `(stack, why)`, one per stack that
 /// failed; empty when every stack involved validated.
@@ -112,5 +124,27 @@ mod tests {
             stacks_involved("deploy-commit", "", &declared),
             Vec::<String>::new()
         );
+    }
+}
+
+#[cfg(test)]
+mod fix_200_tests {
+    use super::unpushed_touches_deploy_input;
+
+    #[test]
+    fn a_docs_only_commit_never_blocks_the_press_a_stack_file_does() {
+        let docs = vec![
+            "docs/deployment/CORRECTIONS.md".to_string(),
+            "CLAUDE.md".to_string(),
+        ];
+        assert!(!unpushed_touches_deploy_input(&docs));
+        let stack = vec![
+            "docs/x.md".to_string(),
+            "stacks/gateway/lxc-compose.yml".to_string(),
+        ];
+        assert!(unpushed_touches_deploy_input(&stack));
+        assert!(unpushed_touches_deploy_input(&[
+            "config/host.toml".to_string()
+        ]));
     }
 }

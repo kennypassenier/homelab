@@ -2238,7 +2238,25 @@ async fn ui_repo_preflight(host: &str, token: &str) {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        if let Some(why) = homelab_client::ui_preflight::unpushed_refusal(&unpushed) {
+        // fix-200: only commits that touch what the dashboard deploys from
+        // can make it act on stale files.
+        let touched = std::process::Command::new("git")
+            .args(["-C"])
+            .arg(root)
+            .args(["diff", "--name-only", "@{u}..HEAD"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            });
+        let matters = touched
+            .map(|t| homelab_client::ui_preflight::unpushed_touches_deploy_input(&t))
+            .unwrap_or(true);
+        if matters && let Some(why) = homelab_client::ui_preflight::unpushed_refusal(&unpushed) {
             die(&format!("ui press confirm: {why}"));
         }
     }

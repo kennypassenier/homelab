@@ -17,6 +17,7 @@ const NOW: u64 = 1_788_000_000;
 fn stack(vmid: u16, hostname: &str, enabled: bool, last_backup: u64) -> StackState {
     StackState {
         pushed_file_hashes: std::collections::BTreeMap::new(),
+        component_digests: Default::default(),
         applied_source: None,
         vmid,
         hostname: hostname.into(),
@@ -902,6 +903,7 @@ mod incomplete_deploys {
         let mut st = HostState::default();
         let s = homelab_core::state::StackState {
             pushed_file_hashes: std::collections::BTreeMap::new(),
+            component_digests: Default::default(),
             applied_source: None,
             vmid: 118,
             hostname: "118-app-drill".into(),

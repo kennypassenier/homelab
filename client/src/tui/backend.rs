@@ -313,6 +313,7 @@ fn demo_fleet() -> ServerMsg {
         stacks: vec![
             StackView {
                 applied_source: None,
+                component_digests: Default::default(),
                 usage: None,
                 name: "platform".into(),
                 vmid: 104,
@@ -331,6 +332,7 @@ fn demo_fleet() -> ServerMsg {
             },
             StackView {
                 applied_source: None,
+                component_digests: Default::default(),
                 usage: None,
                 name: "films".into(),
                 vmid: 106,
@@ -348,6 +350,7 @@ fn demo_fleet() -> ServerMsg {
             },
             StackView {
                 applied_source: None,
+                component_digests: Default::default(),
                 usage: None,
                 name: "notes".into(),
                 vmid: 110,

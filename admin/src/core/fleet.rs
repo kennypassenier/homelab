@@ -66,6 +66,11 @@ pub struct StackSummary {
     /// server (drift, apply); the browser gets the verdict, not the hash.
     #[serde(skip)]
     pub applied_hash: String,
+    /// fix-192: the per-component digests recorded alongside `applied_hash`.
+    /// Kept server-side like the hash above — the browser gets the apply
+    /// plan's reason text, never the digests themselves.
+    #[serde(skip)]
+    pub component_digests: homelab_core::manifest::ComponentDigests,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -112,6 +117,7 @@ pub fn fleet_view(state: &FleetState, measured_at: u64) -> FleetView {
             applied_source: s.applied_source.clone(),
             env_sealed: s.env_sealed,
             applied_hash: s.applied_hash.clone(),
+            component_digests: s.component_digests.clone(),
         })
         .collect();
     stacks.sort_by(|a, b| a.vmid.cmp(&b.vmid).then_with(|| a.name.cmp(&b.name)));

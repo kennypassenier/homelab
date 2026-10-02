@@ -265,10 +265,21 @@ test("the version warnings, the apply plan and a shell line in words", () => {
     destroy: ["drill"],
     ephemeral: [],
     broken: [],
+    // fix-192: the plan's own reason text for "media" is shown verbatim;
+    // "new1" has none (it is new) and falls back to the generic line.
+    reasons: {
+      media:
+        "no file, env or secret changed — only the manifest homelab derives from them (homelab v3.70.0 → v3.70.2)",
+    },
   });
   assert.equal(s.headline, "2 to deploy · 1 unchanged · 1 gone from the files");
   assert.ok(s.pending && !s.blocked);
   assert.ok(s.lines.some((l) => l.includes("new1: new")));
+  assert.ok(
+    s.lines.some((l) =>
+      l.includes("media: deploy — no file, env or secret changed"),
+    ),
+  );
   const blocked = applySummary({
     deploy: [],
     new: [],

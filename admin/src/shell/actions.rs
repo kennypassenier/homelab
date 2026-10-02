@@ -172,6 +172,10 @@ pub struct LocalStacks {
     pub ephemeral: Vec<String>,
     /// The specs, when asked for.
     pub specs: BTreeMap<String, homelab_proto::DeploySpec>,
+    /// fix-192: each declared stack's per-component digests, for the apply
+    /// plan's reason text — built on the same cheap path as `hashes` even
+    /// when `specs` is empty.
+    pub component_digests: BTreeMap<String, homelab_core::manifest::ComponentDigests>,
 }
 
 /// The homelab working copy (arch-state: `…/repo`).
@@ -494,13 +498,18 @@ impl StackFiles for RepoFiles {
                     Ok(sp) => {
                         out.hashes
                             .push((name.clone(), Ok(homelab_core::manifest::intent_hash(&sp))));
+                        out.component_digests
+                            .insert(name.clone(), homelab_core::manifest::component_digests(&sp));
                         out.specs.insert(name, sp);
                     }
                     Err(e) => out.hashes.push((name, Err(e))),
                 }
             } else {
                 let h = homelab_client::spec::local_intent_hash(&dir).map(|(h, _)| h);
-                out.hashes.push((name, h));
+                out.hashes.push((name.clone(), h));
+                if let Ok((digests, _)) = homelab_client::spec::local_component_digests(&dir) {
+                    out.component_digests.insert(name, digests);
+                }
             }
         }
         Ok(out)
@@ -1274,6 +1283,22 @@ impl Actions {
         )
     }
 
+    /// fix-192: the host's applied component digests, alongside
+    /// `host_pairs` — a stack applied by a host from before this field
+    /// existed carries the all-empty default, which `redeploy_reason` reads
+    /// as "no component digests recorded" rather than a real comparison.
+    fn host_digests(&self) -> Option<Vec<(String, homelab_core::manifest::ComponentDigests)>> {
+        let s = self.inner.shared.try_read().ok()?;
+        Some(
+            s.fleet
+                .as_ref()?
+                .stacks
+                .iter()
+                .map(|x| (x.name.clone(), x.component_digests.clone()))
+                .collect(),
+        )
+    }
+
     /// TUI parity (the plan in the plain Deploy review, fix-100): what a
     /// deploy of `stack` changes, file by file, against the files the host
     /// applied last (`GetApplied`), with each file's diff. Secrets are never
@@ -1391,8 +1416,16 @@ impl Actions {
                 "wait for the fleet page to show the stacks",
             )
         })?;
-        let view =
+        let mut view =
             crate::core::applyview::plan(&local.hashes, &local.dirs, &host, &local.ephemeral);
+        // fix-192: per-stack, why it is in `deploy` — from digests alone,
+        // never a fetch of the host's applied files.
+        let host_digests = self.host_digests().unwrap_or_default();
+        view.reasons = crate::core::applyview::deploy_reasons(
+            &view.deploy,
+            &local.component_digests,
+            &host_digests,
+        );
         Ok((view, local))
     }
 

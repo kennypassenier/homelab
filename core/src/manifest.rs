@@ -1498,6 +1498,74 @@ pub fn intent_hash(spec: &DeploySpec) -> String {
     out.iter().take(8).map(|b| format!("{:02x}", b)).collect()
 }
 
+/// fix-192 (media-redeploys-without-changing, Kenny 2026-10-02): per-component
+/// digests of a deploy's intent, recorded in `StackState` next to
+/// `applied_hash` so a later `apply` plan can say WHICH component moved
+/// instead of only that the combined fingerprint did. Same sources as
+/// `intent_hash` — manifest, files, env, secret files — so the two can never
+/// disagree about what changed; kept apart so one of them can be named.
+/// Digests only, never content.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComponentDigests {
+    /// sha256 of the derived manifest's canonical JSON. Empty when nothing
+    /// has been recorded (never applied, or applied by a host from before
+    /// this field existed).
+    #[serde(default)]
+    pub manifest: String,
+    /// sha256 of each declared file's content, by its manifest path
+    /// ("<app>/<file>" or a `rootfs/` path) — the same keys `intent_hash`
+    /// walks.
+    #[serde(default)]
+    pub files: BTreeMap<String, String>,
+    /// sha256 of each app's env content, by app name.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    /// sha256 of each secret file's content, by its manifest path.
+    #[serde(default)]
+    pub secret_files: BTreeMap<String, String>,
+    /// The deploying client's own build (`SourceRev::client`,
+    /// `git describe --dirty`), carried so a manifest-only difference can
+    /// name which release changed the derivation instead of pointing at a
+    /// file nothing touched. Empty when the spec carries no `source` (an
+    /// older client, or the TUI's synthetic specs).
+    #[serde(default)]
+    pub built_by: String,
+}
+
+/// fix-192: `ComponentDigests` for a spec, from the same inputs as
+/// `intent_hash` so the two can never disagree about what changed.
+pub fn component_digests(spec: &DeploySpec) -> ComponentDigests {
+    let manifest = serde_json::to_vec(&spec.manifest)
+        .map(|m| sha256_hex(&m))
+        .unwrap_or_default();
+    let files = spec
+        .files
+        .iter()
+        .map(|f| (f.path.clone(), sha256_hex(f.content.as_bytes())))
+        .collect();
+    let env = spec
+        .env
+        .iter()
+        .map(|(app, e)| (app.clone(), sha256_hex(e.as_bytes())))
+        .collect();
+    let secret_files = spec
+        .secret_files
+        .iter()
+        .map(|f| (f.path.clone(), sha256_hex(f.content.as_bytes())))
+        .collect();
+    ComponentDigests {
+        manifest,
+        files,
+        env,
+        secret_files,
+        built_by: spec
+            .source
+            .as_ref()
+            .map(|s| s.client.clone())
+            .unwrap_or_default(),
+    }
+}
+
 /// Hex sha256 of arbitrary bytes (shared by push staging + release verify).
 pub fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};

@@ -1011,6 +1011,12 @@ pub struct StackView {
     /// recorded it ("a1b2c3d4e5f6 + 1 uncommitted file(s)").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_source: Option<String>,
+    /// fix-192: the per-component digests of the intent last applied,
+    /// alongside `applied_hash`. Default (all empty) for a host built before
+    /// this field existed, or a stack never applied — `apply`'s plan then
+    /// says so instead of naming a component that may not have changed.
+    #[serde(default)]
+    pub component_digests: homelab_core::manifest::ComponentDigests,
 }
 
 /// feat-platform-2: one guest's measured use.

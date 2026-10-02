@@ -242,7 +242,8 @@ export function outdatedPage(loadedAs, serving) {
 /**
  * The apply plan in words, and why it cannot run when it cannot.
  * @param {{deploy: string[], new: string[], unchanged: string[],
- *   destroy: string[], ephemeral: string[], broken: [string, string][]}} p
+ *   destroy: string[], ephemeral: string[], broken: [string, string][],
+ *   reasons?: Record<string, string>}} p
  */
 export function applySummary(p) {
   /** @type {string[]} */
@@ -251,7 +252,10 @@ export function applySummary(p) {
     lines.push(
       p.new.includes(n)
         ? `↑ ${n}: new, creates its container`
-        : `↑ ${n}: deploy (its files differ from what the host applied)`,
+        : // fix-192: the plan says WHICH component differs (files, env,
+          // secrets, or only the derived manifest) instead of the generic
+          // "its files differ" that gave no reason to trust a redeploy.
+          `↑ ${n}: deploy — ${p.reasons?.[n] ?? "its files differ from what the host applied"}`,
     );
   for (const n of p.destroy)
     lines.push(

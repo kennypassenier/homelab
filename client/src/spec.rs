@@ -612,6 +612,20 @@ pub fn local_intent_hash(dir: &Path) -> Result<(String, Vec<String>), String> {
     Ok((homelab_core::manifest::intent_hash(&spec), notes))
 }
 
+/// fix-192 (media-redeploys-without-changing, Kenny 2026-10-02): the
+/// per-component digests of a local stack, for the apply plan's reason text
+/// — same cheap path as `local_intent_hash` (no native binaries, no registry
+/// lookups), with `source` stamped too so a manifest-only reason can name
+/// the building client's own version.
+pub fn local_component_digests(
+    dir: &Path,
+) -> Result<(homelab_core::manifest::ComponentDigests, Vec<String>), String> {
+    let mut notes = Vec::new();
+    let mut spec = spec_without_binaries(dir, &mut notes, true)?;
+    spec.source = stack_source(dir);
+    Ok((homelab_core::manifest::component_digests(&spec), notes))
+}
+
 /// gap-34: `prune-orphans` needs `DeploySpec.files` (the paths a deploy
 /// would write) to tell which files on the container are no longer in the
 /// repository — `orphan_files_keeping` reads only `.files`, never `.env` or

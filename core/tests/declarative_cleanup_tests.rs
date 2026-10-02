@@ -128,6 +128,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
 fn record(m: &StackManifest) -> StackState {
     StackState {
         pushed_file_hashes: std::collections::BTreeMap::new(),
+        component_digests: Default::default(),
         applied_source: None,
         vmid: m.vmid,
         hostname: m.hostname.clone(),
@@ -1428,6 +1429,7 @@ fn wipe_plan_refuses_a_live_native_units_record_even_with_no_manifest_at_all() {
         "admin".into(),
         StackState {
             pushed_file_hashes: std::collections::BTreeMap::new(),
+            component_digests: Default::default(),
             applied_source: None,
             vmid: 120,
             hostname: "120-app-admin".into(),

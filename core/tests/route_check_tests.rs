@@ -200,6 +200,7 @@ fn the_same_route_file_declared_by_two_stacks_is_refused() {
 fn recorded(route_file: Option<&str>, extras: &[&str]) -> StackState {
     StackState {
         pushed_file_hashes: std::collections::BTreeMap::new(),
+        component_digests: Default::default(),
         applied_source: None,
         vmid: 104,
         hostname: "104-app-gateway".into(),

@@ -4936,6 +4936,7 @@ span_days = 7\n";
                 route_file: None,
                 extra_route_files: Vec::new(),
                 pushed_file_hashes: std::collections::BTreeMap::new(),
+                component_digests: Default::default(),
             },
         );
         hs.stacks.insert(
@@ -4955,6 +4956,7 @@ span_days = 7\n";
                 route_file: None,
                 extra_route_files: Vec::new(),
                 pushed_file_hashes: std::collections::BTreeMap::new(),
+                component_digests: Default::default(),
             },
         );
         let (total, used, committed, cores, load1) =
@@ -7013,6 +7015,7 @@ async fn build_fleet_state(state: &AppState, exec: &RealExecutor) -> homelab_pro
         .values()
         .map(|s| homelab_proto::StackView {
             applied_source: s.applied_source.clone(),
+            component_digests: s.component_digests.clone(),
             name: s
                 .hostname
                 .rsplit("-app-")

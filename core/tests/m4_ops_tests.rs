@@ -1260,6 +1260,61 @@ fn b4_intent_hash_changes_with_any_file_edit() {
     assert_ne!(h1, intent_hash(&env_changed), "env is part of intent");
 }
 
+/// fix-192 (media-redeploys-without-changing, Kenny 2026-10-02):
+/// `component_digests` is built from the same inputs as `intent_hash`, each
+/// kept apart — a file edit moves only `files`, an env edit only `env`, and
+/// neither moves `manifest`, which stays stable unless the manifest itself
+/// changes.
+#[test]
+fn fix_192_component_digests_isolate_what_changed() {
+    use homelab_core::manifest::{DeploySpec, FileBlob, component_digests};
+    let base = DeploySpec {
+        secret_files: Vec::new(),
+        source: None,
+        native_binaries: Default::default(),
+        native_manifests: Default::default(),
+        manifest: manifest(108, "test"),
+        files: vec![FileBlob {
+            path: "app/docker-compose.yml".into(),
+            content: "services: {}".into(),
+            mode: None,
+        }],
+        env: Default::default(),
+        extra_routes: Vec::new(),
+        gateway_route: None,
+        checks: Default::default(),
+    };
+    let d1 = component_digests(&base);
+    assert_eq!(d1, component_digests(&base), "deterministic");
+
+    let mut edited = base.clone();
+    edited.files[0].content.push('\n');
+    let d2 = component_digests(&edited);
+    assert_ne!(d1.files, d2.files, "the edited file's digest moves");
+    assert_eq!(
+        d1.manifest, d2.manifest,
+        "a file edit never touches the manifest digest"
+    );
+    assert_eq!(d1.env, d2.env);
+
+    let mut env_changed = base.clone();
+    env_changed.env.insert("app".into(), "SECRET=x".into());
+    let d3 = component_digests(&env_changed);
+    assert_ne!(d1.env, d3.env, "env is its own digest");
+    assert_eq!(d1.files, d3.files);
+    assert_eq!(d1.manifest, d3.manifest);
+
+    let mut manifest_changed = base.clone();
+    manifest_changed.manifest.vmid = 109;
+    let d4 = component_digests(&manifest_changed);
+    assert_ne!(
+        d1.manifest, d4.manifest,
+        "the manifest digest moves on its own"
+    );
+    assert_eq!(d1.files, d4.files, "unrelated to the files");
+    assert_eq!(d1.env, d4.env, "unrelated to env");
+}
+
 // ── H4: hardware passthrough flags ──────────────────────────────────────────
 
 #[tokio::test]

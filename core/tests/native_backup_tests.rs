@@ -188,6 +188,7 @@ retention:
         "almanac".into(),
         homelab_core::state::StackState {
             pushed_file_hashes: std::collections::BTreeMap::new(),
+            component_digests: Default::default(),
             applied_source: None,
             extra_route_files: Vec::new(),
             vmid: 112,

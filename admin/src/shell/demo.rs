@@ -72,6 +72,7 @@ pub async fn run_demo(
                     enabled: true,
                     usage: None,
                     applied_source: None,
+                    component_digests: Default::default(),
                 }
             })
             .collect(),

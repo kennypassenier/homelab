@@ -12,6 +12,7 @@ const HOUR: u64 = 3600;
 fn stack(applied_at: u64, last_backup: u64) -> StackState {
     StackState {
         pushed_file_hashes: std::collections::BTreeMap::new(),
+        component_digests: Default::default(),
         applied_source: None,
         vmid: 109,
         hostname: "109-app-kyu".into(),

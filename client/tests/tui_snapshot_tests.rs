@@ -28,6 +28,7 @@ fn fleet() -> FleetState {
         stacks: vec![
             StackView {
                 applied_source: None,
+                component_digests: Default::default(),
                 usage: None,
                 name: "syncthing".into(),
                 vmid: 110,
@@ -45,6 +46,7 @@ fn fleet() -> FleetState {
             },
             StackView {
                 applied_source: None,
+                component_digests: Default::default(),
                 usage: None,
                 name: "media".into(),
                 vmid: 106,
@@ -669,6 +671,7 @@ fn b4_drift_flag_computed_from_applied_hash() {
             host: fleet().host,
             stacks: vec![StackView {
                 applied_source: None,
+                component_digests: Default::default(),
                 usage: None,
                 name: "driftcase".into(),
                 vmid: 140,
@@ -767,6 +770,7 @@ fn fix_107_apply_in_the_tui_deploys_every_changed_stack_after_one_y() {
         stacks: vec![
             StackView {
                 applied_source: None,
+                component_digests: Default::default(),
                 usage: None,
                 name: "changed-a".into(),
                 vmid: 141,
@@ -780,6 +784,7 @@ fn fix_107_apply_in_the_tui_deploys_every_changed_stack_after_one_y() {
             },
             StackView {
                 applied_source: None,
+                component_digests: Default::default(),
                 usage: None,
                 name: "changed-b".into(),
                 vmid: 142,
@@ -793,6 +798,7 @@ fn fix_107_apply_in_the_tui_deploys_every_changed_stack_after_one_y() {
             },
             StackView {
                 applied_source: None,
+                component_digests: Default::default(),
                 usage: None,
                 name: "same-c".into(),
                 vmid: 143,
@@ -2620,6 +2626,7 @@ fn a_native_stack_gets_the_native_operation_from_the_same_key() {
     fleet.stacks.clear();
     fleet.stacks.push(StackView {
         applied_source: None,
+        component_digests: Default::default(),
         usage: None,
         name: "kyu".into(),
         vmid: 109,

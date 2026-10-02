@@ -141,9 +141,12 @@ fn register_rows(root: &Path) -> BTreeMap<String, String> {
         // `fix-23`, `gap-16`: a kind word, a dash and a number.
         let old_shape =
             id.starts_with('F') && id.len() > 1 && id[1..].chars().all(|c| c.is_ascii_digit());
-        let new_shape = id.split_once('-').is_some_and(|(kind, n)| {
+        // A kind may itself carry dashes (`feat-retired-1`, 2026-10-02).
+        let new_shape = id.rsplit_once('-').is_some_and(|(kind, n)| {
             !kind.is_empty()
-                && kind.chars().all(|c| c.is_ascii_lowercase())
+                && !kind.starts_with('-')
+                && !kind.ends_with('-')
+                && kind.chars().all(|c| c.is_ascii_lowercase() || c == '-')
                 && !n.is_empty()
                 && n.chars().all(|c| c.is_ascii_digit())
         });

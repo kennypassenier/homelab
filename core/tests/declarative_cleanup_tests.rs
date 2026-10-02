@@ -1396,7 +1396,8 @@ fn retired_rows_marks_a_stale_record_refused_not_removable() {
     assert!(rows[0].refused.is_some(), "{:?}", rows[0]);
 }
 
-/// covers: live-finding 2026-10-02 (pve state.json, read-only): a deploy bug
+/// covers: feat-retired-1
+/// Live finding 2026-10-02 (pve state.json, read-only): a deploy bug
 /// (fixed separately) wrongly recorded "admin/admin" and "almanac/almanac"
 /// as a retired App, while the admin/almanac stacks are live, fully-native
 /// stacks ("a stack has either `manifest` or `natives`, never both" —

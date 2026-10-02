@@ -234,7 +234,7 @@ firewall:
       action: ACCEPT
       source: 10.10.10.10
       proto: tcp
-      dport: "22,8080"
+      dport: "22,8080,8082,8083"
       note: Kenny's desktop (ssh and the web ports the dashboard tiles link to)
 
 # replace-homepage (Kenny, 2026-09-30): this stack's tiles on the dashboard's

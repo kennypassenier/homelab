@@ -101,5 +101,9 @@ checks:
 
 manual:
   # checks-onetime (Kenny, 2026-09-30): answered ok once is answered for good.
+  # fix-182: this one was already answered ok before fix-178's translation
+  # reset it — `replaces` is what makes that answer carry over.
   - text: "Check in Radarr under Settings › Profiles whether the 1080p profile still looks the way you want, once after the first sync."
     once: true
+    id: recyclarr-1080p-profile-checked-after-sync
+    replaces: ["22d12b39"]

@@ -50,3 +50,4 @@ probes:
       wget --config="$C" -qO- http://localhost:7878/api/v3/movie | jq --argjson r "$R" '[.[]|.path as $p|select(any($r[]; . as $x|$p|startswith($x+"/"))|not)]|length'
     healthy: {equals: "0"}
     layer: application
+    id: radarr-movies-outside-root-folders

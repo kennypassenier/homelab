@@ -37,6 +37,7 @@ probes:
       wget --config="$C" -qO- http://localhost:9696/api/v1/indexerstatus | jq length
     healthy: {equals: "0"}
     layer: application
+    id: prowlarr-indexers-failing-or-disabled
     blind_spot: "Prowlarr's own view of its indexers; no search is run (that would load the indexers every night)"
   # Read 2026-09-30: 0.
   - name: "health notifications from Prowlarr"
@@ -46,3 +47,4 @@ probes:
       wget --config="$C" -qO- http://localhost:9696/api/v1/health | jq length
     healthy: {equals: "0"}
     layer: application
+    id: prowlarr-health-notifications

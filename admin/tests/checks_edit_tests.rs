@@ -36,6 +36,7 @@ fn jelly_probe() -> Probe {
         healthy: Healthy::Equals("0".to_string()),
         layer: Layer::Application,
         blind_spot: None,
+        id: None,
     }
 }
 

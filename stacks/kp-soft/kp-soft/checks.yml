@@ -29,4 +29,8 @@ checks:
       only a large collapse trips it: a page that lost a section stays "ok".
 
 manual:
-  - "Open kp-soft.dev from outside the home network. This is the only stack strangers can reach, and measuring from inside says nothing about what they see."
+  # fix-182: explicit id, with `replaces` carrying over the answer this
+  # check held under the hash of its pre-translation Dutch text (fix-178).
+  - text: "Open kp-soft.dev from outside the home network. This is the only stack strangers can reach, and measuring from inside says nothing about what they see."
+    id: kp-soft-site-reachable-from-outside
+    replaces: ["a6231457"]

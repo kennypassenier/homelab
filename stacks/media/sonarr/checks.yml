@@ -79,3 +79,4 @@ probes:
       wget --config="$C" -qO- http://localhost:8989/api/v3/series | jq --argjson r "$R" '[.[]|.path as $p|select(any($r[]; . as $x|$p|startswith($x+"/"))|not)]|length'
     healthy: {equals: "0"}
     layer: application
+    id: sonarr-series-outside-root-folders

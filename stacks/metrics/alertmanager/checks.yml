@@ -27,7 +27,11 @@ checks:
       one.
 
 manual:
-  - "Once a quarter, send a test alert through the whole chain and check whether it arrives on your phone. That is the only thing that proves the middle part — every link reports itself healthy on its own, even when the chain was broken."
+  # fix-182: explicit id, with `replaces` carrying over the answer this
+  # check held under the hash of its pre-translation Dutch text (fix-178).
+  - text: "Once a quarter, send a test alert through the whole chain and check whether it arrives on your phone. That is the only thing that proves the middle part — every link reports itself healthy on its own, even when the chain was broken."
+    id: alertmanager-test-alert-reaches-phone
+    replaces: ["51fd87cf"]
 
 # checks-automate (Kenny, 2026-09-30: "Alles wat kan"): what a machine can
 # measure of the question above, in every fleet check. Tried once for real on
@@ -39,4 +43,5 @@ probes:
       wget -qO- 'http://127.0.0.1:9090/api/v1/query?query=sum(increase(alertmanager_notifications_failed_total%5B7d%5D))' | jq -r '(.data.result[0].value[1] // "0") | tonumber | floor'
     healthy: {equals: "0"}
     layer: application
+    id: alertmanager-failed-notifications-7d
     blind_spot: "Alertmanager handed every alert on; that the phone showed it is the question above"

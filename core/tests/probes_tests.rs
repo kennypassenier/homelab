@@ -16,6 +16,7 @@ fn missing_files() -> Probe {
         healthy: Healthy::Equals("0".into()),
         layer: Layer::Application,
         blind_spot: None,
+        id: None,
     }
 }
 

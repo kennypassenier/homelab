@@ -143,10 +143,20 @@ pub struct ProbeEdit {
 
 impl ManualEdit {
     fn as_check(&self) -> ManualCheck {
+        // fix-182: the dashboard form does not yet expose `id`/`replaces` —
+        // it only edits text and `once`. An item the browser sends back
+        // unchanged never reaches here (`checks_ops`'s `seq_ops` compares
+        // serialized values by `origin` and only touches a changed one), so
+        // this only drops a manual check's `id` the moment Kenny actually
+        // edits that same check's text or `once` flag here, which is also
+        // the moment a stable id is least likely to still describe the
+        // question — not silently, on every save.
         if self.once {
             ManualCheck::Detailed {
                 text: self.text.clone(),
                 once: true,
+                id: None,
+                replaces: Vec::new(),
             }
         } else {
             ManualCheck::Text(self.text.clone())

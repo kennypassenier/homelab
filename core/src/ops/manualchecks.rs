@@ -49,6 +49,13 @@ pub struct Question {
     pub text: String,
     pub once: bool,
     pub url: Option<String>,
+    /// fix-182: the check's own `id:` from `checks.yml`, when it has one.
+    /// `None` falls back to `id_for(stack, app, text)`, same as before this
+    /// field existed.
+    pub id: Option<String>,
+    /// fix-182: previous hash-ids (`checks.yml`'s `replaces:`) whose answer
+    /// should carry over to this question's id on registration.
+    pub replaces: Vec<String>,
 }
 
 /// Fold the questions a deploy just printed into the state.
@@ -60,7 +67,47 @@ pub struct Question {
 pub fn register(state: &mut HostState, stack: &str, questions: &[Question], now: u64) {
     let mut seen: Vec<String> = Vec::new();
     for q in questions {
-        let id = id_for(stack, &q.app, &q.text);
+        // fix-182: an explicit `id:` IS the identity; only a check that
+        // leaves it out falls back to the old hash. This is what makes a
+        // wording fix (a typo, a translation) no longer reset the answer:
+        // the text can change freely once an id names the check.
+        let id =
+            q.id.clone()
+                .unwrap_or_else(|| id_for(stack, &q.app, &q.text));
+
+        // fix-178/fix-182: a check given an id for the first time, with
+        // `replaces:` naming the hash(es) its text used to live under,
+        // carries that answer across instead of starting unanswered. Only
+        // tried when nothing already sits under the new id — a second
+        // deploy after the migration must not keep re-reading the (now
+        // vacated) old record. The old record is dropped on the spot: it
+        // would otherwise survive the `retain` below under its own stack and
+        // app, duplicating the question that just moved under a new id.
+        if !q.replaces.is_empty() && !state.manual_checks.contains_key(&id) {
+            for old_id in &q.replaces {
+                if let Some(old) = state.manual_checks.remove(old_id) {
+                    state.manual_checks.insert(
+                        id.clone(),
+                        ManualCheckRecord {
+                            stack: stack.to_string(),
+                            app: q.app.clone(),
+                            text: q.text.clone(),
+                            registered_at: now,
+                            answered_at: old.answered_at,
+                            ok: old.ok,
+                            note: old.note,
+                            answered_hash: old.answered_hash,
+                            accepted_until: old.accepted_until,
+                            once: q.once,
+                            url: q.url.clone(),
+                            recur_days: old.recur_days,
+                        },
+                    );
+                    break;
+                }
+            }
+        }
+
         seen.push(id.clone());
         let r = state
             .manual_checks
@@ -395,6 +442,8 @@ pub fn questions_of(checks: &BTreeMap<String, crate::checks::ServiceChecks>) -> 
                 text: m.text().to_string(),
                 once: m.once(),
                 url: sc.url.clone(),
+                id: m.id().map(str::to_string),
+                replaces: m.replaces().to_vec(),
             });
         }
     }

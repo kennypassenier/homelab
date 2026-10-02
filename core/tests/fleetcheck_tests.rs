@@ -964,6 +964,8 @@ fn the_full_round_carries_the_manual_checks() {
             text: "is the sound in sync".into(),
             once: false,
             url: None,
+            id: None,
+            replaces: Vec::new(),
         }],
         100,
     );

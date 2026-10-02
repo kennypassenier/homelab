@@ -324,3 +324,95 @@ async fn a_deliberate_drop_can_be_allowed_but_never_by_silence() {
     // both consequences spelled out, not just two labels (D82).
     assert!(!q.if_allowed.is_empty() && !q.if_stopped.is_empty());
 }
+
+// ── fix-182: an explicit manual-check/probe id must be unique ──────────────
+
+fn checks_with_manual_id(app: &str, id: &str) -> ServiceChecks {
+    ServiceChecks {
+        url: None,
+        probes: Vec::new(),
+        busy_check: None,
+        checks: Vec::new(),
+        manual: vec![ManualCheck::Detailed {
+            text: format!("question for {app}"),
+            once: false,
+            id: Some(id.into()),
+            replaces: Vec::new(),
+        }],
+    }
+}
+
+fn checks_with_probe_id(app: &str, id: &str) -> ServiceChecks {
+    ServiceChecks {
+        url: None,
+        probes: vec![Probe {
+            name: format!("probe for {app}"),
+            command: "true".into(),
+            healthy: Healthy::Equals("0".into()),
+            layer: Layer::Application,
+            blind_spot: None,
+            id: Some(id.into()),
+        }],
+        busy_check: None,
+        checks: Vec::new(),
+        manual: Vec::new(),
+    }
+}
+
+#[test]
+fn two_manual_checks_sharing_an_id_are_refused() {
+    let mut checks = std::collections::BTreeMap::new();
+    checks.insert(
+        "jellyfin".to_string(),
+        checks_with_manual_id("jellyfin", "picture-looks-right"),
+    );
+    checks.insert(
+        "sonarr".to_string(),
+        checks_with_manual_id("sonarr", "picture-looks-right"),
+    );
+
+    let problems = id_problems(&checks);
+    assert_eq!(
+        problems.len(),
+        1,
+        "one duplicate id across two apps is one problem: {:?}",
+        problems
+    );
+    assert!(problems[0].contains("picture-looks-right"));
+}
+
+#[test]
+fn two_probes_sharing_an_id_are_refused_independently_of_manual_checks() {
+    let mut checks = std::collections::BTreeMap::new();
+    // Same id text as a manual check elsewhere, but a probe and a manual
+    // check live in separate state maps, so that collision is harmless —
+    // only a clash WITHIN one kind loses a record.
+    checks.insert("a".to_string(), checks_with_probe_id("a", "shared-name"));
+    checks.insert("b".to_string(), checks_with_probe_id("b", "shared-name"));
+    let mut with_manual = checks_with_manual_id("c", "shared-name");
+    with_manual.probes = Vec::new();
+    checks.insert("c".to_string(), with_manual);
+
+    let problems = id_problems(&checks);
+    assert_eq!(
+        problems.len(),
+        1,
+        "only the probe/probe clash is a problem, manual/probe is not: {:?}",
+        problems
+    );
+    assert!(problems[0].contains("probe id"));
+}
+
+#[test]
+fn distinct_ids_across_apps_are_accepted() {
+    let mut checks = std::collections::BTreeMap::new();
+    checks.insert(
+        "jellyfin".to_string(),
+        checks_with_manual_id("jellyfin", "jellyfin-picture-ok"),
+    );
+    checks.insert(
+        "sonarr".to_string(),
+        checks_with_probe_id("sonarr", "sonarr-outside-root"),
+    );
+    assert!(id_problems(&checks).is_empty());
+}

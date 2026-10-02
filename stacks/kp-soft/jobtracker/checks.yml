@@ -63,10 +63,18 @@ checks:
       readings above are what separate those two.
 
 manual:
-  - "Log in once on job.kp-soft.dev and check whether your dossiers are there. The measurements see the files, not the screen."
+  # fix-182: explicit id, with `replaces` carrying over the answer this
+  # check held under the hash of its pre-translation Dutch text (fix-178).
+  - text: "Log in once on job.kp-soft.dev and check whether your dossiers are there. The measurements see the files, not the screen."
+    id: jobtracker-dossiers-visible-after-login
+    replaces: ["514c80ed"]
   # checks-onetime (Kenny, 2026-09-30): answered ok once is answered for good.
+  # fix-182: this one was already answered ok before fix-178's translation
+  # reset it — `replaces` is what makes that answer carry over.
   - text: "Register a passkey after your first password login, otherwise the password stays the only key."
     once: true
+    id: jobtracker-passkey-registered
+    replaces: ["27473fb2"]
 
 # checks-automate (Kenny, 2026-09-30: "Alles wat kan"): what a machine can
 # measure of the question above, in every fleet check. Tried once for real on
@@ -78,4 +86,5 @@ probes:
       docker exec jobtracker sh -c 'find /appdata/jobtracker/repo/applications -mindepth 2 -maxdepth 2 -type d ! -name ".*" | wc -l'
     healthy: {at_least: 1}
     layer: application
+    id: jobtracker-dossiers-in-data
     blind_spot: "the dossiers are on disk; that the login shows them is the question above"

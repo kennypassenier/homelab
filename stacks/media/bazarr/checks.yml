@@ -42,3 +42,4 @@ probes:
       wget --config="$C" -qO- http://localhost:6767/api/providers | jq '[.data[]|select(.status=="Good")]|length'
     healthy: {at_least: 1}
     layer: application
+    id: bazarr-providers-status-good

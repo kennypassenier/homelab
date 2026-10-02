@@ -88,7 +88,7 @@ fails while this section is stale.
 | admin | admin | `manual` | nothing; updated on request | `kennypassenier/homelab` |
 | almanac | almanac | `self` | runs its own update verb | `kennypassenier/almanac` |
 | drill | drillsvc | `manual` | nothing; updated on request | none |
-| inbox | inbox | `manual` | nothing; updated on request | `kennypassenier/chassis-rs` |
+| inbox | inbox | `manual` | nothing; updated on request | none |
 | kyu | http-switchboard | `manual` | nothing; updated on request | `kennypassenier/http-switchboard` |
 | kyu | kyu | `auto` | installs a newer release | `kennypassenier/kyu` |
 | kyu | kyu-runner | `auto` | installs a newer release | `kennypassenier/kyu-runner` |

@@ -477,6 +477,16 @@ pub const KEYS: &[KeyInfo] = &[
         Apply::Restart,
     ),
     k(
+        "watch_stack",
+        "Notifications",
+        "Stack behind the health address",
+        "The stack watch_url answers for. While the host deploys, installs, updates or adopts that stack, the watch's down notice is held back; a self-update or host restart always holds it (fix-184).",
+        "none: only a self-update or host restart holds it back",
+        Kind::Text,
+        Access::Browser,
+        Apply::Restart,
+    ),
+    k(
         "watch_interval_s",
         "Notifications",
         "Watch interval",

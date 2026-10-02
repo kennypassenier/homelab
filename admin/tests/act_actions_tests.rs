@@ -305,7 +305,8 @@ fn feat_stacks_4_a_wipe_without_a_name_only_lists() {
     ));
 }
 
-/// covers: feat-retired-1 — the Retired page's Wipe button sends a compound
+/// covers: feat-retired-1
+/// the Retired page's Wipe button sends a compound
 /// key (`stack/app`, `stack/unit`) for an app or native unit retired out of
 /// a stack that still exists; `valid_stack_name` alone would refuse it, so
 /// `Wipe` gets its own key check (`valid_retired_key`).

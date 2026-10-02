@@ -1335,7 +1335,8 @@ fn the_wipe_plan_lists_exactly_what_goes_and_what_is_still_in_use() {
     assert!(homelab_core::ops::retired::wipe_plan(&st, "ghost", STATE).is_err());
 }
 
-/// covers: feat-retired-1 — the Retired page's row list carries the same
+/// covers: feat-retired-1
+/// the Retired page's row list carries the same
 /// in-use split `wipe_plan` works out, keyed and named so the page needs no
 /// second lookup.
 #[test]
@@ -1373,7 +1374,8 @@ fn retired_rows_carries_key_kind_and_the_wipe_plans_in_use_split() {
     assert_eq!(row.refused, None);
 }
 
-/// covers: feat-retired-1 — a record whose stack is managed again (stale,
+/// covers: feat-retired-1
+/// a record whose stack is managed again (stale,
 /// `wipe_plan` refuses the WHOLE key) still shows up, not a panic or a
 /// dropped row: the page is a listing. `in_use` stays empty (nothing of
 /// this record would be partially kept — none of it would be touched at

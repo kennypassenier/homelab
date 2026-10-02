@@ -50,7 +50,10 @@ fn only_a_narrow_read_only_proxy_may_hold_the_real_docker_socket() {
             continue;
         }
         let is_narrow_proxy = text.contains("docker-socket-proxy")
-            && text.contains("read_only: true")
+            // fix-167 (2026-10-02): the socket itself is mounted read-only. The
+            // container root cannot be: the image renders haproxy.cfg at every
+            // start, and a read-only root crash-looped it on the first deploy.
+            && text.contains("/var/run/docker.sock:/var/run/docker.sock:ro")
             && !text.contains("ports:")
             // The whole point: a proxy that would itself allow writes back
             // to the socket is not narrow, whatever its image is called.

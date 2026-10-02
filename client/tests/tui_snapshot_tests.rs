@@ -1310,6 +1310,11 @@ const CLI_ONLY: &[(&str, &str)] = &[
          the TUI's update key is the supervised self-update (B1)",
     ),
     (
+        "GetRetired",
+        "feat-retired-1: the dashboard's Retired page reads this; the CLI has \
+         `homelab wipe <key>` (which lists without --yes), the TUI has no retired view",
+    ),
+    (
         "BackupCalendar",
         "feat-overview-10: the dashboard's own backup-calendar page reads this \
          straight through the host; the TUI has no calendar view",

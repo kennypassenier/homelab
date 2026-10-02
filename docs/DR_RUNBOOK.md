@@ -374,7 +374,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 - Container: hostname `118-app-inbox`, ip `CT 118 (inbox)` on `vmbr0` VLAN 10, 1 core(s), 512 MiB RAM, 0 MiB swap, 4 GiB disk on `local-lvm`, unprivileged, template `clone:996`, boot order unset.
 - Runs no docker: native systemd services only.
 - Unit `inbox`:
-  - program `/opt/inbox/bin/inbox`, from the GitHub release `kennypassenier/chassis-rs` (asset `inbox`); update policy manual.
+  - program `/opt/inbox/bin/inbox`, no release_repo, so no recorded source for the binary; update policy manual.
   - unit file `stacks/inbox/inbox/inbox.service` in the repository; the container's copy is `/etc/systemd/system/inbox.service`.
   - data: repository `rclone:gdrive:homelab-backups/inbox-config`, archive `/inbox-data.tar` holding a tar of `/var/lib/inbox`.
   - vault copy of inbox (`/etc/inbox/inbox.env`): `/var/lib/homelab/secrets/inbox/inbox/inbox.env`.

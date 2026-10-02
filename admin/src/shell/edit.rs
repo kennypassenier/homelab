@@ -1758,6 +1758,8 @@ pub async fn save_host_settings(
             Command::ApplyHostConfig {
                 toml: new_text,
                 expect_sha256,
+                // fix-191: only the keys this page changed may move.
+                allow: keys.clone(),
             },
             Duration::from_secs(30),
             None,

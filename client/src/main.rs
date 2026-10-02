@@ -727,19 +727,71 @@ async fn run(explicit_host: Option<String>) {
                 // uses: read host.toml's current sha256 first, so an edit
                 // made meanwhile (over ssh, or a TUI save) is refused
                 // rather than silently overwritten.
-                let expect_sha256 = rpc_reply(&host, &token, Command::GetHostConfig)
+                let current = rpc_reply(&host, &token, Command::GetHostConfig)
                     .await
                     .filter(|r| r.ok)
                     .and_then(|r| {
                         serde_json::from_str::<homelab_proto::HostConfigFile>(&r.message).ok()
                     })
-                    .map(|f| f.sha256);
+                    .unwrap_or_else(|| {
+                        die("the host did not answer GetHostConfig — nothing applied")
+                    });
+                // fix-191: every key this apply moves, shown before anything
+                // is written, and confirmed by typing `apply`. Only these
+                // keys are sent as `allow`; the host refuses any other.
+                let declared: std::collections::BTreeMap<String, serde_json::Value> = toml
+                    .parse::<toml::Table>()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|(k, v)| serde_json::to_value(v).ok().map(|v| (k, v)))
+                    .collect();
+                let changes =
+                    homelab_core::hostconfig::declared_changes(&declared, &current.values);
+                if changes.is_empty() {
+                    println!(
+                        "{}✓ nothing to apply — the host already runs these settings{}",
+                        C_GREEN, C_RESET
+                    );
+                    std::process::exit(0);
+                }
+                let show = |v: &Option<serde_json::Value>| match v {
+                    None => "(not set)".to_string(),
+                    Some(v) => {
+                        let t = v.to_string();
+                        if t.len() > 100 {
+                            format!("{}…", &t[..t.floor_char_boundary(100)])
+                        } else {
+                            t
+                        }
+                    }
+                };
+                println!("  {} key(s) change on the host:", changes.len());
+                for c in &changes {
+                    let colour = if c.to.is_none() { C_RED } else { C_YELLOW };
+                    println!(
+                        "{}  {}: {} → {}{}",
+                        colour,
+                        c.key,
+                        show(&c.from),
+                        show(&c.to),
+                        C_RESET
+                    );
+                }
+                println!("  type `apply` to write exactly these changes:");
+                let mut answer = String::new();
+                let _ = std::io::stdin().read_line(&mut answer);
+                if answer.trim() != "apply" {
+                    die("not confirmed — nothing applied");
+                }
+                let allow: Vec<String> = changes.iter().map(|c| c.key.clone()).collect();
+                let expect_sha256 = Some(current.sha256);
                 let r = rpc_reply(
                     &host,
                     &token,
                     Command::ApplyHostConfig {
                         toml,
                         expect_sha256,
+                        allow,
                     },
                 )
                 .await;

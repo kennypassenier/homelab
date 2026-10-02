@@ -33,6 +33,7 @@
 //! Zero I/O: values travel as JSON, the TOML side is the host's.
 
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 /// Who may change a key from the dashboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1145,4 +1146,50 @@ pub fn apply_declared(
         }
     }
     Ok(merged)
+}
+
+/// fix-191: one key a whole-file apply would move, for the operator to read
+/// before the host writes it. Values as JSON; secrets and host-held keys
+/// never appear (they are kept from the host's own file, never applied).
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyChange {
+    pub key: String,
+    /// The host's current value; `None`: the host does not set it.
+    pub from: Option<serde_json::Value>,
+    /// The declared value; `None`: the apply drops the key.
+    pub to: Option<serde_json::Value>,
+}
+
+/// fix-191: every non-secret, non-host-held key whose value differs between
+/// `current` (the host's file, as `GetHostConfig` reports it) and `declared`
+/// (`config/host.toml`), sorted by key. Pure.
+pub fn declared_changes(
+    declared: &BTreeMap<String, serde_json::Value>,
+    current: &BTreeMap<String, serde_json::Value>,
+) -> Vec<KeyChange> {
+    let keys: std::collections::BTreeSet<&String> = declared.keys().chain(current.keys()).collect();
+    keys.into_iter()
+        .filter(|k| !is_secret(k) && !is_host_held(k))
+        .filter(|k| declared.get(*k) != current.get(*k))
+        .map(|k| KeyChange {
+            key: k.clone(),
+            from: current.get(k).cloned(),
+            to: declared.get(k).cloned(),
+        })
+        .collect()
+}
+
+/// fix-191: the keys `merged` would move away from `current` that `allow`
+/// does not name — what `ApplyHostConfig` refuses. Pure.
+pub fn unannounced_changes(
+    merged: &toml::Table,
+    current: &toml::Table,
+    allow: &[String],
+) -> Vec<String> {
+    let keys: std::collections::BTreeSet<&String> = merged.keys().chain(current.keys()).collect();
+    keys.into_iter()
+        .filter(|k| merged.get(*k) != current.get(*k))
+        .filter(|k| !allow.iter().any(|a| a == *k))
+        .cloned()
+        .collect()
 }

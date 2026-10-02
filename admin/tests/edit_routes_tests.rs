@@ -502,6 +502,7 @@ async fn feat_settings_1_read_and_write_with_the_session_commands_only() {
         Command::ApplyHostConfig {
             toml,
             expect_sha256,
+            ..
         } => {
             assert!(toml.contains("backup_hour = 5"), "{toml}");
             assert_eq!(expect_sha256.as_deref(), Some("b".repeat(64).as_str()));

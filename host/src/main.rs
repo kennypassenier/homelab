@@ -1278,6 +1278,7 @@ fn apply_host_config_whole(
     raw: &str,
     declared: &str,
     expect_sha256: Option<&str>,
+    allow: &[String],
 ) -> Result<(String, homelab_proto::HostConfigSaved), String> {
     if let Some(expect) = expect_sha256 {
         let now = homelab_core::manifest::sha256_hex(raw.as_bytes());
@@ -1297,6 +1298,17 @@ fn apply_host_config_whole(
         toml::from_str(raw).map_err(|e| format!("host.toml does not parse as TOML: {e}"))?
     };
     let merged = homelab_core::hostconfig::apply_declared(&declared_table, &current_table)?;
+    // fix-191: only the keys the sender named may move.
+    let unannounced = homelab_core::hostconfig::unannounced_changes(&merged, &current_table, allow);
+    if !unannounced.is_empty() {
+        return Err(format!(
+            "config/host.toml would also change {} on the host, which this apply did not name \
+             — the working copy and the host disagree there; bring config/host.toml in line \
+             with the host first, or run `homelab host apply`, which shows every change and \
+             asks before it names them",
+            unannounced.join(", ")
+        ));
+    }
     let file: FileConfig = merged
         .clone()
         .try_into()
@@ -2377,6 +2389,38 @@ span_days = 7\n";
             !recovery_without_push.urgency.urgent,
             "a recovery after an outage nobody was pushed about stays centre-only"
         );
+    }
+
+    /// fix-191: a whole-file apply may move only the keys it names. The
+    /// dashboard's Settings save names the one key it edited; a stale
+    /// `config/host.toml` that lacks `zfs_jobs` must then be refused, not
+    /// allowed to drop the host's replication.
+    #[test]
+    fn fix_191_a_whole_file_apply_moves_only_the_named_keys() {
+        let raw = "token = \"0123456789abcdef0123\"\nbackup_hour = 4\nexec_enabled = false\n\
+                   zfs_jobs = [{ source = \"HDD2TB\", target = \"HDD18TB/replica/HDD2TB\" }]\n";
+        let stale = "backup_hour = 5\nexec_enabled = false\n";
+        let err =
+            apply_host_config_whole(raw, stale, None, &["backup_hour".to_string()]).unwrap_err();
+        assert!(err.contains("zfs_jobs"), "{err}");
+        let err = apply_host_config_whole(raw, stale, None, &[]).unwrap_err();
+        assert!(
+            err.contains("backup_hour") && err.contains("zfs_jobs"),
+            "{err}"
+        );
+        // Named: it goes through, and the secret token is kept.
+        let (text, _) = apply_host_config_whole(
+            raw,
+            stale,
+            None,
+            &["backup_hour".to_string(), "zfs_jobs".to_string()],
+        )
+        .unwrap();
+        assert!(
+            text.contains("backup_hour = 5") && !text.contains("zfs_jobs"),
+            "{text}"
+        );
+        assert!(text.contains("0123456789abcdef0123"));
     }
 
     /// SetHostConfig: a change lands with every other key kept; a file that
@@ -11577,11 +11621,15 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         Rpc::ApplyHostConfig {
             toml: declared,
             expect_sha256,
+            allow,
         } => {
             let path = state.config.config_path.clone();
             let raw = std::fs::read_to_string(&path).unwrap_or_default();
-            let outcome = apply_host_config_whole(&raw, &declared, expect_sha256.as_deref())
-                .and_then(|(text, saved)| write_config_file(&path, &text).map(|()| (text, saved)));
+            let outcome =
+                apply_host_config_whole(&raw, &declared, expect_sha256.as_deref(), &allow)
+                    .and_then(|(text, saved)| {
+                        write_config_file(&path, &text).map(|()| (text, saved))
+                    });
             match outcome {
                 Ok((text, saved)) => {
                     if let Ok(file) = toml::from_str::<FileConfig>(&text) {

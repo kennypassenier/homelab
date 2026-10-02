@@ -476,10 +476,19 @@ pub enum Command {
     /// (the nightly round and a first `homelab host apply` on a host nobody
     /// has read yet have nothing to compare against). Answered as JSON
     /// [`HostConfigSaved`], exactly like `SetHostConfig`.
+    ///
+    /// fix-191: `allow` names every key the sender means to change or drop.
+    /// Any other key whose value would differ from the host's current file
+    /// is refused with the list — a whole-file apply from a working copy
+    /// that never took the host's own settings must not silently rewrite
+    /// them. Empty (an older sender): nothing may differ but what is
+    /// identical already, so only a no-op passes.
     ApplyHostConfig {
         toml: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         expect_sha256: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        allow: Vec<String>,
     },
     /// feat-platform-10 (milestone follow): one step of driving the
     /// dashboard's open tabs (`homelab ui <step>`). The host hands it to the

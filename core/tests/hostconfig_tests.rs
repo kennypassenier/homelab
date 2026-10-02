@@ -259,3 +259,40 @@ fn fix_170_drift_ignores_tokens() {
         "tokens is never compared, whichever side names it"
     );
 }
+
+/// fix-191: a whole-file apply from a working copy that never took the
+/// host's own settings must not rewrite them. `unannounced_changes` names
+/// every key that would move without the sender naming it, and
+/// `declared_changes` is the list `homelab host apply` shows before asking.
+#[test]
+fn fix_191_only_named_keys_may_move() {
+    use homelab_core::hostconfig::{declared_changes, unannounced_changes};
+    let current: toml::Table = toml::from_str(
+        "backup_hour = 4\nzfs_jobs = [{ source = \"HDD2TB\", target = \"HDD18TB/replica/HDD2TB\" }]\nlog_level = \"info\"\n",
+    )
+    .unwrap();
+    // A stale repository file: zfs_jobs missing, backup_hour edited.
+    let merged: toml::Table = toml::from_str("backup_hour = 5\nlog_level = \"info\"\n").unwrap();
+    assert_eq!(
+        unannounced_changes(&merged, &current, &["backup_hour".to_string()]),
+        vec!["zfs_jobs".to_string()],
+        "the dashboard named only backup_hour; dropping zfs_jobs must be refused"
+    );
+    assert!(
+        unannounced_changes(
+            &merged,
+            &current,
+            &["backup_hour".into(), "zfs_jobs".into()]
+        )
+        .is_empty()
+    );
+    let to_json = |t: &toml::Table| {
+        t.iter()
+            .map(|(k, v)| (k.clone(), serde_json::to_value(v).unwrap()))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let shown = declared_changes(&to_json(&merged), &to_json(&current));
+    let keys: Vec<&str> = shown.iter().map(|c| c.key.as_str()).collect();
+    assert_eq!(keys, vec!["backup_hour", "zfs_jobs"]);
+    assert!(shown[1].to.is_none(), "a dropped key shows as dropped");
+}

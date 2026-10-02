@@ -2583,6 +2583,13 @@ span_days = 7\n";
 
     /// H8: the probe layer feeds real data — stale backups and a dead
     /// offsite remote must surface, healthy state must not.
+    ///
+    /// fix-218: the backup-age reading now comes from the host's
+    /// `SnapshotCache` (the same one `homelab snapshots` answers from), not
+    /// `StackState::last_backup` — so this test deliberately sets
+    /// `last_backup` to `now` (the live fault's exact shape: a cached
+    /// timestamp that reads as fresh) and proves the age comes out stale
+    /// anyway, from the repository's own newest snapshot.
     #[tokio::test]
     async fn doctor_probes_surface_stale_backup_and_dead_offsite() {
         use homelab_core::executor::{CmdOutput, MockExecutor};
@@ -2591,8 +2598,7 @@ span_days = 7\n";
         exec.seed_file(
             "/var/lib/homelab/state.json",
             &format!(
-                r#"{{"schema_version":1,"stacks":{{"synctest":{{"vmid":108,"hostname":"108-app-synctest","apps":["syncthing"],"applied_at":1,"last_backup":{}}}}}}}"#,
-                now - 80 * 3600
+                r#"{{"schema_version":1,"stacks":{{"synctest":{{"vmid":108,"hostname":"108-app-synctest","apps":["syncthing"],"applied_at":1,"last_backup":{now},"natives":[{{"stack_name":"synctest","vmid":108,"hostname":"108-app-synctest","unit":"synctest","binary":"/opt/synctest/bin/synctest","data_dirs":["/var/lib/synctest"]}}]}}}}}}"#,
             ),
         );
         // Present = Proxmox holds a configuration for it (what `pct status`
@@ -2609,27 +2615,62 @@ span_days = 7\n";
             "lsd gdrive:homelab-backups",
             CmdOutput::failed(3, "token expired"),
         );
+        // The repository's own newest snapshot is 80h old — stale, even
+        // though `last_backup` above claims `now`.
+        exec.respond_always(
+            "snapshots --json",
+            CmdOutput::ok(
+                r#"[{"time":"2023-11-11T14:13:20Z","short_id":"ab12cd34","id":"ab12cd34ef"}]"#,
+            ),
+        );
+        let snapshot_cache =
+            std::sync::Arc::new(homelab_core::ops::snapshot_cache::SnapshotCache::new(3));
+        let backup_cfg = homelab_core::ops::backup::BackupCfg::default();
+        // 2023-11-11T14:13:20Z is exactly 80h before 1_700_000_000; `now`
+        // here is unrelated to that epoch, so the cache is seeded directly
+        // with the same reading `gather_probes` would otherwise have to kick
+        // a background refresh for.
+        snapshot_cache
+            .refresh(&exec, &backup_cfg, "synctest", 1_700_000_000)
+            .await;
         let probes = gather_probes(
             &exec,
             "/var/lib/homelab",
             None,
             None,
             homelab_core::ops::restoredrill::DEFAULT_DRILL_SCRATCH_DIR,
-            now,
+            1_700_000_000,
+            &snapshot_cache,
+            &backup_cfg,
             &|_| {},
         )
         .await;
         assert_eq!(probes.managed_stacks.len(), 1);
-        assert_eq!(probes.managed_stacks[0].backup_age_h, Some(80));
+        assert!(
+            probes.managed_stacks[0].snapshot_read,
+            "the cache was seeded before gather_probes ran"
+        );
+        assert_eq!(probes.managed_stacks[0].snapshot_age_h, Some(80));
         assert!(probes.managed_stacks[0].container_present);
         assert!(probes.offsite_configured);
         assert!(!probes.offsite_token_valid, "expired token must show");
-        // And the diagnosis flags both problems.
+        // And the diagnosis flags both problems — a fresh `last_backup` must
+        // not paper over the stale real snapshot (the live fault, fix-218).
         let checks = homelab_core::doctor::diagnose(&probes);
         assert!(
             checks
                 .iter()
                 .any(|c| c.health != homelab_core::doctor::Health::Ok)
+        );
+        let backup_line = checks
+            .iter()
+            .find(|c| c.name == "stack synctest backup")
+            .expect("a stack synctest backup line");
+        assert_eq!(backup_line.health, homelab_core::doctor::Health::Warn);
+        assert!(
+            backup_line.detail.contains("80h ago"),
+            "{}",
+            backup_line.detail
         );
     }
 
@@ -9434,6 +9475,8 @@ async fn gather_today(
             state.config.backup.staging_dir.as_deref(),
             &state.config.restore_drill_scratch_dir,
             now,
+            &state.snapshot_cache,
+            &state.config.backup,
             &|line: &str| progress_line(state, line),
         )
         .await;
@@ -9547,6 +9590,15 @@ async fn gather_live_facts(
     }
     // fix-96: so the check can say when a configured second copy stops.
     facts.second_copy_dataset = state.config.second_copy_dataset.clone();
+    // fix-218: the same real-snapshot reading `homelab doctor` uses, so the
+    // fleet check (and `homelab today`, and the dashboard's Health) never
+    // disagree with doctor about whether a stack has actually been backed up.
+    facts.backup_snapshots = gather_backup_snapshot_facts(
+        &state.config.state_dir,
+        &state.snapshot_cache,
+        &state.config.backup,
+    )
+    .await;
     // rule-20: pve's own capacity — not a managed container's rootfs
     // (`growth`) and not a stack's declared data pool (`pools`).
     facts.host_capacity = gather_host_capacity(
@@ -9723,6 +9775,92 @@ async fn gather_host_capacity(
     }
 
     out
+}
+
+/// fix-218: the repositories one stack actually owns — a native unit's own
+/// unit name (D25), or a compose stack's `owner_groups` (fix-130: a native
+/// stack backs up each service whole).
+fn stack_snapshot_owners(st: &homelab_core::state::StackState) -> Vec<String> {
+    if st.is_native() {
+        st.natives.iter().map(|n| n.unit.clone()).collect()
+    } else {
+        st.manifest
+            .as_ref()
+            .map(|m| {
+                homelab_core::ops::backup::owner_groups(m)
+                    .into_iter()
+                    .map(|(owner, _paths)| owner)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// fix-218: the newest real snapshot across `owners`, read off the same
+/// `SnapshotCache` `homelab snapshots` and the dashboard use — never
+/// `StackState::last_backup`, which only records that a backup OPERATION
+/// returned ok, even when it archived nothing (an empty native-service list
+/// makes the nightly backup loop and the on-demand `backup-native` RPC both
+/// vacuously "succeed"). A cache miss never blocks the caller: it kicks a
+/// background refresh (the same bounded, coalescing path every other
+/// snapshot-cache caller uses) and reports `read = false` instead of
+/// guessing either "fresh" or "never backed up".
+fn cached_newest_snapshot_unix(
+    snapshot_cache: &Arc<homelab_core::ops::snapshot_cache::SnapshotCache>,
+    backup_cfg: &homelab_core::ops::backup::BackupCfg,
+    owners: &[String],
+) -> (Option<u64>, bool) {
+    let mut newest: Option<u64> = None;
+    let mut read = true;
+    for owner in owners {
+        match snapshot_cache.get(owner) {
+            Some(cached) => {
+                if let Some(t) = cached.snapshots.iter().map(|s| s.time).max() {
+                    newest = Some(newest.map_or(t, |n: u64| n.max(t)));
+                }
+            }
+            None => {
+                read = false;
+                let cache = snapshot_cache.clone();
+                let cfg = backup_cfg.clone();
+                let owner = owner.clone();
+                tokio::spawn(async move {
+                    cache.refresh(&RealExecutor, &cfg, &owner, unix_now()).await;
+                });
+            }
+        }
+    }
+    (newest, read)
+}
+
+/// fix-218: every recorded stack's real backup freshness, for the fleet
+/// check / `homelab today` / the dashboard's Health — the same reading
+/// `gather_probes` feeds `homelab doctor`, so the two never disagree about
+/// whether a stack has actually been backed up.
+async fn gather_backup_snapshot_facts(
+    state_dir: &str,
+    snapshot_cache: &Arc<homelab_core::ops::snapshot_cache::SnapshotCache>,
+    backup_cfg: &homelab_core::ops::backup::BackupCfg,
+) -> Vec<homelab_core::ops::fleetcheck::StackSnapshotFact> {
+    use homelab_core::ops::fleetcheck::StackSnapshotFact;
+    let store = homelab_core::state::StateStore::new(&RealExecutor, state_dir);
+    let hs = store.load().await.unwrap_or_default();
+    hs.stacks
+        .iter()
+        .map(|(name, st)| {
+            let owners = stack_snapshot_owners(st);
+            let (newest_snapshot_unix, snapshot_read) =
+                cached_newest_snapshot_unix(snapshot_cache, backup_cfg, &owners);
+            StackSnapshotFact {
+                name: name.clone(),
+                newest_snapshot_unix,
+                snapshot_read,
+                nothing_to_back_up: !st.is_native()
+                    && st.manifest.as_ref().is_some_and(|m| m.backs_up_nothing()),
+                is_native: st.is_native(),
+            }
+        })
+        .collect()
 }
 
 /// A backup is a backup, whoever asked for it. The scheduler recorded
@@ -11906,6 +12044,8 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 state.config.backup.staging_dir.as_deref(),
                 &state.config.restore_drill_scratch_dir,
                 now,
+                &state.snapshot_cache,
+                &state.config.backup,
                 &|line: &str| progress_line(state, line),
             )
             .await;
@@ -12373,6 +12513,7 @@ async fn gather_security_probes(
 /// healthy/broken matrix is testable with MockExecutor.
 /// `progress` gets one line per phase (fix-104, long-silences, 2026-09-27:
 /// `homelab doctor` took 24 s with nothing on the screen after "link up").
+#[allow(clippy::too_many_arguments)]
 async fn gather_probes(
     exec: &dyn Executor,
     state_dir: &str,
@@ -12380,6 +12521,14 @@ async fn gather_probes(
     staging_dir: Option<&str>,
     restore_scratch_dir: &str,
     now_unix: u64,
+    // fix-218: the same `SnapshotCache` `homelab snapshots` and the dashboard
+    // read, so the backup-age line reflects a real repository instead of
+    // `StackState::last_backup` (which a vacuous "no services" success can
+    // advance with nothing ever archived). A cold entry is kicked for a
+    // background refresh (never blocks doctor) via the `Arc` so the spawned
+    // task can outlive this call.
+    snapshot_cache: &Arc<homelab_core::ops::snapshot_cache::SnapshotCache>,
+    backup_cfg: &homelab_core::ops::backup::BackupCfg,
     progress: &(dyn Fn(&str) + Send + Sync),
 ) -> homelab_core::doctor::Probes {
     use homelab_core::doctor::{Probes, StackProbe};
@@ -12415,15 +12564,22 @@ async fn gather_probes(
                     || homelab_core::ops::facts::unsealed_secret_files(exec, state_dir, name, st)
                         .await
                         .is_empty();
+                // fix-218: the real newest snapshot across every repository
+                // this stack owns, off the same `SnapshotCache` `homelab
+                // snapshots` reads — not `StackState::last_backup`.
+                let owners = stack_snapshot_owners(st);
+                let (newest_snapshot, snapshot_read) =
+                    cached_newest_snapshot_unix(snapshot_cache, backup_cfg, &owners);
                 StackProbe {
                     name: name.clone(),
-                    backup_age_h: (st.last_backup > 0)
-                        .then(|| now_unix.saturating_sub(st.last_backup) / 3600),
+                    snapshot_age_h: newest_snapshot.map(|t| now_unix.saturating_sub(t) / 3600),
+                    snapshot_read,
                     container_present: present,
                     env_sealed,
                     // fix-130: a native stack's services are backed up whole.
                     nothing_to_back_up: !st.is_native()
                         && st.manifest.as_ref().is_some_and(|m| m.backs_up_nothing()),
+                    is_native: st.is_native(),
                 }
             })
             .collect(),

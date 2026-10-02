@@ -1398,8 +1398,13 @@ test("invariants: every action dialog lays its fields on one grid — labels on 
           );
         measured++;
       }
-      await page.keyboard.press("Escape");
-      await dialog.waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});
+      // Close through the dialog's own close button: Escape lands on a
+      // focused select first and leaves the dialog open over the page.
+      await dialog.locator(".kp-dialog__close").first().click();
+      await page
+        .locator("dialog#action-dialog")
+        .waitFor({ state: "detached", timeout: 5000 })
+        .catch(() => {});
     }
     assert.ok(measured >= 2, `only ${measured} dialogs had fields to measure`);
   } finally {

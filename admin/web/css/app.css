@@ -327,6 +327,21 @@ p:has(> .measured:only-child):first-child {
 .kp-tabs__list {
   margin-block: 12px 4px;
 }
+/* fix-233 (the 3.70.6 visual pass): at phone width the stack's six tabs ran
+   off the edge ("Ch…" cut, Settings out of reach). The row scrolls
+   sideways inside itself instead — the page never does — and keeps its
+   tabs whole. */
+@media (max-width: 40rem) {
+  .kp-tabs__list {
+    overflow-x: auto;
+    scrollbar-width: thin;
+    flex-wrap: nowrap;
+  }
+  .kp-tabs__list .kp-tab {
+    flex: none;
+    white-space: nowrap;
+  }
+}
 .kp-tabs__list a.kp-tab {
   text-decoration: none;
 }
@@ -453,10 +468,16 @@ p:has(> .measured:only-child):first-child {
   color: var(--muted-foreground);
   margin: 12px 0 6px;
 }
+/* fix-233: every action group lays its buttons on the same column grid, so
+   buttons line up across groups instead of each row ending ragged. */
 .actions-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
   gap: 8px;
+}
+.actions-row > .kp-button {
+  justify-content: center;
+  text-align: center;
 }
 .actions-running:not(:empty) {
   margin-block-start: 12px;
@@ -523,6 +544,13 @@ p:has(> .measured:only-child):first-child {
   padding-block: 0.75rem 1px;
   background: var(--popover);
   border-block-start: 1px solid var(--border);
+}
+/* fix-233: the wizard's Back does nothing on its first step; it keeps its
+   place (so Next never moves) but is not offered there. */
+#action-dialog
+  .act-wizard:has([data-kp-step]:first-of-type:not([hidden]))
+  [data-kp-wizard-back] {
+  visibility: hidden;
 }
 /* fix-225 (Kenny, 2026-10-02: "ik dacht dat de install a release pagina ook
    al met grid hermaakt was?"): every action dialog's step is one grid —
@@ -1863,6 +1891,27 @@ td.stack-flags {
   gap: 8px 12px;
   flex-wrap: wrap;
   cursor: pointer;
+  list-style: none;
+}
+/* fix-233: a summary laid out as flex loses the browser's own disclosure
+   triangle, so a closed block gave no sign it opens. One chevron, turned
+   when open, on every collapsible block. */
+.health-block summary::-webkit-details-marker {
+  display: none;
+}
+.health-block summary::before {
+  content: "";
+  flex: none;
+  inline-size: 0.5rem;
+  block-size: 0.5rem;
+  border-inline-end: 2px solid currentColor;
+  border-block-end: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  margin-inline: 2px 4px;
+}
+.health-block[open] > summary::before {
+  transform: rotate(45deg);
 }
 .health-block summary h2 {
   display: inline;

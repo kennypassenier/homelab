@@ -287,17 +287,58 @@ fn parse_release(body: &str) -> Result<(String, Option<String>), String> {
 }
 
 /// Fold one round into state: the stacks that were read replace their
-/// record, stacks no longer in state lose theirs, and every upstream asked
-/// tonight replaces its cached answer.
+/// record, whatever [`is_current`] no longer holds is pruned, and every
+/// upstream asked tonight replaces its cached answer.
 pub fn apply(state: &mut HostState, facts: PinFacts) {
     for (stack, images) in facts.images {
         state.running_images.insert(stack, images);
     }
-    let stacks: BTreeSet<String> = state.stacks.keys().cloned().collect();
-    state.running_images.retain(|s, _| stacks.contains(s));
+    prune(state);
     for (up, rec) in facts.releases {
         state.upstream_releases.insert(up, rec);
     }
+}
+
+/// fix-227 (Kenny, 2026-10-02): whether a recorded `(stack, container)` is
+/// still part of the fleet. `running_images` is a nightly snapshot, so a
+/// stack destroyed or an app dropped during the day stayed in it until the
+/// next round, and the fleet check (with the dashboard's Stale images table
+/// behind it) kept naming `uptime/cadvisor`, `home/cadvisor` and
+/// `metrics/grafana` after all three had been retired.
+///
+/// Current means: the stack is in state, and the container is not an app
+/// the stack retired (`HostState::retired`, keyed `<stack>/<name>`) unless
+/// the stack declares it again. A redeploy that brings an app back also
+/// drops its retired record (`retired::unretire`), so a live app is never
+/// hidden. Containers that are not apps themselves (a guard's cAdvisor, or
+/// the several caches one app runs) stay current while their stack is.
+pub fn is_current(state: &HostState, stack: &str, container: &str) -> bool {
+    let Some(st) = state.stacks.get(stack) else {
+        return false;
+    };
+    let declared = st.apps.iter().any(|a| a == container)
+        || st
+            .manifest
+            .as_ref()
+            .is_some_and(|m| m.apps.iter().any(|a| a == container));
+    declared
+        || !state
+            .retired
+            .contains_key(&format!("{}/{}", stack, container))
+}
+
+/// Drop every record [`is_current`] rejects, and stacks left with none.
+/// Run by the nightly [`apply`] and by the destroy and deploy that retire a
+/// stack or app (`retired::retire_stack`, `retired::retire_app`); the fleet
+/// check, which only reads state, applies the same rule in
+/// [`evaluate_pins`]. So a retired stack or app leaves every list at once.
+pub fn prune(state: &mut HostState) {
+    let mut kept = std::mem::take(&mut state.running_images);
+    for (stack, images) in kept.iter_mut() {
+        images.retain(|c, _| is_current(state, stack, c));
+    }
+    kept.retain(|s, images| state.stacks.contains_key(s) && !images.is_empty());
+    state.running_images = kept;
 }
 
 /// The fleet check's half: one `noted` finding per pinned version that its
@@ -309,6 +350,11 @@ pub fn evaluate_pins(state: &HostState) -> Vec<Finding> {
     let mut failed: BTreeMap<String, String> = BTreeMap::new();
     for (stack, images) in &state.running_images {
         for (container, rec) in images {
+            // fix-227: the record is a nightly snapshot; a stack or app
+            // retired since is not reported.
+            if !is_current(state, stack, container) {
+                continue;
+            }
             let (Some(up), Some(version)) = (rec.upstream.as_ref(), pinned_version(&rec.image))
             else {
                 continue;

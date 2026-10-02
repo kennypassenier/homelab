@@ -13,6 +13,19 @@
   font-size: 0.85em;
   color: var(--muted-foreground);
 }
+/* fix-176: kp-themes' own .kp-nav__search already carries
+   margin-inline-start: auto (dist/kp-themes.css), so with .link's auto
+   margin above too, a flex row with TWO auto-margin items splits the
+   bar's free space between them instead of grouping it: the version text
+   floated in the middle of the bar, a few hundred pixels from "Go to…".
+   .link is the one item meant to open the right-hand group (it sits right
+   before .kp-nav__search in index.html); switching off the search
+   trigger's own auto margin here makes .link's auto margin the only one,
+   so it pulls itself and everything after it (search, bell, help, theme)
+   into one cluster at the end of the bar. */
+.kp-nav .kp-nav__search {
+  margin-inline-start: 0;
+}
 .link[data-up="false"] {
   color: var(--destructive);
 }

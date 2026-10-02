@@ -32,12 +32,22 @@ async function freshPage(context) {
   return page;
 }
 
-test("invariants: the nav bar stays inline, with brand Homelab and the version beside Go to…, at 1280/1920/2560 CSS px", async () => {
+test("invariants: the nav bar stays inline, with brand Homelab and the version beside Go to…, at 1600/1920/2560 CSS px and at 1894 in the widest themes", async () => {
   const browser = await chromium.launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
-    for (const width of [1280, 1920, 2560]) {
+    // Kenny, 2026-10-02: a 4K screen at 200% scaling is ~1894 CSS px, and
+    // the widest themes (deco, cyberpunk: wide-spaced capitals) need it
+    // all — measured: they fold at 1760 and fit at 1894. The default
+    // theme folds at 1440 and fits from 1600 (1280 never fitted: the old
+    // case passed only because it measured before the bar had filled). Each width is
+    // checked in the default theme and in the widest one.
+    const cases = [1600, 1920, 2560].map((w) => [w, "dark"]);
+    cases.push([1894, "deco"], [1894, "cyberpunk"]);
+    for (const [width, theme] of cases) {
+      await page.evaluate((t) => localStorage.setItem("theme", t), theme);
+      await page.reload();
       await page.setViewportSize({ width, height: 900 });
       // fix-176's own fitBar() re-measures on resize/content changes; give
       // it a turn of the event loop rather than assuming it already ran.
@@ -46,7 +56,7 @@ test("invariants: the nav bar stays inline, with brand Homelab and the version b
       assert.equal(
         folded,
         null,
-        `the nav bar folded into the hamburger at ${width}px (fix-176)`,
+        `the nav bar folded into the hamburger at ${width}px in ${theme} (fix-176)`,
       );
       const brand = await page.locator("#brand").textContent();
       assert.equal(brand, "Homelab", `brand text wrong at ${width}px`);

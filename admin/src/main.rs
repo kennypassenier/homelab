@@ -124,7 +124,20 @@ async fn main() -> std::process::ExitCode {
         .page(Page::new("host", "Host", "/host"))
         .page(Page::new("log", "Live log", "/log").group("Operations"))
         .page(Page::new("jobs", "Jobs", "/jobs").group("Operations"))
-        .page(Page::new("apply", "Apply", "/apply").group("Operations"))
+        // fix-210 (Kenny, 2026-10-02): Apply moved into Overview as a
+        // collapsible section ("Apply the whole fleet"); the page stays
+        // registered and hidden, the same way "overview" itself is above —
+        // formspec.json keeps listing it (so a Live view script with
+        // `homelab ui goto apply` still works, DRIVABLE_PATHS in
+        // router.js stays in step with it) and the old `/apply` address
+        // still resolves (`router.js` redirectFor sends it on to
+        // `/overview?section=apply`); it just no longer has its own link
+        // in the bar.
+        .page(
+            Page::new("apply", "Apply", "/apply")
+                .group("Operations")
+                .hidden(),
+        )
         .page(Page::new("schedules", "Schedules", "/schedules").group("Operations"))
         .page(Page::new("firewall", "Firewall", "/firewall").group("Configure"))
         .page(Page::new("backups", "Backups", "/backups").group("Configure"))

@@ -15,6 +15,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+// fix-210: this import was missing — the fix-206 spacing sweep below has
+// referenced DRIVABLE_PATHS since it was written without ever importing
+// it, a ReferenceError this suite's own runs apparently never surfaced
+// loudly enough to get fixed; found while adding this file's own fix-210
+// cases, which need the same list.
+import { DRIVABLE_PATHS } from "../js/router.js";
 
 const BASE = process.env.INVARIANTS_BASE_URL ?? "http://127.0.0.1:8099";
 const TOKEN = process.env.INVARIANTS_TOKEN ?? "test-invariants-token-1234";
@@ -703,6 +709,181 @@ test("invariants: a stack whose firewall the host enforces is shown as enforced 
     assert.ok(
       bodyText.includes("in force (repo differs)"),
       "the firewall table never shows a host-enforced-but-repo-disagrees row",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: Overview's apply section loads only after it is opened, and shows a loading state first", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    /** @type {string[]} */
+    const planRequests = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/data/apply/plan")) planRequests.push(r.url());
+    });
+    // Delay the plan read so the loading state's presence does not depend
+    // on how fast the demo host answers (fix-177's own trick, reused).
+    await page.route("**/data/apply/plan", async (route) => {
+      await new Promise((r) => setTimeout(r, 1200));
+      await route.continue();
+    });
+    await page.goto(`${BASE}/overview`);
+    await page.waitForSelector("#apply-section", { timeout: 5000 });
+    assert.equal(
+      planRequests.length,
+      0,
+      "the apply plan was read before its section was ever opened",
+    );
+    const openBefore = await page.$eval(
+      "#apply-section",
+      (d) => /** @type {HTMLDetailsElement} */ (d).open,
+    );
+    assert.equal(openBefore, false, "the apply section starts open");
+
+    await page.click("#apply-section > summary");
+    // Right after opening, before the delayed plan has answered: a
+    // skeleton row must already be on screen. `waitFor` (not a bare
+    // `count()`) because a `<details>` fires its own "toggle" event as a
+    // queued task, not synchronously with the click — this still proves
+    // the point as long as the skeleton attaches well within the 1200ms
+    // the plan read is held back by.
+    await page
+      .locator(".apply-row--skeleton")
+      .first()
+      .waitFor({ state: "attached", timeout: 1000 });
+    assert.ok(
+      planRequests.length > 0,
+      "opening the section never triggered the plan read",
+    );
+
+    // Once the delayed read lands, the skeleton is gone and the real plan
+    // is drawn.
+    await page.waitForSelector(".apply-row--skeleton", {
+      state: "detached",
+      timeout: 5000,
+    });
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: /apply lands on Overview with its section open", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/apply`);
+    await page.waitForURL("**/overview?section=apply", { timeout: 5000 });
+    const open = await page.$eval(
+      "#apply-section",
+      (d) => /** @type {HTMLDetailsElement} */ (d).open,
+    );
+    assert.equal(open, true, "/apply did not land with its section open");
+    const headingText = await page
+      .locator("#apply-section > summary")
+      .innerText();
+    assert.ok(
+      headingText.includes("Apply the whole fleet"),
+      "the opened section is not the apply section",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: every data-loading page shows a loading indicator before its data (or error) arrives", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    // One uniform delay on every data read, so a page's own loading state
+    // (table skeleton, status text, chart placeholder) has to be on screen
+    // from the very first frame, not merely arrive before a fast demo host
+    // happens to answer.
+    await page.route("**/data/**", async (route) => {
+      await new Promise((r) => setTimeout(r, 900));
+      await route.continue();
+    });
+    // apply/shell/log open their own slow or live connections and are
+    // covered by their own dedicated cases above; passkeys is the kit's
+    // own page (pre-existing gap, noted in the fix-206 test).
+    const skip = new Set(["apply", "shell", "log", "passkeys"]);
+    for (const p of DRIVABLE_PATHS.filter((p) => !skip.has(p))) {
+      await page.goto(`${BASE}/${p}`, { waitUntil: "domcontentloaded" });
+      // Read the page's own loading affordance BEFORE the 900ms delay
+      // elapses, i.e. before any `/data/...` response could have landed.
+      const loading = await page.evaluate(() => {
+        const root = document.getElementById("page");
+        if (!root) return false;
+        if (root.querySelector('[data-kp-state="loading"]')) return true;
+        if (root.querySelector(".apply-row--skeleton, [class*='--skeleton']"))
+          return true;
+        return /reading|loading|waiting for/i.test(root.innerText);
+      });
+      assert.ok(
+        loading,
+        `/${p}: no loading indicator visible before its data arrived`,
+      );
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: every top-level section on Overview and the stack page has a heading and a non-empty description", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    const check = async (/** @type {string} */ url) => {
+      await page.goto(url, { waitUntil: "load" });
+      await page.waitForTimeout(300);
+      return page.evaluate(() => {
+        /** @type {string[]} */
+        const bad = [];
+        const heads = document.querySelectorAll("#page h1, #page h2, #page h3");
+        for (const head of heads) {
+          // The description is the shared `.section-head__desc` sibling
+          // when the heading uses `sectionHeader()`, or the next element
+          // sibling of the heading's own row otherwise (a plain paragraph
+          // right after it, or right after its enclosing `.title-row`).
+          let desc =
+            head.parentElement?.querySelector(".section-head__desc") ?? null;
+          if (!desc) {
+            const row = head.closest(".title-row") ?? head;
+            let sib = row.nextElementSibling;
+            while (sib && sib.tagName === "SCRIPT")
+              sib = sib.nextElementSibling;
+            if (
+              sib &&
+              (sib.tagName === "P" || sib.tagName === "SPAN") &&
+              sib.textContent &&
+              sib.textContent.trim().length > 10
+            )
+              desc = sib;
+          }
+          const text = desc?.textContent?.trim() ?? "";
+          if (text.length < 10)
+            bad.push(`"${head.textContent?.trim()}" has no description`);
+        }
+        return bad;
+      });
+    };
+    const overviewBad = await check(`${BASE}/overview`);
+    assert.deepEqual(
+      overviewBad,
+      [],
+      `Overview section(s) missing a description: ${overviewBad.join("; ")}`,
+    );
+    const stackBad = await check(`${BASE}/stacks/films`);
+    assert.deepEqual(
+      stackBad,
+      [],
+      `Stack page section(s) missing a description: ${stackBad.join("; ")}`,
     );
   } finally {
     await browser.close();

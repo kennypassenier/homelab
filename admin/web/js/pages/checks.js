@@ -56,6 +56,11 @@ export function mount(root) {
   const ago = agoEl("read");
   root.replaceChildren(
     h("h1", null, "Checks"),
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "The manual checks a deploy left open for a person to answer; Answer records your verdict.",
+    ),
     summary,
     t.wrap,
     h("p", null, ago),

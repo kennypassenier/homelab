@@ -972,6 +972,11 @@ function settingsExtCard(stack, e, reload) {
     ),
     h("div", { class: "edit-grid" }, ...fields),
     h("h3", null, "retention:"),
+    h(
+      "p",
+      { class: "measured" },
+      "How many of this stack's own snapshots are kept, per period.",
+    ),
     ...retention.wrap,
     h("div", { class: "row-buttons" }, review, " ", status),
   );
@@ -1432,10 +1437,25 @@ function appsEditCard(stack, e, reload) {
       : h("p", { class: "measured" }, "This stack has no apps yet."),
     addBlankX.wrap,
     h("h3", null, "storage:"),
+    h(
+      "p",
+      { class: "measured" },
+      "Folders on the host bind-mounted into the container; each is backed up nightly unless marked no_backup.",
+    ),
     ...storage.wrap,
     h("h3", null, "data_mounts:"),
+    h(
+      "p",
+      { class: "measured" },
+      "Large host datasets mounted read-write into the container (media, downloads); never backed up by this stack.",
+    ),
     ...dataMounts.wrap,
     h("h3", null, "log_files:"),
+    h(
+      "p",
+      { class: "measured" },
+      "Log files inside the container that the dashboard rotates and caps, so they never fill the disk.",
+    ),
     ...logFiles.wrap,
     h("div", { class: "row-buttons" }, review, " ", status),
   );
@@ -1574,6 +1594,11 @@ function latchEditCard(stack, e, reload) {
         )
       : h("p", { class: "measured" }, "This stack has no apps yet."),
     h("h3", null, "latch_files:"),
+    h(
+      "p",
+      { class: "measured" },
+      "Secret files this stack receives from latch at deploy time, and where they land in the container.",
+    ),
     ...files.wrap,
     h("div", { class: "row-buttons" }, review, " ", status),
   );
@@ -1889,10 +1914,25 @@ function checksEditCard(stack, e, apps, reload) {
     urlField.value = view.url ?? "";
     body.replaceChildren(
       h("h3", null, "checks:"),
+      h(
+        "p",
+        { class: "measured" },
+        "Measured checks: a command or URL the dashboard runs to decide this app is healthy.",
+      ),
       ...checksTable.wrap,
       h("h3", null, "manual:"),
+      h(
+        "p",
+        { class: "measured" },
+        "Questions only a person can answer (for example: does the audio stay in sync); asked again when the app's files change.",
+      ),
       ...manualTable.wrap,
       h("h3", null, "probes:"),
+      h(
+        "p",
+        { class: "measured" },
+        "Nightly probes: a deeper test run once a night, whose result shows on Health.",
+      ),
       ...probesTable.wrap,
       labeledField("checks-busy", "Busy check command", busyField),
       labeledField("checks-url", "Link", urlField),
@@ -2293,6 +2333,11 @@ function nativeUnitForm(stack, natives, reload) {
       id: "native-form",
     },
     h("h3", null, "Edit a native unit"),
+    h(
+      "p",
+      { class: "measured" },
+      "Change one unit's service.yml: its binary, state directories and update policy.",
+    ),
     h(
       "div",
       { class: "kp-field" },

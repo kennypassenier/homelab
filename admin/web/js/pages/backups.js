@@ -203,6 +203,15 @@ export function mount(root) {
   const load = async () => {
     progressWrap.replaceChildren();
     failures.replaceChildren();
+    // fix-210: the fleet itself (`/data/fleet`, store.js) may not have
+    // answered yet — that is "still loading", never "no stack has a
+    // backup repository yet" (the same distinction overview.js already
+    // makes with `if (!current().fleet) t.loading(...)`), so a slow first
+    // read never paints as an empty table.
+    if (!current().fleet) {
+      table.loading({ words: "Waiting for the host's report of the fleet…" });
+      return;
+    }
     const names = (current().fleet?.stacks ?? []).map((s) => s.name);
     if (names.length === 0) {
       table.setNothing(NOTHING);

@@ -84,6 +84,11 @@ export function mount(root, ctx) {
       h("h1", null, "Presets"),
       h("span", { class: "actions-row" }, importBtn, newPreset, newStack),
     ),
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "Ready-made stack templates to start a new stack from.",
+    ),
     note,
     t.wrap,
     h("p", null, ago),

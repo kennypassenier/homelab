@@ -15,6 +15,7 @@ import {
   h,
   fetchJson,
   fillStatGrid,
+  sectionHeader,
   selectCell,
   tableBlock,
   td,
@@ -24,6 +25,7 @@ import { openImport } from "../importstack.js";
 import { openNewStack } from "../newstack.js";
 import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
+import { mount as mountApplySection } from "./apply.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 
 /** @typedef {{navigate: (href: string) => void}} Ctx */
@@ -104,29 +106,110 @@ export function mount(root, ctx) {
   );
   importBtn.addEventListener("click", () => void openImport(ctx.navigate));
   // TUI parity ([CHANGED]): comparing runs latch once per stack on the
-  // dashboard, so it runs when asked, not on every visit.
+  // dashboard, so it runs when asked, not on every visit. fix-210 (Kenny,
+  // 2026-10-02): the button used to sit loose at the top of the page,
+  // meaning something different from the fleet-wide apply plan right next
+  // to it — both now live inside the one "Apply the whole fleet" section
+  // below, each its own clearly described step.
   const compareBtn = h(
     "button",
-    { type: "button", class: "kp-button", id: "drift-compare" },
+    {
+      type: "button",
+      class: "kp-button",
+      id: "drift-compare",
+      title:
+        "Check every stack against its files and mark the ones that differ [CHANGED] in the table above.",
+    },
     "Compare with the files",
   );
   const driftError = h("div", { class: "drift-error" });
+  // fix-210: the Apply page's whole functionality, as a collapsible
+  // section that starts loading only once opened (health.js's lazy-block
+  // pattern) — never a page nobody asked to read. `?section=apply`
+  // (`router.js` redirectFor's "apply" case, the old `/apply` address)
+  // opens it and scrolls it into view, the same convention Health already
+  // uses for `?block=`.
+  const applyStep1 = h(
+    "div",
+    { class: "apply-step" },
+    sectionHeader(
+      "Which stacks differ from their files",
+      "A quick per-stack check: marks each stack [CHANGED] in the table above when what runs does not match its stack files. Covers the whole fleet at once; a single stack's own page has the same check for just that stack.",
+      { level: "h3" },
+    ),
+    h("div", { class: "title-row" }, compareBtn),
+    driftError,
+  );
+  const applyPlanBody = h("div", { class: "apply-step" });
+  const applySection = /** @type {HTMLDetailsElement} */ (
+    h(
+      "details",
+      { class: "health-block", id: "apply-section" },
+      h(
+        "summary",
+        null,
+        sectionHeader(
+          "Apply the whole fleet",
+          "Plan and apply every pending change across the fleet in one confirmed batch, including a stack whose directory was deleted.",
+          { level: "h2" },
+        ),
+      ),
+      h("div", { class: "health-block__body" }, applyStep1, applyPlanBody),
+    )
+  );
+  let applyMounted = false;
+  let stopApply = () => {};
+  const mountApplyOnce = () => {
+    if (applyMounted) return;
+    applyMounted = true;
+    applyPlanBody.replaceChildren(
+      sectionHeader(
+        "What applying would change",
+        "The full plan for every stack, read from the host and the working copy; nothing runs until Apply… is confirmed.",
+        { level: "h3" },
+      ),
+    );
+    const planBody = h("div");
+    applyPlanBody.append(planBody);
+    stopApply = mountApplySection(planBody);
+  };
+  applySection.addEventListener("toggle", () => {
+    if (applySection.open) mountApplyOnce();
+  });
   root.replaceChildren(
     h(
       "div",
       { class: "title-row" },
       h("h1", null, "Overview"),
-      h("span", { class: "actions-row" }, compareBtn, importBtn, newStack),
+      h("span", { class: "actions-row" }, importBtn, newStack),
     ),
-    driftError,
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "The host itself and every stack it manages, live; open a stack or act on several at once.",
+    ),
     h(
       "section",
       { class: "kp-card host", "aria-label": "Host", id: "host" },
+      sectionHeader(
+        "Host",
+        "The Proxmox host itself: CPU, RAM, disk and uptime, read live from the host daemon.",
+      ),
       card,
+    ),
+    sectionHeader(
+      "Stacks",
+      "Every stack the host manages, with its live state; click a row to open that stack, or tick several for a batch action.",
     ),
     t.wrap,
     measured,
+    applySection,
   );
+  if (new URLSearchParams(location.search).get("section") === "apply") {
+    applySection.open = true;
+    mountApplyOnce();
+    queueMicrotask(() => applySection.scrollIntoView({ block: "start" }));
+  }
   const detach = attachDataTables(root);
   const table = dataTable(t.wrap);
   const unbind = bindTableUrl(table, "fleet");
@@ -235,5 +318,6 @@ export function mount(root, ctx) {
     unbind();
     detach();
     unregister();
+    stopApply();
   };
 }

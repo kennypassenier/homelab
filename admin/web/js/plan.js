@@ -22,7 +22,7 @@
 
 /**
  * Each file's diff as the page draws it (the edit plan, the Deploy review
- * and the Apply page share it).
+ * and Overview's "Apply the whole fleet" section share it).
  * @param {FileDiff[]} list
  */
 export function fileViews(list) {

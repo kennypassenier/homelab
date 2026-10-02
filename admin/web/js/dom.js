@@ -37,6 +37,28 @@ export function td(text, cls) {
   return h("td", cls ? { class: cls } : null, text);
 }
 
+/**
+ * The one shared shape for a top-level section's heading (rule 8, Kenny
+ * 2026-10-02: "ik moet niet raden naar wat een functie doet, alles moet
+ * duidelijk zijn" — every section says, in one plain sentence, what it
+ * does and when it is used, so nobody has to guess from the heading
+ * alone). `level` picks `h1` (a page's own title) or `h2` (a section
+ * inside a page, e.g. a `<details>` block's `<summary>`); the description
+ * always renders as the next sibling paragraph, in one shared class so
+ * every page's section intro reads the same.
+ * @param {string} title
+ * @param {string} description one plain sentence
+ * @param {{level?: "h1" | "h2" | "h3"}} [opts]
+ */
+export function sectionHeader(title, description, opts = {}) {
+  return h(
+    "hgroup",
+    { class: "section-head" },
+    h(opts.level ?? "h2", null, title),
+    h("p", { class: "section-head__desc measured" }, description),
+  );
+}
+
 /** @param {{label: string, tone: string}} st */
 export function badgeCell(st) {
   return h("td", { class: `state ${st.tone}` }, h("span", null, st.label));

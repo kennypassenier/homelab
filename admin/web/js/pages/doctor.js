@@ -49,6 +49,11 @@ export function mount(root) {
   const ago = agoEl("read");
   root.replaceChildren(
     h("div", { class: "title-row" }, h("h1", null, "Doctor"), overall, refresh),
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "A deeper diagnostic run across the fleet, checked on request — slower than the Today block's quick read.",
+    ),
     status,
     t.wrap,
     h("p", null, ago),

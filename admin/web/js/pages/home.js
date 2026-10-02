@@ -217,7 +217,18 @@ export function mount(root) {
       ),
     ),
   );
-  root.replaceChildren(h("h1", null, "Apps"), status, body, strip, legend);
+  root.replaceChildren(
+    h("h1", null, "Apps"),
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "Every app the fleet runs, as tiles — the fastest way to open one.",
+    ),
+    status,
+    body,
+    strip,
+    legend,
+  );
   const abort = new AbortController();
   (async () => {
     const [r, w] = await Promise.all([

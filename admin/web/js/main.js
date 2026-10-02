@@ -32,7 +32,6 @@ import { mount as overview } from "./pages/overview.js";
 import { mount as stack } from "./pages/stack.js";
 import { mount as hostLog } from "./pages/log.js";
 import { mount as shell } from "./pages/shell.js";
-import { mount as apply } from "./pages/apply.js";
 import { mount as presets } from "./pages/presets.js";
 import { mount as homePage } from "./pages/home.js";
 import { mount as healthPage } from "./pages/health.js";
@@ -123,8 +122,9 @@ function renderNav() {
 function render() {
   // 2026-09-30: /start, /today, /doctor, /checks, /charts, /traffic and
   // /timeline are retired, and /home is the pre-3.1.0 address of the tile
-  // page (now the root); send every one of them on to its new home before
-  // mounting anything (redirectFor is null for every other route).
+  // page (now the root); fix-210 (2026-10-02): /apply moved into Overview
+  // as a collapsible section. Send every one of them on to its new home
+  // before mounting anything (redirectFor is null for every other route).
   const target = redirectFor(route(location.pathname), location.search);
   if (target != null) {
     history.replaceState(null, "", target);
@@ -187,9 +187,10 @@ function render() {
     case "shell":
       cleanup = shell(page);
       break;
-    case "apply":
-      cleanup = apply(page);
-      break;
+    // fix-210: "apply" is never mounted directly — `render()`'s redirect
+    // check above always sends it to `/overview?section=apply` first
+    // (`router.js` `redirectFor`), the same way "status" never reaches
+    // this switch either.
     case "presets":
       cleanup = presets(page, { navigate });
       break;

@@ -53,7 +53,12 @@ export const STACK_TABS = /** @type {const} */ ([
  * redirects every one of them before it ever mounts a page for them (see
  * `redirectFor`). `passkeys` is the kit's own page, drawn by this app since
  * `kit_pages_in_webapp()`; the kit's Status and Clients pages are switched
- * off (2026-10-02), and `/status` redirects to Health.
+ * off (2026-10-02), and `/status` redirects to Health. `apply` (fix-210,
+ * 2026-10-02) is the same shape: it stays a known page (`formspec.json`
+ * still lists it, so Live view's `homelab ui goto apply` keeps working and
+ * `DRIVABLE_PATHS` below stays in step with it), but `redirectFor` always
+ * sends it on to Overview's own "Apply the whole fleet" section before
+ * `main.js` ever mounts anything for it.
  */
 
 /**
@@ -180,6 +185,10 @@ export function redirectFor(r, search) {
       return `/activity${setParams(search, { view: "timeline" })}`;
     case "status-retired":
       return `/health${search}`;
+    // fix-210: /apply moved into Overview as a collapsible section; the
+    // old address still resolves, opened and scrolled to.
+    case "apply":
+      return `/overview${setParams(search, { section: "apply" })}`;
     default:
       return null;
   }

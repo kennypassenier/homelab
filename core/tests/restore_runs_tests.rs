@@ -392,3 +392,57 @@ async fn fix_171_a_restore_without_a_safety_copy_reaches_its_announced_plan() {
     assert_eq!(m, 7, "no room-for-copy, no safety-copy step");
     assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
 }
+
+/// fix-223: every backup carries what made it (`trigger:<kind>`) next to its
+/// night tag, so a person choosing a snapshot can tell a nightly one from a
+/// manual one or the copy taken before a destroy.
+#[tokio::test]
+async fn fix_223_a_backup_is_tagged_with_what_triggered_it() {
+    use homelab_core::ops::backup::BackupTrigger;
+    for (trigger, tag) in [
+        (BackupTrigger::Nightly, "trigger:nightly"),
+        (BackupTrigger::Manual, "trigger:manual"),
+        (BackupTrigger::PreDestroy, "trigger:pre-destroy"),
+    ] {
+        let exec = harness();
+        exec.respond_always("restic backup", CmdOutput::ok(""));
+        let sink = VecSink::new();
+        let j = NullJournal;
+        let cfg = BackupCfg {
+            trigger,
+            ..BackupCfg::default()
+        };
+        let r = backup(&ctx(&exec, &sink, &j), &paperwork(), &cfg).await;
+        assert!(r.ok, "{:?}", r.error);
+        let snaps = exec.calls_containing("restic backup");
+        assert!(
+            !snaps.is_empty() && snaps.iter().all(|c| c.contains(&format!("--tag {tag}"))),
+            "{tag}: {snaps:?}"
+        );
+    }
+}
+
+/// fix-223: size, file count and kind come straight from restic's own
+/// listing — a snapshot that carries no `summary` (restic before 0.17, or a
+/// snapshot taken before then) and no trigger tag says so, never a guess.
+#[test]
+fn fix_223_a_listing_reads_size_files_and_kind_when_restic_has_them() {
+    use homelab_core::ops::backup::parse_snapshot_runs;
+    let raw = r#"[
+      {"id":"newfull","short_id":"new11111","time":"2026-10-02T02:00:00Z",
+       "tags":["run-300","trigger:nightly"],
+       "summary":{"total_files_processed":412,"total_bytes_processed":5242880}},
+      {"id":"oldfull","short_id":"old11111","time":"2026-09-01T02:00:00Z",
+       "tags":["run-100"]}
+    ]"#;
+    let runs = parse_snapshot_runs(raw);
+    let new = runs.iter().find(|r| r.short_id == "new11111").unwrap();
+    assert_eq!(new.size_bytes, Some(5_242_880));
+    assert_eq!(new.file_count, Some(412));
+    assert_eq!(new.trigger.as_deref(), Some("nightly"));
+    assert_eq!(new.run, Some(300));
+    let old = runs.iter().find(|r| r.short_id == "old11111").unwrap();
+    assert_eq!(old.size_bytes, None);
+    assert_eq!(old.file_count, None);
+    assert_eq!(old.trigger, None);
+}

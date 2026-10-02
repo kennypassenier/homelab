@@ -695,6 +695,55 @@ async fn run(explicit_host: Option<String>) {
             };
             rpc(&host, &token, Command::RollbackNative { stack, unit }).await;
         }
+        // fix-223: restore one (or every) unit of an adopted native stack
+        // from a snapshot — the same typed-name confirmation `restore` uses.
+        "restore-native" => {
+            let homelab_client::cli_args::Invocation::RestoreNative {
+                stack,
+                snapshot,
+                unit,
+                yes,
+            } = invocation(&args)
+            else {
+                die("internal: restore-native parsed as another verb")
+            };
+            println!(
+                "{}▶ restore-native {}{} from '{}'{}",
+                C_YELLOW,
+                stack,
+                unit.as_deref()
+                    .map(|u| format!(" :: {}", u))
+                    .unwrap_or_default(),
+                snapshot,
+                C_RESET
+            );
+            let confirm = if yes {
+                stack.clone()
+            } else {
+                let typed = read_typed(&format!(
+                    "This overwrites the live data of '{}'{}. Type the stack name to confirm: ",
+                    stack,
+                    unit.as_deref()
+                        .map(|u| format!(" (unit {})", u))
+                        .unwrap_or_default()
+                ));
+                if typed != stack {
+                    die("name mismatch — nothing was restored");
+                }
+                typed
+            };
+            rpc(
+                &host,
+                &token,
+                Command::RestoreNative {
+                    stack,
+                    snapshot,
+                    confirm: Some(confirm),
+                    unit,
+                },
+            )
+            .await;
+        }
         // Route A: ask every configured device for its own configuration now,
         // instead of waiting for 04:00 to find out whether it works.
         "backup-devices" => rpc(&host, &token, Command::BackupDevices).await,

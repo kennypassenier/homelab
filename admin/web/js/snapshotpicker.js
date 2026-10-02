@@ -9,10 +9,10 @@
 /**
  * @typedef {{id: string, short_id: string, time: number,
  *   run?: number | null, size_bytes?: number | null,
- *   file_count?: number | null}} SnapRun
+ *   file_count?: number | null, trigger?: string | null}} SnapRun
  * @typedef {{value: string, shortId: string, when: string, ago: string,
  *   latest: boolean, selected: boolean, size: string | null,
- *   files: string | null}} SnapshotRow
+ *   files: string | null, kind: string | null}} SnapshotRow
  */
 
 /**
@@ -87,6 +87,10 @@ export function snapshotPickerRows(snapshots, now, selected = "") {
         s.file_count != null && Number.isFinite(s.file_count)
           ? `${s.file_count} ${s.file_count === 1 ? "file" : "files"}`
           : null,
+      // fix-223: what made this backup (nightly, manual, pre-destroy), from
+      // the host's own trigger tag; null for a snapshot taken before the
+      // tag existed — never guessed.
+      kind: typeof s.trigger === "string" && s.trigger ? s.trigger : null,
     };
   });
 }

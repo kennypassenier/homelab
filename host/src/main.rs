@@ -788,6 +788,7 @@ fn load_config_from(path: String) -> Config {
                     .native_backup_staging_cap_mib
                     .unwrap_or(d.staging_cap_mib),
                 tiers: d.tiers,
+                trigger: d.trigger,
             }
         },
         metrics_targets_dir: file.metrics_targets_dir,
@@ -6993,7 +6994,9 @@ async fn run_backup_batch(
                 let name = job.stack.clone();
                 let outcome = match job.what {
                     BackupWhat::Compose(manifest) => {
-                        let cfg = job.cfg.clone();
+                        let mut cfg = job.cfg.clone();
+                        // fix-223: this is the nightly round — tag it as such.
+                        cfg.trigger = homelab_core::ops::backup::BackupTrigger::Nightly;
                         // fix-180: read before `manifest` moves below, so a
                         // successful nightly backup refreshes the same
                         // owners an on-demand `Rpc::BackupStack` would.
@@ -7021,7 +7024,9 @@ async fn run_backup_batch(
                     BackupWhat::Native(services) => {
                         let mut worst = NightBackup::Done;
                         for native in services {
-                            let cfg = job.cfg.clone();
+                            let mut cfg = job.cfg.clone();
+                            // fix-223: this is the nightly round — tag it as such.
+                            cfg.trigger = homelab_core::ops::backup::BackupTrigger::Nightly;
                             let owner = native.unit.clone();
                             let r =
                                 run_op_locked(state, exec, 0, "scheduled-backup-native", |ctx| {
@@ -10393,6 +10398,8 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     .unwrap_or_else(PoisonError::into_inner)
                     .retention
                     .clone(),
+                // fix-223: an operator asked for this on demand.
+                trigger: homelab_core::ops::backup::BackupTrigger::Manual,
                 ..state.config.backup.clone()
             };
             let stack = manifest.stack_name.clone();
@@ -10618,6 +10625,8 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         .clone();
                     let cfg = homelab_core::ops::backup::BackupCfg {
                         tiers,
+                        // fix-223: an operator asked for this on demand.
+                        trigger: homelab_core::ops::backup::BackupTrigger::Manual,
                         ..state.config.backup.clone()
                     };
                     // T5: the stack may hold several services; back up each,
@@ -11749,8 +11758,29 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             stack,
             snapshot,
             confirm,
+            unit,
         } => match native_from_state(&state.config.state_dir, &stack).await {
             Ok((services, _)) => {
+                // fix-223: a named unit restricts the restore to that one
+                // unit's own repository; `None` (and an older client, which
+                // never sends the field) restores every unit of the stack
+                // from the same snapshot, exactly as before.
+                let services = match &unit {
+                    Some(u) => {
+                        let matched: Vec<_> =
+                            services.into_iter().filter(|m| &m.unit == u).collect();
+                        if matched.is_empty() {
+                            return RpcResponse {
+                                id: req.id,
+                                ok: false,
+                                message: format!("stack '{}' has no unit named '{}'", stack, u),
+                                deferred: None,
+                            };
+                        }
+                        matched
+                    }
+                    None => services,
+                };
                 let cfg = state.config.backup.clone();
                 let mut resp = RpcResponse {
                     id: req.id,

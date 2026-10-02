@@ -309,7 +309,7 @@ impl ActionKind {
             Deploy => &[Arg::Force],
             DeployCommit => &[Arg::Commit, Arg::Force],
             Restore => &[Arg::Confirm, Arg::Snapshot, Arg::App, Arg::SkipSafetyCopy],
-            RestoreNative => &[Arg::Confirm, Arg::Snapshot],
+            RestoreNative => &[Arg::Confirm, Arg::Snapshot, Arg::Unit],
             ChangeSecret => &[Arg::SecretRef, Arg::StageToken],
             Update => &[Arg::App],
             RollbackNative => &[Arg::Unit],
@@ -407,7 +407,7 @@ impl ActionKind {
                 "restore the stack's data from a snapshot ('latest' unless named); keeps a copy of the current data first"
             }
             RestoreNative => {
-                "restore an adopted service's data from a snapshot ('latest' unless named): stops the unit, keeps a copy of the current data first, unpacks the archive, restarts it"
+                "restore an adopted service's data from a snapshot ('latest' unless named): stops the unit, keeps a copy of the current data first, unpacks the archive, restarts it; on a multi-unit stack, choose which unit (all units otherwise)"
             }
             Update => "pull and recreate one app or all, with rollback",
             Resize => "apply the manifest's memory, cores and disk to the running container",
@@ -1039,6 +1039,7 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
                 stack,
                 snapshot: a.snapshot.clone().unwrap_or_else(|| "latest".into()),
                 confirm: a.confirm.clone(),
+                unit: a.unit.clone(),
             }]
         }
         (ChangeSecret, Material::Secret { secret, content }) => vec![Command::SetSecret {

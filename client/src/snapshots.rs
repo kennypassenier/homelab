@@ -73,12 +73,18 @@ mod tests {
                 short_id: "aaaa".into(),
                 time: 2000,
                 run: Some(2000),
+                size_bytes: None,
+                file_count: None,
+                trigger: None,
             },
             SnapRun {
                 id: "bbbb".into(),
                 short_id: "bbbb".into(),
                 time: 1000,
                 run: Some(1000),
+                size_bytes: None,
+                file_count: None,
+                trigger: None,
             },
         ];
         let out = render(true, &[repo("kyu", snaps)]);

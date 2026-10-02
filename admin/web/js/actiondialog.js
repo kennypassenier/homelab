@@ -471,18 +471,33 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
               row.when,
               h("span", { class: "measured" }, ` · ${row.ago}`),
             ),
-            ...(row.latest ? [h("span", { class: "kp-badge" }, "latest")] : []),
-            ...(row.size ? [h("span", { class: "measured" }, row.size)] : []),
-            ...(row.files ? [h("span", { class: "measured" }, row.files)] : []),
+            // fix-223: every row has the same cells in the same columns
+            // (rule 6), whatever the host recorded for that snapshot.
+            h(
+              "span",
+              { class: "act-snapshot-row__badge" },
+              ...(row.latest
+                ? [h("span", { class: "kp-badge" }, "latest")]
+                : []),
+            ),
+            h(
+              "span",
+              { class: "act-snapshot-row__meta measured" },
+              [
+                row.kind ?? "kind not recorded",
+                row.size ?? "size not recorded",
+                ...(row.files ? [row.files] : []),
+              ].join(" · "),
+            ),
             h("span", { class: "act-snapshot-row__id mono" }, row.shortId),
           );
         }),
-        ...(rows.every((r) => r.size == null)
+        ...(rows.some((r) => r.size == null || r.kind == null)
           ? [
               h(
                 "p",
                 { class: "measured act-snapshot-gap" },
-                "Size and file count per snapshot are not reported by the host yet.",
+                'Kind, size and file count are recorded for backups taken from 3.70.5 on; older snapshots say "not recorded".',
               ),
             ]
           : []),

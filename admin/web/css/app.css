@@ -581,7 +581,7 @@ p:has(> .measured:only-child):first-child {
 }
 .act-snapshot-row {
   display: grid;
-  grid-template-columns: auto 1fr auto auto auto;
+  grid-template-columns: auto minmax(0, 1fr) 4.5rem minmax(0, 16rem) 5.5rem;
   align-items: baseline;
   column-gap: 8px;
   padding: 6px 8px;
@@ -596,6 +596,15 @@ p:has(> .measured:only-child):first-child {
 .act-snapshot-row__id {
   color: var(--muted-foreground, currentColor);
   font-size: var(--kp-text-sm, 0.8125rem);
+}
+@media (max-width: 30rem) {
+  .act-snapshot-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .act-snapshot-row__meta,
+  .act-snapshot-row__id {
+    grid-column: 2 / -1;
+  }
 }
 .act-snapshot-gap {
   margin-block-start: 4px;

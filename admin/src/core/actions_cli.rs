@@ -44,6 +44,7 @@ fn carries_confirmation(command: &Command) -> bool {
         RestoreStack {
             manifest, confirm, ..
         } => confirm.as_deref() == Some(manifest.stack_name.as_str()),
+        RestoreNative { stack, confirm, .. } => confirm.as_deref() == Some(stack.as_str()),
         DestroyStack {
             manifest, confirm, ..
         } => confirm == &manifest.stack_name,
@@ -141,6 +142,19 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
                 Some(u) => push(&format!("{stack}/{u}"))?,
                 None => push(stack)?,
             }
+        }
+        RestoreNative {
+            stack,
+            snapshot,
+            unit,
+            ..
+        } => {
+            push("restore-native")?;
+            match unit {
+                Some(u) => push(&format!("{stack}/{u}"))?,
+                None => push(stack)?,
+            }
+            push(snapshot)?;
         }
         ApplyGuards { vmid } => {
             push("guards")?;
@@ -281,12 +295,11 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         // feat-backup-1/3, feat-secrets-1/2: reads and a value write with
         // no CLI verb of their own — the Backups and Secrets pages are the
         // only callers, so there is nothing to mirror as a copyable line.
-        // `restore-native` (feat-backup-2) stays dashboard-only the same
-        // way until the CLI grows a native-restore verb.
+        // fix-223: `restore-native` now has a CLI verb (see `cli_line_bare`
+        // above), so it is no longer in this no-mirror bucket.
         | GetBackups { .. }
         | GetRetired
         | BrowseSnapshot { .. }
-        | RestoreNative { .. }
         | RevealSecret { .. }
         | SetSecret { .. } => return None,
     }

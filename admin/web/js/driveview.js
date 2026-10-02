@@ -330,12 +330,25 @@ export function announceView(s, left, driving = false) {
   if (!a && !paused && !driving) return null;
   const countdown = !!a && a.countdown;
   const ms = countdown ? Math.max(0, Math.min(a.total_ms, left)) : 0;
+  // fix-172/fix-173 (Kenny, 2026-10-02): Pause holds the queue between two
+  // jobs, never mid-job — a host operation already running finishes on its
+  // own. Saying "Next: Claude's next step" while that job was still
+  // "running" made Pause look like it had frozen the job itself, which it
+  // never could; Continue then seemed to do nothing. The text now says
+  // honestly what Pause actually holds: the job in flight (single or the
+  // batch's current stack), and what comes after it.
+  const batch = s.form?.edit?.result?.batch;
+  const runningText = s.form?.job
+    ? paused
+      ? `Running: job ${s.form.job.job} ${s.form.job.state} — this step cannot be paused once it started; it finishes on its own`
+      : `Running: job ${s.form.job.job} ${s.form.job.state}`
+    : batch != null
+      ? paused
+        ? `Running: batch ${batch} — the stack running now finishes on its own; Pause holds the one after it`
+        : `Running: batch ${batch}`
+      : null;
   return {
-    text: a
-      ? `Next: ${a.text}`
-      : s.form?.job && !paused
-        ? `Running: job ${s.form.job.job} ${s.form.job.state}`
-        : "Next: Claude's next step",
+    text: a ? `Next: ${a.text}` : (runningText ?? "Next: Claude's next step"),
     count: countdown ? String(Math.ceil(ms / 1000)) : "",
     fraction: countdown && a.total_ms > 0 ? ms / a.total_ms : 0,
     status: paused ? `Paused by ${s.paused_by}` : "",

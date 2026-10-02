@@ -111,8 +111,13 @@ pub struct Progress {
     pub step: String,
     /// 1-based position of this step in this run.
     pub n: usize,
-    /// Steps expected in all: the newest successful run's count, at least
-    /// `n`. None when the operation never succeeded before.
+    /// Steps expected in all: the newest successful run's own count, held
+    /// fixed. None when the operation never succeeded before, or once this
+    /// run has taken more steps than that plan knew about (fix-171: the
+    /// total used to be `plan.len().max(n)`, "at least n", so once a run
+    /// outgrew the plan it read `m == n` on every mark and the pair climbed
+    /// together — "13/13" became "68/68" while BOTH numbers rose. An
+    /// honest "step n" beats a total that is simply wrong).
     pub m: Option<usize>,
     pub finished: bool,
     pub changed: bool,
@@ -171,7 +176,10 @@ impl Tracker {
             self.started.len()
         };
         let plan = self.plan.clone().unwrap_or_default();
-        let m = (!plan.steps.is_empty()).then(|| plan.steps.len().max(n));
+        // fix-171: `m` is the plan's own length, fixed — never raised to
+        // keep up with `n`. Once `n` outgrows it the plan no longer
+        // describes this run, so the total goes unknown rather than lying.
+        let m = (!plan.steps.is_empty() && n <= plan.steps.len()).then_some(plan.steps.len());
         let expected_step_s = plan
             .steps
             .iter()
@@ -330,5 +338,86 @@ mod outcome_tests {
         let history = vec![op("deploy-media", 2_000, 2_010, true, 5)];
         let out = outcome_since(&history, "install-native-admin", 2_000);
         assert!(!out.found);
+    }
+}
+
+#[cfg(test)]
+mod tracker_m_tests {
+    use super::*;
+
+    fn op(subject: &str, start: u64, end: u64, ok: bool, n_steps: usize) -> HistoryEntry {
+        HistoryEntry::Op {
+            start,
+            end,
+            label: "install-native".into(),
+            subject: Some(subject.into()),
+            req: None,
+            by: None,
+            ok,
+            deferred: None,
+            error: None,
+            steps: (0..n_steps)
+                .map(|i| homelab_core::history::StepTiming {
+                    step: format!("step-{i}"),
+                    start,
+                    end: start + 1,
+                    changed: true,
+                })
+                .collect(),
+        }
+    }
+
+    fn mark(op: &str, step: &str, finished: bool) -> StepMark {
+        StepMark {
+            op: op.into(),
+            step: step.into(),
+            finished,
+            changed: finished,
+        }
+    }
+
+    /// fix-171 (Kenny, 2026-10-02 06:55): a batch "Install newest release"
+    /// ran on two stacks; the live job panel went "13/13" to "68/68" with
+    /// BOTH numbers climbing during the one run. The plan's last successful
+    /// run had 13 steps; this run needed more. `m` used to be
+    /// `plan.len().max(n)`, so it tracked `n` exactly once `n` passed the
+    /// plan — the fix holds `m` at the plan's own length and reports
+    /// `None` (not a new, equally wrong total) once the run outgrows it.
+    #[test]
+    fn m_stays_fixed_at_the_plans_length_and_never_grows_with_n() {
+        let subject = "release-update-native-almanac";
+        let history = vec![op(subject, 1_000, 1_013, true, 13)];
+        let mut t = Tracker::new(history);
+
+        // Steps 1..=13 match the plan: m is the plan's own fixed length.
+        // `finished: false` (a step's start mark) is what makes `n` count
+        // up one per mark (`Tracker::on_mark`'s `started` list).
+        for i in 0..13u64 {
+            let p = t.on_mark(&mark(subject, &format!("step-{i}"), false), 2_000 + i);
+            assert_eq!(p.n, i as usize + 1);
+            assert_eq!(p.m, Some(13), "m must stay 13, not grow with n");
+        }
+
+        // Step 14 outgrows the plan: n keeps counting, m goes unknown
+        // rather than becoming 14 (which the old `max(n)` logic did).
+        let p14 = t.on_mark(&mark(subject, "step-13", false), 2_020);
+        assert_eq!(p14.n, 14);
+        assert_eq!(
+            p14.m, None,
+            "once n exceeds the plan, m must not silently become n"
+        );
+
+        // The run keeps going well past the plan (the historical "68"):
+        // m must never reappear as a number that merely mirrors n.
+        for i in 14..68u64 {
+            let p = t.on_mark(&mark(subject, &format!("step-{i}"), false), 2_020 + i);
+            assert_eq!(p.n, i as usize + 1);
+            assert_ne!(
+                p.m,
+                Some(p.n),
+                "m must never equal n once the plan is outgrown (the 13/13 -> 68/68 bug)"
+            );
+            assert_eq!(p.m, None);
+        }
     }
 }

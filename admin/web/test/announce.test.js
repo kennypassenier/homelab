@@ -107,6 +107,61 @@ test("follow_live_pause_and_stop_stay_while_a_driven_job_runs", () => {
   );
 });
 
+test("fix_173_pause_says_honestly_that_a_running_job_finishes_on_its_own", () => {
+  // Kenny, 2026-10-02 06:55: Pause during a driven batch looked like it
+  // had frozen everything ("Next: Claude's next step"), which Pause never
+  // could do to a job already running on the host — it only holds the
+  // queue before the NEXT job (fix-172). The bar must say so honestly
+  // instead of implying the running job itself stopped.
+  const form = {
+    id: "f",
+    action: "deploy",
+    stack: "kp-soft",
+    title: "Deploy · kp-soft",
+    steps: ["review"],
+    step: "review",
+    step_index: 0,
+    values: {},
+    errors: {},
+    run_error: null,
+    job: { job: 7, state: "running", message: null, progress: null },
+    fields: [],
+    buttons: [],
+  };
+  const paused = announceView(state({ form, paused_by: "kenny" }), 0, true);
+  assert.equal(
+    paused?.text,
+    "Running: job 7 running — this step cannot be paused once it started; it finishes on its own",
+  );
+  assert.equal(paused?.paused, true);
+});
+
+test("fix_173_pause_on_a_driven_batch_names_which_stack_still_runs", () => {
+  const form = {
+    id: "f",
+    action: "batch",
+    stack: "media,home",
+    title: "Batch",
+    steps: ["review"],
+    step: "review",
+    step_index: 0,
+    values: {},
+    errors: {},
+    run_error: null,
+    job: null,
+    fields: [],
+    buttons: [],
+    edit: { family: "batch", guarded: 0, result: { batch: 42 } },
+  };
+  const running = announceView(state({ form }), 0, true);
+  assert.equal(running?.text, "Running: batch 42");
+  const paused = announceView(state({ form, paused_by: "kenny" }), 0, true);
+  assert.equal(
+    paused?.text,
+    "Running: batch 42 — the stack running now finishes on its own; Pause holds the one after it",
+  );
+});
+
 test("follow_live_typing_is_held_without_a_countdown", () => {
   const s = state({
     announce: { ...announce(0, false), text: "type into Snapshot" },

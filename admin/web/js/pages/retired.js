@@ -26,10 +26,10 @@ import { humanDuration } from "../format.js";
 import { humanMb } from "../fleet.js";
 import { openAction } from "../actiondialog.js";
 import {
-  fullyRemovable,
   operationLabel,
   repoTotals,
   splitInUse,
+  wipeStatus,
 } from "../retiredview.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
 
@@ -78,10 +78,14 @@ function pathsCell(removed, kept, noun) {
  * @param {import("../retiredview.js").RetiredEntry} entry
  */
 function row(entry) {
-  const totals = repoTotals(entry.repos);
-  const appdata = splitInUse(entry.appdata, entry.in_use);
-  const vault = splitInUse(entry.vault, entry.in_use);
-  const removable = fullyRemovable(entry);
+  const status = wipeStatus(entry);
+  // live-finding 2026-10-02: a refused key is NOT "0 removable, 0 kept" —
+  // it is the whole record still in use, so every cell says "still in use"
+  // rather than running the partial-keep split meant for D25's narrower
+  // case (one repo or dir in use while the rest of the same record is
+  // genuinely gone). Showing a per-path breakdown here would read as "wipe
+  // would remove N things", which is exactly the false safety this guard
+  // exists to prevent.
   const tr = h(
     "tr",
     { "data-kp-row-key": entry.key },
@@ -89,17 +93,63 @@ function row(entry) {
     h("td", null, h("strong", null, entry.key)),
     td(operationLabel(entry.kind)),
     td(age(entry.retired_at)),
-    td(reposCell(totals)),
-    td(pathsCell(appdata.removed, appdata.kept, "dir(s)")),
-    td(pathsCell(vault.removed, vault.kept, "file(s)")),
-    badgeCell(
-      removable
-        ? { label: "fully removable", tone: "good" }
-        : { label: "partly kept in use", tone: "warn" },
+    td(
+      status === "refused"
+        ? "still in use"
+        : reposCell(repoTotals(entry.repos)),
     ),
-    h("td", null, wipeButton(entry)),
+    td(
+      status === "refused"
+        ? "still in use"
+        : pathsCell(...splitHalves(entry.appdata, entry.in_use), "dir(s)"),
+    ),
+    td(
+      status === "refused"
+        ? "still in use"
+        : pathsCell(...splitHalves(entry.vault, entry.in_use), "file(s)"),
+    ),
+    badgeCell(statusBadge(status)),
+    h(
+      "td",
+      null,
+      status === "refused" ? refusedNote(entry) : wipeButton(entry),
+    ),
   );
   return tr;
+}
+
+/**
+ * @param {string[]} paths
+ * @param {string[]} inUse
+ * @returns {[string[], string[]]}
+ */
+function splitHalves(paths, inUse) {
+  const s = splitInUse(paths, inUse);
+  return [s.removed, s.kept];
+}
+
+/**
+ * @param {"removable" | "partial" | "refused"} status
+ */
+function statusBadge(status) {
+  switch (status) {
+    case "refused":
+      return { label: "still in use — not retired", tone: "bad" };
+    case "partial":
+      return { label: "partly kept in use", tone: "warn" };
+    default:
+      return { label: "fully removable", tone: "good" };
+  }
+}
+
+/**
+ * The refusal in place of a Wipe button: `wipe_plan`'s own reason, so the
+ * page never explains a refusal in words of its own that could drift from
+ * what an actual wipe attempt would say.
+ * @param {import("../retiredview.js").RetiredEntry} entry
+ */
+function refusedNote(entry) {
+  return h("span", { class: "measured" }, entry.refused ?? "still in use");
 }
 
 /**

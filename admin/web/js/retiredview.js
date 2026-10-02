@@ -14,7 +14,8 @@
  *   measured_at: number | null}} RetiredRepo
  * @typedef {{key: string, kind: "stack" | "app" | "unit", stack: string,
  *   name: string, vmid: number, retired_at: number, repos: RetiredRepo[],
- *   appdata: string[], vault: string[], in_use: string[]}} RetiredEntry
+ *   appdata: string[], vault: string[], in_use: string[],
+ *   refused: string | null}} RetiredEntry
  */
 
 /**
@@ -84,12 +85,24 @@ export function splitInUse(paths, inUse) {
 }
 
 /**
- * Whether wiping this entry would delete everything it kept (`true`), or
- * leave something behind because a managed stack still uses it (`false`)
- * — the row's "kept" badge reads off this, not a re-derivation of
- * `wipe_plan` in JavaScript.
- * @param {Pick<RetiredEntry, "in_use">} entry
+ * What a wipe of this entry would do, read off `refused`/`in_use` exactly
+ * as the host's own `wipe_plan` decided them — never re-derived from
+ * `kind` or guessed in JavaScript:
+ *
+ * - `"refused"`: `wipe_plan` refuses the WHOLE key outright (`refused` is
+ *   its reason) — the stack, app or native unit is declared again in the
+ *   current state (live-finding 2026-10-02: a deploy bug wrongly retired a
+ *   still-live native unit; `core::ops::retired::wipe_plan` now catches
+ *   this through `StackState::natives`, not only a compose manifest's
+ *   declared natives). The page shows this instead of a Wipe button —
+ *   nothing of this record would be deleted by wiping it, so offering the
+ *   button would only teach "Wipe" means "try and see".
+ * - `"partial"`: wipe proceeds but keeps some repositories/paths because a
+ *   DIFFERENT managed stack still uses them (D25).
+ * - `"removable"`: wipe would delete everything this record kept.
+ * @param {Pick<RetiredEntry, "in_use" | "refused">} entry
  */
-export function fullyRemovable(entry) {
-  return entry.in_use.length === 0;
+export function wipeStatus(entry) {
+  if (entry.refused) return "refused";
+  return entry.in_use.length === 0 ? "removable" : "partial";
 }

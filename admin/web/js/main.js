@@ -84,15 +84,14 @@ function renderNav() {
   const r = route(location.pathname);
   const ps = pages();
   document.title = pageTitle(r, ps);
-  // fix-176: ps.brand.title is the registry's `app` field, which chassis-rs
-  // fills from AppSpec.name ("homelab-admin" — the binary name, env prefix
-  // and state-dir stem, not a display title; chassis has no separate brand
-  // title to ask for). pageTitle() above already knows this and hardcodes
-  // "Homelab" for the tab title; the bar's brand link keeps the same
-  // hardcoded text (set once in index.html) instead of being overwritten
-  // with the internal app name on every registry answer. Only the link
-  // target (where "Apps" vs "Overview" sends it) comes from the registry.
+  // chassis-rs 3.2.0 (fix-15): App::brand_title("Homelab") makes
+  // ps.brand.title the display title instead of AppSpec.name
+  // ("homelab-admin"), so the registry's answer is safe to draw here again
+  // (fix-176 worked around the previous binary-name bug by freezing the
+  // text to index.html's static copy). The static text stays as the
+  // first-paint value until the registry answers.
   if (ps) {
+    brand.textContent = ps.brand.title;
     brand.setAttribute("href", ps.brand.href);
   }
   nav.replaceChildren(

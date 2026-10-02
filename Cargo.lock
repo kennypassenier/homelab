@@ -457,8 +457,8 @@ dependencies = [
 
 [[package]]
 name = "chassis"
-version = "3.1.0"
-source = "git+https://github.com/kennypassenier/chassis-rs?tag=v3.1.0#cd9dee8978dcd69eab09b07e70014e28f75aee4e"
+version = "3.2.0"
+source = "git+https://github.com/kennypassenier/chassis-rs?tag=v3.2.0#2481d72c1da3c86796487022c03bca9c03b54a08"
 dependencies = [
  "axum",
  "axum-extra",

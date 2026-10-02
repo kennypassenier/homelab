@@ -8,6 +8,7 @@
 //! Every write goes through the action queue (`shell::actions`), so a press
 //! here and a driven press are the same job; these routes only read.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -45,10 +46,21 @@ pub struct ParityCtx {
     today_read: Arc<SlowRead>,
     check_read: Arc<SlowRead>,
     /// feat-overview-10: the backup calendar's own read of restic, over the
-    /// network, which can take as long as the fleet check — its own
-    /// `SlowRead` so the calendar page never blocks on (or restarts) the
-    /// Health page's run, and the other way round.
+    /// network — the whole-fleet shape, kept for a caller that has not
+    /// learned the fleet's stack names yet (`stacks: Vec::new()`, the same
+    /// one the TUI's own path asks the host directly).
     backup_calendar_read: Arc<SlowRead>,
+    /// fix-177: one restic read is one stack, never the whole fleet — a
+    /// slow or hung repository (an rclone remote stuck on a stalled
+    /// upload, say) then times out alone, instead of its `ask()` budget
+    /// swallowing the 20-odd other stacks that already answered. Each
+    /// stack gets its own `SlowRead` (so a page reload or second tab joins
+    /// the run already on its way, same as `today_read`), created the
+    /// first time that stack is asked for.
+    backup_calendar_reads: Arc<Mutex<HashMap<String, Arc<SlowRead>>>>,
+    /// Kept to build a `backup_calendar_reads` entry lazily, announced the
+    /// same way as every other slow read.
+    publish: Arc<dyn super::actions::Publish>,
     /// Decision "23 constants": [`DRIFT_REUSE_S`] by default,
     /// `HOMELAB_ADMIN_DRIFT_REUSE_S` in `mount()`.
     drift_reuse_s: u64,
@@ -102,10 +114,30 @@ impl ParityCtx {
             backup_calendar_read: SlowRead::announced(
                 "the backup calendar",
                 "backup-calendar",
-                publish,
+                publish.clone(),
             ),
+            backup_calendar_reads: Arc::new(Mutex::new(HashMap::new())),
+            publish,
             drift_reuse_s,
         }
+    }
+
+    /// fix-177: the per-stack `SlowRead` for the backup calendar, created
+    /// the first time a page asks for that stack.
+    fn backup_calendar_read_for(&self, stack: &str) -> Arc<SlowRead> {
+        let mut m = self
+            .backup_calendar_reads
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        m.entry(stack.to_string())
+            .or_insert_with(|| {
+                SlowRead::announced(
+                    format!("{stack}'s backup calendar"),
+                    format!("backup-calendar:{stack}"),
+                    self.publish.clone(),
+                )
+            })
+            .clone()
     }
 }
 
@@ -339,18 +371,70 @@ async fn read_fleet_check(c: ParityCtx) -> (StatusCode, serde_json::Value) {
     }
 }
 
-/// feat-overview-10 (backup calendar): every snapshot night, per stack, read
-/// straight from restic through the host — its own `BackupCalendar`
-/// command and its own `SlowRead`, kept apart from the Backups page's own
-/// reads so the two merge cleanly.
-async fn backup_calendar(State(c): State<ParityCtx>, Query(q): Query<RunQuery>) -> Response {
-    let read = c.backup_calendar_read.clone();
-    read.read(q.run, WAIT, move || read_backup_calendar(c))
-        .await
+/// `?stack=`: fix-177's per-stack read. Omitted asks the whole fleet in one
+/// call (the page's own fallback before it has learned the fleet's stack
+/// names, and anything else still pointed at the old shape).
+#[derive(Debug, Deserialize, Default)]
+struct BackupCalendarQuery {
+    run: Option<u64>,
+    stack: Option<String>,
 }
 
-async fn read_backup_calendar(c: ParityCtx) -> (StatusCode, serde_json::Value) {
-    match ask(&c, Command::BackupCalendar { stacks: Vec::new() }, 180).await {
+/// feat-overview-10 (backup calendar), fix-177 (per-stack progress): every
+/// snapshot night, per stack, read straight from restic through the host —
+/// its own `BackupCalendar` command. `?stack=` reads one stack alone, on
+/// its own `SlowRead`, so one repository stuck behind a slow or hung
+/// network path (restic over rclone, say) times out by itself instead of
+/// an `ask()` budget sized for the whole fleet swallowing every stack that
+/// already answered (measured live on CT 120, 2026-10-02: a whole-fleet
+/// read hit its 180 s budget and answered 502 with no stack singled out).
+/// Without `?stack=` the old whole-fleet shape still answers, on its own
+/// `SlowRead` so the two never restart each other.
+async fn backup_calendar(
+    State(c): State<ParityCtx>,
+    Query(q): Query<BackupCalendarQuery>,
+) -> Response {
+    match q.stack {
+        Some(stack) => {
+            let read = c.backup_calendar_read_for(&stack);
+            let wanted = stack.clone();
+            read.read(q.run, WAIT, move || read_backup_calendar(c, vec![wanted]))
+                .await
+        }
+        None => {
+            let read = c.backup_calendar_read.clone();
+            read.read(q.run, WAIT, move || read_backup_calendar(c, Vec::new()))
+                .await
+        }
+    }
+}
+
+/// `stacks`: empty asks every stack the host knows (the whole-fleet path);
+/// one name is fix-177's per-stack read. `ASK_SECS` is per stack: a single
+/// repository's `restic snapshots --json` is capped at 120 s host-side
+/// (`core::ops::backup::snapshot_nights_unix`), so one stack with more than
+/// one owner group can legitimately run past that; the whole-fleet path
+/// reuses the same per-call budget since it is the TUI/CLI's own fallback,
+/// not the dashboard's main path any more.
+const ASK_SECS: u64 = 170;
+
+async fn read_backup_calendar(
+    c: ParityCtx,
+    stacks: Vec<String>,
+) -> (StatusCode, serde_json::Value) {
+    let what = match stacks.first() {
+        Some(s) if stacks.len() == 1 => format!("{s}'s backup calendar"),
+        _ => "the backup calendar".to_string(),
+    };
+    match ask(
+        &c,
+        Command::BackupCalendar {
+            stacks: stacks.clone(),
+        },
+        ASK_SECS,
+    )
+    .await
+    {
         Ok(r) => match serde_json::from_str::<serde_json::Value>(&r.message) {
             Ok(v) => (
                 StatusCode::OK,
@@ -360,15 +444,29 @@ async fn read_backup_calendar(c: ParityCtx) -> (StatusCode, serde_json::Value) {
                     "measured_at": now_s(),
                 }),
             ),
-            Err(_) => gateway_value(
-                "the backup calendar",
-                format!(
-                    "the host answered text, not JSON: {}",
-                    r.message.chars().take(200).collect::<String>()
-                ),
-            ),
+            Err(_) => {
+                tracing::warn!(
+                    stacks = ?stacks,
+                    "backup-calendar: the host answered text, not JSON"
+                );
+                gateway_value(
+                    &what,
+                    format!(
+                        "the host answered text, not JSON: {}",
+                        r.message.chars().take(200).collect::<String>()
+                    ),
+                )
+            }
         },
-        Err(e) => gateway_value("the backup calendar", e),
+        Err(e) => {
+            // fix-177: the live symptom was a 502 with nothing in either
+            // journal to say why — the host doesn't log a read-only RPC's
+            // start or end at all, and this ask() failure wasn't logged
+            // either, so the only trace of it ever lived in this one HTTP
+            // response. It now lands in the dashboard's own log too.
+            tracing::warn!(stacks = ?stacks, error = %e, "backup-calendar: the host did not answer");
+            gateway_value(&what, e)
+        }
     }
 }
 

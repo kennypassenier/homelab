@@ -10292,7 +10292,21 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 if m.backs_up_nothing() {
                     continue;
                 }
+                // fix-177: a plain read-only RPC leaves no trace in the
+                // journal otherwise — live evidence on CT 120 (2026-10-02)
+                // was a dashboard 502 with nothing on either side to say
+                // which stack it was waiting on. This fires before the
+                // (possibly slow or hung) restic read, so a stuck read
+                // shows up as a start line with no matching "done" line.
+                tracing::debug!(stack = %name, "backup-calendar: reading restic snapshots");
+                let started = std::time::Instant::now();
                 let times = homelab_core::ops::backup::snapshot_nights_unix(&exec, m, &cfg).await;
+                tracing::debug!(
+                    stack = %name,
+                    snapshots = times.len(),
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "backup-calendar: stack read done"
+                );
                 by_stack.insert(name.clone(), serde_json::json!(times));
             }
             RpcResponse {

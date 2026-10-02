@@ -82,11 +82,13 @@ struct State {
     last: Option<Finished>,
 }
 
-/// One slow read (today, the fleet check, the doctor).
+/// One slow read (today, the fleet check, the doctor, and — since fix-177 —
+/// one per stack of the backup calendar, so a stack name can be the key
+/// too, not only a fixed string known at compile time).
 pub struct SlowRead {
-    what: &'static str,
+    what: String,
     /// The read's name on the live channel (`slow_read` events).
-    key: &'static str,
+    key: String,
     publish: Option<Arc<dyn Publish>>,
     state: Mutex<State>,
     /// The id of the newest finished run.
@@ -94,25 +96,22 @@ pub struct SlowRead {
 }
 
 impl SlowRead {
-    pub fn new(what: &'static str) -> Arc<Self> {
-        Self::build(what, what, None)
+    pub fn new(what: impl Into<String>) -> Arc<Self> {
+        let what = what.into();
+        Self::build(what.clone(), what, None)
     }
 
     /// A read whose finished runs are announced on the live channel as
     /// `slow_read {read: key, run, ok}`.
     pub fn announced(
-        what: &'static str,
-        key: &'static str,
+        what: impl Into<String>,
+        key: impl Into<String>,
         publish: Arc<dyn Publish>,
     ) -> Arc<Self> {
-        Self::build(what, key, Some(publish))
+        Self::build(what.into(), key.into(), Some(publish))
     }
 
-    fn build(
-        what: &'static str,
-        key: &'static str,
-        publish: Option<Arc<dyn Publish>>,
-    ) -> Arc<Self> {
+    fn build(what: String, key: String, publish: Option<Arc<dyn Publish>>) -> Arc<Self> {
         Arc::new(SlowRead {
             what,
             key,
@@ -214,7 +213,7 @@ impl SlowRead {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     serde_json::json!({
-                        "what": me.what,
+                        "what": &me.what,
                         "why": format!("the read stopped before it answered: {e}"),
                         "fix": "read again; if it stays, look at the dashboard's log",
                     }),
@@ -246,7 +245,7 @@ impl SlowRead {
             if let Some(p) = &me.publish {
                 p.publish(
                     "slow_read",
-                    serde_json::json!({ "read": me.key, "run": id, "ok": ok }),
+                    serde_json::json!({ "read": &me.key, "run": id, "ok": ok }),
                 );
             }
         });
@@ -256,7 +255,7 @@ impl SlowRead {
         (
             StatusCode::GONE,
             Json(serde_json::json!({
-                "what": self.what,
+                "what": &self.what,
                 "why": format!("read {id} is no longer on this dashboard (it restarted, or newer reads replaced it)"),
                 "fix": "read again",
             })),

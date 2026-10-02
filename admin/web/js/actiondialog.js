@@ -19,6 +19,7 @@ import {
   fieldChoices,
   formFields,
   initialValues,
+  lockedFields,
   nameTyped,
   previewArgs,
   shownField,
@@ -34,6 +35,7 @@ import {
   refusalCallout,
 } from "./actui.js";
 import { fetchJson, fetchReport, h, statTile } from "./dom.js";
+import { resolveSnapshotOwner, snapshotPickerRows } from "./snapshotpicker.js";
 import { diffBlocks } from "./editui.js";
 import { applySummary, checkChoices } from "./parity.js";
 import { fileViews } from "./plan.js";
@@ -169,7 +171,46 @@ export async function openAction(stack, action, opts = {}) {
   }
   const sources = await readSources(form, opts.sources ?? {});
   const values = initialValues(form, opts.preset);
-  return drawActionDialog(form, values, sources, opts.driven === true);
+  // fix-216: a row or a notice that already picked an app, unit or commit
+  // is not asked again — the field opens locked, read-only, with a
+  // "Change" link, one shared rule for every action form rather than a
+  // list each caller has to remember to pass.
+  const locked = lockedFields(form, opts.preset);
+  return drawActionDialog(form, values, sources, opts.driven === true, locked);
+}
+
+/**
+ * `form.intro` as nodes: plain lines become paragraphs, consecutive lines
+ * starting with "- " become one bullet list — the shape Adopt's step list
+ * needs without teaching every other one-line description any markup.
+ * @param {string} intro
+ */
+function introNodes(intro) {
+  /** @type {Node[]} */
+  const nodes = [];
+  /** @type {string[]} */
+  let items = [];
+  const flushItems = () => {
+    if (!items.length) return;
+    nodes.push(
+      h(
+        "ul",
+        { class: "act-intro-steps" },
+        ...items.map((i) => h("li", null, i)),
+      ),
+    );
+    items = [];
+  };
+  for (const line of intro.split("\n")) {
+    if (!line.trim()) continue;
+    if (line.startsWith("- ")) items.push(line.slice(2));
+    else {
+      flushItems();
+      nodes.push(h("p", { class: "measured act-intro" }, line));
+    }
+  }
+  flushItems();
+  return nodes;
 }
 
 /**
@@ -178,13 +219,70 @@ export async function openAction(stack, action, opts = {}) {
  * @param {import("./actionforms.js").Values} values
  * @param {Sources} sources
  * @param {boolean} driven
+ * @param {string[]} [locked] fix-216: field names the opener already chose
  * @returns {ActionController}
  */
-function drawActionDialog(form, values, sources, driven) {
+function drawActionDialog(form, values, sources, driven, locked = []) {
+  const lockedSet = new Set(locked);
   /** @type {Map<string, HTMLInputElement | HTMLSelectElement>} */
   const inputs = new Map();
   /** @type {Map<string, HTMLElement>} */
   const wraps = new Map();
+  /**
+   * fix-216: the read-only summary a locked field shows instead of its
+   * input — the chosen choice's own label (never a raw id), and a Change
+   * link that reveals the real field for whoever does want to pick again.
+   * @param {import("./actionforms.js").Field} f
+   * @param {{input: HTMLInputElement | HTMLSelectElement, wrap: HTMLElement}} x
+   */
+  const lockedWrap = (f, x) => {
+    const label = () => {
+      if (f.kind === "choice") {
+        const choices = fieldChoices(f, sources);
+        const found = choices.find((c) => c.value === x.input.value);
+        if (found) return found.label;
+      }
+      return x.input.value || "—";
+    };
+    const valueEl = h("strong", null, label());
+    x.input.addEventListener("change", () => {
+      valueEl.textContent = label();
+    });
+    const changeBtn = h(
+      "button",
+      {
+        type: "button",
+        class:
+          "kp-button kp-button--sm kp-button--ghost act-field-locked__change",
+        "data-act-unlock": f.name,
+      },
+      "Change",
+    );
+    const summary = h(
+      "div",
+      { class: "act-field-locked", "data-field": `${f.name}-locked` },
+      h("span", { class: "kp-field__label" }, f.label),
+      h(
+        "span",
+        { class: "act-field-locked__value" },
+        valueEl,
+        h("span", { class: "act-field-locked__hint" }, " — already chosen"),
+      ),
+      changeBtn,
+    );
+    x.wrap.hidden = true;
+    changeBtn.addEventListener("click", () => {
+      summary.hidden = true;
+      x.wrap.hidden = false;
+      x.input.focus();
+    });
+    return h(
+      "div",
+      { class: "act-field-locked-wrap", "data-field": f.name },
+      summary,
+      x.wrap,
+    );
+  };
   /** @param {import("./actionforms.js").Field} f */
   const field = (f) => {
     const x = fieldEl(
@@ -203,7 +301,7 @@ function drawActionDialog(form, values, sources, driven) {
     };
     x.input.addEventListener("input", read);
     x.input.addEventListener("change", read);
-    return x.wrap;
+    return lockedSet.has(f.name) ? lockedWrap(f, x) : x.wrap;
   };
 
   // The review step's parts: the preview, the guard, the typed name.
@@ -283,6 +381,119 @@ function drawActionDialog(form, values, sources, driven) {
       });
     });
   }
+  // fix-216: the snapshot field becomes a picker — every snapshot of the
+  // app or unit already chosen, newest first, dated and aged, the newest
+  // preselected and labelled "latest" — for any form that has one
+  // (restore and restore-native today; one shared mechanism, not a
+  // per-dialog patch). `snapshotWrap`/`snapshotInput` are the plain text
+  // field `field()` already built; its value stays the single source of
+  // truth (buildArgs, Live-view replay via `set()` all read it unchanged),
+  // the picker only changes what is drawn around it.
+  const snapshotInput = inputs.get("snapshot");
+  const snapshotWrap = wraps.get("snapshot");
+  if (snapshotInput instanceof HTMLInputElement && snapshotWrap) {
+    const help = snapshotWrap.querySelector(".kp-field__help");
+    const picker = h("div", {
+      class: "act-snapshot-picker",
+      "data-field": "snapshot-picker",
+    });
+    snapshotInput.hidden = true;
+    snapshotWrap.insertBefore(picker, help);
+    let seq = 0;
+    const renderSnapshots = async () => {
+      const mySeq = ++seq;
+      picker.replaceChildren(
+        h("p", { class: "measured" }, "Reading this app's snapshots…"),
+      );
+      const r = await fetchJson(
+        `/data/backups/${encodeURIComponent(form.stack)}`,
+        "this stack's backup snapshots",
+      );
+      if (mySeq !== seq) return;
+      if (!r.ok) {
+        picker.replaceChildren(
+          h(
+            "p",
+            { class: "kp-alert kp-alert--destructive", role: "alert" },
+            `Could not read the snapshot list — ${r.error.fix ? `${r.error.why} — ${r.error.fix}` : r.error.why}.`,
+          ),
+        );
+        snapshotInput.hidden = false;
+        return;
+      }
+      const repos = r.body?.repos ?? [];
+      const appValue = typeof values.app === "string" ? values.app : "";
+      const owner = resolveSnapshotOwner(repos, appValue);
+      if (!owner) {
+        picker.replaceChildren(
+          h(
+            "p",
+            { class: "measured" },
+            appValue
+              ? `No repository named "${appValue}" was read.`
+              : "Choose an app above to see its snapshots, or leave Snapshot empty for the latest of every app.",
+          ),
+        );
+        snapshotInput.hidden = false;
+        return;
+      }
+      const snaps = owner.snapshots ?? [];
+      if (snaps.length === 0) {
+        picker.replaceChildren(
+          h("p", { class: "measured" }, `${owner.owner} has no snapshots yet.`),
+        );
+        return;
+      }
+      const now = Math.floor(Date.now() / 1000);
+      const rows = snapshotPickerRows(snaps, now, snapshotInput.value);
+      const group = `act-snapshot-${form.id}-${appValue || "all"}`;
+      picker.replaceChildren(
+        ...rows.map((row, i) => {
+          const id = `${snapshotInput.id}-opt-${i}`;
+          const radio = h("input", {
+            type: "radio",
+            name: group,
+            id,
+            value: row.value,
+          });
+          radio.checked = row.selected;
+          radio.addEventListener("change", () => {
+            snapshotInput.value = row.value;
+            snapshotInput.dispatchEvent(new Event("input", { bubbles: true }));
+          });
+          return h(
+            "label",
+            { class: "act-snapshot-row", for: id },
+            radio,
+            h(
+              "span",
+              { class: "act-snapshot-row__when" },
+              row.when,
+              h("span", { class: "measured" }, ` · ${row.ago}`),
+            ),
+            ...(row.latest ? [h("span", { class: "kp-badge" }, "latest")] : []),
+            ...(row.size ? [h("span", { class: "measured" }, row.size)] : []),
+            ...(row.files ? [h("span", { class: "measured" }, row.files)] : []),
+            h("span", { class: "act-snapshot-row__id mono" }, row.shortId),
+          );
+        }),
+        ...(rows.every((r) => r.size == null)
+          ? [
+              h(
+                "p",
+                { class: "measured act-snapshot-gap" },
+                "Size and file count per snapshot are not reported by the host yet.",
+              ),
+            ]
+          : []),
+      );
+    };
+    void renderSnapshots();
+    // A different app re-reads this app's own snapshots instead of the
+    // one the dialog opened on (fix-216: "Change" on a locked app field
+    // still lands here).
+    inputs.get("app")?.addEventListener("change", () => void renderSnapshots());
+  }
   const back = h(
     "button",
     { type: "button", class: "kp-button", "data-kp-wizard-back": "" },
@@ -355,7 +566,18 @@ function drawActionDialog(form, values, sources, driven) {
     wiz.addEventListener("change", applyConditions);
     applyConditions();
   }
-  const body = h("div", { class: "act-body" }, wiz);
+  // fix-216 (rule 8: "every section and every action says what it does";
+  // Kenny, 2026-10-02 on Adopt: "wat doet adopt exact?"): every action's
+  // own plain-English description of what it does — and, for one whose
+  // effects are not obvious from its name, a short step list — read from
+  // `formspec.json`'s `intro` map so it is one place, not a string typed
+  // again in each dialog that wants one.
+  const body = h(
+    "div",
+    { class: "act-body" },
+    ...(form.intro ? introNodes(form.intro) : []),
+    wiz,
+  );
   const d = openDialog({
     title: form.title,
     body: [body],

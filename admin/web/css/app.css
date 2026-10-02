@@ -536,6 +536,80 @@ p:has(> .measured:only-child):first-child {
 .field-danger .kp-field__label {
   color: var(--destructive);
 }
+/* fix-216: a field the opening row already chose (app, unit, commit) shows
+   read-only with a Change link instead of asking again. Grid so the label,
+   value and Change button keep the same columns every field in the same
+   form uses, never a one-off flex row (rule 6). */
+.act-field-locked {
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) 1fr auto;
+  align-items: center;
+  column-gap: var(--kp-space-sm, 0.5rem);
+  margin-block: 10px;
+}
+.act-field-locked__hint {
+  color: var(--muted-foreground, currentColor);
+  font-size: var(--kp-text-sm, 0.8125rem);
+}
+/* Phone width: three columns in one row no longer fit the label, the
+   chosen value and Change together — two rows, still a grid, still
+   aligned with the label above and the value beside the button below. */
+@media (max-width: 30rem) {
+  .act-field-locked {
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "label label" "value change";
+    row-gap: 2px;
+  }
+  .act-field-locked .kp-field__label {
+    grid-area: label;
+  }
+  .act-field-locked__value {
+    grid-area: value;
+  }
+  .act-field-locked__change {
+    grid-area: change;
+  }
+}
+/* fix-216: the restore snapshot picker — one row per snapshot, newest
+   first, each keeping the same columns (date+age, latest badge, size,
+   files, short id) across every row so the list reads as a table, not a
+   ragged stack (rule 6). */
+.act-snapshot-picker {
+  display: grid;
+  gap: 4px;
+  margin-block: 6px 2px;
+}
+.act-snapshot-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto;
+  align-items: baseline;
+  column-gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border, currentColor);
+  border-radius: var(--radius, 6px);
+  cursor: pointer;
+}
+.act-snapshot-row:has(input:checked) {
+  border-color: var(--primary, currentColor);
+  background: var(--accent, transparent);
+}
+.act-snapshot-row__id {
+  color: var(--muted-foreground, currentColor);
+  font-size: var(--kp-text-sm, 0.8125rem);
+}
+.act-snapshot-gap {
+  margin-block-start: 4px;
+}
+.act-intro {
+  margin-block: 0 4px;
+}
+.act-intro-steps {
+  margin-block: 0 10px;
+  padding-inline-start: 1.25rem;
+}
+.act-intro-steps li {
+  margin-block: 2px;
+}
 .refusal .kp-alert__body {
   display: grid;
   gap: 2px;

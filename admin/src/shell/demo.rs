@@ -210,6 +210,52 @@ pub async fn run_demo(
                                 "reasons": {},
                             }).to_string()
                         }
+                        // fix-216 (invariants: the restore dialog's own
+                        // snapshot picker needs real snapshots to show):
+                        // one restic repository per declared app (compose)
+                        // or native unit, each with a few nights of
+                        // snapshots at distinct times so the picker's
+                        // newest-first order and "N days ago" are provable
+                        // without a real restic repository.
+                        Command::GetBackups { stack, .. } => {
+                            let m = homelab_client::spec::build_manifest(
+                                &repo.join("stacks").join(&stack),
+                            )
+                            .ok();
+                            let native = m.as_ref().is_some_and(|m| !m.natives.is_empty());
+                            let owners: Vec<String> = m
+                                .map(|m| if native { m.natives } else { m.apps })
+                                .unwrap_or_default();
+                            let now = now_s();
+                            let repos: Vec<serde_json::Value> = owners
+                                .iter()
+                                .enumerate()
+                                .map(|(oi, owner)| {
+                                    let snaps: Vec<serde_json::Value> = (0..4)
+                                        .map(|i| {
+                                            let t = now
+                                                - (oi as u64) * 1_800
+                                                - (i as u64) * 86_400
+                                                - 3_600;
+                                            serde_json::json!({
+                                                "id": format!("demo{oi}{i:02}snapshotidfortest"),
+                                                "short_id": format!("demo{oi}{i:02}"),
+                                                "time": t,
+                                                "run": t,
+                                            })
+                                        })
+                                        .collect();
+                                    serde_json::json!({
+                                        "owner": owner,
+                                        "newest_snapshot": snaps.first(),
+                                        "snapshot_count": snaps.len(),
+                                        "snapshots": snaps,
+                                        "measured_at": now,
+                                    })
+                                })
+                                .collect();
+                            serde_json::json!({ "native": native, "repos": repos }).to_string()
+                        }
                         _ => "{}".into(),
                     };
                     let _ = reply.send(Ok(answer(body)));

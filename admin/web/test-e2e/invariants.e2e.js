@@ -891,3 +891,64 @@ test("invariants: every top-level section on Overview and the stack page has a h
     await browser.close();
   }
 });
+
+test("invariants: opening Restore from an app's row never asks for the app again and shows dated snapshots with the latest preselected", async () => {
+  // fix-216 (Kenny, 2026-10-02: "als ik daar bv op kyu restore pak, dan
+  // vraagt die nog altijd welke app, terwijl ik restore al bij een app
+  // selecteerde? ... ik heb toch geen idee wat die snapshot is?").
+  // kp-soft's fixture stack declares two apps (kp-soft, jobtracker), so its
+  // Backups rows are a real case of "the row already said which app" — the
+  // demo host answers GetBackups with a few nights of made-up snapshots per
+  // app (admin/src/shell/demo.rs).
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/backups`);
+    const row = page.locator('tr[data-kp-row-key="kp-soft-jobtracker"]');
+    await row.waitFor({ timeout: 15000 });
+    await row.getByRole("button", { name: /Restore/ }).click();
+    const dialog = page.locator("dialog#action-dialog");
+    await dialog.waitFor({ timeout: 5000 });
+
+    // The app is shown read-only, with the row's own choice ("jobtracker")
+    // — never a select box asking which app, all over again.
+    const appLocked = dialog.locator('[data-field="app-locked"]');
+    await appLocked.waitFor({ timeout: 5000 });
+    assert.match(await appLocked.innerText(), /jobtracker/);
+    assert.equal(
+      await dialog.locator('select[name="app"]').isVisible(),
+      false,
+      "the app select must stay hidden behind the locked summary until Change is pressed",
+    );
+
+    // The snapshot field is a picker: dated rows, newest first, the first
+    // one marked "latest" and preselected.
+    const rows = dialog.locator(".act-snapshot-row");
+    await rows.first().waitFor({ timeout: 5000 });
+    const count = await rows.count();
+    assert.ok(count >= 2, `expected several snapshot rows, got ${count}`);
+    const firstText = await rows.first().innerText();
+    assert.match(firstText, /\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}/, "a dated row");
+    assert.match(firstText, /ago/);
+    assert.match(firstText, /latest/);
+    assert.equal(
+      await rows.first().locator('input[type="radio"]').isChecked(),
+      true,
+      "the newest snapshot is preselected",
+    );
+    assert.equal(
+      await rows.nth(1).locator('input[type="radio"]').isChecked(),
+      false,
+    );
+    // Never a bare restic id as the only thing shown — the short id is
+    // there, but only beside the date, never alone.
+    const idText = await rows
+      .first()
+      .locator(".act-snapshot-row__id")
+      .innerText();
+    assert.match(idText, /^demo/);
+  } finally {
+    await browser.close();
+  }
+});

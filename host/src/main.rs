@@ -2836,6 +2836,141 @@ span_days = 7\n";
         );
     }
 
+    /// A handler shaped like the real `Rpc::BackupCalendar`/`Rpc::GetBackups`
+    /// arms (fix-180): a cache miss kicks the slow restic read into a
+    /// detached background task and answers "not read yet" at once, instead
+    /// of awaiting it. Everything else goes to the real `handle_rpc`.
+    async fn cache_answering_handler(st: AppState, req: RpcRequest) -> RpcResponse {
+        if let Rpc::BackupCalendar { .. } = req.command {
+            let cache = st.snapshot_cache.clone();
+            tokio::spawn(async move {
+                // Stands in for a real, slow `restic snapshots` over rclone.
+                let exec = SlowMockExecutor::new(Duration::from_secs(2));
+                cache
+                    .refresh(
+                        &exec,
+                        &homelab_core::ops::backup::BackupCfg::default(),
+                        "gateway",
+                        1,
+                    )
+                    .await;
+            });
+            return RpcResponse {
+                id: req.id,
+                ok: true,
+                message: "not read yet".into(),
+                deferred: None,
+            };
+        }
+        handle_rpc(&st, req).await
+    }
+
+    /// `MockExecutor` with every `run` delayed, so a test can stand in for a
+    /// restic read slow enough to matter without a real restic binary.
+    struct SlowMockExecutor {
+        inner: homelab_core::mock::MockExecutor,
+        delay: Duration,
+    }
+
+    impl SlowMockExecutor {
+        fn new(delay: Duration) -> Self {
+            Self {
+                inner: homelab_core::mock::MockExecutor::new(),
+                delay,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl homelab_core::executor::Executor for SlowMockExecutor {
+        async fn run(
+            &self,
+            cmd: &homelab_core::executor::Cmd,
+        ) -> Result<homelab_core::executor::CmdOutput, homelab_core::error::CoreError> {
+            tokio::time::sleep(self.delay).await;
+            self.inner.run(cmd).await
+        }
+        async fn read_file(&self, path: &str) -> Result<String, homelab_core::error::CoreError> {
+            self.inner.read_file(path).await
+        }
+        async fn write_file(
+            &self,
+            path: &str,
+            content: &str,
+            mode: u32,
+        ) -> Result<(), homelab_core::error::CoreError> {
+            self.inner.write_file(path, content, mode).await
+        }
+        async fn sleep_ms(&self, ms: u64) {
+            self.inner.sleep_ms(ms).await
+        }
+    }
+
+    /// covers fix-180: before this fix, `Rpc::BackupCalendar` read restic
+    /// straight on the request path, so a slow repository (restic over
+    /// rclone, measured live on CT 120 taking past 180 s) ran inside the
+    /// one serial worker (fix-66) and blocked every request queued behind
+    /// it — a deploy, a Live view step, anything. With the cache, a miss
+    /// answers "not read yet" at once and the slow read moves to a detached
+    /// background task, so a request sent right after it on the SAME
+    /// connection (and so queued behind it on the very same `work_tx` the
+    /// serial worker drains) finishes long before the simulated 2 s restic
+    /// read would have.
+    #[tokio::test]
+    async fn fix_180_a_cache_miss_backup_calendar_does_not_block_the_queue_behind_it() {
+        use tokio_tungstenite::tungstenite::Message as WsMsg;
+        let addr = serve_on_loopback(cache_answering_handler).await;
+        let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/ws", addr))
+            .await
+            .expect("connect to the loopback session");
+        let (mut tx, mut rx) = ws.split();
+        let frame = |req: RpcRequest| WsMsg::Text(serde_json::to_string(&req).unwrap().into());
+
+        let started = std::time::Instant::now();
+        // Neither request opts into `reads_beside_queue` (the TUI/CLI
+        // never do, fix-66), so both go through the one serial `work_tx`.
+        tx.send(frame(RpcRequest {
+            id: 1,
+            command: Rpc::BackupCalendar {
+                stacks: Vec::new(),
+                force: false,
+            },
+        }))
+        .await
+        .unwrap();
+        tx.send(frame(RpcRequest {
+            id: 2,
+            command: Rpc::Ping,
+        }))
+        .await
+        .unwrap();
+
+        let mut done = std::collections::HashSet::new();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while done.len() < 2 {
+                if let ServerMsg::RpcDone(r) = serde_json::from_str::<ServerMsg>(
+                    &rx.next().await.unwrap().unwrap().into_text().unwrap(),
+                )
+                .unwrap()
+                {
+                    done.insert(r.id);
+                }
+            }
+        })
+        .await
+        .expect(
+            "both the cache-miss calendar read and the request queued behind it \
+             must finish in well under the simulated 2 s restic read — the queue \
+             must not be blocked by it",
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "took {:?}, which is not meaningfully faster than the 2 s background read \
+             it should never have waited for",
+            started.elapsed()
+        );
+    }
+
     /// fix-127 (expert panel, websocket-edge-cases, 2026-09-27): the session
     /// read `while let Some(Ok(Message::Text(..)))`, so the first Ping,
     /// Pong or Binary frame ended it. A keepalive ping from a client or a
@@ -5099,7 +5234,27 @@ struct AppState {
     /// anything built before `init_production_logging` runs): reloading it
     /// changes nothing, because nothing reads from it.
     log_filter: LogFilterHandle,
+    /// fix-180: every restic repository's cached snapshot list, so
+    /// `BackupCalendar`/`GetBackups` answer without shelling out to restic
+    /// on the request path — see `homelab_core::ops::snapshot_cache`.
+    snapshot_cache: Arc<homelab_core::ops::snapshot_cache::SnapshotCache>,
 }
+
+/// fix-180: restic reads this cache may run at once, across EVERY caller
+/// (a cache-miss RPC, the periodic sweep, a post-backup refresh) — one
+/// `Semaphore` inside `SnapshotCache` enforces it globally. rclone's Google
+/// Drive remote is rate-limited; the nightly backup phase's own measured
+/// concurrency note (`backup::phase_duration_line`) is the same band.
+const SNAPSHOT_REFRESH_CONCURRENCY: usize = 3;
+
+/// fix-180: how often the background sweep re-reads every repository the
+/// fleet currently declares, so a cache entry is never older than this even
+/// when nothing backed up, pruned or restored it in the meantime (and so a
+/// repository that existed before this cache did gets its first read without
+/// anyone having to open a page). 20 min: inside the UI's own "N min ago"
+/// granularity, and nowhere near rclone's rate limit at 2-3 repositories at
+/// a time.
+const SNAPSHOT_SWEEP_INTERVAL_S: u64 = 20 * 60;
 
 /// fix-122: the subscriber's filter, reloadable from `Rpc::SetHostConfig`
 /// and `Rpc::ApplyHostConfig` without a restart.
@@ -5179,6 +5334,9 @@ impl AppState {
                     .unwrap_or(0),
             )),
             log_filter: inert_log_filter_handle(),
+            snapshot_cache: Arc::new(homelab_core::ops::snapshot_cache::SnapshotCache::new(
+                SNAPSHOT_REFRESH_CONCURRENCY,
+            )),
         }
     }
 
@@ -5590,7 +5748,7 @@ fn rpc_stack(command: &Rpc) -> Option<String> {
         | Rpc::DestroyRecorded { stack, .. }
         | Rpc::SetStackEnabled { stack, .. }
         | Rpc::GetApplied { stack }
-        | Rpc::GetBackups { stack }
+        | Rpc::GetBackups { stack, .. }
         | Rpc::RestoreNative { stack, .. }
         | Rpc::RevealSecret { stack, .. }
         | Rpc::SetSecret { stack, .. } => Some(stack.clone()),
@@ -5817,6 +5975,13 @@ async fn main() {
     {
         let st = state.clone();
         tokio::spawn(async move { status_loop(st).await });
+    }
+    // fix-180: keep every repository's snapshot cache fresh in the
+    // background, bounded and coalesced, so `BackupCalendar`/`GetBackups`
+    // never shell out to restic on the request path.
+    {
+        let st = state.clone();
+        tokio::spawn(async move { snapshot_cache_sweep_loop(st).await });
     }
     // replace-kuma (Kenny, 2026-09-30): the host watches the dashboard, as
     // the dashboard watches the host.
@@ -6516,12 +6681,23 @@ async fn run_backup_batch(
                 let outcome = match job.what {
                     BackupWhat::Compose(manifest) => {
                         let cfg = job.cfg.clone();
+                        // fix-180: read before `manifest` moves below, so a
+                        // successful nightly backup refreshes the same
+                        // owners an on-demand `Rpc::BackupStack` would.
+                        let owners: Vec<String> =
+                            homelab_core::ops::backup::owner_groups(&manifest)
+                                .into_iter()
+                                .map(|(owner, _paths)| owner)
+                                .collect();
                         let r = run_op_locked(state, exec, 0, "scheduled-backup", |ctx| {
                             Box::pin(async move {
                                 homelab_core::ops::backup::backup(ctx, &manifest, &cfg).await
                             })
                         })
                         .await;
+                        if r.ok {
+                            kick_snapshot_refresh_many(state, state.config.backup.clone(), owners);
+                        }
                         NightBackup::of(r.ok, r.deferred.as_deref())
                     }
                     // T5: several services share one container, so all of them are
@@ -6533,6 +6709,7 @@ async fn run_backup_batch(
                         let mut worst = NightBackup::Done;
                         for native in services {
                             let cfg = job.cfg.clone();
+                            let owner = native.unit.clone();
                             let r =
                                 run_op_locked(state, exec, 0, "scheduled-backup-native", |ctx| {
                                     Box::pin(async move {
@@ -6541,6 +6718,9 @@ async fn run_backup_batch(
                                     })
                                 })
                                 .await;
+                            if r.ok {
+                                kick_snapshot_refresh(state, state.config.backup.clone(), owner);
+                            }
                             worst = worst.worse_of(NightBackup::of(r.ok, r.deferred.as_deref()));
                         }
                         worst
@@ -9258,6 +9438,88 @@ async fn record_backup_time(state: &AppState, stack: &str) {
     .await;
 }
 
+/// fix-180: refresh one repository's snapshot cache in the background — the
+/// caller (an RPC handler whose cache missed, or who wants a forced
+/// refresh, or the completion of that repository's own backup/prune/
+/// restore) never waits for this; `SnapshotCache::refresh`'s own semaphore
+/// bounds how many of these actually talk to restic at once, cache-wide, so
+/// firing one more of these never by itself adds concurrency.
+fn kick_snapshot_refresh(
+    state: &AppState,
+    cfg: homelab_core::ops::backup::BackupCfg,
+    owner: String,
+) {
+    let cache = state.snapshot_cache.clone();
+    tokio::spawn(async move {
+        cache.refresh(&RealExecutor, &cfg, &owner, unix_now()).await;
+    });
+}
+
+/// fix-180: the same, for every repository a stack's manifest (or a native
+/// unit list) names — used right after that stack's own backup/restore
+/// completes, so the cache the dashboard reads next already has today's
+/// snapshot instead of waiting for the next periodic sweep.
+fn kick_snapshot_refresh_many(
+    state: &AppState,
+    cfg: homelab_core::ops::backup::BackupCfg,
+    owners: Vec<String>,
+) {
+    for owner in owners {
+        kick_snapshot_refresh(state, cfg.clone(), owner);
+    }
+}
+
+/// fix-180: every restic repository the fleet currently declares — compose
+/// stacks' owning apps (D25) and native units alike, generic over both
+/// since neither this nor `SnapshotCache` knows an app's name, only that it
+/// owns a repository. Used by the periodic sweep and by
+/// `SnapshotCache::forget_except` after a destroy, so a cache entry never
+/// outlives the repository it answers for (rule 20).
+async fn known_snapshot_owners(state: &AppState) -> std::collections::HashSet<String> {
+    let store = homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
+    let st = store.load().await.unwrap_or_default();
+    let mut owners = std::collections::HashSet::new();
+    for entry in st.stacks.values() {
+        if let Some(m) = &entry.manifest {
+            for (owner, _paths) in homelab_core::ops::backup::owner_groups(m) {
+                owners.insert(owner);
+            }
+        }
+        for native in &entry.natives {
+            owners.insert(native.unit.clone());
+        }
+    }
+    owners
+}
+
+/// fix-180: keeps every repository's cache entry fresh within
+/// `SNAPSHOT_SWEEP_INTERVAL_S`, even when nothing backed up, pruned or
+/// restored it meanwhile, and prunes entries for a repository no stack
+/// names any more (a destroy). Never blocks anything: each tick kicks
+/// refreshes through the same bounded, coalescing path an RPC's cache miss
+/// uses, and moves on.
+async fn snapshot_cache_sweep_loop(state: AppState) {
+    let mut tick = tokio::time::interval(Duration::from_secs(SNAPSHOT_SWEEP_INTERVAL_S));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tick.tick().await;
+        let owners = known_snapshot_owners(&state).await;
+        state.snapshot_cache.forget_except(&owners);
+        let cfg = state.config.backup.clone();
+        for owner in owners {
+            // A fresh-enough entry is left alone — `refresh` always
+            // overwrites, so re-reading it here would cost a restic call
+            // for no new information.
+            let stale = state.snapshot_cache.get(&owner).is_none_or(|c| {
+                unix_now().saturating_sub(c.measured_at) >= SNAPSHOT_SWEEP_INTERVAL_S
+            });
+            if stale {
+                kick_snapshot_refresh(&state, cfg.clone(), owner);
+            }
+        }
+    }
+}
+
 /// fix-103: one rendering for `homelab check`, the TUI and the nightly log —
 /// a summary first, then the findings grouped by severity.
 fn render_findings(findings: &[homelab_core::ops::fleetcheck::Finding]) -> String {
@@ -9477,6 +9739,12 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 ..state.config.backup.clone()
             };
             let stack = manifest.stack_name.clone();
+            // fix-180: the owners the cache refreshes on success — read
+            // before `manifest` moves into the closure below.
+            let owners: Vec<String> = homelab_core::ops::backup::owner_groups(&manifest)
+                .into_iter()
+                .map(|(owner, _paths)| owner)
+                .collect();
             let resp =
                 run_mutating_op_for_stack(state, &exec, req.id, "backup", Some(&stack), |ctx| {
                     Box::pin(async move {
@@ -9486,6 +9754,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 .await;
             if resp.ok {
                 record_backup_time(state, &stack).await;
+                kick_snapshot_refresh_many(state, state.config.backup.clone(), owners);
             }
             resp
         }
@@ -9512,20 +9781,39 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             // (F38, see REGISTER.md).
             let cfg = state.config.backup.clone();
             let stack_name = manifest.stack_name.clone();
-            run_mutating_op_for_stack(state, &exec, req.id, "restore", Some(&stack_name), |ctx| {
-                Box::pin(async move {
-                    homelab_core::ops::backup::restore_app(
-                        ctx,
-                        &manifest,
-                        &cfg,
-                        &snapshot,
-                        !skip_safety_copy,
-                        app.as_deref(),
-                    )
-                    .await
-                })
-            })
-            .await
+            // fix-180: a restore may take a safety-copy backup first (unless
+            // `skip_safety_copy`) and always re-tags a `restic forget` pass
+            // over the repositories it touches, so the same owners are
+            // refreshed on success as on an ordinary backup.
+            let owners: Vec<String> = homelab_core::ops::backup::owner_groups(&manifest)
+                .into_iter()
+                .map(|(owner, _paths)| owner)
+                .collect();
+            let resp = run_mutating_op_for_stack(
+                state,
+                &exec,
+                req.id,
+                "restore",
+                Some(&stack_name),
+                |ctx| {
+                    Box::pin(async move {
+                        homelab_core::ops::backup::restore_app(
+                            ctx,
+                            &manifest,
+                            &cfg,
+                            &snapshot,
+                            !skip_safety_copy,
+                            app.as_deref(),
+                        )
+                        .await
+                    })
+                },
+            )
+            .await;
+            if resp.ok {
+                kick_snapshot_refresh_many(state, state.config.backup.clone(), owners);
+            }
+            resp
         }
         Rpc::UpdateStack { manifest, app } => {
             let stack_name = manifest.stack_name.clone();
@@ -9685,6 +9973,10 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     };
                     for m in services {
                         let cfg = cfg.clone();
+                        // fix-180: the unit name IS the repository's owner
+                        // for a native service (no `owner_groups` — that is
+                        // compose-only, D25).
+                        let owner = m.unit.clone();
                         let r = run_mutating_op_for_stack(
                             state,
                             &exec,
@@ -9699,6 +9991,9 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         )
                         .await;
                         let failed = !r.ok;
+                        if r.ok {
+                            kick_snapshot_refresh(state, state.config.backup.clone(), owner);
+                        }
                         if resp.ok || failed {
                             resp = r;
                         }
@@ -10269,7 +10564,16 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         // backup calendar, its own query reading restic directly (not
         // through state.json's cached `last_backup`, which only ever holds
         // the newest night — a calendar needs every one of them).
-        Rpc::BackupCalendar { stacks } => {
+        //
+        // fix-180: answered from `state.snapshot_cache`, never restic
+        // directly — a whole-fleet read used to run every owner's
+        // `restic snapshots` one after another and, live on CT 120
+        // (2026-10-02), ran past the dashboard's 180 s budget and answered
+        // 502 with nothing to say which stack it was on. A repository never
+        // read before answers empty at once ("not read yet") while a
+        // background read (bounded, coalesced — see `SnapshotCache`) fills
+        // it in for the next call.
+        Rpc::BackupCalendar { stacks, force } => {
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
             let st = store.load().await.unwrap_or_default();
             let cfg = state.config.backup.clone();
@@ -10279,6 +10583,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 stacks.iter().collect()
             };
             let mut by_stack = serde_json::Map::new();
+            let mut measured_at = serde_json::Map::new();
             let mut skipped = Vec::new();
             for name in wanted {
                 let Some(entry) = st.stacks.get(name) else {
@@ -10292,27 +10597,45 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 if m.backs_up_nothing() {
                     continue;
                 }
-                // fix-177: a plain read-only RPC leaves no trace in the
-                // journal otherwise — live evidence on CT 120 (2026-10-02)
-                // was a dashboard 502 with nothing on either side to say
-                // which stack it was waiting on. This fires before the
-                // (possibly slow or hung) restic read, so a stuck read
-                // shows up as a start line with no matching "done" line.
-                tracing::debug!(stack = %name, "backup-calendar: reading restic snapshots");
-                let started = std::time::Instant::now();
-                let times = homelab_core::ops::backup::snapshot_nights_unix(&exec, m, &cfg).await;
-                tracing::debug!(
-                    stack = %name,
-                    snapshots = times.len(),
-                    elapsed_ms = started.elapsed().as_millis(),
-                    "backup-calendar: stack read done"
+                let mut nights = Vec::new();
+                let mut oldest: Option<u64> = None;
+                let mut any_unread = false;
+                for (owner, _paths) in homelab_core::ops::backup::owner_groups(m) {
+                    match state.snapshot_cache.get(&owner) {
+                        Some(cached) => {
+                            nights.extend(cached.snapshots.iter().map(|s| s.time));
+                            oldest =
+                                Some(oldest.map_or(cached.measured_at, |o: u64| {
+                                    o.min(cached.measured_at)
+                                }));
+                            if force {
+                                kick_snapshot_refresh(state, cfg.clone(), owner);
+                            }
+                        }
+                        None => {
+                            any_unread = true;
+                            kick_snapshot_refresh(state, cfg.clone(), owner);
+                        }
+                    }
+                }
+                if any_unread {
+                    skipped.push(format!("{name}: not read yet"));
+                }
+                by_stack.insert(name.clone(), serde_json::json!(nights));
+                measured_at.insert(
+                    name.clone(),
+                    oldest.map_or(serde_json::Value::Null, |t| serde_json::json!(t)),
                 );
-                by_stack.insert(name.clone(), serde_json::json!(times));
             }
             RpcResponse {
                 id: req.id,
                 ok: true,
-                message: serde_json::json!({ "stacks": by_stack, "skipped": skipped }).to_string(),
+                message: serde_json::json!({
+                    "stacks": by_stack,
+                    "measured_at": measured_at,
+                    "skipped": skipped,
+                })
+                .to_string(),
                 deferred: None,
             }
         }
@@ -10544,7 +10867,12 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         // feat-backup-1: per-repository status (D25's owning-app repos for
         // a compose stack, one per unit for a native stack), joined with
         // the restore-drill verdict the nightly drill already recorded.
-        Rpc::GetBackups { stack } => {
+        // fix-180: answered from `state.snapshot_cache`, same owner-keyed
+        // cache `BackupCalendar` reads — a repository the two pages both
+        // show is read from restic once, not once per page. A repository
+        // never read before answers `repo_status_unread` ("not read yet")
+        // at once, and a background refresh fills the cache for next time.
+        Rpc::GetBackups { stack, force } => {
             let store =
                 homelab_core::state::StateStore::new(&RealExecutor, &state.config.state_dir);
             let snapshot = store.load().await.unwrap_or_default();
@@ -10566,36 +10894,41 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 tiers,
                 ..state.config.backup.clone()
             };
-            let (native, statuses) = if let Some(m) = &st.manifest {
-                (
-                    false,
-                    homelab_core::ops::backup::backup_status(
-                        &exec,
-                        m,
-                        &cfg,
-                        &snapshot.restore_drills,
-                    )
-                    .await,
-                )
+            let owners: Vec<String> = if let Some(m) = &st.manifest {
+                homelab_core::ops::backup::owner_groups(m)
+                    .into_iter()
+                    .map(|(owner, _paths)| owner)
+                    .collect()
             } else {
-                let mut v = Vec::new();
-                for n in &st.natives {
-                    v.push(
-                        homelab_core::ops::backup::repo_status_of(
-                            &exec,
-                            &cfg,
-                            &snapshot.restore_drills,
-                            n.unit.clone(),
-                        )
-                        .await,
-                    );
-                }
-                (true, v)
+                st.natives.iter().map(|n| n.unit.clone()).collect()
             };
+            let mut statuses = Vec::with_capacity(owners.len());
+            for owner in owners {
+                match state.snapshot_cache.get(&owner) {
+                    Some(cached) => {
+                        if force {
+                            kick_snapshot_refresh(state, cfg.clone(), owner.clone());
+                        }
+                        statuses.push(homelab_core::ops::backup::repo_status_from_cache(
+                            &cached,
+                            &snapshot.restore_drills,
+                            owner,
+                        ));
+                    }
+                    None => {
+                        kick_snapshot_refresh(state, cfg.clone(), owner.clone());
+                        statuses.push(homelab_core::ops::backup::repo_status_unread(
+                            &snapshot.restore_drills,
+                            owner,
+                        ));
+                    }
+                }
+            }
             RpcResponse {
                 id: req.id,
                 ok: true,
-                message: serde_json::json!({ "native": native, "repos": statuses }).to_string(),
+                message: serde_json::json!({ "native": st.manifest.is_none(), "repos": statuses })
+                    .to_string(),
                 deferred: None,
             }
         }
@@ -10649,6 +10982,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     let cfg = cfg.clone();
                     let snap = snapshot.clone();
                     let confirm = confirm.clone();
+                    let owner = m.unit.clone();
                     let r = run_mutating_op_for_stack(
                         state,
                         &exec,
@@ -10670,6 +11004,9 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     )
                     .await;
                     let failed = !r.ok;
+                    if r.ok {
+                        kick_snapshot_refresh(state, state.config.backup.clone(), owner);
+                    }
                     if resp.ok || failed {
                         resp = r;
                     }

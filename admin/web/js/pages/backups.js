@@ -6,7 +6,7 @@
 // pre-filled; browsing a snapshot expands its file list inline, read-only.
 
 import { badgeCell, fetchJson, h, tableBlock, td } from "../dom.js";
-import { humanDuration } from "../format.js";
+import { agoText, humanDuration } from "../format.js";
 import { humanMb } from "../fleet.js";
 import { openAction } from "../actiondialog.js";
 import { stackHref } from "../router.js";
@@ -63,6 +63,11 @@ function rows(stack, native, repos) {
       td(age(r.newest_snapshot?.time)),
       td(humanMb((r.size_bytes ?? 0) / (1024 * 1024))),
       td(String(r.snapshot_count)),
+      // fix-180: the host answers from its own snapshot cache now, so a
+      // repository's row can be older than the page load — "read N min
+      // ago" says how old, same wording `agoText` already gives Today and
+      // the fleet check.
+      td(agoText("read", r.measured_at, Math.floor(Date.now() / 1000))),
       badgeCell({ label: drillLabel, tone: drillTone }),
       h("td", null, ...restoreCell(stack, native, r)),
     );
@@ -117,6 +122,7 @@ export function mount(root) {
       { label: "Age", sort: "text" },
       { label: "Size", sort: "text" },
       { label: "Snapshots", sort: "number" },
+      { label: "Read", sort: "text" },
       { label: "Restore drill", sort: "text", filter: "choice" },
       { label: "", sort: "none" },
     ],

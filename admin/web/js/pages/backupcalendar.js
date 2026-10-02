@@ -29,7 +29,7 @@ import {
   withStackResult,
 } from "../backupcalendar.js";
 import { h, progressGroup, slowRead } from "../dom.js";
-import { formatDateTime } from "../format.js";
+import { agoText } from "../format.js";
 import { current, subscribe } from "../store.js";
 
 const WINDOW_DAYS = 35;
@@ -202,7 +202,18 @@ export function mount(root) {
   );
   const abort = new AbortController();
 
-  const load = async () => {
+  /**
+   * fix-180: the host now answers from its own snapshot cache rather than
+   * reading restic on the request path, so a stack's own reply carries
+   * `measured_at` — when restic was actually last read for it, which can be
+   * minutes old, not "now". The oldest of the shown stacks' readings is
+   * what the status line reports, so "measured just now" is never claimed
+   * for data that is, in truth, however old the cache says it is.
+   * @param {boolean} force true on an explicit Refresh click: asks the host
+   *   to read restic again in the background; this call still answers at
+   *   once from whatever is cached.
+   */
+  const load = async (force = false) => {
     grid.replaceChildren(renderGrid(shape, skeletonCell));
     progressWrap.replaceChildren();
     failures.replaceChildren();
@@ -221,6 +232,8 @@ export function mount(root) {
     let results = Object.fromEntries(
       names.map((n) => [n, { status: "pending" }]),
     );
+    /** @type {Record<string, number | null>} */
+    const measuredAt = {};
     const repaint = () => {
       const progress = calendarProgress(results);
       paintProgress(progressWrap, progress, names.length);
@@ -234,14 +247,16 @@ export function mount(root) {
         /** @type {import("../backupcalendar.js").StackResult} */
         let outcome;
         try {
+          const qs = force ? "&refresh=1" : "";
           const r = await slowRead(
-            `/data/backup-calendar?stack=${encodeURIComponent(name)}`,
+            `/data/backup-calendar?stack=${encodeURIComponent(name)}${qs}`,
             `${name}'s backup calendar`,
             abort.signal,
           );
           if (!r.ok) outcome = { status: "failed", reason: r.error.why };
           else {
             const times = r.body.stacks?.[name];
+            measuredAt[name] = r.body.measured_at?.[name] ?? null;
             outcome = times ? { status: "ok", times } : { status: "empty" };
           }
         } catch (e) {
@@ -261,10 +276,15 @@ export function mount(root) {
     const days = calendarDays(stacks, expected, WINDOW_DAYS, now);
     grid.replaceChildren(renderGrid(calendarWeeks(days), finishedCell));
     const progress = calendarProgress(results);
-    status.textContent = `${expected.length} of ${names.length} stacks · measured ${formatDateTime(Math.floor(Date.now() / 1000))}${progress.failed.length ? ` · ${progress.failed.length} not read` : ""}`;
+    const readings = Object.values(measuredAt).filter(
+      (t) => typeof t === "number",
+    );
+    const oldest = readings.length ? Math.min(...readings) : null;
+    const nowS = Math.floor(Date.now() / 1000);
+    status.textContent = `${expected.length} of ${names.length} stacks · ${agoText("read", oldest, nowS)}${progress.failed.length ? ` · ${progress.failed.length} not read` : ""}`;
   };
 
-  refresh.addEventListener("click", () => void load().catch(() => {}));
+  refresh.addEventListener("click", () => void load(true).catch(() => {}));
   void load().catch(() => {});
   return () => abort.abort();
 }

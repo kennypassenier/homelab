@@ -352,13 +352,21 @@ pub enum Command {
     /// time for the named stacks (every managed docker stack when empty),
     /// for the dashboard's own backup calendar — its own query, separate
     /// from the backup page's reads, so the two pages cannot collide.
-    /// Read-only; JSON `{"stacks": {"<name>": [unix, …]}, "skipped":
-    /// ["<name>: why"]}`. Reaches the repositories over the network
-    /// (rclone), so it can take a while on a slow link — the caller treats
-    /// it like `FleetCheck`.
+    /// Read-only; JSON `{"stacks": {"<name>": [unix, …]}, "measured_at":
+    /// {"<name>": unix|null}, "skipped": ["<name>: why"]}`.
+    ///
+    /// fix-180: answered from the host's own snapshot cache, never restic
+    /// directly — a repository never read before answers an empty list at
+    /// once (`measured_at: null`, `skipped: ["<name>: not read yet"]`) while
+    /// a background read fills the cache for the next call. `force` asks
+    /// for that background read right now even when a cached answer already
+    /// exists (an explicit refresh), without making this call itself wait
+    /// for it.
     BackupCalendar {
         #[serde(default)]
         stacks: Vec<String>,
+        #[serde(default)]
+        force: bool,
     },
     /// G17: the questions only a person can answer, as the host has them on
     /// record. Read-only; the deploy is what puts them there.
@@ -506,8 +514,16 @@ pub enum Command {
     /// stack has one per owning app, D25; a native stack has exactly one,
     /// named after the unit) — last snapshot, its age and size, and the last
     /// restore-drill verdict recorded for that repository. Read-only.
+    ///
+    /// fix-180: answered from the host's own snapshot cache (shared with
+    /// `BackupCalendar` — same owner, same cached answer); a repository
+    /// never read before answers with `RepoStatus::error` saying so at once,
+    /// while a background read fills the cache. `force`: see
+    /// `BackupCalendar`.
     GetBackups {
         stack: String,
+        #[serde(default)]
+        force: bool,
     },
     /// feat-backup-3: list the files one snapshot holds under `path` ("" =
     /// the snapshot root), read-only. `owner` is a repository name from

@@ -138,21 +138,39 @@ export function mount(root, ctx) {
   const status = h("p", { class: "measured", role: "status" }, "Reading…");
   const grid = h("div", { class: "chart-grid" });
   const tables = h("div", { class: "chart-grid" });
+  // fix-235 (Kenny, 2026-10-02: "bij metrics/system staat de 1h/6h etc
+  // balk ook onder de titel en bij metrics/traffic staat het ineens naast de
+  // titel, consistentie is ook belangrijk"): one header grid for both tabs —
+  // the title with its description on the left, the tab switch on the
+  // right; below it one toolbar row, what is shown on the left (the stack
+  // picker, or what the traffic tab reads) and the window on the right.
+  const scope =
+    tab === "system"
+      ? pick
+      : h(
+          "p",
+          { class: "metrics-toolbar__scope measured" },
+          "Every hostname behind the gateway, from its access log.",
+        );
   root.replaceChildren(
     h(
       "div",
-      { class: "title-row" },
-      h("h1", null, "Metrics"),
-      tabs,
-      pick,
-      ranges,
+      { class: "metrics-head" },
+      h("h1", { class: "metrics-head__title" }, "Metrics"),
+      h(
+        "p",
+        { class: "metrics-head__desc section-head__desc measured" },
+        "System and traffic charts for the host and the fleet, read from Prometheus.",
+      ),
+      h("div", { class: "metrics-head__tabs" }, tabs),
     ),
     h(
-      "p",
-      { class: "section-head__desc measured" },
-      "System and traffic charts for the host and the fleet, read from Prometheus.",
+      "div",
+      { class: "metrics-toolbar" },
+      h("div", { class: "metrics-toolbar__scope-cell" }, scope),
+      h("div", { class: "metrics-toolbar__ranges" }, ranges),
+      h("div", { class: "metrics-toolbar__status" }, status),
     ),
-    status,
     grid,
     tables,
   );

@@ -1355,7 +1355,13 @@ test("invariants: every action dialog lays its fields on one grid — labels on 
       const dialog = page.locator("dialog#action-dialog[open]");
       if (!(await dialog.isVisible().catch(() => false))) {
         await page.waitForTimeout(300);
-        if (!(await dialog.isVisible().catch(() => false))) continue;
+        if (!(await dialog.isVisible().catch(() => false))) {
+          for (const close of await page
+            .locator("dialog[open] .kp-dialog__close")
+            .all())
+            await close.click().catch(() => {});
+          continue;
+        }
       }
       const edges = await dialog.evaluate((d) => {
         const step = [...d.querySelectorAll("[data-kp-step]")].find(
@@ -1370,6 +1376,9 @@ test("invariants: every action dialog lays its fields on one grid — labels on 
             if (!label || !ctl) return null;
             const l = label.getBoundingClientRect();
             const c = ctl.getBoundingClientRect();
+            // A control replaced on screen by a richer one (the snapshot
+            // field behind its picker) has no box of its own to align.
+            if (c.width === 0 || c.height === 0) return null;
             return {
               label: Math.round(l.left),
               ctl: Math.round(c.left),
@@ -1400,13 +1409,97 @@ test("invariants: every action dialog lays its fields on one grid — labels on 
       }
       // Close through the dialog's own close button: Escape lands on a
       // focused select first and leaves the dialog open over the page.
-      await dialog.locator(".kp-dialog__close").first().click();
+      // Some actions (Roll back…) open their own dialog, not the action
+      // dialog: close whatever is open before the next button.
+      for (const close of await page
+        .locator("dialog[open] .kp-dialog__close")
+        .all())
+        await close.click().catch(() => {});
       await page
-        .locator("dialog#action-dialog")
+        .locator("dialog[open]")
+        .first()
         .waitFor({ state: "detached", timeout: 5000 })
         .catch(() => {});
     }
     assert.ok(measured >= 2, `only ${measured} dialogs had fields to measure`);
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-234 (Kenny, 2026-10-02: "nu staan deze per twee zo half links
+// aligned, terwijl ze nog altijd per twee kunnen staan, maar dan wel
+// gecentreerd in het beeld"): a grid of content blocks fills its own width —
+// its last block ends where the grid ends, never a dead empty track on the
+// right — on the System and the Traffic tab alike, at Kenny's own width.
+test("invariants: chart blocks fill their grid's width, with no empty track left over", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    for (const tab of ["system", "traffic"]) {
+      await page.goto(`${BASE}/charts?tab=${tab}`);
+      const grid = page.locator(".chart-grid").first();
+      await grid.waitFor({ timeout: 15000 });
+      await page.waitForTimeout(1500);
+      const gap = await grid.evaluate((g) => {
+        const gr = g.getBoundingClientRect();
+        const right = Math.max(
+          ...[...g.children].map((c) => c.getBoundingClientRect().right),
+        );
+        return Math.round(gr.right - right);
+      });
+      assert.ok(gap <= 2, `${tab}: ${gap}px of the grid's width left empty`);
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-235 (Kenny, 2026-10-02: "consistentie is ook belangrijk. En niet
+// gewoon alles links aligned naast elkaar proppen"): every page's title row
+// has the same shape — the title on the left edge, whatever acts on the
+// page grouped against the right edge.
+test("invariants: every page's title row puts the title left and its controls against the right edge", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    let checked = 0;
+    for (const path of DRIVABLE_PATHS) {
+      await page.goto(`${BASE}/${path}`);
+      await page.waitForTimeout(800);
+      const rows = await page.evaluate(() =>
+        [...document.querySelectorAll("main .title-row")]
+          .filter((r) => /** @type {HTMLElement} */ (r).offsetParent)
+          .filter(
+            (r) => r.querySelector(":scope > h1") && r.children.length > 1,
+          )
+          .map((r) => {
+            const box = r.getBoundingClientRect();
+            const kids = [...r.children].filter(
+              (c) => /** @type {HTMLElement} */ (c).offsetParent,
+            );
+            const last = kids[kids.length - 1].getBoundingClientRect();
+            return {
+              rowRight: Math.round(box.right),
+              lastRight: Math.round(last.right),
+            };
+          }),
+      );
+      for (const r of rows) {
+        assert.ok(
+          r.rowRight - r.lastRight <= 2,
+          `/${path}: the title row's controls stop ${r.rowRight - r.lastRight}px short of its right edge`,
+        );
+        checked++;
+      }
+    }
+    assert.ok(checked >= 2, `only ${checked} title rows with controls found`);
   } finally {
     await browser.close();
   }

@@ -60,7 +60,12 @@ main.shell > * + * {
   gap: 12px;
   flex-wrap: wrap;
 }
-.title-row .kp-button {
+/* fix-235 (Kenny, 2026-10-02: "niet gewoon alles links aligned naast
+   elkaar proppen"): on every page the title row has one shape — the title
+   on the left, everything that acts on the page (buttons, switches,
+   badges) as one group on the right — instead of each button pushing
+   itself away on its own and the gaps landing wherever. */
+.title-row > :first-child + * {
   margin-inline-start: auto;
 }
 /* fix-210 (Kenny, 2026-10-02: "ik moet niet raden naar wat een functie
@@ -593,6 +598,9 @@ p:has(> .measured:only-child):first-child {
 }
 #action-dialog [data-kp-step] > .kp-field > .kp-field__check {
   justify-self: start;
+  /* The browser's own checkbox margin put it 4 px right of every text
+     field's edge. */
+  margin-inline: 0;
 }
 #action-dialog .act-field-locked {
   grid-template-columns: var(--act-label-w) minmax(0, 1fr) auto;
@@ -1970,9 +1978,68 @@ td.stack-flags {
    100%)` instead of a bare `26rem` — at 390px a bare 26rem (416px) track
    forced the whole page to scroll sideways; clamping the minimum to the
    container lets the grid fall back to one column instead. */
+/* fix-235: the Metrics page's header and toolbar, the same on both tabs. */
+.metrics-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "title tabs" "desc tabs";
+  column-gap: var(--kp-space-lg, 1.5rem);
+  row-gap: 4px;
+  align-items: center;
+}
+.metrics-head__title {
+  grid-area: title;
+  margin: 0;
+}
+.metrics-head__desc {
+  grid-area: desc;
+  margin: 0;
+}
+.metrics-head__tabs {
+  grid-area: tabs;
+  justify-self: end;
+}
+.metrics-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 28rem) 1fr auto;
+  grid-template-areas: "scope . ranges" "status status status";
+  column-gap: var(--kp-space-lg, 1.5rem);
+  row-gap: 8px;
+  align-items: center;
+}
+.metrics-toolbar__scope-cell {
+  grid-area: scope;
+  min-width: 0;
+}
+.metrics-toolbar__scope-cell > * {
+  margin: 0;
+  width: 100%;
+}
+.metrics-toolbar__ranges {
+  grid-area: ranges;
+}
+.metrics-toolbar__status {
+  grid-area: status;
+}
+.metrics-toolbar__status > p {
+  margin: 0;
+}
+@media (max-width: 40rem) {
+  .metrics-head {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "title" "desc" "tabs";
+  }
+  .metrics-head__tabs {
+    justify-self: start;
+  }
+  .metrics-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "scope" "ranges" "status";
+  }
+}
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(26rem, 100%), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(26rem, 100%), 1fr));
   gap: 16px;
 }
 .chart {

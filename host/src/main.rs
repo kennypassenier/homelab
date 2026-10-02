@@ -9174,6 +9174,7 @@ async fn gather_host_capacity(
             subject: "pve".into(),
             used_pct: pct,
             detail: format!("{}% full", pct),
+            cap_configured: true,
         });
     }
 
@@ -9200,12 +9201,14 @@ async fn gather_host_capacity(
             subject: "local-lvm".into(),
             used_pct: data,
             detail: format!("{}% full (data)", data),
+            cap_configured: true,
         });
         out.push(HostCapacityFact {
             metric: HostCapacityMetric::ThinPoolMeta,
             subject: "local-lvm".into(),
             used_pct: meta,
             detail: format!("{}% full (metadata)", meta),
+            cap_configured: true,
         });
     }
 
@@ -9223,6 +9226,7 @@ async fn gather_host_capacity(
                 subject: pool.clone(),
                 used_pct: pct,
                 detail: format!("{}% full", pct),
+                cap_configured: true,
             });
         }
     }
@@ -9233,7 +9237,19 @@ async fn gather_host_capacity(
         && let Some(used_mib) =
             homelab_core::ops::fleetcheck::parse_journal_disk_usage_mib(&o.stdout)
     {
-        // hostunits::JOURNALD_CAP: SystemMaxUse=2G.
+        // hostunits::JOURNALD_CAP: SystemMaxUse=2G. fix-181: whether that
+        // drop-in is actually present is itself a fact to check, not an
+        // assumption — `homelab doctor` already treats its absence as drift
+        // (hostunits::drift), and a rebuilt or hand-edited host can be
+        // without it between a doctor run and the next self-update.
+        let cap_configured = exec
+            .run(&Cmd::new(
+                "test",
+                &["-f", homelab_core::hostunits::JOURNALD_CAP],
+                10,
+            ))
+            .await
+            .is_ok_and(|o| o.success());
         let cap_mib: u64 = 2048;
         let pct = ((used_mib * 100) / cap_mib).min(255) as u8;
         out.push(HostCapacityFact {
@@ -9241,6 +9257,7 @@ async fn gather_host_capacity(
             subject: "pve".into(),
             used_pct: pct,
             detail: format!("{} MiB of its {} MiB cap ({}%)", used_mib, cap_mib, pct),
+            cap_configured,
         });
     }
 
@@ -9264,6 +9281,7 @@ async fn gather_host_capacity(
                     "{} MiB of its {} MiB retention.size ({}%)",
                     used_mib, cap_mib, pct
                 ),
+                cap_configured: true,
             });
         }
     }
@@ -9287,6 +9305,7 @@ async fn gather_host_capacity(
                 "{} MiB of its {} MiB cap ({}%) — it should be empty between runs",
                 used_mib, cap, pct
             ),
+            cap_configured: true,
         });
     }
 

@@ -613,6 +613,35 @@ pub fn evaluate_host_config_drift(live: &LiveFacts) -> Vec<Finding> {
         if want == have {
             continue;
         }
+        // fix-181: a key the host no longer reads at all (retired — it has
+        // left `hostconfig::KEYS`, e.g. the Kuma/Grafana keys superseded by
+        // later work) but still sits in the host's own host.toml is not
+        // drift against the repository, which rightly declares nothing for
+        // it any more — it is a leftover `homelab host apply` would clear.
+        if crate::hostconfig::key_info(key).is_none() {
+            if let Some(v) = have {
+                out.push(Finding {
+                    severity: Severity::Drift,
+                    subject: "host.toml".into(),
+                    what: format!("{key}: retired key still set on the host ({v})"),
+                    remedy: "`homelab host apply` removes it — the host no longer reads this key"
+                        .into(),
+                });
+            }
+            continue;
+        }
+        // fix-181: compare EFFECTIVE values. A key either side leaves unset
+        // runs as its compiled default (`hostconfig::default_effective`),
+        // so declaring that same default explicitly is not a difference —
+        // only a value that actually diverges from what the other side
+        // ends up running is.
+        let effective = |v: Option<&serde_json::Value>| {
+            v.cloned()
+                .or_else(|| crate::hostconfig::default_effective(key))
+        };
+        if effective(want) == effective(have) {
+            continue;
+        }
         let describe = |v: Option<&serde_json::Value>| match v {
             Some(v) => v.to_string(),
             None => "its compiled default (unset)".to_string(),
@@ -1107,6 +1136,16 @@ pub struct HostCapacityFact {
     /// Extra detail for the message, e.g. "27.66% of 794.3G pool" — numbers
     /// Kenny can act on beside the bare percentage.
     pub detail: String,
+    /// fix-181: only meaningful for `HostCapacityMetric::Journald` — whether
+    /// a `SystemMaxUse` cap is actually in force (the
+    /// `hostunits::JOURNALD_CAP` drop-in is present on disk). A capped
+    /// journal sits near its cap *by design* (journald rotates its oldest
+    /// entries to stay under it), so `used_pct` close to or at 100% of the
+    /// cap is the healthy steady state, not drift — the percentage-threshold
+    /// judgment below only applies while no cap is proven to exist. Every
+    /// other metric always has a "cap" (the filesystem, the pool, the
+    /// retention setting) so this is simply `true` for them.
+    pub cap_configured: bool,
 }
 
 /// Warn/critical pairs, one per `HostCapacityMetric`. A host.toml key
@@ -1269,6 +1308,40 @@ pub fn evaluate_host_capacity(
 ) -> Vec<Finding> {
     let mut out = Vec::new();
     for f in facts {
+        if f.metric == HostCapacityMetric::Journald {
+            // fix-181: a capped journal sits near 100% of its cap all the
+            // time — that is journald rotating, not drift. Judge it on
+            // whether the cap exists and holds, not on a percentage scale
+            // built for things that are broken long before they are full.
+            if !f.cap_configured {
+                out.push(Finding {
+                    severity: Severity::Broken,
+                    subject: f.subject.clone(),
+                    what: format!(
+                        "{} has no SystemMaxUse cap configured — it is {}",
+                        f.metric.label(),
+                        f.detail
+                    ),
+                    remedy: "the host's own journald cap drop-in \
+                             (hostunits::JOURNALD_CAP) is missing — \
+                             `homelab self-update` or `homelab doctor` \
+                             should have put it back"
+                        .into(),
+                });
+            } else if f.used_pct > 100 {
+                out.push(Finding {
+                    severity: Severity::Broken,
+                    subject: f.subject.clone(),
+                    what: format!("{} is over its own cap — {}", f.metric.label(), f.detail),
+                    remedy: "a cap is set but journald is not rotating within it — \
+                             `journalctl --vacuum-size` now, and check that \
+                             systemd-journald actually restarted after the cap \
+                             was written"
+                        .into(),
+                });
+            }
+            continue;
+        }
         let (warn, critical) = lim.pair(f.metric);
         if f.used_pct >= critical {
             out.push(Finding {

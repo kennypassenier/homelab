@@ -26,7 +26,7 @@ checks:
   # Measured 2026-09-02: it succeeds on /dev/dri/renderD128 and fails on a
   # device that does not exist, so the reading can move in both directions.
   # It costs about a second and touches nothing in the library.
-  - name: "hardware-transcodering werkt echt"
+  - name: "hardware transcoding really works"
     command: >-
       docker exec jellyfin /usr/lib/jellyfin-ffmpeg/ffmpeg -hide_banner -loglevel error
       -init_hw_device vaapi=va:/dev/dri/renderD128 -filter_hw_device va
@@ -41,7 +41,7 @@ checks:
       hardware for a real file — that is a settings question, and the manual
       check below is where it belongs.
 
-  - name: "films in de bibliotheek"
+  - name: "movies in the library"
     command: >-
       K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
       printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -s -m 30 -K - "http://127.0.0.1:8096/Items/Counts" |
@@ -52,7 +52,7 @@ checks:
       Counts what Jellyfin has indexed, not whether any of it plays. A library
       of unreadable files counts the same as a healthy one.
 
-  - name: "series in de bibliotheek"
+  - name: "series in the library"
     command: >-
       K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
       printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -s -m 30 -K - "http://127.0.0.1:8096/Items/Counts" |
@@ -60,7 +60,7 @@ checks:
     expect: never_decreases
     layer: application
 
-  - name: "afleveringen"
+  - name: "episodes"
     command: >-
       K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
       printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -s -m 30 -K - "http://127.0.0.1:8096/Items/Counts" |
@@ -79,7 +79,7 @@ checks:
   # Not a count: the paths every library and every *arr root folder is stored
   # against. Changing one breaks all of them at once, and it would not show up
   # in any number.
-  - name: "bibliotheekpaden"
+  - name: "library paths"
     command: >-
       K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
       printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -s -m 30 -K - "http://127.0.0.1:8096/Library/VirtualFolders" |
@@ -87,7 +87,7 @@ checks:
     expect: must_match
     layer: application
 
-  - name: "hardwareversnelling"
+  - name: "hardware acceleration"
     command: >-
       grep -oE '<HardwareAccelerationType>[a-z]*' /appdata/media/jellyfin-config/config/encoding.xml |
       cut -d'>' -f2
@@ -98,7 +98,7 @@ checks:
       prove it is used — only an actual transcode does, and that is in the
       manual list below.
 
-  - name: "grafische kaart aanwezig"
+  - name: "graphics card present"
     command: "ls /dev/dri/renderD128 2>/dev/null"
     expect: must_be_present
     layer: network
@@ -112,15 +112,15 @@ checks:
 # acknowledge, because a list he has to go and find is a list that does not
 # get read (form I2).
 manual:
-  - "Speel een film af op de televisie en kijk of het beeld klopt."
-  - "Controleer of het geluid synchroon loopt bij een aflevering met AC3-geluid."
-  - "Open een film met ingebrande ondertitels en kijk of die leesbaar zijn."
+  - "Play a movie on the television and check whether the picture looks right."
+  - "Check whether the audio is in sync on an episode with AC3 sound."
+  - "Open a movie with burned-in subtitles and check whether they are readable."
 # checks-automate (Kenny, 2026-09-30: "Alles wat kan"): the questions a
 # machine can answer, measured in every fleet check. Tried once for real on
 # 2026-09-30, read-only; the reading then is in each probe's comment.
 probes:
   # Read 2026-09-30: 0 of 1167 without a poster.
-  - name: "films en series zonder poster"
+  - name: "movies and series without a poster"
     command: |
       K=$(sqlite3 "file:/appdata/media/jellyfin-config/data/jellyfin.db?mode=ro" "select AccessToken from ApiKeys where Name='Homelab';")
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf 'header = Authorization: MediaBrowser Token="%s"\n' "$K" > "$C"
@@ -130,7 +130,7 @@ probes:
     healthy: {equals: "0"}
     layer: application
   # Read 2026-09-30: 59561 bytes (resized; full size is larger).
-  - name: "poster van de nieuwste film, bytes van de artwork-schijf"
+  - name: "poster of the newest movie, bytes from the artwork disk"
     command: |
       K=$(sqlite3 "file:/appdata/media/jellyfin-config/data/jellyfin.db?mode=ro" "select AccessToken from ApiKeys where Name='Homelab';")
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf 'header = Authorization: MediaBrowser Token="%s"\n' "$K" > "$C"

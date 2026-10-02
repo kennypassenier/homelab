@@ -6,7 +6,7 @@
 # must name Traefik itself. A proxy that only answers `_ping` while refusing
 # /containers would leave Traefik blind; this reading catches that.
 checks:
-  - name: "socket-proxy geeft de containerlijst door"
+  - name: "socket-proxy passes through the container list"
     command: >-
       docker exec socket-proxy wget -qO- http://localhost:2375/containers/json |
       grep -q '"/traefik"' && echo ok

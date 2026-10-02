@@ -5,12 +5,12 @@
 # entries shared, and every hostname in the house went dead (F140). The count
 # below is the reading that was not being taken.
 checks:
-  - name: "geregistreerde bouncers"
+  - name: "registered bouncers"
     command: "docker exec crowdsec cscli bouncers list -o raw | tail -n +2 | wc -l"
     expect: never_decreases
     layer: application
 
-  - name: "geladen scenario's"
+  - name: "loaded scenarios"
     command: "docker exec crowdsec cscli scenarios list -o raw | tail -n +2 | wc -l"
     expect: never_decreases
     layer: application

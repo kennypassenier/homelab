@@ -9,7 +9,7 @@
 # can use it is a decision for Kenny rather than something to slip in. The
 # consequence is named under each check.
 checks:
-  - name: "torrents bekend"
+  - name: "torrents known"
     command: >-
       ls /appdata/downloader/qbittorrent-config/qBittorrent/BT_backup/*.fastresume
       2>/dev/null | wc -l
@@ -22,7 +22,7 @@ checks:
       say so (missingFiles) needs the API, and therefore a credential we have
       deliberately not stored.
 
-  - name: "de twee schijven aangekoppeld"
+  - name: "the two disks mounted"
     command: "ls -d /mnt/data/18TB /mnt/data/12TB 2>/dev/null | wc -l"
     expect: must_match
     layer: process
@@ -31,7 +31,7 @@ checks:
       mount looks identical here — precisely how F118 stayed invisible until
       torrents started failing.
 
-  - name: "media zichtbaar op de 18TB"
+  - name: "media visible on the 18TB"
     command: "ls /mnt/data/18TB/ 2>/dev/null | wc -l"
     expect: never_decreases
     layer: process
@@ -44,7 +44,7 @@ checks:
 # 2026-09-30, read-only; the reading then is in each probe's comment.
 probes:
   # Read 2026-09-30: 0.
-  - name: "torrents op missingFiles"
+  - name: "torrents on missingFiles"
     command: |
       K=$(sed -n 's/^WebUI\\APIKey=//p' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
       T=$(printf 'header = "Authorization: Bearer %s"\n' "$K" | docker exec -i qbittorrent curl -sf -K - http://localhost:8080/api/v2/torrents/info) || exit 1
@@ -52,7 +52,7 @@ probes:
     healthy: {equals: "0"}
     layer: application
   # Read 2026-09-30: ok (nothing was downloading).
-  - name: "actieve downloads bewegen"
+  - name: "active downloads moving"
     command: |
       K=$(sed -n 's/^WebUI\\APIKey=//p' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
       T=$(printf 'header = "Authorization: Bearer %s"\n' "$K" | docker exec -i qbittorrent curl -sf -K - http://localhost:8080/api/v2/torrents/info) || exit 1
@@ -61,7 +61,7 @@ probes:
     layer: application
     blind_spot: "one reading; a download that pauses for a moment reads stalled once"
   # Read 2026-09-30: 0.
-  - name: "afgeronde downloads buiten /downloads/completed"
+  - name: "completed downloads outside /downloads/completed"
     command: |
       K=$(sed -n 's/^WebUI\\APIKey=//p' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
       T=$(printf 'header = "Authorization: Bearer %s"\n' "$K" | docker exec -i qbittorrent curl -sf -K - http://localhost:8080/api/v2/torrents/info) || exit 1

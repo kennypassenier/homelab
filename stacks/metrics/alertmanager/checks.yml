@@ -2,7 +2,7 @@
 # on 2026-08-31 the alert path was finished on every side but this one, and
 # nothing said so because every side reported itself healthy.
 checks:
-  - name: "alertmanager is gezond"
+  - name: "alertmanager is healthy"
     command: "curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:9093/-/healthy"
     expect: must_match
     layer: process
@@ -15,7 +15,7 @@ checks:
   # grepped JSON `"name":` fields until 2026-09-27 and read 0 with one
   # receiver configured, so it could never decrease (expert panel,
   # never-decreases-false-positives).
-  - name: "ontvangers in de configuratie"
+  - name: "receivers in the configuration"
     command: >-
       curl -s -m 10 http://127.0.0.1:9093/api/v2/status |
       grep -o '\\n *- name: ' | wc -l
@@ -27,14 +27,14 @@ checks:
       one.
 
 manual:
-  - "Stuur één keer per kwartaal een testalarm door de hele keten en kijk of het op je telefoon aankomt. Dat is het enige dat het middenstuk bewijst — elke schakel apart meldt zichzelf gezond, ook toen de keten stuk was."
+  - "Once a quarter, send a test alert through the whole chain and check whether it arrives on your phone. That is the only thing that proves the middle part — every link reports itself healthy on its own, even when the chain was broken."
 
 # checks-automate (Kenny, 2026-09-30: "Alles wat kan"): what a machine can
 # measure of the question above, in every fleet check. Tried once for real on
 # 2026-09-30, read-only; the reading then is in each probe's comment.
 probes:
   # Read 2026-09-30: 0.
-  - name: "mislukte meldingen van Alertmanager, 7 dagen"
+  - name: "failed notifications from Alertmanager, 7 days"
     command: |
       wget -qO- 'http://127.0.0.1:9090/api/v1/query?query=sum(increase(alertmanager_notifications_failed_total%5B7d%5D))' | jq -r '(.data.result[0].value[1] // "0") | tonumber | floor'
     healthy: {equals: "0"}

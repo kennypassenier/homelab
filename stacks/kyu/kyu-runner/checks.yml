@@ -2,7 +2,7 @@
 # not 8081, which cadvisor owns fleet-wide, and not 127.0.0.1, which answers
 # nothing. Both of those cost a wrong conclusion once.
 checks:
-  - name: "de runner is gezond"
+  - name: "the runner is healthy"
     command: "curl -s -m 10 http://10.10.10.9:8082/healthz"
     expect: must_match
     layer: application
@@ -12,14 +12,14 @@ checks:
       that — it is in the manual list.
 
 manual:
-  - "Stuur een testbericht door de keten en kijk of het in Home Assistant aankomt. Elke schakel meldt zichzelf gezond, ook op de dag dat de keten in het midden stuk was."
+  - "Send a test message through the chain and check whether it arrives in Home Assistant. Every link reports itself healthy, even on the day the chain was broken in the middle."
 
 # checks-automate (Kenny, 2026-09-30: "Alles wat kan"): what a machine can
 # measure of the question above, in every fleet check. Tried once for real on
 # 2026-09-30, read-only; the reading then is in each probe's comment.
 probes:
   # Read 2026-09-30: 0 (346 delivered).
-  - name: "berichten die Home Assistant weigerde"
+  - name: "messages Home Assistant refused"
     command: |
       wget -qO- http://10.10.10.9:8082/metrics | awk '/^kyu_runner_nacked_total/{n+=$2} END{printf "%d\n", n}'
     healthy: {equals: "0"}

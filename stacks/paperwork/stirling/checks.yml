@@ -3,7 +3,7 @@
 # it ships WITHOUT authentication unless the security profile is switched on,
 # and this instance has it on with credentials from the vault.
 checks:
-  - name: "stirling vraagt om aanmelden"
+  - name: "stirling asks for login"
     command: "curl -s -m 15 -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/login"
     expect: must_match
     layer: application
@@ -16,7 +16,7 @@ checks:
   # Was a manual check until 2026-09-03 (form G1). F62: without the security
   # profile Stirling runs wide open, and from the outside that is invisible —
   # the front page looks identical either way. One request answers it.
-  - name: "weigert een aanvraag zonder aanmelden"
+  - name: "refuses a request without login"
     command: >-
       c=$(curl -s -o /dev/null -m 8 -w "%{http_code}" http://127.0.0.1:8080/);
       [ "$c" = "401" ] && echo ok

@@ -2930,6 +2930,93 @@ fn every_app_either_has_checks_or_is_named_as_deliberately_without() {
     );
 }
 
+/// fix-178: Kenny's rule is that everything in a stack file is English,
+/// Dutch only for his parents' dashboards (which are not in this repo). The
+/// dashboard and `homelab today` print `checks.yml`'s check names, manual
+/// questions and blind spots verbatim, so Dutch text there reaches the
+/// screen directly.
+///
+/// A backstop, not the main control: a short, conservative list of Dutch
+/// function words that essentially never occur inside English technical
+/// prose (padded with spaces so "wordt" does not also flag "keyword", and
+/// so a stray match stays easy to read in the assertion). Comment lines are
+/// skipped, because a comment may quote Kenny's own words verbatim (several
+/// already do, e.g. "Alles wat kan") and that quoting is deliberate, not a
+/// regression.
+#[test]
+fn checks_yml_text_has_no_dutch_function_words() {
+    const DUTCH_WORDS: &[&str] = &[
+        " de ",
+        " het ",
+        " een ",
+        " van ",
+        " niet ",
+        " wordt ",
+        " zijn ",
+        " dat ",
+        " die ",
+        " met ",
+        " voor ",
+        " naar ",
+        " bij ",
+        " wat ",
+        " geen ",
+        " moet ",
+        " kijk ",
+        " open een ",
+        "antwoordt",
+        "bereikbaar",
+        "gezond",
+        "synchroniseert",
+    ];
+
+    let mut offenders = Vec::new();
+    let Ok(stacks) = std::fs::read_dir("../stacks") else {
+        panic!("the stacks tree moved");
+    };
+    for stack in stacks.flatten() {
+        if !stack.path().is_dir() {
+            continue;
+        }
+        let Ok(apps) = std::fs::read_dir(stack.path()) else {
+            continue;
+        };
+        for app in apps.flatten() {
+            let checks_path = app.path().join("checks.yml");
+            if !checks_path.is_file() {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&checks_path) else {
+                continue;
+            };
+            for (i, line) in content.lines().enumerate() {
+                if line.trim_start().starts_with('#') {
+                    continue;
+                }
+                let lower = format!(" {} ", line.to_lowercase());
+                for word in DUTCH_WORDS {
+                    if lower.contains(word) {
+                        offenders.push(format!(
+                            "{}:{}: {:?} — {}",
+                            checks_path.display(),
+                            i + 1,
+                            word,
+                            line.trim()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "Dutch user-facing text crept back into checks.yml (English only, \
+         Dutch is reserved for the parents' dashboards, which are not in \
+         this repo): {:#?}",
+        offenders
+    );
+}
+
 /// The generated test plan must match what the tests actually say, for the
 /// same reason the runbook must: a document nobody regenerates is a document
 /// that describes last month.

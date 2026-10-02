@@ -14,7 +14,7 @@
 # the difference between those two is the difference between preferring x264
 # and refusing every x265 release in the house.
 checks:
-  - name: "Radarr 1080p · toegestane kwaliteiten"
+  - name: "Radarr 1080p · allowed qualities"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/radarr-config/config.xml);
       printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:7878/api/v3/qualityprofile/4 |
@@ -39,7 +39,7 @@ checks:
       are GOOD — only that they are the ones that were there yesterday, and
       that R4 (x264 above x265) and R6 (dubbed at -10000) are still in them.
 
-  - name: "Sonarr 1080p · toegestane kwaliteiten"
+  - name: "Sonarr 1080p · allowed qualities"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
       printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:8989/api/v3/qualityprofile/4 |
@@ -87,7 +87,7 @@ checks:
     blind_spot: >-
       Same blind spot as its Radarr twin.
 
-  - name: "laatste sync zonder fout afgesloten"
+  - name: "last sync finished without error"
     command: >-
       docker logs --since 26h recyclarr 2>&1 | grep -cE 'ERR\]|Configuration Errors' || true
     expect: must_match
@@ -101,5 +101,5 @@ checks:
 
 manual:
   # checks-onetime (Kenny, 2026-09-30): answered ok once is answered for good.
-  - text: "Kijk in Radarr bij Settings › Profiles of het 1080p-profiel er nog uitziet zoals je wil, één keer na de eerste sync."
+  - text: "Check in Radarr under Settings › Profiles whether the 1080p profile still looks the way you want, once after the first sync."
     once: true

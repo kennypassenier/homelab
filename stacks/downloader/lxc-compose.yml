@@ -173,4 +173,4 @@ tiles:
     reading: |
       K=$(sed -n 's/^WebUI\\APIKey=//p' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
       T=$(printf 'header = "Authorization: Bearer %s"\n' "$K" | docker exec -i qbittorrent curl -sf -K - http://localhost:8080/api/v2/torrents/info) || exit 1
-      echo "$T" | jq -r '"\([.[]|select(.state|test("^(downloading|stalledDL|metaDL|forcedDL)$"))]|length) aan het downloaden, \(length) in totaal"'
+      echo "$T" | jq -r '"\([.[]|select(.state|test("^(downloading|stalledDL|metaDL|forcedDL)$"))]|length) downloading, \(length) total"'

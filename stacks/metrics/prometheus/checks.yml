@@ -11,7 +11,7 @@ checks:
   # Up at any moment of the last two minutes: right after a restart the
   # first scrape round has not finished and `count(up==1)` read low, a
   # regression that was not one (never-decreases-false-positives).
-  - name: "targets die antwoorden"
+  - name: "targets that respond"
     command: >-
       curl -s -m 15 "http://127.0.0.1:9090/api/v1/query?query=count(max_over_time(up%5B2m%5D)==1)" |
       grep -o '"value":\[[^]]*\]' | grep -o '[0-9]*"\]' | tr -d '"]'
@@ -23,7 +23,7 @@ checks:
       never counted in the first place. That question belongs to the fleet
       check, which compares the repository against reality.
 
-  - name: "alarmregels geladen"
+  - name: "alert rules loaded"
     command: >-
       curl -s -m 15 http://127.0.0.1:9090/api/v1/rules |
       grep -o '"name":' | wc -l
@@ -34,7 +34,7 @@ checks:
       nobody produces is loaded, valid, and permanently silent — which is how
       an alert chain ends up finished on every side but the middle.
 
-  - name: "verschillende metrieken die binnenkomen"
+  - name: "distinct metrics coming in"
     command: >-
       curl -s -m 20 "http://127.0.0.1:9090/api/v1/label/__name__/values" |
       grep -o ',' | wc -l

@@ -12,7 +12,7 @@ checks:
   # (2026-09-27, fix-44: container_name, filename and stream came back), and
   # a regression removes them. As an exact list this check failed the very
   # deploy that brought the container logs back.
-  - name: "aantal labels die loki kent"
+  - name: "number of labels loki knows"
     command: >-
       curl -s -m 15 http://127.0.0.1:3101/loki/api/v1/labels |
       tr -d '[]{}"' | cut -d: -f3 | tr ',' '\n' | grep -c .
@@ -21,7 +21,7 @@ checks:
 
   # On Loki's own loopback port (fix-93): the LAN port belongs to loki-push,
   # whose checks ask the same question through the front.
-  - name: "loki is klaar"
+  - name: "loki is ready"
     command: "curl -s -m 10 http://127.0.0.1:3101/ready"
     expect: must_match
     layer: process

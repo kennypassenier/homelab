@@ -7,7 +7,7 @@
 # layer, and the deploy sat on it until the step ceiling caught it. So the
 # readings below deliberately ask more than "did the port answer".
 checks:
-  - name: "gespiegelde registries die antwoorden"
+  - name: "mirrored registries that respond"
     command: >-
       n=0; for p in 5000 5001 5002 5003; do
       c=$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:$p/v2/);
@@ -20,7 +20,7 @@ checks:
       up, not that it can hand over a blob. The catalogue below goes one step
       further; only a real pull goes all the way.
 
-  - name: "images die de cache vasthoudt"
+  - name: "images the cache holds"
     command: >-
       curl -s -m 15 http://127.0.0.1:5000/v2/_catalog |
       grep -o '"[a-z0-9./_-]*"' | wc -l
@@ -32,4 +32,4 @@ checks:
       counted here afterwards.
 
 manual:
-  - "Kijk na een uitrol of er `[cache] … did not deliver` in het logboek staat. Dat is de terugval die werkt, maar het betekent ook dat de cache dat image niet leverde — twee keer achter elkaar is een signaal, niet toeval."
+  - "After a rollout, check whether `[cache] … did not deliver` appears in the log. That is the fallback working, but it also means the cache did not deliver that image — twice in a row is a signal, not chance."

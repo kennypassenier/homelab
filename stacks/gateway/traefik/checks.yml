@@ -11,7 +11,7 @@
 # (`--api.insecure=false`), so it is asked the way everything else asks it:
 # through the entrypoint, with the Host header its own route matches on.
 checks:
-  - name: "routes die traefik geladen heeft"
+  - name: "routes traefik has loaded"
     command: >-
       curl -s -m 15 -H "Host: traefik.kp-soft.dev"
       http://127.0.0.1/api/http/routers |
@@ -44,7 +44,7 @@ checks:
   # another stack into the route directory and its backend lives on another
   # container, so this reading also covers the file provider picking up a
   # foreign route — which is what F138 broke.
-  - name: "een echt verzoek door de hele keten"
+  - name: "a real request through the whole chain"
     command: >-
       curl -s -m 15 -o /dev/null -w '%{http_code}'
       -H "Host: kuma.kp-soft.dev" http://127.0.0.1/
@@ -57,7 +57,7 @@ checks:
       unauthenticated request whatever is behind it. The 302 this reading
       returns is the app's own redirect to its login page, not Access's.
 
-  - name: "traefik logt naar docker, niet naar een bestand"
+  - name: "traefik logs to docker, not to a file"
     command: >-
       docker inspect traefik --format '{{json .Config.Cmd}}' |
       tr ',' '\n' | grep -c '^"--log.filepath'
@@ -77,7 +77,7 @@ checks:
   #
   # Requires a real answer first: a curl that fails returns nothing, and
   # "no GoAccess in an empty body" would otherwise pass forever.
-  - name: "goaccess niet meer publiek"
+  - name: "goaccess no longer public"
     command: >-
       b=$(curl -sk -m 10 https://go.kp-soft.dev/ -w "|%{http_code}");
       case "$b" in *"|000") ;; *) echo "$b" | grep -qi goaccess || echo ok ;; esac
@@ -91,4 +91,4 @@ checks:
 
 manual:
   - >-
-    Open een route van buitenaf (bv. son.kp-soft.dev) en kijk of Cloudflare Access je binnenlaat — dat stuk kan van binnen niet gemeten worden.
+    Open a route from outside (e.g. son.kp-soft.dev) and check whether Cloudflare Access lets you in — that part cannot be measured from inside.

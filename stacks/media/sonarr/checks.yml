@@ -6,7 +6,7 @@
 # a key in a checks file is a secret in the wrong place, and one that would
 # silently rot the way Jellyfin's did (F131).
 checks:
-  - name: "series onder beheer"
+  - name: "series under management"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
       printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:8989/api/v3/series |
@@ -17,7 +17,7 @@ checks:
       Counts what Sonarr knows about, not whether any episode file is
       readable. A series whose disk has vanished counts the same.
 
-  - name: "root folders bereikbaar"
+  - name: "root folders reachable"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
       printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:8989/api/v3/rootfolder |
@@ -28,7 +28,7 @@ checks:
       Sonarr's own answer about reachability. It has been wrong before: a
       bind mount that resolves to an empty directory reads as accessible.
 
-  - name: "root folder paden"
+  - name: "root folder paths"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
       printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:8989/api/v3/rootfolder |
@@ -40,7 +40,7 @@ checks:
       change breaks all of them at once — but this reads the paths, not
       whether files are actually there.
 
-  - name: "download client verbonden"
+  - name: "download client connected"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
       printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:8989/api/v3/downloadclient |
@@ -51,7 +51,7 @@ checks:
       That a client is configured and enabled, not that Sonarr can reach it.
       The downloader lives on another container.
 
-  - name: "meldingen in het gezondheidsrapport"
+  - name: "notifications in the health report"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml);
       printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:8989/api/v3/health |
@@ -71,7 +71,7 @@ checks:
 # 2026-09-30, read-only; the reading then is in each probe's comment.
 probes:
   # Read 2026-09-30: 0.
-  - name: "series buiten de root folders"
+  - name: "series outside the root folders"
     command: |
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml)
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-Api-Key: $K" > "$C"

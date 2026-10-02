@@ -1,5 +1,5 @@
 checks:
-  - name: "het dashboard is gezond"
+  - name: "the dashboard is healthy"
     command: "curl -s -m 10 http://10.10.10.20:8090/healthz"
     expect: must_match
     layer: application
@@ -8,4 +8,4 @@ checks:
       whether the two locks hold is in the manual list.
 
 manual:
-  - "Open https://admin.kp-soft.dev thuis en log in; open het daarna vanaf 4G: het moet weigeren."
+  - "Open https://admin.kp-soft.dev at home and log in; then open it from 4G: it must refuse."

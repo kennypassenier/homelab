@@ -14,7 +14,7 @@ checks:
       Counts what prowlarr knows about, not whether the files behind it are
       readable.
 
-  - name: "gezondheidsmeldingen"
+  - name: "health notifications"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/prowlarr-config/config.xml);
       printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:9696/api/v1/health |
@@ -30,7 +30,7 @@ checks:
 # 2026-09-30, read-only; the reading then is in each probe's comment.
 probes:
   # Read 2026-09-30: 0.
-  - name: "indexeerders die falen of uitgeschakeld zijn"
+  - name: "indexers that are failing or disabled"
     command: |
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/prowlarr-config/config.xml)
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-Api-Key: $K" > "$C"
@@ -39,7 +39,7 @@ probes:
     layer: application
     blind_spot: "Prowlarr's own view of its indexers; no search is run (that would load the indexers every night)"
   # Read 2026-09-30: 0.
-  - name: "gezondheidsmeldingen van Prowlarr"
+  - name: "health notifications from Prowlarr"
     command: |
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/prowlarr-config/config.xml)
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-Api-Key: $K" > "$C"

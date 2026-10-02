@@ -2,7 +2,7 @@
 # has no curl — wget is what is available there, and a check written with the
 # wrong tool simply fails to run and reports nothing.
 checks:
-  - name: "almanac is gezond"
+  - name: "almanac is healthy"
     command: "wget -q -O - -T 10 http://127.0.0.1:8080/healthz"
     expect: must_match
     layer: application
@@ -23,7 +23,7 @@ checks:
   # here. `almanac_journal_readable` dropping to 0 means almanac cannot get at
   # its own store on a container this suite provisions and backs up — disk,
   # permissions, a mount — and that is ours to fix.
-  - name: "journaal bereikbaar"
+  - name: "journal reachable"
     command: >-
       n=$(wget -q -O - -T 8 http://127.0.0.1:8080/metrics
       | awk '/^almanac_journal_readable /{print $2}');
@@ -37,14 +37,14 @@ checks:
       a 422 and never reaches the journal at all, so nothing here moves.
 
 manual:
-  - "Maak een testafspraak via almanac en kijk of hij in Google Calendar verschijnt. Een verlopen token laat de dienst gezond ogen en levert niets af."
+  - "Create a test appointment via almanac and check whether it appears in Google Calendar. An expired token lets the service look healthy while delivering nothing."
 
 # checks-automate (Kenny, 2026-09-30: "Alles wat kan"): what a machine can
 # measure of the question above, in every fleet check. Tried once for real on
 # 2026-09-30, read-only; the reading then is in each probe's comment.
 probes:
   # Read 2026-09-30: 0/0/0.
-  - name: "mislukt/dood/wachtend naar Google Calendar"
+  - name: "failed/dead/pending to Google Calendar"
     command: |
       wget -qO- http://127.0.0.1:8080/metrics | awk '/^almanac_deliveries_failed_total/{f=$2} /^almanac_entries_dead_total/{d=$2} /^almanac_journal_pending/{p=$2} END{printf "%d/%d/%d\n", f, d, p}'
     healthy: {equals: "0/0/0"}

@@ -3,7 +3,7 @@
 # budget itself — which is right, and is also the limit of what these
 # readings prove.
 checks:
-  - name: "actual antwoordt"
+  - name: "actual responds"
     command: "curl -s -m 15 -o /dev/null -w '%{http_code}' http://127.0.0.1:5006/"
     expect: must_match
     layer: process
@@ -12,7 +12,7 @@ checks:
       any at all, is behind a login this check does not have and should not
       have.
 
-  - name: "budgetbestanden op schijf"
+  - name: "budget files on disk"
     command: "find /appdata/paperwork/actual-config -name '*.sqlite' 2>/dev/null | wc -l"
     expect: never_decreases
     layer: application

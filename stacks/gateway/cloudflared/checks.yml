@@ -13,4 +13,4 @@
 checks: []
 
 manual:
-  - "Open een route van buitenaf op je telefoon, buiten het huisnetwerk — dat is het enige dat bewijst dat de tunnel staat."
+  - "Open a route from outside on your phone, outside the home network — that is the only thing that proves the tunnel is up."

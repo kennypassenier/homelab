@@ -61,3 +61,47 @@ export function stackReadProgress(results) {
     failed,
   };
 }
+
+/**
+ * fix-224 (Kenny, Dutch: "welke doet die dan niet? waarom kan ik dat niet
+ * zien?" — the calendar's "Stacks read" bar used to say only a count, never
+ * which stack was still outstanding). One row per stack, sorted by name, so
+ * a page can paint a chip grid naming every stack's own state instead of a
+ * bare fraction: `read` (settled, successful, whatever that means for the
+ * page), `no_backup` (fix-202's terminal "keeps nothing by design"),
+ * `reading` (still pending, with how long — `startedAt`'s reading for this
+ * stack, or `nowMs` itself if the caller never recorded one), and `failed`
+ * (the read did not finish, named with the host's own reason — this is also
+ * where a stack that outlived its per-stack timeout lands, since the page's
+ * own retry loop turns that into a `failed` outcome once it gives up).
+ * @template {{status: string}} T
+ * @param {Record<string, T>} results
+ * @param {Record<string, number>} startedAt unix ms each stack's read began
+ * @param {number} nowMs
+ * @returns {{stack: string, state: "read"|"reading"|"no_backup"|"failed",
+ *   seconds?: number, reason?: string}[]}
+ */
+export function stackChips(results, startedAt, nowMs) {
+  return Object.keys(results)
+    .sort()
+    .map((stack) => {
+      const r = results[stack];
+      if (r.status === "pending") {
+        const began = startedAt[stack] ?? nowMs;
+        return {
+          stack,
+          state: /** @type {const} */ ("reading"),
+          seconds: Math.max(0, Math.round((nowMs - began) / 1000)),
+        };
+      }
+      if (r.status === "no_backup")
+        return { stack, state: /** @type {const} */ ("no_backup") };
+      if (r.status === "failed")
+        return {
+          stack,
+          state: /** @type {const} */ ("failed"),
+          reason: /** @type {any} */ (r).reason,
+        };
+      return { stack, state: /** @type {const} */ ("read") };
+    });
+}

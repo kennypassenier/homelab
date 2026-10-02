@@ -3195,6 +3195,126 @@ span_days = 7\n";
         );
     }
 
+    /// fix-217 (Kenny, Dutch, 2026-10-02: "bij kalender bv blijft die op 12
+    /// steken, welke doet die dan niet?"): a freshly deployed stack with a
+    /// real manifest, a real (non-`no_backup`) mount and NO snapshots at
+    /// all yet (`restic snapshots` on a never-initialised repository exits
+    /// 10, which `list_snapshots` already reads as `Ok(vec![])`, not an
+    /// error) must still reach a terminal, counted-as-read answer — "no
+    /// snapshots yet" — once its cache entry has been filled, the same as
+    /// any other stack. The first call (cold cache) answers "not read yet"
+    /// (fix-180's documented shape); the kicked background refresh (here,
+    /// against a `restic` binary this test environment does not have,
+    /// which fails fast rather than hanging) still produces a cache entry,
+    /// so the very next call already resolves with a real `measured_at`
+    /// and an empty `stacks["inbox"]` — never stuck pending forever.
+    #[tokio::test]
+    async fn fix_217_a_never_backed_up_stack_still_resolves_to_a_read_empty_answer() {
+        let dir = std::env::temp_dir().join(format!("homelab-fix217-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let state = test_state(config_from_text(&format!(
+            "token = \"0123456789abcdef0123\"\nstate_dir = \"{}\"\n",
+            dir.display()
+        )));
+
+        let manifest: homelab_core::manifest::StackManifest = serde_json::from_value(serde_json::json!({
+            "stack_name": "inbox",
+            "vmid": 150,
+            "hostname": "150-app-inbox",
+            "network": {"ip": "10.10.10.50/24", "gateway": "10.10.10.1", "bridge": "vmbr0"},
+            "resources": {"cores": 1, "memory_mb": 512, "swap_mb": 0, "disk_gb": 4, "storage": "local-zfs"},
+            "lxc": {"timezone": "host", "template": "t", "unprivileged": true, "features": "", "protection": false, "gpu": false, "vpn": false},
+            "boot": {"onboot": true},
+            // A real, backed-up mount — not `no_data`, not `no_backup` —
+            // so this stack is exactly the "will get a real repository,
+            // just never read yet" case fix-202 left untouched.
+            "storage": [{"host_path": "/mnt/inbox/data", "mount_point": "/data"}],
+            "apps": ["inbox"],
+        }))
+        .unwrap();
+
+        let mut st = homelab_core::state::HostState::default();
+        st.stacks.insert(
+            "inbox".into(),
+            homelab_core::state::StackState {
+                applied_source: None,
+                vmid: 150,
+                hostname: "150-app-inbox".into(),
+                apps: vec!["inbox".into()],
+                applied_at: 0,
+                last_backup: 0,
+                applied_hash: String::new(),
+                manifest: Some(manifest),
+                enabled: true,
+                natives: Vec::new(),
+                incomplete_step: None,
+                route_file: None,
+                extra_route_files: Vec::new(),
+                pushed_file_hashes: std::collections::BTreeMap::new(),
+                component_digests: Default::default(),
+            },
+        );
+        homelab_core::state::StateStore::new(&RealExecutor, &dir.to_string_lossy())
+            .save(st)
+            .await
+            .unwrap();
+
+        let ask = || RpcRequest {
+            id: 1,
+            command: Rpc::BackupCalendar {
+                stacks: Vec::new(),
+                force: false,
+            },
+        };
+
+        let first = handle_rpc(&state, ask()).await;
+        assert!(first.ok);
+        let body: serde_json::Value = serde_json::from_str(&first.message).unwrap();
+        assert!(
+            body["skipped"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|s| s.as_str() == Some("inbox: not read yet")),
+            "a cold cache must say so, not nothing: {body}"
+        );
+        assert!(
+            body["measured_at"]["inbox"].is_null(),
+            "the first, cold-cache answer must not claim a reading yet: {body}"
+        );
+
+        // The kick fired by that first call is a detached background task
+        // (`kick_snapshot_refresh`, real executor); give it a moment to run
+        // and store its answer — it fails fast here (no `restic` binary in
+        // this test environment), which is itself still a cache entry
+        // (`SnapshotCache::refresh` caches the error too), not a hang.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        let second = handle_rpc(&state, ask()).await;
+        assert!(second.ok);
+        let body: serde_json::Value = serde_json::from_str(&second.message).unwrap();
+        assert!(
+            !body["skipped"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|s| s.as_str() == Some("inbox: not read yet")),
+            "the second call must no longer call this stack unread, once its \
+             cache entry exists: {body}"
+        );
+        assert!(
+            body["measured_at"]["inbox"].is_number(),
+            "a stack whose cache entry now exists must answer a real \
+             measured_at, never stay null: {body}"
+        );
+        assert_eq!(
+            body["stacks"]["inbox"],
+            serde_json::json!([]),
+            "zero snapshots ever is still a read, empty answer, not an absent one: {body}"
+        );
+    }
+
     /// fix-127 (expert panel, websocket-edge-cases, 2026-09-27): the session
     /// read `while let Some(Ok(Message::Text(..)))`, so the first Ping,
     /// Pong or Binary frame ended it. A keepalive ping from a client or a

@@ -711,3 +711,52 @@ export function tabRow(label, tabs) {
     ),
   );
 }
+
+/**
+ * fix-224: a per-stack read's progress as a named chip grid — `perstack.js`'s
+ * `stackChips` painted, one chip per stack: `read` (settled), `reading`
+ * (still pending, with how long), `no_backup` (fix-202's terminal "keeps
+ * nothing by design") and `failed` (the host's own reason — also where a
+ * stack that outlived its own per-stack timeout lands, each with its own
+ * Retry button so one hung stack never needs the whole page reloaded).
+ * @param {ReturnType<typeof import("./perstack.js").stackChips>} chips
+ * @param {{onRetry?: (stack: string) => void}} [opts]
+ */
+export function perstackChips(chips, opts = {}) {
+  return h(
+    "ul",
+    { class: "perstack-chips", "aria-live": "polite" },
+    ...chips.map((c) => {
+      const word =
+        c.state === "read"
+          ? "read"
+          : c.state === "no_backup"
+            ? "no backups by design"
+            : c.state === "reading"
+              ? `reading (${c.seconds}s)`
+              : `${c.reason}`;
+      return h(
+        "li",
+        { class: `perstack-chip perstack-chip--${c.state}` },
+        h("span", { class: "perstack-chip__name" }, c.stack),
+        h("span", { class: "perstack-chip__state" }, word),
+        ...(c.state === "failed" && opts.onRetry
+          ? [
+              (() => {
+                const btn = h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "kp-button kp-button--sm perstack-chip__retry",
+                  },
+                  "Retry",
+                );
+                btn.addEventListener("click", () => opts.onRetry?.(c.stack));
+                return btn;
+              })(),
+            ]
+          : []),
+      );
+    }),
+  );
+}

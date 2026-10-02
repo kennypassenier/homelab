@@ -9,14 +9,14 @@ import {
   badgeCell,
   fetchJson,
   h,
-  progressGroup,
+  perstackChips,
   tableBlock,
   td,
 } from "../dom.js";
 import { agoText, humanDuration } from "../format.js";
 import { humanMb } from "../fleet.js";
 import { openAction } from "../actiondialog.js";
-import { stackReadProgress, withStackResult } from "../perstack.js";
+import { stackChips, stackReadProgress, withStackResult } from "../perstack.js";
 import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
@@ -152,11 +152,7 @@ export function mount(root) {
       { label: "", sort: "none" },
     ],
   });
-  const progressWrap = h("div", { class: "backups__progress" });
-  const failures = h("ul", {
-    class: "backups__errors",
-    "aria-live": "polite",
-  });
+  const chipsWrap = h("div", { class: "backups__chips-wrap" });
   root.replaceChildren(
     h("div", { class: "title-row" }, h("h1", null, "Backups")),
     h(
@@ -164,51 +160,97 @@ export function mount(root) {
       null,
       "Each stack's restic repositories (one per app that keeps data; a native service has one of its own), read from the host. Pick Restore to choose a snapshot and bring the stack's data back to it.",
     ),
-    progressWrap,
-    failures,
+    chipsWrap,
     table.wrap,
   );
   const detach = attachDataTables(root);
   const abort = new AbortController();
+  /** @type {Record<string, number>} */
+  const startedAt = {};
+  /** @type {Record<string, StackResult>} */
+  let liveResults = {};
 
   /**
-   * The progress bar and the failed-stack list, redrawn from `results`
-   * (fix-179: a stack that could not be read is named here, with its
-   * reason, never silently dropped from the table the way an `if (r.ok)`
-   * push once did).
+   * fix-224: a named chip grid, not a bare fraction — every stack's own
+   * state, with a Retry on a failed one so a single hung repository never
+   * needs the whole page reloaded.
    * @param {Record<string, StackResult>} results
    */
   const repaint = (results) => {
+    liveResults = results;
     const progress = stackReadProgress(results);
-    progressWrap.replaceChildren(
-      ...(progress.total
-        ? [
-            progressGroup([
-              {
-                label: "Stacks read",
-                pct: progress.pct,
-                value: `${progress.loaded} of ${progress.total}`,
-              },
-            ]),
-          ]
-        : []),
-    );
-    failures.replaceChildren(
-      ...progress.failed.map((f) =>
-        h(
-          "li",
-          { class: "kp-alert kp-alert--destructive" },
-          h("strong", null, f.stack),
-          `: could not be read — ${f.reason}`,
-        ),
-      ),
+    const chips = stackChips(results, startedAt, Date.now());
+    chipsWrap.replaceChildren(
+      perstackChips(chips, { onRetry: (name) => void retryOne(name) }),
     );
     return progress;
   };
 
+  /**
+   * One read of a single stack's repositories, shared by the initial
+   * fleet-wide load and a chip's own Retry (fix-224).
+   * @param {string} name
+   * @returns {Promise<StackResult>}
+   */
+  const readOne = async (name) => {
+    try {
+      const r = await fetchJson(
+        `/data/backups/${encodeURIComponent(name)}`,
+        `${name}'s backups`,
+        abort.signal,
+      );
+      return r.ok
+        ? {
+            status: "ok",
+            native: r.body?.native === true,
+            repos: r.body?.repos ?? [],
+          }
+        : {
+            status: "failed",
+            reason: r.error.fix
+              ? `${r.error.why} — ${r.error.fix}`
+              : r.error.why,
+          };
+    } catch (e) {
+      if (abort.signal.aborted) return { status: "pending" };
+      return { status: "failed", reason: String(e) };
+    }
+  };
+
+  /** Repaints the table from `results` — every "ok" stack's repositories. */
+  const renderTable = (/** @type {Record<string, StackResult>} */ results) => {
+    /** @type {Node[]} */
+    const out = [];
+    for (const [name, r] of Object.entries(results))
+      if (r.status === "ok") out.push(...rows(name, r.native, r.repos));
+    const progress = stackReadProgress(results);
+    table.setNothing(
+      out.length === 0 && progress.failed.length > 0
+        ? "No stack could be read — see the chips above."
+        : NOTHING,
+    );
+    table.tbody.replaceChildren(...out);
+    table.ready();
+  };
+
+  /**
+   * fix-224: one chip's own Retry, re-reading just that repository.
+   * @param {string} name
+   */
+  async function retryOne(name) {
+    if (abort.signal.aborted) return;
+    liveResults = withStackResult(liveResults, name, { status: "pending" });
+    repaint(liveResults);
+    startedAt[name] = Date.now();
+    const outcome = await readOne(name);
+    if (abort.signal.aborted) return;
+    liveResults = withStackResult(liveResults, name, outcome);
+    repaint(liveResults);
+    renderTable(liveResults);
+  }
+
   const load = async () => {
-    progressWrap.replaceChildren();
-    failures.replaceChildren();
+    chipsWrap.replaceChildren();
     // fix-210: the fleet itself (`/data/fleet`, store.js) may not have
     // answered yet — that is "still loading", never "no stack has a
     // backup repository yet" (the same distinction overview.js already
@@ -229,41 +271,18 @@ export function mount(root) {
       words: `Reading each stack's backup status from the host — 0 of ${names.length} so far…`,
     });
 
-    /** @type {Record<string, StackResult>} */
-    let results = Object.fromEntries(
-      names.map((n) => [n, { status: "pending" }]),
+    liveResults = Object.fromEntries(
+      names.map((n) => [n, { status: /** @type {const} */ ("pending") }]),
     );
-    repaint(results);
+    for (const n of names) startedAt[n] = Date.now();
+    repaint(liveResults);
 
     await Promise.allSettled(
       names.map(async (name) => {
-        /** @type {StackResult} */
-        let outcome;
-        try {
-          const r = await fetchJson(
-            `/data/backups/${encodeURIComponent(name)}`,
-            `${name}'s backups`,
-            abort.signal,
-          );
-          outcome = r.ok
-            ? {
-                status: "ok",
-                native: r.body?.native === true,
-                repos: r.body?.repos ?? [],
-              }
-            : {
-                status: "failed",
-                reason: r.error.fix
-                  ? `${r.error.why} — ${r.error.fix}`
-                  : r.error.why,
-              };
-        } catch (e) {
-          if (abort.signal.aborted) return;
-          outcome = { status: "failed", reason: String(e) };
-        }
+        const outcome = await readOne(name);
         if (abort.signal.aborted) return;
-        results = withStackResult(results, name, outcome);
-        const progress = repaint(results);
+        liveResults = withStackResult(liveResults, name, outcome);
+        const progress = repaint(liveResults);
         if (!abort.signal.aborted)
           table.loading({
             words: `Reading each stack's backup status from the host — ${progress.loaded} of ${progress.total} so far…`,
@@ -271,21 +290,7 @@ export function mount(root) {
       }),
     );
     if (abort.signal.aborted) return;
-
-    /** @type {Node[]} */
-    const out = [];
-    for (const name of names) {
-      const r = results[name];
-      if (r.status === "ok") out.push(...rows(name, r.native, r.repos));
-    }
-    const progress = repaint(results);
-    table.setNothing(
-      out.length === 0 && progress.failed.length > 0
-        ? "No stack could be read — see the errors above."
-        : NOTHING,
-    );
-    table.tbody.replaceChildren(...out);
-    table.ready();
+    renderTable(liveResults);
   };
   // fix-204 (Kenny, 2026-10-02: "zes keer zfs … nu zeven, data moet maar
   // één keer laden"): the store notifies on every live update, and each

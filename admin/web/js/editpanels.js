@@ -1447,7 +1447,7 @@ function appsEditCard(stack, e, reload) {
     h(
       "p",
       { class: "measured" },
-      "Large host datasets mounted read-write into the container (media, downloads); never backed up by this stack.",
+      "Large host datasets mounted read-write into the container (a film library, a download folder); never backed up by this stack.",
     ),
     ...dataMounts.wrap,
     h("h3", null, "log_files:"),

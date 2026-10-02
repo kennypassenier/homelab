@@ -44,7 +44,7 @@ cargo test -p homelab-core --test app_knowledge_guard_tests
 | [`checks_tests`](#checks_tests) | homelab-core | 15 | 1 |
 | [`compose_policy_tests`](#compose_policy_tests) | homelab-core | 4 | 0 |
 | [`compose_verify_tests`](#compose_verify_tests) | homelab-core | 4 | 0 |
-| [`declarative_cleanup_tests`](#declarative_cleanup_tests) | homelab-core | 33 | 8 |
+| [`declarative_cleanup_tests`](#declarative_cleanup_tests) | homelab-core | 33 | 6 |
 | [`deploy_tests`](#deploy_tests) | homelab-core | 120 | 28 |
 | [`deployguard_tests`](#deployguard_tests) | homelab-core | 2 | 0 |
 | [`devicebackup_tests`](#devicebackup_tests) | homelab-core | 5 | 1 |
@@ -261,10 +261,8 @@ Findings these tests pin:
 - **ask-8**: Declarative cleanup where data or a container is involved.
 - **ask-9**: Backups, /appdata and vault copies of a destroyed stack are kept forever; wiping them is an explicit act, never automatic, and their existence is brought to (...)
 - **feat-retired-1**: Kenny, 2026-10-02 (about to destroy the retired stacks `home` and `uptime`): "is there a way, from the admin dashboard, to delete backups of services we no (...)
-- **fix-186**: not found in REGISTER.md.
+- **fix-186**: A docker-to-native conversion was recorded as a retirement.
 - **fix-41**: Two regressions from the same day's declarative cleanup (v3.59.0), found by the expert panel before either fired.
-- **live-finding 2026-10-02 (pve state.json**: not found in REGISTER.md.
-- **read-only): a deploy bug**: not found in REGISTER.md.
 - **step-22**: Audit of every place a stack registers itself, against the declarative principle (2026-09-27).
 
 Tests:
@@ -296,7 +294,7 @@ Tests:
 - `the_wipe_plan_lists_exactly_what_goes_and_what_is_still_in_use` *(pins ask-9)*
 - `retired_rows_carries_key_kind_and_the_wipe_plans_in_use_split`: the Retired page's row list carries the same in-use split `wipe_plan` works out, keyed and named so the page needs no second lookup. *(pins feat-retired-1)*
 - `retired_rows_marks_a_stale_record_refused_not_removable`: a record whose stack is managed again (stale, `wipe_plan` refuses the WHOLE key) still shows up, not a panic or a dropped row: the page is a listing. *(pins feat-retired-1)*
-- `wipe_plan_refuses_a_live_native_units_record_even_with_no_manifest_at_all`: (fixed separately) wrongly recorded "admin/admin" and "almanac/almanac" as a retired App, while the admin/almanac stacks are live, fully-native stacks ("a stack has either `manifest` or `natives`, never both" — `StackState::natives`, no `StackManifest` at all). *(pins live-finding 2026-10-02 (pve state.json, read-only): a deploy bug)*
+- `wipe_plan_refuses_a_live_native_units_record_even_with_no_manifest_at_all`: Live finding 2026-10-02 (pve state.json, read-only): a deploy bug (fixed separately) wrongly recorded "admin/admin" and "almanac/almanac" as a retired App, while the admin/almanac stacks are live, fully-native stacks ("a stack has either `manifest` or `natives`, never both" — `StackState::natives`, no `StackManifest` at all). *(pins feat-retired-1)*
 - `wipe_deletes_the_repositories_directories_and_vault_then_the_record` *(pins ask-9)*
 - `wipe_refuses_without_the_typed_name_or_for_a_live_stack` *(pins ask-9)*
 - `a_removed_apps_files_are_left_for_the_garbage_collector`: An app that left the stack is the garbage collector's: its compose file must still be there when `docker compose down` runs, or its containers keep running with nothing left to stop them by. *(pins ask-8)*

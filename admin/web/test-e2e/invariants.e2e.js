@@ -435,12 +435,14 @@ test("invariants: a stack with nothing to back up is named at once, never left p
       text && /oldstack/.test(text) && /no backups by design/.test(text),
       `oldstack was not named as excluded: ${text}`,
     );
-    // The progress bar must reach "3 of 3" promptly — not stuck waiting on
-    // oldstack the way a false "not read yet" would stall it.
+    // The progress bar must reach "N of N" promptly — not stuck waiting on
+    // oldstack the way a false "not read yet" would stall it. N is the demo
+    // fleet's size, which other invariants' fixtures grow (fix-207).
     await page.waitForFunction(
       () => {
         const p = document.querySelector(".backup-cal__progress");
-        return p && /3 of 3/.test(p.textContent ?? "");
+        const m = /(\d+) of (\d+)/.exec(p?.textContent ?? "");
+        return !!m && m[1] === m[2];
       },
       { timeout: 5000 },
     );

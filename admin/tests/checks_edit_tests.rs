@@ -51,6 +51,7 @@ fn jelly_as_is() -> ChecksEdit {
             origin: Some(0),
             text: "kijk of het werkt".to_string(),
             once: false,
+            ..Default::default()
         }]),
         probes: Some(vec![ProbeEdit {
             origin: Some(0),
@@ -160,6 +161,101 @@ fn a_shallow_check_needs_a_blind_spot() {
         problems.iter().any(|p| p.contains("blind spot")),
         "{problems:?}"
     );
+}
+
+const JELLY_WITH_ID: &str = "checks:\n  - name: \"films\"\n    command: \"echo 1\"\n    expect: never_decreases\n    layer: application\nmanual:\n  - text: \"kijk of het werkt\"\n    once: false\n    id: jellyfin-kijk-of-het-werkt\n";
+
+fn texts_with_id() -> StackTexts {
+    let mut t = StackTexts::new();
+    t.insert("lxc-compose.yml".to_string(), BASE.to_string());
+    t.insert("jellyfin/checks.yml".to_string(), JELLY_WITH_ID.to_string());
+    t
+}
+
+#[test]
+fn editing_a_manual_checks_text_keeps_its_id() {
+    let edit = ChecksEdit {
+        app: "jellyfin".to_string(),
+        manual: Some(vec![ManualEdit {
+            origin: Some(0),
+            text: "kijk of het nu werkt".to_string(),
+            once: false,
+            id: Some("jellyfin-kijk-of-het-werkt".to_string()),
+            replaces: Vec::new(),
+        }]),
+        ..Default::default()
+    };
+    let out = changes("x", &texts_with_id(), &StackEdit::Checks(edit), None).unwrap();
+    assert_eq!(out.len(), 1, "{out:?}");
+    let parsed: homelab_core::checks::ServiceChecks =
+        serde_yaml::from_str(out[0].new.as_ref().unwrap()).unwrap();
+    assert_eq!(parsed.manual.len(), 1);
+    assert_eq!(
+        parsed.manual[0].id(),
+        Some("jellyfin-kijk-of-het-werkt"),
+        "{:?}",
+        parsed.manual[0]
+    );
+    assert_eq!(parsed.manual[0].text(), "kijk of het nu werkt");
+}
+
+#[test]
+fn a_new_manual_check_gets_a_valid_unique_id() {
+    let mut edit = jelly_as_is();
+    edit.manual.as_mut().unwrap().push(ManualEdit {
+        origin: None,
+        text: "verify the second passkey".to_string(),
+        once: true,
+        ..Default::default()
+    });
+    let out = changes("x", &texts(), &StackEdit::Checks(edit), None).unwrap();
+    assert_eq!(out.len(), 1, "{out:?}");
+    let parsed: homelab_core::checks::ServiceChecks =
+        serde_yaml::from_str(out[0].new.as_ref().unwrap()).unwrap();
+    assert_eq!(parsed.manual.len(), 2, "{:?}", parsed.manual);
+    let new_check = parsed
+        .manual
+        .iter()
+        .find(|m| m.text() == "verify the second passkey")
+        .unwrap();
+    let id = new_check.id().expect("a new manual check gets an id");
+    assert!(id.starts_with("jellyfin-"), "{id}");
+    assert!(!id.trim().is_empty());
+    // Unique against the other manual check in the same file (which has
+    // no id at all, so this is really just checking the new id is sane).
+    assert_ne!(Some(id), parsed.manual[0].id());
+}
+
+#[test]
+fn editing_an_old_id_less_check_assigns_it_one() {
+    let mut edit = jelly_as_is();
+    edit.manual = Some(vec![ManualEdit {
+        origin: Some(0),
+        text: "kijk of het echt werkt".to_string(),
+        once: false,
+        ..Default::default()
+    }]);
+    let out = changes("x", &texts(), &StackEdit::Checks(edit), None).unwrap();
+    assert_eq!(out.len(), 1, "{out:?}");
+    let parsed: homelab_core::checks::ServiceChecks =
+        serde_yaml::from_str(out[0].new.as_ref().unwrap()).unwrap();
+    assert_eq!(parsed.manual.len(), 1);
+    assert_eq!(parsed.manual[0].text(), "kijk of het echt werkt");
+    assert!(
+        parsed.manual[0].id().is_some(),
+        "an edited, previously id-less check should be given a stable id \
+         so it is never silently re-asked again: {:?}",
+        parsed.manual[0]
+    );
+}
+
+#[test]
+fn an_untouched_id_less_manual_check_stays_id_less() {
+    // Companion to `an_unchanged_checks_yml_writes_no_file`: resending the
+    // same text/once for an id-less check must not manufacture an id (and
+    // therefore a file write) out of nothing.
+    let out = changes("x", &texts(), &StackEdit::Checks(jelly_as_is()), None).unwrap();
+    assert!(out.is_empty(), "{out:?}");
 }
 
 #[test]

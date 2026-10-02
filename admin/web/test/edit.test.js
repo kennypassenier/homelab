@@ -1093,7 +1093,7 @@ test("a probe row's healthy field round-trips equals/at_least/at_most", () => {
   );
 });
 
-test("a manual row is a bare string unless once is set, and normalises either way", () => {
+test("a manual row is a bare string unless once/id/replaces is set, and normalises either way", () => {
   assert.deepEqual(
     manualRowFromValues({ text: "did you register a passkey?", once: true }),
     {
@@ -1104,6 +1104,8 @@ test("a manual row is a bare string unless once is set, and normalises either wa
   assert.deepEqual(manualRow("plain question"), {
     text: "plain question",
     once: false,
+    id: "",
+    replaces: "",
   });
   assert.equal(manualRowSummary(manualRow("plain question")), "plain question");
   assert.equal(
@@ -1112,7 +1114,51 @@ test("a manual row is a bare string unless once is set, and normalises either wa
   );
   assert.deepEqual(
     manualRowFields(manualRow("plain question")).map((f) => f.current),
-    ["plain question", false],
+    ["plain question", false, "", ""],
+  );
+});
+
+test("a manual row's id and replaces round-trip through the dialog fields", () => {
+  // fix-182-dashboard-edits: the whole point is that opening and saving
+  // the dialog again must not drop the check's identity.
+  const loaded = manualRow({
+    text: "kijk of het werkt",
+    once: false,
+    id: "jellyfin-kijk-of-het-werkt",
+    replaces: ["abc123", "def456"],
+  });
+  assert.deepEqual(loaded, {
+    text: "kijk of het werkt",
+    once: false,
+    id: "jellyfin-kijk-of-het-werkt",
+    replaces: "abc123,def456",
+  });
+  const fields = manualRowFields(loaded);
+  const byName = Object.fromEntries(fields.map((f) => [f.name, f]));
+  assert.equal(byName.id.current, "jellyfin-kijk-of-het-werkt");
+  assert.equal(byName.id.readonly, true);
+  assert.equal(byName.replaces.current, "abc123,def456");
+  assert.equal(byName.replaces.hidden, true);
+  const values = Object.fromEntries(
+    fields.map((f) => [f.name, f.current ?? ""]),
+  );
+  assert.deepEqual(manualRowFromValues(values), {
+    text: "kijk of het werkt",
+    once: false,
+    id: "jellyfin-kijk-of-het-werkt",
+    replaces: ["abc123", "def456"],
+  });
+});
+
+test("a manual row with no id/replaces yet does not manufacture any", () => {
+  assert.deepEqual(
+    manualRowFromValues({
+      text: "kijk of het werkt",
+      once: false,
+      id: "",
+      replaces: "",
+    }),
+    { text: "kijk of het werkt", once: false },
   );
 });
 

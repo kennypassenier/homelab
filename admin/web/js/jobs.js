@@ -246,10 +246,14 @@ export function remaining(j, progressAt, now) {
 
 /**
  * How far along, 0 to 100, or null when nothing says (the bar is then
- * indeterminate, busy). Time-based when earlier runs give a total, but
- * never behind the steps already finished (a slow run's time share stayed
- * near 0 while its steps went by, Kenny 2026-09-29); step-based without a
- * time; never 100 before the end.
+ * indeterminate, busy). A step total, once the host sends one, is the
+ * bar's one truth: step-based, never 100 before the end. Time history
+ * (earlier runs' durations) feeds only `remaining()` — it used to also
+ * feed the bar via `max(byTime, bySteps)`, which pinned a 263/310 run at
+ * 99% because an earlier, shorter run made the time share read "almost
+ * done" (Kenny, 2026-10-02, fix-189) while barely a third of the steps
+ * were in. Without a step total, time is still the only thing the bar has
+ * to go by, so that fallback stays.
  * @param {Job} j
  * @param {number | null} progressAt
  * @param {number} now
@@ -259,17 +263,18 @@ export function percent(j, progressAt, now) {
   if (finished(j.state)) return j.state === "done" ? 100 : null;
   const p = j.progress;
   if (!p) return j.state === "queued" ? 0 : null;
+  if (p.m) {
+    const bySteps = Math.round(((p.n - (p.finished ? 0 : 1)) / p.m) * 100);
+    return Math.min(99, Math.max(0, bySteps));
+  }
   const left = remaining(j, progressAt, now).s;
   const ran = elapsedS(j, now);
   const byTime =
     left != null && ran != null && ran + left > 0
       ? Math.round((ran / (ran + left)) * 100)
       : null;
-  const bySteps = p.m
-    ? Math.round(((p.n - (p.finished ? 0 : 1)) / p.m) * 100)
-    : null;
-  if (byTime == null && bySteps == null) return null;
-  return Math.min(99, Math.max(byTime ?? 0, bySteps ?? 0));
+  if (byTime == null) return null;
+  return Math.min(99, Math.max(0, byTime));
 }
 
 /**
@@ -345,6 +350,41 @@ export function jobPanel(j, ctx) {
         ? `expected from ${p.runs} earlier ${p.runs === 1 ? "run" : "runs"}`
         : "",
   };
+}
+
+/**
+ * @typedef {{key: string, label: string, value: string, numeric?: boolean,
+ *   late?: boolean, badge?: Badge}} FactCell
+ */
+
+/**
+ * The running-job panel's facts grid: one cell per fact, every value a
+ * non-empty string so the grid never reflows as a job changes state
+ * (Kenny, 2026-10-02: "maak hier ook een grid van, met vaste locatie").
+ * `badge` on the State cell is drawn as the badge component, not plain
+ * text; every other cell is text, right at home in a <dd>.
+ * @param {ReturnType<typeof jobPanel>} v
+ * @returns {FactCell[]}
+ */
+export function jobFacts(v) {
+  return [
+    { key: "state", label: "State", value: v.badge.label, badge: v.badge },
+    { key: "step", label: "Step", value: v.step || "—", numeric: true },
+    { key: "origin", label: "Origin", value: v.origin || "—" },
+    {
+      key: "elapsed",
+      label: "Running for",
+      value: v.elapsed || "—",
+      numeric: true,
+    },
+    {
+      key: "remaining",
+      label: "Expected remaining",
+      value: v.finished ? "finished" : v.remaining || "—",
+      numeric: true,
+      late: v.late,
+    },
+  ];
 }
 
 /**

@@ -42,6 +42,7 @@ import {
   localOf,
   plan,
   readFollow,
+  stillDriving,
 } from "./driveview.js";
 import { listen } from "./store.js";
 import { attachSwitches } from "/static/kp/js/forms.js";
@@ -135,11 +136,8 @@ export function mountFollow(region, ctx) {
     `${badgeText(state, now()) ?? "Claude drove this form"}. Your own input waits until Claude is done.`;
 
   const paintLive = () => {
-    const on =
-      following && !!state && (isActive(state, now()) || !!state.announce);
-    const v = on
-      ? announceView(state, clock.left(), isActive(state, now()))
-      : null;
+    const on = following && !!state && stillDriving(state, now());
+    const v = on ? announceView(state, clock.left(), on) : null;
     const d = ctl?.dialog;
     const inDialog = !!d && !!dialogBar && d.contains(dialogBar.el);
     pageBar.paint(inDialog ? null : v, "");
@@ -190,7 +188,7 @@ export function mountFollow(region, ctx) {
     }
     dialogBar.paint(
       following && state
-        ? announceView(state, clock.left(), isActive(state, now()))
+        ? announceView(state, clock.left(), stillDriving(state, now()))
         : null,
       idleText(),
     );

@@ -86,6 +86,32 @@ export const isActive = (s, now) =>
   !!s && s.active && now - s.last_at < s.idle_s;
 
 /**
+ * A job or a driven batch is running under `s.form` right now (fix-188,
+ * Kenny, 2026-10-02: "Pause en Stop knoppen zijn niet meer zichtbaar
+ * tijdens de lopende Apply"). A long host operation announces nothing
+ * while it runs — no new `drive` event arrives to keep `last_at` recent —
+ * so `isActive`'s own recency window, built to notice an abandoned
+ * session, timed out mid-job and took Pause/Stop down with it exactly
+ * when the viewer most wanted them. This is the third, independent reason
+ * Live view's strip stays up, alongside `isActive` and `s.announce`.
+ * @param {DriveState | null} s
+ */
+export const jobRunning = (s) =>
+  !!s?.form?.job || s?.form?.edit?.result?.batch != null;
+
+/**
+ * Claude is still driving in every sense the strip cares about: actively
+ * (recent), about to announce a step, or quietly running a job/batch that
+ * announces nothing. The single source `mountFollow` (drive.js) uses to
+ * decide whether Pause/Stop stay up, so the page bar and a driven
+ * dialog's own banner never disagree.
+ * @param {DriveState | null} s
+ * @param {number} now unix seconds
+ */
+export const stillDriving = (s, now) =>
+  isActive(s, now) || !!s?.announce || jobRunning(s);
+
+/**
  * The badge every tab shows while Claude drives, followed or not.
  * @param {DriveState | null} s
  * @param {number} now

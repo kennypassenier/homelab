@@ -96,6 +96,20 @@ export function makeBar(inline, extra = []) {
     h("span", { class: "drive-announce__toggle" }, pause, resume),
     stop,
   );
+  // fix-188/[grid] (Kenny, 2026-10-02): the words and the controls (the
+  // countdown, Pause/Continue, Stop, "Leave live view") used to be three
+  // loose flex children that wrapped onto their own line once the words
+  // ran long, turning a one-line strip into a tall block with an empty
+  // second row reserved under it even while idle. One `__controls` column
+  // puts every button in the one place `.drive-announce`'s own two-column
+  // grid gives it (CSS), lined up with the words column instead of
+  // trailing wherever the flex wrap left it.
+  const controls = h(
+    "span",
+    { class: "drive-announce__controls" },
+    live,
+    ...extra,
+  );
   const el = h(
     "div",
     {
@@ -111,8 +125,7 @@ export function makeBar(inline, extra = []) {
       // moves the step's words.
       h("span", { class: "drive-announce__meta" }, status, counter),
     ),
-    live,
-    ...extra,
+    controls,
   );
   if (!inline) el.hidden = true;
 
@@ -136,7 +149,17 @@ export function makeBar(inline, extra = []) {
     shown(count, !!v?.countdown);
     progress.value = v?.fraction ?? 0;
     shown(progress, !!v?.countdown);
-    shown(live, !!v);
+    // fix-188: Pause/Continue and Stop are no longer reserved-but-invisible
+    // while nothing is driving (that was the strip's "tall block" — a
+    // whole hidden button row still taking its height). `live` collapses
+    // out of flow when idle instead, and `.drive-announce__controls`
+    // (always on screen) keeps only the room `extra` (Leave live view)
+    // actually needs. While Claude *is* driving, `v` is non-null in every
+    // state `stillDriving` recognises (announcing, running a job/batch,
+    // paused, waiting between two jobs) — Pause/Continue and Stop then sit
+    // in their one fixed spot in `__controls`, every time, per Kenny
+    // 2026-10-02 11:00.
+    live.hidden = !v;
     shown(pause, !!v && !v.paused);
     shown(resume, !!v && v.paused);
   };

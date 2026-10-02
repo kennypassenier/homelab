@@ -41,6 +41,10 @@ are not style preferences; ignoring them costs him the ability to steer.
    in ONE form saying what, why and the risks, and built only after his go.
    Every helper brief carries this rule.
 
+5. **Every test run reports how long it took** (Kenny, 2026-10-02), measured
+   and per run (full, carried or rerun) and per project; the gate and release
+   scripts print it themselves.
+
 Both failures look identical from his side: he answered, and then had to
 argue with the answer.
 
@@ -57,7 +61,7 @@ Two projects live in this repo, each with its own phase track.
 
 | | |
 |---|---|
-| Next action | **waiting on Kenny: the Go form for 3.70.1 (fix-170..186, feat-retired-1, chassis-rs 3.2.0 in admin/almanac/kyu/kyu-runner/http-switchboard), posted 2026-10-02 09:52; the 3.70.0 rollout stopped after gateway (apply of the other stacks and the home/uptime destroys still to do).** **3.70.0 release in progress (Kenny's Go 2026-10-01 18:45; drill-restore: permission to copy restic.pw + rclone.conf to a throwaway nested VM; TUI host-settings tab removed; the ~/Projects cap failed and moved to chassis-rs).** **3.70.0 is the last feature release** (Kenny, 2026-10-01): it closes every open item from today's batch — fix-62..169 (release, restore-drill coverage, firewall and token fixes), gap-23/26/31/34, T62, the admin dashboard's backup-secrets and visuals milestones, the chassis-rs 3.1.0 nav rewrite, and rule 20 (nothing may balloon, see `docs/deployment/REGISTER.md` ask-10). **What follows 3.70.0:** release it, roll it out to the host and CT 120, turn on firewalls on the eleven stacks still without one, then measure (fix-66/68/70/142/143/146 and the rest of today's batch all carry a "doing: release" style residual that the rollout must close out in `REGISTER.md`). **After that, this project takes bugfixes only** — no further feature rounds are planned. See `docs/deployment/REGISTER.md` for the row-by-row state and `docs/deployment/CORRECTIONS.md` for today's ratified corrections (O10-twice, the two-sessions fault, fix-161). |
+| Next action | **waiting on Kenny: signing homelab:v3.70.1 almanac:v4.1.1 kyu:v4.2.1 kyu-runner:v1.1.1 http-switchboard:v3.3.1 (asked 2026-10-02 10:30); then the 3.70.1 rollout (host + host apply, dashboard via ui reload, natives, apply of the remaining stacks, home/uptime destroys apart).** **3.70.0 release in progress (Kenny's Go 2026-10-01 18:45; drill-restore: permission to copy restic.pw + rclone.conf to a throwaway nested VM; TUI host-settings tab removed; the ~/Projects cap failed and moved to chassis-rs).** **3.70.0 is the last feature release** (Kenny, 2026-10-01): it closes every open item from today's batch — fix-62..169 (release, restore-drill coverage, firewall and token fixes), gap-23/26/31/34, T62, the admin dashboard's backup-secrets and visuals milestones, the chassis-rs 3.1.0 nav rewrite, and rule 20 (nothing may balloon, see `docs/deployment/REGISTER.md` ask-10). **What follows 3.70.0:** release it, roll it out to the host and CT 120, turn on firewalls on the eleven stacks still without one, then measure (fix-66/68/70/142/143/146 and the rest of today's batch all carry a "doing: release" style residual that the rollout must close out in `REGISTER.md`). **After that, this project takes bugfixes only** — no further feature rounds are planned. See `docs/deployment/REGISTER.md` for the row-by-row state and `docs/deployment/CORRECTIONS.md` for today's ratified corrections (O10-twice, the two-sessions fault, fix-161). |
 
 
 **The deployment project is the active work.** It brings the whole fleet under

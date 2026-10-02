@@ -128,6 +128,33 @@ pub struct LiveFacts {
     /// `StackState::pushed_file_hashes` by `evaluate_container_drift`.
     pub container_file_hashes:
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    /// fix-218: each recorded stack's REAL backup freshness, read off the
+    /// same `SnapshotCache` `homelab snapshots` answers from — not
+    /// `StackState::last_backup`, which a vacuous "no services" nightly
+    /// success can advance with no repository ever created (measured live,
+    /// host 3.70.4: doctor said "last backup 11h ago" for stack inbox while
+    /// `homelab snapshots stacks/inbox` answered "no repositories"). Empty
+    /// from a caller that never gathered it (a nightly round reading only
+    /// what it needs) — then `evaluate` falls back to silence for backup
+    /// age, same as `digests` being empty skips the stack-file comparison.
+    pub backup_snapshots: Vec<StackSnapshotFact>,
+}
+
+/// fix-218: one stack's real backup freshness, as read from the host's
+/// `SnapshotCache`. See `doctor::StackProbe` for the same shape and the
+/// reasoning behind keeping "no snapshot yet" and "not read yet" apart.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StackSnapshotFact {
+    pub name: String,
+    /// Unix seconds of the newest real snapshot across every repository this
+    /// stack owns, or `None` when none of them holds one.
+    pub newest_snapshot_unix: Option<u64>,
+    /// Whether every owning repository's cache entry has been read at least
+    /// once. `false` means "don't know yet".
+    pub snapshot_read: bool,
+    /// Mirrors `doctor::StackProbe::nothing_to_back_up`.
+    pub nothing_to_back_up: bool,
+    pub is_native: bool,
 }
 
 /// fix-92 / fix-130: every name in the gateway's routes directory that no
@@ -1806,7 +1833,6 @@ pub fn evaluate(
             });
         }
 
-        let age = now_unix.saturating_sub(st.last_backup);
         // Z3: a stack that keeps nothing worth keeping, by declaration, is
         // not a stack that was forgotten. Saying "never been backed up"
         // about a decision trains the reader to ignore the line — and that
@@ -1838,22 +1864,69 @@ pub fn evaluate(
                         .into(),
             });
         }
-        if keeps_nothing {
-            // Deliberate, already said above per mount.
-        } else if st.last_backup == 0 {
-            out.push(Finding {
-                severity: Severity::Broken,
-                subject: name.clone(),
-                what: "has never been backed up".into(),
-                remedy: "run a backup now and check why the nightly one never did".into(),
-            });
-        } else if age > backup_max_age_s {
-            out.push(Finding {
-                severity: Severity::Broken,
-                subject: name.clone(),
-                what: format!("last backup was {} hours ago", age / 3600),
-                remedy: "check the nightly run and the backup target".into(),
-            });
+        // fix-218: the REAL backup age, off the same `SnapshotCache`
+        // `homelab snapshots` reads — not `StackState::last_backup`, which a
+        // vacuous "no services" nightly success can advance with no
+        // repository ever created (see `StackSnapshotFact`). A caller that
+        // never gathered `live.backup_snapshots` (e.g. the nightly round,
+        // which reads only what it needs) falls back to the cached
+        // timestamp, same shape this check always had.
+        match live.backup_snapshots.iter().find(|f| &f.name == name) {
+            Some(f) if f.nothing_to_back_up => {
+                // Deliberate, already said above per mount (or nothing to
+                // declare at all for a native stack).
+            }
+            Some(f) if !f.snapshot_read => {
+                // fix-218: the cache has not read this stack's repository
+                // yet (cold right after a host restart) — unknown is not a
+                // finding, so this stays silent rather than guess either way.
+            }
+            Some(f) => match f.newest_snapshot_unix {
+                None => out.push(Finding {
+                    severity: Severity::Broken,
+                    subject: name.clone(),
+                    what: "has data to back up but no snapshot exists yet".into(),
+                    remedy: if f.is_native {
+                        format!("run `homelab backup-native {}` and check why the nightly one never did", name)
+                    } else {
+                        format!(
+                            "run `homelab backup stacks/{}` and check why the nightly one never did",
+                            name
+                        )
+                    },
+                }),
+                Some(t) => {
+                    let age = now_unix.saturating_sub(t);
+                    if age > backup_max_age_s {
+                        out.push(Finding {
+                            severity: Severity::Broken,
+                            subject: name.clone(),
+                            what: format!("last backup was {} hours ago", age / 3600),
+                            remedy: "check the nightly run and the backup target".into(),
+                        });
+                    }
+                }
+            },
+            None => {
+                let age = now_unix.saturating_sub(st.last_backup);
+                if keeps_nothing {
+                    // Deliberate, already said above per mount.
+                } else if st.last_backup == 0 {
+                    out.push(Finding {
+                        severity: Severity::Broken,
+                        subject: name.clone(),
+                        what: "has never been backed up".into(),
+                        remedy: "run a backup now and check why the nightly one never did".into(),
+                    });
+                } else if age > backup_max_age_s {
+                    out.push(Finding {
+                        severity: Severity::Broken,
+                        subject: name.clone(),
+                        what: format!("last backup was {} hours ago", age / 3600),
+                        remedy: "check the nightly run and the backup target".into(),
+                    });
+                }
+            }
         }
     }
 

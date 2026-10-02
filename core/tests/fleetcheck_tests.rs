@@ -129,6 +129,7 @@ fn y4_a_healthy_fleet_is_silent() {
         declared_host_config: None,
         live_host_config: Default::default(),
         container_file_hashes: Default::default(),
+        backup_snapshots: Vec::new(),
     };
     assert!(check(&st, &live).is_empty(), "{:?}", check(&st, &live));
 }

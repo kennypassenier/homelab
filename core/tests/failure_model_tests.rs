@@ -245,10 +245,12 @@ fn f6_doctor_healthy_system_is_ok() {
         state_parses: true,
         managed_stacks: vec![StackProbe {
             name: "syncthing".into(),
-            backup_age_h: Some(3),
+            snapshot_age_h: Some(3),
+            snapshot_read: true,
             container_present: true,
             env_sealed: true,
             nothing_to_back_up: false,
+            is_native: false,
         }],
         offsite_configured: true,
         offsite_token_valid: true,
@@ -268,10 +270,12 @@ fn f6_doctor_flags_each_problem_with_remedy() {
         state_parses: false,         // fail
         managed_stacks: vec![StackProbe {
             name: "media".into(),
-            backup_age_h: Some(72), // warn
+            snapshot_age_h: Some(72), // warn
+            snapshot_read: true,
             container_present: true,
             env_sealed: false, // fail
             nothing_to_back_up: false,
+            is_native: false,
         }],
         offsite_configured: true,
         offsite_token_valid: false,                   // fail
@@ -415,10 +419,12 @@ fn fix_130_doctor_reports_exposure_files_privilege_host_meta_drill_and_space() {
         state_parses: true,
         managed_stacks: vec![StackProbe {
             name: "registry".into(),
-            backup_age_h: Some(12),
+            snapshot_age_h: Some(12),
+            snapshot_read: true,
             container_present: true,
             env_sealed: true,
             nothing_to_back_up: true,
+            is_native: false,
         }],
         exposure: Some(Exposure {
             listen: "0.0.0.0:8443".into(),
@@ -759,5 +765,171 @@ async fn fix_38_a_replayed_command_keeps_its_script_argument_whole() {
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
         format!("7\n{}\n", script)
+    );
+}
+
+// ── fix-218: doctor's backup-age line trusts the real repository ───────────
+//
+// Measured live on host 3.70.4, 2026-10-02: `homelab doctor` said
+// "[Ok] stack inbox backup — last backup 11h ago" while `homelab snapshots
+// stacks/inbox` answered "no repositories (nothing has backed up this stack
+// yet)". `StackState::last_backup` only records that a backup OPERATION
+// returned ok — a native stack's nightly backup loop (and the on-demand
+// `backup-native` RPC) both "succeed" vacuously over zero services, with no
+// restic repository ever created. The fix reads the newest snapshot from the
+// same `SnapshotCache` `homelab snapshots` uses (`StackProbe::snapshot_age_h`
+// / `snapshot_read`) instead of the cached timestamp.
+
+/// A stack whose cached `last_backup`-style timestamp would have read as
+/// fresh must not be reported Ok when its repository's own newest snapshot
+/// is stale — this is the exact live fault (doctor said "0h ago"/"Ok" with a
+/// cold trail: the snapshot cache, once read, is the only thing allowed to
+/// say "fresh").
+#[test]
+fn fix_218_a_recorded_night_with_a_stale_real_snapshot_is_not_ok() {
+    let p = Probes {
+        state_parses: true,
+        managed_stacks: vec![StackProbe {
+            name: "inbox".into(),
+            // The repository's own newest snapshot is 72h old.
+            snapshot_age_h: Some(72),
+            snapshot_read: true,
+            container_present: true,
+            env_sealed: true,
+            nothing_to_back_up: false,
+            is_native: true,
+        }],
+        ..Default::default()
+    };
+    let line = doctor::diagnose(&p)
+        .into_iter()
+        .find(|c| c.name == "stack inbox backup")
+        .expect("a stack inbox backup line");
+    assert_eq!(line.health, Health::Warn, "{:?}", line);
+    assert!(line.detail.contains("72h ago"), "{}", line.detail);
+}
+
+/// fix-218: a deployed stack that has data to back up (not
+/// `backs_up_nothing`) but whose repository holds no snapshot at all gets a
+/// Warn finding naming the remedy command — this is the live inbox case
+/// exactly: a cache read that came back with zero snapshots.
+#[test]
+fn fix_218_data_with_zero_snapshots_is_warn_has_data_but_no_backup_yet() {
+    let p = Probes {
+        state_parses: true,
+        managed_stacks: vec![StackProbe {
+            name: "inbox".into(),
+            snapshot_age_h: None,
+            snapshot_read: true,
+            container_present: true,
+            env_sealed: true,
+            nothing_to_back_up: false,
+            is_native: true,
+        }],
+        ..Default::default()
+    };
+    let line = doctor::diagnose(&p)
+        .into_iter()
+        .find(|c| c.name == "stack inbox backup")
+        .expect("a stack inbox backup line");
+    assert_eq!(line.health, Health::Warn, "{:?}", line);
+    assert!(
+        line.detail.contains("has data but no backup yet"),
+        "{}",
+        line.detail
+    );
+    let remedy = line.remedy.expect("a remedy");
+    assert!(
+        remedy.contains("backup-native inbox"),
+        "native remedy should name backup-native: {}",
+        remedy
+    );
+}
+
+/// fix-218: the same zero-snapshot reading for a COMPOSE stack names
+/// `homelab backup stacks/<name>`, not `backup-native`.
+#[test]
+fn fix_218_compose_stack_zero_snapshots_remedy_names_backup_stacks() {
+    let p = Probes {
+        state_parses: true,
+        managed_stacks: vec![StackProbe {
+            name: "gateway".into(),
+            snapshot_age_h: None,
+            snapshot_read: true,
+            container_present: true,
+            env_sealed: true,
+            nothing_to_back_up: false,
+            is_native: false,
+        }],
+        ..Default::default()
+    };
+    let line = doctor::diagnose(&p)
+        .into_iter()
+        .find(|c| c.name == "stack gateway backup")
+        .expect("a stack gateway backup line");
+    assert_eq!(line.health, Health::Warn, "{:?}", line);
+    let remedy = line.remedy.expect("a remedy");
+    assert!(
+        remedy.contains("backup stacks/gateway"),
+        "compose remedy should name `backup stacks/<name>`: {}",
+        remedy
+    );
+}
+
+/// fix-218: a stack that declares nothing to back up never gets the
+/// no-backup-yet Warn, even with zero snapshots and a cold cache — there is
+/// nothing it could ever have backed up.
+#[test]
+fn fix_218_no_data_stack_is_never_warned_about_missing_snapshots() {
+    for snapshot_read in [true, false] {
+        let p = Probes {
+            state_parses: true,
+            managed_stacks: vec![StackProbe {
+                name: "registry".into(),
+                snapshot_age_h: None,
+                snapshot_read,
+                container_present: true,
+                env_sealed: true,
+                nothing_to_back_up: true,
+                is_native: false,
+            }],
+            ..Default::default()
+        };
+        let line = doctor::diagnose(&p)
+            .into_iter()
+            .find(|c| c.name == "stack registry backup")
+            .expect("a stack registry backup line");
+        assert_eq!(line.health, Health::Ok, "{:?}", line);
+    }
+}
+
+/// fix-218: a cold cache (never read yet, e.g. right after a host restart)
+/// must not be read as either "fresh" (the old bug) or "never backed up" (a
+/// false alarm before the sweep has had its first pass) — it gets its own
+/// Warn, distinct from both.
+#[test]
+fn fix_218_cold_snapshot_cache_is_its_own_warn_not_ok_or_never_backed_up() {
+    let p = Probes {
+        state_parses: true,
+        managed_stacks: vec![StackProbe {
+            name: "almanac".into(),
+            snapshot_age_h: None,
+            snapshot_read: false,
+            container_present: true,
+            env_sealed: true,
+            nothing_to_back_up: false,
+            is_native: false,
+        }],
+        ..Default::default()
+    };
+    let line = doctor::diagnose(&p)
+        .into_iter()
+        .find(|c| c.name == "stack almanac backup")
+        .expect("a stack almanac backup line");
+    assert_eq!(line.health, Health::Warn, "{:?}", line);
+    assert!(
+        !line.detail.contains("has data but no backup yet"),
+        "a cold cache must read as unknown, not as a confirmed no-backup finding: {}",
+        line.detail
     );
 }

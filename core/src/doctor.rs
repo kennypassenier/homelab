@@ -146,8 +146,24 @@ pub struct FailedAuth {
 #[derive(Debug, Clone)]
 pub struct StackProbe {
     pub name: String,
-    /// Hours since the last successful backup, if any.
-    pub backup_age_h: Option<u64>,
+    /// fix-218: hours since the stack's newest REAL restic snapshot, read
+    /// the same way `homelab snapshots` does (the host's `SnapshotCache`,
+    /// keyed by repository owner) — not `StackState::last_backup`, which
+    /// only records that a backup OPERATION returned ok, even when it
+    /// archived nothing: an empty `natives` list makes the nightly native
+    /// backup loop and the on-demand `backup-native` RPC both vacuously
+    /// "succeed" over zero services, with no repository ever created and no
+    /// incident to show for it (measured live on host 3.70.4, stack inbox:
+    /// doctor said "last backup 11h ago", `homelab snapshots stacks/inbox`
+    /// answered "no repositories"). `None` when no owning repository holds a
+    /// snapshot — which `snapshot_read` below tells apart from "the cache
+    /// has not been read for this stack's repositories yet".
+    pub snapshot_age_h: Option<u64>,
+    /// Whether every repository this stack owns has been read at least once
+    /// (the `SnapshotCache` entry exists). `false` means "don't know yet",
+    /// never "never backed up" — a cold cache right after a host restart
+    /// must not report either Ok or the no-backup Warn.
+    pub snapshot_read: bool,
     /// Container exists at the expected vmid.
     pub container_present: bool,
     pub env_sealed: bool,
@@ -155,6 +171,9 @@ pub struct StackProbe {
     /// `no_backup` or `no_data`, no native service), so its backup age says
     /// nothing either way.
     pub nothing_to_back_up: bool,
+    /// fix-218: true for a native stack (so the no-backup-yet remedy can say
+    /// `backup-native` instead of `backup`).
+    pub is_native: bool,
 }
 
 pub fn diagnose(p: &Probes) -> Vec<Check> {
@@ -314,7 +333,22 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
             });
             continue;
         }
-        match s.backup_age_h {
+        // fix-218: read off the actual repository, not the cached
+        // `last_backup` timestamp — see `StackProbe::snapshot_age_h`.
+        if !s.snapshot_read {
+            checks.push(Check {
+                name: format!("stack {} backup", s.name),
+                health: Health::Warn,
+                detail: "backup freshness not read yet (snapshot cache cold)".into(),
+                remedy: Some(
+                    "the host has not read this stack's repository yet — check again in a \
+                     minute; `homelab snapshots stacks/<name>` forces a read now"
+                        .into(),
+                ),
+            });
+            continue;
+        }
+        match s.snapshot_age_h {
             Some(h) if h > 48 => checks.push(Check {
                 name: format!("stack {} backup", s.name),
                 health: Health::Warn,
@@ -324,8 +358,18 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
             None => checks.push(Check {
                 name: format!("stack {} backup", s.name),
                 health: Health::Warn,
-                detail: "never backed up".into(),
-                remedy: Some("run the first backup for this stack".into()),
+                detail: "has data but no backup yet".into(),
+                remedy: Some(if s.is_native {
+                    format!(
+                        "run `homelab backup-native {}` — no repository exists yet",
+                        s.name
+                    )
+                } else {
+                    format!(
+                        "run `homelab backup stacks/{}` — no repository exists yet",
+                        s.name
+                    )
+                }),
             }),
             Some(h) => checks.push(Check {
                 name: format!("stack {} backup", s.name),

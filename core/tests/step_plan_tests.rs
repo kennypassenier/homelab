@@ -309,7 +309,8 @@ async fn destroy_announces_its_fixed_plan_and_every_step_runs() {
     // n never exceeds m: every mark lands on a name from the plan above.
     assert!(names.iter().all(|n| expected.contains(n)));
     // `--no-backup` (skip_backup) skip-marks every one of the nested
-    // `backup` names, and only those — destroy's own 9 still all ran.
+    // `backup` names plus the restore-check of that backup, and only those —
+    // destroy's own steps still all ran.
     let skipped: std::collections::BTreeSet<String> = events
         .iter()
         .filter_map(|e| match e {
@@ -317,10 +318,11 @@ async fn destroy_announces_its_fixed_plan_and_every_step_runs() {
             _ => None,
         })
         .collect();
-    let backup_names: std::collections::BTreeSet<String> =
+    let mut backup_names: std::collections::BTreeSet<String> =
         homelab_core::ops::backup::backup_plan_names(&m.stack_name)
             .into_iter()
             .collect();
+    backup_names.insert(destroy::VERIFY_RESTORE_STEP.to_string());
     assert_eq!(skipped, backup_names);
 }
 

@@ -15,6 +15,7 @@
 //! host's own repositories are in the rotation; a native unit's tar has to
 //! list.
 
+use crate::executor::{Cmd, Executor};
 use crate::ops::fleetcheck::{Finding, Severity};
 use crate::state::HostState;
 
@@ -353,4 +354,84 @@ pub fn evaluate_drill(state: &HostState, now: u64, interval_s: u64) -> Vec<Findi
         });
     }
     out
+}
+
+/// G14 / destroy restore-check: restore one repository's latest snapshot into
+/// `target` and judge what came back — file count, largest file, every tar
+/// lists, every SQLite database passes `PRAGMA integrity_check` (found by
+/// content, not by name, so no app is named here). `target` is emptied
+/// first and LEFT IN PLACE afterwards, so a caller can run checks of its
+/// own on it (the nightly drill's Postgres check); every caller removes it.
+pub async fn restore_and_judge(
+    exec: &dyn Executor,
+    cfg: &crate::ops::backup::BackupCfg,
+    repo: &str,
+    target: &str,
+) -> Outcome {
+    let _ = exec.run(&Cmd::new("rm", &["-rf", target], 120)).await;
+    if let Err(e) = crate::ops::backup::restore_into(exec, cfg, repo, target).await {
+        return Outcome::Failed(format!("the restore itself failed: {}", e));
+    }
+    let sh = |script: String, timeout: u64| async move {
+        exec.run(&Cmd::new("sh", &["-c", &script], timeout))
+            .await
+            .map(|o| o.stdout)
+            .unwrap_or_default()
+    };
+    let count = sh(format!("find {} -type f | wc -l", target), 120)
+        .await
+        .trim()
+        .parse::<usize>()
+        .unwrap_or(0);
+    let largest = sh(
+        format!(
+            "find {} -type f -printf '%s\\n' 2>/dev/null | sort -n | tail -1",
+            target
+        ),
+        120,
+    )
+    .await
+    .trim()
+    .parse::<u64>()
+    .unwrap_or(0);
+    // fix-62: a native unit's backup is one tar; a torn one has content and
+    // passes the size rule, so each must also list.
+    let unreadable: Vec<String> = sh(
+        format!(
+            "find {} -type f -name '*.tar' | while read -r f; do \
+             tar -tf \"$f\" >/dev/null 2>&1 || echo \"$f\"; done",
+            target
+        ),
+        600,
+    )
+    .await
+    .lines()
+    .map(|l| l.trim().to_string())
+    .filter(|l| !l.is_empty())
+    .collect();
+    // fix-62: silent when `sqlite3` is not on the host — a gap in what this
+    // can prove, not a failed restore.
+    let bad_sqlite: Vec<(String, String)> = sh(
+        format!(
+            "command -v sqlite3 >/dev/null 2>&1 || exit 0; \
+             find {} -type f | while read -r f; do \
+             magic=$(head -c 16 \"$f\" 2>/dev/null); \
+             case \"$magic\" in \
+             'SQLite format 3'*) \
+             out=$(sqlite3 \"$f\" 'PRAGMA integrity_check;' 2>&1); \
+             [ \"$out\" = ok ] || printf '%s\\t%s\\n' \"$f\" \"$out\" ;; \
+             esac; done",
+            target
+        ),
+        600,
+    )
+    .await
+    .lines()
+    .filter_map(|l| l.split_once('\t'))
+    .map(|(p, why)| (p.to_string(), why.trim().to_string()))
+    .collect();
+    with_sqlite_checks(
+        with_archives(verdict(count, largest), &unreadable),
+        &bad_sqlite,
+    )
 }

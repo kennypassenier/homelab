@@ -20,6 +20,33 @@ fn runner_warn(ctx: &OpCtx<'_>, msg: String) {
     });
 }
 
+/// CORRECTIONS 2026-10-02 (home and uptime were destroyed with a backup
+/// nobody had restored): between the backup and the first irreversible
+/// step, every repository that backup wrote is restored to scratch and
+/// judged (`restoredrill::restore_and_judge`); one that does not restore
+/// stops the destroy while the container still exists.
+pub const VERIFY_RESTORE_STEP: &str = "verify restore";
+
+/// Where the restore-check restores to: the nightly drill's own default
+/// scratch directory, one sub-directory per repository, removed after.
+fn restore_check_target(stack: &str, repo: &str) -> String {
+    format!(
+        "{}/destroy-{}-{}",
+        crate::ops::restoredrill::DEFAULT_DRILL_SCRATCH_DIR,
+        stack,
+        repo
+    )
+}
+
+/// An informational line from inside a step body (see `runner_warn`).
+fn runner_info(ctx: &OpCtx<'_>, msg: String) {
+    ctx.sink.emit(crate::sink::PipelineEvent::Line {
+        level: Level::Info,
+        source: "HOST".into(),
+        msg,
+    });
+}
+
 /// step-22: `destroy` and `forget` both end by unregistering everything a
 /// deploy registers outside the container — shared so the two cannot drift
 /// apart (see `unregister` below). Every one of these steps is already
@@ -63,6 +90,7 @@ pub fn destroy_plan_names(stack_name: &str) -> Vec<String> {
         "hostname guard".to_string(),
     ];
     v.extend(crate::ops::backup::backup_plan_names(stack_name));
+    v.push(VERIFY_RESTORE_STEP.to_string());
     v.push("stop container".to_string());
     v.push("lift protection".to_string());
     v.push("destroy container".to_string());
@@ -195,6 +223,7 @@ async fn destroy_impl<'a>(
         for name in &crate::ops::backup::backup_plan_names(stack_name) {
             scope.skip(name);
         }
+        scope.skip(VERIFY_RESTORE_STEP);
     } else if manifest.storage.is_empty() {
         // F210: said loudly rather than in silence — for a native stack
         // this is exactly wrong, since its state lives INSIDE the
@@ -211,6 +240,7 @@ async fn destroy_impl<'a>(
         for name in &crate::ops::backup::backup_plan_names(stack_name) {
             scope.skip(name);
         }
+        scope.skip(VERIFY_RESTORE_STEP);
     } else {
         let mut backup_scope = scope.child(format!("backup-{}", stack_name));
         crate::ops::backup::backup_impl(ctx, manifest, &ctx.backup, &mut backup_scope)
@@ -226,6 +256,41 @@ async fn destroy_impl<'a>(
                     )),
                 }
             })?;
+        let repos = crate::ops::restoredrill::drill_repos(&[(
+            manifest.storage.clone(),
+            stack_name.clone(),
+            Vec::new(),
+        )]);
+        scoped_step!(scope, VERIFY_RESTORE_STEP, {
+            for repo in &repos {
+                let target = restore_check_target(stack_name, repo);
+                let outcome =
+                    crate::ops::restoredrill::restore_and_judge(exec, &ctx.backup, repo, &target)
+                        .await;
+                let _ = exec.run(&Cmd::new("rm", &["-rf", &target], 300)).await;
+                match outcome {
+                    crate::ops::restoredrill::Outcome::Passed {
+                        files,
+                        largest_bytes,
+                    } => runner_info(
+                        ctx,
+                        format!(
+                            "[destroy] {} restores: {} file(s), largest {} bytes",
+                            repo, files, largest_bytes
+                        ),
+                    ),
+                    crate::ops::restoredrill::Outcome::Failed(why) => {
+                        return Err(CoreError::SafetyAbort(format!(
+                            "refusing to destroy '{}': the backup of '{}' does not restore :: {} \
+                             :: the container is untouched; pass --no-backup to destroy anyway, \
+                             which is a decision, not a retry",
+                            stack_name, repo, why
+                        )));
+                    }
+                }
+            }
+            Ok(StepOutcome::Unchanged)
+        });
     }
 
     // Stop the container (ignore "already stopped").

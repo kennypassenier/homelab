@@ -3248,6 +3248,7 @@ async fn a_destroy_backs_the_stack_up_before_it_removes_anything() {
     let exec = MockExecutor::new();
     mock_hostname(&exec, 108, "test");
     exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test\n"));
+    restorable(&exec);
     let sink = VecSink::new();
     let j = NullJournal;
     let report = destroy(
@@ -3274,6 +3275,53 @@ async fn a_destroy_backs_the_stack_up_before_it_removes_anything() {
         backup,
         gone
     );
+}
+
+/// The verify-restore step's mock answers: the restore returns three files,
+/// the largest 4096 bytes.
+fn restorable(exec: &MockExecutor) {
+    exec.respond_always("| wc -l", CmdOutput::ok("3\n"));
+    exec.respond_always("| tail -1", CmdOutput::ok("4096\n"));
+}
+
+/// CORRECTIONS 2026-10-02: home and uptime were destroyed on a backup nobody
+/// had restored. The destroy now restores what it just backed up, before the
+/// first irreversible step, and a backup that comes back empty stops it
+/// while the container still exists.
+#[tokio::test]
+async fn a_backup_that_does_not_restore_stops_the_destroy() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always("pct config", CmdOutput::ok("hostname: 108-app-test\n"));
+    exec.respond_always("| wc -l", CmdOutput::ok("0\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = destroy(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        "test",
+        false,
+    )
+    .await;
+    assert!(!report.ok, "an unrestorable backup must stop the destroy");
+    let err = report.error.unwrap();
+    assert!(err.why.contains("does not restore"), "{}", err.why);
+    assert_eq!(
+        exec.ran("pct", &["stop"]),
+        0,
+        "the container is not even stopped"
+    );
+    assert_eq!(exec.ran("pct", &["destroy"]), 0, "nothing may be removed");
+    let calls = exec.calls();
+    let restore = calls
+        .iter()
+        .position(|c| c.contains("restic restore latest"))
+        .expect("the check restores");
+    let cleanup = calls
+        .iter()
+        .rposition(|c| c.contains("rm -rf") && c.contains("destroy-test-"))
+        .expect("and removes the scratch copy");
+    assert!(restore < cleanup);
 }
 
 /// And when that backup fails, nothing is destroyed. A backup you may skip

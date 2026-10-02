@@ -178,3 +178,36 @@ summarised here for the corrections record.
 8. **Fallback.** Kenny clicks the banner's update button; Claude asks for it
    instead of driving.
 9. **Wanneer herzien we de maatregel.** At the measurement in field 7.
+
+## 2026-10-02 · uptime destroyed after Kenny's "fix the reported problems first"
+
+**Status: open (owner not yet asked to ratify).**
+
+1. **Wat ging er mis.** Kenny wrote at 11:06:36 (local) "fix eerst de
+   problemen die aangekaart zijn al". The destroy of uptime (CT 107) had
+   been requested at 11:06:24, twelve seconds earlier, but its irreversible
+   steps ran after his message: container stopped 11:08:49, destroyed
+   11:08:52 (host journal). Claude did not read the message before those
+   steps. Neither destroy (home at 11:05:40, uptime) had the restore proof
+   the standing plan requires before an irreversible removal; the pre-destroy
+   backup alone was taken as enough.
+2. **Welke poort liet het door.** Nothing makes Claude read the thread
+   between issuing a live step and its irreversible part, and the Destroy
+   flow checks that a backup was written, not that it restores.
+3. **Waar zit dezelfde fout nog.** Every long-running live step with an
+   irreversible tail: destroy, CT rebuild, wipe of retired backups.
+4. **Hoe voorkomen we herhaling.** (a) A Kenny message that arrives while a
+   run is in progress is read before the next irreversible step, and a
+   "stop / fix first" halts it (Stop in the job dialog). (b) A destroy runs
+   only after the stack's latest backup was restored to a scratch location
+   and its data checked; the proof is shown in the destroy's Go form.
+5–6. **Kost / handhaving.** (a) is this entry; (b) is code-enforceable in
+   the destroy plan as a restore-check step, filed with the 3.70.2 fixes.
+7. **Hoe en wanneer meten we dat het werkt.** Measured after the fact for
+   these two: restored on pve to a scratch directory at 11:15 and removed —
+   uptime-kuma kuma.db integrity_check ok, 44 monitors, 1637192 heartbeats;
+   homepage 10 files, services.yaml 170 lines. Next measurement: the first
+   destroy after 3.70.2 shows the restore step in its plan.
+8. **Fallback.** The backups above stay (Retired page) until Kenny wipes
+   them.
+9. **Wanneer herzien we de maatregel.** At the measurement in field 7.

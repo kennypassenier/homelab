@@ -6472,103 +6472,10 @@ async fn run_restore_drill(
     target: &str,
     pg: Option<&homelab_core::ops::restoredrill::PostgresCheck>,
 ) -> homelab_core::ops::restoredrill::Outcome {
-    use homelab_core::ops::restoredrill::{Outcome, verdict};
-    let _ = exec.run(&Cmd::new("rm", &["-rf", target], 120)).await;
-    let restored = homelab_core::ops::backup::restore_into(exec, cfg, repo, target).await;
-    let outcome = match restored {
-        Err(e) => Outcome::Failed(format!("the restore itself failed: {}", e)),
-        Ok(()) => {
-            let count = exec
-                .run(&Cmd::new(
-                    "sh",
-                    &["-c", &format!("find {} -type f | wc -l", target)],
-                    120,
-                ))
-                .await
-                .map(|o| o.stdout.trim().parse::<usize>().unwrap_or(0))
-                .unwrap_or(0);
-            let largest = exec
-                .run(&Cmd::new(
-                    "sh",
-                    &[
-                        "-c",
-                        &format!(
-                            "find {} -type f -printf '%s\\n' 2>/dev/null | sort -n | tail -1",
-                            target
-                        ),
-                    ],
-                    120,
-                ))
-                .await
-                .map(|o| o.stdout.trim().parse::<u64>().unwrap_or(0))
-                .unwrap_or(0);
-            // fix-62: a native unit's backup is one tar; a torn one has
-            // content and passed the size rule, so each must also list.
-            let unreadable: Vec<String> = exec
-                .run(&Cmd::new(
-                    "sh",
-                    &[
-                        "-c",
-                        &format!(
-                            "find {} -type f -name '*.tar' | while read -r f; do \
-                             tar -tf \"$f\" >/dev/null 2>&1 || echo \"$f\"; done",
-                            target
-                        ),
-                    ],
-                    600,
-                ))
-                .await
-                .map(|o| {
-                    o.stdout
-                        .lines()
-                        .map(|l| l.trim().to_string())
-                        .filter(|l| !l.is_empty())
-                        .collect()
-                })
-                .unwrap_or_default();
-            // fix-62: every restored SQLite database (found by content, not
-            // by name, so no app is named here) must pass its own integrity
-            // check — a file restic restored without error can still be a
-            // corrupt database. Silent when `sqlite3` is not on the host
-            // (an older template): that is a gap in what this drill can
-            // prove, not a failed drill.
-            let bad_sqlite: Vec<(String, String)> = exec
-                .run(&Cmd::new(
-                    "sh",
-                    &[
-                        "-c",
-                        &format!(
-                            "command -v sqlite3 >/dev/null 2>&1 || exit 0; \
-                             find {} -type f | while read -r f; do \
-                             magic=$(head -c 16 \"$f\" 2>/dev/null); \
-                             case \"$magic\" in \
-                             'SQLite format 3'*) \
-                             out=$(sqlite3 \"$f\" 'PRAGMA integrity_check;' 2>&1); \
-                             [ \"$out\" = ok ] || printf '%s\\t%s\\n' \"$f\" \"$out\" ;; \
-                             esac; done",
-                            target
-                        ),
-                    ],
-                    600,
-                ))
-                .await
-                .map(|o| {
-                    o.stdout
-                        .lines()
-                        .filter_map(|l| l.split_once('\t'))
-                        .map(|(p, why)| (p.to_string(), why.trim().to_string()))
-                        .collect()
-                })
-                .unwrap_or_default();
-            homelab_core::ops::restoredrill::with_sqlite_checks(
-                homelab_core::ops::restoredrill::with_archives(
-                    verdict(count, largest),
-                    &unreadable,
-                ),
-                &bad_sqlite,
-            )
-        }
-    };
+    use homelab_core::ops::restoredrill::Outcome;
+    // The restore and the generic checks live in core, shared with the
+    // destroy's restore-check (`restoredrill::restore_and_judge`).
+    let outcome = homelab_core::ops::restoredrill::restore_and_judge(exec, cfg, repo, target).await;
     // fix-62: a stack that declares a Postgres dump (`postgres_check_image`
     // on the mount) gets a throwaway Postgres restore check — only when the
     // ordinary checks above already passed, because a throwaway container

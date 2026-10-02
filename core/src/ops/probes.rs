@@ -29,8 +29,14 @@ pub fn register(
     state.probes.retain(|_, r| r.stack != stack);
     for (app, sc) in checks {
         for p in &sc.probes {
+            // fix-182: an explicit `id:` is a stable reference the same way
+            // a manual check's is, but probes carry no answer of their own
+            // (the whole stack's probe set is replaced on every deploy,
+            // right above) — so there is nothing to migrate, only a nicer
+            // name to register under.
+            let id = p.id.clone().unwrap_or_else(|| id_for(stack, app, &p.name));
             state.probes.insert(
-                id_for(stack, app, &p.name),
+                id,
                 ProbeRecord {
                     stack: stack.to_string(),
                     app: app.clone(),

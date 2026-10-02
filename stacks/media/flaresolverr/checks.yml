@@ -21,4 +21,5 @@ probes:
     command: "wget -qO- http://localhost:8191/health | jq -r .status"
     healthy: {equals: "ok"}
     layer: application
+    id: flaresolverr-healthy
     blind_spot: "FlareSolverr answers; whether Cloudflare lets it through shows in Prowlarr's indexer status"

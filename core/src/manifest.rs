@@ -1320,6 +1320,10 @@ pub fn validate(spec: &DeploySpec) -> Result<(), CoreError> {
             problems.push(format!("checks for '{}': {}", app, problem));
         }
     }
+    // fix-182: an explicit `id:` is the check's identity, so two checks
+    // sharing one would make two different questions carry one answer.
+    // Checked across the whole stack, not per app — see `id_problems`'s doc.
+    problems.extend(crate::checks::id_problems(&spec.checks));
 
     for f in &spec.files {
         if f.path.contains("..") || f.path.starts_with('/') {

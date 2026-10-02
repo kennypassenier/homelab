@@ -12,7 +12,11 @@ checks:
       that — it is in the manual list.
 
 manual:
-  - "Send a test message through the chain and check whether it arrives in Home Assistant. Every link reports itself healthy, even on the day the chain was broken in the middle."
+  # fix-182: explicit id, with `replaces` carrying over the answer this
+  # check held under the hash of its pre-translation Dutch text (fix-178).
+  - text: "Send a test message through the chain and check whether it arrives in Home Assistant. Every link reports itself healthy, even on the day the chain was broken in the middle."
+    id: kyu-runner-test-message-reaches-home-assistant
+    replaces: ["e576228c"]
 
 # checks-automate (Kenny, 2026-09-30: "Alles wat kan"): what a machine can
 # measure of the question above, in every fleet check. Tried once for real on
@@ -24,4 +28,5 @@ probes:
       wget -qO- http://10.10.10.9:8082/metrics | awk '/^kyu_runner_nacked_total/{n+=$2} END{printf "%d\n", n}'
     healthy: {equals: "0"}
     layer: application
+    id: kyu-runner-messages-refused-by-home-assistant
     blind_spot: "HA accepted each message; that the right automation acted on it is the question above"

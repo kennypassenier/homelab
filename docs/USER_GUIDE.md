@@ -3191,6 +3191,29 @@ registration at all (`core/src/ops/deploy.rs:2944`,
 `core/src/ops/manualchecks.rs:69-74`), and the old questions stay until the
 stack is destroyed or forgotten (`core/src/ops/destroy.rs:298`).
 
+Without an `id:` field that "short id" is `hash(stack/app/text)` — which
+means fixing a typo, or translating the question, is a new check as far as
+the state file is concerned: the old answer is simply gone (fix-178, which
+reset every manual check's answer in one commit by translating `checks.yml`
+from Dutch to English, including two `once: true` ones that were already
+answered). fix-182 is the fix: give the check an explicit, stable,
+human-readable `id:`, and it IS the identity from then on, however the text
+changes. Ids must be unique across the whole stack (every app's manual
+checks together, and separately every app's probes together) — the deploy
+refuses to apply a stack whose `checks.yml` files reuse one
+(`core/src/checks.rs::id_problems`, wired into `manifest::validate`).
+
+A check that already carried answered state under the old hash needs one
+more thing: `replaces`, a one-time list of the previous hash id(s) it used
+to live under. On the first deploy after the id appears, the host moves that
+answer across to the new id and drops the old record
+(`core/src/ops/manualchecks.rs::register`); a later deploy with the same
+`replaces` is a no-op; there is no record left to move. Compute the old hash
+with `homelab_core::ops::manualchecks::id_for(stack, app, old_text)` against
+the text the check had before the edit that needed migrating, and remove
+`replaces` once satisfied it carried over — it is read-only, nothing in this
+codebase ever writes it back.
+
 ```bash
 homelab checks                              # list them
 homelab checks answer <id> ok               # record an answer
@@ -3218,9 +3241,12 @@ finding and `homelab checks` show it next to the question.
 
 ```yaml
 manual:
-  - "Speel een film af op de televisie en kijk of het beeld klopt."
-  - text: "Registreer een passkey na je eerste wachtwoord-login."
+  - text: "Play a movie on the television and check whether the picture looks right."
+    id: jellyfin-picture-looks-right-on-tv
+  - text: "Register a passkey after your first password login."
     once: true
+    id: jobtracker-passkey-registered
+    replaces: ["27473fb2"]   # one-time: the hash this check answered under before it had an id
 url: https://job.kp-soft.dev   # only when no router names the app
 ```
 
@@ -3242,13 +3268,14 @@ says what it must be, as a map with one key:
 
 ```yaml
 probes:
-  - name: "torrents op missingFiles"
+  - name: "torrents on missingFiles"
     command: |
       K=$(sed -n 's/^WebUI\\APIKey=//p' /appdata/downloader/qbittorrent-config/qBittorrent/qBittorrent.conf)
       docker exec qbittorrent curl -sf -H "Authorization: Bearer $K" \
         http://localhost:8080/api/v2/torrents/info | jq '[.[]|select(.state=="missingFiles")]|length'
     healthy: {equals: "0"}      # or {at_least: 1}, {at_most: 0}
     layer: application
+    id: qbittorrent-missing-files
     blind_spot: "what this does not prove"
 ```
 
@@ -3261,6 +3288,14 @@ drops the ones that left its files (`core/src/ops/probes.rs`); a destroy
 drops them all. 18 probes replaced or complemented manual questions on
 2026-09-30; each was run once for real, through `lxc-attach` as the host
 runs it, and read healthy.
+
+fix-182: `id:` works the same as a manual check's — a stable, human-readable
+reference in place of `hash(stack/app/probe-name)` — but a probe keeps no
+answer or acceptance state of its own (the whole set is replaced on every
+deploy, right above), so there is nothing to migrate and no `replaces:`
+field exists for probes. Giving one an id is purely so `homelab checks`
+and the nightly findings name it the same way every time, independent of a
+later rewording.
 
 ### The dashboard: Apps, Metrics and the minute watch
 

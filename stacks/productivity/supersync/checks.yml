@@ -24,4 +24,8 @@ checks:
       is what asks that.
 
 manual:
-  - "Open Super Productivity on your phone and on the desktop and check whether a task you create on one appears on the other. The websocket connection count in /health counts clients, not whether their sync is correct."
+  # fix-182: explicit id, with `replaces` carrying over the answer this
+  # check held under the hash of its pre-translation Dutch text (fix-178).
+  - text: "Open Super Productivity on your phone and on the desktop and check whether a task you create on one appears on the other. The websocket connection count in /health counts clients, not whether their sync is correct."
+    id: supersync-task-syncs-across-devices
+    replaces: ["521d88ad"]

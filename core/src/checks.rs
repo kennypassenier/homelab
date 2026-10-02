@@ -21,6 +21,8 @@
 //! (Kenny, form J2). Uptime Kuma left the gateway the same day this was
 //! decided, which is the argument in one sentence.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// How a measurement is allowed to change between the two readings.
@@ -146,6 +148,15 @@ pub struct Probe {
     /// What this probe does NOT prove, in one line.
     #[serde(default)]
     pub blind_spot: Option<String>,
+    /// fix-182: a stable, human-readable reference (`id: jobtracker-passkey-registered`)
+    /// in place of the implicit `stack/app/probe-name` hash. A probe keeps no
+    /// answer or acceptance state of its own (its record is replaced whole on
+    /// every deploy, `probes::register`), so renaming one loses nothing —
+    /// this field exists only so a probe can be pointed at from outside
+    /// `checks.yml` without relying on the hash. No migration is needed for
+    /// probes; `manualchecks.rs`'s doc comment says why.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
 }
 
 /// What a probe's reading must be. Written in checks.yml as a map with one
@@ -227,6 +238,17 @@ impl Healthy {
 /// One question only a person can answer: the plain text, or the text with
 /// `once: true` for something done a single time (register a passkey), which
 /// an `ok` answers for good (checks-onetime, Kenny, 2026-09-30).
+///
+/// fix-182: a check's identity used to be purely `hash(stack/app/text)`
+/// (`manualchecks::id_for`) — so fixing a typo, or translating the text
+/// (commit 763e7f76, every `checks.yml` Dutch to English in one sweep),
+/// silently started a brand new check and threw away any answer the old one
+/// held. `id` is the fix: an explicit, stable, human-readable name. When
+/// present it IS the identity (the plain-string `Text` form has none, and
+/// neither does a `Detailed` entry that leaves it out — both still fall back
+/// to the hash, so every `checks.yml` written before this stays valid).
+/// `replaces` is the one-time bridge for a check that already had answered
+/// state under the old hash: see `manualchecks::register`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ManualCheck {
@@ -235,6 +257,16 @@ pub enum ManualCheck {
         text: String,
         #[serde(default)]
         once: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        /// Previous ids (plain `hash(stack/app/text)` values, computed with
+        /// `manualchecks::id_for` against the text this check used to have)
+        /// whose answer should be carried over to `id` the next time this
+        /// stack deploys. One-time: meant to be removed again once the
+        /// carry-over has happened, which is why it is never written back
+        /// by anything in this codebase — only read.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        replaces: Vec<String>,
     },
 }
 
@@ -260,6 +292,23 @@ impl ManualCheck {
 
     pub fn once(&self) -> bool {
         matches!(self, ManualCheck::Detailed { once: true, .. })
+    }
+
+    /// The explicit identity, when this check declares one.
+    pub fn id(&self) -> Option<&str> {
+        match self {
+            ManualCheck::Text(_) => None,
+            ManualCheck::Detailed { id, .. } => id.as_deref(),
+        }
+    }
+
+    /// Previous hash-ids whose answer should carry over to this check's own
+    /// id. Always empty for a check with no explicit `id`.
+    pub fn replaces(&self) -> &[String] {
+        match self {
+            ManualCheck::Text(_) => &[],
+            ManualCheck::Detailed { replaces, .. } => replaces,
+        }
     }
 }
 
@@ -399,6 +448,51 @@ pub fn shortcomings(sc: &ServiceChecks) -> Vec<String> {
                 "'{}' only reaches {:?} and does not say what it fails to prove",
                 c.name, c.layer
             ));
+        }
+    }
+    out
+}
+
+/// fix-182: every explicit `id:` a stack's manual checks and probes declare
+/// must be unique — manual checks and probes are validated separately
+/// (`state.manual_checks` and `state.probes` are two different maps, so a
+/// collision between the two kinds is harmless, only a collision within one
+/// kind loses a record). A duplicate id would make two different questions
+/// share one answer, silently, which is worse than the hash collision this
+/// field exists to avoid. Checked across the whole stack (every app in
+/// `checks`), because the identity is what `homelab checks answer <id>`
+/// types — app-scoped uniqueness would still let two apps in the same stack
+/// clash.
+pub fn id_problems(checks: &BTreeMap<String, ServiceChecks>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen_manual: BTreeMap<String, String> = BTreeMap::new();
+    let mut seen_probe: BTreeMap<String, String> = BTreeMap::new();
+    for (app, sc) in checks {
+        for m in &sc.manual {
+            let Some(id) = m.id() else { continue };
+            if id.trim().is_empty() {
+                out.push(format!("'{}': manual check id must not be empty", app));
+                continue;
+            }
+            if let Some(first_app) = seen_manual.insert(id.to_string(), app.clone()) {
+                out.push(format!(
+                    "manual check id '{}' is used by both '{}' and '{}' — ids must be unique",
+                    id, first_app, app
+                ));
+            }
+        }
+        for p in &sc.probes {
+            let Some(id) = p.id.as_deref() else { continue };
+            if id.trim().is_empty() {
+                out.push(format!("'{}': probe id must not be empty", app));
+                continue;
+            }
+            if let Some(first_app) = seen_probe.insert(id.to_string(), app.clone()) {
+                out.push(format!(
+                    "probe id '{}' is used by both '{}' and '{}' — ids must be unique",
+                    id, first_app, app
+                ));
+            }
         }
     }
     out

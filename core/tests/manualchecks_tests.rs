@@ -40,6 +40,8 @@ fn q(app: &str, text: &str) -> Question {
         text: text.into(),
         once: false,
         url: None,
+        id: None,
+        replaces: Vec::new(),
     }
 }
 
@@ -85,6 +87,110 @@ fn registering_twice_does_not_forget_an_answer() {
     assert_eq!(r.ok, Some(true));
     assert_eq!(r.note, "checked on the tv");
     assert_eq!(r.registered_at, 100, "nor rewrite when it first appeared");
+}
+
+/// fix-182: the scenario fix-178 actually hit. A check answered under the
+/// old `hash(stack/app/dutch_text)` id must end up under its new, explicit
+/// id once `checks.yml` gives it one and names the old hash in `replaces`
+/// — the whole point being that a translation (or any other wording fix)
+/// no longer throws the answer away.
+#[test]
+fn a_check_given_an_id_carries_its_answer_over_from_the_replaced_hash() {
+    let mut st = state_with_stack(100);
+
+    // The check as it was before fix-178: no id, so it lived under the hash
+    // of its (here, stand-in) Dutch text.
+    let old_hash = id_for("kp-soft", "jobtracker", "Registreer een passkey …");
+    register(
+        &mut st,
+        "kp-soft",
+        &[q("jobtracker", "Registreer een passkey …")],
+        100,
+    );
+    assert!(answer(&mut st, &old_hash, true, "done", 150));
+    assert_eq!(st.manual_checks.len(), 1);
+
+    // The translated check, now carrying an explicit id and `replaces`
+    // naming that same old hash — exactly what fix-182 adds to checks.yml.
+    let new_question = Question {
+        app: "jobtracker".into(),
+        text: "Register a passkey …".into(),
+        once: true,
+        url: None,
+        id: Some("jobtracker-passkey-registered".into()),
+        replaces: vec![old_hash.clone()],
+    };
+    register(&mut st, "kp-soft", &[new_question], 200);
+
+    assert!(
+        !st.manual_checks.contains_key(&old_hash),
+        "the old record must not survive the migration under its own id"
+    );
+    let r = st
+        .manual_checks
+        .get("jobtracker-passkey-registered")
+        .expect("the answer must now sit under the new, explicit id");
+    assert_eq!(r.ok, Some(true), "the answer itself carries over");
+    assert_eq!(r.answered_at, Some(150), "and when it was given");
+    assert_eq!(r.note, "done");
+    assert_eq!(
+        st.manual_checks.len(),
+        1,
+        "one check, not two — the old record must not linger: {:?}",
+        st.manual_checks.keys().collect::<Vec<_>>()
+    );
+
+    // A second deploy after the migration must not re-read the (now gone)
+    // old record and must not disturb the carried-over answer.
+    let new_question_again = Question {
+        app: "jobtracker".into(),
+        text: "Register a passkey …".into(),
+        once: true,
+        url: None,
+        id: Some("jobtracker-passkey-registered".into()),
+        replaces: vec![old_hash],
+    };
+    register(&mut st, "kp-soft", &[new_question_again], 300);
+    let r = &st.manual_checks["jobtracker-passkey-registered"];
+    assert_eq!(r.ok, Some(true));
+    assert_eq!(r.answered_at, Some(150), "still the original answer time");
+}
+
+/// A check with an explicit `id` and no `replaces` (the normal case for a
+/// check that never had answered state, or whose migration already ran)
+/// behaves exactly like one with no id at all, just under a nicer name.
+#[test]
+fn an_id_with_no_replaces_is_just_a_nicer_name() {
+    let mut st = state_with_stack(100);
+    let question = Question {
+        app: "jellyfin".into(),
+        text: "is the picture right".into(),
+        once: false,
+        url: None,
+        id: Some("jellyfin-picture-ok".into()),
+        replaces: Vec::new(),
+    };
+    register(&mut st, "media", &[question], 100);
+    assert!(st.manual_checks.contains_key("jellyfin-picture-ok"));
+    assert!(answer(&mut st, "jellyfin-picture-ok", true, "", 200));
+    register(
+        &mut st,
+        "media",
+        &[Question {
+            app: "jellyfin".into(),
+            text: "is the picture right".into(),
+            once: false,
+            url: None,
+            id: Some("jellyfin-picture-ok".into()),
+            replaces: Vec::new(),
+        }],
+        300,
+    );
+    assert_eq!(
+        st.manual_checks["jellyfin-picture-ok"].answered_at,
+        Some(200),
+        "a redeploy must not forget the answer, same as the hash-id path"
+    );
 }
 
 #[test]

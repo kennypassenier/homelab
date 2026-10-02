@@ -49,4 +49,5 @@ probes:
       docker exec syncthing sh -c 'K=$(sed -n "s:.*<apikey>\(.*\)</apikey>.*:\1:p" /var/syncthing/config/config.xml); printf "header = \"X-API-Key: %s\"\n" "$K" | curl -sf -K - "http://127.0.0.1:8384/rest/db/status?folder=obsidian-vault"' | jq -r '"\(.state)/\(.needTotalItems)/\(.errors)"'
     healthy: {equals: "idle/0/0"}
     layer: application
+    id: syncthing-obsidian-vault-sync-status
     blind_spot: "this device's view; a remote device that stopped syncing shows in its own status"

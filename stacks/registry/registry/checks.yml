@@ -32,4 +32,8 @@ checks:
       counted here afterwards.
 
 manual:
-  - "After a rollout, check whether `[cache] … did not deliver` appears in the log. That is the fallback working, but it also means the cache did not deliver that image — twice in a row is a signal, not chance."
+  # fix-182: explicit id, with `replaces` carrying over the answer this
+  # check held under the hash of its pre-translation Dutch text (fix-178).
+  - text: "After a rollout, check whether `[cache] … did not deliver` appears in the log. That is the fallback working, but it also means the cache did not deliver that image — twice in a row is a signal, not chance."
+    id: registry-cache-fallback-logged
+    replaces: ["d90145d6"]

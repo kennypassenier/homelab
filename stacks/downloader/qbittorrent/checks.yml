@@ -51,6 +51,7 @@ probes:
       echo "$T" | jq '[.[]|select(.state=="missingFiles")]|length'
     healthy: {equals: "0"}
     layer: application
+    id: qbittorrent-missing-files
   # Read 2026-09-30: ok (nothing was downloading).
   - name: "active downloads moving"
     command: |
@@ -59,6 +60,7 @@ probes:
       echo "$T" | jq -r '[.[]|select(.state|test("^(downloading|stalledDL|metaDL|forcedDL)$"))] as $a | if ($a|length)==0 or ([$a[]|select(.dlspeed>0)]|length)>0 then "ok" else "stalled" end'
     healthy: {equals: "ok"}
     layer: application
+    id: qbittorrent-active-downloads-moving
     blind_spot: "one reading; a download that pauses for a moment reads stalled once"
   # Read 2026-09-30: 0.
   - name: "completed downloads outside /downloads/completed"
@@ -68,4 +70,5 @@ probes:
       echo "$T" | jq '[.[]|select(.progress==1 and ((.content_path // .save_path)|startswith("/downloads/completed")|not))]|length'
     healthy: {equals: "0"}
     layer: application
+    id: qbittorrent-completed-outside-downloads-folder
     blind_spot: "the path inside the container; that /downloads is the 18TB disk is the mount's question"

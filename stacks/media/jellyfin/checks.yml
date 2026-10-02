@@ -112,9 +112,17 @@ checks:
 # acknowledge, because a list he has to go and find is a list that does not
 # get read (form I2).
 manual:
-  - "Play a movie on the television and check whether the picture looks right."
-  - "Check whether the audio is in sync on an episode with AC3 sound."
-  - "Open a movie with burned-in subtitles and check whether they are readable."
+  # fix-182: explicit id on each, with `replaces` carrying over the answer
+  # this check held under the hash of its pre-translation Dutch text (fix-178).
+  - text: "Play a movie on the television and check whether the picture looks right."
+    id: jellyfin-picture-looks-right-on-tv
+    replaces: ["7da8e7ef"]
+  - text: "Check whether the audio is in sync on an episode with AC3 sound."
+    id: jellyfin-audio-in-sync-ac3
+    replaces: ["eb67174f"]
+  - text: "Open a movie with burned-in subtitles and check whether they are readable."
+    id: jellyfin-burned-in-subtitles-readable
+    replaces: ["08083062"]
 # checks-automate (Kenny, 2026-09-30: "Alles wat kan"): the questions a
 # machine can answer, measured in every fleet check. Tried once for real on
 # 2026-09-30, read-only; the reading then is in each probe's comment.
@@ -129,6 +137,7 @@ probes:
       echo $((A-P))
     healthy: {equals: "0"}
     layer: application
+    id: jellyfin-items-without-poster
   # Read 2026-09-30: 59561 bytes (resized; full size is larger).
   - name: "poster of the newest movie, bytes from the artwork disk"
     command: |
@@ -138,6 +147,7 @@ probes:
       wget -qO- "http://localhost:8096/Items/$ID/Images/Primary" | wc -c
     healthy: {at_least: 1}
     layer: user_visible
+    id: jellyfin-newest-movie-poster-bytes
     blind_spot: "one poster served by Jellyfin; the phone app itself is not asked"
 
 # O10 / app-knowledge (Kenny, 2026-09-30: "Alles verplaatsen"): is anybody

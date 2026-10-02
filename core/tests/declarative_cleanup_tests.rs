@@ -814,6 +814,164 @@ async fn an_adopted_unit_the_stack_never_declared_is_not_retired() {
     assert_eq!(load_state(&exec).await.stacks["syncthing"].natives.len(), 1);
 }
 
+/// fix-186 (live finding, 2026-10-02): a stack converted from a docker app to
+/// a native unit under the same name — exactly what the 3.70.0 deploy did to
+/// `admin` and `almanac` — is not a departure. The name is still declared,
+/// only under `natives:` now instead of `apps:`, so it must never land in
+/// `HostState::retired`.
+/// covers: fix-186
+#[tokio::test]
+async fn deploying_a_native_only_stack_never_retires_its_native() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok(
+            "hostname: 120-app-admin\nprotection: 1\n\
+             mp0: /appdata/admin/admin-config,mp=/appdata/admin/admin-config\n\
+             onboot: 1\nstartup: order=50\n",
+        ),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
+    exec.respond_always("systemctl is-active admin", CmdOutput::ok("active\n"));
+
+    // Before: a plain docker app named "admin".
+    let before = manifest(120, "admin");
+    let mut st = HostState::default();
+    st.stacks.insert("admin".into(), record(&before));
+    seed_state(&exec, st).await;
+
+    // After: the same name, now a native unit instead of a docker app.
+    let mut after_manifest = before.clone();
+    after_manifest.apps = vec![];
+    after_manifest.storage = vec![];
+    after_manifest.native_only = true;
+    after_manifest.natives = vec!["admin".into()];
+    let mut sp = spec(120, "admin");
+    sp.manifest = after_manifest;
+    sp.gateway_route = None;
+    sp.files = vec![FileBlob {
+        path: "admin/admin.service".into(),
+        content: "[Unit]\nDescription=admin\n".into(),
+        mode: None,
+    }];
+
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &sp).await;
+    assert!(report.ok, "{:?}", report.error);
+
+    let after = load_state(&exec).await;
+    assert!(
+        after.retired.is_empty(),
+        "a native the stack still declares must never be retired: {:?}",
+        after.retired
+    );
+    assert_eq!(
+        after
+            .stacks
+            .get("admin")
+            .unwrap()
+            .manifest
+            .as_ref()
+            .unwrap()
+            .natives,
+        vec!["admin".to_string()],
+        "the stack manifest still declares its native"
+    );
+}
+
+/// fix-186: the 3.70.0 deploy already left a wrong `admin/admin` App record
+/// behind (the bug above, before the fix). The very next deploy of the same
+/// stack — which still declares `admin` as a native — must clear that stale
+/// record by itself; nothing manual (no `homelab wipe`) should be needed.
+/// covers: fix-186
+#[tokio::test]
+async fn a_redeploy_clears_a_wrong_app_record_whose_name_is_a_declared_native() {
+    let exec = MockExecutor::new();
+    exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always(
+        "pct config",
+        CmdOutput::ok("hostname: 120-app-admin\nprotection: 1\nonboot: 1\nstartup: order=50\n"),
+    );
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
+    exec.respond_always("systemctl is-active admin", CmdOutput::ok("active\n"));
+
+    let mut native_manifest = manifest(120, "admin");
+    native_manifest.apps = vec![];
+    native_manifest.storage = vec![];
+    native_manifest.native_only = true;
+    native_manifest.natives = vec!["admin".into()];
+    let mut rec = record(&native_manifest);
+    rec.natives = vec![native("admin", 120, "admin")];
+    let mut st = HostState::default();
+    st.stacks.insert("admin".into(), rec);
+    // The wrong record a buggy deploy left behind.
+    st.retired.insert(
+        "admin/admin".into(),
+        RetiredRecord {
+            kind: RetiredKind::App,
+            stack: "admin".into(),
+            name: "admin".into(),
+            vmid: 120,
+            retired_at: 5,
+            repos: vec!["admin-config".into()],
+            appdata: vec!["/appdata/admin/admin-config".into()],
+            vault: vec!["/var/lib/homelab/secrets/admin/admin.env".into()],
+        },
+    );
+    seed_state(&exec, st).await;
+
+    let mut sp = spec(120, "admin");
+    sp.manifest = native_manifest;
+    sp.gateway_route = None;
+    sp.files = vec![FileBlob {
+        path: "admin/admin.service".into(),
+        content: "[Unit]\nDescription=admin\n".into(),
+        mode: None,
+    }];
+
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &sp).await;
+    assert!(report.ok, "{:?}", report.error);
+
+    let after = load_state(&exec).await;
+    assert!(
+        !after.retired.contains_key("admin/admin"),
+        "a native declared again clears its stale app record by itself"
+    );
+}
+
+/// Regression guard: an app that really leaves the stack — not declared as
+/// an app and not picked up as a native under the same name — is still
+/// retired exactly as before.
+/// covers: fix-186
+#[tokio::test]
+async fn a_really_dropped_docker_app_is_still_retired() {
+    let exec = MockExecutor::new();
+    script_existing(&exec, 110, "syncthing", "");
+    let mut before = manifest(110, "syncthing");
+    before.apps = vec!["syncthing".into(), "oldapp".into()];
+    let mut st = HostState::default();
+    st.stacks.insert("syncthing".into(), record(&before));
+    seed_state(&exec, st).await;
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = deploy(&ctx(&exec, &sink, &j), &spec(110, "syncthing")).await;
+    assert!(report.ok, "{:?}", report.error);
+    let after = load_state(&exec).await;
+    let gone = after
+        .retired
+        .get("syncthing/oldapp")
+        .expect("a really dropped app is still retired");
+    assert_eq!(gone.kind, RetiredKind::App);
+}
+
 // ── 9 · a mount the stack no longer declares is detached ────────────────────
 
 /// `Loskoppelen`: `pct set --delete mpN` under lifted protection; the host
@@ -1210,13 +1368,19 @@ fn retired_rows_carries_key_kind_and_the_wipe_plans_in_use_split() {
             "/appdata/other/shared-config".to_string()
         ]
     );
+    // Wipeable: `wipe_plan` would proceed (with the above kept), so this is
+    // not a refused row.
+    assert_eq!(row.refused, None);
 }
 
 /// covers: feat-retired-1 — a record whose stack is managed again (stale,
-/// `wipe_plan` refuses) still shows up with an empty `in_use`, not a panic
-/// or a dropped row: the page is a listing, the refusal is the wipe's.
+/// `wipe_plan` refuses the WHOLE key) still shows up, not a panic or a
+/// dropped row: the page is a listing. `in_use` stays empty (nothing of
+/// this record would be partially kept — none of it would be touched at
+/// all), and `refused` carries `wipe_plan`'s own reason, which is what the
+/// page shows instead of a Wipe button.
 #[test]
-fn retired_rows_keeps_a_stale_record_with_empty_in_use() {
+fn retired_rows_marks_a_stale_record_refused_not_removable() {
     let mut st = HostState::default();
     st.retired.insert("back".into(), retired_drill());
     st.stacks
@@ -1227,6 +1391,66 @@ fn retired_rows_keeps_a_stale_record_with_empty_in_use() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].key, "back");
     assert!(rows[0].in_use.is_empty());
+    assert!(rows[0].refused.is_some(), "{:?}", rows[0]);
+}
+
+/// covers: live-finding 2026-10-02 (pve state.json, read-only): a deploy bug
+/// (fixed separately) wrongly recorded "admin/admin" and "almanac/almanac"
+/// as a retired App, while the admin/almanac stacks are live, fully-native
+/// stacks ("a stack has either `manifest` or `natives`, never both" —
+/// `StackState::natives`, no `StackManifest` at all). Before this guard,
+/// `wipe_plan`'s "is it back in its stack" check only looked at `st.apps`
+/// (compose apps) and `st.manifest.natives` (a compose stack's DECLARED
+/// native sidecars) — neither exists for a fully-native stack, so nothing
+/// stopped `homelab wipe admin/admin` from deleting admin's own still-live
+/// restic repository, /appdata directory and vault copy. `wipe_plan` must
+/// refuse this regardless of how the record was wrongly created.
+#[test]
+fn wipe_plan_refuses_a_live_native_units_record_even_with_no_manifest_at_all() {
+    let mut st = HostState::default();
+    st.retired.insert(
+        "admin/admin".into(),
+        RetiredRecord {
+            kind: RetiredKind::App,
+            stack: "admin".into(),
+            name: "admin".into(),
+            vmid: 120,
+            retired_at: NOW,
+            repos: vec!["admin-config".into()],
+            appdata: vec!["/appdata/admin/admin-config".into()],
+            vault: vec![format!("{}/secrets/admin/admin.env", STATE)],
+        },
+    );
+    st.stacks.insert(
+        "admin".into(),
+        StackState {
+            pushed_file_hashes: std::collections::BTreeMap::new(),
+            applied_source: None,
+            vmid: 120,
+            hostname: "120-app-admin".into(),
+            apps: Vec::new(),
+            applied_at: NOW,
+            last_backup: NOW,
+            applied_hash: String::new(),
+            manifest: None,
+            enabled: true,
+            natives: vec![native("admin", 120, "admin")],
+            incomplete_step: None,
+            route_file: None,
+            extra_route_files: Vec::new(),
+        },
+    );
+
+    let err = homelab_core::ops::retired::wipe_plan(&st, "admin/admin", STATE)
+        .expect_err("a live native unit's record must never be wipeable");
+    assert!(err.contains("back in stack"), "{err}");
+
+    // Same guard reaches the Retired page's listing: refused, nothing
+    // claimed removable or even partially kept.
+    let rows = homelab_core::ops::retired::retired_rows(&st, STATE);
+    let row = rows.iter().find(|r| r.key == "admin/admin").unwrap();
+    assert!(row.in_use.is_empty());
+    assert!(row.refused.is_some(), "{:?}", row);
 }
 
 /// covers: ask-9

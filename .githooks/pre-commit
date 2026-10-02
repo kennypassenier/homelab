@@ -65,6 +65,23 @@ if [ -x "$root/.githooks/gate-stamp" ] \
   exit 0
 fi
 
+# Generated docs follow the code they describe (2026-10-02: TEST_PLAN.md went
+# stale three times in one morning, each found only by a failing gate). When
+# the commit touches code or stack files, regenerate them from this tree and
+# stage the result, so the commit carries docs that match it. A generator
+# that fails leaves the file alone; the staleness test still catches it.
+if git diff --cached --name-only | grep -qE '\.rs$|^stacks/|^admin/web/|^docs/INVARIANTS\.md$'; then
+  for gen in testplan update-policy "runbook docs/DR_RUNBOOK.md"; do
+    cargo run -q -p homelab-client --bin homelab -- $gen </dev/null >/dev/null 2>&1 || true
+  done
+  for doc in docs/deployment/TEST_PLAN.md docs/deployment/UPDATE_POLICY.md docs/DR_RUNBOOK.md; do
+    if [ -f "$doc" ] && ! git diff --quiet -- "$doc"; then
+      git add -- "$doc"
+      echo "pre-commit: regenerated and staged $doc"
+    fi
+  done
+fi
+
 # Single source of truth: the same script the session hook runs.
 gates="$root/.claude/hooks/gates.sh"
 if [ ! -x "$gates" ]; then

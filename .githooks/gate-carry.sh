@@ -169,7 +169,7 @@ cmd_rust() {
   mkdir -p "$state"
   local cur_tc; cur_tc="$(rustc -V 2>/dev/null || echo 'rustc none')"
   local workdir; workdir=$(mktemp -d)
-  trap 'rm -rf "$workdir"' RETURN
+  trap 'rm -rf "${workdir:-}"; trap - RETURN' RETURN
 
   local base reason
   if [ "$force_full" = full ]; then
@@ -298,7 +298,7 @@ cmd_node() {
   mkdir -p "$state"
   local cur_tc; cur_tc="node $(node -v 2>/dev/null || echo none)"
   local workdir; workdir=$(mktemp -d)
-  trap 'rm -rf "$workdir"' RETURN
+  trap 'rm -rf "${workdir:-}"; trap - RETURN' RETURN
 
   local base reason
   if [ "$force_full" = full ]; then
@@ -364,7 +364,7 @@ cmd_invariants() {
   mkdir -p "$state"
   local cur_tc; cur_tc="node $(node -v 2>/dev/null || echo none)"
   local workdir; workdir=$(mktemp -d)
-  trap 'rm -rf "$workdir"' RETURN
+  trap 'rm -rf "${workdir:-}"; trap - RETURN' RETURN
 
   local base reason
   if [ "$force_full" = full ]; then

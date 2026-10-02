@@ -2,7 +2,7 @@
 # exactly in the middle of the alert chain, which is where that chain has
 # broken before without anything saying so.
 checks:
-  - name: "de switchboard is gezond"
+  - name: "the switchboard is healthy"
     command: "curl -s -m 10 -o /dev/null -w '%{http_code}' http://10.10.10.9:8083/healthz?strict=1"
     expect: must_match
     layer: application

@@ -3,7 +3,7 @@
 # stored here would be a secret in the wrong place, and one that would rot
 # unnoticed the way Jellyfin's did (F131).
 checks:
-  - name: "films onder beheer"
+  - name: "movies under management"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/radarr-config/config.xml);
       printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:7878/api/v3/movie |
@@ -14,7 +14,7 @@ checks:
       Counts what radarr knows about, not whether the files behind it are
       readable.
 
-  - name: "gezondheidsmeldingen"
+  - name: "health notifications"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/radarr-config/config.xml);
       printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:7878/api/v3/health |
@@ -25,7 +25,7 @@ checks:
       How many warnings there are, not whether they matter. Three failing
       indexers during the rebuild were all healthy an hour later.
 
-  - name: "root folder paden"
+  - name: "root folder paths"
     command: >-
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/radarr-config/config.xml);
       printf 'header = "X-Api-Key: %s"\n' "$K" | curl -s -m 40  -K - http://127.0.0.1:7878/api/v3/rootfolder |
@@ -42,7 +42,7 @@ checks:
 # 2026-09-30, read-only; the reading then is in each probe's comment.
 probes:
   # Read 2026-09-30: 0.
-  - name: "films buiten de root folders"
+  - name: "movies outside the root folders"
     command: |
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/radarr-config/config.xml)
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-Api-Key: $K" > "$C"

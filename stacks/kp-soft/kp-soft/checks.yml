@@ -1,12 +1,12 @@
 # The public site. It is the one container strangers can reach (K5), which
 # makes "does it serve the right thing" a different question from "is it up".
 checks:
-  - name: "de gezondheidspagina"
+  - name: "the health page"
     command: "curl -s -m 15 -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/up"
     expect: must_match
     layer: application
 
-  - name: "de startpagina levert inhoud"
+  - name: "the homepage delivers content"
     # A FLOOR, not a byte count. The count was `never_decreases` until
     # 2026-09-04, when a deploy that had not touched this application at all
     # stopped on it: the page had "fallen" from 30929 to 30854 bytes. Measured
@@ -29,4 +29,4 @@ checks:
       only a large collapse trips it: a page that lost a section stays "ok".
 
 manual:
-  - "Open kp-soft.dev van buiten het huisnetwerk. Dit is de enige stack die strangers kunnen bereiken, en van binnen meten zegt niets over wat zij zien."
+  - "Open kp-soft.dev from outside the home network. This is the only stack strangers can reach, and measuring from inside says nothing about what they see."

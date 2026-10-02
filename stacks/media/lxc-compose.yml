@@ -196,7 +196,7 @@ tiles:
       K=$(sqlite3 "file:/appdata/media/jellyfin-config/data/jellyfin.db?mode=ro" "select AccessToken from ApiKeys where Name='Homelab';")
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf 'header = Authorization: MediaBrowser Token="%s"\n' "$K" > "$C"
       wget --config="$C" -qO- http://localhost:8096/Items/Counts | jq -r '"\(.MovieCount) films, \(.SeriesCount) series"'
-      wget --config="$C" -qO- http://localhost:8096/Sessions | jq -r '[.[]|select(.NowPlayingItem != null)]|length|if . == 0 then empty else "\(.) aan het kijken" end'
+      wget --config="$C" -qO- http://localhost:8096/Sessions | jq -r '[.[]|select(.NowPlayingItem != null)]|length|if . == 0 then empty else "\(.) watching" end'
   seerr.kp-soft.dev:
     name: "Seerr"
     group: "Media"
@@ -205,7 +205,7 @@ tiles:
     reading: |
       K=$(sed -n 's/.*"apiKey": *"\([^"]*\)".*/\1/p' /appdata/media/seerr-config/settings.json | head -1)
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-Api-Key: $K" > "$C"
-      wget --config="$C" -qO- http://localhost:5055/api/v1/request/count | jq -r '"\(.pending) wachten op goedkeuring"'
+      wget --config="$C" -qO- http://localhost:5055/api/v1/request/count | jq -r '"\(.pending) awaiting approval"'
   son.kp-soft.dev:
     name: "Sonarr"
     group: "Media"
@@ -214,7 +214,7 @@ tiles:
     reading: |
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/sonarr-config/config.xml)
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-Api-Key: $K" > "$C"
-      wget --config="$C" -qO- 'http://localhost:8989/api/v3/queue?pageSize=1' | jq -r '"\(.totalRecords) in de wachtrij"'
+      wget --config="$C" -qO- 'http://localhost:8989/api/v3/queue?pageSize=1' | jq -r '"\(.totalRecords) in the queue"'
       wget --config="$C" -qO- http://localhost:8989/api/v3/series | jq -r '"\(length) series"'
   rad.kp-soft.dev:
     name: "Radarr"
@@ -224,7 +224,7 @@ tiles:
     reading: |
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/radarr-config/config.xml)
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-Api-Key: $K" > "$C"
-      wget --config="$C" -qO- 'http://localhost:7878/api/v3/queue?pageSize=1' | jq -r '"\(.totalRecords) in de wachtrij"'
+      wget --config="$C" -qO- 'http://localhost:7878/api/v3/queue?pageSize=1' | jq -r '"\(.totalRecords) in the queue"'
       wget --config="$C" -qO- http://localhost:7878/api/v3/movie | jq -r '"\(length) films"'
   prowl.kp-soft.dev:
     name: "Prowlarr"
@@ -234,7 +234,7 @@ tiles:
     reading: |
       K=$(sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /appdata/media/prowlarr-config/config.xml)
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-Api-Key: $K" > "$C"
-      wget --config="$C" -qO- http://localhost:9696/api/v1/indexer | jq -r '"\([.[]|select(.enable)]|length) indexeerders aan"'
+      wget --config="$C" -qO- http://localhost:9696/api/v1/indexer | jq -r '"\([.[]|select(.enable)]|length) indexers enabled"'
   baz.kp-soft.dev:
     name: "Bazarr"
     group: "Media"
@@ -243,4 +243,4 @@ tiles:
     reading: |
       K=$(awk '/^auth:/{f=1} f&&/apikey:/{print $2; exit}' /appdata/media/bazarr-config/config/config.yaml)
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-API-KEY: $K" > "$C"
-      wget --config="$C" -qO- http://localhost:6767/api/providers | jq -r '"\([.data[]|select(.status=="Good")]|length) providers actief"'
+      wget --config="$C" -qO- http://localhost:6767/api/providers | jq -r '"\([.data[]|select(.status=="Good")]|length) providers active"'

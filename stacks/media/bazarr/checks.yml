@@ -8,7 +8,7 @@
 # from Bazarr's own config on /appdata, the same source the Homepage widget
 # uses — not a copy that can go stale (F32).
 checks:
-  - name: "bereikbare arr-diensten"
+  - name: "reachable arr services"
     command: >-
       K=$(sed -n 's/^ *apikey: *//p' /appdata/media/bazarr-config/config/config.yaml | head -1);
       printf 'header = "X-API-KEY: %s"\n' "$K" | curl -sf -m 10  -K - http://127.0.0.1:6767/api/system/status
@@ -21,7 +21,7 @@ checks:
       leaves this at two while nothing is ever found again, which is what the
       manual check below is for.
 
-  - name: "bazarr antwoordt"
+  - name: "bazarr responds"
     command: "curl -s -m 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:6767/"
     expect: must_match
     layer: network
@@ -35,7 +35,7 @@ checks:
 # 2026-09-30, read-only; the reading then is in each probe's comment.
 probes:
   # Read 2026-09-30: 4.
-  - name: "providers met status Good"
+  - name: "providers with status Good"
     command: |
       K=$(awk '/^auth:/{f=1} f&&/apikey:/{print $2; exit}' /appdata/media/bazarr-config/config/config.yaml)
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf "header = %s\n" "X-API-KEY: $K" > "$C"

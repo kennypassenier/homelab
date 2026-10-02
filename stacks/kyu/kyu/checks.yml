@@ -7,14 +7,14 @@
 # 10.10.10.9, not localhost, which is worth writing down: probing 127.0.0.1
 # returned nothing and made a healthy service look dead once already.
 checks:
-  - name: "de hub kan naar zijn opslag schrijven"
+  - name: "the hub can write to its storage"
     command: >-
       curl -s -m 10 http://10.10.10.9:8080/healthz |
       grep -o '"store":"[a-z]*"' | cut -d'"' -f4
     expect: must_match
     layer: application
 
-  - name: "onderwerpen op de hub"
+  - name: "topics on the hub"
     command: >-
       curl -s -m 10 http://10.10.10.9:8080/metrics |
       grep '^kyu_topics ' | awk '{print $2}'
@@ -24,7 +24,7 @@ checks:
       Counts topics that exist, not topics anybody still publishes to. A topic
       nothing has written to in months counts the same as a busy one.
 
-  - name: "abonnementen"
+  - name: "subscriptions"
     command: >-
       curl -s -m 10 http://10.10.10.9:8080/metrics |
       grep '^kyu_subscriptions ' | awk '{print $2}'

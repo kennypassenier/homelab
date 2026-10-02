@@ -2,7 +2,7 @@
 # which is the one thing that must not change silently on a stack whose
 # policy is automatic.
 checks:
-  - name: "seerr versie"
+  - name: "seerr version"
     command: >-
       curl -sf -m 10 http://127.0.0.1:5055/api/v1/status
       | grep -oE '"version":"[^"]+"' | head -1
@@ -14,4 +14,4 @@ checks:
       returns this line unchanged.
 
 manual:
-  - "Doe één aanvraag in Seerr en kijk of Sonarr of Radarr hem oppikt. De koppeling naar beneden is het enige dat deze meting niet ziet."
+  - "Make one request in Seerr and check whether Sonarr or Radarr picks it up. The link downward is the only thing this measurement does not see."

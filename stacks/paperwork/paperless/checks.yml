@@ -7,7 +7,7 @@
 # one thing nobody would notice from the outside — the web page keeps
 # answering, the login keeps working, and the library is smaller.
 checks:
-  - name: "documenten in paperless"
+  - name: "documents in paperless"
     command: >-
       docker exec paperless-db psql -U paperless -d paperless -tAc
       "select count(*) from documents_document"
@@ -18,7 +18,7 @@ checks:
       original was deleted while its row survives counts here as present —
       the reverse of what F61 lost, and equally invisible.
 
-  - name: "de aanmeldpagina antwoordt"
+  - name: "the login page responds"
     command: "curl -s -m 15 -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/accounts/login/"
     expect: must_match
     layer: process
@@ -27,4 +27,4 @@ checks:
       down while this stays 200 — the count above is what asks that.
 
 manual:
-  - "Zoek na een herbouw op een woord dat je zeker in een document staan hebt. Volledige tekst zoeken gebruikt een index die apart van de database leeft, en een lege index geeft nul resultaten zonder één foutmelding."
+  - "After a rebuild, search for a word you know is in a document. Full-text search uses an index that lives separately from the database, and an empty index gives zero results without a single error message."

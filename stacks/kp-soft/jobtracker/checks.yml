@@ -11,7 +11,7 @@
 # passkeys in `.jobtracker/` inside it. A JobTracker that lost its clone
 # answers `/healthz` exactly the same as a healthy one.
 checks:
-  - name: "healthz antwoordt"
+  - name: "healthz responds"
     command: >-
       curl -s -o /dev/null -m 20 -w '%{http_code}' http://127.0.0.1:8787/healthz
     expect: must_match
@@ -21,7 +21,7 @@ checks:
       is reachable, that Almanac answers, or that any dossier can be read —
       the endpoint that knows those things sits behind the login.
 
-  - name: "de datarepo is uitgecheckt"
+  - name: "the data repo is checked out"
     command: >-
       test -d /appdata/kp-soft/jobtracker-config/repo/.git && echo ok || echo MISSING
     expect: must_match
@@ -30,7 +30,7 @@ checks:
       Only that a git checkout exists there. A checkout that is behind, or
       whose remote credential expired, looks identical from here.
 
-  - name: "dossiers in de bibliotheek"
+  - name: "dossiers in the library"
     command: >-
       find /appdata/kp-soft/jobtracker-config/repo -maxdepth 3 -name '*.md' -not -path '*/.git/*'
       2>/dev/null | wc -l
@@ -41,7 +41,7 @@ checks:
       them or shows them. A drop means something removed dossiers, which is
       the case worth catching.
 
-  - name: "eigen staat van de app"
+  - name: "the app's own state"
     command: >-
       test -d /appdata/kp-soft/jobtracker-config/repo/.jobtracker && echo ok || echo MISSING
     expect: must_match
@@ -52,7 +52,7 @@ checks:
       has to be set up again from scratch, and that is worth noticing before
       Kenny does.
 
-  - name: "laatste uur zonder fout"
+  - name: "last hour without an error"
     command: >-
       docker logs --since 1h jobtracker 2>&1 | grep -ciE '"level":"(error|fatal)"' || true
     expect: must_match
@@ -63,9 +63,9 @@ checks:
       readings above are what separate those two.
 
 manual:
-  - "Log één keer in op job.kp-soft.dev en kijk of je dossiers er staan. De metingen zien de bestanden, niet het scherm."
+  - "Log in once on job.kp-soft.dev and check whether your dossiers are there. The measurements see the files, not the screen."
   # checks-onetime (Kenny, 2026-09-30): answered ok once is answered for good.
-  - text: "Registreer een passkey na je eerste wachtwoord-login, anders blijft het wachtwoord de enige sleutel."
+  - text: "Register a passkey after your first password login, otherwise the password stays the only key."
     once: true
 
 # checks-automate (Kenny, 2026-09-30: "Alles wat kan"): what a machine can
@@ -73,7 +73,7 @@ manual:
 # 2026-09-30, read-only; the reading then is in each probe's comment.
 probes:
   # Read 2026-09-30: 2.
-  - name: "dossiers in de gegevens"
+  - name: "dossiers in the data"
     command: |
       docker exec jobtracker sh -c 'find /appdata/jobtracker/repo/applications -mindepth 2 -maxdepth 2 -type d ! -name ".*" | wc -l'
     healthy: {at_least: 1}

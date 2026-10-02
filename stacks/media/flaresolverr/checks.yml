@@ -2,7 +2,7 @@
 # reading and it is a good one: its own health endpoint says ok only when the
 # browser it drives actually started.
 checks:
-  - name: "flaresolverr gezond"
+  - name: "flaresolverr healthy"
     command: >-
       curl -sf -m 15 http://127.0.0.1:8191/health | grep -o '"status": "ok"'
     expect: must_be_present
@@ -17,7 +17,7 @@ checks:
 # 2026-09-30, read-only; the reading then is in each probe's comment.
 probes:
   # Read 2026-09-30: ok.
-  - name: "FlareSolverr gezond"
+  - name: "FlareSolverr healthy"
     command: "wget -qO- http://localhost:8191/health | jq -r .status"
     healthy: {equals: "ok"}
     layer: application

@@ -7,14 +7,14 @@
 # That is the difference between a reading at the network and one at the
 # application.
 checks:
-  - name: "supersync bereikt zijn database"
+  - name: "supersync reaches its database"
     command: >-
       curl -s -m 15 http://127.0.0.1:1900/health |
       grep -o '"db":"[a-z]*"' | cut -d'"' -f4
     expect: must_match
     layer: application
 
-  - name: "de webpagina antwoordt"
+  - name: "the web page responds"
     command: "curl -s -m 15 -o /dev/null -w '%{http_code}' http://127.0.0.1:1900/"
     expect: must_match
     layer: process
@@ -24,4 +24,4 @@ checks:
       is what asks that.
 
 manual:
-  - "Open Super Productivity op je telefoon en op de desktop en kijk of een taak die je op de een aanmaakt op de ander verschijnt. Het aantal websocket-verbindingen in /health telt clients, niet of hun synchronisatie klopt."
+  - "Open Super Productivity on your phone and on the desktop and check whether a task you create on one appears on the other. The websocket connection count in /health counts clients, not whether their sync is correct."

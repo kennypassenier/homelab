@@ -2,7 +2,7 @@
 # that were lost once before (F61) and that the documents on disk cannot
 # reconstruct — so "it accepts connections" is the floor, not the ceiling.
 checks:
-  - name: "database accepteert verbindingen"
+  - name: "database accepts connections"
     command: "docker exec paperless-db pg_isready | grep -o 'accepting connections'"
     expect: must_be_present
     layer: process
@@ -11,7 +11,7 @@ checks:
       database accepts connections exactly as happily; the row count below is
       the reading that would notice.
 
-  - name: "documenten in de database"
+  - name: "documents in the database"
     command: >-
       docker exec paperless-db psql -U paperless -d paperless -tAc
       'select count(*) from documents_document' 2>/dev/null || echo 0

@@ -10,7 +10,7 @@
 # `{"status": "OK"}` — which is exactly what the Uptime Kuma monitor asks —
 # and the container reports healthy. The service was up. It was not a service.
 checks:
-  - name: "mappen die syncthing synchroniseert"
+  - name: "folders syncthing synchronizes"
     command: >-
       docker exec syncthing sh -c 'K=$(grep -o "<apikey>[^<]*" /var/syncthing/config/config.xml | cut -d\> -f2);
       printf "header = \"X-API-Key: %s\"\\n" "$K" | curl -s -m 10 -K - http://127.0.0.1:8384/rest/config/folders |
@@ -18,7 +18,7 @@ checks:
     expect: never_decreases
     layer: application
 
-  - name: "apparaten die syncthing kent"
+  - name: "devices syncthing knows"
     command: >-
       docker exec syncthing sh -c 'K=$(grep -o "<apikey>[^<]*" /var/syncthing/config/config.xml | cut -d\> -f2);
       printf "header = \"X-API-Key: %s\"\\n" "$K" | curl -s -m 10 -K - http://127.0.0.1:8384/rest/config/devices |
@@ -29,7 +29,7 @@ checks:
       Devices it knows, not devices it reaches. A peer that is configured and
       has been off for a month counts here.
 
-  - name: "syncthing meldt zich gezond"
+  - name: "syncthing reports itself healthy"
     command: "curl -s -m 10 http://127.0.0.1:8384/rest/noauth/health"
     expect: must_match
     layer: process
@@ -44,7 +44,7 @@ checks:
 # 2026-09-30, read-only; the reading then is in each probe's comment.
 probes:
   # Read 2026-09-30: idle/0/0.
-  - name: "vault (obsidian-vault): toestand/nodig/fouten"
+  - name: "vault (obsidian-vault): state/needed/errors"
     command: |
       docker exec syncthing sh -c 'K=$(sed -n "s:.*<apikey>\(.*\)</apikey>.*:\1:p" /var/syncthing/config/config.xml); printf "header = \"X-API-Key: %s\"\n" "$K" | curl -sf -K - "http://127.0.0.1:8384/rest/db/status?folder=obsidian-vault"' | jq -r '"\(.state)/\(.needTotalItems)/\(.errors)"'
     healthy: {equals: "idle/0/0"}

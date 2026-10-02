@@ -57,11 +57,19 @@ pub const DOCKER_DAEMON_JSON: &str = r#"{
 /// never gets whatever the registry calls `latest` on the day it is cloned.
 /// The template pre-pulls this same reference; moving it is an edit of this
 /// line and of the compose below. Story: `docs/deployment/REGISTER.md`.
-pub const CADVISOR_IMAGE: &str = "gcr.io/cadvisor/cadvisor:v0.55.1@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57";
+///
+/// fix-228 (2026-10-02): v0.55.1 on gcr.io became v0.60.6 on
+/// ghcr.io/google/cadvisor, where upstream publishes since v0.56.0. The
+/// release notes v0.56.0..v0.60.6 change none of the three flags below nor
+/// the 8080 listen port; v0.56.0 drops docker older than 25.0 (the template
+/// installs docker-ce from get.docker.com), and v0.57.0 makes
+/// `container_start_time_seconds` the runtime start time, so the restart
+/// chart now also counts an in-place `docker restart`.
+pub const CADVISOR_IMAGE: &str = "ghcr.io/google/cadvisor:v0.60.6@sha256:b8e7d1093144fd088f425ff003d75a4aa405de075db78dae3bc563730b1bd07a";
 
 pub const CADVISOR_COMPOSE: &str = r#"services:
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.55.1@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
+    image: ghcr.io/google/cadvisor:v0.60.6@sha256:b8e7d1093144fd088f425ff003d75a4aa405de075db78dae3bc563730b1bd07a
     container_name: cadvisor
     restart: unless-stopped
     command:
@@ -86,8 +94,7 @@ pub const CADVISOR_COMPOSE: &str = r#"services:
     labels:
       - com.homelab.update.policy=manual
       # fix-83: where the nightly round asks whether this pin is behind.
-      # cAdvisor moved its images from gcr.io to ghcr.io/google/cadvisor after
-      # v0.55; the notice says a newer release exists, not that gcr.io has it.
+      # Upstream publishes on ghcr.io/google/cadvisor since v0.56 (fix-228).
       - com.homelab.update.upstream=github.com/google/cadvisor
 # No custom network on purpose: cadvisor has to run on EVERY docker host to
 # see that host's containers, and a stack network exists only on its own

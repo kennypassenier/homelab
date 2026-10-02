@@ -16,7 +16,7 @@ use homelab_core::ops::fleetcheck::{GrowthLimits, LiveFacts, Severity, check_pas
 use homelab_core::ops::pins::{
     RunningImage, UPSTREAM_MAX_AGE_S, UpstreamRelease, apply, evaluate_pins, gather, is_behind,
 };
-use homelab_core::state::{HostState, StackState};
+use homelab_core::state::{HostState, RetiredKind, RetiredRecord, StackState};
 
 const NOW: u64 = 1_790_000_000;
 const TRAEFIK_DIGEST: &str =
@@ -347,6 +347,111 @@ fn fix_83_an_upstream_that_could_not_be_asked_is_said_once() {
     assert_eq!(f.len(), 1, "{:#?}", f);
     assert_eq!(f[0].severity, Severity::Noted);
     assert!(f[0].what.contains("rate limit"), "{}", f[0].what);
+}
+
+fn retired(kind: RetiredKind, stack: &str, name: &str, vmid: u16) -> RetiredRecord {
+    RetiredRecord {
+        kind,
+        stack: stack.into(),
+        name: name.into(),
+        vmid,
+        retired_at: NOW,
+        repos: Vec::new(),
+        appdata: Vec::new(),
+        vault: Vec::new(),
+    }
+}
+
+/// A fleet whose nightly snapshot still holds what was retired during the
+/// day: the `uptime` stack (destroyed) and `metrics/grafana` (dropped from
+/// the stack's files), next to a live `metrics/cadvisor` — the 2026-10-02
+/// state of Kenny's Stale images table.
+fn fleet_after_retirements() -> HostState {
+    let mut s = fleet();
+    let cadvisor = || {
+        recorded(
+            "gcr.io/cadvisor/cadvisor:v0.55.1@sha256:aa",
+            Some("github.com/google/cadvisor"),
+        )
+    };
+    s.running_images.insert(
+        "uptime".into(),
+        BTreeMap::from([("cadvisor".to_string(), cadvisor())]),
+    );
+    s.retired.insert(
+        "uptime".into(),
+        retired(RetiredKind::Stack, "uptime", "uptime", 107),
+    );
+    s.running_images.insert(
+        "metrics".into(),
+        BTreeMap::from([
+            ("cadvisor".to_string(), cadvisor()),
+            (
+                "grafana".to_string(),
+                recorded(
+                    "grafana/grafana:13.2.1@sha256:aa",
+                    Some("github.com/grafana/grafana"),
+                ),
+            ),
+        ]),
+    );
+    s.retired.insert(
+        "metrics/grafana".into(),
+        retired(RetiredKind::App, "metrics", "grafana", 113),
+    );
+    s.upstream_releases
+        .insert("github.com/google/cadvisor".into(), release("v0.60.6"));
+    s.upstream_releases
+        .insert("github.com/grafana/grafana".into(), release("v13.2.3"));
+    s
+}
+
+/// covers: fix-227
+#[test]
+fn fix_227_a_retired_stack_or_app_is_not_reported_as_a_stale_image() {
+    let s = fleet_after_retirements();
+    let f = evaluate_pins(&s);
+    let subjects: Vec<&str> = f.iter().map(|x| x.subject.as_str()).collect();
+    assert_eq!(
+        subjects,
+        vec!["metrics/cadvisor"],
+        "only the live stack's live container: {:#?}",
+        f
+    );
+}
+
+/// covers: fix-227
+#[test]
+fn fix_227_the_nightly_apply_prunes_retired_apps_and_stacks_from_state() {
+    let mut s = fleet_after_retirements();
+    apply(&mut s, Default::default());
+    assert!(!s.running_images.contains_key("uptime"));
+    let metrics: Vec<&String> = s.running_images["metrics"].keys().collect();
+    assert_eq!(metrics, vec!["cadvisor"]);
+}
+
+/// covers: fix-227
+#[test]
+fn fix_227_destroying_a_stack_drops_its_recorded_images_at_once() {
+    let mut s = fleet_after_retirements();
+    s.retired.clear();
+    // What destroy's "update state" step does: the stack leaves state, then
+    // it is recorded as retired.
+    s.stacks.remove("metrics");
+    homelab_core::ops::retired::retire_stack(&mut s, "metrics", 113, None, &[], "/x", NOW);
+    assert!(!s.running_images.contains_key("metrics"));
+    assert!(!s.running_images.contains_key("uptime"));
+}
+
+/// covers: fix-227
+#[test]
+fn fix_227_an_app_that_is_declared_again_is_reported_again() {
+    let mut s = fleet_after_retirements();
+    // A redeploy brought grafana back but its retired record lingered: the
+    // stack's own list wins, so a live app is never hidden.
+    s.stacks.get_mut("metrics").unwrap().apps = vec!["grafana".into()];
+    let f = evaluate_pins(&s);
+    assert!(f.iter().any(|x| x.subject == "metrics/grafana"), "{:#?}", f);
 }
 
 /// covers: fix-83

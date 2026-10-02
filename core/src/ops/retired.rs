@@ -101,6 +101,8 @@ pub fn retire_stack(
             vault,
         },
     );
+    // fix-227: what the nightly round recorded it running goes with it.
+    crate::ops::pins::prune(state);
 }
 
 /// Record an app that left a stack which still exists. Keeps the first
@@ -112,6 +114,12 @@ pub fn retire_app(
     state_dir: &str,
     now: u64,
 ) {
+    // fix-227: the image the nightly round recorded for it goes now, not at
+    // the next round. (`pins::prune` cannot tell yet: the stack's own app
+    // list is replaced after this.)
+    if let Some(images) = state.running_images.get_mut(&prior.stack_name) {
+        images.remove(app);
+    }
     let key = format!("{}/{}", prior.stack_name, app);
     if state.retired.contains_key(&key) {
         return;

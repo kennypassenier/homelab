@@ -278,7 +278,13 @@ pub fn build_spec(dir: &Path) -> Result<DeploySpec, String> {
     // verifies. Best-effort and silent on failure beyond a note: a registry
     // having a bad evening must cost nothing more than staying unpinned for
     // this one deploy (the same stance D60 takes toward the cache itself).
-    for line in resolve_compose_digests(&mut spec.files) {
+    // fix-213: through `resolve_images_with`, the same function
+    // `stack_digest` now calls — see its doc comment.
+    let mut image_notes = Vec::new();
+    resolve_images_with(&mut spec, &mut image_notes, |registry, repository, tag| {
+        crate::pinexists::resolve_digest(registry, repository, tag)
+    });
+    for line in &image_notes {
         eprintln!("{}", line);
     }
     // fix-141: where these files came from, recorded by the host.
@@ -293,6 +299,26 @@ pub fn resolve_compose_digests(files: &mut [FileBlob]) -> Vec<String> {
     resolve_compose_digests_with(files, |registry, repository, tag| {
         crate::pinexists::resolve_digest(registry, repository, tag)
     })
+}
+
+/// fix-213 (fleet-check-and-apply-disagree-on-media): the one place that
+/// decides what a compose file's `image:` lines look like for comparison —
+/// called by `build_spec` (a real deploy, and `homelab apply`'s plan, which
+/// both build every declared stack's spec through this same function) AND by
+/// `stack_digest` (`homelab today`/`check`), so the two can never pin an
+/// image differently again. Before this, `stack_digest` hashed the compose
+/// file exactly as it reads on disk, while `build_spec` pinned every
+/// tag-only `image:` line to the digest its registry answers with right now
+/// (registry-cache-plaintext, 2026-10-01) before hashing it — so any app
+/// whose compose file names a tag instead of a digest (the normal case)
+/// hashed differently on each side forever, with nothing in the repository
+/// ever having changed. `resolve` is injected so a test can prove the two
+/// paths agree without reaching a real registry.
+fn resolve_images_with<F>(spec: &mut DeploySpec, notes: &mut Vec<String>, resolve: F)
+where
+    F: Fn(&str, &str, &str) -> Result<Option<String>, String> + Sync,
+{
+    notes.extend(resolve_compose_digests_with(&mut spec.files, resolve));
 }
 
 fn resolve_compose_digests_with<F>(files: &mut [FileBlob], resolve: F) -> Vec<String>
@@ -484,6 +510,72 @@ mod registry_cache_plaintext_tests {
         assert!(files[0].content.contains("@sha256:bbbb"));
         assert!(files[1].content.contains("@sha256:bbbb"));
     }
+
+    /// fix-213 (fleet-check-and-apply-disagree-on-media): a resolver standing
+    /// in for a registry that always answers — any registry, pinned or not,
+    /// reproduces the fault, since before this fix `stack_digest` ran no
+    /// resolver at all.
+    fn fix_213_resolve(
+        _registry: &str,
+        _repository: &str,
+        _tag: &str,
+    ) -> Result<Option<String>, String> {
+        Ok(Some("sha256:deadbeef".to_string()))
+    }
+
+    #[test]
+    fn fix_213_check_and_deploy_pin_the_same_compose_image_the_same_way() {
+        // Reproduces the media case measured 2026-10-02: a compose file
+        // naming a tag (the normal, unpinned case), nothing in the
+        // repository touched between the two builds, the same registry
+        // answer both times. Before fix-213, `stack_digest` (what `homelab
+        // today`/`check` sends) hashed the file exactly as written, while
+        // `build_spec` (what a deploy records in `StackState` via
+        // `component_digests`) pinned the image to a digest first — so this
+        // assertion fails on the old code even though the two sides agree on
+        // every byte of the repository.
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dir = std::env::temp_dir().join(format!("homelab-fix-213-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::copy(
+            repo.join("stacks/syncthing/lxc-compose.yml"),
+            dir.join("lxc-compose.yml"),
+        )
+        .unwrap();
+        std::fs::write(dir.join("traefik-routes.yml"), "http: {}\n").unwrap();
+        std::fs::create_dir_all(dir.join("syncthing")).unwrap();
+        let compose = "services:\n  syncthing:\n    image: syncthing/syncthing:1.27\n";
+        std::fs::write(dir.join("syncthing/docker-compose.yml"), compose).unwrap();
+        std::fs::write(dir.join("syncthing/.env"), "SECRET=x\n").unwrap();
+        std::fs::write(dir.join("syncthing/checks.yml"), "{}\n").unwrap();
+
+        // What a deploy would record (`build_spec`'s own sequence, minus
+        // native binaries and `.source`, which `component_digests` never
+        // hashes).
+        let mut notes = Vec::new();
+        let mut deployed_spec = spec_without_binaries(&dir, &mut notes, false).unwrap();
+        resolve_images_with(&mut deployed_spec, &mut notes, fix_213_resolve);
+        let deployed = homelab_core::manifest::component_digests(&deployed_spec);
+
+        // What the fleet check builds for the same directory, same resolver.
+        let checked = stack_digest_with(&dir, fix_213_resolve).expect("digest");
+
+        assert_eq!(
+            checked.component_digests.files, deployed.files,
+            "a compose file naming only a tag must hash the same for the fleet check and for \
+             what a deploy records — otherwise `homelab today` and `homelab apply --plan` \
+             disagree about every app that names a tag instead of a digest, as media's six apps \
+             did on 2026-10-02"
+        );
+        assert_ne!(
+            checked.files["syncthing/docker-compose.yml"],
+            homelab_core::manifest::sha256_hex(compose.as_bytes()),
+            "the file sent for comparison must be the pinned one, not the raw repository text"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci): the
@@ -558,7 +650,28 @@ pub fn stack_source(dir: &Path) -> Option<homelab_proto::SourceRev> {
 /// `fetch_secrets: false` — env and secret files are excluded from both the
 /// digests this produces and the comparison `evaluate_repo_drift` makes with
 /// them.
+///
+/// fix-213 (fleet-check-and-apply-disagree-on-media): also pins every
+/// tag-only `image:` line through `resolve_images_with` — the same step
+/// `build_spec` runs before a real deploy records `StackState`'s
+/// `component_digests`. Without it, every compose file naming a tag instead
+/// of a digest (the normal case) hashed differently here than it did at
+/// deploy time, forever, with nothing in the repository ever having changed:
+/// `evaluate_repo_drift`'s raw-spec-vs-raw-spec comparison (fix-201) is only
+/// as good as the two specs being built the same way.
 pub fn stack_digest(dir: &Path) -> Result<homelab_core::ops::fleetcheck::StackDigest, String> {
+    stack_digest_with(dir, |registry, repository, tag| {
+        crate::pinexists::resolve_digest(registry, repository, tag)
+    })
+}
+
+fn stack_digest_with<F>(
+    dir: &Path,
+    resolve: F,
+) -> Result<homelab_core::ops::fleetcheck::StackDigest, String>
+where
+    F: Fn(&str, &str, &str) -> Result<Option<String>, String> + Sync,
+{
     let stack = dir
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -585,7 +698,8 @@ pub fn stack_digest(dir: &Path) -> Result<homelab_core::ops::fleetcheck::StackDi
         });
     }
     let mut notes = Vec::new();
-    let spec = spec_without_binaries(dir, &mut notes, false)?;
+    let mut spec = spec_without_binaries(dir, &mut notes, false)?;
+    resolve_images_with(&mut spec, &mut notes, resolve);
     let files = spec
         .files
         .iter()

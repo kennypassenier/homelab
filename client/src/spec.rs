@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde::Deserialize;
 
-use homelab_proto::{DeploySpec, FileBlob, GatewayRoute, StackManifest};
+use homelab_proto::{CURRENT_CLIENT_SCHEMA, DeploySpec, FileBlob, GatewayRoute, StackManifest};
 
 use crate::pinexists::PIN_ASK_WIDTH;
 
@@ -840,6 +840,7 @@ fn spec_without_binaries(
         checks,
         native_binaries,
         native_manifests: native_manifests_for(dir),
+        client_schema: CURRENT_CLIENT_SCHEMA,
     })
 }
 

@@ -2548,19 +2548,18 @@ async fn rpc_exchange(
                 }
                 // The client refuses to send a mutating command to an older
                 // host, and says which command fixes it (the 2026-08-31
-                // data_mounts incident; the rule is in `link`).
+                // data_mounts incident; the rule is in `link`) — the host
+                // ignoring a field it predates is a separate, still-live
+                // risk this fix does not touch.
                 if let Some(why) = homelab_client::link::refuse_older_host(&req.command, &version) {
                     die(&why);
                 }
-                // fix-105 (older-client-no-warning, 2026-09-27): the other
-                // direction — a stale client may not change anything, and
-                // says so when it only reads.
-                if let Some(why) = homelab_client::link::refuse_older_client(&req.command, &version)
-                {
-                    die(&why);
-                }
-                if let Some(warn) = homelab_client::link::older_client_warning(&version) {
-                    eprintln!("{}! {}{}", C_YELLOW, warn, C_RESET);
+                // fix-199 (replaces fix-105's refusal): the other direction
+                // — a stale client — no longer refuses anything; the host's
+                // own field-keeping rule makes sending safe, so this is only
+                // ever a notice.
+                if let Some(notice) = homelab_client::link::older_client_notice(&version) {
+                    eprintln!("{}! {}{}", C_YELLOW, notice, C_RESET);
                 }
                 if !sent {
                     tx.send(Message::Text(serde_json::to_string(&req).unwrap().into()))

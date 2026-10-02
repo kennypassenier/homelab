@@ -21,7 +21,7 @@ use homelab_proto::UiStep;
 use serde::Serialize;
 
 use crate::core::actions::{ActionKind, HOST_TARGET, Refusal};
-use crate::core::drive::{DriveState, Family, action_form};
+use crate::core::drive::{DriveState, Family, TabCaps, action_form};
 use crate::core::driveedit::EditKind;
 
 /// How long a step is announced before it is taken, unless the dashboard's
@@ -299,31 +299,64 @@ pub fn stopped_refusal(step: &UiStep, who: &str) -> Refusal {
     )
 }
 
-/// fix-185: does this step need the driven tab's loaded page to match the
-/// client's own version before it is taken? Reading the screen never
-/// refuses (it changes nothing a stale page could get wrong); `Reload`
-/// itself is exempt — it is precisely the step that brings a stale tab
-/// current, so a version check would refuse the one step that fixes it;
-/// `Done` is exempt too — a drive has to be endable from a stale tab, never
-/// stuck needing the very reload that `done` would otherwise block.
-pub fn needs_version_match(step: &UiStep) -> bool {
-    !matches!(step, UiStep::State | UiStep::Reload | UiStep::Done)
+/// fix-199 (replaces fix-185's blanket version refusal; Kenny, 2026-10-02:
+/// "het enige wat een versie check moet doen is om ons te laten weten welke
+/// pagina's of commandos we kunnen gebruiken voor die versie, dat moet niks
+/// tegenhouden" — a version check informs, it never blocks): the capability
+/// this step needs from the tab it will act on, if it needs one at all.
+/// `Goto` needs the page it opens; `Open` needs the form it opens. Every
+/// other step kind (typing, picking, pressing, …) only ever follows an
+/// `Open` that already passed this same check, so it needs nothing further;
+/// `State`, `Reload` and `Done` need nothing either — reading never acts on
+/// a page, `Reload` is precisely the step that cures a gap, and a drive has
+/// to be endable from any tab, however old.
+fn step_capability(step: &UiStep) -> Option<(&'static str, &str)> {
+    match step {
+        UiStep::Goto { path } => Some(("page", path.as_str())),
+        UiStep::Open { form, .. } => Some(("form", form.as_str())),
+        _ => None,
+    }
 }
 
-/// fix-185: a driven tab last reported `tab_version`, and the client driving
-/// now is `client_version` — different versions means the tab is still
-/// running an older (or newer) dashboard release than the one checking the
-/// step, so taking the step would be acted on by a page this client never
-/// validated against. Only called when `tab_version != client_version`.
-pub fn version_mismatch(step: &UiStep, tab_version: &str, client_version: &str) -> Refusal {
-    Refusal::new(
+/// fix-199: `path`'s page name, the way `caps.pages` names it — the first
+/// path segment, or `""` for the home page. A stack's own pages
+/// (`/stacks/<name>[/<tab>]`) report as the generic `"stacks"`: whether a
+/// tab can show a *particular* stack tab is not a version question (every
+/// stack page comes from the same `"stacks"` capability), only whether it
+/// knows the stacks page at all.
+fn goto_capability_name(path: &str) -> &str {
+    let p = path.split(['?', '#']).next().unwrap_or("");
+    let rest = p.trim_start_matches('/').trim_end_matches('/');
+    rest.split('/').next().unwrap_or("")
+}
+
+/// fix-199: is `step` something `caps` does not say the tab knows? `None`
+/// (never refused) when the step needs no capability, when the tab has
+/// never reported any (nothing to check against), or when it does know it.
+/// The check runs on the page/form name alone, stripped of its arguments —
+/// by design, a step for a page or form the tab knows is taken however the
+/// two sides' version numbers compare; only an actual capability gap is
+/// reported, and only for this one step.
+pub fn missing_capability(step: &UiStep, caps: Option<&TabCaps>) -> Option<Refusal> {
+    let (kind, name) = step_capability(step)?;
+    let caps = caps?;
+    let (known, bare) = match kind {
+        "page" => (&caps.pages, goto_capability_name(name)),
+        _ => (&caps.forms, name),
+    };
+    if known.iter().any(|k| k == bare) {
+        return None;
+    }
+    let bare = if bare.is_empty() { "home" } else { bare };
+    Some(Refusal::new(
         format!("ui {}", step.verb()),
         format!(
-            "the tab still runs {tab_version}'s page (this client is {client_version}): \
-             a step would be acted on by code this client never checked against"
+            "the tab's own version has no {kind} \"{bare}\": this one step cannot be taken \
+             against it, the rest of a plan still can"
         ),
-        "press its update banner or `homelab ui reload`",
-    )
+        "`homelab ui reload` once its dashboard is updated, or drive a page/form it already \
+         knows",
+    ))
 }
 
 /// Why a step paused past the longest pause failed.
@@ -476,20 +509,57 @@ mod tests {
         assert!(new_plan(&vec![a; PLAN_MAX + 1], "wsl", &st).is_err());
     }
 
-    /// fix-185: `state` never needs a version match (it changes nothing);
-    /// `reload` is exempt too (it is the fix, not another thing to refuse);
-    /// everything else does, and the refusal names what/why/fix.
+    /// fix-199: `state`, `reload` and `done` need no capability at all, even
+    /// against a tab that reported none or an empty one; `goto`/`open` do,
+    /// but only when the tab HAS reported capabilities and they lack the
+    /// one this step needs — a tab that never reported is never refused.
     #[test]
-    fn fix_185_version_match_exempts_state_and_reload_and_names_the_fix() {
-        assert!(!needs_version_match(&UiStep::State));
-        assert!(!needs_version_match(&UiStep::Reload));
-        assert!(!needs_version_match(&UiStep::Done));
-        assert!(needs_version_match(&goto("/jobs")));
-        let r = version_mismatch(&goto("/jobs"), "3.69.0", "3.70.0");
+    fn fix_199_capability_check_exempts_state_reload_done_and_a_silent_tab() {
+        let empty = TabCaps::default();
+        assert!(missing_capability(&UiStep::State, Some(&empty)).is_none());
+        assert!(missing_capability(&UiStep::Reload, Some(&empty)).is_none());
+        assert!(missing_capability(&UiStep::Done, Some(&empty)).is_none());
+        // A tab that never reported anything: nothing is refused.
+        assert!(missing_capability(&goto("/jobs"), None).is_none());
+        // A tab that reported, but without "jobs": refused, naming it.
+        let r = missing_capability(&goto("/jobs"), Some(&empty)).unwrap();
         assert_eq!(r.what, "ui goto");
-        assert!(r.why.contains("3.69.0"), "{}", r.why);
-        assert!(r.why.contains("3.70.0"), "{}", r.why);
+        assert!(r.why.contains("page \"jobs\""), "{}", r.why);
         assert!(r.fix.contains("homelab ui reload"), "{}", r.fix);
+    }
+
+    /// fix-199: a step for a page or form the tab DOES know is taken
+    /// however the two sides' version numbers would have compared — the
+    /// capability check cares only about the one name, never about a raw
+    /// version string.
+    #[test]
+    fn fix_199_a_known_page_or_form_is_never_refused() {
+        let caps = TabCaps {
+            pages: ["jobs".into(), "".into()].into_iter().collect(),
+            forms: ["deploy".into()].into_iter().collect(),
+        };
+        assert!(missing_capability(&goto("/jobs"), Some(&caps)).is_none());
+        assert!(missing_capability(&goto("/"), Some(&caps)).is_none());
+        assert!(
+            missing_capability(
+                &UiStep::Open {
+                    form: "deploy".into(),
+                    target: Some("media".into())
+                },
+                Some(&caps)
+            )
+            .is_none()
+        );
+        // A form the tab does not know: refused, naming it, not the stack.
+        let r = missing_capability(
+            &UiStep::Open {
+                form: "new-feature".into(),
+                target: Some("media".into()),
+            },
+            Some(&caps),
+        )
+        .unwrap();
+        assert!(r.why.contains("form \"new-feature\""), "{}", r.why);
     }
 
     #[test]

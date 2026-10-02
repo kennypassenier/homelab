@@ -11,8 +11,8 @@
 use serde::{Deserialize, Serialize};
 
 pub use homelab_core::manifest::{
-    BootSpec, DeploySpec, FileBlob, GatewayRoute, LxcSpec, MountSpec, NetworkSpec, ResourceSpec,
-    SourceRev, StackManifest,
+    BootSpec, CURRENT_CLIENT_SCHEMA, DeploySpec, FileBlob, GatewayRoute, LxcSpec, MountSpec,
+    NetworkSpec, ResourceSpec, SourceRev, StackManifest, client_knows, field_schema,
 };
 pub use homelab_core::native::{BackupPause, NativeServiceManifest};
 pub use homelab_core::retention::RetentionTier;

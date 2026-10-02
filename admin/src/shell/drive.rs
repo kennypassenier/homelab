@@ -37,7 +37,7 @@ use super::actions::{Actions, Clock, HostPort, Origin, PauseGate, Publish};
 use super::edit::{self as ed, EditCtx};
 use super::host_link::Shared;
 use crate::core::actions::{self as act, ActionKind, Arg, Refusal};
-use crate::core::drive::{Applied, Ctx, DriveState, Effect, Family, JobRef, Sources};
+use crate::core::drive::{Applied, Ctx, DriveState, Effect, Family, JobRef, Sources, TabCaps};
 use crate::core::driveedit::{self, EditCall, EditKind};
 use crate::core::drivelive::{self, Announce, Control};
 
@@ -578,10 +578,12 @@ impl Driver {
 
     /// [`Driver::step`], announced and held first (Live view); `hold` asks
     /// the host to wait longer while a viewer has paused. `client_version`
-    /// (fix-185): empty skips the check (an old client, or the demo route);
-    /// otherwise a step is refused at once when a following tab's last
-    /// reported page version differs from it — before anything is announced
-    /// or applied.
+    /// is used only to tell `Reload` which version to wait for — nothing is
+    /// refused on it alone (fix-199). Instead, a step that opens a specific
+    /// page or form is checked against the following tab's own
+    /// self-reported capabilities (`DriveState.tab_caps`); a gap there
+    /// refuses only that one step, naming the page/form, before anything is
+    /// announced or applied.
     pub async fn step_held(
         &self,
         by: &str,
@@ -598,19 +600,13 @@ impl Driver {
         // `if`'s condition: a MutexGuard born in a let-chain's condition
         // lives through the whole body, and `self.publish` below takes the
         // same lock again — nested, that deadlocks a step forever.
-        let tab_v = self.lock().tab_page_version.clone();
-        if !client_version.is_empty()
-            && drivelive::needs_version_match(&step)
-            && let Some(tab_v) = tab_v.as_deref()
-            && tab_v != client_version
-        {
-            let r = drivelive::version_mismatch(&step, tab_v, client_version);
+        let tab_caps = self.lock().tab_caps.clone();
+        if let Some(r) = drivelive::missing_capability(&step, tab_caps.as_ref()) {
             tracing::info!(
                 by,
                 step = step.verb(),
-                tab = %tab_v,
-                client = client_version,
-                "a driven step was refused: the tab is stale"
+                why = %r.why,
+                "a driven step was refused: the tab does not know it"
             );
             self.publish(&step, false, Some(&r));
             return reply(Some(&r), &self.snapshot());
@@ -1014,12 +1010,22 @@ impl Driver {
         }
     }
 
-    /// fix-185: a following tab's own reported page version, from `POST
-    /// /data/drive/attach` — set on every page load/navigation, not only
-    /// while Live view follows, so a step is checked against the most
-    /// recent truth a tab has ever volunteered.
-    fn report_tab_version(&self, version: String) {
-        self.lock().tab_page_version = Some(version);
+    /// fix-185/fix-199: a following tab's own reported page version and
+    /// capabilities, from `POST /data/drive/attach` — set on every page
+    /// load/navigation, not only while Live view follows, so a step is
+    /// checked against the most recent truth a tab has ever volunteered.
+    /// `caps` is `None` when the tab sent none (an old tab, from before
+    /// fix-199, or a body that genuinely named nothing): the driver then
+    /// keeps whatever it already had rather than wiping it to empty, since
+    /// "no capabilities reported this time" must never read as "this tab
+    /// now knows nothing" — the permissive default stays permissive.
+    fn report_tab(&self, version: String, caps: Option<TabCaps>) {
+        let mut st = self.lock();
+        st.tab_page_version = Some(version);
+        if let Some(caps) = caps {
+            st.tab_caps = Some(caps);
+        }
+        drop(st);
         self.inner.wake.notify_waiters();
     }
 
@@ -1245,14 +1251,28 @@ async fn control(
 #[derive(serde::Deserialize)]
 struct AttachBody {
     page_version: String,
+    /// fix-199: the page names this tab's own loaded `formspec.json` lists
+    /// (`SPEC.pages`) — empty on a tab built before this field existed.
+    #[serde(default)]
+    known_pages: Vec<String>,
+    /// fix-199: the `Open{form}` slugs this tab's own loaded
+    /// `formspec.json` lists (`SPEC.forms`).
+    #[serde(default)]
+    known_forms: Vec<String>,
 }
 
-/// fix-185: a tab reports the dashboard version its loaded page actually
-/// runs — sent on every page load/navigation (not only while Live view
-/// follows), so `homelab ui` can tell a step from a page it never reloaded
-/// into. Never refused: a tab reporting itself is never wrong, only late.
+/// fix-185/fix-199: a tab reports the dashboard version its loaded page
+/// actually runs, and what pages/forms that same loaded page knows — sent
+/// on every page load/navigation (not only while Live view follows), so
+/// `homelab ui` can check a step against what the tab actually has rather
+/// than refusing on a bare version mismatch. Never refused: a tab reporting
+/// itself is never wrong, only late.
 async fn attach(State(d): State<Driver>, Json(body): Json<AttachBody>) -> Json<Value> {
-    d.report_tab_version(body.page_version);
+    let caps = (!body.known_pages.is_empty() || !body.known_forms.is_empty()).then(|| TabCaps {
+        pages: body.known_pages.into_iter().collect(),
+        forms: body.known_forms.into_iter().collect(),
+    });
+    d.report_tab(body.page_version, caps);
     Json(json!({ "state": d.snapshot() }))
 }
 

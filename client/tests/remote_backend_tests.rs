@@ -338,7 +338,7 @@ async fn fix_67_the_tui_reads_a_message_larger_than_sixteen_mib() {
 /// mirror image of the 2026-08-31 data_mounts incident. The TUI refuses a
 /// mutating command to a newer host and names `homelab self-install`.
 #[tokio::test]
-async fn fix_105_the_tui_refuses_a_mutating_command_to_a_newer_host() {
+async fn fix_199_the_tui_no_longer_refuses_a_mutating_command_to_a_newer_host() {
     let mut host = fake_host("999.0.0").await;
     let Channels { cmd_tx, mut evt_rx } = start(&host.addr);
     let _ = drain(&mut evt_rx, Duration::from_millis(500)).await;
@@ -346,17 +346,17 @@ async fn fix_105_the_tui_refuses_a_mutating_command_to_a_newer_host() {
     cmd_tx.send(Command::PatchFleet).await.unwrap();
     let reached = tokio::time::timeout(Duration::from_millis(1000), host.received.recv()).await;
     assert!(
-        reached.is_err(),
-        "a mutating command from an older client reached the host: {:?}",
+        reached.is_ok(),
+        "an older client's mutating command must now reach the host — the host's own \
+         field-keeping rule makes it safe, so nothing here is refused: {:?}",
         reached
     );
     let events = drain(&mut evt_rx, Duration::from_millis(500)).await;
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            BackendEvent::Server(ServerMsg::RpcDone(r)) if !r.ok && r.message.contains("self-install")
-        )),
-        "the refusal must reach the screen and name the remedy: {:?}",
+        !events
+            .iter()
+            .any(|e| matches!(e, BackendEvent::Server(ServerMsg::RpcDone(r)) if !r.ok)),
+        "nothing is refused on the version alone: {:?}",
         events
     );
 }
@@ -402,18 +402,17 @@ async fn fix_149_a_first_connection_refuses_any_certificate_but_the_built_in_one
     );
 }
 
-/// covers: fix-105
+/// covers: fix-199
 ///
-/// The command line holds the same rule; a read-only command still goes
-/// through, so the mismatch can be looked at, with a warning.
+/// Replaces fix-105's refusal: an older client no longer refuses a mutating command — the host's own
+/// field-keeping rule (`core::manifest::client_knows`) makes sending safe —
+/// it only ever prints a notice, for any command, mutating or not.
 #[test]
-fn fix_105_an_older_client_may_read_but_not_change() {
-    use homelab_client::link::{older_client_warning, refuse_older_client};
-    let why = refuse_older_client(&Command::PatchFleet, "999.0.0").expect("refused");
-    assert!(why.contains("self-install"), "{}", why);
-    assert!(refuse_older_client(&Command::Status, "999.0.0").is_none());
-    assert!(refuse_older_client(&Command::PatchFleet, env!("CARGO_PKG_VERSION")).is_none());
-    assert!(refuse_older_client(&Command::PatchFleet, "0.1.0").is_none());
-    assert!(older_client_warning("999.0.0").is_some());
-    assert!(older_client_warning(env!("CARGO_PKG_VERSION")).is_none());
+fn fix_199_an_older_client_is_only_ever_told_never_refused() {
+    use homelab_client::link::older_client_notice;
+    let notice = older_client_notice("999.0.0").expect("a notice");
+    assert!(notice.contains("self-install"), "{}", notice);
+    assert!(notice.contains("kept by the host, not"), "{}", notice);
+    assert!(older_client_notice(env!("CARGO_PKG_VERSION")).is_none());
+    assert!(older_client_notice("0.1.0").is_none());
 }

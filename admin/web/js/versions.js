@@ -6,6 +6,7 @@
 import { send } from "./act.js";
 import { openAction } from "./actiondialog.js";
 import { fetchJson, h } from "./dom.js";
+import SPEC from "./formspec.json" with { type: "json" };
 import { outdatedPage, versionNotes } from "./parity.js";
 import { listen } from "./store.js";
 
@@ -115,17 +116,26 @@ export function mountVersions(root) {
     if (!r.ok) return;
     paint(r.body);
     checkOutdated(r.body.dashboard);
-    // fix-185: tell the driver which version this page actually runs now —
-    // on every load and reconnect, not only while Live view follows, so
-    // `homelab ui` can refuse a step before it lands on a stale page rather
-    // than finding out from the dashboard's own guard afterwards. Best
-    // effort: a page that cannot reach this route is no worse off than
-    // before it existed.
+    // fix-185/fix-199: tell the driver which version this page actually
+    // runs now, and which pages/forms THIS loaded bundle's own
+    // `formspec.json` knows — on every load and reconnect, not only while
+    // Live view follows, so `homelab ui` can check a step against what this
+    // page can actually do rather than refusing on a bare version mismatch.
+    // `SPEC` is this module's own imported copy: a tab that has not
+    // reloaded since an update still reports its OLD bundle's lists, which
+    // is exactly the point — a step for a page/form only a newer release
+    // added is named as missing, one step at a time, never a blanket
+    // refusal. Best effort: a page that cannot reach this route is no worse
+    // off than before it existed.
     if (r.body.dashboard)
       void send(
         "POST",
         "/data/drive/attach",
-        { page_version: r.body.dashboard },
+        {
+          page_version: r.body.dashboard,
+          known_pages: SPEC.pages,
+          known_forms: SPEC.forms,
+        },
         "reporting this page's version",
       );
   };

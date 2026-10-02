@@ -602,57 +602,94 @@ async fn fix_185_a_stale_stop_never_reaches_into_a_later_round() {
     );
 }
 
-/// fix-185: version match. A tab reports its loaded page version over
-/// `/data/drive/attach`; a step driven by a different client version is
-/// refused at once, naming both versions and `homelab ui reload`; `state`
-/// never checks (reading the screen is always safe); the same client
-/// version is taken normally.
+/// fix-199 (replaces fix-185's blanket version refusal; Kenny, 2026-10-02:
+/// a version check informs, it never blocks). A tab reports its loaded page
+/// version AND its own `formspec.json`'s pages/forms over
+/// `/data/drive/attach`; a step for a page/form it does not list is refused
+/// at once, naming only that page/form (never a version number); a step for
+/// one it DOES list is taken normally, however the two sides' versions
+/// compare; `state` never checks (reading the screen is always safe); a tab
+/// that reported no capabilities at all is never refused on their absence.
 #[tokio::test(start_paused = true)]
-async fn fix_185_a_step_is_refused_when_the_tab_runs_a_different_version() {
+async fn fix_199_a_step_is_refused_only_for_a_page_or_form_the_tab_does_not_know() {
     let w = world("version-match");
     let holds = Holds::default();
     let app = router(w.driver.clone());
-    let attach = |v: &str| {
+    let attach = |v: &str, pages: &str, forms: &str| {
         Request::post("/data/drive/attach")
             .header("content-type", "application/json")
-            .body(Body::from(format!(r#"{{"page_version":"{v}"}}"#)))
+            .body(Body::from(format!(
+                r#"{{"page_version":"{v}","known_pages":{pages},"known_forms":{forms}}}"#
+            )))
             .unwrap()
     };
-    let r = app.clone().oneshot(attach("3.69.0")).await.unwrap();
+    // An older tab (3.69.0) that does not yet list "jobs" among its pages.
+    let r = app
+        .clone()
+        .oneshot(attach("3.69.0", r#"["","overview","host"]"#, "[]"))
+        .await
+        .unwrap();
     assert_eq!(r.status(), StatusCode::OK);
     assert_eq!(
         w.driver.snapshot().tab_page_version.as_deref(),
         Some("3.69.0")
     );
 
-    // `state` is read-only and never checks the tab's version.
+    // `state` is read-only and never checks the tab's capabilities.
     let s = w
         .driver
         .step_held("wsl", Scope::Read, UiStep::State, "3.70.0", &|_, _| {})
         .await;
     assert_eq!(s["ok"], true, "{s}");
 
-    // Any other step is refused: it names both versions and the fix.
+    // "jobs" is not in what the tab reported: refused, naming the page —
+    // never a version number, since the versions are no longer compared.
     let r = w
         .driver
         .step_held("wsl", Scope::Operate, goto("/jobs"), "3.70.0", &|_, _| {})
         .await;
     assert_eq!(r["ok"], false, "{r}");
     let why = r["refusal"]["why"].as_str().unwrap();
-    assert!(why.contains("3.69.0") && why.contains("3.70.0"), "{why}");
+    assert!(why.contains("page \"jobs\""), "{why}");
+    assert!(!why.contains("3.69.0") && !why.contains("3.70.0"), "{why}");
     let fix = r["refusal"]["fix"].as_str().unwrap();
     assert!(fix.contains("homelab ui reload"), "{fix}");
     assert_eq!(w.driver.snapshot().page, "/", "nothing was taken");
 
-    // The matching version is taken normally (announced and held, like any
-    // other step — `send`/`announced` drive its countdown; `send` drives
-    // with client version 3.70.0, so the tab reports that too).
-    app.clone().oneshot(attach("3.70.0")).await.unwrap();
+    // "host" IS one of the pages this same older tab reported: taken
+    // normally, although the tab is still on 3.69.0 and the client is
+    // 3.70.0 — a known page is never refused on the version alone.
+    let pending = send(&w, goto("/host"), &holds);
+    announced(&w).await;
+    let r = pending.await.unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["state"]["page"], "/host");
+
+    // Once the tab reports "jobs" too (its dashboard updated and it
+    // reloaded), the same step that was refused now succeeds.
+    app.clone()
+        .oneshot(attach("3.70.0", r#"["","overview","host","jobs"]"#, "[]"))
+        .await
+        .unwrap();
     let pending = send(&w, goto("/jobs"), &holds);
     announced(&w).await;
     let r = pending.await.unwrap();
     assert_eq!(r["ok"], true, "{r}");
     assert_eq!(r["state"]["page"], "/jobs");
+}
+
+/// fix-199: a tab that has never reported any capabilities (an old tab from
+/// before this field existed, or `/data/drive/attach` not yet called) is
+/// never refused for it — the permissive default from fix-185 (nothing
+/// known about a tab is never a reason to refuse) carries over unchanged.
+#[tokio::test(start_paused = true)]
+async fn fix_199_a_tab_that_never_reported_capabilities_is_never_refused() {
+    let w = world("no-caps");
+    let holds = Holds::default();
+    let pending = send(&w, goto("/jobs"), &holds);
+    announced(&w).await;
+    let r = pending.await.unwrap();
+    assert_eq!(r["ok"], true, "{r}");
 }
 
 /// fix-185 (`homelab ui reload`): the driven tab takes the dashboard's

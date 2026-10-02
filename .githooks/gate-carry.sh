@@ -272,7 +272,7 @@ cmd_rust() {
     echo "carried run, $(date -Iseconds)"
     echo "base: $base"
     echo "reran in full: ${full_pkgs[*]:-none}"
-    echo "reran previously-failing: ${!exact_by_pkg[*]:-none}"
+    echo "reran previously-failing: ${exact_pkg_list}"
   } > "$state/last-run.txt"
   return "$rc"
 }

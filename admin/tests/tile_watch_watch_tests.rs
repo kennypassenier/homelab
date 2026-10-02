@@ -103,7 +103,7 @@ async fn a_tile_with_a_probe_is_asked_directly_one_with_none_is_skipped() {
     let watched: Watched = Default::default();
     let acts = actions(host.clone(), notify.clone(), &clock);
 
-    round(&host, &sh, &notify, &watched, &acts).await;
+    round(&host, &sh, &notify, &watched, &acts, &clock.clock()).await;
 
     let snap = snapshot(&watched).await;
     let targets = snap.as_array().cloned().unwrap_or_default();
@@ -166,7 +166,7 @@ async fn a_stack_the_host_says_is_deploying_is_never_asked_or_reported_down() {
     let watched: Watched = Default::default();
     let acts = actions(host.clone(), notify.clone(), &clock);
 
-    round(&host, &sh, &notify, &watched, &acts).await;
+    round(&host, &sh, &notify, &watched, &acts, &clock.clock()).await;
 
     let snap = snapshot(&watched).await;
     let targets = snap.as_array().cloned().unwrap_or_default();
@@ -184,5 +184,138 @@ async fn a_stack_the_host_says_is_deploying_is_never_asked_or_reported_down() {
         snap["notices"].as_array().map(|a| a.len()).unwrap_or(0),
         0,
         "a known outage sends no notice: {snap:?}"
+    );
+}
+
+/// fix-194: a tile already told Down must not lose that state just because
+/// one round in between could not read the host at all (a host restart, a
+/// failed `Tiles` ask) — reproduces the 2026-10-02 incident where Proxmox
+/// and OPNsense stayed "does not answer" forever because the recovery round
+/// wiped `down_told` before it ever had the chance to see the tile answer
+/// again.
+#[tokio::test]
+async fn a_link_blip_after_down_told_still_lets_the_recovery_be_seen() {
+    // The probe the tile asks: dead at first, swapped for a live one once
+    // the host recovers.
+    let probe = Arc::new(Mutex::new("http://127.0.0.1:1/".to_string()));
+    let probe_for_closure = probe.clone();
+    let behaviour: Behaviour = Arc::new(move |c: &Command| match c {
+        Command::Tiles { .. } => {
+            let probe_url = probe_for_closure.lock().unwrap().clone();
+            let tiles = serde_json::json!([
+                {
+                    "stack": "media", "host": "fin.kp-soft.dev",
+                    "url": "https://fin.kp-soft.dev/", "probe": probe_url,
+                    "name": "Jellyfin", "group": "Media", "order": 1,
+                    // A short down_after so the test does not need to move
+                    // the clock by a real five minutes, and a short
+                    // watch_every so every round below actually asks it
+                    // rather than being skipped as "too soon" against the
+                    // 60 s fleet default.
+                    "down_after": 2,
+                    "watch_every": 1,
+                },
+            ]);
+            Script {
+                steps: vec![],
+                skipped: vec![],
+                ok: true,
+                deferred: None,
+                message: serde_json::json!({ "tiles": tiles }).to_string(),
+                drop_line: false,
+            }
+        }
+        _ => Script::ok(&[]),
+    });
+    let clock = TestClock::at(1_000);
+    let host: Arc<dyn HostPort> = MockHost::start(
+        clock.clone(),
+        behaviour,
+        serde_json::json!([]),
+        Arc::new(Mutex::new(Vec::new())),
+    );
+    let notify = center("tile-watch-link-blip", &clock);
+    let sh = shared(&[("media", 106, None)]);
+    let watched: Watched = Default::default();
+    let acts = actions(host.clone(), notify.clone(), &clock);
+
+    // Round 1: the tile fails, but not long enough to be told Down yet.
+    round(&host, &sh, &notify, &watched, &acts, &clock.clock()).await;
+    let snap = snapshot(&watched).await;
+    let tile = snap
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["key"] == "tile:fin.kp-soft.dev")
+        .unwrap()
+        .clone();
+    assert_eq!(tile["down"], false, "not down yet: {tile:?}");
+
+    // Round 2: past down_after (2s) — told Down.
+    clock.advance(3);
+    round(&host, &sh, &notify, &watched, &acts, &clock.clock()).await;
+    let snap = snapshot(&watched).await;
+    let tile = snap
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["key"] == "tile:fin.kp-soft.dev")
+        .unwrap()
+        .clone();
+    assert_eq!(tile["down"], true, "told down: {tile:?}");
+    let down_notice = notify.snapshot().await;
+    assert!(
+        down_notice["notices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n["title"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("does not answer")),
+        "a Down notice went out: {down_notice:?}"
+    );
+
+    // Round 3: the host restarts — the line is down, so neither the stacks
+    // nor the tiles can be read this round. Before fix-194 this round would
+    // forget the tile entirely (`seen.retain` ran unconditionally), wiping
+    // `down_told` and erasing the outage that was just told.
+    {
+        let mut s = sh.write().await;
+        s.link_error = Some("the host does not answer".into());
+    }
+    clock.advance(10);
+    round(&host, &sh, &notify, &watched, &acts, &clock.clock()).await;
+
+    // Round 4: the line and the tile both recover.
+    {
+        let mut s = sh.write().await;
+        s.link_error = None;
+    }
+    *probe.lock().unwrap() = fake_backend("200 OK").await;
+    clock.advance(1);
+    round(&host, &sh, &notify, &watched, &acts, &clock.clock()).await;
+
+    let snap = snapshot(&watched).await;
+    let tile = snap
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["key"] == "tile:fin.kp-soft.dev")
+        .unwrap()
+        .clone();
+    assert_eq!(tile["down"], false, "answers again: {tile:?}");
+    let final_notices = notify.snapshot().await;
+    assert!(
+        final_notices["notices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n["title"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("answers again")),
+        "the recovery after the link blip must be told, same as any other \
+         Up: {final_notices:?}"
     );
 }

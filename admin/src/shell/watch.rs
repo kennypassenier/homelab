@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use tokio::sync::Mutex;
 
-use super::actions::{Actions, HostPort, JobState};
+use super::actions::{Actions, Clock, HostPort, JobState};
 use super::actions_notify::NotifyCenter;
 use super::host_link::Shared;
 use crate::core::notify::{Detail, Draft, Kind, Level};
@@ -125,6 +125,7 @@ pub fn spawn(
     center: Arc<NotifyCenter>,
     watched: Watched,
     actions: Actions,
+    clock: Clock,
 ) {
     tokio::spawn(async move {
         // The loop ticks at the smallest interval a tile may ask for
@@ -136,24 +137,24 @@ pub fn spawn(
         let mut t = tokio::time::interval(TICK);
         loop {
             t.tick().await;
-            round(&host, &shared, &center, &watched, &actions).await;
+            round(&host, &shared, &center, &watched, &actions, &clock).await;
         }
     });
 }
 
 /// `pub` (rather than the module-private a scheduled call needs) so a test
-/// can run one round directly instead of waiting on `EVERY`.
+/// can run one round directly instead of waiting on `EVERY`. `clock` is
+/// injected (same as the rest of milestone-act, `shell::actions::Clock`) so
+/// a test can hold time still rather than racing `SystemTime::now()`.
 pub async fn round(
     host: &Arc<dyn HostPort>,
     shared: &Shared,
     center: &Arc<NotifyCenter>,
     watched: &Watched,
     actions: &Actions,
+    clock: &Clock,
 ) {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let now = clock();
     let mut readings: Vec<(Target, Probe)> = Vec::new();
 
     // The host: the line's own state.

@@ -2555,6 +2555,7 @@ pub fn mount(
             notify.clone(),
             watched,
             actions_for_watch,
+            clock.clone(),
         );
         super::actions_notify::spawn_incident_poll(host, notify, poll);
     });

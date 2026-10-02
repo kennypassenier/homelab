@@ -1,5 +1,8 @@
 //! G17 · the questions only a person can answer, and the record of who did.
 
+use std::collections::BTreeMap;
+
+use homelab_core::manifest::ComponentDigests;
 use homelab_core::ops::fleetcheck::Severity;
 use homelab_core::ops::manualchecks::{
     PASSWORD_CHAIN_APP, PASSWORD_CHAIN_RECUR_DAYS, PASSWORD_CHAIN_TEXT, Question, STANDING_STACK,
@@ -447,6 +450,160 @@ fn a_no_keeps_its_own_line_even_among_many_open_ones() {
         broken[0].what
     );
     assert_eq!(broken[0].subject, "media/jellyfin", "and it names the app");
+}
+
+// ── fix-195: an answer is about the files its check is about ───────────────
+
+/// fix-195: today, five stacks' manual checks reopened only because fix-178
+/// translated `checks.yml` to English and because the derived manifest's
+/// own serialization changed — neither is anything the questions are
+/// about. Once the stack carries `component_digests` (fix-192), an answer
+/// is reopened only when the check's own app files, the stack's rootfs, or
+/// the app's env actually changed; a manifest-only move, or a change to
+/// another app's files, must not reopen it.
+#[test]
+fn fix_195_only_the_files_a_check_is_about_can_reopen_its_answer() {
+    let mut st = state_with_stack(100);
+    let cd = ComponentDigests {
+        manifest: "m1".into(),
+        files: BTreeMap::from([
+            ("jellyfin/compose.yml".into(), "f1".into()),
+            ("rootfs/etc/foo".into(), "r1".into()),
+            ("sonarr/compose.yml".into(), "s1".into()),
+        ]),
+        env: BTreeMap::from([("jellyfin".into(), "e1".into())]),
+        secret_files: BTreeMap::new(),
+        built_by: String::new(),
+    };
+    {
+        let s = st.stacks.get_mut("media").unwrap();
+        s.component_digests = cd;
+        s.applied_hash = "h1".into();
+    }
+
+    register(&mut st, "media", &[q("jellyfin", "sound in sync")], 100);
+    let id = id_for("media", "jellyfin", "sound in sync");
+    assert!(answer(&mut st, &id, true, "", 200));
+    assert!(evaluate_manual(&st, 300).is_empty(), "answered ok, silent");
+
+    // Stand-in for fix-178 (translating checks.yml) and fix-192 (the
+    // manifest's own serialization moving): the combined `applied_hash`
+    // moves and the manifest digest moves, but nothing this question is
+    // about changed.
+    {
+        let s = st.stacks.get_mut("media").unwrap();
+        s.component_digests.manifest = "m2".into();
+        s.applied_hash = "h2".into();
+    }
+    assert!(
+        evaluate_manual(&st, 300).is_empty(),
+        "a manifest-only difference must not reopen an answer about files"
+    );
+
+    // Another app's file in the same stack changes — still not what this
+    // question is about.
+    st.stacks
+        .get_mut("media")
+        .unwrap()
+        .component_digests
+        .files
+        .insert("sonarr/compose.yml".into(), "s2".into());
+    assert!(
+        evaluate_manual(&st, 300).is_empty(),
+        "another app's file must not reopen this question"
+    );
+
+    // This app's own file changes — reopened, and said why.
+    st.stacks
+        .get_mut("media")
+        .unwrap()
+        .component_digests
+        .files
+        .insert("jellyfin/compose.yml".into(), "f2".into());
+    let f = evaluate_manual(&st, 300);
+    assert_eq!(f.len(), 1, "{:?}", f);
+    assert_eq!(f[0].severity, Severity::Drift);
+    assert!(f[0].what.contains("reopened"), "{}", f[0].what);
+}
+
+/// fix-195: the rootfs and the app's own env count too, not only the app's
+/// named files.
+#[test]
+fn fix_195_rootfs_and_env_changes_reopen_too() {
+    let mut st = state_with_stack(100);
+    let cd = ComponentDigests {
+        manifest: "m1".into(),
+        files: BTreeMap::from([("rootfs/etc/foo".into(), "r1".into())]),
+        env: BTreeMap::from([("jellyfin".into(), "e1".into())]),
+        secret_files: BTreeMap::new(),
+        built_by: String::new(),
+    };
+    {
+        let s = st.stacks.get_mut("media").unwrap();
+        s.component_digests = cd;
+        s.applied_hash = "h1".into();
+    }
+    register(&mut st, "media", &[q("jellyfin", "sound in sync")], 100);
+    let id = id_for("media", "jellyfin", "sound in sync");
+    assert!(answer(&mut st, &id, true, "", 200));
+    assert!(evaluate_manual(&st, 300).is_empty());
+
+    st.stacks
+        .get_mut("media")
+        .unwrap()
+        .component_digests
+        .env
+        .insert("jellyfin".into(), "e2".into());
+    assert_eq!(
+        evaluate_manual(&st, 300).len(),
+        1,
+        "the app's own env changed"
+    );
+
+    // Answer again, then move the rootfs digest instead.
+    assert!(answer(&mut st, &id, true, "", 400));
+    st.stacks
+        .get_mut("media")
+        .unwrap()
+        .component_digests
+        .files
+        .insert("rootfs/etc/foo".into(), "r2".into());
+    assert_eq!(evaluate_manual(&st, 500).len(), 1, "rootfs changed");
+}
+
+/// fix-195: a record with no `answered_digests` (an answer from before this
+/// field existed), or one made while the stack carried no
+/// `component_digests` yet, keeps the old `answered_hash` rule — this is
+/// the pre-existing `fix_65_*` behaviour, unaffected by fix-195.
+#[test]
+fn fix_195_an_old_record_without_digests_keeps_the_old_rule() {
+    let mut st = state_with_stack(100);
+    st.stacks.get_mut("media").unwrap().applied_hash = "h1".into();
+    register(&mut st, "media", &[q("jellyfin", "sound in sync")], 100);
+    let id = id_for("media", "jellyfin", "sound in sync");
+    assert!(answer(&mut st, &id, true, "", 200));
+    assert!(
+        st.manual_checks[&id].answered_digests.is_none(),
+        "no component_digests on the stack: nothing to record"
+    );
+
+    // The stack gains component_digests only now (e.g. the first deploy
+    // through a host that has fix-192) — the OLD answer still falls back to
+    // answered_hash, since it never recorded the new field.
+    st.stacks.get_mut("media").unwrap().component_digests = ComponentDigests {
+        manifest: "m1".into(),
+        ..Default::default()
+    };
+    assert!(
+        evaluate_manual(&st, 300).is_empty(),
+        "applied_hash unchanged: still answered under the old rule"
+    );
+    st.stacks.get_mut("media").unwrap().applied_hash = "h2".into();
+    assert_eq!(
+        evaluate_manual(&st, 300).len(),
+        1,
+        "applied_hash moved: the old rule still reopens it"
+    );
 }
 
 // ── fix-65: the nightly report was red every night by design ───────────────

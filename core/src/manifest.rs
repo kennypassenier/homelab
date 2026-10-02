@@ -1566,6 +1566,60 @@ pub fn component_digests(spec: &DeploySpec) -> ComponentDigests {
     }
 }
 
+impl ComponentDigests {
+    /// Whether this was ever recorded. A host before fix-192, or a stack
+    /// never (re)applied since, carries the all-empty default — which must
+    /// be read as "nothing to compare", not as "nothing changed".
+    pub fn has_digests(&self) -> bool {
+        !self.manifest.is_empty()
+    }
+}
+
+/// fix-195: the subset of a stack's [`ComponentDigests`] that one app's
+/// manual checks are actually about — that app's own files (`<app>/...`)
+/// and the stack's `rootfs/` files (shared container content, not any one
+/// app's), plus that app's own env. Everything else in `ComponentDigests` —
+/// the derived manifest's own serialization, another app's files or env,
+/// secret files — can change without the question having changed what it
+/// asks, so an answer keyed on this subset is not reopened by any of that
+/// (the incident this exists for: fix-178 translating `checks.yml` to
+/// English, and the manifest's own serialization changing, both reopened
+/// five stacks' worth of answers that were never about either).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelevantDigests {
+    #[serde(default)]
+    pub files: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<String>,
+}
+
+/// The digests relevant to one app's manual checks, from the stack's full
+/// `ComponentDigests` — see [`RelevantDigests`]. `checks.yml` never reaches
+/// `ComponentDigests::files` in the first place (the client's `collect` in
+/// `client/src/spec.rs` parses it into `DeploySpec::checks` and never adds
+/// it to `files`), so no filter for it should ever be needed here; the
+/// `file_name` guard below is defensive in case that ever stops being true,
+/// not load-bearing today.
+pub fn relevant_digests(cd: &ComponentDigests, app: &str) -> RelevantDigests {
+    let app_prefix = format!("{app}/");
+    let files = cd
+        .files
+        .iter()
+        .filter(|(path, _)| {
+            (path.starts_with(&app_prefix) || path.starts_with(ROOTFS_PREFIX))
+                && std::path::Path::new(path.as_str())
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    != Some("checks.yml")
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    RelevantDigests {
+        files,
+        env: cd.env.get(app).cloned(),
+    }
+}
+
 /// Hex sha256 of arbitrary bytes (shared by push staging + release verify).
 pub fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};

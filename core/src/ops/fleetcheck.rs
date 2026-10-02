@@ -407,12 +407,28 @@ pub struct StackDigest {
     /// The parsed `lxc-compose.yml`; None for a stack with only a
     /// `service.yml`. Sent whole rather than hashed so the host compares it
     /// through its own type, and a client one release older does not make
-    /// every stack look changed.
+    /// every stack look changed. Used only when `component_digests` is empty
+    /// on either side (fix-201).
     #[serde(default)]
     pub manifest: Option<crate::manifest::StackManifest>,
-    /// Every file a deploy would send into the container → sha256 hex.
+    /// Every file a deploy would send into the container → sha256 hex. Used
+    /// only when `component_digests` is empty on either side (fix-201).
     #[serde(default)]
     pub files: std::collections::BTreeMap<String, String>,
+    /// fix-201 (today-reports-just-deployed-stacks-as-drifted): this stack
+    /// directory's manifest and files digested the same way
+    /// `StackState::component_digests` is — the same inputs `intent_hash`
+    /// uses, from the fully derived spec (tile `probe` fields included, no
+    /// latch: F291). Preferred over `manifest`/`files` above whenever both
+    /// sides have it, because it compares the raw spec the host actually
+    /// applied against the raw spec this directory would build, rather than
+    /// a parsed-manifest snapshot built a different way on one side and a
+    /// separate host-side git mirror of the repository on the other — a
+    /// mirror that can simply not have caught up yet, and that was never
+    /// asked for `lxc-compose.yml` in the first place. Empty (`has_digests()`
+    /// false) for an older client.
+    #[serde(default)]
+    pub component_digests: crate::manifest::ComponentDigests,
 }
 
 /// fix-142: the repository against what the host applied. Story:
@@ -425,6 +441,16 @@ pub struct StackDigest {
 /// Only what was asked: no digests (an older client, or the nightly round,
 /// which has no repository) means no comparison; a stack whose intent copy
 /// could not be read is compared on its manifest alone.
+///
+/// fix-201: when both sides carry `component_digests` (recorded at the last
+/// deploy from the exact spec it applied — see `manifest::component_digests`
+/// and `StackState::component_digests`), the manifest and files comparison
+/// below uses those instead of `manifest`/`intent_files` — raw spec vs raw
+/// spec, the same inputs `intent_hash` used to decide `apply` already saw
+/// this stack as unchanged. That is what fixed the finding: `apply --plan`
+/// and `today` used to read "what changed" from two different places and
+/// could disagree. The old comparison remains the fallback for a host or
+/// client that recorded no component digests yet.
 pub fn evaluate_repo_drift(state: &HostState, live: &LiveFacts) -> Vec<Finding> {
     let mut out = Vec::new();
     for d in &live.digests {
@@ -452,28 +478,41 @@ pub fn evaluate_repo_drift(state: &HostState, live: &LiveFacts) -> Vec<Finding> 
             }
             continue;
         };
+        let list = |names: Vec<&String>| -> String {
+            names
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
         let mut parts: Vec<String> = Vec::new();
-        if let (Some(local), Some(applied)) = (d.manifest.as_ref(), st.manifest.as_ref())
-            && serde_json::to_value(local).ok() != serde_json::to_value(applied).ok()
-        {
-            parts.push("lxc-compose.yml differs".into());
-        }
-        if let Some(copy) = live.intent_files.get(&d.stack) {
-            let list = |names: Vec<&String>| -> String {
-                names
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
+        if d.component_digests.has_digests() && st.component_digests.has_digests() {
+            // fix-201: raw spec vs raw spec — the same inputs `intent_hash`
+            // compared when this deploy was judged unchanged, never the
+            // separate host-side intent-history mirror (`live.intent_files`),
+            // which is not asked for in this branch at all.
+            if d.component_digests.manifest != st.component_digests.manifest {
+                parts.push("lxc-compose.yml differs".into());
+            }
             let changed: Vec<&String> = d
+                .component_digests
                 .files
                 .iter()
-                .filter(|(p, h)| copy.get(*p).is_some_and(|c| c != *h))
+                .filter(|(p, h)| st.component_digests.files.get(*p).is_some_and(|c| c != *h))
                 .map(|(p, _)| p)
                 .collect();
-            let added: Vec<&String> = d.files.keys().filter(|p| !copy.contains_key(*p)).collect();
-            let gone: Vec<&String> = copy.keys().filter(|p| !d.files.contains_key(*p)).collect();
+            let added: Vec<&String> = d
+                .component_digests
+                .files
+                .keys()
+                .filter(|p| !st.component_digests.files.contains_key(*p))
+                .collect();
+            let gone: Vec<&String> = st
+                .component_digests
+                .files
+                .keys()
+                .filter(|p| !d.component_digests.files.contains_key(*p))
+                .collect();
             if !changed.is_empty() {
                 parts.push(format!("changed: {}", list(changed)));
             }
@@ -482,6 +521,37 @@ pub fn evaluate_repo_drift(state: &HostState, live: &LiveFacts) -> Vec<Finding> 
             }
             if !gone.is_empty() {
                 parts.push(format!("gone from the files: {}", list(gone)));
+            }
+        } else {
+            // Fallback: no component digests on one side (an older client or
+            // host, or a stack never (re)applied since fix-192) — compare the
+            // parsed manifest and the files against the host's git-mirror
+            // intent copy, same as before fix-201.
+            if let (Some(local), Some(applied)) = (d.manifest.as_ref(), st.manifest.as_ref())
+                && serde_json::to_value(local).ok() != serde_json::to_value(applied).ok()
+            {
+                parts.push("lxc-compose.yml differs".into());
+            }
+            if let Some(copy) = live.intent_files.get(&d.stack) {
+                let changed: Vec<&String> = d
+                    .files
+                    .iter()
+                    .filter(|(p, h)| copy.get(*p).is_some_and(|c| c != *h))
+                    .map(|(p, _)| p)
+                    .collect();
+                let added: Vec<&String> =
+                    d.files.keys().filter(|p| !copy.contains_key(*p)).collect();
+                let gone: Vec<&String> =
+                    copy.keys().filter(|p| !d.files.contains_key(*p)).collect();
+                if !changed.is_empty() {
+                    parts.push(format!("changed: {}", list(changed)));
+                }
+                if !added.is_empty() {
+                    parts.push(format!("new: {}", list(added)));
+                }
+                if !gone.is_empty() {
+                    parts.push(format!("gone from the files: {}", list(gone)));
+                }
             }
         }
         if parts.is_empty() {

@@ -1528,6 +1528,7 @@ fn digest(stack: &str, m: Option<StackManifest>, files: &[(&str, &str)]) -> Stac
             .iter()
             .map(|(p, h)| (p.to_string(), h.to_string()))
             .collect(),
+        component_digests: Default::default(),
     }
 }
 
@@ -1698,6 +1699,150 @@ fn fix_142_a_stack_without_a_manifest_compares_its_files_only() {
         ..Default::default()
     };
     assert!(evaluate_repo_drift(&st, &live).is_empty());
+}
+
+// ── fix-201: the repository drift check, compared through the same
+// component digests `intent_hash`/`apply --plan` already use ───────────────
+//
+// Found 2026-10-02: right after `homelab deploy` succeeded, `homelab today`
+// still reported ten stacks as differing ("lxc-compose.yml differs" and,
+// for media, several files) while `homelab apply --plan` called every one of
+// them unchanged. The two commands read "what changed" from different
+// places — `apply --plan` from `intent_hash`/`applied_hash`, `today` from a
+// parsed-manifest snapshot and the host's separate git-mirror copy of the
+// repository — and could disagree even when nothing had. These three tests
+// pin that a stack just deployed from the files being compared reads quiet
+// through `evaluate_repo_drift`, that a real change is still named, and that
+// a host or client with no recorded component digests still gets the old
+// comparison.
+
+fn component_digests(
+    manifest: &str,
+    files: &[(&str, &str)],
+) -> homelab_core::manifest::ComponentDigests {
+    homelab_core::manifest::ComponentDigests {
+        manifest: manifest.into(),
+        files: files
+            .iter()
+            .map(|(p, h)| (p.to_string(), h.to_string()))
+            .collect(),
+        env: Default::default(),
+        secret_files: Default::default(),
+        built_by: String::new(),
+    }
+}
+
+fn digest_cd(
+    stack: &str,
+    m: Option<StackManifest>,
+    files: &[(&str, &str)],
+    cd: homelab_core::manifest::ComponentDigests,
+) -> StackDigest {
+    StackDigest {
+        component_digests: cd,
+        ..digest(stack, m, files)
+    }
+}
+
+/// fix-201: component digests equal on both sides says nothing, even though
+/// the parsed manifest and the host's intent-history mirror the old
+/// comparison used both disagree — that mismatch is exactly what made a
+/// freshly deployed stack with a tile (whose `probe` field a deploy fills in
+/// but the old client-side digest never derived) read as drifted forever.
+#[test]
+fn fix_201_a_just_deployed_stack_is_quiet_through_component_digests() {
+    let applied = boot_manifest(115, true, 3, 1024, 2);
+    let mut st = stack(115, "115-app-home", true, NOW - 3600);
+    // The old comparison's inputs disagree on purpose, to prove it is not
+    // consulted when both sides carry component digests.
+    let mut different_manifest = applied.clone();
+    different_manifest.resources.memory_mb = 4096;
+    st.manifest = Some(different_manifest);
+    st.applied_at = 1_788_000_000 - 86_400;
+    st.component_digests =
+        component_digests("same-manifest-hash", &[("app/docker-compose.yml", "aaa")]);
+    let state = state(vec![("home", st)]);
+    let live = LiveFacts {
+        digests: vec![digest_cd(
+            "home",
+            Some(applied),
+            &[("app/docker-compose.yml", "zzz-not-compared")],
+            component_digests("same-manifest-hash", &[("app/docker-compose.yml", "aaa")]),
+        )],
+        intent_files: intent("home", &[("app/docker-compose.yml", "not-compared-either")]),
+        ..Default::default()
+    };
+    assert!(
+        evaluate_repo_drift(&state, &live).is_empty(),
+        "{:#?}",
+        evaluate_repo_drift(&state, &live)
+    );
+}
+
+/// fix-201: a file whose content actually changed is still named, through
+/// the component digests this time.
+#[test]
+fn fix_201_a_changed_file_is_still_drift_and_names_the_file() {
+    let m = boot_manifest(115, true, 3, 1024, 2);
+    let mut st = stack(115, "115-app-home", true, NOW - 3600);
+    st.manifest = Some(m.clone());
+    st.applied_at = 1_788_000_000 - 86_400;
+    st.component_digests = component_digests(
+        "manifest-hash",
+        &[
+            ("app/docker-compose.yml", "aaa"),
+            ("app/config.yml", "old-hash"),
+        ],
+    );
+    let state = state(vec![("home", st)]);
+    let live = LiveFacts {
+        digests: vec![digest_cd(
+            "home",
+            Some(m),
+            &[],
+            component_digests(
+                "manifest-hash",
+                &[
+                    ("app/docker-compose.yml", "aaa"),
+                    ("app/config.yml", "new-hash"),
+                ],
+            ),
+        )],
+        ..Default::default()
+    };
+    let got = evaluate_repo_drift(&state, &live);
+    assert_eq!(got.len(), 1, "{got:#?}");
+    assert_eq!(got[0].severity, Severity::Drift);
+    assert_eq!(got[0].subject, "home");
+    assert!(got[0].what.contains("app/config.yml"), "{}", got[0].what);
+    assert!(
+        !got[0].what.contains("app/docker-compose.yml"),
+        "an unchanged file is not named: {}",
+        got[0].what
+    );
+}
+
+/// fix-201: a host (or client) that recorded no component digests yet — a
+/// host from before fix-192, or a stack never (re)applied since — still gets
+/// the old manifest/intent-files comparison, unchanged.
+#[test]
+fn fix_201_no_component_digests_falls_back_to_the_old_comparison() {
+    let applied = boot_manifest(115, true, 3, 1024, 2);
+    let st = applied_home(applied.clone());
+    let mut edited = applied;
+    edited.resources.memory_mb = 2048;
+    let live = LiveFacts {
+        digests: vec![digest(
+            "home",
+            Some(edited),
+            &[("app/docker-compose.yml", "aaa")],
+        )],
+        intent_files: intent("home", &[("app/docker-compose.yml", "aaa")]),
+        ..Default::default()
+    };
+    let got = evaluate_repo_drift(&st, &live);
+    assert_eq!(got.len(), 1, "{got:#?}");
+    assert!(got[0].what.contains("lxc-compose.yml"), "{}", got[0].what);
 }
 
 // ── fix-142: the nightly hash comparison, the in-container half ────────────

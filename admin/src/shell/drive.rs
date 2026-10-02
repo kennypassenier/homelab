@@ -33,7 +33,7 @@ use serde_json::{Value, json};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::time::Instant;
 
-use super::actions::{Actions, Clock, HostPort, Origin, Publish};
+use super::actions::{Actions, Clock, HostPort, Origin, PauseGate, Publish};
 use super::edit::{self as ed, EditCtx};
 use super::host_link::Shared;
 use crate::core::actions::{self as act, ActionKind, Arg, Refusal};
@@ -76,8 +76,11 @@ struct Inner {
     edit: Option<EditCtx>,
     /// Live view.
     timing: Mutex<LiveTiming>,
-    /// A viewer pressed a button: the held step looks again.
-    wake: tokio::sync::Notify,
+    /// A viewer pressed a button: the held step looks again. fix-172: also
+    /// handed to the action queue ([`PauseGate::notified`]) so Pause holds
+    /// a driven batch at the boundary between its jobs, not only a driven
+    /// UI step that has not been sent yet.
+    wake: Arc<tokio::sync::Notify>,
     /// Where the running countdown ends; None when none runs (or paused).
     deadline: Mutex<Option<Instant>>,
     announced: AtomicU64,
@@ -113,7 +116,7 @@ impl Driver {
                 clock,
                 edit,
                 timing: Mutex::new(LiveTiming::default()),
-                wake: tokio::sync::Notify::new(),
+                wake: Arc::new(tokio::sync::Notify::new()),
                 deadline: Mutex::new(None),
                 announced: AtomicU64::new(0),
                 continued_by: Mutex::new(None),
@@ -800,6 +803,14 @@ impl Driver {
         Ok(self.snapshot())
     }
 
+    /// fix-172: the action queue asks this before it takes the next job
+    /// off the queue, so a viewer's Pause holds a driven batch at the
+    /// boundary between its jobs the same way it already holds a driven UI
+    /// step that has not been sent yet.
+    fn paused_by_now(&self) -> Option<String> {
+        self.lock().paused_by.clone()
+    }
+
     /// The announcement or the pause changed; no step was taken.
     fn publish_live(&self, kind: &str) {
         let state = self.snapshot();
@@ -1095,6 +1106,19 @@ async fn control(
     match d.control(body.what, &viewer(&headers)) {
         Ok(state) => Json(json!({ "state": state })).into_response(),
         Err(r) => (StatusCode::CONFLICT, Json(r)).into_response(),
+    }
+}
+
+/// fix-172: the action queue's view of Live view's pause, wired in
+/// `shell::actions::mount` once both the queue and the driver exist
+/// (`Actions::set_pause_gate`).
+impl PauseGate for Driver {
+    fn paused_by(&self) -> Option<String> {
+        self.paused_by_now()
+    }
+
+    fn notified(&self) -> Arc<tokio::sync::Notify> {
+        self.inner.wake.clone()
     }
 }
 

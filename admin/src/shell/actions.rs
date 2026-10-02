@@ -589,6 +589,23 @@ struct Job {
     view: JobView,
 }
 
+/// fix-172 (Kenny, 2026-10-02): what the queue asks the drive session
+/// (Live view) before it runs the next queued job. A viewer's Pause used to
+/// only hold a driven UI step that had not been sent yet — once the final
+/// press fired a batch, the jobs it queued ran on regardless, because
+/// nothing in the queue ever looked at `paused_by`. The driver (the only
+/// thing that knows about Live view) registers itself here
+/// ([`Actions::set_pause_gate`]), so the queue holds at the boundary
+/// between two jobs the same way a driven step already held between two
+/// screens — never mid-job, which stays Kenny's `stop_batch` boundary.
+pub trait PauseGate: Send + Sync {
+    /// Who has Live view paused right now; None to run the queue on.
+    fn paused_by(&self) -> Option<String>;
+    /// Notified whenever Pause, Continue or Stop changes the state above,
+    /// so the queue's wait never has to poll.
+    fn notified(&self) -> Arc<tokio::sync::Notify>;
+}
+
 /// Jobs kept for `GET /data/actions/jobs` and reloads, unless
 /// [`Actions::set_limits`] says otherwise (`HOMELAB_ADMIN_KEEP_JOBS`).
 const KEEP_JOBS: usize = 200;
@@ -620,6 +637,10 @@ struct Inner {
     /// `change-secret` job it is for — never part of `ActionArgs`/`JobView`,
     /// never logged, expired after [`SECRET_STAGE_TTL`] either way.
     secret_stage: std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, String)>>,
+    /// fix-172: the drive session's pause gate, set once the driver exists
+    /// (mount wires it after both are built). None for a queue the driver
+    /// never reached (most tests): the queue then never waits.
+    pause_gate: std::sync::OnceLock<Arc<dyn PauseGate>>,
 }
 
 /// feat-secrets-2: how long a staged secret value waits for the job that
@@ -693,12 +714,14 @@ impl Actions {
             reconnect_wait: std::sync::OnceLock::new(),
             limits: std::sync::OnceLock::new(),
             secret_stage: std::sync::Mutex::new(std::collections::HashMap::new()),
+            pause_gate: std::sync::OnceLock::new(),
         });
         let worker = Actions {
             inner: inner.clone(),
         };
         tokio::spawn(async move {
             while let Some(job) = rx.recv().await {
+                worker.wait_while_paused().await;
                 worker.run(job).await;
             }
         });
@@ -713,6 +736,39 @@ impl Actions {
     /// test). Set once.
     pub fn set_releases(&self, r: Arc<dyn super::releases::Releases>) {
         let _ = self.inner.releases.set(r);
+    }
+
+    /// fix-172: the drive session registers itself here once it exists
+    /// (mount builds the driver from an `Actions` it already has, so this
+    /// comes after `start`). Set once.
+    pub fn set_pause_gate(&self, gate: Arc<dyn PauseGate>) {
+        let _ = self.inner.pause_gate.set(gate);
+    }
+
+    /// fix-172: hold the queue here, between two jobs, while a viewer has
+    /// Live view paused — the boundary Pause actually promises. The job
+    /// that was already running when Pause was pressed keeps running to
+    /// its end (a host operation already under way cannot be held
+    /// mid-step); this only ever waits before the NEXT job is taken off
+    /// the queue, batch or not, since the queue runs one job at a time
+    /// anyway (AR12).
+    async fn wait_while_paused(&self) {
+        let Some(gate) = self.inner.pause_gate.get() else {
+            return;
+        };
+        loop {
+            let notify = gate.notified();
+            let woken = notify.notified();
+            tokio::pin!(woken);
+            // Register as a waiter before reading `paused_by`, the same
+            // order `drive::held` uses, so a Continue that lands between
+            // the read and the wait is never missed.
+            woken.as_mut().enable();
+            if gate.paused_by().is_none() {
+                return;
+            }
+            woken.await;
+        }
     }
 
     /// How long "Update host" waits for the host to come back (a test
@@ -2290,6 +2346,10 @@ pub fn mount(
         max_pause: Duration::from_secs(cfg.live_max_pause_s),
     });
     driver.set_limits(cfg.drive_idle_s, cfg.drive_release_after_job_s);
+    // fix-172: the queue now holds between two jobs while Live view is
+    // paused; the driver is the only thing that knows about Live view, so
+    // it registers itself once it exists (the queue was built first).
+    actions.set_pause_gate(Arc::new(driver.clone()));
     app.dashboard_routes(super::drive::router(driver.clone()));
     #[cfg(feature = "demo-host")]
     if demo_host {

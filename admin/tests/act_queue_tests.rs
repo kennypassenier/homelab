@@ -15,7 +15,7 @@ use axum::http::{Request, StatusCode};
 use homelab_admin::core::actions::{ActionArgs, BatchRequest, validate};
 use homelab_admin::core::schedule::{ScheduleInput, When, resolve_local};
 use homelab_admin::shell::actions::{
-    Actions, ActionsDeps, CommitInfo, JobState, Origin, Publish, router,
+    Actions, ActionsDeps, CommitInfo, JobState, Origin, PauseGate, Publish, router,
 };
 use homelab_admin::shell::actions_notify::NotifyCenter;
 use homelab_admin::shell::scheduler::Scheduler;
@@ -238,6 +238,105 @@ async fn feat_stacks_5_one_failure_in_a_batch_does_not_hide_the_others() {
             .unwrap()
             .contains("locked")
     );
+}
+
+/// fix-172 (Kenny, 2026-10-02 06:55): a viewer's Pause in Live view during a
+/// driven batch ("Install newest release" on kyu and almanac) did nothing —
+/// the batch ran to its end regardless, and Continue afterwards changed
+/// nothing because there was nothing actually held. A stand-in for the
+/// driver (the real gate lives in `shell::drive::Driver`, which `mount`
+/// wires up; this test only needs the queue's side of the contract).
+struct FakeGate {
+    paused: Mutex<Option<String>>,
+    notify: Arc<tokio::sync::Notify>,
+}
+
+impl FakeGate {
+    fn new() -> Arc<Self> {
+        Arc::new(FakeGate {
+            paused: Mutex::new(None),
+            notify: Arc::new(tokio::sync::Notify::new()),
+        })
+    }
+    fn pause(&self, who: &str) {
+        *self.paused.lock().unwrap() = Some(who.into());
+        self.notify.notify_waiters();
+    }
+    fn resume(&self) {
+        *self.paused.lock().unwrap() = None;
+        self.notify.notify_waiters();
+    }
+}
+
+impl PauseGate for FakeGate {
+    fn paused_by(&self) -> Option<String> {
+        self.paused.lock().unwrap().clone()
+    }
+    fn notified(&self) -> Arc<tokio::sync::Notify> {
+        self.notify.clone()
+    }
+}
+
+#[tokio::test]
+async fn fix_172_pause_holds_a_batch_at_the_boundary_before_its_next_job() {
+    let w = world(
+        "pause-batch",
+        MemFiles::default(),
+        Arc::new(|_c: &Command| Script::ok(&[("snapshot", 5)])),
+    );
+    let gate = FakeGate::new();
+    w.actions.set_pause_gate(gate.clone());
+    // Paused before the batch is even submitted: on the OLD code (no wait
+    // in the worker loop) this made no difference and every job ran at
+    // once, so this assertion fails without the fix.
+    gate.pause("the viewer kenny");
+    let reqs = homelab_admin::core::actions::validate_batch(BatchRequest {
+        action: "backup".into(),
+        stacks: vec!["media".into(), "home".into()],
+        args: ActionArgs::default(),
+        confirms: Default::default(),
+    })
+    .unwrap();
+    let (_batch, jobs) = w.actions.submit_batch(reqs);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        w.host.ran().is_empty(),
+        "paused: the queue must not have run a single job yet"
+    );
+    assert_eq!(w.actions.job(jobs[0].job).unwrap().state, JobState::Queued);
+
+    // Continue releases it: both jobs run, in order, same as an unpaused
+    // batch would.
+    gate.resume();
+    for j in &jobs {
+        finished(&w, j.job).await;
+    }
+    let ran: Vec<String> = w.host.ran().into_iter().map(|r| r.2).collect();
+    assert_eq!(ran, vec!["media", "home"]);
+    let states: Vec<JobState> = jobs
+        .iter()
+        .map(|j| w.actions.job(j.job).unwrap().state)
+        .collect();
+    assert_eq!(states, vec![JobState::Done, JobState::Done]);
+}
+
+/// fix-172: a queue nobody ever registered a gate for (every other test in
+/// this file, and a dashboard before `mount` wires the driver in) must
+/// never wait — `PauseGate` is optional, not a new way to deadlock the
+/// queue.
+#[tokio::test]
+async fn fix_172_a_queue_without_a_pause_gate_never_waits() {
+    let w = world("no-gate", MemFiles::default(), steady());
+    let view = w.actions.submit(
+        homelab_admin::core::actions::ActionRequest {
+            stack: "media".into(),
+            action: homelab_admin::core::actions::ActionKind::Backup,
+            args: ActionArgs::default(),
+        },
+        Origin::Manual,
+    );
+    let j = finished(&w, view.job).await;
+    assert_eq!(j.state, JobState::Done);
 }
 
 #[tokio::test]

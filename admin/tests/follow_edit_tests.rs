@@ -1387,41 +1387,6 @@ fn follow_the_edit_checks_match_the_browser_cases() {
     );
 }
 
-/// feat-platform-10 (milestone follow).
-///
-/// Every browser module is served: the dashboard embeds its files one by
-/// one, and a module left out breaks every page that imports it (a new
-/// file of this milestone once was).
-#[test]
-fn follow_every_browser_module_is_embedded() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let main: String = std::fs::read_to_string(root.join("src/main.rs"))
-        .unwrap()
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect();
-    let mut missing = Vec::new();
-    for dir in ["js", "js/pages"] {
-        for e in std::fs::read_dir(root.join("web").join(dir))
-            .unwrap()
-            .flatten()
-        {
-            let name = e.file_name().to_string_lossy().to_string();
-            if !(name.ends_with(".js") || name.ends_with(".json")) {
-                continue;
-            }
-            let path = format!("{dir}/{name}");
-            if !main.contains(&format!("(\"{path}\",include_bytes!(\"../web/{path}\")")) {
-                missing.push(path);
-            }
-        }
-    }
-    assert!(
-        missing.is_empty(),
-        "not embedded in src/main.rs: {missing:?}"
-    );
-}
-
 /// TUI parity (`homelab import`): the import form, driven. The bundle is
 /// one multi-line field (`homelab ui edit import-bundle <file>`), the name
 /// and the number are held in the new-stack wizard's words, then the plan

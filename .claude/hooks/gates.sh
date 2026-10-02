@@ -44,12 +44,18 @@ if [ "${GATE_SUITE:-}" = full ] && [ "${GATE_FULL:-0}" = 1 ]; then
   # before this existed.
   gate_suite_cmd=(.githooks/gate-carry.sh rust)
   gate_admin_tests_cmd=(.githooks/gate-carry.sh node)
+  # docs/INVARIANTS.md: the Playwright smoke against the demo-host build.
+  # Only in a full run (standing rule 7's commit subset cannot afford a
+  # built binary and a browser); gate-carry.sh decides, same as rust/node
+  # above, whether admin/web or admin/src moved since its last run.
+  gate_invariants_cmd=(.githooks/gate-carry.sh invariants)
   if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
     gate_stamp_ok=1
   fi
 else
   gate_suite_cmd=(.githooks/test-subset.sh)
   gate_admin_tests_cmd=(sh -c 'cd admin/web && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && node --import ./test/support/kp-register.mjs --test test/')
+  gate_invariants_cmd=(true)
 fi
 # Kenny, 2026-09-16, standing rule 49 (commit-floor and rust-suite):
 # format and lint always run, and the suite is skipped when no Rust
@@ -113,6 +119,12 @@ gate_glob admin-web 'admin/web/*' -- \
 # and `make gate` (GATE_FULL=1) runs them — in full, or carried (fix-187),
 # exactly like the Rust suite above.
 gate_glob admin-web-tests 'admin/web/*' -- "${gate_admin_tests_cmd[@]}"
+# docs/INVARIANTS.md: `true` at commit time (the non-full branch above sets
+# gate_invariants_cmd to it) so this line costs nothing there; on `make
+# gate`/`make release` gate-carry.sh decides to run or skip the actual
+# smoke (admin/web and admin/src both watched, since it drives the
+# dashboard's own demo host).
+gate_glob admin-invariants 'admin/web/*' 'admin/src/*' -- "${gate_invariants_cmd[@]}"
 
 gate_cache_done
 

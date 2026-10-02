@@ -345,6 +345,52 @@ cmd_node() {
   return "$rc"
 }
 
+# ── Invariants family (docs/INVARIANTS.md) ──────────────────────────────
+#
+# The Playwright smoke in admin/web/test-e2e/invariants.e2e.js, against the
+# admin dashboard's demo-host build (scripts/invariants-run.sh builds and
+# serves it, drives the suite, tears it down). It depends on both admin/web
+# (the pages it drives) and admin/src (the demo host and driver it drives
+# against), so it tracks both — unlike the node family above, which only
+# cares about admin/web. No sub-test carry (it is Kenny's "one short smoke
+# per milestone", not a suite worth rerunning piecemeal): full run or
+# skipped, same shape as rust/node's own full path, just without the
+# failing-test bookkeeping.
+cmd_invariants() {
+  local state="$root/.git/gate-carry/invariants"
+  mkdir -p "$state"
+  local cur_tc; cur_tc="node $(node -v 2>/dev/null || echo none)"
+  local workdir; workdir=$(mktemp -d)
+  trap 'rm -rf "$workdir"' RETURN
+
+  local base reason
+  if [ "$force_full" = full ]; then
+    reason="GATE_CARRY_MODE=full"
+  else
+    base=$(carry_base invariants "$cur_tc" 2>"$workdir/reason") || reason=$(cat "$workdir/reason")
+  fi
+
+  local changed=""
+  if [ -z "${reason:-}" ]; then
+    changed=$(git diff --name-only "$base" -- admin/web admin/src 2>/dev/null || true)
+  fi
+
+  if [ -z "${reason:-}" ] && [ -z "$changed" ]; then
+    echo "gate-carry: invariants smoke skipped — admin/web and admin/src unchanged since $(git rev-parse --short "$base")"
+    record_state invariants "$(current_tree)" "$cur_tc" /dev/null "carry:$(git rev-parse --short "$base")"
+    { echo "carried run, $(date -Iseconds)"; echo "base: $base"; echo "reran: nothing (admin/web and admin/src unchanged)"; } > "$state/last-run.txt"
+    return 0
+  fi
+
+  local why="${reason:-admin/web or admin/src changed since $(git rev-parse --short "$base" 2>/dev/null || echo "the last run")}"
+  echo "gate-carry: invariants smoke run — $why"
+  local rc=0
+  "$root"/scripts/invariants-run.sh || rc=$?
+  record_state invariants "$(current_tree)" "$cur_tc" /dev/null full
+  { echo "full run, $(date -Iseconds)"; echo "reason: $why"; } > "$state/last-run.txt"
+  return "$rc"
+}
+
 # Sourced (by the test suite, to exercise the parsing/decision functions
 # directly against fixtures) vs executed: only dispatch when run as a
 # command, so `source gate-carry.sh` loads the functions and nothing else.
@@ -366,7 +412,8 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-}" in
     rust) timed "rust tests" cmd_rust ;;
     node) timed "node tests" cmd_node ;;
-    full) GATE_CARRY_MODE=full; force_full=full; timed "rust tests" cmd_rust; rc1=$?; timed "node tests" cmd_node; rc2=$?; [ "$rc1" = 0 ] && [ "$rc2" = 0 ] ;;
+    invariants) timed "invariants smoke" cmd_invariants ;;
+    full) GATE_CARRY_MODE=full; force_full=full; timed "rust tests" cmd_rust; rc1=$?; timed "node tests" cmd_node; rc2=$?; timed "invariants smoke" cmd_invariants; rc3=$?; [ "$rc1" = 0 ] && [ "$rc2" = 0 ] && [ "$rc3" = 0 ] ;;
     *) sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
   esac
 fi

@@ -29,6 +29,7 @@ import {
   applyOutcome,
   applyProgress,
   batchView,
+  jobFacts,
   jobPanel,
   jobRows,
   jobsAwaitingOutcome,
@@ -378,9 +379,42 @@ test("the job panel reads step 3/35 with the time run and the time left", () => 
   assert.equal(v.elapsed, "2 min"); // 1130 - 1010
   assert.equal(v.remaining, "about 2 min 50 s left"); // 200 - 30
   assert.equal(v.basis, "expected from 5 earlier runs");
-  assert.equal(v.percent, 41); // 120 / (120 + 170)
+  // fix-189 (Kenny, 2026-10-02): a step total is the bar's one truth once
+  // the host sends one; time history (which alone would say 41% here,
+  // 120 / (120 + 170)) now only feeds "Expected remaining" above.
+  assert.equal(v.percent, 6); // (3 - 1) / 35
   assert.equal(v.finished, false);
   assert.equal(v.badge.label, "running");
+});
+
+// fix-189: 263/310 with an earlier, shorter run's time estimate expired
+// (no time left to go by) read 99% — the bar pinned at "almost done" on a
+// run barely a third through its own steps. Steps-only once there is a
+// total: 85%, and it never goes backwards or claims 100 before `done`.
+test("fix_189_the_bar_is_steps_only_once_it_has_a_total_never_pinned_at_99", () => {
+  const mid = job({ progress: prog({ n: 263, m: 310 }) });
+  assert.equal(percent(mid, 1100, 1130), 85); // (263 - 1) / 310
+  assert.notEqual(percent(mid, 1100, 1130), 99);
+
+  // Monotonic: as the host marks more steps, the bar never drops back.
+  let last = -1;
+  for (const n of [1, 50, 120, 200, 263, 309, 310]) {
+    const p = /** @type {number} */ (
+      percent(job({ progress: prog({ n, m: 310 }) }), 1100, 1130)
+    );
+    assert.ok(p >= last, `${p} should not be behind ${last} at step ${n}`);
+    last = p;
+  }
+
+  // Done is 100, from the job's own state, not the step math.
+  assert.equal(
+    percent(
+      job({ state: "done", progress: prog({ n: 310, m: 310 }) }),
+      1100,
+      1130,
+    ),
+    100,
+  );
 });
 
 test("no earlier run: the step without a count and an honest remaining", () => {
@@ -446,6 +480,41 @@ test("the end of a job says what came of it", () => {
   );
   assert.equal(outcome(job({ state: "deferred" }))?.tone, "info");
   assert.equal(outcome(job()), null);
+});
+
+// feat-jobpanel-1 (Kenny, 2026-10-02): the panel's facts grid never shows
+// an empty cell — every state (queued, running, done, failed, paused-ish
+// via "unknown") gives State, Step, Origin, Running for and Expected
+// remaining a real value, so the grid's cells never collapse or reflow as
+// a job moves between states.
+test("feat_jobpanel_1_every_fact_cell_is_non_empty_in_every_state", () => {
+  const ctx = {
+    label: (/** @type {string} */ a) => a,
+    progressAt: 1100,
+    now: 1130,
+  };
+  const states = [
+    job({ state: "queued", started_at: null, progress: null }),
+    job({ state: "running", progress: prog() }),
+    job({ state: "running", progress: null }),
+    job({ state: "done", finished_at: 1210, progress: prog() }),
+    job({ state: "failed", finished_at: 1210, progress: prog() }),
+    job({ state: "unknown", progress: null }),
+  ];
+  for (const j of states) {
+    const cells = jobFacts(jobPanel(j, ctx));
+    assert.equal(cells.length, 5);
+    for (const c of cells)
+      assert.ok(
+        c.value && c.value.length > 0,
+        `${j.state}'s "${c.label}" cell must not be empty`,
+      );
+  }
+  // The State cell carries the badge to draw, not just its label text.
+  const stateCell = jobFacts(jobPanel(job({ state: "failed" }), ctx)).find(
+    (c) => c.key === "state",
+  );
+  assert.equal(stateCell?.badge?.label, "failed");
 });
 
 test("jobs merge newest first, progress survives a later job view", () => {

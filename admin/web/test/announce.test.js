@@ -5,9 +5,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   announceView,
+  isActive,
+  jobRunning,
   leftNow,
   plan,
   planList,
+  stillDriving,
   targetOf,
 } from "../js/driveview.js";
 
@@ -258,4 +261,62 @@ test("follow_live_an_announcement_marks_but_is_no_step", () => {
     [],
     "a tab that does not follow",
   );
+});
+
+// fix-188 (Kenny, 2026-10-02): driving a running Apply, Pause and Stop
+// vanished partway through. `isActive`'s recency window is built to
+// notice an abandoned session, not a job still working — a long host
+// operation announces nothing while it runs, so `last_at` goes stale and
+// `isActive` alone timed out mid-job. `stillDriving` is the one source
+// drive.js now asks, so Pause/Stop never disappear while a job or a
+// driven batch is actually running, however long it takes.
+test("fix_188_pause_and_stop_stay_up_through_a_long_running_job", () => {
+  /** @type {NonNullable<DriveState["form"]>} */
+  const applyForm = {
+    id: "action:apply",
+    action: "apply",
+    stack: "_host",
+    title: "Apply · the whole host",
+    steps: ["review"],
+    step: "review",
+    step_index: 0,
+    values: {},
+    errors: {},
+    run_error: null,
+    job: { job: 9, state: "running", message: null, progress: null },
+    fields: [],
+    buttons: [],
+  };
+  const stale = state({ last_at: 0, idle_s: 30, form: applyForm });
+  // The recency check alone says Claude stopped driving long ago...
+  assert.equal(isActive(stale, 10_000), false);
+  // ...but a job is still running under this very state.
+  assert.equal(jobRunning(stale), true);
+  assert.equal(stillDriving(stale, 10_000), true);
+  const v = announceView(stale, 0, stillDriving(stale, 10_000));
+  assert.notEqual(v, null, "the strip (and its Pause/Stop) stays rendered");
+  assert.equal(v?.text, "Running: job 9 running");
+
+  // A driven batch, same shape, under `form.edit.result.batch`.
+  const batchStale = state({
+    last_at: 0,
+    idle_s: 30,
+    form: {
+      ...applyForm,
+      job: null,
+      edit: { family: "batch", result: { batch: 4 }, guarded: 0 },
+    },
+  });
+  assert.equal(isActive(batchStale, 10_000), false);
+  assert.equal(jobRunning(batchStale), true);
+  assert.notEqual(
+    announceView(batchStale, 0, stillDriving(batchStale, 10_000)),
+    null,
+  );
+
+  // Once the job and the batch are both gone and nothing is active or
+  // announced, the strip is genuinely idle — Pause/Stop rightly disappear.
+  const idle = state({ last_at: 0, idle_s: 30, form: null });
+  assert.equal(stillDriving(idle, 10_000), false);
+  assert.equal(announceView(idle, 0, stillDriving(idle, 10_000)), null);
 });

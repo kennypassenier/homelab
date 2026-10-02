@@ -536,12 +536,38 @@ p:has(> .measured:only-child):first-child {
 .job-step-name {
   margin: 4px 0 8px;
 }
-.job-remaining[data-late="true"] {
+.job-fact--remaining[data-late="true"] {
   color: var(--destructive);
 }
 .job-outcome:not(:empty),
 .job-cli:not(:empty) {
   margin-block: 8px;
+}
+/* feat-jobpanel-1 (Kenny, 2026-10-02): the log fills whatever height the
+   compact panel (a dialog's own job panel) is given rather than growing
+   with its own content — a job that has printed two lines and one that
+   has printed five hundred take up the same room, and the dialog around
+   them never resizes as lines arrive. `.job-panel--compact` is the flex
+   column that makes `.job-log-wrap` the one region with `flex: 1 1 auto`
+   (dom.js/jobpanel.js sets the modifier only inside a dialog; the full
+   Jobs-page panel keeps growing with its content, which is the right
+   shape for a page rather than a fixed-size dialog). */
+.job-panel--compact {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-block-size: min(60vh, 30rem);
+}
+.job-panel--compact .job-log-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-block-size: 0;
+}
+.job-panel--compact .job-log {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  max-block-size: none;
 }
 .job-log {
   max-block-size: 18rem;
@@ -555,8 +581,12 @@ p:has(> .measured:only-child):first-child {
 .job-log-empty {
   margin: 4px 0;
 }
+/* The bar used to cap at 40rem like any other lone progress bar
+   (`.kp-progress-group`'s own default); here it is the fixed-width row
+   right under the facts grid, so it takes the panel's full width instead
+   of stranding the rest beside it (Kenny, 2026-10-02). */
 .job-progress {
-  max-inline-size: 40rem;
+  max-inline-size: none;
 }
 /* feat-stacks-5: the batch bar and progress. */
 .select-col {
@@ -662,6 +692,29 @@ tr.unread td:first-child {
 }
 .job-facts {
   margin-block: 8px 0;
+}
+/* feat-jobpanel-1 (Kenny, 2026-10-02): "maak hier ook een grid van" — on a
+   wide dialog the five facts repeated 2-3 pairs across instead of one
+   column trailing down the left edge while the rest of the width sat
+   empty. `.facts`' own grid-auto-flow lays dt/dd pairs into these columns
+   in document order (State, Step, Origin on row one; Running for,
+   Expected remaining on row two at 3-up); its phone rule (one column,
+   label over value) still wins below 30rem. Every value is set from a
+   fixed-width numeric font so a job going from "9 s" to "2 min 14 s"
+   never shifts its neighbour. */
+@media (min-width: 46rem) {
+  .job-facts {
+    grid-template-columns: repeat(2, max-content minmax(9rem, 1fr));
+    column-gap: 28px;
+  }
+}
+@media (min-width: 64rem) {
+  .job-facts {
+    grid-template-columns: repeat(3, max-content minmax(9rem, 1fr));
+  }
+}
+.job-fact {
+  font-variant-numeric: tabular-nums;
 }
 /* On a phone a log line's message gets a row of its own. */
 @media (max-width: 520px) {
@@ -1170,17 +1223,27 @@ td.stack-flags {
 }
 
 /* ==== BEGIN Live view: announce, plan and pause (feat-platform-10, ====
-   Kenny 2026-09-29, form "Live view aankondigen"). The bar over the page
-   (fixed, so it moves nothing when it comes or goes), the same bar as a
-   driven dialog's banner (always there, its parts keep their place), the
-   plan beside the page, and the mark on the step's target. Every value
-   that changes has a reserved place: the count is two characters wide,
-   Pause and Continue share one cell, a hidden part keeps its space. */
+   Kenny 2026-09-29, form "Live view aankondigen"; grid rebuild 2026-10-02,
+   fix-188: "de tekst staat scheef uitgelijnd" and Pause/Stop disappearing
+   mid-job). The bar over the page (fixed, so it moves nothing when it
+   comes or goes), the same bar as a driven dialog's banner (always there,
+   its parts keep their place), the plan beside the page, and the mark on
+   the step's target.
+   Two columns, not a wrapping flex row: the words (what Claude is doing,
+   its status/counter line) in one, the controls (countdown, Pause/
+   Continue, Stop, Leave live view) in the other, both vertically centred
+   on the same line — a loose flex row let the words and the buttons drift
+   out of line with each other and, once the controls' own invisible-but-
+   reserved row wrapped below the words, turned a one-line strip into a
+   tall block. Every value that still changes while Claude drives keeps a
+   reserved place inside its own column: the count is two characters wide,
+   Pause and Continue share one cell, a hidden status/counter keeps its
+   line's height. */
 .drive-announce {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) auto;
   align-items: center;
-  gap: 8px 12px;
+  gap: 4px 16px;
 }
 .drive-announce[hidden] {
   display: none;
@@ -1197,9 +1260,16 @@ td.stack-flags {
 .drive-announce--inline {
   margin-block-end: 12px;
 }
+/* Narrower than the words need room for both themselves and the controls
+   on one line: stack the two columns instead of crowding them (the same
+   one-column fallback `.facts`/`.job-facts` use below their own width). */
+@media (max-width: 36rem) {
+  .drive-announce {
+    grid-template-columns: 1fr;
+  }
+}
 .drive-announce__words {
   display: flex;
-  flex: 1 1 16rem;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
@@ -1221,11 +1291,30 @@ td.stack-flags {
 .drive-announce__status {
   font-weight: 600;
 }
+/* The controls column: whatever it holds (just "Leave live view" while
+   idle, the full countdown/Pause/Stop row while driving) sits flush with
+   the strip's end, vertically centred with the words beside it. */
+.drive-announce__controls {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 12px;
+}
 .drive-announce__live {
   display: inline-flex;
-  flex: 0 0 auto;
   align-items: center;
   gap: 8px;
+}
+/* fix-188: collapses out of flow entirely while Claude is not driving —
+   the strip then shows only the words and "Leave live view", instead of
+   reserving a whole invisible button row under them (the "tall block"
+   Kenny measured against the words-only idle state). While driving, its
+   children still use `.drive-announce--off` (visibility, not display) so
+   Pause swapping for Continue never shifts Stop or the countdown beside
+   it. */
+.drive-announce__live[hidden] {
+  display: none;
 }
 .drive-announce__count {
   display: inline-block;

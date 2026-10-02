@@ -6,7 +6,7 @@
 import { act, actionLabel, onAct } from "./act.js";
 import { badge, labeledCopyLine } from "./actui.js";
 import { h } from "./dom.js";
-import { jobPanel, logLine } from "./jobs.js";
+import { jobFacts, jobPanel, logLine } from "./jobs.js";
 import { attachLogs } from "/static/kp/js/log.js";
 
 /**
@@ -17,9 +17,6 @@ import { attachLogs } from "/static/kp/js/log.js";
  */
 export function mountJobPanel(jobId, opts = {}) {
   const title = h("h3", { class: "job-title" });
-  const stateDD = h("dd", { class: "job-state" });
-  const stepDD = h("dd", { class: "job-step" });
-  const originDD = h("dd", { class: "job-origin" });
   const restarts = h(
     "div",
     { class: "kp-alert kp-alert--warning", role: "status", hidden: "" },
@@ -32,24 +29,34 @@ export function mountJobPanel(jobId, opts = {}) {
   });
   const pctText = h("span", { class: "kp-progress__value" });
   const stepName = h("p", { class: "job-step-name mono" });
-  const elapsed = h("dd", { class: "job-elapsed" });
-  const left = h("dd", { class: "job-remaining" });
-  // Kenny, 2026-10-01: state, step, origin, elapsed and remaining used to
-  // scatter across a title row and two separate paragraphs; one kv-grid
-  // keeps every fact lined up in place instead.
+  // feat-jobpanel-1 (Kenny, 2026-10-02: "maak hier ook een grid van, met
+  // vaste locatie"): State, Step, Origin, Running for and Expected
+  // remaining used to be one column of label/value pairs, however wide the
+  // dialog — most of a 1100px dialog sat empty beside them. `.job-facts`
+  // (app.css) repeats the pairs 2-3 across on a wide screen and falls back
+  // to `.facts`' own one-column phone rule. `jobFacts()` (jobs.js) is the
+  // pure view model that fills each `<dd>` once the job is known; every
+  // cell starts on "—" here so none of them is ever briefly empty.
+  /** @type {Map<string, HTMLElement>} */
+  const factDD = new Map(
+    ["state", "step", "origin", "elapsed", "remaining"].map((key) => [
+      key,
+      h("dd", { class: `job-fact job-fact--${key}` }, "—"),
+    ]),
+  );
   const facts = h(
     "dl",
     { class: "facts job-facts" },
     h("dt", null, "State"),
-    stateDD,
+    /** @type {HTMLElement} */ (factDD.get("state")),
     h("dt", null, "Step"),
-    stepDD,
+    /** @type {HTMLElement} */ (factDD.get("step")),
     h("dt", null, "Origin"),
-    originDD,
+    /** @type {HTMLElement} */ (factDD.get("origin")),
     h("dt", null, "Running for"),
-    elapsed,
+    /** @type {HTMLElement} */ (factDD.get("elapsed")),
     h("dt", null, "Expected remaining"),
-    left,
+    /** @type {HTMLElement} */ (factDD.get("remaining")),
   );
   const basis = h("p", { class: "measured job-basis" });
   const end = h("div", { class: "job-outcome" });
@@ -69,7 +76,7 @@ export function mountJobPanel(jobId, opts = {}) {
   const element = h(
     "section",
     {
-      class: "kp-card job-panel",
+      class: `kp-card job-panel${opts.compact ? " job-panel--compact" : ""}`,
       "aria-label": `Job ${jobId}`,
       "data-job": String(jobId),
     },
@@ -105,7 +112,8 @@ export function mountJobPanel(jobId, opts = {}) {
   const paint = () => {
     const j = act.jobs.find((x) => x.job === jobId);
     if (!j) {
-      originDD.textContent = `Job ${jobId}: waiting for the dashboard to report it…`;
+      /** @type {HTMLElement} */ (factDD.get("origin")).textContent =
+        `Job ${jobId}: waiting for the dashboard to report it…`;
       return;
     }
     const v = jobPanel(j, {
@@ -114,10 +122,16 @@ export function mountJobPanel(jobId, opts = {}) {
       now: Date.now() / 1000,
     });
     title.textContent = v.title;
-    stateDD.replaceChildren(badge(v.badge));
-    originDD.textContent = `Job ${j.job} · ${v.origin}`;
     restarts.hidden = !v.restarts;
-    stepDD.textContent = v.step;
+    for (const c of jobFacts(v)) {
+      if (c.key === "origin") continue; // set below, with the job number
+      const dd = factDD.get(c.key);
+      if (!dd) continue;
+      dd.replaceChildren(...(c.badge ? [badge(c.badge)] : [c.value]));
+      if (c.late != null) dd.dataset.late = String(c.late);
+    }
+    /** @type {HTMLElement} */ (factDD.get("origin")).textContent =
+      `Job ${j.job} · ${v.origin}`;
     if (v.percent == null) {
       bar.removeAttribute("value");
       pctText.textContent = v.finished ? "" : "…";
@@ -127,9 +141,6 @@ export function mountJobPanel(jobId, opts = {}) {
     }
     stepName.textContent = v.stepName;
     stepName.hidden = !v.stepName;
-    elapsed.textContent = v.elapsed;
-    left.textContent = v.finished ? "finished" : v.remaining || "—";
-    left.dataset.late = String(v.late);
     basis.textContent = v.basis;
     basis.hidden = !v.basis || v.finished;
     const o = v.outcome;

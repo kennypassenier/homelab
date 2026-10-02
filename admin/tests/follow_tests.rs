@@ -157,8 +157,8 @@ fn follow_the_form_description_is_one_file_both_sides_read() {
     assert_eq!(
         ids,
         [
-            "act-snapshot",
             "act-app",
+            "act-snapshot",
             "act-skip-safety-copy",
             "act-confirm"
         ]

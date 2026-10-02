@@ -89,7 +89,7 @@ const catalog = {
     entry("backup", { label: "Back up" }),
     entry("restore", {
       label: "Restore",
-      args: ["confirm", "snapshot", "app", "skip_safety_copy"],
+      args: ["confirm", "app", "snapshot", "skip_safety_copy"],
       confirm: true,
     }),
     entry("update", { label: "Update", args: ["app"] }),
@@ -117,7 +117,7 @@ test("a form is its steps: options first, the review with force and the typed na
   assert.deepEqual(
     f.steps.map((s) => [s.id, s.fields.map((x) => x.name)]),
     [
-      ["options", ["snapshot", "app", "skip_safety_copy"]],
+      ["options", ["app", "snapshot", "skip_safety_copy"]],
       ["review", ["confirm"]],
     ],
   );
@@ -127,7 +127,7 @@ test("a form is its steps: options first, the review with force and the typed na
   // Every field has a stable id a replayed step can find.
   assert.deepEqual(
     formFields(f).map((x) => x.id),
-    ["act-snapshot", "act-app", "act-skip-safety-copy", "act-confirm"],
+    ["act-app", "act-snapshot", "act-skip-safety-copy", "act-confirm"],
   );
   const d = actionForm(find("deploy"), ctx);
   assert.deepEqual(

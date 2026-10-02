@@ -3,7 +3,7 @@
   "cases": [
     {
       "action": "restore",
-      "args": ["confirm", "snapshot", "app", "skip_safety_copy"],
+      "args": ["confirm", "app", "snapshot", "skip_safety_copy"],
       "confirm": true,
       "stack": "media",
       "values": {
@@ -19,7 +19,7 @@
     },
     {
       "action": "restore",
-      "args": ["confirm", "snapshot", "app", "skip_safety_copy"],
+      "args": ["confirm", "app", "snapshot", "skip_safety_copy"],
       "confirm": true,
       "stack": "media",
       "values": {

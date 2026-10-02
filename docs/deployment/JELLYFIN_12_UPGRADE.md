@@ -49,6 +49,10 @@ is done together with Kenny, who tests the TV and phone clients afterwards.
     can be turned back on temporarily with
     `<EnableLegacyAuthorization>true</EnableLegacyAuthorization>` in
     `system.xml` if an older client needs it.
+11. Once every plugin is back and its settings are checked, delete the saved
+    plugin configurations on the workstation
+    (`rm -r ~/.local/share/homelab/jellyfin-12-upgrade`): they hold the Trakt,
+    Open Subtitles and Webhook credentials (folder 0700, files 0600 until then).
 
 ## Rollback
 

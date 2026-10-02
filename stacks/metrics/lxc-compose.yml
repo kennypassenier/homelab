@@ -149,6 +149,12 @@ firewall:
       note: scrape kyu, and Alertmanager's webhook to kyu
     - dir: out
       action: ACCEPT
+      dest: 10.10.10.20
+      proto: tcp
+      dport: "8090"
+      note: Alertmanager's webhook to the admin dashboard (fix-193)
+    - dir: out
+      action: ACCEPT
       dest: 10.10.10.12
       proto: tcp
       dport: "8080"

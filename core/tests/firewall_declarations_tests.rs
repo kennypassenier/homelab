@@ -442,3 +442,140 @@ fn the_logins_stay_out_of_reach_from_the_neighbours() {
         }
     }
 }
+
+/// Every `10.10.5.x:port` / `10.10.10.x:port` in one line of text.
+fn house_addresses(line: &str) -> Vec<(Ipv4Addr, u16)> {
+    let mut out = Vec::new();
+    let mut rest = line;
+    while let Some(i) = rest.find("10.10.") {
+        let tail = &rest[i..];
+        let end = tail
+            .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == ':'))
+            .unwrap_or(tail.len());
+        let token = &tail[..end];
+        let preceded_by_digit = rest[..i].chars().last().is_some_and(|c| c.is_ascii_digit());
+        if let Some((ip, port)) = token.split_once(':')
+            && !preceded_by_digit
+            && let (Ok(ip), Ok(port)) = (
+                ip.parse::<Ipv4Addr>(),
+                port.trim_end_matches(':').parse::<u16>(),
+            )
+            && matches!(ip.octets()[2], 5 | 10)
+        {
+            out.push((ip, port));
+        }
+        rest = &tail[end.max(1)..];
+    }
+    out
+}
+
+/// Every `10.10.x.y:port` written in `dir`'s files (comment lines and `.env`
+/// files skipped), outside the `routes/` directory.
+fn addresses_named_in(dir: &Path) -> Vec<(Ipv4Addr, u16, String)> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().to_string();
+            if p.is_dir() {
+                if name != "routes" && !name.starts_with('.') {
+                    stack.push(p);
+                }
+                continue;
+            }
+            if name.ends_with(".env") || name.starts_with('.') {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&p) else {
+                continue;
+            };
+            for line in text.lines().filter(|l| !l.trim_start().starts_with('#')) {
+                for (ip, port) in house_addresses(line) {
+                    out.push((ip, port, p.display().to_string()));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// fix-193: derived from the stack files themselves, so it cannot fall
+/// behind the way a hand-kept flow list does (2026-10-02: the dashboard on
+/// CT 120 arrived after the 2026-09-27 measurement, and neither the
+/// gateway's route to it nor Alertmanager's webhook to it was allowed out —
+/// switching either firewall on would have cut the dashboard off).
+///
+/// Two kinds of flow: every address a stack's own files name is one it
+/// connects to (OUT at its end, IN at the other end when that is a managed
+/// stack), and every route file under any `stacks/*/routes/` is a flow from
+/// the gateway to the route's backend.
+/// covers: fix-193
+#[test]
+fn every_flow_the_stack_files_name_passes_the_declared_firewalls() {
+    let all = stacks();
+    let by_ip: BTreeMap<Ipv4Addr, &StackManifest> = all.values().map(|m| (ip_of(m), m)).collect();
+    let gateway_vmid = all
+        .keys()
+        .find_map(|name| {
+            let raw = std::fs::read_to_string(
+                repo_root()
+                    .join("stacks")
+                    .join(name)
+                    .join("lxc-compose.yml"),
+            )
+            .ok()?;
+            let v: serde_yaml::Value = serde_yaml::from_str(&raw).ok()?;
+            v.get("gateway_route")?.get("gateway_vmid")?.as_u64()
+        })
+        .expect("some stack routes through the gateway") as u16;
+    let gateway = all
+        .values()
+        .find(|m| m.vmid == gateway_vmid)
+        .expect("the gateway is a stack");
+    let mut flows: Vec<(Ipv4Addr, Ipv4Addr, u16, String)> = Vec::new();
+    for (name, m) in &all {
+        let dir = repo_root().join("stacks").join(name);
+        for (to, port, file) in addresses_named_in(&dir) {
+            flows.push((ip_of(m), to, port, file));
+        }
+        for e in std::fs::read_dir(dir.join("routes"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let text = std::fs::read_to_string(e.path()).unwrap_or_default();
+            for line in text.lines().filter(|l| !l.trim_start().starts_with('#')) {
+                for (to, port) in house_addresses(line) {
+                    flows.push((ip_of(gateway), to, port, e.path().display().to_string()));
+                }
+            }
+        }
+    }
+    let mut broken = Vec::new();
+    for (from, to, port, file) in flows {
+        if from == to {
+            continue;
+        }
+        for (ip, dir, peer) in [(from, FwDir::Out, to), (to, FwDir::In, from)] {
+            let Some(m) = by_ip.get(&ip) else { continue };
+            let Some(fw) = m.firewall.as_ref() else {
+                continue;
+            };
+            if !firewall::permits(fw, ip, dir, peer, FwProto::Tcp, Some(port)) {
+                broken.push(format!(
+                    "{from} -> {to}:{port} (named in {file}): refused {} {}",
+                    if dir == FwDir::Out {
+                        "leaving"
+                    } else {
+                        "entering"
+                    },
+                    m.stack_name
+                ));
+            }
+        }
+    }
+    broken.sort();
+    broken.dedup();
+    assert!(broken.is_empty(), "{}", broken.join("\n"));
+}

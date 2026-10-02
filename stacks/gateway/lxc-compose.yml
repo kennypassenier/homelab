@@ -247,6 +247,12 @@ firewall:
       note: kp-soft routes (116.fw lets both in)
     - dir: out
       action: ACCEPT
+      dest: 10.10.10.20
+      proto: tcp
+      dport: "8090"
+      note: admin dashboard route (fix-193; CT 120 arrived after the 2026-09-27 measurement)
+    - dir: out
+      action: ACCEPT
       dest: 10.10.10.2
       proto: tcp
       dport: "8123"

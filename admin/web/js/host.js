@@ -75,8 +75,15 @@ export function hostFacts(fleet, meta) {
 export function hostBars(fleet) {
   const h = fleet.host;
   const ram = pct(h.ram_used_mb, h.ram_total_mb) ?? 0;
+  // fix-175: no /proc/stat delta yet, or the reading pair was untrustworthy
+  // — an empty bar and "not measured yet", never a fabricated "0%".
+  const cpu = h.cpu_pct ?? 0;
   return [
-    { label: "CPU", pct: h.cpu_pct, value: `${h.cpu_pct}%` },
+    {
+      label: "CPU",
+      pct: cpu,
+      value: h.cpu_pct == null ? "not measured yet" : `${cpu}%`,
+    },
     {
       label: "RAM",
       pct: ram,

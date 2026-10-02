@@ -983,7 +983,14 @@ pub struct AppView {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostView {
     pub name: String,
-    pub cpu_pct: u64,
+    /// fix-175: the host's own busy share of all CPUs, measured between two
+    /// status-poll samples. `None` before the first poll has a predecessor
+    /// to diff against, or when the pair could not be trusted — never a
+    /// fabricated 0 (it used to be a hard-coded 0, same mistake ram_pct had
+    /// before feat-platform-2). `#[serde(default)]` so an older host that
+    /// still sends a bare number keeps working.
+    #[serde(default)]
+    pub cpu_pct: Option<u64>,
     pub ram_pct: u64,
     pub disk_pct: u64,
     pub tls_fingerprint: String,

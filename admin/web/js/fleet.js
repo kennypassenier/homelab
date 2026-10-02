@@ -10,7 +10,7 @@ import { agoText, humanDuration } from "./format.js";
  *   ram_used_mb?: number | null, ram_max_mb?: number | null,
  *   hostname?: string, apps?: App[], uptime_s?: number | null,
  *   applied_source?: string | null, env_sealed?: boolean}} Stack
- * @typedef {{name: string, cpu_pct: number, ram_used_mb: number,
+ * @typedef {{name: string, cpu_pct: number | null, ram_used_mb: number,
  *   ram_total_mb: number, disk_pct: number, ram_committed_mb?: number,
  *   cores_total?: number, load1_x100?: number,
  *   tls_fingerprint?: string}} Host
@@ -83,7 +83,12 @@ export function hostCard(fleet) {
   const c = fleet.counts;
   return [
     { label: "Host", value: h.name },
-    { label: "CPU", value: `${h.cpu_pct}%` },
+    // fix-175: no /proc/stat delta yet (daemon just started, or the
+    // reading pair was untrustworthy) — never a fabricated "0%".
+    {
+      label: "CPU",
+      value: h.cpu_pct == null ? "not measured yet" : `${h.cpu_pct}%`,
+    },
     {
       label: "RAM",
       value: `${humanMb(h.ram_used_mb)} of ${humanMb(h.ram_total_mb)}`,

@@ -32,7 +32,7 @@ pub async fn run_demo(
     let build = || FleetState {
         host: HostView {
             name: "demo".into(),
-            cpu_pct: 7,
+            cpu_pct: Some(7),
             ram_pct: 40,
             disk_pct: 31,
             tls_fingerprint: String::new(),

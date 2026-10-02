@@ -298,7 +298,7 @@ fn demo_fleet() -> ServerMsg {
         host: HostView {
             home_address: None,
             name: "pve-01".into(),
-            cpu_pct: 18,
+            cpu_pct: Some(18),
             ram_pct: 68,
             disk_pct: 42,
             tls_fingerprint: "9F:2A:C4:1E:AB:CD:EF:01".into(),

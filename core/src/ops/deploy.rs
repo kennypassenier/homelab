@@ -432,12 +432,18 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // ask-8 (`Stoppen, data bewaren`): only a unit the stack FILE used to
     // declare is retired. One registered by `homelab adopt` that no stack
     // file ever named is not the deploy's to take away.
+    //
+    // fix-186: a unit this deploy still declares as a native is never
+    // dropped — and neither is one that moved from `natives:` to `apps:`
+    // under the same name (a docker-to-native or native-to-docker
+    // conversion is not a departure). Only a name declared NOWHERE in the
+    // new manifest left the stack.
     let dropped_natives: Vec<String> = prior_manifest
         .as_ref()
         .map(|pm| {
             pm.natives
                 .iter()
-                .filter(|u| !m.natives.contains(u))
+                .filter(|u| !m.natives.contains(u) && !m.apps.contains(u))
                 .cloned()
                 .collect()
         })
@@ -3354,7 +3360,15 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 .get(&m.stack_name)
                 .map(|s| s.apps.clone())
                 .unwrap_or_default();
-            for app in before.iter().filter(|a| !m.apps.contains(a)) {
+            // fix-186: an app this deploy still declares is obviously not
+            // dropped (`m.apps.contains`) — but neither is one that moved to
+            // `natives:` under the same name (a docker-to-native conversion,
+            // exactly what the 3.70.0 admin/almanac deploy did). Only a name
+            // declared NOWHERE in the new manifest actually left the stack.
+            for app in before
+                .iter()
+                .filter(|a| !m.apps.contains(a) && !m.natives.contains(a))
+            {
                 crate::ops::retired::retire_app(&mut state, pm, app, &ctx.state_dir, ctx.now_unix);
             }
         }

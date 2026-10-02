@@ -133,7 +133,7 @@ fn demo_metric_body(query: &str) -> serde_json::Value {
         return series(&[("", 1.25)]);
     }
     if query.contains("RequestHost") {
-        return series(&[("demo.kp-soft.dev", 42.0), ("films.kp-soft.dev", 7.0)]);
+        return series(&[("demo.example.org", 42.0), ("films.example.org", 7.0)]);
     }
     if query.contains("DownstreamStatus") {
         return series(&[("200", 44.0), ("404", 3.0), ("500", 1.0)]);

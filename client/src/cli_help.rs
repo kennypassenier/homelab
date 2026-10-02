@@ -240,6 +240,13 @@ pub const VERBS: &[Verb] = &[
         "homelab rollback-native mystack/myunit",
     ),
     v(
+        Native,
+        "restore-native",
+        "<stack>[/<unit>] [snapshot] [--yes]",
+        "restore a native service's data from a snapshot ('latest' unless named); a unit restores only that one, otherwise every unit of the stack",
+        "homelab restore-native mystack/myunit",
+    ),
+    v(
         Host,
         "config",
         "",

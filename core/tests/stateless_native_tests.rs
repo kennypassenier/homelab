@@ -54,6 +54,7 @@ fn a_stateless_unit_has_no_repository_to_copy() {
         "drill".into(),
         StackState {
             pushed_file_hashes: std::collections::BTreeMap::new(),
+            component_digests: Default::default(),
             applied_source: None,
             extra_route_files: Vec::new(),
             vmid: 119,

@@ -31,6 +31,7 @@ fn service(unit: &str, policy: &str) -> NativeServiceManifest {
 fn stack(manifest: Option<StackManifest>, natives: Vec<NativeServiceManifest>) -> StackState {
     StackState {
         pushed_file_hashes: std::collections::BTreeMap::new(),
+        component_digests: Default::default(),
         applied_source: None,
         extra_route_files: Vec::new(),
         vmid: 119,

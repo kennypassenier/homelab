@@ -4,7 +4,8 @@
 //! directory is gone is offered for destruction — never destroyed without the
 //! operator typing its name.
 
-use homelab_client::apply::{ApplyPlan, plan, plan_exit_code};
+use homelab_client::apply::{ApplyPlan, plan, plan_exit_code, redeploy_reason};
+use homelab_core::manifest::ComponentDigests;
 
 /// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift): `apply`
 /// could only act; `apply --plan` prints the plan and answers with an exit
@@ -204,4 +205,133 @@ fn fix_159_the_plan_names_the_native_units_a_deploy_restarts() {
     let mut local = applied.clone();
     local[1] = blob("admin/checks.yml", "y");
     assert!(native_restarts(&local, &applied).is_empty());
+}
+
+// ── fix-192 (media-redeploys-without-changing, Kenny 2026-10-02) ──────────
+
+fn digests(files: &[(&str, &str)], env: &[(&str, &str)]) -> ComponentDigests {
+    ComponentDigests {
+        manifest: "m1".into(),
+        files: files
+            .iter()
+            .map(|(p, h)| (p.to_string(), h.to_string()))
+            .collect(),
+        env: env
+            .iter()
+            .map(|(a, h)| (a.to_string(), h.to_string()))
+            .collect(),
+        secret_files: Default::default(),
+        built_by: String::new(),
+    }
+}
+
+#[test]
+fn fix_192_no_component_digests_recorded_is_said_plainly() {
+    let local = digests(&[("media/docker-compose.yml", "h1")], &[]);
+    assert_eq!(
+        redeploy_reason(&local, None),
+        "new, or applied by a host that recorded no component digests yet — comparing by the \
+         combined fingerprint only"
+    );
+}
+
+#[test]
+fn fix_192_names_a_changed_file() {
+    let local = digests(&[("media/docker-compose.yml", "h2")], &[]);
+    let applied = digests(&[("media/docker-compose.yml", "h1")], &[]);
+    assert_eq!(
+        redeploy_reason(&local, Some(&applied)),
+        "~ media/docker-compose.yml"
+    );
+}
+
+#[test]
+fn fix_192_names_a_new_file() {
+    let local = digests(
+        &[
+            ("media/docker-compose.yml", "h1"),
+            ("media/config.yml", "h9"),
+        ],
+        &[],
+    );
+    let applied = digests(&[("media/docker-compose.yml", "h1")], &[]);
+    assert_eq!(
+        redeploy_reason(&local, Some(&applied)),
+        "+ media/config.yml"
+    );
+}
+
+#[test]
+fn fix_192_names_a_gone_file() {
+    let local = digests(&[("media/docker-compose.yml", "h1")], &[]);
+    let applied = digests(
+        &[("media/docker-compose.yml", "h1"), ("media/old.yml", "h5")],
+        &[],
+    );
+    assert_eq!(redeploy_reason(&local, Some(&applied)), "- media/old.yml");
+}
+
+#[test]
+fn fix_192_names_a_changed_env() {
+    let local = digests(&[("media/docker-compose.yml", "h1")], &[("media", "e2")]);
+    let applied = digests(&[("media/docker-compose.yml", "h1")], &[("media", "e1")]);
+    assert_eq!(redeploy_reason(&local, Some(&applied)), "env: media");
+}
+
+#[test]
+fn fix_192_names_a_changed_secret_file() {
+    let mut local = digests(&[("media/docker-compose.yml", "h1")], &[]);
+    local
+        .secret_files
+        .insert("/opt/media/secret".into(), "s2".into());
+    let mut applied = digests(&[("media/docker-compose.yml", "h1")], &[]);
+    applied
+        .secret_files
+        .insert("/opt/media/secret".into(), "s1".into());
+    assert_eq!(
+        redeploy_reason(&local, Some(&applied)),
+        "secret: /opt/media/secret"
+    );
+}
+
+/// The exact defect this fix answers: the host recorded an earlier
+/// manifest digest (a release predating a new manifest field), nothing in
+/// files/env/secrets moved, but the combined intent hash still differs —
+/// the plan must say so instead of pointing at a file nothing touched.
+#[test]
+fn fix_192_manifest_only_difference_names_the_versions() {
+    let mut local = digests(&[("media/docker-compose.yml", "h1")], &[]);
+    local.manifest = "m2".into();
+    local.built_by = "v3.70.2".into();
+    let mut applied = digests(&[("media/docker-compose.yml", "h1")], &[]);
+    applied.manifest = "m1".into();
+    applied.built_by = "v3.70.0".into();
+    assert_eq!(
+        redeploy_reason(&local, Some(&applied)),
+        "no file, env or secret changed — only the manifest homelab derives from them \
+         (homelab v3.70.0 → v3.70.2)"
+    );
+}
+
+#[test]
+fn fix_192_manifest_only_difference_with_no_recorded_build_names_it_plainly() {
+    let mut local = digests(&[("media/docker-compose.yml", "h1")], &[]);
+    local.manifest = "m2".into();
+    let mut applied = digests(&[("media/docker-compose.yml", "h1")], &[]);
+    applied.manifest = "m1".into();
+    assert_eq!(
+        redeploy_reason(&local, Some(&applied)),
+        "no file, env or secret changed — only the manifest homelab derives from them \
+         (homelab an earlier version → this version)"
+    );
+}
+
+#[test]
+fn fix_192_identical_digests_say_so() {
+    let local = digests(&[("media/docker-compose.yml", "h1")], &[("media", "e1")]);
+    let applied = digests(&[("media/docker-compose.yml", "h1")], &[("media", "e1")]);
+    assert_eq!(
+        redeploy_reason(&local, Some(&applied)),
+        "no difference found between the recorded digests"
+    );
 }

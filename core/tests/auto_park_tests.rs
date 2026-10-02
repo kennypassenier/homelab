@@ -26,6 +26,7 @@ fn one_stack() -> homelab_core::state::HostState {
         "media".into(),
         homelab_core::state::StackState {
             pushed_file_hashes: std::collections::BTreeMap::new(),
+            component_digests: Default::default(),
             applied_source: None,
             vmid: 106,
             hostname: "106-app-media".into(),

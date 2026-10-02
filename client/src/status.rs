@@ -112,6 +112,7 @@ mod tests {
             enabled,
             usage: None,
             applied_source: None,
+            component_digests: Default::default(),
         }
     }
 

@@ -103,6 +103,7 @@ async fn mark_incomplete(
                     natives: Vec::new(),
                     incomplete_step: Some(step.to_string()),
                     pushed_file_hashes: std::collections::BTreeMap::new(),
+                    component_digests: Default::default(),
                 },
             );
         }
@@ -3428,6 +3429,10 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                     .lock()
                     .map(|g| g.clone())
                     .unwrap_or_default(),
+                // fix-192: recorded from the same `spec` `intent_hash` just
+                // hashed above, so the two can never disagree about what
+                // this deploy's intent actually was.
+                component_digests: manifest::component_digests(spec),
             },
         );
         store.save(state).await?;

@@ -83,6 +83,14 @@ pub struct StackState {
     /// comparison then skips it, same as an unasked question.
     #[serde(default)]
     pub pushed_file_hashes: std::collections::BTreeMap<String, String>,
+    /// fix-192 (media-redeploys-without-changing, Kenny 2026-10-02): the
+    /// per-component digests of the intent this deploy actually applied —
+    /// manifest, files, env, secret files — kept beside `applied_hash` so a
+    /// later `apply` plan can name WHICH one moved instead of only that the
+    /// combined fingerprint did. Default (all empty) for a stack applied by
+    /// a host built before this field existed, or never applied.
+    #[serde(default)]
+    pub component_digests: crate::manifest::ComponentDigests,
 }
 
 /// A unix timestamp as `YYYY-MM-DD`, for messages that have to say when a

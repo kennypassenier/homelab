@@ -395,6 +395,7 @@ async fn adopt_impl<'a>(
             route_file: None,
             extra_route_files: Vec::new(),
             pushed_file_hashes: std::collections::BTreeMap::new(),
+            component_digests: Default::default(),
         };
         // fix-164: install-native re-adopts every time; a stack a deploy
         // already recorded keeps its manifest, hash, routes, enabled flag and

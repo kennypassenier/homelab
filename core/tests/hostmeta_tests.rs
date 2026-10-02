@@ -96,6 +96,7 @@ fn fleet_with(last_host_meta: u64) -> HostState {
         "kyu".into(),
         StackState {
             pushed_file_hashes: std::collections::BTreeMap::new(),
+            component_digests: Default::default(),
             applied_source: None,
             extra_route_files: Vec::new(),
             vmid: 109,

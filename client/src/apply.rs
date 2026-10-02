@@ -6,6 +6,8 @@
 //! and always through the same destroy with the same safety gates. The plan
 //! itself is pure so it can be tested without a host or a repository.
 
+use std::collections::BTreeMap;
+
 /// What `apply` will do, by stack name. Each list is sorted.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ApplyPlan {
@@ -150,6 +152,85 @@ pub fn native_restarts(
         .collect();
     out.sort();
     out
+}
+
+/// fix-192 (media-redeploys-without-changing, Kenny 2026-10-02): the names
+/// whose digest differs between `local` and `applied`, each written
+/// `"<prefix>: <key>"`. Shared by the file/env/secret-file comparisons below
+/// — one pure rule, no per-kind special case.
+fn digest_diff_names(
+    local: &BTreeMap<String, String>,
+    applied: &BTreeMap<String, String>,
+    prefix: &str,
+) -> Vec<String> {
+    let keys: std::collections::BTreeSet<&String> = local.keys().chain(applied.keys()).collect();
+    let mut out: Vec<String> = keys
+        .iter()
+        .filter(|k| local.get(k.as_str()) != applied.get(k.as_str()))
+        .map(|k| format!("{prefix}: {k}"))
+        .collect();
+    out.sort();
+    out
+}
+
+/// fix-192: why a stack in the apply plan's `deploy` list differs from what
+/// the host applied, from each side's `ComponentDigests` alone — never from
+/// file content, so this costs nothing the plan did not already fetch
+/// (`GetState`). `applied` is `None` when the host has recorded no component
+/// digests for this stack yet (a deploy from before this field existed, or
+/// a stack the host has never applied): said plainly rather than guessing
+/// which component moved. Pure, and the only place this sentence is built —
+/// the dashboard's Apply page and `homelab apply`'s plan both call it so
+/// they say the same thing.
+pub fn redeploy_reason(
+    local: &homelab_core::manifest::ComponentDigests,
+    applied: Option<&homelab_core::manifest::ComponentDigests>,
+) -> String {
+    let Some(applied) = applied else {
+        return "new, or applied by a host that recorded no component digests yet — comparing \
+                 by the combined fingerprint only"
+            .to_string();
+    };
+    let mut changed: Vec<String> = Vec::new();
+    for path in local.files.keys() {
+        if !applied.files.contains_key(path) {
+            changed.push(format!("+ {path}"));
+        } else if local.files.get(path) != applied.files.get(path) {
+            changed.push(format!("~ {path}"));
+        }
+    }
+    for path in applied.files.keys() {
+        if !local.files.contains_key(path) {
+            changed.push(format!("- {path}"));
+        }
+    }
+    changed.sort();
+    changed.extend(digest_diff_names(&local.env, &applied.env, "env"));
+    changed.extend(digest_diff_names(
+        &local.secret_files,
+        &applied.secret_files,
+        "secret",
+    ));
+    if !changed.is_empty() {
+        return changed.join(", ");
+    }
+    if local.manifest != applied.manifest {
+        let old = if applied.built_by.is_empty() {
+            "an earlier version".to_string()
+        } else {
+            applied.built_by.clone()
+        };
+        let new = if local.built_by.is_empty() {
+            "this version".to_string()
+        } else {
+            local.built_by.clone()
+        };
+        return format!(
+            "no file, env or secret changed — only the manifest homelab derives from them \
+             (homelab {old} → {new})"
+        );
+    }
+    "no difference found between the recorded digests".to_string()
 }
 
 /// fix-142 (expert panel 2026-09-27, check-blind-to-repo-drift): the exit

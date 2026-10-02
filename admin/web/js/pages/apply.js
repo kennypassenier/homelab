@@ -59,8 +59,14 @@ export function mount(root) {
   );
   const abort = new AbortController();
 
-  /** @param {string} stack */
-  const stackBlock = (stack, isNew = false) => {
+  /**
+   * @param {string} stack
+   * @param {boolean} isNew
+   * @param {string | undefined} reason fix-192: which component differs
+   *   (files, env, secrets, or only the derived manifest), read straight
+   *   from the plan — never recomputed in the page.
+   */
+  const stackBlock = (stack, isNew = false, reason = undefined) => {
     const body = h(
       "div",
       { class: "apply-diff" },
@@ -75,7 +81,7 @@ export function mount(root) {
         h("a", { href: stackHref(stack) }, stack),
         isNew
           ? " · new container"
-          : " · files differ from what the host applied",
+          : ` · ${reason ?? "files differ from what the host applied"}`,
       ),
       body,
     );
@@ -146,7 +152,7 @@ export function mount(root) {
         ? [
             h("h2", null, "To deploy"),
             ...p.deploy.map((/** @type {string} */ n) =>
-              stackBlock(n, p.new.includes(n)),
+              stackBlock(n, p.new.includes(n), p.reasons?.[n]),
             ),
           ]
         : []),

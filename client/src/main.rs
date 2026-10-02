@@ -1422,6 +1422,17 @@ async fn run(explicit_host: Option<String>) {
                 .iter()
                 .map(|s| (s.name.clone(), s.applied_hash.clone()))
                 .collect();
+            // fix-192: the host's per-component digests, keyed by name, for
+            // the reason text below — an empty manifest digest is the same
+            // "nothing recorded" case as no record at all.
+            let host_digests: std::collections::BTreeMap<
+                String,
+                homelab_core::manifest::ComponentDigests,
+            > = fleet
+                .stacks
+                .iter()
+                .map(|s| (s.name.clone(), s.component_digests.clone()))
+                .collect();
             // Every stack is built and validated before anything is sent: a
             // stack file that does not build stops the whole apply rather
             // than leaving the fleet half-applied.
@@ -1497,9 +1508,18 @@ async fn run(explicit_host: Option<String>) {
                         });
                 let changes = homelab_client::apply::file_changes(&sp.files, &applied);
                 if changes.is_empty() {
+                    // fix-192 (media-redeploys-without-changing, Kenny
+                    // 2026-10-02): no file differs, but the intent hash
+                    // still moved — say which component did, from the
+                    // digests alone, instead of the old generic "settings
+                    // differ" guess.
+                    let local_digest = homelab_core::manifest::component_digests(sp);
+                    let applied_digest = host_digests.get(n).filter(|d| !d.manifest.is_empty());
                     println!(
-                        "{}      files unchanged (secrets or settings differ){}",
-                        C_DIM, C_RESET
+                        "{}      {}{}",
+                        C_DIM,
+                        homelab_client::apply::redeploy_reason(&local_digest, applied_digest),
+                        C_RESET
                     );
                 }
                 for c in changes {

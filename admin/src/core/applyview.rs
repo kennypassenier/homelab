@@ -24,6 +24,12 @@ pub struct ApplyView {
     /// Stacks whose files do not build, with why: apply refuses while any
     /// is listed, as `homelab apply` does ("nothing applied").
     pub broken: Vec<(String, String)>,
+    /// fix-192 (media-redeploys-without-changing, Kenny 2026-10-02): for
+    /// each stack in `deploy`, WHY — which files/env/secrets changed, or
+    /// that only the derived manifest did. Filled by `deploy_reasons`; empty
+    /// until that runs (the pure `plan` above never touches the host's
+    /// per-component digests).
+    pub reasons: std::collections::BTreeMap<String, String>,
 }
 
 impl ApplyView {
@@ -63,7 +69,36 @@ pub fn plan(
             .iter()
             .filter_map(|(n, h)| h.as_ref().err().map(|e| (n.clone(), e.clone())))
             .collect(),
+        // fix-192: filled by the caller (`deploy_reasons`), which needs the
+        // component digests this pure function never takes.
+        reasons: Default::default(),
     }
+}
+
+/// fix-192: the reason text for every stack in `deploy`, from each side's
+/// `ComponentDigests` (`client::apply::redeploy_reason`). A stack with no
+/// local digest recorded (should not happen — `deploy` only ever lists a
+/// stack `hashes` built) is left out rather than guessed at.
+pub fn deploy_reasons(
+    deploy: &[String],
+    local: &std::collections::BTreeMap<String, homelab_core::manifest::ComponentDigests>,
+    host: &[(String, homelab_core::manifest::ComponentDigests)],
+) -> std::collections::BTreeMap<String, String> {
+    deploy
+        .iter()
+        .filter_map(|name| {
+            let l = local.get(name)?;
+            let applied = host.iter().find(|(n, _)| n == name).map(|(_, d)| d);
+            // A host record whose manifest digest is empty is the same
+            // "nothing recorded" case as no record at all — never applied,
+            // or applied by a host from before this field existed.
+            let applied = applied.filter(|d| !d.manifest.is_empty());
+            Some((
+                name.clone(),
+                homelab_client::apply::redeploy_reason(l, applied),
+            ))
+        })
+        .collect()
 }
 
 /// The gone stacks the typed names choose. A typed name the plan does not

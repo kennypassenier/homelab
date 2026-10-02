@@ -3777,6 +3777,7 @@ mod native_from_zero {
                 "drill".into(),
                 homelab_core::state::StackState {
                     pushed_file_hashes: std::collections::BTreeMap::new(),
+                    component_digests: Default::default(),
                     extra_route_files: Vec::new(),
                     applied_source: None,
                     vmid: 118,

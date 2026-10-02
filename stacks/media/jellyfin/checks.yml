@@ -132,8 +132,12 @@ probes:
     command: |
       K=$(sqlite3 "file:/appdata/media/jellyfin-config/data/jellyfin.db?mode=ro" "select AccessToken from ApiKeys where Name='Homelab';")
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf 'header = Authorization: MediaBrowser Token="%s"\n' "$K" > "$C"
-      A=$(wget --config="$C" -qO- "http://localhost:8096/Items?Recursive=true&IncludeItemTypes=Movie,Series&Limit=0" | jq .TotalRecordCount)
-      P=$(wget --config="$C" -qO- "http://localhost:8096/Items?Recursive=true&IncludeItemTypes=Movie,Series&ImageTypes=Primary&Limit=0" | jq .TotalRecordCount)
+      # Asked as a user: since 12.x the user-less /Items count leaves items out
+      # (1048 against 1167 on 2026-10-02) while the ImageTypes count does not,
+      # which read as "-119 without a poster".
+      U=$(wget --config="$C" -qO- "http://localhost:8096/Users" | jq -r '.[0].Id')
+      A=$(wget --config="$C" -qO- "http://localhost:8096/Users/$U/Items?Recursive=true&IncludeItemTypes=Movie,Series&Limit=0" | jq .TotalRecordCount)
+      P=$(wget --config="$C" -qO- "http://localhost:8096/Users/$U/Items?Recursive=true&IncludeItemTypes=Movie,Series&ImageTypes=Primary&Limit=0" | jq .TotalRecordCount)
       echo $((A-P))
     healthy: {equals: "0"}
     layer: application

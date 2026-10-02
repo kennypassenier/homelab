@@ -261,6 +261,7 @@ pub async fn round(
     // (tile-watch, see REGISTER.md fix-89). Only a tile that carries a
     // `probe` (the client resolved one, at deploy time) is watched; one
     // with none is silently skipped, same as one with no reading.
+    let complete_round = link_error.is_none() && tiles_answer.is_some();
     if let Some(a) = tiles_answer {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
@@ -322,8 +323,16 @@ pub async fn round(
     let mut news = Vec::new();
     {
         let mut w = watched.lock().await;
-        let keep: Vec<String> = readings.iter().map(|(t, _)| t.key.clone()).collect();
-        w.seen.retain(|k, _| keep.contains(k));
+        // fix-194: forget a target only after a COMPLETE round — the line up
+        // and the tile list read. A round that could not enumerate the stacks
+        // and tiles (a host restart, a failed `Tiles` read) says nothing about
+        // them; dropping their state there wiped `down_told`, so the recovery
+        // that followed was never told and the centre kept "Proxmox does not
+        // answer" open forever (8 Downs, no Up, on 2026-10-02).
+        if complete_round {
+            let keep: Vec<String> = readings.iter().map(|(t, _)| t.key.clone()).collect();
+            w.seen.retain(|k, _| keep.contains(k));
+        }
         for (target, outcome) in &readings {
             let seen = w.seen.entry(target.key.clone()).or_default();
             match outcome {

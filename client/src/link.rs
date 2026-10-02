@@ -167,21 +167,50 @@ pub fn version_label(version: &str, build: Option<&str>) -> String {
     )
 }
 
+/// fix-211 (Kenny, 2026-10-02, decision "Host weigert enkel onbekende
+/// velden"): the first release whose HOST half knows how to refuse a
+/// mutating command for a field its own build has no room for, naming it
+/// (`homelab_core::wire::unknown_fields`, called from `host/src/main.rs`
+/// before a command reaches its handler). A host at or above this version
+/// is trusted to say so itself, so [`refuse_older_host`] stops refusing on
+/// its behalf and lets the command go, whatever the client's own version
+/// is — the host's own refusal, if any, comes back as an ordinary failed
+/// reply and is relayed exactly like any other. A host older than this
+/// still cannot tell "unknown" from "my struct never had a field for
+/// this" apart, so it is still refused, now saying why rather than only
+/// comparing version numbers.
+///
+/// This is a capability check, not a version gate against the client's own
+/// build: a client far newer than this constant still sends everything to
+/// a host at or above it.
+pub const UNKNOWN_FIELD_CHECK_SINCE: &str = "3.70.4";
+
 /// Why `command` may not go to a host at `host_version`, if it may not.
 ///
-/// A client newer than the host loses whatever the host does not know about.
-/// Serde drops an unknown field silently, so the deploy succeeds and simply
-/// does less than it was asked to: on 2026-08-31 a host one release behind
-/// ignored the `data_mounts` block, the downloader came up without its disks,
-/// and 73 torrents went to `missingFiles`. Nothing said a word.
+/// Before fix-211, a client newer than the host lost whatever the host did
+/// not know about: serde dropped an unknown field silently, so the deploy
+/// succeeded and simply did less than it was asked to — on 2026-08-31 a
+/// host one release behind ignored the `data_mounts` block, the downloader
+/// came up without its disks, and 73 torrents went to `missingFiles`.
+/// Nothing said a word. [`UNKNOWN_FIELD_CHECK_SINCE`] is the host-side fix
+/// for that: a host at or above it refuses the unknown field itself and
+/// names it, so this function only still refuses for a host that predates
+/// that check and genuinely cannot tell the difference.
 pub fn refuse_older_host(command: &Command, host_version: &str) -> Option<String> {
-    let client = env!("CARGO_PKG_VERSION");
-    (crate::version::mutates(command) && crate::version::older(host_version, client)).then(|| {
-        format!(
-            "host is v{} and this client is v{} :: a host that predates a \
-             field ignores it silently, which is how a deploy quietly does \
-             less than you asked — run 'homelab release-update' first",
-            host_version, client
-        )
-    })
+    if !crate::version::mutates(command) {
+        return None;
+    }
+    if !crate::version::older(host_version, UNKNOWN_FIELD_CHECK_SINCE) {
+        // The host itself can tell an unknown field from one it simply has
+        // no room for, and will refuse (naming the field) if it finds one.
+        return None;
+    }
+    Some(format!(
+        "host is v{} and cannot yet tell an unknown field from one its own \
+         build simply has no room for — that check landed in v{}; a field \
+         this old a host predates is dropped silently, which is how a \
+         deploy quietly does less than you asked — run \
+         'homelab release-update' first",
+        host_version, UNKNOWN_FIELD_CHECK_SINCE
+    ))
 }

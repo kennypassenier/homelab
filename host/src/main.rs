@@ -1719,6 +1719,51 @@ mod tests {
         assert!(!line.is_empty(), "the frame still gets a log line");
     }
 
+    fn parsed(text: &str) -> (serde_json::Value, RpcRequest) {
+        let value: serde_json::Value = serde_json::from_str(text).unwrap();
+        let req: RpcRequest = serde_json::from_value(value.clone()).unwrap();
+        (value, req)
+    }
+
+    /// covers: fix-211
+    ///
+    /// (1) a mutating command carrying a field this host's own build has
+    /// no struct field for ("force_wipe" is not a field of
+    /// `set_stack_enabled`) is refused, naming that field's exact path,
+    /// before it ever reaches a handler.
+    #[test]
+    fn fix_211_a_field_the_host_does_not_know_is_refused_by_name() {
+        let (value, req) = parsed(
+            r#"{"id":1,"cmd":"set_stack_enabled","stack":"media","enabled":true,"force_wipe":true}"#,
+        );
+        let why = super::unknown_field_refusal(&value, &req).expect("refused");
+        assert!(why.contains("force_wipe"), "{}", why);
+        assert!(why.contains("release-update"), "{}", why);
+    }
+
+    /// covers: fix-211
+    ///
+    /// (2) a mutating command whose JSON carries only fields this build
+    /// knows is never refused by this check.
+    #[test]
+    fn fix_211_a_command_with_only_known_fields_is_never_refused() {
+        let (value, req) =
+            parsed(r#"{"id":1,"cmd":"set_stack_enabled","stack":"media","enabled":true}"#);
+        assert!(super::unknown_field_refusal(&value, &req).is_none());
+    }
+
+    /// covers: fix-211
+    ///
+    /// A READ-ONLY command carrying a field this build does not know is
+    /// never refused: it changes nothing, so an unknown field in it
+    /// cannot repeat the 2026-08-31 incident.
+    #[test]
+    fn fix_211_a_read_only_command_is_never_refused_for_an_unknown_field() {
+        let (value, req) = parsed(r#"{"id":1,"cmd":"status","mystery_field":true}"#);
+        assert!(req.command.is_read_only());
+        assert!(super::unknown_field_refusal(&value, &req).is_none());
+    }
+
     /// Load a config from `raw` through a file of its own. Tests run as
     /// parallel threads of one process, so neither a shared path nor
     /// `HOMELAB_CONFIG` may be used (rust-code-hygiene, 2026-09-27: one test
@@ -7780,6 +7825,29 @@ fn unparseable_frame_line(e: &serde_json::Error, text: &str) -> String {
     )
 }
 
+/// fix-211 (Kenny, 2026-10-02, decision "Host weigert enkel onbekende
+/// velden"): why `req` should be refused before it reaches its handler, if
+/// it should — a field `value` (the request exactly as the wire sent it)
+/// carries that this build's own struct has no room for
+/// (`homelab_core::wire::unknown_fields`), named by its path. `None` for a
+/// read-only command (it changes nothing, so an unknown field in it cannot
+/// cause the 2026-08-31 kind of harm) or for a request with no such field.
+fn unknown_field_refusal(value: &serde_json::Value, req: &RpcRequest) -> Option<String> {
+    if req.command.is_read_only() {
+        return None;
+    }
+    let unknown = homelab_core::wire::unknown_fields(value, req);
+    if unknown.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "refused: this host's build does not know {} — update the host \
+         ('homelab release-update') and try again, or drop the field if it \
+         was sent by mistake",
+        unknown.join(", ")
+    ))
+}
+
 async fn ws_session(socket: WebSocket, state: AppState, who: Identity) {
     serve_ws(socket, state, who, |st, req| async move {
         handle_rpc(&st, req).await
@@ -7901,8 +7969,8 @@ where
                 break;
             }
         };
-        let req = match serde_json::from_str::<RpcRequest>(&text) {
-            Ok(r) => r,
+        let value: serde_json::Value = match serde_json::from_str(&text) {
+            Ok(v) => v,
             Err(e) => {
                 // Silence here is why `homelab checks answer` looked like a
                 // hang rather than a bug: the request was dropped and the
@@ -7912,6 +7980,31 @@ where
                 continue;
             }
         };
+        let req = match serde_json::from_value::<RpcRequest>(value.clone()) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("{}", unparseable_frame_line(&e, &text));
+                continue;
+            }
+        };
+        // fix-211 (Kenny, 2026-10-02: "Host weigert enkel onbekende velden"
+        // — the host refuses a command only for a field it does not know,
+        // naming it, never for merely being older than the client): a
+        // field this host's own build has no struct field for is dropped
+        // by serde without a word, which is how a host one release behind
+        // silently ignored `data_mounts` on 2026-08-31 and came up without
+        // a container's disks.
+        if let Some(why) = unknown_field_refusal(&value, &req) {
+            tracing::warn!(cmd = req.command.name(), "fix-211: {}", why);
+            let resp = RpcResponse {
+                id: req.id,
+                ok: false,
+                message: why,
+                deferred: None,
+            };
+            let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
+            continue;
+        }
         // arch-tokens: a command above the token's scope is refused here,
         // before it reaches the queue, and the refusal is audited.
         if req.command.scope() > who.scope {

@@ -161,7 +161,11 @@ async fn drain(evt_rx: &mut mpsc::Receiver<BackendEvent>, quiet: Duration) -> Ve
 /// which request was an answer and turns its reply into a log line.
 #[tokio::test]
 async fn fix_66_the_reply_to_an_answer_is_a_log_line_not_the_end_of_the_operation() {
-    let mut host = fake_host(env!("CARGO_PKG_VERSION")).await;
+    // fix-211: this test is about the answer/reply bookkeeping, not about
+    // version skew — pinned to a host version at the unknown-field-check
+    // capability so it never starts exercising that guard by accident
+    // merely because this crate has not yet been bumped to that release.
+    let mut host = fake_host(homelab_client::link::UNKNOWN_FIELD_CHECK_SINCE).await;
     let Channels { cmd_tx, mut evt_rx } = start(&host.addr);
     let _ = drain(&mut evt_rx, Duration::from_millis(500)).await;
 
@@ -415,4 +419,86 @@ fn fix_199_an_older_client_is_only_ever_told_never_refused() {
     assert!(notice.contains("kept by the host, not"), "{}", notice);
     assert!(older_client_notice(env!("CARGO_PKG_VERSION")).is_none());
     assert!(older_client_notice("0.1.0").is_none());
+}
+
+/// covers: fix-211
+///
+/// (3) a host that predates `UNKNOWN_FIELD_CHECK_SINCE` cannot yet tell
+/// an unknown field from one its own build simply has no room for, so the
+/// client still refuses a mutating command on its behalf — the same
+/// guard as fix-67, now explaining why rather than only comparing
+/// version numbers.
+#[tokio::test]
+async fn fix_211_the_tui_still_refuses_a_mutating_command_to_a_host_before_the_check() {
+    let mut host = fake_host("3.70.3").await;
+    let Channels { cmd_tx, mut evt_rx } = start(&host.addr);
+    let _ = drain(&mut evt_rx, Duration::from_millis(500)).await;
+
+    cmd_tx.send(Command::PatchFleet).await.unwrap();
+    let reached = tokio::time::timeout(Duration::from_millis(1000), host.received.recv()).await;
+    assert!(
+        reached.is_err(),
+        "a mutating command reached a host that cannot check unknown fields itself: {:?}",
+        reached
+    );
+    let events = drain(&mut evt_rx, Duration::from_millis(500)).await;
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            BackendEvent::Server(ServerMsg::RpcDone(r))
+                if !r.ok && r.message.contains("cannot yet tell")
+        )),
+        "the refusal must say WHY this host is refused, not just name a version: {:?}",
+        events
+    );
+}
+
+/// covers: fix-211
+///
+/// (2) a host AT `UNKNOWN_FIELD_CHECK_SINCE` is trusted to police its own
+/// unknown fields, so the client sends the command through and relays
+/// whatever the host answers.
+#[tokio::test]
+async fn fix_211_the_tui_sends_a_mutating_command_to_a_host_at_the_check_version() {
+    let mut host = fake_host(homelab_client::link::UNKNOWN_FIELD_CHECK_SINCE).await;
+    let Channels { cmd_tx, mut evt_rx } = start(&host.addr);
+    let _ = drain(&mut evt_rx, Duration::from_millis(500)).await;
+
+    cmd_tx.send(Command::PatchFleet).await.unwrap();
+    let reached = tokio::time::timeout(Duration::from_millis(1000), host.received.recv()).await;
+    assert!(
+        reached.is_ok(),
+        "a mutating command with only known fields must reach a host that can police them \
+         itself: {:?}",
+        reached
+    );
+}
+
+/// covers: fix-211
+///
+/// `refuse_older_host` is a capability check against
+/// `UNKNOWN_FIELD_CHECK_SINCE`, never a comparison against this client's
+/// own version: a client far newer than that constant still sends
+/// everything to a host that has reached it, and a read-only command is
+/// never refused either way.
+#[test]
+fn fix_211_refuse_older_host_is_a_capability_check_not_a_version_gate() {
+    use homelab_client::link::{UNKNOWN_FIELD_CHECK_SINCE, refuse_older_host};
+    let mutating = Command::PatchFleet;
+    assert!(
+        refuse_older_host(&mutating, "3.70.3").is_some(),
+        "older than the capability version must still be refused"
+    );
+    assert!(
+        refuse_older_host(&mutating, UNKNOWN_FIELD_CHECK_SINCE).is_none(),
+        "at the capability version must go through"
+    );
+    assert!(
+        refuse_older_host(&mutating, "999.0.0").is_none(),
+        "well past the capability version must go through"
+    );
+    assert!(
+        refuse_older_host(&Command::Status, "0.1.0").is_none(),
+        "a read-only command is never refused"
+    );
 }

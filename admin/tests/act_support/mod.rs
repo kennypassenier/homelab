@@ -213,6 +213,10 @@ impl StackFiles for MemFiles {
 pub struct Script {
     /// Steps with how many seconds each takes on the test clock.
     pub steps: Vec<(String, i64)>,
+    /// fix-171 round 2: steps the announced plan lists that this run does
+    /// not take — each gets one skip mark instead of a start/finish pair,
+    /// so `n` still reaches the plan's length exactly.
+    pub skipped: Vec<String>,
     pub ok: bool,
     pub deferred: Option<String>,
     pub message: String,
@@ -224,6 +228,7 @@ impl Script {
     pub fn ok(steps: &[(&str, i64)]) -> Self {
         Script {
             steps: steps.iter().map(|(s, d)| (s.to_string(), *d)).collect(),
+            skipped: Vec::new(),
             ok: true,
             deferred: None,
             message: "complete".into(),
@@ -236,6 +241,12 @@ impl Script {
             message: why.into(),
             ..Script::ok(steps)
         }
+    }
+    /// fix-171 round 2: the op's own plan also lists these — they do not
+    /// run this time and each gets a skip mark instead.
+    pub fn with_skipped(mut self, names: &[&str]) -> Self {
+        self.skipped = names.iter().map(|s| s.to_string()).collect();
+        self
     }
 }
 
@@ -312,6 +323,7 @@ impl MockHost {
                         req,
                         ts: Some(clock.now() as u64),
                         step,
+                        plan: None,
                         by: Some(by.into()),
                     }
                 };
@@ -348,12 +360,48 @@ impl MockHost {
                 );
                 // Another session's request flows past on the same channel.
                 let _ = events.send(log("a CLI line".into(), Some(1), None, "wsl"));
+                // fix-171 round 2: the plan, before the first step mark —
+                // every name this run will either run or skip.
+                let plan_names: Vec<String> = script
+                    .steps
+                    .iter()
+                    .map(|(s, _)| s.clone())
+                    .chain(script.skipped.iter().cloned())
+                    .collect();
+                let _ = events.send(ServerMsg::Log {
+                    level: LogLevel::Info,
+                    source: "HOST".into(),
+                    msg: format!("[sync][plan] {op} :: {} step(s) planned", plan_names.len()),
+                    req: Some(id),
+                    ts: Some(clock.now() as u64),
+                    step: None,
+                    plan: Some(homelab_proto::StepPlan {
+                        op: op.clone(),
+                        steps: plan_names,
+                    }),
+                    by: Some("admin".into()),
+                });
+                for name in &script.skipped {
+                    let _ = events.send(log(
+                        format!("[sync][skip] {op} :: {name}"),
+                        Some(id),
+                        Some(StepMark {
+                            op: op.clone(),
+                            step: name.clone(),
+                            finished: true,
+                            changed: false,
+                            skipped: true,
+                        }),
+                        "admin",
+                    ));
+                }
                 for (step, secs) in &script.steps {
                     let mark = |finished| StepMark {
                         op: op.clone(),
                         step: step.clone(),
                         finished,
                         changed: finished,
+                        skipped: false,
                     };
                     let _ = events.send(log(
                         format!("[sync][run ] {op} :: {step}"),

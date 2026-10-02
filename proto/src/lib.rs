@@ -675,6 +675,24 @@ pub struct StepMark {
     /// On a finished step: whether it changed anything.
     #[serde(default)]
     pub changed: bool,
+    /// fix-171 round 2: this step's slot in the op's own `StepPlan` was
+    /// filled by a skip, not a run — its precondition did not hold this
+    /// time (an unused `firewall` field, an app that failed its policy
+    /// gate). A single mark (`finished: true`), never a start/finish pair,
+    /// so it still fills exactly one slot of the plan and `n` reaches `m`.
+    #[serde(default)]
+    pub skipped: bool,
+}
+
+/// fix-171 round 2: an operation's own announcement of the full, ordered
+/// list of steps it plans to mark — run or skipped — sent once, before its
+/// first `StepMark`. Computed from the same inputs the op itself uses (the
+/// manifest/spec it was given, the app list, the stack list for a
+/// multi-stack action), never from a past run's history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StepPlan {
+    pub op: String,
+    pub steps: Vec<String>,
 }
 
 /// feat-platform-3: what `CurrentOp` answers (JSON in `RpcResponse.message`):
@@ -1098,6 +1116,14 @@ pub enum ServerMsg {
         /// without parsing `msg` (feat-ops-6, "step 3/35").
         #[serde(default, skip_serializing_if = "Option::is_none")]
         step: Option<StepMark>,
+        /// fix-171 round 2: the operation's own announcement of every step
+        /// it plans to mark, run or skipped, sent before its first `step`
+        /// line — so a client's total is this op's real plan, not a guess
+        /// from a past run's count (which went "13/13" to "68/68" live,
+        /// both numbers climbing, the first time this run needed more
+        /// steps than the last one happened to).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        plan: Option<StepPlan>,
         /// milestone act (homelab-admin, 2026-09-28): the name of the token
         /// whose session asked for the operation that printed this line
         /// ("admin", "wsl", "legacy"); None for the host's own work. `req`

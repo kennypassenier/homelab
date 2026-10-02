@@ -1608,6 +1608,32 @@ impl Actions {
         self.store(view);
         let history = self.history().await;
         let mut tracker = Tracker::new(history);
+        // fix-171 round 2: a job of more than one plan-producing command
+        // (Apply, a batch item that stages a binary and then deploys it)
+        // would otherwise only learn command 2's plan once command 1 had
+        // already finished — too late for "m correct from step 1" on a
+        // 13-stack apply. Each deploy's and each destroy's own step plan is
+        // a fixed constant (`homelab_core::ops::deploy::STEPS`,
+        // `...::destroy::STEPS`) — the same list every run, because a step
+        // whose precondition does not hold this time is a planned no-op or
+        // an explicit skip, never an absent step (see those modules) — so
+        // the caller can sum them here, before the first command is sent.
+        // A job of exactly one such command needs none of this: its own
+        // announced plan already arrives before its own first step, which
+        // is the whole of "step 1" this job will ever have.
+        let plan_producing = commands
+            .iter()
+            .filter(|c| matches!(c, Command::DeployStack(_) | Command::DestroyRecorded { .. }));
+        if plan_producing.clone().count() > 1 {
+            let total: usize = plan_producing
+                .map(|c| match c {
+                    Command::DeployStack(_) => homelab_core::ops::deploy::STEPS.len(),
+                    Command::DestroyRecorded { .. } => homelab_core::ops::destroy::STEPS.len(),
+                    _ => 0,
+                })
+                .sum();
+            tracker.set_total(total);
+        }
         let mut last = None;
         for command in commands {
             let r = self.follow(command, view, &mut tracker).await?;
@@ -1812,6 +1838,7 @@ impl Actions {
             req: Some(r),
             ts,
             step,
+            plan,
             ..
         } = m
         else {
@@ -1828,6 +1855,13 @@ impl Actions {
                 "msg": homelab_core::executor::mask_secrets(&msg), "ts": ts,
             }),
         );
+        // fix-171 round 2: an op's own plan, before its first step mark —
+        // for a single-command job this is what sets `m`; for Apply/a
+        // batch item `execute` already fixed the whole total up front
+        // (`Tracker::set_total`), so this only confirms it.
+        if let Some(p) = plan {
+            tracker.on_plan(&p.op, &p.steps);
+        }
         if let Some(mark) = step {
             let p = tracker.on_mark(&mark, ts.max(0) as u64);
             view.progress = Some(p.clone());

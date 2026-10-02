@@ -305,6 +305,7 @@ async fn fix_67_the_tui_reads_a_message_larger_than_sixteen_mib() {
                 ts: None,
                 by: None,
                 step: None,
+                plan: None,
                 level: homelab_proto::LogLevel::Info,
                 source: "HOST".into(),
                 msg: big,

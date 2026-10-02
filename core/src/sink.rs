@@ -12,6 +12,14 @@ pub enum Level {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum PipelineEvent {
+    /// fix-171 round 2: the operation's own announcement of every step it
+    /// plans to mark (run or skipped), emitted once, before its first
+    /// `StepStarted` — so a listener's total is known and fixed from the
+    /// very first step rather than guessed from a past run.
+    Plan {
+        op: String,
+        steps: Vec<String>,
+    },
     StepStarted {
         op: String,
         step: String,
@@ -20,6 +28,13 @@ pub enum PipelineEvent {
         op: String,
         step: String,
         changed: bool,
+    },
+    /// fix-171 round 2: a step the plan listed that this run did not take —
+    /// its precondition did not hold. One event, not a start/finish pair,
+    /// so it still fills exactly one slot of the announced plan.
+    StepSkipped {
+        op: String,
+        step: String,
     },
     Line {
         level: Level,

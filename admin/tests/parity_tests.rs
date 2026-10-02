@@ -118,6 +118,7 @@ fn log(source: &str, msg: &str, by: Option<&str>) -> ServerMsg {
         req: by.map(|_| 7),
         ts: Some(1_790_000_000),
         step: None,
+        plan: None,
         by: by.map(str::to_string),
     }
 }

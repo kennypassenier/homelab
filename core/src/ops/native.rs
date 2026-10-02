@@ -414,6 +414,22 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
 /// A first install and a re-install are deliberately the same operation. The
 /// difference that matters is whether there is a previous binary to roll back
 /// to, and that is a fact about the container, not a flag the caller passes.
+/// fix-171 round 2: install-native's own step plan — fixed, every run,
+/// because every step here is already unconditional (a precondition that
+/// does not hold, like no previous binary to preserve, makes the step a
+/// no-op, never an absent one).
+pub const INSTALL_STEPS: &[&str] = &[
+    "validate manifest",
+    "guard target",
+    "preserve previous binary",
+    "stage binary",
+    "check the glibc the binary needs",
+    "install unit file",
+    "activate",
+    "own program directory",
+    "keep one previous binary",
+];
+
 pub async fn install_native(
     ctx: &OpCtx<'_>,
     m: &NativeServiceManifest,
@@ -422,6 +438,7 @@ pub async fn install_native(
 ) -> OperationReport {
     let op = format!("install-{}", m.unit);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    runner.plan(INSTALL_STEPS);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let unit = format!("{}.service", m.unit);

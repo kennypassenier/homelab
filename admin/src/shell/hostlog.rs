@@ -114,6 +114,7 @@ pub fn line_of(m: &ServerMsg, now: i64) -> Option<LineView> {
         ts,
         step,
         by,
+        ..
     } = m
     else {
         return None;

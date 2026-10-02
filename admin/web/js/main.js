@@ -304,6 +304,20 @@ function fitBar() {
 }
 fitBar();
 addEventListener("resize", fitBar);
+// fix-176: the bar's content changes after the first paint — the registry's
+// links land async, the kit adds its search, bell and theme buttons, and the
+// link status swaps "connecting…" for a version or a long link-down reason.
+// A fold decided once on the early content stuck until the window resized,
+// so the bar is measured again whenever its content or its own size moves.
+// Only childList/characterData are watched: fitBar's own data-fold toggle
+// is an attribute change and cannot re-trigger it.
+new MutationObserver(fitBar).observe(bar, {
+  childList: true,
+  subtree: true,
+  characterData: true,
+});
+if (typeof ResizeObserver === "function")
+  new ResizeObserver(fitBar).observe(bar);
 new MutationObserver(fitBar).observe(document.documentElement, {
   attributes: true,
   attributeFilter: ["data-theme", "class"],

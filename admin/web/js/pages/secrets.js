@@ -180,7 +180,13 @@ export function mount(root) {
       null,
       "Which latch secrets and latch_files a stack declares. Values are never shown until Reveal is pressed, and are hidden again the moment this page is left.",
     ),
-    h("label", null, "Stack ", stackSelect),
+    // fix-206: a bare `<label>` is inline by default, so as a direct
+    // top-level child of `#page` it never took part in the page's
+    // block-level vertical-spacing rhythm (`main.shell > * + *` in
+    // app.css) — its forced margin-block-start had nothing to lay out
+    // against. A block wrapper gives it the same section spacing as
+    // every other top-level piece of this page.
+    h("div", null, h("label", null, "Stack ", stackSelect)),
     status,
     table,
   );

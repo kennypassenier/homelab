@@ -55,7 +55,7 @@ const pageSet = {
     {
       id: "metrics",
       title: "Metrics",
-      path: "/metrics",
+      path: "/charts",
       group: null,
       order: 0,
       nav: true,
@@ -249,7 +249,7 @@ test("every path lives at the root", () => {
   assert.deepEqual(route("/"), { page: "home" });
   assert.deepEqual(route("/overview"), { page: "overview" });
   assert.deepEqual(route("/health"), { page: "health" });
-  assert.deepEqual(route("/metrics"), { page: "metrics" });
+  assert.deepEqual(route("/charts"), { page: "metrics" });
   assert.deepEqual(route("/host"), { page: "host" });
   assert.deepEqual(route("/activity"), { page: "activity" });
   assert.deepEqual(route("/log?source=media"), { page: "log" });
@@ -279,7 +279,6 @@ test("retired and pre-3.1.0 paths still parse, for an old link or a Live view sc
   assert.deepEqual(route("/today"), { page: "today" });
   assert.deepEqual(route("/doctor"), { page: "doctor" });
   assert.deepEqual(route("/checks/"), { page: "checks" });
-  assert.deepEqual(route("/charts"), { page: "charts" });
   assert.deepEqual(route("/traffic"), { page: "traffic" });
   assert.deepEqual(route("/timeline?days=3"), { page: "timeline" });
   assert.deepEqual(route("/home"), { page: "home-legacy" });
@@ -295,12 +294,8 @@ test("redirectFor sends every retired or pre-3.1.0 path on to its home", () => {
   );
   assert.equal(redirectFor(route("/checks"), ""), "/health?block=checks");
   assert.equal(
-    redirectFor(route("/charts"), "?stack=media&range=6h"),
-    "/metrics?stack=media&range=6h&tab=system",
-  );
-  assert.equal(
     redirectFor(route("/traffic"), "?range=7d"),
-    "/metrics?range=7d&tab=traffic",
+    "/charts?range=7d&tab=traffic",
   );
   assert.equal(
     redirectFor(route("/timeline"), "?days=30"),
@@ -337,7 +332,7 @@ test("the navigation renders from the registry and marks the current page", () =
   assert.deepEqual(cur("/"), ["Apps"]);
   assert.deepEqual(cur("/host"), ["Host"]);
   assert.deepEqual(cur("/health"), ["Health"]);
-  assert.deepEqual(cur("/metrics"), ["Metrics"]);
+  assert.deepEqual(cur("/charts"), ["Metrics"]);
   // Overview is hidden from the bar (the brand link opens it instead).
   assert.deepEqual(cur("/overview"), []);
   const top = navEntries(pageSet, route("/"));

@@ -18,7 +18,7 @@ const PAGES = {
   overview: { href: "/overview", label: "Overview" },
   home: { href: "/", label: "Apps" },
   health: { href: "/health", label: "Health" },
-  metrics: { href: "/metrics", label: "Metrics" },
+  metrics: { href: "/charts", label: "Metrics" },
   host: { href: "/host", label: "Host" },
   activity: { href: "/activity", label: "Activity" },
   jobs: { href: "/jobs", label: "Jobs" },

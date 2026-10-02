@@ -113,7 +113,13 @@ async fn main() -> std::process::ExitCode {
     app.page(Page::new("home", "Apps", "/"))
         .page(Page::new("overview", "Overview", "/overview").hidden())
         .page(Page::new("health", "Health", "/health"))
-        .page(Page::new("metrics", "Metrics", "/metrics"))
+        // fix-206: chassis reserves `/metrics` for its own Prometheus
+        // scrape text, unconditionally (`kit_pages_in_webapp` frees only
+        // Status/Clients/Passkeys); a page registered at that same path is
+        // dead — the kit's axum route always answers first, and this
+        // page's styled charts never render. "/charts" is the live path
+        // for this page; the title stays "Metrics".
+        .page(Page::new("metrics", "Metrics", "/charts"))
         .page(Page::new("activity", "Activity", "/activity"))
         .page(Page::new("host", "Host", "/host"))
         .page(Page::new("log", "Live log", "/log").group("Operations"))

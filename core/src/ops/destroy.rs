@@ -5,7 +5,7 @@
 
 use crate::error::CoreError;
 use crate::executor::{Cmd, Executor, TracingExecutor, run_ok};
-use crate::runner::{OperationReport, Runner, StepOutcome};
+use crate::runner::{OperationReport, Runner, Scope, StepFailure, StepOutcome};
 use crate::sink::Level;
 
 use super::OpCtx;
@@ -49,6 +49,27 @@ pub const STEPS: &[&str] = &[
     "update state",
 ];
 
+/// fix-step-plan-nested: `destroy`'s own FULL plan — `STEPS` above with its
+/// single "backup before destroy" entry replaced by the `backup` op it
+/// always ends up marking there (run, or skip-marked when `--no-backup` was
+/// passed or the manifest declares no storage — either way every one of
+/// `backup`'s names gets exactly one mark). Constant length regardless of
+/// those two facts, because a skip IS a mark; the single source `destroy`
+/// itself plans from and `admin`'s batch-total calls.
+pub fn destroy_plan_names(stack_name: &str) -> Vec<String> {
+    let mut v: Vec<String> = vec![
+        "confirm".to_string(),
+        "no-touch check".to_string(),
+        "hostname guard".to_string(),
+    ];
+    v.extend(crate::ops::backup::backup_plan_names(stack_name));
+    v.push("stop container".to_string());
+    v.push("lift protection".to_string());
+    v.push("destroy container".to_string());
+    v.extend(UNREGISTER_STEPS.iter().map(|s| s.to_string()));
+    v
+}
+
 /// Destroy a managed container by stack name + vmid. `confirmed` must be the
 /// caller's proof the user typed the stack name (the TUI enforces this); we
 /// re-check it here so the core is safe on its own.
@@ -59,16 +80,38 @@ pub async fn destroy(
     skip_backup: bool,
 ) -> OperationReport {
     let stack_name = &manifest.stack_name;
+    let mut scope = Scope::top(&format!("destroy-{}", stack_name), ctx.sink, ctx.journal);
+    // fix-step-plan-nested: the FULL plan, including the `backup` this
+    // always marks one way or the other (run, or skip-marked when
+    // `--no-backup` was passed or the manifest declares no storage) —
+    // `destroy_plan_names` is the one source this and `admin`'s batch-total
+    // both call.
+    scope.plan_if_top(&destroy_plan_names(stack_name));
+    let result = destroy_impl(ctx, manifest, confirmed_name, skip_backup, &mut scope).await;
+    scope.finish(result)
+}
+
+/// fix-step-plan-nested: the step logic behind `destroy`, run through the
+/// `Scope` its own wrapper (above) already planned — it composes `backup`
+/// (`crate::ops::backup::backup_impl`) as a NESTED call sharing this same
+/// scope's `Runner`, rather than a second standalone op announcing its own
+/// plan (the exact shape `install_native`/`adopt` and `release_install` were
+/// fixed to carry the LIVE kyu counter fault).
+async fn destroy_impl<'a>(
+    ctx: &OpCtx<'a>,
+    manifest: &crate::manifest::StackManifest,
+    confirmed_name: &str,
+    skip_backup: bool,
+    scope: &mut Scope<'_, 'a>,
+) -> Result<(), StepFailure> {
+    let stack_name = &manifest.stack_name;
     let vmid = manifest.vmid;
-    let op = format!("destroy-{}", stack_name);
-    let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
-    runner.plan(STEPS);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let vm = vmid.to_string();
     let expected_hostname = format!("{}-app-{}", vmid, stack_name);
 
-    runner.log(
+    scope.log(
         Level::Warn,
         format!(
             "[destroy] requested for {} (vmid {})",
@@ -77,7 +120,7 @@ pub async fn destroy(
     );
 
     // Gate 0: typed-name confirmation.
-    step!(runner, "confirm", {
+    scoped_step!(scope, "confirm", {
         if confirmed_name != stack_name {
             return Err(CoreError::SafetyAbort(format!(
                 "typed name '{}' does not match stack '{}'",
@@ -88,7 +131,7 @@ pub async fn destroy(
     });
 
     // Gate 1: no-touch list (A1).
-    step!(runner, "no-touch check", {
+    scoped_step!(scope, "no-touch check", {
         if ctx.safety.no_touch.contains(&vmid) {
             return Err(CoreError::SafetyAbort(format!(
                 "vmid {} is on the no-touch list — never destroyed",
@@ -99,7 +142,7 @@ pub async fn destroy(
     });
 
     // Gate 2: live hostname guard (A2) — the container must actually be ours.
-    step!(runner, "hostname guard", {
+    scoped_step!(scope, "hostname guard", {
         let cfg = exec.run(&Cmd::new("pct", &["config", &vm], 30)).await?;
         if !cfg.success() {
             return Err(CoreError::SafetyAbort(format!(
@@ -134,58 +177,66 @@ pub async fn destroy(
     // changes little: those directories survive a destroy anyway. It matters
     // for what lives INSIDE the container, which is exactly where the native
     // services keep their state.
-    step!(runner, "backup before destroy", {
-        if skip_backup {
-            runner_warn(
-                ctx,
-                format!(
-                    "[destroy] backup SKIPPED for {} at the operator's explicit request — \
-                     whatever this container holds that is not on /appdata is gone in a moment",
-                    stack_name
-                ),
-            );
-            return Ok(StepOutcome::Unchanged);
+    //
+    // fix-step-plan-nested: `backup` is composed in — nested through THIS
+    // scope — instead of called as a standalone op with its own plan. Both
+    // early-out cases below still skip-mark every one of `backup`'s names:
+    // they are part of the announced plan and every name in it gets exactly
+    // one mark, run or skip.
+    if skip_backup {
+        runner_warn(
+            ctx,
+            format!(
+                "[destroy] backup SKIPPED for {} at the operator's explicit request — \
+                 whatever this container holds that is not on /appdata is gone in a moment",
+                stack_name
+            ),
+        );
+        for name in &crate::ops::backup::backup_plan_names(stack_name) {
+            scope.skip(name);
         }
-        if manifest.storage.is_empty() {
-            // F210: said loudly rather than in silence — for a native stack
-            // this is exactly wrong, since its state lives INSIDE the
-            // container about to be deleted. Story: docs/deployment/REGISTER.md.
-            runner_warn(
-                ctx,
-                format!(
-                    "[destroy] {} declares no storage, so there is nothing to back up \
-                     from the host — anything this container holds internally goes with \
-                     it",
-                    stack_name
-                ),
-            );
-            return Ok(StepOutcome::Unchanged);
+    } else if manifest.storage.is_empty() {
+        // F210: said loudly rather than in silence — for a native stack
+        // this is exactly wrong, since its state lives INSIDE the
+        // container about to be deleted. Story: docs/deployment/REGISTER.md.
+        runner_warn(
+            ctx,
+            format!(
+                "[destroy] {} declares no storage, so there is nothing to back up \
+                 from the host — anything this container holds internally goes with \
+                 it",
+                stack_name
+            ),
+        );
+        for name in &crate::ops::backup::backup_plan_names(stack_name) {
+            scope.skip(name);
         }
-        let report = crate::ops::backup::backup(ctx, manifest, &ctx.backup).await;
-        if !report.ok {
-            let why = report
-                .error
-                .as_ref()
-                .map(|e| e.why.clone())
-                .unwrap_or_else(|| "backup failed".into());
-            return Err(CoreError::SafetyAbort(format!(
-                "refusing to destroy '{}': the backup taken first did not succeed :: {} :: \
-                 pass --no-backup to destroy anyway, which is a decision, not a retry",
-                stack_name, why
-            )));
-        }
-        Ok(StepOutcome::Changed)
-    });
+    } else {
+        let mut backup_scope = scope.child(format!("backup-{}", stack_name));
+        crate::ops::backup::backup_impl(ctx, manifest, &ctx.backup, &mut backup_scope)
+            .await
+            .map_err(|f| {
+                let why = crate::error::OperatorError::from_core(&f.step, &f.err).why;
+                StepFailure {
+                    step: f.step,
+                    err: CoreError::SafetyAbort(format!(
+                        "refusing to destroy '{}': the backup taken first did not succeed :: {} \
+                         :: pass --no-backup to destroy anyway, which is a decision, not a retry",
+                        stack_name, why
+                    )),
+                }
+            })?;
+    }
 
     // Stop the container (ignore "already stopped").
-    step!(runner, "stop container", {
+    scoped_step!(scope, "stop container", {
         let _ = exec.run(&Cmd::new("pct", &["stop", &vm], 120)).await?;
         Ok(StepOutcome::Changed)
     });
 
     // Lift the Proxmox protection flag deliberately (it exists precisely to
     // block accidental destroys).
-    step!(runner, "lift protection", {
+    scoped_step!(scope, "lift protection", {
         let _ = exec
             .run(&Cmd::new("pct", &["set", &vm, "--protection", "0"], 30))
             .await?;
@@ -194,27 +245,28 @@ pub async fn destroy(
 
     // Destroy — purge removes it from all configs; the guest disk on the thin
     // pool goes with it. /appdata data on the host is intentionally kept.
-    step!(runner, "destroy container", {
+    scoped_step!(scope, "destroy container", {
         run_ok(exec, &Cmd::new("pct", &["destroy", &vm, "--purge"], 120)).await?;
         Ok(StepOutcome::Changed)
     });
 
     // step-22: whatever a deploy registers, a destroy unregisters — the same
     // list `forget` runs, so the two cannot drift apart.
-    if let Err((step, e)) =
-        unregister(&mut runner, ctx, exec, stack_name, vmid, Some(manifest)).await
-    {
-        return runner.finish_err(step, &e);
-    }
+    unregister(scope, ctx, exec, stack_name, vmid, Some(manifest))
+        .await
+        .map_err(|(step, err)| StepFailure {
+            step: step.to_string(),
+            err,
+        })?;
 
-    runner.log(
+    scope.log(
         Level::Info,
         format!(
             "[destroy] {} removed (data under /appdata kept for redeploy)",
             expected_hostname
         ),
     );
-    runner.finish_ok()
+    Ok(())
 }
 
 /// step-22: every registration a stack has outside its container, removed
@@ -224,7 +276,7 @@ pub async fn destroy(
 /// Returns the failing step's name with the error, so the caller can finish
 /// its own runner with it.
 async fn unregister(
-    runner: &mut Runner<'_>,
+    scope: &mut Scope<'_, '_>,
     ctx: &OpCtx<'_>,
     exec: &dyn Executor,
     stack_name: &str,
@@ -234,7 +286,7 @@ async fn unregister(
     // T1: a removed stack stops being a scrape target. Without this it would
     // keep firing HostDown on its way out — which is exactly what the
     // scratch container at 10.10.10.14 was set up to do.
-    runner
+    scope
         .step("remove metrics discovery", || async {
             let Some(dir) = ctx.metrics_targets_dir.as_deref() else {
                 return Ok(StepOutcome::Unchanged);
@@ -246,7 +298,7 @@ async fn unregister(
         .await
         .map_err(|e| ("remove metrics discovery", e))?;
 
-    runner
+    scope
         .step("remove gateway route", || async {
             let mut files = vec![format!("{}-app-{}.yml", vmid, stack_name)];
             // fix-91: the `extra_routes` files this stack's deploy recorded go
@@ -288,7 +340,7 @@ async fn unregister(
     // question about a stack that no longer exists can never be answered
     // meaningfully, and the fleet check would ask it forever. /appdata and
     // the secrets vault are kept so a redeploy can auto-restore (E3).
-    runner
+    scope
         .step("update state", || async {
             let store = crate::state::StateStore::new(exec, &ctx.state_dir);
             let mut state = store.load().await?;
@@ -336,16 +388,24 @@ async fn unregister(
 /// longer answers to that hostname may be forgotten. A live one being
 /// forgotten would go silently unbacked-up.
 pub async fn forget(ctx: &OpCtx<'_>, stack: &str) -> OperationReport {
-    let op = format!("forget-{}", stack);
-    let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    let mut scope = Scope::top(&format!("forget-{}", stack), ctx.sink, ctx.journal);
     let mut plan: Vec<&str> = vec!["read record", "live check"];
     plan.extend(UNREGISTER_STEPS);
-    runner.plan(&plan);
+    scope.plan_if_top(&plan);
+    let result = forget_impl(ctx, stack, &mut scope).await;
+    scope.finish(result)
+}
+
+async fn forget_impl<'a>(
+    ctx: &OpCtx<'a>,
+    stack: &str,
+    scope: &mut Scope<'_, 'a>,
+) -> Result<(), StepFailure> {
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let mut entry: Option<crate::state::StackState> = None;
 
-    step!(runner, "read record", {
+    scoped_step!(scope, "read record", {
         let store = crate::state::StateStore::new(exec, &ctx.state_dir);
         let state = store.load().await?;
         match state.stacks.get(stack) {
@@ -360,13 +420,13 @@ pub async fn forget(ctx: &OpCtx<'_>, stack: &str) -> OperationReport {
         }
     });
     let Some(entry) = entry else {
-        return runner.finish_err(
-            "read record",
-            &CoreError::Other(format!("no stack '{}' in host state", stack)),
-        );
+        return Err(StepFailure {
+            step: scope.qualify("read record"),
+            err: CoreError::Other(format!("no stack '{}' in host state", stack)),
+        });
     };
 
-    step!(runner, "live check", {
+    scoped_step!(scope, "live check", {
         let live = exec
             .run(&Cmd::new("pct", &["list"], 30))
             .await
@@ -385,17 +445,20 @@ pub async fn forget(ctx: &OpCtx<'_>, stack: &str) -> OperationReport {
         Ok(StepOutcome::Unchanged)
     });
 
-    if let Err((step, e)) = unregister(&mut runner, ctx, exec, stack, entry.vmid, None).await {
-        return runner.finish_err(step, &e);
-    }
-    runner.log(
+    unregister(scope, ctx, exec, stack, entry.vmid, None)
+        .await
+        .map_err(|(step, err)| StepFailure {
+            step: step.to_string(),
+            err,
+        })?;
+    scope.log(
         Level::Info,
         format!(
             "[forget] forgot '{}' (was vmid {} as {}) — the container was not touched",
             stack, entry.vmid, entry.hostname
         ),
     );
-    runner.finish_ok()
+    Ok(())
 }
 
 /// Destroy a stack from the manifest recorded in host state (ask-8).

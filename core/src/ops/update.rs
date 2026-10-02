@@ -469,7 +469,7 @@ pub async fn update(
         // fix-171 round 2: this app's own step names, computed once so every
         // `continue` below can skip exactly the ones it will not reach.
         let names = app_steps(app, auto);
-        let skip_from = |runner: &Runner, from: usize| {
+        let skip_from = |runner: &mut Runner, from: usize| {
             for n in &names[from..] {
                 runner.skip(n);
             }
@@ -502,7 +502,7 @@ pub async fn update(
                 Level::Info,
                 format!("[update] {} skipped (policy is not 'auto')", app),
             );
-            skip_from(&runner, 1);
+            skip_from(&mut runner, 1);
             continue;
         }
         // fix-117: the services this run may touch, as compose arguments; an
@@ -557,7 +557,7 @@ pub async fn update(
         });
         if let Some(why) = skip_app {
             runner.log(Level::Info, format!("[o10] {} skipped: {}", app, why));
-            skip_from(&runner, 4);
+            skip_from(&mut runner, 4);
             continue;
         }
 
@@ -597,7 +597,7 @@ pub async fn update(
                     app, why
                 ),
             );
-            skip_from(&runner, 5);
+            skip_from(&mut runner, 5);
             continue;
         }
 
@@ -636,7 +636,7 @@ pub async fn update(
                         app, why
                     ),
                 );
-                skip_from(&runner, 6);
+                skip_from(&mut runner, 6);
                 continue;
             }
         }

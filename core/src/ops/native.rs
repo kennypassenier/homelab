@@ -6,7 +6,7 @@
 use crate::error::CoreError;
 use crate::executor::{Cmd, CmdOutput, Executor, TracingExecutor, run_ok};
 use crate::native::{BackupPause, NativeServiceManifest};
-use crate::runner::{OperationReport, Runner, StepOutcome};
+use crate::runner::{OperationReport, Runner, Scope, StepFailure, StepOutcome};
 use crate::sink::Level;
 
 use super::util::shq;
@@ -154,20 +154,38 @@ pub const ADOPT_STEPS: &[&str] = &[
     "record state",
 ];
 
-pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationReport {
-    let op = format!("adopt-{}", m.stack_name);
-    let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
-    runner.plan(ADOPT_STEPS);
+/// fix-step-plan-nested: `adopt`'s own step names, qualified the way they
+/// are marked when `adopt` runs nested inside another op (`install_native`
+/// always ends with one) — the single source both that composer and
+/// `admin`'s batch-total use, so neither can drift from what `adopt_impl`
+/// actually marks.
+pub fn adopt_plan_names(stack_name: &str) -> Vec<String> {
+    let prefix = format!("adopt-{}", stack_name);
+    ADOPT_STEPS
+        .iter()
+        .map(|s| format!("{prefix} :: {s}"))
+        .collect()
+}
+
+/// fix-step-plan-nested: the step logic behind `adopt`, written to run
+/// through a `Scope` — as the outermost call (`adopt`, below) or nested
+/// inside `install_native`'s own composed plan, sharing its `Runner` and
+/// qualifying every mark with `"adopt-<stack>"`.
+async fn adopt_impl<'a>(
+    ctx: &OpCtx<'a>,
+    m: &NativeServiceManifest,
+    scope: &mut Scope<'_, 'a>,
+) -> Result<(), StepFailure> {
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
 
-    step!(runner, "validate manifest", {
+    scoped_step!(scope, "validate manifest", {
         crate::native::validate_native(m)
             .map_err(|p| CoreError::SafetyAbort(format!("native manifest: {}", p.join("; "))))?;
         Ok(StepOutcome::Unchanged)
     });
 
-    step!(runner, "guard target", {
+    scoped_step!(scope, "guard target", {
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
         Ok(StepOutcome::Unchanged)
     });
@@ -175,7 +193,7 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
     // The unit must be running AND wired the way the manifest claims:
     // adopting a half-truth would make every later backup and update act on
     // the wrong paths.
-    step!(runner, "verify service", {
+    scoped_step!(scope, "verify service", {
         let unit = format!("{}.service", m.unit);
         let active =
             util_pct_sh(exec, m.vmid, &format!("systemctl is-active {}", unit), 30).await?;
@@ -218,7 +236,7 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
         Ok(StepOutcome::Unchanged)
     });
 
-    step!(runner, "verify paths", {
+    scoped_step!(scope, "verify paths", {
         let mut script = format!("test -x {}", shq(&m.binary));
         for d in &m.data_dirs {
             script.push_str(&format!(" && test -d {}", shq(d)));
@@ -243,7 +261,7 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
     // the orchestrator" (Kenny's question, 2026-08-31). Adoption is the other
     // way in, so it sets the tag too. Additive: any tag somebody else put
     // there stays.
-    step!(runner, "tag as managed", {
+    scoped_step!(scope, "tag as managed", {
         let vm = m.vmid.to_string();
         let cfg = exec.run(&Cmd::new("pct", &["config", &vm], 30)).await?;
         let tags: Vec<String> = cfg
@@ -280,7 +298,7 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
     // copying facts that will move again. Idempotent by construction: every
     // service in a shared container renders the same string (T5), so the
     // three natives on CT 109 do not fight over it.
-    step!(runner, "describe", {
+    scoped_step!(scope, "describe", {
         let vm = m.vmid.to_string();
         let desc = format!(
             "managed by homelab v2 :: stack {} :: native service(s) under systemd. \
@@ -312,7 +330,7 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
     // gap-27: an adopted service's env file gets a copy in the host's vault,
     // like a deployed one, so a lost container can get it back. Read without
     // echoing it (fix-39); nothing in the container is written.
-    step!(runner, "seal env file", {
+    scoped_step!(scope, "seal env file", {
         let Some(env) = &m.env_file else {
             return Ok(StepOutcome::Unchanged);
         };
@@ -336,7 +354,7 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
         Ok(StepOutcome::Changed)
     });
 
-    step!(runner, "record state", {
+    scoped_step!(scope, "record state", {
         let store = crate::state::StateStore::new(exec, &ctx.state_dir);
         let mut state = store.load().await?;
         if let Some(existing) = state.stacks.get(&m.stack_name)
@@ -396,7 +414,7 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
         Ok(StepOutcome::Changed)
     });
 
-    runner.log(
+    scope.log(
         Level::Info,
         format!(
             "[adopt] {} ({}) is now managed — service untouched, nightly backup + update \
@@ -404,7 +422,14 @@ pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationRepor
             m.stack_name, m.hostname
         ),
     );
-    runner.finish_ok()
+    Ok(())
+}
+
+pub async fn adopt(ctx: &OpCtx<'_>, m: &NativeServiceManifest) -> OperationReport {
+    let mut scope = Scope::top(&format!("adopt-{}", m.stack_name), ctx.sink, ctx.journal);
+    scope.plan_if_top(ADOPT_STEPS);
+    let result = adopt_impl(ctx, m, &mut scope).await;
+    scope.finish(result)
 }
 
 /// T11: install a native service's binary and unit file into a container
@@ -446,15 +471,38 @@ pub const INSTALL_STEPS: &[&str] = &[
     "keep one previous binary",
 ];
 
-pub async fn install_native(
-    ctx: &OpCtx<'_>,
+/// fix-step-plan-nested: `install_native`'s own full plan — its own
+/// `INSTALL_STEPS` followed by the `adopt` it always ends with, as a flat
+/// sibling (`adopt_plan_names`), never double-prefixed. `own_prefix` is
+/// `None` when `install_native` is the outermost call (its own names stay
+/// bare, same as before this fix) or `Some("install-<unit>")` when a
+/// composing caller (`release_install`) is folding this whole plan into its
+/// own — the one source `install_native`'s wrapper and that composer both
+/// call, so they cannot drift apart the way the admin dashboard's separate
+/// constant-times-units sum once did.
+pub fn install_plan_names(m: &NativeServiceManifest, own_prefix: Option<&str>) -> Vec<String> {
+    let mut all: Vec<String> = match own_prefix {
+        None => INSTALL_STEPS.iter().map(|s| s.to_string()).collect(),
+        Some(p) => INSTALL_STEPS
+            .iter()
+            .map(|s| format!("{p} :: {s}"))
+            .collect(),
+    };
+    all.extend(adopt_plan_names(&m.stack_name));
+    all
+}
+
+/// fix-step-plan-nested: the step logic behind `install_native`, written to
+/// run through a `Scope` — as the outermost call or nested inside
+/// `release_install`'s own composed plan.
+#[allow(clippy::too_many_arguments)]
+async fn install_native_impl<'a>(
+    ctx: &OpCtx<'a>,
     m: &NativeServiceManifest,
     binary_b64: &str,
     unit_file: &str,
-) -> OperationReport {
-    let op = format!("install-{}", m.unit);
-    let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
-    runner.plan(INSTALL_STEPS);
+    scope: &mut Scope<'_, 'a>,
+) -> Result<(), StepFailure> {
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let unit = format!("{}.service", m.unit);
@@ -462,7 +510,7 @@ pub async fn install_native(
     let staged = format!("{}.homelab-new", m.binary);
     let unit_path = format!("/etc/systemd/system/{}", unit);
 
-    step!(runner, "validate manifest", {
+    scoped_step!(scope, "validate manifest", {
         crate::native::validate_native(m)
             .map_err(|p| CoreError::SafetyAbort(format!("native manifest: {}", p.join("; "))))?;
         if unit_file.trim().is_empty() {
@@ -483,14 +531,14 @@ pub async fn install_native(
         Ok(StepOutcome::Unchanged)
     });
 
-    step!(runner, "guard target", {
+    scoped_step!(scope, "guard target", {
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
         Ok(StepOutcome::Unchanged)
     });
 
     // Whether there is something to fall back to is discovered, not assumed.
     let mut had_previous = false;
-    step!(runner, "preserve previous binary", {
+    scoped_step!(scope, "preserve previous binary", {
         let probe = util_pct_sh(
             exec,
             m.vmid,
@@ -516,7 +564,7 @@ pub async fn install_native(
     // carries reliably; it is decoded on the container. The decoded file is
     // staged BESIDE the target rather than over it, so a transfer that dies
     // half way leaves the running service on its own binary.
-    step!(runner, "stage binary", {
+    scoped_step!(scope, "stage binary", {
         let b64_path = format!("{}.b64", staged);
         crate::ops::util::push_content(exec, m.vmid, &b64_path, binary_b64, "600").await?;
         let script = format!(
@@ -540,7 +588,7 @@ pub async fn install_native(
     // staged file goes too, so a retry starts clean and nothing on the
     // container looks half-installed.
     let mut glibc_note = String::new();
-    step!(runner, "check the glibc the binary needs", {
+    scoped_step!(scope, "check the glibc the binary needs", {
         let out = util_pct_sh(exec, m.vmid, &glibc_probe_script(&staged), 60).await?;
         match glibc_verdict(&out.stdout) {
             Ok(fine) => {
@@ -562,9 +610,9 @@ pub async fn install_native(
         }
     });
 
-    runner.log(Level::Info, format!("[install] {}", glibc_note));
+    scope.log(Level::Info, format!("[install] {}", glibc_note));
 
-    step!(runner, "install unit file", {
+    scoped_step!(scope, "install unit file", {
         crate::ops::util::push_content(exec, m.vmid, &unit_path, unit_file, "644").await?;
         let out = util_pct_sh(exec, m.vmid, "systemctl daemon-reload", 60).await?;
         if !out.success() {
@@ -576,7 +624,7 @@ pub async fn install_native(
         Ok(StepOutcome::Changed)
     });
 
-    step!(runner, "activate", {
+    scoped_step!(scope, "activate", {
         // Stopping first is deliberate: replacing the file under a running
         // process leaves the old one mapped, so the service keeps running the
         // version that was just replaced and every reading afterwards lies.
@@ -634,7 +682,7 @@ pub async fn install_native(
     });
 
     let mut stale_kept = false;
-    step!(runner, "own program directory", {
+    scoped_step!(scope, "own program directory", {
         let Some(user) = unit_user(unit_file) else {
             // A unit with no User= runs as root and already owns everything.
             return Ok(StepOutcome::Unchanged);
@@ -652,7 +700,7 @@ pub async fn install_native(
     });
 
     // fix-114: keep exactly one previous binary, as a supervised update does.
-    step!(runner, "keep one previous binary", {
+    scoped_step!(scope, "keep one previous binary", {
         if !had_previous {
             return Ok(StepOutcome::Unchanged);
         }
@@ -674,7 +722,7 @@ pub async fn install_native(
     });
 
     if stale_kept {
-        runner.log(
+        scope.log(
             Level::Warn,
             format!(
                 "could not settle the kept previous binary at {} — check it and {}.old by hand",
@@ -685,20 +733,34 @@ pub async fn install_native(
 
     // Installed and healthy: the same record adoption writes, so a service
     // built this way and one taken over by hand are indistinguishable
-    // afterwards — which is the point.
-    let report = adopt(ctx, m).await;
-    if !report.ok {
-        return report;
-    }
+    // afterwards — which is the point. fix-step-plan-nested: nested through
+    // THIS scope (flattened — `adopt_impl`'s marks land on whichever
+    // `Runner` this call chain is ultimately `Top` for, qualified
+    // "adopt-<stack> :: …", a sibling of "install-<unit> :: …" rather than
+    // compounded under it), not a second standalone op with its own plan.
+    let mut adopt_scope = scope.child(format!("adopt-{}", m.stack_name));
+    adopt_impl(ctx, m, &mut adopt_scope).await?;
 
-    runner.log(
+    scope.log(
         Level::Info,
         format!(
             "[install] {} on {} — binary installed, unit active, stack recorded",
             m.unit, m.hostname
         ),
     );
-    runner.finish_ok()
+    Ok(())
+}
+
+pub async fn install_native(
+    ctx: &OpCtx<'_>,
+    m: &NativeServiceManifest,
+    binary_b64: &str,
+    unit_file: &str,
+) -> OperationReport {
+    let mut scope = Scope::top(&format!("install-{}", m.unit), ctx.sink, ctx.journal);
+    scope.plan_if_top(&install_plan_names(m, None));
+    let result = install_native_impl(ctx, m, binary_b64, unit_file, &mut scope).await;
+    scope.finish(result)
 }
 
 /// fix-146 (native-empty-rebuild, Kenny 2026-09-27, form "Keuzes helpers"):
@@ -2029,13 +2091,43 @@ pub const RELEASE_UPDATE_STEPS: &[&str] = &[
     "read the unit file from the container",
 ];
 
-/// A stack's native services may each declare their own `release_repo`; a
-/// multi-unit release-update (kyu's three) must announce the FULL sum of
-/// every unit's plan before the first one even starts (fix-171 round 3,
-/// point 2) — mirroring `admin::shell::actions::execute`'s own
-/// `Tracker::set_total` for a batch of deploys. A unit with no
-/// `release_repo` contributes nothing: `release_update` marks nothing for
-/// it either.
+/// fix-step-plan-nested: `release_install`'s own full plan — its own named
+/// steps (which vary with `pinned`/`unit_from_repo`, both known up front)
+/// followed by the `install_native` (itself followed by `adopt`) it always
+/// ends with when it gets that far. Every name here is marked exactly once,
+/// run or skip, by `release_install` — the single source that function and
+/// `admin`'s batch-total both call, so the two can never drift the way
+/// `RELEASE_UPDATE_STEPS.len() * units` once did (18 announced for kyu where
+/// 69 marks actually ran).
+pub fn release_install_plan_names(
+    m: &NativeServiceManifest,
+    pinned: Option<&str>,
+    unit_from_repo: Option<&str>,
+) -> Vec<String> {
+    if m.release_repo.is_none() {
+        // Nothing is ever attempted: the "zero marks, no plan needed" shape.
+        return Vec::new();
+    }
+    let asked = match pinned {
+        None => "ask GitHub for the latest release".to_string(),
+        Some(t) => format!("ask GitHub for release {t}"),
+    };
+    let mut steps: Vec<String> = vec!["guard target".to_string(), asked];
+    steps.push("read the checksum list".to_string());
+    steps.push("compare with the installed binary".to_string());
+    steps.push("download and verify the asset".to_string());
+    if unit_from_repo.is_none() {
+        steps.push("read the unit file from the container".to_string());
+    }
+    steps.extend(install_plan_names(m, Some(&format!("install-{}", m.unit))));
+    steps
+}
+
+/// fix-171 round 3 (superseded in its per-unit SHAPE by fix-step-plan-nested
+/// above; `admin` now calls [`release_install_plan_names`] directly, the
+/// same function `release_install` itself plans from): kept as the cheap
+/// "does this unit contribute anything at all" check `admin` filters units
+/// with before summing their full plans.
 pub fn release_update_plan_len(m: &NativeServiceManifest) -> usize {
     if m.release_repo.is_some() {
         RELEASE_UPDATE_STEPS.len()
@@ -2084,47 +2176,68 @@ async fn release_install(
         None => format!("release-update-{}", m.unit),
         Some(_) => format!("install-native-{}", m.unit),
     };
-    let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
-    let texec = TracingExecutor::new(ctx.exec, ctx.sink);
-    let exec: &dyn Executor = &texec;
-    let Some(repo) = m.release_repo.clone() else {
+    let Some(_) = m.release_repo.clone() else {
         // fix-171 round 3: nothing is ever attempted here, so there is
         // nothing to plan either — the same "zero marks, no plan needed"
         // shape as `backup_native`'s stateless early return.
-        runner.log(
+        let scope = Scope::top(&op, ctx.sink, ctx.journal);
+        scope.log(
             Level::Info,
             format!(
                 "[release] {} declares no release_repo — nothing to fetch",
                 m.unit
             ),
         );
-        return runner.finish_ok();
+        return scope.finish(Ok(()));
     };
-    let asset = m.release_asset.clone().unwrap_or_else(|| m.unit.clone());
 
-    // fix-171 round 3: this run's own fixed plan — `pinned` and
-    // `unit_from_repo` are both arguments, known before anything runs, so
-    // the one step whose NAME varies ("ask GitHub for release X" vs "...the
-    // latest release") and the one step that may not even exist this call
-    // ("read the unit file from the container", never attempted when the
-    // caller already has it) are both decided up front. What is NOT known
-    // up front — whether the release turns out unsigned, or the binary
-    // turns out already current — is handled by skip-marking the rest of
-    // this same list rather than by a plan that shrinks mid-run.
+    let mut scope = Scope::top(&op, ctx.sink, ctx.journal);
+    // fix-step-plan-nested: the FULL plan, including the `install_native` +
+    // `adopt` this always ends with when it gets that far — one source
+    // (`release_install_plan_names`) shared with `admin`'s batch sum, so the
+    // two can never drift apart the way `RELEASE_UPDATE_STEPS.len() * units`
+    // once did (18 announced for kyu where 69 marks actually ran, LIVE
+    // 2026-10-02).
+    scope.plan_if_top(&release_install_plan_names(m, pinned, unit_from_repo));
+    let result = release_install_impl(ctx, m, pinned, unit_from_repo, &mut scope).await;
+    scope.finish(result)
+}
+
+/// fix-step-plan-nested: the step logic behind `release_install`, run
+/// through the `Scope` its own wrapper (above) already planned — it ends by
+/// composing `install_native` (which itself composes `adopt`) as NESTED
+/// calls sharing this same scope's `Runner`, rather than two more
+/// standalone ops each announcing their own plan.
+async fn release_install_impl<'a>(
+    ctx: &OpCtx<'a>,
+    m: &NativeServiceManifest,
+    pinned: Option<&str>,
+    unit_from_repo: Option<&str>,
+    scope: &mut Scope<'_, 'a>,
+) -> Result<(), StepFailure> {
+    let texec = TracingExecutor::new(ctx.exec, ctx.sink);
+    let exec: &dyn Executor = &texec;
+    // Checked by the wrapper before this is even called — a plan was
+    // already announced, so a repository is known to exist.
+    let repo = m.release_repo.clone().expect("checked by release_install");
+    let asset = m.release_asset.clone().unwrap_or_else(|| m.unit.clone());
     let asked = match pinned {
         None => "ask GitHub for the latest release".to_string(),
         Some(t) => format!("ask GitHub for release {t}"),
     };
-    let mut steps: Vec<&str> = vec!["guard target", asked.as_str()];
-    steps.push("read the checksum list");
-    steps.push("compare with the installed binary");
-    steps.push("download and verify the asset");
-    if unit_from_repo.is_none() {
-        steps.push("read the unit file from the container");
-    }
-    runner.plan(&steps);
+    // The nested install_native + adopt names, for the skip-marking every
+    // early exit below must do — never reached in that case, but still
+    // part of this run's announced plan, and every name in it gets exactly
+    // one mark.
+    let install_prefix = format!("install-{}", m.unit);
+    let install_adopt_names = install_plan_names(m, Some(&install_prefix));
+    let skip_install_adopt = |scope: &mut Scope<'_, 'a>| {
+        for name in &install_adopt_names {
+            scope.skip(name);
+        }
+    };
 
-    step!(runner, "guard target", {
+    scoped_step!(scope, "guard target", {
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
         Ok(StepOutcome::Unchanged)
     });
@@ -2132,15 +2245,15 @@ async fn release_install(
     if let Some(tag) = pinned
         && !valid_tag(tag)
     {
-        return runner.finish_err(
-            "check the tag",
-            &CoreError::Other(format!(
+        return Err(StepFailure {
+            step: "check the tag".to_string(),
+            err: CoreError::Other(format!(
                 "{tag:?} is not a release tag (letters, digits, dots and dashes)"
             )),
-        );
+        });
     }
     let mut refs: Option<ReleaseRefs> = None;
-    step!(runner, asked.as_str(), {
+    scoped_step!(scope, asked.as_str(), {
         let url = match pinned {
             None => format!("https://api.github.com/repos/{}/releases/latest", repo),
             Some(t) => format!("https://api.github.com/repos/{}/releases/tags/{}", repo, t),
@@ -2177,35 +2290,38 @@ async fn release_install(
         // fix-171 round 3: an unsigned release is a legitimate reason to
         // stop, in BOTH branches below — not a step that crashed — so the
         // rest of the announced plan is marked skipped rather than left
-        // for n to fall permanently short of m.
-        runner.skip("read the checksum list");
-        runner.skip("compare with the installed binary");
-        runner.skip("download and verify the asset");
+        // for n to fall permanently short of m. fix-step-plan-nested: that
+        // now includes the nested install_native + adopt names too — never
+        // reached, still part of this run's announced plan.
+        scope.skip("read the checksum list");
+        scope.skip("compare with the installed binary");
+        scope.skip("download and verify the asset");
         if unit_from_repo.is_none() {
-            runner.skip("read the unit file from the container");
+            scope.skip("read the unit file from the container");
         }
+        skip_install_adopt(scope);
         if pinned.is_some() {
-            return runner.finish_err(
-                "read the checksum list",
-                &CoreError::SafetyAbort(format!(
+            return Err(StepFailure {
+                step: "read the checksum list".to_string(),
+                err: CoreError::SafetyAbort(format!(
                     "{} {} of {} is not signed (no SHA256SUMS.minisig) — not installing it; \
                      sign it first",
                     m.unit, refs.tag, repo
                 )),
-            );
+            });
         }
-        runner.log(
+        scope.log(
             Level::Info,
             format!(
                 "[release] {} {} of {} is not signed yet — skipped, tried again next night",
                 m.unit, refs.tag, repo
             ),
         );
-        return runner.finish_ok();
+        return Ok(());
     };
 
     let mut wanted = String::new();
-    step!(runner, "read the checksum list", {
+    scoped_step!(scope, "read the checksum list", {
         let out = exec
             .run(&Cmd::new("curl", &["-sSL", "-m", "60", &refs.sums_url], 90))
             .await?;
@@ -2241,7 +2357,7 @@ async fn release_install(
     });
 
     let mut current = false;
-    step!(runner, "compare with the installed binary", {
+    scoped_step!(scope, "compare with the installed binary", {
         let out = util_pct_sh(
             exec,
             m.vmid,
@@ -2254,19 +2370,21 @@ async fn release_install(
     });
     if current {
         // fix-171 round 3: already on the wanted binary is success, not
-        // failure — the two remaining planned steps are marked skipped.
-        runner.skip("download and verify the asset");
+        // failure — the remaining planned steps, including install_native +
+        // adopt, are marked skipped (fix-step-plan-nested).
+        scope.skip("download and verify the asset");
         if unit_from_repo.is_none() {
-            runner.skip("read the unit file from the container");
+            scope.skip("read the unit file from the container");
         }
-        runner.log(
+        skip_install_adopt(scope);
+        scope.log(
             Level::Info,
             format!(
                 "[release] {} already runs {} of {} — nothing to install",
                 m.unit, refs.tag, repo
             ),
         );
-        return runner.finish_ok();
+        return Ok(());
     }
 
     let staged = format!(
@@ -2274,7 +2392,7 @@ async fn release_install(
         ctx.state_dir, m.stack_name, m.unit
     );
     let mut b64 = String::new();
-    step!(runner, "download and verify the asset", {
+    scoped_step!(scope, "download and verify the asset", {
         let dir = staged.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
         let script = format!(
             "mkdir -p {d} && curl -sSL -m 600 -o {f} {u} && sha256sum {f} | cut -d' ' -f1",
@@ -2316,7 +2434,7 @@ async fn release_install(
 
     let mut unit_file = unit_from_repo.map(str::to_string).unwrap_or_default();
     if unit_from_repo.is_none() {
-        step!(runner, "read the unit file from the container", {
+        scoped_step!(scope, "read the unit file from the container", {
             let out = util_pct_sh(
                 exec,
                 m.vmid,
@@ -2336,18 +2454,21 @@ async fn release_install(
         });
     }
 
-    let report = install_native(ctx, m, &b64, &unit_file).await;
-    if !report.ok {
-        return report;
-    }
-    runner.log(
+    // fix-step-plan-nested: nested through THIS scope (flattened to the one
+    // underlying `Runner`, qualified "install-<unit> :: …" — `install_native`
+    // itself goes on to nest `adopt` the same way), not a second and third
+    // standalone op each announcing their own plan.
+    let mut install_scope = scope.child(install_prefix);
+    install_native_impl(ctx, m, &b64, &unit_file, &mut install_scope).await?;
+
+    scope.log(
         Level::Info,
         format!(
             "[release] {} updated to {} of {} — installed under the armed rollback",
             m.unit, refs.tag, repo
         ),
     );
-    runner.finish_ok()
+    Ok(())
 }
 
 /// T85: fill a deploy's binary map from what was staged one message at a

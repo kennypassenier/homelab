@@ -2029,7 +2029,11 @@ async fn fix_171_adopt_announces_its_plan_and_reaches_it() {
 
 /// fix-171 round 3: an unsigned release is a legitimate stop, not a crash —
 /// the plan is announced up front and the steps this run never reaches are
-/// marked skipped, so n still reaches m exactly.
+/// marked skipped, so n still reaches m exactly. fix-step-plan-nested: `m`
+/// is now the FULL composed plan — release_install's own names plus the
+/// nested install_native + adopt names it never reaches here, every one of
+/// them skip-marked too (this is the exact early-exit shape LIVE where the
+/// old per-unit constant, `RELEASE_UPDATE_STEPS.len()`, undercounted).
 #[tokio::test]
 async fn fix_171_an_unsigned_release_still_reaches_its_announced_plan() {
     use homelab_core::ops::native::release_update;
@@ -2045,13 +2049,21 @@ async fn fix_171_an_unsigned_release_still_reaches_its_announced_plan() {
     let report = release_update(&ctx(&exec, &sink, &j), &install_manifest()).await;
     assert!(report.ok, "{:?}", report.error);
     let (m, names) = plan_and_marks(&sink.events());
-    assert_eq!(m, homelab_core::ops::native::RELEASE_UPDATE_STEPS.len());
+    let expected =
+        homelab_core::ops::native::release_install_plan_names(&install_manifest(), None, None);
+    assert_eq!(m, expected.len());
     assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+    assert_eq!(
+        events_plan_count(&sink.events()),
+        1,
+        "one composed plan, not one per nested op"
+    );
 }
 
 /// fix-171 round 3: a binary already current is also success-with-an-early-
-/// stop — the remaining planned steps (download, read the unit file) are
-/// marked skipped.
+/// stop — the remaining planned steps (download, read the unit file, AND —
+/// fix-step-plan-nested — the nested install_native + adopt names it never
+/// reaches) are marked skipped.
 #[tokio::test]
 async fn fix_171_a_current_binary_still_reaches_its_announced_plan() {
     use homelab_core::ops::native::release_update;
@@ -2062,8 +2074,69 @@ async fn fix_171_a_current_binary_still_reaches_its_announced_plan() {
     let report = release_update(&ctx(&exec, &sink, &j), &install_manifest()).await;
     assert!(report.ok, "{:?}", report.error);
     let (m, names) = plan_and_marks(&sink.events());
-    assert_eq!(m, homelab_core::ops::native::RELEASE_UPDATE_STEPS.len());
+    let expected =
+        homelab_core::ops::native::release_install_plan_names(&install_manifest(), None, None);
+    assert_eq!(m, expected.len());
     assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}
+
+fn events_plan_count(events: &[homelab_core::sink::PipelineEvent]) -> usize {
+    events
+        .iter()
+        .filter(|e| matches!(e, homelab_core::sink::PipelineEvent::Plan { .. }))
+        .count()
+}
+
+/// fix-step-plan-nested: the LIVE fault itself, reproduced — a successful
+/// release update composes release_install + install_native + adopt into
+/// ONE plan (6 + 9 + 8 = 23 for kyu's shape), not three separate
+/// announcements whose total the client had no way to know up front.
+#[tokio::test]
+async fn fix_step_plan_nested_a_full_release_install_composes_one_plan() {
+    use homelab_core::ops::native::release_update;
+    let exec = MockExecutor::new();
+    release_mocks(&exec, "abcd");
+    exec.respond_always(
+        "sha256sum '/var/lib/homelab/staged/kyu/kyu.release'",
+        CmdOutput::ok(&format!("{}\n", SIGNED_KYU_SHA)),
+    );
+    exec.respond_always("base64 -w0", CmdOutput::ok("YmluYXJ5\n"));
+    exec.respond_always(
+        "cat /etc/systemd/system/kyu.service",
+        CmdOutput::ok(UNIT_FILE),
+    );
+    exec.respond_always("test -f", CmdOutput::ok("yes\n"));
+    exec.respond_always("base64 -d", CmdOutput::ok(""));
+    glibc_ok(&exec);
+    exec.respond_always("systemctl daemon-reload", CmdOutput::ok(""));
+    exec.respond_always("systemctl stop", CmdOutput::ok(""));
+    exec.respond_always("cat /var/lib/homelab/state.json", CmdOutput::failed(1, ""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = release_update(&ctx(&exec, &sink, &j), &install_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+
+    let events = sink.events();
+    assert_eq!(
+        events_plan_count(&events),
+        1,
+        "release_install + its nested install_native + adopt must announce ONE plan"
+    );
+    let (m, names) = plan_and_marks(&events);
+    let expected =
+        homelab_core::ops::native::release_install_plan_names(&install_manifest(), None, None);
+    assert_eq!(
+        m,
+        homelab_core::ops::native::RELEASE_UPDATE_STEPS.len()
+            + homelab_core::ops::native::INSTALL_STEPS.len()
+            + homelab_core::ops::native::ADOPT_STEPS.len(),
+        "6 release_install + 9 install_native + 8 adopt = 23, the exact LIVE shortfall \
+         (18 announced for kyu's three units vs 69 marks that actually ran)"
+    );
+    assert_eq!(m, expected.len());
+    // n never exceeds m, and every mark lands on an announced name.
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+    assert!(names.iter().all(|n| expected.contains(n)));
 }
 
 /// fix-171 round 3: a unit with no `release_repo` marks nothing at all —

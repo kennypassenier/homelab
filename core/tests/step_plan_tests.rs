@@ -270,8 +270,14 @@ fn script_fresh(exec: &MockExecutor) {
 
 // ── destroy ──────────────────────────────────────────────────────────────
 
-/// destroy's plan is a fixed constant too; every one of its steps is
-/// already unconditional, so none is ever skipped.
+/// destroy's plan is a fixed constant too — fix-step-plan-nested: that
+/// constant now COMPOSES the `backup` op it always marks one way or the
+/// other ("backup before destroy" used to hide a whole second standalone op
+/// announcing its own separate plan, the same shape that let the kyu
+/// counter climb past its announced total LIVE on 2026-10-02). With
+/// `skip_backup: true` here, every one of `backup`'s own names is
+/// skip-marked rather than run — still one mark each, still part of the ONE
+/// plan destroy itself announced.
 #[tokio::test]
 async fn destroy_announces_its_fixed_plan_and_every_step_runs() {
     let exec = MockExecutor::new();
@@ -284,23 +290,38 @@ async fn destroy_announces_its_fixed_plan_and_every_step_runs() {
     assert!(report.ok, "destroy failed: {:?}", report.error);
 
     let events = sink.events();
-    let plan = plan_of(&events);
-    assert_eq!(plan.len(), destroy::STEPS.len());
+    // fix-step-plan-nested: exactly one Plan event for the whole job — a
+    // nested op (backup) must never announce a second one.
     assert_eq!(
-        plan,
-        destroy::STEPS
+        events
             .iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
+            .filter(|e| matches!(e, PipelineEvent::Plan { .. }))
+            .count(),
+        1,
+        "a composed op announces ONE plan, not one per nested call"
     );
+    let plan = plan_of(&events);
+    let expected = destroy::destroy_plan_names(&m.stack_name);
+    assert_eq!(plan.len(), expected.len());
+    assert_eq!(plan, expected);
     let names = marked_names(&events);
-    assert_eq!(names.len(), destroy::STEPS.len());
-    // Nothing in destroy is conditional on absent input: no skip marks.
-    assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, PipelineEvent::StepSkipped { .. }))
-    );
+    assert_eq!(names.len(), expected.len());
+    // n never exceeds m: every mark lands on a name from the plan above.
+    assert!(names.iter().all(|n| expected.contains(n)));
+    // `--no-backup` (skip_backup) skip-marks every one of the nested
+    // `backup` names, and only those — destroy's own 9 still all ran.
+    let skipped: std::collections::BTreeSet<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            PipelineEvent::StepSkipped { step, .. } => Some(step.clone()),
+            _ => None,
+        })
+        .collect();
+    let backup_names: std::collections::BTreeSet<String> =
+        homelab_core::ops::backup::backup_plan_names(&m.stack_name)
+            .into_iter()
+            .collect();
+    assert_eq!(skipped, backup_names);
 }
 
 // ── install-native ───────────────────────────────────────────────────────
@@ -350,7 +371,14 @@ fn glibc_ok(exec: &MockExecutor) {
 
 /// install-native's plan is a fixed constant, announced before its first
 /// step, matching the number of marks a successful install actually
-/// produces.
+/// produces. fix-step-plan-nested: `install_native` always ends by calling
+/// `adopt` — that was ALREADY true before this fix, just invisibly: `adopt`
+/// ran for real but announced its OWN separate plan under its own op id, so
+/// this test's old assertion (`plan.len() == INSTALL_STEPS.len()`, 9) only
+/// checked install's own slice and never noticed adopt's further 8 marks
+/// arriving on a second, unchecked `Plan` event — exactly the blind spot
+/// that let the kyu counter climb LIVE on 2026-10-02. Now there is only one
+/// `Plan` event, and it already lists adopt's 8 names too.
 #[tokio::test]
 async fn install_native_announces_its_fixed_plan_before_the_first_step() {
     let exec = MockExecutor::new();
@@ -373,20 +401,33 @@ async fn install_native_announces_its_fixed_plan_before_the_first_step() {
     assert!(report.ok, "{:?}", report.error);
 
     let events = sink.events();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e, PipelineEvent::Plan { .. }))
+            .count(),
+        1,
+        "install_native + its nested adopt must announce ONE plan, not two"
+    );
     let plan_idx = events
         .iter()
         .position(|e| matches!(e, PipelineEvent::Plan { .. }))
         .expect("a plan was announced");
     assert_eq!(plan_idx, 0);
     let plan = plan_of(&events);
-    assert_eq!(plan.len(), INSTALL_STEPS.len());
+    let expected = homelab_core::ops::native::install_plan_names(&kyu_manifest(), None);
     assert_eq!(
-        plan,
-        INSTALL_STEPS
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
+        plan.len(),
+        INSTALL_STEPS.len() + 8,
+        "9 own + 8 nested adopt"
     );
+    assert_eq!(plan, expected);
+
+    // Every name marked is one the plan actually listed, and every listed
+    // name got exactly one mark (run or skip) — n never exceeds m.
+    let names = marked_names(&events);
+    assert_eq!(names.len(), expected.len());
+    assert!(names.iter().all(|n| expected.contains(n)));
 }
 
 // ── update: a per-app loop whose later steps are skipped, not absent ─────

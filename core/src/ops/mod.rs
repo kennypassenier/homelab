@@ -14,6 +14,26 @@ macro_rules! step {
     };
 }
 
+/// fix-step-plan-nested: the composable twin of `step!`, for an op body
+/// written to run through a `Scope` — either as the outermost call (its own
+/// `Runner`) or nested inside a larger op (sharing the parent's `Runner`,
+/// its names qualified). On failure it returns the already-qualified step
+/// name and the error to its OWN caller rather than finishing a report
+/// directly, because only `Scope::Top` owns a `Runner` to finish.
+macro_rules! scoped_step {
+    ($scope:expr_2021, $name:expr_2021, $body:expr_2021) => {
+        match $scope.step($name, || async { $body }).await {
+            Ok(o) => o,
+            Err(e) => {
+                return Err(crate::runner::StepFailure {
+                    step: $scope.qualify($name),
+                    err: e,
+                });
+            }
+        }
+    };
+}
+
 pub mod backup;
 pub mod busy;
 pub mod deploy;

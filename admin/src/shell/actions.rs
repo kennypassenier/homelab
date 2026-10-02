@@ -1621,6 +1621,13 @@ impl Actions {
         // A job of exactly one such command needs none of this: its own
         // announced plan already arrives before its own first step, which
         // is the whole of "step 1" this job will ever have.
+        // fix-step-plan-nested: `DestroyRecorded`'s own plan now composes
+        // `backup`'s names in (destroy's single "backup before destroy" mark
+        // used to hide a whole second standalone op with its own plan) —
+        // `destroy_plan_names` is the one source `destroy` itself plans from
+        // AND this sum calls, so the two can never drift the way
+        // `destroy::STEPS.len()` (which did not know about the nested
+        // `backup`) once would have.
         let plan_producing = commands
             .iter()
             .filter(|c| matches!(c, Command::DeployStack(_) | Command::DestroyRecorded { .. }));
@@ -1628,42 +1635,42 @@ impl Actions {
             let total: usize = plan_producing
                 .map(|c| match c {
                     Command::DeployStack(_) => homelab_core::ops::deploy::STEPS.len(),
-                    Command::DestroyRecorded { .. } => homelab_core::ops::destroy::STEPS.len(),
+                    Command::DestroyRecorded { stack, .. } => {
+                        homelab_core::ops::destroy::destroy_plan_names(stack).len()
+                    }
                     _ => 0,
                 })
                 .sum();
             tracker.set_total(total);
         }
         // fix-171 round 3 (Kenny: "release_install over a stack's several
-        // natives, e.g. kyu's three, must announce the full sum up front"):
-        // `ReleaseUpdateNative` is ONE command on the wire, but the host
-        // fans it out into one `release_update` per native service of the
-        // stack, each with its OWN plan announcement (same req id). Left
-        // alone, `Tracker::on_plan` only ADDS each one as it arrives — the
-        // dashboard's total would climb from unit to unit exactly like the
-        // bug this whole fix exists to kill. `release_update`'s own plan is
-        // now fixed per unit (`native::RELEASE_UPDATE_STEPS`; a unit with
-        // no `release_repo` contributes nothing), so the sum is knowable
-        // from the working copy before the request is even sent — the same
-        // shape as the deploy/destroy batch above, just counted from the
-        // stack's native services instead of from this job's own command
-        // list.
+        // natives, e.g. kyu's three, must announce the full sum up front"),
+        // superseded in its per-unit SHAPE by fix-step-plan-nested: the LIVE
+        // 2026-10-02 fault was exactly this sum staying at
+        // `RELEASE_UPDATE_STEPS.len() * units` (18 for kyu's three) while
+        // `release_update` itself was fanning out into the FULL
+        // release_install → install_native → adopt chain per unit (69 marks
+        // actually ran: 23 × 3). `ReleaseUpdateNative` is still ONE command
+        // on the wire that the host fans out into one `release_update` per
+        // native service of the stack — now each with ONE combined plan
+        // (`release_install_plan_names`, the exact function `release_install`
+        // itself plans from), so the sum below can never drift from what
+        // actually runs the way the old per-unit constant did.
         if let [Command::ReleaseUpdateNative { stack }] = commands.as_slice() {
             let files = self.inner.files.clone();
             let stack = stack.clone();
             let total = tokio::task::spawn_blocking(move || {
-                let per_unit = homelab_core::ops::native::RELEASE_UPDATE_STEPS.len();
                 files
                     .native_units(&stack)
                     .iter()
-                    .filter(|u| {
-                        files
-                            .native_release(&stack, Some(u))
-                            .map(|(m, _, _)| m.release_repo.is_some())
-                            .unwrap_or(false)
+                    .filter_map(|u| {
+                        let (m, _, _) = files.native_release(&stack, Some(u)).ok()?;
+                        Some(
+                            homelab_core::ops::native::release_install_plan_names(&m, None, None)
+                                .len(),
+                        )
                     })
-                    .count()
-                    * per_unit
+                    .sum::<usize>()
             })
             .await
             .unwrap_or(0);

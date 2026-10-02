@@ -7,7 +7,7 @@
 use crate::error::CoreError;
 use crate::executor::{Cmd, Executor, TracingExecutor, run_ok, shq};
 use crate::manifest::StackManifest;
-use crate::runner::{OperationReport, Runner, StepOutcome};
+use crate::runner::{OperationReport, Runner, Scope, StepFailure, StepOutcome};
 use crate::sink::{Level, PipelineEvent};
 
 use super::OpCtx;
@@ -464,10 +464,34 @@ pub const BACKUP_STEPS: &[&str] = &[
     "retention",
 ];
 
+/// fix-step-plan-nested: `backup`'s own step names, qualified the way they
+/// are marked when `backup` runs nested inside another op (`destroy`'s
+/// "backup before destroy") — the single source that composer and
+/// `admin`'s batch-total both use.
+pub fn backup_plan_names(stack_name: &str) -> Vec<String> {
+    let prefix = format!("backup-{}", stack_name);
+    BACKUP_STEPS
+        .iter()
+        .map(|s| format!("{prefix} :: {s}"))
+        .collect()
+}
+
 pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> OperationReport {
-    let op = format!("backup-{}", m.stack_name);
-    let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
-    runner.plan(BACKUP_STEPS);
+    let mut scope = Scope::top(&format!("backup-{}", m.stack_name), ctx.sink, ctx.journal);
+    scope.plan_if_top(BACKUP_STEPS);
+    let result = backup_impl(ctx, m, cfg, &mut scope).await;
+    scope.finish(result)
+}
+
+/// fix-step-plan-nested: the step logic behind `backup`, written to run
+/// through a `Scope` — as the outermost call or nested inside `destroy`'s
+/// own composed plan ("backup before destroy").
+pub(crate) async fn backup_impl<'a>(
+    ctx: &OpCtx<'a>,
+    m: &StackManifest,
+    cfg: &BackupCfg,
+    scope: &mut Scope<'_, 'a>,
+) -> Result<(), StepFailure> {
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     // D25: one repository per owning app, so an app that moves to another
@@ -477,7 +501,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
 
     // A1/A2: same gate as every mutating op (quiesce/resume reach into the
     // container).
-    step!(runner, "safety gates", {
+    scoped_step!(scope, "safety gates", {
         crate::manifest::validate_manifest(m)?;
         super::guard_target(exec, &ctx.safety, m.vmid, &m.hostname).await?;
         Ok(StepOutcome::Unchanged)
@@ -495,7 +519,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     // somebody else's repository is worse than no backup, because the
     // repository still looks healthy afterwards.
     let mut newcomer_named: Option<(String, String)> = None;
-    step!(runner, "owner conflict", {
+    scoped_step!(scope, "owner conflict", {
         let store = crate::state::StateStore::new(ctx.exec, &ctx.state_dir);
         let Ok(snapshot) = store.load().await else {
             // No state file is a first deploy, not a conflict.
@@ -533,7 +557,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
         Ok(StepOutcome::Unchanged)
     });
     if let Some((owner, other)) = &newcomer_named {
-        runner.log(
+        scope.log(
             Level::Warn,
             format!(
                 "[owner] stack '{}' also claims '{}' but was recorded later — it is the \
@@ -565,7 +589,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     // container and the snapshot is taken of the stack's paths in one pass.
     // Backing up five of six configs while the sixth is live would be a
     // partial snapshot nobody asked for.
-    step!(runner, "in use?", {
+    scoped_step!(scope, "in use?", {
         for app in &m.apps {
             let Some(verdict) =
                 // ctx.exec, not the tracing one: see `busy::app_busy`.
@@ -589,7 +613,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     // is checked. An app that says it keeps nothing and then keeps something
     // has quietly opted its data out of every backup, which is a worse
     // failure than the one the flag was added to fix.
-    step!(runner, "declared-empty paths", {
+    scoped_step!(scope, "declared-empty paths", {
         let mut wrong = Vec::new();
         for mount in m.storage.iter().filter(|s| s.no_data) {
             let out = exec
@@ -627,7 +651,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     // problem, and on 2026-09-02 it cost the author several minutes and a
     // read of the raw log to work out that `stacks/uptime` had simply gained
     // a mount that evening and never been deployed (F170).
-    step!(runner, "declared paths exist", {
+    scoped_step!(scope, "declared paths exist", {
         let mut missing = Vec::new();
         for mount in m
             .storage
@@ -661,7 +685,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
         Ok(StepOutcome::Unchanged)
     });
 
-    step!(runner, "init repos", {
+    scoped_step!(scope, "init repos", {
         // gap-24: the answer is read. An existing repository says so and is
         // the normal case; a new one is checked against host-meta's password.
         let mut created = false;
@@ -683,7 +707,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     // H2 hardening: a previous run killed mid-snapshot can leave a stale
     // repo lock; restic unlock only removes locks from dead processes, so
     // this is always safe. Best-effort (repo may not exist yet).
-    step!(runner, "clear stale locks", {
+    scoped_step!(scope, "clear stale locks", {
         for (owner, _) in &groups {
             let _ = exec
                 .run(&restic(
@@ -716,7 +740,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     let paused: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
         std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let paused_w = paused.clone();
-    step!(runner, "quiesce", {
+    scoped_step!(scope, "quiesce", {
         let script = "docker ps --filter label=com.homelab.backup.pause=true --format '{{.Names}}'";
         let out = super::util_pct_sh(exec, m.vmid, script, 60).await?;
         let names: Vec<String> = out
@@ -742,7 +766,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     // fail-closed abort here would leave the quiesced databases down until
     // a human noticed. So the snapshot error is captured, resume runs
     // unconditionally, and only then does the operation fail.
-    let snapshot_result = runner
+    let snapshot_result = scope
         .step("snapshot", || async {
             if groups.is_empty() {
                 return Ok(StepOutcome::Unchanged);
@@ -796,7 +820,7 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
 
     // Resume the paused containers — unconditionally.
     let paused_r = paused.clone();
-    step!(runner, "resume", {
+    scoped_step!(scope, "resume", {
         // Exactly what quiesce stopped, by name — this is the half that must
         // not depend on any list that can go stale.
         let names = paused_r.lock().map(|g| g.clone()).unwrap_or_default();
@@ -824,10 +848,13 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
     });
 
     if let Err(e) = snapshot_result {
-        return runner.finish_err("snapshot", &e);
+        return Err(StepFailure {
+            step: scope.qualify("snapshot"),
+            err: e,
+        });
     }
 
-    step!(runner, "retention", {
+    scoped_step!(scope, "retention", {
         // G8 tiered retention: list snapshots, compute the forget-set with
         // our own engine, forget by explicit id. Per repository, since D25
         // gave every app its own.
@@ -883,11 +910,11 @@ pub async fn backup(ctx: &OpCtx<'_>, m: &StackManifest, cfg: &BackupCfg) -> Oper
         })
     });
 
-    runner.log(
+    scope.log(
         Level::Info,
         format!("[backup] {} snapshot complete", m.stack_name),
     );
-    runner.finish_ok()
+    Ok(())
 }
 
 /// Parse `restic snapshots --json` into `(short_id, unix_time)` pairs.

@@ -138,7 +138,8 @@ pub async fn run_demo(
                                 msg: format!("[{op}] {step} {}", if finished { "done" } else { "started" }),
                                 req: Some(id),
                                 ts: Some(now_s()),
-                                step: Some(StepMark { op: op.clone(), step: step.into(), finished, changed: finished }),
+                                step: Some(StepMark { op: op.clone(), step: step.into(), finished, changed: finished, skipped: false }),
+                                plan: None,
                                 by: Some("admin".into()),
                             });
                             tokio::time::sleep(Duration::from_millis(600)).await;

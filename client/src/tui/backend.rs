@@ -146,7 +146,7 @@ impl Backend for RemoteBackend {
                             Some(Ok(Message::Text(t))) => {
                                 if let Ok(sm) = serde_json::from_str::<ServerMsg>(&t) {
                                     let sm = match sm {
-                                        ServerMsg::RpcDone(r) if answers.remove(&r.id) => ServerMsg::Log { req: None, step: None, ts: None, by: None,
+                                        ServerMsg::RpcDone(r) if answers.remove(&r.id) => ServerMsg::Log { req: None, step: None, ts: None, by: None, plan: None,
                                             level: if r.ok { LogLevel::Info } else { LogLevel::Warn },
                                             source: "HOST".into(),
                                             msg: r.message,
@@ -230,7 +230,7 @@ impl Backend for DemoBackend {
                     _ = ticker.tick() => {
                         n += 1;
                         let (src, msg) = demo_log(n);
-                        let _ = evt_tx.send(BackendEvent::Server(ServerMsg::Log { req: None, step: None, ts: None, by: None,
+                        let _ = evt_tx.send(BackendEvent::Server(ServerMsg::Log { req: None, step: None, ts: None, by: None, plan: None,
                             level: homelab_proto::LogLevel::Debug,
                             source: src.into(),
                             msg: msg.into(),
@@ -397,6 +397,7 @@ async fn play_demo_deploy(evt_tx: &mpsc::Sender<BackendEvent>, stack: &str) {
             step: None,
             ts: None,
             by: None,
+            plan: None,
             level: homelab_proto::LogLevel::Info,
             source: src.to_string(),
             msg,

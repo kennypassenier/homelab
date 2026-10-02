@@ -39,6 +39,7 @@ fn mark(step: &str, finished: bool) -> StepMark {
         step: step.into(),
         finished,
         changed: false,
+        skipped: false,
     }
 }
 
@@ -106,6 +107,12 @@ fn feat_ops_6_step_n_of_m_with_the_expected_rest() {
         ),
     ];
     let mut t = Tracker::new(h);
+    // fix-171 round 2: `m` comes from this run's own announced plan, not
+    // from history — the op sends it before its first step mark.
+    t.on_plan(
+        "deploy-media",
+        &["pull".into(), "up".into(), "verify".into()],
+    );
     let p = t.on_mark(&mark("pull", false), 10_000);
     assert_eq!((p.n, p.m), (1, Some(3)));
     assert_eq!(p.expected_step_s, Some(30));
@@ -122,12 +129,28 @@ fn feat_ops_6_step_n_of_m_with_the_expected_rest() {
     assert_eq!((p.n, p.m), (2, Some(3)));
     assert_eq!(p.expected_remaining_s, Some(10 + 5));
     assert_eq!(p.elapsed_s, 12);
-    // A step the plan never had: counted, m grows with it, no expectation.
-    let p = t.on_mark(&mark("migrate", false), 10_030);
-    assert_eq!((p.n, p.m), (3, Some(3)));
     let p = t.on_mark(&mark("verify", false), 10_040);
-    assert_eq!((p.n, p.m), (4, Some(4)));
+    assert_eq!((p.n, p.m), (3, Some(3)), "m stays the announced total");
     assert_eq!(p.expected_step_s, Some(5));
+}
+
+/// fix-171 round 2: with no plan announced, `m` stays `None` throughout —
+/// it is never derived from history, and never drifts into mirroring `n`
+/// (the shape of the original "13/13" -> "68/68" bug).
+#[test]
+fn feat_ops_6_without_an_announced_plan_m_stays_none_and_never_mirrors_n() {
+    let h = vec![run(
+        "deploy-media",
+        100,
+        &[("pull", 20), ("up", 10), ("verify", 4)],
+        true,
+    )];
+    let mut t = Tracker::new(h);
+    for (step, ts) in [("pull", 10_000), ("up", 10_010), ("verify", 10_020)] {
+        let p = t.on_mark(&mark(step, false), ts);
+        assert_eq!(p.m, None, "no plan was ever announced");
+        assert_ne!(Some(p.n), p.m);
+    }
 }
 
 #[test]

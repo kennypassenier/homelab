@@ -388,6 +388,29 @@ async fn pre_update_copy_of(
     Ok(CopyOutcome::Copied(dest))
 }
 
+/// fix-171 round 2: one app's own step names, in order — known from the app
+/// name and whether this is a scheduled run (`auto`) alone, before anything
+/// runs. `pre-update copy` only exists this run when `auto` is true (a
+/// manual, operator-requested update never takes the automatic data copy);
+/// that is a fact about the WHOLE run, the same for every app in it, not a
+/// per-app guess, so the plan still knows it up front.
+fn app_steps(app: &str, auto: bool) -> Vec<String> {
+    let mut v = vec![
+        format!("{app} :: policy"),
+        format!("{app} :: capture"),
+        format!("{app} :: running before"),
+        format!("{app} :: busy check"),
+        format!("{app} :: pull"),
+    ];
+    if auto {
+        v.push(format!("{app} :: pre-update copy"));
+    }
+    v.push(format!("{app} :: stop-first"));
+    v.push(format!("{app} :: up"));
+    v.push(format!("{app} :: verify"));
+    v
+}
+
 /// Update one app (or all apps when `only=None`) in a stack. `auto=true` means
 /// a scheduled run: apps without the `auto` policy label are skipped.
 pub async fn update(
@@ -418,6 +441,19 @@ pub async fn update(
         );
     }
 
+    // fix-171 round 2: every app's step names, known from `apps` + `auto`
+    // alone — before "safety gates" even starts. Whether an app's LATER
+    // steps actually run depends on what "policy"/"busy check"/"pull"
+    // discover once they run (host-side facts), but the NAMES they could
+    // ever produce are fixed right here, so the announced plan is complete
+    // and a skipped one still fills its slot (see the `continue` points
+    // below).
+    let mut plan: Vec<String> = vec!["safety gates".to_string()];
+    for app in &apps {
+        plan.extend(app_steps(app, auto));
+    }
+    runner.plan(&plan.iter().map(String::as_str).collect::<Vec<_>>());
+
     // A1/A2: updates pull and recreate containers inside the target.
     step!(runner, "safety gates", {
         crate::manifest::validate_manifest(m)?;
@@ -430,9 +466,27 @@ pub async fn update(
         let stack = m.stack_name.clone();
         let vmid = m.vmid;
 
+        // fix-171 round 2: this app's own step names, computed once so every
+        // `continue` below can skip exactly the ones it will not reach.
+        let names = app_steps(app, auto);
+        let skip_from = |runner: &Runner, from: usize| {
+            for n in &names[from..] {
+                runner.skip(n);
+            }
+        };
+        let (policy_step, cap_step, ran_step, busy_step, pull_step) = (
+            names[0].clone(),
+            names[1].clone(),
+            names[2].clone(),
+            names[3].clone(),
+            names[4].clone(),
+        );
+        let stop_step = format!("{app} :: stop-first");
+        let up_step = format!("{app} :: up");
+        let verify_step = format!("{app} :: verify");
+
         // Policy gate (D9): scheduled runs only touch policy=auto apps.
         // fix-117: read per service, not from the first container.
-        let policy_step = format!("{} :: policy", app);
         let mut scope = AutoScope::All;
         let skipped = step!(runner, &policy_step, {
             if auto {
@@ -448,6 +502,7 @@ pub async fn update(
                 Level::Info,
                 format!("[update] {} skipped (policy is not 'auto')", app),
             );
+            skip_from(&runner, 1);
             continue;
         }
         // fix-117: the services this run may touch, as compose arguments; an
@@ -470,7 +525,6 @@ pub async fn update(
 
         // B6: capture the running images so a bad update can be undone.
         let mut captured: Vec<CapturedImage> = Vec::new();
-        let cap_step = format!("{} :: capture", app);
         step!(runner, &cap_step, {
             captured = capture_app(exec, vmid, &stack, app).await?;
             Ok(StepOutcome::Unchanged)
@@ -478,7 +532,6 @@ pub async fn update(
 
         // fix-118: what ran before, which is what must run after.
         let mut ran_before: Vec<String> = Vec::new();
-        let ran_step = format!("{} :: running before", app);
         step!(runner, &ran_step, {
             ran_before = running_services(exec, vmid, &stack, app, &services).await?;
             Ok(StepOutcome::Unchanged)
@@ -488,7 +541,6 @@ pub async fn update(
         // the only service here where an update lands in somebody's evening —
         // and the check fails CLOSED, so an unreachable or unparseable answer
         // skips the update rather than assuming nobody is watching.
-        let busy_step = format!("{} :: busy check", app);
         let mut skip_app: Option<String> = None;
         step!(runner, &busy_step, {
             // ctx.exec, not the tracing one: see `busy::app_busy`.
@@ -505,6 +557,7 @@ pub async fn update(
         });
         if let Some(why) = skip_app {
             runner.log(Level::Info, format!("[o10] {} skipped: {}", app, why));
+            skip_from(&runner, 4);
             continue;
         }
 
@@ -512,7 +565,6 @@ pub async fn update(
         // still runs keeps the window in which it is down to the swap itself
         // rather than the download — which over a residential uplink is the
         // difference between seconds and minutes.
-        let pull_step = format!("{} :: pull", app);
         let pull_failed = std::sync::Mutex::new(None::<String>);
         step!(runner, &pull_step, {
             let out = super::util_pct_sh(
@@ -545,6 +597,7 @@ pub async fn update(
                     app, why
                 ),
             );
+            skip_from(&runner, 5);
             continue;
         }
 
@@ -557,9 +610,11 @@ pub async fn update(
         // it and names it. No room, or a failed copy, means no update.
         let mut pre_update_copy: Option<String> = None;
         if auto {
-            let copy_step = format!("{} :: pre-update copy", app);
+            // index 5 is "pre-update copy" whenever `auto` is true (see
+            // `app_steps`).
+            let copy_step = &names[5];
             let skip_why = std::sync::Mutex::new(None::<String>);
-            step!(runner, &copy_step, {
+            step!(runner, copy_step, {
                 match pre_update_copy_of(ctx, exec, m, app, &captured, &services).await? {
                     CopyOutcome::NotNeeded => Ok(StepOutcome::Unchanged),
                     CopyOutcome::Copied(dest) => {
@@ -581,6 +636,7 @@ pub async fn update(
                         app, why
                     ),
                 );
+                skip_from(&runner, 6);
                 continue;
             }
         }
@@ -591,7 +647,7 @@ pub async fn update(
         // and for Postgres that means the next start is a recovery — the
         // pattern mirrors `com.homelab.backup.pause`, which already does this
         // for backups.
-        let stop_step = format!("{} :: stop-first", app);
+
         step!(runner, &stop_step, {
             let script = super::util::app_dir_script(&stack, app)
                 .raw(&format!(
@@ -609,7 +665,6 @@ pub async fn update(
             })
         });
 
-        let up_step = format!("{} :: up", app);
         step!(runner, &up_step, {
             let verb = if services.is_empty() {
                 "docker compose up -d --remove-orphans".to_string()
@@ -644,7 +699,6 @@ pub async fn update(
             Ok(StepOutcome::Changed)
         });
 
-        let verify_step = format!("{} :: verify", app);
         let mut settle_why: Option<String> = None;
         step!(runner, &verify_step, {
             // fix-118: the quick reading first; then, when `up -d` started a

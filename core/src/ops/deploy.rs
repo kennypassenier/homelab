@@ -294,10 +294,61 @@ pub(crate) async fn record_restore_checks(
     }
 }
 
+/// fix-171 round 2: deploy's own step plan — fixed, EVERY deploy, regardless
+/// of how many apps the manifest declares, whether it has a firewall, gives
+/// a gateway route, or needs a log shipper. Every step here is already
+/// invoked unconditionally and no-ops when its precondition does not hold
+/// (`baseline` when the container does not exist yet, `native units` when
+/// the manifest declares none); the six that used to be invoked only
+/// conditionally (`firewall`, `firewall after create`,
+/// `refresh the tile watcher's firewall`, `gateway route`,
+/// `retire gateway route`, `log shipper`) now take an explicit `skip` mark
+/// in their `else` branch instead of silently not appearing — so `n`
+/// reaches this list's length exactly, every time, and the dashboard's
+/// total is this constant rather than a guess from a past run's count
+/// (fix-171's first attempt, rejected for exactly that reason). Shared with
+/// the dashboard (`admin::shell::actions::execute`) so Apply and a batch of
+/// several deploys can announce the combined total before the first one
+/// starts.
+pub const STEPS: &[&str] = &[
+    "validate",
+    "safety gates",
+    "baseline",
+    "registry cache",
+    "hardware readiness",
+    "host storage",
+    "auto-restore check",
+    "metrics discovery",
+    "firewall",
+    "provision container",
+    "firewall after create",
+    "refresh the tile watcher's firewall",
+    "wait for systemd",
+    "bootstrap docker",
+    "runaway guards",
+    "log rotation",
+    "retire dropped",
+    "commit intent",
+    "push files",
+    "start apps",
+    "storage ownership",
+    "verify health",
+    "gateway route",
+    "retire gateway route",
+    "orphan files",
+    "garbage collect",
+    "log shipper",
+    "native units",
+    "record state",
+    "reconcile",
+    "service checks",
+];
+
 pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     let m = &spec.manifest;
     let op = format!("deploy-{}", m.stack_name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    runner.plan(STEPS);
     runner.log(
         Level::Info,
         format!("[sync][run ] deploy {} (vmid {})", m.stack_name, m.vmid),
@@ -803,6 +854,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 StepOutcome::Unchanged
             })
         });
+    } else {
+        runner.skip("firewall");
     }
 
     // ── C1: create or reuse the container; C3 boot policy at create. ─────
@@ -1238,6 +1291,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
             ));
             Ok(StepOutcome::Changed)
         });
+    } else {
+        runner.skip("firewall after create");
     }
 
     // ── tile-watch-watcher-out (found 2026-10-01): this stack's own tiles
@@ -1301,6 +1356,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 Ok(StepOutcome::Changed)
             }
         );
+    } else {
+        runner.skip("refresh the tile watcher's firewall");
     }
 
     step!(runner, exec, ctx, m, "wait for systemd", {
@@ -2446,6 +2503,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 StepOutcome::Unchanged
             })
         });
+    } else {
+        runner.skip("gateway route");
     }
 
     // ── step-22: a route the stack no longer declares goes. The file is
@@ -2500,6 +2559,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 StepOutcome::Unchanged
             })
         });
+    } else {
+        runner.skip("retire gateway route");
     }
 
     // ── D3: garbage-collect apps removed from intent — stop + remove their
@@ -2783,6 +2844,8 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 StepOutcome::Unchanged
             })
         });
+    } else {
+        runner.skip("log shipper");
     }
 
     // A5 (Kenny, 2026-09-02): prepare, then start — in that order.

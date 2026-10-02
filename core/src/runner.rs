@@ -70,6 +70,34 @@ impl<'a> Runner<'a> {
         });
     }
 
+    /// fix-171 round 2: announce the ordered, complete list of steps this
+    /// run plans to mark — every one it might run OR skip — before the
+    /// first one starts. A client's "step n/m" becomes `m` = this list's
+    /// length, fixed from the very first mark, because it is the op's own
+    /// plan for the run under way rather than a guess from a past run's
+    /// count. A step named here that this run's inputs say will not run
+    /// must still be marked, with `skip` (below), so `n` reaches `m`
+    /// exactly when the operation finishes.
+    pub fn plan(&mut self, steps: &[&str]) {
+        self.sink.emit(PipelineEvent::Plan {
+            op: self.op.clone(),
+            steps: steps.iter().map(|s| s.to_string()).collect(),
+        });
+    }
+
+    /// fix-171 round 2: fill one slot of the announced plan with a skip —
+    /// this step's precondition did not hold this run (no firewall
+    /// declared, an app that failed its policy gate, a route nothing
+    /// retires). One mark, not a start/finish pair, matching `plan`'s
+    /// count 1-for-1 whether the step ran or not.
+    pub fn skip(&self, name: &str) {
+        self.journal.record(&self.op, name, "skipped");
+        self.sink.emit(PipelineEvent::StepSkipped {
+            op: self.op.clone(),
+            step: name.to_string(),
+        });
+    }
+
     /// Run one named step. The journal sees "running" before the body starts
     /// and "done"/"failed" after — an interrupt leaves a visible "running"
     /// record behind (AR13).

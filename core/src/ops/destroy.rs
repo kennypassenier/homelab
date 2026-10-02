@@ -20,6 +20,35 @@ fn runner_warn(ctx: &OpCtx<'_>, msg: String) {
     });
 }
 
+/// step-22: `destroy` and `forget` both end by unregistering everything a
+/// deploy registers outside the container — shared so the two cannot drift
+/// apart (see `unregister` below). Every one of these steps is already
+/// unconditional too.
+pub const UNREGISTER_STEPS: &[&str] = &[
+    "remove metrics discovery",
+    "remove gateway route",
+    "update state",
+];
+
+/// fix-171 round 2: destroy's own step plan — fixed, every run, because
+/// every step here is already unconditional (a precondition that does not
+/// hold makes the step a no-op, never an absent one; see `step!` below).
+/// Shared with the dashboard (`admin::shell::actions::execute`) so Apply and
+/// a batch of destroys can announce the combined total before the first one
+/// starts.
+pub const STEPS: &[&str] = &[
+    "confirm",
+    "no-touch check",
+    "hostname guard",
+    "backup before destroy",
+    "stop container",
+    "lift protection",
+    "destroy container",
+    "remove metrics discovery",
+    "remove gateway route",
+    "update state",
+];
+
 /// Destroy a managed container by stack name + vmid. `confirmed` must be the
 /// caller's proof the user typed the stack name (the TUI enforces this); we
 /// re-check it here so the core is safe on its own.
@@ -33,6 +62,7 @@ pub async fn destroy(
     let vmid = manifest.vmid;
     let op = format!("destroy-{}", stack_name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    runner.plan(STEPS);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let vm = vmid.to_string();
@@ -308,6 +338,9 @@ async fn unregister(
 pub async fn forget(ctx: &OpCtx<'_>, stack: &str) -> OperationReport {
     let op = format!("forget-{}", stack);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    let mut plan: Vec<&str> = vec!["read record", "live check"];
+    plan.extend(UNREGISTER_STEPS);
+    runner.plan(&plan);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let mut entry: Option<crate::state::StackState> = None;

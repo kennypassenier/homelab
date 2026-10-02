@@ -2983,6 +2983,7 @@ span_days = 7\n";
             req: Some(9),
             ts: Some(1_800_000_010),
             step: None,
+            plan: None,
             by: None,
         });
         let resp = handle_rpc(
@@ -3238,6 +3239,7 @@ span_days = 7\n";
                         ts: None,
                         by: None,
                         step: None,
+                        plan: None,
                     },
                 },
             );
@@ -3796,6 +3798,7 @@ span_days = 7\n";
                     step: None,
                     ts: None,
                     by: None,
+                    plan: None,
                     level: homelab_proto::LogLevel::Debug,
                     source: "HOST".into(),
                     msg: format!("noise {}", i),
@@ -4916,6 +4919,11 @@ impl Sink for BroadcastSink {
                     open.changed = *changed;
                 }
             }
+            PipelineEvent::Plan { op, .. } => {
+                if let Ok(mut subject) = self.subject.lock() {
+                    subject.get_or_insert_with(|| op.clone());
+                }
+            }
             _ => {}
         }
         let msg = match event {
@@ -4936,6 +4944,7 @@ impl Sink for BroadcastSink {
                     req: self.req,
                     ts: Some(unix_now()),
                     step: None,
+                    plan: None,
                     by: self.by.clone(),
                 }
             }
@@ -4956,7 +4965,9 @@ impl Sink for BroadcastSink {
                         step: step.clone(),
                         finished: false,
                         changed: false,
+                        skipped: false,
                     }),
+                    plan: None,
                     by: self.by.clone(),
                 }
             }
@@ -4979,7 +4990,9 @@ impl Sink for BroadcastSink {
                         step: step.clone(),
                         finished: true,
                         changed,
+                        skipped: false,
                     }),
+                    plan: None,
                     by: self.by.clone(),
                 }
             }
@@ -4994,6 +5007,43 @@ impl Sink for BroadcastSink {
                 done,
                 total,
             },
+            // fix-171 round 2: the op's own announced plan, before its
+            // first step mark — a client's total comes from this, not from
+            // a past run's step count.
+            PipelineEvent::Plan { op, steps } => {
+                let msg = format!("[sync][plan] {} :: {} step(s) planned", op, steps.len());
+                tracing::info!("{}", msg);
+                ServerMsg::Log {
+                    level: homelab_proto::LogLevel::Info,
+                    source: "HOST".into(),
+                    msg,
+                    req: self.req,
+                    ts: Some(unix_now()),
+                    step: None,
+                    plan: Some(homelab_proto::StepPlan { op, steps }),
+                    by: self.by.clone(),
+                }
+            }
+            PipelineEvent::StepSkipped { op, step } => {
+                let msg = format!("[sync][skip] {} :: {}", op, step);
+                tracing::info!("{}", msg);
+                ServerMsg::Log {
+                    level: homelab_proto::LogLevel::Info,
+                    source: "HOST".into(),
+                    msg,
+                    req: self.req,
+                    ts: Some(unix_now()),
+                    step: Some(homelab_proto::StepMark {
+                        op: op.clone(),
+                        step: step.clone(),
+                        finished: true,
+                        changed: false,
+                        skipped: true,
+                    }),
+                    plan: None,
+                    by: self.by.clone(),
+                }
+            }
         };
         if matches!(msg, ServerMsg::Log { .. })
             && let Ok(mut ring) = self.recent.lock()
@@ -7805,6 +7855,7 @@ fn lag_catch_up(
         step: None,
         ts: None,
         by: None,
+        plan: None,
         level: homelab_proto::LogLevel::Warn,
         source: "HOST".into(),
         msg: format!(
@@ -8644,6 +8695,7 @@ async fn lock_ops(state: &AppState) -> tokio::sync::MutexGuard<'_, ()> {
         step: None,
         ts: None,
         by: None,
+        plan: None,
         level: homelab_proto::LogLevel::Warn,
         source: "HOST".into(),
         msg,
@@ -8659,6 +8711,7 @@ fn progress_line(state: &AppState, line: &str) {
         step: None,
         ts: None,
         by: None,
+        plan: None,
         level: homelab_proto::LogLevel::Info,
         source: "CHECK".into(),
         msg: line.to_string(),

@@ -83,6 +83,7 @@ async fn a_tile_with_a_probe_is_asked_directly_one_with_none_is_skipped() {
     let behaviour: Behaviour = Arc::new(move |c: &Command| match c {
         Command::Tiles { .. } => Script {
             steps: vec![],
+            skipped: vec![],
             ok: true,
             deferred: None,
             message: serde_json::json!({ "tiles": tiles }).to_string(),
@@ -141,6 +142,7 @@ async fn a_stack_the_host_says_is_deploying_is_never_asked_or_reported_down() {
     let behaviour: Behaviour = Arc::new(move |c: &Command| match c {
         Command::Tiles { .. } => Script {
             steps: vec![],
+            skipped: vec![],
             ok: true,
             deferred: None,
             message: serde_json::json!({

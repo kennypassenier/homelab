@@ -110,7 +110,17 @@ fn fix_158_a_dashboard_without_locks_never_attaches_for_ui_steps() {
     };
     assert!(attaches(&real, own), "the real dashboard attaches");
     assert!(!attaches(&dev, own), "a dev dashboard never does");
-    assert!(!attaches(&real, "3.0.0"), "nor to a host older than itself");
+    assert!(
+        !attaches(&real, "3.0.0"),
+        "nor to a host that does not know the command"
+    );
+    // fix-208: a host older than the dashboard but new enough to know
+    // UiAttach is still attached to — a version difference never blocks.
+    assert!(attaches(&real, "3.63.0"), "a 3.63.0 host knows UiAttach");
+    assert!(
+        attaches(&real, "3.70.1"),
+        "a dashboard updated before its host can still be driven"
+    );
     // Both still ask to read beside the queue.
     let g = greeting(&LinkConfig::from_admin(&dev), own);
     assert!(

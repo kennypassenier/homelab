@@ -166,15 +166,21 @@ impl LinkConfig {
     }
 }
 
+/// The first host release that knows `UiAttach` (feat-platform-10); an
+/// older host would log the frame as unreadable.
+pub const UI_ATTACH_SINCE: &str = "3.63.0";
+
 /// What the dashboard sends once the host said Hello (`host_version`), in
 /// order: reads beside the queue (arch-host-link), then `UiAttach` when
-/// `cfg.ui_attach` and the host is not older than this dashboard (an older
-/// host does not know the command and would log it as an unreadable frame).
+/// `cfg.ui_attach` and the host knows the command at all (fix-208,
+/// CLAUDE.md rule 7: a version check says what the other side supports, it
+/// never blocks — this used to demand a host at least as new as the
+/// dashboard, so a dashboard updated before its host could not be driven).
 pub fn greeting(cfg: &LinkConfig, host_version: &str) -> Vec<Command> {
     let mut out = vec![Command::SessionOptions {
         reads_beside_queue: true,
     }];
-    if cfg.ui_attach && !homelab_client::version::older(host_version, env!("CARGO_PKG_VERSION")) {
+    if cfg.ui_attach && !homelab_client::version::older(host_version, UI_ATTACH_SINCE) {
         out.push(Command::UiAttach);
     }
     out

@@ -42,7 +42,7 @@ export const STACK_TABS = /** @type {const} */ ([
  *   {page: "log"} | {page: "shell"} | {page: "apply"} |
  *   {page: "presets"} |
  *   {page: "fleetview"} | {page: "backupcalendar"} |
- *   {page: "status"} | {page: "clients"} | {page: "passkeys"} |
+ *   {page: "passkeys"} | {page: "status-retired"} |
  *   {page: "start"} | {page: "today"} | {page: "doctor"} | {page: "checks"} |
  *   {page: "charts"} | {page: "traffic"} | {page: "timeline"} |
  *   {page: "home-legacy"} |
@@ -51,8 +51,9 @@ export const STACK_TABS = /** @type {const} */ ([
  * are 2026-09-30's retired addresses: `route()` still names them, so an old
  * link or a Live view script naming one is recognised, but `main.js`
  * redirects every one of them before it ever mounts a page for them (see
- * `redirectFor`). `status`, `clients` and `passkeys` are the kit's own
- * pages, drawn by this app since `kit_pages_in_webapp()`.
+ * `redirectFor`). `passkeys` is the kit's own page, drawn by this app since
+ * `kit_pages_in_webapp()`; the kit's Status and Clients pages are switched
+ * off (2026-10-02), and `/status` redirects to Health.
  */
 
 /**
@@ -83,9 +84,10 @@ const PATH_TO_PAGE = {
   presets: "presets",
   fleetview: "fleetview",
   backupcalendar: "backupcalendar",
-  status: "status",
-  clients: "clients",
   passkeys: "passkeys",
+  // 2026-10-02: the kit's Status page is switched off (it duplicated
+  // Health); an old link to it goes to Health instead.
+  status: "status-retired",
   // 2026-09-30: retired addresses, kept parseable for old links and for
   // Live view's known_page (core::drive checks formspec.json's page list,
   // not this table); `redirectFor` sends every one of them on to its new
@@ -120,6 +122,7 @@ export const DRIVABLE_PATHS = Object.keys(PATH_TO_PAGE).filter(
       "traffic",
       "timeline",
       "home",
+      "status",
     ].includes(k),
 );
 
@@ -145,8 +148,6 @@ const FALLBACK_TITLE = /** @type {Record<string, string>} */ ({
   notifications: "Notifications",
   shell: "Shell",
   presets: "Presets",
-  status: "Status",
-  clients: "Clients",
   passkeys: "Passkeys",
 });
 
@@ -176,6 +177,8 @@ export function redirectFor(r, search) {
       return `/metrics${setParams(search, { tab: "traffic" })}`;
     case "timeline":
       return `/activity${setParams(search, { view: "timeline" })}`;
+    case "status-retired":
+      return `/health${search}`;
     default:
       return null;
   }

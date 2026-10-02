@@ -256,8 +256,6 @@
     "presets",
     "fleetview",
     "backupcalendar",
-    "status",
-    "clients",
     "passkeys"
   ],
   "stack_tabs": [

@@ -224,3 +224,35 @@ test("invariants: an expandable row opens and closes from a click anywhere in it
     await browser.close();
   }
 });
+
+test("invariants: the kit's Status and Clients pages are switched off, Passkeys stays", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.setViewportSize({ width: 1920, height: 900 });
+    await page.waitForTimeout(500);
+    const links = await page.locator("#bar a").allTextContents();
+    const names = links.map((t) => t.trim().toLowerCase());
+    assert.ok(!names.includes("status"), `Status still in the bar: ${names}`);
+    assert.ok(!names.includes("clients"), `Clients still in the bar: ${names}`);
+    for (const api of ["/api/kit/status", "/api/kit/clients"]) {
+      const r = await page.request.get(`${BASE}${api}`);
+      assert.equal(r.status(), 404, `${api} still answers ${r.status()}`);
+    }
+    const passkeys = await page.request.get(`${BASE}/api/kit/passkeys`);
+    assert.notEqual(
+      passkeys.status(),
+      404,
+      "Passkeys must stay (Kenny logs in with it)",
+    );
+    // An old link to /status: either the server no longer has it (404) or
+    // the app sends it on to Health — never the old page.
+    const old = await page.goto(`${BASE}/status`);
+    if (old && old.status() !== 404) {
+      await page.waitForURL("**/health", { timeout: 5000 });
+    }
+  } finally {
+    await browser.close();
+  }
+});

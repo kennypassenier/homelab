@@ -134,7 +134,12 @@ async fn main() -> std::process::ExitCode {
         .page(Page::new("presets", "Presets", "/presets").hidden())
         .brand("/overview")
         .brand_title("Homelab")
-        .kit_pages_in_webapp();
+        .kit_pages_in_webapp()
+        // Kenny, 2026-10-02: the kit's Status page duplicates Health, and
+        // nothing calls this dashboard's client API, so both are switched
+        // off; Passkeys stays (it is how Kenny logs in).
+        .disable_kit_page("status")
+        .disable_kit_page("clients");
     app.dashboard_routes(live.router("/events"));
     // Doctor reads for about a minute on pve (fix-68), so the pages wait up
     // to two for an answer.

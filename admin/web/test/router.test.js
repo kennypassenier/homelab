@@ -256,8 +256,11 @@ test("every path lives at the root", () => {
   assert.deepEqual(route("/shell"), { page: "shell" });
   assert.deepEqual(route("/apply"), { page: "apply" });
   assert.deepEqual(route("/presets"), { page: "presets" });
-  assert.deepEqual(route("/status"), { page: "status" });
-  assert.deepEqual(route("/clients"), { page: "clients" });
+  // 2026-10-02: Status and Clients are switched off; /status goes to
+  // Health, /clients is no page of this app.
+  assert.deepEqual(route("/status"), { page: "status-retired" });
+  assert.equal(redirectFor(route("/status"), ""), "/health");
+  assert.equal(route("/clients").page, "notfound");
   assert.deepEqual(route("/passkeys"), { page: "passkeys" });
   assert.deepEqual(route("/stacks/media"), {
     page: "stack",

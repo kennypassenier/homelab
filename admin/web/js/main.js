@@ -39,8 +39,6 @@ import { mount as healthPage } from "./pages/health.js";
 import { mount as metricsPage } from "./pages/metrics.js";
 import { mount as fleetviewPage } from "./pages/fleetview.js";
 import { mount as backupCalendarPage } from "./pages/backupcalendar.js";
-import { mount as statusPage } from "./pages/status.js";
-import { mount as clientsPage } from "./pages/clients.js";
 import { mount as passkeysPage } from "./pages/passkeys.js";
 import { mountVersions } from "./versions.js";
 
@@ -201,15 +199,9 @@ function render() {
     case "backupcalendar":
       cleanup = backupCalendarPage(page);
       break;
-    // The kit's own pages (chassis-rs 3.1.0, `kit_pages_in_webapp`): this
-    // app draws them from GET /api/kit/status|clients|passkeys, in this
-    // same bar, instead of the kit's own layout.
-    case "status":
-      cleanup = statusPage(page);
-      break;
-    case "clients":
-      cleanup = clientsPage(page);
-      break;
+    // The kit's own Passkeys page (chassis-rs 3.1.0, `kit_pages_in_webapp`):
+    // this app draws it from GET /api/kit/passkeys, in this same bar.
+    // Status and Clients are switched off (`disable_kit_page`, 2026-10-02).
     case "passkeys":
       cleanup = passkeysPage(page);
       break;

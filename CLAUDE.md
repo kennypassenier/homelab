@@ -49,6 +49,9 @@ are not style preferences; ignoring them costs him the ability to steer.
    with each other and keep the same space in every state (loading, empty,
    error, filled); loose flex or stacked layouts are converted.
 
+7. **A version check informs, it never blocks** (Kenny, 2026-10-02): it
+   says which pages and commands the other side supports.
+
 Both failures look identical from his side: he answered, and then had to
 argue with the answer.
 

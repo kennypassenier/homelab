@@ -1480,8 +1480,23 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // Vault copies of each retired unit, for its retired record (ask-9).
     let mut unit_vault: std::collections::BTreeMap<String, Vec<String>> =
         std::collections::BTreeMap::new();
-    step!(runner, exec, ctx, m, "retire dropped", {
-        let listing = exec
+    // fix-199: an older client's `DeploySpec` may have no field at all for
+    // something a newer one added, so an empty/absent `files` would read as
+    // "none declared, remove the rest" rather than "this client cannot even
+    // say" (`client/src/link.rs`'s 2026-08-31 incident). `client_knows`
+    // gates the whole diff on it; a client too old to know this field skips
+    // the step rather than retiring what it cannot declare.
+    let files_removal = manifest::client_knows(spec.client_schema, "files");
+    if !files_removal {
+        log_info(format!(
+            "[retire dropped] skipped — the deploying client (schema {}) predates this \
+             declared-files list; nothing was retired on its behalf",
+            spec.client_schema
+        ));
+    }
+    if files_removal {
+        step!(runner, exec, ctx, m, "retire dropped", {
+            let listing = exec
             .run(&Cmd::new(
                 "sh",
                 &[
@@ -1494,138 +1509,141 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 60,
             ))
             .await?;
-        let declared: std::collections::BTreeSet<&str> =
-            spec.files.iter().map(|f| f.path.as_str()).collect();
-        dropped_repo_files = listing
-            .stdout
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !declared.contains(*l))
-            .map(str::to_string)
-            .collect();
-        let mut changed = false;
-        let mut reload = false;
-        for rel in &dropped_repo_files {
-            if !rel.starts_with(manifest::ROOTFS_PREFIX) {
-                continue;
-            }
-            // A path the validator would refuse today was never placed.
-            let Ok((dest, _)) = manifest::file_destination(&m.stack_name, rel) else {
-                continue;
-            };
-            if let Some(name) = dest.strip_prefix("/etc/systemd/system/") {
-                reload = true;
-                let is_unit = !name.contains('/')
-                    && [".service", ".timer", ".socket", ".path"]
-                        .iter()
-                        .any(|x| name.ends_with(x));
-                if is_unit {
-                    pct_sh(
-                        exec,
-                        m.vmid,
-                        &format!(
-                            "systemctl disable --now {} 2>&1 || true",
-                            crate::ops::util::shq(name)
-                        ),
-                        120,
-                    )
-                    .await?;
+            let declared: std::collections::BTreeSet<&str> =
+                spec.files.iter().map(|f| f.path.as_str()).collect();
+            dropped_repo_files = listing
+                .stdout
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !declared.contains(*l))
+                .map(str::to_string)
+                .collect();
+            let mut changed = false;
+            let mut reload = false;
+            for rel in &dropped_repo_files {
+                if !rel.starts_with(manifest::ROOTFS_PREFIX) {
+                    continue;
                 }
-            }
-            run_ok(
-                exec,
-                &Cmd::new("pct", &["exec", &vm, "--", "rm", "-f", &dest], 60),
-            )
-            .await?;
-            log_info(format!(
-                "[orphans] removed {} — the stack no longer places it",
-                dest
-            ));
-            changed = true;
-        }
-        for unit in &dropped_natives {
-            // The program's path: the registration knows it; the unit file
-            // the last deploy placed says it too; the convention otherwise.
-            let old_unit = exec
-                .read_file(&format!("{}/{}/{}.service", repo_stack_dir, unit, unit))
-                .await
-                .ok();
-            let need = old_unit.as_deref().map(crate::native::unit_prereqs);
-            let binary = prior
-                .as_ref()
-                .and_then(|p| p.natives.iter().find(|n| &n.unit == unit))
-                .map(|n| n.binary.clone())
-                .filter(|b| !b.is_empty())
-                .or_else(|| need.as_ref().and_then(|n| n.binary.clone()))
-                .unwrap_or_else(|| format!("/usr/local/bin/{}", unit));
-            let mut vault: Vec<String> = need
-                .as_ref()
-                .map(|n| {
-                    n.env_files
-                        .iter()
-                        .chain(n.credentials.iter())
-                        .map(|f| {
-                            format!(
-                                "{}/secrets/{}/{}",
-                                ctx.state_dir,
-                                m.stack_name,
-                                vault_key(f)
-                            )
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            if let Some(env) = prior
-                .as_ref()
-                .and_then(|p| p.natives.iter().find(|n| &n.unit == unit))
-                .and_then(|n| n.env_file.clone())
-            {
-                vault.push(format!(
-                    "{}/secrets/{}/{}",
-                    ctx.state_dir,
-                    m.stack_name,
-                    vault_key(&env)
-                ));
-            }
-            unit_vault.insert(unit.clone(), vault);
-            pct_sh(
-                exec,
-                m.vmid,
-                &format!(
-                    "systemctl disable --now {} 2>&1 || true",
-                    crate::ops::util::shq(unit)
-                ),
-                120,
-            )
-            .await?;
-            log_info(format!(
-                "[native] {} left the stack file — stopped and disabled",
-                unit
-            ));
-            for path in [format!("/etc/systemd/system/{}.service", unit), binary] {
+                // A path the validator would refuse today was never placed.
+                let Ok((dest, _)) = manifest::file_destination(&m.stack_name, rel) else {
+                    continue;
+                };
+                if let Some(name) = dest.strip_prefix("/etc/systemd/system/") {
+                    reload = true;
+                    let is_unit = !name.contains('/')
+                        && [".service", ".timer", ".socket", ".path"]
+                            .iter()
+                            .any(|x| name.ends_with(x));
+                    if is_unit {
+                        pct_sh(
+                            exec,
+                            m.vmid,
+                            &format!(
+                                "systemctl disable --now {} 2>&1 || true",
+                                crate::ops::util::shq(name)
+                            ),
+                            120,
+                        )
+                        .await?;
+                    }
+                }
                 run_ok(
                     exec,
-                    &Cmd::new("pct", &["exec", &vm, "--", "rm", "-f", &path], 60),
+                    &Cmd::new("pct", &["exec", &vm, "--", "rm", "-f", &dest], 60),
                 )
                 .await?;
-                log_info(format!("[native] removed {}", path));
+                log_info(format!(
+                    "[orphans] removed {} — the stack no longer places it",
+                    dest
+                ));
+                changed = true;
             }
-            log_info(format!(
-                "[native] {}'s data directories and its restic repository are kept",
-                unit
-            ));
-            reload = true;
-            changed = true;
-        }
-        if reload {
-            pct_sh(exec, m.vmid, "systemctl daemon-reload", 60).await?;
-        }
-        Ok(if changed {
-            StepOutcome::Changed
-        } else {
-            StepOutcome::Unchanged
-        })
-    });
+            for unit in &dropped_natives {
+                // The program's path: the registration knows it; the unit file
+                // the last deploy placed says it too; the convention otherwise.
+                let old_unit = exec
+                    .read_file(&format!("{}/{}/{}.service", repo_stack_dir, unit, unit))
+                    .await
+                    .ok();
+                let need = old_unit.as_deref().map(crate::native::unit_prereqs);
+                let binary = prior
+                    .as_ref()
+                    .and_then(|p| p.natives.iter().find(|n| &n.unit == unit))
+                    .map(|n| n.binary.clone())
+                    .filter(|b| !b.is_empty())
+                    .or_else(|| need.as_ref().and_then(|n| n.binary.clone()))
+                    .unwrap_or_else(|| format!("/usr/local/bin/{}", unit));
+                let mut vault: Vec<String> = need
+                    .as_ref()
+                    .map(|n| {
+                        n.env_files
+                            .iter()
+                            .chain(n.credentials.iter())
+                            .map(|f| {
+                                format!(
+                                    "{}/secrets/{}/{}",
+                                    ctx.state_dir,
+                                    m.stack_name,
+                                    vault_key(f)
+                                )
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if let Some(env) = prior
+                    .as_ref()
+                    .and_then(|p| p.natives.iter().find(|n| &n.unit == unit))
+                    .and_then(|n| n.env_file.clone())
+                {
+                    vault.push(format!(
+                        "{}/secrets/{}/{}",
+                        ctx.state_dir,
+                        m.stack_name,
+                        vault_key(&env)
+                    ));
+                }
+                unit_vault.insert(unit.clone(), vault);
+                pct_sh(
+                    exec,
+                    m.vmid,
+                    &format!(
+                        "systemctl disable --now {} 2>&1 || true",
+                        crate::ops::util::shq(unit)
+                    ),
+                    120,
+                )
+                .await?;
+                log_info(format!(
+                    "[native] {} left the stack file — stopped and disabled",
+                    unit
+                ));
+                for path in [format!("/etc/systemd/system/{}.service", unit), binary] {
+                    run_ok(
+                        exec,
+                        &Cmd::new("pct", &["exec", &vm, "--", "rm", "-f", &path], 60),
+                    )
+                    .await?;
+                    log_info(format!("[native] removed {}", path));
+                }
+                log_info(format!(
+                    "[native] {}'s data directories and its restic repository are kept",
+                    unit
+                ));
+                reload = true;
+                changed = true;
+            }
+            if reload {
+                pct_sh(exec, m.vmid, "systemctl daemon-reload", 60).await?;
+            }
+            Ok(if changed {
+                StepOutcome::Changed
+            } else {
+                StepOutcome::Unchanged
+            })
+        });
+    } else {
+        runner.skip("retire dropped");
+    }
 
     // ── D4: intent into the host-local git repo (never secrets, A5). ─────
     step!(runner, exec, ctx, m, "commit intent", {
@@ -2526,18 +2544,34 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // this stack's to remove.
     // fix-91: the recorded `extra_routes` files follow the same rule — every
     // file this stack's last deploy recorded and this deploy does not write.
+    // fix-199: same field-keeping rule as "retire dropped" — an older
+    // client's spec may simply have no route this stack always declared,
+    // because its struct predates routes being removable at all; its
+    // absence must not read as "retire every route this stack ever wrote".
+    let routes_removal = manifest::client_knows(spec.client_schema, "routes");
+    if !routes_removal {
+        log_info(format!(
+            "[retire gateway route] skipped — the deploying client (schema {}) predates this \
+             declared-routes list; nothing was retired on its behalf",
+            spec.client_schema
+        ));
+    }
     let declared: Vec<&str> = routes.iter().map(|r| r.filename.as_str()).collect();
-    let stale_routes: Vec<String> = prior
-        .as_ref()
-        .map(|p| {
-            p.route_file
-                .iter()
-                .chain(p.extra_route_files.iter())
-                .filter(|f| !declared.contains(&f.as_str()))
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default();
+    let stale_routes: Vec<String> = if routes_removal {
+        prior
+            .as_ref()
+            .map(|p| {
+                p.route_file
+                    .iter()
+                    .chain(p.extra_route_files.iter())
+                    .filter(|f| !declared.contains(&f.as_str()))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     if !stale_routes.is_empty() {
         step!(runner, exec, ctx, m, "retire gateway route", {
             let mut changed = false;
@@ -2586,8 +2620,19 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     // files come from the vault, never from the repository, and directories
     // the orchestrator fills on behalf of other stacks (the gateway's
     // generated dashboards and routes) are not this stack's files at all.
+    // fix-199: same field-keeping rule — a client whose manifest schema
+    // predates the stack's `apps:` list being diffable for departures must
+    // not have every app it cannot name treated as "left the stack".
+    let apps_removal = manifest::client_knows(spec.client_schema, "apps");
+    if !apps_removal {
+        log_info(format!(
+            "[orphan files] skipped — the deploying client (schema {}) predates the \
+             declared-apps list; nothing was retired on its behalf",
+            spec.client_schema
+        ));
+    }
     step!(runner, exec, ctx, m, "orphan files", {
-        if m.native_only {
+        if m.native_only || !apps_removal {
             return Ok(StepOutcome::Unchanged);
         }
         let keep = generated_dirs(&ctx.safety, m.vmid);
@@ -2630,7 +2675,9 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     step!(runner, exec, ctx, m, "garbage collect", {
         // Nor is there anything to garbage-collect: an app directory under
         // /opt on a native-only container was never put there by a deploy.
-        if m.native_only {
+        // fix-199: nor while the deploying client predates the declared-apps
+        // list (`apps_removal`, above) — the same field-keeping rule.
+        if m.native_only || !apps_removal {
             return Ok(StepOutcome::Unchanged);
         }
         let store = StateStore::new(exec, &ctx.state_dir);

@@ -2250,6 +2250,7 @@ fn preview_line(a: &Actions, req: &ActionRequest, typed: bool) -> Result<String,
             {
                 Material::Manifest(m) => Material::Spec(Box::new(homelab_proto::DeploySpec {
                     secret_files: Vec::new(),
+                    client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
                     manifest: *m,
                     files: Vec::new(),
                     env: BTreeMap::new(),

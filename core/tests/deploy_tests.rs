@@ -66,6 +66,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
 fn spec(vmid: u16, stack: &str) -> DeploySpec {
     DeploySpec {
         secret_files: Vec::new(),
+        client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),
         native_manifests: Default::default(),

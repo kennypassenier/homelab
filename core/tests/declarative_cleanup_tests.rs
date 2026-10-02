@@ -85,6 +85,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
 fn spec(vmid: u16, stack: &str) -> DeploySpec {
     DeploySpec {
         secret_files: Vec::new(),
+        client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),
         native_manifests: Default::default(),
@@ -637,6 +638,72 @@ async fn the_deploy_removes_files_the_stack_no_longer_declares() {
         .filter(|l| l.contains("removed") && l.contains("/opt/syncthing/syncthing/stale.conf"))
         .collect();
     assert_eq!(said.len(), 1, "one transcript line per removed file");
+}
+
+/// fix-199 (field-keeping; the mirror of the test above): a client built
+/// before the declared-files list existed at all (`client_schema: 0`) sends
+/// the same spec, minus knowing it is even possible to retire a file — its
+/// absence must read as "this client cannot say", never as "nothing
+/// declared, remove the rest". The stale file the current-client test above
+/// removes is instead left alone, and the "retire dropped" step is skipped
+/// rather than run empty-handed.
+#[tokio::test]
+async fn fix_199_an_older_client_keeps_a_file_it_cannot_even_say() {
+    let exec = MockExecutor::new();
+    script_existing(&exec, 110, "syncthing", "");
+    exec.respond_always(
+        "cd '/opt/syncthing' 2>/dev/null && find",
+        CmdOutput::ok("syncthing/docker-compose.yml\nsyncthing/stale.conf\nsyncthing/.env\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut s = spec(110, "syncthing");
+    s.client_schema = 0;
+    let report = deploy(&ctx(&exec, &sink, &j), &s).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        exec.calls_containing("rm -f /opt/syncthing/syncthing/stale.conf")
+            .is_empty(),
+        "an older client's absent field must never read as a removal"
+    );
+    assert!(
+        lines(&sink)
+            .iter()
+            .any(|l| l.contains("retire dropped") && l.contains("skipped")),
+        "the step names why it did nothing"
+    );
+}
+
+/// fix-199: the same rule for the stack's own `apps:` list — a client whose
+/// schema predates it being diffable for departures never has an app it
+/// cannot name treated as "left the stack" (the orphan-files and
+/// garbage-collect steps both skip).
+#[tokio::test]
+async fn fix_199_an_older_client_keeps_apps_it_cannot_even_say() {
+    let exec = MockExecutor::new();
+    script_existing(&exec, 110, "syncthing", "");
+    let mut state = HostState::default();
+    let mut recorded = record(&manifest(110, "syncthing"));
+    recorded.apps = vec!["syncthing".into(), "old-app".into()];
+    state.stacks.insert("syncthing".into(), recorded);
+    seed_state(&exec, state).await;
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut s = spec(110, "syncthing");
+    s.client_schema = 0;
+    let report = deploy(&ctx(&exec, &sink, &j), &s).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        exec.calls_containing("rm -rf /opt/syncthing/old-app")
+            .is_empty(),
+        "an older client's absent apps field must never read as a removal"
+    );
+    assert!(
+        lines(&sink)
+            .iter()
+            .any(|l| l.contains("orphan files") && l.contains("skipped")),
+        "the step names why it did nothing"
+    );
 }
 
 /// A `rootfs/` file the stack used to place (known from the intent repo's

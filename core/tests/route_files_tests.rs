@@ -103,6 +103,7 @@ fn extra(filename: &str, content: &str) -> GatewayRoute {
 fn spec(vmid: u16, stack: &str, extras: Vec<GatewayRoute>) -> DeploySpec {
     DeploySpec {
         secret_files: Vec::new(),
+        client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_manifests: Default::default(),
         native_binaries: Default::default(),

@@ -268,6 +268,7 @@ fn plan_modal_previews_changes() {
         ],
         spec: Box::new(DeploySpec {
             secret_files: Vec::new(),
+            client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
             source: None,
             native_binaries: Default::default(),
             native_manifests: Default::default(),
@@ -1783,6 +1784,7 @@ fn d6_plan_diff_skip_update_and_line_previews() {
     m.hostname = "108-app-test".into();
     let spec = DeploySpec {
         secret_files: Vec::new(),
+        client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),
         native_manifests: Default::default(),

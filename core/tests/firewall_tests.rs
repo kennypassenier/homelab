@@ -333,6 +333,7 @@ fn manifest(vmid: u16, stack: &str, spec: Option<FirewallSpec>) -> StackManifest
 fn spec(vmid: u16, stack: &str, fwspec: Option<FirewallSpec>) -> DeploySpec {
     DeploySpec {
         secret_files: Vec::new(),
+        client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_manifests: Default::default(),
         native_binaries: Default::default(),

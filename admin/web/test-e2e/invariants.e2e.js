@@ -256,3 +256,100 @@ test("invariants: the kit's Status and Clients pages are switched off, Passkeys 
     await browser.close();
   }
 });
+
+test("invariants: a version difference never blocks — Live view still drives and updates a dashboard tab reporting an older version", async () => {
+  // fix-199 (Kenny, 2026-10-02: "het enige wat een versie check moet doen
+  // is om ons te laten weten welke pagina's of commandos we kunnen
+  // gebruiken voor die versie, dat moet niks tegenhouden" — a version check
+  // informs, it never blocks). fix-185's gate refused EVERY Live view step
+  // once the driven tab's reported version differed from the client's own,
+  // which also refused the one step meant to cure it — a 3.70.1 tab
+  // refused being updated by a 3.70.3 client, because the drive could not
+  // even open the update dialog on it. This case makes the demo host's own
+  // tab report an OLDER version's capabilities (`POST /data/drive/attach`,
+  // the same route the real browser bundle posts to) and proves Live view
+  // still drives what that version knows, refuses only the one page/form
+  // it does not, by name, and still opens the update path's own dialog —
+  // never a blanket refusal naming two version numbers.
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.check("#live-view");
+    await page.waitForTimeout(150);
+
+    // The tab reports an older dashboard's capabilities: it knows "host"
+    // and the install-native form, but not "jobs" — a page a later
+    // release added. A real older tab would report this from its OWN
+    // stale `formspec.json`; this is that same report, by hand.
+    const attach = await page.evaluate(() =>
+      fetch("/data/drive/attach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          page_version: "3.69.0",
+          known_pages: ["", "overview", "host"],
+          known_forms: ["install-native"],
+        }),
+      }).then((r) => r.json()),
+    );
+    assert.deepEqual(attach.state.tab_caps.pages.sort(), [
+      "",
+      "host",
+      "overview",
+    ]);
+
+    // A page this version does not know: refused, naming only "jobs" — no
+    // version number, and the drive is still active afterwards (not a
+    // blanket stop).
+    const toJobs = await page.evaluate(() =>
+      fetch("/data/drive/demo-step", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ do: "goto", path: "/jobs" }),
+      }).then((r) => r.json()),
+    );
+    assert.equal(toJobs.ok, false);
+    assert.match(toJobs.refusal.why, /page "jobs"/);
+    assert.doesNotMatch(
+      toJobs.refusal.why,
+      /\d+\.\d+\.\d+/,
+      "never a version number",
+    );
+
+    // A page this same older version DOES know: taken normally — a
+    // capability gap on one step never blocks the next.
+    const toHost = await page.evaluate(() =>
+      fetch("/data/drive/demo-step", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ do: "goto", path: "/host" }),
+      }).then((r) => r.json()),
+    );
+    assert.equal(toHost.ok, true, JSON.stringify(toHost));
+    assert.equal(toHost.state.page, "/host");
+
+    // The update path itself (install-native of a stack, the same family
+    // as the dashboard's own "Update the host…"/install-native banner
+    // action) opens against this older-reporting tab — fix-185 would have
+    // refused this on the version mismatch alone, which is exactly the
+    // bug: Live view could not drive the very step meant to cure a stale
+    // tab. It is never refused here because the tab's own report already
+    // lists "install-native" as known.
+    const openUpdate = await page.evaluate(() =>
+      fetch("/data/drive/demo-step", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          do: "open",
+          form: "install-native",
+          target: "films",
+        }),
+      }).then((r) => r.json()),
+    );
+    assert.equal(openUpdate.ok, true, JSON.stringify(openUpdate));
+    assert.equal(openUpdate.state.form?.action, "install-native");
+  } finally {
+    await browser.close();
+  }
+});

@@ -40,6 +40,7 @@ fn ctx<'a>(exec: &'a MockExecutor, sink: &'a VecSink, journal: &'a NullJournal) 
 fn spec() -> DeploySpec {
     DeploySpec {
         secret_files: Vec::new(),
+        client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         extra_routes: Vec::new(),
         native_binaries: Default::default(),

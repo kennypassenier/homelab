@@ -148,8 +148,36 @@ pub struct FormSpec {
     pub messages: Messages,
     pub pages: Vec<String>,
     pub stack_tabs: Vec<String>,
+    /// fix-199: every `Open{form}` target Claude or a click can name — the
+    /// edit forms' slugs (`EditKind::ALL`) and the action forms' slugs
+    /// (`ActionKind::ALL`), one list, read by the browser the same way
+    /// `pages` already is. A test (`drivelive::tests`) holds it equal to
+    /// those two enums, so a kind added to either and forgotten here fails
+    /// the build rather than silently under-reporting what this version
+    /// knows.
+    #[serde(default)]
+    pub forms: Vec<String>,
     /// The edit forms (`driveedit`).
     pub edit: crate::core::driveedit::EditSpec,
+}
+
+/// fix-199 (Kenny, 2026-10-02: "het enige wat een versie check moet doen is
+/// om ons te laten weten welke pagina's of commandos we kunnen gebruiken
+/// voor die versie, dat moet niks tegenhouden" — a version check informs,
+/// it never blocks): what a following Live view tab has told the driver it
+/// knows, from its OWN loaded copy of `formspec.json` (`POST
+/// /data/drive/attach`). A tab that never reported anything (`DriveState.
+/// tab_caps == None`) is not held to any capability — nothing is refused on
+/// the strength of a version nobody has told the driver about, the same
+/// rule fix-185 already applied to a bare version string.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TabCaps {
+    /// The page names the tab's own router recognises (`formspec.json`'s
+    /// `pages`, as its bundle has them — `""` is the home page).
+    pub pages: std::collections::BTreeSet<String>,
+    /// The `Open{form}` slugs the tab's own bundle can draw a dialog for
+    /// (`formspec.json`'s `forms`, as its bundle has them).
+    pub forms: std::collections::BTreeSet<String>,
 }
 
 /// The description, read once. It is compiled in and covered by a test, so
@@ -653,6 +681,12 @@ pub struct DriveState {
     /// nobody has told the driver about.
     #[serde(default)]
     pub tab_page_version: Option<String>,
+    /// fix-199: the same tab's self-reported capabilities, alongside its
+    /// version string. `None` until a tab has ever reported them (an old
+    /// tab whose `/data/drive/attach` predates this field, or none yet) —
+    /// permissive, never a reason to refuse a step.
+    #[serde(default)]
+    pub tab_caps: Option<TabCaps>,
 }
 
 impl Default for DriveState {
@@ -675,6 +709,7 @@ impl Default for DriveState {
             plan: None,
             selected: Vec::new(),
             tab_page_version: None,
+            tab_caps: None,
         }
     }
 }

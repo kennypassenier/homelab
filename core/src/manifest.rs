@@ -718,6 +718,55 @@ pub struct GatewayRoute {
     pub content: String,
 }
 
+/// fix-199 (Kenny, 2026-10-02: a version check informs, it never blocks —
+/// "het enige wat een versie check moet doen is om ons te laten weten welke
+/// pagina's of commandos we kunnen gebruiken voor die versie"): the deploy
+/// pipeline diffs what a stack's files, gateway routes and apps declare NOW
+/// against what the PRIOR deploy recorded, and removes whatever left
+/// (`core::ops::deploy`'s "retire dropped", "retire gateway route" and
+/// "orphan files"/"garbage collect" steps). `client/src/link.rs` names the
+/// 2026-08-31 incident this field-keeping rule fixes: an older client's
+/// `DeploySpec` struct simply has no field for something a newer one added,
+/// so its outgoing spec looks exactly like "none declared", and the host
+/// read that as "the operator removed everything" rather than "this client
+/// cannot even say".
+///
+/// [`DeploySpec::client_schema`] says which schema the DEPLOYING client's
+/// own struct is built against; [`client_knows`] says whether that schema
+/// is new enough to have populated a given declared list at all. A list the
+/// client's schema predates is never diffed for removal: its absence reads
+/// as "this client does not know this field", never as "remove everything
+/// recorded" — an old client can still deploy safely, it only cannot retire
+/// what it cannot declare. Bump this constant and add the new list's name
+/// to [`field_schema`] the day a field whose absence must mean "remove" is
+/// added to `DeploySpec`; `files`, `gateway_route`/`extra_routes` and the
+/// manifest's own `apps` have all been removable since schema 1 and need no
+/// change.
+pub const CURRENT_CLIENT_SCHEMA: u32 = 1;
+
+/// The [`CURRENT_CLIENT_SCHEMA`] a removable declared list was introduced
+/// at: `"files"` (`DeploySpec.files` — rootfs files and native units dropped
+/// from the stack), `"routes"` (`gateway_route`/`extra_routes`), `"apps"`
+/// (the manifest's own app list — orphaned `/opt/<stack>/<app>` files and
+/// directories). A name this table does not list is assumed to need the
+/// current schema, the conservative default for a field not yet wired into
+/// this check.
+pub fn field_schema(field: &str) -> u32 {
+    match field {
+        "files" | "routes" | "apps" => 1,
+        _ => CURRENT_CLIENT_SCHEMA,
+    }
+}
+
+/// Is `client_schema` new enough to have been able to declare `field` at
+/// all? `false` means: an empty or absent `field` is read as "this client's
+/// struct has no field for it", never as "nothing declared, remove
+/// everything recorded" — the field-keeping rule fix-199 adds alongside
+/// `client/src/link.rs`'s version-aware INFORM (never block).
+pub fn client_knows(client_schema: u32, field: &str) -> bool {
+    client_schema >= field_schema(field)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeploySpec {
     pub manifest: StackManifest,
@@ -775,6 +824,16 @@ pub struct DeploySpec {
     /// the vault restores what it holds, the behaviour before this existed.
     #[serde(default)]
     pub secret_files: Vec<SecretFile>,
+
+    /// fix-199: [`CURRENT_CLIENT_SCHEMA`] as of the client that built this
+    /// spec (`homelab_client::spec::build_spec`) — so the host can tell "this
+    /// client declares none of this" from "this client's struct has no field
+    /// for this at all" when it diffs a declared list against what the
+    /// prior deploy recorded (see [`client_knows`]). `0` from a client built
+    /// before this field existed: the safest default, read as "knows none of
+    /// the removable lists yet", so nothing is retired on its behalf.
+    #[serde(default)]
+    pub client_schema: u32,
 }
 
 /// fix-141: where a deployed stack came from.
@@ -1626,4 +1685,40 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
     h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+#[cfg(test)]
+mod client_schema_tests {
+    use super::*;
+
+    #[test]
+    fn fix_199_every_current_removable_list_is_known_since_schema_1() {
+        for field in ["files", "routes", "apps"] {
+            assert_eq!(field_schema(field), 1);
+            assert!(client_knows(CURRENT_CLIENT_SCHEMA, field));
+            assert!(client_knows(1, field));
+        }
+    }
+
+    #[test]
+    fn fix_199_a_client_schema_below_the_fields_schema_does_not_know_it() {
+        // `client_knows` itself, not `field_schema`'s table: an "apps" field
+        // registered at schema 1 is unknown to a client reporting schema 0
+        // (the default for one built before this mechanism existed at all)
+        // and known to one at schema 1 or above.
+        assert!(!client_knows(0, "apps"));
+        assert!(client_knows(1, "apps"));
+        assert!(client_knows(2, "apps"));
+    }
+
+    #[test]
+    fn fix_199_an_unnamed_field_defaults_to_needing_the_current_schema() {
+        // The conservative default for a field this table does not (yet)
+        // list by name: assume it needs today's schema, so a client that
+        // predates it is read as "does not know", never as "knows".
+        assert_eq!(
+            field_schema("something-not-yet-registered"),
+            CURRENT_CLIENT_SCHEMA
+        );
+    }
 }

@@ -8,6 +8,31 @@
   padding-inline: 16px;
   padding-block: 16px 48px;
 }
+/* fix-206: ONE shared vertical-spacing token between a page's top-level
+   sections (Kenny, 2026-10-02: "verticale ademruimte" — firewall, settings,
+   host and health all packed their blocks almost edge to edge). Every
+   page's `mount()` replaces `#page`'s children with its own top-level
+   pieces (a title row, status text, tables, panels, …), so one rule on
+   `main.shell`'s direct children reaches every page without a per-page
+   one-off. kp-themes' `--kp-space-xl` (1.5rem) is the fallback so a theme
+   that defines its own scale is honoured; invariants.e2e.js checks every
+   page measures at least this.
+   `!important`: measured (fix-206 investigation), a later same-file,
+   lower-specificity rule on an element's own class (e.g. `.measured`'s
+   `margin-block: 0.3em`) still wins its longhand over this selector's
+   higher specificity (0,1,1) vs (0,1,0) — a logical-property-group
+   cascade quirk reproduced in isolation with Chromium's own
+   `CSS.getMatchedStylesForNode` confirming the specificity this sheet
+   assumed, yet losing anyway; `!important` here is the one guaranteed
+   way a single shared token wins over any page's per-element margin
+   without hunting down and overriding each one individually.
+*/
+:root {
+  --section-gap: var(--kp-space-xl, 1.5rem);
+}
+main.shell > * + * {
+  margin-block-start: var(--section-gap) !important;
+}
 .kp-nav .link {
   margin: 0 0 0 auto;
   font-size: 0.85em;
@@ -1701,10 +1726,13 @@ td.stack-flags {
   display: none;
 }
 
-/* replace-grafana (2026-09-30): the charts page. */
+/* replace-grafana (2026-09-30): the charts page. fix-206: `min(26rem,
+   100%)` instead of a bare `26rem` — at 390px a bare 26rem (416px) track
+   forced the whole page to scroll sideways; clamping the minimum to the
+   container lets the grid fall back to one column instead. */
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(26rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(26rem, 100%), 1fr));
   gap: 16px;
 }
 .chart {

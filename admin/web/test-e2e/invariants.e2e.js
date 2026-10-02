@@ -15,6 +15,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { DRIVABLE_PATHS } from "../js/router.js";
 
 const BASE = process.env.INVARIANTS_BASE_URL ?? "http://127.0.0.1:8099";
 const TOKEN = process.env.INVARIANTS_TOKEN ?? "test-invariants-token-1234";
@@ -251,6 +252,80 @@ test("invariants: the kit's Status and Clients pages are switched off, Passkeys 
     const old = await page.goto(`${BASE}/status`);
     if (old && old.status() !== 404) {
       await page.waitForURL("**/health", { timeout: 5000 });
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: every page keeps clear vertical spacing between its top-level sections and is drawn in kp-themes styling", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.setViewportSize({ width: 1920, height: 1080 });
+
+    // The token itself (admin/web/css/app.css: `--section-gap`, default
+    // `--kp-space-xl`), measured through the cascade rather than hard-coded
+    // here, so a themed override of the space scale still has to meet it.
+    const tokenPx = await page.evaluate(() => {
+      const probe = document.createElement("div");
+      probe.style.marginTop = "var(--section-gap)";
+      document.body.append(probe);
+      const px = parseFloat(getComputedStyle(probe).marginTop);
+      probe.remove();
+      return px;
+    });
+    assert.ok(tokenPx > 0, "--section-gap did not resolve to a length");
+
+    // `apply`'s plan can take a few seconds to read on a cold demo host and
+    // `shell`/`log` open a live connection; `passkeys` is the kit's own
+    // page (chassis-rs `kit_pages_in_webapp`) and, found while writing this
+    // test, 404s as `route=unmatched` even against a demo host with
+    // `HOMELAB_ADMIN_PUBLIC_URL` set — a separate, pre-existing gap outside
+    // fix-206's UI-rules scope (noted in the fix-206 register row, not
+    // fixed here). Every other drivable path (the stack pages have their
+    // own fixture-heavy tests already) is swept.
+    const skip = new Set(["apply", "shell", "log", "passkeys"]);
+    for (const p of DRIVABLE_PATHS.filter((p) => !skip.has(p))) {
+      await page.goto(`${BASE}/${p}`, { waitUntil: "load" });
+      await page.waitForTimeout(400);
+
+      // fix-206: Metrics' page was registered at `/metrics`, a path
+      // chassis always answers itself (Prometheus scrape text) — the SPA
+      // never mounted there. Any drivable path must land on the actual
+      // app shell, not a route the kit intercepted first.
+      await page.locator("#bar").waitFor({ state: "visible", timeout: 5000 });
+      const kpStyled = await page.locator('#page [class*="kp-"]').count();
+      assert.ok(
+        kpStyled > 0,
+        `/${p}: no kp-themes-styled element in #page — an unstyled or misrouted page`,
+      );
+
+      const gaps = await page.evaluate(() => {
+        // A zero-height placeholder (a slot filled in later, once its own
+        // read answers) collapses its own margins through to its
+        // neighbours — CSS's normal behaviour for an empty block, and not
+        // a section a person can see, so it is not one of the "top-level
+        // sections" the rule is about. Only sections with visible height
+        // are compared, pairwise.
+        const kids = [...document.getElementById("page").children].filter(
+          (k) => k.getBoundingClientRect().height > 0,
+        );
+        const out = [];
+        for (let i = 1; i < kids.length; i++) {
+          const prev = kids[i - 1].getBoundingClientRect();
+          const cur = kids[i].getBoundingClientRect();
+          out.push(cur.top - prev.bottom);
+        }
+        return out;
+      });
+      for (const [i, gap] of gaps.entries()) {
+        assert.ok(
+          gap >= tokenPx - 1,
+          `/${p}: gap #${i + 1} between top-level sections is ${gap}px, under the ${tokenPx}px --section-gap token`,
+        );
+      }
     }
   } finally {
     await browser.close();

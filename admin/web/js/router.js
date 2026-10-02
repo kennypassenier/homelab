@@ -67,7 +67,12 @@ const PATH_TO_PAGE = {
   "": "home",
   overview: "overview",
   health: "health",
-  metrics: "metrics",
+  // fix-206: the Metrics page (system + traffic charts) lives at
+  // `/charts`, not `/metrics` — chassis reserves `/metrics` itself,
+  // unconditionally, for its own Prometheus scrape text (see the kit-claim
+  // comment above); a page registered at that path never renders, the kit
+  // answers first. The title stays "Metrics".
+  charts: "metrics",
   host: "host",
   activity: "activity",
   jobs: "jobs",
@@ -96,7 +101,6 @@ const PATH_TO_PAGE = {
   today: "today",
   doctor: "doctor",
   checks: "checks",
-  charts: "charts",
   traffic: "traffic",
   timeline: "timeline",
   // Pre-3.1.0 address for the tile page, now the root: kept so an old
@@ -118,7 +122,6 @@ export const DRIVABLE_PATHS = Object.keys(PATH_TO_PAGE).filter(
       "today",
       "doctor",
       "checks",
-      "charts",
       "traffic",
       "timeline",
       "home",
@@ -171,10 +174,8 @@ export function redirectFor(r, search) {
       return `/health${setParams(search, { block: "doctor" })}`;
     case "checks":
       return `/health${setParams(search, { block: "checks" })}`;
-    case "charts":
-      return `/metrics${setParams(search, { tab: "system" })}`;
     case "traffic":
-      return `/metrics${setParams(search, { tab: "traffic" })}`;
+      return `/charts${setParams(search, { tab: "traffic" })}`;
     case "timeline":
       return `/activity${setParams(search, { view: "timeline" })}`;
     case "status-retired":

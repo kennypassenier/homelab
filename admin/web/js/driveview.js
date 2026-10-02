@@ -41,7 +41,7 @@
  * @typedef {{do: string, path?: string, form?: string, target?: string,
  *   field?: string, text?: string, value?: string, on?: boolean,
  *   button?: string, op?: string, stacks?: string[]}} DriveStep
- * @typedef {{kind?: "step" | "announce" | "control", seq: number,
+ * @typedef {{kind?: "step" | "announce" | "control" | "reload", seq: number,
  *   step: DriveStep, applied: boolean,
  *   refusal: DriveRefusal | null, state: DriveState}} DriveEvent
  * @typedef {{seq: number, page: string,
@@ -318,7 +318,7 @@ export function planCounter(s) {
  * @param {boolean} [driving] Claude is driving now (`isActive`)
  * @returns {{text: string, count: string, fraction: number,
  *   status: string, counter: string, paused: boolean,
- *   countdown: boolean} | null}
+ *   countdown: boolean, seq: number} | null}
  */
 export function announceView(s, left, driving = false) {
   if (!s) return null;
@@ -355,6 +355,12 @@ export function announceView(s, left, driving = false) {
     counter: planCounter(s),
     paused,
     countdown,
+    // fix-185: the `seq` this bar's buttons are drawn against, so a Pause,
+    // Continue or Stop click can tell the server which round it means — a
+    // press that arrives after the state has moved on (delayed, or a
+    // duplicate) is then refused instead of landing on a later, unrelated
+    // round (see admin/src/shell/drive.rs::Driver::control).
+    seq: s.seq,
   };
 }
 

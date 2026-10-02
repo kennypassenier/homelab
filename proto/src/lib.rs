@@ -486,8 +486,17 @@ pub enum Command {
     /// session that sent `UiAttach` and answers with that session's
     /// `UiReply`: JSON `{ok, state, refusal?}` in the reply's message.
     /// Refused at once when no dashboard is attached.
+    ///
+    /// fix-185: `client_version` is this CLI build's own version
+    /// (`env!("CARGO_PKG_VERSION")`), so the dashboard can tell a driven
+    /// step from one whose tab has not taken a newer dashboard release yet —
+    /// a stale tab reads a page the client no longer matches, so a step that
+    /// lands on it would be acted on by code the client never checked
+    /// against.
     Ui {
         step: UiStep,
+        #[serde(default)]
+        client_version: String,
     },
     /// feat-platform-10: this session is the dashboard; UI steps come here.
     /// The newest attach wins; the session's end detaches it.
@@ -631,6 +640,11 @@ pub enum UiStep {
     Select { stacks: Vec<String> },
     /// Close the open dialog.
     Close,
+    /// fix-185: tell the driven tab to take the dashboard's current page
+    /// (what the "update available" banner's own Reload button does), then
+    /// wait, bounded, until it re-attaches reporting that version. The
+    /// answer to a step a stale tab would have been refused for.
+    Reload,
     /// Change nothing; answer what is on screen now.
     State,
     /// Stop driving: the tabs are the viewer's again.
@@ -666,6 +680,7 @@ impl UiStep {
             UiStep::Row { .. } => "row",
             UiStep::Select { .. } => "select",
             UiStep::Close => "close",
+            UiStep::Reload => "reload",
             UiStep::State => "state",
             UiStep::Done => "done",
             UiStep::Plan { .. } => "plan",
@@ -766,7 +781,7 @@ impl Command {
             | TokenList
             | GetBackups { .. }
             | BrowseSnapshot { .. } => Scope::Read,
-            Ui { step } => step.scope(),
+            Ui { step, .. } => step.scope(),
             DeployStack(_)
             | StageNativeBinary { .. }
             | BackupStack(_)
@@ -1185,6 +1200,11 @@ pub enum ServerMsg {
         by: String,
         scope: Scope,
         step: UiStep,
+        /// fix-185: the driving CLI's own version, carried along so the
+        /// dashboard can refuse a step whose tab has not taken a newer
+        /// release yet.
+        #[serde(default)]
+        client_version: String,
     },
     /// Live view: a word for the CLI whose UI step the dashboard holds
     /// ("paused by the viewer …"), sent to that session alone.
@@ -1312,27 +1332,43 @@ mod wire_tests {
             },
             UiStep::Select { stacks: vec![] },
             UiStep::Close,
+            UiStep::Reload,
             UiStep::State,
             UiStep::Done,
         ];
         for step in steps {
             let req = RpcRequest {
                 id: 9,
-                command: Command::Ui { step: step.clone() },
+                command: Command::Ui {
+                    step: step.clone(),
+                    client_version: "3.70.0".into(),
+                },
             };
             let json = serde_json::to_string(&req).unwrap();
             let back: RpcRequest = serde_json::from_str(&json).unwrap();
             assert_eq!(back.id, 9);
-            let Command::Ui { step: got } = back.command else {
+            let Command::Ui {
+                step: got,
+                client_version,
+            } = back.command
+            else {
                 panic!("{json}")
             };
             assert_eq!(got, step);
+            assert_eq!(client_version, "3.70.0");
             let want = if step == UiStep::State {
                 Scope::Read
             } else {
                 Scope::Operate
             };
-            assert_eq!(Command::Ui { step }.scope(), want);
+            assert_eq!(
+                Command::Ui {
+                    step,
+                    client_version: "3.70.0".into()
+                }
+                .scope(),
+                want
+            );
         }
         assert_eq!(Command::UiAttach.scope(), Scope::Operate);
         let reply = Command::UiReply {
@@ -1347,11 +1383,13 @@ mod wire_tests {
             by: "wsl".into(),
             scope: Scope::Operate,
             step: UiStep::Close,
+            client_version: "3.70.0".into(),
         })
         .unwrap();
         assert_eq!(frame["kind"], "ui");
         assert_eq!(frame["step"]["do"], "close");
         assert_eq!(frame["by"], "wsl");
+        assert_eq!(frame["client_version"], "3.70.0");
         // Live view: the plan carries its steps, the hold its wait.
         let plan = UiStep::Plan {
             steps: vec![UiStep::Close, UiStep::Done],

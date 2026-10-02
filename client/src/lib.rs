@@ -24,6 +24,7 @@ pub mod tls;
 #[cfg(feature = "tui")]
 pub mod tui;
 pub mod ui_cli;
+pub mod ui_preflight;
 pub mod updatepolicy;
 pub mod version;
 

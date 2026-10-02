@@ -82,7 +82,8 @@ fn send(w: &World, step: UiStep, holds: &Holds) -> JoinHandle<Value> {
     let (d, h) = (w.driver.clone(), holds.clone());
     tokio::spawn(async move {
         let hold = move |wait: u64, note: Option<String>| h.lock().unwrap().push((wait, note));
-        d.step_held("wsl", Scope::Operate, step, &hold).await
+        d.step_held("wsl", Scope::Operate, step, "3.70.0", &hold)
+            .await
     })
 }
 
@@ -188,7 +189,7 @@ async fn follow_live_pause_holds_the_step_until_continue_or_the_longest_pause() 
     announced(&w).await;
     let st = w
         .driver
-        .control(Control::Pause, "the viewer kenny@example.org")
+        .control(Control::Pause, "the viewer kenny@example.org", None)
         .unwrap();
     assert_eq!(
         st.paused_by.as_deref(),
@@ -216,7 +217,7 @@ async fn follow_live_pause_holds_the_step_until_continue_or_the_longest_pause() 
         assert!(note.contains("at most 30 min"), "{note}");
     }
     w.driver
-        .control(Control::Continue, "the viewer kenny@example.org")
+        .control(Control::Continue, "the viewer kenny@example.org", None)
         .unwrap();
     let answer = pending.await.unwrap();
     assert_eq!(answer["ok"], true, "{answer}");
@@ -232,11 +233,11 @@ async fn follow_live_pause_holds_the_step_until_continue_or_the_longest_pause() 
         "{notes:?}"
     );
     // Continue with nothing paused is refused.
-    assert!(w.driver.control(Control::Continue, "kenny").is_err());
+    assert!(w.driver.control(Control::Continue, "kenny", None).is_err());
 
     // A pause pressed between two steps holds the next one.
     w.driver
-        .control(Control::Pause, "the viewer kenny")
+        .control(Control::Pause, "the viewer kenny", None)
         .unwrap();
     let t0 = Instant::now();
     let pending = send(&w, goto("/host"), &holds);
@@ -286,7 +287,9 @@ async fn follow_live_stop_ends_the_sequence_and_a_stopped_press_never_runs() {
     );
     let a = announced(&w).await;
     assert!(a.text.contains("the final press"), "{}", a.text);
-    w.driver.control(Control::Stop, "the viewer kenny").unwrap();
+    w.driver
+        .control(Control::Stop, "the viewer kenny", None)
+        .unwrap();
     let r = pressed.await.unwrap();
     assert_eq!(r["ok"], false);
     assert!(
@@ -318,7 +321,7 @@ async fn follow_live_stop_ends_the_sequence_and_a_stopped_press_never_runs() {
     assert_eq!(r["ok"], true, "{r}");
     // Nothing to stop or pause once nobody drives.
     w.driver.step("wsl", Scope::Operate, UiStep::Done).await;
-    assert!(w.driver.control(Control::Stop, "kenny").is_err());
+    assert!(w.driver.control(Control::Stop, "kenny", None).is_err());
 }
 
 /// Live view.
@@ -522,4 +525,179 @@ async fn fix_163_a_finished_confirmed_dialog_is_closed_and_released() {
     w.clock.advance(60);
     assert!(!w.driver.release_if_done());
     assert_eq!(deploys(&w), 1);
+}
+
+/// fix-185 (Kenny, 2026-10-02): a viewer's Stop stayed held after `ui done`
+/// had already acknowledged it, and a brand new round of steps was refused
+/// "stopped by the viewer" all the same. The cause: `Driver::control` judged
+/// whether a drive was active from the CURRENT state alone, so a Stop
+/// delayed in flight (a slow connection, a double-submitted click) and only
+/// delivered after `done` had cleanly ended round one could still land while
+/// round two's first step was announced — and since announcing makes the
+/// drive "active" again, that stale Stop was honoured and stopped the wrong,
+/// unrelated round. The fix: a Stop (or Pause/Continue) carries the `seq`
+/// the viewer's button was drawn against; one that no longer matches the
+/// live state is refused as stale rather than acted on.
+#[tokio::test(start_paused = true)]
+async fn fix_185_a_stale_stop_never_reaches_into_a_later_round() {
+    let w = world("stale-stop");
+    let holds = Holds::default();
+
+    // Round one: open, press confirm, and Stop it — exactly the existing
+    // Stop behaviour, with the `seq` the viewer's button was drawn against.
+    let opened = send(
+        &w,
+        UiStep::Open {
+            form: "deploy".into(),
+            target: Some("media".into()),
+        },
+        &holds,
+    );
+    announced(&w).await;
+    assert_eq!(opened.await.unwrap()["state"]["form"]["step"], "review");
+    let round_one_seq = w.driver.snapshot().seq;
+    let pressed = send(
+        &w,
+        UiStep::Press {
+            button: "confirm".into(),
+        },
+        &holds,
+    );
+    announced(&w).await;
+    w.driver
+        .control(Control::Stop, "the viewer kenny", Some(round_one_seq))
+        .unwrap();
+    assert_eq!(pressed.await.unwrap()["ok"], false);
+
+    // The driver acknowledges the stop and starts a clean round two.
+    assert_eq!(
+        w.driver.step("wsl", Scope::Operate, UiStep::Done).await["ok"],
+        true
+    );
+    let round_two = send(&w, goto("/jobs"), &holds);
+    announced(&w).await;
+
+    // The STALE Stop from round one — carrying round one's seq, delivered
+    // only now — must be refused: it is not round two's seq.
+    let stale = w
+        .driver
+        .control(Control::Stop, "the viewer kenny", Some(round_one_seq));
+    assert!(stale.is_err(), "a stale Stop must not be honoured");
+    let why = stale.unwrap_err().why;
+    assert!(why.contains("moved on"), "{why}");
+
+    // Round two's step still runs, undisturbed by the stale Stop.
+    let r = round_two.await.unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["state"]["page"], "/jobs");
+    assert!(r["state"]["stopped_by"].is_null());
+
+    // A Stop with no seq at all (an older tab) keeps working as before.
+    w.driver
+        .control(Control::Stop, "the viewer kenny", None)
+        .unwrap();
+    assert_eq!(
+        w.driver.snapshot().stopped_by.as_deref(),
+        Some("the viewer kenny")
+    );
+}
+
+/// fix-185: version match. A tab reports its loaded page version over
+/// `/data/drive/attach`; a step driven by a different client version is
+/// refused at once, naming both versions and `homelab ui reload`; `state`
+/// never checks (reading the screen is always safe); the same client
+/// version is taken normally.
+#[tokio::test(start_paused = true)]
+async fn fix_185_a_step_is_refused_when_the_tab_runs_a_different_version() {
+    let w = world("version-match");
+    let holds = Holds::default();
+    let app = router(w.driver.clone());
+    let attach = |v: &str| {
+        Request::post("/data/drive/attach")
+            .header("content-type", "application/json")
+            .body(Body::from(format!(r#"{{"page_version":"{v}"}}"#)))
+            .unwrap()
+    };
+    let r = app.clone().oneshot(attach("3.69.0")).await.unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(
+        w.driver.snapshot().tab_page_version.as_deref(),
+        Some("3.69.0")
+    );
+
+    // `state` is read-only and never checks the tab's version.
+    let s = w
+        .driver
+        .step_held("wsl", Scope::Read, UiStep::State, "3.70.0", &|_, _| {})
+        .await;
+    assert_eq!(s["ok"], true, "{s}");
+
+    // Any other step is refused: it names both versions and the fix.
+    let r = w
+        .driver
+        .step_held("wsl", Scope::Operate, goto("/jobs"), "3.70.0", &|_, _| {})
+        .await;
+    assert_eq!(r["ok"], false, "{r}");
+    let why = r["refusal"]["why"].as_str().unwrap();
+    assert!(why.contains("3.69.0") && why.contains("3.70.0"), "{why}");
+    let fix = r["refusal"]["fix"].as_str().unwrap();
+    assert!(fix.contains("homelab ui reload"), "{fix}");
+    assert_eq!(w.driver.snapshot().page, "/", "nothing was taken");
+
+    // The matching version is taken normally (announced and held, like any
+    // other step — `send`/`announced` drive its countdown; `send` drives
+    // with client version 3.70.0, so the tab reports that too).
+    app.clone().oneshot(attach("3.70.0")).await.unwrap();
+    let pending = send(&w, goto("/jobs"), &holds);
+    announced(&w).await;
+    let r = pending.await.unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["state"]["page"], "/jobs");
+}
+
+/// fix-185 (`homelab ui reload`): the driven tab takes the dashboard's
+/// current page — the live channel carries a "reload" event — and the step
+/// waits, bounded, until a tab reports the client's own version; it fails
+/// when nothing ever does.
+#[tokio::test(start_paused = true)]
+async fn fix_185_reload_waits_for_the_tab_to_report_the_new_version() {
+    let w = world("reload");
+    let holds = Holds::default();
+    let app = router(w.driver.clone());
+    let attach = |v: &str| {
+        Request::post("/data/drive/attach")
+            .header("content-type", "application/json")
+            .body(Body::from(format!(r#"{{"page_version":"{v}"}}"#)))
+            .unwrap()
+    };
+    app.clone().oneshot(attach("3.69.0")).await.unwrap();
+
+    // `reload` itself is never refused by the version check, even though
+    // the tab is stale — it is the step that fixes that. It is announced
+    // and held like any other step first (the existing `send`/`announced`
+    // helpers already drive a step through its countdown).
+    let pending = send(&w, UiStep::Reload, &holds);
+    announced(&w).await;
+    // Every tab was told to reload, once the announcement's countdown ran.
+    until("the reload was broadcast", || {
+        w.live.events("drive").iter().any(|e| e["kind"] == "reload")
+    })
+    .await;
+    assert!(!pending.is_finished(), "still waiting for the new version");
+    // The tab comes back on the new version.
+    app.clone().oneshot(attach("3.70.0")).await.unwrap();
+    let r = pending.await.unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+
+    // Nothing ever reports the client's version: the step fails after the
+    // bounded wait, naming it.
+    app.clone().oneshot(attach("3.69.0")).await.unwrap();
+    let pending = send(&w, UiStep::Reload, &holds);
+    announced(&w).await;
+    let r = pending.await.unwrap();
+    assert_eq!(r["ok"], false, "{r}");
+    assert!(
+        r["refusal"]["why"].as_str().unwrap().contains("3.70.0"),
+        "{r}"
+    );
 }

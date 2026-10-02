@@ -566,8 +566,35 @@ pub struct OpenForm {
     /// the plan, what the final press answered (`driveedit`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edit: Option<EditState>,
+    /// fix-185: does this form's final press read the stack files from the
+    /// repository (`Needs::Spec`, `Needs::Apply`)? `homelab ui` preflights
+    /// such a press on the machine driving it, before the dashboard (and
+    /// its own working copy) is asked at all.
+    #[serde(default)]
+    pub reads_repo: bool,
     #[serde(skip)]
     pub desc: FormDesc,
+}
+
+/// fix-185: `f`'s final press reads the repository — a single action's own
+/// `Needs`, or a batch's wrapped action.
+fn reads_repo(f: &OpenForm) -> bool {
+    let of = |k: ActionKind| {
+        matches!(
+            k.needs(),
+            crate::core::actions::Needs::Spec | crate::core::actions::Needs::Apply
+        )
+    };
+    match f.desc.family {
+        Family::Action(kind) => of(kind),
+        Family::Edit(EditKind::Batch) => f
+            .edit
+            .as_ref()
+            .and_then(|e| e.batch_action.as_deref())
+            .and_then(ActionKind::from_slug)
+            .is_some_and(of),
+        Family::Edit(_) => false,
+    }
 }
 
 /// What a form is: one of the actions, or one of the edit forms.
@@ -620,6 +647,12 @@ pub struct DriveState {
     /// exactly as the page's own "Run on the selected…" button does.
     #[serde(default)]
     pub selected: Vec<String>,
+    /// fix-185: the loaded dashboard version a following tab most recently
+    /// reported (`POST /data/drive/attach`). `None` until a tab has ever
+    /// reported — a step is never refused on the strength of a version
+    /// nobody has told the driver about.
+    #[serde(default)]
+    pub tab_page_version: Option<String>,
 }
 
 impl Default for DriveState {
@@ -641,6 +674,7 @@ impl Default for DriveState {
             stopped_by: None,
             plan: None,
             selected: Vec::new(),
+            tab_page_version: None,
         }
     }
 }
@@ -685,6 +719,9 @@ pub enum Effect {
     /// An edit form needs the dashboard's server: a plan, the data
     /// folders, or its final press (the commit, host.toml, the batch).
     Edit(EditCall),
+    /// fix-185 (`homelab ui reload`): tell the driven tab to take the
+    /// dashboard's current page and wait, bounded, for it to re-attach.
+    Reload,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -753,6 +790,7 @@ impl OpenForm {
             buttons: Vec::new(),
             fields: Vec::new(),
             edit: None,
+            reads_repo: false,
             desc: FormDesc {
                 family: Family::Action(desc.action),
                 steps: desc.steps,
@@ -792,6 +830,7 @@ impl OpenForm {
             job: None,
             buttons: Vec::new(),
             fields: Vec::new(),
+            reads_repo: false,
             desc: FormDesc {
                 family: Family::Edit(edit.family),
                 steps,
@@ -843,6 +882,7 @@ impl OpenForm {
         self.steps = self.desc.steps.iter().map(|s| s.id.clone()).collect();
         self.step_index = self.step_index.min(self.steps.len().saturating_sub(1));
         self.step = self.steps[self.step_index].clone();
+        self.reads_repo = reads_repo(self);
         if let Family::Edit(_) = self.desc.family {
             crate::core::driveedit::refresh(self);
             return;
@@ -1354,6 +1394,12 @@ impl DriveState {
                 }
                 plain
             }
+            // fix-185: nothing on the shared state changes; the shell tells
+            // the driven tab to reload and waits for it to re-attach.
+            UiStep::Reload => Applied {
+                effect: Effect::Reload,
+                held: None,
+            },
             UiStep::Type { field, text } => {
                 let form = self.open_form(step)?;
                 // dashboard-latest, back-compat: `tag` was a text field

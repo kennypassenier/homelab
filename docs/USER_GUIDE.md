@@ -635,6 +635,7 @@ no second way in: the steps travel on the same TLS line as every other verb.
 | `homelab ui press confirm --wait` | the final press, then as `finish`: one call from Confirm to the dashboard handed back |
 | `homelab ui finish` | waits for the open dialog's job to end (reads the screen every 2 s, prints each new step line), prints its outcome, then closes the dialog and hands the dashboard back at once, as `done`; exit 1 when the job did not end in done or deferred. Refused when the open dialog ran no job (`close` and `done` let go without running it). Without it, a confirmed dialog is closed 30 s after its job ended (fix-163) |
 | `homelab ui close` | closes the dialog |
+| `homelab ui reload` | fix-185: tells the driven tab to take the dashboard's current page — what its own "update available" banner's button does — then waits (bounded, 20 s) until a tab reports back running the client's own version; fails, naming it, if none does in time |
 | `homelab ui state` | changes nothing; prints what is on screen |
 | `homelab ui done` | stops driving: every tab is its viewer's again; after a viewer's **Stop** it also acknowledges the stop |
 | `homelab ui plan "<step>" "<step>" …` | sends the whole sequence up front, each argument one step as above (`plan "goto jobs" "open deploy media" "press confirm"`); changes nothing on screen |
@@ -647,6 +648,25 @@ of the wrong kind or on another step, a value that is not on the list, an
 unknown page, action or stack are refused with what, why and what to do, and
 change nothing. A press the form holds (a field in error, the deploy guard)
 is shown in the dialog and answered with its reason, exit code 1. `--json`
+
+**fix-185 (version match):** every step carries `homelab`'s own build
+version. If a tab that follows has not taken the dashboard's current release
+yet — it last reported an older page over `POST /data/drive/attach`, sent on
+every load and reconnect — any step but `state`, `reload` or `done` is
+refused at once, naming both versions: "the tab still runs 3.69.0's page
+(this client is 3.70.0) … press its update banner or `homelab ui reload`."
+`homelab ui reload` is the fix: it is never refused by this check, tells the
+tab to take the current page, and waits (bounded) for it to report back.
+
+**fix-185 (repository preflight):** before `homelab ui press confirm` (also
+`--wait`) runs the final press of a form that reads the repository (deploy,
+deploy-commit, apply, a batch wrapping one of them — `state.form.reads_repo`
+says which), `homelab ui` checks this machine's own working copy FIRST,
+never the dashboard's: local HEAD must carry no commit the upstream does not
+have yet (`git rev-list @{u}..HEAD`, named in the refusal — "push first,
+Kenny's go"), and every stack involved must pass the same validation
+`homelab apply --plan` runs. Both are refused here, before the dashboard (and
+its own working copy, which fetches origin) is ever asked.
 prints the dashboard's answer as it came. Reading the state needs a token of
 scope `read`; every other step needs `operate`, and the final press also the
 action's own scope (a destroy needs `all`). The final press runs on the

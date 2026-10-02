@@ -3,6 +3,7 @@
 // host); the dashboard shows the same, with the button that opens "Update
 // the host", and says so when it is itself older than the host it talks to.
 
+import { send } from "./act.js";
 import { openAction } from "./actiondialog.js";
 import { fetchJson, h } from "./dom.js";
 import { outdatedPage, versionNotes } from "./parity.js";
@@ -114,6 +115,19 @@ export function mountVersions(root) {
     if (!r.ok) return;
     paint(r.body);
     checkOutdated(r.body.dashboard);
+    // fix-185: tell the driver which version this page actually runs now —
+    // on every load and reconnect, not only while Live view follows, so
+    // `homelab ui` can refuse a step before it lands on a stale page rather
+    // than finding out from the dashboard's own guard afterwards. Best
+    // effort: a page that cannot reach this route is no worse off than
+    // before it existed.
+    if (r.body.dashboard)
+      void send(
+        "POST",
+        "/data/drive/attach",
+        { page_version: r.body.dashboard },
+        "reporting this page's version",
+      );
   };
   const offRelease = listen("release", (v) => paint(v));
   // The host restarts into another version: read the warnings again.

@@ -477,12 +477,16 @@ p:has(> .measured:only-child):first-child {
    buttons line up across groups instead of each row ending ragged. */
 .actions-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
   gap: 8px;
 }
+/* fix-236: every action label is a short verb phrase that fits its column
+   on one line (no wrapping, no cut-off); what it does in full is its
+   tooltip and its dialog's own description. */
 .actions-row > .kp-button {
   justify-content: center;
   text-align: center;
+  white-space: nowrap;
 }
 .actions-running:not(:empty) {
   margin-block-start: 12px;
@@ -557,6 +561,17 @@ p:has(> .measured:only-child):first-child {
   [data-kp-wizard-back] {
   visibility: hidden;
 }
+/* fix-236: the datatable's own "Not sorted." line sat between every
+   table's search bar and its rows as visible noise; the column headers
+   already show the sort. It stays readable to a screen reader. */
+.kp-datatable__sort-line {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 /* fix-225 (Kenny, 2026-10-02: "ik dacht dat de install a release pagina ook
    al met grid hermaakt was?"): every action dialog's step is one grid —
    labels in the first column, controls and their help in the second — so
@@ -595,6 +610,19 @@ p:has(> .measured:only-child):first-child {
 #action-dialog [data-kp-step] > .kp-field > .kp-field__input,
 #action-dialog [data-kp-step] > .kp-field > .kp-field__check {
   grid-row: 1;
+}
+/* fix-236: a text field or a choice keeps a readable width on a wide
+   dialog instead of stretching across 800 px for a short value; the
+   snapshot picker and other rich controls still use the full column. */
+#action-dialog [data-kp-step] > .kp-field > .kp-field__input {
+  max-inline-size: 32rem;
+}
+/* fix-236: the wizard's buttons sit together against the dialog's right
+   edge, where a dialog's actions are expected. */
+#action-dialog .kp-wizard__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 #action-dialog [data-kp-step] > .kp-field > .kp-field__check {
   justify-self: start;
@@ -2730,4 +2758,103 @@ td.stack-flags {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+/* fix-230 (Kenny, 2026-10-02): kp's failed slot — "Could not read the
+   capacity map…" with its Try again — is a flex row, and at 390 px the
+   reason's long words pushed the button past the box's right edge. One
+   grid instead: the reason takes the room (and may break anywhere), Try
+   again sits beside it on a wide screen and under it on a phone, inside
+   the box in every width. The standard error box (`dom.js` errorBox) gets
+   the same one-column grid. */
+.kp-datatable > [data-kp-datatable-failed]:not([hidden]) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: var(--kp-space-md, 0.75rem);
+  row-gap: var(--kp-space-sm, 0.5rem);
+}
+.kp-datatable > [data-kp-datatable-failed] [data-kp-datatable-failed-reason] {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 40rem) {
+  .kp-datatable > [data-kp-datatable-failed]:not([hidden]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .kp-datatable > [data-kp-datatable-failed] [data-kp-datatable-retry] {
+    justify-self: start;
+  }
+}
+.kp-alert.error {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 4px;
+  overflow-wrap: anywhere;
+}
+/* fix-231: the stale-image row's own action column, and its Update
+   dialog — the facts on the shared `.facts` grid, the steps and their
+   states on one three-column grid (number, step, state), so nothing moves
+   sideways as a step goes from waiting to done. */
+.stale__action {
+  white-space: nowrap;
+}
+td.measured.stale__action {
+  white-space: normal;
+  min-width: 14em;
+}
+.stale__latest .state {
+  margin-inline-start: 4px;
+}
+.pin-update {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: var(--kp-space-md, 0.75rem);
+}
+.pin-update > * {
+  margin: 0;
+}
+.pin-update__facts dd strong {
+  display: block;
+}
+.pin-update__ref {
+  display: block;
+  font-size: 0.85em;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.pin-update__h {
+  margin: 0;
+  font-size: 1rem;
+}
+.pin-update__steps {
+  margin: 0;
+  padding-inline-start: 1.5em;
+  display: grid;
+  row-gap: 4px;
+}
+.pin-update__progress {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pin-update__progress > li {
+  display: contents;
+}
+.pin-update__n {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.pin-update .kp-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.pin-update .kp-field--check {
+  margin: 0;
 }

@@ -207,6 +207,11 @@ export function mount(root, ctx) {
   const body = h("div", { class: "activity-body" });
   root.replaceChildren(
     h("div", { class: "title-row" }, h("h1", null, "Activity"), toggle),
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "What the host and the dashboard did, newest first: every operation with its outcome, as a list or on a timeline.",
+    ),
     body,
   );
 

@@ -49,6 +49,12 @@ export function mount(root) {
 
   root.replaceChildren(
     h("h1", null, "Health"),
+    // fix-236: the page says what it is, like every other page (rule 8).
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "Everything about the fleet that needs a look: today's open items, the fleet check against the repository, the host's own doctor and the checks only a person can answer.",
+    ),
     ...sections.map((s) => s.details),
   );
 

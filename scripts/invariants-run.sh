@@ -53,8 +53,8 @@ cp "$root/stacks/gateway/lxc-compose.yml" "$fixture_repo/stacks/gateway/lxc-comp
 mkdir -p "$fixture_repo/stacks/alpha-demo" "$fixture_repo/stacks/beta-demo"
 cat > "$fixture_repo/stacks/beta-demo/lxc-compose.yml" <<'EOF'
 stack_name: beta-demo
-vmid: 901
-hostname: 901-app-beta-demo
+vmid: 351
+hostname: 351-app-beta-demo
 network:
   ip: 10.10.10.91/24
   gateway: 10.10.10.1
@@ -65,12 +65,12 @@ resources:
 lxc:
   template: clone:996
 boot: {}
-apps: []
+apps: [api, web]
 EOF
 cat > "$fixture_repo/stacks/alpha-demo/lxc-compose.yml" <<'EOF'
 stack_name: alpha-demo
-vmid: 902
-hostname: 902-app-alpha-demo
+vmid: 352
+hostname: 352-app-alpha-demo
 network:
   ip: 10.10.10.92/24
   gateway: 10.10.10.1
@@ -86,12 +86,40 @@ apps: []
 # rather than through any firewall rule.
 upstream: "10.10.10.91:8080"
 EOF
+# fix-231: two digest-pinned images in beta-demo (alpha-demo's manifest
+# carries the topology's extra key, which a commit's validation refuses),
+# each declaring an upstream, so the demo host's fleet check (shell/demo.rs
+# `demo_stale_findings`) names them as stale and the Fleet view offers
+# Update on them — the first (api) as a major jump, web as a minor one.
+# Made-up names and digests; nothing here is ever pulled.
+mkdir -p "$fixture_repo/stacks/beta-demo/web" "$fixture_repo/stacks/beta-demo/api"
+cat > "$fixture_repo/stacks/beta-demo/web/docker-compose.yml" <<'EOF'
+services:
+  web:
+    image: example/demo-web:1.4.2@sha256:1111111111111111111111111111111111111111111111111111111111111111
+    container_name: demo-web
+    labels:
+      - "com.homelab.update.policy=manual"
+      - "com.homelab.update.upstream=github.com/example/demo-web"
+EOF
+cat > "$fixture_repo/stacks/beta-demo/api/docker-compose.yml" <<'EOF'
+services:
+  api:
+    image: example/demo-api:v2.3.0@sha256:2222222222222222222222222222222222222222222222222222222222222222
+    labels:
+      - "com.homelab.update.policy=manual"
+      - "com.homelab.update.upstream=github.com/example/demo-api"
+EOF
 
 git init -q -b main "$fixture_repo"
 git -C "$fixture_repo" -c user.email=invariants@example.com -c user.name=invariants \
   add -A
 git -C "$fixture_repo" -c user.email=invariants@example.com -c user.name=invariants \
   commit -q -m "fixture: three stacks for the invariants smoke"
+# fix-231: the dashboard's own commits (the Fleet view's Update of a stale
+# pin) push back into this fixture; a non-bare repository refuses a push to
+# its checked-out branch unless told to move its work tree along.
+git -C "$fixture_repo" config receive.denyCurrentBranch updateInstead
 
 # A free-ish high port, so two runs on one machine (a dev shell and a CI
 # box, say) do not collide on 8090 (the service's own default).

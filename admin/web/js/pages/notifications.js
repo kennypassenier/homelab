@@ -163,6 +163,11 @@ export function mount(root) {
 
   root.replaceChildren(
     h("h1", null, "Notifications"),
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "Every notice the fleet raised, with its history, and where each kind is sent: only urgent ones reach the phone, the desktop and the lights.",
+    ),
     err,
     h(
       "section",

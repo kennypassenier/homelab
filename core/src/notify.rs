@@ -719,11 +719,9 @@ fn retry(label: &str, stack: Option<&str>) -> Option<String> {
             on_stack("Back up (native)", "backup-native")
         }
         "update" | "scheduled-update" => on_stack("Update", "update"),
-        "update-native" | "scheduled-update-native" => {
-            on_stack("Update (native, own policy)", "update-native")
-        }
+        "update-native" | "scheduled-update-native" => on_stack("Update (native)", "update-native"),
         "release-update-native" | "scheduled-release-update" => Some(
-            "Install newest release on the stack page of the stack that runs it, or \
+            "Install newest on the stack page of the stack that runs it, or \
              `homelab release-update-native <stack>`"
                 .into(),
         ),
@@ -739,9 +737,9 @@ fn retry(label: &str, stack: Option<&str>) -> Option<String> {
             Some("Update the host on the host page, or `homelab release-update`".into())
         }
         "patch" => Some("Patch the fleet on the host page, or `homelab patch`".into()),
-        "host-meta-backup" => Some(
-            "Back up the host's own state on the host page, or `homelab backup-host-meta`".into(),
-        ),
+        "host-meta-backup" => {
+            Some("Back up host state on the host page, or `homelab backup-host-meta`".into())
+        }
         "device-backup" => {
             Some("Back up devices on the host page, or `homelab backup-devices`".into())
         }

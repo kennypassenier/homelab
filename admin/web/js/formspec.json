@@ -1792,7 +1792,7 @@
         "name": "commit",
         "id": "rollback-commit",
         "kind": "choice",
-        "label": "Deploy an earlier commit",
+        "label": "Deploy a commit",
         "help": "The stack's files as they were at this commit are deployed (the Deploy this button of its row)."
       },
       {

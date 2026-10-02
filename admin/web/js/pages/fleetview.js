@@ -13,6 +13,16 @@
 // apart. Now there is ONE topology, here, with a "Show measured traffic"
 // toggle; the Firewall page links to it (with the toggle on) instead of
 // drawing its own.
+//
+// [fix-230] (Kenny, Dutch: "zet eens deftige titels per chunk zodat ik
+// direct weet welke tabel hoort te tonen"): every block opens with the
+// shared `sectionHeader` — its name and one sentence saying what it shows —
+// and the tables' own tiny captions, which only repeated that name under
+// it, are kept for screen readers alone (`captionHidden`).
+//
+// [fix-231] the stale images get an Update per row (pinupdate.js), and
+// [fix-232] each row's upstream is an absolute link to the newer version's
+// release page (staleimages.js `releaseUrl`), opening in its own tab.
 
 import { formatValue } from "../charts.js";
 import {
@@ -20,11 +30,14 @@ import {
   errorBox,
   fetchJson,
   h,
+  sectionHeader,
   slowRead,
   tableBlock,
   td,
 } from "../dom.js";
 import { formatDateTime } from "../format.js";
+import { openPinUpdate } from "../pinupdate.js";
+import { majorJump, releaseUrl } from "../staleimages.js";
 import { topologyFigure } from "../topology.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 import { attachSwitches } from "/static/kp/js/forms.js";
@@ -53,6 +66,41 @@ function switchEl(id, label) {
 }
 
 /**
+ * fix-231: one stale row's Update — what it moves to, a MAJOR jump marked
+ * on the button itself (the dialog then asks for the release notes first).
+ * @param {any} x the `/data/stale-images` row
+ * @param {string} stack
+ * @param {string} container
+ * @param {boolean} major
+ */
+function updateButton(x, stack, container, major) {
+  const btn = h(
+    "button",
+    {
+      type: "button",
+      class: "kp-button kp-button--sm",
+      "data-pin-update": "",
+      "data-from": x.pinned,
+      "data-to": x.latest,
+      ...(major ? { "data-major": "" } : {}),
+      title: `Back up ${stack}, move ${x.key} from ${x.pinned} to ${x.latest}, commit and deploy`,
+    },
+    `Update to ${x.latest}`,
+  );
+  btn.addEventListener("click", () => {
+    void openPinUpdate({
+      stack,
+      container,
+      key: x.key,
+      pinned: x.pinned,
+      latest: x.latest,
+      upstream: x.upstream,
+    });
+  });
+  return btn;
+}
+
+/**
  * @param {HTMLElement} root
  * @returns {() => void}
  */
@@ -68,6 +116,7 @@ export function mount(root) {
   trafficSwitch.input.checked = trafficWanted;
   const capacity = tableBlock({
     remember: "capacity-map",
+    captionHidden: true,
     caption: "Capacity map",
     search: "Search stacks",
     state: "loading",
@@ -81,6 +130,7 @@ export function mount(root) {
   });
   const growth = tableBlock({
     remember: "disk-growth",
+    captionHidden: true,
     caption: "Disk growth",
     search: "Search filesystems",
     state: "loading",
@@ -96,6 +146,7 @@ export function mount(root) {
   });
   const deps = tableBlock({
     remember: "dependencies",
+    captionHidden: true,
     caption: "Dependencies between stacks",
     search: "Search stacks",
     state: "loading",
@@ -108,6 +159,7 @@ export function mount(root) {
   });
   const stale = tableBlock({
     remember: "stale-images",
+    captionHidden: true,
     caption: "Stale images",
     search: "Search images",
     state: "loading",
@@ -118,6 +170,7 @@ export function mount(root) {
       { label: "Upstream", sort: "text" },
       { label: "Latest", sort: "text" },
       { label: "Released", sort: "text" },
+      { label: "Action", sort: "none" },
     ],
   });
   const staleStatus = h("p", { class: "measured" });
@@ -131,30 +184,53 @@ export function mount(root) {
     ),
     h(
       "section",
-      { class: "kp-card", "aria-label": "Topology" },
-      h("h2", null, "Topology"),
+      { class: "kp-card fleetview__block", "aria-label": "Topology" },
+      sectionHeader(
+        "Topology",
+        "Which container talks to which, from the stack files and the firewall state the host enforces now.",
+      ),
       h(
         "p",
         { class: "measured" },
-        'Which container talks to which, derived from the stack files and the live firewall state on the host. Turn on "Show measured traffic" to size each stack\'s ring by its own total network throughput (bytes/s from Prometheus, received + transmitted) — that ring is per stack, not per connection: the fleet has no per-neighbour flow metric.',
+        'Turn on "Show measured traffic" to size each stack\'s ring by its own total network throughput (bytes/s from Prometheus, received + transmitted) — that ring is per stack, not per connection: the fleet has no per-neighbour flow metric.',
       ),
       trafficSwitch.wrap,
       topoBox,
     ),
     h(
       "section",
-      { class: "kp-card", "aria-label": "Capacity map" },
+      { class: "kp-card fleetview__block", "aria-label": "Capacity map" },
+      sectionHeader(
+        "Capacity map",
+        "CPU, memory and disk per stack, measured now from the fleet's metrics.",
+      ),
       capacity.wrap,
     ),
     h(
       "section",
-      { class: "kp-card", "aria-label": "Disk growth" },
+      { class: "kp-card fleetview__block", "aria-label": "Disk growth" },
+      sectionHeader(
+        "Disk growth",
+        "Which filesystems fill up, and when each would be full at its current trend.",
+      ),
       growth.wrap,
     ),
-    h("section", { class: "kp-card", "aria-label": "Dependencies" }, deps.wrap),
     h(
       "section",
-      { class: "kp-card", "aria-label": "Stale images" },
+      { class: "kp-card fleetview__block", "aria-label": "Dependencies" },
+      sectionHeader(
+        "Dependencies between stacks",
+        "Which stack needs which, derived from the firewall rules each stack declares.",
+      ),
+      deps.wrap,
+    ),
+    h(
+      "section",
+      { class: "kp-card fleetview__block", "aria-label": "Stale images" },
+      sectionHeader(
+        "Stale images",
+        "Pinned images whose upstream has a newer release; Update backs the stack up, moves the pin and deploys it.",
+      ),
       stale.wrap,
       staleStatus,
     ),
@@ -294,12 +370,10 @@ export function mount(root) {
       );
     });
     growth.tbody.replaceChildren(...rows);
-    if (rows.length) growth.ready();
-    else
-      growth.loading({
-        words: "No growing filesystem has enough history yet.",
-        overlay: false,
-      });
+    // fix-230: no rows is an answer, not a load still on its way — kp's
+    // empty box says "No growing filesystem has enough history yet."
+    // (spec.nothing) instead of a spinner counting seconds for ever.
+    growth.ready();
   })().catch(() => {});
 
   void (async () => {
@@ -333,17 +407,60 @@ export function mount(root) {
    * @param {any} body
    */
   const paintStale = (body) => {
-    const rows = (body.images ?? []).map((/** @type {any} */ x) =>
-      h(
+    const rows = (body.images ?? []).map((/** @type {any} */ x) => {
+      const major = majorJump(x.pinned, x.latest);
+      const notes = releaseUrl(x.upstream, x.latest);
+      const [stack, container] = String(x.where_).split("/");
+      return h(
         "tr",
         { "data-kp-row-key": x.where_ },
         td(x.where_),
         td(x.pinned),
-        td(x.upstream),
-        td(x.latest),
+        h(
+          "td",
+          null,
+          notes
+            ? h(
+                "a",
+                {
+                  href: notes,
+                  target: "_blank",
+                  rel: "noopener noreferrer",
+                  title: `The ${x.latest} release notes, in a new tab`,
+                },
+                x.upstream,
+              )
+            : x.upstream,
+        ),
+        h(
+          "td",
+          { class: "stale__latest" },
+          x.latest,
+          ...(major
+            ? [
+                " ",
+                h(
+                  "span",
+                  { class: "state warn", title: "The first number changes" },
+                  h("span", null, "major"),
+                ),
+              ]
+            : []),
+        ),
         td(x.released ?? "—"),
-      ),
-    );
+        x.key
+          ? h(
+              "td",
+              { class: "stale__action" },
+              updateButton(x, stack, container, major),
+            )
+          : h(
+              "td",
+              { class: "measured stale__action" },
+              "updated with a homelab release, not from here",
+            ),
+      );
+    });
     stale.tbody.replaceChildren(...rows);
     if (body.measured_at)
       staleStatus.textContent = `measured ${formatDateTime(body.measured_at)} (reuses the fleet check's own run)`;

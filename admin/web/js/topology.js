@@ -327,7 +327,8 @@ export function topologyFigure(topo, opts = {}) {
   return h(
     "figure",
     { class: "topology" },
-    h("figcaption", null, opts.caption ?? "Topology"),
+    // fix-230: the section heading above names it; kept for screen readers.
+    h("figcaption", { class: "kp-sr-only" }, opts.caption ?? "Topology"),
     svgEl,
     h(
       "ul",

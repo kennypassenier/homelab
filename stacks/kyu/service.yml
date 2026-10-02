@@ -46,6 +46,11 @@ release_asset: kyu
 # is looking at. The reverse of the moving rule, where those three travel
 # together.
 backup_from_newest: /appdata/kyu/kyu-config/kyu.backup-*.db
+# fix-113 (owner decision, Kenny 2026-10-01): kyu 4.2.0 joined the chassis-rs
+# kit's backup-pause/backup-resume (feat-backup-1), so the hub holds its writes
+# while the rest of kyu-config (the TLS terminator's certificate among it) is
+# read. Falls back to stopping the unit when the binary predates it.
+backup_pause: chassis
 # fix-146 (native-empty-rebuild, 2026-10-01): the automation of the RESTORE
 # NOTE above. Runs inside the container, after the archive is unpacked and
 # before the unit starts — on both the automatic empty-rebuild path and a

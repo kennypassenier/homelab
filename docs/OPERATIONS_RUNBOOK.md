@@ -251,13 +251,13 @@ notifications over `https://` instead of plain `http://`: `kyu-tls.service`
 (declared in `stacks/kyu`, the hub's own project untouched) terminates TLS
 on :8443 with a self-signed certificate and forwards to the hub's own
 :8080. The certificate is generated at deploy (`kyu-tls-cert`, idempotent,
-renews itself within 30 days of expiry) into `/appdata/kyu/tls`, which the
+renews itself within 30 days of expiry) into `/appdata/kyu/kyu-config/tls`, which the
 normal per-stack backup covers like any other kyu mount.
 
 - *A sender* (the host's `notify_webhook`/`notify_fallback_webhook`, or the
   dashboard's `HOMELAB_ADMIN_NOTIFY_URL`) switches to `https://10.10.10.9:8443/…`
   only once it also has the certificate pinned: copy
-  `/appdata/kyu/tls/hub.pem` to the sending machine, read its fingerprint
+  `/appdata/kyu/kyu-config/tls/hub.pem` to the sending machine, read its fingerprint
   (`openssl x509 -in hub.pem -noout -fingerprint -sha256`, lowercase,
   colons removed), and set both `notify_tls_cert`
   (host.toml)/`HOMELAB_ADMIN_NOTIFY_TLS_CERT` (admin.env) to the file's path

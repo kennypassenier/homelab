@@ -1,15 +1,18 @@
 # traefik-docker-socket (expert panel 2026-09-27, fix-167): this proxy is the
 # only container still touching /var/run/docker.sock, narrowed to the one
 # endpoint Traefik's docker provider calls. There is no route and no
-# published port to prove it from outside — the only honest reading is the
-# proxy answering its own `_ping` the way the container's healthcheck already
-# does, asked the same way Traefik does: inside the gateway_net.
+# published port to prove it from outside, so it is asked from inside, for
+# the very thing Traefik asks it: the container list (CONTAINERS=1), which
+# must name Traefik itself. A proxy that only answers `_ping` while refusing
+# /containers would leave Traefik blind; this reading catches that.
 checks:
-  - name: "socket-proxy antwoordt op _ping"
-    command: "docker exec socket-proxy wget -qO- http://localhost:2375/_ping"
+  - name: "socket-proxy geeft de containerlijst door"
+    command: >-
+      docker exec socket-proxy wget -qO- http://localhost:2375/containers/json |
+      grep -q '"/traefik"' && echo ok
     expect: must_be_present
-    layer: process
+    layer: application
     blind_spot: >-
-      Only that the proxy's HTTP endpoint answers, not that Traefik's docker
-      provider actually reads the CrowdSec bouncer label through it — that is
-      the routes check in stacks/gateway/traefik/checks.yml.
+      Only that the proxy serves the container list, not that Traefik's docker
+      provider reads the CrowdSec bouncer label through it; that is the routes
+      check in stacks/gateway/traefik/checks.yml.

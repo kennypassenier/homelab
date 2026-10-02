@@ -12,7 +12,7 @@ OnFailure=kyu-alert@%n.service
 
 [Service]
 Type=simple
-Environment=KYU_TLS_DIR=/appdata/kyu/tls
+Environment=KYU_TLS_DIR=/appdata/kyu/kyu-config/tls
 # Regenerates the certificate only when it is missing or near expiry
 # (kyu-tls-cert is idempotent); runs before every start, including a
 # restart, so a certificate is always in place before socat opens the port.
@@ -25,7 +25,7 @@ ExecStartPre=/usr/local/bin/kyu-tls-cert
 # server's — a sender authenticates with its bearer token, the same as the
 # plain-http route it is migrating from.
 ExecStart=/usr/bin/socat -d -d \
-    OPENSSL-LISTEN:8443,reuseaddr,fork,cert=/appdata/kyu/tls/hub.pem,key=/appdata/kyu/tls/hub.key,verify=0 \
+    OPENSSL-LISTEN:8443,reuseaddr,fork,cert=/appdata/kyu/kyu-config/tls/hub.pem,key=/appdata/kyu/kyu-config/tls/hub.key,verify=0 \
     TCP:127.0.0.1:8080
 Restart=on-failure
 RestartSec=5

@@ -14,8 +14,9 @@ data_dirs:
   - /var/lib/inbox
 # update_cmd deliberately absent until chassis-rs has a real release pipeline
 # (the drill server on Kenny's PC is not a release host); the nightly run backs up only.
-release_repo: kennypassenier/chassis-rs
-release_asset: inbox
+# No release_repo: chassis-rs publishes no binary (the kit ships none), so
+# there is nothing to fetch and inbox stays adopt-only; naming the repo made
+# every apply try a download that cannot succeed (2026-10-02).
 # fix-113 (owner decision, Kenny 2026-10-01): inbox is paused for its nightly
 # backup through the chassis-rs kit's own backup-pause/backup-resume
 # subcommand (chassis-rs commit 722249b) rather than a plain systemctl stop.

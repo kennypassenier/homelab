@@ -148,3 +148,33 @@ summarised here for the corrections record.
 9. **Wanneer herzien we de maatregel.** At the measurement in field 7,
    once inbox has actually been redeployed.
 
+
+## 2026-10-02 · "The dashboard runs 3.70.0", said without measuring
+
+**Status: open (owner not yet asked to ratify).**
+
+1. **Wat ging er mis.** After the dashboard's install-native job, Claude
+   told Kenny the dashboard ran 3.70.0 because the re-attached tab reported
+   page `/`. Kenny's tab still ran the 3.69 page (the version banner with
+   its update button was showing), and the next Live view steps, sent by a
+   3.70 client with 3.70 routes, misbehaved on it. Kenny had to press Stop
+   twice and explain the cause himself.
+2. **Welke poort liet het door.** None existed: `homelab ui` never compares
+   the driven tab's page version with the client's, and the claim rested on
+   a page path that the 3.69 build (deployed from main on 2026-10-01)
+   already had. The binary was in fact 3.70.0 (`homelab-admin --version` on
+   CT 120); the loaded page was not.
+3. **Waar zit dezelfde fout nog.** Any "it runs version X" read from a page
+   path, a route or a title instead of `--version` or the served version.
+4. **Hoe voorkomen we herhaling.** A version claim cites `--version` (or the
+   served version) of the running binary AND of the driven tab; Live view
+   refuses a step to a tab whose page version differs from the client's,
+   with the reason (register row filed with the 3.70.1 fixes).
+5–6. **Kost / handhaving.** Code-enforced for Live view once built; the
+   citation rule is this entry until then.
+7. **Hoe en wanneer meten we dat het werkt.** At the 3.70.1 rollout: drive
+   one step against a tab left on the old page and see it refused with the
+   reason.
+8. **Fallback.** Kenny clicks the banner's update button; Claude asks for it
+   instead of driving.
+9. **Wanneer herzien we de maatregel.** At the measurement in field 7.

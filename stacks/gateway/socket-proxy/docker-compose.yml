@@ -52,7 +52,11 @@ services:
       - DISTRIBUTION=0
       - POST=0
     restart: unless-stopped
-    read_only: true
+    # Not read_only: the image's entrypoint renders haproxy.cfg from a
+    # template beside it at every start, so a read-only root fails at once
+    # ("can't create /usr/local/etc/haproxy/haproxy.cfg", 2026-10-02), and a
+    # tmpfs there hides the template. Least privilege stays in the API
+    # flags above (measured locally: /containers 200, /images 403).
     security_opt:
       - no-new-privileges:true
     labels:

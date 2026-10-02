@@ -52,6 +52,12 @@ are not style preferences; ignoring them costs him the ability to steer.
 7. **A version check informs, it never blocks** (Kenny, 2026-10-02): it
    says which pages and commands the other side supports.
 
+8. **Every section and every action says what it does** (Kenny, 2026-10-02:
+   "ik moet niet raden naar wat een functie doet, alles moet duidelijk
+   zijn"): each top-level section on every page has a heading and a
+   one-sentence description, every action button a short description; every
+   page that loads data shows that it is loading from the first frame.
+
 Both failures look identical from his side: he answered, and then had to
 argue with the answer.
 

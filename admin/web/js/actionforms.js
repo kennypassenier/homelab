@@ -43,7 +43,8 @@ import SPEC from "./formspec.json" with { type: "json" };
  * @typedef {{id: string, action: string, target: "stack" | "host",
  *   stack: string, title: string, what: string, submit: string,
  *   steps: Step[], confirmName: string | null, refused: string | null,
- *   destructive: boolean, runPath: string, previewPath: string}} ActionForm
+ *   destructive: boolean, runPath: string, previewPath: string,
+ *   intro: string | null}} ActionForm
  * @typedef {Record<string, string | boolean>} Values
  * @typedef {{force?: boolean, confirm?: string, snapshot?: string,
  *   app?: string, unit?: string, skip_backup?: boolean,
@@ -218,7 +219,35 @@ export function actionForm(entry, ctx) {
     destructive: entry.scope === "all",
     runPath: `/data/actions/${encodeURIComponent(stack)}/${entry.action}`,
     previewPath: `/data/actions/${encodeURIComponent(stack)}/${entry.action}/preview`,
+    intro: /** @type {Record<string, string>} */ (SPEC.intro)[entry.action]
+      ? fill(/** @type {Record<string, string>} */ (SPEC.intro)[entry.action], {
+          stack,
+        })
+      : null,
   };
+}
+
+/**
+ * The field names a preset value locks: the row or page that opened this
+ * dialog already chose them, so the form shows them read-only with a
+ * "Change" affordance instead of asking again (fix-216). `snapshot` is
+ * never locked this way — it gets its own picker instead.
+ */
+export const LOCKABLE_FIELDS = /** @type {const} */ (["app", "unit", "commit"]);
+
+/**
+ * Which of a form's fields should open locked: every `LOCKABLE_FIELDS`
+ * name the form actually has, for which `preset` gives a non-empty value
+ * (fix-216 — one shared mechanism, not a per-dialog list of what to lock).
+ * @param {ActionForm} form
+ * @param {Values} [preset]
+ * @returns {string[]}
+ */
+export function lockedFields(form, preset = {}) {
+  const names = new Set(formFields(form).map((f) => f.name));
+  return LOCKABLE_FIELDS.filter(
+    (n) => names.has(n) && typeof preset[n] === "string" && preset[n] !== "",
+  );
 }
 
 /**

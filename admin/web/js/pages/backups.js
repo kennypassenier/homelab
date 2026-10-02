@@ -115,7 +115,13 @@ function restoreCell(stack, native, r) {
     "click",
     () =>
       void openAction(stack, native ? "restore-native" : "restore", {
-        preset: { snapshot: r.newest_snapshot.short_id },
+        // fix-216: this row already says which app (or native unit) and
+        // which snapshot is newest — the dialog opens with both, the app
+        // locked read-only (a native stack has no separate app field: the
+        // unit is the whole of `stack`), never asked again.
+        preset: native
+          ? { snapshot: r.newest_snapshot.short_id }
+          : { app: r.owner, snapshot: r.newest_snapshot.short_id },
       }),
   );
   return [btn];

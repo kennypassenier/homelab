@@ -543,6 +543,7 @@ async fn read_backup_calendar(
 /// ones fix-83's pin check writes (`crate::core::stale_images`).
 async fn stale_images(State(c): State<ParityCtx>, Query(q): Query<RunQuery>) -> Response {
     let read = c.check_read.clone();
+    let repo = c.repo.clone();
     let resp = read.read(q.run, WAIT, move || read_fleet_check(c)).await;
     // read_fleet_check's own 202/error shapes (still running, or the host
     // could not be reached) pass straight through unfiltered; only a
@@ -564,7 +565,28 @@ async fn stale_images(State(c): State<ParityCtx>, Query(q): Query<RunQuery>) -> 
     let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
     let findings: Vec<crate::core::stale_images::FindingLike> =
         serde_json::from_value(body["findings"].clone()).unwrap_or_default();
-    let rows = crate::core::stale_images::from_findings(&findings);
+    let mut rows = crate::core::stale_images::from_findings(&findings);
+    // fix-231: which `<app>/<service>` of the working copy each row is, so
+    // the page offers Update only on a pin a stack file holds.
+    rows = tokio::task::spawn_blocking(move || {
+        let mut texts: std::collections::BTreeMap<String, crate::core::stackedit::StackTexts> =
+            Default::default();
+        for row in &mut rows {
+            let Some((stack, container)) = row.where_.split_once('/') else {
+                continue;
+            };
+            if !crate::core::actions::valid_stack_name(stack) {
+                continue;
+            }
+            let t = texts
+                .entry(stack.to_string())
+                .or_insert_with(|| super::workcopy::read_texts(&repo.join("stacks").join(stack)));
+            row.key = crate::core::stale_images::locate(t, container);
+        }
+        rows
+    })
+    .await
+    .unwrap_or_default();
     (
         StatusCode::OK,
         Json(serde_json::json!({

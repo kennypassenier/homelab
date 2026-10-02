@@ -13,6 +13,7 @@ pub mod host_link;
 pub mod hostlog;
 pub mod loki;
 pub mod parity;
+pub mod pinupdate;
 pub mod prometheus;
 pub mod queryflag;
 pub mod releases;

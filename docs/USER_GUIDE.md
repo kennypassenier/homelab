@@ -3383,7 +3383,21 @@ decisions behind each one.
     on (fix-83, `homelab_core::ops::pins::evaluate_pins`), parsed into a
     table instead of a sentence — it reads the same run the Health page's
     fleet check uses (`check_read`), so visiting both never starts the
-    read twice.
+    read twice. Each row's upstream links to the newer version's release
+    page on GitHub, in a new tab (fix-232). **Update to <latest>**
+    (fix-231) opens a dialog that names the move (from → to, the new
+    `image:` reference with the digest its registry gives for the new tag,
+    read from `/data/stacks/{stack}/pin-target`), then runs, in order: the
+    stack's Backup action; the stack editor's own commit of the rewritten
+    `image:` line; the deploy of exactly that commit. A failed or deferred
+    backup stops it before anything changes. A MAJOR version jump (the first
+    number differs, e.g. 10.11.11 → v12.1) is marked and needs "I read the
+    release notes for this major version" ticked before Confirm. When it
+    ends, **Roll back to <old>** puts the old reference back the same way.
+    A pin that lives in no stack file (the guards' metrics agent, kept in
+    code) reads "updated with a homelab release, not from here".
+- Every Fleet view block opens with a heading and one sentence saying what
+  it shows (fix-230).
 - **Backup calendar** (`/backupcalendar`, feat-overview-10): the last
   35 nights, one cell per day, green when every stack that keeps data has
   at least one restic snapshot that night, amber for some, red for none.

@@ -2518,6 +2518,19 @@ pub fn mount(
     if demo_host {
         app.dashboard_routes(super::drive::demo_router(driver.clone()));
     }
+    // fix-231: the Fleet view's Update of a stale pin asks for its new
+    // reference here; the demo host's registry is made up, never asked.
+    #[cfg_attr(not(feature = "demo-host"), allow(unused_mut))]
+    let mut resolve: super::pinupdate::Resolver =
+        Arc::new(homelab_client::pinexists::resolve_digest);
+    #[cfg(feature = "demo-host")]
+    if demo_host {
+        resolve = Arc::new(super::demo::demo_resolve);
+    }
+    app.dashboard_routes(super::pinupdate::router(super::pinupdate::PinCtx {
+        wc: wc.clone(),
+        resolve,
+    }));
     let _ = demo_host;
     // TUI parity: releases (Update host, install-native, the badge), the
     // host's log stream, and the read routes the TUI and CLI had alone.

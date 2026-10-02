@@ -88,13 +88,16 @@ export function badgeCell(st) {
  * @param {{remember: string, caption: string, search: string,
  *   columns: Column[], state?: "loading", pageSize?: number,
  *   pageSizes?: string, select?: {label: string, actions: Node[]},
- *   nothing?: string, busyOverlay?: boolean}} spec
+ *   nothing?: string, busyOverlay?: boolean, captionHidden?: boolean}} spec
  *   pageSize/pageSizes: page a long table (the logs) instead of showing
  *   every row. select: a checkbox column first and an action bar that
  *   shows while rows are ticked; each row brings its own
  *   `selectCell(key)`. nothing: the empty box's words when the table has
  *   no rows at all. busyOverlay: false leaves out the big loading layer
- *   over the rows (`busyOverlay`; on by default).
+ *   over the rows (`busyOverlay`; on by default). captionHidden: the
+ *   caption stays for a screen reader but is not drawn — for a table whose
+ *   section heading (`sectionHeader`) already names it right above
+ *   (fix-230: the tiny caption repeated the heading under it).
  */
 export function tableBlock(spec) {
   const tbody = h("tbody");
@@ -203,7 +206,11 @@ export function tableBlock(spec) {
       h(
         "table",
         { class: "kp-table grid" },
-        h("caption", null, spec.caption),
+        h(
+          "caption",
+          spec.captionHidden ? { class: "kp-sr-only" } : null,
+          spec.caption,
+        ),
         h("thead", null, head),
         tbody,
       ),

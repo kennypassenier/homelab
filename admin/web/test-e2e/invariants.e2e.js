@@ -20,7 +20,7 @@ import { chromium } from "playwright";
 // it, a ReferenceError this suite's own runs apparently never surfaced
 // loudly enough to get fixed; found while adding this file's own fix-210
 // cases, which need the same list.
-import { DRIVABLE_PATHS } from "../js/router.js";
+import { DRIVABLE_PATHS, route } from "../js/router.js";
 
 const BASE = process.env.INVARIANTS_BASE_URL ?? "http://127.0.0.1:8099";
 const TOKEN = process.env.INVARIANTS_TOKEN ?? "test-invariants-token-1234";
@@ -1402,6 +1402,239 @@ test("invariants: every action dialog lays its fields on one grid — labels on 
       await dialog.waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});
     }
     assert.ok(measured >= 2, `only ${measured} dialogs had fields to measure`);
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── fix-230/231/232: the Fleet view's blocks, its stale images, and every
+// link (Kenny, 2026-10-02, Dutch: "zet eens deftige titels per chunk zodat
+// ik direct weet welke tabel hoort te tonen"; "ik zie die tabel wel, maar er
+// zijn geen actions aan verbonden?"; "en de links werken niet") ──────────
+
+test("invariants: every Fleet view block has a heading and a one-sentence description, and no table repeats its heading as a caption", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1920, height: 1080 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/fleetview`);
+    await page.waitForTimeout(600);
+    const blocks = await page.evaluate(() =>
+      [...document.querySelectorAll("#page > section")].map((s) => {
+        const head = s.querySelector(":scope > .section-head h2");
+        const desc = s.querySelector(
+          ":scope > .section-head .section-head__desc",
+        );
+        const captions = [...s.querySelectorAll("caption")].filter(
+          (c) => c.getBoundingClientRect().height > 1,
+        );
+        return {
+          label: s.getAttribute("aria-label") ?? "",
+          heading: head?.textContent?.trim() ?? "",
+          desc: desc?.textContent?.trim() ?? "",
+          visibleCaptions: captions.map((c) => c.textContent?.trim() ?? ""),
+        };
+      }),
+    );
+    assert.ok(blocks.length >= 5, `expected 5 blocks, got ${blocks.length}`);
+    for (const b of blocks) {
+      assert.ok(b.heading.length > 0, `block "${b.label}" has no h2 heading`);
+      assert.ok(
+        b.desc.length >= 20 && /[a-z]/.test(b.desc),
+        `block "${b.heading || b.label}" has no one-sentence description`,
+      );
+      assert.deepEqual(
+        b.visibleCaptions,
+        [],
+        `block "${b.heading}" repeats a visible table caption under its heading`,
+      );
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: a stale-image row offers Update with the from/to versions, and a major jump requires the release-notes tick", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/fleetview`);
+    const updates = page.locator(
+      'section[aria-label="Stale images"] button[data-pin-update]',
+    );
+    await updates.first().waitFor({ timeout: 15000 });
+    // A pin that lives in code (the demo's made-up agent on several stacks)
+    // says where it is updated instead of offering a button.
+    const elsewhere = page.locator('section[aria-label="Stale images"] td', {
+      hasText: "updated with a homelab release, not from here",
+    });
+    assert.ok(
+      (await elsewhere.count()) >= 1,
+      "a pin that lives outside the stack files must say it is updated with a homelab release",
+    );
+
+    // Each source link is an absolute https link to the newer release's
+    // page, opening in a new tab.
+    const links = await page
+      .locator('section[aria-label="Stale images"] tbody a')
+      .evaluateAll((as) =>
+        as.map((a) => ({
+          href: a.getAttribute("href") ?? "",
+          target: a.getAttribute("target") ?? "",
+          rel: a.getAttribute("rel") ?? "",
+        })),
+      );
+    assert.ok(links.length >= 1, "the stale-image rows have no source link");
+    for (const l of links) {
+      assert.match(
+        l.href,
+        /^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/tag\/[^/]+$/,
+        `not a release-page link: ${l.href}`,
+      );
+      assert.equal(l.target, "_blank");
+      assert.match(l.rel, /noopener/);
+    }
+
+    // The row marked as a major jump: the dialog names from and to, warns,
+    // and keeps Confirm off until the release notes are ticked as read.
+    const major = page.locator(
+      'section[aria-label="Stale images"] button[data-pin-update][data-major]',
+    );
+    assert.ok((await major.count()) >= 1, "no major-jump row in the demo");
+    const from = (await major.first().getAttribute("data-from")) ?? "";
+    const to = (await major.first().getAttribute("data-to")) ?? "";
+    assert.match(await major.first().innerText(), /Update to/);
+    await major.first().click();
+    const dialog = page.locator("dialog#action-dialog[open]");
+    await dialog.waitFor({ timeout: 5000 });
+    const confirm = dialog.locator("button[data-pin-confirm]");
+    await confirm.waitFor({ timeout: 10000 });
+    const text = await dialog.innerText();
+    assert.ok(
+      text.includes(from),
+      `the dialog does not name the pinned ${from}`,
+    );
+    assert.ok(text.includes(to), `the dialog does not name the target ${to}`);
+    assert.match(text, /major/i);
+    const tick = dialog.getByLabel(
+      "I read the release notes for this major version",
+    );
+    assert.equal(await tick.isChecked(), false);
+    assert.equal(
+      await confirm.isEnabled(),
+      false,
+      "Confirm must stay off until the release notes are ticked",
+    );
+    await tick.check();
+    assert.equal(
+      await confirm.isEnabled(),
+      true,
+      "the tick must enable Confirm",
+    );
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});
+
+    // A minor move asks no tick: Confirm is on at once.
+    const minor = page.locator(
+      'section[aria-label="Stale images"] button[data-pin-update]:not([data-major])',
+    );
+    assert.ok((await minor.count()) >= 1, "no minor-jump row in the demo");
+    await minor.first().click();
+    await dialog.waitFor({ timeout: 5000 });
+    const confirm2 = dialog.locator("button[data-pin-confirm]");
+    await confirm2.waitFor({ timeout: 10000 });
+    assert.equal(
+      await dialog
+        .getByLabel("I read the release notes for this major version")
+        .count(),
+      0,
+    );
+    assert.equal(await confirm2.isEnabled(), true);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: every link on every drivable page has an absolute http(s) href or a same-site path that resolves", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const skip = new Set(["apply", "shell", "log", "passkeys"]);
+    const paths = [
+      ...DRIVABLE_PATHS.filter((p) => !skip.has(p)).map((p) => `/${p}`),
+      "/stacks/kp-soft",
+    ];
+    /** @type {string[]} */
+    const bad = [];
+    /** @type {Map<string, string>} where each same-site path was first seen */
+    const sameSite = new Map();
+    for (const p of paths) {
+      await page.goto(`${BASE}${p}`, { waitUntil: "load" });
+      await page.waitForTimeout(1200);
+      // Expandable rows hold their own links: open every one first.
+      await page.evaluate(() => {
+        for (const b of document.querySelectorAll(
+          "#page [data-kp-row-toggle]:not([aria-expanded='true'])",
+        ))
+          /** @type {HTMLElement} */ (b).click();
+      });
+      await page.waitForTimeout(200);
+      const hrefs = await page.evaluate(() =>
+        [...document.querySelectorAll("a[href]")].map(
+          (a) => a.getAttribute("href") ?? "",
+        ),
+      );
+      // A repository address shown as text reads as a link and is not one
+      // ("en de links werken niet"): it must be a real, absolute link.
+      const deadText = await page.evaluate(() => {
+        const out = [];
+        const walk = document.createTreeWalker(
+          document.getElementById("page") ?? document.body,
+          NodeFilter.SHOW_TEXT,
+        );
+        for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+          const m =
+            /\b(?:github\.com|gitlab\.com|codeberg\.org)\/[\w.-]+\/[\w.-]+/.exec(
+              n.textContent ?? "",
+            );
+          if (!m) continue;
+          const a = n.parentElement?.closest("a[href]");
+          if (!a || !/^https?:\/\//.test(a.getAttribute("href") ?? ""))
+            out.push(m[0]);
+        }
+        return out;
+      });
+      for (const t of deadText)
+        bad.push(`${p}: "${t}" is shown as text, not as a working link`);
+      for (const href of hrefs) {
+        if (/^https?:\/\/[^/\s]+/.test(href)) continue;
+        if (href.startsWith("/") && !href.startsWith("//")) {
+          if (!sameSite.has(href)) sameSite.set(href, p);
+          continue;
+        }
+        bad.push(
+          `${p}: ${JSON.stringify(href)} has no scheme and no leading /`,
+        );
+      }
+    }
+    for (const [href, where] of sameSite) {
+      const path = href.split(/[?#]/)[0];
+      if (route(path).page !== "notfound") continue;
+      const r = await page.request.get(`${BASE}${path}`, { maxRedirects: 0 });
+      if (r.status() >= 400)
+        bad.push(`${where}: ${href} does not resolve (${r.status()})`);
+      else if (!/^\/(data|static|login|logout|hooks|healthz)\b/.test(path))
+        bad.push(`${where}: ${href} is no page of this dashboard`);
+    }
+    assert.deepEqual(bad, [], `broken links:\n${bad.join("\n")}`);
   } finally {
     await browser.close();
   }

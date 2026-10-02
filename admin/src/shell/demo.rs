@@ -173,6 +173,137 @@ fn metric_key(query: &str) -> &'static str {
 /// them, reads answer empty, and every command that would change something
 /// only prints three step lines and answers "complete". Nothing leaves the
 /// machine.
+/// fix-231: the demo host's stand-in for fix-83's pin check — one `Noted`
+/// finding per digest-pinned image in the working copy that declares an
+/// upstream (`com.homelab.update.upstream`), worded exactly as
+/// `homelab_core::ops::pins::evaluate_pins` writes it. Generic: whatever
+/// the working copy holds. The first such image (stack, then file order)
+/// is made a MAJOR jump, every other one a minor one, so the Fleet view's
+/// dialog shows both. One more finding names a made-up pin on two stacks
+/// that lives in no stack file (the shape of a pin kept in code), so the
+/// table's "updated with a homelab release" row has something to show.
+pub fn demo_stale_findings(repo: &std::path::Path, stacks: &[String]) -> Vec<serde_json::Value> {
+    use homelab_core::ops::pins::pinned_version;
+    let mut out = Vec::new();
+    let mut names: Vec<String> = std::fs::read_dir(repo.join("stacks"))
+        .map(|d| {
+            d.flatten()
+                .filter(|e| e.path().is_dir())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    for stack in &names {
+        let texts = super::workcopy::read_texts(&repo.join("stacks").join(stack));
+        for (path, text) in &texts {
+            if !path.ends_with("docker-compose.yml") {
+                continue;
+            }
+            let Ok(v) = serde_yaml::from_str::<serde_yaml::Value>(text) else {
+                continue;
+            };
+            let Some(serde_yaml::Value::Mapping(services)) = v.get("services") else {
+                continue;
+            };
+            for (service, s) in services {
+                let (Some(service), Some(image)) =
+                    (service.as_str(), s.get("image").and_then(|i| i.as_str()))
+                else {
+                    continue;
+                };
+                let Some(version) = pinned_version(image).filter(|_| image.contains('@')) else {
+                    continue;
+                };
+                let upstream = s
+                    .get("labels")
+                    .and_then(|l| l.as_sequence())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|l| l.as_str())
+                    .find_map(|l| l.strip_prefix(homelab_core::ops::pins::UPSTREAM_LABEL))
+                    .and_then(|l| l.strip_prefix('='))
+                    .map(str::to_string);
+                let Some(upstream) = upstream else { continue };
+                let container = s
+                    .get("container_name")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or(service);
+                let latest = demo_bump(&version, out.is_empty());
+                out.push(serde_json::json!({
+                    "severity": "Noted",
+                    "subject": format!("{stack}/{container}"),
+                    "what": format!("pinned to {version}; upstream {upstream} released {latest} on 2026-09-30"),
+                    "remedy": "nothing is urgent (demo host)",
+                }));
+            }
+        }
+    }
+    let two: Vec<&String> = stacks.iter().take(2).collect();
+    if !two.is_empty() {
+        out.push(serde_json::json!({
+            "severity": "Noted",
+            "subject": two.iter().map(|s| format!("{s}/demo-agent")).collect::<Vec<_>>().join(", "),
+            "what": "pinned to v0.1.0; upstream github.com/example/demo-agent released v0.2.0 on 2026-09-28",
+            "remedy": "nothing is urgent (demo host)",
+        }));
+    }
+    out
+}
+
+/// A made-up newer version of `v`, keeping its own `v` prefix: the first
+/// number up by one (a major jump) or the second (a minor one).
+fn demo_bump(v: &str, major: bool) -> String {
+    let (prefix, rest) = match v.strip_prefix('v') {
+        Some(r) => ("v", r),
+        None => ("", v),
+    };
+    let mut parts: Vec<u64> = rest
+        .split('.')
+        .map(|p| {
+            p.chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse()
+                .unwrap_or(0)
+        })
+        .collect();
+    while parts.len() < 3 {
+        parts.push(0);
+    }
+    if major {
+        parts = vec![parts[0] + 1, 0, 0];
+    } else {
+        parts = vec![parts[0], parts[1] + 1, 0];
+    }
+    format!(
+        "{prefix}{}",
+        parts
+            .iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join(".")
+    )
+}
+
+/// fix-231: the demo host's registry — a made-up digest for any tag, the
+/// same one every time, so the update dialog has a new image reference to
+/// show without asking a real registry.
+pub fn demo_resolve(
+    _registry: &str,
+    repository: &str,
+    tag: &str,
+) -> Result<Option<String>, String> {
+    let seed: String = format!("{repository}:{tag}")
+        .bytes()
+        .map(|b| format!("{:02x}", b))
+        .collect();
+    Ok(Some(format!(
+        "sha256:{}",
+        seed.chars().cycle().take(64).collect::<String>()
+    )))
+}
+
 pub async fn run_demo(
     shared: Shared,
     live: Live,
@@ -295,7 +426,12 @@ pub async fn run_demo(
                             "what": "demo host: one made-up item so the list has a row",
                             "remedy": "nothing; this is the demo host",
                         }], "unread": [] }).to_string(),
-                        Command::FleetCheck { .. } => serde_json::json!({ "passes": true, "findings": [] }).to_string(),
+                        // fix-231: the stale-image rows the Fleet view
+                        // offers Update on, made up from the working copy.
+                        Command::FleetCheck { .. } => serde_json::json!({
+                            "passes": true,
+                            "findings": demo_stale_findings(&repo, &stacks),
+                        }).to_string(),
                         Command::ListManualChecks { .. } => serde_json::json!({ "now": now_s(), "checks": [] }).to_string(),
                         Command::ListTemplates => "clonable golden templates (fast):\nclone:996  debian-13-homelab-v4\n\nOS templates (full bootstrap):\n  local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst\n".into(),
                         Command::GetApplied { .. } => "[]".into(),

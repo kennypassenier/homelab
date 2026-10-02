@@ -410,10 +410,12 @@ pub const KEYS: &[KeyInfo] = &[
         "notify_fallback_webhook",
         "Notifications",
         "Fallback webhook",
-        "The second route, tried when the first does not answer 2xx.",
+        "The second route, tried when the first does not answer 2xx. A secret (fix-191): \
+         its URL carries a Home Assistant webhook id, so it is changed over ssh only and \
+         never declared in the public repository.",
         "none",
         Kind::Url,
-        Access::Browser,
+        Access::Secret,
         Apply::Restart,
     ),
     k(

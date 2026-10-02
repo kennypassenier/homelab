@@ -1538,7 +1538,10 @@ fn open_snapshots(model: &mut Model) {
         result: String::new(),
     });
     model.snapshots_pending = true;
-    model.outbox.push(Command::GetBackups { stack: name });
+    model.outbox.push(Command::GetBackups {
+        stack: name,
+        force: false,
+    });
 }
 
 /// G2: open the new-stack wizard (key `n`, and the palette since fix-107).

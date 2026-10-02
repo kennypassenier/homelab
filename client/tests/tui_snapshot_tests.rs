@@ -908,7 +908,7 @@ fn fix_64_snapshots_in_the_tui_lists_every_repository_from_get_backups() {
     assert!(
         m.outbox
             .iter()
-            .any(|c| matches!(c, Command::GetBackups { stack } if *stack == stack_name))
+            .any(|c| matches!(c, Command::GetBackups { stack, .. } if *stack == stack_name))
     );
     assert!(m.focus.as_ref().unwrap().title.contains(&stack_name));
     assert!(!m.focus.as_ref().unwrap().done);

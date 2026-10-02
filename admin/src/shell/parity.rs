@@ -378,6 +378,12 @@ async fn read_fleet_check(c: ParityCtx) -> (StatusCode, serde_json::Value) {
 struct BackupCalendarQuery {
     run: Option<u64>,
     stack: Option<String>,
+    /// fix-180: the page's own Refresh button — asks the host to read
+    /// restic again for every owner involved, in the background, even
+    /// though this call itself still answers at once from whatever is
+    /// cached.
+    #[serde(default)]
+    refresh: bool,
 }
 
 /// feat-overview-10 (backup calendar), fix-177 (per-stack progress): every
@@ -394,17 +400,22 @@ async fn backup_calendar(
     State(c): State<ParityCtx>,
     Query(q): Query<BackupCalendarQuery>,
 ) -> Response {
+    let force = q.refresh;
     match q.stack {
         Some(stack) => {
             let read = c.backup_calendar_read_for(&stack);
             let wanted = stack.clone();
-            read.read(q.run, WAIT, move || read_backup_calendar(c, vec![wanted]))
-                .await
+            read.read(q.run, WAIT, move || {
+                read_backup_calendar(c, vec![wanted], force)
+            })
+            .await
         }
         None => {
             let read = c.backup_calendar_read.clone();
-            read.read(q.run, WAIT, move || read_backup_calendar(c, Vec::new()))
-                .await
+            read.read(q.run, WAIT, move || {
+                read_backup_calendar(c, Vec::new(), force)
+            })
+            .await
         }
     }
 }
@@ -421,6 +432,7 @@ const ASK_SECS: u64 = 170;
 async fn read_backup_calendar(
     c: ParityCtx,
     stacks: Vec<String>,
+    force: bool,
 ) -> (StatusCode, serde_json::Value) {
     let what = match stacks.first() {
         Some(s) if stacks.len() == 1 => format!("{s}'s backup calendar"),
@@ -430,6 +442,7 @@ async fn read_backup_calendar(
         &c,
         Command::BackupCalendar {
             stacks: stacks.clone(),
+            force,
         },
         ASK_SECS,
     )
@@ -440,8 +453,12 @@ async fn read_backup_calendar(
                 StatusCode::OK,
                 serde_json::json!({
                     "stacks": v["stacks"],
+                    // fix-180: the host's OWN per-stack reading, not this
+                    // call's clock — the cache can answer with data read
+                    // minutes ago. `SlowRead` already stamps `read_at` with
+                    // when THIS call happened.
+                    "measured_at": v["measured_at"],
                     "skipped": v["skipped"],
-                    "measured_at": now_s(),
                 }),
             ),
             Err(_) => {

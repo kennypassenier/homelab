@@ -1857,6 +1857,13 @@ pub struct RepoStatus {
     pub drill: Option<crate::state::DrillRecord>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// fix-180: unix seconds this status was actually read from restic,
+    /// `None` when it came from `repo_status_of`'s own live read (every
+    /// call site but the host's cached `GetBackups` answer, which fills
+    /// this from the snapshot cache's `measured_at` — the UI's "read N min
+    /// ago").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub measured_at: Option<u64>,
 }
 
 /// feat-backup-1: `restic snapshots --json` for one repository, parsed and
@@ -1892,7 +1899,15 @@ pub async fn list_snapshots(
 /// feat-backup-1: one repository's size on the remote, from `restic stats`.
 /// `None` on any failure — a status page shows "unknown" rather than
 /// refusing to show the rest of the row.
-async fn repo_size_bytes(exec: &dyn Executor, cfg: &BackupCfg, owner: &str) -> Option<u64> {
+///
+/// `pub(crate)` since fix-180: `snapshot_cache` folds this into the same
+/// cached entry as `list_snapshots`, so a cache hit never needs a second
+/// restic call just for the size.
+pub(crate) async fn repo_size_bytes(
+    exec: &dyn Executor,
+    cfg: &BackupCfg,
+    owner: &str,
+) -> Option<u64> {
     let out = exec
         .run(&restic_cmd(cfg, owner, &["stats", "latest", "--json"], 120))
         .await
@@ -1940,6 +1955,7 @@ pub async fn repo_status_of(
             error: None,
             owner,
             snapshots: snaps,
+            measured_at: None,
         },
         Err(e) => RepoStatus {
             newest_snapshot: None,
@@ -1949,7 +1965,46 @@ pub async fn repo_status_of(
             error: Some(e.to_string()),
             owner,
             snapshots: Vec::new(),
+            measured_at: None,
         },
+    }
+}
+
+/// fix-180: one repository's status straight from the host's snapshot
+/// cache, no restic call — `None` (a cache miss) means "not read yet", for
+/// the caller to say so and kick a background [`SnapshotCache::refresh`].
+pub fn repo_status_from_cache(
+    cache: &super::snapshot_cache::CachedRepo,
+    drills: &std::collections::BTreeMap<String, crate::state::DrillRecord>,
+    owner: String,
+) -> RepoStatus {
+    RepoStatus {
+        newest_snapshot: cache.snapshots.first().cloned(),
+        snapshot_count: cache.snapshots.len(),
+        size_bytes: cache.size_bytes,
+        drill: drills.get(&owner).cloned(),
+        error: cache.error.clone(),
+        snapshots: cache.snapshots.clone(),
+        measured_at: Some(cache.measured_at),
+        owner,
+    }
+}
+
+/// fix-180: a repository the cache has never read — "not read yet" rather
+/// than blocking the caller on a restic call that can take minutes.
+pub fn repo_status_unread(
+    drills: &std::collections::BTreeMap<String, crate::state::DrillRecord>,
+    owner: String,
+) -> RepoStatus {
+    RepoStatus {
+        newest_snapshot: None,
+        snapshot_count: 0,
+        size_bytes: None,
+        drill: drills.get(&owner).cloned(),
+        error: Some("not read yet".into()),
+        snapshots: Vec::new(),
+        measured_at: None,
+        owner,
     }
 }
 

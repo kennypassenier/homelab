@@ -61,6 +61,7 @@ mod tests {
             size_bytes: None,
             drill: None,
             error: None,
+            measured_at: None,
         }
     }
 

@@ -49,6 +49,7 @@ pub mod retired;
 pub mod secondcopy;
 pub mod secrets;
 pub mod selfupdate;
+pub mod snapshot_cache;
 pub mod template;
 pub mod tiles;
 pub mod today;

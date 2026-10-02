@@ -23,15 +23,32 @@ fn refusal(status: StatusCode, r: impl ToString) -> Response {
     (status, Json(serde_json::json!({ "error": r.to_string() }))).into_response()
 }
 
+/// fix-180: `?refresh=1` asks the host to read restic again for this
+/// stack's repositories in the background, even though this call itself
+/// still answers at once from whatever is cached.
+#[derive(Deserialize, Default)]
+struct StatusQuery {
+    #[serde(default)]
+    refresh: bool,
+}
+
 async fn status(
     State(host): State<Arc<dyn HostPort>>,
     UrlPath(stack): UrlPath<String>,
+    Query(q): Query<StatusQuery>,
 ) -> Response {
     if !crate::core::actions::valid_stack_name(&stack) {
         return refusal(StatusCode::BAD_REQUEST, "not a stack name");
     }
     match host
-        .ask_traced(Command::GetBackups { stack }, ASK_TIMEOUT, None)
+        .ask_traced(
+            Command::GetBackups {
+                stack,
+                force: q.refresh,
+            },
+            ASK_TIMEOUT,
+            None,
+        )
         .await
     {
         Ok(r) if r.ok => match serde_json::from_str::<serde_json::Value>(&r.message) {

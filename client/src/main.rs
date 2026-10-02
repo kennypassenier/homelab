@@ -1108,9 +1108,16 @@ async fn run(explicit_host: Option<String>) {
                     .unwrap_or_else(|| die("usage: homelab snapshots stacks/<name>")),
             );
             let json = args.iter().any(|a| a == "--json");
-            let reply = rpc_reply(&host, &token, Command::GetBackups { stack })
-                .await
-                .unwrap_or_else(|| die("the host did not answer"));
+            let reply = rpc_reply(
+                &host,
+                &token,
+                Command::GetBackups {
+                    stack,
+                    force: false,
+                },
+            )
+            .await
+            .unwrap_or_else(|| die("the host did not answer"));
             if !reply.ok {
                 die(&reply.message);
             }

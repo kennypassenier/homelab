@@ -2542,9 +2542,10 @@ fn declared_host_config() -> Option<std::collections::BTreeMap<String, serde_jso
         .ok()?;
     let mut out = std::collections::BTreeMap::new();
     for (key, value) in &table {
-        // A secret must never have been in this file; dropped defensively
-        // rather than sent, in case one was pasted in by hand.
-        if homelab_core::hostconfig::is_secret(key) {
+        // A secret, or a host-held key (`tokens`, fix-170), must never have
+        // been in this file; dropped defensively rather than sent, in case
+        // one was pasted in by hand.
+        if homelab_core::hostconfig::is_secret(key) || homelab_core::hostconfig::is_host_held(key) {
             continue;
         }
         if let Ok(v) = serde_json::to_value(value) {

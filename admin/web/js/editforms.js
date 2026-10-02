@@ -1463,7 +1463,7 @@ export function checkNewStep(w, step, v, taken) {
  * @typedef {{key: string, group: string, label: string, help: string,
  *   default: string, kind: KeyKind,
  *   access: "browser" | "confirm" | "locked" | "ssh_only" | "secret" |
- *     "dashboard_secret",
+ *     "dashboard_secret" | "host_held",
  *   apply: "live" | "restart", set: boolean, value: unknown,
  *   toml: string | null}} HostField
  */
@@ -1478,6 +1478,9 @@ export const ACCESS = /** @type {const} */ ({
   // fix-143: a write-only field, set or replaced here, never read back —
   // the same "never sent" promise as `secret`, minus the ssh requirement.
   dashboard_secret: "Here (secret, write-only)",
+  // fix-170: shown like any other key, but generated and kept by the host
+  // itself — never declared in config/host.toml, never changed here.
+  host_held: "ssh only (generated and kept by the host itself)",
 });
 
 /** fix-143: `dashboard_secret` is a secret that may still be WRITTEN here.

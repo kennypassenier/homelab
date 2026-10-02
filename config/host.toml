@@ -12,10 +12,18 @@
 # `notify_fallback_auth_bearer`): they stay in the host's own vault, set
 # once over ssh, and `homelab host apply` never sends or overwrites them.
 #
+# `tokens` (fix-170) never lives here either, for a different reason: it is
+# not a secret the host keeps for us, it is generated and kept BY the host
+# — one entry per machine, name/scope/SHA-256 of its own token, written as
+# tokens are issued and revoked over ssh. `homelab host apply` refuses a
+# file that sets it and keeps the host's current table untouched, the same
+# as it does for a secret.
+#
 # `homelab host apply` sends this file to the host, which validates it with
 # the same parser host.toml has always used and writes it back whole,
-# keeping only the secret keys the host already holds. `homelab check`
-# reports when this file and the host's running settings disagree.
+# keeping only the secret and host-held keys the host already holds.
+# `homelab check` reports when this file and the host's running settings
+# disagree.
 #
 # This file was seeded with the compiled defaults on 2026-10-01 (fix-110);
 # it has not yet been reconciled with pve's live host.toml, so every key
@@ -39,22 +47,18 @@ restic_snapshot_timeout_s = 14400
 restic_restore_timeout_s = 14400
 integrity_data_read_interval_s = 2592000
 restore_drill_interval_s = 72000
-
-[[retention]]
-every_days = 1
-span_days = 7
-
-[[retention]]
-every_days = 14
-span_days = 60
-
-[[retention]]
-every_days = 60
+# `retention` (a list of tables) is declared at the end of this file: TOML
+# closes an `[[array-of-tables]]` section only at the next `[table]` or
+# `[[array-of-tables]]` header, so every plain `key = value` line between it
+# and the next header would otherwise nest silently INSIDE its last entry
+# instead of staying top-level (fix-170 found this: everything from
+# `dashboard_url` on had been swallowed into `[[retention]]` since fix-110
+# seeded this file, invisible to every drift comparison since).
 
 # ── Notifications ───────────────────────────────────────────────────────────
-# notify_webhook, notify_fallback_webhook, dashboard_url and watch_url are
-# left unset: their compiled default is "off" (no notice sent, no link, not
-# watched).
+# notify_webhook, notify_fallback_webhook and watch_url are left unset:
+# their compiled default is "off" (no notice sent, not watched).
+dashboard_url = "https://admin.kp-soft.dev"
 watch_interval_s = 60
 watch_down_after_s = 300
 ask_timeout_s = 120
@@ -98,3 +102,16 @@ data_mount_roots = [
     "/HDD4TB/jellyfin-metadata",
     "/HDD2TB/logs/traefik",
 ]
+
+# ── Nightly round and backups: retention ────────────────────────────────────
+# Last in the file on purpose — see the note above restic_base.
+[[retention]]
+every_days = 1
+span_days = 7
+
+[[retention]]
+every_days = 14
+span_days = 60
+
+[[retention]]
+every_days = 60

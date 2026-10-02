@@ -1,8 +1,8 @@
 //! feat-settings-1: the host.toml key table the dashboard and the host share.
 
 use homelab_core::hostconfig::{
-    Access, KEYS, apply_declared, check_shape, check_value, is_secret, key_info, merge_changes,
-    redact, valid_window,
+    Access, KEYS, apply_declared, check_shape, check_value, is_host_held, is_secret, key_info,
+    merge_changes, redact, valid_window,
 };
 use serde_json::json;
 
@@ -138,4 +138,87 @@ fn fix_110_apply_declared_keeps_secrets_and_drops_the_undeclared() {
 
     let bad_declared: toml::Table = toml::from_str("token = \"leaked\"\n").unwrap();
     assert!(apply_declared(&bad_declared, &current).is_err());
+}
+
+/// fix-170: `tokens` is host-held — generated and kept by the host itself,
+/// never a secret value, but still never the repository's to declare.
+/// `apply_declared` must keep the host's current table untouched the same
+/// way it keeps a secret, and refuse a `config/host.toml` that sets it.
+#[test]
+fn fix_170_tokens_is_host_held_not_secret() {
+    assert!(is_host_held("tokens"), "tokens");
+    assert!(
+        !is_secret("tokens"),
+        "tokens is shown (name/scope), unlike a secret"
+    );
+    assert_eq!(key_info("tokens").unwrap().access, Access::HostHeld);
+    assert!(!key_info("tokens").unwrap().access.editable());
+}
+
+/// fix-170: `apply_declared` keeps the host's current `tokens` table
+/// untouched across an apply that never mentions it, and refuses a
+/// `config/host.toml` that sets `tokens` itself.
+#[test]
+fn fix_170_apply_declared_keeps_tokens_and_refuses_it_in_the_repo() {
+    let current: toml::Table = toml::from_str(
+        "gateway_vmid = 104\n\
+         [[tokens]]\n\
+         name = \"admin\"\n\
+         scope = \"all\"\n\
+         sha256 = \"a\"\n",
+    )
+    .unwrap();
+    let declared: toml::Table = toml::from_str("gateway_vmid = 105\n").unwrap();
+    let merged = apply_declared(&declared, &current).unwrap();
+    assert_eq!(
+        merged.get("tokens"),
+        current.get("tokens"),
+        "the host's own tokens table survives an apply that never mentions it"
+    );
+
+    let bad_declared: toml::Table = toml::from_str(
+        "[[tokens]]\n\
+         name = \"sneaked-in\"\n\
+         scope = \"all\"\n\
+         sha256 = \"b\"\n",
+    )
+    .unwrap();
+    let e = apply_declared(&bad_declared, &current).unwrap_err();
+    assert!(e.contains("tokens"), "{e}");
+}
+
+/// fix-170: the drift check never compares `tokens` — neither side
+/// declares it, so a running host with tokens and a repository without
+/// them (always true, since `tokens` can never be declared) must not be
+/// reported as drift.
+#[test]
+fn fix_170_drift_ignores_tokens() {
+    use homelab_core::ops::fleetcheck::{LiveFacts, evaluate_host_config_drift};
+
+    let mut live = LiveFacts {
+        declared_host_config: Some(std::collections::BTreeMap::from([(
+            "gateway_vmid".to_string(),
+            json!(104),
+        )])),
+        live_host_config: std::collections::BTreeMap::from([
+            ("gateway_vmid".to_string(), json!(104)),
+            (
+                "tokens".to_string(),
+                json!([{"name": "admin", "scope": "all"}]),
+            ),
+        ]),
+        ..Default::default()
+    };
+    assert!(evaluate_host_config_drift(&live).is_empty(), "no drift");
+
+    // Even if a stray declaration slipped into the declared side, the
+    // comparison still ignores the key by name.
+    live.declared_host_config
+        .as_mut()
+        .unwrap()
+        .insert("tokens".to_string(), json!([{"name": "x", "scope": "all"}]));
+    assert!(
+        evaluate_host_config_drift(&live).is_empty(),
+        "tokens is never compared, whichever side names it"
+    );
 }

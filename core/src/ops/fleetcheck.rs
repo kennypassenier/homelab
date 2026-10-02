@@ -596,9 +596,14 @@ pub fn evaluate_host_config_drift(live: &LiveFacts) -> Vec<Finding> {
     let Some(declared) = &live.declared_host_config else {
         return Vec::new();
     };
+    // fix-170: a secret or a host-held key (`tokens`, generated and kept by
+    // the host itself) is never the repository's to declare, so it is
+    // never compared — belt and braces on top of the callers that already
+    // leave these out of both maps.
     let mut keys: std::collections::BTreeSet<&String> = declared
         .keys()
         .chain(live.live_host_config.keys())
+        .filter(|k| !crate::hostconfig::is_secret(k) && !crate::hostconfig::is_host_held(k))
         .collect();
     // The order drives only the output; sorted for a stable report.
     let mut out = Vec::new();

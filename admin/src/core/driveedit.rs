@@ -3924,6 +3924,7 @@ pub fn row(
                 let who = match access {
                     "locked" => "ssh only (can cut the dashboard off)",
                     "ssh_only" => "ssh only (safety policy)",
+                    "host_held" => "ssh only (generated and kept by the host itself)",
                     _ => "ssh only (secret)",
                 };
                 return Err(refused(

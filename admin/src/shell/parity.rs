@@ -164,9 +164,10 @@ fn stack_side(
     (files, digests, None)
 }
 
-/// fix-110: `config/host.toml` as the dashboard's working copy reads it
-/// (non-secret keys only), for `Today`/`FleetCheck` to compare against the
-/// host's running settings. `None` when the working copy has no such file.
+/// fix-110 (fix-170: also drops host-held keys): `config/host.toml` as the
+/// dashboard's working copy reads it (non-secret, non-host-held keys only),
+/// for `Today`/`FleetCheck` to compare against the host's running settings.
+/// `None` when the working copy has no such file.
 fn host_config_side(
     repo: &std::path::Path,
 ) -> Option<std::collections::BTreeMap<String, serde_json::Value>> {
@@ -174,7 +175,7 @@ fn host_config_side(
     let table: toml::Table = toml::from_str(&raw).ok()?;
     let mut out = std::collections::BTreeMap::new();
     for (key, value) in &table {
-        if homelab_core::hostconfig::is_secret(key) {
+        if homelab_core::hostconfig::is_secret(key) || homelab_core::hostconfig::is_host_held(key) {
             continue;
         }
         if let Ok(v) = serde_json::to_value(value) {

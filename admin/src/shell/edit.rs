@@ -1799,11 +1799,12 @@ pub async fn save_host_settings(
 // ── fix-120 (per-machine tokens, owner decision 2026-10-01) ────────────────
 //
 // Issuing and revoking are their own commands rather than going through
-// `SetHostConfig` — `tokens` is `Access::Locked` there on purpose
+// `SetHostConfig` — `tokens` is `Access::HostHeld` there on purpose
 // (arch-self: the dashboard's own token must not be able to loosen what it
-// may do). Both still need scope `All`, so a read- or operate-scope
-// dashboard session is refused by the host itself, the same as any other
-// scope-all command.
+// may do; fix-170: it is also generated and kept by the host itself, never
+// declared in `config/host.toml`). Both still need scope `All`, so a read-
+// or operate-scope dashboard session is refused by the host itself, the
+// same as any other scope-all command.
 
 async fn tokens_list(State(c): State<EditCtx>) -> Response {
     answer(read_tokens(&c).await)

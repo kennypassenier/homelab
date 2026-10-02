@@ -1095,8 +1095,11 @@ fn json_to_toml(v: &serde_json::Value) -> Result<toml::Value, String> {
     })
 }
 
-/// fix-110: the non-secret keys host.toml sets right now, as JSON — for the
-/// fleet check's comparison with `config/host.toml` (`evaluate_host_config_drift`).
+/// fix-110 (fix-170: also drops host-held keys): the non-secret, non-host-held
+/// keys host.toml sets right now, as JSON — for the fleet check's comparison
+/// with `config/host.toml` (`evaluate_host_config_drift`). `tokens` is left
+/// out here the same way a secret is, since `config/host.toml` never
+/// declares it either — comparing the two would always show drift.
 /// Unlike `host_config_view` this never fails: an unreadable or unparsable
 /// file is simply "sets nothing", which is also true of a host that has
 /// never had one.
@@ -1106,7 +1109,7 @@ fn live_host_config_table(raw: &str) -> std::collections::BTreeMap<String, serde
         return out;
     };
     for (key, v) in &table {
-        if homelab_core::hostconfig::is_secret(key) {
+        if homelab_core::hostconfig::is_secret(key) || homelab_core::hostconfig::is_host_held(key) {
             continue;
         }
         if let Ok(json) = serde_json::to_value(v) {

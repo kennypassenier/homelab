@@ -1483,12 +1483,18 @@ async fn import_commit(
 // ── feat-firewall-2 ─────────────────────────────────────────────────────
 
 /// The fleet's firewall declarations, the editable summary rows the
-/// firewall page shows, and the working copy's head commit (if any) they
-/// were read at.
+/// firewall page shows, the working copy's head commit (if any) they were
+/// read at, and — fix-203 — every stack's own `natives`, every vmid some
+/// stack's own `gateway_route` names, and every `10.10.x.y:port` a stack's
+/// own files name (the fleet view's richer topology needs all three; the
+/// firewall page itself only ever reads the first three fields).
 type FleetFirewallRead = (
     Vec<FleetFirewall>,
     Vec<serde_json::Value>,
     Option<super::workcopy::CommitRef>,
+    Vec<String>,
+    Vec<u16>,
+    Vec<crate::core::topology::NamedFlow>,
 );
 
 /// Shared by every reader that needs the fleet's firewall declarations
@@ -1504,8 +1510,15 @@ fn fleet_firewall(wc: &WorkingCopy) -> Result<FleetFirewallRead, Refusal> {
     }
     let mut fleet = Vec::new();
     let mut summaries = Vec::new();
+    let mut natives = Vec::new();
+    let mut gateway_vmids = Vec::new();
+    let mut named = Vec::new();
     for name in wc.stack_names() {
         let Ok(texts) = wc.stack_texts(&name) else {
+            continue;
+        };
+        named.extend(crate::core::topology::addresses_named_in(&name, &texts));
+        let Some(raw) = texts.get(MANIFEST) else {
             continue;
         };
         let Some(Ok(m)) = texts.get(MANIFEST).map(|t| stackedit::parse_manifest(t)) else {
@@ -1514,6 +1527,21 @@ fn fleet_firewall(wc: &WorkingCopy) -> Result<FleetFirewallRead, Refusal> {
         let Ok(ip) = bare_ip(&m.network.ip).parse() else {
             continue;
         };
+        if !m.natives.is_empty() {
+            natives.push(name.clone());
+        }
+        // `gateway_route` lives on `DeploySpec`, not `StackManifest` — the
+        // stack file names a gateway's vmid to route THROUGH, which is not
+        // itself part of what the container needs to run. Read generically
+        // off the raw YAML, same as
+        // `core/tests/firewall_declarations_tests.rs`'s own
+        // `gateway_vmid` lookup.
+        if let Some(vmid) = serde_yaml::from_str::<serde_yaml::Value>(raw)
+            .ok()
+            .and_then(|v| v.get("gateway_route")?.get("gateway_vmid")?.as_u64())
+        {
+            gateway_vmids.push(vmid as u16);
+        }
         summaries.push(serde_json::json!({
             "stack": name, "vmid": m.vmid, "ip": bare_ip(&m.network.ip),
             "declared": m.firewall.is_some(),
@@ -1531,13 +1559,13 @@ fn fleet_firewall(wc: &WorkingCopy) -> Result<FleetFirewallRead, Refusal> {
         });
     }
     let head = wc.status().head;
-    Ok((fleet, summaries, head))
+    Ok((fleet, summaries, head, natives, gateway_vmids, named))
 }
 
 async fn firewall(State(c): State<EditCtx>) -> Response {
     let wc = c.wc.clone();
     let read = blocking(move || {
-        let (fleet, summaries, head) = fleet_firewall(&wc)?;
+        let (fleet, summaries, head, ..) = fleet_firewall(&wc)?;
         Ok((fwmatrix::matrix(&fleet), summaries, head))
     })
     .await
@@ -1555,14 +1583,20 @@ async fn firewall(State(c): State<EditCtx>) -> Response {
 
 /// feat-overview-7 (topology: which container talks to which): the same
 /// firewall declarations feat-firewall-2 reads, turned into nodes and
-/// edges (`crate::core::topology`). The firewall page overlays measured
-/// traffic on this same shape (feat-firewall-3); this route stays the
-/// plain, undecorated graph so the Overview page costs no Prometheus call.
+/// edges (`crate::core::topology`). fix-203: `from_fleet_declared`, not the
+/// firewall page's stricter `from_fleet` — the fleet view wants every
+/// written-down relationship (even one not enforced yet) and every address
+/// a stack's own files name, not only what is currently enforced. The
+/// firewall page overlays measured traffic on ITS OWN plain
+/// `from_fleet`/`from_matrix` shape (feat-firewall-3), unchanged.
 async fn topology(State(c): State<EditCtx>) -> Response {
     let wc = c.wc.clone();
     let read = blocking(move || {
-        let (fleet, _summaries, head) = fleet_firewall(&wc)?;
-        Ok((crate::core::topology::from_fleet(&fleet), head))
+        let (fleet, _summaries, head, natives, gateway_vmids, named) = fleet_firewall(&wc)?;
+        Ok((
+            crate::core::topology::from_fleet_declared(&fleet, &natives, &gateway_vmids, &named),
+            head,
+        ))
     })
     .await
     .and_then(|r| r);
@@ -1573,12 +1607,15 @@ async fn topology(State(c): State<EditCtx>) -> Response {
 }
 
 /// feat-stacks-9 (dependencies between stacks): the topology's edges, read
-/// per stack as "depends on" / "depended on by".
+/// per stack as "depends on" / "depended on by". Same `from_fleet_declared`
+/// as the topology route (fix-203), so the two pages can never disagree
+/// about what counts as a dependency.
 async fn dependencies(State(c): State<EditCtx>) -> Response {
     let wc = c.wc.clone();
     let read = blocking(move || {
-        let (fleet, _summaries, head) = fleet_firewall(&wc)?;
-        let topo = crate::core::topology::from_fleet(&fleet);
+        let (fleet, _summaries, head, natives, gateway_vmids, named) = fleet_firewall(&wc)?;
+        let topo =
+            crate::core::topology::from_fleet_declared(&fleet, &natives, &gateway_vmids, &named);
         Ok((crate::core::topology::dependencies(&topo), head))
     })
     .await

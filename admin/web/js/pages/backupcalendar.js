@@ -17,13 +17,23 @@
 //
 // Kenny's call on the loading shape (2026-10-02): the real grid is laid
 // out at once with every cell pulsing, same size as the finished one — no
-// spinner, nothing that changes shape when the data lands. A day's tone is
-// only ever painted once every stack has answered (a day's ratio needs all
-// of them), so the skeleton cells repaint in one pass, in place.
+// spinner, nothing that changes shape when the data lands.
+//
+// fix-202 (Kenny, 2026-10-02, live on the real fleet): the grid used to stay
+// a full skeleton until EVERY stack had answered, even once most of them
+// already had — measured sitting at "11 of 13" for minutes with nothing but
+// pulsing cells to show for it. It now repaints from whatever subset of
+// stacks has answered "ok" on every settle, not only at the end; a day's
+// ratio can shift as the rest trickle in (the progress bar says how many
+// are left), which beats a frozen skeleton. A stack the host already named
+// as terminal — keeps no data by design, or could never be read at all
+// (no manifest on record, not a known stack) — is named at once instead of
+// being retried for minutes and then blamed on "not read yet".
 
 import {
   calendarDays,
   calendarInputs,
+  calendarNoBackup,
   calendarProgress,
   calendarWeeks,
   withStackResult,
@@ -148,6 +158,25 @@ function paintFailures(ul, failed) {
   );
 }
 
+/**
+ * fix-202: stacks the host has already named as keeping no data at all —
+ * its own line, named at once, never left looking like a stuck read.
+ * @param {HTMLElement} ul
+ * @param {string[]} names
+ */
+function paintNoBackup(ul, names) {
+  ul.replaceChildren(
+    ...names.map((name) =>
+      h(
+        "li",
+        { class: "backup-cal__excluded" },
+        h("strong", null, name),
+        ": no backups by design — every mount is excluded",
+      ),
+    ),
+  );
+}
+
 /** fix-180: how long a stack may stay "not read yet" before it is named. */
 const UNREAD_GIVE_UP_MS = 180_000;
 
@@ -193,6 +222,10 @@ export function mount(root) {
     class: "backup-cal__errors",
     "aria-live": "polite",
   });
+  const noBackup = h("ul", {
+    class: "backup-cal__excluded-list",
+    "aria-live": "polite",
+  });
   const grid = h(
     "div",
     { class: "backup-cal", "aria-label": "Backup calendar" },
@@ -229,6 +262,7 @@ export function mount(root) {
     ),
     progressWrap,
     failures,
+    noBackup,
     grid,
     status,
   );
@@ -249,6 +283,7 @@ export function mount(root) {
     grid.replaceChildren(renderGrid(shape, skeletonCell));
     progressWrap.replaceChildren();
     failures.replaceChildren();
+    noBackup.replaceChildren();
     status.textContent = "Reading the fleet…";
 
     const names = await fleetStackNames();
@@ -266,10 +301,26 @@ export function mount(root) {
     );
     /** @type {Record<string, number | null>} */
     const measuredAt = {};
+    // fix-202: Kenny measured the page sitting on a full skeleton grid for
+    // minutes while the status line already said "11 of 13" — every stack
+    // that HAD answered was thrown away until every last one had. The grid
+    // now repaints from whatever subset of stacks has already answered
+    // "ok", on every settle, not only once the whole fleet is in; a day's
+    // ratio can still shift as more stacks arrive (the progress bar says
+    // how many are left), but that beats a frozen skeleton. Cells stay
+    // skeletons only until the very first stack answers "ok" — before that,
+    // an empty `expected` would paint every day "no stack keeps data",
+    // which is simply untrue while the reads are still in flight.
     const repaint = () => {
       const progress = calendarProgress(results);
       paintProgress(progressWrap, progress, names.length);
       paintFailures(failures, progress.failed);
+      paintNoBackup(noBackup, calendarNoBackup(results));
+      if (Object.values(results).some((r) => r.status === "ok")) {
+        const { stacks, expected } = calendarInputs(results);
+        const days = calendarDays(stacks, expected, WINDOW_DAYS, now);
+        grid.replaceChildren(renderGrid(calendarWeeks(days), finishedCell));
+      }
     };
     status.textContent = `Reading each stack's restic snapshots from the host — 0 of ${names.length} so far…`;
     repaint();
@@ -284,6 +335,16 @@ export function mount(root) {
           // never "no backups", so it stays pending and is asked again
           // (the host is reading it in the background) until it has been
           // read or UNREAD_GIVE_UP_MS has passed.
+          //
+          // fix-202: that retry loop must never run for a name the host has
+          // already named as terminal — `no_backup` (keeps no data, by
+          // design: `StackManifest::backs_up_nothing`) or `reasons` (no
+          // manifest on record yet, or not a known stack at all). Before
+          // this fix those names got no `measured_at` entry either, so they
+          // were indistinguishable from "cache still warming up" and sat
+          // retrying for the full 3 minutes before a generic "press
+          // Refresh" — the live "stuck at 11 of 13" symptom (Kenny,
+          // 2026-10-02).
           const started = Date.now();
           for (let attempt = 0; ; attempt++) {
             const qs = force && attempt === 0 ? "&refresh=1" : "";
@@ -294,6 +355,17 @@ export function mount(root) {
             );
             if (!r.ok) {
               outcome = { status: "failed", reason: r.error.why };
+              break;
+            }
+            if (r.body.no_backup?.includes(name)) {
+              measuredAt[name] =
+                r.body.measured_at?.[name] ?? Math.floor(Date.now() / 1000);
+              outcome = { status: "no_backup" };
+              break;
+            }
+            const terminalReason = r.body.reasons?.[name];
+            if (terminalReason) {
+              outcome = { status: "failed", reason: terminalReason };
               break;
             }
             const read = r.body.measured_at?.[name] ?? null;

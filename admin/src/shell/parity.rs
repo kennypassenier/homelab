@@ -459,6 +459,13 @@ async fn read_backup_calendar(
                     // when THIS call happened.
                     "measured_at": v["measured_at"],
                     "skipped": v["skipped"],
+                    // fix-202: a name that will never get a restic read
+                    // (backs up nothing by design, or has no manifest on
+                    // record / isn't a known stack) — forwarded as-is so the
+                    // dashboard can show it at once instead of retrying it
+                    // for minutes.
+                    "no_backup": v["no_backup"],
+                    "reasons": v["reasons"],
                 }),
             ),
             Err(_) => {

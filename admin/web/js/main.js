@@ -12,6 +12,7 @@
 import { startAgoTicker } from "./ago.js";
 import { mountChrome } from "./chrome.js";
 import { mountFollow } from "./drive.js";
+import { attachRowToggle } from "./rowtoggle.js";
 import { h } from "./dom.js";
 import { attachNavMenus, attachNavToggles } from "/static/kp/js/components.js";
 import { loadPages, pages, subscribePages } from "./pages.js";
@@ -307,6 +308,7 @@ function fitBar() {
 }
 fitBar();
 addEventListener("resize", fitBar);
+attachRowToggle();
 // fix-176: the bar's content changes after the first paint — the registry's
 // links land async, the kit adds its search, bell and theme buttons, and the
 // link status swaps "connecting…" for a version or a long link-down reason.

@@ -104,7 +104,18 @@ pub async fn run_demo(
                     let body = match command {
                         Command::History { .. } => serde_json::json!({ "entries": [] }).to_string(),
                         Command::Incidents { .. } => serde_json::json!({ "incidents": [] }).to_string(),
-                        Command::Notices { .. } => serde_json::json!({ "notices": [], "last_seq": 0 }).to_string(),
+                        // One made-up notice, so the notification centre has
+                        // an expandable row for the screen tests to click.
+                        Command::Notices { .. } => serde_json::json!({ "notices": [{
+                            "seq": 1, "at": 1_790_000_000u64, "since": 1_790_000_000u64,
+                            "op": "deploy-films", "label": "deploy films", "ok": false,
+                            "stack": "films", "title": "demo host: deploy films failed",
+                            "what": "a made-up failure so the centre has a row",
+                            "consequence": "nothing; this is the demo host",
+                            "remedy": "nothing; this is the demo host",
+                            "page": "/stack/films", "urgent": false,
+                            "routed": "centre", "push": "",
+                        }], "last_seq": 1 }).to_string(),
                         Command::CurrentOp => serde_json::to_string(&homelab_proto::CurrentOpView::default()).unwrap_or_default(),
                         // The TUI parity pages' reads, in the shapes the real
                         // host answers (empty, or plainly made up and said so).

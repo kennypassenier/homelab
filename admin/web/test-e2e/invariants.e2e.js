@@ -177,3 +177,50 @@ test("invariants: the job dialog's panel does not shift sideways between its run
     await browser.close();
   }
 });
+
+test("invariants: an expandable row opens and closes from a click anywhere in it, never from its own controls", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/notifications`);
+    const row = page
+      .locator("[data-kp-expandable] tbody tr:not([data-kp-detail])")
+      .first();
+    await row.waitFor({ timeout: 10000 });
+    const toggle = row.locator("[data-kp-row-toggle]");
+    const before = await toggle.getAttribute("aria-expanded");
+    // A plain cell: the last text cell that holds no control of its own.
+    const plain = row.locator("td:not([data-kp-expand-cell])").nth(1);
+    await plain.click();
+    const after = await toggle.getAttribute("aria-expanded");
+    assert.notEqual(
+      after,
+      before,
+      "a click in the row must toggle it (Kenny, 2026-10-02)",
+    );
+    await plain.click();
+    assert.equal(
+      await toggle.getAttribute("aria-expanded"),
+      before,
+      "a second click must close it again",
+    );
+    // A control of the row's own keeps doing its own thing.
+    const control = row
+      .locator("td button:not([data-kp-row-toggle]), td a")
+      .first();
+    if ((await control.count()) > 0) {
+      const href = await control.getAttribute("href");
+      if (href === null) {
+        await control.click();
+        assert.equal(
+          await toggle.getAttribute("aria-expanded"),
+          before,
+          "a click on the row's own button must not toggle the row",
+        );
+      }
+    }
+  } finally {
+    await browser.close();
+  }
+});

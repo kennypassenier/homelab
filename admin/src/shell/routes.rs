@@ -246,13 +246,28 @@ async fn charts(State(c): State<ReadCtx>, Query(q): Query<ChartQuery>) -> Respon
     };
     let end = now_s();
     let start = end.saturating_sub(span);
+    // fix-220: the vmid→stack pairs a network device or cgroup id's humanized
+    // label is resolved against — the same fleet view the rest of this
+    // dashboard reads, never a lookup of its own.
+    let stacks_vn: Vec<homelab_core::charts::humanize::Stack> = c
+        .shared
+        .read()
+        .await
+        .fleet
+        .as_ref()
+        .map(|f| f.stacks.iter().map(|s| (s.vmid, s.name.clone())).collect())
+        .unwrap_or_default();
     let mut out = Vec::new();
     for p in panels {
         let r = prom
             .range(&p.query, start, end, step, p.legend.as_deref())
             .await;
         out.push(match r {
-            Ok(series) => serde_json::json!({ "panel": p, "series": series }),
+            Ok(series) => {
+                let series =
+                    homelab_core::charts::humanize::series(series, p.legend.as_deref(), &stacks_vn);
+                serde_json::json!({ "panel": p, "series": series })
+            }
             Err(e) => serde_json::json!({ "panel": p, "series": [], "error": e }),
         });
     }
@@ -429,16 +444,24 @@ async fn traffic(State(c): State<ReadCtx>, Query(q): Query<ChartQuery>) -> Respo
     let start = end.saturating_sub(span);
     let per = |by: &str| format!("topk(8, sum by ({by}) (count_over_time({sel} [{step}s])))");
     let panels = [
-        ("Requests per hostname", per("RequestHost"), "RequestHost"),
+        (
+            "Requests per hostname",
+            "How many requests each hostname behind the proxy received in \
+             this window, from its access log.",
+            per("RequestHost"),
+            "RequestHost",
+        ),
         (
             "Requests per status",
+            "How many requests answered with each HTTP status in this \
+             window; a rising share of 4xx/5xx is worth a look.",
             per("DownstreamStatus"),
             "DownstreamStatus",
         ),
     ];
     let mut out = Vec::new();
-    for (title, query, legend) in panels {
-        let panel = serde_json::json!({ "title": title, "query": query, "unit": "count", "legend": legend });
+    for (title, desc, query, legend) in panels {
+        let panel = serde_json::json!({ "title": title, "desc": desc, "query": query, "unit": "count", "legend": legend });
         out.push(
             match loki
                 .metric_range(&query, start, end, step, Some(legend))

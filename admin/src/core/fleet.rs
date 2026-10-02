@@ -37,6 +37,11 @@ pub struct HostSummary {
     /// TUI parity: the host's TLS certificate fingerprint, as it reports it
     /// (the one the pin is compared with); empty when it does not say.
     pub tls_fingerprint: String,
+    /// fix-222: which disk `disk_pct` above is measuring, the local-lvm
+    /// thin pool and the root filesystem's biggest directories. `None`
+    /// before the host's first gather, or from a host too old to send it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk_detail: Option<homelab_proto::HostDiskDetail>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -138,6 +143,7 @@ pub fn fleet_view(state: &FleetState, measured_at: u64) -> FleetView {
             cores_total: state.host.cores_total,
             load1_x100: state.host.load1_x100,
             tls_fingerprint: state.host.tls_fingerprint.clone(),
+            disk_detail: state.host.disk_detail.clone(),
         },
         stacks,
         counts,

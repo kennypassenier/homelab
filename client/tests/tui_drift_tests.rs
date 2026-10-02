@@ -87,6 +87,7 @@ fn fleet(applied_hash: &str) -> ServerMsg {
             ram_committed_mb: 0,
             cores_total: 1,
             load1_x100: 0,
+            disk_detail: None,
         },
         stacks: vec![StackView {
             applied_source: None,

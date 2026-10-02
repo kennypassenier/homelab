@@ -891,3 +891,184 @@ test("invariants: every top-level section on Overview and the stack page has a h
     await browser.close();
   }
 });
+
+// fix-220 (Kenny, 2026-10-02: "fwbr117iO? wtf is dat?", "wat is bv
+// 0000:00:01_0_0000:01:00_0?"): the demo host's own made-up Prometheus
+// (spawn_demo_metrics, admin/src/shell/demo.rs) deliberately answers with
+// the raw ids Kenny saw live — a firewall bridge (fwbr117i0), an hwmon PCI
+// chip id, a Proxmox cgroup id (lxc/118) — so this proves the dashboard's
+// own humanizing code (homelab_core::charts::humanize) runs on the real
+// page, not merely that the Rust unit tests pass in isolation.
+const RAW_ID_PATTERNS = [
+  /^(fwbr|fwln|fwpr|veth|tap)\d+[ip]?\d*$/,
+  /^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}[_.][0-9a-f]/i,
+  /^lxc\/\d+$/,
+];
+
+test("invariants: no /charts series label matches a raw-id pattern and every chart has a description", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/charts`, { waitUntil: "load" });
+    // The host's own charts (no ?stack=) carry the temperature/SMART/
+    // network/memory panels the demo metrics server answers with raw ids.
+    await page.waitForSelector(".chart, .chart--health", { timeout: 5000 });
+    await page.waitForTimeout(300);
+    const found = await page.evaluate(() => {
+      /** @type {string[]} */
+      const labels = [];
+      for (const li of document.querySelectorAll(".chart__key"))
+        labels.push(li.textContent ?? "");
+      for (const td of document.querySelectorAll(
+        ".chart--health td:first-child",
+      ))
+        labels.push(td.textContent ?? "");
+      /** @type {string[]} */
+      const noDesc = [];
+      for (const fig of document.querySelectorAll(".chart, .chart--health")) {
+        const cap = fig.querySelector("figcaption")?.textContent?.trim();
+        const desc = fig.querySelector(".chart__desc")?.textContent?.trim();
+        if (!desc || desc.length < 10) noDesc.push(cap ?? "(no caption)");
+      }
+      return { labels, noDesc };
+    });
+    const patterns = [
+      /^(fwbr|fwln|fwpr|veth|tap)\d+[ip]?\d*$/,
+      /^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}[_.][0-9a-f]/i,
+      /^lxc\/\d+$/,
+    ];
+    for (const label of found.labels) {
+      // chart__key reads "<label>: <value>" (charts.js's panelEl) — the
+      // value itself is never allowed to carry a colon (a plain number, a
+      // unit, "ok"), so the LAST ": " is the split point; a PCI-style
+      // label ("PCI device 01:00.0: 46 °C") has colons of its own earlier.
+      const cut = label.lastIndexOf(": ");
+      const bare = (cut >= 0 ? label.slice(0, cut) : label).trim();
+      for (const re of patterns) {
+        assert.ok(
+          !re.test(bare),
+          `chart series label "${label}" matches a raw-id pattern (${re})`,
+        );
+      }
+    }
+    assert.deepEqual(
+      found.noDesc,
+      [],
+      `chart(s) with no description: ${found.noDesc.join("; ")}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the Drive health panel draws a status table naming each drive's own state, not an overlapping line", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/charts`, { waitUntil: "load" });
+    await page.waitForSelector(".chart--health", { timeout: 5000 });
+    const rows = await page.evaluate(() => {
+      const table = [...document.querySelectorAll(".chart--health")].find((f) =>
+        f.querySelector("figcaption")?.textContent?.includes("Drive health"),
+      );
+      return [...(table?.querySelectorAll("tbody tr") ?? [])].map((tr) => ({
+        device: tr.children[0]?.textContent?.trim() ?? "",
+        state: tr.children[1]?.textContent?.trim() ?? "",
+      }));
+    });
+    assert.ok(
+      rows.length >= 2,
+      `expected at least 2 drives, got: ${JSON.stringify(rows)}`,
+    );
+    assert.ok(
+      rows.some((r) => r.state === "not ok"),
+      `expected at least one "not ok" drive (the demo's sdb): ${JSON.stringify(rows)}`,
+    );
+    assert.ok(
+      rows.some((r) => r.state === "ok"),
+      `expected at least one healthy drive: ${JSON.stringify(rows)}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: a refused /data/traffic read shows the standard error box, never raw page text", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    // Stands in for the Loki gateway's real 403 (fix-221): routes.rs's
+    // `refused()` always answers a clean {what, why, fix} — `why` here is
+    // exactly what `Loki::metric_now`'s `upstream_reason` produces from an
+    // HTML error body (`admin/tests/loki_metric_now_tests.rs` pins that
+    // conversion); this pins the OTHER half, that the browser renders such
+    // a refusal through dom.js's errorBox, never as raw page text.
+    await page.route("**/data/traffic*", (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          what: "the traffic",
+          why: "Loki refused the query (HTTP 403)",
+          fix: "check the Loki gateway",
+        }),
+      }),
+    );
+    await page.goto(`${BASE}/charts?tab=traffic`, { waitUntil: "load" });
+    await page.waitForTimeout(300);
+    const text = await page.evaluate(
+      () => document.querySelector("#page")?.textContent ?? "",
+    );
+    assert.ok(
+      !text.toLowerCase().includes("<html"),
+      `the page must never show a raw <html> error body as text, got: ${text}`,
+    );
+    const box = await page.locator(".kp-alert.error").count();
+    assert.ok(
+      box > 0,
+      "expected the standard error box (dom.js errorBox) to be shown",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the Host page's Disk section names the root volume's device and size, and the biggest directories", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/host`, { waitUntil: "load" });
+    await page.waitForSelector("#host-disk-facts", { timeout: 5000 });
+    await page.waitForTimeout(300);
+    const diskFactsText = await page.evaluate(
+      () => document.querySelector("#host-disk-facts")?.textContent ?? "",
+    );
+    // fix-222 (Kenny, 2026-10-02: "is dat de 1TB SSD die erin zit?"): the
+    // demo host's own made-up disk_detail (admin/src/shell/demo.rs) names
+    // /dev/sda and its total size — this proves the Host page actually
+    // shows them, not only that the pure view-model functions do.
+    assert.ok(
+      diskFactsText.includes("/dev/sda"),
+      `expected the root volume's device, got: ${diskFactsText}`,
+    );
+    assert.ok(
+      /\d+ GB/.test(diskFactsText),
+      `expected a GB size on the Disk section, got: ${diskFactsText}`,
+    );
+    const topDirsText = await page.evaluate(
+      () =>
+        document.querySelector('[data-kp-remember="host-top-dirs"]')
+          ?.textContent ?? "",
+    );
+    assert.ok(
+      topDirsText.includes("/var"),
+      `expected the biggest directories table to list /var, got: ${topDirsText}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});

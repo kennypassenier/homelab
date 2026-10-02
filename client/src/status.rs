@@ -86,6 +86,7 @@ mod tests {
                 cores_total: 8,
                 load1_x100: 125,
                 home_address: None,
+                disk_detail: None,
             },
             stacks,
             status_measured_at: None,

@@ -5443,6 +5443,10 @@ struct AppState {
     /// fix-175: the `/proc/stat` sample `status_loop` took last time, kept
     /// so the next tick can take the delta.
     host_cpu_prev: Arc<std::sync::RwLock<Option<homelab_core::ops::hostcpu::CpuSnapshot>>>,
+    /// fix-222: the newest `gather_host_disk_detail` reading, refreshed only
+    /// once `DISK_DETAIL_REFRESH_S` has passed since it was taken (it runs
+    /// `du` over the whole root filesystem) — never on every status poll.
+    disk_detail: Arc<std::sync::RwLock<Option<homelab_proto::HostDiskDetail>>>,
     /// feat-platform-3: the newest operation lines, for `CurrentOp`.
     recent: Arc<std::sync::Mutex<std::collections::VecDeque<ServerMsg>>>,
     /// arch-host-link: this start of the host, stamped on every question.
@@ -5555,6 +5559,7 @@ impl AppState {
             live_status: Arc::new(std::sync::RwLock::new(None)),
             host_cpu_pct: Arc::new(std::sync::RwLock::new(None)),
             host_cpu_prev: Arc::new(std::sync::RwLock::new(None)),
+            disk_detail: Arc::new(std::sync::RwLock::new(None)),
             recent: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
             boot_id: format!(
                 "{}-{}",
@@ -6997,6 +7002,28 @@ async fn build_fleet_state(state: &AppState, exec: &RealExecutor) -> homelab_pro
                 .and_then(|l| l.trim().trim_end_matches('%').parse::<u64>().ok())
         })
         .unwrap_or(0);
+    // fix-222: cached at DISK_DETAIL_REFRESH_S, never re-gathered on every
+    // status poll — a fresh read here would run `du` over the whole root
+    // filesystem on a schedule governed by `status_interval_s`, which is
+    // seconds, not the 15 minutes this is worth re-measuring at.
+    const DISK_DETAIL_REFRESH_S: u64 = 900;
+    let now_s = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let stale = state
+        .disk_detail
+        .read()
+        .ok()
+        .and_then(|d| d.clone())
+        .is_none_or(|d| now_s.saturating_sub(d.measured_at) >= DISK_DETAIL_REFRESH_S);
+    if stale {
+        let fresh = gather_host_disk_detail(exec, now_s).await;
+        if let Ok(mut w) = state.disk_detail.write() {
+            *w = Some(fresh);
+        }
+    }
+    let disk_detail = state.disk_detail.read().ok().and_then(|d| d.clone());
     let (_, fingerprint) = tls::ensure_cert(&state.config.state_dir, "homelab-host").unwrap_or((
         tls::CertPaths {
             cert_pem: String::new(),
@@ -7082,6 +7109,7 @@ async fn build_fleet_state(state: &AppState, exec: &RealExecutor) -> homelab_pro
             ram_committed_mb: cap.2,
             cores_total: cap.3,
             load1_x100: cap.4,
+            disk_detail,
         },
         stacks,
     }
@@ -9722,6 +9750,72 @@ async fn gather_host_capacity(
         });
     }
 
+    out
+}
+
+/// fix-222 (Kenny, 2026-10-02: "root disk van HOST is 48% gebruikt, is dat
+/// de 1TB SSD die erin zit? is die al halfvol? met wat?"): which disk "root"
+/// (`pve/root`, the lv the Host page's `disk_pct` measures) and "local-lvm"
+/// (`pve/data`, the thin pool every LXC/VM disk is carved from) actually
+/// are, and the root filesystem's biggest directories — `du -x
+/// --max-depth=2 /` is the one potentially slow command here, bounded by
+/// its own 20 s timeout and, in `build_fleet_state`, only ever run again
+/// once the cache is stale (never on every status poll).
+async fn gather_host_disk_detail(exec: &dyn Executor, now: u64) -> homelab_proto::HostDiskDetail {
+    use homelab_core::ops::fleetcheck::{
+        parse_blockdev_bytes, parse_du_top, parse_lv_size_gb, parse_pv_name, whole_disk_device,
+    };
+    let mut out = homelab_proto::HostDiskDetail {
+        measured_at: now,
+        ..Default::default()
+    };
+    if let Ok(o) = exec
+        .run(&Cmd::new(
+            "lvs",
+            &["--noheadings", "--units", "g", "-o", "lv_size", "pve/root"],
+            15,
+        ))
+        .await
+        && let Some(gb) = parse_lv_size_gb(&o.stdout)
+    {
+        out.root_lv_size_gb = gb;
+    }
+    if let Ok(o) = exec
+        .run(&Cmd::new(
+            "lvs",
+            &["--noheadings", "--units", "g", "-o", "lv_size", "pve/data"],
+            15,
+        ))
+        .await
+        && let Some(gb) = parse_lv_size_gb(&o.stdout)
+    {
+        out.thin_pool_size_gb = gb;
+    }
+    if let Ok(o) = exec
+        .run(&Cmd::new(
+            "pvs",
+            &["--noheadings", "-o", "pv_name", "pve"],
+            15,
+        ))
+        .await
+        && let Some(pv) = parse_pv_name(&o.stdout)
+    {
+        let disk = whole_disk_device(&pv);
+        if let Ok(o) = exec
+            .run(&Cmd::new("blockdev", &["--getsize64", &disk], 15))
+            .await
+            && let Some(gb) = parse_blockdev_bytes(&o.stdout)
+        {
+            out.root_disk_device = disk;
+            out.root_disk_total_gb = gb;
+        }
+    }
+    if let Ok(o) = exec
+        .run(&Cmd::new("du", &["-x", "--max-depth=2", "/"], 20))
+        .await
+    {
+        out.top_dirs = parse_du_top(&o.stdout, 10);
+    }
     out
 }
 

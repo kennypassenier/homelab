@@ -30,6 +30,17 @@ impl Prometheus {
         })
     }
 
+    /// A client for a given base (feat-platform-10's demo metrics server;
+    /// also this module's own tests) rather than the project config.
+    pub fn new(base: String, timeout: Duration, host_label: Option<String>) -> Option<Self> {
+        let http = reqwest::Client::builder().timeout(timeout).build().ok()?;
+        Some(Prometheus {
+            base,
+            http,
+            host_label,
+        })
+    }
+
     pub fn base(&self) -> &str {
         &self.base
     }

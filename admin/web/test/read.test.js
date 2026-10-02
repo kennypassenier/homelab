@@ -6,11 +6,13 @@ import assert from "node:assert/strict";
 import { answerBody, askView, openAsks } from "../js/asks.js";
 import { agoText } from "../js/format.js";
 import {
+  diskDetailFacts,
   guestRows,
   hostBars,
   hostChecks,
   hostFacts,
   pct,
+  topDirRows,
   versionText,
 } from "../js/host.js";
 import {
@@ -119,6 +121,98 @@ test("the CPU bar says 'not measured yet' instead of a fabricated 0%", () => {
     pct: 0,
     value: "not measured yet",
   });
+});
+
+// fix-222 (Kenny, 2026-10-02: "root disk van HOST is 48% gebruikt, is dat
+// de 1TB SSD die erin zit?"): once the host has read `disk_detail`, the
+// Root disk bar names the device and its total size; before that (or on an
+// older host), it reads exactly as before — no regression for `fleet`
+// above, which carries no `disk_detail` at all.
+test("the root disk bar names the device once disk_detail is read", () => {
+  const f = {
+    ...fleet,
+    host: {
+      ...fleet.host,
+      disk_detail: {
+        root_lv_size_gb: 96,
+        root_disk_device: "/dev/sda",
+        root_disk_total_gb: 931.5,
+        thin_pool_size_gb: 780,
+        top_dirs: /** @type {[string, number][]} */ ([
+          ["/var", 42],
+          ["/usr", 18],
+        ]),
+        measured_at: 1,
+      },
+    },
+  };
+  assert.deepEqual(hostBars(f)[2], {
+    label: "Root disk",
+    pct: 31,
+    value: "31% used — /dev/sda, 932 GB total",
+  });
+});
+
+test("diskDetailFacts names the root volume and the local-lvm pool", () => {
+  const f = {
+    ...fleet,
+    host: {
+      ...fleet.host,
+      disk_detail: {
+        root_lv_size_gb: 96,
+        root_disk_device: "/dev/sda",
+        root_disk_total_gb: 931.5,
+        thin_pool_size_gb: 780,
+        top_dirs: [],
+        measured_at: 1,
+      },
+    },
+  };
+  const facts = Object.fromEntries(
+    diskDetailFacts(f).map((x) => [x.label, x.value]),
+  );
+  assert.equal(
+    facts["Root volume (pve/root)"],
+    "96 GB, on /dev/sda (932 GB total)",
+  );
+  assert.equal(
+    facts["local-lvm thin pool (pve/data)"],
+    "780 GB — every LXC/VM's own disk is carved from here",
+  );
+});
+
+test("diskDetailFacts says not read yet before the host's first gather", () => {
+  assert.deepEqual(diskDetailFacts(fleet), [
+    { label: "Root volume (pve/root)", value: "not read yet" },
+  ]);
+});
+
+test("topDirRows reads the host's own du ordering, formatted in GB", () => {
+  const f = {
+    ...fleet,
+    host: {
+      ...fleet.host,
+      disk_detail: {
+        root_lv_size_gb: 96,
+        root_disk_device: "/dev/sda",
+        root_disk_total_gb: 931.5,
+        thin_pool_size_gb: 780,
+        top_dirs: /** @type {[string, number][]} */ ([
+          ["/var", 42],
+          ["/usr", 18.456],
+        ]),
+        measured_at: 1,
+      },
+    },
+  };
+  assert.deepEqual(topDirRows(f), [
+    { path: "/var", gb: "42.0 GB" },
+    { path: "/usr", gb: "18.5 GB" },
+  ]);
+});
+
+test("topDirRows is empty before the host has read anything", () => {
+  assert.deepEqual(topDirRows(fleet), []);
 });
 
 test("the containers table names each guest's stack and flags a stopped one", () => {

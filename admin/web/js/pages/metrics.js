@@ -5,7 +5,7 @@
 // (feat-overview-8), so the tab switch is a navigation, not a new control.
 
 import { panelEl } from "../charts.js";
-import { h, fetchJson } from "../dom.js";
+import { errorBox, h, fetchJson } from "../dom.js";
 import { formatDateTime } from "../format.js";
 import { current, subscribe } from "../store.js";
 import { choice, setParams } from "../urlstate.js";
@@ -17,18 +17,27 @@ const TABS = /** @type {const} */ ([
 ]);
 
 /**
- * A two-column table of the busiest names in the window.
+ * A two-column table of the busiest names in the window, with the
+ * one-sentence description rule 8 asks of every section. fix-221: `t.error`
+ * is always a short, already-stripped reason by the time it reaches here
+ * (never an upstream's raw HTML page) — see `Loki::metric_now`'s
+ * `upstream_reason`.
  * @param {string} caption
+ * @param {string} desc
  * @param {string} what
  * @param {{rows: [string, number][], error?: string}} t
  */
-function topTable(caption, what, t) {
-  if (t.error)
-    return h("p", { class: "chart__error" }, `${caption}: ${t.error}`);
+function topTable(caption, desc, what, t) {
+  if (t.error) return errorBox({ what: caption, why: t.error, fix: "" });
   return h(
     "table",
     { class: "kp-table" },
-    h("caption", null, caption),
+    h(
+      "caption",
+      null,
+      caption,
+      h("p", { class: "section-head__desc measured" }, desc),
+    ),
     h(
       "thead",
       null,
@@ -158,7 +167,8 @@ export function mount(root, ctx) {
       const q = setParams("", { stack: stack || null, range });
       const r = await fetchJson(`/data/charts${q}`, "the charts", abort.signal);
       if (!r.ok) {
-        status.textContent = `${r.error.what}: ${r.error.why} — ${r.error.fix}`;
+        status.textContent = "";
+        grid.replaceChildren(errorBox(r.error));
         return;
       }
       status.textContent = `${stack ? `Stack ${stack}` : "The host"}, ${formatDateTime(r.body.from)} to ${formatDateTime(r.body.to)}`;
@@ -177,7 +187,9 @@ export function mount(root, ctx) {
         abort.signal,
       );
       if (!r.ok) {
-        status.textContent = `${r.error.what}: ${r.error.why} — ${r.error.fix}`;
+        status.textContent = "";
+        grid.replaceChildren(errorBox(r.error));
+        tables.replaceChildren();
         return;
       }
       const b = r.body;
@@ -186,8 +198,18 @@ export function mount(root, ctx) {
         ...b.panels.map((/** @type {any} */ p) => panelEl(p, b.from, b.to)),
       );
       tables.replaceChildren(
-        topTable("Busiest hostnames", "Hostname", b.hosts),
-        topTable("Busiest client addresses", "Client", b.clients),
+        topTable(
+          "Busiest hostnames",
+          "The hostnames with the most requests in this window.",
+          "Hostname",
+          b.hosts,
+        ),
+        topTable(
+          "Busiest client addresses",
+          "The client addresses that made the most requests in this window.",
+          "Client",
+          b.clients,
+        ),
       );
     };
     read().catch(() => {});

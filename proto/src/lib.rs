@@ -1106,6 +1106,36 @@ pub struct HostView {
     /// from the router (fix-94). The dashboard answers only from there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_address: Option<String>,
+    /// fix-222 (Kenny, 2026-10-02: "root disk van HOST is 48% gebruikt, is
+    /// dat de 1TB SSD die erin zit?"): which disk `disk_pct` above is
+    /// measuring, the local-lvm thin pool beside it, and the biggest
+    /// directories on root — gathered on the host itself, cached (it runs
+    /// `du`), never over ssh from the client. `None` before the host's
+    /// first gather, or on a host too old to send it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_detail: Option<HostDiskDetail>,
+}
+
+/// fix-222: see `HostView::disk_detail`. Every size is GiB, already
+/// human-scaled (never a raw byte count for a person to divide themselves).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct HostDiskDetail {
+    /// The `pve/root` logical volume's own size.
+    pub root_lv_size_gb: f64,
+    /// The physical disk behind it, e.g. `/dev/sda` (never a partition).
+    pub root_disk_device: String,
+    /// That disk's own total capacity — "is dat de 1TB SSD" answered
+    /// directly, rather than left for Kenny to work out from a percentage.
+    pub root_disk_total_gb: f64,
+    /// The `pve/data` thin pool's own size — what "local-lvm" is: the pool
+    /// Proxmox carves every LXC/VM's own disk out of.
+    pub thin_pool_size_gb: f64,
+    /// The root filesystem's biggest directories (`du -x --max-depth=2 /`),
+    /// largest first, capped to a handful — "used by what".
+    pub top_dirs: Vec<(String, f64)>,
+    /// Unix seconds this reading was taken; gathering is bounded and cached
+    /// (it runs `du`), so this can be noticeably older than `measured_at`.
+    pub measured_at: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

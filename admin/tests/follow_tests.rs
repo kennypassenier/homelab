@@ -594,3 +594,44 @@ async fn parity_a_check_answer_is_drivable() {
     })
     .await;
 }
+
+/// fix-185: `state.form.reads_repo` says whether a driven form's final
+/// press reads the repository (`Needs::Spec`/`Needs::Apply`) — deploy and
+/// the host-wide apply do, a backup does not, and a batch wrapping a
+/// repo-reading action does too, by the action it wraps rather than its own
+/// "batch" slug. `homelab ui` preflights a press only when this is set.
+#[tokio::test]
+async fn fix_185_reads_repo_names_the_actions_that_read_the_repository() {
+    let w = world("reads-repo", MemFiles::default(), None);
+    let s = |st| step(&w, st);
+
+    let opened = s(open("deploy", Some("media"))).await;
+    assert_eq!(opened["state"]["form"]["reads_repo"], true, "{opened}");
+    s(press("close")).await;
+
+    let opened = s(open("backup", Some("media"))).await;
+    assert_eq!(opened["state"]["form"]["reads_repo"], false, "{opened}");
+    s(press("close")).await;
+
+    // The host-wide "apply" form (every declared stack against the host)
+    // needs scope All.
+    let opened = w.driver.step("wsl", Scope::All, open("apply", None)).await;
+    assert_eq!(opened["state"]["form"]["reads_repo"], true, "{opened}");
+    w.driver.step("wsl", Scope::All, press("close")).await;
+
+    // A batch wrapping deploy reads the repository too, by the action it
+    // wraps — a batch wrapping backup does not.
+    let opened = s(UiStep::Open {
+        form: "batch:deploy".into(),
+        target: Some("media,drill".into()),
+    })
+    .await;
+    assert_eq!(opened["state"]["form"]["reads_repo"], true, "{opened}");
+    s(press("close")).await;
+    let opened = s(UiStep::Open {
+        form: "batch:backup".into(),
+        target: Some("media,drill".into()),
+    })
+    .await;
+    assert_eq!(opened["state"]["form"]["reads_repo"], false, "{opened}");
+}

@@ -16,7 +16,7 @@ pub const STEPS: &str = "goto <path> | open <form> [stack] | open batch <action>
 select <stack>,<stack>|none | type <field> <text> | \
 pick <field> <value> | check <field> on|off | edit <field> <file|-> | \
 row add|edit|up|down|delete [n|key] | press next|back|save|cancel|default | \
-press confirm [--wait] | finish | close | state | done | plan \"<step>\" \"<step>\" … | plan --file <file|->";
+press confirm [--wait] | finish | close | reload | state | done | plan \"<step>\" \"<step>\" … | plan --file <file|->";
 
 /// What the line may print for a command besides its own answer. The host
 /// broadcasts every log line, transfer, fleet snapshot and question to every
@@ -266,6 +266,9 @@ pub fn parse_with(
         }
         "press" => UiStep::Press { button: word(1)? },
         "close" => UiStep::Close,
+        // fix-185: tell the driven tab to take the dashboard's current
+        // page, what its own "update available" banner's button does.
+        "reload" => UiStep::Reload,
         "state" => UiStep::State,
         "done" => UiStep::Done,
         other => return Err(format!("unknown ui step '{other}'; {}", usage())),
@@ -280,7 +283,7 @@ pub fn parse_with(
         | UiStep::Edit { .. }
         | UiStep::Row { .. } => args.len() > 3,
         UiStep::Select { .. } => args.len() > 2,
-        UiStep::Close | UiStep::State | UiStep::Done => args.len() > 1,
+        UiStep::Close | UiStep::Reload | UiStep::State | UiStep::Done => args.len() > 1,
         UiStep::Type { .. } | UiStep::Plan { .. } => false,
     };
     if extra {
@@ -601,6 +604,11 @@ mod tests {
                 .contains("usage: homelab ui")
         );
         assert!(parse(&words("close now")).is_err());
+        // fix-185: tell the driven tab to take the dashboard's current
+        // page, what its own "update available" banner's button does.
+        assert_eq!(parse(&words("reload")).unwrap(), UiStep::Reload);
+        assert!(parse(&words("reload now")).is_err());
+        assert!(STEPS.contains("reload"));
         // The edit forms' steps.
         assert_eq!(
             parse(&words("open batch update media,drill")).unwrap(),
@@ -831,6 +839,7 @@ mod tests {
         use homelab_proto::Command;
         let step = Command::Ui {
             step: UiStep::Goto { path: "/".into() },
+            client_version: "3.70.0".into(),
         };
         assert!(quiet_line(&step));
         assert!(!quiet_line(&Command::Ping));

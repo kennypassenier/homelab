@@ -41,6 +41,10 @@ use crate::core::drive::{Applied, Ctx, DriveState, Effect, Family, JobRef, Sourc
 use crate::core::driveedit::{self, EditCall, EditKind};
 use crate::core::drivelive::{self, Announce, Control};
 
+/// fix-185 (`homelab ui reload`): how long the driver waits for the driven
+/// tab to re-attach reporting the client's own version before giving up.
+pub const RELOAD_WAIT: Duration = Duration::from_secs(20);
+
 /// Live view's timing: how long a step is announced, and how long a paused
 /// step waits for Continue before it fails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -566,17 +570,50 @@ impl Driver {
         refusal.filter(|_| call.final_press())
     }
 
-    /// Apply one step and answer `{ok, refusal, state}`.
+    /// Apply one step and answer `{ok, refusal, state}`. No client version to
+    /// check against (the demo route; there is no real client behind it).
     pub async fn step(&self, by: &str, scope: Scope, step: UiStep) -> Value {
-        self.step_held(by, scope, step, &|_, _| {}).await
+        self.step_held(by, scope, step, "", &|_, _| {}).await
     }
 
     /// [`Driver::step`], announced and held first (Live view); `hold` asks
-    /// the host to wait longer while a viewer has paused.
-    pub async fn step_held(&self, by: &str, scope: Scope, step: UiStep, hold: Hold<'_>) -> Value {
+    /// the host to wait longer while a viewer has paused. `client_version`
+    /// (fix-185): empty skips the check (an old client, or the demo route);
+    /// otherwise a step is refused at once when a following tab's last
+    /// reported page version differs from it — before anything is announced
+    /// or applied.
+    pub async fn step_held(
+        &self,
+        by: &str,
+        scope: Scope,
+        step: UiStep,
+        client_version: &str,
+        hold: Hold<'_>,
+    ) -> Value {
         // Reading the screen never waits behind a held step.
         if step == UiStep::State {
             return reply(None, &self.snapshot());
+        }
+        // The lock is taken and dropped on its own line, never inside the
+        // `if`'s condition: a MutexGuard born in a let-chain's condition
+        // lives through the whole body, and `self.publish` below takes the
+        // same lock again — nested, that deadlocks a step forever.
+        let tab_v = self.lock().tab_page_version.clone();
+        if !client_version.is_empty()
+            && drivelive::needs_version_match(&step)
+            && let Some(tab_v) = tab_v.as_deref()
+            && tab_v != client_version
+        {
+            let r = drivelive::version_mismatch(&step, tab_v, client_version);
+            tracing::info!(
+                by,
+                step = step.verb(),
+                tab = %tab_v,
+                client = client_version,
+                "a driven step was refused: the tab is stale"
+            );
+            self.publish(&step, false, Some(&r));
+            return reply(Some(&r), &self.snapshot());
         }
         let _turn = self.inner.turn.lock().await;
         let stacks = self.stacks().await;
@@ -606,6 +643,7 @@ impl Driver {
                 }
                 Effect::Run(args) => self.run(by, *args).await,
                 Effect::Edit(call) => self.edit_call(by, call).await.or(held),
+                Effect::Reload => self.reload(client_version).await.or(held),
             },
         };
         tracing::info!(by, step = step.verb(), "a driven step was applied");
@@ -756,7 +794,34 @@ impl Driver {
     }
 
     /// A viewer pressed Pause, Continue or Stop in the announcement bar.
-    pub fn control(&self, c: Control, who: &str) -> Result<DriveState, Refusal> {
+    ///
+    /// fix-185: `at_seq`, when given, is the `seq` the button was drawn
+    /// against (the tab's last known state). A Stop whose `seq` no longer
+    /// matches the live state is refused as stale rather than acted on: a
+    /// delayed or duplicated press meant for a drive that has since ended
+    /// (`done`) must never reach into a LATER, unrelated one that happens to
+    /// be driving again when it finally arrives — that is how a viewer's
+    /// Stop stayed held after `ui done` had already acknowledged it and a
+    /// new round had begun (Kenny, 2026-10-02). `None` (an older tab) keeps
+    /// the previous, unchecked behaviour.
+    pub fn control(
+        &self,
+        c: Control,
+        who: &str,
+        at_seq: Option<u64>,
+    ) -> Result<DriveState, Refusal> {
+        if let Some(want) = at_seq {
+            let now_seq = self.lock().seq;
+            if want != now_seq {
+                return Err(Refusal::new(
+                    c.word(),
+                    format!(
+                        "the drive has moved on since this button was drawn (it showed step {want}, now at {now_seq}): a stale press never acts on a later, unrelated round"
+                    ),
+                    "the page keeps its own state current; press it again if it still applies",
+                ));
+            }
+        }
         // Read before Stop clears the form: the batch its final press began.
         let batch = self
             .lock()
@@ -915,6 +980,67 @@ impl Driver {
         }
     }
 
+    /// fix-185 (`homelab ui reload`): tell every following tab to take the
+    /// dashboard's current page — what its own "update available" banner's
+    /// Reload button does — then wait, bounded by [`RELOAD_WAIT`], for a tab
+    /// to report back exactly `client_version`. `Some` when the wait ran
+    /// out: the driver did not hear the new version in time.
+    async fn reload(&self, client_version: &str) -> Option<Refusal> {
+        self.publish_reload();
+        let deadline = Instant::now() + RELOAD_WAIT;
+        loop {
+            if !client_version.is_empty()
+                && self.lock().tab_page_version.as_deref() == Some(client_version)
+            {
+                return None;
+            }
+            if Instant::now() >= deadline {
+                return Some(Refusal::new(
+                    "ui reload",
+                    format!(
+                        "no tab reported running {client_version} within {} s of the reload",
+                        RELOAD_WAIT.as_secs()
+                    ),
+                    "check the tab is open and reachable; `homelab ui state` shows what it last reported",
+                ));
+            }
+            let woken = self.inner.wake.notified();
+            tokio::pin!(woken);
+            woken.as_mut().enable();
+            tokio::select! {
+                _ = &mut woken => {}
+                _ = tokio::time::sleep(Duration::from_millis(200)) => {}
+            }
+        }
+    }
+
+    /// fix-185: a following tab's own reported page version, from `POST
+    /// /data/drive/attach` — set on every page load/navigation, not only
+    /// while Live view follows, so a step is checked against the most
+    /// recent truth a tab has ever volunteered.
+    fn report_tab_version(&self, version: String) {
+        self.lock().tab_page_version = Some(version);
+        self.inner.wake.notify_waiters();
+    }
+
+    /// fix-185: every tab that follows takes the dashboard's current page at
+    /// once (the live channel's own "reload", distinct from the step-by-step
+    /// "announce"/"control"/"step" kinds it already carries).
+    fn publish_reload(&self) {
+        let state = self.snapshot();
+        self.inner.publish.publish(
+            "drive",
+            json!({
+                "kind": "reload",
+                "seq": state.seq,
+                "step": Value::Null,
+                "applied": true,
+                "refusal": null,
+                "state": state,
+            }),
+        );
+    }
+
     /// fix-163 (Kenny, 2026-09-29): after `ui press confirm` the dialog shows
     /// the job's end; when no step follows within 30 s of it, close the
     /// dialog and give the tabs back, as `homelab ui done` does, so the
@@ -987,6 +1113,7 @@ impl Driver {
                         by,
                         scope,
                         step,
+                        client_version,
                     }) => {
                         // Each step on its own task: a held step (Live view)
                         // must not keep `ui state` or a viewer's button
@@ -1013,7 +1140,9 @@ impl Driver {
                                     }
                                 });
                             };
-                            let answer = driver.step_held(&by, scope, step, &hold).await;
+                            let answer = driver
+                                .step_held(&by, scope, step, &client_version, &hold)
+                                .await;
                             let ok = answer["ok"] == Value::Bool(true);
                             let r = host
                                 .ask_traced(
@@ -1080,6 +1209,10 @@ async fn state(State(d): State<Driver>) -> Json<Value> {
 struct ControlBody {
     #[serde(rename = "do")]
     what: Control,
+    /// fix-185: the `seq` the tab's button was drawn against; see
+    /// [`Driver::control`].
+    #[serde(default)]
+    seq: Option<u64>,
 }
 
 /// Who pressed a Live view button, as the driver reads it after "paused
@@ -1103,10 +1236,24 @@ async fn control(
     headers: HeaderMap,
     Json(body): Json<ControlBody>,
 ) -> Response {
-    match d.control(body.what, &viewer(&headers)) {
+    match d.control(body.what, &viewer(&headers), body.seq) {
         Ok(state) => Json(json!({ "state": state })).into_response(),
         Err(r) => (StatusCode::CONFLICT, Json(r)).into_response(),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct AttachBody {
+    page_version: String,
+}
+
+/// fix-185: a tab reports the dashboard version its loaded page actually
+/// runs — sent on every page load/navigation (not only while Live view
+/// follows), so `homelab ui` can tell a step from a page it never reloaded
+/// into. Never refused: a tab reporting itself is never wrong, only late.
+async fn attach(State(d): State<Driver>, Json(body): Json<AttachBody>) -> Json<Value> {
+    d.report_tab_version(body.page_version);
+    Json(json!({ "state": d.snapshot() }))
 }
 
 /// fix-172: the action queue's view of Live view's pause, wired in
@@ -1127,6 +1274,7 @@ pub fn router(driver: Driver) -> Router {
     Router::new()
         .route("/data/drive", get(state))
         .route("/data/drive/control", post(control))
+        .route("/data/drive/attach", post(attach))
         .with_state(driver)
 }
 

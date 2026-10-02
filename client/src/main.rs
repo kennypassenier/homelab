@@ -42,6 +42,10 @@ static REPO_ROOT: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::O
 // never waits on a question nobody is watching for.
 static PRE_ANSWER: std::sync::OnceLock<Option<bool>> = std::sync::OnceLock::new();
 
+/// fix-185: this build's own version, carried with every `homelab ui` step
+/// so the dashboard can tell a step from a stale tab's.
+const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn repo_root() -> Option<&'static Path> {
     REPO_ROOT.get().and_then(|r| r.as_deref())
 }
@@ -311,13 +315,30 @@ async fn run(explicit_host: Option<String>) {
                 .collect();
             use homelab_client::ui_cli::UiCall;
             let call = homelab_client::ui_cli::parse_call(&words).unwrap_or_else(|e| die(&e));
+            // fix-185: a final press of an action that reads the repository
+            // is checked here, on the machine that is driving, before the
+            // dashboard (and its own working copy) is asked at all.
+            if matches!(
+                &call,
+                UiCall::Step(UiStep::Press { button }) | UiCall::PressWait(UiStep::Press { button })
+                    if button == "confirm"
+            ) {
+                ui_repo_preflight(&host, &token).await;
+            }
             let step = match call {
                 UiCall::Step(step) => step,
                 UiCall::Finish => ui_finish(&host, &token, json).await,
                 UiCall::PressWait(step) => {
-                    let reply = rpc_reply(&host, &token, Command::Ui { step })
-                        .await
-                        .unwrap_or_else(|| die("the host closed the line before it answered"));
+                    let reply = rpc_reply(
+                        &host,
+                        &token,
+                        Command::Ui {
+                            step,
+                            client_version: CLIENT_VERSION.to_string(),
+                        },
+                    )
+                    .await
+                    .unwrap_or_else(|| die("the host closed the line before it answered"));
                     if !reply.ok {
                         ui_print(&reply, json);
                     }
@@ -327,9 +348,16 @@ async fn run(explicit_host: Option<String>) {
                     ui_finish(&host, &token, json).await
                 }
             };
-            let reply = rpc_reply(&host, &token, Command::Ui { step })
-                .await
-                .unwrap_or_else(|| die("the host closed the line before it answered"));
+            let reply = rpc_reply(
+                &host,
+                &token,
+                Command::Ui {
+                    step,
+                    client_version: CLIENT_VERSION.to_string(),
+                },
+            )
+            .await
+            .unwrap_or_else(|| die("the host closed the line before it answered"));
             ui_print(&reply, json);
         }
         "patch" => rpc(&host, &token, Command::PatchFleet).await,
@@ -2086,6 +2114,84 @@ fn ui_print(reply: &homelab_proto::RpcResponse, json: bool) -> ! {
     }
 }
 
+/// fix-185: before a driven `press confirm` on an action that reads the
+/// repository, refuse HERE — never lets a bad press reach the dashboard —
+/// when local HEAD has commits not on its upstream (the dashboard's own
+/// working copy fetches origin, so it would read the files from before
+/// them), or a stack involved fails the same validation `homelab apply
+/// --plan` runs. Reads the open form through one `ui state` first: the step
+/// itself carries no stack name.
+async fn ui_repo_preflight(host: &str, token: &str) {
+    let Some(reply) = rpc_reply(
+        host,
+        token,
+        Command::Ui {
+            step: UiStep::State,
+            client_version: CLIENT_VERSION.to_string(),
+        },
+    )
+    .await
+    else {
+        // The real press surfaces the connection problem; nothing to check
+        // here without an answer.
+        return;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&reply.message) else {
+        return;
+    };
+    let form = &v["state"]["form"];
+    if !form["reads_repo"].as_bool().unwrap_or(false) {
+        return;
+    }
+    let action = form["action"].as_str().unwrap_or("");
+    let form_stack = form["stack"].as_str().unwrap_or("");
+    let base = stacks_base();
+    let declared: Vec<String> = homelab_client::spec::declared_stacks(&base)
+        .into_iter()
+        .map(|(n, _)| n)
+        .collect();
+    let stacks = homelab_client::ui_preflight::stacks_involved(action, form_stack, &declared);
+    if let Some(root) = repo_root() {
+        let unpushed = std::process::Command::new("git")
+            .args(["-C"])
+            .arg(root)
+            .args(["rev-list", "--oneline", "@{u}..HEAD"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if let Some(why) = homelab_client::ui_preflight::unpushed_refusal(&unpushed) {
+            die(&format!("ui press confirm: {why}"));
+        }
+    }
+    let mut errors: Vec<(String, String)> = Vec::new();
+    for name in &stacks {
+        let dir = stack_dir(name);
+        if !dir.join("lxc-compose.yml").is_file() {
+            // Not a deployable stack (e.g. native-only): nothing here for
+            // `homelab apply --plan`'s own validation to check either.
+            continue;
+        }
+        match homelab_client::spec::build_spec(&dir) {
+            Ok(sp) => {
+                if let Err(e) = homelab_core::manifest::validate(&sp) {
+                    errors.push((name.clone(), e.to_string()));
+                }
+            }
+            Err(e) => errors.push((name.clone(), e)),
+        }
+    }
+    if let Some(why) = homelab_client::ui_preflight::validation_refusal(&errors) {
+        die(&format!("ui press confirm: {why}"));
+    }
+}
+
 /// `homelab ui finish` (Kenny, 2026-09-29): read the screen every 2 s until
 /// the open dialog's job has ended, print its outcome, then answer with the
 /// `done` step to send, which closes the dialog and gives the tabs back at
@@ -2101,6 +2207,7 @@ async fn ui_finish(host: &str, token: &str, json: bool) -> UiStep {
             token,
             Command::Ui {
                 step: UiStep::State,
+                client_version: CLIENT_VERSION.to_string(),
             },
         )
         .await

@@ -77,6 +77,17 @@ test("follow_live_a_pause_freezes_the_countdown_and_offers_continue", () => {
   assert.equal(between?.countdown, false);
 });
 
+// fix-185: the bar carries the `seq` it was drawn against, so a Pause,
+// Continue or Stop click can tell the server which round it means — a
+// stale press (delayed, or a duplicate) that arrives once the state has
+// moved on is then refused instead of landing on a later, unrelated round.
+test("fix_185_the_bar_carries_the_seq_it_was_drawn_against", () => {
+  const s = state({ seq: 7, announce: announce() });
+  assert.equal(announceView(s, leftNow(s, 0))?.seq, 7);
+  const later = state({ seq: 12, paused_by: "kenny" });
+  assert.equal(announceView(later, 0)?.seq, 12);
+});
+
 test("follow_live_pause_and_stop_stay_while_a_driven_job_runs", () => {
   // Kenny, 2026-09-30: during `confirm --wait` only "Leave live view" was
   // left, because nothing was announced while the deploy ran.

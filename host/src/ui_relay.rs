@@ -206,11 +206,14 @@ impl UiRelay {
     /// Hand `step` to the dashboard and wait for its answer: `(ok, JSON)`.
     /// `wait` is the quiet time allowed; a `UiHold` replaces it with the
     /// time the dashboard asks for, and its note goes to `note`.
+    /// `client_version` (fix-185): the CLI's own build, so the dashboard can
+    /// tell a stale tab from the client driving it.
     pub async fn relay(
         &self,
         by: &str,
         scope: Scope,
         step: UiStep,
+        client_version: &str,
         wait: Duration,
         note: &(dyn Fn(String) + Send + Sync),
     ) -> (bool, String) {
@@ -249,6 +252,7 @@ impl UiRelay {
             by: by.to_string(),
             scope,
             step,
+            client_version: client_version.to_string(),
         };
         if out.send(msg).await.is_err() {
             self.pending
@@ -331,6 +335,7 @@ mod tests {
                 "wsl",
                 Scope::Operate,
                 UiStep::State,
+                "3.70.0",
                 Duration::from_millis(50),
                 &|_| {},
             )
@@ -358,10 +363,12 @@ mod tests {
                 by,
                 scope,
                 step,
+                client_version,
             }) = rx.recv().await
             else {
                 panic!("no step")
             };
+            assert_eq!(client_version, "3.70.0");
             assert_eq!(
                 (by.as_str(), scope, step),
                 ("wsl", Scope::Operate, UiStep::Close)
@@ -375,6 +382,7 @@ mod tests {
                 "wsl",
                 Scope::Operate,
                 UiStep::Close,
+                "3.70.0",
                 Duration::from_secs(2),
                 &|_| {},
             )
@@ -451,6 +459,7 @@ mod tests {
                 "wsl",
                 Scope::Operate,
                 UiStep::Close,
+                "3.70.0",
                 RELAY_WAIT,
                 &move |n| n2.lock().unwrap().push(n),
             )
@@ -473,7 +482,14 @@ mod tests {
             }
         });
         let (ok, msg) = r
-            .relay("wsl", Scope::Operate, UiStep::Close, RELAY_WAIT, &|_| {})
+            .relay(
+                "wsl",
+                Scope::Operate,
+                UiStep::Close,
+                "3.70.0",
+                RELAY_WAIT,
+                &|_| {},
+            )
             .await;
         assert!(!ok);
         let v: serde_json::Value = serde_json::from_str(&msg).unwrap();
@@ -498,7 +514,14 @@ mod tests {
         });
         let started = tokio::time::Instant::now();
         let (ok, _) = r
-            .relay("wsl", Scope::Operate, UiStep::Close, RELAY_WAIT, &|_| {})
+            .relay(
+                "wsl",
+                Scope::Operate,
+                UiStep::Close,
+                "3.70.0",
+                RELAY_WAIT,
+                &|_| {},
+            )
             .await;
         assert!(!ok);
         assert!(started.elapsed() < Duration::from_secs(1));

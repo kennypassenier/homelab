@@ -199,6 +199,7 @@ pub fn describe(step: &UiStep, st: &DriveState) -> String {
             Some(t) => format!("close {t}"),
             None => "close the dialog".into(),
         },
+        UiStep::Reload => "reload the driven tab".into(),
         UiStep::State => "read the screen".into(),
         UiStep::Done => "hand the dashboard back".into(),
         UiStep::Plan { steps } => format!("send a plan of {} steps", steps.len()),
@@ -295,6 +296,33 @@ pub fn stopped_refusal(step: &UiStep, who: &str) -> Refusal {
         format!("ui {}", step.verb()),
         format!("stopped by {who}: the sequence ended and the tabs are theirs again"),
         "ask Kenny before driving again; `homelab ui done` acknowledges the stop, after which steps are taken again",
+    )
+}
+
+/// fix-185: does this step need the driven tab's loaded page to match the
+/// client's own version before it is taken? Reading the screen never
+/// refuses (it changes nothing a stale page could get wrong); `Reload`
+/// itself is exempt — it is precisely the step that brings a stale tab
+/// current, so a version check would refuse the one step that fixes it;
+/// `Done` is exempt too — a drive has to be endable from a stale tab, never
+/// stuck needing the very reload that `done` would otherwise block.
+pub fn needs_version_match(step: &UiStep) -> bool {
+    !matches!(step, UiStep::State | UiStep::Reload | UiStep::Done)
+}
+
+/// fix-185: a driven tab last reported `tab_version`, and the client driving
+/// now is `client_version` — different versions means the tab is still
+/// running an older (or newer) dashboard release than the one checking the
+/// step, so taking the step would be acted on by a page this client never
+/// validated against. Only called when `tab_version != client_version`.
+pub fn version_mismatch(step: &UiStep, tab_version: &str, client_version: &str) -> Refusal {
+    Refusal::new(
+        format!("ui {}", step.verb()),
+        format!(
+            "the tab still runs {tab_version}'s page (this client is {client_version}): \
+             a step would be acted on by code this client never checked against"
+        ),
+        "press its update banner or `homelab ui reload`",
     )
 }
 
@@ -446,6 +474,22 @@ mod tests {
         assert!(new_plan(&[], "wsl", &st).is_err());
         assert!(new_plan(&[UiStep::State], "wsl", &st).is_err());
         assert!(new_plan(&vec![a; PLAN_MAX + 1], "wsl", &st).is_err());
+    }
+
+    /// fix-185: `state` never needs a version match (it changes nothing);
+    /// `reload` is exempt too (it is the fix, not another thing to refuse);
+    /// everything else does, and the refusal names what/why/fix.
+    #[test]
+    fn fix_185_version_match_exempts_state_and_reload_and_names_the_fix() {
+        assert!(!needs_version_match(&UiStep::State));
+        assert!(!needs_version_match(&UiStep::Reload));
+        assert!(!needs_version_match(&UiStep::Done));
+        assert!(needs_version_match(&goto("/jobs")));
+        let r = version_mismatch(&goto("/jobs"), "3.69.0", "3.70.0");
+        assert_eq!(r.what, "ui goto");
+        assert!(r.why.contains("3.69.0"), "{}", r.why);
+        assert!(r.why.contains("3.70.0"), "{}", r.why);
+        assert!(r.fix.contains("homelab ui reload"), "{}", r.fix);
     }
 
     #[test]

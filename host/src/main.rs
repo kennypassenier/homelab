@@ -3599,6 +3599,7 @@ span_days = 7\n";
                         by,
                         scope,
                         step,
+                        ..
                     }) => {
                         next += 1;
                         let reply = RpcRequest {
@@ -3628,6 +3629,7 @@ span_days = 7\n";
                     2,
                     Rpc::Ui {
                         step: homelab_proto::UiStep::Close,
+                        client_version: "3.70.0".into(),
                     },
                 ),
             ],
@@ -3643,12 +3645,14 @@ span_days = 7\n";
                     1,
                     Rpc::Ui {
                         step: homelab_proto::UiStep::State,
+                        client_version: "3.70.0".into(),
                     },
                 ),
                 (
                     2,
                     Rpc::Ui {
                         step: homelab_proto::UiStep::Close,
+                        client_version: "3.70.0".into(),
                     },
                 ),
             ],
@@ -7946,10 +7950,14 @@ where
                 let _ = out_tx.send(ServerMsg::RpcDone(resp)).await;
                 continue;
             }
-            Rpc::Ui { ref step } => {
+            Rpc::Ui {
+                ref step,
+                ref client_version,
+            } => {
                 info!(token = %who.name, step = step.verb(), "UI step relayed to the dashboard");
                 let (out_tx, ui, step) = (out_tx.clone(), state.ui.clone(), step.clone());
                 let (by, scope, id) = (who.name.clone(), who.scope, req.id);
+                let client_version = client_version.clone();
                 tokio::spawn(async move {
                     // Live view: a note from a held step ("paused by the
                     // viewer …") goes to this CLI alone.
@@ -7958,7 +7966,14 @@ where
                         let _ = notes.try_send(ServerMsg::UiNote { note });
                     };
                     let (ok, message) = ui
-                        .relay(&by, scope, step, ui_relay::RELAY_WAIT, &note)
+                        .relay(
+                            &by,
+                            scope,
+                            step,
+                            &client_version,
+                            ui_relay::RELAY_WAIT,
+                            &note,
+                        )
                         .await;
                     let resp = RpcResponse {
                         id,

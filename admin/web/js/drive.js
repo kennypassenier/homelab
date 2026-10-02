@@ -405,6 +405,14 @@ export function mountFollow(region, ctx) {
   watchBtn.addEventListener("click", () => setFollowing(true));
 
   listen("drive", (/** @type {import("./driveview.js").DriveEvent} */ ev) => {
+    // fix-185 (`homelab ui reload`): every tab takes the dashboard's
+    // current page at once, whether or not Live view follows here — this
+    // is precisely the step that brings a stale tab current, so it never
+    // waits for the viewer's own toggle the way a driven step does.
+    if (ev.kind === "reload") {
+      location.reload();
+      return;
+    }
     state = ev.state;
     clock.set(ev.state);
     if ((ev.kind ?? "step") === "step") {

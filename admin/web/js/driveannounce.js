@@ -31,9 +31,16 @@ import {
  *   row?: (op: string, target?: string) => HTMLElement | null}} Ctl
  */
 
-/** @param {"pause" | "continue" | "stop"} what */
-async function press(what) {
-  const r = await send("POST", "/data/drive/control", { do: what }, what);
+/**
+ * @param {"pause" | "continue" | "stop"} what
+ * @param {number | null} seq the `seq` this button was last drawn against
+ *   (fix-185): a press that arrives once the state has moved on (a delayed
+ *   or duplicated click) is refused rather than acted on against whatever
+ *   is driving now.
+ */
+async function press(what, seq) {
+  const body = seq == null ? { do: what } : { do: what, seq };
+  const r = await send("POST", "/data/drive/control", body, what);
   if (!r.ok) notify(`${r.error.why}.`, "warning");
 }
 
@@ -75,9 +82,12 @@ export function makeBar(inline, extra = []) {
     { type: "button", class: "kp-button kp-button--destructive" },
     "Stop",
   );
-  pause.addEventListener("click", () => void press("pause"));
-  resume.addEventListener("click", () => void press("continue"));
-  stop.addEventListener("click", () => void press("stop"));
+  // fix-185: the seq the bar last painted — captured below on every
+  // `paint`, so a click always sends the round it was actually drawn for.
+  let lastSeq = /** @type {number | null} */ (null);
+  pause.addEventListener("click", () => void press("pause", lastSeq));
+  resume.addEventListener("click", () => void press("continue", lastSeq));
+  stop.addEventListener("click", () => void press("stop", lastSeq));
   const live = h(
     "span",
     { class: "drive-announce__live" },
@@ -111,6 +121,10 @@ export function makeBar(inline, extra = []) {
 
   /** @type {Bar["paint"]} */
   const paint = (v, idle) => {
+    // fix-185: remember the round these buttons now represent, even while
+    // idle (v null) — the last one seen is still the right one to refuse a
+    // button pressed a moment before Claude starts again.
+    if (v) lastSeq = v.seq;
     if (!inline) el.hidden = !v;
     el.dataset.paused = String(!!v?.paused);
     text.textContent = v ? v.text : idle;

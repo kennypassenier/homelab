@@ -211,3 +211,16 @@ summarised here for the corrections record.
 8. **Fallback.** The backups above stay (Retired page) until Kenny wipes
    them.
 9. **Wanneer herzien we de maatregel.** At the measurement in field 7.
+
+## 2026-10-02 · Live view could not update the dashboard it exists to update
+
+**Status: open (owner not yet asked to ratify).**
+
+1. **Wat ging er mis.** fix-185 (this morning) made the dashboard refuse every Live view step from a client of another version, exempting only state, reload and done. At the 3.70.3 rollout the 3.70.1 tab refused the 3.70.3 client's steps, including the one that updates the dashboard; the update had to go through the CLI. Kenny: "een belachelijke fout die van mijlenver zichtbaar was".
+2. **Welke poort liet het door.** fix-185's design asked "which steps are safe on a stale tab" but never "how does a stale tab become current through Live view", the one path every release takes; no test drove an older tab.
+3. **Waar dezelfde fout nog zit.** Any version gate on a path that the version change itself must cross: the older-client refusal on the host (fix-105) has the same shape for `ui` steps (measured: the signed 3.70.1 client is refused by the 3.70.3 host).
+4. **Hoe voorkomen we herhaling.** fix-199: one frozen `ui update-dashboard` step every version accepts; invariant row 14 with a screen test driving an older tab. A version gate is designed together with the path that crosses it.
+5–6. **Kost / handhaving.** Code and screen test (invariants smoke in the full gate).
+7. **Hoe en wanneer meten we dat het werkt.** At the 3.70.4 → next release rollout: the 3.70.4 tab updates itself through Live view without the CLI.
+8. **Fallback.** `homelab install-native stacks/admin <tag>` from the CLI, announced in the thread.
+9. **Wanneer herzien we de maatregel.** At the measurement in field 7.

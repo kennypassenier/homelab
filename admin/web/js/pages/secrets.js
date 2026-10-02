@@ -7,7 +7,7 @@
 // never becomes a URL, a query param or part of `ActionArgs`.
 
 import { send } from "../act.js";
-import { fetchJson, h } from "../dom.js";
+import { errorBox, fetchJson, h } from "../dom.js";
 import { current, subscribe } from "../store.js";
 
 /**
@@ -172,7 +172,7 @@ export function mount(root) {
     ),
     body,
   );
-  const status = h("p", { class: "measured" });
+  const status = h("div", { class: "measured" });
   root.replaceChildren(
     h("div", { class: "title-row" }, h("h1", null, "Secrets")),
     h(
@@ -198,7 +198,7 @@ export function mount(root) {
       abort.signal,
     );
     if (!r.ok) {
-      status.textContent = `could not read: ${r.error}`;
+      status.replaceChildren(errorBox(r.error));
       return;
     }
     const secrets = r.body.secrets ?? [];

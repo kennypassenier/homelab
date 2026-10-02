@@ -49,14 +49,77 @@ export function doctorSummary(report) {
 }
 
 /**
+ * HTTP's standard name for a status a proxy in front of the dashboard can
+ * send on its own, so the fallback below can say more than a bare number.
+ * Not exhaustive — only the ones Traefik, Cloudflare or the dashboard's own
+ * guard are seen to send; an unlisted code just gets no name.
+ * @param {number} status
+ * @returns {string}
+ */
+function statusName(status) {
+  /** @type {Record<number, string>} */
+  const known = {
+    400: "Bad Request",
+    404: "Not Found",
+    405: "Method Not Allowed",
+    413: "Payload Too Large",
+    500: "Internal Server Error",
+    502: "Bad Gateway",
+    503: "Service Unavailable",
+    520: "Web Server Returned an Unknown Error",
+    521: "Web Server Is Down",
+    522: "Connection Timed Out",
+    523: "Origin Is Unreachable",
+  };
+  return known[status] ?? "";
+}
+
+/**
+ * Whether a body reads as an HTML page rather than anything meant for the
+ * dashboard's own JSON routes — Traefik and Cloudflare both answer this way
+ * mid-restart or mid-outage.
+ * @param {string} text
+ * @returns {boolean}
+ */
+function looksLikeHtml(text) {
+  return /^\s*(<!doctype html|<html)/i.test(text);
+}
+
+/**
+ * The first line of a text body worth reading: HTML tags stripped (an edge
+ * page's text usually sits inside them), blank lines skipped, whitespace
+ * collapsed, cut to a sane length for a one-line reading.
+ * @param {string} text
+ * @returns {string}
+ */
+function firstMeaningfulLine(text) {
+  const stripped = text.replace(/<[^>]*>/g, " ");
+  for (const raw of stripped.split(/\r?\n/)) {
+    const line = raw.replace(/\s+/g, " ").trim();
+    if (line) return line.length > 160 ? `${line.slice(0, 160)}…` : line;
+  }
+  return "";
+}
+
+/** The fallback's one concrete fix: both an HTML edge page and a status
+ * nobody explained are "try again, and if it keeps happening look at the
+ * dashboard's own journal" (CT 120 is where `admin` runs). */
+const RELOAD_THEN_JOURNAL =
+  "reload in a few seconds; if it stays, the dashboard's journal: journalctl -u admin on CT 120";
+
+/**
  * Whatever a report route answered, as `{what, why, fix}`: the route's own
- * error when it sent one (HTTP 502), otherwise one built from the status.
+ * error when it sent one (HTTP 502), otherwise one built from the status
+ * and, when the JSON body could not be parsed, the raw text underneath it.
  * @param {string} what what the page asked for
  * @param {number} status
  * @param {unknown} body the parsed JSON, or null
+ * @param {string} [rawText] the response body as text, when `body` is null
+ *   because it did not parse as JSON (fetchJson/act.js's `send`) — an edge
+ *   or proxy page answering instead of the dashboard, most often
  * @returns {RouteError}
  */
-export function routeError(what, status, body) {
+export function routeError(what, status, body, rawText = "") {
   if (body && typeof body === "object") {
     const b = /** @type {Record<string, unknown>} */ (body);
     if (typeof b.what === "string" && typeof b.why === "string")
@@ -88,12 +151,31 @@ export function routeError(what, status, body) {
       why: `the answer took longer than ${status === 524 ? "Cloudflare" : status === 504 ? "the proxy" : "the dashboard"} waits (HTTP ${status})`,
       fix: "read again; if it keeps timing out, look at the dashboard's log for this route",
     };
+  if (status === 0)
+    return {
+      what,
+      why: "the dashboard did not answer",
+      fix: "reload the page; if it stays, look at the dashboard's log",
+    };
+  // An unrecognised status/body (Kenny, 2026-10-02: a raw 502 page from
+  // Traefik mid-restart said nothing a non-technical reader could act on) —
+  // say what is knowable: the status's name, whether the body is an edge or
+  // proxy's own HTML rather than the dashboard's, and the first readable
+  // line of it otherwise.
+  const name = statusName(status);
+  const label = `HTTP ${status}${name ? ` (${name})` : ""}`;
+  if (rawText && looksLikeHtml(rawText))
+    return {
+      what,
+      why: `${label} — an edge or proxy page answered instead of the dashboard (it may be restarting)`,
+      fix: RELOAD_THEN_JOURNAL,
+    };
+  const line = rawText ? firstMeaningfulLine(rawText) : "";
   return {
     what,
-    why:
-      status === 0
-        ? "the dashboard did not answer"
-        : `the dashboard answered HTTP ${status} without an explanation`,
-    fix: "reload the page; if it stays, look at the dashboard's log",
+    why: line
+      ? `the dashboard answered ${label}: ${line}`
+      : `the dashboard answered ${label} without an explanation`,
+    fix: RELOAD_THEN_JOURNAL,
   };
 }

@@ -110,9 +110,14 @@ export function calendarWeeks(daysOldestFirst) {
 // One request per stack (the page already knows the fleet's stack names,
 // `current().fleet.stacks`), run concurrently, so one slow or hung
 // repository times out alone instead of an all-stacks call's budget
-// swallowing every stack that already answered. Pure reducers, so the
-// progress bar, the per-stack error list and the final merge are testable
-// without a DOM or a network.
+// swallowing every stack that already answered. The fold and the progress
+// count (fix-179: the Backups page needs the same shape) live in
+// `perstack.js`, a shared pure module; this file keeps only what is
+// calendar-specific.
+
+import { stackReadProgress, withStackResult } from "./perstack.js";
+
+export { withStackResult };
 
 /**
  * `ok`: read, with its snapshot times (possibly none yet, still a stack
@@ -127,44 +132,14 @@ export function calendarWeeks(daysOldestFirst) {
  */
 
 /**
- * `results` with one more stack's outcome folded in.
- * @param {Record<string, StackResult>} results
- * @param {string} name
- * @param {StackResult} outcome
- * @returns {Record<string, StackResult>}
- */
-export function withStackResult(results, name, outcome) {
-  return { ...results, [name]: outcome };
-}
-
-/**
- * The progress bar's numbers and the failures to name under it. A stack
- * still "pending" counts toward `total` but not `loaded`, so the bar fills
- * as each one settles — ok or failed, either way "read".
+ * `perstack.js`'s `stackReadProgress`, under the calendar page's own name
+ * (kept so the page and its tests need no change).
  * @param {Record<string, StackResult>} results
  * @returns {{total: number, loaded: number, pct: number, done: boolean,
  *   failed: {stack: string, reason: string}[]}}
  */
 export function calendarProgress(results) {
-  const names = Object.keys(results);
-  const total = names.length;
-  let loaded = 0;
-  /** @type {{stack: string, reason: string}[]} */
-  const failed = [];
-  for (const name of names) {
-    const r = results[name];
-    if (r.status === "pending") continue;
-    loaded += 1;
-    if (r.status === "failed") failed.push({ stack: name, reason: r.reason });
-  }
-  failed.sort((a, b) => a.stack.localeCompare(b.stack));
-  return {
-    total,
-    loaded,
-    pct: total ? Math.round((loaded / total) * 100) : 0,
-    done: total > 0 && loaded === total,
-    failed,
-  };
+  return stackReadProgress(results);
 }
 
 /**

@@ -293,7 +293,17 @@ export function tableBlock(spec) {
     handle()?.fail(failReason(e));
     return secs;
   };
-  return { wrap, tbody, loading, ready, failed: fail };
+  /**
+   * Changes the empty box's "nothing at all" words after the table was
+   * built (fix-179: a per-stack read that found zero rows because every
+   * stack failed, rather than because the fleet truly has none, says so
+   * instead of the page's fixed `spec.nothing`).
+   * @param {string} text
+   */
+  const setNothing = (text) => {
+    noneTitle.textContent = text;
+  };
+  return { wrap, tbody, loading, ready, failed: fail, setNothing };
 }
 
 /**
@@ -458,15 +468,16 @@ export async function fetchJson(url, what, signal) {
     location.assign("/login");
     return { ok: false, error: routeError(what, 401, null) };
   }
+  const text = await r.text().catch(() => "");
   /** @type {unknown} */
   let body = null;
   try {
-    body = await r.json();
+    body = JSON.parse(text);
   } catch {
     body = null;
   }
   if (!r.ok || !body || typeof body !== "object")
-    return { ok: false, error: routeError(what, r.status, body) };
+    return { ok: false, error: routeError(what, r.status, body, text) };
   return { ok: true, body };
 }
 

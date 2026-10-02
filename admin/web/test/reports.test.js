@@ -195,6 +195,48 @@ test("a route's error reads as what, why and fix", () => {
   assert.match(routeError("today", 524, null).why, /Cloudflare.*HTTP 524/);
 });
 
+test("fix-179: an unrecognised status with an HTML body names the edge/proxy, not the dashboard", () => {
+  const e = routeError(
+    "the dashboard",
+    502,
+    null,
+    "<!DOCTYPE html><html><body><h1>502 Bad Gateway</h1></body></html>",
+  );
+  assert.match(e.why, /HTTP 502/);
+  assert.match(e.why, /Bad Gateway/);
+  assert.match(e.why, /edge or proxy page/);
+  assert.match(e.why, /restarting/);
+  assert.match(e.fix, /journalctl -u admin/);
+});
+
+test("fix-179: an unrecognised status with a plain-text body reads its first meaningful line", () => {
+  const e = routeError(
+    "the dashboard",
+    503,
+    null,
+    "\n\n  Service temporarily unavailable, try again later.\nextra detail nobody needs\n",
+  );
+  assert.match(e.why, /HTTP 503/);
+  assert.match(e.why, /Service temporarily unavailable, try again later\./);
+  assert.doesNotMatch(e.why, /extra detail/);
+  assert.match(e.fix, /journalctl -u admin/);
+});
+
+test("fix-179: an unrecognised status with no body at all still says the status, not nothing", () => {
+  const e = routeError("the dashboard", 599, null);
+  assert.match(e.why, /HTTP 599/);
+  assert.match(e.why, /without an explanation/);
+});
+
+test("fix-179: HTML detection strips tags before reading a body that is not actually HTML", () => {
+  // A body that merely contains a stray "<" (not an HTML document) is read
+  // as text, with any tag-like fragments stripped rather than mistaken for
+  // the whole answer being an edge page.
+  const e = routeError("the dashboard", 500, null, "value < 10 is too low");
+  assert.doesNotMatch(e.why, /edge or proxy page/);
+  assert.match(e.why, /value/);
+});
+
 test("fix-checks-refresh: a finished answer job is news once, wherever it came from", () => {
   /** @param {number} job @param {string} action @param {string} state */
   const j = (job, action, state) =>

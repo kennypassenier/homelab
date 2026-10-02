@@ -17,6 +17,7 @@ import { showButton } from "../incident.js";
 import {
   badgeCell,
   bindTableUrl,
+  errorBox,
   fetchJson,
   fetchReport,
   fillFacts,
@@ -128,10 +129,18 @@ export function mount(root, params) {
       "drift",
       driftAbort.signal,
     );
-    if (!r.ok) return;
+    if (!r.ok) {
+      document.dispatchEvent(
+        new CustomEvent("stack-drift-error", { detail: r.error }),
+      );
+      return;
+    }
     drift = r.body.stacks?.[params.name] ?? null;
     header();
     document.dispatchEvent(new CustomEvent("stack-drift", { detail: drift }));
+    document.dispatchEvent(
+      new CustomEvent("stack-drift-error", { detail: null }),
+    );
   };
   const onCompare = () => void readDrift(true).catch(() => {});
   document.addEventListener("stack-drift-compare", onCompare);
@@ -198,11 +207,13 @@ function overviewTab(panel, params) {
     document.dispatchEvent(new CustomEvent("stack-drift-compare")),
   );
   links.append(compareBtn);
+  const driftError = h("div", { class: "drift-error" });
   panel.replaceChildren(
     h("section", { class: "kp-card", "aria-label": "Stack" }, facts),
     counts,
     h("p", null, ago),
     links,
+    driftError,
     actions.element,
   );
   /** @type {any} */
@@ -212,6 +223,11 @@ function overviewTab(panel, params) {
     render();
   };
   document.addEventListener("stack-drift", onDrift);
+  const onDriftError = (/** @type {Event} */ e) => {
+    const err = /** @type {CustomEvent} */ (e).detail;
+    driftError.replaceChildren(...(err ? [errorBox(err)] : []));
+  };
+  document.addEventListener("stack-drift-error", onDriftError);
   const render = () => {
     const f = current().fleet;
     const d = stackDetail(f, params.name);
@@ -243,6 +259,7 @@ function overviewTab(panel, params) {
   return () => {
     unsub();
     document.removeEventListener("stack-drift", onDrift);
+    document.removeEventListener("stack-drift-error", onDriftError);
     actions.stop();
   };
 }

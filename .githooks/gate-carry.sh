@@ -39,6 +39,9 @@ set -uo pipefail
 root=$(git rev-parse --show-toplevel) || exit 2
 cd "$root"
 meta="$root/.githooks/gate-carry-meta.py"
+# The state lives in the git dir, which in a linked worktree is a file
+# pointer, not `$root/.git/`: ask git for the real (shared) directory.
+gitdir="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)"
 
 # GATE_CARRY_MODE=full is the escape hatch (`make gate-full`): skip the
 # decision and run everything, same as before this file existed.
@@ -61,7 +64,7 @@ gate_global_trigger() {
 # Prints the base tree to stdout, or nothing (and a reason to stderr) if
 # there is none usable yet.
 carry_base() {
-  local family="$1" state="$root/.git/gate-carry/$1" cur_tc="$2"
+  local family="$1" state="$gitdir/gate-carry/$1" cur_tc="$2"
   [ -s "$state/base-tree" ] || { echo "no earlier $family run recorded yet" >&2; return 1; }
   [ "$(cat "$state/toolchain" 2>/dev/null)" = "$cur_tc" ] || { echo "the toolchain changed since the last $family run" >&2; return 1; }
   local base
@@ -88,7 +91,7 @@ current_tree() {
 
 record_state() {  # record_state FAMILY TREE TOOLCHAIN FAILFILE KIND
   local family="$1" tree="$2" tc="$3" failsrc="$4" kind="$5"
-  local state="$root/.git/gate-carry/$family"
+  local state="$gitdir/gate-carry/$family"
   mkdir -p "$state"
   printf '%s' "$tree" > "$state/base-tree"
   printf '%s' "$tc" > "$state/toolchain"
@@ -162,7 +165,7 @@ rust_run_exact() {  # rust_run_exact LOG PKG NAME...
 }
 
 cmd_rust() {
-  local state="$root/.git/gate-carry/rust"
+  local state="$gitdir/gate-carry/rust"
   mkdir -p "$state"
   local cur_tc; cur_tc="$(rustc -V 2>/dev/null || echo 'rustc none')"
   local workdir; workdir=$(mktemp -d)
@@ -291,7 +294,7 @@ node_parse_failures() {
 }
 
 cmd_node() {
-  local state="$root/.git/gate-carry/node"
+  local state="$gitdir/gate-carry/node"
   mkdir -p "$state"
   local cur_tc; cur_tc="node $(node -v 2>/dev/null || echo none)"
   local workdir; workdir=$(mktemp -d)
@@ -357,7 +360,7 @@ cmd_node() {
 # skipped, same shape as rust/node's own full path, just without the
 # failing-test bookkeeping.
 cmd_invariants() {
-  local state="$root/.git/gate-carry/invariants"
+  local state="$gitdir/gate-carry/invariants"
   mkdir -p "$state"
   local cur_tc; cur_tc="node $(node -v 2>/dev/null || echo none)"
   local workdir; workdir=$(mktemp -d)

@@ -89,6 +89,11 @@ export function mount(root, params) {
   root.replaceChildren(
     h("p", { class: "crumb" }, h("a", { href: "/" }, "← Overview")),
     h("div", { class: "title-row" }, title, h("span", null, state, flags)),
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "Everything about this one stack: its facts, apps, history, logs, checks and settings.",
+    ),
     missing,
     tabs,
     panel,
@@ -200,7 +205,13 @@ function overviewTab(panel, params) {
   links.append(shellLink);
   const compareBtn = h(
     "button",
-    { type: "button", class: "kp-button", id: "drift-compare" },
+    {
+      type: "button",
+      class: "kp-button",
+      id: "drift-compare",
+      title:
+        "Check only this one stack against its files (for every stack at once, use Overview's Apply section).",
+    },
     "Compare with the files",
   );
   compareBtn.addEventListener("click", () =>
@@ -209,6 +220,11 @@ function overviewTab(panel, params) {
   links.append(compareBtn);
   const driftError = h("div", { class: "drift-error" });
   panel.replaceChildren(
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "What this one stack is: its facts, its drift from the files, and the actions you can run on it.",
+    ),
     h("section", { class: "kp-card", "aria-label": "Stack" }, facts),
     counts,
     h("p", null, ago),
@@ -286,7 +302,15 @@ function appsTab(panel, params) {
       { label: "Publish", sort: "text" },
     ],
   });
-  panel.replaceChildren(t.wrap, h("p", null, ago));
+  panel.replaceChildren(
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "Every app this stack runs, with its own running state and restart count.",
+    ),
+    t.wrap,
+    h("p", null, ago),
+  );
   const detach = attachDataTables(panel);
   const table = dataTable(t.wrap);
   const unbind = bindTableUrl(table, "apps");
@@ -380,7 +404,16 @@ function historyTab(panel, params) {
       { label: "Read", sort: "text" },
     ],
   });
-  panel.replaceChildren(hist.wrap, inc.wrap, h("p", null, ago));
+  panel.replaceChildren(
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      `Every operation the host ran on ${params.name}, and every one that failed, over the last ${HISTORY_DAYS} days.`,
+    ),
+    hist.wrap,
+    inc.wrap,
+    h("p", null, ago),
+  );
   const detach = attachDataTables(panel, { compare: keys.compare(compare) });
   const histTable = dataTable(hist.wrap);
   const incTable = dataTable(inc.wrap);
@@ -533,6 +566,11 @@ function logsTab(panel, params) {
     );
   panel.replaceChildren(
     h(
+      "p",
+      { class: "section-head__desc measured" },
+      `This stack's own log lines, filtered from the host's live log.`,
+    ),
+    h(
       "form",
       { class: "logs-controls", role: "search", "aria-label": "Which logs" },
       field("App", appSel),
@@ -641,7 +679,15 @@ function logsTab(panel, params) {
 function checksTab(panel, params) {
   const editHost = h("div");
   const tableHost = h("div");
-  panel.replaceChildren(editHost, tableHost);
+  panel.replaceChildren(
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      `The manual checks a deploy left open for this stack; Answer records your verdict.`,
+    ),
+    editHost,
+    tableHost,
+  );
   const stopEdit = checksEditTab(editHost, params);
   const keys = sortKeys();
   /** @param {number | null} unix */

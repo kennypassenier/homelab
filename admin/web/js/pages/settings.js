@@ -106,7 +106,17 @@ export function mount(root) {
   });
   root.replaceChildren(
     h("h1", null, "Settings"),
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "The working copy, the host's own settings, and this dashboard's per-machine tokens.",
+    ),
     h("h2", null, "Working copy"),
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "The stacks repository the host applies from, and its current commit.",
+    ),
     repoBox,
     h("h2", null, "Host settings"),
     h(

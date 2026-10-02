@@ -5,10 +5,24 @@
 import { act, catalogReady, onAct } from "./act.js";
 import { openAction } from "./actiondialog.js";
 import { hostActions, stackActionGroups } from "./actionforms.js";
-import { h } from "./dom.js";
+import { h, sectionHeader } from "./dom.js";
 import { finished } from "./jobs.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { openRollback } from "./rollbackdialog.js";
+
+/** fix-210: one short, plain sentence per action group, so a button's
+ * purpose never has to be guessed from its group's bare name. A group
+ * missing here (a future catalog addition) still gets a generic fallback
+ * rather than no description at all. */
+const GROUP_DESC = /** @type {Record<string, string>} */ ({
+  "Deploy and update": "Apply this stack's files, or check for an update.",
+  Backups: "Back this stack up now, or restore it from a snapshot.",
+  Secrets: "Push or rotate what this stack reads from latch.",
+  Parking: "Pause or resume this stack without destroying it.",
+  "Native services":
+    "Install, update or roll back a native (non-docker) service.",
+  Retire: "Destroy this stack, or hand it off to another orchestrator.",
+});
 
 /**
  * @param {{stack: string} | {host: true}} target
@@ -29,7 +43,12 @@ export function mountActionsArea(target) {
       "aria-label": isHost ? "Host-wide actions" : "Actions",
       id: "actions",
     },
-    h("h2", null, isHost ? "Host-wide actions" : "Actions"),
+    sectionHeader(
+      isHost ? "Host-wide actions" : "Actions",
+      isHost
+        ? "Actions that act on the host itself, not on any one stack."
+        : "Every action you can run on this one stack, grouped by what it does.",
+    ),
     buttons,
     runningBox,
   );
@@ -93,7 +112,15 @@ export function mountActionsArea(target) {
         h(
           "div",
           { class: "actions-group" },
-          h("h3", { class: "actions-group__label" }, g.group),
+          (() => {
+            const head = sectionHeader(
+              g.group,
+              GROUP_DESC[g.group] ?? "Actions on this stack.",
+              { level: "h3" },
+            );
+            head.classList.add("actions-group__label");
+            return head;
+          })(),
           h(
             "div",
             { class: "actions-row" },

@@ -54,19 +54,27 @@ export function mount(root) {
     { type: "button", class: "kp-button", id: "log-tail" },
     "Back to the tail",
   );
-  const count = h("p", { class: "measured", role: "status" });
+  const count = h(
+    "p",
+    { class: "measured", role: "status" },
+    "Reading the log…",
+  );
   const transfers = h("section", {
     class: "kp-card transfers",
     "aria-label": "Transfers",
     hidden: "",
   });
-  const log = h("div", {
-    class: "kp-log host-log",
-    role: "log",
-    "aria-live": "off",
-    "aria-label": "Every line the host prints",
-    id: "host-log",
-  });
+  const log = h(
+    "div",
+    {
+      class: "kp-log host-log",
+      role: "log",
+      "aria-live": "off",
+      "aria-label": "Every line the host prints",
+      id: "host-log",
+    },
+    h("p", { class: "measured" }, "Reading…"),
+  );
   const field = (
     /** @type {string} */ label,
     /** @type {HTMLElement} */ control,

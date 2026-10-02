@@ -227,6 +227,11 @@ export function mount(root) {
       unreadText,
       markAll,
     ),
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "Every notification the fleet has raised, newest first, with its own history.",
+    ),
     notices.wrap,
     h("h2", null, "Per stack"),
     h(

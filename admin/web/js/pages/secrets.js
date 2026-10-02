@@ -221,6 +221,12 @@ export function mount(root) {
   };
 
   const fillStacks = () => {
+    // fix-210: the fleet itself may not have answered yet — show that,
+    // never a silently empty picker with nothing to say why.
+    if (!current().fleet) {
+      status.textContent = "Waiting for the host's report of the fleet…";
+      return;
+    }
     const stacks = current().fleet?.stacks ?? [];
     const kept = stackSelect.value;
     const wanted = stacks.some((s) => s.name === kept)

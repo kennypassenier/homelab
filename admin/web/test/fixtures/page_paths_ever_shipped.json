@@ -1,0 +1,40 @@
+{
+  "_comment": "fix-210: every key `router.js`'s PATH_TO_PAGE table has ever had, read with `git show <tag>:admin/web/js/router.js` across every tag from v3.63.0 to HEAD (2026-10-02) and unioned. PATH_TO_PAGE itself (the root-mounted router) only exists from v3.70.0 on — chassis-rs 3.1.0's root-mounting round; before that, the same pages lived under an `/app/` prefix in a differently-shaped table (`FIXED`), and an old `/app/...` link is chassis's own 308 to the root path, never something this router parses, so it is out of this fixture's scope. `router_history.test.js` asserts every path below still resolves to a real page in the CURRENT router (or is a documented, Kenny-approved exception in `allowed_404`) — the guard that a page renamed or moved (fix-210's /apply, fix-199's /status) never strands an old link or a Live view script.",
+  "tags_scanned": ["v3.70.0", "v3.70.1", "v3.70.2", "v3.70.3", "HEAD"],
+  "paths": [
+    "activity",
+    "apply",
+    "backupcalendar",
+    "backups",
+    "charts",
+    "checks",
+    "clients",
+    "doctor",
+    "firewall",
+    "fleetview",
+    "health",
+    "home",
+    "host",
+    "jobs",
+    "log",
+    "metrics",
+    "notifications",
+    "overview",
+    "passkeys",
+    "presets",
+    "retired",
+    "schedules",
+    "secrets",
+    "settings",
+    "shell",
+    "start",
+    "status",
+    "timeline",
+    "today",
+    "traffic"
+  ],
+  "allowed_404": {
+    "clients": "the kit's Clients page, switched off 2026-10-02 (docs/INVARIANTS.md row 13, fix-199): registers no client API, so an old /clients link answering 404 is the documented, Kenny-approved outcome, not a strand — the same decision /status could have taken instead of redirecting to Health.",
+    "metrics": "chassis itself reserves GET /metrics unconditionally for its own Prometheus scrape text (admin/src/main.rs comment on fix-206, admin/web/js/main.js RESERVED, router.js header comment) — the request never reaches this SPA's router in a real deployment, so the router having no page named 'metrics' (the live path is /charts since fix-206) is not a strand, it is the page living where it always had to. Pure-router tests like this one cannot see the server-level interception, so route('/metrics') here legitimately 404s where a browser would instead see the kit's scrape text."
+  }
+}

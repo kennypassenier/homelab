@@ -46,13 +46,17 @@ export function mount(root, ctx) {
     ),
   );
   daySel.value = days;
-  const chart = h("div", { class: "timeline", id: "timeline" });
+  const chart = h(
+    "div",
+    { class: "timeline", id: "timeline" },
+    h("p", { class: "measured" }, "Reading the history and the incidents…"),
+  );
   const detail = h(
     "p",
     { class: "timeline-detail", id: "timeline-detail", role: "status" },
     "Point at or tab to a mark to read it.",
   );
-  const summary = h("p", { class: "measured" });
+  const summary = h("p", { class: "measured" }, "Reading the timeline…");
   const ago = agoEl("read");
   const err = h("div");
   const legend = h(
@@ -69,6 +73,11 @@ export function mount(root, ctx) {
   );
   root.replaceChildren(
     h("h1", null, "Timeline"),
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "Backups and deploys charted over time, so a gap or a cluster stands out.",
+    ),
     h(
       "div",
       { class: "title-row" },

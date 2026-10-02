@@ -310,6 +310,16 @@ test("redirectFor sends every retired or pre-3.1.0 path on to its home", () => {
   );
 });
 
+test("fix-210: /apply still resolves, redirected to Overview's own section", () => {
+  assert.deepEqual(route("/apply"), { page: "apply" });
+  assert.equal(redirectFor(route("/apply"), ""), "/overview?section=apply");
+  // The query string an old link carried survives the move.
+  assert.equal(
+    redirectFor(route("/apply"), "?fleet.q=media"),
+    "/overview?fleet.q=media&section=apply",
+  );
+});
+
 test("every stack tab has its own path and round-trips", () => {
   for (const { tab } of STACK_TABS) {
     const href = stackHref("odd name", tab);

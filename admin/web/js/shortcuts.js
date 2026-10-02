@@ -27,7 +27,10 @@ const PAGES = {
   firewall: { href: "/firewall", label: "Firewall" },
   settings: { href: "/settings", label: "Settings" },
   log: { href: "/log", label: "Live log" },
-  apply: { href: "/apply", label: "Apply" },
+  // fix-210: Apply is now Overview's own collapsible section; the
+  // shortcut goes straight to it instead of bouncing through the
+  // `/apply` → `/overview?section=apply` alias.
+  apply: { href: "/overview?section=apply", label: "Apply the whole fleet" },
   shell: { href: "/shell", label: "Shell" },
 };
 

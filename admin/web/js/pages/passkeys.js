@@ -109,7 +109,16 @@ function registerForm(onRegistered) {
 export function mount(root) {
   const status = h("p", { class: "measured", role: "status" }, "Reading…");
   const body = h("div", { class: "passkeys-page" });
-  root.replaceChildren(h("h1", null, "Passkeys"), status, body);
+  root.replaceChildren(
+    h("h1", null, "Passkeys"),
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "The passkeys that can sign in to this dashboard; add or remove one here.",
+    ),
+    status,
+    body,
+  );
   const abort = new AbortController();
 
   const load = async () => {

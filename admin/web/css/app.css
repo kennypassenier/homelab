@@ -63,6 +63,20 @@ main.shell > * + * {
 .title-row .kp-button {
   margin-inline-start: auto;
 }
+/* fix-210 (Kenny, 2026-10-02: "ik moet niet raden naar wat een functie
+   doet, alles moet duidelijk zijn"): the one shared shape for a section's
+   heading plus its one-sentence description (`dom.js` `sectionHeader()`),
+   so every page's section intro reads the same instead of each page
+   inventing its own heading/caption pair. */
+.section-head {
+  margin: 0;
+}
+.section-head > :first-child {
+  margin: 0;
+}
+.section-head__desc {
+  margin-block-start: 2px !important;
+}
 .crumb {
   margin: 0 0 4px;
   font-size: 0.9em;
@@ -1010,6 +1024,40 @@ td.stack-flags {
 }
 .apply-stack summary a {
   font-weight: 600;
+}
+/* fix-210: the fleet-wide Apply section, now embedded in Overview — its
+   groups (deploy/destroy/rest) and their rows sit in one CSS grid column
+   so every row aligns to the same left edge and width instead of the
+   loose paragraphs/`<ul>`s the old standalone page had. */
+.apply-step + .apply-step {
+  margin-block-start: 16px;
+}
+.apply-group {
+  margin-block: 8px;
+}
+.apply-group h3 {
+  margin-block-end: 4px;
+}
+.apply-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+.apply-row {
+  margin: 0;
+}
+/* The loading state shown the instant the section is opened, before the
+   plan has been read — the same `kp-pulse` animation as
+   `backupcalendar.js`'s skeleton cells (reused, not reinvented). */
+.apply-row--skeleton {
+  block-size: 2.4em;
+  border-radius: var(--radius, 6px);
+  background: var(--muted);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .apply-row--skeleton {
+    animation: kp-pulse 1600ms ease-in-out infinite;
+  }
 }
 /* The import dialog's bundle: a YAML file, pasted or uploaded. */
 #import-bundle {

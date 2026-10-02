@@ -138,6 +138,11 @@ export function mount(root, ctx) {
       pick,
       ranges,
     ),
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "System and traffic charts for the host and the fleet, read from Prometheus.",
+    ),
     status,
     grid,
     tables,

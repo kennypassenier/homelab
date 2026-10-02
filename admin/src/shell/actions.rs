@@ -1399,6 +1399,55 @@ impl Actions {
         }))
     }
 
+    /// fix-219 (drift-finding-names-only-filenames): the actual per-file
+    /// change behind a `homelab check`/`today` repo-drift finding, read only
+    /// when the Health page's finding is expanded — the normal, no-drift
+    /// fleet check never calls this. Same pairing `deploy_diff` already uses
+    /// for the Apply page (this working copy's pinned files against the
+    /// host's intent-repository copy, `GetApplied`, secret-free by
+    /// construction, D6), capped short through
+    /// `homelab_client::apply::file_diffs` instead of shown in full.
+    pub async fn repo_drift_file_diff(&self, stack: &str) -> Result<serde_json::Value, Refusal> {
+        let files = self.inner.files.clone();
+        let s2 = stack.to_string();
+        let local = tokio::task::spawn_blocking(move || files.stack_files(&s2))
+            .await
+            .map_err(|e| Refusal::new("the drift diff", e.to_string(), "report this"))??;
+        let r = self
+            .inner
+            .host
+            .ask_traced(
+                Command::GetApplied {
+                    stack: stack.to_string(),
+                },
+                Duration::from_secs(30),
+                None,
+            )
+            .await
+            .map_err(|e| Refusal::new("the drift diff", e, "check that the host answers"))?;
+        if !r.ok {
+            return Err(Refusal::new(
+                "the drift diff",
+                r.message,
+                "look at the host's intent repository",
+            ));
+        }
+        let applied: Vec<homelab_proto::FileBlob> =
+            serde_json::from_str(&r.message).map_err(|e| {
+                Refusal::new(
+                    "the drift diff",
+                    format!("the host's applied files do not read: {e}"),
+                    "update the host and the dashboard to the same release",
+                )
+            })?;
+        let diffs = homelab_client::apply::file_diffs(&local, &applied);
+        Ok(serde_json::json!({
+            "stack": stack,
+            "files": diffs,
+            "note": "secrets are never part of this: neither side carries them (D6, F291)",
+        }))
+    }
+
     /// dash-apply: the plan against the host, as `homelab apply --plan`
     /// prints it; `with_specs` builds what a deploy sends (for the run).
     pub async fn apply_plan(

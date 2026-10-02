@@ -8,6 +8,7 @@ import { agoEl, setAgo } from "../ago.js";
 import {
   badgeCell,
   bindTableUrl,
+  fetchJson,
   h,
   slowRead,
   tableBlock,
@@ -39,6 +40,79 @@ function remedyCell(remedy, fix) {
     () => void openAction(fix.stack, fix.action, { preset: fix.args ?? {} }),
   );
   return h("td", null, h("span", { class: "mono" }, remedy), " ", b);
+}
+
+/**
+ * One file's part of a drift diff: its path and sign, then its change in
+ * monospace — or "(secret — content not shown)" for a path that never
+ * carries content (fix-219).
+ * @param {{path: string, sign: string, diff: string | null}} f
+ */
+function fileDiffBlock(f) {
+  return h(
+    "div",
+    { class: "finding-diff__file" },
+    h("div", { class: "mono" }, `${f.sign} ${f.path}`),
+    f.diff == null
+      ? h("p", { class: "measured" }, "(secret — content not shown)")
+      : h("pre", { class: "mono" }, f.diff),
+  );
+}
+
+/**
+ * The "About" cell for a repo-drift finding (fix-219,
+ * drift-finding-names-only-filenames): the stack name inside a `<details>`
+ * that reads its per-file diff from the host, lazily, the first time it is
+ * opened — rule 8: the summary says what opening it does before it is
+ * pressed. A plain finding (not a repo-drift one) still gets a plain cell.
+ * @param {string} stack
+ */
+function driftDiffCell(stack) {
+  const body = h(
+    "div",
+    { class: "finding-diff__body", hidden: "" },
+    "Reading the diff from the host…",
+  );
+  const details = h(
+    "details",
+    { class: "finding-diff" },
+    h(
+      "summary",
+      null,
+      stack,
+      " ",
+      h("span", { class: "measured" }, "(show what changed, file by file)"),
+    ),
+    body,
+  );
+  let loaded = false;
+  details.addEventListener("toggle", () => {
+    if (!details.open || loaded) return;
+    loaded = true;
+    body.hidden = false;
+    void fetchJson(
+      `/data/fleet-check/${encodeURIComponent(stack)}/diff`,
+      `the diff of ${stack}`,
+    ).then((r) => {
+      if (!r.ok) {
+        body.replaceChildren(
+          h(
+            "p",
+            { class: "measured", role: "status" },
+            `Could not read the diff: ${r.error.why}.`,
+          ),
+        );
+        return;
+      }
+      const files = r.body.files ?? [];
+      body.replaceChildren(
+        files.length
+          ? h("div", null, ...files.map(fileDiffBlock))
+          : h("p", { class: "measured" }, "No files to show."),
+      );
+    });
+  });
+  return h("td", null, details);
 }
 
 /**
@@ -269,7 +343,9 @@ export function mount(root) {
           "tr",
           null,
           badgeCell(f.badge),
-          td(f.subject),
+          f.diffable && f.driftStack
+            ? driftDiffCell(f.driftStack)
+            : td(f.subject),
           td(f.what),
           remedyCell(f.remedy, f.fix),
         ),

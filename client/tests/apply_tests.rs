@@ -335,3 +335,114 @@ fn fix_192_identical_digests_say_so() {
         "no difference found between the recorded digests"
     );
 }
+
+// ── fix-219 (drift-finding-names-only-filenames) ────────────────────────────
+//
+// A repo-drift finding named only the file names that changed, so Kenny had
+// to ask what changed. `file_diffs` pairs the same two file lists
+// `deploy_diff` already pairs for the Apply page (this working copy's own
+// files, the host's `GetApplied` copy) into a per-file unified diff, capped
+// short, with a secret path never showing content.
+
+mod fix_219_file_diffs {
+    use homelab_client::apply::file_diffs;
+    use homelab_proto::FileBlob;
+
+    fn blob(p: &str, c: &str) -> FileBlob {
+        FileBlob {
+            path: p.into(),
+            content: c.into(),
+            mode: None,
+        }
+    }
+
+    /// Fail-before-fix case 1: a changed compose line's diff names the
+    /// actual old line and the actual new line, not just the file name.
+    #[test]
+    fn a_changed_compose_line_includes_the_old_and_the_new_line() {
+        let local = vec![blob(
+            "syncthing/docker-compose.yml",
+            "services:\n  syncthing:\n    image: syncthing/syncthing:1.28\n",
+        )];
+        let applied = vec![blob(
+            "syncthing/docker-compose.yml",
+            "services:\n  syncthing:\n    image: syncthing/syncthing:1.27\n",
+        )];
+        let diffs = file_diffs(&local, &applied);
+        let d = diffs
+            .iter()
+            .find(|d| d.path == "syncthing/docker-compose.yml")
+            .expect("the changed file is in the diff");
+        assert_eq!(d.sign, '~');
+        let text = d.diff.as_deref().expect("a non-secret file shows content");
+        assert!(
+            text.contains("-    image: syncthing/syncthing:1.27"),
+            "{text}"
+        );
+        assert!(
+            text.contains("+    image: syncthing/syncthing:1.28"),
+            "{text}"
+        );
+    }
+
+    /// Fail-before-fix case 2: a secret file (`.env`) never shows content,
+    /// only that it changed — even though `file_diffs` is handed its full
+    /// content directly (belt and braces: today's digest comparison never
+    /// sends a secret path here in the first place, but the helper itself
+    /// must never be the place that leaks one).
+    #[test]
+    fn a_secret_file_never_shows_content() {
+        let local = vec![blob("syncthing/.env", "TOKEN=new-secret")];
+        let applied = vec![blob("syncthing/.env", "TOKEN=old-secret")];
+        let diffs = file_diffs(&local, &applied);
+        let d = diffs
+            .iter()
+            .find(|d| d.path == "syncthing/.env")
+            .expect("the changed secret path is still named");
+        assert_eq!(d.sign, '~');
+        assert!(d.diff.is_none(), "{:?}", d.diff);
+    }
+
+    /// Fail-before-fix case 3: the cap works — a diff longer than
+    /// `FILE_DIFF_MAX_LINES` is cut short with a "… N more lines" marker,
+    /// never the whole file.
+    #[test]
+    fn a_long_diff_is_capped() {
+        let old: String = (0..30).map(|i| format!("old{i}\n")).collect();
+        let new: String = (0..30).map(|i| format!("new{i}\n")).collect();
+        let local = vec![blob("x/docker-compose.yml", &new)];
+        let applied = vec![blob("x/docker-compose.yml", &old)];
+        let diffs = file_diffs(&local, &applied);
+        let text = diffs[0].diff.as_deref().unwrap();
+        assert!(text.contains("more lines"), "{text}");
+        let body_lines = text
+            .lines()
+            .filter(|l| !(l.starts_with("--- ") || l.starts_with("+++ ") || l.starts_with("@@ ")))
+            .count();
+        assert_eq!(body_lines, 21, "{text}");
+    }
+
+    #[test]
+    fn a_new_file_is_a_plus_with_only_added_lines() {
+        let local = vec![blob("x/new.yml", "a\nb\n")];
+        let diffs = file_diffs(&local, &[]);
+        assert_eq!(diffs[0].sign, '+');
+        let text = diffs[0].diff.as_deref().unwrap();
+        assert!(text.contains("+a") && text.contains("+b"), "{text}");
+    }
+
+    #[test]
+    fn a_removed_file_is_a_minus_with_only_removed_lines() {
+        let applied = vec![blob("x/gone.yml", "a\nb\n")];
+        let diffs = file_diffs(&[], &applied);
+        assert_eq!(diffs[0].sign, '-');
+        let text = diffs[0].diff.as_deref().unwrap();
+        assert!(text.contains("-a") && text.contains("-b"), "{text}");
+    }
+
+    #[test]
+    fn an_unchanged_file_produces_no_entry() {
+        let same = vec![blob("x/same.yml", "a\n")];
+        assert!(file_diffs(&same, &same).is_empty());
+    }
+}

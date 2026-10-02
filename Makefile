@@ -10,7 +10,7 @@
 # TUI when the update badge appears.
 # ============================================================================
 
-.PHONY: help build test gate gate-full check advisories secrets secrets-staged msrv scanners admin-full release-binaries fmt clippy release host-binary hooks install diagrams
+.PHONY: help build test gate gate-full check advisories secrets secrets-staged msrv scanners admin-full invariants release-binaries fmt clippy release host-binary hooks install diagrams
 
 help:
 	@echo "make build            debug build of the whole workspace"
@@ -138,6 +138,15 @@ msrv:
 # with the `read` milestone.
 admin-full:
 	cd admin/web && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && npm run --silent check
+
+# docs/INVARIANTS.md: the Playwright smoke against the admin dashboard's
+# demo-host build, pinning the UI invariants Kenny has stated as "must
+# always be so" (the step counter, Pause/Stop, the nav bar, the backup
+# calendar skeleton, the job dialog). Builds its own binary and starts and
+# stops its own throwaway server; touches no real host. Also wired into
+# `make gate`'s full run via `.githooks/gate-carry.sh invariants`.
+invariants:
+	./scripts/invariants-run.sh
 
 # Cross-build the host binary against Debian 12 glibc, same as the release does.
 host-binary:

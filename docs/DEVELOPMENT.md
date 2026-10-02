@@ -95,6 +95,7 @@ make gate-full                # make gate, but always the whole suite (skips the
 make test                    # tests only
 make build                   # debug build of the workspace
 make host-binary             # release build of the host daemon for Debian 12
+make invariants               # docs/INVARIANTS.md's Playwright smoke against the demo-host build
 ```
 
 ### Why `make gate` no longer always means "run everything" (fix-187)
@@ -107,8 +108,9 @@ times for one release. Standing rule 7: tests run once per release, then
 only the failures are rerun.
 
 `.githooks/gate-carry.sh` now makes that decision, separately for the Rust
-suite and the admin/web node tests, each time `make gate` reaches them. It
-keeps its own record per family under `.git/gate-carry/<rust|node>/`
+suite, the admin/web node tests, and (since `docs/INVARIANTS.md`, 2026-10-02)
+the `invariants` Playwright smoke, each time `make gate` reaches them. It
+keeps its own record per family under `.git/gate-carry/<rust|node|invariants>/`
 (never in the tree): the tree the last run saw, the toolchain, and which
 tests were failing. On the next `make gate` it reruns:
 
@@ -127,7 +129,10 @@ tests were failing. On the next `make gate` it reruns:
   (`cargo test -p <crate> --no-fail-fast`), plus fmt/clippy/the admin/web
   lint, which always run. The node suite runs the same way, scoped to
   `admin/web`; it is skipped outright when nothing under `admin/web`
-  changed and nothing was failing.
+  changed and nothing was failing. The `invariants` smoke (short, no
+  sub-test carry — one Playwright run or none) is skipped the same way
+  when neither `admin/web` nor `admin/src` moved, and always runs on a
+  forced full run.
 
 A run — full or carried, green or red — always updates its family's
 record, so a red carry still narrows tomorrow's diff; only a run where

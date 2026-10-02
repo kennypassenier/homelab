@@ -3,10 +3,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  fullyRemovable,
   operationLabel,
   repoTotals,
   splitInUse,
+  wipeStatus,
 } from "../js/retiredview.js";
 
 test("operationLabel names the three ways something leaves the files", () => {
@@ -89,7 +89,30 @@ test("splitInUse with nothing in use removes everything", () => {
   });
 });
 
-test("fullyRemovable is true only when in_use is empty", () => {
-  assert.equal(fullyRemovable({ in_use: [] }), true);
-  assert.equal(fullyRemovable({ in_use: ["shared-config"] }), false);
+test("wipeStatus: removable when nothing is in use and the key is not refused", () => {
+  assert.equal(wipeStatus({ in_use: [], refused: null }), "removable");
+});
+
+test("wipeStatus: partial when a wipe proceeds but some path is kept", () => {
+  assert.equal(
+    wipeStatus({ in_use: ["shared-config"], refused: null }),
+    "partial",
+  );
+});
+
+// live-finding 2026-10-02: a deploy bug wrongly retired "admin/admin" and
+// "almanac/almanac" — still-live native units the host's own state still
+// declares. wipe_plan refuses the whole key outright in that case; the
+// view-model must say "refused", never "removable" just because `in_use`
+// (a DIFFERENT, partial-keep concept, D25) happens to be empty — that
+// would be the exact bug this guard exists to prevent, moved into the UI.
+test("wipeStatus: refused outranks an empty in_use — never shown as removable", () => {
+  assert.equal(
+    wipeStatus({
+      in_use: [],
+      refused:
+        "'admin' is back in stack 'admin' — refusing to delete what it uses",
+    }),
+    "refused",
+  );
 });

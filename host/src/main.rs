@@ -11219,6 +11219,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         "appdata": r.appdata,
                         "vault": r.vault,
                         "in_use": r.in_use,
+                        "refused": r.refused,
                     })
                 })
                 .collect();

@@ -3688,6 +3688,15 @@ stack itself is destroyed, which is exactly when a wipe becomes wanted
 live stack too (`core::drive`'s `ActionKind::targets_retired`), which the
 dashboard's other `ui open <action> <stack>` forms refuse.
 
+A row never shows a Wipe button, only a badge reading "still in use — not
+retired" with the exact refusal underneath, when `wipe_plan` itself refuses
+the key outright (live-finding 2026-10-02: a deploy bug briefly recorded two
+live, fully-native stacks' own units — `admin`, `almanac` — as retired apps;
+`wipe_plan`'s guard, which checks whether the stack, app or native unit is
+still declared in the host's current state, closes this for any stack
+regardless of how a wrong record was created, and the page reads that same
+refusal rather than guessing "removable" from an empty in-use list).
+
 ### `homelab backup-host-meta` and `homelab backup-devices`
 
 `backup-host-meta` takes the host's own backup (see E4 step 3) now instead of

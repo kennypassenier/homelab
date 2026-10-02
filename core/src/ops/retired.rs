@@ -238,32 +238,51 @@ pub struct RetiredRow {
     pub repos: Vec<String>,
     pub appdata: Vec<String>,
     pub vault: Vec<String>,
-    /// What [`wipe_plan`] says is still in use (so a wipe would keep it);
-    /// empty when the record is stale and `wipe_plan` refuses outright —
-    /// that refusal belongs to the actual wipe attempt, not this listing.
+    /// What [`wipe_plan`] says is still in use within an otherwise
+    /// wipeable record (D25: an app that moved stacks keeps its repository)
+    /// — always empty when `refused` is set, since then NOTHING of this
+    /// record would be deleted: `wipe_plan` refused the whole key, not one
+    /// path within it.
     #[serde(default)]
     pub in_use: Vec<String>,
+    /// Why [`wipe_plan`] refuses this key outright — e.g. live-finding
+    /// 2026-10-02: a deploy bug wrongly retired a stack's own still-live
+    /// native unit, and the host's state still declares it. `None` means a
+    /// wipe would proceed (`in_use` above is then its only caveat). This is
+    /// never derived from `kind`/`in_use` by the caller — only `wipe_plan`
+    /// itself decides whether a wipe of this key is safe, so the page
+    /// cannot show "fully removable" for a key wipe_plan would refuse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused: Option<String>,
 }
 
 /// Every retired entry, for the dashboard's Retired page. Zero I/O (AR1):
-/// `state` is a snapshot already loaded by the caller.
+/// `state` is a snapshot already loaded by the caller. Never guesses
+/// "safe to wipe" from `kind` or from the record's own fields — it asks
+/// [`wipe_plan`], the same function `homelab wipe` itself runs, so a row
+/// can never claim a key is removable that the actual wipe would refuse.
 pub fn retired_rows(state: &HostState, state_dir: &str) -> Vec<RetiredRow> {
     state
         .retired
         .iter()
-        .map(|(key, r)| RetiredRow {
-            key: key.clone(),
-            kind: r.kind,
-            stack: r.stack.clone(),
-            name: r.name.clone(),
-            vmid: r.vmid,
-            retired_at: r.retired_at,
-            repos: r.repos.clone(),
-            appdata: r.appdata.clone(),
-            vault: r.vault.clone(),
-            in_use: wipe_plan(state, key, state_dir)
-                .map(|p| p.in_use)
-                .unwrap_or_default(),
+        .map(|(key, r)| {
+            let (in_use, refused) = match wipe_plan(state, key, state_dir) {
+                Ok(plan) => (plan.in_use, None),
+                Err(why) => (Vec::new(), Some(why)),
+            };
+            RetiredRow {
+                key: key.clone(),
+                kind: r.kind,
+                stack: r.stack.clone(),
+                name: r.name.clone(),
+                vmid: r.vmid,
+                retired_at: r.retired_at,
+                repos: r.repos.clone(),
+                appdata: r.appdata.clone(),
+                vault: r.vault.clone(),
+                in_use,
+                refused,
+            }
         })
         .collect()
 }
@@ -328,11 +347,20 @@ pub fn wipe_plan(state: &HostState, key: &str, state_dir: &str) -> Result<WipePl
     if r.kind != RetiredKind::Stack
         && let Some(st) = state.stacks.get(&r.stack)
     {
+        // live-finding 2026-10-02: a fully-native stack (admin, almanac,
+        // kyu — "a stack has either `manifest` or `natives`, never both",
+        // `StackState::natives`) has no `manifest` at all, so the compose
+        // check above never saw it; a deploy that wrongly retired one of
+        // its own live units (a separate bug) was then free to have
+        // `homelab wipe` delete that unit's still-live repository, appdata
+        // and vault copy. Checked here, not just in the compose manifest,
+        // so the guard holds regardless of why a unit ended up retired.
         let back = st.apps.contains(&r.name)
             || st
                 .manifest
                 .as_ref()
-                .is_some_and(|m| m.natives.contains(&r.name));
+                .is_some_and(|m| m.natives.contains(&r.name))
+            || st.natives.iter().any(|n| n.unit == r.name);
         if back {
             return Err(format!(
                 "'{}' is back in stack '{}' — refusing to delete what it uses",

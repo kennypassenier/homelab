@@ -50,8 +50,16 @@ function layout(nodes) {
 }
 
 /**
- * @typedef {{stack: string, vmid: number, ip: string}} TopoNode
- * @typedef {{from: string, to: string, kind: "declared"|"open", detail: string[]}} TopoEdge
+ * fix-203: `kind` tells nodes apart generically — `docker` (a compose
+ * stack), `native` (declares at least one `natives` unit), `gateway`
+ * (whichever vmid some OTHER stack's own `gateway_route.gateway_vmid`
+ * names) and `external` (an address a stack's own files name that belongs
+ * to no fleet stack at all — a house device, Home Assistant, pve — labelled
+ * by its bare IP since nothing here is allowed to know its name).
+ * @typedef {{stack: string, vmid: number, ip: string,
+ *   kind: "docker"|"native"|"gateway"|"external"}} TopoNode
+ * @typedef {{from: string, to: string,
+ *   kind: "declared"|"planned"|"open"|"named"|"route", detail: string[]}} TopoEdge
  * @typedef {{nodes: TopoNode[], edges: TopoEdge[]}} Topology
  */
 
@@ -123,7 +131,7 @@ export function topologyEl(topo, opts = {}) {
         cx: String(p.x),
         cy: String(p.y),
         r: String(NODE_R),
-        class: "topology__dot",
+        class: `topology__dot topology__dot--${n.kind ?? "docker"}`,
       }),
     );
     const below = p.y > CENTER;
@@ -139,7 +147,15 @@ export function topologyEl(topo, opts = {}) {
         n.stack,
       ),
     );
-    g.append(svg("title", {}, `${n.stack} · vmid ${n.vmid} · ${n.ip}`));
+    g.append(
+      svg(
+        "title",
+        {},
+        n.kind === "external"
+          ? `${n.stack} · outside the fleet`
+          : `${n.stack} · ${n.kind ?? "docker"} · vmid ${n.vmid} · ${n.ip}`,
+      ),
+    );
     if (opts.onSelect) {
       g.addEventListener("click", () => opts.onSelect?.(n.stack));
       g.addEventListener("keydown", (e) => {
@@ -175,11 +191,26 @@ export function topologyFigure(topo, opts = {}) {
     topologyEl(topo, opts),
     h(
       "ul",
-      { class: "topology__legend" },
+      { class: "topology__legend topology__legend--edges" },
       h(
         "li",
         { class: "topology__key topology__key--declared" },
-        "declared flow",
+        "declared flow (firewall enforced)",
+      ),
+      h(
+        "li",
+        { class: "topology__key topology__key--planned" },
+        "declared, firewall not enabled yet",
+      ),
+      h(
+        "li",
+        { class: "topology__key topology__key--named" },
+        "address named in a stack's own files",
+      ),
+      h(
+        "li",
+        { class: "topology__key topology__key--route" },
+        "gateway route to a backend",
       ),
       h(
         "li",
@@ -195,6 +226,30 @@ export function topologyFigure(topo, opts = {}) {
             ),
           ]
         : []),
+    ),
+    h(
+      "ul",
+      { class: "topology__legend topology__legend--nodes" },
+      h(
+        "li",
+        { class: "topology__key topology__key--node-docker" },
+        "docker stack",
+      ),
+      h(
+        "li",
+        { class: "topology__key topology__key--node-native" },
+        "native stack",
+      ),
+      h(
+        "li",
+        { class: "topology__key topology__key--node-gateway" },
+        "gateway",
+      ),
+      h(
+        "li",
+        { class: "topology__key topology__key--node-external" },
+        "outside the fleet",
+      ),
     ),
   );
 }

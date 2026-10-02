@@ -45,6 +45,54 @@ dev_without_locks = true
 EOF
 mkdir -p "$workdir/state"
 
+# fix-203: a throwaway working copy fixture for the fleet view's topology —
+# `WorkingCopy::present()` only needs a `.git` marker and a `stacks/` dir
+# (read-only routes never run a git command at all), so this costs no real
+# clone, no network and no credentials. Two made-up stacks (never real app
+# names): `beta-demo`'s address is named directly in `alpha-demo`'s own
+# manifest, outside any firewall declaration, which is exactly the
+# `every_flow_the_stack_files_name_passes_the_declared_firewalls`-style
+# signal `admin/src/core/topology.rs::addresses_named_in` now reads —
+# proving the invariant "an edge for a stack whose file names another
+# stack's address" without touching a real stack file.
+repo="$workdir/repo"
+mkdir -p "$repo/.git" "$repo/stacks/alpha-demo" "$repo/stacks/beta-demo"
+cat > "$repo/stacks/beta-demo/lxc-compose.yml" <<'EOF'
+stack_name: beta-demo
+vmid: 901
+hostname: 901-app-beta-demo
+network:
+  ip: 10.10.10.91/24
+  gateway: 10.10.10.1
+resources:
+  cores: 1
+  memory_mb: 256
+  disk_gb: 4
+lxc:
+  template: clone:996
+boot: {}
+apps: []
+EOF
+cat > "$repo/stacks/alpha-demo/lxc-compose.yml" <<'EOF'
+stack_name: alpha-demo
+vmid: 902
+hostname: 902-app-alpha-demo
+network:
+  ip: 10.10.10.92/24
+  gateway: 10.10.10.1
+resources:
+  cores: 1
+  memory_mb: 256
+  disk_gb: 4
+lxc:
+  template: clone:996
+boot: {}
+apps: []
+# invariants fixture only: alpha-demo reaches beta-demo directly, named here
+# rather than through any firewall rule.
+upstream: "10.10.10.91:8080"
+EOF
+
 echo "invariants: building homelab-admin --features demo-host"
 cargo build -p homelab-admin --features demo-host --quiet
 # The binary lands in cargo's target directory, which a global
@@ -57,6 +105,7 @@ HOMELAB_ADMIN_SECRET_KEY="$secret_key" \
 HOMELAB_ADMIN_PUBLIC_URL="https://localhost:$port" \
 HOMELAB_ADMIN_DEMO_HOST=1 \
 HOMELAB_ADMIN_DEMO_STACKS="films,notes,oldstack" \
+HOMELAB_ADMIN_REPO="$repo" \
   "$target_dir"/debug/homelab-admin \
     --config "$workdir/admin.toml" \
     --state-dir "$workdir/state" \

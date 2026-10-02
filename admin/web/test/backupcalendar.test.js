@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   calendarDays,
   calendarInputs,
+  calendarNoBackup,
   calendarProgress,
   calendarWeeks,
   withStackResult,
@@ -163,6 +164,56 @@ test("calendarInputs: only ok stacks count toward expected, times carried throug
   });
   assert.deepEqual(stacks, { gateway: [1, 2], media: [] });
   assert.deepEqual(expected, ["gateway", "media"]);
+});
+
+// ── fix-202: a stack with nothing to keep is named at once, never pending ──
+
+test("calendarNoBackup: only no_backup stacks are listed, sorted", () => {
+  const names = calendarNoBackup({
+    syncthing: { status: "no_backup" },
+    gateway: { status: "ok", times: [] },
+    almanac: { status: "no_backup" },
+    backups: { status: "failed", reason: "timeout" },
+  });
+  assert.deepEqual(names, ["almanac", "syncthing"]);
+});
+
+test("calendarNoBackup of nothing (or nothing excluded) is empty", () => {
+  assert.deepEqual(calendarNoBackup({}), []);
+  assert.deepEqual(
+    calendarNoBackup({ gateway: { status: "ok", times: [] } }),
+    [],
+  );
+});
+
+test("calendarProgress: a no_backup stack counts as loaded, never as failed", () => {
+  const p = calendarProgress({
+    gateway: { status: "ok", times: [1] },
+    syncthing: { status: "no_backup" },
+    jellyfin: { status: "pending" },
+  });
+  assert.equal(p.total, 3);
+  assert.equal(p.loaded, 2);
+  assert.deepEqual(p.failed, []);
+});
+
+test("calendarInputs: a no_backup stack never counts toward expected", () => {
+  const { stacks, expected } = calendarInputs({
+    gateway: { status: "ok", times: [1] },
+    syncthing: { status: "no_backup" },
+  });
+  assert.deepEqual(stacks, { gateway: [1] });
+  assert.deepEqual(expected, ["gateway"]);
+});
+
+test("calendarInputs: a no_backup stack never drags a night's ratio down", () => {
+  const { stacks, expected } = calendarInputs({
+    gateway: { status: "ok", times: [SUN_20] },
+    syncthing: { status: "no_backup" },
+  });
+  const days = calendarDays(stacks, expected, 1, SUN_20, UTC);
+  assert.equal(days[0].tone, "ok");
+  assert.deepEqual(days[0].expected, ["gateway"]);
 });
 
 test("calendarInputs: a failed stack never drags a night's ratio down", () => {

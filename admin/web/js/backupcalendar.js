@@ -122,13 +122,21 @@ export { withStackResult };
 /**
  * `ok`: read, with its snapshot times (possibly none yet, still a stack
  * the calendar should expect a night from). `empty`: read, but the host
- * has nothing to say about it (it backs up nothing, or isn't a stack it
- * knows) — not an error, just a stack the calendar leaves out entirely,
- * same as the old all-stacks answer silently never naming it. `failed`:
- * the read itself did not finish (network, timeout, the host down) —
- * named under the progress bar, never folded into "no backup that night".
+ * has nothing to say about it (isn't a stack it knows) — not an error,
+ * just a stack the calendar leaves out entirely, same as the old
+ * all-stacks answer silently never naming it. `no_backup` (fix-202): the
+ * host named this stack explicitly as keeping no data at all (every mount
+ * is `no_backup`/`no_data`, no native service) — known and terminal at
+ * once, never "not read yet", shown as its own line rather than folded
+ * into "no backup that night" (which would wrongly repeat every night for
+ * a reason that has nothing to do with backups actually failing).
+ * `failed`: the read itself did not finish, or the host could name no
+ * manifest for it at all (network, timeout, the host down, no manifest on
+ * record) — named under the progress bar, never folded into "no backup
+ * that night".
  * @typedef {{status: "pending"} | {status: "ok", times: number[]} |
- *   {status: "empty"} | {status: "failed", reason: string}} StackResult
+ *   {status: "empty"} | {status: "no_backup"} |
+ *   {status: "failed", reason: string}} StackResult
  */
 
 /**
@@ -140,6 +148,21 @@ export { withStackResult };
  */
 export function calendarProgress(results) {
   return stackReadProgress(results);
+}
+
+/**
+ * fix-202: the stacks the host has already named as keeping no data at all
+ * — read, terminal, never pending, but also never part of a night's ratio.
+ * Sorted so the list painted from it does not reorder itself as more
+ * stacks settle.
+ * @param {Record<string, StackResult>} results
+ * @returns {string[]}
+ */
+export function calendarNoBackup(results) {
+  return Object.entries(results)
+    .filter(([, r]) => r.status === "no_backup")
+    .map(([name]) => name)
+    .sort();
 }
 
 /**

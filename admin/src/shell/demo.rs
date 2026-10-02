@@ -133,6 +133,39 @@ pub async fn run_demo(
                             path: "/etc/homelab/host.toml (demo host)".into(),
                             ..Default::default()
                         }).unwrap_or_default(),
+                        // fix-202 (invariants: the backup calendar must show
+                        // partial data at once and never hang on a stack
+                        // with nothing to read): every requested stack
+                        // answers at once — the demo host's own LAST stack
+                        // (whichever name `HOMELAB_ADMIN_DEMO_STACKS` gives
+                        // it, never hard-coded) stands in for "keeps no
+                        // data at all" (`no_backup`), every other one for an
+                        // ordinary read with a few nights of snapshots.
+                        Command::BackupCalendar { stacks: req, .. } => {
+                            let names: Vec<String> = if req.is_empty() { stacks.clone() } else { req };
+                            let now = now_s();
+                            let mut by_stack = serde_json::Map::new();
+                            let mut measured_at = serde_json::Map::new();
+                            let mut no_backup = Vec::new();
+                            for name in &names {
+                                if stacks.last() == Some(name) && stacks.len() > 1 {
+                                    no_backup.push(name.clone());
+                                    measured_at.insert(name.clone(), serde_json::json!(now));
+                                    continue;
+                                }
+                                let nights: Vec<u64> =
+                                    (0..5).map(|i| now - i * 86_400 - 3600).collect();
+                                by_stack.insert(name.clone(), serde_json::json!(nights));
+                                measured_at.insert(name.clone(), serde_json::json!(now));
+                            }
+                            serde_json::json!({
+                                "stacks": by_stack,
+                                "measured_at": measured_at,
+                                "skipped": [],
+                                "no_backup": no_backup,
+                                "reasons": {},
+                            }).to_string()
+                        }
                         _ => "{}".into(),
                     };
                     let _ = reply.send(Ok(answer(body)));

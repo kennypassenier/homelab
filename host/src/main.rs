@@ -10799,16 +10799,39 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             let mut by_stack = serde_json::Map::new();
             let mut measured_at = serde_json::Map::new();
             let mut skipped = Vec::new();
+            // fix-202: a name that will NEVER get a restic read (no manifest
+            // on record yet, not a known stack, or it backs up nothing by
+            // design) used to fall straight through `continue` with no
+            // `measured_at` entry at all — indistinguishable, client-side,
+            // from an owner whose cache is simply still warming up. The
+            // dashboard's per-stack read (fix-177) then retried it for the
+            // full `UNREAD_GIVE_UP_MS` (3 min) before giving up with a
+            // generic "press Refresh" message, which is exactly the "stuck
+            // at 11 of 13 for minutes" symptom Kenny measured live on
+            // 2026-10-02. Every such name now gets `measured_at` set at once
+            // (so the client never waits on it) plus its own entry here:
+            // `no_backup` for "nothing to keep, by design" (shown as such,
+            // not as a failure), `reasons` for the rest (a real finding,
+            // shown with its own text instead of a generic one).
+            let mut no_backup = Vec::new();
+            let mut reasons = serde_json::Map::new();
+            let now = unix_now();
             for name in wanted {
                 let Some(entry) = st.stacks.get(name) else {
+                    reasons.insert(name.clone(), serde_json::json!("not a known stack"));
+                    measured_at.insert(name.clone(), serde_json::json!(now));
                     skipped.push(format!("{name}: not a known stack"));
                     continue;
                 };
                 let Some(m) = entry.manifest.as_ref() else {
+                    reasons.insert(name.clone(), serde_json::json!("no manifest on record"));
+                    measured_at.insert(name.clone(), serde_json::json!(now));
                     skipped.push(format!("{name}: no manifest on record"));
                     continue;
                 };
                 if m.backs_up_nothing() {
+                    no_backup.push(name.clone());
+                    measured_at.insert(name.clone(), serde_json::json!(now));
                     continue;
                 }
                 let mut nights = Vec::new();
@@ -10848,6 +10871,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     "stacks": by_stack,
                     "measured_at": measured_at,
                     "skipped": skipped,
+                    // fix-202: see above — always present (possibly empty),
+                    // so the dashboard never has to tell "not answered yet"
+                    // apart from "will never be answered".
+                    "no_backup": no_backup,
+                    "reasons": reasons,
                 })
                 .to_string(),
                 deferred: None,

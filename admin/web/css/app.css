@@ -1793,23 +1793,31 @@ td.stack-flags {
 }
 
 /* feat-overview-10: the backup calendar. */
+/* fix-202 (Kenny, 2026-10-02, verbatim: "die kalender zelf is veeeeeeel te
+ * klein, die gebruikt misschien een derde van de breedte van de pagina?
+ * hetzelfde voor alles vanaf de legende"): everything from the legend down
+ * used to be capped at a hard 28rem regardless of the page's own width
+ * (`.shell`'s `max(80vw, 64rem)`), so on a 4K screen it sat in a third of a
+ * third of the page. Nothing here carries its own max-width any more — it
+ * fills whatever `.shell` gives it, fluid down to a phone, with bigger
+ * cells and type to match. */
 .backup-cal__legend {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  font-size: 0.85em;
+  gap: 4px 10px;
+  font-size: 0.95em;
   color: var(--muted-foreground);
-  margin-block-end: 8px;
+  margin-block-end: 10px;
 }
 .backup-cal__grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(2.2rem, 1fr));
-  gap: 4px;
-  max-width: 28rem;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
 }
 .backup-cal__head {
-  font-size: 0.75em;
+  font-size: 0.8em;
   color: var(--muted-foreground);
   text-align: center;
 }
@@ -1818,14 +1826,15 @@ td.stack-flags {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
-  font-size: 0.75em;
-  width: 1.1em;
-  height: 1.1em;
+  border-radius: 6px;
+  font-size: 1em;
+  width: 1.4em;
+  height: 1.4em;
 }
 .backup-cal__grid .backup-cal__cell {
   width: auto;
   height: auto;
+  font-size: clamp(0.85rem, 1.4vw, 1.15rem);
 }
 .backup-cal__cell--ok {
   background: var(--chart-3, #3aa675);
@@ -1863,18 +1872,32 @@ td.stack-flags {
  * legend and the grid from the first paint, empty until there is something
  * to say, so their arrival never shifts the grid below them. */
 .backup-cal__progress {
-  max-width: 28rem;
+  width: 100%;
   margin-block-end: 8px;
 }
 .backup-cal__errors {
-  max-width: 28rem;
+  width: 100%;
   margin: 0 0 8px;
   padding: 0;
   list-style: none;
-  font-size: 0.85em;
+  font-size: 0.9em;
   color: var(--destructive);
 }
 .backup-cal__error + .backup-cal__error {
+  margin-block-start: 2px;
+}
+/* fix-202: stacks the host already named as keeping no data at all — its
+ * own list, same shape as the failure list but not an error tone, so "no
+ * backups by design" never reads as something gone wrong. */
+.backup-cal__excluded-list {
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9em;
+  color: var(--muted-foreground);
+}
+.backup-cal__excluded + .backup-cal__excluded {
   margin-block-start: 2px;
 }
 
@@ -1902,6 +1925,27 @@ td.stack-flags {
   stroke-width: 1.4;
   opacity: 0.7;
 }
+/* fix-203: a declared rule whose firewall is not enabled yet is a real,
+ * written-down relationship — distinct from both an enforced "declared"
+ * flow and a blanket "open" one, so a phased firewall rollout never reads
+ * as "no relationship at all" (Kenny: "waarom is almanac met niks
+ * gelinked?"). */
+.topology__edge--planned {
+  stroke: var(--chart-2, #e8a33d);
+  stroke-dasharray: 6 3;
+  opacity: 0.8;
+}
+/* An address a stack's own files name, independent of any firewall. */
+.topology__edge--named {
+  stroke: var(--chart-3, #3aa675);
+  opacity: 0.85;
+}
+/* A routes/*.yml file's gateway -> backend flow. */
+.topology__edge--route {
+  stroke: var(--chart-4, #6e8efb);
+  stroke-dasharray: 1 4;
+  opacity: 0.85;
+}
 .topology__edge--open {
   stroke: var(--muted-foreground);
   stroke-dasharray: 3 3;
@@ -1911,6 +1955,18 @@ td.stack-flags {
   fill: var(--primary);
   stroke: var(--background);
   stroke-width: 1.5;
+}
+/* fix-203: node kind, read generically off the manifest (natives,
+ * gateway_route) — never an app name. */
+.topology__dot--native {
+  fill: var(--chart-3, #3aa675);
+}
+.topology__dot--gateway {
+  fill: var(--chart-4, #6e8efb);
+}
+.topology__dot--external {
+  fill: var(--muted-foreground);
+  stroke-dasharray: 2 1;
 }
 .topology__node:focus-visible .topology__dot {
   outline: 2px solid var(--ring, var(--primary));
@@ -1944,11 +2000,37 @@ td.stack-flags {
   vertical-align: middle;
   background: var(--chart-1, var(--primary));
 }
+.topology__key--planned::before {
+  background: var(--chart-2, #e8a33d);
+}
+.topology__key--named::before {
+  background: var(--chart-3, #3aa675);
+}
+.topology__key--route::before {
+  background: var(--chart-4, #6e8efb);
+}
 .topology__key--open::before {
   background: var(--muted-foreground);
 }
 .topology__key--traffic::before {
   background: var(--chart-2, #e8a33d);
+}
+/* Node-kind legend entries get a round marker instead of the edges' bar,
+ * so the two legends never read as the same kind of key. */
+.topology__legend--nodes .topology__key::before {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+.topology__key--node-native::before {
+  background: var(--chart-3, #3aa675);
+}
+.topology__key--node-gateway::before {
+  background: var(--chart-4, #6e8efb);
+}
+.topology__key--node-external::before {
+  background: var(--muted-foreground);
 }
 
 /* replace-kuma (2026-09-30): the minute watch's dot on a tile. */

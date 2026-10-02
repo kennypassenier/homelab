@@ -377,3 +377,124 @@ test("invariants: a version difference never blocks — Live view still drives a
     await browser.close();
   }
 });
+
+// ── fix-202: the backup calendar (Kenny, 2026-10-02 verbatim: "na een paar
+// minuten zie ik nog altijd niks van data laden. nog altijd 11/13") ────────
+
+test("invariants: the backup calendar paints a stack's own cells as soon as it answers, without waiting for the rest", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    // The demo host answers films/notes at once and oldstack (its own
+    // no_backup stand-in, fix-202) after a delay — before this fix the
+    // grid stayed a full skeleton until EVERY stack answered, which is
+    // exactly what sat at "11 of 13" for minutes on the real fleet.
+    await page.route(
+      "**/data/backup-calendar?stack=oldstack*",
+      async (route) => {
+        await new Promise((r) => setTimeout(r, 2000));
+        await route.continue();
+      },
+    );
+    await page.goto(`${BASE}/backupcalendar`);
+    await page.waitForTimeout(900);
+    const finishedCells = await page
+      .locator(
+        ".backup-cal__cell:not(.backup-cal__cell--skeleton):not(.backup-cal__cell--pad)",
+      )
+      .count();
+    assert.ok(
+      finishedCells > 0,
+      "the grid is still a full skeleton after films/notes answered, while oldstack is still pending",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: a stack with nothing to back up is named at once, never left pending", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    // fix-202: the demo host's last demo stack (oldstack) answers
+    // `no_backup: true` — before this fix an unrepresented name looked
+    // identical to "cache still warming up" and was retried for minutes.
+    await page.goto(`${BASE}/backupcalendar`);
+    const excluded = page.locator(".backup-cal__excluded");
+    await excluded.first().waitFor({ timeout: 5000 });
+    const text = await excluded.first().textContent();
+    assert.ok(
+      text && /oldstack/.test(text) && /no backups by design/.test(text),
+      `oldstack was not named as excluded: ${text}`,
+    );
+    // The progress bar must reach "3 of 3" promptly — not stuck waiting on
+    // oldstack the way a false "not read yet" would stall it.
+    await page.waitForFunction(
+      () => {
+        const p = document.querySelector(".backup-cal__progress");
+        return p && /3 of 3/.test(p.textContent ?? "");
+      },
+      { timeout: 5000 },
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the backup calendar's grid uses at least 75% of the content area at 1920px", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.setViewportSize({ width: 1920, height: 1000 });
+    await page.goto(`${BASE}/backupcalendar`);
+    await page.waitForTimeout(600);
+    const gridBox = await page.locator(".backup-cal__grid").boundingBox();
+    const shellBox = await page.locator("main#page.shell").boundingBox();
+    assert.ok(gridBox && shellBox, "grid or shell did not render");
+    const ratio = gridBox.width / shellBox.width;
+    assert.ok(
+      ratio >= 0.75,
+      `the calendar grid is ${Math.round(ratio * 100)}% of the content area at 1920px, Kenny measured it at roughly a third`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── fix-203: fleet view's topology (Kenny, verbatim: "waarom is bv almanac
+// met niks gelinked?") ──────────────────────────────────────────────────
+
+test("invariants: fleet view shows a legend and an edge for a stack whose own files name another stack's address", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/fleetview`);
+    await page.waitForTimeout(600);
+    const legendItems = await page
+      .locator(".topology__legend .topology__key")
+      .count();
+    assert.ok(legendItems > 0, "the topology has no legend");
+    // scripts/invariants-run.sh's fixture working copy: alpha-demo names
+    // beta-demo's address (10.10.10.91:8080) directly in its own manifest,
+    // with no firewall rule involved at all (fix-203's `named` edge kind).
+    // An SVG <path>'s own visibility heuristic can read "hidden" when its
+    // bounding box has zero width (two nodes placed directly above each
+    // other on the circle layout draw a dead-straight vertical curve) —
+    // present in the DOM is what matters here, not CSS visibility.
+    await page.waitForFunction(
+      () => document.querySelectorAll(".topology__edge--named").length > 0,
+      { timeout: 5000 },
+    );
+    const named = page.locator(".topology__edge--named");
+    assert.ok(
+      (await named.count()) > 0,
+      "no named edge for alpha-demo -> beta-demo",
+    );
+  } finally {
+    await browser.close();
+  }
+});

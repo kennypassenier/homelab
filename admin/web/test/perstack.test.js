@@ -6,7 +6,11 @@
 // prove it carries no calendar-specific assumption.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stackReadProgress, withStackResult } from "../js/perstack.js";
+import {
+  stackChips,
+  stackReadProgress,
+  withStackResult,
+} from "../js/perstack.js";
 
 test("withStackResult folds one outcome in without touching the rest", () => {
   const a = { media: { status: "pending" } };
@@ -70,4 +74,56 @@ test("stackReadProgress of no stacks at all is 0%, not done (nothing to wait for
     done: false,
     failed: [],
   });
+});
+
+// ── fix-216: named per-stack chips, not a bare fraction ─────────────────
+
+test('stackChips: a settled stack reads "read", sorted by name', () => {
+  const rows = stackChips(
+    {
+      zulu: { status: "ok", times: [] },
+      alpha: { status: "ok", times: [] },
+    },
+    {},
+    1_000,
+  );
+  assert.deepEqual(rows, [
+    { stack: "alpha", state: "read" },
+    { stack: "zulu", state: "read" },
+  ]);
+});
+
+test('stackChips: a pending stack reads "reading" with how long it has waited', () => {
+  const rows = stackChips(
+    { inbox: { status: "pending" } },
+    { inbox: 1_000 },
+    1_000 + 37_000,
+  );
+  assert.deepEqual(rows, [{ stack: "inbox", state: "reading", seconds: 37 }]);
+});
+
+test("stackChips: a pending stack with no recorded start reads 0 s, not a crash", () => {
+  const rows = stackChips({ inbox: { status: "pending" } }, {}, 5_000);
+  assert.deepEqual(rows, [{ stack: "inbox", state: "reading", seconds: 0 }]);
+});
+
+test('stackChips: no_backup is its own terminal state, never "reading" or "failed"', () => {
+  const rows = stackChips({ registry: { status: "no_backup" } }, {}, 0);
+  assert.deepEqual(rows, [{ stack: "registry", state: "no_backup" }]);
+});
+
+test("stackChips: a failed (including timed-out) stack carries the host's own reason", () => {
+  const rows = stackChips(
+    {
+      inbox: {
+        status: "failed",
+        reason: "did not answer within 180 s",
+      },
+    },
+    {},
+    0,
+  );
+  assert.deepEqual(rows, [
+    { stack: "inbox", state: "failed", reason: "did not answer within 180 s" },
+  ]);
 });

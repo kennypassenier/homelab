@@ -4,6 +4,15 @@
 // and feat-stacks-10 (stale images). Each section reads its own route and
 // fails on its own, so a Prometheus outage only empties the two sections
 // that need it.
+//
+// [fix-215] (Kenny, Dutch: "wat is het verschil met topology en topology
+// with measured traffic?"): there used to be a second, near-identical
+// topology graph on the Firewall page, drawn from the same shape but with
+// a traffic overlay always on. One graph that looked almost the same as
+// this one, under a different heading, is exactly what he could not tell
+// apart. Now there is ONE topology, here, with a "Show measured traffic"
+// toggle; the Firewall page links to it (with the toggle on) instead of
+// drawing its own.
 
 import { formatValue } from "../charts.js";
 import {
@@ -18,17 +27,45 @@ import {
 import { formatDateTime } from "../format.js";
 import { topologyFigure } from "../topology.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
+import { attachSwitches } from "/static/kp/js/forms.js";
+
+/**
+ * A kp switch (shared shape with notifications.js's own, kept local here
+ * since neither page exports it yet): the checkbox plus its On/Off words.
+ * @param {string} id
+ * @param {string} label
+ */
+function switchEl(id, label) {
+  const input = h("input", {
+    class: "kp-switch__input",
+    type: "checkbox",
+    role: "switch",
+    id,
+  });
+  const wrap = h(
+    "label",
+    { class: "kp-switch" },
+    input,
+    h("span", { class: "kp-switch__state", "aria-hidden": "true" }),
+    h("span", null, label),
+  );
+  return { wrap, input };
+}
 
 /**
  * @param {HTMLElement} root
  * @returns {() => void}
  */
 export function mount(root) {
+  const params = new URLSearchParams(location.search);
+  const trafficWanted = params.get("traffic") === "1";
   const topoBox = h(
     "div",
     { class: "fleetview__topology" },
     h("p", null, "Loading…"),
   );
+  const trafficSwitch = switchEl("fleetview-traffic", "Show measured traffic");
+  trafficSwitch.input.checked = trafficWanted;
   const capacity = tableBlock({
     remember: "capacity-map",
     caption: "Capacity map",
@@ -92,7 +129,18 @@ export function mount(root) {
       { class: "page-intro" },
       "Derived from the stack files and the fleet's metrics — nothing here is typed by hand.",
     ),
-    h("section", { class: "kp-card", "aria-label": "Topology" }, topoBox),
+    h(
+      "section",
+      { class: "kp-card", "aria-label": "Topology" },
+      h("h2", null, "Topology"),
+      h(
+        "p",
+        { class: "measured" },
+        'Which container talks to which, derived from the stack files and the live firewall state on the host. Turn on "Show measured traffic" to size each stack\'s ring by its own total network throughput (bytes/s from Prometheus, received + transmitted) — that ring is per stack, not per connection: the fleet has no per-neighbour flow metric.',
+      ),
+      trafficSwitch.wrap,
+      topoBox,
+    ),
     h(
       "section",
       { class: "kp-card", "aria-label": "Capacity map" },
@@ -111,12 +159,61 @@ export function mount(root) {
       staleStatus,
     ),
   );
+  const detachSwitches = attachSwitches(root);
   const detach = attachDataTables(root);
   const capacityTable = dataTable(capacity.wrap);
   const growthTable = dataTable(growth.wrap);
   const depsTable = dataTable(deps.wrap);
   const staleTable = dataTable(stale.wrap);
   const abort = new AbortController();
+
+  /** @type {any} */
+  let topo = null;
+  /** @type {Map<string, number> | undefined} */
+  let traffic;
+  let trafficLoaded = false;
+
+  const paintTopology = () => {
+    if (!topo) return;
+    topoBox.replaceChildren(
+      topologyFigure(topo, {
+        traffic: trafficSwitch.input.checked ? traffic : undefined,
+        caption: "Topology",
+      }),
+    );
+  };
+
+  const ensureTraffic = async () => {
+    if (trafficLoaded) return;
+    trafficLoaded = true;
+    const r = await fetchJson(
+      "/data/fleet-traffic",
+      "the measured traffic",
+      abort.signal,
+    );
+    if (abort.signal.aborted) return;
+    if (!r.ok) return;
+    traffic = new Map();
+    for (const p of r.body.panels ?? []) {
+      for (const s of p.series ?? []) {
+        if (!s.points?.length) continue;
+        traffic.set(s.label, (traffic.get(s.label) ?? 0) + s.points[0][1]);
+      }
+    }
+    paintTopology();
+  };
+
+  trafficSwitch.input.addEventListener("change", () => {
+    const url = new URL(location.href);
+    if (trafficSwitch.input.checked) {
+      url.searchParams.set("traffic", "1");
+      void ensureTraffic();
+    } else {
+      url.searchParams.delete("traffic");
+    }
+    history.replaceState(null, "", url);
+    paintTopology();
+  });
 
   void (async () => {
     const r = await fetchJson("/data/topology", "the topology", abort.signal);
@@ -125,9 +222,9 @@ export function mount(root) {
       topoBox.replaceChildren(errorBox(r.error));
       return;
     }
-    topoBox.replaceChildren(
-      topologyFigure(r.body.topology, { caption: "Topology" }),
-    );
+    topo = r.body.topology;
+    paintTopology();
+    if (trafficSwitch.input.checked) void ensureTraffic();
   })().catch(() => {});
 
   void (async () => {
@@ -274,6 +371,7 @@ export function mount(root) {
   return () => {
     abort.abort();
     detach();
+    detachSwitches();
     void capacityTable;
     void growthTable;
     void depsTable;

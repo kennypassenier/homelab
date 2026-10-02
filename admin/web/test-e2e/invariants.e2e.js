@@ -427,21 +427,24 @@ test("invariants: a stack with nothing to back up is named at once, never left p
     // fix-202: the demo host's last demo stack (oldstack) answers
     // `no_backup: true` — before this fix an unrepresented name looked
     // identical to "cache still warming up" and was retried for minutes.
+    // fix-216: named as its own chip now, not a separate list.
     await page.goto(`${BASE}/backupcalendar`);
-    const excluded = page.locator(".backup-cal__excluded");
-    await excluded.first().waitFor({ timeout: 5000 });
-    const text = await excluded.first().textContent();
+    const noBackupChip = page.locator(".perstack-chip--no_backup");
+    await noBackupChip.first().waitFor({ timeout: 5000 });
+    const text = await noBackupChip.first().textContent();
     assert.ok(
       text && /oldstack/.test(text) && /no backups by design/.test(text),
       `oldstack was not named as excluded: ${text}`,
     );
-    // The progress bar must reach "N of N" promptly — not stuck waiting on
+    // The status line must reach "N of N" promptly — not stuck waiting on
     // oldstack the way a false "not read yet" would stall it. N is the demo
     // fleet's size, which other invariants' fixtures grow (fix-207).
     await page.waitForFunction(
       () => {
-        const p = document.querySelector(".backup-cal__progress");
-        const m = /(\d+) of (\d+)/.exec(p?.textContent ?? "");
+        const p = document.querySelector(
+          "main#page.shell .measured[role=status]",
+        );
+        const m = /Stacks read: (\d+) of (\d+)/.exec(p?.textContent ?? "");
         return !!m && m[1] === m[2];
       },
       { timeout: 5000 },
@@ -466,6 +469,209 @@ test("invariants: the backup calendar's grid uses at least 75% of the content ar
     assert.ok(
       ratio >= 0.75,
       `the calendar grid is ${Math.round(ratio * 100)}% of the content area at 1920px, Kenny measured it at roughly a third`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── fix-214: the backup calendar is a month view (a date picker) ─────────
+
+test("invariants: the backup calendar shows a month heading, and prev/next change the month", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/backupcalendar`);
+    const heading = page.locator("#backup-cal-heading");
+    const before = await heading.textContent();
+    assert.ok(
+      /^[A-Z][a-z]+ \d{4}$/.test(before ?? ""),
+      `the month heading does not read "Month Year": ${before}`,
+    );
+    await page.getByRole("button", { name: "Previous month" }).click();
+    const after = await heading.textContent();
+    assert.notEqual(after, before, "Prev did not change the month heading");
+    await page.getByRole("button", { name: "Next month" }).click();
+    const back = await heading.textContent();
+    assert.equal(back, before, "Next did not return to the original month");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the backup calendar grid is never more than 6 week rows, in every month", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/backupcalendar`);
+    await page.waitForSelector(".backup-cal__grid");
+    for (let i = 0; i < 12; i++) {
+      const cells = await page.locator(".backup-cal__grid > *").count();
+      // 7 weekday headers + 7 cells per week row.
+      const weeks = (cells - 7) / 7;
+      assert.ok(
+        Number.isInteger(weeks) && weeks <= 6 && weeks >= 4,
+        `month ${i}: ${weeks} week rows, expected 4-6`,
+      );
+      await page.getByRole("button", { name: "Next month" }).click();
+      await page.waitForTimeout(50);
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: clicking a day in the backup calendar shows its detail with the stacks", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/backupcalendar`);
+    await page.getByRole("button", { name: "Today" }).click();
+    await page.waitForFunction(
+      () =>
+        document.querySelectorAll(
+          ".backup-cal__cell:not(.backup-cal__cell--skeleton):not(.backup-cal__cell--pad)",
+        ).length > 0,
+      { timeout: 5000 },
+    );
+    const todayCell = page.locator(".backup-cal__cell--today");
+    await todayCell.first().click();
+    const detail = page.locator(".backup-cal__detail");
+    await detail.locator(".backup-cal__detail-row").first().waitFor({
+      timeout: 5000,
+    });
+    const rows = await detail.locator(".backup-cal__detail-row").count();
+    assert.ok(rows > 0, "the day detail panel lists no stacks");
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── fix-216: a stuck per-stack read is named and offers a Retry ──────────
+
+test("invariants: a stack that never answers is named in the progress and turns into a timed-out state with Retry", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    // fix-216: the production give-up window is 180 s — far too long for a
+    // smoke test. `backupcalendar.js` reads this override only from
+    // `globalThis`, never from anything a server or URL controls, so
+    // production behaviour is unaffected by this hook existing at all.
+    await page.addInitScript(() => {
+      // @ts-ignore test-only override, see admin/web/js/pages/backupcalendar.js
+      window.__HOMELAB_TEST_UNREAD_GIVE_UP_MS__ = 1200;
+    });
+    // "oldstack" is the demo fleet's own no_backup stand-in (fix-202);
+    // "notes" is an ordinary stack here made to never settle, standing in
+    // for Kenny's live "blijft op 12 steken" symptom.
+    await page.route("**/data/backup-calendar?stack=notes*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          stacks: {},
+          measured_at: {},
+          skipped: ["notes: not read yet"],
+          no_backup: [],
+          reasons: {},
+        }),
+      }),
+    );
+    await page.goto(`${BASE}/login`);
+    await page.fill("#token", TOKEN);
+    await Promise.all([
+      page.waitForURL("**/overview", { timeout: 5000 }).catch(() => {}),
+      page.click("button[type=submit]"),
+    ]);
+    await page.goto(`${BASE}/backupcalendar`);
+    const readingChip = page.locator(".perstack-chip--reading", {
+      hasText: "notes",
+    });
+    await readingChip.first().waitFor({ timeout: 5000 });
+    assert.ok(
+      /reading \(\d+s\)/.test((await readingChip.first().textContent()) ?? ""),
+      "the still-pending stack does not name how long it has waited",
+    );
+    const failedChip = page.locator(".perstack-chip--failed", {
+      hasText: "notes",
+    });
+    await failedChip.first().waitFor({ timeout: 10000 });
+    const text = await failedChip.first().textContent();
+    assert.ok(
+      text && /did not answer within/.test(text),
+      `the timed-out chip does not name why: ${text}`,
+    );
+    assert.ok(
+      await failedChip
+        .first()
+        .locator("button", { hasText: "Retry" })
+        .isVisible(),
+      "a failed/timed-out chip has no Retry button",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── fix-215: one topology, not a near-identical second one ───────────────
+
+test("invariants: only one topology exists, on the Fleet view, and the traffic toggle works", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    // The invariants fixture configures no Prometheus, so `/data/fleet-
+    // traffic` answers 503 for real — mocked here so the toggle has real
+    // numbers to draw a ring from, the same way other invariants mock a
+    // route rather than needing a live Prometheus.
+    await page.route("**/data/fleet-traffic*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          panels: [
+            {
+              panel: { title: "Network" },
+              series: [{ label: "alpha-demo", points: [[0, 5000]] }],
+            },
+          ],
+          measured_at: 0,
+        }),
+      }),
+    );
+    await page.goto(`${BASE}/firewall`);
+    await page.waitForSelector("table", { timeout: 10000 });
+    assert.equal(
+      await page.locator(".topology__svg").count(),
+      0,
+      "the firewall page must draw no topology of its own any more",
+    );
+    const link = page.locator("a", { hasText: "Fleet view topology" });
+    assert.equal(await link.count(), 1, "no link to the Fleet view topology");
+    const href = await link.getAttribute("href");
+    assert.ok(href?.includes("traffic=1"), `link missing traffic=1: ${href}`);
+
+    await page.goto(`${BASE}/fleetview`);
+    await page.waitForSelector(".topology__svg", { timeout: 10000 });
+    assert.equal(
+      await page.locator(".topology__svg").count(),
+      1,
+      "the fleet view must draw exactly one topology",
+    );
+    const toggle = page.locator("#fleetview-traffic");
+    assert.equal(
+      await page.locator(".topology__traffic-ring").count(),
+      0,
+      "a traffic ring is drawn before the toggle is on",
+    );
+    await toggle.check();
+    await page.waitForFunction(
+      () => document.querySelectorAll(".topology__traffic-ring").length > 0,
+      { timeout: 5000 },
     );
   } finally {
     await browser.close();

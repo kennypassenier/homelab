@@ -1907,10 +1907,29 @@ td.stack-flags {
   width: 1.4em;
   height: 1.4em;
 }
+/* fix-214: the grid's cells are buttons now (a day picker, clickable and
+ * tabbable), reset to the plain block the calendar always drew — merged
+ * with the sizing rule below so there is exactly one `.backup-cal__grid
+ * .backup-cal__cell` rule. The border reset excludes `--future`/`--before`
+ * (`:not()`, found from a screenshot, not a test): an EQUAL-specificity
+ * `border: none` here used to win over their single-class dashed border
+ * regardless of source order, in both the grid AND the legend swatch. */
 .backup-cal__grid .backup-cal__cell {
   width: auto;
   height: auto;
   font-size: clamp(0.85rem, 1.4vw, 1.15rem);
+  appearance: none;
+  font-family: inherit;
+  cursor: pointer;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0;
+}
+.backup-cal__grid
+  .backup-cal__cell:not(.backup-cal__cell--future):not(
+    .backup-cal__cell--before
+  ) {
+  border: none;
 }
 .backup-cal__cell--ok {
   background: var(--chart-3, #3aa675);
@@ -1928,8 +1947,34 @@ td.stack-flags {
   background: var(--border);
   color: var(--muted-foreground);
 }
+/* fix-214: a day the host's data cannot speak to — later than today, or
+ * before the fleet's oldest snapshot ever — reads as its own plain,
+ * unmistakably-not-measured state, never a false "no stack backed up" red.
+ * Applies both in the grid (a real day cell) and in the legend (a plain
+ * swatch) — the grid's own border reset above explicitly excludes these
+ * two classes, so this one rule is enough for both. */
+.backup-cal__cell--future,
+.backup-cal__cell--before {
+  background: transparent;
+  border: 2px dashed var(--muted-foreground);
+  color: var(--muted-foreground);
+}
 .backup-cal__cell--pad {
   background: transparent;
+}
+.backup-cal__cell--selected {
+  outline: 2px solid var(--ring, var(--foreground));
+  outline-offset: 1px;
+}
+.backup-cal__cell--today {
+  box-shadow: inset 0 0 0 2px var(--foreground);
+}
+.backup-cal__cell-day {
+  font-weight: 600;
+}
+.backup-cal__cell-count {
+  font-size: 0.7em;
+  opacity: 0.85;
 }
 /* fix-177: the grid's shape (headers, 35 cells, the week padding) is laid
  * out at once; a cell waiting on its stack's own read is this modifier
@@ -1944,37 +1989,138 @@ td.stack-flags {
     animation: kp-pulse 1600ms ease-in-out infinite;
   }
 }
-/* fix-177: the progress bar and the per-stack failure list sit between the
- * legend and the grid from the first paint, empty until there is something
- * to say, so their arrival never shifts the grid below them. */
-.backup-cal__progress {
-  width: 100%;
-  margin-block-end: 8px;
-}
-.backup-cal__errors {
-  width: 100%;
-  margin: 0 0 8px;
-  padding: 0;
-  list-style: none;
-  font-size: 0.9em;
-  color: var(--destructive);
-}
-.backup-cal__error + .backup-cal__error {
-  margin-block-start: 2px;
-}
-/* fix-202: stacks the host already named as keeping no data at all — its
- * own list, same shape as the failure list but not an error tone, so "no
- * backups by design" never reads as something gone wrong. */
-.backup-cal__excluded-list {
+/* fix-216 (Kenny, Dutch: "welke doet die dan niet? waarom kan ik dat niet
+ * zien?"): a per-stack read's progress as a named chip grid — one chip per
+ * stack, every state its own colour, instead of a bare "N of M" a reader
+ * cannot act on. Shared by the backup calendar and the Backups page, the
+ * two pages that read one route per stack (`perstack.js`). */
+.perstack-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 6px;
   width: 100%;
   margin: 0 0 8px;
   padding: 0;
   list-style: none;
-  font-size: 0.9em;
+}
+.perstack-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 0.85em;
+  border: 1px solid var(--border);
+  background: var(--muted);
   color: var(--muted-foreground);
 }
-.backup-cal__excluded + .backup-cal__excluded {
-  margin-block-start: 2px;
+.perstack-chip--read {
+  background: color-mix(in srgb, var(--chart-3, #3aa675) 18%, transparent);
+  border-color: var(--chart-3, #3aa675);
+  color: var(--foreground);
+}
+.perstack-chip--no_backup {
+  color: var(--muted-foreground);
+}
+.perstack-chip--reading {
+  color: var(--foreground);
+}
+.perstack-chip--failed {
+  background: color-mix(in srgb, var(--destructive) 14%, transparent);
+  border-color: var(--destructive);
+  color: var(--foreground);
+}
+.perstack-chip__name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.perstack-chip__state {
+  white-space: nowrap;
+}
+.perstack-chip__retry {
+  flex: none;
+}
+.backups__chips-wrap {
+  margin-block-end: 8px;
+}
+
+/* fix-214: month navigation (prev/next/Today + the "Month Year" heading)
+ * and the calendar/detail two-column layout — a grid, per rule 6, so the
+ * two panes keep the same place across every state (loading, a day picked,
+ * nothing picked) rather than the detail pane appearing and shoving things
+ * around. */
+.backup-cal__nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-block-end: 10px;
+}
+.backup-cal__nav h2 {
+  margin: 0;
+  min-width: 12ch;
+  text-align: center;
+  font-size: 1.1em;
+}
+.backup-cal__chips-wrap {
+  margin-block-end: 8px;
+}
+/* fix-214: the detail pane is a FIXED width, not a fraction of the row — a
+ * proportional column would eat into the grid Kenny already measured at
+ * 75% of the content width (fix-202's own invariant), and the day detail
+ * never needs more than this to read comfortably. */
+.backup-cal__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16rem;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .backup-cal__layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.backup-cal__detail {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-height: 8rem;
+}
+.backup-cal__detail h3 {
+  margin: 0 0 8px;
+}
+.backup-cal__detail-empty {
+  margin: 0;
+}
+.backup-cal__detail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.backup-cal__detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.92em;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border);
+}
+.backup-cal__detail-row--backed_up .backup-cal__detail-state {
+  color: var(--chart-3, #3aa675);
+}
+.backup-cal__detail-row--missing .backup-cal__detail-state {
+  color: var(--destructive);
+}
+.backup-cal__detail-row--no_backup .backup-cal__detail-state,
+.backup-cal__detail-row--not_read .backup-cal__detail-state {
+  color: var(--muted-foreground);
+}
+.backup-cal__detail-stack {
+  font-weight: 600;
 }
 
 /* feat-overview-7 / feat-firewall-3: the topology graph. */

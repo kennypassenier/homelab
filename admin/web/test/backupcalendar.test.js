@@ -9,6 +9,10 @@ import {
   calendarNoBackup,
   calendarProgress,
   calendarWeeks,
+  dayDetail,
+  earliestSnapshot,
+  monthDays,
+  shiftMonth,
   withStackResult,
 } from "../js/backupcalendar.js";
 
@@ -230,4 +234,149 @@ test("calendarInputs: a failed stack never drags a night's ratio down", () => {
   // "backups" not reading is not the same as "backups" not backing up.
   assert.equal(days[0].tone, "ok");
   assert.deepEqual(days[0].expected, ["gateway"]);
+});
+
+// ── fix-214: a real month, not a fixed 35-day strip ─────────────────────
+
+test("monthDays: September 2026 has exactly 30 days, oldest first", () => {
+  const days = monthDays({}, [], 2026, 9, "2026-09-30", null, UTC);
+  assert.equal(days.length, 30);
+  assert.equal(days[0].date, "2026-09-01");
+  assert.equal(days[29].date, "2026-09-30");
+});
+
+test("monthDays: February in a leap year has 29 days", () => {
+  const days = monthDays({}, [], 2028, 2, "2028-02-29", null, UTC);
+  assert.equal(days.length, 29);
+});
+
+test("monthDays: a day after today is the future, never a false bad/red", () => {
+  const days = monthDays(
+    { gateway: [] },
+    ["gateway"],
+    2026,
+    9,
+    "2026-09-20",
+    null,
+    UTC,
+  );
+  assert.equal(days[19].date, "2026-09-20");
+  assert.equal(days[19].tone, "bad", "today itself is still verdicted");
+  assert.equal(days[20].tone, "future");
+  assert.equal(days[29].tone, "future");
+});
+
+test("monthDays: a day before the fleet's oldest snapshot ever is 'before', not 'bad'", () => {
+  const sep20 = Date.UTC(2026, 8, 20, 12) / 1000;
+  const days = monthDays(
+    { gateway: [] },
+    ["gateway"],
+    2026,
+    9,
+    "2026-09-30",
+    sep20,
+    UTC,
+  );
+  assert.equal(days[18].date, "2026-09-19");
+  assert.equal(days[18].tone, "before");
+  assert.equal(days[19].date, "2026-09-20");
+  assert.equal(days[19].tone, "bad", "the day it started is a real verdict");
+});
+
+test("monthDays: a day that did back up reads ok, same rule as calendarDays", () => {
+  const sep20 = Date.UTC(2026, 8, 20, 12) / 1000;
+  const days = monthDays(
+    { gateway: [sep20] },
+    ["gateway"],
+    2026,
+    9,
+    "2026-09-30",
+    sep20,
+    UTC,
+  );
+  assert.equal(days[19].tone, "ok");
+});
+
+test("monthDays feeds calendarWeeks the same way calendarDays does: never more than 6 weeks", () => {
+  for (let m = 1; m <= 12; m++) {
+    const days = monthDays({}, [], 2026, m, "2026-12-31", null, UTC);
+    const weeks = calendarWeeks(days);
+    assert.ok(
+      weeks.length <= 6,
+      `month ${m} produced ${weeks.length} week rows`,
+    );
+    for (const w of weeks) assert.equal(w.length, 7);
+  }
+});
+
+test("earliestSnapshot: the oldest time across every stack, or null for nothing read yet", () => {
+  assert.equal(earliestSnapshot({ gateway: [300, 100], media: [200] }), 100);
+  assert.equal(earliestSnapshot({}), null);
+  assert.equal(earliestSnapshot({ gateway: [] }), null);
+});
+
+test("shiftMonth: a month back from January lands on last December", () => {
+  assert.deepEqual(shiftMonth({ year: 2026, month: 1 }, -1), {
+    year: 2025,
+    month: 12,
+  });
+});
+
+test("shiftMonth: a month forward from December lands on next January", () => {
+  assert.deepEqual(shiftMonth({ year: 2026, month: 12 }, 1), {
+    year: 2027,
+    month: 1,
+  });
+});
+
+test("shiftMonth: a year (12 months) forward or back lands on the same month", () => {
+  assert.deepEqual(shiftMonth({ year: 2026, month: 5 }, 12), {
+    year: 2027,
+    month: 5,
+  });
+  assert.deepEqual(shiftMonth({ year: 2026, month: 5 }, -12), {
+    year: 2025,
+    month: 5,
+  });
+});
+
+// ── fix-214: the day detail panel, built from the same `results` the grid
+// reads — no fetch of its own ─────────────────────────────────────────────
+
+test("dayDetail: a stack that backed up that night names its own snapshot time(s)", () => {
+  const sep20 = Date.UTC(2026, 8, 20, 12) / 1000;
+  const rows = dayDetail(
+    { gateway: { status: "ok", times: [sep20] } },
+    "2026-09-20",
+    UTC,
+  );
+  assert.deepEqual(rows, [
+    { stack: "gateway", state: "backed_up", times: [sep20] },
+  ]);
+});
+
+test("dayDetail: a stack read ok but with no snapshot that night is 'missing'", () => {
+  const rows = dayDetail(
+    { gateway: { status: "ok", times: [] } },
+    "2026-09-20",
+    UTC,
+  );
+  assert.deepEqual(rows, [{ stack: "gateway", state: "missing", times: [] }]);
+});
+
+test("dayDetail: no_backup and not-yet-read states are their own, never folded into 'missing'", () => {
+  const rows = dayDetail(
+    {
+      syncthing: { status: "no_backup" },
+      jellyfin: { status: "pending" },
+      backups: { status: "failed", reason: "timeout" },
+    },
+    "2026-09-20",
+    UTC,
+  );
+  assert.deepEqual(rows, [
+    { stack: "backups", state: "not_read", times: [] },
+    { stack: "jellyfin", state: "not_read", times: [] },
+    { stack: "syncthing", state: "no_backup", times: [] },
+  ]);
 });

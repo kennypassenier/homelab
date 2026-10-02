@@ -4,6 +4,19 @@
 // a second helper is building the Backups page in the same milestone, and
 // the owner asked for this calendar to read the host its own way so the
 // two merge without touching each other's files.
+//
+// fix-214 (Kenny, 2026-10-02): a month view (a date picker), not a fixed
+// 35-day strip that only ever grows. A day's detail panel (`dayDetail`) can
+// only show what the host's `Rpc::BackupCalendar` answer already carries
+// per stack per night — a bare unix timestamp (`host/src/main.rs`'s
+// `nights` is `cached.snapshots.iter().map(|s| s.time)`, built from
+// `core::ops::backup::SnapRun { id, short_id, time, run }`). The host
+// COULD be asked to also forward `short_id` (restic's own id for each
+// snapshot) and the per-snapshot size (today only on `GetBackups`'s
+// `repo_size_bytes`, which reads the LATEST snapshot's total, not each
+// night's own), which would let the day panel name which exact restic
+// snapshot a night holds and how big it was — not added here, since this
+// round is UI-only and that is host work.
 
 /**
  * One calendar day's local date key (`YYYY-MM-DD`, the viewer's own
@@ -29,7 +42,12 @@ function dayKey(unix, tz) {
 
 /**
  * @typedef {{date: string, backed_up: string[], expected: string[],
- *   missing: string[], ratio: number, tone: "ok"|"warn"|"bad"|"muted"}} CalendarDay
+ *   missing: string[], ratio: number,
+ *   tone: "ok"|"warn"|"bad"|"muted"|"future"|"before"}} CalendarDay
+ *   `future`: later than today — nothing to verdict yet. `before`: earlier
+ *   than the oldest snapshot the whole fleet has ever produced (fix-214) —
+ *   this calendar had no history at all yet, which reads differently from a
+ *   month the fleet simply slept through.
  */
 
 /**
@@ -69,6 +87,129 @@ export function calendarDays(stacks, expected, days, now, tz) {
     out.push({ date, backed_up: backed, expected, missing, ratio, tone });
   }
   return out;
+}
+
+/**
+ * fix-214 (Kenny, Dutch: "die kan toch net als een datepicker per maand de
+ * dingen tonen, met controls om door de maanden te scrollen?"): the month
+ * equivalent of `calendarDays`'s sliding window — every day of ONE calendar
+ * month, each with its own verdict, so the page can show a real month
+ * (a date picker) rather than a fixed 35-day strip that only ever grows.
+ * @param {Record<string, number[]>} stacks stack -> unix seconds per snapshot
+ * @param {string[]} expected every stack that should appear
+ * @param {number} year
+ * @param {number} month 1-12 (plain calendar numbers, never JS Date's 0-based)
+ * @param {string} today YYYY-MM-DD, the viewer's own "today" — a day later
+ *   than this is the future: nothing to verdict yet.
+ * @param {number | null} earliestKnown unix seconds of the oldest snapshot
+ *   across the WHOLE fleet (every stack, not just this month's `expected`),
+ *   or `null` when nothing has ever been read. A day before it existed
+ *   before this calendar had any history at all, which reads differently
+ *   from a night the fleet was simply asked to back up and didn't.
+ * @param {TimeZone} [tz]
+ * @returns {CalendarDay[]} oldest first, one entry per day of the month
+ */
+export function monthDays(
+  stacks,
+  expected,
+  year,
+  month,
+  today,
+  earliestKnown,
+  tz,
+) {
+  /** @type {Map<string, Set<string>>} */
+  const byDay = new Map();
+  for (const [stack, times] of Object.entries(stacks)) {
+    for (const t of times) {
+      const key = dayKey(t, tz);
+      if (!byDay.has(key)) byDay.set(key, new Set());
+      byDay.get(key)?.add(stack);
+    }
+  }
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const earliestDay = earliestKnown != null ? dayKey(earliestKnown, tz) : null;
+  const out = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const backed = [...(byDay.get(date) ?? [])].sort();
+    const missing = expected.filter((s) => !backed.includes(s));
+    const ratio = expected.length ? backed.length / expected.length : 1;
+    /** @type {CalendarDay["tone"]} */
+    let tone;
+    if (date > today) tone = "future";
+    else if (earliestDay != null && date < earliestDay) tone = "before";
+    else if (!expected.length) tone = "muted";
+    else if (ratio >= 1) tone = "ok";
+    else if (ratio > 0) tone = "warn";
+    else tone = "bad";
+    out.push({ date, backed_up: backed, expected, missing, ratio, tone });
+  }
+  return out;
+}
+
+/**
+ * fix-214: the oldest snapshot across the WHOLE fleet (every stack this
+ * page has read "ok", regardless of which month is on screen) — the one
+ * fact that tells a month from before the fleet existed apart from a month
+ * the fleet simply slept through.
+ * @param {Record<string, number[]>} stacks
+ * @returns {number | null}
+ */
+export function earliestSnapshot(stacks) {
+  let min = null;
+  for (const times of Object.values(stacks))
+    for (const t of times) if (min == null || t < min) min = t;
+  return min;
+}
+
+/**
+ * fix-214: one calendar month's identity (year, 1-12 month), shifted by
+ * `delta` months — the pure half of the prev/next/PageUp/PageDown
+ * navigation, so moving from December back a month lands on last
+ * December, not month 0.
+ * @param {{year: number, month: number}} ym
+ * @param {number} delta
+ * @returns {{year: number, month: number}}
+ */
+export function shiftMonth(ym, delta) {
+  const total = ym.year * 12 + (ym.month - 1) + delta;
+  return {
+    year: Math.floor(total / 12),
+    month: (((total % 12) + 12) % 12) + 1,
+  };
+}
+
+/**
+ * fix-214: everything the calendar can honestly say about one night, per
+ * stack — built from the SAME `results` the grid itself reads (fix-216's
+ * `StackResult` shape: `ok`/`no_backup`/`failed`/`pending`), so the detail
+ * panel never needs a fetch of its own and never claims more than the host
+ * actually answered (no per-snapshot size or file count: the host's
+ * `BackupCalendar` answer carries only each night's unix time — see this
+ * module's own header comment for what else it could be asked to send).
+ * @param {Record<string, import("./pages/backupcalendar.js").StackResult>} results
+ * @param {string} date YYYY-MM-DD
+ * @param {TimeZone} [tz]
+ * @returns {{stack: string,
+ *   state: "backed_up"|"missing"|"no_backup"|"not_read",
+ *   times: number[]}[]} sorted by stack name
+ */
+export function dayDetail(results, date, tz) {
+  return Object.keys(results)
+    .sort()
+    .map((stack) => {
+      const r = results[stack];
+      if (r.status === "no_backup")
+        return { stack, state: /** @type {const} */ ("no_backup"), times: [] };
+      if (r.status === "ok") {
+        const times = r.times.filter((t) => dayKey(t, tz) === date);
+        return times.length
+          ? { stack, state: /** @type {const} */ ("backed_up"), times }
+          : { stack, state: /** @type {const} */ ("missing"), times };
+      }
+      return { stack, state: /** @type {const} */ ("not_read"), times: [] };
+    });
 }
 
 /**

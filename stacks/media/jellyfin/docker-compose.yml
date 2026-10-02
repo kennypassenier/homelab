@@ -30,7 +30,7 @@ services:
     # exist upstream before it was written here. fix-82
     # (manual-images-latest-unpinned, 2026-09-27) adds the digest CT 106 ran
     # that day, so a re-pushed tag cannot change what runs.
-    image: jellyfin/jellyfin:10.11.11@sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db
+    image: jellyfin/jellyfin:12.1@sha256:78d3ea1207d1322471fcac39a614f004f2ccf7e878f95ab2977d752f07e4dd7e
     container_name: jellyfin
     user: "1000:1000"
     group_add:

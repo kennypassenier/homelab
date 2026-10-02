@@ -49,7 +49,8 @@ export function todayView(body) {
 
 /**
  * The fleet check's findings as rows, most severe first.
- * @param {{severity: string, subject: string, what: string, remedy: string, fix?: Fix}[]} findings
+ * @param {{severity: string, subject: string, what: string, remedy: string,
+ *   fix?: Fix, drift_diffable?: boolean, drift_stack?: string}[]} findings
  */
 export function findingRows(findings) {
   const rank = { Broken: 0, Drift: 1, Noted: 2 };
@@ -74,6 +75,11 @@ export function findingRows(findings) {
       what: f.what,
       remedy: f.remedy,
       fix: f.fix ?? null,
+      // fix-219: a repo-drift finding (evaluate_repo_drift) can expand into
+      // the actual per-file change; `driftStack` is the name the Health
+      // page fetches `/data/fleet-check/{stack}/diff` with.
+      diffable: f.drift_diffable ?? false,
+      driftStack: f.drift_stack ?? null,
     }));
 }
 

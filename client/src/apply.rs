@@ -8,6 +8,8 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
+
 /// What `apply` will do, by stack name. Each list is sorted.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ApplyPlan {
@@ -109,6 +111,70 @@ pub fn file_changes(
     out.into_iter()
         .map(|(p, sign)| format!("{} {}", sign, p))
         .collect()
+}
+
+/// fix-219 (drift-finding-names-only-filenames): one changed file's actual
+/// difference, beside the bare path `file_changes` already names — what
+/// `homelab check`/`today` shows behind a repo-drift finding, and the
+/// dashboard's Health page behind the same finding, once a stack is already
+/// known to have drifted (never for the normal, no-drift case: building this
+/// needs both sides' full content, which costs a `GetApplied` round trip the
+/// hash-only comparison in `fleetcheck::evaluate_repo_drift` was built to
+/// avoid paying on every check).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileDiffEntry {
+    pub path: String,
+    /// `+` new, `~` changed, `-` removed by the deploy that would fix the
+    /// drift — the same sign `file_changes` already uses.
+    pub sign: char,
+    /// A compact unified diff capped at
+    /// `homelab_core::ops::fleetcheck::FILE_DIFF_MAX_LINES` lines, or `None`
+    /// for a secret path (`homelab_core::ops::fleetcheck::is_secret_path`) —
+    /// never computed, so its content can never reach this struct, let alone
+    /// be printed or sent to the dashboard.
+    pub diff: Option<String>,
+}
+
+/// fix-219: pair `local` (this working copy's pinned files, as
+/// `spec::stack_files` builds them) against `applied` (the host's intent
+/// repository copy, `GetApplied` — secret-free by construction, D6) into one
+/// [`FileDiffEntry`] per changed, added or removed file, sorted by path.
+pub fn file_diffs(
+    local: &[homelab_proto::FileBlob],
+    applied: &[homelab_proto::FileBlob],
+) -> Vec<FileDiffEntry> {
+    use homelab_core::ops::fleetcheck::{FILE_DIFF_MAX_LINES, is_secret_path};
+    use homelab_core::textdiff::unified_capped;
+    let diff_of = |path: &str, old: Option<&str>, new: Option<&str>| {
+        (!is_secret_path(path)).then(|| unified_capped(path, old, new, FILE_DIFF_MAX_LINES))
+    };
+    let mut out: Vec<FileDiffEntry> = Vec::new();
+    for f in local {
+        match applied.iter().find(|a| a.path == f.path) {
+            None => out.push(FileDiffEntry {
+                path: f.path.clone(),
+                sign: '+',
+                diff: diff_of(&f.path, None, Some(&f.content)),
+            }),
+            Some(a) if a.content != f.content || a.mode != f.mode => out.push(FileDiffEntry {
+                path: f.path.clone(),
+                sign: '~',
+                diff: diff_of(&f.path, Some(&a.content), Some(&f.content)),
+            }),
+            Some(_) => {}
+        }
+    }
+    for a in applied {
+        if !local.iter().any(|f| f.path == a.path) {
+            out.push(FileDiffEntry {
+                path: a.path.clone(),
+                sign: '-',
+                diff: diff_of(&a.path, Some(&a.content), None),
+            });
+        }
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    out
 }
 
 /// fix-159 (2026-09-29): the running native units a deploy of these files

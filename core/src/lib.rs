@@ -35,4 +35,5 @@ pub mod runner;
 pub mod safety;
 pub mod sink;
 pub mod state;
+pub mod textdiff;
 pub mod wire;

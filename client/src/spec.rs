@@ -576,6 +576,69 @@ mod registry_cache_plaintext_tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// fix-219 (dashboard-apply-plan-ignores-pinning, locking test): a stack
+    /// whose repository equals what the host recorded except for a
+    /// tag-only `image:` line — pinned by the same injected resolver on
+    /// both sides, standing in for the digest the host's own deploy
+    /// recorded — must never redeploy. Before fix-219, `local_intent_hash`
+    /// (the dashboard's cheap Apply-plan preview, `apply_plan(false)`) never
+    /// ran `resolve_images_with`, so it hashed the bare tag while the host's
+    /// record was built from `build_spec`'s pinned one — the exact fix-213
+    /// fault, reopened in the one path fix-213 never reached. Routes
+    /// through `homelab_client::apply::plan`, the one function `homelab
+    /// apply` and the dashboard's Apply page both call to decide deploy vs
+    /// unchanged (`admin::core::applyview::plan` is a thin wrapper over it).
+    #[test]
+    fn fix_219_an_unchanged_stack_with_only_a_tag_only_image_line_never_redeploys() {
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dir = std::env::temp_dir().join(format!("homelab-fix-219-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::copy(
+            repo.join("stacks/syncthing/lxc-compose.yml"),
+            dir.join("lxc-compose.yml"),
+        )
+        .unwrap();
+        std::fs::write(dir.join("traefik-routes.yml"), "http: {}\n").unwrap();
+        std::fs::create_dir_all(dir.join("syncthing")).unwrap();
+        let compose = "services:\n  syncthing:\n    image: syncthing/syncthing:1.27\n";
+        std::fs::write(dir.join("syncthing/docker-compose.yml"), compose).unwrap();
+        std::fs::write(dir.join("syncthing/.env"), "SECRET=x\n").unwrap();
+        std::fs::write(dir.join("syncthing/checks.yml"), "{}\n").unwrap();
+
+        // What the host recorded at its last real deploy (`build_spec`'s own
+        // sequence, pinned — fix-213's own shape).
+        let mut notes = Vec::new();
+        let mut deployed_spec = spec_without_binaries(&dir, &mut notes, false).unwrap();
+        resolve_images_with(&mut deployed_spec, &mut notes, fix_213_resolve);
+        let host_hash = homelab_core::manifest::intent_hash(&deployed_spec);
+
+        // The dashboard's cheap preview path — no specs, no download, the
+        // one `apply_plan(false)` actually calls.
+        let (local_hash, _) = local_intent_hash_with(&dir, fix_213_resolve).expect("hash");
+        assert_eq!(
+            local_hash, host_hash,
+            "a stack whose only unpinned line is a tag-only image must hash the same as what \
+             the host recorded — otherwise the dashboard's Apply page (and the TUI's drift \
+             badge) redeploys it forever"
+        );
+
+        let plan = crate::apply::plan(
+            &[("syncthing".to_string(), local_hash)],
+            &["syncthing".to_string()],
+            &[("syncthing".to_string(), host_hash)],
+        );
+        assert_eq!(
+            plan.unchanged,
+            vec!["syncthing".to_string()],
+            "unchanged except for pinning :: {:?}",
+            plan
+        );
+        assert!(plan.deploy.is_empty(), "{:?}", plan);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// fix-141 (expert panel 2026-09-27, changes-reach-prod-without-ci): the
@@ -751,22 +814,61 @@ pub fn uncommitted_warning(stack: &str, src: &homelab_proto::SourceRev) -> Optio
 /// programs are not part of the hash, so they are not fetched. The secrets
 /// are, because the host's hash includes them, so `latch` still runs; the
 /// caller runs this off the UI thread.
+///
+/// fix-219 (dashboard-apply-plan-ignores-pinning): pins every tag-only
+/// `image:` line first, through `resolve_images_with` — the same step
+/// `build_spec`/`stack_digest` already run (fix-213). Without it this cheap
+/// path (no specs, no deploy) hashed a compose file's tag exactly as written
+/// while the host's recorded hash was built from the pinned digest, so the
+/// dashboard's Apply page (which calls this, never `build_spec`, for its own
+/// preview) called every stack with a tag-only image changed forever, with
+/// nothing in the repository ever having moved.
 pub fn local_intent_hash(dir: &Path) -> Result<(String, Vec<String>), String> {
+    local_intent_hash_with(dir, |registry, repository, tag| {
+        crate::pinexists::resolve_digest(registry, repository, tag)
+    })
+}
+
+fn local_intent_hash_with<F>(dir: &Path, resolve: F) -> Result<(String, Vec<String>), String>
+where
+    F: Fn(&str, &str, &str) -> Result<Option<String>, String> + Sync,
+{
     let mut notes = Vec::new();
-    let spec = spec_without_binaries(dir, &mut notes, true)?;
+    let mut spec = spec_without_binaries(dir, &mut notes, true)?;
+    resolve_images_with(&mut spec, &mut notes, resolve);
     Ok((homelab_core::manifest::intent_hash(&spec), notes))
 }
 
 /// fix-192 (media-redeploys-without-changing, Kenny 2026-10-02): the
 /// per-component digests of a local stack, for the apply plan's reason text
 /// — same cheap path as `local_intent_hash` (no native binaries, no registry
-/// lookups), with `source` stamped too so a manifest-only reason can name
-/// the building client's own version.
+/// lookups for anything but the compose images, pinned the same way), with
+/// `source` stamped too so a manifest-only reason can name the building
+/// client's own version.
+///
+/// fix-219: also pins compose images first, for the same reason
+/// `local_intent_hash` now does — `apply_plan`'s per-stack "why" text
+/// (`applyview::deploy_reasons`) compares this against the host's own
+/// (pinned) `component_digests`, and disagreed on every tag-only image
+/// before this.
 pub fn local_component_digests(
     dir: &Path,
 ) -> Result<(homelab_core::manifest::ComponentDigests, Vec<String>), String> {
+    local_component_digests_with(dir, |registry, repository, tag| {
+        crate::pinexists::resolve_digest(registry, repository, tag)
+    })
+}
+
+fn local_component_digests_with<F>(
+    dir: &Path,
+    resolve: F,
+) -> Result<(homelab_core::manifest::ComponentDigests, Vec<String>), String>
+where
+    F: Fn(&str, &str, &str) -> Result<Option<String>, String> + Sync,
+{
     let mut notes = Vec::new();
     let mut spec = spec_without_binaries(dir, &mut notes, true)?;
+    resolve_images_with(&mut spec, &mut notes, resolve);
     spec.source = stack_source(dir);
     Ok((homelab_core::manifest::component_digests(&spec), notes))
 }
@@ -792,7 +894,24 @@ pub fn build_spec_files_only(dir: &Path) -> Result<DeploySpec, String> {
 /// secrets and programs (no latch, no download), for the dashboard's plan:
 /// the Deploy review and the Apply page diff these against what the host
 /// applied (`GetApplied`), as `homelab apply` does.
+///
+/// fix-219 (dashboard-apply-plan-ignores-pinning): pins every tag-only
+/// `image:` line first (fix-213's step, via `resolve_images_with`). Before
+/// this, `deploy_diff` (the dashboard's Deploy review and Apply-page diff)
+/// compared this function's UNPINNED compose file against the host's
+/// PINNED `GetApplied` copy and called every app naming a tag instead of a
+/// digest changed, on every read, with nothing in the repository ever
+/// having moved — the fix-213 fault, in the one path fix-213 did not reach.
 pub fn stack_files(dir: &Path) -> Result<Vec<FileBlob>, String> {
+    stack_files_with(dir, |registry, repository, tag| {
+        crate::pinexists::resolve_digest(registry, repository, tag)
+    })
+}
+
+fn stack_files_with<F>(dir: &Path, resolve: F) -> Result<Vec<FileBlob>, String>
+where
+    F: Fn(&str, &str, &str) -> Result<Option<String>, String> + Sync,
+{
     let mut files: Vec<FileBlob> = Vec::new();
     let mut env: BTreeMap<String, String> = BTreeMap::new();
     let mut checks: BTreeMap<String, homelab_core::checks::ServiceChecks> = BTreeMap::new();
@@ -800,6 +919,7 @@ pub fn stack_files(dir: &Path) -> Result<Vec<FileBlob>, String> {
         return Err(format!("{} has no lxc-compose.yml", dir.display()));
     }
     collect(dir, dir, &mut files, &mut env, &mut checks)?;
+    let _notes = resolve_compose_digests_with(&mut files, resolve);
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
 }

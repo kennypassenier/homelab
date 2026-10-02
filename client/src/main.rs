@@ -532,7 +532,7 @@ async fn run(explicit_host: Option<String>) {
                     C_RESET
                 );
             }
-            let fleet_ok = rpc_with(
+            let (fleet_ok, _fleet, fleet_resp) = rpc_exchange(
                 &host,
                 &token,
                 Command::FleetCheck {
@@ -541,8 +541,16 @@ async fn run(explicit_host: Option<String>) {
                     digests,
                     host_config: declared_host_config(),
                 },
+                true,
             )
             .await;
+            // fix-219 (drift-finding-names-only-filenames): for every stack
+            // the fleet check just named as drifted against the host, show
+            // the actual old/new file content — fetched only for those
+            // stacks, so a clean fleet (the normal case) pays nothing extra.
+            if let Some(resp) = &fleet_resp {
+                print_repo_drift_diffs(&host, &token, &base, &resp.message).await;
+            }
             // fix-143 (expert panel 2026-09-27, edge-changes-unnoticed): the
             // Cloudflare edge against captured/gateway/, from here because
             // the read-only token and the capture both live on this side.
@@ -645,6 +653,11 @@ async fn run(explicit_host: Option<String>) {
                 println!("{}", body);
             }
             println!("{}{}{}", color, verdict, C_RESET);
+            // fix-219: same drift diffs as `homelab check`, read from the
+            // text just printed — `today` folds the fleet check's findings
+            // in with doctor and the incidents, so the stack names are
+            // found here instead of asking the host separately again.
+            print_repo_drift_diffs(&host, &token, &base, &text).await;
             std::process::exit(if today.needs_you() { 1 } else { 0 });
         }
         "backup-native" => {
@@ -2691,6 +2704,77 @@ fn print_check(msg: &str, ok: bool) {
             _ => "",
         };
         println!("{}{}{}{}", color, mark, line, C_RESET);
+    }
+}
+
+/// fix-219 (drift-finding-names-only-filenames, 2026-10-02): for every stack
+/// a rendered fleet check/`today` text names as drifted against the host
+/// (`homelab_core::ops::fleetcheck::repo_drift_stacks_in_rendered_text`),
+/// print the actual per-file change: this working copy's own pinned files
+/// against the host's intent repository copy (`GetApplied`, secret-free by
+/// construction), the same pairing `deploy_diff` already uses for the
+/// dashboard's Apply page. Only ever runs for stacks already reported
+/// drifted — a clean fleet costs nothing beyond what it already cost.
+async fn print_repo_drift_diffs(host: &str, token: &str, base: &str, rendered: &str) {
+    let stacks = homelab_core::ops::fleetcheck::repo_drift_stacks_in_rendered_text(rendered);
+    for stack in stacks {
+        let dir = Path::new(base).join(&stack);
+        let local = match homelab_client::spec::stack_files(&dir) {
+            Ok(f) => f,
+            Err(e) => {
+                println!(
+                    "{}  {}: could not read its local files for the diff — {}{}",
+                    C_DIM, stack, e, C_RESET
+                );
+                continue;
+            }
+        };
+        let Some(reply) = rpc_reply(
+            host,
+            token,
+            Command::GetApplied {
+                stack: stack.clone(),
+            },
+        )
+        .await
+        else {
+            println!(
+                "{}  {}: the host did not answer GetApplied for the diff{}",
+                C_DIM, stack, C_RESET
+            );
+            continue;
+        };
+        if !reply.ok {
+            println!("{}  {}: {}{}", C_DIM, stack, reply.message, C_RESET);
+            continue;
+        }
+        let applied: Vec<homelab_proto::FileBlob> = match serde_json::from_str(&reply.message) {
+            Ok(v) => v,
+            Err(_) => {
+                println!(
+                    "{}  {}: the host's applied files did not read — update the host and the \
+                     client to the same release{}",
+                    C_DIM, stack, C_RESET
+                );
+                continue;
+            }
+        };
+        let diffs = homelab_client::apply::file_diffs(&local, &applied);
+        if diffs.is_empty() {
+            continue;
+        }
+        println!("{}  {} — what changed:{}", C_YELLOW, stack, C_RESET);
+        for d in &diffs {
+            println!("    {} {}", d.sign, d.path);
+            match &d.diff {
+                Some(text) => {
+                    for line in text.lines() {
+                        println!("      {}", line);
+                    }
+                }
+                None => println!("      (secret — content not shown)"),
+            }
+        }
     }
 }
 

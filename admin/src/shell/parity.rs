@@ -291,6 +291,49 @@ pub fn with_fixes(mut rows: serde_json::Value) -> serde_json::Value {
     rows
 }
 
+/// fix-219 (drift-finding-names-only-filenames): marks every row that is a
+/// repo-drift finding from `evaluate_repo_drift` — the one kind whose `what`
+/// names bare filenames where Kenny wants the actual change — with
+/// `drift_diffable` and the stack name it is about (`drift_stack`), so the
+/// Health page knows which findings can expand into a diff (fetched from
+/// `/data/fleet-check/{stack}/diff`, only when opened). `has_subject` is
+/// `true` for a fleet-check finding row (its own `subject` field names the
+/// stack directly) and `false` for a `Today` item (`ops::today::assemble`
+/// folds subject and what into one `"<subject>: <what>"` string).
+pub fn with_repo_drift(mut rows: serde_json::Value, has_subject: bool) -> serde_json::Value {
+    if let Some(list) = rows.as_array_mut() {
+        for row in list.iter_mut() {
+            let what = row
+                .get("what")
+                .and_then(|w| w.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let diffable = homelab_core::ops::fleetcheck::is_repo_file_drift_text(&what);
+            let stack = diffable
+                .then(|| {
+                    if has_subject {
+                        row.get("subject")
+                            .and_then(|s| s.as_str())
+                            .map(str::to_string)
+                    } else {
+                        what.split_once(": ").map(|(s, _)| s.to_string())
+                    }
+                })
+                .flatten();
+            if let Some(o) = row.as_object_mut() {
+                o.insert(
+                    "drift_diffable".into(),
+                    serde_json::Value::Bool(stack.is_some()),
+                );
+                if let Some(s) = stack {
+                    o.insert("drift_stack".into(), serde_json::Value::String(s));
+                }
+            }
+        }
+    }
+    rows
+}
+
 /// Decision daily-digest: the open Today items.
 pub async fn fetch_today(
     host: &Arc<dyn HostPort>,
@@ -303,7 +346,7 @@ async fn read_today(c: ParityCtx) -> (StatusCode, serde_json::Value) {
     match today_with_files(&c.host, &c.repo).await {
         Ok((t, n, skipped)) => {
             let mut today = serde_json::to_value(&t).unwrap_or_default();
-            today["items"] = with_fixes(today["items"].clone());
+            today["items"] = with_repo_drift(with_fixes(today["items"].clone()), false);
             (
                 StatusCode::OK,
                 serde_json::json!({
@@ -352,7 +395,7 @@ async fn read_fleet_check(c: ParityCtx) -> (StatusCode, serde_json::Value) {
                 StatusCode::OK,
                 serde_json::json!({
                     "passes": v["passes"],
-                    "findings": with_fixes(v["findings"].clone()),
+                    "findings": with_repo_drift(with_fixes(v["findings"].clone()), true),
                     "stack_files": n,
                     "skipped": skipped,
                     "not_here": "The Cloudflare edge and the registries' pinned digests are compared from a workstation: homelab check.",
@@ -737,6 +780,28 @@ async fn stack_plan(State(c): State<ParityCtx>, UrlPath(stack): UrlPath<String>)
     }
 }
 
+/// fix-219: the actual per-file change behind a repo-drift finding, read
+/// only when the Health page's finding is expanded.
+async fn fleet_check_file_diff(
+    State(c): State<ParityCtx>,
+    UrlPath(stack): UrlPath<String>,
+) -> Response {
+    if !valid_stack_name(&stack) {
+        return refused(
+            StatusCode::BAD_REQUEST,
+            Refusal::new(
+                format!("the diff of {stack:?}"),
+                "not a stack name",
+                "use the stack name the Health page shows",
+            ),
+        );
+    }
+    match c.actions.repo_drift_file_diff(&stack).await {
+        Ok(v) => Json(v).into_response(),
+        Err(r) => refused(StatusCode::CONFLICT, r),
+    }
+}
+
 // ── downloads ───────────────────────────────────────────────────────────
 
 fn attachment(name: &str, mime: &str, body: String) -> Response {
@@ -846,7 +911,70 @@ pub fn router(c: ParityCtx) -> Router {
         .route("/data/drift", get(drift))
         .route("/data/apply/plan", get(apply_plan))
         .route("/data/plan/{stack}", get(stack_plan))
+        .route("/data/fleet-check/{stack}/diff", get(fleet_check_file_diff))
         .route("/data/download/runbook", get(runbook))
         .route("/data/download/export/{stack}", get(export))
         .with_state(c)
+}
+
+#[cfg(test)]
+mod fix_219_with_repo_drift_tests {
+    use super::with_repo_drift;
+
+    /// A fleet-check finding row (`has_subject = true`): the stack is read
+    /// straight from its own `subject` field.
+    #[test]
+    fn a_fleet_check_repo_drift_row_carries_its_stack_from_subject() {
+        let rows = serde_json::json!([
+            {
+                "severity": "Drift",
+                "subject": "syncthing",
+                "what": "the files differ from what the host applied on 2026-10-02 — changed: a",
+                "remedy": "x",
+            },
+            {
+                "severity": "Drift",
+                "subject": "kyu",
+                "what": "net0 has firewall=0, so Proxmox applies none of the declared rules",
+                "remedy": "x",
+            },
+        ]);
+        let got = with_repo_drift(rows, true);
+        let list = got.as_array().unwrap();
+        assert_eq!(list[0]["drift_diffable"], serde_json::json!(true));
+        assert_eq!(list[0]["drift_stack"], serde_json::json!("syncthing"));
+        assert_eq!(list[1]["drift_diffable"], serde_json::json!(false));
+        assert!(list[1].get("drift_stack").is_none());
+    }
+
+    /// A `Today` item (`has_subject = false`): the stack name is folded into
+    /// `what` as `"<subject>: <what>"` by `ops::today::assemble`, so it is
+    /// split out of there instead.
+    #[test]
+    fn a_today_item_repo_drift_row_carries_its_stack_split_from_what() {
+        let rows = serde_json::json!([{
+            "level": "Attention",
+            "source": "check",
+            "what": "syncthing: the files differ from what the host applied on 2026-10-02 — changed: a",
+            "remedy": "x",
+        }]);
+        let got = with_repo_drift(rows, false);
+        let list = got.as_array().unwrap();
+        assert_eq!(list[0]["drift_diffable"], serde_json::json!(true));
+        assert_eq!(list[0]["drift_stack"], serde_json::json!("syncthing"));
+    }
+
+    #[test]
+    fn a_non_drift_row_is_never_marked_diffable() {
+        let rows = serde_json::json!([{
+            "level": "Broken",
+            "source": "doctor",
+            "what": "some other finding entirely",
+            "remedy": "x",
+        }]);
+        let got = with_repo_drift(rows, false);
+        let list = got.as_array().unwrap();
+        assert_eq!(list[0]["drift_diffable"], serde_json::json!(false));
+        assert!(list[0].get("drift_stack").is_none());
+    }
 }

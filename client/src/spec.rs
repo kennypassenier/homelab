@@ -545,30 +545,61 @@ pub fn stack_source(dir: &Path) -> Option<homelab_proto::SourceRev> {
 /// about which files count; `.env` content is read by `collect` but never
 /// leaves this function, and latch is not asked (F291: a check must not
 /// depend on a credential it does not need).
+///
+/// fix-201 (today-reports-just-deployed-stacks-as-drifted): a compose stack's
+/// manifest and files are now built through `spec_without_binaries` — the
+/// same derivation a deploy's spec goes through, tile `probe` fields
+/// included — rather than `build_manifest`'s raw parse, and
+/// `component_digests` is hashed from that same spec. `build_manifest`
+/// skips the route lookups that fill `probe`, so its manifest permanently
+/// differed from `StackState::manifest` (which deploy records post-lookup)
+/// for any stack with a tile: `homelab today` named `lxc-compose.yml` as
+/// differing on every such stack, forever, right after a clean deploy. Still
+/// `fetch_secrets: false` — env and secret files are excluded from both the
+/// digests this produces and the comparison `evaluate_repo_drift` makes with
+/// them.
 pub fn stack_digest(dir: &Path) -> Result<homelab_core::ops::fleetcheck::StackDigest, String> {
     let stack = dir
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .ok_or_else(|| format!("{}: not a stack directory", dir.display()))?;
-    let manifest = if dir.join("lxc-compose.yml").exists() {
-        Some(build_manifest(dir)?)
-    } else {
-        None
-    };
-    let mut files: Vec<FileBlob> = Vec::new();
-    let mut env: BTreeMap<String, String> = BTreeMap::new();
-    let mut checks: BTreeMap<String, homelab_core::checks::ServiceChecks> = BTreeMap::new();
-    collect(dir, dir, &mut files, &mut env, &mut checks)?;
+    if !dir.join("lxc-compose.yml").exists() {
+        // Native-only (`service.yml`): no manifest, no component digests —
+        // `spec_without_binaries` requires `lxc-compose.yml` to exist, so
+        // this stays on the old `collect`-only path.
+        let mut files: Vec<FileBlob> = Vec::new();
+        let mut env: BTreeMap<String, String> = BTreeMap::new();
+        let mut checks: BTreeMap<String, homelab_core::checks::ServiceChecks> = BTreeMap::new();
+        collect(dir, dir, &mut files, &mut env, &mut checks)?;
+        return Ok(homelab_core::ops::fleetcheck::StackDigest {
+            stack,
+            manifest: None,
+            files: files
+                .into_iter()
+                .map(|f| {
+                    let h = homelab_core::manifest::sha256_hex(f.content.as_bytes());
+                    (f.path, h)
+                })
+                .collect(),
+            component_digests: Default::default(),
+        });
+    }
+    let mut notes = Vec::new();
+    let spec = spec_without_binaries(dir, &mut notes, false)?;
+    let files = spec
+        .files
+        .iter()
+        .map(|f| {
+            let h = homelab_core::manifest::sha256_hex(f.content.as_bytes());
+            (f.path.clone(), h)
+        })
+        .collect();
+    let component_digests = homelab_core::manifest::component_digests(&spec);
     Ok(homelab_core::ops::fleetcheck::StackDigest {
         stack,
-        manifest,
-        files: files
-            .into_iter()
-            .map(|f| {
-                let h = homelab_core::manifest::sha256_hex(f.content.as_bytes());
-                (f.path, h)
-            })
-            .collect(),
+        manifest: Some(spec.manifest),
+        files,
+        component_digests,
     })
 }
 

@@ -94,6 +94,12 @@ pub async fn backup_device(
 ) -> OperationReport {
     let op = format!("device-backup-{}", dev.name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    // fix-171 round 3: fixed and unconditional.
+    runner.plan(&[
+        "init repo",
+        "fetch and store",
+        "verify the snapshot has substance",
+    ]);
     let exec = ctx.exec;
 
     runner.log(

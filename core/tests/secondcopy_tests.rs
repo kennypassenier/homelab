@@ -560,3 +560,92 @@ fn a_healthy_pair_of_copies_is_silent_and_an_unconfigured_one_asks_nothing() {
         f
     );
 }
+
+// ── fix-171 round 3: copy_all's and check_repo's own plans, computed from
+// this run's own repository list / dataset argument. ──────────────────────
+
+fn fix171_plan_and_marks(
+    events: &[homelab_core::sink::PipelineEvent],
+) -> (usize, std::collections::BTreeSet<String>) {
+    use homelab_core::sink::PipelineEvent;
+    let plan_len = events
+        .iter()
+        .find_map(|e| match e {
+            PipelineEvent::Plan { steps, .. } => Some(steps.len()),
+            _ => None,
+        })
+        .expect("a plan was announced");
+    let mut names = std::collections::BTreeSet::new();
+    for e in events {
+        match e {
+            PipelineEvent::StepStarted { step, .. } | PipelineEvent::StepSkipped { step, .. } => {
+                names.insert(step.clone());
+            }
+            _ => {}
+        }
+    }
+    (plan_len, names)
+}
+
+#[tokio::test]
+async fn fix_171_copy_all_reaches_its_announced_plan() {
+    let exec = MockExecutor::new();
+    exec.respond_always("zfs list", CmdOutput::ok("yes\t/HDD4TB/restic\n"));
+    exec.respond_always("snapshots --json", CmdOutput::ok("[]"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let repos = vec![
+        RepoPolicy {
+            repo: "kyu".into(),
+            tiers: None,
+        },
+        RepoPolicy {
+            repo: "almanac".into(),
+            tiers: None,
+        },
+    ];
+    let r = copy_all(&ctx(&exec, &sink, &j), &BackupCfg::default(), DS, &repos).await;
+    assert!(r.ok, "{:?}", r.error);
+    let (m, names) = fix171_plan_and_marks(&sink.events());
+    assert_eq!(m, 3, "one dataset step plus one per repository");
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}
+
+#[tokio::test]
+async fn fix_171_check_repo_with_a_second_copy_plans_both_checks() {
+    let exec = MockExecutor::new();
+    exec.respond_always("zfs list", CmdOutput::ok("yes\t/HDD4TB/restic\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let r = check_repo(
+        &ctx(&exec, &sink, &j),
+        &BackupCfg::default(),
+        "kyu",
+        Some(DS),
+        None,
+    )
+    .await;
+    assert!(r.ok, "{:?}", r.error);
+    let (m, names) = fix171_plan_and_marks(&sink.events());
+    assert_eq!(m, 2);
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}
+
+#[tokio::test]
+async fn fix_171_check_repo_without_a_second_copy_plans_one_check() {
+    let exec = MockExecutor::new();
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let r = check_repo(
+        &ctx(&exec, &sink, &j),
+        &BackupCfg::default(),
+        "kyu",
+        None,
+        None,
+    )
+    .await;
+    assert!(r.ok, "{:?}", r.error);
+    let (m, names) = fix171_plan_and_marks(&sink.events());
+    assert_eq!(m, 1);
+    assert_eq!(names.len(), m);
+}

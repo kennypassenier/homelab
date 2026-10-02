@@ -96,6 +96,18 @@ pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationRepo
         if cfg.unprivileged { "" } else { "-priv" }
     );
     let mut runner = Runner::new("template-build", ctx.sink, ctx.journal);
+    // fix-171 round 3: fixed and unconditional.
+    runner.plan(&[
+        "claim temp vmid",
+        "create build container",
+        "wait for systemd",
+        "bake docker",
+        "bake observability agents",
+        "bake guards",
+        "trim what cannot work in a container",
+        "generalize",
+        "convert to template",
+    ]);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let vm = cfg.temp_vmid.to_string();

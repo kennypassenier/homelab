@@ -31,10 +31,17 @@ pub async fn patch_fleet(ctx: &OpCtx<'_>, targets: &[(String, u16)]) -> Operatio
         return runner.finish_ok();
     }
 
+    // fix-171 round 3: one named step per target, known entirely from this
+    // run's own `targets` list before anything is touched.
+    let plan: Vec<String> = targets.iter().map(|(n, _)| format!("patch {n}")).collect();
+    runner.plan(&plan.iter().map(String::as_str).collect::<Vec<_>>());
+
     for (name, vmid) in targets {
         // Defense in depth: state should never contain a no-touch vmid, but
         // patching writes to the guest, so check anyway.
         if ctx.safety.no_touch.contains(vmid) {
+            let step_name = format!("patch {}", name);
+            runner.skip(&step_name);
             runner.log(
                 Level::Warn,
                 format!(

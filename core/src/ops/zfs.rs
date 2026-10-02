@@ -408,6 +408,17 @@ pub async fn replicate(
     tiers: &[crate::retention::RetentionTier],
 ) -> OperationReport {
     let mut runner = Runner::new("zfs-replicate", ctx.sink, ctx.journal);
+    // fix-171 round 3: "validate jobs" plus five named steps per job — all
+    // known from `jobs`, this run's own input, before anything runs.
+    let mut plan: Vec<String> = vec!["validate jobs".to_string()];
+    for j in jobs {
+        plan.push(format!("check {} → {}", j.source, j.target));
+        plan.push(format!("snapshot {}", j.source));
+        plan.push(format!("replicate {} → {}", j.source, j.target));
+        plan.push(format!("prune {}", j.source));
+        plan.push(format!("prune {}", j.target));
+    }
+    runner.plan(&plan.iter().map(String::as_str).collect::<Vec<_>>());
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let label = snapshot_label(ctx.now_unix);

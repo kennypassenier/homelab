@@ -281,6 +281,11 @@ pub async fn copy_all(
     repos: &[RepoPolicy],
 ) -> OperationReport {
     let mut runner = Runner::new("second-copy", ctx.sink, ctx.journal);
+    // fix-171 round 3: one fixed name plus one named per repository in
+    // `repos` — this run's own input, known before anything is touched.
+    let mut plan: Vec<String> = vec!["second-copy dataset".to_string()];
+    plan.extend(repos.iter().map(|p| format!("copy {}", p.repo)));
+    runner.plan(&plan.iter().map(String::as_str).collect::<Vec<_>>());
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let store = StateStore::new(ctx.exec, &ctx.state_dir);
@@ -452,6 +457,13 @@ pub async fn check_repo(
     subset: Option<(u32, u32)>,
 ) -> OperationReport {
     let mut runner = Runner::new(&format!("check-{}", repo), ctx.sink, ctx.journal);
+    // fix-171 round 3: known from `dataset` alone (an argument), before
+    // anything runs.
+    let mut plan: Vec<&str> = vec!["check the Google Drive copy"];
+    if dataset.is_some() {
+        plan.push("check the second copy");
+    }
+    runner.plan(&plan);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let pw = cfg.password_file.as_str();

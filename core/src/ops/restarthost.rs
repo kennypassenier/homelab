@@ -21,6 +21,8 @@ pub const SERVICE: &str = "homelab-host";
 
 pub async fn restart_host(ctx: &OpCtx<'_>) -> OperationReport {
     let mut runner = Runner::new("restart-host", ctx.sink, ctx.journal);
+    // fix-171 round 3: one fixed step, always.
+    runner.plan(&["schedule restart"]);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
 

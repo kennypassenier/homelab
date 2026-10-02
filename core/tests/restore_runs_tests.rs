@@ -324,3 +324,71 @@ async fn without_a_safety_copy_nothing_is_deleted_first() {
     assert!(r.ok, "{:?}", r.error);
     assert!(exec.calls_containing("-delete").is_empty());
 }
+
+// ── fix-171 round 3: restore_app's own plan, computed from `safety_copy`
+// (a plain argument) before anything runs.
+
+fn fix171_plan_and_marks(
+    events: &[homelab_core::sink::PipelineEvent],
+) -> (usize, std::collections::BTreeSet<String>) {
+    use homelab_core::sink::PipelineEvent;
+    let plan_len = events
+        .iter()
+        .find_map(|e| match e {
+            PipelineEvent::Plan { steps, .. } => Some(steps.len()),
+            _ => None,
+        })
+        .expect("a plan was announced");
+    let mut names = std::collections::BTreeSet::new();
+    for e in events {
+        match e {
+            PipelineEvent::StepStarted { step, .. } | PipelineEvent::StepSkipped { step, .. } => {
+                names.insert(step.clone());
+            }
+            _ => {}
+        }
+    }
+    (plan_len, names)
+}
+
+#[tokio::test]
+async fn fix_171_a_restore_with_a_safety_copy_reaches_its_announced_plan() {
+    let exec = harness();
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let r = restore_with(
+        &ctx(&exec, &sink, &j),
+        &paperwork(),
+        &BackupCfg::default(),
+        "latest",
+        true,
+    )
+    .await;
+    assert!(r.ok, "{:?}", r.error);
+    let (m, names) = fix171_plan_and_marks(&sink.events());
+    assert_eq!(
+        m, 9,
+        "safety gates/native units/validate/room/quiesce/copy/restore/resume/verify"
+    );
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}
+
+#[tokio::test]
+async fn fix_171_a_restore_without_a_safety_copy_reaches_its_announced_plan() {
+    let exec = harness();
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let r = restore_app(
+        &ctx(&exec, &sink, &j),
+        &paperwork(),
+        &BackupCfg::default(),
+        "latest",
+        false,
+        Some("paperless"),
+    )
+    .await;
+    assert!(r.ok, "{:?}", r.error);
+    let (m, names) = fix171_plan_and_marks(&sink.events());
+    assert_eq!(m, 7, "no room-for-copy, no safety-copy step");
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}

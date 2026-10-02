@@ -81,3 +81,46 @@ async fn fix_70_the_template_declares_systemd_start_time_metrics() {
             .any(|c| c.contains(NODE_EXPORTER_ARGS.trim()))
     );
 }
+
+/// fix-171 round 3: build_template's fixed plan is announced and reached.
+#[tokio::test]
+async fn fix_171_build_template_reaches_its_announced_plan() {
+    let exec = MockExecutor::new();
+    exec.enqueue(
+        "pct config 999",
+        homelab_core::executor::CmdOutput::failed(2, "does not exist"),
+    );
+    exec.respond_always(
+        "systemctl is-system-running",
+        homelab_core::executor::CmdOutput::ok("running"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let octx = ctx(&exec, &sink, &journal);
+    let cfg = TemplateCfg {
+        temp_vmid: 999,
+        ..Default::default()
+    };
+    let report = build_template(&octx, &cfg).await;
+    assert!(report.ok, "{:?}", report);
+    let events = sink.events();
+    let m = events
+        .iter()
+        .find_map(|e| match e {
+            homelab_core::sink::PipelineEvent::Plan { steps, .. } => Some(steps.len()),
+            _ => None,
+        })
+        .expect("a plan was announced");
+    let mut names = std::collections::BTreeSet::new();
+    for e in &events {
+        match e {
+            homelab_core::sink::PipelineEvent::StepStarted { step, .. }
+            | homelab_core::sink::PipelineEvent::StepSkipped { step, .. } => {
+                names.insert(step.clone());
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(m, 9);
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}

@@ -645,3 +645,42 @@ fn the_replica_keeps_at_least_what_either_retention_policy_keeps() {
     );
     assert!(replica.contains("s0"), "the newest is the next base");
 }
+
+/// fix-171 round 3: replicate's own plan ("validate jobs" plus five named
+/// steps per job) is announced before anything runs and reached exactly.
+#[tokio::test]
+async fn fix_171_replicate_reaches_its_announced_plan() {
+    let exec = MockExecutor::new();
+    exec.respond_always("zfs list -H -o name HDD4TB", CmdOutput::ok("HDD4TB\n"));
+    exec.respond_always("-r HDD4TB", CmdOutput::ok("HDD4TB@homelab-20260827-1845\n"));
+    exec.respond_always("-r HDD18TB/REPLICA_4TB", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = replicate(
+        &ctx(&exec, &sink, &j),
+        &[job("HDD4TB", "HDD18TB/REPLICA_4TB")],
+        &homelab_core::retention::default_tiers(),
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    let events = sink.events();
+    let m = events
+        .iter()
+        .find_map(|e| match e {
+            homelab_core::sink::PipelineEvent::Plan { steps, .. } => Some(steps.len()),
+            _ => None,
+        })
+        .expect("a plan was announced");
+    let mut names = std::collections::BTreeSet::new();
+    for e in &events {
+        match e {
+            homelab_core::sink::PipelineEvent::StepStarted { step, .. }
+            | homelab_core::sink::PipelineEvent::StepSkipped { step, .. } => {
+                names.insert(step.clone());
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(m, 6, "validate jobs plus five named steps for one job");
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}

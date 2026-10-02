@@ -4284,3 +4284,154 @@ async fn gap_33_requested_guards_check_the_hostname_and_skip_docker_on_a_native_
     assert!(exec.calls_containing("systemctl restart docker").is_empty());
     assert!(exec.calls_containing("daemon.json").is_empty());
 }
+
+// ── fix-171 round 3: every op here announces its own fixed plan before its
+// first step, and reaches it exactly. ──────────────────────────────────────
+
+fn fix171_plan_and_marks(
+    events: &[homelab_core::sink::PipelineEvent],
+) -> (usize, std::collections::BTreeSet<String>) {
+    use homelab_core::sink::PipelineEvent;
+    let plan_len = events
+        .iter()
+        .find_map(|e| match e {
+            PipelineEvent::Plan { steps, .. } => Some(steps.len()),
+            _ => None,
+        })
+        .expect("a plan was announced");
+    let mut names = std::collections::BTreeSet::new();
+    for e in events {
+        match e {
+            PipelineEvent::StepStarted { step, .. } | PipelineEvent::StepSkipped { step, .. } => {
+                names.insert(step.clone());
+            }
+            _ => {}
+        }
+    }
+    (plan_len, names)
+}
+
+#[tokio::test]
+async fn fix_171_backup_reaches_its_announced_plan() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let cfg = BackupCfg::default();
+    let report = backup(&ctx(&exec, &sink, &j), &manifest(108, "test"), &cfg).await;
+    assert!(report.ok, "{:?}", report.error);
+    let (m, names) = fix171_plan_and_marks(&sink.events());
+    assert_eq!(m, homelab_core::ops::backup::BACKUP_STEPS.len());
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}
+
+#[tokio::test]
+async fn fix_171_restore_reaches_its_announced_plan() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.respond_always(
+        "snapshots",
+        CmdOutput::ok("ID  Time  Host\nabc123  today  pve\n"),
+    );
+    exec.respond_always(
+        "docker compose ps --format json",
+        CmdOutput::ok("{\"Service\":\"app\",\"State\":\"running\",\"Health\":\"\"}\n"),
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let cfg = BackupCfg::default();
+    let report = restore(
+        &ctx(&exec, &sink, &j),
+        &manifest(108, "test"),
+        &cfg,
+        "latest",
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.error);
+    let (m, names) = fix171_plan_and_marks(&sink.events());
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}
+
+#[tokio::test]
+async fn fix_171_backup_host_meta_reaches_its_announced_plan() {
+    use homelab_core::ops::backup::backup_host_meta;
+    let exec = MockExecutor::new();
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = backup_host_meta(&ctx(&exec, &sink, &j), &BackupCfg::default()).await;
+    assert!(report.ok, "{:?}", report.error);
+    let (m, names) = fix171_plan_and_marks(&sink.events());
+    assert_eq!(m, homelab_core::ops::backup::HOST_META_BACKUP_STEPS.len());
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}
+
+#[tokio::test]
+async fn fix_171_patch_fleet_skip_marks_a_no_touch_target() {
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "ok");
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let targets = vec![("evil".to_string(), 101u16), ("ok".to_string(), 108u16)];
+    let report = patch_fleet(&ctx(&exec, &sink, &j), &targets).await;
+    assert!(report.ok, "{:?}", report.error);
+    let events = sink.events();
+    let (m, names) = fix171_plan_and_marks(&events);
+    assert_eq!(m, 2, "one named step per target");
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            homelab_core::sink::PipelineEvent::StepSkipped { step, .. }
+            if step == "patch evil"
+        )),
+        "the no-touch target must be an explicit skip: {:?}",
+        events
+    );
+}
+
+#[tokio::test]
+async fn fix_171_hot_apply_reaches_its_announced_plan() {
+    let exec = resize_exec(512, 1, 4, true);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut m = manifest(108, "test");
+    m.resources.memory_mb = 1024;
+    m.resources.cores = 2;
+    m.resources.disk_gb = 8;
+    let report = hot_apply(&ctx(&exec, &sink, &j), &m).await;
+    assert!(report.ok, "{:?}", report.error);
+    let (m, names) = fix171_plan_and_marks(&sink.events());
+    assert_eq!(m, 3);
+    assert_eq!(names.len(), m);
+}
+
+#[tokio::test]
+async fn fix_171_set_enabled_reaches_its_announced_plan() {
+    use homelab_core::ops::enable::set_enabled;
+    let exec = MockExecutor::new();
+    mock_hostname(&exec, 108, "test");
+    exec.seed_file(
+        "/var/lib/homelab/state.json",
+        r#"{"schema_version":1,"stacks":{"test":{"vmid":108,"hostname":"108-app-test","apps":["app"],"applied_at":1,"enabled":false}}}"#,
+    );
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = set_enabled(&ctx(&exec, &sink, &j), "test", true).await;
+    assert!(report.ok, "{:?}", report.error);
+    let (m, names) = fix171_plan_and_marks(&sink.events());
+    assert_eq!(m, 4);
+    assert_eq!(names.len(), m);
+}
+
+#[tokio::test]
+async fn fix_171_self_update_reaches_its_announced_plan() {
+    let exec = MockExecutor::new();
+    exec.respond_always("--selfcheck", CmdOutput::ok("2.1.0\n"));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = self_update(&ctx(&exec, &sink, &j), &SelfUpdateCfg::default()).await;
+    assert!(report.ok, "{:?}", report.error);
+    let (m, names) = fix171_plan_and_marks(&sink.events());
+    assert_eq!(m, 7);
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}

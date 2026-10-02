@@ -4177,6 +4177,7 @@ span_days = 7\n";
                         run_op_locked(&state, &RealExecutor, 0, "scheduled-backup", |ctx| {
                             Box::pin(async move {
                                 let mut r = Runner::new("backup-paperwork", ctx.sink, ctx.journal);
+                                r.plan(&["snapshot"]);
                                 let _ = r
                                     .step("snapshot", || async {
                                         ctx.sink.emit(PipelineEvent::Line {
@@ -10050,6 +10051,8 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 Box::pin(async move {
                     let mut runner =
                         homelab_core::runner::Runner::new("apply-guards", ctx.sink, ctx.journal);
+                    // fix-171 round 3: one fixed step, always.
+                    runner.plan(&["guards"]);
                     match runner
                         .step("guards", || async {
                             // gap-33: only a managed stack, after the A2

@@ -363,6 +363,14 @@ pub fn wipe_plan(state: &HostState, key: &str, state_dir: &str) -> Result<WipePl
 pub async fn wipe(ctx: &OpCtx<'_>, key: &str, confirmed_name: &str) -> OperationReport {
     let op = format!("wipe-{}", key.replace('/', "-"));
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    // fix-171 round 3: fixed and unconditional.
+    runner.plan(&[
+        "confirm",
+        "plan",
+        "restic repositories",
+        "appdata and vault",
+        "update state",
+    ]);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let say = |msg: String| {

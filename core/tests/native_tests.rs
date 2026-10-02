@@ -1986,3 +1986,101 @@ async fn fix_164_readopting_keeps_what_a_deploy_recorded() {
     assert!(!st.enabled, "re-adoption does not re-enable a parked stack");
     assert_eq!(st.natives.len(), 1);
 }
+
+// ── fix-171 round 3: every op's own plan is announced before its first
+// step, and skip-marks fill whatever an early, legitimate exit does not
+// reach, so n always reaches the announced m. ─────────────────────────────
+
+fn plan_and_marks(
+    events: &[homelab_core::sink::PipelineEvent],
+) -> (usize, std::collections::BTreeSet<String>) {
+    use homelab_core::sink::PipelineEvent;
+    let plan_len = events
+        .iter()
+        .find_map(|e| match e {
+            PipelineEvent::Plan { steps, .. } => Some(steps.len()),
+            _ => None,
+        })
+        .expect("a plan was announced");
+    let mut names = std::collections::BTreeSet::new();
+    for e in events {
+        match e {
+            PipelineEvent::StepStarted { step, .. } | PipelineEvent::StepSkipped { step, .. } => {
+                names.insert(step.clone());
+            }
+            _ => {}
+        }
+    }
+    (plan_len, names)
+}
+
+#[tokio::test]
+async fn fix_171_adopt_announces_its_plan_and_reaches_it() {
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = adopt(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+    let (m, names) = plan_and_marks(&sink.events());
+    assert_eq!(m, homelab_core::ops::native::ADOPT_STEPS.len());
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}
+
+/// fix-171 round 3: an unsigned release is a legitimate stop, not a crash —
+/// the plan is announced up front and the steps this run never reaches are
+/// marked skipped, so n still reaches m exactly.
+#[tokio::test]
+async fn fix_171_an_unsigned_release_still_reaches_its_announced_plan() {
+    use homelab_core::ops::native::release_update;
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    let unsigned = RELEASE_JSON.replace(
+        ",\n  {\"name\":\"SHA256SUMS.minisig\",\"browser_download_url\":\"https://github.com/kennypassenier/kyu/releases/download/v3.3.0/SHA256SUMS.minisig\"}",
+        "",
+    );
+    exec.respond_always("releases/latest", CmdOutput::ok(&unsigned));
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = release_update(&ctx(&exec, &sink, &j), &install_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+    let (m, names) = plan_and_marks(&sink.events());
+    assert_eq!(m, homelab_core::ops::native::RELEASE_UPDATE_STEPS.len());
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}
+
+/// fix-171 round 3: a binary already current is also success-with-an-early-
+/// stop — the remaining planned steps (download, read the unit file) are
+/// marked skipped.
+#[tokio::test]
+async fn fix_171_a_current_binary_still_reaches_its_announced_plan() {
+    use homelab_core::ops::native::release_update;
+    let exec = MockExecutor::new();
+    release_mocks(&exec, SIGNED_KYU_SHA);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = release_update(&ctx(&exec, &sink, &j), &install_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+    let (m, names) = plan_and_marks(&sink.events());
+    assert_eq!(m, homelab_core::ops::native::RELEASE_UPDATE_STEPS.len());
+    assert_eq!(names.len(), m, "n must reach the announced m: {:?}", names);
+}
+
+/// fix-171 round 3: a unit with no `release_repo` marks nothing at all —
+/// zero steps, so no plan is owed either.
+#[tokio::test]
+async fn fix_171_no_release_repo_marks_nothing() {
+    use homelab_core::ops::native::release_update;
+    let exec = MockExecutor::new();
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let report = release_update(&ctx(&exec, &sink, &j), &kyu_manifest()).await;
+    assert!(report.ok, "{:?}", report.error);
+    assert!(
+        !sink
+            .events()
+            .iter()
+            .any(|e| matches!(e, homelab_core::sink::PipelineEvent::Plan { .. })),
+        "nothing was ever attempted, so no plan was announced"
+    );
+}

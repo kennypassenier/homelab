@@ -19,6 +19,8 @@ pub async fn set_enabled(ctx: &OpCtx<'_>, stack_name: &str, enabled: bool) -> Op
         stack_name
     );
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
+    // fix-171 round 3: fixed and unconditional.
+    runner.plan(&["load state", "guard target", "set onboot", "persist flag"]);
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
     let store = crate::state::StateStore::new(exec, &ctx.state_dir);

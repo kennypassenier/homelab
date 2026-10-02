@@ -47,6 +47,9 @@ mkdir -p "$workdir/state"
 
 echo "invariants: building homelab-admin --features demo-host"
 cargo build -p homelab-admin --features demo-host --quiet
+# The binary lands in cargo's target directory, which a global
+# ~/.cargo/config.toml (or CARGO_TARGET_DIR) may move out of the repository.
+target_dir=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
 
 echo "invariants: starting the demo host on $listen"
 HOMELAB_ADMIN_TOKEN="$token" \
@@ -54,7 +57,7 @@ HOMELAB_ADMIN_SECRET_KEY="$secret_key" \
 HOMELAB_ADMIN_PUBLIC_URL="https://localhost:$port" \
 HOMELAB_ADMIN_DEMO_HOST=1 \
 HOMELAB_ADMIN_DEMO_STACKS="films,notes,oldstack" \
-  "$root"/target/debug/homelab-admin \
+  "$target_dir"/debug/homelab-admin \
     --config "$workdir/admin.toml" \
     --state-dir "$workdir/state" \
     --listen "$listen" \
@@ -82,6 +85,6 @@ fi
 
 echo "invariants: running the Playwright smoke"
 cd admin/web
-[ -d node_modules ] || npm ci --no-audit --no-fund
+[ -d node_modules/playwright ] || PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --no-audit --no-fund
 INVARIANTS_BASE_URL="$base_url" INVARIANTS_TOKEN="$token" \
   node --test test-e2e/invariants.e2e.js

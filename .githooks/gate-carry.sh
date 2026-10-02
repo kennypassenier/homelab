@@ -375,21 +375,31 @@ cmd_invariants() {
 
   local changed=""
   if [ -z "${reason:-}" ]; then
-    changed=$(git diff --name-only "$base" -- admin/web admin/src 2>/dev/null || true)
+    changed=$(git diff --name-only "$base" -- admin/web admin/src scripts/invariants-run.sh 2>/dev/null || true)
   fi
 
-  if [ -z "${reason:-}" ] && [ -z "$changed" ]; then
+  # A failed smoke is never carried as a pass: its failing file stays
+  # non-empty until a run passes.
+  local old_fail="$state/failing.tsv"
+  [ -s "$old_fail" ] || : > "$old_fail"
+  if [ -z "${reason:-}" ] && [ -z "$changed" ] && [ ! -s "$old_fail" ]; then
     echo "gate-carry: invariants smoke skipped — admin/web and admin/src unchanged since $(git rev-parse --short "$base")"
     record_state invariants "$(current_tree)" "$cur_tc" /dev/null "carry:$(git rev-parse --short "$base")"
     { echo "carried run, $(date -Iseconds)"; echo "base: $base"; echo "reran: nothing (admin/web and admin/src unchanged)"; } > "$state/last-run.txt"
     return 0
   fi
 
-  local why="${reason:-admin/web or admin/src changed since $(git rev-parse --short "$base" 2>/dev/null || echo "the last run")}"
+  local why="${reason:-}"
+  if [ -z "$why" ]; then
+    if [ -n "$changed" ]; then why="admin/web, admin/src or the smoke script changed since $(git rev-parse --short "$base")"
+    else why="the last smoke failed — rerun"; fi
+  fi
   echo "gate-carry: invariants smoke run — $why"
   local rc=0
   "$root"/scripts/invariants-run.sh || rc=$?
-  record_state invariants "$(current_tree)" "$cur_tc" /dev/null full
+  : > "$workdir/failing.tsv"
+  [ "$rc" = 0 ] || echo "invariants-smoke" > "$workdir/failing.tsv"
+  record_state invariants "$(current_tree)" "$cur_tc" "$workdir/failing.tsv" full
   { echo "full run, $(date -Iseconds)"; echo "reason: $why"; } > "$state/last-run.txt"
   return "$rc"
 }

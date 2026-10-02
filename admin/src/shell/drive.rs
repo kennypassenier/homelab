@@ -1092,6 +1092,45 @@ impl Driver {
         true
     }
 
+    /// fix-226: a drive with no step for `idle_s` (20 s) is released and
+    /// the tabs are told so at once — before this, an idle drive only read
+    /// as released to the next `ui state` caller, while the viewer's tab
+    /// kept showing "next: Claude's next step" until something else
+    /// happened. A dialog whose job is still queued or running is left to
+    /// fix-163's own release after the job ends. `true` when it released.
+    pub fn release_if_idle(&self) -> bool {
+        let Ok(_turn) = self.inner.turn.try_lock() else {
+            return false;
+        };
+        let running = self
+            .lock()
+            .form
+            .as_ref()
+            .and_then(|f| f.job.as_ref())
+            .map(|j| j.job)
+            .and_then(|job| self.inner.actions.job(job))
+            .is_some_and(|v| {
+                matches!(
+                    v.state,
+                    super::actions::JobState::Queued | super::actions::JobState::Running
+                )
+            });
+        if running {
+            return false;
+        }
+        let now = self.now();
+        {
+            let mut st = self.lock();
+            if !st.idle_release_due(now) {
+                return false;
+            }
+            st.release(now);
+        }
+        tracing::info!("no Live view step for the idle limit: the drive was released");
+        self.publish(&UiStep::Done, true, None);
+        true
+    }
+
     /// fix-163: look every few seconds whether a finished drive is due to
     /// be released.
     pub fn spawn_release(&self) {
@@ -1101,7 +1140,9 @@ impl Driver {
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 tick.tick().await;
-                driver.release_if_done();
+                if !driver.release_if_done() {
+                    driver.release_if_idle();
+                }
             }
         });
     }

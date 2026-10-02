@@ -95,7 +95,9 @@ git -C "$fixture_repo" -c user.email=invariants@example.com -c user.name=invaria
 
 # A free-ish high port, so two runs on one machine (a dev shell and a CI
 # box, say) do not collide on 8090 (the service's own default).
-port=18099
+# INVARIANTS_PORT lets two runs on one machine (a gate and a helper) not
+# fight over one port.
+port="${INVARIANTS_PORT:-18099}"
 listen="127.0.0.1:$port"
 base_url="http://$listen"
 token="invariants-$(date +%s)-$$"
@@ -155,5 +157,16 @@ fi
 echo "invariants: running the Playwright smoke"
 cd admin/web
 [ -d node_modules/playwright ] || PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --no-audit --no-fund
-INVARIANTS_BASE_URL="$base_url" INVARIANTS_TOKEN="$token" \
-  node --test test-e2e/invariants.e2e.js
+# INVARIANTS_ONLY: run just the cases whose name matches (a fix's own
+# fail-before / pass-after run), never a substitute for the full run a
+# release gate makes. INVARIANTS_SCRIPT: run another script against the same
+# demo host instead (a screenshot pass), with the same two variables set.
+if [ -n "${INVARIANTS_SCRIPT:-}" ]; then
+  INVARIANTS_BASE_URL="$base_url" INVARIANTS_TOKEN="$token" node "$INVARIANTS_SCRIPT"
+elif [ -n "${INVARIANTS_ONLY:-}" ]; then
+  INVARIANTS_BASE_URL="$base_url" INVARIANTS_TOKEN="$token" \
+    node --test --test-name-pattern="$INVARIANTS_ONLY" test-e2e/invariants.e2e.js
+else
+  INVARIANTS_BASE_URL="$base_url" INVARIANTS_TOKEN="$token" \
+    node --test test-e2e/invariants.e2e.js
+fi

@@ -7203,6 +7203,7 @@ async fn build_fleet_state(state: &AppState, exec: &RealExecutor) -> homelab_pro
         .stacks
         .values()
         .map(|s| homelab_proto::StackView {
+            native: s.is_native(),
             applied_source: s.applied_source.clone(),
             component_digests: s.component_digests.clone(),
             name: s

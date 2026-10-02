@@ -92,6 +92,7 @@ fn fleet(applied_hash: &str) -> ServerMsg {
         stacks: vec![StackView {
             applied_source: None,
             component_digests: Default::default(),
+            native: false,
             usage: None,
             name: "almanac".into(),
             vmid: 112,

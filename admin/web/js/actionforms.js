@@ -406,13 +406,30 @@ export function fieldChoices(field, sources) {
  * @param {string} stack
  * @returns {{group: string, actions: {entry: CatalogEntry, refused: string | null}[]}[]}
  */
-export function stackActionGroups(catalog, stack) {
+/**
+ * fix-229: the actions that only mean something for a native service
+ * (a systemd unit, no docker).
+ * @param {string} name
+ */
+export const isNativeAction = (name) =>
+  name === "adopt" || name.endsWith("-native");
+
+/**
+ * @param {Catalog} catalog
+ * @param {string} stack
+ * @param {boolean | null} [native] whether the stack runs native services;
+ *   null when the host does not say
+ */
+export function stackActionGroups(catalog, stack, native = null) {
   const by = new Map(catalog.actions.map((a) => [a.action, a]));
   return GROUPS.map((g) => ({
     group: g.group,
     actions: g.actions.flatMap((name) => {
       const entry = by.get(name);
       if (!entry || entry.target !== "stack") return [];
+      // fix-229: a native-service action is offered only on a stack that
+      // runs native services. `null` (a host too old to say) offers all.
+      if (native === false && isNativeAction(name)) return [];
       const refused =
         stack === catalog.self_stack && entry.refused_for_self
           ? "never on the dashboard's own stack"

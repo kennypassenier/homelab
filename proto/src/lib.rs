@@ -1051,6 +1051,11 @@ pub struct StackView {
     /// says so instead of naming a component that may not have changed.
     #[serde(default)]
     pub component_digests: homelab_core::manifest::ComponentDigests,
+    /// fix-229: the stack runs native services (systemd units, no docker),
+    /// so the dashboard offers the native actions only where they apply.
+    /// False from a host built before this field existed.
+    #[serde(default)]
+    pub native: bool,
 }
 
 /// feat-platform-2: one guest's measured use.

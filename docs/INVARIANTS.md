@@ -49,6 +49,7 @@ reason is the thing waiting on it, never "not written yet".
 | 27 | Drive health is a status per drive, never lines overlapping on one value. | 2026-10-02, Kenny, fix-220; `admin/web/test-e2e/invariants.e2e.js: "invariants: the Drive health panel draws a status table naming each drive's own state, not an overlapping line"`. |
 | 28 | An upstream error (Loki, Prometheus) is shown as a short reason in the standard error box, never as raw HTML or page text. | 2026-10-02, Kenny, fix-221; `admin/web/test-e2e/invariants.e2e.js: "invariants: a refused /data/traffic read shows the standard error box, never raw page text"`. |
 | 29 | The Host page names which disk "root" is, its size, and what fills it. | 2026-10-02, Kenny ("is dat de 1TB SSD?"), fix-222; `admin/web/test-e2e/invariants.e2e.js: "invariants: the Host page's Disk section names the root volume's device and size, and the biggest directories"`. |
+| 30 | Every action dialog lays its fields on one grid: labels on one edge, controls on another. | 2026-10-02, Kenny ("ik dacht dat de install a release pagina ook al met grid hermaakt was?"), `docs/deployment/REGISTER.md` fix-225; `admin/web/test-e2e/invariants.e2e.js: "invariants: every action dialog lays its fields on one grid — labels on one edge, controls on another"`. |
 
 ## How this list is kept honest
 

@@ -9,7 +9,8 @@ import { agoText, humanDuration } from "./format.js";
  *   apps_running: number, apps_total: number, restarts?: number,
  *   ram_used_mb?: number | null, ram_max_mb?: number | null,
  *   hostname?: string, apps?: App[], uptime_s?: number | null,
- *   applied_source?: string | null, env_sealed?: boolean}} Stack
+ *   applied_source?: string | null, env_sealed?: boolean,
+ *   native?: boolean}} Stack
  * @typedef {{root_lv_size_gb: number, root_disk_device: string,
  *   root_disk_total_gb: number, thin_pool_size_gb: number,
  *   top_dirs: [string, number][], measured_at: number}} HostDiskDetail

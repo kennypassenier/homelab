@@ -44,7 +44,7 @@
 //! | `HOMELAB_ADMIN_DRIFT_REUSE_S` | 300 | how long a drift reading is reused before latch runs again |
 //! | `HOMELAB_ADMIN_LIVE_ANNOUNCE_MAX_MS` | 10000 | Live view: the longest announcement `HOMELAB_ADMIN_LIVE_ANNOUNCE_MS` may be set to |
 //! | `HOMELAB_ADMIN_LIVE_MAX_PAUSE_MAX_S` | 3600 | Live view: the longest pause `HOMELAB_ADMIN_LIVE_MAX_PAUSE_S` may be set to |
-//! | `HOMELAB_ADMIN_DRIVE_IDLE_S` | 600 | a driver who sends nothing for this long no longer holds the tabs |
+//! | `HOMELAB_ADMIN_DRIVE_IDLE_S` | 20 | a driver who sends nothing for this long no longer holds the tabs |
 //! | `HOMELAB_ADMIN_RELEASE_AFTER_JOB_S` | 30 | a confirmed dialog whose job has ended, with no step since, is closed and the tabs given back this long after |
 
 use std::path::PathBuf;

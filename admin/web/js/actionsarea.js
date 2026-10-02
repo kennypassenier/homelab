@@ -7,6 +7,7 @@ import { openAction } from "./actiondialog.js";
 import { hostActions, stackActionGroups } from "./actionforms.js";
 import { h, sectionHeader } from "./dom.js";
 import { finished } from "./jobs.js";
+import { current } from "./store.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { openRollback } from "./rollbackdialog.js";
 
@@ -108,7 +109,13 @@ export function mountActionsArea(target) {
     );
     rb.addEventListener("click", () => void openRollback(stack));
     buttons.replaceChildren(
-      ...stackActionGroups(catalog, stack).map((g) =>
+      ...stackActionGroups(
+        catalog,
+        stack,
+        // fix-229: what the host says about this stack; `null` (an older
+        // host, or the fleet not read yet) offers every action as before.
+        current().fleet?.stacks?.find((s) => s.name === stack)?.native ?? null,
+      ).map((g) =>
         h(
           "div",
           { class: "actions-group" },

@@ -67,6 +67,9 @@ pub struct StackSummary {
     /// TUI parity ([NOENV]): whether the host holds the stack's sealed env;
     /// without it a deploy fails closed.
     pub env_sealed: bool,
+    /// fix-229: the stack runs native services; the stack page offers the
+    /// native actions only then.
+    pub native: bool,
     /// B4: the intent hash the host recorded at the last deploy. Kept on the
     /// server (drift, apply); the browser gets the verdict, not the hash.
     #[serde(skip)]
@@ -121,6 +124,7 @@ pub fn fleet_view(state: &FleetState, measured_at: u64) -> FleetView {
             uptime_s: s.usage.as_ref().map(|u| u.uptime_s),
             applied_source: s.applied_source.clone(),
             env_sealed: s.env_sealed,
+            native: s.native,
             applied_hash: s.applied_hash.clone(),
             component_digests: s.component_digests.clone(),
         })

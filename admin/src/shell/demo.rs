@@ -243,6 +243,7 @@ pub async fn run_demo(
                     usage: None,
                     applied_source: None,
                     component_digests: Default::default(),
+                    native: false,
                 }
             })
             .collect(),

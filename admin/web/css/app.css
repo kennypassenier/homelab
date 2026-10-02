@@ -524,6 +524,66 @@ p:has(> .measured:only-child):first-child {
   background: var(--popover);
   border-block-start: 1px solid var(--border);
 }
+/* fix-225 (Kenny, 2026-10-02: "ik dacht dat de install a release pagina ook
+   al met grid hermaakt was?"): every action dialog's step is one grid —
+   labels in the first column, controls and their help in the second — so
+   every field of every dialog lines up on the same two edges (rule 6).
+   Anything that is not a field (the "what this does" line, previews,
+   alerts) spans both columns. Phone width: one column, label above. */
+#action-dialog {
+  --act-label-w: 11rem;
+}
+#action-dialog [data-kp-step] {
+  display: grid;
+  grid-template-columns: var(--act-label-w) minmax(0, 1fr);
+  column-gap: var(--kp-space-md, 1rem);
+  row-gap: var(--kp-space-sm, 0.5rem);
+  align-items: start;
+}
+#action-dialog [data-kp-step] > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+#action-dialog [data-kp-step] > .kp-field {
+  display: grid;
+  grid-template-columns: subgrid;
+  row-gap: 2px;
+  margin: 0;
+}
+#action-dialog [data-kp-step] > .kp-field > * {
+  grid-column: 2;
+  min-width: 0;
+}
+#action-dialog [data-kp-step] > .kp-field > .kp-field__label {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: center;
+}
+#action-dialog [data-kp-step] > .kp-field > .kp-field__input,
+#action-dialog [data-kp-step] > .kp-field > .kp-field__check {
+  grid-row: 1;
+}
+#action-dialog [data-kp-step] > .kp-field > .kp-field__check {
+  justify-self: start;
+}
+#action-dialog .act-field-locked {
+  grid-template-columns: var(--act-label-w) minmax(0, 1fr) auto;
+  column-gap: var(--kp-space-md, 1rem);
+  margin-block: 0;
+}
+@media (max-width: 30rem) {
+  #action-dialog [data-kp-step] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #action-dialog .act-field-locked {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  #action-dialog [data-kp-step] > .kp-field > *,
+  #action-dialog [data-kp-step] > .kp-field > .kp-field__label {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
 .act-what {
   margin-block: 0 8px;
 }

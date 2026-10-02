@@ -1326,3 +1326,83 @@ test("invariants: the Host page's Disk section names the root volume's device an
     await browser.close();
   }
 });
+
+// fix-225 (Kenny, 2026-10-02: "ik dacht dat de install a release pagina ook
+// al met grid hermaakt was?"): the page sweeps (fix-206, fix-210) never
+// opened a dialog, so an action dialog could still stack its fields loosely.
+// This opens every action a stack page offers and measures each visible
+// field: every label starts on one edge and every control on another, to
+// the right of the labels.
+test("invariants: every action dialog lays its fields on one grid — labels on one edge, controls on another", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/kp-soft`);
+    const buttons = page.locator("button[data-action]");
+    await buttons.first().waitFor({ timeout: 15000 });
+    const actions = await buttons.evaluateAll((bs) =>
+      bs.map((b) => b.getAttribute("data-action")).filter(Boolean),
+    );
+    assert.ok(actions.length >= 3, `expected several actions, got ${actions}`);
+    let measured = 0;
+    for (const action of actions) {
+      const btn = page.locator(`button[data-action="${action}"]`).first();
+      if (!(await btn.isVisible()) || !(await btn.isEnabled())) continue;
+      await btn.click();
+      const dialog = page.locator("dialog#action-dialog[open]");
+      if (!(await dialog.isVisible().catch(() => false))) {
+        await page.waitForTimeout(300);
+        if (!(await dialog.isVisible().catch(() => false))) continue;
+      }
+      const edges = await dialog.evaluate((d) => {
+        const step = [...d.querySelectorAll("[data-kp-step]")].find(
+          (s) => !(/** @type {HTMLElement} */ (s).hidden),
+        );
+        if (!step) return [];
+        return [...step.querySelectorAll(":scope > .kp-field")]
+          .filter((f) => /** @type {HTMLElement} */ (f).offsetParent)
+          .map((f) => {
+            const label = f.querySelector(".kp-field__label");
+            const ctl = f.querySelector(".kp-field__input, .kp-field__check");
+            if (!label || !ctl) return null;
+            const l = label.getBoundingClientRect();
+            const c = ctl.getBoundingClientRect();
+            return {
+              label: Math.round(l.left),
+              ctl: Math.round(c.left),
+              labelRight: Math.round(l.right),
+            };
+          })
+          .filter(Boolean);
+      });
+      if (edges.length >= 1) {
+        const labelEdges = new Set(edges.map((e) => e.label));
+        const ctlEdges = new Set(edges.map((e) => e.ctl));
+        assert.equal(
+          labelEdges.size,
+          1,
+          `${action}: labels start at ${[...labelEdges]}`,
+        );
+        assert.equal(
+          ctlEdges.size,
+          1,
+          `${action}: controls start at ${[...ctlEdges]}`,
+        );
+        for (const e of edges)
+          assert.ok(
+            e.ctl > e.label,
+            `${action}: a control sits under its label instead of beside it`,
+          );
+        measured++;
+      }
+      await page.keyboard.press("Escape");
+      await dialog.waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});
+    }
+    assert.ok(measured >= 2, `only ${measured} dialogs had fields to measure`);
+  } finally {
+    await browser.close();
+  }
+});

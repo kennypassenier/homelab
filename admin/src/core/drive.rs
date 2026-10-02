@@ -24,7 +24,13 @@ use crate::core::drivelive::{self, Announce, Plan};
 pub const FORM_SPEC_JSON: &str = include_str!("../../web/js/formspec.json");
 
 /// A driver who sends nothing for this long no longer holds the tabs.
-pub const IDLE_S: i64 = 600;
+/// fix-226 (Kenny, 2026-10-02: "er staat in live-view nog altijd 'next:
+/// claude's next step' terwijl je niks aan het doen bent, je moet na je
+/// commands controle altijd direct teruggeven"): 20 s, not 10 min — Claude's
+/// steps follow each other within seconds, so a silence this long means the
+/// sequence is over (or its session died), and the tab is Kenny's again even
+/// when no `homelab ui done` ever comes.
+pub const IDLE_S: i64 = 20;
 
 /// fix-163: a confirmed dialog whose job has ended, with no step since, is
 /// closed and the tabs given back this long after (as `homelab ui done`),
@@ -1201,6 +1207,13 @@ impl DriveState {
             && self.stopped_by.is_none()
             && self.form.as_ref().is_some_and(|f| f.job.is_some())
             && now - ended.max(self.last_at) >= self.release_after_job_s
+    }
+
+    /// fix-226: whether a drive has been silent for `idle_s` and should be
+    /// given back now. A step still announced (its countdown running) is
+    /// never cut short.
+    pub fn idle_release_due(&self, now: i64) -> bool {
+        self.active && self.announce.is_none() && now - self.last_at >= self.idle_s
     }
 
     /// Release the drive as `homelab ui done` does: the dialog closes and

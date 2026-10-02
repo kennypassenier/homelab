@@ -738,3 +738,32 @@ async fn fix_185_reload_waits_for_the_tab_to_report_the_new_version() {
         "{r}"
     );
 }
+
+/// fix-226 (Kenny, 2026-10-02: "er staat in live-view nog altijd 'next:
+/// claude's next step' terwijl je niks aan het doen bent, je moet na je
+/// commands controle altijd direct teruggeven"): a drive silent for the idle
+/// limit — now 20 s — is due to be given back, even with no `ui done` and no
+/// job; a step still in its announce countdown is never cut short.
+#[test]
+fn fix_226_a_silent_drive_is_given_back_within_seconds() {
+    use homelab_admin::core::drive::{DriveState, IDLE_S};
+    const {
+        assert!(
+            IDLE_S <= 30,
+            "the idle release must be seconds, not minutes"
+        )
+    };
+    let st = DriveState {
+        active: true,
+        by: Some("wsl".into()),
+        last_at: 1000,
+        ..DriveState::default()
+    };
+    assert!(!st.idle_release_due(1000 + IDLE_S - 1));
+    assert!(st.idle_release_due(1000 + IDLE_S));
+    let over = DriveState {
+        active: false,
+        ..st.clone()
+    };
+    assert!(!over.idle_release_due(5000));
+}

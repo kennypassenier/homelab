@@ -157,6 +157,7 @@ fn check(stack: &str, app: &str, text: &str) -> (String, ManualCheckRecord) {
             ok: None,
             note: String::new(),
             answered_hash: None,
+            answered_digests: None,
             accepted_until: None,
             once: false,
             url: None,

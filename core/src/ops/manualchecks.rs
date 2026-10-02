@@ -97,6 +97,7 @@ pub fn register(state: &mut HostState, stack: &str, questions: &[Question], now:
                             ok: old.ok,
                             note: old.note,
                             answered_hash: old.answered_hash,
+                            answered_digests: old.answered_digests,
                             accepted_until: old.accepted_until,
                             once: q.once,
                             url: q.url.clone(),
@@ -121,6 +122,7 @@ pub fn register(state: &mut HostState, stack: &str, questions: &[Question], now:
                 ok: None,
                 note: String::new(),
                 answered_hash: None,
+                answered_digests: None,
                 accepted_until: None,
                 once: false,
                 url: None,
@@ -145,16 +147,33 @@ pub fn register(state: &mut HostState, stack: &str, questions: &[Question], now:
 /// fix-65: the stack's `applied_hash` is kept with the answer, so only a
 /// deploy that changed the stack's files asks the question again.
 pub fn answer(state: &mut HostState, id: &str, ok: bool, note: &str, now: u64) -> bool {
-    let Some(stack) = state.manual_checks.get(id).map(|r| r.stack.clone()) else {
+    let Some((stack, app)) = state
+        .manual_checks
+        .get(id)
+        .map(|r| (r.stack.clone(), r.app.clone()))
+    else {
         return false;
     };
     let hash = state.stacks.get(&stack).map(|s| s.applied_hash.clone());
+    // fix-195: record exactly the digests this answer is about — the app's
+    // own files, the stack's rootfs, and the app's env — so a change
+    // elsewhere in the stack (another app, the check's own wording, the
+    // manifest's own serialization) can never reopen it. Only when the
+    // stack already carries `component_digests` (fix-192); an older host, or
+    // a stack never (re)applied since, has nothing to record and falls back
+    // to `answered_hash` below.
+    let digests = state
+        .stacks
+        .get(&stack)
+        .filter(|s| s.component_digests.has_digests())
+        .map(|s| crate::manifest::relevant_digests(&s.component_digests, &app));
     match state.manual_checks.get_mut(id) {
         Some(r) => {
             r.answered_at = Some(now);
             r.ok = Some(ok);
             r.note = note.to_string();
             r.answered_hash = hash;
+            r.answered_digests = digests;
             r.accepted_until = None;
             true
         }
@@ -197,6 +216,7 @@ pub fn ensure_standing(state: &mut HostState, app: &str, text: &str, recur_days:
             ok: None,
             note: String::new(),
             answered_hash: None,
+            answered_digests: None,
             accepted_until: None,
             once: false,
             url: None,
@@ -263,9 +283,25 @@ pub fn evaluate_manual(state: &HostState, now: u64) -> Vec<Finding> {
         // fix-65: an answer is about the files it was given against. Any
         // deploy used to reopen it, and `applied_at` moves on every deploy,
         // so answers given in the morning were open again by the evening.
-        let files_changed = |at: u64| match &r.answered_hash {
-            Some(h) => stack.map(|s| &s.applied_hash != h).unwrap_or(false),
-            None => at < deployed_at,
+        //
+        // fix-195: when the answer carries `answered_digests` AND the stack
+        // still has `component_digests` to compare against, that replaces
+        // the whole-stack `answered_hash` rule — it only reopens when the
+        // check's own app files, the rootfs, or the app's env actually
+        // changed, not when something the question was never about did
+        // (another app, the check's own wording, the manifest's own
+        // serialization). An older answer, or one made before the stack
+        // ever carried `component_digests`, keeps the old rule.
+        let files_changed = |at: u64| {
+            if let (Some(rd), Some(s)) = (&r.answered_digests, stack)
+                && s.component_digests.has_digests()
+            {
+                return crate::manifest::relevant_digests(&s.component_digests, &r.app) != *rd;
+            }
+            match &r.answered_hash {
+                Some(h) => stack.map(|s| &s.applied_hash != h).unwrap_or(false),
+                None => at < deployed_at,
+            }
         };
         match (r.ok, r.answered_at) {
             (Some(false), _) if r.accepted_until.is_some_and(|u| now < u) => out.push(Finding {

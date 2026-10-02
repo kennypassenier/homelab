@@ -458,6 +458,15 @@ pub struct ManualCheckRecord {
     /// does ever reopens it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recur_days: Option<u64>,
+    /// fix-195: the digests of exactly what this answer is about — the
+    /// check's own app files, the stack's rootfs, and the app's env —
+    /// recorded at answer time from the stack's `component_digests`. `None`
+    /// for an answer given before this field existed, or while the stack
+    /// carried no `component_digests` yet (a host before fix-192, or never
+    /// (re)applied since); either way falls back to the old `answered_hash`
+    /// rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered_digests: Option<crate::manifest::RelevantDigests>,
 }
 
 /// fix-51 (expert panel, state-writes-race, 2026-09-27): the lock that

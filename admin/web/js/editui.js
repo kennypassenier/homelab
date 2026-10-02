@@ -99,6 +99,19 @@ export function editField(f, value, onChange) {
     inp.value = String(value ?? "");
     input = inp;
   }
+  // fix-182-dashboard-edits: a field the server fills in (a manual check's
+  // generated `id`) is shown but never typed into — `readOnly` still
+  // submits the field's value, `disabled` would not. `hidden` is for a
+  // field that rides along (`replaces`) without being shown at all.
+  if (f.readonly && "readOnly" in input) input.readOnly = true;
+  if (f.hidden) {
+    const wrap = h(
+      "div",
+      { class: "kp-field", "data-field": f.name, style: "display: none" },
+      input,
+    );
+    return { wrap, input };
+  }
   const read = () => {
     onChange(input.value);
     if (input.getAttribute("aria-invalid") === "true") clearError(input);

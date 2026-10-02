@@ -29,7 +29,7 @@ const say = (key, w = {}) =>
  *   help: string, required?: boolean, min?: number, max?: number,
  *   unit?: string, pattern?: string, placeholder?: string,
  *   choices?: {value: string, label: string}[], expect?: string,
- *   current?: string | boolean}} EditField
+ *   current?: string | boolean, readonly?: boolean, hidden?: boolean}} EditField
  * @typedef {{id: string, label: string, fields: EditField[]}} EditStep
  * @typedef {Record<string, string | boolean>} Values
  * @typedef {{cores: number, memory_mb: number, swap_mb: number,
@@ -77,7 +77,8 @@ const say = (key, w = {}) =>
  *   blind_spot?: string | null}} CheckView
  * @typedef {{healthy: {equals: string} | {at_least: number} | {at_most: number}}
  *   & Omit<CheckView, "expect">} ProbeView
- * @typedef {{checks: CheckView[], manual: ({text: string, once?: boolean} | string)[],
+ * @typedef {{checks: CheckView[], manual: ({text: string, once?: boolean,
+ *   id?: string | null, replaces?: string[]} | string)[],
  *   probes: ProbeView[], busy_check?: {command: string} | null,
  *   url?: string | null}} ChecksReadView
  * @typedef {ChecksReadView | {error: string}} ChecksView
@@ -629,13 +630,32 @@ export function probeRowSummary(row) {
 
 /**
  * A manual check row normalized to an object: `checks.yml`'s `manual:`
- * list is a bare string unless the question has `once: true`.
- * @param {{text: string, once?: boolean} | string} row
+ * list is a bare string unless the question has `once: true`, `id` or
+ * `replaces` is set. fix-182-dashboard-edits: `id`/`replaces` are carried
+ * through here too (`id` shown read-only, `replaces` hidden — see
+ * `manual_row` in formspec.json) so the dialog round-trips them instead of
+ * rebuilding the question from only `text`/`once`, which used to silently
+ * drop a check's `id` the moment it was opened and saved again.
+ * `replaces` is joined into a single comma-separated string because the
+ * generic row-dialog field is a plain text input, not a list editor — its
+ * values are `manualchecks::id_for` hashes, which never contain a comma.
+ * @param {{text: string, once?: boolean, id?: string | null,
+ *   replaces?: string[] | string} | string} row
  */
 export function manualRow(row) {
-  return typeof row === "string"
-    ? { text: row, once: false }
-    : { text: row.text, once: !!row.once };
+  if (typeof row === "string")
+    return { text: row, once: false, id: "", replaces: "" };
+  // Idempotent on its own output: the row dialog calls this again on a
+  // row this function already normalised (`replaces` already joined into
+  // a string), not only on a freshly-read `ManualCheck`.
+  return {
+    text: row.text,
+    once: !!row.once,
+    id: row.id ?? "",
+    replaces: Array.isArray(row.replaces)
+      ? row.replaces.join(",")
+      : (row.replaces ?? ""),
+  };
 }
 
 /**
@@ -654,7 +674,16 @@ export function manualRowFields(row) {
 
 /** @param {Values} v */
 export function manualRowFromValues(v) {
-  return { text: String(v.text ?? "").trim(), once: v.once === true };
+  /** @type {Record<string, unknown>} */
+  const out = { text: String(v.text ?? "").trim(), once: v.once === true };
+  const id = String(v.id ?? "").trim();
+  if (id) out.id = id;
+  const replaces = String(v.replaces ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (replaces.length) out.replaces = replaces;
+  return out;
 }
 
 /** @param {Record<string, unknown>} row */

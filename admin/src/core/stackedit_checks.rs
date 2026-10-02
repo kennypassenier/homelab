@@ -121,7 +121,18 @@ pub struct CheckEdit {
 }
 
 /// One manual question, and which one of the file's `manual:` list it was.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+///
+/// fix-182-dashboard-edits: `id`/`replaces` round-trip the `ManualCheck`
+/// fields of the same name — the gap this closes is that the dashboard's
+/// checks form used to edit only `text`/`once`, so the moment Kenny edited
+/// either one here, `as_check` rebuilt the item from scratch and silently
+/// dropped its `id` (`ManualCheck`'s own doc explains why a dropped `id`
+/// throws away any answer already recorded). The browser now sends back
+/// whatever `id`/`replaces` the item was loaded with, for every item in
+/// the list, not only the one actually touched — `checks_ops`'s `seq_ops`
+/// reserializes the whole list it was handed, so an item whose `id` goes
+/// missing here would lose it even if nothing about it changed.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManualEdit {
     #[serde(default)]
@@ -129,6 +140,10 @@ pub struct ManualEdit {
     pub text: String,
     #[serde(default)]
     pub once: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replaces: Vec<String>,
 }
 
 /// One nightly probe, and which probe of the file it was. `probe`'s fields
@@ -143,25 +158,123 @@ pub struct ProbeEdit {
 
 impl ManualEdit {
     fn as_check(&self) -> ManualCheck {
-        // fix-182: the dashboard form does not yet expose `id`/`replaces` —
-        // it only edits text and `once`. An item the browser sends back
-        // unchanged never reaches here (`checks_ops`'s `seq_ops` compares
-        // serialized values by `origin` and only touches a changed one), so
-        // this only drops a manual check's `id` the moment Kenny actually
-        // edits that same check's text or `once` flag here, which is also
-        // the moment a stable id is least likely to still describe the
-        // question — not silently, on every save.
-        if self.once {
+        // fix-182-dashboard-edits: `id`/`replaces` now round-trip (the
+        // struct doc says why). `Text` has no `id` field at all, so an
+        // item that carries an explicit `id` or a `replaces` bridge must
+        // use `Detailed` even when `once` is false — otherwise the id
+        // this same edit may just have been given by
+        // `fill_new_manual_ids` would be thrown away right back out.
+        if self.once || self.id.is_some() || !self.replaces.is_empty() {
             ManualCheck::Detailed {
                 text: self.text.clone(),
-                once: true,
-                id: None,
-                replaces: Vec::new(),
+                once: self.once,
+                id: self.id.clone(),
+                replaces: self.replaces.clone(),
             }
         } else {
             ManualCheck::Text(self.text.clone())
         }
     }
+}
+
+/// fix-182-dashboard-edits: assign a stable `id` to a manual check that
+/// does not have one yet, in exactly the two cases where the gap this
+/// closes would otherwise bite:
+///
+/// - a brand new check (`origin: None`) — it has never had a hash-based
+///   identity to lose, so it is cheaper to give it a real one from birth
+///   than to let it start life id-less.
+/// - an edit of an old, id-less check whose `text` or `once` actually
+///   changed — exactly the case `ManualCheck`'s own doc warns about: the
+///   moment the text changes is the moment the hash fallback (`hash(stack/
+///   app/text)`) would quietly start a new identity and lose whatever was
+///   already answered. Kenny's choice (dashboard-edits-id-choice): assign
+///   an id here rather than leave it id-less, so this exact loss can never
+///   happen to the same check twice.
+///
+/// An item that already carries its own `id` (round-tripped from what the
+/// browser loaded) is left alone. `taken` seeds from every id already in
+/// the file plus every id already sitting on another edit in this same
+/// save, so two ids generated in the same request cannot collide with
+/// each other either.
+fn fill_new_manual_ids(app: &str, old: &[ManualCheck], edits: &mut [ManualEdit]) {
+    let mut taken: std::collections::BTreeSet<String> = old
+        .iter()
+        .filter_map(|m| m.id())
+        .map(str::to_string)
+        .collect();
+    for e in edits.iter() {
+        if let Some(id) = &e.id {
+            taken.insert(id.clone());
+        }
+    }
+    for e in edits.iter_mut() {
+        if e.id.is_some() || e.text.trim().is_empty() {
+            continue;
+        }
+        let needs_id = match e.origin {
+            None => true,
+            Some(i) => match old.get(i) {
+                Some(old_check) if old_check.id().is_none() => {
+                    old_check.text() != e.text || old_check.once() != e.once
+                }
+                _ => false,
+            },
+        };
+        if needs_id {
+            e.id = Some(generate_manual_id(app, &e.text, &mut taken));
+        }
+    }
+}
+
+/// A fresh, stable, unique-within-`taken` manual-check id: the same
+/// `{app}-{text slug}` shape every `checks.yml` in the repo already
+/// carries by hand (fix-182's own migration), so a check this form
+/// assigns an id to reads exactly like one a person wrote. Scoped to one
+/// app's own list, which is also unique within the stack (an app name is
+/// its directory name) — together that is unique within the stack, which
+/// is what `checks::id_problems` enforces.
+fn generate_manual_id(
+    app: &str,
+    text: &str,
+    taken: &mut std::collections::BTreeSet<String>,
+) -> String {
+    let app_slug = slugify(app);
+    let text_slug = slugify(text);
+    // A handful of words is plenty to keep a manual check's id
+    // recognisable without carrying the whole question into the id.
+    let short_slug: String = text_slug.split('-').take(6).collect::<Vec<_>>().join("-");
+    let base = if short_slug.is_empty() {
+        app_slug.clone()
+    } else {
+        format!("{app_slug}-{short_slug}")
+    };
+    let mut id = base.clone();
+    let mut n = 2;
+    while id.is_empty() || taken.contains(&id) {
+        id = format!("{base}-{n}");
+        n += 1;
+    }
+    taken.insert(id.clone());
+    id
+}
+
+/// Lowercase ascii-alphanumeric words joined by single dashes — leading,
+/// trailing and repeated separators collapse away, so `"Kijk of het werkt?"`
+/// becomes `"kijk-of-het-werkt"`.
+fn slugify(s: &str) -> String {
+    let mut out = String::new();
+    for ch in s.to_lowercase().chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+        } else if !out.is_empty() && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
 }
 
 fn to_value<T: Serialize>(v: &T) -> Value {
@@ -235,8 +348,16 @@ pub fn checks_value(edit: &ChecksEdit) -> Value {
             Value::Sequence(checks.into_iter().map(|c| to_value(&c.check)).collect()),
         );
     }
-    let manual: Vec<&ManualEdit> = edit.manual.iter().flatten().collect();
+    let mut manual: Vec<ManualEdit> = edit.manual.iter().flatten().cloned().collect();
     if !manual.is_empty() {
+        // There is no old file yet, so every item here is "new" by
+        // definition — an `origin` the browser may still have sent
+        // (stale, from whatever this app's form last read) cannot point
+        // at anything real.
+        for e in &mut manual {
+            e.origin = None;
+        }
+        fill_new_manual_ids(&edit.app, &[], &mut manual);
         m.insert(
             Value::from("manual"),
             Value::Sequence(
@@ -284,6 +405,8 @@ pub fn checks_ops(old: &ServiceChecks, want: &ChecksEdit) -> Result<Vec<Op>, Str
         )?;
     }
     if let Some(manual) = &want.manual {
+        let mut manual = manual.clone();
+        fill_new_manual_ids(&want.app, &old.manual, &mut manual);
         seq_ops(
             &mut ops,
             "manual",

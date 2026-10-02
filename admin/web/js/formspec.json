@@ -1333,6 +1333,23 @@
         "id": "manual-once",
         "kind": "check",
         "label": "Asked once, not every round"
+      },
+      {
+        "name": "id",
+        "id": "manual-id",
+        "kind": "text",
+        "label": "Id",
+        "help": "What this check is remembered by, so an answer survives a wording change. Assigned automatically for a new check; an edit keeps it.",
+        "readonly": true
+      },
+      {
+        "name": "replaces",
+        "id": "manual-replaces",
+        "kind": "text",
+        "label": "Replaces",
+        "help": "",
+        "readonly": true,
+        "hidden": true
       }
     ],
     "checks_scalar": [

@@ -382,7 +382,7 @@ struct BackupCalendarQuery {
     /// restic again for every owner involved, in the background, even
     /// though this call itself still answers at once from whatever is
     /// cached.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::shell::queryflag::flag")]
     refresh: bool,
 }
 
@@ -632,7 +632,7 @@ async fn versions(State(c): State<ParityCtx>) -> Json<serde_json::Value> {
 
 #[derive(Deserialize)]
 struct Fresh {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::shell::queryflag::flag")]
     fresh: bool,
 }
 

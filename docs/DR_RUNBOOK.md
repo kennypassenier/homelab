@@ -477,7 +477,7 @@ One section per directory under `stacks/`, read from its `lxc-compose.yml` and, 
 
 ## Full-host rebuild order
 
-1. Install Proxmox and recreate the networks the stack files use: `vmbr0` VLAN 10 (gateway `the router`). Clients expect the daemon at `pve:8443`.
+1. Install Proxmox and recreate the networks the stack files use: `vmbr0` VLAN 10 (gateway `the router`). Clients expect the daemon at `pve:8443`. For an unattended install, build the answer file INTO the installer with `proxmox-auto-install-assistant prepare-iso <iso> --fetch-from iso --answer-file answer.toml`: attached as a second CD beside the stock ISO, the 2026-10-01 rehearsal's answer file set the network, hostname and disk but not `root-password` or `root-ssh-keys`, which left the new host unreachable (fix-212). After the install, a changed boot order only takes effect on a full `qm stop` and `qm start` of a rehearsal VM, never on `qm reset`.
 2. Import the ZFS pools the stack files mount from (`HDD12TB` (mounted by downloader, media), `HDD18TB` (mounted by downloader, media), `HDD2TB` (mounted by gateway), `HDD4TB` (mounted by media)), and any pool named in `[[zfs_jobs]]`. Check replica mountpoints before anything mounts (Layer 5).
 3. Install `restic` and `rclone`, recreate the rclone remote `gdrive`, write `/var/lib/homelab/secrets/restic.pw` from the offline copy, and restore `host-meta-config` (Layer 3).
 4. Put back the `homelab-host` program and its unit file, start it, and check the certificate fingerprint against the pin (Layer 1).

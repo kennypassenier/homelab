@@ -2198,7 +2198,13 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
     doc.push_str("## Full-host rebuild order\n\n");
     doc.push_str(&format!(
         "1. Install Proxmox and recreate the networks the stack files use: {nets}. Clients \
-         expect the daemon at {client}.\n\
+         expect the daemon at {client}. For an unattended install, build the answer file \
+         INTO the installer with `proxmox-auto-install-assistant prepare-iso <iso> \
+         --fetch-from iso --answer-file answer.toml`: attached as a second CD beside the \
+         stock ISO, the 2026-10-01 rehearsal's answer file set the network, hostname and \
+         disk but not `root-password` or `root-ssh-keys`, which left the new host \
+         unreachable (fix-212). After the install, a changed boot order only takes effect \
+         on a full `qm stop` and `qm start` of a rehearsal VM, never on `qm reset`.\n\
          2. Import the ZFS pools the stack files mount from ({pools}), and any pool named in \
          `[[zfs_jobs]]`. Check replica mountpoints before anything mounts (Layer 5).\n\
          3. Install `restic` and `rclone`, recreate the rclone remote `{remote}`, write \

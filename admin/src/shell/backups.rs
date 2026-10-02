@@ -28,7 +28,7 @@ fn refusal(status: StatusCode, r: impl ToString) -> Response {
 /// still answers at once from whatever is cached.
 #[derive(Deserialize, Default)]
 struct StatusQuery {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::shell::queryflag::flag")]
     refresh: bool,
 }
 

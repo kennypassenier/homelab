@@ -15,7 +15,7 @@
 
 use crate::error::CoreError;
 use crate::executor::{Cmd, Executor, TracingExecutor, run_ok};
-use crate::ops::backup::{BackupCfg, init_repository, owner_groups, parse_snapshots_json, restic};
+use crate::ops::backup::{BackupCfg, init_repository, owner_groups, restic};
 use crate::ops::fleetcheck::{Finding, Severity};
 use crate::retention::RetentionTier;
 use crate::runner::{OperationReport, Runner, StepOutcome};
@@ -261,7 +261,7 @@ async fn copy_one(
         &restic(base, &p.repo, pw, &["snapshots", "--json"], 300),
     )
     .await?;
-    let doomed = crate::retention::forget_list(&parse_snapshots_json(&listing.stdout), tiers, now);
+    let doomed = crate::ops::backup::retention_doomed(&listing.stdout, tiers, now);
     if !doomed.is_empty() {
         let mut args: Vec<&str> = vec!["forget"];
         args.extend(doomed.iter().map(|s| s.as_str()));

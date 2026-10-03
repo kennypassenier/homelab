@@ -123,6 +123,30 @@ pub fn forget_list(snapshots: &[(String, u64)], tiers: &[RetentionTier], now: u6
     forget
 }
 
+/// fix-238: retention in two lanes. Scheduled snapshots (the nightly round,
+/// and every snapshot from before fix-223 that carries no trigger at all)
+/// are thinned only against each other; snapshots taken on demand (a manual
+/// backup, the copy before a destroy) are thinned only against each other.
+/// So a manual backup at 22:05 can never push that night's nightly out of
+/// its daily bucket, which is what happened to every stack backed up by
+/// hand on 2026-10-02. Each lane keeps its own newest snapshot.
+pub fn forget_list_by_lane(
+    snapshots: &[(String, u64, bool)],
+    tiers: &[RetentionTier],
+    now: u64,
+) -> Vec<String> {
+    let lane = |scheduled: bool| -> Vec<(String, u64)> {
+        snapshots
+            .iter()
+            .filter(|(_, _, s)| *s == scheduled)
+            .map(|(id, t, _)| (id.clone(), *t))
+            .collect()
+    };
+    let mut out = forget_list(&lane(true), tiers, now);
+    out.extend(forget_list(&lane(false), tiers, now));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

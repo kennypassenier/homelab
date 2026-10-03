@@ -1669,8 +1669,7 @@ pub async fn backup_native(
             &crate::ops::backup::restic_cmd(cfg, &m.unit, &["snapshots", "--json"], 300),
         )
         .await?;
-        let snapshots = crate::ops::backup::parse_snapshots_json(&out.stdout);
-        let doomed = crate::retention::forget_list(&snapshots, &tiers, ctx.now_unix);
+        let doomed = crate::ops::backup::retention_doomed(&out.stdout, &tiers, ctx.now_unix);
         if doomed.is_empty() {
             return Ok(StepOutcome::Unchanged);
         }

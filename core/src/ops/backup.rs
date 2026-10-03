@@ -904,8 +904,7 @@ pub(crate) async fn backup_impl<'a>(
                 ),
             )
             .await?;
-            let snapshots = parse_snapshots_json(&out.stdout);
-            let doomed = crate::retention::forget_list(&snapshots, tiers, ctx.now_unix);
+            let doomed = retention_doomed(&out.stdout, tiers, ctx.now_unix);
             if doomed.is_empty() {
                 continue;
             }
@@ -951,6 +950,46 @@ pub(crate) fn parse_snapshots_json(raw: &str) -> Vec<(String, u64)> {
             // RFC3339 → unix without pulling in chrono: date parsing via the
             // subset restic emits (e.g. 2026-08-11T04:00:12.123+02:00).
             humantime_to_unix(&s.time).map(|t| (s.short_id, t))
+        })
+        .collect()
+}
+
+/// fix-238: the ids retention forgets in one repository, from the raw
+/// `restic snapshots --json` listing. Every retention step goes through
+/// here so the lanes below cannot be bypassed by one call site.
+pub fn retention_doomed(
+    raw: &str,
+    tiers: &[crate::retention::RetentionTier],
+    now: u64,
+) -> Vec<String> {
+    crate::retention::forget_list_by_lane(&parse_snapshot_lanes(raw), tiers, now)
+}
+
+/// fix-238: `(short_id, unix_time, scheduled)` per snapshot. Scheduled means
+/// a `trigger:nightly` tag or no trigger tag at all (snapshots from before
+/// fix-223 were all nightly runs); `trigger:manual` and `trigger:pre-destroy`
+/// are on demand. Malformed input gives an empty list, so retention keeps
+/// everything, the same fail-safe direction as [`parse_snapshots_json`].
+pub(crate) fn parse_snapshot_lanes(raw: &str) -> Vec<(String, u64, bool)> {
+    #[derive(serde::Deserialize)]
+    struct Snap {
+        short_id: String,
+        time: String,
+        #[serde(default)]
+        tags: Vec<String>,
+    }
+    let Ok(snaps) = serde_json::from_str::<Vec<Snap>>(raw.trim()) else {
+        return Vec::new();
+    };
+    snaps
+        .into_iter()
+        .filter_map(|s| {
+            let scheduled = s
+                .tags
+                .iter()
+                .find_map(|t| BackupTrigger::parse_tag(t))
+                .is_none_or(|k| k == BackupTrigger::Nightly);
+            humantime_to_unix(&s.time).map(|t| (s.short_id, t, scheduled))
         })
         .collect()
 }
@@ -1947,11 +1986,7 @@ pub async fn backup_host_meta(ctx: &OpCtx<'_>, cfg: &BackupCfg) -> OperationRepo
             ),
         )
         .await?;
-        let doomed = crate::retention::forget_list(
-            &parse_snapshots_json(&out.stdout),
-            &cfg.tiers,
-            ctx.now_unix,
-        );
+        let doomed = retention_doomed(&out.stdout, &cfg.tiers, ctx.now_unix);
         if doomed.is_empty() {
             return Ok(StepOutcome::Unchanged);
         }

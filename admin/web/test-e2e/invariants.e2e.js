@@ -25,20 +25,49 @@ import { DRIVABLE_PATHS, PATH_TO_PAGE, route } from "../js/router.js";
 const BASE = process.env.INVARIANTS_BASE_URL ?? "http://127.0.0.1:8099";
 const TOKEN = process.env.INVARIANTS_TOKEN ?? "test-invariants-token-1234";
 
-/** Logs in on a fresh page and leaves it on /overview. */
-async function freshPage(context) {
+/** @type {any[] | null} the session's cookies, after the one login */
+let session = null;
+
+/**
+ * Gives `context` a logged-in session: the suite logs in ONCE and every
+ * later context reuses that session's cookies. Before 3.71.0 each case
+ * logged in anew and then waited up to 5 s for an `/overview` the login
+ * never landed on, which spaced the logins out by accident; since the
+ * redesign (feat-shell-1) the wait ends at once and ~60 logins a run trip
+ * the kit's own per-address `/login` rate limit (K10).
+ * @param {import("playwright").BrowserContext} context
+ */
+async function logIn(context) {
+  if (session) {
+    await context.addCookies(session);
+    return;
+  }
   const page = await context.newPage();
   await page.goto(`${BASE}/login`);
   await page.fill("#token", TOKEN);
   await Promise.all([
-    page.waitForURL("**/overview", { timeout: 5000 }).catch(() => {}),
+    page.waitForURL((u) => !u.pathname.startsWith("/login"), {
+      timeout: 10000,
+    }),
     page.click("button[type=submit]"),
   ]);
-  await page.goto(`${BASE}/overview`);
+  session = (await context.storageState()).cookies;
+  await page.close();
+}
+
+/**
+ * A logged-in page left on /stacks (feat-shell-1: the stack list's
+ * address since 3.71.0; /overview redirects there).
+ * @param {import("playwright").BrowserContext} context
+ */
+async function freshPage(context) {
+  await logIn(context);
+  const page = await context.newPage();
+  await page.goto(`${BASE}/stacks`);
   return page;
 }
 
-test("invariants: the nav bar stays inline, with brand Homelab and the version beside Go to…, at 1600/1920/2560 CSS px and at 1894 in the widest themes", async () => {
+test("invariants: the nav bar stays inline, with brand Homelab and the version beside the search box, at 1600/1920/2560 CSS px and at 1894 in the widest themes", async () => {
   const browser = await chromium.launch();
   try {
     const context = await browser.newContext();
@@ -150,11 +179,12 @@ test("invariants: the job dialog's panel does not shift sideways between its run
     const page = await freshPage(context);
     await page.goto(`${BASE}/stacks/films`);
     await page.waitForTimeout(600);
-    // H8 (per-stack enabled flag): "Disable" needs only the stack name, so
-    // it runs end to end against the demo host without a working copy of
-    // the repository (deploy/backup both refuse without one there).
+    // H8 (per-stack enabled flag): "Park" ("Disable" before 3.71.0, the
+    // approved rename) needs only the stack name, so it runs end to end
+    // against the demo host without a working copy of the repository
+    // (deploy/backup both refuse without one there).
     await page
-      .getByRole("button", { name: "Disable", exact: true })
+      .getByRole("button", { name: "Park", exact: true })
       .click({ timeout: 5000 });
     await page.waitForTimeout(300);
     await page.locator("#action-dialog #act-run").click();
@@ -189,7 +219,9 @@ test("invariants: an expandable row opens and closes from a click anywhere in it
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
-    await page.goto(`${BASE}/notifications`);
+    // feat-shell-1: the notices table is Notification rules' page under
+    // System since 3.71.0 (`/notifications` itself goes to the Inbox).
+    await page.goto(`${BASE}/system/notifications`);
     const row = page
       .locator("[data-kp-expandable] tbody tr:not([data-kp-detail])")
       .first();
@@ -253,10 +285,11 @@ test("invariants: the kit's Status and Clients pages are switched off, Passkeys 
       "Passkeys must stay (Kenny logs in with it)",
     );
     // An old link to /status: either the server no longer has it (404) or
-    // the app sends it on to Health — never the old page.
+    // the app sends it on to the Inbox (Health's home since 3.71.0, the
+    // approved "Health → Inbox" merge) — never the old page.
     const old = await page.goto(`${BASE}/status`);
     if (old && old.status() !== 404) {
-      await page.waitForURL("**/health", { timeout: 5000 });
+      await page.waitForURL("**/inbox", { timeout: 5000 });
     }
   } finally {
     await browser.close();
@@ -581,12 +614,7 @@ test("invariants: a stack that never answers is named in the progress and turns 
         }),
       }),
     );
-    await page.goto(`${BASE}/login`);
-    await page.fill("#token", TOKEN);
-    await Promise.all([
-      page.waitForURL("**/overview", { timeout: 5000 }).catch(() => {}),
-      page.click("button[type=submit]"),
-    ]);
+    await logIn(context);
     await page.goto(`${BASE}/backupcalendar`);
     const readingChip = page.locator(".perstack-chip--reading", {
       hasText: "notes",
@@ -650,8 +678,9 @@ test("invariants: only one topology exists, on the Fleet view, and the traffic t
       0,
       "the firewall page must draw no topology of its own any more",
     );
-    const link = page.locator("a", { hasText: "Fleet view topology" });
-    assert.equal(await link.count(), 1, "no link to the Fleet view topology");
+    // "Map": the Fleet view's name since 3.71.0 (the approved rename).
+    const link = page.locator("a", { hasText: "Map topology" });
+    assert.equal(await link.count(), 1, "no link to the Map's topology");
     const href = await link.getAttribute("href");
     assert.ok(href?.includes("traffic=1"), `link missing traffic=1: ${href}`);
 
@@ -741,7 +770,8 @@ test("invariants: every page keeps clear vertical spacing between its top-level 
     // fix-206's UI-rules scope (noted in the fix-206 register row, not
     // fixed here). Every other drivable path (the stack pages have their
     // own fixture-heavy tests already) is swept.
-    const skip = new Set(["apply", "shell", "log", "passkeys"]);
+    // `console` is `shell` at its 3.71.0 address (feat-shell-1).
+    const skip = new Set(["apply", "shell", "console", "log", "passkeys"]);
     for (const p of DRIVABLE_PATHS.filter((p) => !skip.has(p))) {
       await page.goto(`${BASE}/${p}`, { waitUntil: "load" });
       await page.waitForTimeout(400);
@@ -988,13 +1018,15 @@ test("invariants: Overview's apply section loads only after it is opened, and sh
   }
 });
 
-test("invariants: /apply lands on Overview with its section open", async () => {
+test("invariants: /apply lands on Stacks with Deploy all changes open", async () => {
   const browser = await chromium.launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
+    // feat-shell-1: Overview is Stacks since 3.71.0 and its Apply section
+    // is "Deploy all changes" (`?deploy-all=1`), the approved redirect.
     await page.goto(`${BASE}/apply`);
-    await page.waitForURL("**/overview?section=apply", { timeout: 5000 });
+    await page.waitForURL("**/stacks?deploy-all=1", { timeout: 5000 });
     const open = await page.$eval(
       "#apply-section",
       (d) => /** @type {HTMLDetailsElement} */ (d).open,
@@ -1027,8 +1059,17 @@ test("invariants: every data-loading page shows a loading indicator before its d
     });
     // apply/shell/log open their own slow or live connections and are
     // covered by their own dedicated cases above; passkeys is the kit's
-    // own page (pre-existing gap, noted in the fix-206 test).
-    const skip = new Set(["apply", "shell", "log", "passkeys"]);
+    // own page (pre-existing gap, noted in the fix-206 test). `system` is
+    // a landing page of links that reads no data at all (feat-shell-1),
+    // and `console` is the shell module at its 3.71.0 address.
+    const skip = new Set([
+      "apply",
+      "shell",
+      "log",
+      "passkeys",
+      "system",
+      "console",
+    ]);
     for (const p of DRIVABLE_PATHS.filter((p) => !skip.has(p))) {
       await page.goto(`${BASE}/${p}`, { waitUntil: "domcontentloaded" });
       // Read the page's own loading affordance BEFORE the 900ms delay
@@ -1674,7 +1715,8 @@ test("invariants: every link on every drivable page has an absolute http(s) href
       viewport: { width: 1600, height: 1000 },
     });
     const page = await freshPage(context);
-    const skip = new Set(["apply", "shell", "log", "passkeys"]);
+    // `console` is `shell` at its 3.71.0 address (feat-shell-1).
+    const skip = new Set(["apply", "shell", "console", "log", "passkeys"]);
     const paths = [
       ...DRIVABLE_PATHS.filter((p) => !skip.has(p)).map((p) => `/${p}`),
       "/stacks/kp-soft",
@@ -2402,8 +2444,9 @@ test("invariants: a running job's log scrolls inside its dialog and never makes 
     const page = await freshPage(context);
     await page.goto(`${BASE}/stacks/films`);
     await page.waitForTimeout(600);
+    // "Park": "Disable" before 3.71.0 (the approved rename).
     await page
-      .getByRole("button", { name: "Disable", exact: true })
+      .getByRole("button", { name: "Park", exact: true })
       .click({ timeout: 5000 });
     await page.waitForTimeout(300);
     await page.locator("#action-dialog #act-run").click();
@@ -3085,6 +3128,222 @@ test("invariants: hovering the Fleet view topology never redraws a node, so a cl
     }));
     assert.equal(out.same, true, "a hover redrew the topology's nodes");
     assert.deepEqual(out.clicks, [stacks[1]], "the click did not land");
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── feat-shell-1..4 (redesign 3.71.0, Kenny approved 2026-10-03): every old
+// address still lands, Ctrl K finds an action by intent, the theme picker
+// is on every page, and counters are exact ─────────────────────────────
+
+test("invariants: every pre-3.71.0 address lands on its new home", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const { redirectFor: target } = await import("../js/router.js");
+    const stacks = await page.evaluate(async () => {
+      const r = await fetch("/data/fleet", {
+        headers: { accept: "application/json" },
+      });
+      const b = await r.json();
+      return (b.fleet?.stacks ?? []).map((/** @type {any} */ s) => s.name);
+    });
+    const old = [
+      ...Object.entries(PATH_TO_PAGE)
+        .filter(([, p]) => p === "retired")
+        .map(([k]) => `/${k}`),
+      "/stacks/kp-soft/checks",
+      "/stacks/kp-soft/firewall",
+      "/overview?section=apply",
+      "/health?block=doctor",
+      "/secrets?stack=gateway",
+    ];
+    const bad = [];
+    for (const from of old) {
+      const [path, q = ""] = from.split("?");
+      const want = target(route(path), q ? `?${q}` : "", { stacks });
+      await page.goto(`${BASE}${from}`);
+      // `/` (from /start) is the landing, which goes on to the Inbox or
+      // Apps by itself (Kenny, 2026-10-03).
+      const landed = (/** @type {URL} */ u) =>
+        want === "/"
+          ? ["/inbox", "/apps"].includes(u.pathname)
+          : u.pathname + u.search === want;
+      await page.waitForURL(landed, { timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(200);
+      const u = new URL(page.url());
+      const h1 = await page.locator("main h1").count();
+      if (!landed(u) || h1 === 0)
+        bad.push(
+          `${from} → ${u.pathname}${u.search} (wanted ${want}, h1 ${h1})`,
+        );
+    }
+    assert.deepEqual(
+      bad,
+      [],
+      `old addresses that did not land:\n${bad.join("\n")}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: Ctrl K finds an action by intent, in any word order, and Enter opens its dialog", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    // No Inbox rows (they come first in the palette), so the first row is
+    // the best action.
+    await page.route("**/data/notifications", (r) =>
+      r.request().method() === "GET"
+        ? r.fulfill({
+            json: {
+              notices: [],
+              unread: 0,
+              unread_by_stack: {},
+              settings: { push: true, muted_stacks: [], digest_at: null },
+              snoozed: false,
+            },
+          })
+        : r.continue(),
+    );
+    await page.goto(`${BASE}/stacks`);
+    await page.waitForTimeout(1200);
+    /** @param {string} q */
+    const first = async (q) => {
+      await page.keyboard.press("Escape");
+      await page.keyboard.press("Control+k");
+      const input = page.locator("#commands input");
+      await input.waitFor({ timeout: 3000 });
+      await input.fill(q);
+      await page.waitForTimeout(150);
+      return page.evaluate(() => {
+        const opt = [
+          ...document.querySelectorAll("#commands [data-kp-option]"),
+        ].find((o) => !(/** @type {HTMLElement} */ (o).hidden));
+        const group = opt
+          ?.closest("[data-kp-group]")
+          ?.querySelector(".kp-palette__group-label")?.textContent;
+        const label = opt?.firstChild?.textContent ?? "";
+        return { group: group ?? "", label: label.trim() };
+      });
+    };
+    for (const q of ["update kp-soft", "kp-soft update", "upd kp"]) {
+      const r = await first(q);
+      assert.deepEqual(r, { group: "Do", label: "Update · kp-soft" }, q);
+    }
+    for (const q of ["gateway logs", "logs gateway"]) {
+      const r = await first(q);
+      assert.ok(
+        /gateway/.test(r.label) && /Logs/.test(r.label),
+        `${q} → ${r.group}: ${r.label}`,
+      );
+    }
+    // Enter starts it: the action's own dialog opens (nothing runs yet).
+    await first("update kp-soft");
+    await page.keyboard.press("Enter");
+    const dialog = page.locator("dialog#action-dialog[open]");
+    await dialog.waitFor({ timeout: 5000 });
+    const title = await dialog.locator(".kp-dialog__title").first().innerText();
+    assert.match(title, /Update/, `the dialog that opened: ${title}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the kp-themes theme picker is in the bar on every page, desktop and phone", async () => {
+  const browser = await chromium.launch();
+  try {
+    const bad = [];
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 900 },
+      });
+      const page = await freshPage(context);
+      for (const p of [
+        ...DRIVABLE_PATHS,
+        "stacks/kp-soft",
+        "stacks/kp-soft/logs",
+      ]) {
+        await page.goto(`${BASE}/${p}`);
+        await page.waitForTimeout(300);
+        const ok = await page.evaluate(() => {
+          const b = document.querySelector(
+            "#bar .kp-theme-menu > button[popovertarget]",
+          );
+          if (!b) return false;
+          const r = b.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && r.top < 120;
+        });
+        if (!ok) bad.push(`${width}px /${p}`);
+      }
+      await context.close();
+    }
+    assert.deepEqual(bad, [], `no theme picker in the bar: ${bad.join(", ")}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the Inbox counter shows the exact number, never 9+, and equals the Inbox's rows", async () => {
+  const browser = await chromium.launch();
+  try {
+    for (const width of [1600, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 900 },
+      });
+      const page = await context.newPage();
+      // Twelve unread notices that need a person: more than the old bell's
+      // "9+" cap ever showed.
+      const now = Math.floor(Date.now() / 1000);
+      await page.route("**/data/notifications", (r) =>
+        r.request().method() === "GET"
+          ? r.fulfill({
+              json: {
+                notices: Array.from({ length: 12 }, (_, i) => ({
+                  id: i + 1,
+                  at: now - i * 60,
+                  kind: "action_failed",
+                  level: "warning",
+                  stack: "kp-soft",
+                  title: `Made-up failure ${i + 1}`,
+                  body: "a test notice",
+                  read: false,
+                  push: { state: "sent" },
+                })),
+                unread: 12,
+                unread_by_stack: { "kp-soft": 12 },
+                settings: { push: true, muted_stacks: [], digest_at: null },
+                snoozed: false,
+              },
+            })
+          : r.continue(),
+      );
+      await page.route("**/data/asks", (r) =>
+        r.fulfill({ json: { asks: [] } }),
+      );
+      await logIn(context);
+      // `/` opens the Inbox when it holds something (Kenny, 2026-10-03).
+      await page.goto(`${BASE}/`);
+      await page.waitForURL("**/inbox", { timeout: 5000 });
+      await page.waitForTimeout(500);
+      const badge =
+        width > 960
+          ? page.locator("#nav a[data-area='inbox'] .nx-count")
+          : page.locator(".nx-tabbar [data-area='inbox'] .nx-count");
+      assert.equal((await badge.innerText()).trim(), "12", `${width}px`);
+      const rows = await page.locator("#page .nx-inbox__row").count();
+      assert.equal(rows, 12, `${width}px: the Inbox shows ${rows} rows`);
+      assert.match(await page.title(), /^● 12 in the Inbox/);
+      await context.close();
+    }
   } finally {
     await browser.close();
   }

@@ -16,7 +16,7 @@ import { fetchJson } from "../dom.js";
 import { declare, drivable } from "../drivable.js";
 // @ts-ignore — a kit asset, not part of this app's own module graph.
 import { registerPasskey } from "/static/passkeys.js";
-import { el, failBox, skel } from "./configkit.js";
+import { el, failNote, skel } from "./configkit.js";
 import { mount as mountSettings } from "./settings.js";
 
 /**
@@ -73,9 +73,13 @@ export function mount(root) {
  * The Passkeys half of the Sign-in card: a heading with Register a
  * passkey, then the list (or why there is none).
  * @param {HTMLElement} box
+ * @param {(fail: import("../doctor.js").RouteError | null,
+ *   retry: () => void) => void} report the page's one failure alert
+ *   (redesign-config-11): a failed read goes there, the list only says
+ *   it is empty.
  * @returns {() => void}
  */
-export function mountPasskeys(box) {
+export function mountPasskeys(box, report) {
   const abort = new AbortController();
   const register = drivable(
     el(
@@ -214,9 +218,11 @@ export function mountPasskeys(box) {
       abort.signal,
     );
     if (!r.ok) {
-      list.replaceChildren(failBox(r.error, retry));
+      list.replaceChildren(failNote("Not read: see the message at the top."));
+      report(r.error, retry);
       return;
     }
+    report(null, retry);
     /** @type {PasskeysData} */
     const d = r.body;
     /** @type {HTMLButtonElement} */ (register).disabled = !d.https;

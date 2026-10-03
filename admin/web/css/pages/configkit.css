@@ -23,68 +23,17 @@ main.shell.cf-page > [hidden] {
   display: none;
 }
 
-/* ---------- page header (DESIGN_LANGUAGE §1.1) ---------- */
-.cf-head {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas: "t m a" "d d a";
-  column-gap: var(--kp-space-md, 12px);
-  align-items: center;
-}
-.cf-head > h1 {
-  grid-area: t;
-  margin: 0;
-  font-size: min(var(--kp-text-display, 2.25rem), 2.25rem);
-  line-height: 1.1;
-  letter-spacing: -0.01em;
-}
-.cf-head .cf-head__desc {
-  grid-area: d;
-  margin: 6px 0 0 !important;
-  color: var(--muted-foreground);
-  max-inline-size: 70ch;
-}
-.cf-head__meta {
-  grid-area: m;
+/* ---------- page header: ui.js's, plus the meta chips beside the title ---------- */
+.cf-page .title-row > .cf-head__meta {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 12px;
   align-items: center;
   min-inline-size: 0;
+  margin-inline-start: 0;
 }
-.cf-page .cf-head__actions.actions-row {
-  grid-area: a;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--kp-space-sm, 8px);
-  align-items: center;
-  justify-content: flex-end;
-  padding-inline-start: var(--kp-space-xl, 24px);
-}
-@media (max-width: 48rem) {
-  .cf-head {
-    grid-template-columns: auto minmax(0, 1fr);
-    grid-template-areas: "t m" "d d" "a a";
-  }
-  .cf-page .cf-head__actions.actions-row {
-    justify-content: flex-start;
-    padding-inline-start: 0;
-    margin-block-start: var(--kp-space-md, 12px);
-  }
-}
-@media (max-width: 30rem) {
-  .cf-page .cf-head__actions.actions-row {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .cf-page .cf-head__actions > * {
-    justify-content: center;
-    text-align: center;
-  }
-  .cf-page .cf-head__actions > .kp-button--primary {
-    grid-column: 1 / -1;
-    order: -1;
-  }
+.cf-page .title-row > .cf-head__meta + * {
+  margin-inline-start: auto;
 }
 
 /* the live freshness: dot + words */
@@ -288,7 +237,12 @@ button.cf-chip,
   font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
 }
+/* one element around a match, so a flex chip keeps its word whole */
+.cf-hl {
+  display: inline;
+}
 .cf-mark {
+  padding: 0;
   background: color-mix(in oklab, var(--warning) 80%, transparent);
   color: inherit;
   border-radius: 2px;
@@ -353,83 +307,34 @@ button.cf-chip,
   }
 }
 
-/* ---------- tables (DESIGN_LANGUAGE §6) ---------- */
+/* ---------- tables: kp's own (kp-table / kp datatable); only what the
+   rows do here is added ---------- */
 .cf-table-wrap {
   overflow-x: auto;
   min-inline-size: 0;
 }
-.cf-table {
-  inline-size: 100%;
-  border-collapse: collapse;
+.cf-page .kp-table tbody tr[tabindex] {
+  cursor: pointer;
+}
+.cf-page .kp-table .num {
+  text-align: end;
   font-variant-numeric: tabular-nums;
 }
-.cf-table th {
-  font-size: var(--kp-text-xs);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted-foreground);
-  text-align: start;
-  padding: 8px 10px;
-  border-block-end: 1px solid var(--border);
-  white-space: nowrap;
-}
-.cf-table td {
-  padding: 10px;
-  border-block-end: 1px solid var(--border);
-  vertical-align: middle;
-}
-.cf-table tbody tr:last-child td {
-  border-block-end: 0;
-}
-.cf-table tbody tr {
-  transition: background 120ms var(--cf-ease);
-}
-.cf-table tbody tr:hover {
-  background: color-mix(in oklab, var(--muted) 60%, transparent);
-}
-.cf-table .num,
-.cf-table th.num {
-  text-align: end;
-}
-.cf-table .cf-id {
-  font-weight: 600;
-}
-.cf-table .cf-id a {
+.cf-page .kp-table .cf-id a {
   color: inherit;
+  font-weight: 600;
   text-decoration: none;
 }
-.cf-table .cf-id a:hover {
+.cf-page .kp-table .cf-id a:hover {
   text-decoration: underline;
 }
-.cf-table .cf-row-actions {
+.cf-page .kp-table .cf-row-actions {
   text-align: end;
   white-space: nowrap;
 }
-.cf-table tr[tabindex]:focus-visible {
+.cf-page .kp-table tr[tabindex]:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
-}
-.cf-sort {
-  all: unset;
-  cursor: pointer;
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-}
-.cf-sort:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-  border-radius: 3px;
-}
-.cf-sort__mark {
-  opacity: 0.45;
-  font-size: 0.9em;
-}
-th[aria-sort="ascending"] .cf-sort__mark,
-th[aria-sort="descending"] .cf-sort__mark {
-  opacity: 1;
-  color: var(--primary);
 }
 
 /* ---------- segmented choice ---------- */
@@ -500,6 +405,20 @@ th[aria-sort="descending"] .cf-sort__mark {
 }
 .cf-fail p {
   margin: 0;
+}
+.cf-fail {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+.cf-failband[hidden] {
+  display: none;
+}
+.cf-failnote {
+  margin: 0;
+  padding: var(--kp-space-md, 12px) 0;
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm);
 }
 
 @media (prefers-reduced-motion: reduce) {

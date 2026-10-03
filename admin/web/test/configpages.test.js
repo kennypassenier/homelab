@@ -14,6 +14,8 @@ import {
   fwState,
   fwSummary,
   portsText,
+  ruleOrderText,
+  busiestStack,
   ruleMatches,
   rulesFor,
 } from "../js/fwview.js";
@@ -35,8 +37,12 @@ import {
   shortRemote,
   slug,
   stagedWords,
+  failSummary,
+  keepStaged,
+  restoreStaged,
 } from "../js/settingsview.js";
-import { applySort, nextSort } from "../js/pages/configkit.js";
+import { highlight, typingTarget } from "../js/pages/configkit.js";
+import { ruleIntent, toggleRuleOff } from "../js/editforms.js";
 
 /** @param {Partial<import("../js/fwview.js").StackFw>} o */
 const stack = (o) => ({
@@ -408,27 +414,155 @@ test("redesign-settings: the working copy in words, the remote shortened, ?secti
   assert.equal(sectionTarget(null, []), null);
 });
 
-test("redesign-config: a header click sorts asc → desc → none; Shift adds a second key", () => {
-  /** @type {import("../js/pages/configkit.js").SortState} */
-  let s = [];
-  s = nextSort(s, "stack", false);
-  assert.deepEqual(s, [{ key: "stack", dir: 1 }]);
-  s = nextSort(s, "stack", false);
-  assert.deepEqual(s, [{ key: "stack", dir: -1 }]);
-  s = nextSort(s, "stack", false);
-  assert.deepEqual(s, []);
-  s = nextSort(nextSort(s, "state", false), "rules", true);
-  assert.deepEqual(s, [
-    { key: "state", dir: 1 },
-    { key: "rules", dir: 1 },
-  ]);
-  const rows = [
-    { state: "b", rules: 2 },
-    { state: "a", rules: 9 },
-    { state: "b", rules: 1 },
+// ── the 3.71.0 senior review of this branch (redesign-config-2..) ───────
+
+test("review 2: a rule's order counts the whole stack, with its direction's share", () => {
+  const rules = [
+    ...Array.from({ length: 16 }, (_, i) => rule({ n: i + 1, dir: "out" })),
+    ...Array.from({ length: 4 }, (_, i) => rule({ n: 17 + i, dir: "in" })),
+    rule({ stack: "admin", n: 1, dir: "in" }),
   ];
-  assert.deepEqual(
-    applySort(rows, s, (r, k) => /** @type {any} */ (r)[k]).map((r) => r.rules),
-    [9, 1, 2],
+  assert.equal(
+    ruleOrderText(rules[16], rules),
+    "rule 17 of 20 (4 inbound): first match wins",
   );
+  assert.equal(
+    ruleOrderText(rules[0], rules),
+    "rule 1 of 20 (16 outbound): first match wins",
+  );
+});
+
+test("review 7: the rules card opens on the stack with the most rules, never a name the code knows", () => {
+  const rules = [
+    rule({ stack: "gateway", n: 1 }),
+    rule({ stack: "films", n: 1 }),
+    rule({ stack: "films", n: 2 }),
+  ];
+  assert.equal(busiestStack(["gateway", "films"], rules), "films");
+  // A tie goes to the first in the page's order.
+  assert.equal(
+    busiestStack(["b", "a"], [rule({ stack: "a" }), rule({ stack: "b" })]),
+    "b",
+  );
+  assert.equal(busiestStack([], rules), "");
+});
+
+/** A document just big enough for `el()`: elements with children and text. */
+function fakeDocument() {
+  /** @param {string} tag */
+  const node = (tag) => {
+    /** @type {any[]} */
+    const kids = [];
+    return {
+      nodeName: tag.toUpperCase(),
+      className: "",
+      childNodes: kids,
+      setAttribute() {},
+      addEventListener() {},
+      /** @param {...any} xs */
+      append(...xs) {
+        for (const x of xs)
+          kids.push(typeof x === "string" ? { textContent: x } : x);
+      },
+      get textContent() {
+        return kids.map((k) => k.textContent).join("");
+      },
+    };
+  };
+  return { createElement: node };
+}
+
+test("review 4: a highlighted match is ONE element, so a flex chip keeps its word whole", () => {
+  const g = /** @type {any} */ (globalThis);
+  const before = g.document;
+  g.document = fakeDocument();
+  try {
+    const h = /** @type {any} */ (highlight("cadvisor", "a"));
+    assert.ok(!Array.isArray(h), "highlight split the word into loose parts");
+    assert.equal(h.nodeName, "SPAN");
+    assert.equal(h.textContent, "cadvisor");
+    assert.equal(h.childNodes[1].nodeName, "MARK");
+    assert.equal(highlight("cadvisor", "zz"), "cadvisor");
+    assert.equal(highlight("cadvisor", ""), "cadvisor");
+  } finally {
+    g.document = before;
+  }
+});
+
+test("review 12: only fields, buttons and links keep j/k and Enter to themselves", () => {
+  for (const t of ["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A"])
+    assert.ok(typingTarget(t), t);
+  for (const t of ["TR", "ARTICLE", "SPAN", "TABLE", "LABEL", "DIV"])
+    assert.ok(!typingTarget(t), t);
+});
+
+test("review 5: staged Settings changes survive leaving the page, never a secret", () => {
+  const fields = [
+    { key: "backup_hour", secret: false },
+    { key: "notify_webhook", secret: true },
+  ];
+  const changes = new Map([
+    ["backup_hour", { field: fields[0], value: 3 }],
+    ["notify_webhook", { field: fields[1], value: "https://x" }],
+  ]);
+  const raw = keepStaged(changes, (f) => f.secret);
+  assert.ok(!raw.includes("https://x"), "a secret went to browser storage");
+  assert.deepEqual(restoreStaged(raw, fields), { backup_hour: 3 });
+  // A key the host no longer reads, or a broken record, restores nothing.
+  assert.deepEqual(restoreStaged(raw, [{ key: "other" }]), {});
+  assert.deepEqual(restoreStaged("{nope", fields), {});
+  assert.deepEqual(restoreStaged(null, fields), {});
+});
+
+test("review 11: one failed read of the host is one message, naming every part it took out", () => {
+  const e = {
+    what: "x",
+    why: "the host does not answer",
+    fix: "check the line",
+  };
+  assert.deepEqual(
+    failSummary([
+      { what: "the working copy", error: e },
+      { what: "the host settings", error: e },
+      { what: "the tokens", error: e },
+    ]),
+    {
+      title:
+        "Could not read the working copy, the host settings and the tokens",
+      why: "the host does not answer",
+      fix: "check the line",
+    },
+  );
+  assert.equal(failSummary([]), null);
+  assert.equal(
+    failSummary([{ what: "the tokens", error: e }])?.title,
+    "Could not read the tokens",
+  );
+});
+
+test("review 8: Move up and Disable from the Firewall page act on the editor's own model", () => {
+  /** @type {any} */
+  const m = {
+    enabled: true,
+    comment: "",
+    policy_in: "DROP",
+    policy_out: "ACCEPT",
+    management_open: "",
+    rules: ["a", "b", "c"].map((note, i) => ({
+      origin: i,
+      rule: { dir: "in", action: "ACCEPT", note },
+    })),
+  };
+  const up = ruleIntent(m, 3, "up");
+  assert.deepEqual(
+    up.rules.map((/** @type {any} */ r) => r.rule.note),
+    ["a", "c", "b"],
+  );
+  const off = ruleIntent(m, 2, "disable");
+  assert.equal(off.rules[1].rule.disabled, true);
+  assert.equal(toggleRuleOff(off, 1).rules[1].rule.disabled, undefined);
+  // Out of range or unknown: the model as it was.
+  assert.equal(ruleIntent(m, 9, "up"), m);
+  assert.equal(ruleIntent(m, 1, "up"), m);
+  assert.equal(ruleIntent(m, 1, "nope"), m);
 });

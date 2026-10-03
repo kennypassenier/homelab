@@ -43,6 +43,8 @@ pub struct RuleRow {
     pub note: String,
     /// Whether the stack's firewall is in force (`enabled`).
     pub enabled: bool,
+    /// redesign-config-8: the rule is switched off (Proxmox skips it).
+    pub disabled: bool,
 }
 
 /// One cell of the matrix: from `from` to `to`.
@@ -142,6 +144,7 @@ pub fn matrix(fleet: &[FleetFirewall]) -> Matrix {
                     })
                     .unwrap_or_default(),
                 enabled: fw.enabled,
+                disabled: r.disabled,
             });
         }
     }
@@ -165,7 +168,8 @@ pub fn matrix(fleet: &[FleetFirewall]) -> Matrix {
             // whose source covers `from`, one probe per declared port.
             let mut probes: BTreeSet<(u8, &'static str, Option<u16>)> = BTreeSet::new();
             for r in dst.rules.iter().filter(|r| {
-                r.dir == FwDir::In
+                !r.disabled
+                    && r.dir == FwDir::In
                     && r.action == FwAction::Accept
                     && r.source.as_deref().is_none_or(|s| covers(s, from.ip))
             }) {

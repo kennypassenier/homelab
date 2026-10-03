@@ -142,3 +142,64 @@ export function sectionTarget(section, groups) {
   if (section === "repo" || section === "working-copy") return "wc";
   return groups.map(slug).find((g) => g === section) ?? null;
 }
+
+/** Where the tab keeps its staged host.toml changes (redesign-config-5). */
+export const STAGED_STORE = "homelab:settings-staged";
+
+/**
+ * The staged changes as the tab keeps them while you look elsewhere
+ * (redesign-config-5): key → value, with every secret left out (a secret
+ * never goes to browser storage; leaving the page drops it, and says so).
+ * @template {{key: string}} F
+ * @param {Map<string, {field: F, value: unknown}>} changes
+ * @param {(f: F) => boolean} secret
+ * @returns {string}
+ */
+export function keepStaged(changes, secret) {
+  /** @type {Record<string, unknown>} */
+  const out = {};
+  for (const [k, { field, value }] of changes)
+    if (!secret(field)) out[k] = value;
+  return JSON.stringify(out);
+}
+
+/**
+ * The kept changes back, for the keys the host still reads; anything
+ * broken restores nothing.
+ * @param {string | null} raw
+ * @param {{key: string}[]} fields
+ * @returns {Record<string, unknown>}
+ */
+export function restoreStaged(raw, fields) {
+  if (!raw) return {};
+  try {
+    const v = JSON.parse(raw);
+    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+    /** @type {Record<string, unknown>} */
+    const out = {};
+    for (const [k, x] of Object.entries(v))
+      if (fields.some((f) => f.key === k)) out[k] = x;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * One message for every read the page lost at once (redesign-config-11):
+ * the dashboard's line to the host carries all of them, so one cause
+ * shows once, with one Try again.
+ * @param {{what: string, error: {why: string, fix?: string | null}}[]} fails
+ * @returns {{title: string, why: string, fix: string | null} | null}
+ */
+export function failSummary(fails) {
+  if (!fails.length) return null;
+  const w = fails.map((f) => f.what);
+  const list =
+    w.length === 1 ? w[0] : `${w.slice(0, -1).join(", ")} and ${w.at(-1)}`;
+  return {
+    title: `Could not read ${list}`,
+    why: fails[0].error.why,
+    fix: fails[0].error.fix ?? null,
+  };
+}

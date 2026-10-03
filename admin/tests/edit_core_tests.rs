@@ -33,6 +33,7 @@ fn rule(
     port: Option<&str>,
 ) -> FirewallRule {
     FirewallRule {
+        disabled: false,
         dir,
         action,
         source: (dir == FwDir::In).then(|| peer.to_string()),
@@ -101,6 +102,7 @@ fn feat_firewall_1_add_and_remove_a_rule_keep_the_rest_of_the_file() {
     f.rules.push(RuleEdit {
         origin: None,
         rule: FirewallRule {
+            disabled: false,
             note: Some("  the desktop  ".into()),
             ..rule(
                 FwDir::In,
@@ -510,6 +512,47 @@ fn feat_firewall_2_the_matrix_reads_both_ends() {
         .collect();
     assert_eq!(rows[0].peer_stacks, vec!["gateway"]);
     assert!(m.unguarded.iter().all(|s| s != "admin" && s != "kp-soft"));
+}
+
+/// redesign-config-8: a rule switched off on the Firewall page says so in
+/// its row, and the matrix no longer counts it: gateway's 8090 into the
+/// dashboard closes once admin's rule for it is off.
+#[test]
+fn redesign_config_8_a_disabled_rule_is_marked_and_opens_nothing() {
+    let load = |stack: &str| {
+        let m = parse_manifest(&texts(stack)["lxc-compose.yml"]).unwrap();
+        FleetFirewall {
+            stack: stack.into(),
+            vmid: m.vmid,
+            ip: m.network.ip.split('/').next().unwrap().parse().unwrap(),
+            firewall: m.firewall,
+        }
+    };
+    let mut fleet: Vec<FleetFirewall> = ["admin", "gateway"].iter().map(|s| load(s)).collect();
+    let fw = fleet[0].firewall.as_mut().unwrap();
+    let i = fw
+        .rules
+        .iter()
+        .position(|r| r.dir == FwDir::In && r.dport.as_deref() == Some("8090"))
+        .unwrap();
+    for r in fw.rules.iter_mut() {
+        if r.dir == FwDir::In && r.dport.as_deref() == Some("8090") {
+            r.disabled = true;
+        }
+    }
+    let m = matrix(&fleet);
+    let row = m
+        .rules
+        .iter()
+        .find(|r| r.stack == "admin" && r.n == i + 1)
+        .unwrap();
+    assert!(row.disabled);
+    let cell = m
+        .cells
+        .iter()
+        .find(|c| c.from == "gateway" && c.to == "admin")
+        .unwrap();
+    assert!(!cell.allowed.contains(&"tcp 8090".to_string()), "{cell:?}");
 }
 
 #[test]

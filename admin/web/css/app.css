@@ -1104,6 +1104,14 @@ tr.unread td:first-child {
 tr.rule-new td {
   font-style: italic;
 }
+/* redesign-config-8: a rule switched off reads muted; the one the
+   Firewall page just staged is outlined until it is written. */
+tr.rule-off td {
+  color: var(--muted-foreground);
+}
+tr.rule-staged td {
+  background: color-mix(in oklab, var(--primary) 12%, transparent);
+}
 .fw-matrix td.cell {
   white-space: normal;
   font-size: 0.85rem;

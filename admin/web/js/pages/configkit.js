@@ -5,20 +5,25 @@
 // and their cfg-aa93.js interaction kit). Shaped like the foundation's
 // ui.js API where one exists, so the merge can fold them in:
 //
-//   pageHeader   ui.js's, plus a `meta` slot beside the title (the demo's
-//                "working copy bb5dce9" / "read 3 s ago" chip)
+//   pageHeader   ui.js's own, plus a `meta` slot beside the title (the
+//                demo's "working copy bb5dce9" / "read 3 s ago" chip)
 //   tipOn        one floating detail card for hover AND keyboard focus
 //                (cfg-aa93.js `tipOn`); never under the pointer
-//   sortHead     a sortable header: click asc → desc → none, Shift+click
-//                adds a second key; remembered per table (localStorage)
 //   seg          a segmented single choice (the demo's `.nx-seg`)
 //   highlight    the search's match marked inside a text
 //   rowKeys      j / k move between rows, Enter opens
-//   skel         one skeleton bar in the final geometry
+//   skel         one inline skeleton bar in the final geometry (ui.js
+//                has lines, tables and blocks, not one bar in a text)
+//   failBox      dom.js's errorBox plus its Try again
+//   failBand     one alert for every read a page lost at once
 //   dot          status = dot + word (DESIGN_LANGUAGE §4)
 //
 // Styled by css/pages/configkit.css under the `cf-` prefix.
 
+import { errorBox } from "../dom.js";
+import { declare, drivable } from "../drivable.js";
+import { failSummary } from "../settingsview.js";
+import { pageHeader as uiHeader } from "../ui.js";
 import { el, ensureStyle } from "./hostkit.js";
 
 export { el, ensureStyle };
@@ -32,28 +37,22 @@ export function pageStyles(page) {
 }
 
 /**
- * The page header as the demos draw it: the title with its meta chips on
- * one line, the one-sentence description right under it, the actions
- * against the right edge across both (secondary first, the ONE primary
- * last). The description is the title's next sibling paragraph
- * (invariants 32, 36, 40, 41).
- * @param {{title: string, desc: string, meta?: Child[], actions?: Child[],
+ * The page header: ui.js's own (the title row with the actions against
+ * its right edge, the primary last, the description under it), plus the
+ * demo's meta chips right beside the title — the slot ui.js lacks.
+ * @param {{title: string, desc: string, meta?: Child[], actions?: Node[],
  *   primary?: Node | null}} spec
  */
 export function pageHeader(spec) {
-  const title = /** @type {HTMLHeadingElement} */ (el("h1", null, spec.title));
-  const desc = /** @type {HTMLParagraphElement} */ (
-    el("p", { class: "cf-head__desc section-head__desc" }, spec.desc)
-  );
+  const head = uiHeader({
+    title: spec.title,
+    desc: spec.desc,
+    actions: spec.actions ?? [],
+    primary: spec.primary ?? null,
+  });
   const meta = el("div", { class: "cf-head__meta" }, spec.meta ?? []);
-  const actions = el(
-    "div",
-    { class: "cf-head__actions actions-row" },
-    spec.actions ?? [],
-    spec.primary ?? null,
-  );
-  const e = el("header", { class: "cf-head" }, title, desc, meta, actions);
-  return { el: e, title, desc, meta, actions };
+  head.title.after(meta);
+  return { ...head, meta };
 }
 
 /** A small chip. @param {Child} text @param {string} [tone] */
@@ -123,119 +122,6 @@ export function tipOn(target, fill) {
   target.addEventListener("blur", hideTip);
 }
 
-// ── sorting ──────────────────────────────────────────────────────────────
-
-/** @typedef {{key: string, dir: 1 | -1}[]} SortState */
-
-/**
- * The sort a table had last time on this browser (DESIGN_LANGUAGE §6:
- * remembered per table).
- * @param {string} name
- * @returns {SortState}
- */
-export function rememberedSort(name) {
-  try {
-    const v = JSON.parse(localStorage.getItem(`cf-sort:${name}`) ?? "[]");
-    return Array.isArray(v)
-      ? v.filter(
-          (x) => typeof x?.key === "string" && (x.dir === 1 || x.dir === -1),
-        )
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-/** @param {string} name @param {SortState} state */
-function keepSort(name, state) {
-  try {
-    localStorage.setItem(`cf-sort:${name}`, JSON.stringify(state));
-  } catch {
-    /* private window: the sort lives for this visit only */
-  }
-}
-
-/**
- * The next sort after a click on `key` (pure): a plain click sorts by it
- * alone, ascending → descending → none; Shift+click adds it as a further
- * key, or flips it when it is one already.
- * @param {SortState} state
- * @param {string} key
- * @param {boolean} shift
- * @returns {SortState}
- */
-export function nextSort(state, key, shift) {
-  const i = state.findIndex((s) => s.key === key);
-  if (shift) {
-    if (i < 0) return [...state, { key, dir: 1 }];
-    return state.map((s, j) =>
-      j === i ? { key, dir: /** @type {1 | -1} */ (-s.dir) } : s,
-    );
-  }
-  if (i === 0 && state.length === 1)
-    return state[0].dir === 1 ? [{ key, dir: -1 }] : [];
-  return [{ key, dir: 1 }];
-}
-
-/**
- * Rows in the sort's order (pure; a stable sort, numbers as numbers).
- * @template T
- * @param {T[]} rows
- * @param {SortState} state
- * @param {(row: T, key: string) => string | number} get
- * @returns {T[]}
- */
-export function applySort(rows, state, get) {
-  return [...rows].sort((a, b) => {
-    for (const { key, dir } of state) {
-      const x = get(a, key);
-      const y = get(b, key);
-      if (x < y) return -dir;
-      if (x > y) return dir;
-    }
-    return 0;
-  });
-}
-
-/**
- * A sortable header cell: `state` is changed in place and remembered
- * under `name`, then `onChange` repaints.
- * @param {{label: string, key: string, name: string, state: SortState,
- *   onChange: () => void, cls?: string}} spec
- */
-export function sortHead(spec) {
-  const i = spec.state.findIndex((s) => s.key === spec.key);
-  const s = spec.state[i];
-  const mark = s
-    ? `${s.dir > 0 ? "↑" : "↓"}${spec.state.length > 1 ? i + 1 : ""}`
-    : "↕";
-  return el(
-    "th",
-    {
-      class: spec.cls ?? null,
-      scope: "col",
-      "aria-sort": s ? (s.dir > 0 ? "ascending" : "descending") : "none",
-    },
-    el(
-      "button",
-      {
-        type: "button",
-        class: "cf-sort",
-        title:
-          "Sort: click for ascending, again for descending, a third time for none · Shift+click adds a second sort",
-        onclick: (/** @type {MouseEvent} */ e) => {
-          const next = nextSort(spec.state, spec.key, e.shiftKey);
-          spec.state.splice(0, spec.state.length, ...next);
-          keepSort(spec.name, spec.state);
-          spec.onChange();
-        },
-      },
-      spec.label,
-      el("span", { class: "cf-sort__mark", "aria-hidden": "true" }, mark),
-    ),
-  );
-}
-
 // ── small controls ───────────────────────────────────────────────────────
 
 /**
@@ -292,7 +178,10 @@ export function seg(spec) {
 }
 
 /**
- * The text with the query's first match marked (case-insensitive).
+ * The text with the query's first match marked (case-insensitive), as ONE
+ * element: a chip is a flex box, and loose text nodes beside a `<mark>`
+ * would each become a flex item with the chip's gap between them
+ * ("c a dvisor", redesign-config-4).
  * @param {string | null | undefined} text
  * @param {string} q lower-case
  * @returns {Child}
@@ -302,12 +191,23 @@ export function highlight(text, q) {
   if (!q) return text;
   const i = text.toLowerCase().indexOf(q);
   if (i < 0) return text;
-  return [
+  return el(
+    "span",
+    { class: "cf-hl" },
     text.slice(0, i),
     el("mark", { class: "cf-mark" }, text.slice(i, i + q.length)),
     text.slice(i + q.length),
-  ];
+  );
 }
+
+/**
+ * Whether a focused element keeps j / k / Enter to itself (a field, a
+ * button, a link); anchored, so a row, a card or a span never does
+ * (redesign-config-12).
+ * @param {string} tag
+ */
+export const typingTarget = (tag) =>
+  /^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(tag);
 
 /**
  * j / k (and the arrows) move between `selector` items inside `root`;
@@ -320,7 +220,7 @@ export function rowKeys(root, selector, onEnter) {
   root.addEventListener("keydown", (e) => {
     if (!["j", "k", "ArrowDown", "ArrowUp", "Enter"].includes(e.key)) return;
     const t = /** @type {HTMLElement} */ (e.target);
-    if (/INPUT|TEXTAREA|SELECT|BUTTON|A/.test(t.tagName)) return;
+    if (typingTarget(t.tagName)) return;
     const items = /** @type {HTMLElement[]} */ ([
       ...root.querySelectorAll(selector),
     ]).filter((x) => x.offsetParent);
@@ -339,31 +239,79 @@ export function rowKeys(root, selector, onEnter) {
 }
 
 /**
- * A card's error (DESIGN_LANGUAGE §7): what failed, why (the host's
- * reason), what to do, and Try again, inside the card it belongs to.
+ * A card's error (DESIGN_LANGUAGE §7): dom.js's errorBox (what failed,
+ * why, what to do) with its Try again.
  * @param {import("../doctor.js").RouteError} e
  * @param {() => void} retry
+ * @param {string} page whose Live view id its Try again carries
  */
-export function failBox(e, retry) {
-  return el(
-    "div",
-    { class: "kp-alert kp-alert--destructive cf-fail", role: "alert" },
-    el(
-      "div",
-      { class: "kp-alert__body" },
-      el("strong", null, `Could not read ${e.what}`),
-      el("p", null, e.why),
-      e.fix ? el("p", null, e.fix) : null,
-      el(
-        "button",
-        {
-          type: "button",
-          class: "kp-button kp-button--sm",
-          title: "Read it again",
-          onclick: retry,
-        },
-        "Try again",
-      ),
-    ),
-  );
+export function failBox(e, retry, page) {
+  const box = errorBox(e);
+  box.classList.add("cf-fail");
+  box.append(tryAgain(retry, page));
+  return box;
 }
+
+// Live view: the one Try again each page's error shows.
+const TRY_AGAIN = Object.fromEntries(
+  ["firewall", "settings", "presets"].map((page) => [
+    page,
+    declare({
+      id: `${page}-try-again`,
+      page,
+      opens: "view",
+      what: "read what failed again",
+    }),
+  ]),
+);
+
+/** @param {() => void} retry @param {string} page */
+const tryAgain = (retry, page) =>
+  drivable(
+    el(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--sm",
+        title: "Read it again",
+        onclick: retry,
+      },
+      "Try again",
+    ),
+    TRY_AGAIN[page] ?? TRY_AGAIN.settings,
+  );
+
+/**
+ * One alert for every read the page lost at once (redesign-config-11):
+ * the cause once, under the header, with ONE Try again; the cards only
+ * say they are empty (`failNote`). Hidden while nothing failed.
+ * @param {string} page whose Live view id its Try again carries
+ */
+export function failBand(page) {
+  const box = el("div", { class: "cf-failband", hidden: true });
+  return {
+    el: box,
+    /**
+     * @param {{what: string, error: import("../doctor.js").RouteError}[]} fails
+     * @param {() => void} retry
+     */
+    set: (fails, retry) => {
+      const f = failSummary(fails);
+      box.hidden = !f;
+      if (!f) return box.replaceChildren();
+      box.replaceChildren(
+        el(
+          "div",
+          { class: "kp-alert kp-alert--destructive cf-fail", role: "alert" },
+          el("strong", null, f.title),
+          el("p", null, `Why: ${f.why}`),
+          f.fix ? el("p", null, `What to do: ${f.fix}`) : null,
+          tryAgain(retry, page),
+        ),
+      );
+    },
+  };
+}
+
+/** A card's muted line while the page's one alert says why. @param {string} text */
+export const failNote = (text) => el("p", { class: "cf-failnote" }, text);

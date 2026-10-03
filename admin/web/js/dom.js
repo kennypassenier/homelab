@@ -65,8 +65,9 @@ export function badgeCell(st) {
 }
 
 /**
- * @typedef {{label: string, sort: string, order?: string, filter?: string,
- *   cls?: string}} Column
+ * @typedef {{label: string, sort: string | null, order?: string,
+ *   filter?: string, cls?: string}} Column
+ *   sort: null for a column that does not sort (its actions, say).
  */
 
 /**
@@ -85,7 +86,7 @@ export function badgeCell(st) {
  * says "nothing" and "nothing matches" apart; kp's failed slot carries the
  * reason and a Try again (fail(), `kp-datatable-retry`, which each page
  * already hears). All of it kp-themes 7.3.0 (chassis-rs 2.4.1).
- * @param {{remember: string, caption: string, search: string,
+ * @param {{remember: string, caption: string, search: string | null,
  *   columns: Column[], state?: "loading", pageSize?: number,
  *   pageSizes?: string, select?: {label: string, actions: Node[]},
  *   nothing?: string, busyOverlay?: boolean, captionHidden?: boolean}} spec
@@ -120,7 +121,8 @@ export function tableBlock(spec) {
       : []),
     ...spec.columns.map((c) => {
       /** @type {Record<string, string>} */
-      const a = { "data-kp-sort": c.sort };
+      const a = {};
+      if (c.sort) a["data-kp-sort"] = c.sort;
       if (c.order) a["data-kp-sort-order"] = c.order;
       if (c.filter) a["data-kp-filter"] = c.filter;
       if (c.cls) a.class = c.cls;
@@ -175,17 +177,22 @@ export function tableBlock(spec) {
   const wrap = h(
     "div",
     wrapAttrs,
-    h(
-      "div",
-      { class: "kp-datatable__bar" },
-      h("input", {
-        class: "kp-datatable__search",
-        "data-kp-datatable-search": "",
-        type: "search",
-        placeholder: spec.search,
-        "aria-label": spec.search,
-      }),
-    ),
+    // search null: a short table the page filters itself has no box.
+    ...(spec.search
+      ? [
+          h(
+            "div",
+            { class: "kp-datatable__bar" },
+            h("input", {
+              class: "kp-datatable__search",
+              "data-kp-datatable-search": "",
+              type: "search",
+              placeholder: spec.search,
+              "aria-label": spec.search,
+            }),
+          ),
+        ]
+      : []),
     ...(spec.select
       ? [
           h(

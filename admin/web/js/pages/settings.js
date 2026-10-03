@@ -49,7 +49,10 @@ import {
   repoState,
   sectionTarget,
   shortRemote,
+  keepStaged,
+  restoreStaged,
   slug,
+  STAGED_STORE,
   stagedWords,
 } from "../settingsview.js";
 import { listen } from "../store.js";
@@ -59,7 +62,8 @@ import {
   chip,
   dot,
   el,
-  failBox,
+  failBand,
+  failNote,
   hideTip,
   highlight,
   pageHeader,
@@ -215,6 +219,23 @@ export function mount(root, opts = {}) {
   const abort = new AbortController();
   /** @type {(() => void)[]} */
   const stops = [];
+  // redesign-config-11: one alert under the header for every read the
+  // page lost, with one Try again that reads each of them again.
+  const band = failBand("settings");
+  /** @type {Map<string, {error: import("../doctor.js").RouteError, retry: () => void}>} */
+  const fails = new Map();
+  /**
+   * @param {string} what
+   * @param {import("../doctor.js").RouteError | null} error
+   * @param {() => void} retry
+   */
+  const failed = (what, error, retry) => {
+    if (error) fails.set(what, { error, retry });
+    else fails.delete(what);
+    const now = [...fails].map(([w, f]) => ({ what: w, error: f.error }));
+    const again = [...fails.values()].map((f) => f.retry);
+    band.set(now, () => again.forEach((r) => r()));
+  };
   const q0 = new URLSearchParams(location.search);
   const S = {
     q: (q0.get("q") ?? "").toLowerCase(),
@@ -427,7 +448,9 @@ export function mount(root, opts = {}) {
     desc: "Who can reach this dashboard and the host: your passkeys for the browser, one token per machine for the CLI and TUI.",
     body: [el("div", { class: "si-grid" }, passkeyCol, tokenCol)],
   });
-  stops.push(mountPasskeys(passkeyCol));
+  stops.push(
+    mountPasskeys(passkeyCol, (e, retry) => failed("the passkeys", e, retry)),
+  );
 
   // ── host settings ─────────────────────────────────────────────────────
   const hsDesc = el(
@@ -546,6 +569,7 @@ export function mount(root, opts = {}) {
   const main = el("div", { class: "st-main" }, wc, signin, hsHead, groupBox);
   root.replaceChildren(
     head.el,
+    band.el,
     tb.el,
     el("div", { class: "st-split" }, side, main),
   );
@@ -580,7 +604,53 @@ export function mount(root, opts = {}) {
             ? v.join(", ")
             : String(v);
 
+  // redesign-config-5: the staged changes outlive a look at another page
+  // (kept for this tab, never a secret), and closing the tab with some
+  // staged asks first.
+  // Nothing is written back until the first read has restored what was
+  // kept, so the page's first (empty) paint does not wipe it.
+  let restored = false;
+  const keep = () => {
+    if (!restored) return;
+    try {
+      if (changes.size)
+        sessionStorage.setItem(STAGED_STORE, keepStaged(changes, isSecret));
+      else sessionStorage.removeItem(STAGED_STORE);
+    } catch {
+      /* storage off: the changes live while the page does */
+    }
+  };
+  const restore = () => {
+    if (!page) return;
+    restored = true;
+    if (changes.size) return;
+    let raw = null;
+    try {
+      raw = sessionStorage.getItem(STAGED_STORE);
+    } catch {
+      return;
+    }
+    const back = restoreStaged(raw, page.fields);
+    for (const [k, value] of Object.entries(back)) {
+      const field = page.fields.find((f) => f.key === k);
+      if (field) changes.set(k, { field, value });
+    }
+    if (changes.size)
+      notify(
+        `${stagedWords(changes.size).chip}: kept from before you left this page.`,
+        "info",
+      );
+  };
+  /** @param {BeforeUnloadEvent} e */
+  const onUnload = (e) => {
+    if (!changes.size) return;
+    e.preventDefault();
+    e.returnValue = "";
+  };
+  addEventListener("beforeunload", onUnload);
+
   const paint = () => {
+    keep();
     const w = stagedWords(changes.size);
     stagedChip.textContent = w.chip;
     stagedChip.className = `cf-chip${changes.size ? " cf-chip--info" : ""}`;
@@ -1055,10 +1125,14 @@ export function mount(root, opts = {}) {
       abort.signal,
     );
     if (!r.ok) {
-      groupBox.replaceChildren(failBox(r.error, () => void loadHost()));
+      groupBox.replaceChildren(
+        failNote("Not read: see the message at the top."),
+      );
       found.textContent = "";
+      failed("the host settings", r.error, () => void loadHost());
       return;
     }
+    failed("the host settings", null, () => void loadHost());
     const first = page === null;
     page = r.body.page;
     if (first && page)
@@ -1066,6 +1140,7 @@ export function mount(root, opts = {}) {
     // A staged change whose key the new read no longer has is dropped.
     for (const k of [...changes.keys()])
       if (!page?.fields.some((f) => f.key === k)) changes.delete(k);
+    if (first) restore();
     paintSide(spyCurrent);
     paint();
     setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
@@ -1092,9 +1167,11 @@ export function mount(root, opts = {}) {
   const loadRepo = async () => {
     const r = await fetchJson("/data/repo", "the working copy", abort.signal);
     if (!r.ok) {
-      wcBody.replaceChildren(failBox(r.error, () => void loadRepo()));
+      wcBody.replaceChildren(failNote("Not read: see the message at the top."));
+      failed("the working copy", r.error, () => void loadRepo());
       return;
     }
+    failed("the working copy", null, () => void loadRepo());
     drawRepo(r.body);
   };
 
@@ -1245,18 +1322,26 @@ export function mount(root, opts = {}) {
     );
   };
 
+  // redesign-config-10: the fetch says it runs (it can take seconds on a
+  // slow remote), and a page left meanwhile neither toasts nor reads.
   fetchNow.addEventListener("click", async () => {
-    /** @type {HTMLButtonElement} */ (fetchNow).disabled = true;
+    const b = /** @type {HTMLButtonElement} */ (fetchNow);
+    b.disabled = true;
+    b.setAttribute("aria-busy", "true");
+    b.textContent = "Fetching the remote…";
     const x = await send(
       "POST",
       "/data/repo/sync",
       undefined,
       "the working copy",
     );
-    /** @type {HTMLButtonElement} */ (fetchNow).disabled = false;
+    b.disabled = false;
+    b.removeAttribute("aria-busy");
+    b.textContent = "Fetch now";
+    if (abort.signal.aborted) return;
     if (!x.ok) await refusalAlarm(x.error, x.status);
     else notify("The working copy is up to date.", "success");
-    void loadRepo();
+    if (!abort.signal.aborted) void loadRepo();
   });
 
   // ── fix-120: per-machine tokens ──
@@ -1325,9 +1410,13 @@ export function mount(root, opts = {}) {
   const loadTokens = async () => {
     const r = await fetchJson("/data/tokens", "the tokens", abort.signal);
     if (!r.ok) {
-      tokenList.replaceChildren(failBox(r.error, () => void loadTokens()));
+      tokenList.replaceChildren(
+        failNote("Not read: see the message at the top."),
+      );
+      failed("the tokens", r.error, () => void loadTokens());
       return;
     }
+    failed("the tokens", null, () => void loadTokens());
     paintTokens(r.body.tokens ?? []);
   };
   const issueTokenDialog = () => {
@@ -1736,6 +1825,13 @@ export function mount(root, opts = {}) {
     hideTip();
     document.removeEventListener("keydown", onKey);
     for (const s of stops) s();
+    removeEventListener("beforeunload", onUnload);
+    const secrets = [...changes.values()].filter((c) => isSecret(c.field));
+    if (secrets.length)
+      notify(
+        `A staged secret (${secrets.map((c) => c.field.key).join(", ")}) was dropped: secrets are never kept in the browser. The other staged changes wait on Settings.`,
+        "warning",
+      );
     root.classList.remove("cf-page", "st-page");
   };
 }

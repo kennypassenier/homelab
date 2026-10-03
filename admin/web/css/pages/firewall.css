@@ -305,8 +305,45 @@
   .fw-hide-sm {
     display: none;
   }
-  .fw-stacks th:nth-child(3),
-  .fw-stacks td:nth-child(3) {
-    display: none;
+  /* redesign-config-1: on a phone the Stacks table is kp's card layout
+     (data-kp-cards); the CT/IP line wraps under the name in its own row. */
+  .fw-idcell__text small {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
+  .fw-stacks td.cf-row-actions {
+    justify-content: flex-end;
+  }
+  /* redesign-config-13: a KPI's context takes two lines on a phone
+     instead of being cut. */
+  .fw-page .nx-kpi__ctx {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    min-block-size: 2.8em;
+  }
+}
+
+/* the Actions column's header is for a screen reader only */
+.fw-stacks th.fw-col-acts {
+  font-size: 0;
+}
+
+/* redesign-config-9: the rules toolbar in the demo's order — the ACCEPT /
+   DROP toggles, the search with its "/", the count against the right
+   edge. Above a phone only; there the foundation stacks it. */
+@media (min-width: 48.01rem) {
+  .nx-tb.fw-tb {
+    grid-template-columns: auto minmax(14rem, 22rem) minmax(0, 1fr);
+  }
+}
+
+/* redesign-config-8: a rule switched off reads muted */
+.fw-rule--off td {
+  color: var(--muted-foreground);
+}
+.fw-rule--off .fw-act {
+  opacity: 0.6;
 }

@@ -18,9 +18,10 @@
 // stack hub's Settings tab draws.
 
 import { agoEl, setAgo } from "../ago.js";
-import { fetchJson } from "../dom.js";
+import { fetchJson, tableBlock } from "../dom.js";
 import { declare, drivable } from "../drivable.js";
 import {
+  busiestStack,
   cellLabel,
   cellOf,
   cellWords,
@@ -31,6 +32,7 @@ import {
   portsText,
   ruleHits,
   ruleMatches,
+  ruleOrderText,
   rulesFor,
 } from "../fwview.js";
 import { stackHref } from "../router.js";
@@ -47,22 +49,21 @@ import {
 } from "../ui.js";
 import { setParams } from "../urlstate.js";
 import {
-  applySort,
   chip,
   dot,
   el,
-  failBox,
+  failBand,
+  failNote,
   hideTip,
   highlight,
   pageHeader,
   pageStyles,
-  rememberedSort,
   rowKeys,
   seg,
   skel,
-  sortHead,
   tipOn,
 } from "./configkit.js";
+import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 
 export { fwSummary } from "../fwview.js";
 
@@ -203,6 +204,20 @@ const EDIT_RULE = declare({
   row: "<stack>/<in|out>/<n>",
   what: "go to an opened rule's stack firewall on its Settings",
 });
+const RULE_UP = declare({
+  id: "firewall-rule-move-up",
+  page: "firewall",
+  opens: "view",
+  row: "<stack>/<in|out>/<n>",
+  what: "move an opened rule one place up: its stack's firewall editor opens with the move staged for review",
+});
+const RULE_OFF = declare({
+  id: "firewall-rule-disable",
+  page: "firewall",
+  opens: "view",
+  row: "<stack>/<in|out>/<n>",
+  what: "switch an opened rule off (or back on): its stack's firewall editor opens with the change staged for review",
+});
 const SORT = declare({
   id: "firewall-sort",
   page: "firewall",
@@ -240,7 +255,6 @@ export function mount(root) {
     open: null,
     /** @type {RuleRow | null} */
     hot: null,
-    sort: rememberedSort("firewall-stacks"),
   };
   const keepUrl = () => {
     const next = setParams(location.search, {
@@ -312,6 +326,7 @@ export function mount(root) {
   );
   kpis.el.setAttribute("aria-label", "Firewall totals");
   const attention = attentionBand([]);
+  const fail = failBand("firewall");
 
   // ── stacks card ───────────────────────────────────────────────────────
   const stBox = el("div", { class: "cf-table-wrap" }, skeletonTable(5, 5));
@@ -424,6 +439,13 @@ export function mount(root) {
     state: [ruleCount],
   });
   if (tb.search) drivable(tb.search, RULE_SEARCH);
+  // The demo's order: the ACCEPT / DROP toggles first, then the search
+  // with its "/", the count against the right edge (redesign-config-9).
+  {
+    const filters = tb.el.querySelector(".nx-tb__filters");
+    if (filters) tb.el.prepend(filters);
+    tb.el.classList.add("fw-tb");
+  }
   const rulesBody = el("div", { class: "fw-rules2" });
   const editThese = /** @type {HTMLAnchorElement} */ (
     el(
@@ -449,6 +471,7 @@ export function mount(root) {
 
   root.replaceChildren(
     head.el,
+    fail.el,
     kpis.el,
     attention.el,
     el("div", { class: "cf-grid" }, stacksCard.el, mxCard.el),
@@ -522,13 +545,131 @@ export function mount(root) {
     );
   };
 
-  /** @param {StackFw} s @param {string} k */
-  const stGet = (s, k) =>
-    k === "stack" ? s.stack : k === "state" ? fwState(s).word : s.rules;
+  // The Stacks card is a kp datatable (Kenny's rule: sortable, Shift for
+  // a second key, remembered per table; redesign-config-6). Its rows are
+  // drawn once per read; lighting a stack up only marks them.
+  /** @type {ReturnType<typeof tableBlock> | null} */
+  let stTable = null;
+  let detachSt = () => {};
+  /** @type {StackFw[] | null} */
+  let stDrawn = null;
+  /** @param {StackFw} s */
+  const stackRow = (s) => {
+    const st = fwState(s);
+    const tr = el(
+      "tr",
+      {
+        class: "fw-row",
+        tabindex: "0",
+        "data-stack": s.stack,
+        "data-kp-row-key": s.stack,
+        "aria-selected": String(S.focus.has(s.stack)),
+        title:
+          "Click to light this stack up in the matrix (click again to turn it off) and show its rules",
+        onclick: (/** @type {MouseEvent} */ e) => {
+          if (/** @type {Element} */ (e.target).closest("a,button")) return;
+          toggleFocus(s.stack);
+          S.stack = s.stack;
+          S.open = null;
+          paintAll();
+        },
+      },
+      el(
+        "td",
+        { class: "cf-id", "data-label": "Stack" },
+        el(
+          "span",
+          { class: "fw-idcell" },
+          stackMark(s.stack, 16),
+          el(
+            "span",
+            { class: "fw-idcell__text" },
+            drivable(
+              el(
+                "a",
+                { href: stackHref(s.stack), title: `Open ${s.stack}` },
+                s.stack,
+              ),
+              OPEN_STACK,
+              s.stack,
+            ),
+            el("small", { class: "cf-mono" }, `CT ${s.vmid} · ${s.ip}`),
+          ),
+        ),
+      ),
+      el(
+        "td",
+        { class: "nowrap", "data-label": "State" },
+        dot(st.tone, st.word),
+      ),
+      el(
+        "td",
+        { class: "kp-col-low", "data-label": "Default" },
+        s.policy_in
+          ? el(
+              "span",
+              { class: "fw-policy" },
+              el("b", null, "in"),
+              el(
+                "span",
+                { class: `fw-act fw-act--${s.policy_in}` },
+                s.policy_in,
+              ),
+              el("b", null, "out"),
+              el(
+                "span",
+                { class: `fw-act fw-act--${s.policy_out}` },
+                s.policy_out ?? "—",
+              ),
+            )
+          : el("span", { class: "cf-muted" }, "—"),
+      ),
+      el("td", { class: "num", "data-label": "Rules" }, String(s.rules)),
+      el(
+        "td",
+        { class: "cf-row-actions", "data-label": "" },
+        drivable(
+          el(
+            "a",
+            {
+              class: "kp-button kp-button--sm",
+              href: fwHref(s.stack),
+              title: s.declared
+                ? "Edit on the stack's Settings"
+                : "Declare a firewall for this stack on its Settings",
+            },
+            s.declared ? "Edit" : "Declare…",
+          ),
+          EDIT_STACK,
+          s.stack,
+        ),
+      ),
+    );
+    drivable(tr, LIGHT, s.stack);
+    if (s.management_open)
+      tipOn(/** @type {HTMLElement} */ (tr.children[2]), () => [
+        el("b", null, "Management network"),
+        el("span", null, s.management_open ?? ""),
+      ]);
+    return tr;
+  };
+  const markStacks = () => {
+    for (const tr of stBox.querySelectorAll("tr.fw-row"))
+      tr.setAttribute(
+        "aria-selected",
+        String(
+          S.focus.has(/** @type {HTMLElement} */ (tr).dataset.stack ?? ""),
+        ),
+      );
+  };
 
   const paintStacks = () => {
     if (!data) return;
+    if (stDrawn === data.stacks) return markStacks();
+    stDrawn = data.stacks;
     if (!data.stacks.length) {
+      detachSt();
+      stTable = null;
       stBox.replaceChildren(
         emptyState({
           title: "No stack files",
@@ -537,145 +678,39 @@ export function mount(root) {
       );
       return;
     }
-    const sh = (
-      /** @type {string} */ label,
-      /** @type {string} */ key,
-      cls = "",
-    ) => {
-      const th = sortHead({
-        label,
-        key,
-        name: "firewall-stacks",
-        state: S.sort,
-        onChange: paintStacks,
-        cls,
+    if (!stTable) {
+      stTable = tableBlock({
+        remember: "firewall-stacks",
+        caption: "Each stack's firewall",
+        captionHidden: true,
+        search: null,
+        busyOverlay: false,
+        nothing: "No stack files.",
+        columns: [
+          { label: "Stack", sort: "text", cls: "fw-col-stack" },
+          { label: "State", sort: "text" },
+          { label: "Default", sort: null, cls: "fw-col-default kp-col-low" },
+          { label: "Rules", sort: "number", cls: "num" },
+          { label: "Actions", sort: null, cls: "fw-col-acts" },
+        ],
       });
-      const b = th.querySelector("button");
-      if (b) drivable(b, SORT, key);
-      return th;
-    };
-    stBox.replaceChildren(
-      el(
-        "table",
-        { class: "cf-table fw-stacks" },
-        el(
-          "thead",
-          null,
-          el(
-            "tr",
-            null,
-            sh("Stack", "stack"),
-            sh("State", "state"),
-            el("th", { scope: "col" }, "Default"),
-            sh("Rules", "rules", "num"),
-            el(
-              "th",
-              { scope: "col" },
-              el("span", { class: "cf-sr" }, "Actions"),
-            ),
-          ),
-        ),
-        el(
-          "tbody",
-          null,
-          applySort(data.stacks, S.sort, stGet).map((s) => {
-            const st = fwState(s);
-            const tr = el(
-              "tr",
-              {
-                class: "fw-row",
-                tabindex: "0",
-                "data-stack": s.stack,
-                "aria-selected": String(S.focus.has(s.stack)),
-                title:
-                  "Click to light this stack up in the matrix (click again to turn it off) and show its rules",
-                onclick: (/** @type {MouseEvent} */ e) => {
-                  if (/** @type {Element} */ (e.target).closest("a,button"))
-                    return;
-                  toggleFocus(s.stack);
-                  S.stack = s.stack;
-                  S.open = null;
-                  paintAll();
-                },
-              },
-              el(
-                "td",
-                { class: "cf-id" },
-                el(
-                  "span",
-                  { class: "fw-idcell" },
-                  stackMark(s.stack, 16),
-                  el(
-                    "span",
-                    { class: "fw-idcell__text" },
-                    drivable(
-                      el(
-                        "a",
-                        { href: stackHref(s.stack), title: `Open ${s.stack}` },
-                        s.stack,
-                      ),
-                      OPEN_STACK,
-                      s.stack,
-                    ),
-                    el("small", { class: "cf-mono" }, `CT ${s.vmid} · ${s.ip}`),
-                  ),
-                ),
-              ),
-              el("td", { class: "nowrap" }, dot(st.tone, st.word)),
-              el(
-                "td",
-                null,
-                s.policy_in
-                  ? el(
-                      "span",
-                      { class: "fw-policy" },
-                      el("b", null, "in"),
-                      el(
-                        "span",
-                        { class: `fw-act fw-act--${s.policy_in}` },
-                        s.policy_in,
-                      ),
-                      el("b", null, "out"),
-                      el(
-                        "span",
-                        { class: `fw-act fw-act--${s.policy_out}` },
-                        s.policy_out ?? "—",
-                      ),
-                    )
-                  : el("span", { class: "cf-muted" }, "—"),
-              ),
-              el("td", { class: "num" }, String(s.rules)),
-              el(
-                "td",
-                { class: "cf-row-actions" },
-                drivable(
-                  el(
-                    "a",
-                    {
-                      class: "kp-button kp-button--sm",
-                      href: fwHref(s.stack),
-                      title: s.declared
-                        ? "Edit on the stack's Settings"
-                        : "Declare a firewall for this stack on its Settings",
-                    },
-                    s.declared ? "Edit" : "Declare…",
-                  ),
-                  EDIT_STACK,
-                  s.stack,
-                ),
-              ),
-            );
-            drivable(tr, LIGHT, s.stack);
-            if (s.management_open)
-              tipOn(/** @type {HTMLElement} */ (tr.children[2]), () => [
-                el("b", null, "Management network"),
-                el("span", null, s.management_open ?? ""),
-              ]);
-            return tr;
-          }),
-        ),
-      ),
-    );
+      stTable.wrap.classList.add("fw-stacks-dt");
+      // A phone gets kp's card layout (one card per stack, label: value),
+      // so no column is squeezed over its neighbour (redesign-config-1).
+      stTable.wrap.setAttribute("data-kp-cards", "");
+      stTable.tbody.closest("table")?.classList.add("fw-stacks");
+      stTable.tbody.replaceChildren(...data.stacks.map(stackRow));
+      stBox.replaceChildren(stTable.wrap);
+      detachSt = attachDataTables(stBox);
+      const ths = stTable.wrap.querySelectorAll("thead th");
+      ["stack", "state", "", "rules"].forEach((k, i) => {
+        if (k) drivable(/** @type {HTMLElement} */ (ths[i]), SORT, k);
+      });
+    } else {
+      stTable.tbody.replaceChildren(...data.stacks.map(stackRow));
+      dataTable(stTable.wrap)?.refresh();
+    }
+    stTable.ready();
   };
 
   const paintMx = () => {
@@ -941,7 +976,7 @@ export function mount(root) {
     if (!withRules.includes(S.stack))
       S.stack =
         [...S.focus].find((n) => withRules.includes(n)) ??
-        (withRules.includes("gateway") ? "gateway" : withRules[0]);
+        busiestStack(withRules, m.rules);
     stackSeg.setOptions(
       withRules.map((n) => ({
         value: n,
@@ -980,7 +1015,7 @@ export function mount(root) {
           { class: "cf-table-wrap" },
           el(
             "table",
-            { class: "cf-table fw-rules" },
+            { class: "kp-table fw-rules" },
             el(
               "thead",
               null,
@@ -998,7 +1033,7 @@ export function mount(root) {
               "tbody",
               null,
               rs.length
-                ? rs.flatMap((r) => ruleRow(r, all.length))
+                ? rs.flatMap((r) => ruleRow(r, m.rules))
                 : [
                     el(
                       "tr",
@@ -1057,14 +1092,14 @@ export function mount(root) {
     paintRules();
   };
 
-  /** @param {RuleRow} r @param {number} of */
-  const ruleRow = (r, of) => {
+  /** @param {RuleRow} r @param {RuleRow[]} every */
+  const ruleRow = (r, every) => {
     const key = `${r.stack}/${r.dir}/${r.n}`;
     const open = S.open === key;
     const tr = el(
       "tr",
       {
-        class: "fw-rule",
+        class: `fw-rule${r.disabled ? " fw-rule--off" : ""}`,
         tabindex: "0",
         "data-rule": key,
         "aria-expanded": String(open),
@@ -1091,6 +1126,7 @@ export function mount(root) {
         "td",
         null,
         el("span", { class: `fw-act fw-act--${r.action}` }, r.action),
+        r.disabled ? chip("off") : null,
       ),
       el(
         "td",
@@ -1125,12 +1161,14 @@ export function mount(root) {
             el(
               "dd",
               null,
-              r.enabled
-                ? `yes, live on CT ${r.vmid}`
-                : "declared, not applied yet",
+              r.disabled
+                ? "no: switched off, Proxmox skips it"
+                : r.enabled
+                  ? `yes, live on CT ${r.vmid}`
+                  : "declared, not applied yet",
             ),
             el("dt", null, "Order"),
-            el("dd", null, `rule ${r.n} of ${of}: first match wins`),
+            el("dd", null, ruleOrderText(r, every)),
             el("dt", null, "Why"),
             el("dd", null, r.note || "—"),
             el("dt", null, "Matrix"),
@@ -1159,6 +1197,37 @@ export function mount(root) {
               EDIT_RULE,
               key,
             ),
+            r.n > 1
+              ? drivable(
+                  el(
+                    "a",
+                    {
+                      class: "kp-button kp-button--sm kp-button--ghost",
+                      href: `${fwHref(r.stack)}&rule=${r.n}&do=up`,
+                      title:
+                        "Move this rule one place up: the stack's firewall opens with the move staged; you review and write it there",
+                    },
+                    "Move up",
+                  ),
+                  RULE_UP,
+                  key,
+                )
+              : null,
+            drivable(
+              el(
+                "a",
+                {
+                  class: "kp-button kp-button--sm kp-button--ghost",
+                  href: `${fwHref(r.stack)}&rule=${r.n}&do=${r.disabled ? "enable" : "disable"}`,
+                  title: r.disabled
+                    ? "Switch this rule back on: the stack's firewall opens with it staged; you review and write it there"
+                    : "Switch this rule off (it stays in the file, Proxmox skips it): the stack's firewall opens with it staged; you review and write it there",
+                },
+                r.disabled ? "Enable" : "Disable",
+              ),
+              RULE_OFF,
+              key,
+            ),
           ),
         ),
       ),
@@ -1172,7 +1241,7 @@ export function mount(root) {
   const onKey = (e) => {
     if (e.key !== "Escape") return;
     const a = document.activeElement;
-    if (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) return;
+    if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
     if (document.querySelector("dialog[open]")) return;
     hideTip();
     if (S.focus.size) {
@@ -1209,13 +1278,17 @@ export function mount(root) {
       abort.signal,
     );
     if (!r.ok) {
-      const e = r.error;
-      stBox.replaceChildren(failBox(e, retry));
-      mx.replaceChildren(failBox(e, retry));
+      // One read, one message (redesign-config-11): the alert under the
+      // header says why with one Try again; each card says it is empty.
+      fail.set([{ what: "the fleet's firewall", error: r.error }], retry);
+      const note = failNote("Not read: see the message at the top.");
+      stBox.replaceChildren(note);
+      mx.replaceChildren(note.cloneNode(true));
       pathBox.hidden = true;
-      rulesBody.replaceChildren(failBox(e, retry));
+      rulesBody.replaceChildren(note.cloneNode(true));
       return;
     }
+    fail.set([], retry);
     data = /** @type {FirewallRead} */ (r.body);
     data.stacks = data.stacks ?? [];
     foot.replaceChildren(el("span", null, data.head?.subject ?? ""), ago);
@@ -1230,6 +1303,7 @@ export function mount(root) {
     off();
     hideTip();
     document.removeEventListener("keydown", onKey);
+    detachSt();
     root.classList.remove("cf-page", "fw-page");
   };
 }

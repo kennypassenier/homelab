@@ -6,7 +6,8 @@
 /**
  * @typedef {{stack: string, vmid: number, n: number, dir: "in" | "out",
  *   action: string, peer: string, peer_stacks: string[], proto: string,
- *   ports: string, note: string, enabled: boolean}} RuleRow
+ *   ports: string, note: string, enabled: boolean,
+ *   disabled?: boolean}} RuleRow
  * @typedef {{from: string, to: string, state: "open" | "some" | "none",
  *   allowed: string[], stopped_at_source: string[]}} Cell
  * @typedef {{stacks: string[], cells: Cell[], rules: RuleRow[],
@@ -338,4 +339,39 @@ export function fwSummary(d, stack) {
     ),
     href: `/firewall?stack=${encodeURIComponent(stack)}`,
   };
+}
+
+/**
+ * redesign-config-2: where a rule stands in its stack's list. Proxmox
+ * numbers a stack's rules across both directions, so "rule 17 of 4" (the
+ * direction's count) read wrong; the stack's total comes first, the
+ * direction's share after it.
+ * @param {RuleRow} r
+ * @param {RuleRow[]} rules every rule of the fleet
+ */
+export function ruleOrderText(r, rules) {
+  const mine = rules.filter((x) => x.stack === r.stack);
+  const way = mine.filter((x) => x.dir === r.dir).length;
+  return `rule ${r.n} of ${mine.length} (${way} ${r.dir === "in" ? "inbound" : "outbound"}): first match wins`;
+}
+
+/**
+ * redesign-config-7: the stack the Rules card opens on when nothing chose
+ * one: the one with the most rules (the most telling), the first in the
+ * page's order on a tie, "" when there is none. No stack name is known
+ * to the code.
+ * @param {string[]} names in the page's order
+ * @param {RuleRow[]} rules
+ */
+export function busiestStack(names, rules) {
+  let best = "";
+  let most = 0;
+  for (const n of names) {
+    const c = rules.filter((r) => r.stack === n).length;
+    if (c > most) {
+      best = n;
+      most = c;
+    }
+  }
+  return best;
 }

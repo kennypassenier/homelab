@@ -296,3 +296,37 @@ fn fix_191_only_named_keys_may_move() {
     assert_eq!(keys, vec!["backup_hour", "zfs_jobs"]);
     assert!(shown[1].to.is_none(), "a dropped key shows as dropped");
 }
+
+/// redesign-config-2 (3.71.0 review): the Settings page shows every key's
+/// label, description and default, and the refusal `check_value` gives, to
+/// the person using the dashboard. Internal finding ids ("(arch-self)",
+/// "fix-191", "gap-26") mean nothing there; they belong in `///` comments.
+#[test]
+fn redesign_config_2_no_internal_id_reaches_the_settings_page() {
+    let id = |s: &str| {
+        s.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+            .any(|w| {
+                ["arch-", "fix-", "gap-", "feat-", "scope-", "redesign-"]
+                    .iter()
+                    .any(|p| w.starts_with(p) && w.len() > p.len())
+            })
+    };
+    let mut bad = Vec::new();
+    for k in KEYS {
+        for (what, s) in [("label", k.label), ("help", k.help), ("default", k.default)] {
+            if id(s) {
+                bad.push(format!("{} {what}: {s}", k.key));
+            }
+        }
+        if let Err(e) = check_value(k.key, &json!("x"))
+            && id(&e)
+        {
+            bad.push(format!("{} refusal: {e}", k.key));
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "internal ids shown to users:\n{}",
+        bad.join("\n")
+    );
+}

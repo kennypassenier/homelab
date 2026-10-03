@@ -556,7 +556,7 @@ export function mount(root, ctx) {
     const r = await fetchJson("/data/presets", "the presets", abort.signal);
     if (!r.ok) {
       gallery.hidden = true;
-      below.replaceChildren(failBox(r.error, retry));
+      below.replaceChildren(failBox(r.error, retry, "presets"));
       count.textContent = "";
       return;
     }

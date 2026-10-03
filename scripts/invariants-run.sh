@@ -112,6 +112,11 @@ services:
       - "com.homelab.update.upstream=github.com/example/demo-api"
 EOF
 
+# redesign-presets-1: the repository's own presets/ (public files, no
+# secrets: preset.yml and docker-compose.yml templates), so the Presets
+# gallery and the New stack wizard have something to show.
+cp -r "$root/presets" "$fixture_repo/presets"
+
 git init -q -b main "$fixture_repo"
 git -C "$fixture_repo" -c user.email=invariants@example.com -c user.name=invariants \
   add -A

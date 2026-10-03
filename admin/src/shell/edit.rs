@@ -828,6 +828,10 @@ pub async fn read_presets(c: &EditCtx) -> serde_json::Value {
             "ram_mb": p.meta.ram_mb,
             "cores": p.meta.cores.unwrap_or(d.default_cores),
             "disk_gb": p.meta.disk_gb.unwrap_or(d.default_disk_gb),
+            // redesign-presets-1: whether the preset itself sets them, so
+            // the gallery can say "default" for the fleet's fallback.
+            "cores_set": p.meta.cores.is_some(),
+            "disk_set": p.meta.disk_gb.is_some(),
             "apps": p.apps,
             "gpu": p.meta.gpu,
             "vpn": p.meta.vpn,

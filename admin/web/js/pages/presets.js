@@ -1,37 +1,119 @@
-// Presets (TUI parity, `homelab presets`): the repository's preset
-// catalogue, each preset's size and apps; a new stack starts from one.
+// The Presets page (redesign-presets, release 3.71.0; Kenny approved the
+// demo 2026-10-03: ~/.local/share/homelab/redesign-3.71/presets.html,
+// implemented exactly). The repository's presets/ directory as a gallery:
+// one card per preset with its mark, purpose, apps and size (RAM, cores,
+// disk — "default" where the preset leaves it to the fleet), "Use this
+// preset" and "Edit"; the app-less preset (presets/custom) is the dashed
+// "Empty stack" card at the end. A search and an A–Z / Largest first
+// switch sit above it; with no presets at all the page says why and offers
+// the three ways on (write one, import one, start empty).
+//
+// "Use this preset" opens the existing New stack wizard with that preset
+// chosen (feat-stacks-3: name and number, size, data, plan and commit,
+// replayed by Live view), "Edit" the presets editor (feat-preset-1).
 
 import { agoEl, setAgo } from "../ago.js";
-import { humanMb } from "../fleet.js";
-import { bindTableUrl, fetchJson, h, tableBlock, td } from "../dom.js";
+import { fetchJson } from "../dom.js";
+import { declare, drivable, viaForm } from "../drivable.js";
 import { openImport } from "../importstack.js";
 import { openNewStack } from "../newstack.js";
 import { openPresetEditor } from "../presetseditor.js";
-import { sortKeys } from "../sortkeys.js";
 import {
-  attachDataTables,
-  compare,
-  dataTable,
-} from "/static/kp/js/datatable.js";
-import { viaForm } from "../drivable.js";
+  countText,
+  emptyPreset,
+  galleryCards,
+  ramText,
+  sets,
+} from "../presetsview.js";
+import { toolbar } from "../ui.js";
+import { setParams } from "../urlstate.js";
+import {
+  chip,
+  el,
+  failBox,
+  highlight,
+  pageHeader,
+  pageStyles,
+  seg,
+  skel,
+  tipOn,
+} from "./configkit.js";
 
-/**
- * The preset's name, as a button that opens the presets editor
- * (feat-preset-1) — editing a preset never touches its YAML by hand.
- * @param {string} name
- * @param {() => void} onChanged
- */
-function presetNameCell(name, onChanged) {
-  const btn = h(
-    "button",
-    { type: "button", class: "kp-link-button", "data-preset-edit": name },
-    name,
-  );
-  // fix-239: Live view reaches it as `homelab ui open preset <name>`.
-  viaForm(btn, "preset");
-  btn.addEventListener("click", () => void openPresetEditor(name, onChanged));
-  return btn;
-}
+/** @typedef {import("../presetsview.js").PresetView} PresetView */
+
+// Live view (invariant 39): every control on the page has its own id; the
+// buttons that open a dialog are also the server-modelled forms they open
+// (`homelab ui open new-stack | import | new-preset | preset <name>`).
+/** @param {string} id @param {string} what @param {string} [row] */
+const ctl = (id, what, row) =>
+  declare({
+    id,
+    page: "presets",
+    opens: /^presets-(card|use|edit|start|import|new|empty)/.test(id)
+      ? "dialog"
+      : "view",
+    what,
+    ...(row ? { row } : {}),
+  });
+const IMPORT = ctl("presets-import", "open the Import a bundle dialog");
+const NEW_PRESET = ctl(
+  "presets-new-preset",
+  "open the presets editor for a new preset",
+);
+const NEW_STACK = ctl("presets-new-stack", "open the New stack wizard");
+const NONE_IMPORT = ctl(
+  "presets-import-first",
+  "the empty page's Import a bundle…",
+);
+const NONE_NEW_PRESET = ctl(
+  "presets-new-preset-first",
+  "the empty page's New preset…",
+);
+const NONE_NEW_STACK = ctl(
+  "presets-new-stack-first",
+  "the empty page's New stack…",
+);
+const SEARCH = ctl(
+  "presets-search",
+  "the gallery's search box (name, app or purpose)",
+);
+const SORT = ctl(
+  "presets-sort",
+  "sort the gallery A–Z or largest first",
+  "name|ram",
+);
+const CARD = ctl(
+  "presets-card",
+  "a preset's card: opens the New stack wizard on it",
+  "<preset>",
+);
+const USE = ctl(
+  "presets-use",
+  "Use this preset: the New stack wizard on that preset",
+  "<preset>",
+);
+const EDIT = ctl(
+  "presets-edit",
+  "open the presets editor on one preset",
+  "<preset>",
+);
+const START_EMPTY = ctl(
+  "presets-start-empty",
+  "the Empty stack card: the New stack wizard with no apps",
+);
+const EMPTY_CARD = ctl(
+  "presets-empty-card",
+  "the Empty stack card itself: the New stack wizard with no apps",
+);
+const CLEAR = ctl("presets-clear-search", "clear the gallery's search");
+
+const HUES = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+];
 
 /**
  * @param {HTMLElement} root
@@ -39,109 +121,458 @@ function presetNameCell(name, onChanged) {
  * @returns {() => void}
  */
 export function mount(root, ctx) {
-  const keys = sortKeys();
-  const note = h("p", { class: "measured", role: "status" });
-  const ago = agoEl("read");
-  const t = tableBlock({
-    remember: "presets",
-    caption: "Presets",
-    search: "Search presets",
-    state: "loading",
-    nothing:
-      "No presets: the working copy's presets/ directory is empty or missing.",
-    columns: [
-      { label: "Preset", sort: "text" },
-      { label: "Memory", sort: "size" },
-      { label: "Cores", sort: "number" },
-      { label: "Disk (GB)", sort: "number" },
-      { label: "Apps", sort: "text" },
-      { label: "What it is", sort: "text", cls: "wide" },
-    ],
-  });
-  const newStack = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--primary",
-      id: "presets-new",
-    },
-    "New stack from a preset…",
-  );
-  // fix-239: `homelab ui open new-stack`, `open import`, `open new-preset`.
-  viaForm(newStack, "new-stack");
-  newStack.addEventListener("click", () => void openNewStack(ctx.navigate));
-  const importBtn = h(
-    "button",
-    { type: "button", class: "kp-button", id: "presets-import" },
-    "Import a bundle…",
-  );
-  viaForm(importBtn, "import");
-  importBtn.addEventListener("click", () => void openImport(ctx.navigate));
-  const newPreset = h(
-    "button",
-    { type: "button", class: "kp-button", id: "presets-new-preset" },
-    "New preset…",
-  );
-  viaForm(newPreset, "new-preset");
-  newPreset.addEventListener("click", () => void openPresetEditor(null, retry));
-  root.replaceChildren(
-    h(
-      "div",
-      { class: "title-row" },
-      h("h1", null, "Presets"),
-      h("span", { class: "actions-row" }, importBtn, newPreset, newStack),
-    ),
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      "Ready-made stack templates to start a new stack from.",
-    ),
-    note,
-    t.wrap,
-    h("p", null, ago),
-  );
-  const detach = attachDataTables(root, { compare: keys.compare(compare) });
-  const table = dataTable(t.wrap);
-  const unbind = bindTableUrl(table, "presets");
+  pageStyles("presets");
+  root.classList.add("cf-page", "ps-page");
   const abort = new AbortController();
-  const load = async () => {
-    t.loading({ words: "Reading the presets from the working copy…" });
-    const r = await fetchJson("/data/presets", "the presets", abort.signal);
-    if (!r.ok) {
-      t.failed(r.error);
+  const q0 = new URLSearchParams(location.search);
+  const S = {
+    q: (q0.get("q") ?? "").toLowerCase(),
+    /** @type {"name" | "ram"} */
+    sort: q0.get("sort") === "ram" ? "ram" : "name",
+  };
+  const keepUrl = () =>
+    history.replaceState(
+      history.state,
+      "",
+      `${location.pathname}${setParams(location.search, { q: S.q, sort: S.sort === "ram" ? "ram" : null })}`,
+    );
+  /** @type {{presets: PresetView[], suggest_vmid: number | null, working_copy: boolean, sync_error: string | null} | null} */
+  let data = null;
+
+  /** @param {string} [preset] */
+  const useStack = (preset) =>
+    void openNewStack(ctx.navigate, preset ? { preset } : {});
+
+  // ── header ────────────────────────────────────────────────────────────
+  const ago = agoEl("read");
+  /** @param {string} label @param {string} title @param {string} form @param {string} drive @param {() => void} go @param {string} [cls] */
+  const action = (
+    label,
+    title,
+    form,
+    drive,
+    go,
+    cls = "kp-button--secondary",
+  ) =>
+    drivable(
+      viaForm(
+        el(
+          "button",
+          { type: "button", class: `kp-button ${cls}`, title, onclick: go },
+          label,
+        ),
+        form,
+      ),
+      drive,
+    );
+  const head = pageHeader({
+    title: "Presets",
+    desc: "Ready-made stacks from the repository's presets/ directory. Pick one to start a new stack with its apps and sizes filled in; you choose the name and the container number.",
+    meta: [el("span", { class: "cf-live" }, ago)],
+    actions: [
+      action(
+        "Import a bundle…",
+        "Add a stack from a bundle someone shared (an export of another homelab)",
+        "import",
+        IMPORT,
+        () => void openImport(ctx.navigate),
+      ),
+      action(
+        "New preset…",
+        "Write a new preset into presets/: its size, apps and files",
+        "new-preset",
+        NEW_PRESET,
+        () => void openPresetEditor(null, retry),
+      ),
+    ],
+    primary: action(
+      "New stack…",
+      "Start a new stack; choose a preset in the first step",
+      "new-stack",
+      NEW_STACK,
+      () => useStack(),
+      "kp-button--primary",
+    ),
+  });
+
+  // ── toolbar ───────────────────────────────────────────────────────────
+  const sortSeg = seg({
+    label: "Sort",
+    options: [
+      { value: "name", label: "A–Z", hint: "Sort the presets by name" },
+      {
+        value: "ram",
+        label: "Largest first",
+        hint: "Sort the presets by memory, largest first",
+      },
+    ],
+    value: S.sort,
+    mark: (b, v) => void drivable(b, SORT, v),
+    onChange: (v) => {
+      S.sort = v === "ram" ? "ram" : "name";
+      keepUrl();
+      paint();
+    },
+  });
+  const count = el("span", { class: "cf-count" });
+  const tb = toolbar({
+    search: {
+      placeholder: "Find a preset by name, app or purpose",
+      label: "Find a preset",
+      value: S.q,
+      onInput: (v) => {
+        S.q = v.trim().toLowerCase();
+        keepUrl();
+        paint();
+      },
+    },
+    groups: [],
+    state: [sortSeg.el, count],
+  });
+  tb.el.classList.add("ps-tb");
+  if (tb.search) drivable(tb.search, SEARCH);
+
+  const gallery = el("section", {
+    class: "ps-gallery",
+    "aria-label": "Presets",
+  });
+  const below = el("div", { class: "ps-below" });
+  root.replaceChildren(head.el, tb.el, gallery, below);
+
+  // ── cards ─────────────────────────────────────────────────────────────
+  /** @param {PresetView} p @param {number} i */
+  const card = (p, i) => {
+    const has = sets(p);
+    const use = viaForm(
+      el(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--secondary",
+          title: `New stack from ${p.name}: name and container number next`,
+          "data-preset-use": p.name,
+          onclick: (/** @type {Event} */ e) => {
+            e.stopPropagation();
+            useStack(p.name);
+          },
+        },
+        "Use this preset",
+      ),
+      "new-stack",
+    );
+    drivable(use, USE, p.name);
+    const edit = viaForm(
+      el(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--ghost",
+          title: `Edit presets/${p.name}/preset.yml and its apps`,
+          "data-preset-edit": p.name,
+          onclick: (/** @type {Event} */ e) => {
+            e.stopPropagation();
+            void openPresetEditor(p.name, retry);
+          },
+        },
+        "Edit",
+      ),
+      "preset",
+    );
+    drivable(edit, EDIT, p.name);
+    const gpu = p.gpu ? chip("GPU", "info") : null;
+    const vpn = p.vpn ? chip("VPN", "info") : null;
+    /** @param {string} label @param {string} value @param {boolean} set */
+    const spec = (label, value, set) => {
+      const b = el(
+        "b",
+        { class: set ? null : "ps-def" },
+        set ? value : "default",
+      );
+      if (!set)
+        tipOn(b, () => [
+          el("b", null, "Not set by the preset"),
+          el(
+            "span",
+            null,
+            `The new-stack form fills in the fleet default (${value}); you can change it there.`,
+          ),
+        ]);
+      return el("div", null, el("span", null, label), b);
+    };
+    const c = el(
+      "article",
+      {
+        class: "ps-card",
+        tabindex: "0",
+        "data-preset": p.name,
+        title: `Start a new stack from ${p.name} (Enter)`,
+        onclick: () => useStack(p.name),
+        onkeydown: (/** @type {KeyboardEvent} */ e) => {
+          if (e.key === "Enter" && e.target === c) useStack(p.name);
+        },
+      },
+      el(
+        "div",
+        { class: "ps-card__top" },
+        el(
+          "span",
+          { class: "ps-card__mono", "aria-hidden": "true" },
+          p.name.slice(0, 2),
+        ),
+        el("h3", null, highlight(p.name, S.q)),
+        el("span", { class: "cf-row" }, gpu, vpn),
+      ),
+      el("p", null, highlight(p.description, S.q)),
+      el(
+        "div",
+        { class: "ps-apps" },
+        (p.apps ?? []).map((a) => chip(highlight(a, S.q))),
+      ),
+      el(
+        "div",
+        { class: "ps-spec" },
+        spec("RAM", ramText(p.ram_mb), true),
+        spec("Cores", String(p.cores), has.cores),
+        spec("Disk", `${p.disk_gb} GB`, has.disk),
+      ),
+      el("div", { class: "ps-card__foot" }, use, edit),
+    );
+    c.style.setProperty("--c", HUES[i % HUES.length]);
+    if (gpu)
+      tipOn(gpu, () => [
+        el("b", null, "GPU passthrough"),
+        el(
+          "span",
+          null,
+          "The host's /dev/dri is passed into the container for VAAPI transcoding.",
+        ),
+      ]);
+    if (vpn)
+      tipOn(vpn, () => [
+        el("b", null, "Tunnel device"),
+        el("span", null, "The container gets /dev/net/tun for a VPN client."),
+      ]);
+    drivable(c, CARD, p.name);
+    return c;
+  };
+
+  /** @param {PresetView} p */
+  const emptyCard = (p) => {
+    const start = viaForm(
+      el(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--secondary",
+          title: `A new stack with no apps (from presets/${p.name})`,
+          "data-preset-use": p.name,
+          onclick: (/** @type {Event} */ e) => {
+            e.stopPropagation();
+            useStack(p.name);
+          },
+        },
+        "Start empty",
+      ),
+      "new-stack",
+    );
+    drivable(start, START_EMPTY);
+    const c = el(
+      "article",
+      {
+        class: "ps-card ps-card--empty",
+        tabindex: "0",
+        title: "Start a new stack with no apps (Enter)",
+        onclick: () => useStack(p.name),
+        onkeydown: (/** @type {KeyboardEvent} */ e) => {
+          if (e.key === "Enter" && e.target === c) useStack(p.name);
+        },
+      },
+      el(
+        "div",
+        { class: "ps-card__top" },
+        el("span", { class: "ps-card__mono", "aria-hidden": "true" }, "+"),
+        el("h3", null, "Empty stack"),
+        el("span"),
+      ),
+      el(
+        "p",
+        null,
+        "No apps yet: a container with the default size. Add apps from the stack's own page afterwards.",
+      ),
+      el("span"),
+      el("span"),
+      el("div", { class: "ps-card__foot" }, start),
+    );
+    c.style.setProperty("--c", "var(--muted-foreground)");
+    drivable(c, EMPTY_CARD);
+    return c;
+  };
+
+  const skeletonCard = () =>
+    el(
+      "article",
+      { class: "ps-card ps-card--sk", "aria-hidden": "true" },
+      el(
+        "div",
+        { class: "ps-card__top" },
+        el("span", { class: "ps-card__mono" }),
+        el("h3", null, skel("60%")),
+        el("span"),
+      ),
+      el("p", null, skel("90%")),
+      el("div", { class: "ps-apps" }, skel("40%")),
+      el(
+        "div",
+        { class: "ps-spec" },
+        ...["RAM", "Cores", "Disk"].map((l) =>
+          el("div", null, el("span", null, l), el("b", null, skel("3ch"))),
+        ),
+      ),
+      el("div", { class: "ps-card__foot" }, skel("100%"), skel("100%")),
+    );
+
+  const paint = () => {
+    if (!data) return;
+    const all = data.presets;
+    const empty = emptyPreset(all);
+    const listed = all.filter((p) => p !== empty);
+    if (!all.length) {
+      tb.el.hidden = false;
+      count.textContent = "";
+      gallery.hidden = true;
+      below.replaceChildren(noPresets());
       return;
     }
-    const list = r.body.presets ?? [];
-    note.textContent = r.body.working_copy
-      ? `${list.length} preset(s) in the repository's presets/ directory.`
-      : "The dashboard has no working copy yet, so it lists no presets.";
-    t.tbody.replaceChildren(
-      ...list.map((/** @type {any} */ p) => {
-        return h(
-          "tr",
-          { "data-preset": p.name },
-          h("td", null, presetNameCell(p.name, retry)),
-          // The memory column sorts by the number behind the words.
-          td(keys.note("size", humanMb(p.ram_mb), p.ram_mb), "num"),
-          td(String(p.cores), "num"),
-          td(String(p.disk_gb), "num"),
-          td((p.apps ?? []).join(", ") || "no apps"),
-          td(
-            `${p.description}${p.gpu ? " · GPU" : ""}${p.vpn ? " · VPN" : ""}`,
-          ),
-        );
-      }),
+    gallery.hidden = false;
+    below.replaceChildren();
+    const cards = galleryCards(all, S.q, S.sort);
+    count.textContent = countText(
+      cards.length,
+      listed.length,
+      S.q,
+      data.suggest_vmid,
     );
-    t.ready();
+    gallery.replaceChildren(
+      ...cards.map(card),
+      ...(S.q && !cards.length
+        ? [
+            el(
+              "div",
+              { class: "cf-empty ps-nomatch" },
+              el("strong", null, `No preset matches “${S.q}”`),
+              drivable(
+                el(
+                  "button",
+                  {
+                    type: "button",
+                    class: "cf-linkbtn",
+                    onclick: () => {
+                      S.q = "";
+                      if (tb.search) tb.search.value = "";
+                      keepUrl();
+                      paint();
+                    },
+                  },
+                  "Clear the search",
+                ),
+                CLEAR,
+              ),
+            ),
+          ]
+        : []),
+      ...(empty ? [emptyCard(empty)] : []),
+    );
+  };
+
+  /** The page with no presets: why, and the three ways on. */
+  const noPresets = () =>
+    el(
+      "section",
+      { class: "kp-card nx-card ps-none", "aria-labelledby": "ps-none-h" },
+      el(
+        "div",
+        { class: "nx-card__head" },
+        el("h2", { id: "ps-none-h" }, "No presets in this working copy"),
+        el(
+          "p",
+          { class: "section-head__desc" },
+          data?.working_copy === false
+            ? "The dashboard has no working copy yet, so it lists no presets. The Settings page shows the working copy's state."
+            : "The working copy's presets/ directory is empty or missing. A preset is one folder with a preset.yml and its apps.",
+        ),
+      ),
+      el(
+        "div",
+        { class: "ps-next" },
+        el(
+          "div",
+          null,
+          el("strong", null, "Write one"),
+          "New preset… asks for a name, sizes and apps and commits the folder.",
+          action(
+            "New preset…",
+            "Write a new preset into presets/",
+            "new-preset",
+            NONE_NEW_PRESET,
+            () => void openPresetEditor(null, retry),
+            "kp-button--sm",
+          ),
+        ),
+        el(
+          "div",
+          null,
+          el("strong", null, "Import one"),
+          "A bundle from another homelab or a backup of your own.",
+          action(
+            "Import a bundle…",
+            "Add a stack from a bundle",
+            "import",
+            NONE_IMPORT,
+            () => void openImport(ctx.navigate),
+            "kp-button--sm",
+          ),
+        ),
+        el(
+          "div",
+          null,
+          el("strong", null, "Or start a stack"),
+          "The New stack wizard says what it needs before anything is written.",
+          action(
+            "New stack…",
+            "Start a new stack",
+            "new-stack",
+            NONE_NEW_STACK,
+            () => useStack(),
+            "kp-button--sm",
+          ),
+        ),
+      ),
+    );
+
+  gallery.replaceChildren(...Array.from({ length: 8 }, skeletonCard));
+  count.replaceChildren(skel("14ch"));
+
+  const load = async () => {
+    const r = await fetchJson("/data/presets", "the presets", abort.signal);
+    if (!r.ok) {
+      gallery.hidden = true;
+      below.replaceChildren(failBox(r.error, retry));
+      count.textContent = "";
+      return;
+    }
+    data = {
+      presets: r.body.presets ?? [],
+      suggest_vmid: r.body.suggest_vmid ?? null,
+      working_copy: r.body.working_copy !== false,
+      sync_error: r.body.sync_error ?? null,
+    };
     setAgo(ago, Date.now() / 1000);
+    paint();
   };
   const retry = () => void load().catch(() => {});
-  root.addEventListener("kp-datatable-retry", retry);
   retry();
   return () => {
     abort.abort();
-    root.removeEventListener("kp-datatable-retry", retry);
-    unbind();
-    detach();
+    root.classList.remove("cf-page", "ps-page");
   };
 }

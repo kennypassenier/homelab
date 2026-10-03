@@ -33,8 +33,11 @@ import {
 
 /**
  * @param {(href: string) => void} [navigate]
+ * @param {{preset?: string}} [opts] redesign-presets: the preset a
+ *   gallery card's "Use this preset" picked, chosen (with its size) when
+ *   the wizard opens
  */
-export async function openNewStack(navigate) {
+export async function openNewStack(navigate, opts = {}) {
   const r = await fetchJson("/data/presets", "the presets");
   if (!r.ok) {
     await refusalAlarm(r.error, 0);
@@ -61,6 +64,9 @@ export async function openNewStack(navigate) {
   };
   const w = newStackWizard(presets, r.body.suggest_vmid ?? null);
   const values = startValues(w);
+  const picked = presets.find((p) => p.name === opts.preset);
+  if (picked)
+    Object.assign(values, { preset: picked.name }, presetSize(picked));
   /** @type {Map<string, HTMLElement>} */
   const inputs = new Map();
   /** @param {import("./editforms.js").EditField} f */
@@ -154,6 +160,8 @@ export async function openNewStack(navigate) {
   d.dialog.dataset.form = w.id;
   const detach = attachWizards(d.dialog, { focusStep: false });
   const handle = wizard(wiz);
+  // A gallery card already chose the preset: open on its name and number.
+  if (picked) void handle?.goTo(1);
   /** @type {() => void} */
   let stopPanel = () => {};
   // feat-platform-10: the Live view replay moves this very wizard.

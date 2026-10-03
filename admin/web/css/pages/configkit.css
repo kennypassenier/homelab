@@ -1,0 +1,511 @@
+/* redesign-config (3.71.0): the shared look of the three Configure-side
+   pages — Firewall, Settings (with Sign-in) and Presets — as the approved
+   demos draw them (~/.local/share/homelab/redesign-3.71/next.css and
+   cfg-aa93.css). kp-themes tokens only, everything under `.cf-page` with
+   the `cf-` prefix so it never collides with the foundation's `nx-`
+   classes; js/pages/configkit.js draws the markup. */
+
+.cf-page {
+  --cf-gap: var(--nx-gap, var(--kp-space-xl, 1.5rem));
+  --cf-pad: var(--nx-pad, var(--kp-space-lg, 1rem));
+  --cf-r: var(--nx-radius, 10px);
+  --cf-ease: cubic-bezier(0.2, 0, 0.38, 0.9);
+}
+main.shell.cf-page > * + * {
+  margin-block-start: max(var(--cf-gap), var(--section-gap)) !important;
+}
+/* The cards are spaced by the page's grids and gaps, never by kp-card's
+   own 12 px block margin (it pushed the first card of a row down). */
+.cf-page .kp-card {
+  margin-block: 0;
+}
+main.shell.cf-page > [hidden] {
+  display: none;
+}
+
+/* ---------- page header (DESIGN_LANGUAGE §1.1) ---------- */
+.cf-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "t m a" "d d a";
+  column-gap: var(--kp-space-md, 12px);
+  align-items: center;
+}
+.cf-head > h1 {
+  grid-area: t;
+  margin: 0;
+  font-size: min(var(--kp-text-display, 2.25rem), 2.25rem);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+.cf-head .cf-head__desc {
+  grid-area: d;
+  margin: 6px 0 0 !important;
+  color: var(--muted-foreground);
+  max-inline-size: 70ch;
+}
+.cf-head__meta {
+  grid-area: m;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  min-inline-size: 0;
+}
+.cf-page .cf-head__actions.actions-row {
+  grid-area: a;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kp-space-sm, 8px);
+  align-items: center;
+  justify-content: flex-end;
+  padding-inline-start: var(--kp-space-xl, 24px);
+}
+@media (max-width: 48rem) {
+  .cf-head {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: "t m" "d d" "a a";
+  }
+  .cf-page .cf-head__actions.actions-row {
+    justify-content: flex-start;
+    padding-inline-start: 0;
+    margin-block-start: var(--kp-space-md, 12px);
+  }
+}
+@media (max-width: 30rem) {
+  .cf-page .cf-head__actions.actions-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cf-page .cf-head__actions > * {
+    justify-content: center;
+    text-align: center;
+  }
+  .cf-page .cf-head__actions > .kp-button--primary {
+    grid-column: 1 / -1;
+    order: -1;
+  }
+}
+
+/* the live freshness: dot + words */
+.cf-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.cf-live::before {
+  content: "";
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--success-foreground, var(--success));
+}
+.cf-live:has([data-stale="true"])::before {
+  background: var(--warning-foreground, var(--warning));
+}
+.cf-live .measured {
+  margin: 0;
+}
+
+/* ---------- grid (rule 6) ---------- */
+.cf-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--cf-gap);
+  align-items: stretch;
+}
+.cf-grid > .cf-span-6 {
+  grid-column: span 6;
+}
+.cf-grid > .cf-span-12 {
+  grid-column: span 12;
+}
+@media (max-width: 75rem) {
+  .cf-grid > .cf-span-6 {
+    grid-column: span 12;
+  }
+}
+.cf-grid > .nx-card + .nx-card {
+  margin-block-start: 0;
+}
+
+/* ---------- cards ---------- */
+.cf-page .cf-card {
+  grid-template-rows: auto 1fr auto;
+  align-content: start;
+}
+.cf-card__foot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--kp-space-md, 12px);
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+  border-block-start: 1px solid var(--border);
+  padding-block-start: var(--kp-space-sm, 8px);
+}
+.cf-card__foot .measured {
+  margin: 0;
+  font-size: inherit;
+}
+
+/* ---------- words, dots, chips ---------- */
+.cf-muted {
+  color: var(--muted-foreground);
+}
+.cf-mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.875em;
+}
+.cf-hint {
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.cf-page .nowrap {
+  white-space: nowrap;
+}
+.cf-sr {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.cf-row {
+  display: flex;
+  align-items: center;
+  gap: var(--kp-space-sm, 8px);
+  flex-wrap: wrap;
+}
+.cf-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.cf-dot::before {
+  content: "";
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+  flex: none;
+}
+.cf-dot--ok::before {
+  background: var(--success-foreground, var(--success));
+}
+.cf-dot--warn::before {
+  background: var(--warning-foreground, var(--warning));
+}
+.cf-dot--bad::before {
+  background: var(--destructive);
+}
+.cf-dot--info::before {
+  background: var(--info-foreground, var(--info));
+}
+.cf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: var(--kp-text-xs);
+  font-weight: 500;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  background: var(--card);
+  white-space: nowrap;
+  line-height: 1.6;
+}
+.cf-chip--info {
+  background: var(--info);
+  color: var(--info-foreground);
+  border-color: transparent;
+}
+.cf-chip--warn {
+  background: var(--warning);
+  color: var(--warning-foreground);
+  border-color: transparent;
+}
+.cf-chip--mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+button.cf-chip,
+.cf-chip--btn {
+  font: inherit;
+  font-size: var(--kp-text-xs);
+  cursor: pointer;
+}
+.cf-chip--btn:hover {
+  border-color: var(--ring);
+  color: var(--foreground);
+}
+.cf-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-foreground);
+  font-size: var(--kp-text-xs);
+  font-weight: 500;
+}
+.cf-tag button {
+  all: unset;
+  cursor: pointer;
+  inline-size: 18px;
+  block-size: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+.cf-tag button:hover {
+  background: color-mix(in oklab, currentColor 15%, transparent);
+}
+.cf-linkbtn {
+  all: unset;
+  cursor: pointer;
+  color: var(--link, var(--primary));
+  font-size: var(--kp-text-xs);
+}
+.cf-linkbtn:hover {
+  text-decoration: underline;
+}
+.cf-linkbtn:focus-visible,
+.cf-tag button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.cf-active {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-block-size: 24px;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.cf-mark {
+  background: color-mix(in oklab, var(--warning) 80%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+.cf-count {
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cf-empty {
+  display: grid;
+  place-items: center;
+  text-align: center;
+  gap: 6px;
+  padding: var(--kp-space-xl, 24px);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted-foreground);
+}
+.cf-empty strong {
+  color: var(--foreground);
+}
+.cf-kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 0;
+}
+.cf-kv dt {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm);
+}
+.cf-kv dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* skeleton bar in the final geometry */
+.cf-sk {
+  display: inline-block;
+  min-block-size: 0.9em;
+  inline-size: var(--w, 70%);
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--muted) 0%,
+    color-mix(in oklab, var(--muted) 55%, var(--card)) 50%,
+    var(--muted) 100%
+  );
+  background-size: 200% 100%;
+  animation: cf-sk 1.4s linear infinite;
+  vertical-align: middle;
+  color: transparent !important;
+}
+@keyframes cf-sk {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* ---------- tables (DESIGN_LANGUAGE §6) ---------- */
+.cf-table-wrap {
+  overflow-x: auto;
+  min-inline-size: 0;
+}
+.cf-table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.cf-table th {
+  font-size: var(--kp-text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+  text-align: start;
+  padding: 8px 10px;
+  border-block-end: 1px solid var(--border);
+  white-space: nowrap;
+}
+.cf-table td {
+  padding: 10px;
+  border-block-end: 1px solid var(--border);
+  vertical-align: middle;
+}
+.cf-table tbody tr:last-child td {
+  border-block-end: 0;
+}
+.cf-table tbody tr {
+  transition: background 120ms var(--cf-ease);
+}
+.cf-table tbody tr:hover {
+  background: color-mix(in oklab, var(--muted) 60%, transparent);
+}
+.cf-table .num,
+.cf-table th.num {
+  text-align: end;
+}
+.cf-table .cf-id {
+  font-weight: 600;
+}
+.cf-table .cf-id a {
+  color: inherit;
+  text-decoration: none;
+}
+.cf-table .cf-id a:hover {
+  text-decoration: underline;
+}
+.cf-table .cf-row-actions {
+  text-align: end;
+  white-space: nowrap;
+}
+.cf-table tr[tabindex]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.cf-sort {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.cf-sort:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.cf-sort__mark {
+  opacity: 0.45;
+  font-size: 0.9em;
+}
+th[aria-sort="ascending"] .cf-sort__mark,
+th[aria-sort="descending"] .cf-sort__mark {
+  opacity: 1;
+  color: var(--primary);
+}
+
+/* ---------- segmented choice ---------- */
+.cf-seg {
+  display: inline-grid;
+  grid-auto-flow: column;
+  justify-self: start;
+  max-inline-size: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  scrollbar-width: none;
+}
+.cf-seg button {
+  font: inherit;
+  font-size: var(--kp-text-sm);
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--muted-foreground);
+  border: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cf-seg button[aria-pressed="true"] {
+  background: var(--muted);
+  color: var(--foreground);
+  font-weight: 600;
+}
+.cf-seg button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+/* ---------- the floating detail card ---------- */
+.cf-tip {
+  position: absolute;
+  z-index: 50;
+  pointer-events: none;
+  max-inline-size: 22rem;
+  background: var(--popover, var(--card));
+  color: var(--popover-foreground, var(--foreground));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: var(--kp-text-sm);
+  box-shadow: 0 10px 28px -8px
+    color-mix(in oklab, var(--foreground) 30%, transparent);
+  display: grid;
+  gap: 4px;
+}
+.cf-tip[hidden] {
+  display: none;
+}
+.cf-tip b {
+  font-weight: 600;
+}
+.cf-tip .cf-tip__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.cf-fail .kp-alert__body {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+.cf-fail p {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cf-page *,
+  .cf-sk {
+    animation: none !important;
+    transition: none !important;
+  }
+}

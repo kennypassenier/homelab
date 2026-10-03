@@ -38,17 +38,21 @@ fn emails() -> Value {
            {"email": {"email": "c@example.invalid"}}])
 }
 
+/// edge-capture-2026-10-03: the Access apps as read-only measured on
+/// 2026-10-03 — the Access split (step-25) replaced `Kobo services`
+/// (ha/trmnl) with `Homelab admin` (prox, opn, traefik, admin), so the
+/// capture and this answer were renewed together.
 fn api_apps() -> Value {
     json!([
-        {"id": "x1", "name": "Kobo services", "domain": "ha.kp-soft.dev",
-         "self_hosted_domains": ["ha.kp-soft.dev", "trmnl.kp-soft.dev"],
-         "type": "self_hosted", "session_duration": "24h", "aud": "zzz",
+        {"id": "x1", "name": "Homelab admin", "domain": "prox.kp-soft.dev",
+         "self_hosted_domains": ["prox.kp-soft.dev", "opn.kp-soft.dev",
+                                 "traefik.kp-soft.dev", "admin.kp-soft.dev"],
+         "type": "self_hosted", "session_duration": "8h", "aud": "zzz",
          "policies": [
-            {"id": "p1", "name": "Toegang kpsoft", "decision": "allow", "include": emails(),
-             "require": [], "exclude": [], "precedence": 1},
-            {"id": "p2", "name": "kobo-token", "decision": "non_identity",
-             "include": [{"service_token": {"token_id": "a836cb28-4c6e-440c-ac2b-b4317ee0b44c"}}],
-             "require": [], "exclude": []}]},
+            {"id": "p1", "name": "Kenny only, Google", "decision": "allow",
+             "include": [{"email": {"email": "a@example.invalid"}},
+                         {"email": {"email": "b@example.invalid"}}],
+             "require": [], "exclude": [], "precedence": 1}]},
         {"id": "x2", "name": "sp", "domain": "sp.kp-soft.dev",
          "self_hosted_domains": ["sp.kp-soft.dev"], "type": "self_hosted",
          "session_duration": "24h",

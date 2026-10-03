@@ -423,6 +423,33 @@ pub fn phase_duration_line(secs: u64, stacks: usize, at_a_time: usize) -> String
     )
 }
 
+/// fix-218 round 2: every restic repository one recorded stack owns — the
+/// single answer `homelab snapshots`, the dashboard's Backups page,
+/// `homelab doctor` and the fleet check all read, so they can never disagree
+/// about whether a stack has been backed up.
+///
+/// It mirrors what the nightly round writes (`night::backup_work`): a stack
+/// with native services backs up each unit whole into the unit's own
+/// repository, whatever manifest it also records; only a compose stack's
+/// repositories come from its manifest's mounts. Since fix-145 a native
+/// stack records BOTH a manifest and its natives; `GetBackups` took the
+/// manifest whenever one existed, so inbox (manifest `storage: []`) showed
+/// "no repositories" while its `inbox` repository took a snapshot every night.
+pub fn stack_repo_owners(st: &crate::state::StackState) -> Vec<String> {
+    if st.is_native() {
+        return st.natives.iter().map(|n| n.unit.clone()).collect();
+    }
+    st.manifest
+        .as_ref()
+        .map(|m| {
+            owner_groups(m)
+                .into_iter()
+                .map(|(owner, _)| owner)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub fn owner_groups(m: &StackManifest) -> Vec<(String, Vec<String>)> {
     let mut groups: Vec<(String, Vec<String>)> = Vec::new();
     for mount in &m.storage {

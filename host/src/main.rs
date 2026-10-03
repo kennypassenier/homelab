@@ -10359,19 +10359,8 @@ async fn gather_host_capacity(
 /// unit name (D25), or a compose stack's `owner_groups` (fix-130: a native
 /// stack backs up each service whole).
 fn stack_snapshot_owners(st: &homelab_core::state::StackState) -> Vec<String> {
-    if st.is_native() {
-        st.natives.iter().map(|n| n.unit.clone()).collect()
-    } else {
-        st.manifest
-            .as_ref()
-            .map(|m| {
-                homelab_core::ops::backup::owner_groups(m)
-                    .into_iter()
-                    .map(|(owner, _paths)| owner)
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
+    // fix-218 round 2: one shared answer with `Rpc::GetBackups`.
+    homelab_core::ops::backup::stack_repo_owners(st)
 }
 
 /// fix-218: the newest real snapshot across `owners`, read off the same
@@ -10509,7 +10498,10 @@ async fn gather_host_disk_detail(exec: &dyn Executor, now: u64) -> homelab_proto
     if let Ok(o) = exec
         .run(&Cmd::new(
             "pvs",
-            &["--noheadings", "-o", "pv_name", "pve"],
+            // fix-222 round 2: pvs's positional arguments are PVs, not a
+            // volume group (`pvs ... pve` fails on every real host); the
+            // group is selected.
+            &["--noheadings", "-o", "pv_name", "--select", "vg_name=pve"],
             15,
         ))
         .await
@@ -11868,12 +11860,19 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         "now": now,
                         "checks": rows
                             .iter()
-                            .map(|(id, rec)| serde_json::json!({ "id": id, "record": rec }))
+                            .map(|(id, rec)| {
+                                // fix-195 round 2: the report's own rule, so
+                                // the dashboard cannot show "ok" for an
+                                // answer the report has reopened.
+                                let reopened =
+                                    homelab_core::ops::manualchecks::open_again(&st, rec, now);
+                                serde_json::json!({ "id": id, "record": rec, "reopened": reopened })
+                            })
                             .collect::<Vec<_>>(),
                     })
                     .to_string()
                 } else {
-                    homelab_core::ops::manualchecks::render_listing(&rows, now)
+                    homelab_core::ops::manualchecks::render_listing(&st, now)
                 },
                 deferred: None,
             }
@@ -12151,14 +12150,11 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 tiers,
                 ..state.config.backup.clone()
             };
-            let owners: Vec<String> = if let Some(m) = &st.manifest {
-                homelab_core::ops::backup::owner_groups(m)
-                    .into_iter()
-                    .map(|(owner, _paths)| owner)
-                    .collect()
-            } else {
-                st.natives.iter().map(|n| n.unit.clone()).collect()
-            };
+            // fix-218 round 2: the same owners doctor and the fleet check
+            // read. Taking the manifest's mounts whenever one was recorded
+            // dropped a native stack's unit repositories (inbox: manifest
+            // with `storage: []` since fix-145 → "no repositories").
+            let owners = homelab_core::ops::backup::stack_repo_owners(st);
             let mut statuses = Vec::with_capacity(owners.len());
             for owner in owners {
                 match state.snapshot_cache.get(&owner) {
@@ -12184,7 +12180,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             RpcResponse {
                 id: req.id,
                 ok: true,
-                message: serde_json::json!({ "native": st.manifest.is_none(), "repos": statuses })
+                message: serde_json::json!({ "native": st.is_native(), "repos": statuses })
                     .to_string(),
                 deferred: None,
             }
@@ -13672,7 +13668,10 @@ mod redesign_host_4_tests {
         exec.respond_always("lv_size pve/root", CmdOutput::ok("  96.00g\n"));
         exec.respond_always("lv_size pve/data", CmdOutput::ok("  794.30g\n"));
         exec.respond_always("--reportformat json", CmdOutput::ok(LVS_JSON));
-        exec.respond_always("pv_name pve", CmdOutput::ok("  /dev/sda3\n"));
+        exec.respond_always(
+            "pv_name --select vg_name=pve",
+            CmdOutput::ok("  /dev/sda3\n"),
+        );
         exec.respond_always("--getsize64", CmdOutput::ok("1000204886016\n"));
         exec.respond_always("ROTA,TRAN /dev/sda", CmdOutput::ok("   0 sata\n"));
         exec.respond_always("--max-depth=2", CmdOutput::ok("1024\t/var\n"));
@@ -13691,11 +13690,62 @@ mod redesign_host_4_tests {
     async fn redesign_host_4_an_unreadable_pool_or_disk_is_absent_never_invented() {
         let exec = MockExecutor::new();
         exec.respond_always("--reportformat json", CmdOutput::failed(5, "no such vg"));
-        exec.respond_always("pv_name pve", CmdOutput::ok("  /dev/nvme0n1p3\n"));
+        exec.respond_always(
+            "pv_name --select vg_name=pve",
+            CmdOutput::ok("  /dev/nvme0n1p3\n"),
+        );
         exec.respond_always("--getsize64", CmdOutput::ok("1000204886016\n"));
         exec.respond_always("ROTA,TRAN", CmdOutput::failed(32, "not a block device"));
         let d = gather_host_disk_detail(&exec, 7).await;
         assert_eq!(d.thin_pool, None);
         assert_eq!(d.root_disk_kind, None);
+    }
+}
+
+/// fix-222 round 2 (live, host 3.70.7, 2026-10-03): `status --json` carried
+/// the root volume and the thin pool but `root_disk_device` was empty and
+/// `root_disk_total_gb` 0. `pvs` takes physical volumes (or tags) as its
+/// positional arguments, never a volume group: `pvs ... pve` answers
+/// `Failed to find physical volume "pve".` with exit 5 on a real host, so
+/// the whole physical-disk half was skipped. The earlier tests matched the
+/// mock on the substring `pv_name pve` and so accepted the wrong call. The
+/// outputs below have the shape lvm2, util-linux and coreutils print on a
+/// Proxmox VE host installed on one NVMe disk.
+#[cfg(test)]
+mod fix_222_real_host_tests {
+    use super::*;
+    use homelab_core::executor::{CmdOutput, MockExecutor};
+
+    #[tokio::test]
+    async fn fix_222_the_physical_disk_is_found_with_the_call_lvm_really_answers() {
+        let exec = MockExecutor::new();
+        exec.respond_always("lv_size pve/root", CmdOutput::ok("  96.00g\n"));
+        exec.respond_always("lv_size pve/data", CmdOutput::ok("  794.30g\n"));
+        // What lvm2 answers when handed a volume group where a PV belongs.
+        exec.respond_always(
+            "pvs --noheadings -o pv_name pve",
+            CmdOutput::failed(5, "  Failed to find physical volume \"pve\".\n"),
+        );
+        // The volume group selected the way pvs accepts it.
+        exec.respond_always(
+            "pvs --noheadings -o pv_name --select vg_name=pve",
+            CmdOutput::ok("  /dev/nvme0n1p3\n"),
+        );
+        exec.respond_always(
+            "blockdev --getsize64 /dev/nvme0n1",
+            CmdOutput::ok("1000204886016\n"),
+        );
+        exec.respond_always(
+            "lsblk -d -n -o ROTA,TRAN /dev/nvme0n1",
+            CmdOutput::ok("   0 nvme\n"),
+        );
+        let d = gather_host_disk_detail(&exec, 7).await;
+        assert_eq!(d.root_disk_device, "/dev/nvme0n1");
+        assert!(
+            (d.root_disk_total_gb - 931.5).abs() < 0.1,
+            "{}",
+            d.root_disk_total_gb
+        );
+        assert_eq!(d.root_disk_kind.as_deref(), Some("NVMe SSD"));
     }
 }

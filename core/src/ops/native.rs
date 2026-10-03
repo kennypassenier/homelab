@@ -1867,7 +1867,7 @@ pub fn glibc_verdict(probe_output: &str) -> Result<String, String> {
         )),
         (Some(_), Some(_)) => Err(format!(
             "the binary needs glibc {} and the container has {} — it would install fine and \
-             crash-loop at the first restart (F304); refusing. Ship a static build, or one \
+             crash-loop at the first restart; refusing. Ship a static build, or one \
              built against glibc {} or older",
             need, have, have
         )),

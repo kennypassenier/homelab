@@ -1854,7 +1854,7 @@ fn start_stack_op(model: &mut Model, op: StackOp) {
             None => {
                 model.focus = None;
                 model.status_line = "restore is not wired for native stacks — restore by hand as \
-                     docs/OPERATIONS_RUNBOOK.md op-11 describes (gap-28)"
+                     docs/OPERATIONS_RUNBOOK.md op-11 describes"
                     .into();
             }
         }

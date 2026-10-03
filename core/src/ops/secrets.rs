@@ -134,7 +134,9 @@ pub fn reveal_history(
 mod tests {
     use super::*;
 
-    /// covers: feat-secrets-6 — the history line names the secret
+    /// covers: feat-secrets-6
+    ///
+    /// The history line names the secret
     /// and the actor, and carries nothing that could be the value.
     #[test]
     fn redesign_371_a_reveal_history_line_names_the_secret_never_the_value() {

@@ -171,7 +171,7 @@ pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationRepo
                     "--features",
                     &cfg.features,
                     "--description",
-                    "homelab golden template build (B8) — temporary",
+                    "homelab golden template build — temporary",
                 ],
                 300,
             ),
@@ -339,7 +339,7 @@ pub async fn build_template(ctx: &OpCtx<'_>, cfg: &TemplateCfg) -> OperationRepo
                     &vm,
                     "--description",
                     &format!(
-                        "{} — golden template (B8), clone with template: \"clone:{}\"",
+                        "{} — golden template, clone with template: \"clone:{}\"",
                         name, cfg.temp_vmid
                     ),
                 ],

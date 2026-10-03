@@ -1000,7 +1000,7 @@ pub fn evaluate_big_logs(facts: &[BigLogFact]) -> Vec<Finding> {
                     .into()
             } else {
                 "nothing rotates it — declare `rotate:` on this data mount in the stack file \
-                 (fix-24) and deploy"
+                 and deploy"
                     .into()
             },
         })
@@ -2036,7 +2036,7 @@ pub fn evaluate(
                 subject: name.clone(),
                 what: "disabled — the nightly run skips it entirely".into(),
                 remedy: format!(
-                    "a failed nightly run auto-disables a stack (H8); fix the cause, then `homelab enable {}`",
+                    "a failed nightly run auto-disables a stack; fix the cause, then `homelab enable {}`",
                     name
                 ),
             });
@@ -2050,7 +2050,7 @@ pub fn evaluate(
                 subject: name.clone(),
                 what: format!(
                     "automatic updates parked since {} after a failed nightly update or a \
-                     `homelab rollback-native` (fix-114); the nightly backup still runs",
+                     `homelab rollback-native`; the nightly backup still runs",
                     crate::state::ymd(*since)
                 ),
                 remedy: format!(
@@ -2553,7 +2553,7 @@ pub fn evaluate_coverage(facts: &[CoverageFact]) -> Vec<Finding> {
             out.push(Finding {
                 severity: Severity::Drift,
                 subject: c.stack.clone(),
-                what: "no LABELLED log line reached Loki from this stack recently — either nothing is shipping, or it ships without the container name (F79)".into(),
+                what: "no LABELLED log line reached Loki from this stack recently — either nothing is shipping, or it ships without the container name".into(),
                 remedy: "on that container: `systemctl status alloy`, then `runuser -u alloy -- ls /var/lib/docker/containers` (a compose stack) or `journalctl -u alloy` (a native one); a redeploy re-applies Alloy's config and its read access".into(),
             });
         }

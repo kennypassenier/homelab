@@ -302,7 +302,7 @@ pub fn effects(
     if !new.natives.is_empty() {
         out.push(effect(
             "info",
-            "native programs stay as they are: a deploy never replaces an installed binary (fix-28); a newer release is its own action",
+            "native programs stay as they are: a deploy never replaces an installed binary; a newer release is its own action",
             None,
         ));
     }

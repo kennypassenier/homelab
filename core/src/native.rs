@@ -257,7 +257,7 @@ pub fn validate_native(m: &NativeServiceManifest) -> Result<(), Vec<String>> {
     let canonical = format!("{}-app-{}", m.vmid, m.stack_name);
     if m.hostname != canonical {
         problems.push(format!(
-            "hostname '{}' must be '{}' (A2 guard depends on it)",
+            "hostname '{}' must be '{}' (the hostname guard depends on it)",
             m.hostname, canonical
         ));
     }

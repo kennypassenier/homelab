@@ -166,7 +166,7 @@ impl<'a> Runner<'a> {
         debug_assert!(
             self.planned,
             "[{}] skip(\"{}\") before plan() — every step mark must be preceded by this op's \
-             own announced plan (fix-171)",
+             own announced plan",
             self.op, name
         );
         self.check_mark(name);
@@ -188,7 +188,7 @@ impl<'a> Runner<'a> {
         debug_assert!(
             self.planned,
             "[{}] step(\"{}\") before plan() — every step mark must be preceded by this op's \
-             own announced plan (fix-171)",
+             own announced plan",
             self.op, name
         );
         self.check_mark(name);

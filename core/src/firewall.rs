@@ -255,7 +255,7 @@ pub fn derive_watcher_out_rules(
 /// matched first.
 pub fn render(stack: &str, fw: &FirewallSpec) -> String {
     let mut s = format!(
-        "# Written by homelab from stacks/{}/lxc-compose.yml (fix-88): edit that file, not this one\n",
+        "# Written by homelab from stacks/{}/lxc-compose.yml (fix-88): edit that file, not this one\n", // id-ok: a comment inside a generated file, for its maintainer; rewording it would make every deployed copy differ from what the host renders (the fleet check compares firewall files line by line)
         stack
     );
     if let Some(c) = &fw.comment {

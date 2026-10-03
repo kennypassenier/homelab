@@ -1,0 +1,28 @@
+# The kinds of a register id, one per line: the single list the commit gate
+# (.githooks/check-register.py), core/tests/user_text_ids_tests.rs and
+# admin/web/test/user_text.test.js read (fix-guards-8).
+#
+# Lowercase: a kind, a dash, optional lowercase words, a number
+# (fix-240, feat-shell-1, gap-26).
+fix
+feat
+gap
+redesign
+arch
+step
+scope
+ask
+tech
+# Uppercase: a prefix and a number with nothing between (H8, E1, D9, B6,
+# F186, T64, AR9): the feature list's A1-H6, the register's findings (F),
+# decisions (D), tasks (T), batches (B) and the frozen architecture (AR).
+AR
+A
+B
+C
+D
+E
+F
+G
+H
+T

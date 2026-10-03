@@ -41,14 +41,11 @@ import { mount as activity } from "./pages/activity.js";
 import { mount as backups } from "./pages/backups.js";
 import { mount as firewall } from "./pages/firewall.js";
 import { mount as host } from "./pages/host.js";
-import { mount as jobs } from "./pages/jobs.js";
 import { mount as notifications } from "./pages/notifications.js";
 import { mount as retired } from "./pages/retired.js";
-import { mount as schedules } from "./pages/schedules.js";
 import { mount as settings } from "./pages/settings.js";
 import { mount as overview } from "./pages/overview.js";
 import { mount as stack } from "./pages/stack.js";
-import { mount as hostLog } from "./pages/log.js";
 import { mount as shell } from "./pages/shell.js";
 import { mount as presets } from "./pages/presets.js";
 import { mount as homePage } from "./pages/home.js";
@@ -169,9 +166,9 @@ function viewOf(at, q) {
 
 /** @type {Record<string, (root: HTMLElement) => () => void>} */
 const VIEW_MOUNTS = {
-  jobs: (root) => jobs(root, { navigate }),
-  log: (root) => hostLog(root),
-  schedules: (root) => schedules(root),
+  // redesign-activity: Activity draws these as its own views.
+  log: (root) => activity(root, { navigate }),
+  schedules: (root) => activity(root, { navigate }),
   backupcalendar: (root) => backupCalendarPage(root),
   retired: (root) => retired(root),
   passkeys: (root) => passkeysPage(root),

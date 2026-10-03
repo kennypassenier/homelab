@@ -1,17 +1,27 @@
-// Shell (TUI parity, the SHELL tab): a line-based shell into one container.
-// Each line is the exec action (A6) on the host-wide target: it goes through
-// the action queue like a click on "Run a command", shows in Jobs, and the
-// host writes it to its audit log. No typed confirmation (Kenny: "we hebben
-// genoeg security"); the host refuses unless exec_enabled = true.
+// redesign-console (3.71.0, the Console demo Kenny approved on 2026-10-03):
+// the host's log and a root shell in one place. Every line the host prints,
+// live, with the Source/Level side column (the explorer in log.js), and
+// under it a shell bar: one line at a time, run as root inside a container
+// (pct exec). Each line is the exec action (A6) on the host-wide target: it
+// goes through the action queue like "Run a command", shows in Activity,
+// and the host writes it to its audit log; the host refuses unless
+// exec_enabled = true. `/shell` and `/log`'s old Console role land here.
 
-import { declareField } from "../drivable.js";
 import { act, onAct, send } from "../act.js";
 import { refusalCallout } from "../actui.js";
-import { h } from "../dom.js";
+import { fetchJson, h } from "../dom.js";
+import { declare, declareField, drivable } from "../drivable.js";
 import { shellResult, shellTargets } from "../parity.js";
 import { current, subscribe } from "../store.js";
+import { ensureStyle, pageHeader } from "../ui.js";
 import { setParams } from "../urlstate.js";
+import { mountHostLog } from "./log.js";
 
+/** Lines the Up key recalls. */
+const RECALL = 50;
+
+// Live view (invariant 39): every control on this page that runs
+// something; the explorer's own controls are declared for this page too.
 // review M5: every page field Live view may set is declared (drivable.js
 // `declareField`); the client and the dashboard refuse any other.
 const SHELL_TARGET = declareField({
@@ -19,35 +29,186 @@ const SHELL_TARGET = declareField({
   page: "shell",
   what: "the container a command runs in",
 });
-const SHELL_VMID = declareField({
-  id: "shell-vmid",
-  page: "shell",
-  what: "a container by its number, when it is not in the list",
-});
 const SHELL_LINE = declareField({
   id: "shell-line",
   page: "shell",
   what: "the command to run",
 });
 
-/** Lines the Up key recalls. */
-const RECALL = 50;
+const RUN = declare({
+  id: "console-run",
+  page: "shell",
+  opens: "run",
+  what: "run the command line as root in the chosen container (a queued, audited job)",
+});
+const FOCUS = declare({
+  id: "console-run-a-command",
+  page: "shell",
+  opens: "view",
+  what: "jump to the shell bar",
+});
+const DOWNLOAD = declare({
+  id: "console-download",
+  page: "shell",
+  opens: "run",
+  what: "save the lines the filter shows as host-log.txt",
+});
+const DRIVE = {
+  follow: declare({
+    id: "console-follow",
+    page: "shell",
+    opens: "view",
+    what: "pause or resume following the newest host lines",
+  }),
+  source: declare({
+    id: "console-source",
+    page: "shell",
+    opens: "view",
+    row: "<source>",
+    what: "turn one source's lines on or off",
+  }),
+  only: declare({
+    id: "console-only",
+    page: "shell",
+    opens: "view",
+    row: "<source>",
+    what: "show only one source's lines",
+  }),
+  level: declare({
+    id: "console-level",
+    page: "shell",
+    opens: "view",
+    row: "info|warn|error",
+    what: "show lines of at least this level",
+  }),
+  reset: declare({
+    id: "console-reset",
+    page: "shell",
+    opens: "view",
+    what: "show every source and level again",
+  }),
+  line: declare({
+    id: "console-line",
+    page: "shell",
+    opens: "view",
+    row: "<line number>",
+    what: "open or close one line's details",
+  }),
+  openJob: declare({
+    id: "console-open-job",
+    page: "shell",
+    opens: "dialog",
+    row: "<job>",
+    what: "open the job a host line belongs to",
+  }),
+  copy: declare({
+    id: "console-copy-line",
+    page: "shell",
+    opens: "run",
+    what: "copy an opened line to the clipboard",
+  }),
+  everything: declare({
+    id: "console-everything",
+    page: "shell",
+    opens: "view",
+    what: "show every source again",
+  }),
+  onlyLine: declare({
+    id: "console-only-line-source",
+    page: "shell",
+    opens: "view",
+    what: "show only the opened line's source",
+  }),
+  newLines: declare({
+    id: "console-back-to-tail",
+    page: "shell",
+    opens: "view",
+    what: "jump back to the newest lines and follow again",
+  }),
+  search: declare({
+    id: "console-search",
+    page: "shell",
+    opens: "view",
+    what: "the Lines containing box",
+  }),
+  retry: declare({
+    id: "console-retry",
+    page: "shell",
+    opens: "run",
+    what: "read the host's lines again after a failed read",
+  }),
+};
+const CONTAINER = declare({
+  id: "console-container",
+  page: "shell",
+  opens: "view",
+  what: "the container the next command runs in",
+});
+const COMMAND = declare({
+  id: "console-command",
+  page: "shell",
+  opens: "view",
+  what: "the command line",
+});
 
 /**
  * @param {HTMLElement} root
  * @returns {() => void}
  */
 export function mount(root) {
+  ensureStyle("/css/pages/activity.css");
+  root.classList.add("con-page");
   const params = new URLSearchParams(location.search);
-  const target = h("select", { class: "kp-field__input", id: SHELL_TARGET });
-  const other = h("input", {
+
+  const pause = drivable(
+    h("button", { type: "button", class: "kp-button kp-button--secondary" }),
+    DRIVE.follow,
+  );
+  const download = drivable(
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--secondary",
+        title: "Save the lines the filter shows as a .txt file",
+      },
+      "Download",
+    ),
+    DOWNLOAD,
+  );
+  const runACommand = drivable(
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--primary",
+        title: "Jump to the shell bar (Ctrl `)",
+      },
+      "Run a command",
+    ),
+    FOCUS,
+  );
+  const header = pageHeader({
+    title: "Console",
+    desc: "Every line the host prints, live, whoever started the work: this dashboard, a CLI or TUI, or the nightly round. Below it, a root shell into any container. Secrets are masked before a line leaves the host.",
+    live: false,
+    actions: [pause, download],
+    primary: runACommand,
+  });
+  // The live chip sits beside the title, as the demo (senior review,
+  // finding 5); on a phone the header reads title + chip, description,
+  // "Run a command" across the width, then Pause and Download
+  // (activity.css).
+  const liveChip = h("span", { class: "nx-live con-live", role: "status" });
+  header.title.after(liveChip);
+  header.el.classList.add("con-head");
+
+  // ── the shell bar ───────────────────────────────────────────────────
+  const target = h("select", {
     class: "kp-field__input",
-    id: SHELL_VMID,
-    type: "text",
-    inputmode: "numeric",
-    pattern: "\\d{3,5}",
-    placeholder: "or a vmid",
-    "aria-label": "Another container's vmid",
+    id: SHELL_TARGET,
+    "aria-label": "Container",
+    title: "The container the command runs in",
   });
   const line = h("input", {
     class: "kp-field__input mono",
@@ -55,95 +216,115 @@ export function mount(root) {
     type: "text",
     autocomplete: "off",
     spellcheck: "false",
-    placeholder: "a command, e.g. df -h",
-    "aria-label": "Command line",
+    placeholder: "a command, e.g. df -h /appdata",
+    "aria-label": "Command",
   });
-  const run = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--destructive",
-      id: "shell-run",
-    },
-    "Run",
+  drivable(target, CONTAINER);
+  drivable(line, COMMAND);
+  const run = drivable(
+    h(
+      "button",
+      {
+        type: "submit",
+        class: "kp-button kp-button--primary",
+        id: "shell-run",
+        title:
+          "Run as root in the container (pct exec); queued as a job and audited (Enter)",
+      },
+      "Run",
+    ),
+    RUN,
   );
-  const out = h("div", {
-    class: "shell-out",
-    id: "shell-out",
-    role: "log",
-    "aria-live": "polite",
-    "aria-label": "What ran and what it printed",
-  });
-  root.replaceChildren(
-    h("h1", null, "Console"),
+  // The hint's words are there from the first frame, so the footer never
+  // grows when the host's settings arrive, and stay when they cannot be
+  // read (finding 11).
+  const EXEC_ON =
+    "Runs as root; every line is a job in the queue and a line in the host's audit log. ↑ ↓ walk your history.";
+  const off = h("p", { class: "con-off" }, EXEC_ON);
+  const form = h(
+    "form",
+    { class: "con-shell", "aria-label": "Run a command" },
+    target,
     h(
-      "p",
-      { class: "measured" },
-      "One line at a time, run as root inside the container (pct exec). Every line is a job in the queue and a line in the host's audit log; the host refuses unless exec_enabled = true in host.toml. The same as the Run a command form, or homelab exec <vmid> <command>.",
-    ),
-    h(
-      "div",
-      { class: "shell-bar" },
-      h(
-        "div",
-        { class: "kp-field" },
-        h(
-          "label",
-          { class: "kp-field__label", for: "shell-target" },
-          "Container",
-        ),
-        target,
-      ),
-      h(
-        "div",
-        { class: "kp-field" },
-        h(
-          "label",
-          { class: "kp-field__label", for: "shell-vmid" },
-          "Or by number",
-        ),
-        other,
-      ),
-    ),
-    out,
-    h(
-      "div",
-      { class: "shell-input" },
-      h("span", { class: "shell-prompt mono" }, "#"),
+      "label",
+      { class: "con-prompt" },
+      h("b", { "aria-hidden": "true" }, "#"),
       line,
-      run,
     ),
+    run,
+    off,
+  );
+
+  const body = h("div", { class: "con-body" });
+  root.replaceChildren(header.el, body);
+  const explorer = mountHostLog(body, {
+    drive: DRIVE,
+    followInBar: false,
+    foot: form,
+    label: "Host lines and shell",
+    onFollow: (on) => paintFollow(on),
+  });
+  const paintFollow = (/** @type {boolean} */ on) => {
+    pause.textContent = on ? "Pause" : "Resume";
+    pause.title = on
+      ? "Stop following; new lines wait below a marker (Space)"
+      : "Follow the newest lines again (Space)";
+    liveChip.textContent = on
+      ? "following · 2\u00a0000-line ring"
+      : "paused · new lines wait";
+    liveChip.dataset.paused = String(!on);
+  };
+  paintFollow(true);
+  pause.addEventListener("click", () =>
+    explorer.setFollow(!explorer.following()),
+  );
+  download.addEventListener("click", () => explorer.download());
+  runACommand.addEventListener("click", () => line.focus());
+
+  // Remote exec off on this host: say so under the bar, once known.
+  const abort = new AbortController();
+  void fetchJson("/data/host-settings", "the host settings", abort.signal).then(
+    (r) => {
+      if (!r.ok) return;
+      /** @type {{key: string, value: unknown, set?: boolean}[]} */
+      const fields = r.body?.page?.fields ?? [];
+      const exec = fields.find((x) => x.key === "exec_enabled");
+      if (exec?.value === false)
+        off.textContent =
+          "Remote exec is off on this host (exec_enabled = false, changed over ssh only): the host refuses commands. ↑ ↓ walk your history.";
+    },
   );
 
   let wanted = params.get("vmid") ?? "";
   const fillTargets = () => {
     const list = shellTargets(current().fleet?.stacks ?? []);
+    if (wanted && !list.some((t) => t.value === wanted))
+      list.push({ value: wanted, label: `${wanted} · by number` });
     const sig = list.map((t) => t.value).join(",");
     if (target.dataset.sig === sig) return;
     target.dataset.sig = sig;
+    // The first container is chosen from the start, as the demo (finding
+    // 11); an address's ?vmid= or the one picked before stays chosen.
+    const keep = target.value || wanted;
     target.replaceChildren(
-      h("option", { value: "" }, "Choose a container…"),
-      ...list.map((t) => h("option", { value: t.value }, t.label)),
+      ...(list.length
+        ? list.map((t) => h("option", { value: t.value }, t.label))
+        : [h("option", { value: "" }, "Reading the containers…")]),
     );
-    if (wanted && list.some((t) => t.value === wanted)) target.value = wanted;
-    else if (wanted) other.value = wanted;
+    target.value = list.some((t) => t.value === keep)
+      ? keep
+      : (list[0]?.value ?? "");
   };
   fillTargets();
   const unsub = subscribe(fillTargets);
-  const vmid = () => other.value.trim() || target.value;
-  const remember = () => {
-    wanted = vmid();
+  target.addEventListener("change", () => {
+    wanted = target.value;
     history.replaceState(
       history.state,
       "",
       location.pathname + setParams(location.search, { vmid: wanted }),
     );
-  };
-  target.addEventListener("change", () => {
-    other.value = "";
-    remember();
   });
-  other.addEventListener("change", remember);
 
   /** @type {string[]} */
   const recall = [];
@@ -157,28 +338,25 @@ export function mount(root) {
     const j = act.jobs.find((x) => x.job === job);
     if (!el || !j) return;
     const r = shellResult(j);
-    const body = /** @type {HTMLElement} */ (el.querySelector(".shell-result"));
-    body.replaceChildren(
-      r.done
-        ? h(
-            "pre",
-            {
-              class: `shell-output mono${r.ok ? "" : " shell-output--failed"}`,
-            },
-            r.exit == null
-              ? r.output
-              : `${r.output}${r.output.endsWith("\n") || !r.output ? "" : "\n"}(exit ${r.exit})`,
-          )
-        : h(
-            "p",
-            { class: "measured" },
-            j.state === "queued"
-              ? "queued behind the host's current operation…"
-              : "running…",
-          ),
+    const res = /** @type {HTMLElement} */ (el.querySelector(".con-exec__out"));
+    const state = /** @type {HTMLElement} */ (
+      el.querySelector(".con-exec__state")
     );
-    if (r.done) pending.delete(job);
-    out.scrollTop = out.scrollHeight;
+    state.textContent = r.done
+      ? r.ok
+        ? `exit ${r.exit ?? 0}`
+        : r.exit == null
+          ? j.state
+          : `exit ${r.exit}`
+      : j.state === "queued"
+        ? "queued behind the host's current operation…"
+        : "running…";
+    state.dataset.tone = r.done ? (r.ok ? "ok" : "bad") : "";
+    if (r.done) {
+      res.textContent = r.output || "(no output)";
+      res.hidden = false;
+      pending.delete(job);
+    }
   };
   const offJobs = onAct("jobs", (id) => {
     if (id == null) for (const j of pending.keys()) paintJob(j);
@@ -187,18 +365,22 @@ export function mount(root) {
 
   const submit = async () => {
     const cmd = line.value.trim();
-    const n = vmid();
+    const n = target.value;
     if (!cmd) return;
     if (!/^\d{3,5}$/.test(n)) {
       target.focus();
-      out.append(
-        refusalCallout(
-          {
-            what: "the shell",
-            why: "no container is chosen",
-            fix: "choose one, or type its vmid",
-          },
-          "warning",
+      explorer.addBlock(
+        h(
+          "div",
+          { class: "con-exec" },
+          refusalCallout(
+            {
+              what: "the shell",
+              why: "no container is chosen",
+              fix: "choose one first",
+            },
+            "warning",
+          ),
         ),
       );
       return;
@@ -207,18 +389,19 @@ export function mount(root) {
     recall.splice(RECALL);
     recallAt = -1;
     line.value = "";
+    const ct = target.selectedOptions[0]?.textContent?.trim() ?? `CT ${n}`;
     const entry = h(
       "div",
-      { class: "shell-entry" },
-      h("p", { class: "shell-cmd mono" }, `CT ${n} # ${cmd}`),
+      { class: "con-exec" },
       h(
         "div",
-        { class: "shell-result" },
-        h("p", { class: "measured" }, "sending…"),
+        { class: "con-exec__head" },
+        h("span", { class: "mono" }, `# ${cmd}  ·  ${ct}`),
+        h("span", { class: "con-exec__state" }, "sending…"),
       ),
+      h("pre", { class: "con-exec__out mono", hidden: "" }),
     );
-    out.append(entry);
-    out.scrollTop = out.scrollHeight;
+    explorer.addBlock(entry);
     const r = await send(
       "POST",
       "/data/actions/_host/exec",
@@ -227,8 +410,9 @@ export function mount(root) {
     );
     if (!r.ok) {
       /** @type {HTMLElement} */ (
-        entry.querySelector(".shell-result")
-      ).replaceChildren(refusalCallout(r.error));
+        entry.querySelector(".con-exec__state")
+      ).textContent = "refused";
+      entry.append(refusalCallout(r.error));
       return;
     }
     const job = /** @type {number} */ (r.body.job);
@@ -236,12 +420,12 @@ export function mount(root) {
     pending.set(job, entry);
     paintJob(job);
   };
-  run.addEventListener("click", () => void submit());
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    void submit();
+  });
   line.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      void submit();
-    } else if (e.key === "ArrowUp" && recall.length) {
+    if (e.key === "ArrowUp" && recall.length) {
       e.preventDefault();
       recallAt = Math.min(recallAt + 1, recall.length - 1);
       line.value = recall[recallAt];
@@ -251,9 +435,20 @@ export function mount(root) {
       line.value = recallAt >= 0 ? recall[recallAt] : "";
     }
   });
-  line.focus();
+  /** @param {KeyboardEvent} e */
+  const onKey = (e) => {
+    if (e.key === "`" && e.ctrlKey) {
+      e.preventDefault();
+      line.focus();
+    }
+  };
+  document.addEventListener("keydown", onKey);
   return () => {
+    abort.abort();
+    explorer.cleanup();
     unsub();
     offJobs();
+    document.removeEventListener("keydown", onKey);
+    root.classList.remove("con-page");
   };
 }

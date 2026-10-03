@@ -203,7 +203,7 @@ impl Scheduler {
             )),
             remedy: Some(format!(
                 "Run it now if it matters before the next slot: the {} button on the {} page. \
-                 The Schedules page shows the next slot.",
+                 Activity's Planned view shows the next slot.",
                 s.action,
                 if on_stack {
                     format!("{} stack", s.stack)
@@ -214,7 +214,7 @@ impl Scheduler {
             link: Some(if on_stack {
                 homelab_core::notify::page::stack(&s.stack)
             } else {
-                "/schedules".into()
+                "/activity?view=planned".into()
             }),
             label: Some(s.action.clone()),
             fixes: crate::core::notify::fix_for(&crate::core::notify::FixSource::Retry {

@@ -4,7 +4,7 @@
 // jobPanel() in jobs.js; this module only puts it on the page.
 
 import { act, actionLabel, onAct } from "./act.js";
-import { badge, labeledCopyLine } from "./actui.js";
+import { badge, labeledCopyLine, openDialog } from "./actui.js";
 import { h } from "./dom.js";
 import { jobFacts, jobPanel, logLine } from "./jobs.js";
 import { attachLogs } from "/static/kp/js/log.js";
@@ -230,4 +230,32 @@ export function mountJobPanel(jobId, opts = {}) {
       clearInterval(timer);
     },
   };
+}
+
+/**
+ * One job, live, in a dialog: its facts, progress and its log. The log
+ * scrolls inside the panel's fixed height; the dialog never grows as lines
+ * arrive (invariant 47). Shared by Activity, its Running now view and the
+ * Console (redesign-activity; moved here from activitykit.js on merge).
+ * @param {number} job
+ * @param {{onClose?: () => void}} [opts]
+ */
+export function openJobDialog(job, opts = {}) {
+  const j = act.jobs.find((x) => x.job === job);
+  const panel = mountJobPanel(job, { compact: true });
+  const d = openDialog({
+    title: j
+      ? `${actionLabel(j.action)} · ${j.stack === "_host" ? "the whole host" : j.stack} · job ${job}`
+      : `Job ${job}`,
+    description:
+      "This job, live: its steps, how long it has run and every line the host printed for it.",
+    body: [panel.element],
+    id: "job-dialog",
+    wide: true,
+  });
+  void d.closed.then(() => {
+    panel.stop();
+    opts.onClose?.();
+  });
+  return d;
 }

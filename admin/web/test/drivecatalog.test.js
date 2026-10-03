@@ -177,6 +177,31 @@ const boundTo = (/** @type {string} */ src, /** @type {string} */ fn) =>
   );
 
 /**
+ * The objects a module builds of declared controls only
+ * (`const DRIVE = { follow: declare({…}), … }`): name → its keys.
+ * @param {string} src
+ */
+export function declaredMaps(src) {
+  /** @type {Map<string, Set<string>>} */
+  const out = new Map();
+  for (const m of src.matchAll(/const (\w+) = \{/g)) {
+    const open = (m.index ?? 0) + m[0].length - 1;
+    let depth = 0;
+    let end = open;
+    for (; end < src.length; end++) {
+      if (src[end] === "{") depth++;
+      else if (src[end] === "}" && --depth === 0) break;
+    }
+    const members = calls(`f(${src.slice(open + 1, end)})`, "f")[0]?.args;
+    if (!members?.length) continue;
+    const keys = members.map((a) => /^(\w+):\s*declare\(/.exec(a)?.[1]);
+    if (keys.every(Boolean))
+      out.set(m[1], new Set(/** @type {string[]} */ (keys)));
+  }
+  return out;
+}
+
+/**
  * What a module does wrong marking elements for Live view: a hand-written
  * mark, or a control id that is not a declared one.
  * @param {string} file
@@ -193,6 +218,7 @@ export function markFaults(file, src, declared) {
   ))
     bad.push(`${file}: writes ${m[0]} by hand (use drivable())`);
   const consts = boundTo(src, "declare");
+  const maps = declaredMaps(src);
   // A member read (`action.drive`) is fine when every `drive:` the module
   // writes is a declared constant.
   const driveProps = [...src.matchAll(/\bdrive:\s*([^,}\n]+)/g)].map((m) =>
@@ -219,11 +245,22 @@ export function markFaults(file, src, declared) {
             `${file}:${at}: drivable(…, ${id}): ${x} is not a declare() constant of this module`,
           );
     } else if (/^\w+\.drive$/.test(id)) {
-      const wrong = driveProps.filter((p) => !consts.has(p));
+      // `string`: a JSDoc type (`{drive: string}`), not a value.
+      const wrong = driveProps.filter((p) => p !== "string" && !consts.has(p));
       if (wrong.length)
         bad.push(
           `${file}:${at}: drivable(…, ${id}) where a drive: is ${wrong.join(", ")}, not a declare() constant`,
         );
+    } else if (/^[A-Z][A-Z0-9_]*\.\w+$/.test(id)) {
+      // A member of an object of declared controls (`DRIVE.follow`).
+      const [name, key] = id.split(".");
+      if (!maps.get(name)?.has(key))
+        bad.push(
+          `${file}:${at}: drivable(…, ${id}): ${name} is no object of declare() constants with ${key}`,
+        );
+    } else if (/^\w+\.drive\.\w+$/.test(id)) {
+      // A shared component marks a member of the object its caller passes
+      // as `drive: NAME`, checked at the caller below.
     } else if (/^\w+\.id$/.test(id) && file === "ui.js") {
       // The shared kit marks what its caller names: a `Drive` the caller
       // passes as `drive: { id: X }`, checked at the caller below.
@@ -242,6 +279,14 @@ export function markFaults(file, src, declared) {
     if (lit ? !declared.has(lit[1]) : !consts.has(id))
       bad.push(
         `${file}:${at}: drive: { id: ${id} } is not a declare() constant of this module`,
+      );
+  }
+  // A caller's `drive: NAME`: a declare() constant or an object of them.
+  for (const m of src.matchAll(/\bdrive:\s*([A-Z][A-Z0-9_]*)\b(?!\.)/g)) {
+    const at = src.slice(0, m.index).split("\n").length;
+    if (!consts.has(m[1]) && !maps.has(m[1]))
+      bad.push(
+        `${file}:${at}: drive: ${m[1]} is no declare() constant or object of them`,
       );
   }
   return bad;
@@ -266,6 +311,9 @@ test("redesign-drive-5: the undeclared-mark check catches every way around driva
     computed: `drivable(b, \`schedule-\${kind}\`);`,
     passThroughOutsideKit: `drivable(b, d.id);`,
     undeclaredDrive: `toggleChips({ drive: { id: NOPE } });`,
+    undeclaredMap: `const D = { a: declare({ id: "new-schedule" }), b: "x" };\ndrivable(e, D.a);`,
+    undeclaredMapKey: `const D = { a: declare({ id: "new-schedule" }) };\ndrivable(e, D.z);`,
+    undeclaredPassedMap: `const D = { a: "x" };\nmountHostLog(r, { drive: D });`,
     notConst: `const NOPE = "new-schedule";\ndrivable(b, NOPE);`,
     nested: `drivable(h("button", { a: 1, b: [2, 3] }, f(x, y)), "nope-x");`,
   };
@@ -277,6 +325,14 @@ test("redesign-drive-5: the undeclared-mark check catches every way around driva
   // The real shapes pass.
   const good = `const NEW = declare({ id: "new-schedule" });\ndrivable(h("button", { a: 1, b: [2, 3] }, f(x, y)), NEW, row);\nconst t = { drive: NEW };\ndrivable(b, t.drive);`;
   assert.deepEqual(markFaults("good", good, declared), []);
+  assert.deepEqual(
+    markFaults(
+      "p",
+      `const D = { a: declare({ id: "new-schedule" }) };\ndrivable(e, D.a);\nmount(r, { drive: D });\ndrivable(e, opts.drive.a);`,
+      declared,
+    ),
+    [],
+  );
   assert.deepEqual(
     markFaults(
       "ui.js",

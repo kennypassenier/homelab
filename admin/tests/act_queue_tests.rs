@@ -581,6 +581,68 @@ async fn arch_schedule_a_due_slot_is_queued_a_missed_one_is_notified() {
     assert!(s.delete(&id).await.is_err());
 }
 
+/// redesign-schedules-2/3: a skipped slot is neither run nor notified, and
+/// the newest slot that passed without a run is remembered with its reason
+/// for the page's "Last run" column.
+/// covers: redesign-schedules-2, redesign-schedules-3
+#[tokio::test]
+async fn redesign_schedules_a_skipped_slot_is_quiet_and_a_missed_one_is_remembered() {
+    let w = world("sched-skip", MemFiles::default(), steady());
+    let slot = resolve_local(2026, 9, 28, 3, 30).instant();
+    w.clock.set(slot - 3_600);
+    let s = Scheduler::load(
+        w.dir.join("schedules.json"),
+        w.actions.clone(),
+        w.notify.clone(),
+        w.live.clone(),
+        w.clock.clock(),
+        300,
+    )
+    .unwrap();
+    let created = s
+        .create(ScheduleInput {
+            stack: "media".into(),
+            action: "backup".into(),
+            args: ActionArgs::default(),
+            when: When::Day { at: "03:30".into() },
+            enabled: true,
+            note: String::new(),
+        })
+        .await
+        .unwrap();
+    let id = created["schedule"]["id"].as_str().unwrap().to_string();
+    // Only the next slot can be skipped.
+    assert!(s.skip(&id, slot + 86_400).await.is_err());
+    let view = s.skip(&id, slot).await.unwrap();
+    assert_eq!(view["next_run"], slot + 86_400);
+    w.clock.set(slot + 5);
+    s.tick().await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(w.host.ran().is_empty(), "a skipped slot ran");
+    assert!(
+        !w.live
+            .events("notification")
+            .iter()
+            .any(|n| n["notice"]["kind"] == "schedule_missed"),
+        "a skipped slot was notified as missed"
+    );
+    let list = s.list().await;
+    assert!(list["schedules"][0]["schedule"]["last_missed"].is_null());
+    // Down over the next slot: remembered as missed, and why.
+    w.clock.set(slot + 86_400 + 7_200);
+    s.tick().await;
+    let list = s.list().await;
+    assert_eq!(
+        list["schedules"][0]["schedule"]["last_missed"]["slot"],
+        slot + 86_400
+    );
+    assert_eq!(
+        list["schedules"][0]["schedule"]["last_missed"]["why"],
+        "down"
+    );
+    assert!(s.skip("nope", slot).await.is_err());
+}
+
 async fn call(
     app: axum::Router,
     method: &str,

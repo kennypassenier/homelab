@@ -54,13 +54,16 @@ pub fn sha_listed(sums: &str, filename: &str, actual_hex: &str) -> bool {
 
 /// Download `homelab-host` + SHA256SUMS for `tag`, verify, return the binary
 /// base64-encoded ready for SelfUpdateHost. Every failure is a clear string.
-pub fn stage_release(tag: &str) -> Result<String, String> {
+/// redesign-host-4: with the signed checksum list it came with, which
+/// `SelfUpdateHost` hands to the host so it can later report whether it
+/// runs a signed release.
+pub fn stage_release(tag: &str) -> Result<(String, Option<homelab_proto::ReleaseProof>), String> {
     // fix-29's remaining gap, closed in the TUI parity round: homelab's own
     // releases are signed since the dashboard release (3.62.0, Kenny), so
     // the host binary is verified like every native release: the minisign
     // signature over SHA256SUMS, then the binary against it. An unsigned
     // release is refused.
-    stage_asset_checked(REPO, tag, "homelab-host", true)
+    stage_asset_proven(REPO, tag, "homelab-host", true)
 }
 
 /// fix-105 (older-client-no-warning, 2026-09-27): the release's own client,
@@ -118,6 +121,18 @@ pub fn stage_asset_checked(
     asset: &str,
     signed: bool,
 ) -> Result<String, String> {
+    stage_asset_proven(repo, tag, asset, signed).map(|(b64, _)| b64)
+}
+
+/// redesign-host-4: the same, also handing back the verified `SHA256SUMS`
+/// and its signature (None when `signed` is false).
+pub fn stage_asset_proven(
+    repo: &str,
+    tag: &str,
+    asset: &str,
+    signed: bool,
+) -> Result<(String, Option<homelab_proto::ReleaseProof>), String> {
+    let mut proof = None;
     let dir =
         std::env::temp_dir().join(format!("homelab-release-{}-{}", std::process::id(), asset));
     let _ = std::fs::remove_dir_all(&dir);
@@ -182,6 +197,10 @@ pub fn stage_asset_checked(
             let _ = std::fs::remove_dir_all(&dir);
             return Err(format!("{} {} of {}: {}", asset, tag, repo, e));
         }
+        proof = sig.map(|sig| homelab_proto::ReleaseProof {
+            sums: sums.clone(),
+            sig,
+        });
     }
     let actual = homelab_core::manifest::sha256_hex(&binary);
     if !sha_listed(&sums, asset, &actual) {
@@ -193,7 +212,10 @@ pub fn stage_asset_checked(
     }
     let _ = std::fs::remove_dir_all(&dir);
     use base64::Engine as _;
-    Ok(base64::engine::general_purpose::STANDARD.encode(&binary))
+    Ok((
+        base64::engine::general_purpose::STANDARD.encode(&binary),
+        proof,
+    ))
 }
 
 /// Latest release tag of any repository (H7's helper, generalised for T11).

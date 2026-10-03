@@ -342,6 +342,7 @@ fn feat_stacks_7_commands_no_verb_sends_have_no_line() {
         Command::GetState,
         Command::SelfUpdateHost {
             binary_b64: String::new(),
+            proof: None,
         },
         Command::StageNativeBinary {
             stack: "kyu".into(),

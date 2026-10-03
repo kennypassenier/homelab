@@ -1196,14 +1196,18 @@ impl Actions {
                             Refusal::new(what.clone(), why, "name the tag, or try again later")
                         })?,
                 };
-                let binary_b64 = releases.host_binary(&tag).await.map_err(|why| {
+                let bin = releases.host_binary(&tag).await.map_err(|why| {
                     Refusal::new(
                         what.clone(),
                         why,
                         "nothing was sent to the host; sign the release, or pick a signed one",
                     )
                 })?;
-                return Ok(Material::HostRelease { tag, binary_b64 });
+                return Ok(Material::HostRelease {
+                    tag,
+                    binary_b64: bin.binary_b64,
+                    proof: bin.proof,
+                });
             }
             Needs::NativeRelease => {
                 let files = self.inner.files.clone();

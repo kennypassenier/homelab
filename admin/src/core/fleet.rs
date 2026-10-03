@@ -42,6 +42,18 @@ pub struct HostSummary {
     /// before the host's first gather, or from a host too old to send it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disk_detail: Option<homelab_proto::HostDiskDetail>,
+    /// redesign-host-4: seconds since the host booted. Absent from a host
+    /// older than 3.71.0, which the page says rather than guessing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uptime_s: Option<u64>,
+    /// redesign-host-4: whether the running daemon is a signed release, as
+    /// the host verified its own binary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release: Option<homelab_proto::ReleaseVerdict>,
+    /// redesign-host-4: every guest's measured use by vmid, managed or not
+    /// (the Host page's Containers table).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guests_usage: Option<Vec<homelab_proto::GuestUse>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -153,6 +165,9 @@ pub fn fleet_view(state: &FleetState, measured_at: u64) -> FleetView {
             load1_x100: state.host.load1_x100,
             tls_fingerprint: state.host.tls_fingerprint.clone(),
             disk_detail: state.host.disk_detail.clone(),
+            uptime_s: state.host.uptime_s,
+            release: state.host.release.clone(),
+            guests_usage: state.host.guests_usage.clone(),
         },
         stacks,
         counts,

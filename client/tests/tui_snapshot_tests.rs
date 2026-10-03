@@ -25,6 +25,9 @@ fn fleet() -> FleetState {
             cores_total: 12,
             load1_x100: 285,
             disk_detail: None,
+            uptime_s: None,
+            release: None,
+            guests_usage: None,
         },
         stacks: vec![
             StackView {
@@ -2002,6 +2005,7 @@ fn a_host_that_is_behind_is_recognised_as_behind() {
     // meant to replace, and told the operator to run what it had refused.
     assert!(!mutates(&Command::SelfUpdateHost {
         binary_b64: String::new(),
+        proof: None,
     }));
 }
 

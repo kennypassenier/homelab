@@ -14,6 +14,7 @@ use homelab_admin::core::stackedit::{
     images, mount_value, outside_stack, parse_manifest, raw_path_problem,
 };
 use homelab_admin::core::textdiff::{counts, hunks, unified};
+use homelab_admin::shell::edit::{HOST_SETTINGS_SINCE, OLD_HOST_SETTINGS_ADVICE};
 use homelab_admin::shell::edit::{subject_with_id, version_triple};
 use homelab_core::manifest::{FirewallRule, FwAction, FwDir, FwProto};
 
@@ -526,6 +527,7 @@ fn feat_settings_1_the_page_and_its_checks() {
         ]),
         secrets_set: vec!["token".into()],
         unknown: vec![],
+        ..Default::default()
     };
     let p = hostsettings::page(&file);
     let f = |k: &str| p.fields.iter().find(|x| x.info.key == k).unwrap();
@@ -799,4 +801,27 @@ fn settings_edit_tile_validation() {
             .any(|p| p.contains("must be at least check every")),
         "{problems:?}"
     );
+}
+
+/// fix-guards-8 (review): the advice for a host too old for the settings
+/// page names a route that host supports. `homelab host apply` reads the
+/// host's file through GetHostConfig first — the very request a host older
+/// than HOST_SETTINGS_SINCE does not answer — so it cannot be the advice.
+///
+/// covers: fix-guards-8
+#[test]
+fn fix_guards_8_the_advice_for_an_old_host_names_a_route_it_supports() {
+    assert!(HOST_SETTINGS_SINCE >= (3, 63, 0));
+    assert!(
+        !OLD_HOST_SETTINGS_ADVICE.contains("host apply"),
+        "{OLD_HOST_SETTINGS_ADVICE}"
+    );
+    assert!(OLD_HOST_SETTINGS_ADVICE.contains("homelab release-update"));
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/shell/edit.rs"),
+    )
+    .unwrap();
+    let gate = &src[src.find("async fn host_new_enough").unwrap()..];
+    let gate = &gate[..gate.find("\n}\n").unwrap()];
+    assert!(gate.contains("OLD_HOST_SETTINGS_ADVICE"), "{gate}");
 }

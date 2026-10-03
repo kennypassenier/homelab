@@ -2401,7 +2401,7 @@ async fn o2_two_templates_differ_in_privilege_and_in_name() {
             create
         );
         let described = exec
-            .calls_containing("golden template (B8), clone with")
+            .calls_containing("golden template, clone with")
             .join(" ");
         if unprivileged {
             assert!(!described.contains("-priv"), "{}", described);

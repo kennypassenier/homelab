@@ -56,7 +56,7 @@ pub fn draw(f: &mut Frame, model: &Model, area: Rect) {
         ])
     };
     let hint = Line::styled(
-        "audited via A6 — needs exec_enabled = true in host.toml; no-touch vmids always refused",
+        "audited in the host's audit log — needs exec_enabled = true in host.toml; no-touch vmids always refused",
         THEME.muted_style(),
     );
     f.render_widget(Paragraph::new(vec![prompt, hint]), rows[1]);

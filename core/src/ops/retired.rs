@@ -220,7 +220,7 @@ pub fn evaluate_retired(state: &HostState) -> Vec<Finding> {
                 list(&r.vault)
             ),
             remedy: format!(
-                "kept on purpose until you decide (ask-9); `homelab wipe {}` deletes exactly \
+                "kept on purpose until you decide; `homelab wipe {}` deletes exactly \
                  these after you type the name",
                 key
             ),

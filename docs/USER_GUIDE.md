@@ -3066,7 +3066,7 @@ A failed nightly update parks the stack's automatic updates by itself
 (fix-59): the nightly backup goes on, `onboot` and the running containers are
 left alone. A failed backup parks nothing; it is tried again the next night.
 The host logs
-`nightly update for <name> FAILED — automatic updates parked, backups continue (H8, fix-59); investigate, then resume with`
+`nightly update for <name> FAILED — automatic updates parked, backups continue; investigate, then resume with`
 followed by the enable command, and sends a notification
 (`park_after_night` in `host/src/main.rs`). `homelab check` lists the stack
 as `automatic updates parked since <date>` until `homelab enable <name>`
@@ -3549,7 +3549,7 @@ output of the finding for that record):
 
 ```text
   [noted] drill — retired 2026-09-27 (stack, vmid 119) — kept: restic none; /appdata none; vault /var/lib/homelab/secrets/drill
-      remedy: kept on purpose until you decide (ask-9); `homelab wipe drill` deletes exactly these after you type the name
+      remedy: kept on purpose until you decide; `homelab wipe drill` deletes exactly these after you type the name
 ```
 
 **In the TUI** (fix-107/fix-66): the palette's "apply" entry (no key — it
@@ -3681,7 +3681,7 @@ owned by `syncthing`, so one repository, `core/src/ops/retired.rs:36-44`,
 
 ```text
   [noted] syncthing — retired 2026-09-27 (stack, vmid 108) — kept: restic syncthing-config; /appdata /appdata/syncthing/syncthing-config; vault /var/lib/homelab/secrets/syncthing
-      remedy: kept on purpose until you decide (ask-9); `homelab wipe syncthing` deletes exactly these after you type the name
+      remedy: kept on purpose until you decide; `homelab wipe syncthing` deletes exactly these after you type the name
 ```
 
 `homelab wipe syncthing` (a stack) or `homelab wipe media/bazarr` (an app or

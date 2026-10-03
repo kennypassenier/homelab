@@ -785,14 +785,22 @@ async fn run(explicit_host: Option<String>) {
             // like a stack — `config/host.toml` sent whole, the host keeps
             // its own secrets and writes it. The repository's path unless
             // one is given.
-            Some("apply") => {
+            // fix-guards-7: `diff` is `apply` without the write — every key
+            // whose effective value differs between config/host.toml and
+            // the running host, exit 3 (DRIFT_EXIT_CODE) when there is one;
+            // an unreachable host is exit 1 and says so, because it says
+            // nothing about drift. `make release` runs it:
+            // 2026-10-03, fix-240 was "done" with ask_timeout_s 600 in the
+            // repository and 120 on the host, and nothing compared them.
+            Some(sub @ ("apply" | "diff")) => {
                 let path = args
                     .get(3)
                     .map(std::path::PathBuf::from)
                     .unwrap_or_else(|| in_repo("config/host.toml"));
+                let diff = sub == "diff";
                 let toml = std::fs::read_to_string(&path).unwrap_or_else(|e| {
                     die(&format!(
-                        "{} :: {e} — `homelab host apply` reads a repository's config/host.toml; \
+                        "{} :: {e} — `homelab host {sub}` reads a repository's config/host.toml; \
                          run this inside the repository, or pass the path",
                         path.display()
                     ))
@@ -800,7 +808,7 @@ async fn run(explicit_host: Option<String>) {
                 if let Err(e) = toml.parse::<toml::Table>() {
                     die(&format!("{} does not read as TOML: {e}", path.display()));
                 }
-                println!("{}▶ host apply :: {}{}", C_CYAN, path.display(), C_RESET);
+                println!("{}▶ host {sub} :: {}{}", C_CYAN, path.display(), C_RESET);
                 // The same optimistic-concurrency guard a dashboard save
                 // uses: read host.toml's current sha256 first, so an edit
                 // made meanwhile (over ssh, or a TUI save) is refused
@@ -812,7 +820,12 @@ async fn run(explicit_host: Option<String>) {
                         serde_json::from_str::<homelab_proto::HostConfigFile>(&r.message).ok()
                     })
                     .unwrap_or_else(|| {
-                        die("the host did not answer GetHostConfig — nothing applied")
+                        die(if diff {
+                            "the host did not answer GetHostConfig — it is unreachable or refused, \
+                             so drift could not be checked (this is not a drift verdict)"
+                        } else {
+                            "the host did not answer GetHostConfig — nothing applied"
+                        })
                     });
                 // fix-191: every key this apply moves, shown before anything
                 // is written, and confirmed by typing `apply`. Only these
@@ -825,6 +838,28 @@ async fn run(explicit_host: Option<String>) {
                     .collect();
                 let changes =
                     homelab_core::hostconfig::declared_changes(&declared, &current.values);
+                if diff {
+                    let drift = homelab_core::hostconfig::effective_drift(
+                        changes,
+                        &current.known_keys,
+                        &current.defaults,
+                    );
+                    for line in homelab_core::hostconfig::drift_lines(&drift) {
+                        println!("{}  {}{}", C_YELLOW, line, C_RESET);
+                    }
+                    if drift.is_empty() {
+                        println!(
+                            "{}✓ config/host.toml and the host's host.toml agree{}",
+                            C_GREEN, C_RESET
+                        );
+                        std::process::exit(0);
+                    }
+                    println!(
+                        "  {} key(s) differ; `homelab host apply` sends the repository's values",
+                        drift.len()
+                    );
+                    std::process::exit(homelab_core::hostconfig::DRIFT_EXIT_CODE);
+                }
                 if changes.is_empty() {
                     println!(
                         "{}✓ nothing to apply — the host already runs these settings{}",
@@ -894,7 +929,7 @@ async fn run(explicit_host: Option<String>) {
                 }
             }
             other => die(&format!(
-                "usage: homelab host restart | homelab host apply [path] (got {:?})",
+                "usage: homelab host restart | homelab host apply [path] | homelab host diff [path] (got {:?})",
                 other.unwrap_or("nothing")
             )),
         },

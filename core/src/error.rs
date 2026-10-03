@@ -80,7 +80,7 @@ impl OperatorError {
             ),
             CoreError::State(msg) | CoreError::NotFound(msg) => (
                 msg.clone(),
-                "Run doctor (F6) to compare recorded state with reality.".to_string(),
+                "Run `homelab doctor` to compare recorded state with reality.".to_string(),
             ),
             CoreError::Deferred(msg) => (
                 msg.clone(),

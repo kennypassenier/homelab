@@ -482,6 +482,12 @@ pub async fn run_demo(
                         Command::Ping => "pong (demo host)".into(),
                         Command::GetHostConfig => serde_json::to_string(&homelab_proto::HostConfigFile {
                             path: "/etc/homelab/host.toml (demo host)".into(),
+                            // redesign-schedules-1: a nightly round at
+                            // 03:00, so the Schedules calendar has one to
+                            // draw beside the planned runs.
+                            values: [("backup_hour".to_string(), serde_json::json!(3))]
+                                .into_iter()
+                                .collect(),
                             ..Default::default()
                         }).unwrap_or_default(),
                         // fix-202 (invariants: the backup calendar must show

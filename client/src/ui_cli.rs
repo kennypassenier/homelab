@@ -16,7 +16,7 @@ pub const STEPS: &str = "goto <path> | open <form> [stack] | open batch <action>
 select <stack>,<stack>|none | type <field> <text> | \
 pick <field> <value> | check <field> on|off | edit <field> <file|-> | \
 row add|edit|up|down|delete [n|key] | press next|back|save|cancel|default | \
-press confirm [--wait] | finish | close | reload | state | done | plan \"<step>\" \"<step>\" … | plan --file <file|->";
+press confirm [--wait] | finish | answer [operation] allow|stop | close | reload | state | done | plan \"<step>\" \"<step>\" … | plan --file <file|->";
 
 /// What the line may print for a command besides its own answer. The host
 /// broadcasts every log line, transfer, fleet snapshot and question to every
@@ -25,7 +25,12 @@ press confirm [--wait] | finish | close | reload | state | done | plan \"<step>\
 /// 2026-09-29), so a UI step prints only its answer and the dashboard's
 /// notes to it (paused, stopped), plus a first-use certificate pin.
 pub fn quiet_line(command: &homelab_proto::Command) -> bool {
-    matches!(command, homelab_proto::Command::Ui { .. })
+    // fix-240: an answer sent from a second terminal prints only whether
+    // it was taken, not the running operation's stream.
+    matches!(
+        command,
+        homelab_proto::Command::Ui { .. } | homelab_proto::Command::AnswerOpen { .. }
+    )
 }
 
 /// What one `homelab ui …` line asks for: one step, or a step and then

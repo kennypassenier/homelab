@@ -519,8 +519,8 @@ pub const KEYS: &[KeyInfo] = &[
         "ask_timeout_s",
         "Notifications",
         "Question wait",
-        "Seconds a suspended step waits for an answer before it gives up.",
-        "120",
+        "Seconds a suspended step waits for an answer before it fails; the question is pushed as a notice when it is asked.",
+        "600",
         Kind::Int {
             min: 10,
             max: 86_400,

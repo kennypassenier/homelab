@@ -249,6 +249,18 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         boot: Option<String>,
     },
+    /// fix-240: answer a question a RUNNING operation is waiting on, from
+    /// any session — not only the one that started it. A headless run
+    /// (`homelab deploy … < /dev/null`) cannot answer its own question; a
+    /// second `homelab answer <op> allow|stop`, or Live view, can. `op`
+    /// names the operation (`deploy-media`), its subject (`media`) or the
+    /// question's id; None answers the one open question, and is refused
+    /// when more than one is open.
+    AnswerOpen {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        op: Option<String>,
+        allow: bool,
+    },
     /// E8: run the configured ZFS snapshot + replication jobs now.
     ZfsReplicate,
     /// G1: apply the runaway guards to a container. They exist and are
@@ -840,6 +852,7 @@ impl Command {
             | ReleaseUpdateNative { .. }
             | RollbackNative { .. }
             | Answer { .. }
+            | AnswerOpen { .. }
             | ZfsReplicate
             | ApplyGuards { .. }
             | SetStackEnabled { .. }
@@ -904,6 +917,7 @@ impl Command {
             ReleaseUpdateNative { .. } => "release_update_native",
             RollbackNative { .. } => "rollback_native",
             Answer { .. } => "answer",
+            AnswerOpen { .. } => "answer_open",
             ZfsReplicate => "zfs_replicate",
             ApplyGuards { .. } => "apply_guards",
             ForgetStack { .. } => "forget_stack",
@@ -1265,6 +1279,22 @@ pub enum ServerMsg {
         /// answer carries this back and a stale one is refused.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         boot: Option<String>,
+        /// fix-240: how many seconds the host waits for the answer, so a
+        /// banner or prompt shows the host's own deadline rather than a
+        /// guess of it. None from a host older than the field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        wait_s: Option<u64>,
+    },
+    /// fix-240: a question is no longer waiting (answered from any session,
+    /// or its wait ran out). Sent to every session, so a banner or prompt
+    /// for it goes away where it was not answered.
+    AskSettled {
+        id: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        boot: Option<String>,
+        /// What became of it, in words ("allowed", "stopped", or why
+        /// nobody answered).
+        how: String,
     },
     /// Real byte counters for transfer visuals (G6).
     Transfer {
@@ -1323,6 +1353,10 @@ mod wire_tests {
                 accept_days: None,
             },
             Command::ListManualChecks { json: false },
+            Command::AnswerOpen {
+                op: Some("deploy-media".into()),
+                allow: true,
+            },
             Command::SetStackEnabled {
                 stack: "home".into(),
                 enabled: true,

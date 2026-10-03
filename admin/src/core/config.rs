@@ -81,8 +81,10 @@ pub struct AdminConfig {
     #[serde(default = "d_loki_timeout")]
     pub loki_timeout_s: u64,
     /// feat-ops-2: how long the host waits for an answer to a question (its
-    /// own `ask_timeout_s`, default 120). Past it the dashboard refuses to
-    /// send an answer, because the host has stopped waiting.
+    /// own `ask_timeout_s`). Past it the dashboard refuses to send an
+    /// answer, because the host has stopped waiting. fix-240: only for a
+    /// host older than the question's own `wait_s`, which wins when sent;
+    /// the default follows the host's (`homelab_core::ask::DEFAULT_WAIT_S`).
     #[serde(default = "d_ask_timeout")]
     pub ask_timeout_s: u64,
     /// Decision "23 constants" (2026-09-30): the longest log window one
@@ -118,7 +120,7 @@ fn d_loki_timeout() -> u64 {
     15
 }
 fn d_ask_timeout() -> u64 {
-    120
+    homelab_core::ask::DEFAULT_WAIT_S
 }
 fn d_logs_max_since() -> u64 {
     crate::core::logs::MAX_SINCE_S

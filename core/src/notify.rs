@@ -471,6 +471,8 @@ pub enum Event<'a> {
     Parked,
     /// The host came back; `interrupted` when operations did not finish.
     Boot { interrupted: bool },
+    /// fix-240: an operation stopped and waits for a person's answer.
+    Question,
 }
 
 /// The decision and its reason in words, for the notice's push column.
@@ -574,6 +576,9 @@ pub fn urgency(e: &Event) -> Urgency {
         Event::Boot { interrupted: false } => {
             no("not urgent: the host is back, nothing interrupted")
         }
+        // fix-240: a question nobody hears expires and fails its operation;
+        // the person it is for must be told now, not at 09:00.
+        Event::Question => yes("urgent: an operation waits for a person's answer"),
     }
 }
 
@@ -907,6 +912,33 @@ pub fn explain_event(op: &str, label: &str, ok: bool, error: Option<&str>) -> Ex
             )
         },
         page: page::HOST.into(),
+    }
+}
+
+/// fix-240 (2026-10-02): the notice for a question an operation is waiting
+/// on. A question raised by a headless run showed only as a banner on the
+/// dashboard, and expired before anybody looked; now it is a notice like
+/// any other event, urgent so it reaches the phone, saying what is asked,
+/// what each answer does, how long it waits and how to answer it.
+pub fn explain_question(q: &crate::ask::Question, id: u64, wait_s: u64) -> Explained {
+    let wait = crate::ask::wait_words(wait_s);
+    Explained {
+        title: format!("{} waits for an answer ({})", q.op, q.step),
+        stack: None,
+        what: notice_text(&format!(
+            "{} · allow: {} · stop: {}",
+            q.what, q.if_allowed, q.if_stopped
+        )),
+        consequence: format!(
+            "Unanswered within {}, the operation fails: silence is never permission.",
+            wait
+        ),
+        remedy: format!(
+            "Within {}: Allow or Stop on the dashboard's banner, or \
+             `homelab answer {} allow|stop` (question {}).",
+            wait, q.op, id
+        ),
+        page: page::JOBS.into(),
     }
 }
 

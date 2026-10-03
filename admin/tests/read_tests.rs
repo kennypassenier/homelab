@@ -305,7 +305,7 @@ fn arch_config_loki_and_the_ask_wait_have_defaults_and_are_checked() {
     let c = from_table(BASE.parse().unwrap()).unwrap();
     assert_eq!(
         (c.loki_url.clone(), c.loki_timeout_s, c.ask_timeout_s),
-        (None, 15, 120)
+        (None, 15, 600)
     );
     assert_eq!(c.loki_base(), None);
     let c = from_table(

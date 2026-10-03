@@ -28,7 +28,7 @@ The dashboard's own settings are the [admin] table of the config file:
   poll_s = 10  sse_buffer = 256  backoff_min_s = 1  backoff_max_s = 60
   access_team_domain = \"<team>.cloudflareaccess.com\"  access_aud = \"<64 hex>\"
   access_leeway_s = 60  access_certs_refresh_s = 3600
-  loki_url = \"http://10.10.10.13:3100\"  loki_timeout_s = 15  ask_timeout_s = 120";
+  loki_url = \"http://10.10.10.13:3100\"  loki_timeout_s = 15  ask_timeout_s = 600";
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {

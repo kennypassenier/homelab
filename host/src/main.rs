@@ -969,10 +969,10 @@ fn effective_concurrency(configured: usize) -> usize {
     configured.max(1)
 }
 
-/// Two minutes: long enough to read a question and decide, short enough
-/// that a window left open does not hold the global op lock all night.
+/// fix-240: ten minutes (`homelab_core::ask::DEFAULT_WAIT_S`). Two minutes
+/// ran out before the person the question was for had seen it.
 fn default_ask_timeout_s() -> u64 {
-    120
+    homelab_core::ask::DEFAULT_WAIT_S
 }
 
 /// Kenny's choice (form Y4, 2026-09-02): three at a time. About a third of
@@ -2984,12 +2984,23 @@ span_days = 7\n";
     /// through the real `LiveAsker` and reports the answer it got. `Answer`
     /// goes to the real handler, which is what delivers it.
     async fn asking_handler(st: AppState, req: RpcRequest) -> RpcResponse {
-        if matches!(req.command, Rpc::Answer { .. }) {
+        asking_handler_with(st, req, false).await
+    }
+
+    /// fix-240: [`asking_handler`] that also raises the question as a notice
+    /// (the test's state directory is its own).
+    async fn notifying_asking_handler(st: AppState, req: RpcRequest) -> RpcResponse {
+        asking_handler_with(st, req, true).await
+    }
+
+    async fn asking_handler_with(st: AppState, req: RpcRequest, notify: bool) -> RpcResponse {
+        if matches!(req.command, Rpc::Answer { .. } | Rpc::AnswerOpen { .. }) {
             return handle_rpc(&st, req).await;
         }
         let asker = LiveAsker {
             state: &st,
             timeout_s: 5,
+            notify,
         };
         let q = homelab_core::ask::Question {
             op: "deploy-gateway".into(),
@@ -3058,6 +3069,153 @@ span_days = 7\n";
             verdict, "Allow",
             "the operator allowed over the same connection, but the operation heard: {}",
             verdict
+        );
+    }
+
+    /// covers: fix-240
+    ///
+    /// A headless run (`homelab deploy … < /dev/null`) cannot answer the
+    /// question its own operation raised. A SECOND session answers it by the
+    /// operation's subject (`homelab answer gateway allow`), the waiting
+    /// operation hears Allow, the asking session learns the question is
+    /// settled, and the question carried the host's own wait. Real socket,
+    /// two real sessions on one host state.
+    #[tokio::test]
+    async fn fix_240_another_session_answers_a_running_operations_question() {
+        use tokio_tungstenite::tungstenite::Message as WsMsg;
+        let addr = serve_on_loopback(asking_handler).await;
+        let frame = |req: RpcRequest| WsMsg::Text(serde_json::to_string(&req).unwrap().into());
+        let (headless, _) = tokio_tungstenite::connect_async(format!("ws://{}/ws", addr))
+            .await
+            .expect("connect the headless session");
+        let (mut htx, mut hrx) = headless.split();
+        htx.send(frame(RpcRequest {
+            id: 1,
+            command: Rpc::Ping,
+        }))
+        .await
+        .unwrap();
+        let (outcome, wait_s, settled) = tokio::time::timeout(Duration::from_secs(20), async {
+            let mut wait_s = None;
+            let mut settled = false;
+            // The reply and the broadcast travel separate channels, so
+            // either may arrive first: wait for both.
+            let mut outcome: Option<String> = None;
+            while let Some(Ok(WsMsg::Text(t))) = hrx.next().await {
+                match serde_json::from_str::<ServerMsg>(&t).unwrap() {
+                    // The headless session does not answer; another one does.
+                    ServerMsg::Ask { wait_s: w, .. } => {
+                        wait_s = w;
+                        let (other, _) =
+                            tokio_tungstenite::connect_async(format!("ws://{}/ws", addr))
+                                .await
+                                .expect("connect the answering session");
+                        let (mut otx, mut orx) = other.split();
+                        otx.send(frame(RpcRequest {
+                            id: 7,
+                            command: Rpc::AnswerOpen {
+                                op: Some("gateway".into()),
+                                allow: true,
+                            },
+                        }))
+                        .await
+                        .unwrap();
+                        while let Some(Ok(WsMsg::Text(t))) = orx.next().await {
+                            if let Ok(ServerMsg::RpcDone(r)) = serde_json::from_str::<ServerMsg>(&t)
+                                && r.id == 7
+                            {
+                                assert!(r.ok, "the answer was not taken: {}", r.message);
+                                break;
+                            }
+                        }
+                    }
+                    ServerMsg::AskSettled { .. } => settled = true,
+                    ServerMsg::RpcDone(r) if r.id == 1 => outcome = Some(r.message),
+                    _ => {}
+                }
+                if let (Some(o), true) = (&outcome, settled) {
+                    return (o.clone(), wait_s, settled);
+                }
+            }
+            (
+                outcome.unwrap_or_else(|| "the connection closed".to_string()),
+                wait_s,
+                settled,
+            )
+        })
+        .await
+        .expect("the operation never finished");
+        assert_eq!(outcome, "Allow", "the operation heard: {}", outcome);
+        assert_eq!(wait_s, Some(5), "the question must carry the host's wait");
+        assert!(
+            settled,
+            "the asking session was not told the question is settled"
+        );
+    }
+
+    /// covers: fix-240
+    ///
+    /// Nobody answers: the question still fails its operation (silence is
+    /// never permission), and on the way it was raised as an urgent notice
+    /// in the host's notices that names the question and how to answer it.
+    #[tokio::test]
+    async fn fix_240_an_unanswered_question_is_a_notice_and_still_fails() {
+        use tokio_tungstenite::tungstenite::Message as WsMsg;
+        let dir = std::env::temp_dir().join(format!("fix240-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = config_from_text(&format!(
+            "token = \"0123456789abcdef0123\"\nstate_dir = \"{}\"\n",
+            dir.display()
+        ));
+        let addr = serve_state_on_loopback(test_state(config), notifying_asking_handler).await;
+        let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/ws", addr))
+            .await
+            .unwrap();
+        let (mut tx, mut rx) = ws.split();
+        tx.send(WsMsg::Text(
+            serde_json::to_string(&RpcRequest {
+                id: 1,
+                command: Rpc::Ping,
+            })
+            .unwrap()
+            .into(),
+        ))
+        .await
+        .unwrap();
+        let outcome = tokio::time::timeout(Duration::from_secs(20), async {
+            while let Some(Ok(WsMsg::Text(t))) = rx.next().await {
+                if let Ok(ServerMsg::RpcDone(r)) = serde_json::from_str::<ServerMsg>(&t)
+                    && r.id == 1
+                {
+                    return r;
+                }
+            }
+            panic!("the connection closed");
+        })
+        .await
+        .expect("the operation never finished");
+        assert!(
+            !outcome.ok,
+            "an unanswered question let the operation go on"
+        );
+        assert!(
+            outcome.message.contains("Unattended"),
+            "{}",
+            outcome.message
+        );
+        let notices = std::fs::read_to_string(dir.join("notices.jsonl")).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        let all = homelab_core::notify::parse_notices(&notices);
+        let n = all
+            .iter()
+            .find(|n| n.op.contains("deploy-gateway"))
+            .unwrap_or_else(|| panic!("no notice for the question: {notices}"));
+        assert!(n.urgent, "{:?}", n);
+        assert!(n.what.contains("routes went from 29 to 28"), "{:?}", n);
+        assert!(
+            n.remedy.contains("homelab answer deploy-gateway"),
+            "{:?}",
+            n
         );
     }
 
@@ -5918,6 +6076,9 @@ async fn version_endpoint(
 struct LiveAsker<'a> {
     state: &'a AppState,
     timeout_s: u64,
+    /// fix-240: raise the question as a notice (urgent: pushed) so a person
+    /// is told. Off only in tests that have no state directory of their own.
+    notify: bool,
 }
 
 #[async_trait::async_trait]
@@ -5940,6 +6101,8 @@ impl homelab_core::ask::Asker for LiveAsker<'_> {
             what: q.what.clone(),
             if_allowed: q.if_allowed.clone(),
             if_stopped: q.if_stopped.clone(),
+            // fix-240: the banner and the prompt show the host's own wait.
+            wait_s: Some(self.timeout_s),
         };
         if let Ok(mut g) = self.state.pending_asks.lock() {
             g.insert(
@@ -5951,21 +6114,95 @@ impl homelab_core::ask::Asker for LiveAsker<'_> {
             );
         }
         let _ = self.state.log_tx.send(ask);
+        // fix-240: a person is told, the way every other event reaches him —
+        // a banner nobody is looking at is not telling anybody. The wait
+        // starts after the notice is written; a push that fails is recorded
+        // on the notice and never fails the question.
+        let asked_at = unix_now();
+        if self.notify {
+            publish_question_notice(self.state, q, id, self.timeout_s, asked_at).await;
+        }
+        let wait = homelab_core::ask::wait_words(self.timeout_s);
         let answer = match tokio::time::timeout(Duration::from_secs(self.timeout_s), rx).await {
             Ok(Ok(true)) => Answer::Allow,
             Ok(Ok(false)) => Answer::Stop,
             // The sender was dropped: the client disconnected mid-question.
             Ok(Err(_)) => Answer::Unattended("the client went away before answering".into()),
             Err(_) => Answer::Unattended(format!(
-                "nobody answered within {}s — the operation did not guess",
-                self.timeout_s
+                "nobody answered within {} — the operation did not guess",
+                wait
             )),
         };
         if let Ok(mut g) = self.state.pending_asks.lock() {
             g.remove(&id);
         }
+        // fix-240: every session learns the question is settled, so a
+        // banner or prompt for it goes where it was not answered.
+        let _ = self.state.log_tx.send(ServerMsg::AskSettled {
+            id,
+            boot: Some(self.state.boot_id.clone()),
+            how: match &answer {
+                Answer::Allow => "allowed".into(),
+                Answer::Stop => "stopped".into(),
+                Answer::Unattended(why) => why.clone(),
+            },
+        });
         answer
     }
+}
+
+/// fix-240: the notice for a question that is waiting, urgent so it is
+/// pushed. Its op names the question (`question-<op>-<id>`): the 20 h
+/// damper judges by op and text, and a second question about the same
+/// reading is a second thing a person must answer, not a repeat.
+async fn publish_question_notice(
+    state: &AppState,
+    q: &homelab_core::ask::Question,
+    id: u64,
+    wait_s: u64,
+    since: u64,
+) {
+    publish_notice(
+        state,
+        &RealExecutor,
+        NoticeFacts {
+            op: format!("question-{}-{}", q.op, id),
+            label: "question".into(),
+            ok: false,
+            deferred: false,
+            since,
+            ex: homelab_core::notify::explain_question(q, id, wait_s),
+            urgency: homelab_core::notify::urgency(&homelab_core::notify::Event::Question),
+            incident: None,
+            req: None,
+            by: None,
+            findings: Vec::new(),
+        },
+    )
+    .await;
+}
+
+/// fix-240: the questions open right now, oldest first, as `pick_open`
+/// reads them.
+fn open_questions(state: &AppState) -> Vec<homelab_core::ask::OpenQuestion> {
+    let guard = state
+        .pending_asks
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    let mut open: Vec<homelab_core::ask::OpenQuestion> = guard
+        .iter()
+        .filter_map(|(id, p)| match &p.ask {
+            ServerMsg::Ask { op, step, what, .. } => Some(homelab_core::ask::OpenQuestion {
+                id: *id,
+                op: op.clone(),
+                step: step.clone(),
+                what: what.clone(),
+            }),
+            _ => None,
+        })
+        .collect();
+    open.sort_by_key(|q| q.id);
+    open
 }
 
 /// The daemon's log subscriber, writing to `writer` (stderr, which systemd
@@ -8411,7 +8648,10 @@ fn runs_beside_the_queue(command: &Rpc) -> bool {
     // in the queue it would hold up every deploy and refresh the TUI sends
     // after opening. It changes nothing, and the TUI recognises its reply by
     // shape rather than by order.
-    matches!(command, Rpc::Answer { .. } | Rpc::Today { .. })
+    matches!(
+        command,
+        Rpc::Answer { .. } | Rpc::AnswerOpen { .. } | Rpc::Today { .. }
+    )
 }
 
 /// D5: push the intent repo to the offsite mirror, detached — a failing
@@ -9416,6 +9656,7 @@ where
     let asker = LiveAsker {
         state,
         timeout_s: state.config.ask_timeout_s,
+        notify: true,
     };
     // tile-watch-watcher-out (found 2026-10-01): the fleet-wide tile-watch
     // targets and the watcher stack itself, read once per op from the same
@@ -11121,6 +11362,52 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         id
                     )
                 },
+                deferred: None,
+            }
+        }
+        // fix-240: answer a running operation's question from ANY session —
+        // a headless run cannot answer its own, a second client or Live view
+        // can. The same delivery as `Answer`, found by operation rather than
+        // by an id only the asking session saw.
+        Rpc::AnswerOpen { op, allow } => {
+            let open = open_questions(state);
+            let picked = homelab_core::ask::pick_open(&open, op.as_deref()).cloned();
+            let (ok, message) = match picked {
+                Err(why) => (false, why),
+                Ok(q) => {
+                    let delivered = state
+                        .pending_asks
+                        .lock()
+                        .ok()
+                        .and_then(|mut g| g.remove(&q.id))
+                        .map(|p| p.reply.send(allow).is_ok())
+                        .unwrap_or(false);
+                    if delivered {
+                        (
+                            true,
+                            format!(
+                                "{} delivered to {} :: {} (question {})",
+                                if allow { "allow" } else { "stop" },
+                                q.op,
+                                q.step,
+                                q.id
+                            ),
+                        )
+                    } else {
+                        (
+                            false,
+                            format!(
+                                "question {} is no longer waiting — it timed out or was answered",
+                                q.id
+                            ),
+                        )
+                    }
+                }
+            };
+            RpcResponse {
+                id: req.id,
+                ok,
+                message,
                 deferred: None,
             }
         }

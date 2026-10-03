@@ -1255,6 +1255,12 @@ const CLI_ONLY: &[(&str, &str)] = &[
          it in the TUI would mean navigating to it to say 'yes the picture is fine'",
     ),
     (
+        "AnswerOpen",
+        "fix-240: the TUI answers the question in front of it with Answer, by \
+         id; AnswerOpen is for a second terminal or Live view answering a \
+         question some other session's run raised",
+    ),
+    (
         "DestroyStack",
         "deliberate friction: destroying a container should mean leaving the \
          comfortable interface and typing it out (Kenny's C2 gate)",

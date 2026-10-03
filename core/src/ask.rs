@@ -82,3 +82,100 @@ impl Asker for Unattended {
         Answer::Unattended(self.0.to_string())
     }
 }
+
+/// fix-240 (2026-10-02): how long a question waits for a person when the
+/// host's configuration says nothing. Ten minutes: 120 s ran out before
+/// Kenny had seen the banner of a question a headless run raised. Long
+/// enough to be told by the notice, open the dashboard or a terminal and
+/// decide; short enough that a question nobody will answer does not hold
+/// the operation lock for the rest of the night.
+pub const DEFAULT_WAIT_S: u64 = 600;
+
+/// fix-240: a wait in the words a person reads ("10 min", "2 min 30 s",
+/// "45 s").
+pub fn wait_words(seconds: u64) -> String {
+    match (seconds / 60, seconds % 60) {
+        (0, s) => format!("{} s", s),
+        (m, 0) => format!("{} min", m),
+        (m, s) => format!("{} min {} s", m, s),
+    }
+}
+
+/// fix-240: one question a running operation is waiting on, as the host
+/// lists it for an answer that names the operation rather than the
+/// question's id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenQuestion {
+    pub id: u64,
+    pub op: String,
+    pub step: String,
+    pub what: String,
+}
+
+impl OpenQuestion {
+    /// One line naming it, for a refusal that lists what is open.
+    pub fn line(&self) -> String {
+        format!(
+            "question {} · {} :: {} — {}",
+            self.id, self.op, self.step, self.what
+        )
+    }
+}
+
+/// fix-240: which open question an answer from outside the asking session
+/// is for (`homelab answer [<target>] allow|stop`, `homelab ui answer …`).
+///
+/// `target` matches a question by its id, by its operation's name
+/// (`deploy-media`), or by the subject after the operation's verb (`media`
+/// for `deploy-media`). No target answers the one open question, and only
+/// when exactly one is open: with two waiting, picking one is the same
+/// guess an expired question refuses to make. Every refusal lists what is
+/// waiting, so the next try can name it.
+pub fn pick_open<'a>(
+    open: &'a [OpenQuestion],
+    target: Option<&str>,
+) -> Result<&'a OpenQuestion, String> {
+    let listed = |qs: &[&OpenQuestion]| {
+        qs.iter()
+            .map(|q| format!("\n  {}", q.line()))
+            .collect::<String>()
+    };
+    let all: Vec<&OpenQuestion> = open.iter().collect();
+    if all.is_empty() {
+        return Err(
+            "no question is waiting for an answer: it was answered, or its wait ran out \
+             (an unanswered question fails its operation)"
+                .into(),
+        );
+    }
+    let Some(target) = target.map(str::trim).filter(|t| !t.is_empty()) else {
+        return match all.as_slice() {
+            [only] => Ok(only),
+            _ => Err(format!(
+                "{} questions are waiting; name one by its operation or id:{}",
+                all.len(),
+                listed(&all)
+            )),
+        };
+    };
+    let suffix = format!("-{}", target);
+    let hits: Vec<&OpenQuestion> = all
+        .iter()
+        .copied()
+        .filter(|q| q.id.to_string() == target || q.op == target || q.op.ends_with(&suffix))
+        .collect();
+    match hits.as_slice() {
+        [one] => Ok(one),
+        [] => Err(format!(
+            "no waiting question matches '{}'; waiting now:{}",
+            target,
+            listed(&all)
+        )),
+        _ => Err(format!(
+            "'{}' matches {} waiting questions; name one by its id:{}",
+            target,
+            hits.len(),
+            listed(&hits)
+        )),
+    }
+}

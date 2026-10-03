@@ -305,6 +305,13 @@ async fn run(explicit_host: Option<String>) {
             }
         }
         "ping" => rpc(&host, &token, Command::Ping).await,
+        // fix-240: answer a question a running operation is waiting on, from
+        // any terminal — the run that raised it may be headless.
+        "answer" => {
+            let (op, allow) =
+                homelab_client::answer::parse_answer_words(&args[2..]).unwrap_or_else(|e| die(&e));
+            rpc(&host, &token, Command::AnswerOpen { op, allow }).await
+        }
         // feat-platform-10: one step of driving the open dashboard.
         "ui" => {
             let json = args.iter().any(|a| a == "--json");
@@ -313,6 +320,15 @@ async fn run(explicit_host: Option<String>) {
                 .filter(|a| a.as_str() != "--json")
                 .cloned()
                 .collect();
+            // fix-240: Live view answers the open question with the same
+            // host call as the banner's Allow/Stop; every tab's banner
+            // goes once the host says the question is settled.
+            if words.first().map(String::as_str) == Some("answer") {
+                let (op, allow) = homelab_client::answer::parse_answer_words(&words[1..])
+                    .unwrap_or_else(|e| die(&e));
+                rpc(&host, &token, Command::AnswerOpen { op, allow }).await;
+                return;
+            }
             use homelab_client::ui_cli::UiCall;
             let call = homelab_client::ui_cli::parse_call(&words).unwrap_or_else(|e| die(&e));
             // fix-185: a final press of an action that reads the repository
@@ -2522,6 +2538,7 @@ async fn rpc_exchange(
                 if_allowed,
                 if_stopped,
                 boot,
+                wait_s,
             } => {
                 eprintln!(
                     "{}? {} :: {} is waiting for a decision — {}{}",
@@ -2568,10 +2585,11 @@ async fn rpc_exchange(
                             answer_pending += 1;
                         }
                     }
+                    // fix-240: a headless run cannot answer; it says how
+                    // to answer from elsewhere, and how long there is.
                     None => eprintln!(
-                        "  no answer from here: run this from the TUI to decide, \
-                         `homelab <verb> --answer allow|stop` answers without waiting, \
-                         or it times out as unattended"
+                        "{}",
+                        homelab_client::answer::answer_elsewhere_hint(&op, wait_s)
                     ),
                 }
             }
@@ -2650,6 +2668,12 @@ async fn rpc_exchange(
                     "{}⇅ {} {}{} bytes{}",
                     C_DIM, label, done, total_str, C_RESET
                 );
+            }
+            // fix-240: a question was answered (here, in another session,
+            // in Live view or the dashboard) or its wait ran out.
+            ServerMsg::AskSettled { .. } if quiet => {}
+            ServerMsg::AskSettled { id, how, .. } => {
+                eprintln!("  question {} settled: {}", id, how);
             }
             // feat-platform-10: only the attached dashboard gets UI steps.
             ServerMsg::Ui { .. } => {}

@@ -311,14 +311,22 @@ async fn session_loop(
                     // feat-ops-2: an operation stopped and waits for a person.
                     // It also goes on to whoever follows the line (act).
                     ask @ ServerMsg::Ask { .. } => {
-                        if let ServerMsg::Ask { id, op, step, what, if_allowed, if_stopped, boot } = ask.clone() {
+                        if let ServerMsg::Ask { id, op, step, what, if_allowed, if_stopped, boot, wait_s } = ask.clone() {
+                            // fix-240: the host's own wait when it says it;
+                            // this dashboard's setting for an older host.
                             shared.write().await.asks.heard(
                                 id, boot, op, step, what, if_allowed, if_stopped,
-                                now_s(), cfg.ask_timeout_s,
+                                now_s(), wait_s.unwrap_or(cfg.ask_timeout_s),
                             );
                         }
                         publish_asks(shared, live).await;
                         let _ = asks.events.send(ask);
+                    }
+                    // fix-240: answered from another session, or its wait
+                    // ran out: the banner goes in every tab.
+                    ServerMsg::AskSettled { id, boot, .. } => {
+                        shared.write().await.asks.forget(&boot, id);
+                        publish_asks(shared, live).await;
                     }
                     ServerMsg::State(state) => {
                         let view = fleet_view(&state, now_s());

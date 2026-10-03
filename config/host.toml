@@ -1,122 +1,87 @@
-# fix-110: the host's declarative, non-secret settings — homelab-core's
-# `hostconfig::KEYS` table, one row per key, is the single description of
-# what each of these means, who may change it and when it takes effect.
-#
-# Every key here is seeded with the host's own compiled default, so an
-# unmodified checkout already matches an unmodified host. A key the host
-# treats as "unset = its default" is left out here on purpose, for the same
-# reason host.toml itself leaves it out — adding it with its own default
-# value would say nothing a comment could not.
-#
-# Secrets never live here (`token`, `notify_auth_bearer`,
-# `notify_fallback_auth_bearer`): they stay in the host's own vault, set
-# once over ssh, and `homelab host apply` never sends or overwrites them.
-#
-# `tokens` (fix-170) never lives here either, for a different reason: it is
-# not a secret the host keeps for us, it is generated and kept BY the host
-# — one entry per machine, name/scope/SHA-256 of its own token, written as
-# tokens are issued and revoked over ssh. `homelab host apply` refuses a
-# file that sets it and keeps the host's current table untouched, the same
-# as it does for a secret.
-#
-# `homelab host apply` sends this file to the host, which validates it with
-# the same parser host.toml has always used and writes it back whole,
-# keeping only the secret and host-held keys the host already holds.
-# `homelab check` reports when this file and the host's running settings
-# disagree.
-#
-# Seeded with the compiled defaults on 2026-10-01 (fix-110) and reconciled
-# with pve's live host.toml on 2026-10-02 (fix-191). Left out on purpose at
-# that reconciliation: grafana_dashboards_dir, grafana_vmid,
-# kuma_monitors_file and homepage_services_file — Grafana, Uptime Kuma and
-# the homepage stack are retired, so the host has nothing left to write
-# there. `notify_fallback_webhook` became a secret then (its URL carries a
-# Home Assistant webhook id, and this repository is public).
-
-# ── Access to the host ────────────────────────────────────────────────────
-# arch-self: listen and state_dir can cut the dashboard off from the host,
-# so they stay ssh-only in practice even though they are declared here.
-listen = "0.0.0.0:8443"
-state_dir = "/var/lib/homelab"
-exec_enabled = false
-
-# ── Nightly round and backups ───────────────────────────────────────────────
-backup_hour = 4
-second_copy_dataset = "HDD4TB/restic"
-backup_concurrency = 3
-restic_base = "rclone:gdrive:homelab-backups"
-restic_password_file = "/var/lib/homelab/secrets/restic.pw"
-restic_snapshot_timeout_s = 14400
-restic_restore_timeout_s = 14400
-integrity_data_read_interval_s = 2592000
-restore_drill_interval_s = 72000
-# `retention` (a list of tables) is declared at the end of this file: TOML
-# closes an `[[array-of-tables]]` section only at the next `[table]` or
-# `[[array-of-tables]]` header, so every plain `key = value` line between it
-# and the next header would otherwise nest silently INSIDE its last entry
-# instead of staying top-level (fix-170 found this: everything from
-# `dashboard_url` on had been swallowed into `[[retention]]` since fix-110
-# seeded this file, invisible to every drift comparison since).
-
-# ── Notifications ───────────────────────────────────────────────────────────
-# notify_webhook is kyu's homelab.ops topic; the fallback route (a Home
-# Assistant webhook) is a secret and lives only on the host. watch_stack
-# (fix-184) names the stack watch_url answers for, e.g. "admin" — while the
-# host deploys, installs, updates or adopts that one stack, watch_url's own
-# down notice is suppressed, the same as a self-update or host restart
-# already is. Unset: only a self-update or host restart suppresses it.
-notify_webhook = "http://10.10.10.9:8080/t/homelab.ops"
-dashboard_url = "https://admin.kp-soft.dev"
-watch_url = "http://10.10.10.20:8090/healthz"
-watch_stack = "admin"
-watch_interval_s = 60
-watch_down_after_s = 300
 ask_timeout_s = 600
-
-# ── Coverage and monitoring ─────────────────────────────────────────────────
-prometheus_url = "http://10.10.10.13:9090"
-loki_url = "http://10.10.10.13:3100"
-loki_vmid = 113
-metrics_targets_dir = "/appdata/metrics/prometheus-config/targets"
-tile_watch_source = "10.10.10.20"
-logs_window = "24h"
-status_interval_s = 60
-recent_lines = 2000
-history_days = 90
-history_max_mib = 16
-
-# ── Gateway and network ─────────────────────────────────────────────────────
-gateway_vmid = 104
-gateway_routes_dir = "/appdata/gateway/traefik-config/routes"
-# registry_cache, zfs_jobs, device_backups and watched_backups are tables, so
-# they are declared at the end of this file (see the note above restic_base).
-
-# ── Thresholds and limits ───────────────────────────────────────────────────
-patch_threshold_s = 604800
+backup_concurrency = 3
+backup_hour = 4
 backup_max_age_s = 172800
-host_meta_max_age_s = 172800
-nightly_report_repeat_s = 604800
-incident_bundle_max_age_days = 90
-incident_bundle_max_count = 200
-upstream_max_age_s = 72000
-
-# ── Logging ──────────────────────────────────────────────────────────────────
-log_level = "info"
-log_ring_max_bytes = 4194304
-
-# ── Safety (ssh-only; declared here for `homelab check`, changed only over
-#    ssh — see `homelab_core::hostconfig::Access::SshOnly`) ─────────────────
-no_touch = [100, 101, 102, 103]
-privileged_vmids = [105, 106]
+dashboard_url = "https://admin.kp-soft.dev"
 data_mount_roots = [
     "/HDD18TB/subvol-103-disk-0",
     "/HDD12TB/subvol-103-disk-0",
     "/HDD4TB/jellyfin-metadata",
     "/HDD2TB/logs/traefik",
 ]
+exec_enabled = false
+gateway_routes_dir = "/appdata/gateway/traefik-config/routes"
+gateway_vmid = 104
+history_days = 90
+history_max_mib = 16
+host_meta_max_age_s = 172800
+incident_bundle_max_age_days = 90
+incident_bundle_max_count = 200
+integrity_data_read_interval_s = 2592000
+listen = "0.0.0.0:8443"
+log_level = "info"
+log_ring_max_bytes = 4194304
+logs_window = "24h"
+loki_url = "http://10.10.10.13:3100"
+loki_vmid = 113
+metrics_targets_dir = "/appdata/metrics/prometheus-config/targets"
+nightly_report_repeat_s = 604800
+no_touch = [
+    100,
+    101,
+    102,
+    103,
+]
+notify_webhook = "http://10.10.10.9:8080/t/homelab.ops"
+patch_threshold_s = 604800
+privileged_vmids = [
+    105,
+    106,
+]
+prometheus_url = "http://10.10.10.13:9090"
+recent_lines = 2000
+restic_base = "rclone:gdrive:homelab-backups"
+restic_password_file = "/var/lib/homelab/secrets/restic.pw"
+restic_restore_timeout_s = 14400
+restic_snapshot_timeout_s = 14400
+restore_drill_interval_s = 72000
+second_copy_dataset = "HDD4TB/restic"
+state_dir = "/var/lib/homelab"
+status_interval_s = 60
+tile_watch_source = "10.10.10.20"
+upstream_max_age_s = 72000
+watch_down_after_s = 300
+watch_interval_s = 60
+watch_stack = "admin"
+watch_url = "http://10.10.10.20:8090/healthz"
 
-# ── Nightly round and backups: retention ────────────────────────────────────
-# Last in the file on purpose — see the note above restic_base.
+[[device_backups]]
+cred_file = "/var/lib/homelab/secrets/opnsense-backup.conf"
+filename = "config.xml"
+name = "opnsense"
+pin = "sha256//oZKgUOWR56fT3HYG68aGVn7s1saleArMf75StP1KaUE="
+url = "https://10.10.10.1/api/core/backup/download/this"
+
+[registry_cache]
+host = "10.10.10.17"
+pull_timeout_secs = 180
+
+[[registry_cache.upstreams]]
+port = 5000
+registry = "docker.io"
+
+[[registry_cache.upstreams]]
+port = 5001
+registry = "ghcr.io"
+
+[[registry_cache.upstreams]]
+port = 5002
+registry = "gcr.io"
+
+[[registry_cache.upstreams]]
+port = 5003
+registry = "lscr.io"
+
 [[retention]]
 every_days = 1
 span_days = 7
@@ -128,7 +93,11 @@ span_days = 60
 [[retention]]
 every_days = 60
 
-# ── Tables (last, see the note above restic_base) ───────────────────────────
+[[watched_backups]]
+max_age_hours = 26
+name = "opnsense-config"
+rclone_path = "gdrive:homelab-backups/opnsense-config/snapshots"
+
 [[zfs_jobs]]
 source = "HDD2TB"
 target = "HDD18TB/replica/HDD2TB"
@@ -136,37 +105,3 @@ target = "HDD18TB/replica/HDD2TB"
 [[zfs_jobs]]
 source = "HDD4TB"
 target = "HDD18TB/replica/HDD4TB"
-
-# OPNsense's configuration (route B). `pin` is the SHA-256 of the router's
-# public TLS key, not a secret; the API credentials live in `cred_file`.
-[[device_backups]]
-name = "opnsense"
-url = "https://10.10.10.1/api/core/backup/download/this"
-filename = "config.xml"
-cred_file = "/var/lib/homelab/secrets/opnsense-backup.conf"
-pin = "sha256//oZKgUOWR56fT3HYG68aGVn7s1saleArMf75StP1KaUE="
-
-[[watched_backups]]
-name = "opnsense-config"
-rclone_path = "gdrive:homelab-backups/opnsense-config/snapshots"
-max_age_hours = 26
-
-[registry_cache]
-host = "10.10.10.17"
-pull_timeout_secs = 180
-
-[[registry_cache.upstreams]]
-registry = "docker.io"
-port = 5000
-
-[[registry_cache.upstreams]]
-registry = "ghcr.io"
-port = 5001
-
-[[registry_cache.upstreams]]
-registry = "gcr.io"
-port = 5002
-
-[[registry_cache.upstreams]]
-registry = "lscr.io"
-port = 5003

@@ -6,6 +6,8 @@ pub mod actions_state;
 pub mod backups;
 #[cfg(feature = "demo-host")]
 pub mod demo;
+#[cfg(feature = "demo-host")]
+pub mod demo_metrics;
 pub mod drive;
 pub mod edit;
 pub mod guard;

@@ -477,6 +477,40 @@ async fn traffic(State(c): State<ReadCtx>, Query(q): Query<ChartQuery>) -> Respo
         .metric_now(&top("RequestHost"), end, "RequestHost")
         .await;
     let clients = loki.metric_now(&top("ClientHost"), end, "ClientHost").await;
+    // redesign-371-metrics: what the Traffic tab's tiles say beside the
+    // charts — the window before this one ("+8% on the day before"), how
+    // many client addresses there were in all (the table keeps only the
+    // busiest 20), and the biggest error answers with their hostname and
+    // path. Each is its own read and fails on its own (`null`, an error).
+    let one = |r: Result<Vec<(String, f64)>, String>| {
+        r.ok()
+            .and_then(|rows| rows.first().map(|x| x.1))
+            .map(serde_json::Value::from)
+            .unwrap_or(serde_json::Value::Null)
+    };
+    let prev_query = format!("sum(count_over_time({sel} [{span}s] offset {span}s))");
+    let prev_total = one(loki.metric_now(&prev_query, end, "").await);
+    let count_query = format!("count(sum by (ClientHost) (count_over_time({sel} [{span}s])))");
+    let clients_total = one(loki.metric_now(&count_query, end, "").await);
+    let errors_query = format!(
+        "topk(5, sum by (DownstreamStatus, RequestHost, RequestPath) (count_over_time({sel} | DownstreamStatus >= 400 [{span}s])))"
+    );
+    let errors = match loki
+        .metric_now_by(
+            &errors_query,
+            end,
+            &["DownstreamStatus", "RequestHost", "RequestPath"],
+        )
+        .await
+    {
+        Ok(rows) => serde_json::json!({
+            "rows": rows
+                .into_iter()
+                .map(|(k, n)| serde_json::json!({ "status": k[0], "host": k[1], "path": k[2], "n": n }))
+                .collect::<Vec<_>>(),
+        }),
+        Err(e) => serde_json::json!({ "rows": [], "error": e }),
+    };
     let table = |r: Result<Vec<(String, f64)>, String>| match r {
         Ok(rows) => serde_json::json!({ "rows": rows }),
         Err(e) => serde_json::json!({ "rows": [], "error": e }),
@@ -485,6 +519,9 @@ async fn traffic(State(c): State<ReadCtx>, Query(q): Query<ChartQuery>) -> Respo
         "panels": out,
         "hosts": table(hosts),
         "clients": table(clients),
+        "prev_total": prev_total,
+        "clients_total": clients_total,
+        "errors": errors,
         "from": start,
         "to": end,
         "step": step,

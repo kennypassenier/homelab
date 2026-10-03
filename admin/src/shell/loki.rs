@@ -60,6 +60,25 @@ impl Loki {
         at: u64,
         label: &str,
     ) -> Result<Vec<(String, f64)>, String> {
+        Ok(self
+            .metric_now_by(query, at, &[label])
+            .await?
+            .into_iter()
+            .map(|(mut k, n)| (k.pop().unwrap_or_default(), n))
+            .collect())
+    }
+
+    /// redesign-371-metrics: [`Loki::metric_now`] for a query that groups
+    /// by several labels (the Traffic tab's top errors: status, hostname,
+    /// path) — each row's values of `labels`, in that order, and its number,
+    /// biggest first. The same `query_range` read, so the gateway lets it
+    /// through (fix-221).
+    pub async fn metric_now_by(
+        &self,
+        query: &str,
+        at: u64,
+        labels: &[&str],
+    ) -> Result<Vec<(Vec<String>, f64)>, String> {
         let start = at.saturating_sub(1);
         let v = self
             .get(
@@ -72,12 +91,15 @@ impl Loki {
                 ],
             )
             .await?;
-        let mut out: Vec<(String, f64)> = v["data"]["result"]
+        let mut out: Vec<(Vec<String>, f64)> = v["data"]["result"]
             .as_array()
             .map(|rs| {
                 rs.iter()
                     .filter_map(|r| {
-                        let k = r["metric"][label].as_str().unwrap_or("").to_string();
+                        let k = labels
+                            .iter()
+                            .map(|l| r["metric"][*l].as_str().unwrap_or("").to_string())
+                            .collect();
                         let last = r["values"].as_array()?.last()?;
                         let n: f64 = last[1].as_str()?.parse().ok()?;
                         Some((k, n))

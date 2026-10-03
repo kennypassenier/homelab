@@ -59,112 +59,30 @@ pub async fn spawn_demo_metrics() -> String {
 #[derive(serde::Deserialize)]
 struct PromQ {
     query: String,
+    #[serde(default)]
+    start: Option<String>,
+    #[serde(default)]
+    end: Option<String>,
+    #[serde(default)]
+    step: Option<String>,
 }
 
-/// One made-up `matrix`/`vector` answer, chosen by matching a fragment of
-/// the query text — the same thing a real Prometheus would answer for that
-/// `by (...)` clause, with one point per series (good enough for both
-/// `query` and `query_range`: `panelEl` only ever reads the last point).
+/// redesign-371-metrics: one made-up answer over the window asked for
+/// (shell/demo_metrics.rs) — a time series for `query_range`, one point
+/// for an instant `query`.
 async fn prom_query(Query(q): Query<PromQ>) -> Response {
-    axum::Json(demo_metric_body(&q.query)).into_response()
+    let now = now_s();
+    let w = super::demo_metrics::Window::from_params(
+        q.start.as_deref(),
+        q.end.as_deref(),
+        q.step.as_deref(),
+        now,
+    );
+    axum::Json(super::demo_metrics::body(&q.query, &w, now)).into_response()
 }
 
-async fn loki_query_range(Query(q): Query<PromQ>) -> Response {
-    axum::Json(demo_metric_body(&q.query)).into_response()
-}
-
-/// Deliberately raw ids (fix-220's whole-screen invariant proves the
-/// dashboard never shows one of these as a series label):
-/// - `fwbr117i0` / `veth117i0` — a guest's own firewall bridge and virtual
-///   NIC, vmid 117 embedded by Proxmox's own naming.
-/// - `0000:00:01_0_0000:01:00_0` — an hwmon chip id, the sysfs PCI path with
-///   `/` and `.` turned into `_` (exactly what Kenny saw live).
-/// - `lxc/117` — a Proxmox cgroup id, same vmid.
-///
-/// One SMART drive answers "not ok" (`sdb`) so the health table has both
-/// states to show, not one flat "ok" line.
-fn demo_metric_body(query: &str) -> serde_json::Value {
-    let at = now_s();
-    let series = |pairs: &[(&str, f64)]| -> serde_json::Value {
-        let result: Vec<serde_json::Value> = pairs
-            .iter()
-            .map(|(label, v)| {
-                serde_json::json!({
-                    "metric": { metric_key(query): label },
-                    "value": [at, v.to_string()],
-                    "values": [[at, v.to_string()]],
-                })
-            })
-            .collect();
-        serde_json::json!({ "status": "success", "data": { "resultType": "matrix", "result": result } })
-    };
-    if query.contains("node_hwmon_temp_celsius") {
-        return series(&[
-            ("0000:00:01_0_0000:01:00_0", 46.0),
-            ("0000:00:02_0_0000:02:00_0", 52.0),
-        ]);
-    }
-    if query.contains("smart_device_health_ok") {
-        return series(&[("sda", 1.0), ("sdb", 0.0)]);
-    }
-    if query.contains("smart_device_pending_sectors") {
-        return series(&[("sda", 0.0), ("sdb", 12.0)]);
-    }
-    if query.contains("smart_device_reallocated_sectors") {
-        return series(&[("sda", 0.0), ("sdb", 3.0)]);
-    }
-    if query.contains("smart_device_temperature_celsius") {
-        return series(&[("sda", 34.0), ("sdb", 41.0)]);
-    }
-    if query.contains("smart_device_power_on_hours") {
-        return series(&[("sda", 8760.0), ("sdb", 12000.0)]);
-    }
-    if query.contains("pve_memory_usage_bytes") {
-        return series(&[("lxc/117", 2_147_483_648.0), ("lxc/118", 1_073_741_824.0)]);
-    }
-    if query.contains("node_network_receive_bytes_total") {
-        return series(&[
-            ("vmbr0", 120_000.0),
-            ("fwbr117i0", 4_200.0),
-            ("veth118i0", 1_800.0),
-        ]);
-    }
-    if query.contains("node_load") {
-        return series(&[("", 1.25)]);
-    }
-    if query.contains("RequestHost") {
-        return series(&[("demo.example.org", 42.0), ("films.example.org", 7.0)]);
-    }
-    if query.contains("DownstreamStatus") {
-        return series(&[("200", 44.0), ("404", 3.0), ("500", 1.0)]);
-    }
-    // CPU/memory/disk and anything else: one plain series, no legend.
-    series(&[("", 12.5)])
-}
-
-/// The `by (...)` label this query groups on, read straight out of the
-/// query text — the same label the real admin passes as `legend`, so the
-/// made-up `metric` map always carries the field `routes.rs` asks for.
-fn metric_key(query: &str) -> &'static str {
-    if query.contains("smart_device") {
-        "device"
-    } else if query.contains("by (chip)") {
-        "chip"
-    } else if query.contains("by (device)") {
-        "device"
-    } else if query.contains("by (id)") {
-        "id"
-    } else if query.contains("by (name)") {
-        "name"
-    } else if query.contains("RequestHost") {
-        "RequestHost"
-    } else if query.contains("DownstreamStatus") {
-        "DownstreamStatus"
-    } else if query.contains("node_filesystem") {
-        "mountpoint"
-    } else {
-        "stack"
-    }
+async fn loki_query_range(q: Query<PromQ>) -> Response {
+    prom_query(q).await
 }
 
 /// feat-platform-10: a host that lives in this process, for the browser
@@ -413,7 +331,9 @@ pub async fn run_demo(
     // redesign-3.71 secrets: what this demo host was asked to reveal or
     // copy, as the real host records it in history.jsonl (never a value),
     // so the screen tests can see Activity name it.
-    let mut history: Vec<homelab_core::history::HistoryEntry> = Vec::new();
+    // redesign-371-metrics: and what the host did over the last day, so
+    // the Metrics page has events to mark on its charts.
+    let mut history: Vec<homelab_core::history::HistoryEntry> = demo_history(now_s(), &stacks);
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     loop {
         tokio::select! {
@@ -719,4 +639,75 @@ pub async fn run_demo(
             }
         }
     }
+}
+
+/// redesign-371-metrics: a day of made-up history (the shapes the real
+/// host writes to history.jsonl) — two nightly rounds, a backup that
+/// failed, a deploy and an image update — named after the demo's own
+/// stacks, so the Metrics page's charts have events to mark and Activity
+/// has rows. The newest is 36 minutes old.
+pub fn demo_history(now: u64, stacks: &[String]) -> Vec<homelab_core::history::HistoryEntry> {
+    use homelab_core::history::HistoryEntry;
+    let at = |h: f64| now.saturating_sub((h * 3_600.0) as u64);
+    let name = |i: usize| {
+        stacks
+            .get(i % stacks.len().max(1))
+            .cloned()
+            .unwrap_or_default()
+    };
+    let op = |start: u64,
+              secs: u64,
+              label: &str,
+              subject: String,
+              by: Option<&str>,
+              error: Option<&str>| HistoryEntry::Op {
+        start,
+        end: start + secs,
+        label: label.into(),
+        subject: Some(subject),
+        req: None,
+        by: by.map(str::to_string),
+        ok: error.is_none(),
+        deferred: None,
+        error: error.map(str::to_string),
+        steps: Vec::new(),
+    };
+    vec![
+        HistoryEntry::Phase {
+            start: at(28.75),
+            end: at(28.75) + 1_500,
+            name: "backup".into(),
+            count: stacks.len(),
+        },
+        HistoryEntry::Phase {
+            start: at(4.75),
+            end: at(4.75) + 1_620,
+            name: "backup".into(),
+            count: stacks.len(),
+        },
+        op(
+            at(4.4),
+            95,
+            "scheduled-backup",
+            format!("back up {}", name(4)),
+            None,
+            Some("restic: repository locked"),
+        ),
+        op(
+            at(2.1),
+            140,
+            "deploy",
+            format!("deploy {}", name(3)),
+            Some("Kenny"),
+            None,
+        ),
+        op(
+            at(0.6),
+            70,
+            "update",
+            format!("update {}", name(2)),
+            Some("Kenny"),
+            None,
+        ),
+    ]
 }

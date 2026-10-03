@@ -114,7 +114,8 @@ fi
 # redesign-final-12: a merge runs the whole-screen cases of the pages it
 # changes (only on a merge: MERGE_HEAD; a plain commit's cases are its
 # author's own fail-first and pass runs).
-if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+if [ "${HOMELAB_MERGE_COMMIT:-}" = 1 ] \
+   || git rev-parse -q --verify MERGE_HEAD >/dev/null; then
   "$root/.githooks/merge-cases.sh" || exit 1
 fi
 

@@ -2,5 +2,7 @@
 # redesign-integrate-8: a merge git commits by itself (`git merge` with no
 # conflict) runs this hook, never pre-commit; without it a clean merge
 # skipped every commit-time check (the register, the Live view catalog, the
-# gates). It runs exactly what a commit runs.
-exec "$(dirname "$0")/pre-commit" "$@"
+# gates). It runs exactly what a commit runs. redesign-final-12: git writes
+# no MERGE_HEAD for a merge it commits by itself, so this says it is one
+# (pre-commit then runs the merge's affected whole-screen cases).
+HOMELAB_MERGE_COMMIT=1 exec "$(dirname "$0")/pre-commit" "$@"

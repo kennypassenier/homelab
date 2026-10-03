@@ -15,7 +15,10 @@
 set -euo pipefail
 root=$(git rev-parse --show-toplevel)
 cd "$root"
-git rev-parse -q --verify MERGE_HEAD >/dev/null || exit 0
+# pre-merge-commit says so (a merge git commits by itself writes no
+# MERGE_HEAD); a conflicted merge's own commit has MERGE_HEAD.
+[ "${HOMELAB_MERGE_COMMIT:-}" = 1 ] \
+  || git rev-parse -q --verify MERGE_HEAD >/dev/null || exit 0
 
 mapfile -t changed < <(git diff --cached --name-only -- admin/web)
 [ "${#changed[@]}" -gt 0 ] || exit 0

@@ -20,7 +20,7 @@ import { chromium } from "playwright";
 // it, a ReferenceError this suite's own runs apparently never surfaced
 // loudly enough to get fixed; found while adding this file's own fix-210
 // cases, which need the same list.
-import { DRIVABLE_PATHS, route } from "../js/router.js";
+import { DRIVABLE_PATHS, PATH_TO_PAGE, route } from "../js/router.js";
 
 const BASE = process.env.INVARIANTS_BASE_URL ?? "http://127.0.0.1:8099";
 const TOKEN = process.env.INVARIANTS_TOKEN ?? "test-invariants-token-1234";
@@ -1814,6 +1814,658 @@ test("invariants: every action button's label fits on one line, uncut, on deskto
       await context.close();
     }
     assert.deepEqual(bad, [], `labels that wrap or are cut: ${bad.join("; ")}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-251 (design review, 2026-10-03): a mark drawn on a chart or the
+// timeline is coloured with a foreground-strength token, never with a
+// kp-themes background token (`--success`, `--warning`, `--info` are the
+// pale/dark plates text sits on): in dark, "succeeded" was hsl(155 40% 16%)
+// on a near-black page, all but invisible. Every timeline mark and legend
+// swatch must stand out from the page by WCAG's 3:1 for graphics.
+test("invariants: every timeline mark and legend swatch contrasts at least 3:1 with the page, in light and dark", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const bad = [];
+    for (const theme of ["dark", "light"]) {
+      await page.evaluate((t) => localStorage.setItem("theme", t), theme);
+      await page.goto(`${BASE}/timeline`);
+      await page.waitForSelector(".timeline-legend .swatch", {
+        timeout: 8000,
+      });
+      await page
+        .waitForSelector(".timeline svg", { timeout: 8000 })
+        .catch(() => {});
+      await page.waitForTimeout(300);
+      const found = await page.evaluate(() => {
+        /** @param {string} c */
+        const rgb = (c) => {
+          const probe = document.createElement("canvas").getContext("2d");
+          if (!probe) return [0, 0, 0];
+          probe.fillStyle = "#000";
+          probe.fillStyle = c;
+          probe.fillRect(0, 0, 1, 1);
+          const d = probe.getImageData(0, 0, 1, 1).data;
+          return [d[0], d[1], d[2]];
+        };
+        /** @param {number[]} c */
+        const lum = (c) => {
+          const [r, g, b] = c.map((v) => {
+            const s = v / 255;
+            return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        };
+        let bgEl = /** @type {Element | null} */ (
+          document.querySelector(".timeline")
+        );
+        let bg = "rgb(255, 255, 255)";
+        while (bgEl) {
+          const c = getComputedStyle(bgEl).backgroundColor;
+          if (c && c !== "transparent" && !/^rgba\(.*,\s*0\)$/.test(c)) {
+            bg = c;
+            break;
+          }
+          bgEl = bgEl.parentElement;
+        }
+        const lb = lum(rgb(bg));
+        const ratio = (/** @type {string} */ c) => {
+          const l = lum(rgb(c));
+          return (Math.max(l, lb) + 0.05) / (Math.min(l, lb) + 0.05);
+        };
+        const out = [];
+        for (const sw of document.querySelectorAll(
+          ".timeline-legend .swatch",
+        )) {
+          const c = getComputedStyle(sw).backgroundColor;
+          const r = ratio(c);
+          if (r < 3)
+            out.push(
+              `swatch ${sw.className} ${c} is ${r.toFixed(2)}:1 on ${bg}`,
+            );
+        }
+        for (const m of document.querySelectorAll(
+          ".timeline .mark rect, .timeline .mark path",
+        )) {
+          const c = getComputedStyle(m).fill;
+          const r = ratio(c);
+          if (r < 3)
+            out.push(
+              `mark ${m.parentElement?.getAttribute("data-kind")} ${c} is ${r.toFixed(2)}:1 on ${bg}`,
+            );
+        }
+        return out;
+      });
+      for (const f of found) bad.push(`${theme}: ${f}`);
+    }
+    assert.deepEqual(bad, [], `marks too faint:\n${bad.join("\n")}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-252 (design review, 2026-10-03): the charts' axis labels were drawn
+// in a fixed 560-wide viewBox that a phone scales down to ~5 px text; every
+// chart and timeline label must render at 11 px or more at 390 px.
+test("invariants: every chart and timeline axis label renders at 11 px or more on a 390 px phone", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 900 },
+    });
+    const page = await freshPage(context);
+    const bad = [];
+    let seen = 0;
+    for (const path of ["charts", "charts?tab=traffic", "timeline"]) {
+      await page.goto(`${BASE}/${path}`);
+      await page
+        .waitForSelector(".chart__svg text, .timeline svg text", {
+          timeout: 8000,
+        })
+        .catch(() => {});
+      await page.waitForTimeout(400);
+      const found = await page.evaluate(() => {
+        const out = [];
+        let n = 0;
+        for (const t of document.querySelectorAll(
+          ".chart__svg text, .timeline svg text",
+        )) {
+          const svg = /** @type {SVGSVGElement | null} */ (t.closest("svg"));
+          if (!svg) continue;
+          const vb = svg.viewBox.baseVal;
+          const shown = svg.getBoundingClientRect().width;
+          if (!vb || !vb.width || !shown) continue;
+          n++;
+          const px =
+            parseFloat(getComputedStyle(t).fontSize) * (shown / vb.width);
+          if (px < 10.95) out.push(`"${t.textContent}" ${px.toFixed(1)} px`);
+        }
+        return { out, n };
+      });
+      seen += found.n;
+      if (found.out.length)
+        bad.push(`/${path}: ${found.out.slice(0, 4).join(", ")}`);
+    }
+    assert.ok(seen > 0, "no chart or timeline label found to measure");
+    assert.deepEqual(bad, [], `labels too small at 390 px:\n${bad.join("\n")}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-253 (design review, 2026-10-03): with one reading per series a line
+// path is a lone "M" and draws nothing, so every chart looked empty; and a
+// small count range labelled its y axis "1, 1, 0".
+test("invariants: a chart with one reading per series shows a visible point and says so, and its y ticks are distinct", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.route("**/data/charts*", async (route) => {
+      const r = await route.fetch();
+      const body = await r.json();
+      for (const p of body.panels ?? [])
+        for (const s of p.series ?? []) s.points = s.points.slice(-1);
+      await route.fulfill({ response: r, json: body });
+    });
+    await page.goto(`${BASE}/charts`);
+    await page.waitForSelector(".chart__svg", { timeout: 8000 });
+    await page.waitForTimeout(300);
+    const charts = await page.evaluate(() =>
+      [...document.querySelectorAll(".chart:not(.chart--health)")]
+        .filter((f) => f.querySelector(".chart__svg"))
+        .map((f) => ({
+          title: f.querySelector("figcaption")?.textContent ?? "",
+          series: f.querySelectorAll(".chart__key").length,
+          points: [...f.querySelectorAll(".chart__point")].filter((c) => {
+            const r = c.getBoundingClientRect();
+            return r.width >= 4 && r.height >= 4;
+          }).length,
+          note: f.textContent?.includes("one reading so far") ?? false,
+        })),
+    );
+    assert.ok(charts.length > 0, "no line chart drawn");
+    const bad = charts.filter((c) => c.points < c.series || !c.note);
+    assert.deepEqual(bad, [], "charts that look empty with one reading");
+    // Distinct y ticks, over the demo's own (multi-point) answer and the
+    // one-reading one above.
+    const dupAt = async () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll(".chart")]
+          .map((f) => ({
+            title: f.querySelector("figcaption")?.textContent ?? "",
+            ticks: [...f.querySelectorAll(".chart__tick--y")].map(
+              (t) => t.textContent ?? "",
+            ),
+          }))
+          .filter((c) => new Set(c.ticks).size !== c.ticks.length),
+      );
+    const dupOne = await dupAt();
+    await page.unroute("**/data/charts*");
+    await page.goto(`${BASE}/charts`);
+    await page.waitForSelector(".chart__svg", { timeout: 8000 });
+    await page.waitForTimeout(300);
+    const yTicks = await page.locator(".chart__tick--y").count();
+    assert.ok(yTicks > 0, "no y tick labels found (.chart__tick--y)");
+    const dupMany = await dupAt();
+    assert.deepEqual(
+      [...dupOne, ...dupMany],
+      [],
+      "charts with repeated y tick labels",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-254 (design review, 2026-10-03): the gateway's access log sometimes
+// carries no client address; the busiest-clients table showed a bare "—".
+test("invariants: the busiest-clients table names an empty client address instead of a bare dash", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.route("**/data/traffic*", async (route) => {
+      const r = await route.fetch();
+      const body = await r.json();
+      body.clients = {
+        ...(body.clients ?? {}),
+        rows: [["", 42], ...(body.clients?.rows ?? [])],
+      };
+      delete body.clients.error;
+      await route.fulfill({ response: r, json: body });
+    });
+    await page.goto(`${BASE}/charts?tab=traffic`);
+    await page.waitForSelector("table caption", { timeout: 8000 });
+    await page.waitForTimeout(300);
+    const cells = await page.evaluate(() => {
+      const t = [...document.querySelectorAll("table")].find((x) =>
+        x.querySelector("caption")?.textContent?.includes("client"),
+      );
+      return [...(t?.querySelectorAll("tbody tr td:first-child") ?? [])].map(
+        (td) => ({
+          text: (td.textContent ?? "").trim(),
+          hint:
+            td.querySelector("[title]")?.getAttribute("title") ??
+            td.getAttribute("title") ??
+            "",
+        }),
+      );
+    });
+    assert.ok(cells.length > 0, "no busiest-clients rows");
+    assert.ok(
+      !cells.some((c) => c.text === "—" || c.text === ""),
+      `a bare dash or empty client cell: ${JSON.stringify(cells)}`,
+    );
+    const named = cells.find((c) =>
+      c.text.includes("not logged by the gateway"),
+    );
+    assert.ok(
+      named,
+      `no "not logged by the gateway" row: ${JSON.stringify(cells)}`,
+    );
+    assert.ok(named.hint.length > 20, "the empty-address label has no hint");
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-255 (design review, 2026-10-03): red means destructive, nothing
+// else — the Host page showed Update and Apply red because their token
+// scope is full access. Whole-screen: every red action button on the host
+// and a stack page is an action the catalog marks destructive.
+test("invariants: every red action button belongs to an action the catalog marks destructive", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const catalog = await page.evaluate(async () =>
+      (await fetch("/data/actions/catalog")).json(),
+    );
+    const destructive = new Set(
+      catalog.actions
+        .filter((/** @type {any} */ a) => a.destructive === true)
+        .map((/** @type {any} */ a) => a.action),
+    );
+    const bad = [];
+    for (const path of ["host", "stacks/kp-soft"]) {
+      await page.goto(`${BASE}/${path}`);
+      await page
+        .locator(".actions-row .kp-button")
+        .first()
+        .waitFor({ timeout: 15000 });
+      const red = await page.evaluate(() =>
+        [...document.querySelectorAll(".actions-area .kp-button--destructive")]
+          .filter((b) => /** @type {HTMLElement} */ (b).offsetParent)
+          .map((b) => ({
+            action: b.getAttribute("data-action"),
+            label: (b.textContent ?? "").trim(),
+          })),
+      );
+      for (const r of red)
+        if (!r.action || !destructive.has(r.action))
+          bad.push(`/${path}: "${r.label}" (${r.action}) is red`);
+    }
+    assert.ok(destructive.size > 0, "the catalog marks nothing destructive");
+    assert.deepEqual(bad, [], `red but not destructive:\n${bad.join("\n")}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-256 (design review, 2026-10-03): /status and /passkeys answered the
+// kit's bare "no such route" — chassis 3.4.0's root fallback refuses every
+// path the kit reserves, even the pages `kit_pages_in_webapp` hands to the
+// web app. Every address the router knows, retired ones included, renders
+// a page or redirects to one.
+test("invariants: every address the router knows renders a page or redirects to one, never no such route", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const bad = [];
+    for (const key of Object.keys(PATH_TO_PAGE)) {
+      const path = `/${key}`;
+      const res = await page.goto(`${BASE}${path}`);
+      await page.waitForTimeout(500);
+      const status = res?.status() ?? 0;
+      const text = await page.evaluate(() => document.body?.innerText ?? "");
+      const landed = new URL(page.url()).pathname;
+      const h1 = await page.locator("main h1").count();
+      if (status >= 400 || /no such route/i.test(text) || h1 === 0)
+        bad.push(`${path} → ${landed} (HTTP ${status}, h1 ${h1})`);
+      else if (route(landed).page === "notfound")
+        bad.push(`${path} → ${landed}, which is no page`);
+    }
+    assert.deepEqual(
+      bad,
+      [],
+      `addresses that render no page:\n${bad.join("\n")}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-257 (design review, 2026-10-03): Settings' token read failed with
+// "invalid type: map, expected a sequence" — the demo host answered
+// TokenList with `{}` where the real host answers a list.
+test("invariants: Settings lists the per-machine tokens without a read error", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/settings`);
+    await page
+      .locator("[data-token]")
+      .first()
+      .waitFor({ timeout: 8000 })
+      .catch(() => {});
+    const text = await page.evaluate(() => document.body?.innerText ?? "");
+    assert.ok(
+      !/invalid type|did not read/i.test(text),
+      `the tokens read failed: ${(text.match(/.*(invalid type|did not read).*/i) ?? [""])[0]}`,
+    );
+    assert.ok(
+      (await page.locator("[data-token]").count()) > 0,
+      "no token row on Settings",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-258 (design review, 2026-10-03): Backups dropped every stack the host
+// holds no repository for without a word. Every stack of the fleet has a
+// row, and one without a repository says so and why.
+test("invariants: Backups has a row for every stack, naming why one has no repository", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const fleet = await page.evaluate(async () =>
+      (await fetch("/data/fleet")).json(),
+    );
+    const names = (fleet.stacks ?? fleet.fleet?.stacks ?? []).map(
+      (/** @type {any} */ s) => s.name,
+    );
+    assert.ok(
+      names.length > 1,
+      `no fleet read: ${JSON.stringify(fleet).slice(0, 200)}`,
+    );
+    await page.goto(`${BASE}/backups`);
+    // Every stack's own read settled (no chip still reading).
+    await page.waitForFunction(
+      (n) =>
+        document.querySelectorAll(".perstack-chip").length >= n &&
+        !document.querySelector(".perstack-chip--reading"),
+      names.length,
+      { timeout: 15000 },
+    );
+    await page.waitForTimeout(500);
+    const rows = await page.evaluate(() =>
+      [...document.querySelectorAll("#page table tbody tr")].map((tr) => ({
+        stack: tr.children[0]?.textContent?.trim() ?? "",
+        repo: tr.children[1]?.textContent?.trim() ?? "",
+      })),
+    );
+    const missing = names.filter(
+      (/** @type {string} */ n) => !rows.some((r) => r.stack === n),
+    );
+    assert.deepEqual(missing, [], `stacks with no row on Backups`);
+    const none = rows.filter((r) => /no repository/i.test(r.repo));
+    assert.ok(
+      none.length > 0 &&
+        none.every((r) => r.repo.length > "no repository".length + 10),
+      `a stack without a repository is not named with a reason: ${JSON.stringify(rows)}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-259 (design review, 2026-10-03): the backup calendar painted "every
+// stack backed up" in the decorative chart palette (pink in dark). Whole
+// screen, both themes: every status cell, legend swatch and read chip uses
+// the status token its state means.
+test("invariants: the backup calendar's status colours are the status tokens, in light and dark", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const bad = [];
+    let seen = 0;
+    for (const theme of ["dark", "light"]) {
+      await page.evaluate((t) => localStorage.setItem("theme", t), theme);
+      await page.goto(`${BASE}/backupcalendar`);
+      await page
+        .locator(".backup-cal__cell--ok")
+        .first()
+        .waitFor({ timeout: 15000 });
+      await page.waitForTimeout(300);
+      const found = await page.evaluate(() => {
+        const probe = document.createElement("div");
+        document.body.append(probe);
+        const tokenColour = (/** @type {string} */ t) => {
+          probe.style.background = `var(${t})`;
+          return getComputedStyle(probe).backgroundColor;
+        };
+        const want = {
+          "backup-cal__cell--ok": tokenColour("--success-foreground"),
+          "backup-cal__cell--warn": tokenColour("--warning-foreground"),
+          "backup-cal__cell--bad": tokenColour("--destructive"),
+        };
+        const out = [];
+        let n = 0;
+        for (const [cls, colour] of Object.entries(want))
+          for (const el of document.querySelectorAll(`.${cls}`)) {
+            n++;
+            const got = getComputedStyle(el).backgroundColor;
+            if (got !== colour) out.push(`.${cls} is ${got}, not ${colour}`);
+          }
+        const okBorder = tokenColour("--success-foreground");
+        for (const el of document.querySelectorAll(".perstack-chip--read")) {
+          n++;
+          const got = getComputedStyle(el).borderTopColor;
+          if (got !== okBorder)
+            out.push(`.perstack-chip--read border is ${got}, not ${okBorder}`);
+        }
+        probe.remove();
+        return { out: [...new Set(out)], n };
+      });
+      seen += found.n;
+      for (const f of found.out) bad.push(`${theme}: ${f}`);
+    }
+    assert.ok(seen > 0, "no status cell found on the backup calendar");
+    assert.deepEqual(bad, [], `status painted off-token:\n${bad.join("\n")}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-260 (design review, 2026-10-03): Health › Doctor showed "overall
+// fail" while the doctor was still running (an answer with no verdict read
+// as fail), and two loading indicators at once (the busy card over the
+// table and the status line's own spinner under it) beside "not read yet".
+// While a run reads: no verdict, one visible spinner, no "not read yet";
+// the verdict appears once every check has answered.
+test("invariants: the Doctor shows no verdict and one loading indicator until every check has answered", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    // Both ways a run starts: over the dashboard's last answer (one that
+    // carries no verdict, the shape the demo host gives), and from nothing.
+    for (const first of [
+      { report: {}, refreshing: { run: 7 } },
+      { running: true, run: 7 },
+    ]) {
+      const page = await freshPage(context);
+      /** @type {() => void} */
+      let release = () => {};
+      const held = new Promise((r) => (release = () => r(undefined)));
+      await page.route("**/data/doctor*", async (route) => {
+        const url = new URL(route.request().url());
+        if (!url.searchParams.has("run")) {
+          await route.fulfill({ json: first });
+          return;
+        }
+        await held;
+        await route.fulfill({
+          json: {
+            report: {
+              overall: "ok",
+              checks: [{ name: "disk", health: "ok", detail: "fine" }],
+            },
+            read_run: 7,
+            read_at: Math.floor(Date.now() / 1000),
+          },
+        });
+      });
+      await page.goto(`${BASE}/doctor`);
+      await page.waitForTimeout(1500);
+      const during = await page.evaluate(() => {
+        const shown = (/** @type {Element} */ el) => {
+          for (
+            let e = /** @type {Element | null} */ (el);
+            e;
+            e = e.parentElement
+          ) {
+            const cs = getComputedStyle(e);
+            if (
+              cs.display === "none" ||
+              cs.visibility === "hidden" ||
+              Number(cs.opacity) === 0
+            )
+              return false;
+          }
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        };
+        const main =
+          document
+            .querySelector('[data-kp-remember="doctor"]')
+            ?.closest("details") ??
+          document.querySelector("main") ??
+          document.body;
+        return {
+          verdict: [...main.querySelectorAll(".state")]
+            .map((s) => s.textContent ?? "")
+            .join(" "),
+          spinners: [...main.querySelectorAll(".kp-spinner")].filter(shown)
+            .length,
+          notRead: [...main.querySelectorAll("p, span")].some(
+            (e) => shown(e) && (e.textContent ?? "").trim() === "not read yet",
+          ),
+        };
+      });
+      release();
+      assert.ok(
+        !/overall/.test(during.verdict),
+        `a verdict while the doctor runs (${JSON.stringify(first)}): "${during.verdict}"`,
+      );
+      assert.equal(
+        during.spinners,
+        1,
+        `loading indicators shown at once (${JSON.stringify(first)})`,
+      );
+      assert.equal(during.notRead, false, `"not read yet" beside the loading`);
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('[data-kp-remember="doctor"]')
+            ?.closest("details")
+            ?.querySelector(".state")
+            ?.textContent?.includes("overall"),
+        null,
+        { timeout: 10000 },
+      );
+      const after = await page.evaluate(
+        () =>
+          document
+            .querySelector('[data-kp-remember="doctor"]')
+            ?.closest("details")
+            ?.querySelector(".state")?.textContent ?? "",
+      );
+      assert.match(after ?? "", /overall ok/);
+      await page.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+// Design review, 2026-10-03 (checked, not a defect here): a hover must never redraw
+// a topology node, or a click right after the pointer moved lands on a
+// node that is no longer in the page. Whole-screen: hover one node, move
+// to another and click it; the node clicked is the one hovered, the same
+// element as before any hover.
+test("invariants: hovering the Fleet view topology never redraws a node, so a click right after a move lands", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/fleetview`);
+    await page.locator(".topology__node").nth(1).waitFor({ timeout: 10000 });
+    await page.waitForTimeout(500);
+    const stacks = await page.evaluate(() => {
+      /** @type {any} */ (window).__clicks = [];
+      const nodes = [...document.querySelectorAll(".topology__node")];
+      /** @type {any} */ (window).__nodes = nodes;
+      document.addEventListener(
+        "click",
+        (e) => {
+          const g = /** @type {Element} */ (e.target).closest?.(
+            ".topology__node",
+          );
+          /** @type {any} */ (window).__clicks.push(
+            g ? g.getAttribute("data-stack") : null,
+          );
+        },
+        true,
+      );
+      return nodes.map((n) => n.getAttribute("data-stack"));
+    });
+    const dots = page.locator(".topology__node .topology__dot");
+    const a = await dots.nth(0).boundingBox();
+    const b = await dots.nth(1).boundingBox();
+    assert.ok(a && b, "no node to point at");
+    await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, {
+      steps: 2,
+    });
+    await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+    const out = await page.evaluate(() => ({
+      clicks: /** @type {any} */ (window).__clicks,
+      same: [...document.querySelectorAll(".topology__node")].every(
+        (n, i) => n === /** @type {any} */ (window).__nodes[i],
+      ),
+    }));
+    assert.equal(out.same, true, "a hover redrew the topology's nodes");
+    assert.deepEqual(out.clicks, [stacks[1]], "the click did not land");
   } finally {
     await browser.close();
   }

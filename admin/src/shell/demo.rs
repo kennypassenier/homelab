@@ -563,6 +563,22 @@ pub async fn run_demo(
                                 .collect();
                             serde_json::json!({ "native": native, "repos": repos }).to_string()
                         }
+                        // fix-257 (design review, 2026-10-03): the real
+                        // host answers TokenList with a list
+                        // (`host/src/main.rs`, `Vec<TokenView>`); this demo
+                        // fell through to `{}`, which Settings could not
+                        // read ("invalid type: map, expected a sequence").
+                        Command::TokenList => serde_json::to_string(&[
+                            homelab_proto::TokenView {
+                                name: "legacy".into(),
+                                scope: homelab_proto::Scope::All,
+                            },
+                            homelab_proto::TokenView {
+                                name: "wsl".into(),
+                                scope: homelab_proto::Scope::Operate,
+                            },
+                        ])
+                        .unwrap_or_default(),
                         _ => "{}".into(),
                     };
                     let _ = reply.send(Ok(answer(body)));

@@ -429,14 +429,16 @@ p:has(> .measured:only-child):first-child {
   margin-inline-end: 6px;
   vertical-align: middle;
 }
+/* fix-251: a swatch shows the mark's own fill, the foreground-strength
+   token, never the pale/dark badge plate (`--success`, `--warning`). */
 .swatch.ok {
-  background: var(--success);
+  background: var(--success-foreground);
 }
 .swatch.bad {
   background: var(--destructive);
 }
 .swatch.warn {
-  background: var(--warning);
+  background: var(--warning-foreground);
 }
 .swatch.info {
   background: var(--chart-1, var(--primary));
@@ -1444,6 +1446,14 @@ td.stack-flags {
 .kp-datatable__busy-overlay[hidden] {
   display: none;
 }
+/* fix-260: one loading sign at a time. While a busy card is up (kp's own
+   or the shim's), the status line it mirrors is transparent: same place (nothing moves), still the
+   live region for a screen reader. */
+.kp-datatable:has(> .kp-datatable__busy-overlay:not([hidden]))
+  > .kp-datatable__bar
+  > .kp-datatable__status:not(.kp-datatable__sort-summary) {
+  opacity: 0;
+}
 .kp-datatable__busy-panel {
   display: flex;
   flex-direction: column;
@@ -2116,6 +2126,21 @@ td.stack-flags {
 .chart__line--dim {
   opacity: 0.15;
 }
+/* fix-253: a series with one reading draws as a point, in its line's hue. */
+.chart__point {
+  fill: light-dark(
+    hsl(var(--chart-hue, 210) 65% 42%),
+    hsl(var(--chart-hue, 210) 70% 64%)
+  );
+  transition: opacity 0.15s ease;
+}
+.chart__point.chart__line--dim {
+  opacity: 0.15;
+}
+.chart__note {
+  margin: 4px 0 0;
+  font-size: 0.85em;
+}
 .chart__legend {
   list-style: none;
   padding: 0;
@@ -2224,12 +2249,16 @@ td.stack-flags {
   ) {
   border: none;
 }
+/* fix-259 (design review, 2026-10-03): a cell's colour is a status, so it
+ * comes from kp-themes' status tokens, never the decorative chart palette
+ * (`--chart-3` is pink in dark). The foreground-strength tokens fill: the
+ * plain `--success`/`--warning` are the faint plates a badge's text sits on. */
 .backup-cal__cell--ok {
-  background: var(--chart-3, #3aa675);
+  background: var(--success-foreground);
   color: var(--background);
 }
 .backup-cal__cell--warn {
-  background: var(--chart-2, #e8a33d);
+  background: var(--warning-foreground);
   color: var(--background);
 }
 .backup-cal__cell--bad {
@@ -2309,8 +2338,8 @@ td.stack-flags {
   color: var(--muted-foreground);
 }
 .perstack-chip--read {
-  background: color-mix(in srgb, var(--chart-3, #3aa675) 18%, transparent);
-  border-color: var(--chart-3, #3aa675);
+  background: color-mix(in srgb, var(--success-foreground) 18%, transparent);
+  border-color: var(--success-foreground);
   color: var(--foreground);
 }
 .perstack-chip--no_backup {
@@ -2403,7 +2432,7 @@ td.stack-flags {
   border-bottom: 1px solid var(--border);
 }
 .backup-cal__detail-row--backed_up .backup-cal__detail-state {
-  color: var(--chart-3, #3aa675);
+  color: var(--success-foreground);
 }
 .backup-cal__detail-row--missing .backup-cal__detail-state {
   color: var(--destructive);

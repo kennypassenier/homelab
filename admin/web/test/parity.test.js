@@ -37,13 +37,18 @@ const entry = (action, o) =>
     args: [],
     confirm: false,
     refused_for_self: false,
+    destructive: false,
     ...o,
   });
 const ctx = { stack: "_host", selfStack: "admin", hostTarget: "_host" };
 
 test("exec is one step: container and command on the review, no typed name", () => {
   const f = actionForm(
-    entry("exec", { args: ["vmid", "command"], scope: "all" }),
+    entry("exec", {
+      args: ["vmid", "command"],
+      scope: "all",
+      destructive: true,
+    }),
     ctx,
   );
   assert.deepEqual(

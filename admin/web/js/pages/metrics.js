@@ -26,8 +26,10 @@ const TABS = /** @type {const} */ ([
  * @param {string} desc
  * @param {string} what
  * @param {{rows: [string, number][], error?: string}} t
+ * @param {{label: string, hint: string}} empty what an empty name means
+ *   (fix-254: never a bare "—")
  */
-function topTable(caption, desc, what, t) {
+function topTable(caption, desc, what, t, empty) {
   if (t.error) return errorBox({ what: caption, why: t.error, fix: "" });
   return h(
     "table",
@@ -50,7 +52,17 @@ function topTable(caption, desc, what, t) {
         h(
           "tr",
           null,
-          h("td", null, k || "—"),
+          h(
+            "td",
+            null,
+            k ||
+              h(
+                "span",
+                { class: "top-table__empty", title: empty.hint },
+                h("em", null, empty.label),
+                h("span", { class: "measured" }, ` (${empty.hint})`),
+              ),
+          ),
           h("td", null, String(Math.round(n))),
         ),
       ),
@@ -221,12 +233,20 @@ export function mount(root, ctx) {
           "The hostnames with the most requests in this window.",
           "Hostname",
           b.hosts,
+          {
+            label: "no hostname",
+            hint: "the request named no Host header the gateway could log",
+          },
         ),
         topTable(
           "Busiest client addresses",
           "The client addresses that made the most requests in this window.",
           "Client",
           b.clients,
+          {
+            label: "not logged by the gateway",
+            hint: "the access log line carried no client address for these requests",
+          },
         ),
       );
     };

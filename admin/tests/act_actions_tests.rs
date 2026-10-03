@@ -124,6 +124,34 @@ fn feat_stacks_4_every_action_builds_a_command_whose_scope_the_catalog_names() {
     assert_eq!(json[0]["args"][0], "force");
 }
 
+/// covers: fix-255
+#[test]
+fn fix_255_red_is_destructive_not_full_access() {
+    let json = serde_json::to_value(catalog()).unwrap();
+    let flag = |slug: &str| {
+        json.as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["action"] == slug)
+            .unwrap_or_else(|| panic!("{slug} not in the catalog"))["destructive"]
+            .as_bool()
+            .unwrap_or_else(|| panic!("{slug} has no destructive flag"))
+    };
+    for slug in ["destroy", "forget", "wipe", "prune-orphans", "exec"] {
+        assert!(flag(slug), "{slug} must be destructive");
+    }
+    // Full access, nothing lost: the four the Host page painted red.
+    for slug in [
+        "update-host",
+        "apply",
+        "restart-host",
+        "change-secret",
+        "update",
+    ] {
+        assert!(!flag(slug), "{slug} must not be destructive");
+    }
+}
+
 #[test]
 fn feat_stacks_4_the_commands_are_the_ones_the_cli_sends() {
     let req = validate(

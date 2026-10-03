@@ -49,6 +49,8 @@ const SHOW_ALL = declare({
   row: "<card>",
   at: here,
   what: "a chart's Show all: every source on again",
+  shows: "while a chart has a source turned off",
+  reach: [{ do: "click", control: "chart-source", row: "*" }],
 });
 const ZOOM_RESET = declare({
   id: "chart-zoom-reset",
@@ -56,6 +58,7 @@ const ZOOM_RESET = declare({
   opens: "view",
   at: here,
   what: "the zoom chip's Reset: every chart of the page back to its whole window",
+  shows: "while the charts are zoomed in (drag across a chart)",
 });
 
 /**

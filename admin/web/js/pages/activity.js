@@ -83,6 +83,7 @@ const OPEN_JOB = declare({
   opens: "dialog",
   row: "<job>",
   what: "open a running job's live panel: its steps and its log",
+  shows: "while a job runs (Running now)",
 });
 const OPEN_INCIDENT = declare({
   id: "activity-open-incident",
@@ -97,6 +98,8 @@ const SHOW_LOG = declare({
   opens: "dialog",
   row: "<job>",
   what: "open the log of the job an operation in History ran as",
+  shows: "in an opened History row of an operation this dashboard ran as a job",
+  reach: [{ do: "click", control: "activity-row", row: "*" }],
 });
 const WINDOW = declare({
   id: "activity-window",
@@ -141,6 +144,16 @@ const RUN_AGAIN = declare({
   row: "<row key>",
   what: "open the action dialog that starts a failed operation again",
 });
+// redesign-integrate-8: a failed update's Run it again opens the one
+// Update flow (redesign-flows-1), an address, not a dialog: its own control,
+// so Live view does not wait for a dialog that never comes.
+const UPDATE_AGAIN = declare({
+  id: "activity-update-again",
+  page: "activity",
+  opens: "view",
+  row: "<row key>",
+  what: "a failed update's Run it again: open the Update flow for its stack",
+});
 const STACK_LINK = declare({
   id: "activity-stack-link",
   page: "activity",
@@ -166,6 +179,8 @@ const JOB_ROW = declare({
   opens: "dialog",
   row: "<job>",
   what: "open one job of Every job, live, in a dialog",
+  shows: "in the unfolded Every job, once a job ran",
+  reach: [{ do: "click", control: "activity-every-job" }],
 });
 const CHARTS = declare({
   id: "activity-charts",
@@ -173,6 +188,8 @@ const CHARTS = declare({
   opens: "view",
   row: "<row key>",
   what: "open the charts around an operation's moment",
+  shows: "in an opened History row",
+  reach: [{ do: "click", control: "activity-row", row: "*" }],
 });
 const MARK = declare({
   id: "activity-timeline-mark",
@@ -192,12 +209,14 @@ const EVERY_DAY = declare({
   page: "activity",
   opens: "view",
   what: "drop the days picked on the timeline",
+  shows: "while days picked on the timeline narrow History",
 });
 const CLEAR = declare({
   id: "activity-clear-filters",
   page: "activity",
   opens: "view",
   what: "clear every History filter",
+  shows: "when the filters match no row",
 });
 const MORE = declare({
   id: "activity-show-more",
@@ -210,6 +229,7 @@ const RETRY = declare({
   page: "activity",
   opens: "run",
   what: "read the history again after a failed read",
+  shows: "after the history could not be read",
 });
 const LOG_DRIVE = {
   follow: declare({
@@ -244,6 +264,8 @@ const LOG_DRIVE = {
     page: "log",
     opens: "view",
     what: "show every source and level again",
+    shows: "while a source or level filter narrows the lines",
+    reach: [{ do: "click", control: "host-log-level", row: "error" }],
   }),
   line: declare({
     id: "host-log-line",
@@ -258,12 +280,16 @@ const LOG_DRIVE = {
     opens: "dialog",
     row: "<job>",
     what: "open the job a host line belongs to",
+    shows: "in an opened line this dashboard's job printed",
+    reach: [{ do: "click", control: "host-log-line", row: "*" }],
   }),
   copy: declare({
     id: "host-log-copy-line",
     page: "log",
     opens: "run",
     what: "copy an opened line to the clipboard",
+    shows: "in an opened line",
+    reach: [{ do: "click", control: "host-log-line", row: "*" }],
   }),
   everything: declare({
     id: "host-log-everything",
@@ -276,12 +302,16 @@ const LOG_DRIVE = {
     page: "log",
     opens: "view",
     what: "show only the opened line's source",
+    shows: "in an opened line",
+    reach: [{ do: "click", control: "host-log-line", row: "*" }],
   }),
   newLines: declare({
     id: "host-log-back-to-tail",
     page: "log",
     opens: "view",
     what: "jump back to the newest lines and follow again",
+    shows: "while the tail is paused and new lines came",
+    reach: [{ do: "click", control: "host-log-follow" }],
   }),
   search: declare({
     id: "host-log-search",
@@ -294,6 +324,7 @@ const LOG_DRIVE = {
     page: "log",
     opens: "run",
     what: "read the host's lines again after a failed read",
+    shows: "after the lines could not be read",
   }),
 };
 const LOG_DOWNLOAD = declare({
@@ -719,7 +750,10 @@ function mountNow(body, x) {
       e.stopPropagation();
       void openAction(a.stack, a.action);
     });
-    return viaForm(drivable(b, RUN_AGAIN, r.key), a.action);
+    return viaForm(
+      drivable(b, a.action === "update" ? UPDATE_AGAIN : RUN_AGAIN, r.key),
+      a.action,
+    );
   };
   /** @param {string} name */
   const incidentButton = (name) => {

@@ -44,7 +44,11 @@ import { setParams } from "../urlstate.js";
 // buttons that open a dialog are also the server-modelled forms they open
 // (`homelab ui open new-stack | import | new-preset | preset <name>`).
 /** @param {string} id @param {string} what @param {string} [row] */
-const ctl = (id, what, row) =>
+/**
+ * @param {string} id @param {string} what @param {string} [row]
+ * @param {{shows?: string}} [more]
+ */
+const ctl = (id, what, row, more = {}) =>
   declare({
     id,
     page: "presets",
@@ -53,12 +57,14 @@ const ctl = (id, what, row) =>
       : "view",
     what,
     ...(row ? { row } : {}),
+    ...more,
   });
 const TRY_AGAIN = declare({
   id: "presets-try-again",
   page: "presets",
   opens: "view",
   what: "read what failed again",
+  shows: "after the presets could not be read",
 });
 const IMPORT = ctl("presets-import", "open the Import a bundle dialog");
 const NEW_PRESET = ctl(
@@ -69,14 +75,20 @@ const NEW_STACK = ctl("presets-new-stack", "open the New stack wizard");
 const NONE_IMPORT = ctl(
   "presets-import-first",
   "the empty page's Import a bundle…",
+  undefined,
+  { shows: "while there is no preset" },
 );
 const NONE_NEW_PRESET = ctl(
   "presets-new-preset-first",
   "the empty page's New preset…",
+  undefined,
+  { shows: "while there is no preset" },
 );
 const NONE_NEW_STACK = ctl(
   "presets-new-stack-first",
   "the empty page's New stack…",
+  undefined,
+  { shows: "while there is no preset" },
 );
 const SEARCH = ctl(
   "presets-search",
@@ -110,7 +122,14 @@ const EMPTY_CARD = ctl(
   "presets-empty-card",
   "the Empty stack card itself: the New stack wizard with no apps",
 );
-const CLEAR = ctl("presets-clear-search", "clear the gallery's search");
+const CLEAR = ctl(
+  "presets-clear-search",
+  "clear the gallery's search",
+  undefined,
+  {
+    shows: "when the search matches no preset",
+  },
+);
 
 const HUES = [
   "var(--chart-1)",

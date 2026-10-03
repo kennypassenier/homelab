@@ -45,7 +45,11 @@ const FOCUS = declare({
   id: "console-run-a-command",
   page: "shell",
   opens: "view",
-  what: "jump to the shell bar",
+  what: "jump to the shell bar: the command line, focused",
+  // redesign-integrate-8: the merge declared the command box itself as a
+  // control; a press on a text box does nothing (the sweep said so). Its
+  // text is the field shell-line; its press is this jump.
+  was: ["console-command"],
 });
 const DOWNLOAD = declare({
   id: "console-download",
@@ -86,6 +90,8 @@ const DRIVE = {
     page: "shell",
     opens: "view",
     what: "show every source and level again",
+    shows: "while a source or level filter narrows the lines",
+    reach: [{ do: "click", control: "console-level", row: "error" }],
   }),
   line: declare({
     id: "console-line",
@@ -100,12 +106,16 @@ const DRIVE = {
     opens: "dialog",
     row: "<job>",
     what: "open the job a host line belongs to",
+    shows: "in an opened line this dashboard's job printed",
+    reach: [{ do: "click", control: "console-line", row: "*" }],
   }),
   copy: declare({
     id: "console-copy-line",
     page: "shell",
     opens: "run",
     what: "copy an opened line to the clipboard",
+    shows: "in an opened line",
+    reach: [{ do: "click", control: "console-line", row: "*" }],
   }),
   everything: declare({
     id: "console-everything",
@@ -118,12 +128,16 @@ const DRIVE = {
     page: "shell",
     opens: "view",
     what: "show only the opened line's source",
+    shows: "in an opened line",
+    reach: [{ do: "click", control: "console-line", row: "*" }],
   }),
   newLines: declare({
     id: "console-back-to-tail",
     page: "shell",
     opens: "view",
     what: "jump back to the newest lines and follow again",
+    shows: "while the tail is paused and new lines came",
+    reach: [{ do: "click", control: "console-follow" }],
   }),
   search: declare({
     id: "console-search",
@@ -136,6 +150,7 @@ const DRIVE = {
     page: "shell",
     opens: "run",
     what: "read the host's lines again after a failed read",
+    shows: "after the lines could not be read",
   }),
 };
 const CONTAINER = declare({
@@ -143,12 +158,6 @@ const CONTAINER = declare({
   page: "shell",
   opens: "view",
   what: "the container the next command runs in",
-});
-const COMMAND = declare({
-  id: "console-command",
-  page: "shell",
-  opens: "view",
-  what: "the command line",
 });
 
 /**
@@ -220,7 +229,6 @@ export function mount(root) {
     "aria-label": "Command",
   });
   drivable(target, CONTAINER);
-  drivable(line, COMMAND);
   const run = drivable(
     h(
       "button",

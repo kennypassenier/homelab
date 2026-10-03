@@ -77,6 +77,7 @@ const RETRY = declare({
   page: "home",
   opens: "view",
   what: "read the apps again after a failed read",
+  shows: "after the apps could not be read",
 });
 const STAR = declare({
   id: "apps-star",
@@ -90,6 +91,7 @@ const SHOW_ALL = declare({
   page: "home",
   opens: "view",
   what: "clear the app search and show every app again",
+  shows: "when the search matches no app",
 });
 
 /** Where this browser keeps its starred tiles. */

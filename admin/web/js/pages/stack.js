@@ -131,6 +131,7 @@ const UNDO_UPDATE = declare({
   at: (row) =>
     row ? `/stacks/${encodeURIComponent(row.split("/")[0])}/history` : null,
   what: "Roll back one app an Update moved in the last 7 days: its earlier image line, backed up, committed and deployed",
+  shows: "once the Update flow moved an app of this stack in the last 7 days",
 });
 
 const MORE = declare({
@@ -148,6 +149,7 @@ const COMPARE = declare({
   row: "<stack>",
   at: at("overview"),
   what: "compare this one stack with its files now (the Matches its files tile)",
+  shows: "on the Matches its files tile",
 });
 const LOG_FILTER = declare({
   id: "stack-log-filter",
@@ -184,10 +186,13 @@ const WHO = declare({
 const APP_UPDATE = declare({
   id: "stack-app-update",
   page: "stack",
-  opens: "dialog",
+  // redesign-integrate-8: since redesign-flows-1 the one Update flow, an
+  // address (openPinUpdate), not a dialog.
+  opens: "view",
+  shows: "on a stack whose pinned image has a newer release",
   row: "<stack>/<app>/<service>",
   at: at("apps"),
-  what: "an app's Update… to its newer version: back up, move the pinned image, commit and deploy",
+  what: "an app's Update… to its newer version: open the Update flow with that app picked",
 });
 const INCIDENT = declare({
   id: "stack-incident",
@@ -231,6 +236,8 @@ const MENU_ITEM = declare({
   row: "<stack>/<item>",
   at: at("overview"),
   what: "one entry of the header's More menu (restore, verify-restore, change-secret, rollback, resize, guards, disable or enable, the native ones, export, console, danger)",
+  shows: "in the header's More menu",
+  reach: [{ do: "click", control: "stack-more", row: "*" }],
 });
 const FIX = declare({
   id: "stack-fix",
@@ -272,6 +279,7 @@ const CHECK_ANSWER = declare({
   row: "<stack>/<check>",
   at: at("overview"),
   what: "answer one manual check of Is it healthy?",
+  shows: "while a manual check of this stack waits for an answer",
 });
 const LOG_SEARCH = declare({
   id: "stack-log-search",
@@ -288,14 +296,17 @@ const LOG_RETRY = declare({
   row: "<stack>",
   at: at("logs"),
   what: "ask Loki for the lines again after it did not answer",
+  shows: "after Loki did not answer",
 });
 const APP_PULL = declare({
   id: "stack-app-pull",
   page: "stack",
-  opens: "dialog",
+  // redesign-integrate-8: since redesign-flows-1 Update opens the one
+  // Update flow, an address (a native stack's own update: its dialog).
+  opens: "view",
   row: "<stack>/<app>",
   at: at("apps"),
-  what: "an unpinned app's Update…: pull its newest image and recreate it, with rollback",
+  what: "an unpinned app's Update…: the Update flow for its stack (pull the newest image, recreate it, with rollback)",
 });
 const APP_PUBLISH = declare({
   id: "stack-app-publish",
@@ -846,9 +857,13 @@ function overviewTab(panel, c) {
   if (driftTile) {
     plain.append(...driftTile.el.childNodes);
     driftTile.el.replaceWith(plain);
-    plain
-      .querySelector(".nx-kpi__spark")
-      ?.replaceWith(h("span", { class: "sh-kpi__act" }, compareBtn));
+    // redesign-integrate-8: ui.js's tile draws its fourth row only for a
+    // spark or a meter, which this tile has neither of; the button went
+    // into a row that was never there, so Compare now was never drawn.
+    const act = h("span", { class: "sh-kpi__act" }, compareBtn);
+    const slot = plain.querySelector(".nx-kpi__spark");
+    if (slot) slot.replaceWith(act);
+    else plain.append(act);
   }
 
   const checksList = h("ul", { class: "sh-checks", "aria-live": "polite" });

@@ -118,12 +118,16 @@ const SORT = declare({
   opens: "view",
   row: "vmid|name|cpu",
   what: "order the cards by vmid, by name or busiest first",
+  shows: "in the cards view",
+  reach: [{ do: "click", control: "stacks-view", row: "cards" }],
 });
 const CLEAR = declare({
   id: "stacks-untick",
   page: "overview",
   opens: "view",
   what: "untick every ticked stack",
+  shows: "while a stack is ticked",
+  reach: [{ do: "click", control: "stacks-tick", row: "*" }],
 });
 const SEARCH = declare({
   id: "stacks-search",
@@ -143,6 +147,8 @@ const TICK_ALL = declare({
   page: "overview",
   opens: "view",
   what: "tick every stack shown (click again to untick them)",
+  shows: "in the table view",
+  reach: [{ do: "click", control: "stacks-view", row: "table" }],
 });
 const BATCH = declare({
   id: "stacks-batch",
@@ -150,6 +156,8 @@ const BATCH = declare({
   opens: "dialog",
   row: "backup|update|deploy",
   what: "act on the ticked stacks: back up or deploy them in one batch dialog, or update them (each stack's Update dialog in turn)",
+  shows: "while a stack is ticked",
+  reach: [{ do: "click", control: "stacks-tick", row: "*" }],
 });
 const OPEN = declare({
   id: "stacks-open",
@@ -163,7 +171,21 @@ const ROW_ACTION = declare({
   page: "overview",
   opens: "dialog",
   row: "<stack>",
-  what: "a stack's one suggested action that opens its dialog: Deploy, Update or Back up",
+  what: "a stack's one suggested action that opens its dialog: Deploy or Back up",
+  shows: "in the table view",
+  reach: [{ do: "click", control: "stacks-view", row: "table" }],
+});
+// redesign-integrate-8: a row's Update opens the one Update flow
+// (redesign-flows-1), an address, not a dialog: its own control, so Live
+// view does not wait for a dialog that never comes.
+const ROW_UPDATE = declare({
+  id: "stacks-row-update",
+  page: "overview",
+  opens: "view",
+  row: "<stack>",
+  what: "a stack's suggested Update: open the Update flow for that stack",
+  shows: "in the table view",
+  reach: [{ do: "click", control: "stacks-view", row: "table" }],
 });
 const ROW_LOGS = declare({
   id: "stacks-row-logs",
@@ -171,6 +193,8 @@ const ROW_LOGS = declare({
   opens: "view",
   row: "<stack>",
   what: "a stack's suggested Logs: open its hub's Logs tab",
+  shows: "in the table view",
+  reach: [{ do: "click", control: "stacks-view", row: "table" }],
 });
 const KPI = declare({
   id: "stacks-kpi",
@@ -190,6 +214,7 @@ const SHOW_ALL = declare({
   page: "overview",
   opens: "view",
   what: "clear the search and the Only filters (the empty list's Show every stack)",
+  shows: "when the search and the Only filters match no stack",
 });
 const HUB_BUTTON = declare({
   id: "stacks-hub-button",
@@ -197,12 +222,15 @@ const HUB_BUTTON = declare({
   opens: "view",
   row: "<stack>",
   what: "a table row's › button: open that stack's hub",
+  shows: "in the table view",
+  reach: [{ do: "click", control: "stacks-view", row: "table" }],
 });
 const EMPTY_NEW = declare({
   id: "stacks-empty-new",
   page: "overview",
   opens: "dialog",
   what: "the empty fleet's New stack…",
+  shows: "while the fleet has no stack",
 });
 
 /** The view a person last chose, kept in this browser only. */
@@ -688,7 +716,7 @@ export function mount(root, ctx) {
         a.label,
       );
       b.addEventListener("click", () => void openAction(r.name, a.kind));
-      return drivable(b, ROW_ACTION, r.name);
+      return drivable(b, a.kind === "update" ? ROW_UPDATE : ROW_ACTION, r.name);
     }
     // Logs is the hub's second tab.
     return drivable(

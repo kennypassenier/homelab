@@ -86,6 +86,8 @@ const SHOW_ALL = declare({
   page: "firewall",
   opens: "view",
   what: "turn every lit stack off again",
+  shows: "while a stack is lit",
+  reach: [{ do: "click", control: "firewall-light", row: "*" }],
 });
 const CELL = declare({
   id: "firewall-cell",
@@ -120,6 +122,9 @@ const CLEAR_RULES = declare({
   page: "firewall",
   opens: "view",
   what: "clear the Rules card's search and action filter",
+  shows: "while the rule search or filter narrows the rules",
+  // Each direction's empty rule list draws one; both clear the same filter.
+  twins: true,
 });
 const TOPOLOGY = declare({
   id: "firewall-topology",
@@ -180,12 +185,15 @@ const UNLIGHT = declare({
   opens: "view",
   row: "<stack>",
   what: "turn one lit stack off from its chip above the matrix",
+  shows: "while a stack is lit",
+  reach: [{ do: "click", control: "firewall-light", row: "*" }],
 });
 const TRY_AGAIN = declare({
   id: "firewall-try-again",
   page: "firewall",
   opens: "view",
   what: "read what failed again",
+  shows: "after the firewall could not be read",
 });
 const ACTION_FILTER = declare({
   id: "firewall-action-filter",
@@ -206,6 +214,11 @@ const EDIT_RULE = declare({
   opens: "view",
   row: "<stack>/<in|out>/<n>",
   what: "go to an opened rule's stack firewall on its Settings",
+  shows: "in an opened rule",
+  reach: [
+    { do: "click", control: "firewall-light", row: "*" },
+    { do: "click", control: "firewall-rule", row: "*" },
+  ],
 });
 const RULE_UP = declare({
   id: "firewall-rule-move-up",
@@ -213,6 +226,11 @@ const RULE_UP = declare({
   opens: "view",
   row: "<stack>/<in|out>/<n>",
   what: "move an opened rule one place up: its stack's firewall editor opens with the move staged for review",
+  shows: "in an opened rule that is not the first",
+  reach: [
+    { do: "click", control: "firewall-light", row: "*" },
+    { do: "click", control: "firewall-rule", row: "*" },
+  ],
 });
 const RULE_OFF = declare({
   id: "firewall-rule-disable",

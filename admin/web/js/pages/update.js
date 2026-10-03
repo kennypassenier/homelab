@@ -84,6 +84,8 @@ const BACK = declare({
   page: "update",
   opens: "view",
   what: "the Update flow's step 2 → 1: back to the list",
+  shows: "on step 2 (what changes)",
+  reach: [{ do: "click", control: "update-see-impact" }],
 });
 const MAJOR = declare({
   id: "update-major-read",
@@ -91,12 +93,16 @@ const MAJOR = declare({
   opens: "view",
   row: "<pin:stack:app/service>",
   what: "tick “I read the release notes” for a major version",
+  shows: "on step 2 (what changes)",
+  reach: [{ do: "click", control: "update-see-impact" }],
 });
 const GO = declare({
   id: "update-go",
   page: "update",
   opens: "run",
   what: "back up the chosen apps' stacks, update them and verify them",
+  shows: "on step 2, once every major version's notes are ticked as read",
+  reach: [{ do: "click", control: "update-see-impact" }],
 });
 const ROLL_BACK = declare({
   id: "update-roll-back",
@@ -104,6 +110,7 @@ const ROLL_BACK = declare({
   opens: "dialog",
   row: "<pin:stack:app/service>",
   what: "the result's Roll back…: put the earlier version back the same way",
+  shows: "in the result of an update that moved a pinned version",
 });
 
 const NOTES = declare({
@@ -119,18 +126,23 @@ const MAJOR_NOTES = declare({
   opens: "view",
   row: "<pin:stack:app/service>",
   what: "a major version's release notes, in a new tab",
+  shows: "on step 2 (what changes)",
+  reach: [{ do: "click", control: "update-see-impact" }],
 });
 const DIFF = declare({
   id: "update-diff",
   page: "update",
   opens: "view",
   what: "fold or unfold the change to the stack files",
+  shows: "on step 2 (what changes)",
+  reach: [{ do: "click", control: "update-see-impact" }],
 });
 const LEAVE = declare({
   id: "update-leave",
   page: "update",
   opens: "view",
   what: "leave the running update (the job keeps going on the server)",
+  shows: "while the flow's update runs",
 });
 const AFTER = declare({
   id: "update-after",
@@ -138,6 +150,7 @@ const AFTER = declare({
   opens: "view",
   row: "activity|stack|inbox|back|again",
   what: "the result's links: Activity, the stack, back to the Inbox, or the list again; or Back from an empty list",
+  shows: "in the result of an update, or on an empty list (Back)",
 });
 
 /** The six steps (flows/update.html). */

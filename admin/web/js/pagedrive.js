@@ -233,7 +233,16 @@ function unknownControl(id) {
 async function click(id, row, navigate, show, budget) {
   const d = topDialog();
   if (d) {
-    const f = await find(() => d, true, { id, row }, 1500, budget);
+    // redesign-integrate-8: a page drawn as a dialog (Deploy all changes
+    // on Stacks) draws its declared controls after its own read; wait for
+    // one as long as for a page's, a dialog's plain buttons as before.
+    const f = await find(
+      () => d,
+      true,
+      { id, row },
+      resolve(id) ? 8000 : 1500,
+      budget,
+    );
     if (!f.el) return answer({ why: `${f.why} in ${titleOf(d)}`, fix: f.fix });
     return press(f.el, show, false, budget);
   }
@@ -306,7 +315,21 @@ async function press(el, show, opensDialog, budget) {
       why: "the dashboard stopped waiting for this step",
       fix: "send it again",
     });
-  el.click();
+  // redesign-integrate-8: an SVG control (the Map's nodes) has no
+  // click(); it took the step and never answered.
+  if (typeof el.click === "function") el.click();
+  else
+    el.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+      }),
+    );
+  // A person's click on a text box puts the caret in it; click() alone
+  // does not (a search box's press did nothing).
+  if (el.matches("input:not([type=checkbox]):not([type=radio]), textarea"))
+    el.focus({ preventScroll: true });
   // A dialog that reads first draws its title at once; wait for it, within
   // the step's budget.
   if (opensDialog) {

@@ -75,6 +75,7 @@ const ANSWER = declare({
   opens: "run",
   row: "<ask key>:allow|stop",
   what: "answer the host's question: allow, or leave it stopped",
+  shows: "while the host asks whether an operation may go on",
 });
 const FIX = declare({
   id: "inbox-fix",
@@ -89,6 +90,7 @@ const SEEN = declare({
   opens: "run",
   row: "<row key>",
   what: "mark a notice as seen (it leaves the Inbox; Activity keeps it)",
+  shows: "on an unread notice without a fix",
 });
 const PUSH_ENVS = declare({
   id: "inbox-push-envs",
@@ -136,6 +138,7 @@ const ANSWER_CHECK = declare({
   opens: "dialog",
   row: "<check id>:pass|fail|later",
   what: "answer a manual check: it passes, it fails, or not now (asks again in 7 days)",
+  shows: "while a manual check waits for an answer",
 });
 
 /** @param {string} key */

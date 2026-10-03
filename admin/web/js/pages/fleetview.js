@@ -61,9 +61,11 @@ import { mapGraph } from "./mapgraph.js";
 const PIN_UPDATE = declare({
   id: "pin-update",
   page: "fleetview",
-  opens: "dialog",
+  // redesign-integrate-8: since redesign-flows-1 it opens the one Update
+  // flow (an address), not a dialog; Live view waited for a dialog.
+  opens: "view",
   row: "<stack>/<app>/<service>",
-  what: "a stale image's Update: back up the stack, move its pinned image to the newer release, commit and deploy",
+  what: "a stale image's Update: open the Update flow with that app picked (back up, move the pinned image, commit, deploy, verify)",
 });
 const VIEW = declare({
   id: "map-view",
@@ -112,6 +114,8 @@ const FW_RULES = declare({
   opens: "view",
   row: "<stack>",
   what: "open a stack's firewall rules from the Map's side panel",
+  shows: "while a node is selected",
+  reach: [{ do: "click", control: "map-node", row: "*" }],
 });
 const NOTES = declare({
   id: "map-release-notes",
@@ -149,7 +153,7 @@ function updateButton(g) {
       "data-from": g.pinned,
       "data-to": g.latest,
       ...(g.major ? { "data-major": "" } : {}),
-      title: `Back up ${stack}, move ${g.key} from ${g.pinned} to ${g.latest}, commit and deploy${g.major ? "; a major version: the dialog asks you to read the release notes first" : ""}`,
+      title: `Back up ${stack}, move ${g.key} from ${g.pinned} to ${g.latest}, commit and deploy, in the Update flow${g.major ? "; a major version: the flow asks you to read the release notes first" : ""}`,
     },
     `Update to ${g.latest}${g.major ? "…" : ""}`,
   );

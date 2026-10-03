@@ -22,8 +22,14 @@
       "row": "<row key>",
       "href": "/activity",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in an opened History row",
+      "reach": [
+        {
+          "do": "click",
+          "control": "activity-row",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -34,7 +40,7 @@
       "row": null,
       "href": "/activity",
       "was": [],
-      "shows": null,
+      "shows": "when the filters match no row",
       "reach": [],
       "twins": false
     },
@@ -58,8 +64,13 @@
       "row": "<job>",
       "href": "/activity",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the unfolded Every job, once a job ran",
+      "reach": [
+        {
+          "do": "click",
+          "control": "activity-every-job"
+        }
+      ],
       "twins": false
     },
     {
@@ -94,7 +105,7 @@
       "row": "<job>",
       "href": "/activity",
       "was": [],
-      "shows": null,
+      "shows": "while a job runs (Running now)",
       "reach": [],
       "twins": false
     },
@@ -106,7 +117,7 @@
       "row": null,
       "href": "/activity",
       "was": [],
-      "shows": null,
+      "shows": "after the history could not be read",
       "reach": [],
       "twins": false
     },
@@ -166,7 +177,7 @@
       "row": null,
       "href": "/activity",
       "was": [],
-      "shows": null,
+      "shows": "while days picked on the timeline narrow History",
       "reach": [],
       "twins": false
     },
@@ -178,8 +189,14 @@
       "row": "<job>",
       "href": "/activity",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in an opened History row of an operation this dashboard ran as a job",
+      "reach": [
+        {
+          "do": "click",
+          "control": "activity-row",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -210,6 +227,18 @@
       "id": "activity-timeline-mark",
       "page": "activity",
       "what": "open a timeline mark's operation in History",
+      "opens": "view",
+      "row": "<row key>",
+      "href": "/activity",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "activity-update-again",
+      "page": "activity",
+      "what": "a failed update's Run it again: open the Update flow for its stack",
       "opens": "view",
       "row": "<row key>",
       "href": "/activity",
@@ -262,7 +291,7 @@
       "row": null,
       "href": "/apps",
       "was": [],
-      "shows": null,
+      "shows": "after the apps could not be read",
       "reach": [],
       "twins": false
     },
@@ -286,7 +315,7 @@
       "row": null,
       "href": "/apps",
       "was": [],
-      "shows": null,
+      "shows": "when the search matches no app",
       "reach": [],
       "twins": false
     },
@@ -542,8 +571,14 @@
       "row": "<card>",
       "href": "/charts",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "while a chart has a source turned off",
+      "reach": [
+        {
+          "do": "click",
+          "control": "chart-source",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -566,7 +601,7 @@
       "row": null,
       "href": "/charts",
       "was": [],
-      "shows": null,
+      "shows": "while the charts are zoomed in (drag across a chart)",
       "reach": [],
       "twins": false
     },
@@ -595,20 +630,13 @@
       "row": null,
       "href": "/console",
       "was": [],
-      "shows": null,
-      "reach": [],
-      "twins": false
-    },
-    {
-      "id": "console-command",
-      "page": "shell",
-      "what": "the command line",
-      "opens": "view",
-      "row": null,
-      "href": "/console",
-      "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "while the tail is paused and new lines came",
+      "reach": [
+        {
+          "do": "click",
+          "control": "console-follow"
+        }
+      ],
       "twins": false
     },
     {
@@ -631,8 +659,14 @@
       "row": null,
       "href": "/console",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in an opened line",
+      "reach": [
+        {
+          "do": "click",
+          "control": "console-line",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -715,8 +749,14 @@
       "row": null,
       "href": "/console",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in an opened line",
+      "reach": [
+        {
+          "do": "click",
+          "control": "console-line",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -727,8 +767,14 @@
       "row": "<job>",
       "href": "/console",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in an opened line this dashboard's job printed",
+      "reach": [
+        {
+          "do": "click",
+          "control": "console-line",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -739,8 +785,14 @@
       "row": null,
       "href": "/console",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "while a source or level filter narrows the lines",
+      "reach": [
+        {
+          "do": "click",
+          "control": "console-level",
+          "row": "error"
+        }
+      ],
       "twins": false
     },
     {
@@ -751,7 +803,7 @@
       "row": null,
       "href": "/console",
       "was": [],
-      "shows": null,
+      "shows": "after the lines could not be read",
       "reach": [],
       "twins": false
     },
@@ -770,11 +822,15 @@
     {
       "id": "console-run-a-command",
       "page": "shell",
-      "what": "jump to the shell bar",
+      "what": "jump to the shell bar: the command line, focused",
       "opens": "view",
       "row": null,
       "href": "/console",
-      "was": [],
+      "was": [
+        {
+          "id": "console-command"
+        }
+      ],
       "shows": null,
       "reach": [],
       "twins": false
@@ -847,7 +903,7 @@
       "row": "<passkey label>",
       "href": "/settings?section=sign-in",
       "was": [],
-      "shows": null,
+      "shows": "once a passkey is registered",
       "reach": [],
       "twins": false
     },
@@ -859,8 +915,13 @@
       "row": null,
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the Deploy all changes panel, once a destroy is armed and confirmed",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-deploy-all"
+        }
+      ],
       "twins": false
     },
     {
@@ -871,20 +932,13 @@
       "row": null,
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
-      "twins": false
-    },
-    {
-      "id": "deploy-all-destroy-name",
-      "page": "overview",
-      "what": "type a gone stack's name to include its destroy",
-      "opens": "view",
-      "row": "<stack>",
-      "href": "/stacks",
-      "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the Deploy all changes panel, once a gone stack's name is typed",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-deploy-all"
+        }
+      ],
       "twins": false
     },
     {
@@ -895,8 +949,13 @@
       "row": "<stack>",
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the Deploy all changes panel",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-deploy-all"
+        }
+      ],
       "twins": false
     },
     {
@@ -907,8 +966,13 @@
       "row": "<stack>",
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the Deploy all changes panel",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-deploy-all"
+        }
+      ],
       "twins": false
     },
     {
@@ -919,8 +983,13 @@
       "row": null,
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the Deploy all changes panel",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-deploy-all"
+        }
+      ],
       "twins": false
     },
     {
@@ -931,8 +1000,18 @@
       "row": null,
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the Deploy all changes panel, while one column is shown",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-deploy-all"
+        },
+        {
+          "do": "click",
+          "control": "deploy-all-tile",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -943,8 +1022,13 @@
       "row": "<stack>",
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the Deploy all changes panel",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-deploy-all"
+        }
+      ],
       "twins": false
     },
     {
@@ -955,8 +1039,13 @@
       "row": "deploy|destroy|broken|same",
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the Deploy all changes panel",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-deploy-all"
+        }
+      ],
       "twins": false
     },
     {
@@ -1070,9 +1159,9 @@
       "row": null,
       "href": "/firewall",
       "was": [],
-      "shows": null,
+      "shows": "while the rule search or filter narrows the rules",
       "reach": [],
-      "twins": false
+      "twins": true
     },
     {
       "id": "firewall-decided-by",
@@ -1094,8 +1183,19 @@
       "row": "<stack>/<in|out>/<n>",
       "href": "/firewall",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in an opened rule",
+      "reach": [
+        {
+          "do": "click",
+          "control": "firewall-light",
+          "row": "*"
+        },
+        {
+          "do": "click",
+          "control": "firewall-rule",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -1226,8 +1326,19 @@
       "row": "<stack>/<in|out>/<n>",
       "href": "/firewall",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in an opened rule that is not the first",
+      "reach": [
+        {
+          "do": "click",
+          "control": "firewall-light",
+          "row": "*"
+        },
+        {
+          "do": "click",
+          "control": "firewall-rule",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -1262,8 +1373,14 @@
       "row": null,
       "href": "/firewall",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "while a stack is lit",
+      "reach": [
+        {
+          "do": "click",
+          "control": "firewall-light",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -1298,7 +1415,7 @@
       "row": null,
       "href": "/firewall",
       "was": [],
-      "shows": null,
+      "shows": "after the firewall could not be read",
       "reach": [],
       "twins": false
     },
@@ -1310,8 +1427,14 @@
       "row": "<stack>",
       "href": "/firewall",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "while a stack is lit",
+      "reach": [
+        {
+          "do": "click",
+          "control": "firewall-light",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -1346,8 +1469,13 @@
       "row": null,
       "href": "/activity?view=host-log",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "while the tail is paused and new lines came",
+      "reach": [
+        {
+          "do": "click",
+          "control": "host-log-follow"
+        }
+      ],
       "twins": false
     },
     {
@@ -1358,8 +1486,14 @@
       "row": null,
       "href": "/activity?view=host-log",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in an opened line",
+      "reach": [
+        {
+          "do": "click",
+          "control": "host-log-line",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -1442,8 +1576,14 @@
       "row": null,
       "href": "/activity?view=host-log",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in an opened line",
+      "reach": [
+        {
+          "do": "click",
+          "control": "host-log-line",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -1454,8 +1594,14 @@
       "row": "<job>",
       "href": "/activity?view=host-log",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in an opened line this dashboard's job printed",
+      "reach": [
+        {
+          "do": "click",
+          "control": "host-log-line",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -1466,8 +1612,14 @@
       "row": null,
       "href": "/activity?view=host-log",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "while a source or level filter narrows the lines",
+      "reach": [
+        {
+          "do": "click",
+          "control": "host-log-level",
+          "row": "error"
+        }
+      ],
       "twins": false
     },
     {
@@ -1478,7 +1630,7 @@
       "row": null,
       "href": "/activity?view=host-log",
       "was": [],
-      "shows": null,
+      "shows": "after the lines could not be read",
       "reach": [],
       "twins": false
     },
@@ -1538,7 +1690,7 @@
       "row": "<ask key>:allow|stop",
       "href": "/inbox",
       "was": [],
-      "shows": null,
+      "shows": "while the host asks whether an operation may go on",
       "reach": [],
       "twins": false
     },
@@ -1550,7 +1702,7 @@
       "row": "<check id>:pass|fail|later",
       "href": "/inbox",
       "was": [],
-      "shows": null,
+      "shows": "while a manual check waits for an answer",
       "reach": [],
       "twins": false
     },
@@ -1610,7 +1762,7 @@
       "row": "<row key>",
       "href": "/inbox",
       "was": [],
-      "shows": null,
+      "shows": "on an unread notice without a fix",
       "reach": [],
       "twins": false
     },
@@ -1742,8 +1894,14 @@
       "row": "<stack>",
       "href": "/map",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "while a node is selected",
+      "reach": [
+        {
+          "do": "click",
+          "control": "map-node",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -1802,8 +1960,14 @@
       "row": null,
       "href": "/map",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "while a node is selected",
+      "reach": [
+        {
+          "do": "click",
+          "control": "map-node",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -1874,8 +2038,14 @@
       "row": "<hostname>",
       "href": "/charts",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "on the Traffic view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "metrics-view",
+          "row": "traffic"
+        }
+      ],
       "twins": false
     },
     {
@@ -1981,22 +2151,10 @@
       "twins": false
     },
     {
-      "id": "passkey-label",
-      "page": "passkeys",
-      "what": "the name a new passkey is kept under",
-      "opens": "view",
-      "row": null,
-      "href": "/settings?section=sign-in",
-      "was": [],
-      "shows": null,
-      "reach": [],
-      "twins": false
-    },
-    {
       "id": "pin-update",
       "page": "fleetview",
-      "what": "a stale image's Update: back up the stack, move its pinned image to the newer release, commit and deploy",
-      "opens": "dialog",
+      "what": "a stale image's Update: open the Update flow with that app picked (back up, move the pinned image, commit, deploy, verify)",
+      "opens": "view",
       "row": "<stack>/<app>/<service>",
       "href": "/map",
       "was": [],
@@ -2036,7 +2194,7 @@
       "row": null,
       "href": "/presets",
       "was": [],
-      "shows": null,
+      "shows": "when the search matches no preset",
       "reach": [],
       "twins": false
     },
@@ -2084,7 +2242,7 @@
       "row": null,
       "href": "/presets",
       "was": [],
-      "shows": null,
+      "shows": "while there is no preset",
       "reach": [],
       "twins": false
     },
@@ -2108,7 +2266,7 @@
       "row": null,
       "href": "/presets",
       "was": [],
-      "shows": null,
+      "shows": "while there is no preset",
       "reach": [],
       "twins": false
     },
@@ -2132,7 +2290,7 @@
       "row": null,
       "href": "/presets",
       "was": [],
-      "shows": null,
+      "shows": "while there is no preset",
       "reach": [],
       "twins": false
     },
@@ -2180,7 +2338,7 @@
       "row": null,
       "href": "/presets",
       "was": [],
-      "shows": null,
+      "shows": "after the presets could not be read",
       "reach": [],
       "twins": false
     },
@@ -2228,7 +2386,7 @@
       "row": null,
       "href": "/settings?section=sign-in",
       "was": [],
-      "shows": null,
+      "shows": "when the dashboard is reached over HTTPS",
       "reach": [],
       "twins": false
     },
@@ -2240,8 +2398,13 @@
       "row": null,
       "href": "/settings?section=sign-in",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the passkey form (Register this device)",
+      "reach": [
+        {
+          "do": "click",
+          "control": "register-passkey"
+        }
+      ],
       "twins": false
     },
     {
@@ -2252,8 +2415,13 @@
       "row": null,
       "href": "/settings?section=sign-in",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the passkey form (Register this device)",
+      "reach": [
+        {
+          "do": "click",
+          "control": "register-passkey"
+        }
+      ],
       "twins": false
     },
     {
@@ -2381,8 +2549,14 @@
       "row": null,
       "href": "/settings",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in an open editor",
+      "reach": [
+        {
+          "do": "click",
+          "control": "settings-edit",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -2393,7 +2567,7 @@
       "row": null,
       "href": "/settings",
       "was": [],
-      "shows": null,
+      "shows": "while a person has staged a change on this page",
       "reach": [],
       "twins": false
     },
@@ -2405,7 +2579,7 @@
       "row": null,
       "href": "/settings",
       "was": [],
-      "shows": null,
+      "shows": "when the search matches no setting",
       "reach": [],
       "twins": false
     },
@@ -2417,7 +2591,7 @@
       "row": null,
       "href": "/settings",
       "was": [],
-      "shows": null,
+      "shows": "while a person has staged a change on this page",
       "reach": [],
       "twins": false
     },
@@ -2513,8 +2687,14 @@
       "row": null,
       "href": "/settings",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in an open editor",
+      "reach": [
+        {
+          "do": "click",
+          "control": "settings-edit",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -2537,7 +2717,7 @@
       "row": null,
       "href": "/settings",
       "was": [],
-      "shows": null,
+      "shows": "after the settings could not be read",
       "reach": [],
       "twins": false
     },
@@ -2549,7 +2729,7 @@
       "row": "<key>",
       "href": "/settings",
       "was": [],
-      "shows": null,
+      "shows": "while a person has staged a change on this page",
       "reach": [],
       "twins": false
     },
@@ -2561,8 +2741,14 @@
       "row": null,
       "href": "/settings",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in an open editor",
+      "reach": [
+        {
+          "do": "click",
+          "control": "settings-edit",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -2652,8 +2838,8 @@
     {
       "id": "stack-app-pull",
       "page": "stack",
-      "what": "an unpinned app's Update…: pull its newest image and recreate it, with rollback",
-      "opens": "dialog",
+      "what": "an unpinned app's Update…: the Update flow for its stack (pull the newest image, recreate it, with rollback)",
+      "opens": "view",
       "row": "<stack>/<app>",
       "href": "/stacks/<stack>/apps",
       "was": [],
@@ -2664,12 +2850,12 @@
     {
       "id": "stack-app-update",
       "page": "stack",
-      "what": "an app's Update… to its newer version: back up, move the pinned image, commit and deploy",
-      "opens": "dialog",
+      "what": "an app's Update… to its newer version: open the Update flow with that app picked",
+      "opens": "view",
       "row": "<stack>/<app>/<service>",
       "href": "/stacks/<stack>/apps",
       "was": [],
-      "shows": null,
+      "shows": "on a stack whose pinned image has a newer release",
       "reach": [],
       "twins": false
     },
@@ -2705,7 +2891,7 @@
       "row": "<stack>/<check>",
       "href": "/stacks/<stack>",
       "was": [],
-      "shows": null,
+      "shows": "while a manual check of this stack waits for an answer",
       "reach": [],
       "twins": false
     },
@@ -2717,7 +2903,7 @@
       "row": "<stack>",
       "href": "/stacks/<stack>",
       "was": [],
-      "shows": null,
+      "shows": "on the Matches its files tile",
       "reach": [],
       "twins": false
     },
@@ -2861,7 +3047,7 @@
       "row": "<stack>",
       "href": "/stacks/<stack>/logs",
       "was": [],
-      "shows": null,
+      "shows": "after Loki did not answer",
       "reach": [],
       "twins": false
     },
@@ -2909,8 +3095,14 @@
       "row": "<stack>/<item>",
       "href": "/stacks/<stack>",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the header's More menu",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stack-more",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -2957,7 +3149,7 @@
       "row": "<stack>/<app>/<service>",
       "href": "/stacks/<stack>/history",
       "was": [],
-      "shows": null,
+      "shows": "once the Update flow moved an app of this stack in the last 7 days",
       "reach": [],
       "twins": false
     },
@@ -2969,8 +3161,14 @@
       "row": "backup|update|deploy",
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "while a stack is ticked",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-tick",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -2993,7 +3191,7 @@
       "row": null,
       "href": "/stacks",
       "was": [],
-      "shows": null,
+      "shows": "while the fleet has no stack",
       "reach": [],
       "twins": false
     },
@@ -3005,8 +3203,14 @@
       "row": "<stack>",
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the table view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-view",
+          "row": "table"
+        }
+      ],
       "twins": false
     },
     {
@@ -3072,13 +3276,19 @@
     {
       "id": "stacks-row-action",
       "page": "overview",
-      "what": "a stack's one suggested action that opens its dialog: Deploy, Update or Back up",
+      "what": "a stack's one suggested action that opens its dialog: Deploy or Back up",
       "opens": "dialog",
       "row": "<stack>",
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the table view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-view",
+          "row": "table"
+        }
+      ],
       "twins": false
     },
     {
@@ -3089,8 +3299,32 @@
       "row": "<stack>",
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the table view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-view",
+          "row": "table"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "stacks-row-update",
+      "page": "overview",
+      "what": "a stack's suggested Update: open the Update flow for that stack",
+      "opens": "view",
+      "row": "<stack>",
+      "href": "/stacks",
+      "was": [],
+      "shows": "in the table view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-view",
+          "row": "table"
+        }
+      ],
       "twins": false
     },
     {
@@ -3113,7 +3347,7 @@
       "row": null,
       "href": "/stacks",
       "was": [],
-      "shows": null,
+      "shows": "when the search and the Only filters match no stack",
       "reach": [],
       "twins": false
     },
@@ -3125,8 +3359,14 @@
       "row": "vmid|name|cpu",
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the cards view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-view",
+          "row": "cards"
+        }
+      ],
       "twins": false
     },
     {
@@ -3149,8 +3389,14 @@
       "row": null,
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "in the table view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-view",
+          "row": "table"
+        }
+      ],
       "twins": false
     },
     {
@@ -3161,8 +3407,14 @@
       "row": null,
       "href": "/stacks",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "while a stack is ticked",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-tick",
+          "row": "*"
+        }
+      ],
       "twins": false
     },
     {
@@ -3271,7 +3523,7 @@
       "row": "activity|stack|inbox|back|again",
       "href": "/update",
       "was": [],
-      "shows": null,
+      "shows": "in the result of an update, or on an empty list (Back)",
       "reach": [],
       "twins": false
     },
@@ -3283,8 +3535,13 @@
       "row": null,
       "href": "/update",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "on step 2 (what changes)",
+      "reach": [
+        {
+          "do": "click",
+          "control": "update-see-impact"
+        }
+      ],
       "twins": false
     },
     {
@@ -3295,8 +3552,13 @@
       "row": null,
       "href": "/update",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "on step 2 (what changes)",
+      "reach": [
+        {
+          "do": "click",
+          "control": "update-see-impact"
+        }
+      ],
       "twins": false
     },
     {
@@ -3307,8 +3569,13 @@
       "row": null,
       "href": "/update",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "on step 2, once every major version's notes are ticked as read",
+      "reach": [
+        {
+          "do": "click",
+          "control": "update-see-impact"
+        }
+      ],
       "twins": false
     },
     {
@@ -3319,7 +3586,7 @@
       "row": null,
       "href": "/update",
       "was": [],
-      "shows": null,
+      "shows": "while the flow's update runs",
       "reach": [],
       "twins": false
     },
@@ -3331,8 +3598,13 @@
       "row": "<pin:stack:app/service>",
       "href": "/update",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "on step 2 (what changes)",
+      "reach": [
+        {
+          "do": "click",
+          "control": "update-see-impact"
+        }
+      ],
       "twins": false
     },
     {
@@ -3343,8 +3615,13 @@
       "row": "<pin:stack:app/service>",
       "href": "/update",
       "was": [],
-      "shows": null,
-      "reach": [],
+      "shows": "on step 2 (what changes)",
+      "reach": [
+        {
+          "do": "click",
+          "control": "update-see-impact"
+        }
+      ],
       "twins": false
     },
     {
@@ -3379,7 +3656,7 @@
       "row": "<pin:stack:app/service>",
       "href": "/update",
       "was": [],
-      "shows": null,
+      "shows": "in the result of an update that moved a pinned version",
       "reach": [],
       "twins": false
     },
@@ -3457,6 +3734,13 @@
       "what": "the stack a restore reads from (Restore dialog)",
       "was": [],
       "row": null
+    },
+    {
+      "id": "deploy-all-destroy-name",
+      "page": "overview",
+      "what": "type a gone stack's name to include its destroy",
+      "was": [],
+      "row": "<stack>"
     },
     {
       "id": "drop-confirm",

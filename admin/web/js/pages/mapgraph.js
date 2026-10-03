@@ -33,6 +33,8 @@ const SHOW_ALL = declare({
   page: "fleetview",
   opens: "view",
   what: "clear the Map's selection and show every connection kind again",
+  shows: "while a node is selected",
+  reach: [{ do: "click", control: "map-node", row: "*" }],
 });
 
 /**

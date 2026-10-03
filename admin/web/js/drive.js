@@ -369,7 +369,9 @@ export function mountFollow(region, ctx) {
           ctx.navigate,
           async (el) => {
             cursor.sit(el);
-            await flash(el, "drive-press", 420);
+            // redesign-integrate-8: a person's pace unless the demo host's
+            // sweep asked for less (`press_ms`).
+            await flash(el, "drive-press", s.press_ms ?? 420);
           },
           () => closed.includes(s.seq),
         );

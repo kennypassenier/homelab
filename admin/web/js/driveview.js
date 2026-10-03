@@ -37,7 +37,8 @@
  *   form: DriveForm | null, last_at: number, idle_s: number,
  *   announce?: DriveAnnounce | null, paused_by?: string | null,
  *   stopped_by?: string | null, plan?: DrivePlan | null,
- *   selected?: string[], page_dialog?: DrivePageDialog | null}} DriveState
+ *   selected?: string[], page_dialog?: DrivePageDialog | null,
+ *   press_ms?: number}} DriveState
  * @typedef {{control: string, row?: string | null, title: string}}
  *   DrivePageDialog fix-239: a page-level dialog a `ui click` opened, which
  *   the server does not model (the tab that took the click holds it)

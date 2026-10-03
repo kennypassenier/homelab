@@ -32,6 +32,7 @@ const REGISTER = declare({
   page: "passkeys",
   opens: "run",
   what: "register this device as a passkey (the browser asks for Touch ID, Windows Hello or a security key)",
+  shows: "when the dashboard is reached over HTTPS",
 });
 const DELETE = declare({
   id: "delete-passkey",
@@ -39,14 +40,9 @@ const DELETE = declare({
   opens: "run",
   row: "<passkey label>",
   what: "delete one passkey after a confirmation",
+  shows: "once a passkey is registered",
 });
 
-const LABEL = declare({
-  id: "passkey-label",
-  page: "passkeys",
-  opens: "view",
-  what: "the name a new passkey is kept under",
-});
 // review M5: every page field Live view may set is declared (drivable.js
 // `declareField`); the client and the dashboard refuse any other.
 const LABEL_FIELD = declareField({
@@ -59,12 +55,16 @@ const REGISTER_GO = declare({
   page: "passkeys",
   opens: "run",
   what: "ask the browser for the passkey and keep it under the typed name",
+  shows: "in the passkey form (Register this device)",
+  reach: [{ do: "click", control: "register-passkey" }],
 });
 const REGISTER_CANCEL = declare({
   id: "register-passkey-cancel",
   page: "passkeys",
   opens: "view",
   what: "fold the passkey form away without registering",
+  shows: "in the passkey form (Register this device)",
+  reach: [{ do: "click", control: "register-passkey" }],
 });
 
 /**
@@ -109,7 +109,8 @@ export function mountPasskeys(box, report) {
       "aria-label": "What to call this passkey",
     })
   );
-  drivable(label, LABEL);
+  // redesign-integrate-8: the text box is the field passkey-label (typed
+  // into), no longer also a control a click on which did nothing.
   const status = h("p", { class: "cf-hint", role: "status" });
   const go = h(
     "button",

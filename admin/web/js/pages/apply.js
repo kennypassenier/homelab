@@ -30,7 +30,13 @@ import { openAction } from "../actiondialog.js";
 import { agoEl, setAgo } from "../ago.js";
 import { destroyStep, goPlan } from "../applyplan.js";
 import { ensureStyle, errorBox, fetchJson, h } from "../dom.js";
-import { declare, declareField, drivable, viaForm } from "../drivable.js";
+import {
+  declare,
+  declareField,
+  drivable,
+  fieldId,
+  viaForm,
+} from "../drivable.js";
 import { diffBlocks } from "../editui.js";
 import { fileViews } from "../plan.js";
 import { stackHref } from "../router.js";
@@ -42,6 +48,8 @@ const READ = declare({
   page: "overview",
   opens: "run",
   what: "read the plan of every stack again from the host and the working copy",
+  shows: "in the Deploy all changes panel",
+  reach: [{ do: "click", control: "stacks-deploy-all" }],
 });
 const TILE = declare({
   id: "deploy-all-tile",
@@ -49,6 +57,8 @@ const TILE = declare({
   opens: "view",
   row: "deploy|destroy|broken|same",
   what: "show only one column of the plan (a plain click; again shows all)",
+  shows: "in the Deploy all changes panel",
+  reach: [{ do: "click", control: "stacks-deploy-all" }],
 });
 const PICK = declare({
   id: "deploy-all-pick",
@@ -56,6 +66,8 @@ const PICK = declare({
   opens: "view",
   row: "<stack>",
   what: "include or leave out one stack of the deploy batch",
+  shows: "in the Deploy all changes panel",
+  reach: [{ do: "click", control: "stacks-deploy-all" }],
 });
 const DIFF = declare({
   id: "deploy-all-diff",
@@ -63,11 +75,14 @@ const DIFF = declare({
   opens: "view",
   row: "<stack>",
   what: "show or hide what deploying one stack changes",
+  shows: "in the Deploy all changes panel",
+  reach: [{ do: "click", control: "stacks-deploy-all" }],
 });
-const TYPE = declare({
+// redesign-integrate-8: a text box is a field Live view types into, never
+// a control it clicks (a click on it does nothing; the sweep said so).
+const TYPE = declareField({
   id: "deploy-all-destroy-name",
   page: "overview",
-  opens: "view",
   row: "<stack>",
   what: "type a gone stack's name to include its destroy",
 });
@@ -77,18 +92,27 @@ const FILE = declare({
   opens: "view",
   row: "<stack>",
   what: "open the stack file of a stack that cannot be planned (its Settings)",
+  shows: "in the Deploy all changes panel",
+  reach: [{ do: "click", control: "stacks-deploy-all" }],
 });
 const SHOW_ALL = declare({
   id: "deploy-all-show-all",
   page: "overview",
   opens: "view",
   what: "show every column of the plan again (Esc does the same)",
+  shows: "in the Deploy all changes panel, while one column is shown",
+  reach: [
+    { do: "click", control: "stacks-deploy-all" },
+    { do: "click", control: "deploy-all-tile", row: "*" },
+  ],
 });
 const DESTROY_ACK = declare({
   id: "deploy-all-destroy-confirm",
   page: "overview",
   opens: "view",
   what: "tick the destroy step's own red confirmation",
+  shows: "in the Deploy all changes panel, once a gone stack's name is typed",
+  reach: [{ do: "click", control: "stacks-deploy-all" }],
 });
 // review M5: every page field Live view may set is declared (drivable.js
 // `declareField`); the client and the dashboard refuse any other.
@@ -102,6 +126,9 @@ const DESTROY = declare({
   page: "overview",
   opens: "dialog",
   what: "open the destroy of the armed gone stacks, a separate confirmed step after the deploys",
+  shows:
+    "in the Deploy all changes panel, once a destroy is armed and confirmed",
+  reach: [{ do: "click", control: "stacks-deploy-all" }],
 });
 
 /**
@@ -420,17 +447,14 @@ export function mount(root, opts = {}) {
     });
     const destroyItems = p.destroy.map((s) => {
       const armed = typedText.get(s) === s;
-      const input = drivable(
-        h("input", {
-          class: "kp-field__input",
-          placeholder: `type ${s} to arm it`,
-          "aria-label": `Type ${s} to destroy it`,
-          autocomplete: "off",
-          spellcheck: "false",
-        }),
-        TYPE,
-        s,
-      );
+      const input = h("input", {
+        class: "kp-field__input",
+        id: fieldId(TYPE, s),
+        placeholder: `type ${s} to arm it`,
+        "aria-label": `Type ${s} to destroy it`,
+        autocomplete: "off",
+        spellcheck: "false",
+      });
       /** @type {HTMLInputElement} */ (input).value = typedText.get(s) ?? "";
       input.addEventListener("input", () => {
         const v = /** @type {HTMLInputElement} */ (input).value;

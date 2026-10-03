@@ -106,6 +106,7 @@ const TRY_AGAIN = declare({
   page: "settings",
   opens: "view",
   what: "read what failed again",
+  shows: "after the settings could not be read",
 });
 const REPO_CHOICE = declare({
   id: "repo-choice",
@@ -175,12 +176,18 @@ const DISCARD = declare({
   page: "settings",
   opens: "run",
   what: "drop every staged host.toml change (an Undo follows)",
+  // Live view stages on the dashboard's server (ui open host-settings),
+  // never on this page: a person's staged change shows it.
+  shows: "while a person has staged a change on this page",
 });
 const CHECK_WRITE = declare({
   id: "settings-check-and-write",
   page: "settings",
   opens: "dialog",
   what: "open the review of the staged changes (Check and write)",
+  // Live view stages on the dashboard's server (ui open host-settings),
+  // never on this page: a person's staged change shows it.
+  shows: "while a person has staged a change on this page",
 });
 const SEARCH = declare({
   id: "settings-search",
@@ -215,24 +222,33 @@ const UNDO_KEY = declare({
   opens: "view",
   row: "<key>",
   what: "drop one staged change",
+  // Live view stages on the dashboard's server (ui open host-settings),
+  // never on this page: a person's staged change shows it.
+  shows: "while a person has staged a change on this page",
 });
 const STAGE = declare({
   id: "settings-stage",
   page: "settings",
   opens: "view",
   what: "stage the value typed in the open editor (nothing is written yet)",
+  shows: "in an open editor",
+  reach: [{ do: "click", control: "settings-edit", row: "*" }],
 });
 const USE_DEFAULT = declare({
   id: "settings-use-default",
   page: "settings",
   opens: "view",
   what: "stage the open key's removal: the host takes its default",
+  shows: "in an open editor",
+  reach: [{ do: "click", control: "settings-edit", row: "*" }],
 });
 const CANCEL_EDIT = declare({
   id: "settings-cancel-edit",
   page: "settings",
   opens: "view",
   what: "close the open editor and keep the old value",
+  shows: "in an open editor",
+  reach: [{ do: "click", control: "settings-edit", row: "*" }],
 });
 const STAGED = declare({
   id: "settings-staged",
@@ -245,6 +261,7 @@ const CLEAR = declare({
   page: "settings",
   opens: "view",
   what: "clear the search and show every setting",
+  shows: "when the search matches no setting",
 });
 
 /**

@@ -5700,15 +5700,26 @@ async function firstRow(page, id) {
   const sel = `[data-drive="${id}"][data-drive-row]`;
   const h = await page
     .waitForFunction(
-      (s) =>
-        [...document.querySelectorAll(s)]
-          .filter(
-            (e) =>
-              e.getClientRects().length > 0 &&
-              !(/** @type {HTMLButtonElement} */ (e).disabled),
-          )
-          .map((e) => /** @type {HTMLElement} */ (e).dataset.driveRow)[0] ??
-        null,
+      (s) => {
+        // redesign-integrate-8: a row ready to be pressed (on screen,
+        // enabled, not busy), and one whose press changes something first:
+        // the level already chosen, a tab already open, does nothing.
+        const ready = [...document.querySelectorAll(s)].filter(
+          (e) =>
+            e.getClientRects().length > 0 &&
+            !(/** @type {HTMLButtonElement} */ (e).disabled) &&
+            e.getAttribute("aria-busy") !== "true",
+        );
+        const on = (/** @type {Element} */ e) =>
+          /** @type {HTMLInputElement} */ (e).checked === true ||
+          e.getAttribute("aria-pressed") === "true" ||
+          e.getAttribute("aria-current") != null ||
+          e.getAttribute("aria-selected") === "true";
+        const pick = ready.find((e) => !on(e)) ?? ready[0];
+        return pick
+          ? /** @type {HTMLElement} */ (pick.dataset.driveRow ?? null)
+          : null;
+      },
       sel,
       { timeout: 2500 },
     )
@@ -5734,7 +5745,13 @@ async function catalogOf(page) {
     /** @type {any[]} */
     all: cat.controls.map((/** @type {any} */ c) => ({
       ...c,
-      home: !c.href || /[<{]/.test(c.href) ? `/${c.page}` : c.href,
+      // redesign-integrate-8: a control of the stack hub (no old address
+      // of its own) lives at its hub tab, on the demo's kp-soft.
+      home: c.href?.startsWith("/stacks/<stack>")
+        ? c.href.replace("<stack>", "kp-soft").replace(/\/<[^>]+>.*$/, "")
+        : !c.href || /[<{]/.test(c.href)
+          ? `/${c.page}`
+          : c.href,
     })),
   };
 }
@@ -5755,8 +5772,13 @@ async function noCountdown(page) {
         }).then((r) => r.json()),
       body,
     );
-  const before = await set({ announce_ms: 0 });
-  return () => set({ announce_ms: before.announce_ms ?? 3000 });
+  // redesign-integrate-8: and no 420 ms press flash (a person's pace).
+  const before = await set({ announce_ms: 0, press_ms: 0 });
+  return () =>
+    set({
+      announce_ms: before.announce_ms ?? 3000,
+      press_ms: before.press_ms ?? null,
+    });
 }
 
 /**
@@ -5767,6 +5789,9 @@ const PASSES = [
   "/data/drive/",
   "/data/secrets/stage",
   "/data/notifications/snooze",
+  // redesign-integrate-8: a stack's plan is a read (what an edit would
+  // change), sent as a POST; the Update flow's step 2 waits for it.
+  /^\/data\/stacks\/[^/]+\/plan$/,
 ];
 
 /**
@@ -5782,7 +5807,11 @@ const holdChanges = (page, seen) =>
     const url = new URL(req.url());
     if (
       req.method() !== "GET" &&
-      !PASSES.some((x) => url.pathname.startsWith(x))
+      !PASSES.some((x) =>
+        typeof x === "string"
+          ? url.pathname.startsWith(x)
+          : x.test(url.pathname),
+      )
     ) {
       seen?.(`${req.method()} ${url.pathname}`);
       return r.abort();
@@ -5847,6 +5876,56 @@ async function liveGo(page, path, landed) {
 }
 
 /** Close every dialog a press left open. @param {import("playwright").Page} page */
+/**
+ * redesign-integrate-8: what is still open on the screen: a dialog, a
+ * menu (its button says it is expanded), a popover.
+ * @param {import("playwright").Page} page
+ * @returns {Promise<string[]>}
+ */
+const stillOpen = (page) =>
+  page.evaluate(() =>
+    [
+      ...document.querySelectorAll(
+        'dialog[open], [aria-haspopup][aria-expanded="true"], :popover-open',
+      ),
+    ]
+      // Live view's own chrome (its cursor, banner, plan) is not the page's.
+      .filter(
+        (e) =>
+          !e.closest(
+            ".drive-banner, .drive-announce, .drive-plan, .drive-cursor, #follow",
+          ),
+      )
+      .map(
+        (e) =>
+          `${e.tagName.toLowerCase()}${e.id ? `#${e.id}` : ""}${/** @type {HTMLElement} */ (e).dataset.drive ? `[${/** @type {HTMLElement} */ (e).dataset.drive}]` : ""}.${String(e.className).split(" ")[0]}`,
+      ),
+  );
+
+/**
+ * A seeded shuffle (mulberry32): the same seed, the same order.
+ * @param {number} seed
+ */
+const shuffled = (seed) => {
+  let a = seed >>> 0;
+  const next = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  /** @template T @param {T[]} xs @returns {T[]} */
+  return (xs) => {
+    const out = [...xs];
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(next() * (i + 1));
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+  };
+};
+
 const closeAll = (page) =>
   page.evaluate(() =>
     document
@@ -6004,15 +6083,558 @@ test("invariants: drive-reach: every button that opens a dialog or runs an actio
 });
 
 /**
+ * redesign-integrate-8: keep the page's live channel (store.js's one
+ * EventSource) at `window.__sweepLive`, so a sweep state can deliver an
+ * event the way the dashboard would. An init script: it runs before the
+ * page's own modules.
+ */
+function catchLive() {
+  const ES = window.EventSource;
+  /** @type {any} */ (window).EventSource = class extends ES {
+    /** @param {any[]} a */
+    constructor(...a) {
+      // @ts-ignore spread of the constructor's own arguments
+      super(...a);
+      /** @type {any} */ (window).__sweepLive = this;
+    }
+  };
+}
+
+/**
+ * Deliver one live event to the page as the dashboard's channel would.
+ * @param {import("playwright").Page} p
+ * @param {string} name
+ * @param {any} data
+ */
+const liveEvent = (p, name, data) =>
+  p.evaluate(
+    ([n, d]) =>
+      /** @type {any} */ (window).__sweepLive?.dispatchEvent(
+        new MessageEvent(n, { data: JSON.stringify(d) }),
+      ),
+    /** @type {[string, any]} */ ([name, data]),
+  );
+
+/** The made-up job a sweep state shows, and the request it ran as. */
+const SWEEP_JOB = 990001;
+const SWEEP_REQ = 990001;
+
+/**
+ * A job this tab is told about (an `action` event), running or ended:
+ * Running now, Every job and the lines it ran as show it; nothing is sent.
+ * @param {import("playwright").Page} p
+ * @param {string} state
+ * @param {number[]} reqs
+ */
+const sweepJob = (p, state, reqs) => {
+  const now = Math.floor(Date.now() / 1000);
+  return liveEvent(p, "action", {
+    job: SWEEP_JOB,
+    origin: { from: "manual" },
+    stack: "films",
+    action: "backup",
+    args: {},
+    state,
+    queued_at: now - 5,
+    started_at: now - 4,
+    finished_at: state === "running" ? null : now,
+    reqs,
+    finished: state !== "running",
+    changed: false,
+    expected_step_s: null,
+    progress: null,
+  });
+};
+
+/** A read answered with 502 for this one press. @param {string} url */
+const failRead =
+  (url) =>
+  /** @param {import("playwright").Page} p */
+  async (p) => {
+    await p.route(url, (r) =>
+      r.request().method() === "GET"
+        ? r.fulfill({
+            status: 502,
+            json: {
+              what: "the read",
+              why: "the demo read fails on purpose for the sweep",
+              fix: "Try again",
+            },
+          })
+        : r.fallback(),
+    );
+    return () => p.unroute(url);
+  };
+
+/** Activity's controls that show only in some state. */
+/** The answer of a GET `url` changed by `edit` for this one press. */
+const editRead =
+  (/** @type {string} */ url, /** @type {(b: any) => void} */ edit) =>
+  /** @param {import("playwright").Page} p */
+  async (p) => {
+    await p.route(url, async (r) => {
+      if (r.request().method() !== "GET") return r.fallback();
+      const res = await r.fetch();
+      const body = await res.json();
+      edit(body);
+      await r.fulfill({ response: res, json: body });
+    });
+    return () => p.unroute(url);
+  };
+
+const NOTHING = "sweep-matches-nothing";
+const nowS = () => Math.floor(Date.now() / 1000);
+
+/** One open manual check on kp-soft (`/data/manual-checks`). */
+const openCheck = editRead("**/data/manual-checks", (b) => {
+  b.report = {
+    ...(b.report ?? {}),
+    now: nowS(),
+    checks: [
+      {
+        id: "sweep-check",
+        record: {
+          stack: "kp-soft",
+          app: "kp-soft",
+          text: "the sweep's manual check: does the app answer?",
+          registered_at: nowS() - 3600,
+        },
+      },
+    ],
+  };
+});
+
+/** A dashboard reached over HTTPS, with one passkey kept. */
+const passkeys = editRead("**/api/kit/passkeys", (b) => {
+  b.https = true;
+  b.passkeys = [
+    {
+      id: "sweep",
+      label: "sweep key",
+      created_at: "2026-10-01 10:00",
+      last_used_at: null,
+    },
+  ];
+});
+
+/**
+ * Deploy all changes: type the first gone stack's name (Live view's own
+ * type step), and tick the destroy's confirmation when `tick`.
+ * @param {boolean} tick
+ */
+const armDestroy =
+  (tick) => async (/** @type {import("playwright").Page} */ p) => {
+    // The panel draws its plan after its own read.
+    await p
+      .waitForSelector('[id^="deploy-all-destroy-name-"]', { timeout: 8000 })
+      .catch(() => {});
+    // The destroy runs after the deploys: leave every deploy out first.
+    if (tick) {
+      const picks = await p.$$eval(
+        '[data-drive="deploy-all-pick"][data-drive-row]',
+        (els) =>
+          els
+            .filter((e) => /** @type {HTMLInputElement} */ (e).checked)
+            .map((e) => /** @type {HTMLElement} */ (e).dataset.driveRow ?? ""),
+      );
+      for (const row of picks)
+        await reachStep(p, { do: "click", control: "deploy-all-pick", row });
+    }
+    const field = await p.evaluate(
+      () =>
+        document.querySelector('[id^="deploy-all-destroy-name-"]')?.id ?? null,
+    );
+    if (!field) return;
+    await reachStep(p, {
+      do: "type",
+      field,
+      text: field.slice("deploy-all-destroy-name-".length),
+    });
+    if (tick)
+      await reachStep(p, {
+        do: "click",
+        control: "deploy-all-destroy-confirm",
+      });
+  };
+
+/**
+ * The Update flow's update-apps job, as the live channel tells it: one
+ * major move of beta-demo's api, committed.
+ * @param {import("playwright").Page} p
+ * @param {string} state
+ */
+const updateJob = async (p, state, ended = nowS()) => {
+  const now = nowS();
+  await liveEvent(p, "action", {
+    job: SWEEP_JOB + 1,
+    origin: { from: "manual" },
+    stack: "_host",
+    action: "update-apps",
+    args: {},
+    state,
+    queued_at: now - 30,
+    started_at: now - 29,
+    finished_at: state === "running" ? null : ended,
+    reqs: [],
+    finished: state !== "running",
+    changed: state === "done",
+    expected_step_s: null,
+    progress: null,
+    flow: {
+      step: state === "running" ? 4 : 6,
+      items: [
+        {
+          kind: "pin",
+          stack: "beta-demo",
+          key: "api/api",
+          from: "ghcr.io/example/api:v2.3.0",
+          to: "ghcr.io/example/api:v3.0.0",
+        },
+      ],
+      rows: [],
+      commits: state === "done" ? ["0123456789ab"] : [],
+    },
+  });
+  await p.waitForTimeout(300);
+};
+/** An undo that ends the made-up update a day ago. @param {import("playwright").Page} p */
+const updateGone = async (p) => async () =>
+  void (await updateJob(p, "done", nowS() - 86400));
+/** The flow adopts the running update, which then ends. @param {import("playwright").Page} p */
+const updateRan = async (p) => {
+  await updateJob(p, "running");
+  await updateJob(p, "done");
+};
+
+/**
+ * A person stages one host.toml value on Settings, with Live view off for
+ * those clicks (under Live view the page stages on the dashboard's
+ * server); Live view goes on again after.
+ * @param {import("playwright").Page} p
+ */
+const personStages = async (p) => {
+  await p.uncheck("#live-view");
+  try {
+    if (!(await p.$("#key-backup-hour")))
+      await p.click(
+        '[data-drive="settings-edit"][data-drive-row="backup_hour"]',
+      );
+    await p.fill("#key-backup-hour", "23", { timeout: 3000 });
+    await p.click("#key-stage");
+  } finally {
+    await p.check("#live-view");
+  }
+};
+
+/**
+ * redesign-integrate-8: the sweep's named states, one fixture each, shared
+ * by every control that shows in it (SHOWN_IN): an address that draws it,
+ * a read answered differently for the press (`set`, undone after it), or
+ * what the live channel or a person brings after the reach steps
+ * (`ready`). Each was checked against the product by hand first.
+ * @type {Record<string, {home?: string, set?: (p: import("playwright").Page) => Promise<() => Promise<void>>, ready?: (p: import("playwright").Page) => Promise<void>}>}
+ */
+const FIXTURES = {
+  // Reads that fail: the page's own Try again.
+  "history-unread": { set: failRead("**/data/history?*") },
+  "host-log-unread": { set: failRead("**/data/host-log") },
+  "firewall-unread": { set: failRead("**/data/firewall") },
+  "presets-unread": { set: failRead("**/data/presets") },
+  "settings-unread": { set: failRead("**/data/host-settings") },
+  // Its own address, so the page is drawn anew under the failed read.
+  "apps-unread": { home: "/apps?sweep=retry", set: failRead("**/data/tiles") },
+  "loki-unread": {
+    home: "/stacks/kp-soft/logs",
+    set: failRead("**/data/logs?*"),
+  },
+  // A search or filter that matches nothing, from the page's address.
+  "activity-nothing": { home: `/activity?q=${NOTHING}` },
+  "stacks-nothing": { home: `/stacks?q=${NOTHING}` },
+  "firewall-nothing": { home: `/firewall?q=${NOTHING}` },
+  "presets-nothing": { home: `/presets?q=${NOTHING}` },
+  "settings-nothing": { home: `/settings?q=${NOTHING}` },
+  "apps-nothing": { home: `/apps?q=${NOTHING}` },
+  "activity-days-picked": { home: "/activity?from=1&to=4102444800" },
+  // A job of this dashboard, as the live channel tells it.
+  "job-running": {
+    set: async (p) => {
+      await sweepJob(p, "running", []);
+      return async () => void (await sweepJob(p, "done", []));
+    },
+  },
+  "job-ran": {
+    set: async (p) => {
+      await sweepJob(p, "done", []);
+      return async () => {};
+    },
+  },
+  // A person's failed update (Failed's first row) ran as the job's request.
+  "history-op-of-a-job": {
+    home: "/activity?show=failed",
+    set: async (p) => {
+      const reqs = await p.evaluate(() =>
+        fetch("/data/history?since=0&limit=5000")
+          .then((r) => r.json())
+          .then((b) =>
+            (b.report?.entries ?? [])
+              .map((/** @type {any} */ e) => e.req)
+              .filter((/** @type {any} */ r) => typeof r === "number"),
+          ),
+      );
+      await sweepJob(p, "done", reqs);
+      return async () => {};
+    },
+  },
+  // A host line that arrives while the tail is paused.
+  "host-line-arrives": {
+    ready: async (p) => {
+      const last = await p.evaluate(() =>
+        fetch("/data/host-log")
+          .then((r) => r.json())
+          .then((b) => (b.lines ?? []).at(-1) ?? null),
+      );
+      if (last)
+        await liveEvent(p, "host_log", {
+          ...last,
+          seq: last.seq + 1000,
+          msg: "a line that came while the tail was paused",
+        });
+    },
+  },
+  // Every host line ran as the job's request.
+  "host-lines-of-a-job": {
+    set: async (p) => {
+      const url = "**/data/host-log";
+      await p.route(url, async (r) => {
+        const res = await r.fetch();
+        const body = await res.json();
+        for (const l of body.lines ?? []) l.req = SWEEP_REQ;
+        await r.fulfill({ response: res, json: body });
+      });
+      await sweepJob(p, "done", [SWEEP_REQ]);
+      return () => p.unroute(url);
+    },
+  },
+  "no-presets": { set: editRead("**/data/presets", (b) => (b.presets = [])) },
+  // The fleet without a stack, as the live channel brings it; the demo's
+  // own fleet comes back at its next tick (5 s).
+  "no-stacks": {
+    ready: async (p) => {
+      const f = await p.evaluate(() =>
+        import("/js/store.js").then((m) => m.current().fleet),
+      );
+      await liveEvent(p, "fleet", { fleet: { ...f, stacks: [] } });
+    },
+  },
+  "charts-zoomed": {
+    ready: (p) =>
+      p.evaluate(() =>
+        import("/js/timechart.js").then((m) => {
+          const t = Date.now() / 1000;
+          m.pageCharts.setZoom({ from: t - 1800, to: t - 600 });
+        }),
+      ),
+  },
+  "https-with-a-passkey": { set: passkeys },
+  "manual-check-open": { home: "/stacks/kp-soft", set: openCheck },
+  // The Inbox's sources are read once for the whole app: read the checks
+  // again under the answer, and again after it.
+  "inbox-check-open": {
+    set: async (p) => {
+      const undo = await openCheck(p);
+      return async () => {
+        await undo();
+        await p.evaluate(() =>
+          import("/js/inboxsources.js").then((m) => m.readChecks()),
+        );
+      };
+    },
+    ready: (p) =>
+      p.evaluate(() =>
+        import("/js/inboxsources.js").then((m) => m.readChecks()),
+      ),
+  },
+  // A stack that differs from its files: its row suggests Deploy.
+  "stack-drifted": {
+    set: editRead("**/data/drift*", (b) => {
+      b.stacks = { ...(b.stacks ?? {}) };
+      for (const k of ["gateway", "notes", "films", "oldstack", "admin"])
+        b.stacks[k] = { ...(b.stacks[k] ?? {}), state: "changed" };
+    }),
+  },
+  // kp-soft's own app pinned to an older release.
+  "pin-stale": {
+    home: "/stacks/kp-soft/apps",
+    set: editRead("**/data/stale-images*", (b) => {
+      b.images = [
+        ...(b.images ?? []),
+        {
+          where_: "kp-soft/kp-soft",
+          key: "kp-soft/kp-soft",
+          pinned: "1.0.0",
+          latest: "1.1.0",
+          upstream: "",
+        },
+      ];
+    }),
+  },
+  "update-moved-a-pin": {
+    set: editRead("**/data/update-flows?*", (b) => {
+      b.updates = [
+        {
+          items: [
+            {
+              kind: "pin",
+              stack: "kp-soft",
+              key: "kp-soft/kp-soft",
+              from: "ghcr.io/example/kp-soft:1.0.0",
+              to: "ghcr.io/example/kp-soft:1.1.0",
+            },
+          ],
+        },
+      ];
+    }),
+  },
+  // The host asks whether an operation may go on.
+  "host-asks": {
+    set: async (p) => {
+      await liveEvent(p, "asks", {
+        asks: [
+          {
+            id: 1,
+            boot: "sweep",
+            op: "deploy-demo",
+            step: "apply",
+            what: "the sweep's question: may the deploy go on?",
+            if_allowed: "goes on",
+            if_stopped: "stops here",
+            asked_at: nowS(),
+            deadline: nowS() + 600,
+          },
+        ],
+      });
+      return async () => void (await liveEvent(p, "asks", { asks: [] }));
+    },
+  },
+  // An unread notice that suggests no fix.
+  "notice-without-fix": {
+    set: async (p) => {
+      await liveEvent(p, "notification", {
+        notice: {
+          id: 990001,
+          at: nowS(),
+          kind: "host_event",
+          stack: "films",
+          title: "A notice from the sweep",
+          body: "Nothing to do: mark it as seen.",
+          read: false,
+          push: { state: "sent" },
+          level: "info",
+        },
+      });
+      return async () => {};
+    },
+  },
+  // The Update flow's own update running, then ended. Each undo ends it a
+  // day ago, so no later visit adopts it as this tab's (a tab's own update
+  // shows for 30 min).
+  "update-running": {
+    set: updateGone,
+    ready: (p) => updateJob(p, "running"),
+  },
+  "update-done": { set: updateGone, ready: updateRan },
+  // Step 2 of the Update flow with every major version's notes ticked
+  // (its own address: a fresh flow).
+  "update-notes-read": {
+    home: "/update?sweep=go",
+    ready: async (p) => {
+      const rows = await p.$$eval(
+        '[data-drive="update-major-read"][data-drive-row]',
+        (els) =>
+          els
+            .filter((e) => !(/** @type {HTMLInputElement} */ (e).checked))
+            .map((e) => /** @type {HTMLElement} */ (e).dataset.driveRow ?? ""),
+      );
+      for (const row of rows)
+        await reachStep(p, { do: "click", control: "update-major-read", row });
+    },
+  },
+  // A change a person staged on Settings (Live view stages on the
+  // dashboard's server, so the page's own staged list shows a person's).
+  "settings-staged": { home: "/settings?sweep=stage", ready: personStages },
+  "destroy-name-typed": { ready: armDestroy(false) },
+  "destroy-armed": { ready: armDestroy(true) },
+};
+
+/**
+ * redesign-integrate-8: the state each control shows in (FIXTURES).
+ * @type {Record<string, string>}
+ */
+const SHOWN_IN = {
+  "activity-retry": "history-unread",
+  "console-retry": "host-log-unread",
+  "host-log-retry": "host-log-unread",
+  "firewall-try-again": "firewall-unread",
+  "presets-try-again": "presets-unread",
+  "settings-try-again": "settings-unread",
+  "apps-retry": "apps-unread",
+  "stack-log-retry": "loki-unread",
+  "activity-clear-filters": "activity-nothing",
+  "stacks-show-all": "stacks-nothing",
+  "firewall-clear-rule-filter": "firewall-nothing",
+  "presets-clear-search": "presets-nothing",
+  "settings-clear-search": "settings-nothing",
+  "apps-show-all": "apps-nothing",
+  "activity-show-every-day": "activity-days-picked",
+  "activity-open-job": "job-running",
+  "activity-job-row": "job-ran",
+  "activity-show-log": "history-op-of-a-job",
+  "console-back-to-tail": "host-line-arrives",
+  "host-log-back-to-tail": "host-line-arrives",
+  "console-open-job": "host-lines-of-a-job",
+  "host-log-open-job": "host-lines-of-a-job",
+  "presets-import-first": "no-presets",
+  "presets-new-preset-first": "no-presets",
+  "presets-new-stack-first": "no-presets",
+  "stacks-empty-new": "no-stacks",
+  "chart-zoom-reset": "charts-zoomed",
+  "register-passkey": "https-with-a-passkey",
+  "register-passkey-go": "https-with-a-passkey",
+  "register-passkey-cancel": "https-with-a-passkey",
+  "delete-passkey": "https-with-a-passkey",
+  "stack-check-answer": "manual-check-open",
+  "inbox-answer-check": "inbox-check-open",
+  "stacks-row-action": "stack-drifted",
+  "stack-app-update": "pin-stale",
+  "stack-undo-update": "update-moved-a-pin",
+  "inbox-answer": "host-asks",
+  "inbox-mark-seen": "notice-without-fix",
+  "update-leave": "update-running",
+  "update-roll-back": "update-done",
+  "update-after": "update-done",
+  "update-go": "update-notes-read",
+  "settings-undo": "settings-staged",
+  "settings-discard": "settings-staged",
+  "settings-check-and-write": "settings-staged",
+  "deploy-all-destroy-confirm": "destroy-name-typed",
+  "deploy-all-destroy": "destroy-armed",
+};
+
+/**
  * drive-reach review H1: the state each control that shows only in some
  * state needs, drawn for the sweep: a read answered differently for this
  * one press (Playwright routes, undone after it) and, where the state lives
  * on one stack, the address that shows it. The demo host itself draws the
  * notification centre's unread notice with a fix (shell/demo.rs
  * `seed_unread_notice`); `holdChanges` keeps it unread.
- * @type {Record<string, {home?: string, set?: (p: import("playwright").Page) => Promise<() => Promise<void>>}>}
+ * redesign-integrate-8: `ready` brings what must come after the reach
+ * steps (a line that arrives while the tail is paused).
+ * @type {Record<string, {home?: string, set?: (p: import("playwright").Page) => Promise<() => Promise<void>>, ready?: (p: import("playwright").Page) => Promise<void>}>}
  */
 const STATES = {
+  ...Object.fromEntries(
+    Object.entries(SHOWN_IN).map(([id, f]) => [id, FIXTURES[f]]),
+  ),
   // A working copy holding a commit its upstream lacks.
   "repo-choice": {
     set: async (p) => {
@@ -6099,6 +6721,22 @@ const watchScreen = (page) =>
     const w = /** @type {any} */ (window);
     if (w.__sweepObs) return;
     w.__sweepMut = 0;
+    // Where the focus is, and what every radio and box on the page holds.
+    w.__sweepMark = () => {
+      const a = document.activeElement;
+      const at =
+        a && a !== document.body
+          ? `${a.tagName}#${a.id}[${/** @type {HTMLElement} */ (a).dataset?.drive ?? ""}]`
+          : "";
+      const held = [
+        ...document.querySelectorAll(
+          "#page input[type=radio], #page input[type=checkbox]",
+        ),
+      ]
+        .map((e) => (/** @type {HTMLInputElement} */ (e).checked ? "1" : "0"))
+        .join("");
+      return `${at}|${held}`;
+    };
     const ours =
       ".drive-banner, .drive-announce, .drive-plan, .drive-cursor, #follow";
     w.__sweepObs = new MutationObserver((list) => {
@@ -6148,216 +6786,518 @@ async function untwinned(page, byId) {
     .map(([id, k]) => `${id} ×${k}`);
 }
 
-test("invariants: drive-reach: Live view finds and presses every declared control, and each press has its effect", async (t) => {
-  const started = Date.now();
+// redesign-integrate-8: 276 controls, each pressed with its effect, run
+// past the 300 s every other case gets (the run timed out at control 100);
+// each try keeps its own 45 s deadline and the watchdog its 90 s.
+test(
+  "invariants: drive-reach: Live view finds and presses every declared control, and each press has its effect",
+  { timeout: 600_000 },
+  async (t) => {
+    const started = Date.now();
+    const browser = await launch();
+    try {
+      const context = await browser.newContext({
+        viewport: { width: 1600, height: 1000 },
+        timezoneId: "Europe/Brussels",
+      });
+      const page = await freshPage(context);
+      page.setDefaultTimeout(10000);
+      // redesign-integrate-8: a press that opens a new tab (release notes)
+      // has its effect there; count it, and close the tab.
+      let tabs = 0;
+      context.on("page", (pg) => {
+        tabs += 1;
+        void pg.close().catch(() => {});
+      });
+      // A row for the controls that repeat per schedule.
+      const sched = await addSchedule(page, "films", "backup", {
+        every: "day",
+        at: "10:00",
+      });
+      const restore = await noCountdown(page);
+      /** Change requests held back since the last look. @type {string[]} */
+      const held = [];
+      await holdChanges(page, (what) => held.push(what));
+      const dialogs = () => page.$$eval("dialog[open]", (d) => d.length);
+      // redesign-integrate-8: the tab's live channel, so a state can bring
+      // what only the channel brings (a new host line, a running job).
+      await page.addInitScript(catchLive);
+      await markOld(page);
+      await page.goto(`${BASE}/apps`, { waitUntil: "domcontentloaded" });
+      await drawn(page);
+      await page.check("#live-view");
+      const { all } = await catalogOf(page);
+      assert.ok(all.length > 40, `only ${all.length} controls are declared`);
+      const byId = new Map(all.map((c) => [c.id, c]));
+      // INVARIANTS_SWEEP_ONLY (a regular expression over ids): press only
+      // those, while fixing a few; such a run never writes the stamp.
+      const only = process.env.INVARIANTS_SWEEP_ONLY
+        ? new RegExp(process.env.INVARIANTS_SWEEP_ONLY)
+        : null;
+      /** @type {Map<string, any[]>} */
+      const byHome = new Map();
+      for (const c of all.filter((x) => !only || only.test(x.id))) {
+        const home = STATES[c.id]?.home ?? c.home;
+        byHome.set(home, [...(byHome.get(home) ?? []), c]);
+      }
+      // redesign-integrate-8: INVARIANTS_SWEEP_SEED presses the pages and
+      // their controls in a shuffled order (a gated check passes in any
+      // order); the seed is printed.
+      const seed = Number(process.env.INVARIANTS_SWEEP_SEED ?? "") || 0;
+      if (seed) {
+        const rnd = shuffled(seed);
+        const homes = rnd([...byHome]);
+        byHome.clear();
+        for (const [h, list] of homes) byHome.set(h, rnd(list));
+        t.diagnostic(`sweep order: shuffled, seed ${seed}`);
+      }
+      /** What a press left open, named (set by the reset after it). */
+      let leftOpen = "";
+      /** The control before was drawn in a state (STATES). */
+      let afterState = false;
+      // Where a press's time goes (INVARIANTS_PROGRESS prints it).
+      /** @type {Record<string, number>} */
+      let laps = {};
+      let lapAt = Date.now();
+      const lap = (/** @type {string} */ k) => {
+        const n = Date.now();
+        if (k !== "start") laps[k] = (laps[k] ?? 0) + n - lapAt;
+        lapAt = n;
+      };
+      /** @type {Map<string, string>} */
+      const landed = new Map();
+      /** @type {string[]} why each failed or conditional control failed */
+      const failed = [];
+      // redesign-integrate-8: every catalog control's outcome, accounted
+      // for at the end (sweepAccount): a run never drops one silently.
+      /** @type {Map<string, import("./sweepkey.js").Outcome>} */
+      const outcome = new Map(
+        all
+          .filter((x) => only && !only.test(x.id))
+          .map((x) => [x.id, /** @type {const} */ ("skipped")]),
+      );
+      /** @type {Set<string>} */
+      const twins = new Set();
+      try {
+        for (const [home, list] of byHome) {
+          let fromElsewhere = true;
+          for (const c of list) {
+            const state = STATES[c.id];
+            const first = fromElsewhere && !c.row && !c.reach.length && !state;
+            if (first) fromElsewhere = false;
+            /**
+             * One try: from its home as the tab has it now (or freshly drawn),
+             * the reach steps, the click, and its effect. Answers what went
+             * wrong, or null.
+             * @param {boolean} fresh
+             * @returns {Promise<string | null>}
+             */
+            const attempt = async (fresh) => {
+              lap("start");
+              const undo = state?.set ? await state.set(page) : null;
+              try {
+                if (first) {
+                  if (new URL(page.url()).pathname !== "/apps")
+                    await liveGo(page, "/apps", landed);
+                } else if (fresh || state || landed.get(home) !== page.url()) {
+                  const g = await liveGo(page, home, landed);
+                  if (!g.ok)
+                    return `ui goto ${home} refused: ${g.refusal?.why}`;
+                }
+                lap("goto");
+                for (const s of c.reach) {
+                  const body = { ...s };
+                  if (body.row === "*")
+                    body.row = await firstRow(page, body.control ?? "");
+                  const r = await reachStep(page, body);
+                  if (!r.ok)
+                    return `its reach step ${JSON.stringify(s)} was refused: ${r.refusal?.why}`;
+                }
+                if (state?.ready) await state.ready(page);
+                lap("reach");
+                for (const x of await untwinned(page, byId))
+                  twins.add(`${home}: ${x}`);
+                const row = c.row ? await firstRow(page, c.id) : null;
+                const open0 = await dialogs();
+                await watchScreen(page);
+                const before = {
+                  url: page.url(),
+                  held: held.length,
+                  tabs,
+                  mut: await page.evaluate(
+                    () => /** @type {any} */ (window).__sweepMut,
+                  ),
+                  // redesign-integrate-8: a press whose effect is where
+                  // the focus goes (Run a command) or what a radio or a
+                  // box holds (a level) changes no element: from no focus,
+                  // both count.
+                  mark: await page.evaluate(() => {
+                    /** @type {HTMLElement | null} */ (
+                      document.activeElement
+                    )?.blur?.();
+                    return /** @type {any} */ (window).__sweepMark();
+                  }),
+                };
+                lap("look");
+                const r = await reachStep(page, {
+                  do: "click",
+                  control: c.id,
+                  ...(row == null ? {} : { row }),
+                });
+                try {
+                  if (!r.ok) {
+                    if (c.shows && String(r.refusal?.why).includes(c.shows)) {
+                      return `shows only ${c.shows}, and the sweep did not draw that state: ${r.refusal?.why}`;
+                    }
+                    return `${row ? `${row}: ` : ""}refused, ${r.refusal?.why}; ${r.refusal?.fix}`;
+                  }
+                  // review H1: "no error" is not enough; the press did what
+                  // it does: a dialog opened, a change was sent (and held
+                  // back), the address or the screen changed.
+                  const opened = await page
+                    .waitForFunction(
+                      (n) =>
+                        document.querySelectorAll("dialog[open]").length > n,
+                      open0,
+                      { timeout: c.opens === "dialog" ? 3000 : 1 },
+                    )
+                    .then(() => true)
+                    .catch(() => false);
+                  if (c.opens === "dialog")
+                    return opened ? null : "pressed, but no dialog opened";
+                  const moved = await page
+                    .waitForFunction(
+                      (b) =>
+                        location.href !== b.url ||
+                        /** @type {any} */ (window).__sweepMut > b.mut ||
+                        /** @type {any} */ (window).__sweepMark() !== b.mark,
+                      before,
+                      { timeout: 2000 },
+                    )
+                    .then(() => true)
+                    .catch(() => false);
+                  if (
+                    opened ||
+                    moved ||
+                    held.length > before.held ||
+                    tabs > before.tabs
+                  )
+                    return null;
+                  return `pressed, but nothing happened: no dialog, no change sent, no new tab, the address and the screen as they were`;
+                } finally {
+                  lap("effect");
+                  // A refused press inside a page dialog (Deploy all
+                  // changes) leaves it open too: close it, or every later
+                  // goto is refused.
+                  // redesign-integrate-8: every press ends on a known
+                  // screen: Live view's dialog or form left, every dialog
+                  // and menu closed; one the reset cannot close fails
+                  // this press, by name.
+                  if (
+                    !r.ok ||
+                    r.state?.page_dialog ||
+                    r.state?.form ||
+                    (await dialogs())
+                  )
+                    await reachStep(page, { do: "close" });
+                  await closeAll(page);
+                  // A toast (an Undo for 5 s) goes too: the next press
+                  // starts without one (two Undo toasts are one id twice).
+                  await page.evaluate(() =>
+                    document
+                      .querySelectorAll("#page .kp-toasts > *")
+                      .forEach((t) =>
+                        /** @type {any} */ (t).dismiss
+                          ? /** @type {any} */ (t).dismiss()
+                          : t.remove(),
+                      ),
+                  );
+                  // A dialog's close event comes a task later; a row
+                  // menu's button says closed only then. Clicking it before
+                  // that opened the menu again: wait until every menu
+                  // button says closed (at most 500 ms).
+                  await page
+                    .waitForFunction(
+                      () =>
+                        !document.querySelector(
+                          '[aria-haspopup][aria-expanded="true"]',
+                        ),
+                      null,
+                      { timeout: 500 },
+                    )
+                    .catch(() => {});
+                  // A menu still open closes on its own button (Escape is
+                  // Live view's Stop while it plays).
+                  await page.$$eval(
+                    '[aria-haspopup][aria-expanded="true"]',
+                    (els) =>
+                      els.forEach((e) =>
+                        /** @type {HTMLElement} */ (e).click(),
+                      ),
+                  );
+                  const left = await stillOpen(page);
+                  if (left.length) {
+                    leftOpen = left.join(", ");
+                    await closeAll(page);
+                  }
+                  lap("reset");
+                }
+              } finally {
+                await undo?.();
+              }
+            };
+            // The page as the control before left it first (no navigation
+            // when it is already there); once more freshly drawn when that
+            // state was in the way.
+            // Every try has a deadline: a press that waits on a selector or a
+            // read that never comes is named, never a run that hangs.
+            /** @param {boolean} fresh */
+            const timed = (fresh) =>
+              Promise.race([
+                // A state or a step that throws is this control's failure,
+                // never the end of the run (every control is accounted for).
+                attempt(fresh).catch(
+                  (e) => `threw: ${String(e?.message ?? e).split("\n")[0]}`,
+                ),
+                new Promise((res) =>
+                  setTimeout(
+                    () => res("hung: the try took more than 45 s"),
+                    45000,
+                  ),
+                ),
+              ]);
+            const t0 = Date.now();
+            leftOpen = "";
+            laps = {};
+            // A control drawn in a state leaves its page in that state (a failed
+            // read, a filtered list): the next one starts on a freshly
+            // drawn page instead of failing its first try there.
+            const why1 = await timed(afterState);
+            if (why1 && process.env.INVARIANTS_PROGRESS)
+              console.error(`sweep ${c.id} first try: ${why1}`);
+            const why =
+              (why1 && (await timed(true))) ||
+              (leftOpen ? `its press left open: ${leftOpen}` : null);
+            afterState = !!state;
+            if (process.env.INVARIANTS_PROGRESS)
+              console.error(
+                `sweep ${c.id}${why ? ` ✖ ${why}` : ""} (${Date.now() - t0} ms; ${Object.entries(
+                  laps,
+                )
+                  .map(([k, v]) => `${k} ${v}`)
+                  .join(", ")})`,
+              );
+            if (why) failed.push(`${c.id}: ${why}`);
+            outcome.set(
+              c.id,
+              !why
+                ? "passed"
+                : why.startsWith("shows only ")
+                  ? "conditional"
+                  : "failed",
+            );
+            // The tab went to the first control's home itself.
+            if (first && new URL(page.url()).pathname === home.split("?")[0])
+              landed.set(home, page.url());
+          }
+        }
+      } finally {
+        await reachStep(page, { do: "done" });
+        await restore();
+        await page.unroute("**/data/**");
+        await schedApi(page, "DELETE", `/data/schedules/${sched}`);
+      }
+      // redesign-integrate-8: one count per run, every control in exactly
+      // one category, each named; a run whose counts do not add up fails.
+      const { sweepKey, catalogHash, sweepAccount, catalogDiff } =
+        await import("./sweepkey.js");
+      const acct = sweepAccount(
+        all.map((c) => c.id),
+        outcome,
+      );
+      const secs = Math.round((Date.now() - started) / 1000);
+      t.diagnostic(`sweep: ${acct.line}, in ${secs} s`);
+      for (const k of /** @type {const} */ ([
+        "failed",
+        "conditional",
+        "skipped",
+      ]))
+        t.diagnostic(`sweep ${k}: ${acct[k].join(", ") || "none"}`);
+      // The catalog's size against the last passing sweep's stamp: every
+      // change named by the controls added or removed.
+      const { readFileSync, writeFileSync, existsSync } =
+        await import("node:fs");
+      const stampFile = new URL("./sweep-stamp.json", import.meta.url);
+      if (existsSync(stampFile)) {
+        const d = catalogDiff(
+          JSON.parse(readFileSync(stampFile, "utf8")).controls ?? [],
+          all.map((c) => c.id),
+        );
+        t.diagnostic(
+          `sweep catalog: ${d.now} controls, the stamp had ${d.before}; added: ${d.added.join(", ") || "none"}; removed: ${d.removed.join(", ") || "none"}`,
+        );
+      }
+      assert.deepEqual(
+        acct.failed,
+        [],
+        `controls Live view could not reach:\n${failed.join("\n")}`,
+      );
+      // review H1: no control may be excused as "shows only in a state": the
+      // sweep draws every state (STATES, and the demo host's notice).
+      assert.deepEqual(
+        acct.conditional,
+        [],
+        `controls the sweep did not draw:\n${failed.join("\n")}`,
+      );
+      // review M6: copies of one control on screen only from declared twins.
+      assert.deepEqual(
+        [...twins],
+        [],
+        "controls drawn twice that are not declared twins",
+      );
+      // redesign-integrate-8: a passing sweep stamps every control it pressed;
+      // the commit-time catalog check refuses a control no sweep has pressed
+      // since its entry changed.
+      // The stamp names the catalog it was produced for (`catalog`, the hash
+      // of every pressed key) and the run that produced it; the commit check
+      // refuses a stamp whose keys do not hash to its `catalog`.
+      if (acct.skipped.length) return;
+      const keys = all.map(sweepKey).sort();
+      writeFileSync(
+        new URL("./sweep-stamp.json", import.meta.url),
+        `${JSON.stringify(
+          {
+            about:
+              "Written by the passing Live view sweep (invariants.e2e.js, drive-reach); read by admin/web/test/drivecatalog.test.js. Never edit by hand: `catalog` is the hash of `controls`.",
+            schema: 2,
+            catalog: catalogHash(keys),
+            run: {
+              at: new Date(started).toISOString(),
+              seconds: secs,
+              pressed: acct.passed.length,
+            },
+            controls: keys,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+    } finally {
+      await browser.close();
+    }
+  },
+);
+
+/**
+ * redesign-integrate-8: one Live view press of `id` on `path` as a driver
+ * sends it (its first row on screen), with what it did: Live view's
+ * answer, the address after it, the dialogs open, and the control's
+ * catalog entry.
+ * @param {string} path
+ * @param {string} id
+ */
+async function liveClick(path, id) {
   const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
-      timezoneId: "Europe/Brussels",
     });
     const page = await freshPage(context);
-    page.setDefaultTimeout(10000);
-    // A row for the controls that repeat per schedule.
-    const sched = await addSchedule(page, "films", "backup", {
-      every: "day",
-      at: "10:00",
-    });
     const restore = await noCountdown(page);
-    /** Change requests held back since the last look. @type {string[]} */
-    const held = [];
-    await holdChanges(page, (what) => held.push(what));
-    const dialogs = () => page.$$eval("dialog[open]", (d) => d.length);
-    await markOld(page);
     await page.goto(`${BASE}/apps`, { waitUntil: "domcontentloaded" });
     await drawn(page);
     await page.check("#live-view");
     const { all } = await catalogOf(page);
-    assert.ok(all.length > 40, `only ${all.length} controls are declared`);
-    const byId = new Map(all.map((c) => [c.id, c]));
-    /** @type {Map<string, any[]>} */
-    const byHome = new Map();
-    for (const c of all) {
-      const home = STATES[c.id]?.home ?? c.home;
-      byHome.set(home, [...(byHome.get(home) ?? []), c]);
-    }
+    const entry = all.find((c) => c.id === id) ?? null;
     /** @type {Map<string, string>} */
     const landed = new Map();
-    /** @type {string[]} */
-    const failed = [];
-    /** @type {string[]} controls refused naming the state they show in */
-    const conditional = [];
-    /** @type {Set<string>} */
-    const twins = new Set();
-    try {
-      for (const [home, list] of byHome) {
-        let fromElsewhere = true;
-        for (const c of list) {
-          const state = STATES[c.id];
-          const first = fromElsewhere && !c.row && !c.reach.length && !state;
-          if (first) fromElsewhere = false;
-          /**
-           * One try: from its home as the tab has it now (or freshly drawn),
-           * the reach steps, the click, and its effect. Answers what went
-           * wrong, or null.
-           * @param {boolean} fresh
-           * @returns {Promise<string | null>}
-           */
-          const attempt = async (fresh) => {
-            const undo = state?.set ? await state.set(page) : null;
-            try {
-              if (first) {
-                if (new URL(page.url()).pathname !== "/apps")
-                  await liveGo(page, "/apps", landed);
-              } else if (fresh || state || landed.get(home) !== page.url()) {
-                const g = await liveGo(page, home, landed);
-                if (!g.ok) return `ui goto ${home} refused: ${g.refusal?.why}`;
-              }
-              for (const s of c.reach) {
-                const body = { ...s };
-                if (body.row === "*")
-                  body.row = await firstRow(page, body.control ?? "");
-                const r = await reachStep(page, body);
-                if (!r.ok)
-                  return `its reach step ${JSON.stringify(s)} was refused: ${r.refusal?.why}`;
-              }
-              for (const x of await untwinned(page, byId))
-                twins.add(`${home}: ${x}`);
-              const row = c.row ? await firstRow(page, c.id) : null;
-              const open0 = await dialogs();
-              await watchScreen(page);
-              const before = {
-                url: page.url(),
-                held: held.length,
-                mut: await page.evaluate(
-                  () => /** @type {any} */ (window).__sweepMut,
-                ),
-              };
-              const r = await reachStep(page, {
-                do: "click",
-                control: c.id,
-                ...(row == null ? {} : { row }),
-              });
-              try {
-                if (!r.ok) {
-                  if (c.shows && String(r.refusal?.why).includes(c.shows)) {
-                    conditional.push(c.id);
-                    return `shows only ${c.shows}, and the sweep did not draw that state: ${r.refusal?.why}`;
-                  }
-                  return `${row ? `${row}: ` : ""}refused, ${r.refusal?.why}; ${r.refusal?.fix}`;
-                }
-                // review H1: "no error" is not enough; the press did what
-                // it does: a dialog opened, a change was sent (and held
-                // back), the address or the screen changed.
-                const opened = await page
-                  .waitForFunction(
-                    (n) => document.querySelectorAll("dialog[open]").length > n,
-                    open0,
-                    { timeout: c.opens === "dialog" ? 3000 : 1 },
-                  )
-                  .then(() => true)
-                  .catch(() => false);
-                if (c.opens === "dialog")
-                  return opened ? null : "pressed, but no dialog opened";
-                const moved = await page
-                  .waitForFunction(
-                    (b) =>
-                      location.href !== b.url ||
-                      /** @type {any} */ (window).__sweepMut > b.mut,
-                    before,
-                    { timeout: 2000 },
-                  )
-                  .then(() => true)
-                  .catch(() => false);
-                if (opened || moved || held.length > before.held) return null;
-                return `pressed, but nothing happened: no dialog, no change sent, the address and the screen as they were`;
-              } finally {
-                if (r.state?.page_dialog || (await dialogs()))
-                  await reachStep(page, { do: "close" });
-                await closeAll(page);
-              }
-            } finally {
-              await undo?.();
-            }
-          };
-          // The page as the control before left it first (no navigation
-          // when it is already there); once more freshly drawn when that
-          // state was in the way.
-          // Every try has a deadline: a press that waits on a selector or a
-          // read that never comes is named, never a run that hangs.
-          /** @param {boolean} fresh */
-          const timed = (fresh) =>
-            Promise.race([
-              attempt(fresh),
-              new Promise((res) =>
-                setTimeout(
-                  () => res("hung: the try took more than 45 s"),
-                  45000,
-                ),
-              ),
-            ]);
-          const t0 = Date.now();
-          const why = (await timed(false)) && (await timed(true));
-          if (process.env.INVARIANTS_PROGRESS)
-            console.error(
-              `sweep ${c.id}${why ? ` ✖ ${why}` : ""} (${Date.now() - t0} ms)`,
-            );
-          if (why) failed.push(`${c.id}: ${why}`);
-          else
-            conditional.splice(
-              0,
-              conditional.length,
-              ...conditional.filter((x) => x !== c.id),
-            );
-          // The tab went to the first control's home itself.
-          if (first && new URL(page.url()).pathname === home.split("?")[0])
-            landed.set(home, page.url());
-        }
-      }
-    } finally {
-      await reachStep(page, { do: "done" });
-      await restore();
-      await page.unroute("**/data/**");
-      await schedApi(page, "DELETE", `/data/schedules/${sched}`);
-    }
-    t.diagnostic(
-      `pressed ${all.length - failed.length} of ${all.length} catalog controls, each with its effect, in ${Math.round((Date.now() - started) / 1000)} s; conditional: ${conditional.join(", ") || "none"}`,
-    );
-    assert.deepEqual(
-      failed,
-      [],
-      `controls Live view could not reach:\n${failed.join("\n")}`,
-    );
-    // review H1: no control may be excused as "shows only in a state": the
-    // sweep draws every state (STATES, and the demo host's notice).
-    assert.deepEqual(conditional, [], "controls the sweep did not draw");
-    // review M6: copies of one control on screen only from declared twins.
-    assert.deepEqual(
-      [...twins],
-      [],
-      "controls drawn twice that are not declared twins",
-    );
-    // redesign-integrate-8: a passing sweep stamps every control it pressed;
-    // the commit-time catalog check refuses a control no sweep has pressed
-    // since its entry changed.
-    const { sweepKey } = await import("./sweepkey.js");
-    const { writeFileSync } = await import("node:fs");
-    writeFileSync(
-      new URL("./sweep-stamp.json", import.meta.url),
-      `${JSON.stringify(
-        {
-          about:
-            "Written by the passing Live view sweep (invariants.e2e.js, drive-reach); read by admin/web/test/drivecatalog.test.js. Never edit by hand.",
-          schema: 1,
-          controls: all.map(sweepKey).sort(),
-        },
-        null,
-        1,
-      )}\n`,
-    );
+    const g = await liveGo(page, path, landed);
+    assert.ok(g.ok, `ui goto ${path}: ${g.refusal?.why}`);
+    const row = entry?.row ? await firstRow(page, id) : null;
+    const r = await reachStep(page, {
+      do: "click",
+      control: id,
+      ...(row == null ? {} : { row }),
+    });
+    await page.waitForTimeout(800);
+    const out = {
+      r,
+      entry,
+      row,
+      url: new URL(page.url()),
+      dialogs: await page.$$eval("dialog[open]", (d) => d.length),
+      focused: await page.evaluate(() => document.activeElement?.id ?? ""),
+      pressed: await page.$$eval(
+        `[data-drive="${id}"][aria-pressed="true"]`,
+        (e) => e.length,
+      ),
+    };
+    await reachStep(page, { do: "done" });
+    await restore();
+    return out;
   } finally {
     await browser.close();
   }
+}
+
+// redesign-integrate-8: the three Update presses the flows merge turned
+// into the one Update flow (an address) were still declared as opening a
+// dialog, so Live view waited 3 s for a dialog that never came and the
+// sweep failed them; each now is a control that opens a view.
+test("invariants: redesign-integrate-8: Live view's press of a failed update's Run it again opens the Update flow for its stack, no dialog", async () => {
+  const x = await liveClick("/activity", "activity-update-again");
+  assert.equal(x.entry?.opens, "view", "declared as opening a view");
+  assert.ok(x.r.ok, `refused: ${x.r.refusal?.why}`);
+  assert.equal(x.url.pathname, "/update");
+  assert.ok(x.url.searchParams.get("stack"), `${x.url}`);
+  assert.equal(x.dialogs, 0);
+});
+
+test("invariants: redesign-integrate-8: Live view's press of a Stacks row's Update opens the Update flow for that stack, no dialog", async () => {
+  const x = await liveClick("/stacks?view=table", "stacks-row-update");
+  assert.equal(x.entry?.opens, "view", "declared as opening a view");
+  assert.ok(x.r.ok, `refused: ${x.r.refusal?.why}`);
+  assert.equal(x.url.pathname, "/update");
+  assert.equal(x.url.searchParams.get("stack"), x.row);
+  assert.equal(x.dialogs, 0);
+});
+
+test("invariants: redesign-integrate-8: Live view's press of the Map's stale-image Update opens the Update flow with that app picked, no dialog", async () => {
+  const x = await liveClick("/map", "pin-update");
+  assert.equal(x.entry?.opens, "view", "declared as opening a view");
+  assert.ok(x.r.ok, `refused: ${x.r.refusal?.why}`);
+  assert.equal(x.url.pathname, "/update");
+  const [stack, ...app] = String(x.row).split("/");
+  assert.equal(x.url.searchParams.get("stack"), stack);
+  assert.equal(x.url.searchParams.get("app"), app.join("/"));
+  assert.equal(x.dialogs, 0);
+});
+
+// redesign-integrate-8: a Map node is an SVG <g>, which has no click();
+// Live view took the step and never answered.
+test("invariants: redesign-integrate-8: Live view presses a Map node (an SVG element) and answers: the node is selected", async () => {
+  const x = await liveClick("/map", "map-node");
+  assert.ok(x.r.ok, `refused: ${x.r.refusal?.why}`);
+  assert.equal(x.url.searchParams.get("select"), x.row);
+  assert.equal(x.pressed, 1, "the pressed node shows pressed");
+});
+
+// redesign-integrate-8: ui.js's KPI tile draws no fourth row without a
+// spark or a meter; the hub put Compare now into that row, so the
+// "Matches its files" tile never showed it.
+test("invariants: redesign-integrate-8: the stack hub's Matches its files tile holds Compare now, and Live view presses it", async () => {
+  const x = await liveClick("/stacks/kp-soft", "stack-compare");
+  assert.ok(x.r.ok, `refused: ${x.r.refusal?.why}`);
+  assert.equal(x.row, "kp-soft");
+});
+
+// redesign-integrate-8: the merge declared the Console's command text box
+// as a control too; a press on a text box does nothing. Its old id now
+// presses "Run a command", which focuses the command line.
+test("invariants: redesign-integrate-8: Live view's console-command focuses the Console's command line", async () => {
+  const x = await liveClick("/console", "console-command");
+  assert.ok(x.r.ok, `refused: ${x.r.refusal?.why}`);
+  assert.equal(x.focused, "shell-line");
 });
 
 test("invariants: drive-reach: every old control name a declaration keeps still clicks", async () => {

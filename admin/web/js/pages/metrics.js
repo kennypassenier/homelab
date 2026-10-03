@@ -100,6 +100,8 @@ const HOSTNAME = declare({
   opens: "view",
   row: "<hostname>",
   what: "turn one hostname on or off in the Requests per hostname chart",
+  shows: "on the Traffic view",
+  reach: [{ do: "click", control: "metrics-view", row: "traffic" }],
 });
 const SHOWING = declare({
   id: "metrics-showing",

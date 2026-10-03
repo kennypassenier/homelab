@@ -78,11 +78,221 @@ async fn prom_query(Query(q): Query<PromQ>) -> Response {
         q.step.as_deref(),
         now,
     );
+    // redesign-stackhub-2: the hub's restarts series first, over a range.
+    if q.start.is_some()
+        && let Some(body) = demo_restarts(&q.query, w.start, w.end, w.step)
+    {
+        return axum::Json(body).into_response();
+    }
     axum::Json(super::demo_metrics::body(&q.query, &w, now)).into_response()
 }
 
+/// redesign-stackhub-2: the stack charts' "Restarts (last hour)" series
+/// over a range, point by point as Prometheus answers
+/// `changes(container_start_time_seconds[1h])`: the stack's first app
+/// restarted once 2.5 h before the window's end and twice 9.2 h before
+/// it, every other app never — so the hub's Restarts tile reads 3 in the
+/// last 24 h with two bumps on its sparkline.
+fn demo_restarts(query: &str, start: u64, end: u64, step: u64) -> Option<serde_json::Value> {
+    if !query.contains("container_start_time_seconds") || step == 0 {
+        return None;
+    }
+    let stack = selector_label(query, "stack")?;
+    let apps = demo_stack_apps(&stack);
+    let events = [
+        end.saturating_sub(9000),
+        end.saturating_sub(33_120),
+        end.saturating_sub(33_100),
+    ];
+    let result: Vec<serde_json::Value> = apps
+        .iter()
+        .enumerate()
+        .map(|(i, app)| {
+            let values: Vec<serde_json::Value> = (0..)
+                .map(|k| start + k * step)
+                .take_while(|t| *t <= end)
+                .map(|t| {
+                    let n = if i == 0 {
+                        events.iter().filter(|e| **e + 3600 > t && **e <= t).count()
+                    } else {
+                        0
+                    };
+                    serde_json::json!([t, n.to_string()])
+                })
+                .collect();
+            serde_json::json!({ "metric": { "name": app }, "values": values })
+        })
+        .collect();
+    Some(
+        serde_json::json!({ "status": "success", "data": { "resultType": "matrix", "result": result } }),
+    )
+}
+
 async fn loki_query_range(q: Query<PromQ>) -> Response {
+    // redesign-stackhub: a LogQL log query gets made-up lines; a metric
+    // query the made-up series.
+    if let Some(body) = demo_log_streams(&q.query, now_s()) {
+        return axum::Json(body).into_response();
+    }
     prom_query(q).await
+}
+
+/// One label's value in a LogQL selector (`stack="gateway"` → `gateway`).
+fn selector_label(query: &str, key: &str) -> Option<String> {
+    let start = query.find(&format!("{key}=\""))? + key.len() + 2;
+    let rest = &query[start..];
+    Some(rest[..rest.find('"')?].to_string())
+}
+
+/// The apps a demo stack's files declare (the same working copy
+/// [`run_demo`] builds its fleet from); none for a stack with no files.
+fn demo_stack_apps(stack: &str) -> Vec<String> {
+    crate::core::actions_config::from_env(&|k| std::env::var(k).ok())
+        .ok()
+        .and_then(|a| homelab_client::spec::build_manifest(&a.repo.join("stacks").join(stack)).ok())
+        .map(|m| m.apps)
+        .unwrap_or_default()
+}
+
+/// redesign-stackhub (3.71.0): a made-up answer to a LogQL *log* query
+/// (`{stack="…", …} |= "…"`; a metric query starts with a function), in
+/// Loki's `streams` shape, so the stack hub's Logs tab and its "Errors in
+/// logs · 1 h" tile have lines to show in the browser tests: 26 lines over
+/// the last 13 minutes, spread over the stack's apps and its journal, at
+/// info, warn and error. The selector's app and the line filter are
+/// honoured, as Loki would. No address or name of a real machine.
+fn demo_log_streams(query: &str, now: u64) -> Option<serde_json::Value> {
+    let q = query.trim_start();
+    if !q.starts_with('{') {
+        return None;
+    }
+    let stack = selector_label(q, "stack")?;
+    let only = selector_label(q, "container_name");
+    let journal_only = q.contains("job=\"systemd-journal\"");
+    let needle = q
+        .split("|= \"")
+        .nth(1)
+        .and_then(|r| r.split('"').next())
+        .map(str::to_string);
+    let mut sources: Vec<(String, bool)> = demo_stack_apps(&stack)
+        .into_iter()
+        .map(|a| (a, false))
+        .collect();
+    sources.push(("docker.service".into(), true));
+    const LINES: [(&str, &str); 6] = [
+        ("info", "request served 200 in 12 ms"),
+        ("info", "config reloaded"),
+        ("warn", "slow upstream: 1.8 s"),
+        ("info", "certificate valid for 61 more days"),
+        ("error", "upstream refused the connection"),
+        ("info", "healthcheck ok"),
+    ];
+    // (source, journal?, level) -> its lines
+    type Key<'a> = (String, bool, &'a str);
+    let mut streams: std::collections::BTreeMap<Key<'_>, Vec<(String, String)>> =
+        std::collections::BTreeMap::new();
+    for i in 0..26u64 {
+        let (src, journal) = &sources[(i as usize) % sources.len()];
+        if journal_only && !journal {
+            continue;
+        }
+        if let Some(o) = &only
+            && (o != src || *journal)
+        {
+            continue;
+        }
+        let (level, line) = LINES[((i * 7) % 6) as usize];
+        if let Some(n) = &needle
+            && !line.contains(n.as_str())
+        {
+            continue;
+        }
+        let at_ns = (now.saturating_sub((26 - i) * 30)) as u128 * 1_000_000_000;
+        streams
+            .entry((src.clone(), *journal, level))
+            .or_default()
+            .push((at_ns.to_string(), line.to_string()));
+    }
+    let result: Vec<serde_json::Value> = streams
+        .into_iter()
+        .map(|((src, journal, level), values)| {
+            let mut labels = serde_json::json!({
+                "stack": stack,
+                "detected_level": level,
+                "stream": if level == "info" { "stdout" } else { "stderr" },
+            });
+            if journal {
+                labels["job"] = "systemd-journal".into();
+                labels["unit"] = src.into();
+            } else {
+                labels["container_name"] = src.into();
+            }
+            serde_json::json!({ "stream": labels, "values": values })
+        })
+        .collect();
+    Some(serde_json::json!({
+        "status": "success",
+        "data": { "resultType": "streams", "result": result },
+    }))
+}
+
+/// redesign-stackhub (3.71.0): a made-up history per demo stack, as the
+/// real host records it in history.jsonl, so the stack hub's Recent history
+/// and History tab show who started what — a person (`by`), Claude through
+/// Live view, the nightly round (no request) — and the second stack one
+/// failed update.
+fn demo_history(stacks: &[String], now: u64) -> Vec<homelab_core::history::HistoryEntry> {
+    use homelab_core::history::{HistoryEntry, StepTiming};
+    let op = |start: u64, label: &str, stack: &str, by: Option<&str>, error: Option<&str>| {
+        let step = |name: &str, from: u64, to: u64, changed: bool| StepTiming {
+            step: name.into(),
+            start: from,
+            end: to,
+            changed,
+        };
+        HistoryEntry::Op {
+            start,
+            end: start + 64,
+            label: label.into(),
+            subject: Some(format!("{label} {stack}")),
+            req: by.map(|_| start),
+            by: by.map(str::to_string),
+            ok: error.is_none(),
+            deferred: None,
+            error: error.map(str::to_string),
+            steps: vec![
+                step("check", start, start + 4, false),
+                step("apply", start + 4, start + 60, true),
+                step("verify", start + 60, start + 64, false),
+            ],
+        }
+    };
+    let day = 86_400;
+    let mut out = Vec::new();
+    for (i, s) in stacks.iter().enumerate() {
+        out.push(op(now - 4 * day - 3_600, "resize", s, Some("Kenny"), None));
+        out.push(op(
+            now - 4 * day - 3_000,
+            "guards",
+            s,
+            Some("Claude (Live view)"),
+            None,
+        ));
+        out.push(op(now - day - 7_200, "backup", s, None, None));
+        out.push(op(now - day + 3_600, "deploy", s, Some("Kenny"), None));
+        if i == 1 {
+            out.push(op(
+                now - 5 * 3_600,
+                "update",
+                s,
+                Some("Kenny"),
+                Some("the new image did not come up healthy; the old one is back"),
+            ));
+        }
+        out.push(op(now - 3_600, "backup", s, None, None));
+    }
+    out.sort_by_key(|e| e.start());
+    out
 }
 
 /// feat-platform-10: a host that lives in this process, for the browser
@@ -643,11 +853,13 @@ pub async fn run_demo(
                             name: a,
                             running: true,
                             restarts: 0,
+                            health: None,
                         })
                         .collect(),
                     drift: false,
                     applied_hash: String::new(),
                     env_sealed: false,
+                    env_sealed_read: Some(false),
                     online: true,
                     enabled: true,
                     // redesign-host-3: made-up but plausible use per guest
@@ -684,10 +896,15 @@ pub async fn run_demo(
     // and two failures to show. Shared with the action tasks, which record
     // each demo job as the real host records an operation.
     let history: std::sync::Arc<std::sync::Mutex<Vec<homelab_core::history::HistoryEntry>>> =
-        std::sync::Arc::new(std::sync::Mutex::new(activity_demo_history(
-            &stacks,
-            now_s(),
-        )));
+        std::sync::Arc::new(std::sync::Mutex::new({
+            // redesign-stackhub: and a made-up history per stack (who did
+            // what: a person, Claude through Live view, the nightly round,
+            // one failed update), for the stack hub's Recent history.
+            let mut h = activity_demo_history(&stacks, now_s());
+            h.extend(demo_history(&stacks, now_s()));
+            h.sort_by_key(|e| e.start());
+            h
+        }));
     let incidents = activity_demo_incidents(&history.lock().unwrap_or_else(|e| e.into_inner()));
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     loop {

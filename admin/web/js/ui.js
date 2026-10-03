@@ -650,6 +650,7 @@ export function toolbar(spec) {
  * @returns {{el: HTMLElement, head: HTMLElement, body: HTMLElement,
  *   foot: HTMLElement, title: HTMLElement | null,
  *   desc: HTMLElement | null, tools: HTMLElement | null,
+ *   setFoot: (parts: import("./dom.js").Child[]) => void,
  *   stop: () => void, open: () => void}}
  *   `title`, `desc`, `tools`: the head's parts, for a card whose heading
  *   follows what it shows (a stack's name)
@@ -746,6 +747,12 @@ export function section(spec) {
     title: titleEl,
     desc: descEl,
     tools: toolsEl,
+    // The foot line drawn later (the source left, a link or "read 4 s
+    // ago" right), when it is known only after the section is made.
+    setFoot: (parts) => {
+      foot.replaceChildren(...parts.map((x) => h("span", null, x)));
+      foot.hidden = !parts.length;
+    },
     stop: () => cleanup?.(),
     open: () => {
       if (e instanceof HTMLDetailsElement) e.open = true;

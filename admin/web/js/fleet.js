@@ -4,13 +4,14 @@
 import { agoText, humanDuration } from "./format.js";
 
 /**
- * @typedef {{name: string, running: boolean, restarts: number}} App
+ * @typedef {{name: string, running: boolean, restarts: number,
+ *   health?: string | null}} App
  * @typedef {{name: string, vmid: number, online: boolean, enabled: boolean,
  *   apps_running: number, apps_total: number, restarts?: number,
  *   ram_used_mb?: number | null, ram_max_mb?: number | null,
  *   cpu_permille?: number | null,
  *   hostname?: string, apps?: App[], uptime_s?: number | null,
- *   applied_source?: string | null, env_sealed?: boolean,
+ *   applied_source?: string | null, env_sealed?: boolean | null,
  *   native?: boolean}} Stack
  * @typedef {{data_pct: number, metadata_pct: number, promised_gb: number,
  *   volumes: number}} ThinPool

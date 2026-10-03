@@ -69,7 +69,7 @@ export const GROUPS = /** @type {const} */ ([
     group: "Backups",
     actions: ["backup", "restore", "restore-native", "verify-restore"],
   },
-  { group: "Secrets", actions: ["change-secret"] },
+  { group: "Secrets", actions: ["change-secret", "seal-env"] },
   { group: "Parking", actions: ["enable", "disable"] },
   {
     group: "Native services",

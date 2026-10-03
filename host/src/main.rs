@@ -3547,6 +3547,7 @@ span_days = 7\n";
                 running: false,
                 containers: 1,
                 restarts: 4,
+                health: None,
             },
         );
         assert_eq!(live_app(Some(&r), 106, "jellyfin"), (false, 4));
@@ -3560,6 +3561,29 @@ span_days = 7\n";
             (true, 0),
             "guest not probed: unknown"
         );
+    }
+
+    /// redesign-stackhub-2: an app's own health check goes out from the
+    /// reading as it was read; nothing read is None, never "healthy".
+    #[test]
+    fn redesign_stackhub_2_app_health_comes_from_the_reading() {
+        use homelab_core::ops::livestatus::{AppStatus, LiveStatus};
+        assert_eq!(live_health(None, 106, "jellyfin"), None);
+        let mut r = LiveStatus::default();
+        r.apps.entry(106).or_default().insert(
+            "jellyfin".into(),
+            AppStatus {
+                running: true,
+                containers: 1,
+                restarts: 0,
+                health: Some("unhealthy".into()),
+            },
+        );
+        assert_eq!(
+            live_health(Some(&r), 106, "jellyfin").as_deref(),
+            Some("unhealthy")
+        );
+        assert_eq!(live_health(Some(&r), 106, "bazarr"), None);
     }
 
     /// feat-platform-3: every line an operation prints carries its request
@@ -5864,6 +5888,11 @@ struct AppState {
     auth_failures: Arc<AuthFailures>,
     /// feat-platform-2: the newest reading of every container's real status.
     live_status: Arc<std::sync::RwLock<Option<homelab_core::ops::livestatus::LiveStatus>>>,
+    /// redesign-stackhub-1: each stack's "Env sealed" verdict as the status
+    /// loop last read it (`ops::facts::sealed_verdicts`, every
+    /// `ENV_SEALED_INTERVAL_S`). A stack absent here was not read yet and
+    /// goes out as unknown, never as sealed.
+    env_sealed: Arc<std::sync::RwLock<std::collections::BTreeMap<String, bool>>>,
     /// fix-175: the host's own busy share of all CPUs, computed in
     /// `status_loop` from the delta between two `/proc/stat` samples taken
     /// `status_interval_s` apart. `None` before the first poll has a
@@ -5991,6 +6020,7 @@ impl AppState {
             )),
             auth_failures: Arc::new(AuthFailures::default()),
             live_status: Arc::new(std::sync::RwLock::new(None)),
+            env_sealed: Arc::new(std::sync::RwLock::new(Default::default())),
             host_cpu_pct: Arc::new(std::sync::RwLock::new(None)),
             host_cpu_prev: Arc::new(std::sync::RwLock::new(None)),
             disk_detail: Arc::new(std::sync::RwLock::new(None)),
@@ -6506,6 +6536,7 @@ fn rpc_stack(command: &Rpc) -> Option<String> {
         | Rpc::ForgetStack { stack }
         | Rpc::DestroyRecorded { stack, .. }
         | Rpc::SetStackEnabled { stack, .. }
+        | Rpc::SealEnv { stack }
         | Rpc::GetApplied { stack }
         | Rpc::GetBackups { stack, .. }
         | Rpc::RestoreNative { stack, .. }
@@ -7487,6 +7518,35 @@ fn live_app(
     }
 }
 
+/// redesign-stackhub-2: an app's own health check from the newest reading
+/// (docker's healthcheck, or `systemctl is-active` for a native unit); None
+/// when the app declares none or was not read.
+fn live_health(
+    reading: Option<&homelab_core::ops::livestatus::LiveStatus>,
+    vmid: u16,
+    app: &str,
+) -> Option<String> {
+    reading?.apps.get(&vmid)?.get(app)?.health.clone()
+}
+
+/// redesign-stackhub-1: how often the status loop reads every stack's
+/// "Env sealed" verdict. It asks each container per secret file, so it runs
+/// at a slower cadence than the guest status; a seal-env action reads it
+/// again at once.
+const ENV_SEALED_INTERVAL_S: u64 = 600;
+
+/// redesign-stackhub-1: read every stack's "Env sealed" verdict now and
+/// keep it for the fleet state.
+async fn refresh_env_sealed(state: &AppState, exec: &RealExecutor) {
+    let store = homelab_core::state::StateStore::new(exec, &state.config.state_dir);
+    let hs = store.load().await.unwrap_or_default();
+    let verdicts =
+        homelab_core::ops::facts::sealed_verdicts(exec, &state.config.state_dir, &hs).await;
+    if let Ok(mut slot) = state.env_sealed.write() {
+        *slot = verdicts;
+    }
+}
+
 /// fix-68: the fleet snapshot `GetState` broadcasts and `Status` now
 /// returns directly, built once so neither drifts from the other.
 async fn build_fleet_state(state: &AppState, exec: &RealExecutor) -> homelab_proto::FleetState {
@@ -7564,6 +7624,19 @@ async fn build_fleet_state(state: &AppState, exec: &RealExecutor) -> homelab_pro
     ));
     // feat-platform-2: the newest status reading, when there is one.
     let reading = state.live_status.read().ok().and_then(|r| r.clone());
+    // Keyed by hostname here: the map is keyed by the state's stack name,
+    // which `values()` below does not carry.
+    let sealed: std::collections::BTreeMap<String, bool> = {
+        let by_name = state
+            .env_sealed
+            .read()
+            .map(|m| m.clone())
+            .unwrap_or_default();
+        hs.stacks
+            .iter()
+            .filter_map(|(name, st)| by_name.get(name).map(|v| (st.hostname.clone(), *v)))
+            .collect()
+    };
     let stacks = hs
         .stacks
         .values()
@@ -7596,12 +7669,17 @@ async fn build_fleet_state(state: &AppState, exec: &RealExecutor) -> homelab_pro
                         name: a.clone(),
                         running,
                         restarts,
+                        health: live_health(reading.as_ref(), s.vmid, a),
                     }
                 })
                 .collect(),
             drift: false, // computed client-side from applied_hash
             applied_hash: s.applied_hash.clone(),
-            env_sealed: true,
+            // redesign-stackhub-1: what the status loop read, not a
+            // hard-coded true; unread goes out as unknown (None) and the
+            // old field keeps its old meaning for older readers.
+            env_sealed: sealed.get(&s.hostname).copied().unwrap_or(true),
+            env_sealed_read: sealed.get(&s.hostname).copied(),
             online: reading
                 .as_ref()
                 .and_then(|r| r.guests.get(&s.vmid))
@@ -7695,6 +7773,7 @@ const SELF_ASSET: &str = "homelab-host";
 /// stacks taken from state.json each time so a new stack is read at once.
 async fn status_loop(state: AppState) {
     let exec = RealExecutor;
+    let mut sealed_at: Option<u64> = None;
     loop {
         let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
         let hs = store.load().await.unwrap_or_default();
@@ -7713,6 +7792,12 @@ async fn status_loop(state: AppState) {
         }
         if let Ok(mut slot) = state.live_status.write() {
             *slot = Some(reading);
+        }
+        // redesign-stackhub-1: after the status reading, so the first one is
+        // not held up by asking every container about its secret files.
+        if sealed_at.is_none_or(|t| unix_now().saturating_sub(t) >= ENV_SEALED_INTERVAL_S) {
+            refresh_env_sealed(&state, &exec).await;
+            sealed_at = Some(unix_now());
         }
         // fix-175: the host's own CPU, same cadence as the guest reading —
         // busy share since the previous poll, from two /proc/stat samples.
@@ -11926,6 +12011,16 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 })
             })
             .await
+        }
+        Rpc::SealEnv { stack } => {
+            let report = run_mutating_op(state, &exec, req.id, "seal-env", |ctx| {
+                Box::pin(async move { homelab_core::ops::sealenv::seal_env(ctx, &stack).await })
+            })
+            .await;
+            // The fleet's "Env sealed" verdict is read again at once rather
+            // than at the next slow tick, so the hub's row goes away.
+            refresh_env_sealed(state, &exec).await;
+            report
         }
         Rpc::ListTemplates => {
             // C5: discovery instead of hardcoded strings. Two sources: OS

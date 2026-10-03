@@ -371,6 +371,14 @@ pub enum Command {
         stack: String,
         enabled: bool,
     },
+    /// redesign-stackhub-2: copy every secret file on the stack's container
+    /// that has no copy in the host's vault into the vault (the stack hub's
+    /// "Push the env…"), so a lost container can be rebuilt and the next
+    /// deploy does not fail closed. Reads without echoing; writes nothing
+    /// in the container.
+    SealEnv {
+        stack: String,
+    },
     /// Route A: fetch every configured device's own configuration now.
     ///
     /// It only ever ran inside the nightly round, which meant the only way to
@@ -929,6 +937,7 @@ impl Command {
             | ZfsReplicate
             | ApplyGuards { .. }
             | SetStackEnabled { .. }
+            | SealEnv { .. }
             | BackupDevices
             | AnswerManualCheck { .. }
             | UiAttach
@@ -1000,6 +1009,7 @@ impl Command {
             FleetCheck { .. } => "fleet_check",
             Today { .. } => "today",
             SetStackEnabled { .. } => "set_stack_enabled",
+            SealEnv { .. } => "seal_env",
             BackupDevices => "backup_devices",
             ListManualChecks { .. } => "list_manual_checks",
             Tiles { .. } => "tiles",
@@ -1130,7 +1140,14 @@ pub struct StackView {
     /// B4: fingerprint the host recorded at the last successful deploy.
     #[serde(default)]
     pub applied_hash: String,
+    /// Kept for older readers: `env_sealed_read`, or true while unread.
     pub env_sealed: bool,
+    /// redesign-stackhub-1: whether every secret file on the container has
+    /// a copy in the host's vault, as the status loop last checked it.
+    /// None = not checked yet, or an older host that hard-coded
+    /// `env_sealed: true` — a reader shows that as unknown, never as ok.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_sealed_read: Option<bool>,
     pub online: bool,
     /// H8 (light): false = parked — nightly scheduler skips it, onboot off.
     #[serde(default = "enabled_default")]
@@ -1179,6 +1196,12 @@ pub struct AppView {
     pub name: String,
     pub running: bool,
     pub restarts: u32,
+    /// redesign-stackhub-2: the app's own health check as the host's status
+    /// reading saw it — docker's healthcheck (`healthy`, `starting`,
+    /// `unhealthy`), or `systemctl is-active` for a native unit. None: the
+    /// app declares no healthcheck, or an older host that does not read it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1508,6 +1531,9 @@ mod wire_tests {
             Command::SetStackEnabled {
                 stack: "home".into(),
                 enabled: true,
+            },
+            Command::SealEnv {
+                stack: "kp-soft".into(),
             },
         ];
         for c in cases {

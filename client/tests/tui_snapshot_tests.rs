@@ -42,10 +42,12 @@ fn fleet() -> FleetState {
                     name: "syncthing".into(),
                     running: true,
                     restarts: 0,
+                    health: None,
                 }],
                 drift: false,
                 applied_hash: String::new(),
                 env_sealed: true,
+                env_sealed_read: Some(true),
                 online: true,
                 enabled: true,
             },
@@ -61,10 +63,12 @@ fn fleet() -> FleetState {
                     name: "jellyfin".into(),
                     running: false,
                     restarts: 3,
+                    health: None,
                 }],
                 drift: true,
                 applied_hash: String::new(),
                 env_sealed: false,
+                env_sealed_read: Some(false),
                 online: true,
                 enabled: true,
             },
@@ -690,6 +694,7 @@ fn b4_drift_flag_computed_from_applied_hash() {
                 drift: false,
                 applied_hash: hash.to_string(),
                 env_sealed: true,
+                env_sealed_read: Some(true),
                 online: true,
                 enabled: true,
             }],
@@ -790,6 +795,7 @@ fn fix_107_apply_in_the_tui_deploys_every_changed_stack_after_one_y() {
                 drift: false,
                 applied_hash: String::new(), // never applied
                 env_sealed: true,
+                env_sealed_read: Some(true),
                 online: true,
                 enabled: true,
             },
@@ -805,6 +811,7 @@ fn fix_107_apply_in_the_tui_deploys_every_changed_stack_after_one_y() {
                 drift: false,
                 applied_hash: "deadbeef00112233".into(), // stale
                 env_sealed: true,
+                env_sealed_read: Some(true),
                 online: true,
                 enabled: true,
             },
@@ -820,6 +827,7 @@ fn fix_107_apply_in_the_tui_deploys_every_changed_stack_after_one_y() {
                 drift: false,
                 applied_hash: same_hash,
                 env_sealed: true,
+                env_sealed_read: Some(true),
                 online: true,
                 enabled: true,
             },
@@ -1160,6 +1168,10 @@ fn the_runbook_warns_that_a_restore_revives_retired_almanac_profiles() {
 /// wired into the TUI or written down here with a reason. Neither answer is
 /// wrong; leaving the question unanswered is.
 const CLI_ONLY: &[(&str, &str)] = &[
+    (
+        "SealEnv",
+        "redesign-stackhub-2: the dashboard stack hub's \"Push the env…\" on its          no-env row; from the TUI and the CLI a deploy seals the env as it          always did, so neither needs a second way",
+    ),
     (
         "RestartHost",
         "Kenny, 2026-09-30: the dashboard's host-settings form restarts the host \
@@ -2679,6 +2691,7 @@ fn a_native_stack_gets_the_native_operation_from_the_same_key() {
         drift: false,
         applied_hash: String::new(),
         env_sealed: true,
+        env_sealed_read: Some(true),
         online: true,
         enabled: true,
     });

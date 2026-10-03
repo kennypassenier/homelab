@@ -20,13 +20,19 @@ use crate::executor::{Cmd, Executor};
 
 /// Inside a container: one line per docker container. `working_dir` is the
 /// compose project directory (`/opt/<stack>/<app>`), which names the app.
+/// redesign-stackhub-2: the fifth field is the container's own healthcheck
+/// verdict (`healthy`, `unhealthy`, `starting`), empty when its image or
+/// compose file declares none — the same expression the deploy's settle
+/// check reads (`ops::update::settle_script`).
 pub const PROBE: &str = "if command -v docker >/dev/null 2>&1; then \
      for c in $(docker ps -aq); do \
-     docker inspect --format '{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}|{{index .Config.Labels \"com.docker.compose.service\"}}|{{.State.Running}}|{{.RestartCount}}' \"$c\"; \
+     docker inspect --format '{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}|{{index .Config.Labels \"com.docker.compose.service\"}}|{{.State.Running}}|{{.RestartCount}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' \"$c\"; \
      done; fi";
 
 /// fix-160: the probe for one guest. After the docker lines, one line per
-/// native unit, `unit:<unit>|<unit>|<active>|<NRestarts>`, so a stack of
+/// native unit, `unit:<unit>|<unit>|<active>|<NRestarts>|<is-active>`
+/// (redesign-stackhub-2: a unit's health is what `systemctl is-active`
+/// says), so a stack of
 /// systemd services has apps too. A unit name that is not a plain unit name
 /// is left out rather than put in a shell line.
 pub fn probe(units: &[String]) -> String {
@@ -41,7 +47,7 @@ pub fn probe(units: &[String]) -> String {
         }
         sh.push_str(&format!(
             "; if [ \"$(systemctl is-active {u})\" = active ]; then a=true; else a=false; fi; \
-             printf 'unit:{u}|{u}|%s|%s\\n' \"$a\" \"$(systemctl show -p NRestarts --value {u} 2>/dev/null || echo 0)\""
+             printf 'unit:{u}|{u}|%s|%s|%s\\n' \"$a\" \"$(systemctl show -p NRestarts --value {u} 2>/dev/null || echo 0)\" \"$(systemctl is-active {u} 2>/dev/null)\""
         ));
     }
     sh
@@ -69,6 +75,23 @@ pub struct AppStatus {
     pub containers: u32,
     /// Sum of the containers' restart counters.
     pub restarts: u32,
+    /// redesign-stackhub-2: the app's health as its own check says it —
+    /// docker's healthcheck (`healthy`, `starting`, `unhealthy`; the worst
+    /// container wins), or for a native unit what `systemctl is-active`
+    /// answered. None: no container of the app declares a healthcheck (or
+    /// an older probe line without the field).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<String>,
+}
+
+/// How bad a health word is, for "the worst container wins": anything
+/// that is not healthy or active ranks above both.
+fn health_rank(h: &str) -> u8 {
+    match h {
+        "healthy" | "active" => 0,
+        "starting" | "activating" | "reloading" => 1,
+        _ => 2,
+    }
 }
 
 /// A whole reading: when, every guest, and the apps of each probed guest.
@@ -124,7 +147,8 @@ pub fn parse_apps(stack: &str, probe_out: &str) -> BTreeMap<String, AppStatus> {
     let mut out: BTreeMap<String, AppStatus> = BTreeMap::new();
     for line in probe_out.lines() {
         let parts: Vec<&str> = line.trim().split('|').collect();
-        if parts.len() != 4 {
+        // Four fields from a probe before redesign-stackhub-2, five since.
+        if parts.len() != 4 && parts.len() != 5 {
             continue;
         }
         let Some(app) = parts[0]
@@ -139,14 +163,27 @@ pub fn parse_apps(stack: &str, probe_out: &str) -> BTreeMap<String, AppStatus> {
         }
         let running = parts[2] == "true";
         let restarts: u32 = parts[3].parse().unwrap_or(0);
+        let health = parts
+            .get(4)
+            .map(|h| h.trim())
+            .filter(|h| !h.is_empty())
+            .map(str::to_string);
         let e = out.entry(app.to_string()).or_insert(AppStatus {
             running: true,
             containers: 0,
             restarts: 0,
+            health: None,
         });
         e.containers += 1;
         e.running &= running;
         e.restarts = e.restarts.saturating_add(restarts);
+        if let Some(h) = health
+            && e.health
+                .as_deref()
+                .is_none_or(|cur| health_rank(&h) > health_rank(cur))
+        {
+            e.health = Some(h);
+        }
     }
     out
 }

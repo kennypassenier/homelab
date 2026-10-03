@@ -177,7 +177,7 @@ mod tests {
                     apps: Vec::new(),
                     uptime_s: None,
                     applied_source: None,
-                    env_sealed: true,
+                    env_sealed: Some(true),
                     native: false,
                     applied_hash: String::new(),
                     component_digests: Default::default(),

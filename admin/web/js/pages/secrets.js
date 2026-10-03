@@ -343,17 +343,28 @@ export function mount(root, opts = {}) {
     },
     "Open stack",
   );
-  const detailCard = section({
-    id: "sd",
-    title: "Secrets",
-    desc: "What this stack's lxc-compose.yml lists under latch_secrets and latch_files.",
-    tools: [openStack],
-    foot: [
-      "Every reveal and change is written to the host's audit log",
-      [kbd("↑ ↓"), " stack · ", kbd("Esc"), " hide all"],
-    ],
-    plain: true,
-  });
+  // redesign-stackhub review 5: inside the stack hub the hub's Secrets
+  // section is the card — the pane is no second card inside it, names no
+  // stack (the page is that stack's), links to no other and has no other
+  // stack to move to.
+  const audit = "Every reveal and change is written to the host's audit log";
+  const detailCard =
+    one != null
+      ? section({
+          id: "sd",
+          label: `${one}'s secrets`,
+          foot: [audit, [kbd("Esc"), " hide all"]],
+          plain: true,
+          cls: "sx-one-detail",
+        })
+      : section({
+          id: "sd",
+          title: "Secrets",
+          desc: "What this stack's lxc-compose.yml lists under latch_secrets and latch_files.",
+          tools: [openStack],
+          foot: [audit, [kbd("↑ ↓"), " stack · ", kbd("Esc"), " hide all"]],
+          plain: true,
+        });
   const detail = detailCard.body;
   const closeBtn = drivable(
     h(
@@ -376,7 +387,7 @@ export function mount(root, opts = {}) {
     desc: "Pick Change… on a secret to stage a new value here. Nothing is written until you press Write.",
     tools: [closeBtn],
     plain: true,
-    cls: "sx-drawer",
+    cls: one != null ? "sx-drawer sx-drawer--one" : "sx-drawer",
   });
   const drawer = drawerCard.body;
 
@@ -682,9 +693,9 @@ export function mount(root, opts = {}) {
   function paintDetail() {
     const s = S.stack;
     const names = fleet();
-    const title = /** @type {HTMLElement} */ (detailCard.title);
+    const title = detailCard.title;
     if (!s) {
-      title.replaceChildren(sk("8rem"));
+      title?.replaceChildren(sk("8rem"));
       openStack.hidden = true;
       detail.replaceChildren(...skRows());
       return;
@@ -739,7 +750,10 @@ export function mount(root, opts = {}) {
           ),
           h(
             "a",
-            { class: "sx-linkbtn", href: stackHref(s, "settings") },
+            {
+              class: "sx-linkbtn",
+              href: `${stackHref(s, "settings")}?section=files`,
+            },
             "Open its stack file",
           ),
         ),
@@ -748,7 +762,7 @@ export function mount(root, opts = {}) {
       (x) => x instanceof HTMLElement && x.classList.contains("hint"),
     );
     if (hintP instanceof HTMLElement) hintP.style.margin = "12px 0 0";
-    title.replaceChildren(
+    title?.replaceChildren(
       h("span", { class: "sx-row" }, swatch(chartColour(s, names)), s),
     );
     openStack.hidden = false;

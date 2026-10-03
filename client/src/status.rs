@@ -108,10 +108,12 @@ mod tests {
                 // container the last known state remembers is running.
                 running: true,
                 restarts: 0,
+                health: None,
             }],
             drift,
             applied_hash: "h".into(),
             env_sealed: true,
+            env_sealed_read: Some(true),
             online,
             enabled,
             usage: None,

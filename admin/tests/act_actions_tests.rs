@@ -728,3 +728,30 @@ fn redesign_stacks_6_batch_deploy_and_apply_ask_the_host_to_back_up_first() {
     assert!(!from_body.backup_first);
     assert!(serde_json::from_str::<ActionArgs>(r#"{"backup_first":true}"#).is_err());
 }
+
+/// redesign-stackhub-2: the stack hub's no-env row offers "Push the env…",
+/// a stack action that sends `SealEnv` for exactly that stack; it changes
+/// nothing in the container, so it is not destructive.
+///
+/// covers: redesign-stackhub-2
+#[test]
+fn redesign_stackhub_2_seal_env_is_a_stack_action_that_seals_that_stack() {
+    let kind = ActionKind::from_slug("seal-env").expect("seal-env is in the catalog");
+    assert!(!kind.host_wide());
+    let req = validate("kp-soft", "seal-env", ActionArgs::default()).unwrap();
+    let cmds = commands(&req, material_for(kind, "kp-soft")).unwrap();
+    assert!(
+        matches!(cmds.as_slice(), [Command::SealEnv { stack }] if stack == "kp-soft"),
+        "{cmds:?}"
+    );
+    let json = serde_json::to_value(catalog()).unwrap();
+    let e = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["action"] == "seal-env")
+        .unwrap();
+    assert_eq!(e["destructive"], false);
+    assert_eq!(e["target"], "stack");
+    assert_eq!(e["label"], "Push the env");
+}

@@ -1018,6 +1018,22 @@ pub async fn unsealed_secret_files(
     stack: &str,
     st: &crate::state::StackState,
 ) -> Vec<String> {
+    unsealed_secret_pairs(exec, state_dir, stack, st)
+        .await
+        .into_iter()
+        .map(|(on_container, _)| on_container)
+        .collect()
+}
+
+/// redesign-stackhub-2: [`unsealed_secret_files`] with the vault path each
+/// one belongs at, `(on the container, in the vault)` — what the seal-env
+/// action copies.
+pub async fn unsealed_secret_pairs(
+    exec: &dyn Executor,
+    state_dir: &str,
+    stack: &str,
+    st: &crate::state::StackState,
+) -> Vec<(String, String)> {
     let mut wanted: Vec<(String, String)> = Vec::new();
     for app in &st.apps {
         if st.natives.iter().any(|n| &n.unit == app) {
@@ -1063,8 +1079,40 @@ pub async fn unsealed_secret_files(
             .map(|c| !c.trim().is_empty())
             .unwrap_or(false);
         if !sealed {
-            missing.push(on_container);
+            missing.push((on_container, in_vault));
         }
     }
     missing
+}
+
+/// redesign-stackhub-1: the "Env sealed" verdict of every managed stack, as
+/// the doctor computes it — a stack whose container Proxmox does not know
+/// has nothing to seal, otherwise sealed = no secret file on it lacks a
+/// vault copy. The host's status loop keeps this, read at a slower cadence
+/// than the guest status, and sends it in the fleet state; before the
+/// first read a stack is absent here and reads as unknown.
+pub async fn sealed_verdicts(
+    exec: &dyn Executor,
+    state_dir: &str,
+    hs: &crate::state::HostState,
+) -> std::collections::BTreeMap<String, bool> {
+    let read = crate::ops::pool::bounded(
+        hs.stacks
+            .iter()
+            .map(|(name, st)| async move {
+                let present = exec
+                    .read_file(&crate::executor::lxc_conf_path(st.vmid))
+                    .await
+                    .is_ok();
+                let sealed = !present
+                    || unsealed_secret_files(exec, state_dir, name, st)
+                        .await
+                        .is_empty();
+                (name.clone(), sealed)
+            })
+            .collect(),
+        crate::ops::pool::READ_CONCURRENCY,
+    )
+    .await;
+    read.into_iter().collect()
 }

@@ -71,6 +71,18 @@ async function freshPage(context) {
   return page;
 }
 
+/**
+ * redesign-stackhub: open the stack hub header's More ▾ menu (where most
+ * stack actions live since 3.71.0), when the page has one and it is shut.
+ * @param {import("playwright").Page} page
+ */
+async function openStackMore(page) {
+  const more = page.locator('[data-drive="stack-more"]');
+  if ((await more.count()) === 0) return;
+  if ((await more.getAttribute("aria-expanded")) !== "true")
+    await more.click({ timeout: 2000 }).catch(() => {});
+}
+
 test("invariants: the nav bar stays inline, with brand Homelab and the version beside the search box, at 1600/1920/2560 CSS px and at 1894 in the widest themes", async () => {
   const browser = await chromium.launch();
   try {
@@ -187,8 +199,10 @@ test("invariants: the job dialog's panel does not shift sideways between its run
     // approved rename) needs only the stack name, so it runs end to end
     // against the demo host without a working copy of the repository
     // (deploy/backup both refuse without one there).
+    // redesign-stackhub: Park sits in the hub header's More ▾ (Pause).
+    await page.locator('[data-drive="stack-more"]').click({ timeout: 5000 });
     await page
-      .getByRole("button", { name: "Park", exact: true })
+      .locator('[role=menuitem][data-action="disable"]')
       .click({ timeout: 5000 });
     await page.waitForTimeout(300);
     await page.locator("#action-dialog #act-run").click();
@@ -1407,8 +1421,10 @@ test("invariants: every action dialog lays its fields on one grid — labels on 
     let measured = 0;
     for (const action of actions) {
       const btn = page.locator(`button[data-action="${action}"]`).first();
+      // redesign-stackhub: the hub keeps most actions in its More ▾.
+      if (!(await btn.isVisible())) await openStackMore(page);
       if (!(await btn.isVisible()) || !(await btn.isEnabled())) continue;
-      await btn.click();
+      await btn.click({ timeout: 5000 });
       const dialog = page.locator("dialog#action-dialog[open]");
       if (!(await dialog.isVisible().catch(() => false))) {
         await page.waitForTimeout(300);
@@ -1416,7 +1432,7 @@ test("invariants: every action dialog lays its fields on one grid — labels on 
           for (const close of await page
             .locator("dialog[open] .kp-dialog__close")
             .all())
-            await close.click().catch(() => {});
+            await close.click({ timeout: 2000 }).catch(() => {});
           continue;
         }
       }
@@ -1471,7 +1487,7 @@ test("invariants: every action dialog lays its fields on one grid — labels on 
       for (const close of await page
         .locator("dialog[open] .kp-dialog__close")
         .all())
-        await close.click().catch(() => {});
+        await close.click({ timeout: 2000 }).catch(() => {});
       await page
         .locator("dialog[open]")
         .first()
@@ -1919,8 +1935,10 @@ async function eachActionDialog(page, measure) {
     ]);
     for (const action of actions) {
       const btn = page.locator(`button[data-action="${action}"]`).first();
+      // redesign-stackhub: the hub keeps most actions in its More ▾.
+      if (!(await btn.isVisible())) await openStackMore(page);
       if (!(await btn.isVisible()) || !(await btn.isEnabled())) continue;
-      await btn.click();
+      await btn.click({ timeout: 5000 });
       const dialog = page.locator("dialog#action-dialog[open]");
       await dialog.waitFor({ timeout: 1500 }).catch(() => {});
       if (await dialog.isVisible().catch(() => false))
@@ -1928,7 +1946,7 @@ async function eachActionDialog(page, measure) {
       for (const close of await page
         .locator("dialog[open] .kp-dialog__close")
         .all())
-        await close.click().catch(() => {});
+        await close.click({ timeout: 2000 }).catch(() => {});
       await page
         .locator("dialog[open]")
         .first()
@@ -2252,8 +2270,10 @@ test("invariants: a running job's log scrolls inside its dialog and never makes 
     await page.goto(`${BASE}/stacks/films`);
     await page.waitForTimeout(600);
     // "Park": "Disable" before 3.71.0 (the approved rename).
+    // redesign-stackhub: Park sits in the hub header's More ▾ (Pause).
+    await page.locator('[data-drive="stack-more"]').click({ timeout: 5000 });
     await page
-      .getByRole("button", { name: "Park", exact: true })
+      .locator('[role=menuitem][data-action="disable"]')
       .click({ timeout: 5000 });
     await page.waitForTimeout(300);
     await page.locator("#action-dialog #act-run").click();
@@ -8032,6 +8052,615 @@ test("invariants: Apps loads as its grouped board, its group labels are the body
     assert.equal(
       await page.locator(".nx-head .title-row > h1 + .nx-live").count(),
       1,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── redesign-stackhub (3.71.0, Kenny approved the stack hub demo
+// 2026-10-03: flows/stack-hub.html + stack.html, FLOWS.md §1.3) — the
+// whole-screen shape of one stack's hub, in the demo host's own data. ────
+
+test("invariants: stack hub — the header keeps Back up · Update · Deploy (primary) · More, with b u d . and a grouped More", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/gateway`);
+    const actions = page.locator(".sh-head__actions");
+    await actions.waitFor({ timeout: 10000 });
+    const order = await actions.evaluate((a) =>
+      [...a.children].map((c) => ({
+        text: (c.matches(".sh-menu")
+          ? c.firstElementChild
+          : c
+        )?.textContent?.trim(),
+        primary: c.classList.contains("kp-button--primary"),
+        action: /** @type {HTMLElement} */ (c).dataset.action ?? null,
+      })),
+    );
+    assert.deepEqual(
+      order.map((o) => o.text),
+      ["Back up", "Update", "Deploy", "More ▾"],
+    );
+    assert.deepEqual(
+      order.map((o) => o.primary),
+      [false, false, true, false],
+    );
+    assert.deepEqual(
+      order.slice(0, 3).map((o) => o.action),
+      ["backup", "update", "deploy"],
+    );
+    // `.` opens More, grouped as the demo groups it.
+    await page
+      .locator("body")
+      .click({ position: { x: 5, y: 500 }, timeout: 5000 });
+    await page.keyboard.press(".");
+    const groups = await page
+      .locator(".sh-menu__list:not([hidden]) .sh-menu__group")
+      .allTextContents();
+    assert.deepEqual(groups, ["Data", "Change", "Pause", "Tools", "Remove"]);
+    for (const a of ["restore", "deploy-commit", "resize", "guards", "disable"])
+      assert.equal(
+        await page.locator(`.sh-menu__list [data-action="${a}"]`).count(),
+        1,
+        `More has no ${a}`,
+      );
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator(".sh-menu__list").isHidden(), true);
+    // `b` opens the Back up dialog, as the button does.
+    await page.keyboard.press("b");
+    const dialog = page.locator("dialog#action-dialog[open]");
+    await dialog.waitFor({ timeout: 5000 });
+    assert.match(
+      (await dialog.locator(".kp-dialog__title").textContent()) ?? "",
+      /Back up/,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: stack hub — six tabs; Overview has five KPI tiles, Is it healthy? and Recent history with who did it", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/gateway`);
+    // The list shows skeleton lines until the fleet is read: wait for a
+    // real row, not the first line.
+    await page
+      .locator('#healthy .sh-checks li[data-key="apps"]')
+      .waitFor({ timeout: 10000 });
+    await page
+      .locator(".sh-feed li[data-who]")
+      .first()
+      .waitFor({ timeout: 10000 });
+    const r = await page.evaluate(() => ({
+      tabs: [...document.querySelectorAll(".sh-tabs .kp-tab")].map((t) =>
+        (t.firstChild?.textContent ?? "").trim(),
+      ),
+      kpis: [...document.querySelectorAll(".nx-kpis .nx-kpi__label")].map(
+        (l) => l.textContent,
+      ),
+      links: [...document.querySelectorAll(".nx-kpis a.nx-kpi")].length,
+      checks: [...document.querySelectorAll("#healthy .sh-checks li")].map(
+        (l) => l.getAttribute("data-key"),
+      ),
+      who: [...document.querySelectorAll(".sh-feed li[data-who]")].map((l) =>
+        l.getAttribute("data-who"),
+      ),
+      noEnv: !!document.querySelector('.nx-attention [data-key="no-env"]'),
+    }));
+    assert.deepEqual(r.tabs, [
+      "Overview",
+      "Logs",
+      "Apps",
+      "Backups",
+      "History",
+      "Settings",
+    ]);
+    assert.deepEqual(r.kpis, [
+      "Apps up",
+      "Restarts",
+      "Last backup",
+      "Errors in logs · 1 h",
+      "Matches its files",
+    ]);
+    assert.equal(r.links, 4, "every tile but the drift one links into its tab");
+    for (const k of [
+      "online",
+      "apps",
+      "restarts",
+      "disk",
+      "backup",
+      "env",
+      "drift",
+    ])
+      assert.ok(r.checks.includes(k), `Is it healthy? has no ${k} row`);
+    assert.ok(r.who.includes("claude"), "Recent history names no Claude row");
+    assert.ok(r.who.includes("night"), "Recent history names no nightly row");
+    assert.ok(r.noEnv, "the stack's no-env problem is not in its band");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: stack hub — Logs' side column turns an app or a level on and off with a plain click; Esc shows all again", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/gateway/logs`);
+    const lines = page.locator(".sh-log .sh-log__line");
+    await lines.first().waitFor({ timeout: 10000 });
+    const total = await lines.count();
+    assert.ok(total > 5, `only ${total} log lines`);
+    assert.equal(
+      await page.locator('[data-drive="stack-log-window"]').count(),
+      4,
+    );
+    const errors = page.locator(
+      '[data-drive="stack-log-filter"][data-drive-row="gateway/levels/e"]',
+    );
+    await errors.click({ timeout: 5000 });
+    assert.equal(await errors.getAttribute("aria-pressed"), "false");
+    assert.equal(await page.locator('.sh-log [data-lvl="e"]').count(), 0);
+    const traefik = page.locator(
+      '[data-drive="stack-log-filter"][data-drive-row="gateway/apps/traefik"]',
+    );
+    await traefik.click({ timeout: 5000 });
+    assert.equal(await page.locator('.sh-log [data-src="traefik"]').count(), 0);
+    assert.match(
+      (await page.locator(".sh-count-text").textContent()) ?? "",
+      new RegExp(`of ${total} lines`),
+    );
+    await page
+      .locator("body")
+      .click({ position: { x: 5, y: 900 }, timeout: 5000 });
+    await page.keyboard.press("Escape");
+    assert.equal(await lines.count(), total);
+    assert.equal(await errors.getAttribute("aria-pressed"), "true");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: stack hub — History's Started by chips filter with a plain click, several at once", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/kp-soft/history`);
+    const rows = page.locator(".sh-feed--full li[data-who]");
+    await rows.first().waitFor({ timeout: 10000 });
+    const all = await rows.count();
+    await page
+      .locator(
+        '[data-drive="stack-history-who"][data-drive-row="kp-soft/claude"]',
+      )
+      .click({ timeout: 5000 });
+    const who = await rows.evaluateAll((ls) =>
+      ls.map((l) => l.getAttribute("data-who")),
+    );
+    assert.ok(who.length > 0 && who.every((w) => w === "claude"), who.join());
+    await page
+      .locator(
+        '[data-drive="stack-history-who"][data-drive-row="kp-soft/night"]',
+      )
+      .click({ timeout: 5000 });
+    const two = await rows.evaluateAll((ls) =>
+      ls.map((l) => l.getAttribute("data-who")),
+    );
+    assert.ok(two.includes("night") && two.includes("claude"));
+    assert.ok(!two.includes("you"));
+    assert.match(page.url(), /by=claude%2Cnight|by=claude,night/);
+    await page
+      .locator("body")
+      .click({ position: { x: 5, y: 900 }, timeout: 5000 });
+    await page.keyboard.press("Escape");
+    assert.equal(await rows.count(), all);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: stack hub — Apps and Backups are kp datatables; Backups draws 14 nights per app; Settings ends in a folded Danger zone", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/gateway/apps`);
+    await page
+      .locator(".sh-table[data-kp-datatable] tbody tr")
+      .first()
+      .waitFor({ timeout: 10000 });
+    assert.equal(
+      await page
+        .locator(".sh-table[data-kp-sort-multi][data-kp-remember]")
+        .count(),
+      1,
+    );
+    await page.goto(`${BASE}/stacks/gateway/backups`);
+    const strips = page.locator(".sh-table .sh-strip");
+    await strips.first().waitFor({ timeout: 10000 });
+    const cells = await strips.evaluateAll((ss) =>
+      ss.map((s) => s.children.length),
+    );
+    assert.ok(cells.length >= 1 && cells.every((n) => n === 14), cells.join());
+    assert.ok(
+      (await page.locator('.sh-table [data-action="restore"]').count()) >= 1,
+    );
+    await page.goto(`${BASE}/stacks/gateway/settings`);
+    await page.locator("#size dd").first().waitFor({ timeout: 10000 });
+    const r = await page.evaluate(() => ({
+      parts: [...document.querySelectorAll(".sh-grid > *")].map((e) => e.id),
+      dangerOpen: /** @type {HTMLDetailsElement} */ (
+        document.getElementById("danger")
+      ).open,
+      danger: [...document.querySelectorAll("#danger [data-action]")].map((b) =>
+        b.getAttribute("data-action"),
+      ),
+    }));
+    assert.deepEqual(r.parts, [
+      "secrets",
+      "size",
+      "firewall",
+      "files",
+      "danger",
+    ]);
+    assert.equal(r.dangerOpen, false);
+    assert.deepEqual(r.danger, ["destroy", "forget", "wipe", "prune-orphans"]);
+    await page.goto(`${BASE}/stacks/gateway/settings?section=danger`);
+    await page.waitForTimeout(500);
+    assert.equal(
+      await page.evaluate(
+        () =>
+          /** @type {HTMLDetailsElement} */ (document.getElementById("danger"))
+            .open,
+      ),
+      true,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: stack hub — every tab fits 390 and 1894 px in light and dark, no sideways scroll, nothing clipped inside a card", async () => {
+  const browser = await chromium.launch();
+  try {
+    const bad = [];
+    for (const theme of ["formal", "dark"])
+      for (const width of [1894, 390]) {
+        const context = await browser.newContext({
+          viewport: { width, height: 900 },
+        });
+        const page = await freshPage(context);
+        await page.evaluate((t) => localStorage.setItem("theme", t), theme);
+        for (const tab of [
+          "",
+          "/logs",
+          "/apps",
+          "/backups",
+          "/history",
+          "/settings",
+        ]) {
+          for (const stack of tab === "/apps"
+            ? ["gateway", "kp-soft"]
+            : ["gateway"]) {
+            await page.goto(`${BASE}/stacks/${stack}${tab}`);
+            await page.waitForTimeout(1200);
+            const over = await page.evaluate(
+              () => document.documentElement.scrollWidth - innerWidth,
+            );
+            if (over > 0)
+              bad.push(`${theme} ${width}px ${tab || "/"}: ${over}px`);
+            // Review 3: nothing clipped INSIDE a card either — no table that
+            // scrolls sideways in its own box, no button past its card's
+            // edge; on a phone the KPI tiles are one column and their words
+            // wrap, and a table as cards opens sorted by something.
+            const inside = await page.evaluate((w) => {
+              const out = [];
+              for (const t of document.querySelectorAll("main .kp-table-wrap"))
+                if (t.checkVisibility() && t.scrollWidth > t.clientWidth + 1)
+                  out.push(`table ${t.scrollWidth} > ${t.clientWidth}`);
+              for (const b of document.querySelectorAll(
+                "main button, main a.kp-button",
+              )) {
+                const card = b.closest(".kp-card, .nx-card, .nx-kpi");
+                if (!card || !b.checkVisibility()) continue;
+                const r = b.getBoundingClientRect();
+                const c = card.getBoundingClientRect();
+                if (r.right > c.right + 1 || r.left < c.left - 1)
+                  out.push(`"${b.textContent?.trim()}" past its card`);
+              }
+              if (w === 390) {
+                const lefts = new Set(
+                  [...document.querySelectorAll("main .nx-kpis > *")].map((t) =>
+                    Math.round(t.getBoundingClientRect().left),
+                  ),
+                );
+                if (lefts.size > 1) out.push(`${lefts.size} KPI columns`);
+                for (const e of document.querySelectorAll(
+                  "main .nx-kpi__label, main .nx-kpi__ctx",
+                ))
+                  if (e.scrollWidth > e.clientWidth + 1)
+                    out.push(`KPI text cut: ${e.textContent}`);
+                for (const sel of document.querySelectorAll(
+                  "main .kp-datatable__card-sort select",
+                ))
+                  if (
+                    /** @type {HTMLElement} */ (sel).checkVisibility() &&
+                    /** @type {HTMLSelectElement} */ (sel).value === ""
+                  )
+                    out.push("a card sort reads None");
+              }
+              return out;
+            }, width);
+            for (const x of inside)
+              bad.push(`${theme} ${width}px ${stack}${tab || "/"}: ${x}`);
+          }
+        }
+        await context.close();
+      }
+    assert.deepEqual(bad, [], `clipped: ${bad.join("; ")}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── senior review of redesign-stackhub (2026-10-03) ─────────────────────
+
+test("invariants: stack hub review — Update and the u key open the Update dialog", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/gateway`);
+    const dialog = page.locator("dialog#action-dialog[open]");
+    const title = dialog.locator(".kp-dialog__title");
+    await page
+      .locator('[data-drive="stack-head"][data-drive-row="gateway/update"]')
+      .click({ timeout: 10000 });
+    await dialog.waitFor({ timeout: 5000 });
+    assert.match((await title.textContent()) ?? "", /Update/);
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "detached", timeout: 5000 }).catch(() => {});
+    await page.locator("dialog#action-dialog[open]").waitFor({
+      state: "hidden",
+      timeout: 5000,
+    });
+    await page
+      .locator("body")
+      .click({ position: { x: 5, y: 500 }, timeout: 5000 });
+    await page.keyboard.press("u");
+    await dialog.waitFor({ timeout: 5000 });
+    assert.match((await title.textContent()) ?? "", /Update/);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: stack hub review — the More menu keeps the keyboard focus across fleet pushes", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/gateway`);
+    await page.locator(".sh-head__actions").waitFor({ timeout: 10000 });
+    await page.waitForTimeout(1500);
+    await page
+      .locator("body")
+      .click({ position: { x: 5, y: 500 }, timeout: 5000 });
+    await page.keyboard.press(".");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    const before = await page.evaluate(() =>
+      document.activeElement?.textContent?.trim(),
+    );
+    // The demo host pushes the fleet every few seconds: wait through more
+    // than one push with the menu open.
+    const pushes = await page.evaluate(
+      () =>
+        new Promise((done) => {
+          let n = 0;
+          const t0 = Date.now();
+          const tick = setInterval(() => {
+            if (Date.now() - t0 > 12000) {
+              clearInterval(tick);
+              done(n);
+            }
+          }, 250);
+          import("/js/store.js").then((m) =>
+            m.subscribe(() => {
+              n += 1;
+            }),
+          );
+        }),
+    );
+    assert.ok(Number(pushes) >= 2, `only ${pushes} fleet pushes arrived`);
+    const after = await page.evaluate(() => ({
+      text: document.activeElement?.textContent?.trim(),
+      inMenu: !!document.activeElement?.closest(".sh-menu__list"),
+    }));
+    assert.equal(after.inMenu, true, "the focus left the menu");
+    assert.equal(after.text, before);
+    await page.keyboard.press("ArrowDown");
+    assert.equal(
+      await page.evaluate(
+        () => !!document.activeElement?.closest(".sh-menu__list"),
+      ),
+      true,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: stack hub review — Settings ▸ Secrets is this stack's pane: no stack list, no Open stack, no ↑ ↓, no card in a card", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/gateway/settings`);
+    const pane = page.locator("#secrets .sx--one");
+    await pane.waitFor({ timeout: 10000 });
+    await page.waitForTimeout(1500);
+    const r = await page.evaluate(() => {
+      const sec = /** @type {HTMLElement} */ (
+        document.getElementById("secrets")
+      );
+      return {
+        list: sec.querySelectorAll(".sx-stacks").length,
+        open: [...sec.querySelectorAll("a")].filter((a) =>
+          /open stack/i.test(a.textContent ?? ""),
+        ).length,
+        arrows: /↑\s*↓/.test(sec.textContent ?? ""),
+        cards: sec.querySelectorAll(".nx-card, .kp-card").length,
+      };
+    });
+    assert.deepEqual(r, { list: 0, open: 0, arrows: false, cards: 0 });
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: stack hub review — Restarts counts 24 h with a sparkline and opens the charts; Is it healthy? has each app's health check and its web addresses", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/kp-soft`);
+    const tile = page.locator(
+      '[data-drive="stack-kpi"][data-drive-row="kp-soft/restarts"]',
+    );
+    await page
+      .locator(".nx-kpi__ctx", { hasText: "in the last 24 h" })
+      .waitFor({ timeout: 15000 });
+    assert.equal(
+      (await tile.locator(".nx-kpi__value").textContent())?.trim(),
+      "3",
+    );
+    assert.equal(await tile.locator(".nx-kpi__spark svg").count(), 1);
+    assert.equal(
+      await tile.getAttribute("href"),
+      "/charts?stack=kp-soft&range=24h",
+    );
+    const checks = page.locator(".sh-checks li");
+    await page
+      .locator('.sh-checks li[data-key="restarts"]', {
+        hasText: "in 24 h",
+      })
+      .waitFor({ timeout: 10000 });
+    const keys = await checks.evaluateAll((ls) =>
+      ls.map((l) => l.getAttribute("data-key")),
+    );
+    assert.ok(
+      keys.some((k) => k?.startsWith("health:")),
+      `no app health row: ${keys.join()}`,
+    );
+    assert.ok(keys.includes("web"), `no web row: ${keys.join()}`);
+    assert.match(
+      (await page
+        .locator('.sh-checks li[data-key^="health:"]')
+        .first()
+        .textContent()) ?? "",
+      /not declared|healthy|unhealthy|starting/,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: stack hub review — the no-env row's Push the env… opens the seal-env action", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/kp-soft`);
+    const fix = page.locator(
+      '[data-drive="stack-fix"][data-drive-row="kp-soft/no-env"]',
+    );
+    await fix.waitFor({ timeout: 10000 });
+    assert.equal((await fix.textContent())?.trim(), "Push the env…");
+    assert.equal(await fix.getAttribute("data-action"), "seal-env");
+    await fix.click();
+    const dialog = page.locator("dialog#action-dialog[open]");
+    await dialog.waitFor({ timeout: 5000 });
+    assert.match(
+      (await dialog.locator(".kp-dialog__title").textContent()) ?? "",
+      /Push the env/,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: stack hub review — History says Kenny in chip and rows, dates read 30 Sep 12:14, and no incidents reads as no bundles kept", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/kp-soft/history`);
+    const rows = page.locator(".sh-feed--full li[data-who]");
+    await rows.first().waitFor({ timeout: 10000 });
+    assert.equal(
+      (
+        await page
+          .locator(
+            '[data-drive="stack-history-who"][data-drive-row="kp-soft/you"]',
+          )
+          .textContent()
+      )?.trim(),
+      "Kenny",
+    );
+    const you = await page
+      .locator('.sh-feed--full li[data-who="you"] .nx-chip')
+      .allTextContents();
+    assert.ok(
+      you.length > 0 && you.every((t) => t.trim() === "Kenny"),
+      you.join(),
+    );
+    const times = await page
+      .locator(".sh-feed--full li time")
+      .allTextContents();
+    for (const t of times)
+      assert.match(
+        t.trim(),
+        /^(\d+ (s|min|h) ago|\d{1,2} [A-Z][a-z]{2}( \d{4})? \d\d:\d\d)$/,
+        `a date reads ${t}`,
+      );
+    await page.goto(`${BASE}/stacks/notes/history`);
+    const empty = page.locator(
+      ".sh-stack .sh-feed:not(.sh-feed--full) .sh-feed__empty",
+    );
+    await empty.waitFor({ timeout: 10000 });
+    assert.equal(
+      (await empty.textContent())?.trim(),
+      "No incident bundles kept for notes.",
     );
   } finally {
     await browser.close();

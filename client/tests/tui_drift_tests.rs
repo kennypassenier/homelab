@@ -104,6 +104,7 @@ fn fleet(applied_hash: &str) -> ServerMsg {
             drift: false,
             applied_hash: applied_hash.into(),
             env_sealed: true,
+            env_sealed_read: Some(true),
             online: true,
             enabled: true,
         }],

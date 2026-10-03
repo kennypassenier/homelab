@@ -305,7 +305,7 @@ export function markFaults(file, src, declared) {
         );
     } else if (/^[a-z]\w*$/.test(id) && passedDeclared(id, at)) {
       // A helper's parameter that every caller fills with a declared id.
-    } else if (/^\w+\.drive\.\w+$/.test(id)) {
+    } else if (/^\w+\.drive(\.\w+|\[0\])$/.test(id)) {
       // A shared component marks a member of the object its caller passes
       // as `drive: NAME`, checked at the caller below.
     } else if (/^\w+\.id$/.test(id) && file === "ui.js") {
@@ -326,6 +326,14 @@ export function markFaults(file, src, declared) {
     if (lit ? !declared.has(lit[1]) : !consts.has(id))
       bad.push(
         `${file}:${at}: drive: { id: ${id} } is not a declare() constant of this module`,
+      );
+  }
+  // A caller's `drive: [NAME, row]` (the stack hub's action buttons).
+  for (const m of src.matchAll(/\bdrive:\s*\[\s*([^,\]\s]+)\s*,/g)) {
+    const at = src.slice(0, m.index).split("\n").length;
+    if (m[1] !== "string" && !named(m[1]))
+      bad.push(
+        `${file}:${at}: drive: [${m[1]}, …] is not a declare() constant of this module`,
       );
   }
   // A caller's `drive: NAME`: a declare() constant or an object of them.
@@ -362,6 +370,7 @@ test("redesign-drive-5: the undeclared-mark check catches every way around driva
     undeclaredMapKey: `const D = { a: declare({ id: "new-schedule" }) };\ndrivable(e, D.z);`,
     undeclaredPassedMap: `const D = { a: "x" };\nmountHostLog(r, { drive: D });`,
     undeclaredParam: `const go = (b, id) => drivable(b, id);\ngo(x, "nope-x");`,
+    undeclaredPair: `button(c, "x", { drive: [NOPE, row] });`,
     notConst: `const NOPE = "new-schedule";\ndrivable(b, NOPE);`,
     nested: `drivable(h("button", { a: 1, b: [2, 3] }, f(x, y)), "nope-x");`,
   };

@@ -80,7 +80,6 @@ import {
   logSources,
   logView,
   logWindow,
-  menuSignature,
   moreGroups,
   noIncidentsText,
   restartsDay,
@@ -104,6 +103,7 @@ import {
   keyRow,
   liveStatus,
   kpiStrip,
+  moreMenu,
   section,
   segSwitch,
   skeletonLines,
@@ -446,11 +446,16 @@ export function mount(root, params) {
       () => void openAction(name, b.dataset.action ?? "", { openRollback }),
     );
 
-  const menu = groupedMenu({
-    label: "More ▾",
-    title: "Every other action on this stack (.)",
+  // redesign-openpoints-3: the shared more menu (ui.js), grouped.
+  const menu = moreMenu({
+    label: "Every other action on this stack (.)",
+    button: {
+      text: "More ▾",
+      class: "kp-button",
+      keys: ".",
+      mark: (b) => drivable(b, MORE, name),
+    },
     groups: [],
-    mark: (b) => drivable(b, MORE, name),
   });
   stops.push(menu.stop);
   const header = hubHeader({
@@ -486,8 +491,8 @@ export function mount(root, params) {
         .map((g) => ({
           group: g.group,
           items: g.items.flatMap(
-            /** @returns {MenuEntry[]} */ (it) => {
-              /** @type {MenuEntry} */
+            /** @returns {import("../ui.js").MenuEntry[]} */ (it) => {
+              /** @type {import("../ui.js").MenuEntry} */
               const base = {
                 label: it.label,
                 hint: it.hint,
@@ -2695,164 +2700,6 @@ function hubHeader(spec) {
           return e;
         }),
       ),
-  };
-}
-
-/**
- * @typedef {{label: string, hint: string, danger?: boolean,
- *   attrs?: Record<string, string | null>, onClick?: () => void,
- *   href?: string, download?: string,
- *   mark?: (e: HTMLElement) => void, disabled?: string | null}} MenuEntry
- */
-
-/**
- * A button that opens a grouped menu (the header's More ▾): each entry a
- * label with its one-line hint under it, each group under its small
- * heading. Closed by Escape, a click outside or picking an entry; arrow
- * keys move between entries. A closed menu's entries stay in the DOM, so
- * a Live view step aimed at one marks this menu's button (driveannounce
- * `onScreen`: the first `:scope > button` of the nearest visible parent).
- * @param {{label: string, title: string, groups: {group: string,
- *   items: MenuEntry[]}[], mark?: (b: HTMLElement) => void}} spec
- */
-function groupedMenu(spec) {
-  const list = h("div", {
-    class: "sh-menu__list",
-    role: "menu",
-    hidden: true,
-    "aria-label": spec.title,
-  });
-  const btn = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button",
-      "aria-haspopup": "menu",
-      "aria-expanded": "false",
-      title: spec.title,
-      "aria-keyshortcuts": ".",
-    },
-    spec.label,
-  );
-  spec.mark?.(btn);
-  const wrap = h("div", { class: "sh-menu" }, btn, list);
-  const open = () => {
-    list.hidden = false;
-    btn.setAttribute("aria-expanded", "true");
-    /** @type {HTMLElement | null} */ (
-      list.querySelector("[role=menuitem]:not([disabled])")
-    )?.focus();
-  };
-  const close = (focus = false) => {
-    if (list.hidden) return;
-    list.hidden = true;
-    btn.setAttribute("aria-expanded", "false");
-    if (focus) btn.focus();
-    if (pending) {
-      const p = pending;
-      pending = null;
-      fill(p);
-    }
-  };
-  btn.addEventListener("click", () => (list.hidden ? open() : close()));
-  // review 4: the stack page calls `fill` on every fleet push. Redrawing an
-  // open menu threw away the entry that had the keyboard focus, so it is
-  // redrawn only when what it shows changed, and never while it is open
-  // (the change waits until it closes).
-  let drawn = "";
-  /** @type {{group: string, items: MenuEntry[]}[] | null} */
-  let pending = null;
-  /** @param {{group: string, items: MenuEntry[]}[]} groups */
-  const fill = (groups) => {
-    const sig = menuSignature(groups);
-    if (sig === drawn) {
-      pending = null;
-      return;
-    }
-    if (!list.hidden) {
-      pending = groups;
-      return;
-    }
-    drawn = sig;
-    draw(groups);
-  };
-  /** @param {{group: string, items: MenuEntry[]}[]} groups */
-  const draw = (groups) => {
-    list.replaceChildren(
-      ...groups.flatMap((g) => [
-        h("p", { class: "sh-menu__group", role: "presentation" }, g.group),
-        ...g.items.map((it) => {
-          const item = h(
-            it.href ? "a" : "button",
-            {
-              ...(it.href
-                ? { href: it.href, download: it.download ?? null }
-                : { type: "button" }),
-              role: "menuitem",
-              class: `sh-menu__item${it.danger ? " sh-menu__item--danger" : ""}`,
-              title: it.disabled ?? it.hint,
-              disabled: it.disabled ? true : null,
-              ...(it.attrs ?? {}),
-            },
-            h("b", null, it.label),
-            h("span", null, it.disabled ?? it.hint),
-          );
-          it.mark?.(item);
-          item.addEventListener("click", () => {
-            close();
-            it.onClick?.();
-          });
-          return item;
-        }),
-      ]),
-    );
-  };
-  fill(spec.groups);
-  list.addEventListener("keydown", (e) => {
-    const items = /** @type {HTMLElement[]} */ ([
-      ...list.querySelectorAll("[role=menuitem]:not([disabled])"),
-    ]);
-    const i = items.indexOf(
-      /** @type {HTMLElement} */ (document.activeElement),
-    );
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      const n = items.length;
-      if (!n) return;
-      const next = e.key === "ArrowDown" ? (i + 1) % n : (i - 1 + n) % n;
-      items[next].focus();
-    } else if (e.key === "Home") {
-      e.preventDefault();
-      items[0]?.focus();
-    } else if (e.key === "End") {
-      e.preventDefault();
-      items.at(-1)?.focus();
-    }
-  });
-  /** @param {MouseEvent} e */
-  const outside = (e) => {
-    if (!wrap.contains(/** @type {Node} */ (e.target))) close();
-  };
-  /** @param {KeyboardEvent} e */
-  const esc = (e) => {
-    if (e.key === "Escape" && !list.hidden) {
-      e.stopPropagation();
-      close(true);
-    }
-  };
-  document.addEventListener("click", outside);
-  document.addEventListener("keydown", esc, true);
-  return {
-    el: wrap,
-    button: btn,
-    open,
-    close,
-    toggle: () => (list.hidden ? open() : close()),
-    fill,
-    stop: () => {
-      document.removeEventListener("click", outside);
-      document.removeEventListener("keydown", esc, true);
-    },
   };
 }
 

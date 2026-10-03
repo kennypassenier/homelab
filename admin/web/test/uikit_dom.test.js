@@ -672,3 +672,131 @@ test("redesign-kit-19: the page sheets loaded on every page keep every rule behi
   );
   assert.doesNotMatch(read("js/ui.js"), /Activity, Metrics, Notifications/);
 });
+
+// redesign-openpoints-3: the stack hub kept its own grouped More menu; the
+// shared more menu draws groups under headings, buttons beside links, a
+// disabled entry with its reason, a danger entry, a page's own button and
+// marks, and redraws only when what it shows changed (never while open).
+test("redesign-openpoints-3: the shared more menu draws grouped entries, closes after one, on a click outside and on Esc (focus back), and redraws only on change", () => {
+  /** @type {string[]} */
+  const ran = [];
+  /** @type {any[]} */
+  const marked = [];
+  const groups = (/** @type {string} */ hint) => [
+    {
+      group: "Data",
+      items: [
+        {
+          label: "Restore…",
+          hint,
+          onClick: () => ran.push("restore"),
+          attrs: { "data-action": "restore" },
+          mark: (/** @type {any} */ e) => marked.push(e),
+        },
+        {
+          label: "Change a secret…",
+          hint: "rotate one",
+          disabled: "Never on the dashboard's own stack",
+          onClick: () => ran.push("secret"),
+        },
+      ],
+    },
+    {
+      group: "Remove",
+      items: [
+        {
+          label: "Remove…",
+          hint: "gone",
+          danger: true,
+          onClick: () => ran.push("remove"),
+        },
+        { label: "Export", hint: "the files", href: "/x", download: "x.tgz" },
+      ],
+    },
+  ];
+  const more = ui.moreMenu({
+    label: "Every other action on this stack (.)",
+    button: {
+      text: "More ▾",
+      class: "kp-button",
+      keys: ".",
+      mark: (/** @type {any} */ b) => b.setAttribute("data-test", "more"),
+    },
+    groups: groups("from a snapshot"),
+  });
+  doc.body.append(more.el);
+  const btn = /** @type {any} */ (more.button);
+  assert.equal(btn.getAttribute("data-test"), "more", "the page marks it");
+  assert.equal(btn.getAttribute("aria-keyshortcuts"), ".");
+  assert.equal(btn.textContent, "More ▾");
+  const list = /** @type {any} */ (more.el.querySelector('[role="menu"]'));
+  assert.deepEqual(
+    list
+      .querySelectorAll(".nx-menu__group")
+      .map((/** @type {any} */ g) => g.textContent),
+    ["Data", "Remove"],
+  );
+  const items = list.querySelectorAll('[role="menuitem"]');
+  assert.equal(items.length, 4);
+  assert.equal(items[0].getAttribute("data-action"), "restore");
+  assert.equal(marked.length, 1);
+  assert.equal(items[1].getAttribute("disabled"), "");
+  assert.match(items[1].textContent, /Never on the dashboard's own stack/);
+  assert.match(items[2].getAttribute("class"), /nx-menu__item--danger/);
+  assert.equal(items[3].localName, "a");
+  assert.equal(items[3].getAttribute("download"), "x.tgz");
+
+  more.toggle();
+  assert.equal(btn.getAttribute("aria-expanded"), "true");
+  assert.equal(doc.activeElement, items[0], "the first enabled entry");
+  press(items[0], "ArrowDown");
+  assert.equal(doc.activeElement, items[2], "↓ skips the disabled entry");
+  items[2].click();
+  assert.deepEqual(ran, ["remove"]);
+  assert.equal(btn.getAttribute("aria-expanded"), "false", "closed after it");
+
+  btn.click();
+  doc.body.click();
+  assert.equal(btn.getAttribute("aria-expanded"), "false", "outside click");
+
+  btn.click();
+  // A push that changes nothing keeps the drawn entries (and the focus).
+  more.fill(groups("from a snapshot"));
+  assert.equal(list.querySelectorAll('[role="menuitem"]')[0], items[0]);
+  // A change while open waits until it closes.
+  more.fill(groups("from the newest snapshot"));
+  assert.equal(list.querySelectorAll('[role="menuitem"]')[0], items[0]);
+  items[0].focus();
+  press(items[0], "Escape");
+  assert.equal(btn.getAttribute("aria-expanded"), "false");
+  assert.equal(doc.activeElement, btn, "Esc gives the focus back");
+  assert.match(
+    list.querySelectorAll('[role="menuitem"]')[0].textContent,
+    /from the newest snapshot/,
+  );
+  more.stop();
+  more.el.remove();
+});
+
+test("redesign-openpoints-3: the stack hub has no menu of its own", () => {
+  assert.doesNotMatch(
+    read("js/pages/stack.js"),
+    /function groupedMenu|sh-menu/,
+  );
+  assert.doesNotMatch(read("css/pages/stack.css"), /sh-menu/);
+});
+
+// review 4 (moved with the menu, redesign-openpoints-3): a fleet push that
+// changes nothing in the stack hub's More menu does not redraw it.
+test("review 4: the More menu's signature changes only when its groups do", async () => {
+  const { moreGroups } = await import("../js/stackhub.js");
+  const a = moreGroups({ stack: "gateway", native: false, enabled: true });
+  const b = moreGroups({ stack: "gateway", native: false, enabled: true });
+  assert.equal(ui.menuSignature(a), ui.menuSignature(b));
+  const parked = moreGroups({
+    stack: "gateway",
+    native: false,
+    enabled: false,
+  });
+  assert.notEqual(ui.menuSignature(a), ui.menuSignature(parked));
+});

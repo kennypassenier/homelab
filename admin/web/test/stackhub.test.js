@@ -21,7 +21,6 @@ import {
   logSources,
   logView,
   logWindow,
-  menuSignature,
   moreGroups,
   noIncidentsText,
   restartsDay,
@@ -630,18 +629,6 @@ test("review 2: the no-env row offers Push the env as its own host action", () =
     0,
     "unknown is not a problem to fix",
   );
-});
-
-test("review 4: the More menu's signature changes only when its groups do", () => {
-  const a = moreGroups({ stack: "gateway", native: false, enabled: true });
-  const b = moreGroups({ stack: "gateway", native: false, enabled: true });
-  assert.equal(menuSignature(a), menuSignature(b));
-  const parked = moreGroups({
-    stack: "gateway",
-    native: false,
-    enabled: false,
-  });
-  assert.notEqual(menuSignature(a), menuSignature(parked));
 });
 
 test("review 8: History says Kenny in the chip and in the rows", () => {

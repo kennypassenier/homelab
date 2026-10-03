@@ -1369,23 +1369,3 @@ export function shortWhen(unix, now = Date.now() / 1000, timeZone) {
 /** What History's Incidents says with none kept. @param {string} name */
 export const noIncidentsText = (name) =>
   `No incident bundles kept for ${name}.`;
-
-/**
- * What the More menu would draw, as one string: a fleet push that changes
- * nothing in it must not redraw it (that took the keyboard focus away).
- * @param {{group: string, items: {key?: string, label: string,
- *   hint?: string, disabled?: string | null, danger?: boolean}[]}[]} groups
- */
-export const menuSignature = (groups) =>
-  JSON.stringify(
-    groups.map((g) => [
-      g.group,
-      g.items.map((i) => [
-        i.key ?? "",
-        i.label,
-        i.hint ?? "",
-        i.disabled ?? "",
-        !!i.danger,
-      ]),
-    ]),
-  );

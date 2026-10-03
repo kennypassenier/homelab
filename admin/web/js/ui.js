@@ -28,8 +28,9 @@
 //                sorting on several keys, remembered per table
 //   toast        kp-themes' toast in a region inside #page, so Live view
 //                can press its Undo
-//   rowMenu / moreMenu   a row's menu (a non-modal <dialog>) and the
-//                header's overflow `···` menu, both keyboard menus
+//   rowMenu / moreMenu   a row's menu (a non-modal <dialog>) and a
+//                header's more menu (the `···` one, or grouped under
+//                headings like the stack hub's More ▾), both keyboard menus
 //   drawer       a side panel on a modal <dialog>
 //   hoverCard    one floating detail card for hover and keyboard focus
 //   chip / dot / meter / shareBar / swatch / stackMark   small marks
@@ -1608,9 +1609,10 @@ export function menuPlace(r, ht, view, width) {
  * @returns {boolean} whether the key was one of them
  */
 export function menuKey(menu, e) {
+  // A disabled entry (its reason in place of its hint) takes no focus.
   const items = /** @type {HTMLElement[]} */ ([
     ...menu.querySelectorAll('[role="menuitem"]'),
-  ]);
+  ]).filter((e) => e.getAttribute("disabled") == null);
   if (!items.length) return false;
   const i = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
   const to =
@@ -1726,48 +1728,89 @@ export function rowMenu(spec) {
 }
 
 /**
- * The header's overflow `···` menu: a button (the Live view control
- * `drive`) and a small list of links. A second click on the button,
- * Escape (the focus back on the button), a click outside or picking an
- * item closes it; ↑ ↓ Home End move between the items. It listens on the
- * document only while it is open.
- * @param {{label: string, items: {label: string, hint: string,
- *   href: string, download?: string}[], drive: Drive}} spec
- * @returns {{el: HTMLElement, stop: () => void}}
+ * One entry of a more menu: a link (`href`) or a button (`onClick`), its
+ * label with a one-line hint under it. `disabled`: why it cannot be used
+ * now, shown in place of the hint; `danger`: a destructive one; `attrs`:
+ * the page's own attributes; `mark`: the page marks the drawn entry (its
+ * Live view control), on every draw.
+ * @typedef {{label: string, hint: string, href?: string, download?: string,
+ *   onClick?: () => void, disabled?: string | null, danger?: boolean,
+ *   attrs?: Record<string, string | null>,
+ *   mark?: (e: HTMLElement) => void}} MenuEntry
+ * @typedef {{group: string, items: MenuEntry[]}} MenuGroup
+ */
+
+/**
+ * What a more menu draws, as one string: a refill that changes nothing in
+ * it must not redraw it (that took the keyboard focus away).
+ * @param {{group: string, items: {label: string, hint?: string,
+ *   href?: string, disabled?: string | null, danger?: boolean,
+ *   attrs?: Record<string, string | null>}[]}[]} groups
+ */
+export const menuSignature = (groups) =>
+  JSON.stringify(
+    groups.map((g) => [
+      g.group,
+      g.items.map((i) => [
+        i.label,
+        i.hint ?? "",
+        i.href ?? "",
+        i.disabled ?? "",
+        !!i.danger,
+        i.attrs ?? null,
+      ]),
+    ]),
+  );
+
+/**
+ * A header's more menu: a button and a list of entries, flat (`items`) or
+ * under small headings (`groups`, the stack hub's More ▾). The button is
+ * the `···` icon marked as the Live view control `drive`, or the page's
+ * own (`button`: its text, class, key and mark). Opening it focuses the
+ * first usable entry; a second click on the button, Escape (the focus back
+ * on the button), a click outside or picking an entry closes it; ↑ ↓ Home
+ * End move between the usable entries. It listens on the document only
+ * while it is open. `fill` redraws the entries only when what they show
+ * changed, and never while the menu is open (the change waits until it
+ * closes). A closed menu's entries stay in the DOM, so a Live view step
+ * aimed at one marks the menu's button (its wrap's first button).
+ * @param {{label: string, items?: MenuEntry[], groups?: MenuGroup[],
+ *   drive?: Drive, button?: {text: string, class?: string, keys?: string,
+ *   mark?: (b: HTMLElement) => void}}} spec
+ * @returns {{el: HTMLElement, button: HTMLElement, open: () => void,
+ *   close: (focus?: boolean) => void, toggle: () => void,
+ *   fill: (groups: MenuGroup[]) => void, stop: () => void}}
  */
 export function moreMenu(spec) {
-  const list = h(
-    "div",
-    { class: "nx-menu", role: "menu", hidden: true },
-    spec.items.map((it) =>
-      h(
-        "a",
-        {
-          role: "menuitem",
-          href: it.href,
-          download: it.download ?? null,
-          onclick: () => close(),
-        },
-        h("b", null, it.label),
-        h("span", null, it.hint),
-      ),
-    ),
-  );
+  const grouped = !!spec.groups;
+  const list = h("div", {
+    class: `nx-menu${grouped ? " nx-menu--grouped" : ""}`,
+    role: "menu",
+    hidden: true,
+    "aria-label": spec.label,
+  });
   const btn = h(
     "button",
     {
       type: "button",
-      class: "nx-icon-btn",
-      "aria-label": spec.label,
+      class: spec.button?.class ?? "nx-icon-btn",
+      "aria-label": spec.button ? null : spec.label,
       "aria-haspopup": "menu",
       "aria-expanded": "false",
+      "aria-keyshortcuts": spec.button?.keys ?? null,
       title: spec.label,
       onclick: () => (list.hidden ? open() : close()),
     },
-    "···",
+    spec.button?.text ?? "···",
   );
-  drive(btn, spec.drive);
+  if (spec.drive) drive(btn, spec.drive);
+  spec.button?.mark?.(btn);
   const wrap = h("div", { class: "nx-more" }, btn, list);
+  /** The usable entries, in order. */
+  const usable = () =>
+    /** @type {HTMLElement[]} */ ([
+      ...list.querySelectorAll('[role="menuitem"]'),
+    ]).filter((e) => e.getAttribute("disabled") == null);
   /** @param {MouseEvent} e */
   const outside = (e) => {
     if (!wrap.contains(/** @type {Node} */ (e.target))) close();
@@ -1777,8 +1820,8 @@ export function moreMenu(spec) {
     if (list.hidden) return;
     if (e.key === "Escape") {
       e.preventDefault();
-      close();
-      btn.focus();
+      e.stopPropagation();
+      close(true);
     } else if (
       list.contains(/** @type {Node} */ (e.target)) ||
       e.target === btn
@@ -1786,18 +1829,90 @@ export function moreMenu(spec) {
       menuKey(list, e);
   };
   const open = () => {
+    if (!list.hidden) return;
     list.hidden = false;
     btn.setAttribute("aria-expanded", "true");
     document.addEventListener("click", outside);
-    document.addEventListener("keydown", keys);
+    // Capture: the menu's Escape is its own, not the page's as well.
+    document.addEventListener("keydown", keys, true);
+    usable()[0]?.focus();
   };
-  const close = () => {
+  const close = (focus = false) => {
+    if (list.hidden) return;
     list.hidden = true;
     btn.setAttribute("aria-expanded", "false");
     document.removeEventListener("click", outside);
-    document.removeEventListener("keydown", keys);
+    document.removeEventListener("keydown", keys, true);
+    if (focus) btn.focus();
+    if (pending) {
+      const p = pending;
+      pending = null;
+      fill(p);
+    }
   };
-  return { el: wrap, stop: close };
+  /** @param {MenuEntry} it */
+  const entry = (it) => {
+    const item = h(
+      it.href ? "a" : "button",
+      {
+        ...(it.href
+          ? { href: it.href, download: it.download ?? null }
+          : { type: "button" }),
+        role: "menuitem",
+        class: `nx-menu__item${it.danger ? " nx-menu__item--danger" : ""}`,
+        title: it.disabled ?? it.hint,
+        disabled: !it.href && it.disabled ? true : null,
+        "aria-disabled": it.href && it.disabled ? "true" : null,
+        ...(it.attrs ?? {}),
+      },
+      h("b", null, it.label),
+      h("span", null, it.disabled ?? it.hint),
+    );
+    it.mark?.(item);
+    item.addEventListener("click", (e) => {
+      if (it.disabled) {
+        e.preventDefault();
+        return;
+      }
+      close();
+      it.onClick?.();
+    });
+    return item;
+  };
+  let drawn = "";
+  /** @type {MenuGroup[] | null} */
+  let pending = null;
+  /** @param {MenuGroup[]} groups */
+  const fill = (groups) => {
+    const sig = menuSignature(groups);
+    if (sig === drawn) {
+      pending = null;
+      return;
+    }
+    if (!list.hidden) {
+      pending = groups;
+      return;
+    }
+    drawn = sig;
+    list.replaceChildren(
+      ...groups.flatMap((g) => [
+        ...(g.group
+          ? [h("p", { class: "nx-menu__group", role: "presentation" }, g.group)]
+          : []),
+        ...g.items.map(entry),
+      ]),
+    );
+  };
+  fill(spec.groups ?? [{ group: "", items: spec.items ?? [] }]);
+  return {
+    el: wrap,
+    button: btn,
+    open,
+    close,
+    toggle: () => (list.hidden ? open() : close()),
+    fill,
+    stop: () => close(),
+  };
 }
 
 /**

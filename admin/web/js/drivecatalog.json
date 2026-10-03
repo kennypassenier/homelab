@@ -2946,7 +2946,7 @@
     {
       "id": "stack-head",
       "page": "stack",
-      "what": "the header's Back up, Update or Deploy (b, u, d): Back up and Deploy open that action's dialog, Update opens the stack's Update flow",
+      "what": "the header's Back up, Update or Deploy (b, u, d): opens that action's dialog",
       "opens": "dialog",
       "row": "<stack>/<backup|update|deploy>",
       "href": "/stacks/<stack>",

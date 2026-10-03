@@ -4979,9 +4979,61 @@ dialog.nx-rowmenu[open] {
 .nx-menu a:focus-visible {
   background: var(--nx-soft);
 }
+/* redesign-openpoints-3: entries as buttons, groups under small headings
+   (the stack hub's More ▾), an entry's reason it is disabled, a danger one */
+.nx-menu__item {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: grid;
+  gap: 1px;
+  padding: var(--kp-space-sm) var(--kp-space-sm);
+  border-radius: var(--nx-r-sm);
+  color: inherit;
+}
+.nx-menu__item:hover,
+.nx-menu__item:focus-visible {
+  background: var(--nx-soft);
+}
+.nx-menu__item:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.nx-menu__item[disabled],
+.nx-menu__item[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.nx-menu__item--danger b {
+  color: var(--destructive);
+}
+.nx-menu__group {
+  margin: var(--kp-space-sm) var(--kp-space-sm) 0;
+  font-size: var(--kp-text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+}
+.nx-menu__group:first-child {
+  margin-block-start: var(--kp-space-xs);
+}
+.nx-menu--grouped {
+  inline-size: max-content;
+  min-inline-size: 19rem;
+  max-inline-size: min(26rem, calc(100vw - 2rem));
+  max-block-size: calc(100vh - 12rem);
+  overflow-y: auto;
+}
 @media (max-width: 48rem) {
   .nx-menu {
     inset-inline: 0 auto;
+  }
+  .nx-menu--grouped {
+    inset-inline: 0;
+    inline-size: auto;
+    min-inline-size: 0;
+    max-inline-size: none;
   }
 }
 

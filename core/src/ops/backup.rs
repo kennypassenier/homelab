@@ -2313,6 +2313,263 @@ pub async fn browse_snapshot(
     Ok(parse_snapshot_ls(&out.stdout))
 }
 
+// ── fix-241: one file from a snapshot, read-only ─────────────────────────
+
+/// fix-241: the most of one file [`read_snapshot_file`] hands back. A
+/// settings file is kilobytes; anything past this is cut, and the answer
+/// says so (`truncated`) rather than pretending the start is the whole.
+pub const SNAPSHOT_FILE_CAP: usize = 1024 * 1024;
+
+/// fix-241: one file as a snapshot holds it, read with `restic dump` —
+/// nothing is restored, nothing is written next to live data.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SnapshotFile {
+    /// The repository (owning app or native unit) it was read from.
+    pub owner: String,
+    /// The snapshot as asked for: an id or `latest`.
+    pub snapshot: String,
+    /// The absolute path inside the snapshot.
+    pub path: String,
+    /// The bytes handed back (at most [`SNAPSHOT_FILE_CAP`]).
+    pub shown_bytes: u64,
+    /// The file is larger than the cap: `text` is only its start.
+    pub truncated: bool,
+    /// The cap that applied, so a reader can say "first N bytes".
+    pub cap_bytes: u64,
+    /// Not text (a NUL byte or not UTF-8, e.g. a database, an image, or a
+    /// directory, which `restic dump` sends as a tar): `text` is then None.
+    pub binary: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+/// fix-241: a snapshot reference `restic dump` may take: `latest`, or a
+/// (short or full) hexadecimal snapshot id. Anything else is refused before
+/// a command is built, so no flag or path can ride in as the snapshot.
+pub fn valid_snapshot_ref(s: &str) -> bool {
+    s == "latest" || ((4..=64).contains(&s.len()) && s.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// fix-241: an absolute path inside a snapshot, plain enough to pass as one
+/// argument: no `..`, no control characters.
+pub fn valid_snapshot_path(p: &str) -> bool {
+    p.starts_with('/')
+        && p.len() > 1
+        && !p.chars().any(|c| c.is_control())
+        && !p.split('/').any(|seg| seg == "..")
+}
+
+/// fix-241: the command [`read_snapshot_file`] runs. `restic dump` writes
+/// the file to stdout; `head -c` stops reading one byte past the cap (so a
+/// 10 GB file never lands in the host's memory, and the extra byte is how
+/// the cut is known), and `base64` carries the bytes exactly through the
+/// executor's text output. bash, for `PIPESTATUS`: restic's own exit code,
+/// not head's. Quiet (fix-39): a settings file can hold a secret, so the
+/// transcript names the command and never echoes what came back.
+pub fn snapshot_file_cmd(
+    cfg: &BackupCfg,
+    owner: &str,
+    snapshot: &str,
+    path: &str,
+) -> Result<Cmd, CoreError> {
+    if owner.is_empty()
+        || !owner
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return Err(CoreError::Other(format!(
+            "'{}' is not a repository name (the owner `homelab snapshots` lists)",
+            owner
+        )));
+    }
+    if !valid_snapshot_ref(snapshot) {
+        return Err(CoreError::Other(format!(
+            "'{}' is not a snapshot :: give `latest` or an id `homelab snapshots` lists",
+            snapshot
+        )));
+    }
+    if !valid_snapshot_path(path) {
+        return Err(CoreError::Other(format!(
+            "'{}' is not an absolute path inside the snapshot (no `..`)",
+            path
+        )));
+    }
+    let inner = restic_cmd(cfg, owner, &["dump", snapshot, path], 300);
+    let cap = (SNAPSHOT_FILE_CAP + 1).to_string();
+    let mut args: Vec<&str> = vec![
+        "-c",
+        "cap=$1; shift; \"$@\" | head -c \"$cap\" | base64 -w0; exit \"${PIPESTATUS[0]}\"",
+        "snapshot-file",
+        &cap,
+        &inner.program,
+    ];
+    args.extend(inner.args.iter().map(String::as_str));
+    Ok(Cmd::new("bash", &args, 300).quiet())
+}
+
+/// fix-241: what [`snapshot_file_cmd`]'s output means. Pure, so the cut, the
+/// binary verdict and the error reading are tested without a host.
+pub fn parse_snapshot_file(
+    owner: &str,
+    snapshot: &str,
+    path: &str,
+    out: &crate::executor::CmdOutput,
+) -> Result<SnapshotFile, CoreError> {
+    use base64::Engine;
+    let mut bytes = base64::engine::general_purpose::STANDARD
+        .decode(out.stdout.trim())
+        .map_err(|e| CoreError::Other(format!("the dump of {} did not decode: {}", path, e)))?;
+    let truncated = bytes.len() > SNAPSHOT_FILE_CAP;
+    // A cut file's restic dies of the closed pipe; that exit is the cut, not
+    // a failure. An uncut one must have exited 0.
+    if !truncated && !out.success() {
+        return Err(CoreError::Other(format!(
+            "restic dump {} {} for '{}' failed (exit {}): {}",
+            snapshot,
+            path,
+            owner,
+            out.code,
+            out.stderr.trim()
+        )));
+    }
+    bytes.truncate(SNAPSHOT_FILE_CAP);
+    let text = if bytes.contains(&0) {
+        None
+    } else {
+        match std::str::from_utf8(&bytes) {
+            Ok(s) => Some(s.to_string()),
+            // The cut can fall inside one multi-byte character: the text up
+            // to it is still text.
+            Err(e) if truncated && e.error_len().is_none() => {
+                Some(String::from_utf8_lossy(&bytes[..e.valid_up_to()]).into_owned())
+            }
+            Err(_) => None,
+        }
+    };
+    Ok(SnapshotFile {
+        owner: owner.to_string(),
+        snapshot: snapshot.to_string(),
+        path: path.to_string(),
+        shown_bytes: bytes.len() as u64,
+        truncated,
+        cap_bytes: SNAPSHOT_FILE_CAP as u64,
+        binary: text.is_none(),
+        text,
+    })
+}
+
+/// fix-241: read one file from one snapshot of one repository, without a
+/// restore: `restic dump` to stdout, capped at [`SNAPSHOT_FILE_CAP`]. Never
+/// writes a file, never stops a container, never touches `/appdata`.
+pub async fn read_snapshot_file(
+    exec: &dyn Executor,
+    cfg: &BackupCfg,
+    owner: &str,
+    snapshot: &str,
+    path: &str,
+) -> Result<SnapshotFile, CoreError> {
+    let cmd = snapshot_file_cmd(cfg, owner, snapshot, path)?;
+    let out = exec.run(&cmd).await?;
+    parse_snapshot_file(owner, snapshot, path, &out)
+}
+
+/// fix-241: the directories repository `owner` of stack `m` backs up — the
+/// ones a typed path is resolved against. Empty when `owner` is no
+/// repository of this stack.
+pub fn snapshot_dirs(m: &StackManifest, owner: &str) -> Vec<String> {
+    owner_groups(m)
+        .into_iter()
+        .find(|(o, _)| o == owner)
+        .map(|(_, paths)| paths)
+        .unwrap_or_default()
+}
+
+/// fix-241: where a typed path points inside `owner`'s snapshots, from the
+/// stack's manifest as host state records it. A native unit's snapshot is
+/// one tar stream, not a tree of files, so it is refused with what to use
+/// instead.
+pub fn snapshot_file_target(
+    state: &crate::state::HostState,
+    stack: &str,
+    owner: &str,
+    typed: &str,
+) -> Result<String, String> {
+    let Some(st) = state.stacks.get(stack) else {
+        return Err(format!("stack '{}' is not in host state", stack));
+    };
+    if st.is_native() {
+        return Err(format!(
+            "'{}' is a native service: its snapshot is one tar stream, not a tree of files :: \
+             restore it with `homelab restore-native`",
+            stack
+        ));
+    }
+    let Some(m) = st.manifest.as_ref() else {
+        return Err(format!(
+            "stack '{}' has no manifest in host state :: deploy it once",
+            stack
+        ));
+    };
+    let dirs = snapshot_dirs(m, owner);
+    if dirs.is_empty() {
+        let owners: Vec<String> = owner_groups(m).into_iter().map(|(o, _)| o).collect();
+        return Err(format!(
+            "'{}' is no repository of stack '{}' :: one of: {}",
+            owner,
+            stack,
+            owners.join(", ")
+        ));
+    }
+    resolve_snapshot_path(&dirs, typed)
+}
+
+/// fix-241: a path as a person types it, made into the absolute path the
+/// snapshot holds. `paths` are the directories the app's repository backs
+/// up (its `storage` host paths). A relative path is taken inside the one
+/// directory when there is one; an absolute path must lie under one of
+/// them, so a typo names the directories instead of asking restic for a
+/// path that cannot be there.
+pub fn resolve_snapshot_path(paths: &[String], typed: &str) -> Result<String, String> {
+    let listed = || paths.join(", ");
+    if paths.is_empty() {
+        return Err("this app has no backed-up directory, so no snapshot holds its files".into());
+    }
+    let abs = if typed.starts_with('/') {
+        typed.to_string()
+    } else if paths.len() == 1 {
+        format!(
+            "{}/{}",
+            paths[0].trim_end_matches('/'),
+            typed.trim_start_matches("./")
+        )
+    } else {
+        return Err(format!(
+            "'{}' is relative and this app backs up more than one directory :: give the \
+             absolute path, under one of: {}",
+            typed,
+            listed()
+        ));
+    };
+    if !valid_snapshot_path(&abs) {
+        return Err(format!(
+            "'{}' is not a plain path inside the snapshot (no `..`)",
+            typed
+        ));
+    }
+    let under = paths.iter().any(|p| {
+        let p = p.trim_end_matches('/');
+        abs == p || abs.starts_with(&format!("{}/", p))
+    });
+    if !under {
+        return Err(format!(
+            "'{}' is not under a directory this app backs up :: one of: {}",
+            abs,
+            listed()
+        ));
+    }
+    Ok(abs)
+}
+
 #[cfg(test)]
 mod backup_status_tests {
     use super::*;

@@ -47,6 +47,90 @@ pub fn render(native: bool, repos: &[RepoStatus]) -> String {
     out
 }
 
+/// fix-241: what `homelab snapshot-file` was asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnapshotFileArgs {
+    pub stack: String,
+    pub snapshot: String,
+    pub app: String,
+    pub path: String,
+    pub json: bool,
+}
+
+pub const SNAPSHOT_FILE_USAGE: &str =
+    "usage: homelab snapshot-file stacks/<name> <snapshot|latest> --app <app> <path> [--json]";
+
+/// fix-241: the arguments after `homelab snapshot-file`. Flags may stand
+/// anywhere, as for `restore`; the words are the stack, the snapshot and
+/// the path, in that order. `--app` is required: each app has its own
+/// repository, so without it there is no one place to read from.
+pub fn snapshot_file_args(rest: &[String]) -> Result<SnapshotFileArgs, String> {
+    let mut positional: Vec<String> = Vec::new();
+    let mut app = None;
+    let mut json = false;
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--json" => json = true,
+            "--app" => match it.next() {
+                Some(name) if !name.starts_with("--") && !name.is_empty() => {
+                    app = Some(name.clone())
+                }
+                _ => {
+                    return Err(format!(
+                        "--app needs an app name :: {}",
+                        SNAPSHOT_FILE_USAGE
+                    ));
+                }
+            },
+            other if other.starts_with("--") => {
+                return Err(format!("unknown flag {} :: {}", other, SNAPSHOT_FILE_USAGE));
+            }
+            other => positional.push(other.to_string()),
+        }
+    }
+    let [stack, snapshot, path]: [String; 3] = positional
+        .try_into()
+        .map_err(|_| SNAPSHOT_FILE_USAGE.to_string())?;
+    let app = app.ok_or_else(|| {
+        format!(
+            "--app is required: each app has its own repository :: {}",
+            SNAPSHOT_FILE_USAGE
+        )
+    })?;
+    Ok(SnapshotFileArgs {
+        stack,
+        snapshot,
+        app,
+        path,
+        json,
+    })
+}
+
+/// fix-241: the file for stdout (exactly its text, so it can be redirected
+/// into a file to compare), and the note for stderr: what was read, and
+/// whether it was cut at the cap or is not text.
+pub fn render_snapshot_file(f: &homelab_core::ops::backup::SnapshotFile) -> (String, String) {
+    let mut note = format!(
+        "{} from snapshot {} of repository {} — read only, nothing restored",
+        f.path, f.snapshot, f.owner
+    );
+    if f.truncated {
+        note.push_str(&format!(
+            "\nCUT: the file is larger than {} KiB; this is only its first {} bytes",
+            f.cap_bytes / 1024,
+            f.shown_bytes
+        ));
+    }
+    if f.binary {
+        note.push_str(&format!(
+            "\nnot text ({} bytes read: a database, an image, or a directory) — nothing printed",
+            f.shown_bytes
+        ));
+    }
+    (f.text.clone().unwrap_or_default(), note)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

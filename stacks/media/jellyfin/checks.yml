@@ -6,14 +6,20 @@
 #
 # Every command runs on the CONTAINER, not inside the docker container: that
 # is the level the orchestrator already works at, it reaches every app on
-# localhost, and it can read /appdata directly. Jellyfin's own image has no
-# sqlite3 in it, so a check written one level deeper cannot run at all.
+# localhost, and it can read /appdata directly.
 #
-# The API key is read from Jellyfin's
-# own database rather than passed in, because the key that WAS passed in
-# turned out to be dead and had been for an unknown length of time (F131) —
-# asking the application which keys it accepts is the only reading that
-# cannot go stale.
+# The API key (Jellyfin's "Homelab" key) comes from a file the stack itself
+# lays down: `latch_files` in ../lxc-compose.yml writes it to
+# /etc/homelab/jellyfin-api-key, root-only, on every deploy (fix-242). These
+# probes used to read it with `sqlite3` straight out of the live jellyfin.db,
+# and jellyfin#18100 reports that ANY process opening and closing that
+# database between a migrating boot and the next restart can corrupt it —
+# Jellyfin 12.1's own upgrade on 2026-10-02 was exactly that window. A
+# guard test (core/tests/stack_files_tests.rs) now refuses sqlite3 in any
+# stack command. The reason the key was once read from the database still
+# holds: a key handed in can die unnoticed (F131). It cannot hide here: a
+# dead key makes every probe below fail loudly (401, no number), never read
+# as a healthy zero.
 checks:
   # G22 of the Phase-7 gate. The CT 106 replacement recorded "the device node
   # is present in the LXC and in the container, encoding.xml still says vaapi,
@@ -43,7 +49,7 @@ checks:
 
   - name: "movies in the library"
     command: >-
-      K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
+      K=$(cat /etc/homelab/jellyfin-api-key);
       printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -s -m 30 -K - "http://127.0.0.1:8096/Items/Counts" |
       sed 's/.*"MovieCount":\([0-9]*\).*/\1/'
     expect: never_decreases
@@ -54,7 +60,7 @@ checks:
 
   - name: "series in the library"
     command: >-
-      K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
+      K=$(cat /etc/homelab/jellyfin-api-key);
       printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -s -m 30 -K - "http://127.0.0.1:8096/Items/Counts" |
       sed 's/.*"SeriesCount":\([0-9]*\).*/\1/'
     expect: never_decreases
@@ -62,7 +68,7 @@ checks:
 
   - name: "episodes"
     command: >-
-      K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
+      K=$(cat /etc/homelab/jellyfin-api-key);
       printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -s -m 30 -K - "http://127.0.0.1:8096/Items/Counts" |
       sed 's/.*"EpisodeCount":\([0-9]*\).*/\1/'
     expect: never_decreases
@@ -70,7 +76,7 @@ checks:
 
   - name: "collections"
     command: >-
-      K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
+      K=$(cat /etc/homelab/jellyfin-api-key);
       printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -s -m 30 -K - "http://127.0.0.1:8096/Items/Counts" |
       sed 's/.*"BoxSetCount":\([0-9]*\).*/\1/'
     expect: never_decreases
@@ -81,7 +87,7 @@ checks:
   # in any number.
   - name: "library paths"
     command: >-
-      K=$(sqlite3 /appdata/media/jellyfin-config/data/jellyfin.db "select AccessToken from ApiKeys limit 1");
+      K=$(cat /etc/homelab/jellyfin-api-key);
       printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -s -m 30 -K - "http://127.0.0.1:8096/Library/VirtualFolders" |
       grep -o '/data/[0-9]*TB/[A-Za-z0-9]*' | sort -u | tr '\n' ','
     expect: must_match
@@ -130,7 +136,7 @@ probes:
   # Read 2026-09-30: 0 of 1167 without a poster.
   - name: "movies and series without a poster"
     command: |
-      K=$(sqlite3 "file:/appdata/media/jellyfin-config/data/jellyfin.db?mode=ro" "select AccessToken from ApiKeys where Name='Homelab';")
+      K=$(cat /etc/homelab/jellyfin-api-key) || exit 1
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf 'header = Authorization: MediaBrowser Token="%s"\n' "$K" > "$C"
       # Asked as a user: since 12.x the user-less /Items count leaves items out
       # (1048 against 1167 on 2026-10-02) while the ImageTypes count does not,
@@ -145,7 +151,7 @@ probes:
   # Read 2026-09-30: 59561 bytes (resized; full size is larger).
   - name: "poster of the newest movie, bytes from the artwork disk"
     command: |
-      K=$(sqlite3 "file:/appdata/media/jellyfin-config/data/jellyfin.db?mode=ro" "select AccessToken from ApiKeys where Name='Homelab';")
+      K=$(cat /etc/homelab/jellyfin-api-key) || exit 1
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf 'header = Authorization: MediaBrowser Token="%s"\n' "$K" > "$C"
       ID=$(wget --config="$C" -qO- "http://localhost:8096/Items?Recursive=true&IncludeItemTypes=Movie&ImageTypes=Primary&SortBy=DateCreated&SortOrder=Descending&Limit=1" | jq -r '.Items[0].Id')
       wget -qO- "http://localhost:8096/Items/$ID/Images/Primary" | wc -c
@@ -162,7 +168,7 @@ probes:
 # which counts as in use. The key goes in through curl -K -, never argv.
 busy_check:
   command: |
-    K=$(sqlite3 "file:/appdata/media/jellyfin-config/data/jellyfin.db?mode=ro" 'select AccessToken from ApiKeys limit 1') || exit 1
+    K=$(cat /etc/homelab/jellyfin-api-key) || exit 1
     S=$(printf 'header = "Authorization: MediaBrowser Token=%s"\n' "$K" | curl -sf -m 10 -K - http://127.0.0.1:8096/Sessions) || { echo "Jellyfin did not answer" >&2; exit 1; }
     [ -n "$S" ] || { echo "Jellyfin returned nothing" >&2; exit 1; }
     printf '%s' "$S" | jq -r 'if type == "array" then .[] | select(.NowPlayingItem != null) | "\(.UserName // "someone") is \(if .PlayState.IsPaused then "paused on" else "watching" end) \(.NowPlayingItem.Name // "something")" else error("not a list of sessions") end'

@@ -1371,6 +1371,12 @@ const CLI_ONLY: &[(&str, &str)] = &[
          a file browser",
     ),
     (
+        "ReadSnapshotFile",
+        "fix-241: `homelab snapshot-file` and the dashboard's Backups page \
+         show one file of a snapshot; the TUI's snapshots list is not a file \
+         viewer",
+    ),
+    (
         "RestoreNative",
         "the dashboard's restore action for a native service (ActionKind::\
          RestoreNative); the TUI has no restore flow of its own, native or \

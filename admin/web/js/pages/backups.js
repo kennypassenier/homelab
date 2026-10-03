@@ -3,7 +3,8 @@
 // stack), the newest snapshot, its age and size, and the last restore-drill
 // verdict recorded for that repository. Restore picks a snapshot here and
 // opens the existing Restore/Restore (native) action dialog with it
-// pre-filled; browsing a snapshot expands its file list inline, read-only.
+// pre-filled. fix-241: "Show a file…" reads one file as a snapshot holds
+// it, read-only (`restic dump` on the host, cut at 1 MiB), no restore.
 
 import {
   badgeCell,
@@ -16,6 +17,9 @@ import {
 import { agoText, humanDuration } from "../format.js";
 import { humanMb } from "../fleet.js";
 import { openAction } from "../actiondialog.js";
+import { openDialog } from "../actui.js";
+import { snapshotPickerRows } from "../snapshotpicker.js";
+import { snapshotFileUrl, snapshotFileView } from "../snapshotfile.js";
 import { stackChips, stackReadProgress, withStackResult } from "../perstack.js";
 import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
@@ -88,7 +92,16 @@ function rows(stack, native, repos) {
       // the fleet check.
       td(agoText("read", r.measured_at, Math.floor(Date.now() / 1000))),
       badgeCell({ label: drillLabel, tone: drillTone }),
-      h("td", null, ...restoreCell(stack, native, r)),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { class: "backups__actions" },
+          ...restoreCell(stack, native, r),
+          ...fileCell(stack, native, r),
+        ),
+      ),
     );
     return tr;
   });
@@ -125,6 +138,151 @@ function restoreCell(stack, native, r) {
       }),
   );
   return [btn];
+}
+
+/**
+ * fix-241: "Show a file…" — one file of one snapshot of this app, read-only.
+ * A native unit's snapshot is one tar stream, not a tree of files, so its
+ * row has no such button (restore is the way back for it).
+ * @param {string} stack
+ * @param {boolean} native
+ * @param {any} r
+ * @returns {Node[]}
+ */
+function fileCell(stack, native, r) {
+  if (native || !r.newest_snapshot) return [];
+  const btn = h(
+    "button",
+    {
+      class: "kp-button kp-button--sm kp-button--ghost",
+      type: "button",
+      "data-action": "snapshot-file",
+      title:
+        "Read one file as this snapshot holds it, without restoring anything",
+    },
+    "Show a file…",
+  );
+  btn.addEventListener("click", () => openFileDialog(stack, r));
+  return [btn];
+}
+
+/**
+ * @param {string} stack
+ * @param {any} r a repository row: `owner`, `snapshots`
+ */
+function openFileDialog(stack, r) {
+  const now = Math.floor(Date.now() / 1000);
+  const id = `snapfile-${stack}-${r.owner}`;
+  const snap = h("select", { class: "kp-field__input", id: `${id}-snap` });
+  snap.append(
+    ...snapshotPickerRows(r.snapshots ?? [], now).map((row) =>
+      h(
+        "option",
+        { value: row.value },
+        `${row.shortId} · ${row.when} · ${row.ago}${row.latest ? " (latest)" : ""}`,
+      ),
+    ),
+  );
+  const path = h("input", {
+    class: "kp-field__input",
+    type: "text",
+    id: `${id}-path`,
+    autocomplete: "off",
+    spellcheck: "false",
+    placeholder: "config/settings.xml",
+    "aria-describedby": `${id}-path-hint`,
+  });
+  const show = h(
+    "button",
+    { class: "kp-button kp-button--primary", type: "submit" },
+    "Show the file",
+  );
+  const status = h(
+    "p",
+    { class: "snapfile__status", role: "status", "aria-live": "polite" },
+    "Pick a snapshot, type a path, then Show the file.",
+  );
+  const out = h("pre", { class: "snapfile__out mono", tabindex: "0" });
+  const form = h(
+    "form",
+    { class: "snapfile" },
+    h(
+      "div",
+      { class: "kp-field" },
+      h("label", { class: "kp-field__label", for: `${id}-snap` }, "Snapshot"),
+      snap,
+    ),
+    h(
+      "div",
+      { class: "kp-field" },
+      h("label", { class: "kp-field__label", for: `${id}-path` }, "File"),
+      path,
+      h(
+        "p",
+        { class: "kp-field__help", id: `${id}-path-hint` },
+        "Relative to this app's backed-up directory, or the absolute path under it.",
+      ),
+    ),
+    h(
+      "div",
+      { class: "snapfile__go" },
+      show,
+      h(
+        "span",
+        { class: "kp-field__help" },
+        "Reads the file from the backup on the host; nothing is restored or written.",
+      ),
+    ),
+    status,
+    out,
+  );
+  /** @type {AbortController | null} */
+  let reading = null;
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const typed = /** @type {HTMLInputElement} */ (path).value.trim();
+    if (!typed) {
+      status.textContent = "Type the path of the file first.";
+      return;
+    }
+    reading?.abort();
+    const abort = new AbortController();
+    reading = abort;
+    const chosen = /** @type {HTMLSelectElement} */ (snap).value;
+    status.textContent = `Reading ${typed} from the snapshot… (up to 30 s; the backup lives on the remote)`;
+    out.textContent = "";
+    void fetchJson(
+      snapshotFileUrl(stack, r.owner, chosen, typed),
+      "the file from the snapshot",
+      abort.signal,
+    )
+      .then((res) => {
+        if (abort.signal.aborted) return;
+        if (!res.ok) {
+          status.textContent = res.error.fix
+            ? `Could not read it: ${res.error.why} — ${res.error.fix}`
+            : `Could not read it: ${res.error.why}`;
+          return;
+        }
+        const v = snapshotFileView(/** @type {any} */ (res.body));
+        status.textContent = v.notes.join(" ");
+        status.dataset.tone = v.tone;
+        out.textContent = v.text;
+      })
+      .catch((e) => {
+        if (!abort.signal.aborted)
+          status.textContent = `Could not read it: ${String(e)}`;
+      });
+  });
+  const d = openDialog({
+    title: `A file from ${r.owner}'s backup`,
+    description: `Shows one file of ${stack}/${r.owner} as the chosen snapshot holds it (up to 1 MiB, and says so when cut), without restoring anything.`,
+    body: [form],
+    wide: true,
+    id,
+  });
+  void d.closed.then(() => reading?.abort());
+  /** @type {HTMLInputElement} */ (path).focus();
 }
 
 /**

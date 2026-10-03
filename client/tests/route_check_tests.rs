@@ -144,7 +144,10 @@ fn hostnames_are_read_from_every_router_rule() {
 /// stack: Sonarr is son.kp-soft.dev, and an app with no router has none.
 #[test]
 fn checks_link_a_manual_check_carries_the_address_of_its_app() {
-    let spec = homelab_client::spec::build_spec(&stacks().join("media")).unwrap();
+    // fix-242: media now carries a `latch_files` entry (Jellyfin's API key),
+    // so the full `build_spec` would need a latch session; the checks are
+    // built the same way without one.
+    let spec = homelab_client::spec::build_spec_files_only(&stacks().join("media")).unwrap();
     assert_eq!(
         spec.checks["sonarr"].url.as_deref(),
         Some("https://son.kp-soft.dev")

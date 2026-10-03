@@ -3703,6 +3703,74 @@ test("invariants: the Host page lays out two columns, Containers first, the line
   }
 });
 
+// redesign-host-4: the seven facts the approved demo shows that the host
+// did not send before 3.71.0. The demo host sends every one, so nothing on
+// the page may read "not reported", and each shows its real value.
+test("invariants: the Host page shows every host fact the demo host sends, none reported missing", async () => {
+  const browser = await chromium.launch();
+  try {
+    const bad = [];
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 1000 },
+      });
+      const page = await freshPage(context);
+      await page.goto(`${BASE}/host`);
+      await page
+        .locator("#host-guests tr[data-vmid='113']")
+        .waitFor({ timeout: 10000 });
+      await page
+        .locator("#host-growth", { hasText: /Root/ })
+        .waitFor({ timeout: 10000 });
+      const r = await page.evaluate(() => {
+        const text = (/** @type {string} */ sel) =>
+          (document.querySelector(sel)?.textContent ?? "")
+            .replace(/\s+/g, " ")
+            .trim();
+        return {
+          all: text("main") || document.body.textContent || "",
+          pool: text(".hk-kpi[data-key='pool']"),
+          promised: text("#host-pool-promised"),
+          written: text("#host-pool-written"),
+          disk: text("#host-disk .hk-disk-line"),
+          about: text("#host-about"),
+          signature: text("#host-daemon-signature"),
+          metrics: text("#host-guests tr[data-vmid='113']"),
+          growth: text("#host-growth"),
+        };
+      });
+      if (/not reported/i.test(r.all))
+        bad.push(
+          `${width}px: the page still says "not reported": ${r.all.match(/.{0,60}not reported.{0,40}/i)?.[0]}`,
+        );
+      if (!/41\s*%/.test(r.pool) || !/460 GB free of 780 GB/.test(r.pool))
+        bad.push(`${width}px: pool KPI "${r.pool}"`);
+      if (!/412 GB/.test(r.promised))
+        bad.push(`${width}px: promised "${r.promised}"`);
+      if (!/320 GB · 41%/.test(r.written))
+        bad.push(`${width}px: written "${r.written}"`);
+      if (!/\(932 GB SSD\)/.test(r.disk))
+        bad.push(`${width}px: root disk line "${r.disk}"`);
+      if (!/Up for ?12 days 3 h/.test(r.about))
+        bad.push(`${width}px: about "${r.about}"`);
+      if (!/\(signed release\)/.test(r.signature))
+        bad.push(`${width}px: daemon "${r.signature}"`);
+      // The unmanaged container's memory and CPU (hidden columns on a
+      // phone still carry the text).
+      if (!/3\.0 \/ 8\.0 GiB/.test(r.metrics) || !/13%/.test(r.metrics))
+        bad.push(`${width}px: CT 113 row "${r.metrics}"`);
+      if (
+        !/^Root grows 0\.2 GB a week — full in about \d+ years/.test(r.growth)
+      )
+        bad.push(`${width}px: growth "${r.growth}"`);
+      await context.close();
+    }
+    assert.deepEqual(bad, [], bad.join("; "));
+  } finally {
+    await browser.close();
+  }
+});
+
 test("invariants: the Host page's Containers filter toggles with a plain click and / focuses its search", async () => {
   const browser = await chromium.launch();
   try {

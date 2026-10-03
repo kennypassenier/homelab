@@ -109,6 +109,15 @@ pub enum Command {
     /// rollback, and restarts itself.
     SelfUpdateHost {
         binary_b64: String,
+        /// redesign-host-4: the signed checksum list the binary came with,
+        /// when it came from a release (`release-update`, the dashboard's
+        /// Update host). The host verifies it again and records it, so it
+        /// can later report whether the daemon running is a signed
+        /// release. None for a file shipped by hand (`self-update`) and
+        /// from a client or dashboard older than 3.71.0; left off the wire
+        /// then, so an older host reads the command exactly as before.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        proof: Option<ReleaseProof>,
     },
     /// Owner decision 2026-09-30 (item 2): restart `homelab-host.service`
     /// itself, so a `host.toml` change marked `Apply::Restart` takes
@@ -1189,6 +1198,61 @@ pub struct HostView {
     /// first gather, or on a host too old to send it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk_detail: Option<HostDiskDetail>,
+    /// redesign-host-4: seconds since the host booted (`/proc/uptime`).
+    /// None from a host older than 3.71.0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uptime_s: Option<u64>,
+    /// redesign-host-4: whether the running daemon is a signed release, as
+    /// the host verified its own binary against the signature recorded when
+    /// it was installed. None from a host older than 3.71.0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release: Option<ReleaseVerdict>,
+    /// redesign-host-4: every guest's measured use at the host's last status
+    /// reading — the ones this orchestrator manages and the ones it does
+    /// not — by vmid. None before the first reading, and from a host older
+    /// than 3.71.0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guests_usage: Option<Vec<GuestUse>>,
+}
+
+/// redesign-host-4: see `Command::SelfUpdateHost::proof`. The release's
+/// `SHA256SUMS` and the text of its `SHA256SUMS.minisig`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseProof {
+    pub sums: String,
+    pub sig: String,
+}
+
+/// redesign-host-4: see `HostView::release`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseVerdict {
+    pub signed: bool,
+    /// Why, in a sentence a person can act on.
+    pub detail: String,
+}
+
+/// redesign-host-4: one guest's measured use, flat beside its vmid.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuestUse {
+    pub vmid: u16,
+    #[serde(flatten)]
+    pub usage: GuestUsage,
+}
+
+/// redesign-host-4: how full the local-lvm thin pool is, and what its
+/// volumes are promised (`lvs`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ThinPoolUse {
+    /// The pool's data area, percent full.
+    pub data_pct: f64,
+    /// Its metadata area, percent full.
+    pub metadata_pct: f64,
+    /// The virtual sizes of every volume carved from the pool summed, GiB:
+    /// what the guests are promised. Above the pool's size is thin
+    /// over-provisioning.
+    pub promised_gb: f64,
+    /// How many volumes that covers.
+    pub volumes: u32,
 }
 
 /// fix-222: see `HostView::disk_detail`. Every size is GiB, already
@@ -1211,6 +1275,15 @@ pub struct HostDiskDetail {
     /// Unix seconds this reading was taken; gathering is bounded and cached
     /// (it runs `du`), so this can be noticeably older than `measured_at`.
     pub measured_at: u64,
+    /// redesign-host-4: the root disk's kind ("SSD", "HDD", "NVMe SSD"),
+    /// from its rotation flag and transport. None when unread, and from a
+    /// host older than 3.71.0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_disk_kind: Option<String>,
+    /// redesign-host-4: how full the thin pool is and what it promises.
+    /// None when unread, and from a host older than 3.71.0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thin_pool: Option<ThinPoolUse>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

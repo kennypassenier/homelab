@@ -4499,8 +4499,9 @@ test("invariants: Activity is one page with Now and history, Planned and Host lo
   }
 });
 
-// redesign-activity: History's Show filter is plain-click toggle chips
-// (several at once, none = everything), kept in the address; a failed row
+// redesign-activity: History's Show filter is the demo's one-of switch
+// (All, Failed, Nightly, By Claude) with a plain click, kept in the
+// address (senior review, finding 7); a failed row
 // opens in place with its error and its fixes.
 test("invariants: Activity's History filters with a plain click, keeps it in the address, and a failed row opens with its fixes", async () => {
   const browser = await chromium.launch();
@@ -4514,7 +4515,11 @@ test("invariants: Activity's History filters with a plain click, keeps it in the
     const count = () =>
       page.locator("#history .ac-count").textContent({ timeout: 2000 });
     const all = await count();
-    await page.locator('#history .nx-chip-toggle[data-value="claude"]').click();
+    const pick = (/** @type {string} */ v) =>
+      page
+        .locator(`#history [data-drive="activity-show"][data-drive-row="${v}"]`)
+        .click();
+    await pick("claude");
     const claude = await page.evaluate(() =>
       [...document.querySelectorAll("#history .ac-row .ac-by-chip")].map((c) =>
         (c.textContent ?? "").trim(),
@@ -4526,19 +4531,16 @@ test("invariants: Activity's History filters with a plain click, keeps it in the
       `By Claude shows ${[...new Set(claude)]}`,
     );
     assert.match(page.url(), /show=claude/);
-    await page.locator('#history .nx-chip-toggle[data-value="failed"]').click();
-    assert.match(page.url(), /show=failed%2Cclaude|show=failed,claude/);
-    const both = await page.evaluate(() =>
+    await pick("failed");
+    assert.match(page.url(), /show=failed(&|$)/);
+    const onlyFailed = await page.evaluate(() =>
       [...document.querySelectorAll("#history .ac-row")].every(
-        (r) =>
-          /Claude/.test(r.querySelector(".ac-by-chip")?.textContent ?? "") ||
-          /** @type {HTMLElement} */ (r).dataset.tone === "bad",
+        (r) => /** @type {HTMLElement} */ (r).dataset.tone === "bad",
       ),
     );
-    assert.ok(both, "Failed + By Claude shows a row that is neither");
-    // Clicking both off shows everything again.
-    await page.locator('#history .nx-chip-toggle[data-value="failed"]').click();
-    await page.locator('#history .nx-chip-toggle[data-value="claude"]').click();
+    assert.ok(onlyFailed, "Failed shows a row that did not fail");
+    // All shows everything again.
+    await pick("all");
     assert.equal(await count(), all);
     const failed = page.locator('#history .ac-row[data-tone="bad"]').first();
     await failed.click();
@@ -4758,6 +4760,428 @@ test("invariants: Console shows the host's lines with the shell bar under them, 
       (await page.locator(".con-live").textContent()) ?? "",
       /paused/,
     );
+  } finally {
+    await browser.close();
+  }
+});
+
+// Senior review of redesign-371-activity: a fake live channel, so a test
+// can hand the page a host line at the moment it chooses.
+const FAKE_EVENTS = () => {
+  const Real = window.EventSource;
+  /** @type {EventSource[]} */
+  const all = [];
+  // @ts-ignore
+  window.__es = all;
+  // @ts-ignore
+  window.EventSource = class extends Real {
+    /** @param {string | URL} u @param {EventSourceInit} [o] */
+    constructor(u, o) {
+      super(u, o);
+      all.push(this);
+    }
+  };
+};
+/**
+ * @param {import("playwright").Page} page
+ * @param {object[]} lines
+ */
+const pushLines = (page, lines) =>
+  page.evaluate((ls) => {
+    // @ts-ignore
+    for (const es of window.__es)
+      for (const l of ls)
+        es.dispatchEvent(
+          new MessageEvent("host_log", { data: JSON.stringify(l) }),
+        );
+  }, lines);
+/** @param {number} seq @param {string} source @param {string} msg */
+const hostLine = (seq, source, msg) => ({
+  seq,
+  ts: Math.floor(Date.now() / 1000),
+  level: "info",
+  source,
+  msg,
+  req: null,
+  by: null,
+});
+
+// Finding 1: a live line that arrives before the snapshot no longer hides
+// every snapshot line. Finding 3: the side column is built once, so a
+// focused source keeps focus while lines (and a new source) arrive.
+test("invariants: review-activity: the host log merges early live lines with its snapshot and keeps side-column focus", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const snap = await page.evaluate(async () => {
+      const r = await fetch("/data/host-log");
+      const b = await r.json();
+      return (b.lines ?? []).filter(
+        (/** @type {{level: string}} */ l) => l.level !== "debug",
+      ).length;
+    });
+    await page.addInitScript(FAKE_EVENTS);
+    let release = () => {};
+    const held = new Promise((r) => (release = () => r(undefined)));
+    await page.route("**/data/host-log*", async (route) => {
+      await Promise.race([held, new Promise((r) => setTimeout(r, 8000))]);
+      await route.continue();
+    });
+    await page.goto(`${BASE}/console`);
+    await page.waitForFunction(
+      // @ts-ignore
+      () => (window.__es ?? []).length > 0,
+      null,
+      { timeout: 5000 },
+    );
+    assert.ok(snap > 1, `the demo snapshot holds ${snap} lines`);
+    await pushLines(page, [hostLine(9_000_000, "HOST", "early live line")]);
+    release();
+    await page.locator(".hl-out .hl-ln[data-seq]").first().waitFor({
+      timeout: 10000,
+    });
+    await page.waitForTimeout(300);
+    const r = await page.evaluate(() => ({
+      count: (document.querySelector(".hl-count")?.textContent ?? "").trim(),
+      early: !!document.querySelector('.hl-ln[data-seq="9000000"]'),
+    }));
+    const total = Number(/of (\d+)/.exec(r.count)?.[1] ?? 0);
+    assert.ok(r.early, "the early live line is missing");
+    assert.ok(
+      total >= snap,
+      `"${r.count}": the snapshot's ${snap} lines were dropped`,
+    );
+    // Focus a source; lines and a new source arrive; focus stays put.
+    const host = page.locator(
+      '.hl-side input[data-drive="console-source"][data-drive-row="HOST"]',
+    );
+    await host.focus();
+    await host.evaluate((el) => (el.dataset.mark = "kept"));
+    await pushLines(page, [
+      hostLine(9_000_001, "HOST", "one"),
+      hostLine(9_000_002, "zz-new-source", "two"),
+      hostLine(9_000_003, "HOST", "three"),
+    ]);
+    await page.waitForTimeout(400);
+    const after = await page.evaluate(() => ({
+      mark: /** @type {HTMLElement} */ (document.activeElement)?.dataset?.mark,
+      newRow: !!document.querySelector(
+        '.hl-side input[data-drive-row="zz-new-source"]',
+      ),
+    }));
+    assert.equal(after.mark, "kept", "the focused source lost focus");
+    assert.ok(after.newRow, "the new source got no row");
+  } finally {
+    await browser.close();
+  }
+});
+
+// Findings 12, 14, 16: Space opens a focused line like Enter, "Copied"
+// turns back into "Copy line", and the side column's hint and reset use
+// the demo's words.
+test("invariants: review-activity: a host line opens with Space, Copy line comes back, and the hint reads as the demo", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/console`);
+    const first = page.locator(".hl-out .hl-ln[data-seq]").first();
+    await first.waitFor({ timeout: 10000 });
+    const hint = async () =>
+      page.evaluate(() => {
+        const vis = (/** @type {Element | null} */ e) =>
+          !!e && /** @type {HTMLElement} */ (e).offsetParent !== null;
+        const reset = [...document.querySelectorAll(".hl-side button")].find(
+          (b) => (b.textContent ?? "").trim() === "Reset the filters",
+        );
+        return {
+          hint: vis(document.querySelector(".hl-side .hl-hint"))
+            ? (
+                document.querySelector(".hl-side .hl-hint")?.textContent ?? ""
+              ).trim()
+            : null,
+          reset: vis(reset ?? null),
+        };
+      });
+    assert.deepEqual(await hint(), {
+      hint: "Hover a source for “only”.",
+      reset: false,
+    });
+    await page
+      .locator(
+        '.hl-side input[data-drive="console-source"][data-drive-row="HOST"]',
+      )
+      .click();
+    assert.deepEqual(await hint(), { hint: null, reset: true });
+    await page
+      .locator(
+        '.hl-side input[data-drive="console-source"][data-drive-row="HOST"]',
+      )
+      .click();
+    const row = page.locator(".hl-out .hl-ln[data-seq]").first();
+    await row.focus();
+    await page.keyboard.press(" ");
+    assert.equal(await row.getAttribute("aria-expanded"), "true");
+    assert.equal(
+      await page.evaluate(
+        () =>
+          /** @type {HTMLElement} */ (document.querySelector(".con-body"))
+            ?.dataset.following,
+      ),
+      "true",
+      "Space on a line paused the log instead of opening it",
+    );
+    const copy = page.locator(".hl-more button", { hasText: /Copy line/ });
+    await copy.click();
+    await page.waitForFunction(
+      () =>
+        [...document.querySelectorAll(".hl-more button")].some((b) =>
+          /^(Copied|Press Ctrl C)$/.test((b.textContent ?? "").trim()),
+        ),
+      null,
+      { timeout: 2000 },
+    );
+    await page.waitForFunction(
+      () =>
+        [...document.querySelectorAll(".hl-more button")].some(
+          (b) => (b.textContent ?? "").trim() === "Copy line",
+        ),
+      null,
+      { timeout: 4000 },
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// Findings 5 and 11: the live chip beside the title, "2 000", the demo's
+// phone header order, the first container chosen, and the exec hint there
+// from the first frame even when the host's settings cannot be read.
+test("invariants: review-activity: Console's header and shell bar are the demo's", async () => {
+  const browser = await chromium.launch();
+  try {
+    const bad = [];
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 1000 },
+      });
+      const page = await freshPage(context);
+      await page.route("**/data/host-settings*", (r) => r.abort());
+      await page.goto(`${BASE}/console`);
+      await page.locator(".hl-out .hl-ln[data-seq]").first().waitFor({
+        timeout: 10000,
+      });
+      const r = await page.evaluate(() => {
+        const box = (/** @type {string} */ q) =>
+          document.querySelector(q)?.getBoundingClientRect() ?? null;
+        const btn = (/** @type {string} */ t) =>
+          [...document.querySelectorAll(".nx-head .kp-button")]
+            .find((b) => (b.textContent ?? "").trim() === t)
+            ?.getBoundingClientRect() ?? null;
+        const sel = /** @type {HTMLSelectElement | null} */ (
+          document.querySelector("#shell-target")
+        );
+        const off = /** @type {HTMLElement | null} */ (
+          document.querySelector(".con-off")
+        );
+        return {
+          beside: !!document
+            .querySelector(".nx-head h1")
+            ?.nextElementSibling?.classList.contains("con-live"),
+          chip: (document.querySelector(".con-live")?.textContent ?? "").trim(),
+          h1: box(".nx-head h1"),
+          desc: box(".nx-head .nx-head-desc"),
+          head: box(".nx-head"),
+          run: btn("Run a command"),
+          pause: btn("Pause"),
+          download: btn("Download"),
+          select: sel?.value ?? "",
+          first: sel?.options[0]?.value ?? "",
+          pick: [...(sel?.options ?? [])].some((o) =>
+            /Pick a container/.test(o.textContent ?? ""),
+          ),
+          hint: off && !off.hidden ? (off.textContent ?? "").trim() : "",
+          overflow: document.documentElement.scrollWidth - window.innerWidth,
+        };
+      });
+      const at = `${width}px`;
+      if (!r.beside) bad.push(`${at}: the live chip is not beside the title`);
+      if (!/2\s000-line ring/.test(r.chip))
+        bad.push(`${at}: the chip reads "${r.chip}"`);
+      if (!r.select || r.select !== r.first || r.pick)
+        bad.push(`${at}: the container select starts on "${r.select}"`);
+      if (!r.hint) bad.push(`${at}: no exec hint when the settings fail`);
+      if (r.overflow > 0) bad.push(`${at}: scrolls ${r.overflow}px sideways`);
+      if (
+        width === 390 &&
+        r.h1 &&
+        r.desc &&
+        r.run &&
+        r.pause &&
+        r.download &&
+        r.head
+      ) {
+        if (!(r.desc.top > r.h1.top))
+          bad.push(`${at}: the description is above the title`);
+        if (!(r.run.top > r.desc.top))
+          bad.push(`${at}: Run a command is not under the description`);
+        if (r.run.width < r.head.width - 4)
+          bad.push(
+            `${at}: Run a command is ${r.run.width}px of ${r.head.width}`,
+          );
+        if (!(r.pause.top > r.run.top))
+          bad.push(`${at}: Pause is not under Run a command`);
+        if (Math.abs(r.pause.top - r.download.top) > 2)
+          bad.push(`${at}: Pause and Download are not side by side`);
+      }
+      await context.close();
+    }
+    assert.deepEqual(bad, [], bad.join("; "));
+  } finally {
+    await browser.close();
+  }
+});
+
+// Findings 7, 8, 9, 10, 13: History's Show switch (All and Failed with
+// exact counts), owners instead of tokens, the Host log's Pause and
+// Download together and its key hints once, its description true on a
+// phone, and a cancelled touch leaves no brush on the timeline.
+test("invariants: review-activity: History's Show switch counts, By names owners, the Host log groups its buttons, the brush never sticks", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/activity`);
+    await page.locator("#history .ac-row").first().waitFor({ timeout: 10000 });
+    const sw = await page.evaluate(() =>
+      [
+        ...document.querySelectorAll('#history [data-drive="activity-show"]'),
+      ].map((b) => (b.textContent ?? "").trim()),
+    );
+    const total = Number(
+      /of (\d+)/.exec(
+        (await page.locator("#history .ac-count").textContent()) ?? "",
+      )?.[1] ?? -1,
+    );
+    assert.equal(sw.length, 4, `the Show switch has ${sw}`);
+    assert.match(sw[0], /^All\s*(\d+)$/);
+    assert.equal(Number(/(\d+)$/.exec(sw[0])?.[1]), total, "All's count");
+    assert.match(sw[1], /^Failed\s*\d+$/);
+    assert.deepEqual(sw.slice(2), ["Nightly", "By Claude"]);
+    await page
+      .locator('#history [data-drive="activity-show"][data-drive-row="failed"]')
+      .click();
+    assert.match(page.url(), /show=failed/);
+    const tones = await page.evaluate(() =>
+      [...document.querySelectorAll("#history .ac-row")].map(
+        (r) => /** @type {HTMLElement} */ (r).dataset.tone,
+      ),
+    );
+    assert.ok(
+      tones.every((t) => t === "bad"),
+      "Failed shows a row that did not fail",
+    );
+    await page.locator("body").press("f");
+    assert.doesNotMatch(page.url(), /show=/);
+    const by = await page.evaluate(() =>
+      [...document.querySelectorAll("#history .ac-by-chip")].map((c) =>
+        (c.textContent ?? "").trim(),
+      ),
+    );
+    const raw = by.filter((b) => /^[a-z0-9][a-z0-9._-]*$/.test(b));
+    assert.deepEqual([...new Set(raw)], [], "By shows a raw token");
+    // The timeline: a touch scroll ends in pointercancel; no brush stays.
+    const tl = page.locator("#timeline .timeline");
+    const b = await tl.boundingBox();
+    assert.ok(b, "no timeline");
+    await page.mouse.move(b.x + 100, b.y + 40);
+    await page.mouse.down();
+    await page.mouse.move(b.x + 260, b.y + 40, { steps: 4 });
+    await tl.evaluate((el) =>
+      el.dispatchEvent(
+        new PointerEvent("pointercancel", { pointerId: 1, bubbles: true }),
+      ),
+    );
+    await page.mouse.move(b.x + 300, b.y + 40);
+    await page.waitForTimeout(100);
+    const brushes = await page.locator("#timeline .ac-tl__brush").count();
+    await page.mouse.up();
+    assert.equal(brushes, 0, "the brush stayed after pointercancel");
+    // The Host log: Pause and Download in the card's head, hints once.
+    await page.goto(`${BASE}/activity?view=host-log`);
+    await page
+      .locator(".hl-out .hl-ln[data-seq]")
+      .first()
+      .waitFor({ timeout: 10000 });
+    const hl = await page.evaluate(() => {
+      const card = document.querySelector("#host-log-card");
+      const outside = [...(card?.querySelectorAll(".kp-button") ?? [])]
+        .filter((b) => !b.closest(".hl"))
+        .map((b) => (b.textContent ?? "").trim());
+      return {
+        outside,
+        inBar: !!document.querySelector(".hl-bar .hl-follow"),
+        keys: document.querySelector(".hk-keys, .ac-keys")?.textContent ?? "",
+        desc: card?.textContent ?? "",
+      };
+    });
+    assert.deepEqual(hl.outside, ["Pause", "Download"]);
+    assert.equal(hl.inBar, false, "Pause is in the toolbar as well");
+    assert.doesNotMatch(hl.keys, /Space|End/, "the key hints show twice");
+    assert.doesNotMatch(hl.desc, /on the left/);
+  } finally {
+    await browser.close();
+  }
+});
+
+// Finding 4: a minute's reread that fails keeps the rows, with a note,
+// and the focused row keeps focus across the repaint.
+test("invariants: review-activity: a failed History reread keeps the rows and the focused row", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.clock.install();
+    let reads = 0;
+    await page.route("**/data/history*", (route) =>
+      ++reads > 1 ? route.abort() : route.continue(),
+    );
+    await page.goto(`${BASE}/activity`);
+    const row = page.locator("#history .ac-row").nth(2);
+    await row.waitFor({ timeout: 10000 });
+    const key = await row.getAttribute("data-key");
+    await row.focus();
+    const before = await page.locator("#history .ac-row").count();
+    await page.clock.fastForward(61_000);
+    await page
+      .waitForFunction(() => !!document.querySelector(".ac-stale"), null, {
+        timeout: 5000,
+      })
+      .catch(() => {});
+    const r = await page.evaluate(() => ({
+      rows: document.querySelectorAll("#history .ac-row").length,
+      alert: !!document.querySelector("#history .kp-alert--destructive"),
+      stale: (
+        document.querySelector("#history .ac-stale")?.textContent ?? ""
+      ).trim(),
+      focus:
+        /** @type {HTMLElement} */ (document.activeElement)?.dataset?.key ??
+        null,
+    }));
+    assert.ok(reads > 1, "the minute's reread never ran");
+    assert.equal(r.alert, false, "the rows were replaced by the error");
+    assert.equal(r.rows, before);
+    assert.match(r.stale, /Not refreshed/);
+    assert.equal(r.focus, key, "the focused row lost focus");
   } finally {
     await browser.close();
   }

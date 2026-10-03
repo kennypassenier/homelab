@@ -36,6 +36,7 @@ import {
   kpis,
   openFailures,
   rowMatches,
+  showCounts,
   stepSegments,
   windowDays,
 } from "../activityview.js";
@@ -58,17 +59,14 @@ import {
   section,
   skeletonBlock,
   skeletonLines,
-  toggleChips,
   toolbar,
 } from "../ui.js";
 import { setParams } from "../urlstate.js";
 import { tabRow } from "../dom.js";
-import {
-  ensureStyle,
-  keysRow,
-  openJobDialog,
-  segmented,
-} from "./activitykit.js";
+import { openJobDialog } from "./activitykit.js";
+// Senior review, finding 6: the shared blocks come from hostkit.js (the
+// shared-kit helper moves them into ui.js), not a copy of their own.
+import { ensureStyle, keyRow, segSwitch } from "./hostkit.js";
 import { mountJobsTable } from "./jobs.js";
 import { mountHostLog } from "./log.js";
 import { mount as mountSchedules } from "./schedules.js";
@@ -111,8 +109,8 @@ const SHOW_CHIP = declare({
   id: "activity-show",
   page: "activity",
   opens: "view",
-  row: "failed|nightly|claude",
-  what: "turn one of History's Show filters on or off",
+  row: "all|failed|nightly|claude",
+  what: "show All of History, or only Failed, Nightly or By Claude",
 });
 const ROW = declare({
   id: "activity-row",
@@ -325,9 +323,9 @@ export function mount(root, ctx) {
   const view = asked === "planned" || asked === "host-log" ? asked : "";
   const days = windowDays(params);
 
-  const windowSeg = segmented({
+  const windowSeg = segSwitch({
     label: "Window",
-    options: WINDOWS.map((d) => ({
+    items: WINDOWS.map((d) => ({
       value: String(d),
       label: `${d} ${d === 1 ? "day" : "days"}`,
       hint: `Show the last ${d === 1 ? "day" : `${d} days`}`,
@@ -337,7 +335,7 @@ export function mount(root, ctx) {
       ctx.navigate(
         `/activity${setParams(location.search, { days: v === "14" ? null : v, from: null, to: null })}`,
       ),
-    decorate: (b, v) => void drivable(b, WINDOW, v),
+    mark: (b, v) => void drivable(b, WINDOW, v),
   });
   const header = pageHeader({
     title: "Activity",
@@ -381,12 +379,21 @@ export function mount(root, ctx) {
     };
   }
   if (view === "host-log") {
+    // Pause and Download sit together in the card's head, the key hints
+    // once in the toolbar, as Console does (senior review, finding 9).
+    const pause = drivable(
+      h("button", {
+        type: "button",
+        class: "kp-button kp-button--sm kp-button--secondary",
+      }),
+      LOG_DRIVE.follow,
+    );
     const download = drivable(
       h(
         "button",
         {
           type: "button",
-          class: "kp-button kp-button--sm",
+          class: "kp-button kp-button--sm kp-button--secondary",
           title: "Save the lines the filter shows as a .txt file",
         },
         "Download",
@@ -395,22 +402,32 @@ export function mount(root, ctx) {
     );
     const card = section({
       title: "Host log",
-      desc: "Every line the host prints for every operation, newest last; turn sources and levels on or off on the left. Secrets are masked before a line leaves the host.",
+      // Finding 10: true at both widths (beside the lines on a wide
+      // screen, above them on a phone).
+      desc: "Every line the host prints for every operation, newest last; turn sources and levels on or off with the filters. Secrets are masked before a line leaves the host.",
       id: "host-log-card",
-      tools: [download],
+      tools: [pause, download],
     });
     body.append(card.el);
+    const paintPause = (/** @type {boolean} */ on) => {
+      pause.textContent = on ? "Pause" : "Resume";
+      pause.title = on
+        ? "Stop following; new lines wait below a marker (Space)"
+        : "Follow the newest lines again (Space)";
+      pause.setAttribute("aria-pressed", String(!on));
+    };
     const ex = mountHostLog(card.body, {
       drive: LOG_DRIVE,
-      followInBar: true,
+      followInBar: false,
       label: "Every line the host prints",
+      onFollow: paintPause,
     });
+    paintPause(ex.following());
+    pause.addEventListener("click", () => ex.setFollow(!ex.following()));
     download.addEventListener("click", () => ex.download());
     body.append(
-      keysRow([
+      keyRow([
         ["/", "search"],
-        ["Space", "pause or resume"],
-        ["End", "back to the newest line"],
         ["Ctrl K", "go to…"],
       ]),
     );
@@ -446,6 +463,10 @@ function mountNow(body, x) {
   let historyRead = false;
   /** @type {string | null} */
   let historyError = null;
+  /** A reread that failed after a good read: the rows stay, with a note
+   * (senior review, finding 4). @type {string | null} */
+  let stale = null;
+  let readAt = 0;
   /** @type {Set<string>} */
   const open = new Set();
   /** How many History rows are drawn; "Show more" adds a page. */
@@ -542,26 +563,26 @@ function mountNow(body, x) {
   // ── History ───────────────────────────────────────────────────────────
   const count = h("span", { class: "ac-count", role: "status" });
   const rangeChip = h("span", { class: "ac-range", hidden: "" });
-  const chips = toggleChips({
+  // The demo's one-of Show switch (senior review, finding 7): All and
+  // Failed with their exact counts, Nightly, By Claude.
+  const chips = segSwitch({
     label: "Show",
-    chips: SHOW.map((s) => ({ value: s.value, label: s.label, hint: s.hint })),
-    selected: filter.show,
-    onChange: (sel) => {
-      filter = { ...filter, show: sel };
-      markChips();
+    items: [
+      { value: "all", label: "All", hint: "Every operation" },
+      ...SHOW.map((x) => ({ value: x.value, label: x.label, hint: x.hint })),
+    ],
+    value: [...filter.show][0] ?? "all",
+    onChange: (v) => {
+      filter = { ...filter, show: new Set(v === "all" ? [] : [v]) };
       changed();
     },
+    mark: (b, v) => void drivable(b, SHOW_CHIP, v),
   });
-  // toggleChips redraws its buttons on every change: mark them again.
-  const markChips = () => {
-    for (const b of chips.el.querySelectorAll("button"))
-      drivable(
-        /** @type {HTMLElement} */ (b),
-        SHOW_CHIP,
-        /** @type {HTMLElement} */ (b).dataset.value ?? "",
-      );
-  };
-  markChips();
+  /** Pick one of the switch's values as a click would. @param {string} v */
+  const pickShow = (v) =>
+    /** @type {HTMLElement | null} */ (
+      chips.el.querySelector(`button[data-v="${v}"]`)
+    )?.click();
   const tb = toolbar({
     search: {
       placeholder: "Search: stack, action, error",
@@ -608,7 +629,7 @@ function mountNow(body, x) {
     timeline.el,
     historyCard.el,
     jobsCard.el,
-    keysRow([
+    keyRow([
       ["/", "search"],
       ["J / K", "next / previous row"],
       ["Enter", "open a row"],
@@ -1111,6 +1132,13 @@ function mountNow(body, x) {
     drag.b = px(e);
     paintTimeline();
   });
+  // A touch scroll that starts on the timeline ends in pointercancel, not
+  // pointerup: drop the drag, or the brush stays stuck (finding 13).
+  tlBox.addEventListener("pointercancel", () => {
+    if (!drag) return;
+    drag = null;
+    paintTimeline();
+  });
   tlBox.addEventListener("pointerup", () => {
     const d = drag;
     drag = null;
@@ -1154,9 +1182,8 @@ function mountNow(body, x) {
     open.add(key);
     if (filter.show.size || filter.q) {
       filter = { ...filter, show: new Set(), q: "" };
-      chips.set([]);
-      markChips();
       if (tb.search) tb.search.value = "";
+      pickShow("all");
     }
     const idx = rows.findIndex((r) => r.key === key);
     if (idx >= limit) limit = idx + PAGE;
@@ -1293,8 +1320,24 @@ function mountNow(body, x) {
       );
       return;
     }
+    // The row that had focus gets it back after the repaint (finding 4):
+    // the minute's reread and a job's end no longer drop it on <body>.
+    const had = /** @type {HTMLElement | null} */ (
+      document.activeElement instanceof Element &&
+      feed.contains(document.activeElement)
+        ? document.activeElement.closest("[data-key]")
+        : null
+    );
+    const focusKey = had?.dataset.key ?? null;
+    const refocus = () => {
+      if (focusKey == null) return;
+      /** @type {HTMLElement | null} */ (
+        feed.querySelector(`.ac-row[data-key="${CSS.escape(focusKey)}"]`)
+      )?.focus({ preventScroll: true });
+    };
     const shown = rows.filter((r) => rowMatches(r, filter));
     count.textContent = `${shown.length} of ${rows.length} shown`;
+    chips.counts(showCounts(rows, filter));
     rangeChip.hidden = !filter.range;
     if (filter.range) {
       const clear = h(
@@ -1320,10 +1363,9 @@ function mountNow(body, x) {
       );
       drivable(clear, CLEAR);
       clear.addEventListener("click", () => {
-        filter = { show: new Set(), q: "", range: null };
-        chips.set([]);
-        markChips();
+        filter = { ...filter, q: "", range: null };
         if (tb.search) tb.search.value = "";
+        pickShow("all");
         changed();
       });
       feed.replaceChildren(
@@ -1343,6 +1385,23 @@ function mountNow(body, x) {
       return;
     }
     const out = [];
+    if (stale) {
+      const again = h(
+        "button",
+        { type: "button", class: "link-button" },
+        "Read it again",
+      );
+      drivable(again, RETRY);
+      again.addEventListener("click", () => void loadHistory());
+      out.push(
+        h(
+          "p",
+          { class: "ac-stale", role: "status" },
+          `Not refreshed: ${stale}. These rows are from ${clock(readAt)}. `,
+          again,
+        ),
+      );
+    }
     for (const d of byDay(shown.slice(0, limit))) {
       out.push(
         h(
@@ -1457,6 +1516,7 @@ function mountNow(body, x) {
       );
     }
     feed.replaceChildren(...out);
+    refocus();
   };
 
   const changed = () => {
@@ -1513,11 +1573,16 @@ function mountNow(body, x) {
     );
     historyRead = true;
     if (!r.ok) {
-      historyError = r.error.why;
+      // Keep what the last good read showed; only a first read that fails
+      // replaces the feed with the error.
+      if (readAt) stale = r.error.why;
+      else historyError = r.error.why;
     } else {
       historyError = null;
+      stale = null;
+      readAt = now();
       entries = r.report?.entries ?? [];
-      x.header.live?.set(now());
+      x.header.live?.set(readAt);
     }
     paintAll();
   };
@@ -1578,13 +1643,7 @@ function mountNow(body, x) {
       e.preventDefault();
       tb.search?.focus();
     } else if (e.key === "f" || e.key === "F") {
-      const sel = chips.selected();
-      if (sel.has("failed")) sel.delete("failed");
-      else sel.add("failed");
-      chips.set(sel);
-      markChips();
-      filter = { ...filter, show: sel };
-      changed();
+      pickShow(filter.show.has("failed") ? "all" : "failed");
     } else if (e.key === "j" || e.key === "k") {
       const list = /** @type {HTMLElement[]} */ ([
         ...feed.querySelectorAll(".ac-row"),
@@ -1597,9 +1656,8 @@ function mountNow(body, x) {
       n?.focus();
       n?.scrollIntoView({ block: "nearest" });
     } else if (e.key === "Escape" && (filter.show.size || filter.range)) {
-      filter = { ...filter, show: new Set(), range: null };
-      chips.set([]);
-      markChips();
+      filter = { ...filter, range: null };
+      pickShow("all");
       changed();
     }
   };

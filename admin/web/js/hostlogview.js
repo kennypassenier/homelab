@@ -46,7 +46,8 @@ export const sourceOn = (source, f) =>
  */
 export function lineShown(l, f) {
   if (!sourceOn(l.source, f)) return false;
-  if (f.level && rank(l.level) < rank(f.level)) return false;
+  // "Info and up" ("") hides debug lines (senior review, finding 14).
+  if (rank(l.level) < (f.level ? rank(f.level) : RANK.info)) return false;
   const q = f.q.trim().toLowerCase();
   if (q && !`${l.source} ${l.msg}`.toLowerCase().includes(q)) return false;
   return true;
@@ -97,7 +98,7 @@ export function counts(lines) {
   for (const l of lines) {
     bySource.set(l.source, (bySource.get(l.source) ?? 0) + 1);
     const r = rank(l.level);
-    byLevel[""] += 1;
+    if (r >= RANK.info) byLevel[""] += 1;
     if (r >= 2) byLevel.warn += 1;
     if (r >= 3) byLevel.error += 1;
   }
@@ -152,3 +153,41 @@ export const countText = (shown, total) =>
  * @param {string} s
  */
 export const sourceLabel = (s) => (s === "HOST" ? "the host" : s);
+
+/**
+ * The page's lines from the snapshot and the live lines that arrived
+ * around it: one line per number, in number order, the newest `keep`
+ * kept (senior review, finding 1: a live line that came before the
+ * snapshot used to hide every older snapshot line).
+ * @param {HostLine[]} a
+ * @param {HostLine[]} b
+ * @param {number} keep
+ * @returns {HostLine[]}
+ */
+export function mergeLines(a, b, keep) {
+  /** @type {Map<number, HostLine>} */
+  const by = new Map();
+  for (const l of a) by.set(l.seq, l);
+  for (const l of b) by.set(l.seq, l);
+  const all = [...by.values()].sort((x, y) => x.seq - y.seq);
+  return all.length > keep ? all.slice(all.length - keep) : all;
+}
+
+/**
+ * What a key does on the explorer: "/" to the search box, Space pauses
+ * or resumes, End back to the tail. Nothing while typing, and Space and
+ * End leave a focused button or link alone (anchored: MAIN or LABEL are
+ * not buttons; senior review, finding 12).
+ * @param {string} key
+ * @param {string} tag the focused element's tag name
+ * @param {string | null} role its role attribute
+ * @returns {"search" | "pause" | "tail" | null}
+ */
+export function keyAction(key, tag, role) {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(tag);
+  if (key === "/") return typing ? null : "search";
+  if (typing || /^(BUTTON|A)$/.test(tag) || role === "button") return null;
+  if (key === " ") return "pause";
+  if (key === "End") return "tail";
+  return null;
+}

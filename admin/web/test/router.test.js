@@ -170,13 +170,15 @@ test("every hub tab has its own path and round-trips; the merged tabs redirect",
 
 test("feat-shell-1: a page module shown as a view of its new home is found there", () => {
   assert.equal(pageHref("schedules"), "/activity?view=planned");
-  assert.equal(pageHref("jobs"), "/activity?view=running");
   assert.equal(pageHref("fleetview"), "/map");
   assert.equal(pageHref("notifications"), "/system/notifications");
   assert.equal(pageHref("passkeys"), "/settings?section=sign-in");
   assert.equal(pageHref("nope"), null);
   assert.equal(shownPage("/activity", "?view=planned"), "schedules");
   assert.equal(shownPage("/activity", ""), "activity");
+  // Senior review finding 15: Running now is part of Activity's own view,
+  // so a Live view click on an activity-* control there stays put.
+  assert.equal(shownPage("/activity", "?view=running"), "activity");
   assert.equal(shownPage("/backups", "?section=coverage"), "backupcalendar");
 });
 

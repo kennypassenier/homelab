@@ -166,8 +166,7 @@ function viewOf(at, q) {
 
 /** @type {Record<string, (root: HTMLElement) => () => void>} */
 const VIEW_MOUNTS = {
-  // redesign-activity: Activity draws these three as its own views.
-  jobs: (root) => activity(root, { navigate }),
+  // redesign-activity: Activity draws these as its own views.
   log: (root) => activity(root, { navigate }),
   schedules: (root) => activity(root, { navigate }),
   backupcalendar: (root) => backupCalendarPage(root),

@@ -14,15 +14,18 @@
 // their own region; the page never grows with them.
 
 import { act } from "../act.js";
+import { ownerOf } from "../activityview.js";
 import { fetchJson, h } from "../dom.js";
 import { drivable } from "../drivable.js";
 import {
   LEVELS,
   counts,
   countText,
+  keyAction,
   lineShown,
   logFilterFromParams,
   logFilterToParams,
+  mergeLines,
   narrowed,
   sourceLabel,
   sourceList,
@@ -65,6 +68,9 @@ export function mountHostLog(root, opts) {
   /** @type {Set<string>} */
   const seen = new Set();
   let lastSeq = 0;
+  /** Live lines that arrived while the snapshot was being read. */
+  /** @type {import("../parity.js").HostLine[]} */
+  let early = [];
   let loaded = false;
   /** @type {string | null} */
   let failure = null;
@@ -159,128 +165,160 @@ export function mountHostLog(root, opts) {
       ? h("span", { class: "hl-sw", "aria-hidden": "true" })
       : stackMark(s, 12);
 
-  const paintSide = () => {
-    const c = counts(lines);
-    const srcs = allSources();
-    const everything = h(
+  // The side column is built once and updated in place (senior review,
+  // finding 3): rebuilding it for every arriving line took keyboard focus
+  // away and made the "only" link flicker. A source seen for the first
+  // time gets its row inserted at its place; nothing else moves.
+  const everythingIn = /** @type {HTMLInputElement} */ (
+    drivable(h("input", { type: "checkbox" }), opts.drive.everything)
+  );
+  everythingIn.addEventListener("change", () => {
+    f = { ...f, off: new Set(), only: null };
+    changed();
+  });
+  const everythingCount = h("small");
+  const srcOpts = h(
+    "div",
+    { class: "hl-opts" },
+    h(
       "label",
       { class: "hl-opt", title: "Show every source again" },
-      h("input", {
-        type: "checkbox",
-        ...(f.only == null && f.off.size === 0 ? { checked: "" } : {}),
-      }),
+      everythingIn,
       h("span"),
       h("span", null, "Everything"),
-      h("small", null, String(lines.length)),
-    );
-    const all = /** @type {HTMLElement} */ (everything.querySelector("input"));
-    drivable(all, opts.drive.everything);
-    all.addEventListener("change", () => {
-      f = { ...f, off: new Set(), only: null };
-      changed();
-    });
-    const rows = srcs.map((s) => {
-      const on = sourceOn(s, f);
-      const input = drivable(
+      everythingCount,
+    ),
+  );
+  /** @type {Map<string, {label: HTMLElement, input: HTMLInputElement,
+   *   count: HTMLElement}>} */
+  const srcRows = new Map();
+  /** @param {string} s */
+  const sourceRow = (s) => {
+    const input = /** @type {HTMLInputElement} */ (
+      drivable(
         h("input", {
           type: "checkbox",
-          ...(on ? { checked: "" } : {}),
           "aria-label": `Show ${sourceLabel(s)}`,
         }),
         opts.drive.source,
         s,
-      );
-      input.addEventListener("change", () => {
-        f = toggleSource(f, s, srcs);
-        changed();
-      });
-      const only = drivable(
-        h(
-          "button",
-          {
-            type: "button",
-            class: "hl-only",
-            title: `Show only ${sourceLabel(s)}`,
-          },
-          "only",
-        ),
-        opts.drive.only,
-        s,
-      );
-      only.addEventListener("click", (e) => {
-        e.preventDefault();
-        f = { ...f, only: s, off: new Set() };
-        changed();
-      });
-      return h(
-        "label",
-        {
-          class: `hl-opt${on ? "" : " hl-opt--off"}`,
-          title: `Show or hide ${s === "HOST" ? "the host's own" : `${s}'s`} lines; each click turns it on or off`,
-        },
-        input,
-        swatch(s),
-        h("span", { class: "hl-opt__name" }, sourceLabel(s), " ", only),
-        h("small", null, String(c.bySource.get(s) ?? 0)),
-      );
-    });
-    const levels = LEVELS.map((lv) => {
-      const input = drivable(
-        h("input", {
-          type: "radio",
-          name: `hl-level-${opts.drive.level}`,
-          ...(f.level === lv.value ? { checked: "" } : {}),
-        }),
-        opts.drive.level,
-        lv.value || "info",
-      );
-      input.addEventListener("change", () => {
-        f = { ...f, level: /** @type {any} */ (lv.value) };
-        changed();
-      });
-      return h(
-        "label",
-        { class: "hl-opt", title: `Show ${lv.label.toLowerCase()}` },
-        input,
-        h("span", { class: `hl-dot hl-dot--${lv.dot}`, "aria-hidden": "true" }),
-        h("span", null, lv.label),
-        h("small", null, String(c.byLevel[lv.value])),
-      );
-    });
-    const reset = drivable(
-      h(
-        "button",
-        { type: "button", class: "kp-button kp-button--ghost kp-button--sm" },
-        "Reset the filters",
-      ),
-      opts.drive.reset,
+      )
     );
-    reset.addEventListener("click", () => {
-      f = { off: new Set(), only: null, level: "", q: "" };
-      if (tb.search) tb.search.value = "";
+    input.addEventListener("change", () => {
+      f = toggleSource(f, s, allSources());
       changed();
     });
-    side.replaceChildren(
+    const only = drivable(
       h(
-        "div",
-        { class: "hl-group" },
-        h("h3", null, "Source"),
-        h("div", { class: "hl-opts" }, everything, ...rows),
+        "button",
+        {
+          type: "button",
+          class: "hl-only",
+          title: `Show only ${sourceLabel(s)}`,
+        },
+        "only",
       ),
-      h(
-        "div",
-        { class: "hl-group" },
-        h("h3", null, "Level"),
-        h("div", { class: "hl-opts" }, ...levels),
-      ),
-      narrowed(f)
-        ? reset
-        : h(
-            "p",
-            { class: "hl-hint" },
-            "Each click turns one on or off · hover a source for “only”.",
-          ),
+      opts.drive.only,
+      s,
     );
+    only.addEventListener("click", (e) => {
+      e.preventDefault();
+      f = { ...f, only: s, off: new Set() };
+      changed();
+    });
+    const count = h("small");
+    const label = h(
+      "label",
+      {
+        class: "hl-opt",
+        title: `Show or hide ${s === "HOST" ? "the host's own" : `${s}'s`} lines; each click turns it on or off`,
+      },
+      input,
+      swatch(s),
+      h("span", { class: "hl-opt__name" }, sourceLabel(s), " ", only),
+      count,
+    );
+    return { label, input, count };
+  };
+  const levelRows = LEVELS.map((lv) => {
+    const input = /** @type {HTMLInputElement} */ (
+      drivable(
+        h("input", { type: "radio", name: `hl-level-${opts.drive.level}` }),
+        opts.drive.level,
+        lv.value || "info",
+      )
+    );
+    input.addEventListener("change", () => {
+      f = { ...f, level: /** @type {any} */ (lv.value) };
+      changed();
+    });
+    const count = h("small");
+    const label = h(
+      "label",
+      { class: "hl-opt", title: `Show ${lv.label.toLowerCase()}` },
+      input,
+      h("span", { class: `hl-dot hl-dot--${lv.dot}`, "aria-hidden": "true" }),
+      h("span", null, lv.label),
+      count,
+    );
+    return { value: lv.value, input, count, label };
+  });
+  const reset = drivable(
+    h(
+      "button",
+      { type: "button", class: "kp-button kp-button--ghost kp-button--sm" },
+      "Reset the filters",
+    ),
+    opts.drive.reset,
+  );
+  reset.addEventListener("click", () => {
+    f = { off: new Set(), only: null, level: "", q: "" };
+    if (tb.search) tb.search.value = "";
+    changed();
+  });
+  // The demo's words: the hint while nothing is narrowed, the reset
+  // while something is (senior review, finding 16).
+  const hint = h("p", { class: "hl-hint" }, "Hover a source for “only”.");
+  side.replaceChildren(
+    h("div", { class: "hl-group" }, h("h3", null, "Source"), srcOpts),
+    h(
+      "div",
+      { class: "hl-group" },
+      h("h3", null, "Level"),
+      h("div", { class: "hl-opts" }, ...levelRows.map((r) => r.label)),
+    ),
+    h("div", { class: "hl-sidefoot" }, reset, hint),
+  );
+
+  const paintSide = () => {
+    const c = counts(lines);
+    const srcs = allSources();
+    srcs.forEach((s, i) => {
+      if (srcRows.has(s)) return;
+      const row = sourceRow(s);
+      srcRows.set(s, row);
+      // After the "Everything" row, before the next source already drawn.
+      const next = srcs.slice(i + 1).find((n) => srcRows.has(n) && n !== s);
+      srcOpts.insertBefore(
+        row.label,
+        next ? (srcRows.get(next)?.label ?? null) : null,
+      );
+    });
+    everythingIn.checked = f.only == null && f.off.size === 0;
+    everythingCount.textContent = String(lines.length);
+    for (const [s, row] of srcRows) {
+      const on = sourceOn(s, f);
+      row.input.checked = on;
+      row.label.classList.toggle("hl-opt--off", !on);
+      row.count.textContent = String(c.bySource.get(s) ?? 0);
+    }
+    for (const r of levelRows) {
+      r.input.checked = f.level === r.value;
+      r.count.textContent = String(c.byLevel[r.value]);
+    }
+    const n = narrowed(f);
+    reset.hidden = !n;
+    hint.hidden = n;
   };
 
   /** @param {import("../parity.js").HostLine} l */
@@ -311,7 +349,7 @@ export function mountHostLog(root, opts) {
             ? h(
                 "em",
                 null,
-                `  · ${l.by === "admin" ? "this dashboard" : `session ${l.by}`}`,
+                `  · ${l.by === "admin" ? "this dashboard" : ownerOf(l.by)}`,
               )
             : "",
         ),
@@ -322,10 +360,15 @@ export function mountHostLog(root, opts) {
     const toggle = () => {
       open = isOpen ? null : l.seq;
       paintLines();
+      // The repainted row keeps focus, so the next key reaches it.
+      /** @type {HTMLElement | null} */ (
+        list.querySelector(`.hl-ln[data-seq="${l.seq}"]`)
+      )?.focus({ preventScroll: true });
     };
     row.addEventListener("click", toggle);
     row.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
+      // A role=button row answers Space like Enter (finding 12).
+      if (e.target === row && (e.key === "Enter" || e.key === " ")) {
         e.preventDefault();
         toggle();
       }
@@ -364,7 +407,13 @@ export function mountHostLog(root, opts) {
       void navigator.clipboard
         ?.writeText(`${x.time} ${x.level} ${l.source} ${l.msg}`)
         .then(() => (copy.textContent = "Copied"))
-        .catch(() => (copy.textContent = "Press Ctrl C"));
+        .catch(() => (copy.textContent = "Press Ctrl C"))
+        // Back to its own name after a moment (finding 14).
+        .finally(() =>
+          setTimeout(() => {
+            if (copy.isConnected) copy.textContent = "Copy line";
+          }, 1500),
+        );
     });
     const more = h(
       "div",
@@ -380,8 +429,8 @@ export function mountHostLog(root, opts) {
           null,
           l.by
             ? l.by === "admin"
-              ? "this dashboard"
-              : `a session with the token “${l.by}”`
+              ? "Kenny, from this dashboard"
+              : `${ownerOf(l.by)} (the token “${l.by}”)`
             : "the host (the nightly round or its own work)",
         ),
         h("dt", null, "Line"),
@@ -545,6 +594,13 @@ export function mountHostLog(root, opts) {
 
   /** @param {import("../parity.js").HostLine} l */
   const add = (l) => {
+    // Until the snapshot is in, a live line waits: the two merge by number
+    // when it lands (finding 1).
+    if (!loaded) {
+      early.push(l);
+      if (early.length > KEEP) early = early.slice(early.length - KEEP);
+      return;
+    }
     if (l.seq <= lastSeq) return;
     lastSeq = l.seq;
     lines.push(l);
@@ -605,27 +661,20 @@ export function mountHostLog(root, opts) {
   /** @param {KeyboardEvent} e */
   const onKey = (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // A line row already answered this key (Space or Enter opens it).
+    if (e.defaultPrevented) return;
     if (document.querySelector("dialog[open]")) return;
     const a = document.activeElement;
-    const typing = /INPUT|TEXTAREA|SELECT/.test(a?.tagName ?? "");
-    if (e.key === "/" && !typing) {
-      e.preventDefault();
-      tb.search?.focus();
-      return;
-    }
-    if (typing) return;
-    if (
-      /BUTTON|A/.test(a?.tagName ?? "") ||
-      a?.getAttribute("role") === "button"
-    )
-      return;
-    if (e.key === " ") {
-      e.preventDefault();
-      setFollow(!follow);
-    } else if (e.key === "End") {
-      e.preventDefault();
-      setFollow(true);
-    }
+    const what = keyAction(
+      e.key,
+      a?.tagName ?? "",
+      a?.getAttribute("role") ?? null,
+    );
+    if (!what) return;
+    e.preventDefault();
+    if (what === "search") tb.search?.focus();
+    else if (what === "pause") setFollow(!follow);
+    else setFollow(true);
   };
   document.addEventListener("keydown", onKey);
 
@@ -640,18 +689,22 @@ export function mountHostLog(root, opts) {
       abort.signal,
     );
     loaded = true;
+    // The page's own lines, the snapshot and the live lines that came
+    // while it was read: merged by number, capped at KEEP (finding 1).
+    lines = mergeLines(
+      mergeLines(lines, r.ok ? (r.body.lines ?? []) : [], KEEP),
+      early,
+      KEEP,
+    );
+    early = [];
     if (!r.ok) {
       failure = r.error.why;
       paintLines();
       return;
     }
     for (const s of r.body.sources ?? []) seen.add(s);
-    for (const l of r.body.lines ?? [])
-      if (l.seq > lastSeq) {
-        lines.push(l);
-        seen.add(l.source);
-        lastSeq = l.seq;
-      }
+    for (const l of lines) seen.add(l.source);
+    lastSeq = lines.length ? lines[lines.length - 1].seq : lastSeq;
     for (const t of r.body.transfers ?? []) live.set(`${t.op}|${t.label}`, t);
     paintTransfers();
     paintSide();
@@ -676,15 +729,15 @@ export function mountHostLog(root, opts) {
         return `${new Date(l.ts * 1000).toISOString()}  ${x.level.toUpperCase().padEnd(5)}  ${l.source.padEnd(12)}  ${l.msg}`;
       })
       .join("\n");
-    const a = h("a", {
-      href: URL.createObjectURL(
-        new Blob([`${text}\n`], { type: "text/plain" }),
-      ),
-      download: "host-log.txt",
-    });
+    const url = URL.createObjectURL(
+      new Blob([`${text}\n`], { type: "text/plain" }),
+    );
+    const a = h("a", { href: url, download: "host-log.txt" });
     document.body.append(a);
     a.click();
     a.remove();
+    // The browser has the file once the click ran (finding 14).
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
   return {

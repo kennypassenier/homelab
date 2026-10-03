@@ -186,7 +186,9 @@ const FALLBACK_TITLE = /** @type {Record<string, string>} */ ({
  * @type {Record<string, {at: string, param: string, value: string}>}
  */
 export const VIEWS = {
-  jobs: { at: "activity", param: "view", value: "running" },
+  // Running now is Activity's own view (senior review, finding 15): no
+  // `jobs` entry, so `/activity?view=running` reports "activity" and a Live
+  // view click on an activity-* control there keeps the filters.
   log: { at: "activity", param: "view", value: "host-log" },
   schedules: { at: "activity", param: "view", value: "planned" },
   backupcalendar: { at: "backups", param: "section", value: "coverage" },

@@ -94,6 +94,20 @@ export function stackOf(subject, stacks) {
 }
 
 /**
+ * Who a session's token belongs to, as a person reads it (senior review,
+ * finding 8): the dashboard's own token is Kenny; a workstation's token
+ * (a lower-case machine name, fix-120's per-machine tokens) is Kenny on
+ * that machine's CLI or TUI; a name the host already gives ("Claude (Live
+ * view)", a schedule) stays as it is.
+ * @param {string} by
+ */
+export function ownerOf(by) {
+  if (by === "admin") return "Kenny";
+  if (/^[a-z0-9][a-z0-9._-]*$/.test(by)) return `Kenny · CLI on ${by}`;
+  return by;
+}
+
+/**
  * Who started an entry, as the History's "By" chip names it: the nightly
  * round, a schedule, Claude through Live view, a person or a workstation,
  * or the host on its own. A job the dashboard ran knows its origin; the
@@ -115,8 +129,7 @@ export function actorOf(e, origins) {
     return { text: e.by, kind: "schedule" };
   if (e.req == null && /^scheduled-/.test(e.label))
     return { text: "nightly round", kind: "nightly" };
-  if (e.by === "admin") return { text: "this dashboard", kind: "person" };
-  if (e.by) return { text: e.by, kind: "person" };
+  if (e.by) return { text: ownerOf(e.by), kind: "person" };
   if (e.req != null) return { text: "asked", kind: "person" };
   return { text: "the host", kind: "host" };
 }
@@ -217,6 +230,20 @@ export function rowMatches(r, f) {
   const q = f.q.trim().toLowerCase();
   if (q && !q.split(/\s+/).every((w) => r.search.includes(w))) return false;
   return true;
+}
+
+/**
+ * The Show switch's exact counts (the demo's "All 129 · Failed 3"): the
+ * rows the days and the search let through, and how many of them failed.
+ * @param {FeedRow[]} rows
+ * @param {FeedFilter} f
+ */
+export function showCounts(rows, f) {
+  const base = rows.filter((r) => rowMatches(r, { ...f, show: new Set() }));
+  return {
+    all: base.length,
+    failed: base.filter((r) => r.state === "failed").length,
+  };
 }
 
 /**
@@ -486,11 +513,12 @@ export function stepSegments(p) {
  * @returns {FeedFilter}
  */
 export function filterFromParams(p) {
-  const show = new Set(
-    (p.get("show") ?? "")
-      .split(",")
-      .filter((v) => SHOW.some((s) => s.value === v)),
-  );
+  // One of All / Failed / Nightly / By Claude (the demo's one-of switch):
+  // an older address naming several keeps the first known one.
+  const first = (p.get("show") ?? "")
+    .split(",")
+    .find((v) => SHOW.some((s) => s.value === v));
+  const show = new Set(first ? [first] : []);
   const from = Number(p.get("from"));
   const to = Number(p.get("to"));
   return {

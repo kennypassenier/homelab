@@ -15,7 +15,7 @@ import { shellResult, shellTargets } from "../parity.js";
 import { current, subscribe } from "../store.js";
 import { pageHeader } from "../ui.js";
 import { setParams } from "../urlstate.js";
-import { ensureStyle } from "./activitykit.js";
+import { ensureStyle } from "./hostkit.js";
 import { mountHostLog } from "./log.js";
 
 /** Lines the Up key recalls. */
@@ -183,8 +183,13 @@ export function mount(root) {
     actions: [pause, download],
     primary: runACommand,
   });
+  // The live chip sits beside the title, as the demo (senior review,
+  // finding 5); on a phone the header reads title + chip, description,
+  // "Run a command" across the width, then Pause and Download
+  // (activity.css).
   const liveChip = h("span", { class: "nx-live con-live", role: "status" });
-  header.actions.before(liveChip);
+  header.title.after(liveChip);
+  header.el.classList.add("con-head");
 
   // ── the shell bar ───────────────────────────────────────────────────
   const target = h("select", {
@@ -218,7 +223,12 @@ export function mount(root) {
     ),
     RUN,
   );
-  const off = h("p", { class: "con-off", hidden: "" });
+  // The hint's words are there from the first frame, so the footer never
+  // grows when the host's settings arrive, and stay when they cannot be
+  // read (finding 11).
+  const EXEC_ON =
+    "Runs as root; every line is a job in the queue and a line in the host's audit log. ↑ ↓ walk your history.";
+  const off = h("p", { class: "con-off" }, EXEC_ON);
   const form = h(
     "form",
     { class: "con-shell", "aria-label": "Run a command" },
@@ -248,7 +258,7 @@ export function mount(root) {
       ? "Stop following; new lines wait below a marker (Space)"
       : "Follow the newest lines again (Space)";
     liveChip.textContent = on
-      ? "following · 2000-line ring"
+      ? "following · 2\u00a0000-line ring"
       : "paused · new lines wait";
     liveChip.dataset.paused = String(!on);
   };
@@ -260,18 +270,18 @@ export function mount(root) {
   runACommand.addEventListener("click", () => line.focus());
 
   // Remote exec off on this host: say so under the bar, once known.
-  void fetchJson("/data/host-settings", "the host settings").then((r) => {
-    if (!r.ok) return;
-    /** @type {{key: string, value: unknown, set?: boolean}[]} */
-    const fields = r.body?.page?.fields ?? [];
-    const exec = fields.find((x) => x.key === "exec_enabled");
-    const on = exec ? exec.value === true : null;
-    off.hidden = false;
-    off.textContent =
-      on === false
-        ? "Remote exec is off on this host (exec_enabled = false, changed over ssh only): the host refuses commands. ↑ ↓ walk your history."
-        : "Runs as root; every line is a job in the queue and a line in the host's audit log. ↑ ↓ walk your history.";
-  });
+  const abort = new AbortController();
+  void fetchJson("/data/host-settings", "the host settings", abort.signal).then(
+    (r) => {
+      if (!r.ok) return;
+      /** @type {{key: string, value: unknown, set?: boolean}[]} */
+      const fields = r.body?.page?.fields ?? [];
+      const exec = fields.find((x) => x.key === "exec_enabled");
+      if (exec?.value === false)
+        off.textContent =
+          "Remote exec is off on this host (exec_enabled = false, changed over ssh only): the host refuses commands. ↑ ↓ walk your history.";
+    },
+  );
 
   let wanted = params.get("vmid") ?? "";
   const fillTargets = () => {
@@ -281,11 +291,17 @@ export function mount(root) {
     const sig = list.map((t) => t.value).join(",");
     if (target.dataset.sig === sig) return;
     target.dataset.sig = sig;
+    // The first container is chosen from the start, as the demo (finding
+    // 11); an address's ?vmid= or the one picked before stays chosen.
+    const keep = target.value || wanted;
     target.replaceChildren(
-      h("option", { value: "" }, "Pick a container"),
-      ...list.map((t) => h("option", { value: t.value }, t.label)),
+      ...(list.length
+        ? list.map((t) => h("option", { value: t.value }, t.label))
+        : [h("option", { value: "" }, "Reading the containers…")]),
     );
-    target.value = wanted;
+    target.value = list.some((t) => t.value === keep)
+      ? keep
+      : (list[0]?.value ?? "");
   };
   fillTargets();
   const unsub = subscribe(fillTargets);
@@ -416,6 +432,7 @@ export function mount(root) {
   };
   document.addEventListener("keydown", onKey);
   return () => {
+    abort.abort();
     explorer.cleanup();
     unsub();
     offJobs();

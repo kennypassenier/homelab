@@ -14,7 +14,9 @@ import {
   incidentFor,
   kpis,
   openFailures,
+  ownerOf,
   rowMatches,
+  showCounts,
   stackOf,
   stepSegments,
   verbOf,
@@ -47,7 +49,7 @@ test("redesign-activity: History names who started an operation", () => {
     actorOf(op({ req: null, by: null, label: "scheduled-backup" })).kind,
     "nightly",
   );
-  assert.equal(actorOf(op({ by: "admin" })).text, "this dashboard");
+  assert.equal(actorOf(op({ by: "admin" })).text, "Kenny");
   assert.equal(actorOf(op({ by: "Kenny" })).text, "Kenny");
   assert.equal(actorOf(op({ req: null, by: null })).text, "the host");
   assert.deepEqual(
@@ -122,12 +124,14 @@ test("redesign-activity: Failed, Nightly and By Claude filter with a plain click
 
 test("redesign-activity: the filter lives in the address", () => {
   const f = filterFromParams(
-    new URLSearchParams("show=claude,failed,bogus&q=notes&from=10&to=20"),
+    new URLSearchParams("show=bogus,claude,failed&q=notes&from=10&to=20"),
   );
-  assert.deepEqual([...f.show].sort(), ["claude", "failed"]);
+  // One of All / Failed / Nightly / By Claude (the demo's one-of switch):
+  // an old address naming several keeps the first known one.
+  assert.deepEqual([...f.show], ["claude"]);
   assert.deepEqual(f.range, { from: 10, to: 20 });
   assert.deepEqual(filterToParams(f), {
-    show: "failed,claude",
+    show: "claude",
     q: "notes",
     from: "10",
     to: "20",
@@ -281,4 +285,39 @@ test("redesign-activity: a running job's steps strip", () => {
     "too many: a bar instead",
   );
   assert.deepEqual(stepSegments(null), []);
+});
+
+// Senior review finding 8: the "By" column names a person, never a raw
+// token: a workstation's token is Kenny on that machine's CLI or TUI.
+test("redesign-activity: a token reads as its owner", () => {
+  assert.equal(ownerOf("admin"), "Kenny");
+  assert.equal(ownerOf("wsl"), "Kenny · CLI on wsl");
+  assert.equal(ownerOf("garuda-pc"), "Kenny · CLI on garuda-pc");
+  assert.equal(ownerOf("Kenny"), "Kenny");
+  assert.equal(ownerOf("Claude (Live view)"), "Claude (Live view)");
+  assert.deepEqual(actorOf(op({ by: "wsl" })), {
+    text: "Kenny · CLI on wsl",
+    kind: "person",
+  });
+});
+
+// Senior review finding 7: the Show switch is All / Failed / Nightly /
+// By Claude, All and Failed with their exact counts, as the demo.
+test("redesign-activity: the Show switch counts All and Failed exactly", () => {
+  const rows = feedRows(
+    [
+      op({ start: NOW - 10, end: NOW - 5, ok: false, error: "boom" }),
+      op({ start: NOW - 20, end: NOW - 15, by: "Claude (Live view)" }),
+      op({ start: NOW - 30, end: NOW - 25, ok: false, error: "late" }),
+      op({ start: NOW - 40, end: NOW - 35 }),
+    ],
+    { stacks: STACKS },
+  );
+  const f = { show: new Set(["claude"]), q: "", range: null };
+  assert.deepEqual(showCounts(rows, f), { all: 4, failed: 2 });
+  assert.deepEqual(
+    showCounts(rows, { ...f, q: "boom" }),
+    { all: 1, failed: 1 },
+    "the search and the days still narrow the counts",
+  );
 });

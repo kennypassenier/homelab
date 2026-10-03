@@ -67,6 +67,18 @@ async function freshPage(context) {
   return page;
 }
 
+/**
+ * redesign-stackhub: open the stack hub header's More ▾ menu (where most
+ * stack actions live since 3.71.0), when the page has one and it is shut.
+ * @param {import("playwright").Page} page
+ */
+async function openStackMore(page) {
+  const more = page.locator('[data-drive="stack-more"]');
+  if ((await more.count()) === 0) return;
+  if ((await more.getAttribute("aria-expanded")) !== "true")
+    await more.click({ timeout: 2000 }).catch(() => {});
+}
+
 test("invariants: the nav bar stays inline, with brand Homelab and the version beside the search box, at 1600/1920/2560 CSS px and at 1894 in the widest themes", async () => {
   const browser = await chromium.launch();
   try {
@@ -183,8 +195,10 @@ test("invariants: the job dialog's panel does not shift sideways between its run
     // approved rename) needs only the stack name, so it runs end to end
     // against the demo host without a working copy of the repository
     // (deploy/backup both refuse without one there).
+    // redesign-stackhub: Park sits in the hub header's More ▾ (Pause).
+    await page.locator('[data-drive="stack-more"]').click({ timeout: 5000 });
     await page
-      .getByRole("button", { name: "Park", exact: true })
+      .locator('[role=menuitem][data-action="disable"]')
       .click({ timeout: 5000 });
     await page.waitForTimeout(300);
     await page.locator("#action-dialog #act-run").click();
@@ -1400,8 +1414,10 @@ test("invariants: every action dialog lays its fields on one grid — labels on 
     let measured = 0;
     for (const action of actions) {
       const btn = page.locator(`button[data-action="${action}"]`).first();
+      // redesign-stackhub: the hub keeps most actions in its More ▾.
+      if (!(await btn.isVisible())) await openStackMore(page);
       if (!(await btn.isVisible()) || !(await btn.isEnabled())) continue;
-      await btn.click();
+      await btn.click({ timeout: 5000 });
       const dialog = page.locator("dialog#action-dialog[open]");
       if (!(await dialog.isVisible().catch(() => false))) {
         await page.waitForTimeout(300);
@@ -1409,7 +1425,7 @@ test("invariants: every action dialog lays its fields on one grid — labels on 
           for (const close of await page
             .locator("dialog[open] .kp-dialog__close")
             .all())
-            await close.click().catch(() => {});
+            await close.click({ timeout: 2000 }).catch(() => {});
           continue;
         }
       }
@@ -1464,7 +1480,7 @@ test("invariants: every action dialog lays its fields on one grid — labels on 
       for (const close of await page
         .locator("dialog[open] .kp-dialog__close")
         .all())
-        await close.click().catch(() => {});
+        await close.click({ timeout: 2000 }).catch(() => {});
       await page
         .locator("dialog[open]")
         .first()
@@ -1905,15 +1921,14 @@ test("invariants: every button that opens a dialog or runs an action is reachabl
     });
     const paths = [
       ...DRIVABLE_PATHS.map((p) => `/${p}`),
-      ...[
-        "",
-        "/apps",
-        "/history",
-        "/logs",
-        "/checks",
-        "/settings",
-        "/firewall",
-      ].map((t) => `/stacks/beta-demo${t}`),
+      // redesign-stackhub (3.71.0): the hub's six tabs. Checks and Firewall
+      // are no tabs any more: their old addresses redirect into Overview and
+      // Settings, and a requested path that redirects made the walk below
+      // reload the page (1.5 s) before every one of its buttons — the
+      // whole-screen run that stalled for 19 minutes.
+      ...["", "/logs", "/apps", "/backups", "/history", "/settings"].map(
+        (t) => `/stacks/beta-demo${t}`,
+      ),
     ];
     const SEL =
       "#page button:not([disabled]), #page [role=button], #page [role=switch]:not([disabled])";
@@ -1992,9 +2007,12 @@ test("invariants: every button that opens a dialog or runs an action is reachabl
      * where the walk found it, for the failure message only */
     const toDrive = new Map();
     let walked = 0;
-    for (const path of paths) {
-      await page.goto(`${BASE}${path}`);
+    for (const asked of paths) {
+      await page.goto(`${BASE}${asked}`);
       await page.waitForTimeout(1500);
+      // Where the page landed: a redirected address is compared as the
+      // page it lands on, so the walk never reloads before every button.
+      const path = new URL(page.url()).pathname;
       const seen = new Set();
       for (const c of await describe()) {
         if (seen.has(c.key)) continue;
@@ -2112,8 +2130,10 @@ async function eachActionDialog(page, measure) {
     ]);
     for (const action of actions) {
       const btn = page.locator(`button[data-action="${action}"]`).first();
+      // redesign-stackhub: the hub keeps most actions in its More ▾.
+      if (!(await btn.isVisible())) await openStackMore(page);
       if (!(await btn.isVisible()) || !(await btn.isEnabled())) continue;
-      await btn.click();
+      await btn.click({ timeout: 5000 });
       const dialog = page.locator("dialog#action-dialog[open]");
       await dialog.waitFor({ timeout: 1500 }).catch(() => {});
       if (await dialog.isVisible().catch(() => false))
@@ -2121,7 +2141,7 @@ async function eachActionDialog(page, measure) {
       for (const close of await page
         .locator("dialog[open] .kp-dialog__close")
         .all())
-        await close.click().catch(() => {});
+        await close.click({ timeout: 2000 }).catch(() => {});
       await page
         .locator("dialog[open]")
         .first()
@@ -2445,8 +2465,10 @@ test("invariants: a running job's log scrolls inside its dialog and never makes 
     await page.goto(`${BASE}/stacks/films`);
     await page.waitForTimeout(600);
     // "Park": "Disable" before 3.71.0 (the approved rename).
+    // redesign-stackhub: Park sits in the hub header's More ▾ (Pause).
+    await page.locator('[data-drive="stack-more"]').click({ timeout: 5000 });
     await page
-      .getByRole("button", { name: "Park", exact: true })
+      .locator('[role=menuitem][data-action="disable"]')
       .click({ timeout: 5000 });
     await page.waitForTimeout(300);
     await page.locator("#action-dialog #act-run").click();
@@ -3918,6 +3940,319 @@ test("invariants: the Host page's actions are grouped by intent as described til
       await dialog.isVisible(),
       "the tile did not open the action dialog",
     );
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── redesign-stackhub (3.71.0, Kenny approved the stack hub demo
+// 2026-10-03: flows/stack-hub.html + stack.html, FLOWS.md §1.3) — the
+// whole-screen shape of one stack's hub, in the demo host's own data. ────
+
+test("invariants: stack hub — the header keeps Back up · Update · Deploy (primary) · More, with b u d . and a grouped More", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/gateway`);
+    const actions = page.locator(".sh-head__actions");
+    await actions.waitFor({ timeout: 10000 });
+    const order = await actions.evaluate((a) =>
+      [...a.children].map((c) => ({
+        text: (c.matches(".sh-menu")
+          ? c.firstElementChild
+          : c
+        )?.textContent?.trim(),
+        primary: c.classList.contains("kp-button--primary"),
+        action: /** @type {HTMLElement} */ (c).dataset.action ?? null,
+      })),
+    );
+    assert.deepEqual(
+      order.map((o) => o.text),
+      ["Back up", "Update", "Deploy", "More ▾"],
+    );
+    assert.deepEqual(
+      order.map((o) => o.primary),
+      [false, false, true, false],
+    );
+    assert.deepEqual(
+      order.slice(0, 3).map((o) => o.action),
+      ["backup", "update", "deploy"],
+    );
+    // `.` opens More, grouped as the demo groups it.
+    await page
+      .locator("body")
+      .click({ position: { x: 5, y: 500 }, timeout: 5000 });
+    await page.keyboard.press(".");
+    const groups = await page
+      .locator(".sh-menu__list:not([hidden]) .sh-menu__group")
+      .allTextContents();
+    assert.deepEqual(groups, ["Data", "Change", "Pause", "Tools", "Remove"]);
+    for (const a of ["restore", "deploy-commit", "resize", "guards", "disable"])
+      assert.equal(
+        await page.locator(`.sh-menu__list [data-action="${a}"]`).count(),
+        1,
+        `More has no ${a}`,
+      );
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator(".sh-menu__list").isHidden(), true);
+    // `b` opens the Back up dialog, as the button does.
+    await page.keyboard.press("b");
+    const dialog = page.locator("dialog#action-dialog[open]");
+    await dialog.waitFor({ timeout: 5000 });
+    assert.match(
+      (await dialog.locator(".kp-dialog__title").textContent()) ?? "",
+      /Back up/,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: stack hub — six tabs; Overview has five KPI tiles, Is it healthy? and Recent history with who did it", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/gateway`);
+    await page
+      .locator("#healthy .sh-checks li")
+      .first()
+      .waitFor({ timeout: 10000 });
+    await page
+      .locator(".sh-feed li[data-who]")
+      .first()
+      .waitFor({ timeout: 10000 });
+    const r = await page.evaluate(() => ({
+      tabs: [...document.querySelectorAll(".sh-tabs .kp-tab")].map((t) =>
+        (t.firstChild?.textContent ?? "").trim(),
+      ),
+      kpis: [...document.querySelectorAll(".nx-kpis .nx-kpi__label")].map(
+        (l) => l.textContent,
+      ),
+      links: [...document.querySelectorAll(".nx-kpis a.nx-kpi")].length,
+      checks: [...document.querySelectorAll("#healthy .sh-checks li")].map(
+        (l) => l.getAttribute("data-key"),
+      ),
+      who: [...document.querySelectorAll(".sh-feed li[data-who]")].map((l) =>
+        l.getAttribute("data-who"),
+      ),
+      noEnv: !!document.querySelector('.nx-attention [data-key="no-env"]'),
+    }));
+    assert.deepEqual(r.tabs, [
+      "Overview",
+      "Logs",
+      "Apps",
+      "Backups",
+      "History",
+      "Settings",
+    ]);
+    assert.deepEqual(r.kpis, [
+      "Apps up",
+      "Restarts",
+      "Last backup",
+      "Errors in logs · 1 h",
+      "Matches its files",
+    ]);
+    assert.equal(r.links, 4, "every tile but the drift one links into its tab");
+    for (const k of [
+      "online",
+      "apps",
+      "restarts",
+      "disk",
+      "backup",
+      "env",
+      "drift",
+    ])
+      assert.ok(r.checks.includes(k), `Is it healthy? has no ${k} row`);
+    assert.ok(r.who.includes("claude"), "Recent history names no Claude row");
+    assert.ok(r.who.includes("night"), "Recent history names no nightly row");
+    assert.ok(r.noEnv, "the stack's no-env problem is not in its band");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: stack hub — Logs' side column turns an app or a level on and off with a plain click; Esc shows all again", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/gateway/logs`);
+    const lines = page.locator(".sh-log .sh-log__line");
+    await lines.first().waitFor({ timeout: 10000 });
+    const total = await lines.count();
+    assert.ok(total > 5, `only ${total} log lines`);
+    assert.equal(
+      await page.locator('[data-drive="stack-log-window"]').count(),
+      4,
+    );
+    const errors = page.locator(
+      '[data-drive="stack-log-filter"][data-drive-row="gateway/levels/e"]',
+    );
+    await errors.click({ timeout: 5000 });
+    assert.equal(await errors.getAttribute("aria-pressed"), "false");
+    assert.equal(await page.locator('.sh-log [data-lvl="e"]').count(), 0);
+    const traefik = page.locator(
+      '[data-drive="stack-log-filter"][data-drive-row="gateway/apps/traefik"]',
+    );
+    await traefik.click({ timeout: 5000 });
+    assert.equal(await page.locator('.sh-log [data-src="traefik"]').count(), 0);
+    assert.match(
+      (await page.locator(".sh-count-text").textContent()) ?? "",
+      new RegExp(`of ${total} lines`),
+    );
+    await page
+      .locator("body")
+      .click({ position: { x: 5, y: 900 }, timeout: 5000 });
+    await page.keyboard.press("Escape");
+    assert.equal(await lines.count(), total);
+    assert.equal(await errors.getAttribute("aria-pressed"), "true");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: stack hub — History's Started by chips filter with a plain click, several at once", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/kp-soft/history`);
+    const rows = page.locator(".sh-feed--full li[data-who]");
+    await rows.first().waitFor({ timeout: 10000 });
+    const all = await rows.count();
+    await page
+      .locator(
+        '[data-drive="stack-history-who"][data-drive-row="kp-soft/claude"]',
+      )
+      .click({ timeout: 5000 });
+    const who = await rows.evaluateAll((ls) =>
+      ls.map((l) => l.getAttribute("data-who")),
+    );
+    assert.ok(who.length > 0 && who.every((w) => w === "claude"), who.join());
+    await page
+      .locator(
+        '[data-drive="stack-history-who"][data-drive-row="kp-soft/night"]',
+      )
+      .click({ timeout: 5000 });
+    const two = await rows.evaluateAll((ls) =>
+      ls.map((l) => l.getAttribute("data-who")),
+    );
+    assert.ok(two.includes("night") && two.includes("claude"));
+    assert.ok(!two.includes("you"));
+    assert.match(page.url(), /by=claude%2Cnight|by=claude,night/);
+    await page
+      .locator("body")
+      .click({ position: { x: 5, y: 900 }, timeout: 5000 });
+    await page.keyboard.press("Escape");
+    assert.equal(await rows.count(), all);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: stack hub — Apps and Backups are kp datatables; Backups draws 14 nights per app; Settings ends in a folded Danger zone", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/gateway/apps`);
+    await page
+      .locator(".sh-table[data-kp-datatable] tbody tr")
+      .first()
+      .waitFor({ timeout: 10000 });
+    assert.equal(
+      await page
+        .locator(".sh-table[data-kp-sort-multi][data-kp-remember]")
+        .count(),
+      1,
+    );
+    await page.goto(`${BASE}/stacks/gateway/backups`);
+    const strips = page.locator(".sh-table .sh-strip");
+    await strips.first().waitFor({ timeout: 10000 });
+    const cells = await strips.evaluateAll((ss) =>
+      ss.map((s) => s.children.length),
+    );
+    assert.ok(cells.length >= 1 && cells.every((n) => n === 14), cells.join());
+    assert.ok(
+      (await page.locator('.sh-table [data-action="restore"]').count()) >= 1,
+    );
+    await page.goto(`${BASE}/stacks/gateway/settings`);
+    await page.locator("#size dd").first().waitFor({ timeout: 10000 });
+    const r = await page.evaluate(() => ({
+      parts: [...document.querySelectorAll(".sh-grid > *")].map((e) => e.id),
+      dangerOpen: /** @type {HTMLDetailsElement} */ (
+        document.getElementById("danger")
+      ).open,
+      danger: [...document.querySelectorAll("#danger [data-action]")].map((b) =>
+        b.getAttribute("data-action"),
+      ),
+    }));
+    assert.deepEqual(r.parts, [
+      "secrets",
+      "size",
+      "firewall",
+      "files",
+      "danger",
+    ]);
+    assert.equal(r.dangerOpen, false);
+    assert.deepEqual(r.danger, ["destroy", "forget", "wipe", "prune-orphans"]);
+    await page.goto(`${BASE}/stacks/gateway/settings?section=danger`);
+    await page.waitForTimeout(500);
+    assert.equal(
+      await page.evaluate(
+        () =>
+          /** @type {HTMLDetailsElement} */ (document.getElementById("danger"))
+            .open,
+      ),
+      true,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: stack hub — every tab fits 390 and 1894 px in light and dark, no sideways scroll", async () => {
+  const browser = await chromium.launch();
+  try {
+    const bad = [];
+    for (const theme of ["formal", "dark"])
+      for (const width of [1894, 390]) {
+        const context = await browser.newContext({
+          viewport: { width, height: 900 },
+        });
+        const page = await freshPage(context);
+        await page.evaluate((t) => localStorage.setItem("theme", t), theme);
+        for (const tab of [
+          "",
+          "/logs",
+          "/apps",
+          "/backups",
+          "/history",
+          "/settings",
+        ]) {
+          await page.goto(`${BASE}/stacks/gateway${tab}`);
+          await page.waitForTimeout(1200);
+          const over = await page.evaluate(
+            () => document.documentElement.scrollWidth - innerWidth,
+          );
+          if (over > 0)
+            bad.push(`${theme} ${width}px ${tab || "/"}: ${over}px`);
+        }
+        await context.close();
+      }
+    assert.deepEqual(bad, [], `sideways scroll: ${bad.join("; ")}`);
   } finally {
     await browser.close();
   }

@@ -1,65 +1,341 @@
-// One stack's page (feat-stacks-1) with its tabs: overview, apps, history,
-// logs and checks. The tab is in the path (/stacks/media/logs), what a
-// tab filters on is in the query string (feat-overview-8).
+// The stack hub (redesign-stackhub, release 3.71.0; Kenny approved the hub
+// demo 2026-10-03: ~/.local/share/homelab/redesign-3.71/flows/stack-hub.html
+// with stack.html, FLOWS.md §1.3 — implemented as drawn). Everything about
+// one stack together, reached from Stacks, the Inbox, Ctrl K and every link
+// that names a stack.
+//
+// The header keeps the same slots on every stack: the identity mark, the
+// name and its state, the meta chips, and `Back up · Update · Deploy
+// (primary) · More ▾` (b, u, d, `.`), More grouped Data · Change · Pause ·
+// Native service · Tools · Remove. The tabs, in order of use: Overview
+// (the stack's slice of Needs you, five KPI tiles, "Is it healthy?" with
+// the manual checks, Recent history with who did it), Logs (a side column
+// of apps and levels, one toolbar), Apps (version and a newer one, Logs /
+// Update… / Publish… per row), Backups (per app: newest snapshot, the last
+// 14 nights, Restore… / Verify…), History (Started by You / Claude /
+// Nightly round), Settings (Secrets, Size and network, Files with the
+// editor, Firewall, and a folded Danger zone). Every action of the old
+// 13-button area is still here (header, More, Danger zone), and every
+// control a person can click is reachable through Live view (`declare`
+// with `at`, or a catalog form's `data-action`).
+//
+// Data: the fleet store (state, apps, restarts, env), /data/drift,
+// /data/stacks/{s}/edit (address, size, firewall, images, files),
+// /data/stale-images, /data/backups/{s} + /data/backup-calendar?stack=,
+// /data/logs (Loki), /data/history + /data/incidents, /data/manual-checks,
+// /data/charts?stack= (how full the disk is), the Inbox and the action
+// catalog. What no source serves is said plainly, never invented.
 
-import { mountActionsArea } from "../actionsarea.js";
+import { act, catalogReady, onAct } from "../act.js";
+import { openAction } from "../actiondialog.js";
+import { onAnswered } from "../answer.js";
+import { checkRows } from "../checks.js";
+import { fetchJson, fetchReport, slowRead, tabRow } from "../dom.js";
+import { declare, drivable, viaForm } from "../drivable.js";
+import { driven } from "../drivehooks.js";
 import {
   checksEditTab,
   firewallTab,
   openPublishDialog,
   settingsTab,
 } from "../editpanels.js";
-import { historyRows, incidentRows } from "../activity.js";
-import { agoEl, setAgo } from "../ago.js";
-import { checkRows } from "../checks.js";
-import { answerButton, onAnswered } from "../answer.js";
-import { showButton } from "../incident.js";
-import {
-  badgeCell,
-  bindTableUrl,
-  errorBox,
-  fetchJson,
-  fetchReport,
-  fillFacts,
-  h,
-  tabRow,
-  tableBlock,
-  td,
-} from "../dom.js";
-import { stackDetail } from "../fleet.js";
-import { badge } from "../actui.js";
-import { driftFact, stackFlags } from "../parity.js";
 import { formatDateTime, humanDuration } from "../format.js";
-import {
-  JOURNAL,
-  SINCE,
-  appChoices,
-  logRows,
-  logSettings,
-  logsUrl,
-} from "../logs.js";
+import { openIncident } from "../incident.js";
+import { inboxNow, onInbox } from "../inbox.js";
+import { finished } from "../jobs.js";
+import { mountJobPanel } from "../jobpanel.js";
+import { lineTime, logsUrl } from "../logs.js";
+import { openPinUpdate } from "../pinupdate.js";
+import { openRollback } from "../rollbackdialog.js";
 import { STACK_TABS, stackHref } from "../router.js";
-import { sortKeys } from "../sortkeys.js";
-import { stackChecks, stackEntries, stackIncidents } from "../stacktabs.js";
+import { incidentRows } from "../activity.js";
+import {
+  DANGER,
+  LEVELS,
+  LOG_WINDOWS,
+  agoParts,
+  appRows,
+  attentionItems,
+  backupRows,
+  backupStanding,
+  backupTimes,
+  errorCount,
+  fileList,
+  filterFeed,
+  headerActions,
+  headerChips,
+  healthChecks,
+  historyFeed,
+  hubKpis,
+  hubState,
+  levelGroup,
+  logSources,
+  logView,
+  logWindow,
+  moreGroups,
+  sizeFacts,
+  staleFor,
+} from "../stackhub.js";
+import { stackEntries, stackIncidents, stackChecks } from "../stacktabs.js";
 import { current, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
-import {
-  attachDataTables,
-  compare,
-  dataTable,
-} from "/static/kp/js/datatable.js";
-import { attachLogs } from "/static/kp/js/log.js";
+import { attachDataTables } from "/static/kp/js/datatable.js";
 import { watchTabOverflow } from "/static/kp/js/overlays.js";
-import { viaForm } from "../drivable.js";
 import { mount as mountSecrets } from "./secrets.js";
-import { emptyState, section } from "../ui.js";
+import {
+  attentionBand,
+  emptyState,
+  kpiStrip,
+  section,
+  skeletonLines,
+  skeletonTable,
+  toolbar,
+} from "../ui.js";
+import {
+  chip,
+  dot,
+  el,
+  ensureStyle,
+  foot,
+  groupedMenu,
+  hubHeader,
+  keyRow,
+  nightStrip,
+  segSwitch,
+  sideFilters,
+} from "./stackkit.js";
 
-/** How far back the history tab reads. */
+/** How far back the History tab reads. */
 const HISTORY_DAYS = 30;
+/** How many lines one Logs read asks Loki for. */
+const LOG_LIMIT = 1000;
+
+// ── Live view (fix-239, invariant 39): every page control of the hub,
+// found from anywhere through its `at` (the stack's own tab, from the row).
+/** @param {string} tab */
+const at = (tab) => (/** @type {string | null} */ row) =>
+  row ? stackHref(row.split("/")[0], /** @type {any} */ (tab)) : null;
+const MORE = declare({
+  id: "stack-more",
+  page: "stack",
+  opens: "run",
+  row: "<stack>",
+  at: at("overview"),
+  what: "open the stack header's More menu (Data, Change, Pause, Tools, Remove)",
+});
+const COMPARE = declare({
+  id: "stack-compare",
+  page: "stack",
+  opens: "run",
+  row: "<stack>",
+  at: at("overview"),
+  what: "compare this one stack with its files now (the Matches its files tile)",
+});
+const LOG_FILTER = declare({
+  id: "stack-log-filter",
+  page: "stack",
+  opens: "view",
+  row: "<stack>/<apps|levels>/<value|all>",
+  at: at("logs"),
+  what: "turn one app or level of the Logs tab on or off (all: every one again)",
+});
+const LOG_WINDOW = declare({
+  id: "stack-log-window",
+  page: "stack",
+  opens: "view",
+  row: "<stack>/<seconds>",
+  at: at("logs"),
+  what: "read the Logs tab over 15 min, 1 h, 24 h or 7 d (900, 3600, 86400, 604800)",
+});
+const LOG_FOLLOW = declare({
+  id: "stack-log-follow",
+  page: "stack",
+  opens: "view",
+  row: "<stack>",
+  at: at("logs"),
+  what: "follow the newest log lines (every 5 s), or stop following",
+});
+const WHO = declare({
+  id: "stack-history-who",
+  page: "stack",
+  opens: "view",
+  row: "<stack>/<you|claude|night>",
+  at: at("history"),
+  what: "show only the operations one starter began; each click turns one on or off",
+});
+const APP_UPDATE = declare({
+  id: "stack-app-update",
+  page: "stack",
+  opens: "dialog",
+  row: "<stack>/<app>/<service>",
+  at: at("apps"),
+  what: "an app's Update… to its newer version: back up, move the pinned image, commit and deploy",
+});
+const INCIDENT = declare({
+  id: "stack-incident",
+  page: "stack",
+  opens: "dialog",
+  row: "<stack>/<bundle>",
+  at: at("history"),
+  what: "open one failed operation's saved incident bundle",
+});
+const FOLD = declare({
+  id: "stack-fold",
+  page: "stack",
+  opens: "view",
+  row: "<stack>/<editor|firewall|danger|checks>",
+  at: (row) =>
+    row
+      ? row.endsWith("/checks")
+        ? stackHref(row.split("/")[0])
+        : `${stackHref(row.split("/")[0], "settings")}`
+      : null,
+  what: "open or fold one of the hub's folded parts: the file editor, the firewall rules, the danger zone, the checks it is judged on",
+});
+
+// Coordinator rule (Kenny, 2026-10-03): every clickable element the hub
+// draws carries a declared, stable Live view id. The rows name the stack
+// first, so `at` finds the tab the control lives on from anywhere.
+/** @param {string | null} row @param {number} i */
+const seg = (row, i) => (row ?? "").split("/")[i] ?? "";
+const HEAD = declare({
+  id: "stack-head",
+  page: "stack",
+  opens: "dialog",
+  row: "<stack>/<backup|update|deploy>",
+  at: at("overview"),
+  what: "the header's Back up, Update or Deploy (b, u, d): opens that action's dialog",
+});
+const MENU_ITEM = declare({
+  id: "stack-more-item",
+  page: "stack",
+  opens: "dialog",
+  row: "<stack>/<item>",
+  at: at("overview"),
+  what: "one entry of the header's More menu (restore, verify-restore, change-secret, rollback, resize, guards, disable or enable, the native ones, export, console, danger)",
+});
+const FIX = declare({
+  id: "stack-fix",
+  page: "stack",
+  opens: "dialog",
+  row: "<stack>/<problem>",
+  at: at("overview"),
+  what: "the fix of one row of the stack's Needs you band (deploy, backup, unpark, pin update, or a link to where it is fixed)",
+});
+const TAB = declare({
+  id: "stack-tab",
+  page: "stack",
+  opens: "view",
+  row: "<stack>/<overview|logs|apps|backups|history|settings>",
+  at: at("overview"),
+  what: "open one of the hub's six tabs",
+});
+const KPI = declare({
+  id: "stack-kpi",
+  page: "stack",
+  opens: "view",
+  row: "<stack>/<apps|restarts|backup|errors>",
+  at: at("overview"),
+  what: "open the tab a KPI tile stands for",
+});
+const LINK = declare({
+  id: "stack-link",
+  page: "stack",
+  opens: "view",
+  row: "<stack>/<tab>/<link>",
+  at: (row) =>
+    row ? stackHref(seg(row, 0), /** @type {any} */ (seg(row, 1))) : null,
+  what: "a link of the hub to a related page or tab (all history, the logs' errors, an app's logs, the host log, Map, Planned, Backups, the files, the fleet firewall)",
+});
+const CHECK_ANSWER = declare({
+  id: "stack-check-answer",
+  page: "stack",
+  opens: "dialog",
+  row: "<stack>/<check>",
+  at: at("overview"),
+  what: "answer one manual check of Is it healthy?",
+});
+const LOG_SEARCH = declare({
+  id: "stack-log-search",
+  page: "stack",
+  opens: "view",
+  row: "<stack>",
+  at: at("logs"),
+  what: "the Logs tab's Lines containing box",
+});
+const LOG_RETRY = declare({
+  id: "stack-log-retry",
+  page: "stack",
+  opens: "run",
+  row: "<stack>",
+  at: at("logs"),
+  what: "ask Loki for the lines again after it did not answer",
+});
+const APP_PULL = declare({
+  id: "stack-app-pull",
+  page: "stack",
+  opens: "dialog",
+  row: "<stack>/<app>",
+  at: at("apps"),
+  what: "an unpinned app's Update…: pull its newest image and recreate it, with rollback",
+});
+const APP_PUBLISH = declare({
+  id: "stack-app-publish",
+  page: "stack",
+  opens: "dialog",
+  row: "<stack>/<app>",
+  at: at("apps"),
+  what: "give one app a hostname on the gateway (and a tile)",
+});
+const BACKUP_CARD = declare({
+  id: "stack-backups-card",
+  page: "stack",
+  opens: "dialog",
+  row: "<stack>/<backup|restore>",
+  at: at("backups"),
+  what: "the Backups card's Back up now or Restore…",
+});
+const BACKUP_ROW = declare({
+  id: "stack-backup-row",
+  page: "stack",
+  opens: "dialog",
+  row: "<stack>/<app>/<restore|verify>",
+  at: at("backups"),
+  what: "one app's Restore… or Verify… on the Backups tab",
+});
+const HISTORY_SEARCH = declare({
+  id: "stack-history-search",
+  page: "stack",
+  opens: "view",
+  row: "<stack>",
+  at: at("history"),
+  what: "the History tab's Find box",
+});
+const OPEN_EDITOR = declare({
+  id: "stack-open-editor",
+  page: "stack",
+  opens: "view",
+  row: "<stack>/<files|size>",
+  at: at("settings"),
+  what: "open the file editor: Files' Open the editor…, Size and network's Edit…",
+});
+const DANGER_BTN = declare({
+  id: "stack-danger",
+  page: "stack",
+  opens: "dialog",
+  row: "<stack>/<destroy|forget|wipe|prune-orphans>",
+  at: (row) =>
+    row ? `${stackHref(seg(row, 0), "settings")}?section=danger` : null,
+  what: "one destructive action of Settings ▸ Danger zone; its dialog asks for the stack's name",
+});
 
 /**
  * @typedef {{name: string, tab: import("../router.js").StackTab,
  *   navigate: (href: string) => void}} Params
+ * @typedef {{s: import("../fleet.js").Stack | null, inFleet: boolean,
+ *   fleetRead: boolean, drift: import("../stackhub.js").Drift | null,
+ *   driftRead: boolean, edit: any | null, editError: string | null,
+ *   catalog: import("../actionforms.js").Catalog | null}} Shared
  */
 
 /**
@@ -68,789 +344,2240 @@ const HISTORY_DAYS = 30;
  * @returns {() => void}
  */
 export function mount(root, params) {
-  const title = h("h1", null, `Stack ${params.name}`);
-  const state = h("span", { class: "state" });
-  // TUI parity: [OFF] [CHANGED] [NOENV], as the TUI flags a stack.
-  const flags = h("span", { class: "stack-flags", id: "stack-flags" });
-  /** @type {any} */
-  let drift = null;
-  const missing = h("p", { class: "kp-alert kp-alert--warning", hidden: "" });
-  const panel = h("div", {
-    class: "kp-tabs__panel",
-    role: "tabpanel",
-    id: "stack-panel",
-    "aria-label": STACK_TABS.find((t) => t.tab === params.tab)?.label ?? "",
+  ensureStyle("/css/pages/stack.css");
+  root.classList.add("sh-page");
+  const name = params.name;
+  const abort = new AbortController();
+  /** @type {(() => void)[]} */
+  const stops = [];
+  /** @type {Shared} */
+  const S = {
+    s: null,
+    inFleet: false,
+    fleetRead: false,
+    drift: null,
+    driftRead: false,
+    edit: null,
+    editError: null,
+    catalog: null,
+  };
+  /** Tell the open tab the shared readings changed. */
+  const bus = new EventTarget();
+  const changed = () => bus.dispatchEvent(new Event("change"));
+
+  // ── header ────────────────────────────────────────────────────────────
+  /**
+   * @param {string} label @param {string} title @param {string} key
+   * @param {boolean} [primary]
+   */
+  const headButton = (label, title, key, primary = false) =>
+    el(
+      "button",
+      {
+        type: "button",
+        class: `kp-button${primary ? " kp-button--primary" : ""}`,
+        title: `${title} (${key})`,
+        "aria-keyshortcuts": key,
+      },
+      label,
+    );
+  const backupBtn = headButton(
+    "Back up",
+    "A snapshot of every app's data now",
+    "b",
+  );
+  const updateBtn = headButton(
+    "Update",
+    "Newest image for one app or all, with rollback",
+    "u",
+  );
+  const deployBtn = headButton(
+    "Deploy",
+    "Make the stack match its files",
+    "d",
+    true,
+  );
+  /** @param {HTMLElement} b @param {string} action */
+  const bindAction = (b, action) => {
+    b.dataset.action = action;
+    viaForm(b, action);
+  };
+  const head = headerActions(null);
+  bindAction(backupBtn, head.backup);
+  bindAction(updateBtn, head.update);
+  bindAction(deployBtn, head.deploy);
+  drivable(backupBtn, HEAD, `${name}/backup`);
+  drivable(updateBtn, HEAD, `${name}/update`);
+  drivable(deployBtn, HEAD, `${name}/deploy`);
+  for (const b of [backupBtn, updateBtn, deployBtn])
+    b.addEventListener(
+      "click",
+      () => void openAction(name, b.dataset.action ?? "", { openRollback }),
+    );
+
+  const menu = groupedMenu({
+    label: "More ▾",
+    title: "Every other action on this stack (.)",
+    groups: [],
+    mark: (b) => drivable(b, MORE, name),
   });
+  stops.push(menu.stop);
+  const header = hubHeader({
+    name,
+    desc: "Everything about this one stack in one place: its health, logs, apps, backups, history and settings.",
+    actions: [backupBtn, updateBtn],
+    primary: deployBtn,
+    more: menu.el,
+  });
+
+  /** @param {string} tab @param {string} [section] */
+  const go = (tab, section) => {
+    const href = `${stackHref(name, /** @type {any} */ (tab))}${section ? `?section=${section}` : ""}`;
+    if (tab === params.tab && section) {
+      history.replaceState(history.state, "", href);
+      bus.dispatchEvent(new CustomEvent("section", { detail: section }));
+      return;
+    }
+    params.navigate(href);
+  };
+  const compare = () =>
+    document.dispatchEvent(new CustomEvent("stack-drift-compare"));
+  const paintMenu = () => {
+    const groups = moreGroups({
+      stack: name,
+      native: S.s?.native ?? null,
+      enabled: S.s ? S.s.enabled : null,
+      vmid: S.s?.vmid ?? null,
+    });
+    const cat = S.catalog;
+    menu.fill(
+      groups
+        .map((g) => ({
+          group: g.group,
+          items: g.items.flatMap(
+            /** @returns {import("./stackkit.js").MenuEntry[]} */ (it) => {
+              /** @type {import("./stackkit.js").MenuEntry} */
+              const base = {
+                label: it.label,
+                hint: it.hint,
+                danger: it.danger,
+                mark: (e) => drivable(e, MENU_ITEM, `${name}/${it.key}`),
+              };
+              switch (it.kind) {
+                case "action": {
+                  const entry = cat?.actions.find(
+                    (a) => a.action === it.action,
+                  );
+                  if (cat && (!entry || entry.target !== "stack")) return [];
+                  const refused =
+                    entry && name === cat?.self_stack && entry.refused_for_self
+                      ? "Never on the dashboard's own stack"
+                      : null;
+                  return [
+                    {
+                      ...base,
+                      disabled: refused,
+                      attrs: { "data-action": it.action },
+                      mark: (e) =>
+                        viaForm(
+                          drivable(e, MENU_ITEM, `${name}/${it.key}`),
+                          it.action,
+                        ),
+                      onClick: () =>
+                        void openAction(name, it.action, { openRollback }),
+                    },
+                  ];
+                }
+                case "rollback":
+                  return [
+                    {
+                      ...base,
+                      attrs: { "data-action": "deploy-commit" },
+                      mark: (e) =>
+                        viaForm(
+                          drivable(e, MENU_ITEM, `${name}/${it.key}`),
+                          "deploy-commit",
+                        ),
+                      onClick: () => void openRollback(name),
+                    },
+                  ];
+                case "go":
+                  return [{ ...base, onClick: () => go(it.tab, it.section) }];
+                case "href":
+                  return [{ ...base, href: it.href, download: it.download }];
+                default:
+                  return [];
+              }
+            },
+          ),
+        }))
+        .filter((g) => g.items.length > 0),
+    );
+  };
+  paintMenu();
+  void catalogReady().then((c) => {
+    if (abort.signal.aborted) return;
+    S.catalog = c;
+    paintMenu();
+  });
+
+  // ── tabs ──────────────────────────────────────────────────────────────
   const tabs = tabRow(
-    `Stack ${params.name}`,
+    `Stack ${name}`,
     STACK_TABS.map((t) => ({
-      href: stackHref(params.name, t.tab),
+      href: stackHref(name, t.tab),
       label: t.label,
       current: t.tab === params.tab,
     })),
   );
-  // feat-shell-1: the shell draws the trail above every page now
-  // (`Stacks / gateway / Logs`); the old "← Overview" link went to `/`.
+  tabs.classList.add("sh-tabs");
+  tabs
+    .querySelectorAll("a.kp-tab")
+    .forEach((a, i) =>
+      drivable(
+        /** @type {HTMLElement} */ (a),
+        TAB,
+        `${name}/${STACK_TABS[i].tab}`,
+      ),
+    );
+  const appsCount = el("span", { class: "sh-count", hidden: true });
+  tabs
+    .querySelector(`a[href="${CSS.escape(stackHref(name, "apps"))}"]`)
+    ?.append(appsCount);
+  const panel = el("div", {
+    class: "kp-tabs__panel sh-panel",
+    role: "tabpanel",
+    id: "stack-panel",
+    "aria-label": STACK_TABS.find((t) => t.tab === params.tab)?.label ?? "",
+  });
+  const keys = keyRow([
+    ["b", "back up"],
+    ["u", "update"],
+    ["d", "deploy"],
+    [".", "more"],
+    ["1–6", "tabs"],
+    ["Ctrl K", "do anything"],
+  ]);
   root.replaceChildren(
-    h("div", { class: "title-row" }, title, h("span", null, state, flags)),
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      "Everything about this one stack: its state, logs, apps, backups, history and settings.",
-    ),
-    missing,
-    tabs,
+    header.el,
+    el("div", { class: "sh-tabbar" }, tabs, keys),
     panel,
   );
+  stops.push(
+    watchTabOverflow(
+      tabs,
+      () =>
+        /** @type {HTMLElement | null} */ (
+          tabs.querySelector('[aria-selected="true"]')
+        ) ?? undefined,
+    ),
+  );
 
-  // The header is live on every tab: the state badge, or the note that the
-  // host has no such stack.
-  const header = () => {
+  // ── shared readings ───────────────────────────────────────────────────
+  const paintHead = () => {
     const f = current().fleet;
-    if (!f) return;
-    const d = stackDetail(f, params.name);
-    missing.hidden = d != null;
-    if (!d) {
-      missing.textContent = `The host's fleet has no stack called "${params.name}" (a stack committed but not deployed yet has only its Settings tab).`;
-      state.replaceChildren();
-      return;
-    }
-    state.className = `state ${d.state.tone}`;
-    state.replaceChildren(h("span", null, d.state.label));
-    const s = f.stacks.find((x) => x.name === params.name);
-    flags.replaceChildren(
-      ...(s ? stackFlags(s, drift?.state) : []).map((x) => {
-        const b = badge({ label: `[${x.label}]`, tone: x.tone });
-        b.title = x.title;
-        return b;
-      }),
+    S.fleetRead = f != null;
+    S.s = f?.stacks.find((x) => x.name === name) ?? null;
+    S.inFleet = S.s != null;
+    const st = f ? hubState(S.s) : { label: "reading…", tone: "" };
+    header.setState(st);
+    header.setChips(
+      headerChips({ s: S.s, manifest: S.edit?.manifest, drift: S.drift }),
     );
+    if (f) header.live.set(f.measured_at);
+    const h = headerActions(S.s?.native ?? null);
+    bindAction(backupBtn, h.backup);
+    bindAction(updateBtn, h.update);
+    const n = S.s?.apps_total ?? S.edit?.manifest?.apps?.length ?? null;
+    appsCount.hidden = n == null;
+    appsCount.textContent = n == null ? "" : String(n);
+    // The tab title carries the state (DESIGN_LANGUAGE §9.4).
+    if (f) {
+      const tab = STACK_TABS.find((t) => t.tab === params.tab);
+      document.title = `● ${name} · ${st.label} · ${params.tab === "overview" ? "Homelab" : `${tab?.label} · Homelab`}`;
+    }
+    paintMenu();
+    changed();
   };
-  const unsub = subscribe(header);
-  header();
-  // Drift runs latch per stack on the dashboard: the newest reading is
-  // shown, and a new one is made only when asked ("Compare with the files").
-  const driftAbort = new AbortController();
-  /** @param {boolean} fresh */
-  const readDrift = async (fresh) => {
+  stops.push(subscribe(paintHead));
+
+  const readDrift = async (/** @type {boolean} */ fresh) => {
     const r = await fetchJson(
       `/data/drift${fresh ? "?fresh=1" : ""}`,
       "drift",
-      driftAbort.signal,
+      abort.signal,
     );
-    if (!r.ok) {
-      document.dispatchEvent(
-        new CustomEvent("stack-drift-error", { detail: r.error }),
-      );
-      return;
+    S.driftRead = true;
+    if (r.ok) {
+      const d = r.body.stacks?.[name] ?? null;
+      S.drift = d
+        ? { ...d, measured_at: d.measured_at ?? r.body.measured_at ?? null }
+        : null;
     }
-    drift = r.body.stacks?.[params.name] ?? null;
-    header();
-    document.dispatchEvent(new CustomEvent("stack-drift", { detail: drift }));
-    document.dispatchEvent(
-      new CustomEvent("stack-drift-error", { detail: null }),
-    );
+    paintHead();
   };
   const onCompare = () => void readDrift(true).catch(() => {});
   document.addEventListener("stack-drift-compare", onCompare);
+  stops.push(() =>
+    document.removeEventListener("stack-drift-compare", onCompare),
+  );
   void readDrift(false).catch(() => {});
-  // A row wider than a phone scrolls, the open tab kept in view (kp-themes).
-  const stopOverflow = watchTabOverflow(
-    tabs,
-    () => tabs.querySelector('[aria-selected="true"]') ?? undefined,
-  );
 
-  /** @type {Record<string, (p: HTMLElement, params: Params) => () => void>} */
+  const readEdit = async () => {
+    const r = await fetchJson(
+      `/data/stacks/${encodeURIComponent(name)}/edit`,
+      `the files of ${name}`,
+      abort.signal,
+    );
+    if (r.ok) {
+      S.edit = r.body;
+      S.editError = r.body.manifest ? null : (r.body.manifest_error ?? null);
+    } else S.editError = r.error.why;
+    paintHead();
+  };
+  void readEdit().catch(() => {});
+  paintHead();
+
+  // ── keys: b u d . (not while typing, not inside a chord or a dialog) ──
+  let lastKey = { key: "", at: 0 };
+  /** @param {KeyboardEvent} e */
+  const onKey = (e) => {
+    const prev = lastKey;
+    lastKey = { key: e.key, at: Date.now() };
+    if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+    const t = /** @type {HTMLElement | null} */ (e.target);
+    if (t?.closest("input, textarea, select, [contenteditable]")) return;
+    if (document.querySelector("dialog[open]")) return;
+    if (prev.key === "g" && Date.now() - prev.at < 1500) return;
+    /** @type {Record<string, HTMLElement>} */
+    const map = { b: backupBtn, u: updateBtn, d: deployBtn };
+    if (map[e.key]) {
+      e.preventDefault();
+      map[e.key].click();
+    } else if (e.key === ".") {
+      e.preventDefault();
+      menu.toggle();
+    }
+  };
+  document.addEventListener("keydown", onKey);
+  stops.push(() => document.removeEventListener("keydown", onKey));
+
+  /** @type {Record<string, (p: HTMLElement) => () => void>} */
   const panels = {
-    overview: hubOverview,
-    logs: logsTab,
-    apps: appsTab,
-    backups: backupsTab,
-    history: historyTab,
-    settings: hubSettings,
+    overview: (p) => overviewTab(p, ctx),
+    logs: (p) => logsTab(p, ctx),
+    apps: (p) => appsTab(p, ctx),
+    backups: (p) => backupsTab(p, ctx),
+    history: (p) => historyTab(p, ctx),
+    settings: (p) => settingsHub(p, ctx),
   };
-  const stop = panels[params.tab](panel, params);
+  /** @type {Ctx} */
+  const ctx = {
+    name,
+    params,
+    S,
+    signal: abort.signal,
+    go,
+    compare,
+    /** @param {() => void} f */
+    onChange: (f) => {
+      bus.addEventListener("change", f);
+      return () => bus.removeEventListener("change", f);
+    },
+    /** @param {(s: string) => void} f */
+    onSection: (f) => {
+      const g = (/** @type {Event} */ e) =>
+        f(/** @type {CustomEvent} */ (e).detail);
+      bus.addEventListener("section", g);
+      return () => bus.removeEventListener("section", g);
+    },
+    reloadEdit: () => void readEdit().catch(() => {}),
+  };
+  stops.push(panels[params.tab](panel));
   return () => {
-    driftAbort.abort();
-    document.removeEventListener("stack-drift-compare", onCompare);
-    unsub();
-    stopOverflow();
-    stop();
+    abort.abort();
+    for (const s of stops.reverse()) s();
   };
 }
 
 /**
- * feat-shell-3 (FLOWS.md §1.3): the hub's Overview holds what the Checks
- * tab held, as its "Is it healthy?" section, until the hub's own page
- * helper redraws it (`/stacks/{s}/checks` redirects here).
- * @type {(p: HTMLElement, params: Params) => () => void}
+ * What every tab gets from the hub.
+ * @typedef {{name: string, params: Params, S: Shared, signal: AbortSignal,
+ *   go: (tab: string, section?: string) => void, compare: () => void,
+ *   onChange: (f: () => void) => () => void,
+ *   onSection: (f: (s: string) => void) => () => void,
+ *   reloadEdit: () => void}} Ctx
  */
-function hubOverview(panel, params) {
-  const top = h("div", { class: "hub-part" });
-  const healthy = section({
-    id: "stack-healthy",
-    title: "Is it healthy?",
-    desc: "Every check on this stack in one list: the manual checks a deploy left open, and your answers to them.",
-    mount: (body) => checksTab(body, params),
-  });
-  panel.replaceChildren(top, healthy.el);
-  const stop = overviewTab(top, params);
-  return () => {
-    stop();
-    healthy.stop();
-  };
-}
+
+/** Now, unix seconds. */
+const nowS = () => Math.floor(Date.now() / 1000);
 
 /**
- * feat-shell-3: the hub's Settings with its Firewall and Secrets sections
- * (the Firewall tab and the fleet Secrets page moved here, FLOWS.md §2);
- * `?section=firewall` / `?section=secrets` opens that one.
- * @type {(p: HTMLElement, params: Params) => () => void}
+ * A button that opens a catalog action's dialog (Live view: the form).
+ * @param {Ctx} c
+ * @param {string} action
+ * @param {{label: string, title: string, cls?: string,
+ *   preset?: Record<string, string>,
+ *   drive: [string, string]}} o `drive`: the declared id and its row
  */
-function hubSettings(panel, params) {
-  const want = new URLSearchParams(location.search).get("section");
-  const top = h("div", { class: "hub-part" });
-  const secrets = section({
-    id: "stack-secrets",
-    title: "Secrets",
-    desc: "The passwords and tokens this stack declares, sealed with latch; Reveal shows one, Change… writes a new one.",
-    collapsible: true,
-    open: want === "secrets",
-    mount: (body) => mountSecrets(body, { stack: params.name }),
-  });
-  const firewall = section({
-    id: "stack-firewall",
-    title: "Firewall",
-    desc: "The rules this stack's firewall lets through, and whether the host enforces them.",
-    collapsible: true,
-    open: want === "firewall",
-    mount: (body) => firewallTab(body, params),
-  });
-  panel.replaceChildren(top, secrets.el, firewall.el);
-  const stop = settingsTab(top, params);
-  const target =
-    want === "secrets" ? secrets : want === "firewall" ? firewall : null;
-  if (target)
-    queueMicrotask(() => target.el.scrollIntoView({ block: "start" }));
-  return () => {
-    stop();
-    secrets.stop();
-    firewall.stop();
-  };
-}
-
-/**
- * feat-shell-3: the hub's Backups tab, new in 3.71.0; until its page
- * helper draws this stack's repositories and nights here, it points at the
- * Backups area.
- * @type {(p: HTMLElement, params: Params) => () => void}
- */
-function backupsTab(panel, params) {
-  panel.replaceChildren(
-    emptyState({
-      title: "This stack's backups live on the Backups page for now",
-      text: "Every snapshot of every night, per stack, with Back up now and Restore… on each row.",
-      action: h(
-        "a",
-        {
-          class: "kp-button",
-          href: `/backups?stack=${encodeURIComponent(params.name)}`,
-        },
-        "Open Backups",
-      ),
-    }),
-  );
-  return () => {};
-}
-
-/** @type {(p: HTMLElement, params: Params) => () => void} */
-function overviewTab(panel, params) {
-  const facts = h("dl", { class: "facts" });
-  const ago = agoEl("measured", null, { live: true });
-  const counts = h("p", null);
-  // feat-stacks-4: every action on this stack, and its running jobs.
-  const actions = mountActionsArea({ stack: params.name });
-  const enc = encodeURIComponent(params.name);
-  const links = h(
-    "p",
-    { class: "actions-row stack-links" },
-    h(
-      "a",
-      {
-        class: "kp-button",
-        href: `/data/download/export/${enc}`,
-        download: `${params.name}-bundle.yml`,
-      },
-      "Export bundle",
-    ),
-  );
-  const shellLink = h(
-    "a",
-    { class: "kp-button", href: "/console" },
-    "Open the console",
-  );
-  links.append(shellLink);
-  const compareBtn = h(
+function actionButton(c, action, o) {
+  const b = el(
     "button",
     {
       type: "button",
-      class: "kp-button",
-      id: "drift-compare",
-      title:
-        "Check only this one stack against its files (for every stack at once, use Deploy all changes on Stacks).",
+      class: `kp-button ${o.cls ?? ""}`.trim(),
+      "data-action": action,
+      title: o.title,
     },
-    "Compare with the files",
+    o.label,
   );
-  compareBtn.addEventListener("click", () =>
-    document.dispatchEvent(new CustomEvent("stack-drift-compare")),
-  );
-  links.append(compareBtn);
-  const driftError = h("div", { class: "drift-error" });
-  panel.replaceChildren(
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      "What this one stack is: its facts, its drift from the files, and the actions you can run on it.",
-    ),
-    h("section", { class: "kp-card", "aria-label": "Stack" }, facts),
-    counts,
-    h("p", null, ago),
-    links,
-    driftError,
-    actions.element,
-  );
-  /** @type {any} */
-  let drift = null;
-  const onDrift = (/** @type {Event} */ e) => {
-    drift = /** @type {CustomEvent} */ (e).detail;
-    render();
-  };
-  document.addEventListener("stack-drift", onDrift);
-  const onDriftError = (/** @type {Event} */ e) => {
-    const err = /** @type {CustomEvent} */ (e).detail;
-    driftError.replaceChildren(...(err ? [errorBox(err)] : []));
-  };
-  document.addEventListener("stack-drift-error", onDriftError);
-  const render = () => {
-    const f = current().fleet;
-    const d = stackDetail(f, params.name);
-    if (!f || !d) return;
-    const s = f.stacks.find((x) => x.name === params.name);
-    shellLink.setAttribute("href", `/console?vmid=${s?.vmid ?? ""}`);
-    fillFacts(facts, [
-      ...d.facts,
-      {
-        label: "Env",
-        value:
-          s?.env_sealed === false
-            ? "[NOENV] the host holds no sealed env: a deploy fails closed"
-            : "sealed on the host",
-      },
-      { label: "Drift", value: driftFact(drift ?? undefined).label },
-    ]);
-    const down = d.apps.filter((a) => a.running !== "running").length;
-    counts.replaceChildren(
-      `${d.apps.length} apps, ${down} not running. `,
-      h("a", { href: stackHref(params.name, "apps") }, "See the apps"),
-      " · ",
-      h("a", { href: stackHref(params.name, "logs") }, "Read the logs"),
-    );
-    setAgo(ago, f.measured_at);
-  };
-  const unsub = subscribe(render);
-  render();
-  return () => {
-    unsub();
-    document.removeEventListener("stack-drift", onDrift);
-    document.removeEventListener("stack-drift-error", onDriftError);
-    actions.stop();
-  };
-}
-
-/** @type {(p: HTMLElement, params: Params) => () => void} */
-function appsTab(panel, params) {
-  const ago = agoEl("measured", null, { live: true });
-  const t = tableBlock({
-    remember: "stack-apps",
-    caption: "Apps",
-    search: "Search apps",
-    state: "loading",
-    nothing: "This stack declares no apps.",
-    columns: [
-      { label: "App", sort: "text" },
-      {
-        label: "Running",
-        sort: "text",
-        order: "stopped,running",
-        filter: "choice",
-      },
-      { label: "Restarts", sort: "number" },
-      { label: "Logs", sort: "text" },
-      { label: "Publish", sort: "text" },
-    ],
-  });
-  panel.replaceChildren(
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      "Every app this stack runs, with its own running state and restart count.",
-    ),
-    t.wrap,
-    h("p", null, ago),
-  );
-  const detach = attachDataTables(panel);
-  const table = dataTable(t.wrap);
-  const unbind = bindTableUrl(table, "apps");
-  t.loading({ words: "Waiting for the host's report of the fleet…" });
-  const render = () => {
-    const f = current().fleet;
-    const d = stackDetail(f, params.name);
-    if (!f || !d) return;
-    t.tbody.replaceChildren(
-      ...d.apps.map((a) => {
-        // feat-publish-1 (B): a hostname and a port, turned into
-        // gateway_route/extra_routes + traefik-routes.yml and optionally a
-        // tile, for this one app.
-        const publish = h(
-          "button",
-          { type: "button", class: "kp-button kp-button--small" },
-          "Publish…",
-        );
-        // fix-239: `homelab ui open publish <stack>/<app>`.
-        viaForm(publish, "publish");
-        publish.addEventListener("click", () => {
-          openPublishDialog(params.name, a.name, () => void render());
-        });
-        return h(
-          "tr",
-          null,
-          td(a.name),
-          badgeCell({ label: a.running, tone: a.tone }),
-          td(a.restarts, "num"),
-          h(
-            "td",
-            null,
-            h(
-              "a",
-              {
-                href: `${stackHref(params.name, "logs")}?app=${encodeURIComponent(a.name)}`,
-              },
-              `${a.name} logs`,
-            ),
-          ),
-          h("td", null, publish),
-        );
+  viaForm(drivable(b, o.drive[0], o.drive[1]), action);
+  b.addEventListener(
+    "click",
+    () =>
+      void openAction(c.name, b.dataset.action ?? action, {
+        openRollback,
+        ...(o.preset ? { preset: o.preset } : {}),
       }),
-    );
-    t.ready();
-    setAgo(ago, f.measured_at);
-  };
-  const unsub = subscribe(render);
-  render();
-  return () => {
-    unsub();
-    unbind();
-    detach();
-  };
+  );
+  return b;
 }
 
-/** @type {(p: HTMLElement, params: Params) => () => void} */
-function historyTab(panel, params) {
-  const keys = sortKeys();
-  /** @param {number | null} unix */
-  const time = (unix) =>
-    unix == null ? "—" : keys.note("time", formatDateTime(unix), unix);
-  const ago = agoEl("read");
-  const hist = tableBlock({
-    remember: "stack-history",
-    caption: `What the host did with ${params.name}, last ${HISTORY_DAYS} days`,
-    search: "Search the history",
-    state: "loading",
-    nothing: `The host did nothing with ${params.name} in the last ${HISTORY_DAYS} days.`,
-    columns: [
-      { label: "Started", sort: "time" },
-      { label: "What", sort: "text" },
-      { label: "Took", sort: "duration" },
+/**
+ * A link styled as a button, marked as the hub's `stack-link` on `row`.
+ * @param {string} href @param {string} label @param {string} title
+ * @param {string} row `<stack>/<tab>/<link>`
+ */
+const linkButton = (href, label, title, row, cls = "kp-button--sm") =>
+  drivable(
+    el("a", { class: `kp-button ${cls}`, href, title }, label),
+    LINK,
+    row,
+  );
+/**
+ * A plain link, marked as the hub's `stack-link` on `row`.
+ * @param {string} href @param {string} row @param {...import("./hostkit.js").Child} kids
+ */
+const link = (href, row, ...kids) =>
+  drivable(el("a", { href }, ...kids), LINK, row);
+
+// ─────────────────────────────────────────────────────────────── Overview
+
+/**
+ * Overview (FLOWS.md §1.3): the running jobs, this stack's slice of Needs
+ * you, five KPI tiles each a link into its tab, then "Is it healthy?" and
+ * Recent history with who did it; last, folded, the checks the stack is
+ * judged on (checks.yml's editor: `/stacks/{s}/checks` lands here).
+ * @param {HTMLElement} panel
+ * @param {Ctx} c
+ */
+function overviewTab(panel, c) {
+  const { name, S } = c;
+  /** @type {(() => void)[]} */
+  const stops = [];
+  const running = el("div", { class: "sh-running" });
+  const band = attentionBand([]);
+  const strip = kpiStrip(
+    hubKpis({
+      s: null,
+      last: null,
+      night: "unknown",
+      errors: undefined,
+      drift: null,
+      now: nowS(),
+    }).map((k) => ({
+      ...k,
+      href: stackHref(name, /** @type {any} */ (k.tab)),
+    })),
+    { loading: true },
+  );
+  strip.el.setAttribute("aria-label", "This stack at a glance");
+  for (const [key, t] of strip.tiles)
+    if (t.el instanceof HTMLAnchorElement)
+      drivable(t.el, KPI, `${name}/${key}`);
+  // The drift tile holds a button, so it is not a link itself.
+  const driftTile = strip.tiles.get("drift");
+  const compareBtn = drivable(
+    el(
+      "button",
       {
-        label: "Outcome",
-        sort: "text",
-        order: "failed,running,deferred,ok,done",
-        filter: "choice",
+        type: "button",
+        class: "kp-button kp-button--sm sh-kpi__btn",
+        title:
+          "Check only this one stack against its files now (every stack at once: Deploy all changes on Stacks)",
       },
-      { label: "Detail", sort: "text" },
-    ],
-  });
-  const inc = tableBlock({
-    remember: "stack-incidents",
-    caption: `Incidents of ${params.name}`,
-    search: "Search incidents",
-    state: "loading",
-    nothing: `No incidents: no operation on ${params.name} has failed.`,
-    columns: [
-      { label: "When", sort: "time" },
-      { label: "Operation", sort: "text" },
-      { label: "Bundle", sort: "text" },
-      { label: "Read", sort: "text" },
-    ],
-  });
-  panel.replaceChildren(
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      `Every operation the host ran on ${params.name}, and every one that failed, over the last ${HISTORY_DAYS} days.`,
+      "Compare now",
     ),
-    hist.wrap,
-    inc.wrap,
-    h("p", null, ago),
+    COMPARE,
+    name,
   );
-  const detach = attachDataTables(panel, { compare: keys.compare(compare) });
-  const histTable = dataTable(hist.wrap);
-  const incTable = dataTable(inc.wrap);
-  const unbindH = bindTableUrl(histTable, "history");
-  const unbindI = bindTableUrl(incTable, "incidents");
-  const abort = new AbortController();
-  const load = async () => {
-    hist.loading({ words: "Reading the history from the host…" });
-    inc.loading({ words: "Reading the incidents from the host…" });
-    const since = Math.floor(Date.now() / 1000) - HISTORY_DAYS * 86400;
-    const [hr, ir] = await Promise.all([
-      fetchReport(`/data/history?since=${since}`, "the history", abort.signal),
-      fetchReport("/data/incidents", "the incidents", abort.signal),
-    ]);
-    if (hr.ok) {
-      const rows = historyRows(
-        stackEntries(hr.report?.entries ?? [], params.name),
-      );
-      hist.tbody.replaceChildren(
-        ...rows.map((x) =>
-          h(
-            "tr",
-            null,
-            td(time(x.start)),
-            td(x.what),
-            td(
-              x.took == null
-                ? "—"
-                : keys.note("duration", humanDuration(x.took), x.took),
-              "num",
-            ),
-            badgeCell(x.outcome),
-            td(x.detail),
-          ),
-        ),
-      );
-      hist.ready();
-    } else hist.failed(hr.error);
-    if (ir.ok) {
-      const names = stackIncidents(ir.report?.incidents ?? [], params.name);
-      inc.tbody.replaceChildren(
-        ...incidentRows(names).map((x) =>
-          h(
-            "tr",
-            null,
-            td(time(x.at)),
-            td(x.op),
-            td(x.name, "mono"),
-            showButton(x.name),
-          ),
-        ),
-      );
-      inc.ready();
-    } else inc.failed(ir.error);
-    setAgo(ago, Date.now() / 1000);
-  };
-  const retry = () => void load().catch(() => {});
-  panel.addEventListener("kp-datatable-retry", retry);
-  const stopAnswers = onAnswered(retry);
-  retry();
-  return () => {
-    abort.abort();
-    stopAnswers();
-    panel.removeEventListener("kp-datatable-retry", retry);
-    unbindH();
-    unbindI();
-    detach();
-  };
-}
+  compareBtn.addEventListener("click", () => {
+    compareBtn.setAttribute("aria-busy", "true");
+    c.compare();
+  });
+  // The drift tile holds the Compare button, so it is a plain tile (a
+  // button inside a link is invalid): its label, value and context move
+  // over, and the tile's own `set` keeps painting them.
+  const plain = el("div", {
+    class: "nx-kpi sh-kpi--plain",
+    "data-loading": "",
+  });
+  if (driftTile) {
+    plain.append(...driftTile.el.childNodes);
+    driftTile.el.replaceWith(plain);
+    plain
+      .querySelector(".nx-kpi__spark")
+      ?.replaceWith(el("span", { class: "sh-kpi__act" }, compareBtn));
+  }
 
-/** @type {(p: HTMLElement, params: Params) => () => void} */
-function logsTab(panel, params) {
-  const keys = sortKeys();
-  let settings = logSettings(new URLSearchParams(location.search));
-  const appSel = h("select", { class: "kp-field__input", id: "logs-app" });
-  let appsShown = "";
-  // The choices follow the fleet: a deep link can arrive before it does.
-  const fillApps = () => {
-    const apps =
-      stackDetail(current().fleet, params.name)?.apps.map((a) => a.name) ?? [];
-    const sig = apps.join(",");
-    if (sig === appsShown && appSel.options.length > 0) return;
-    appsShown = sig;
-    appSel.replaceChildren(
-      ...appChoices(apps).map((c) => h("option", { value: c.value }, c.label)),
-    );
-    // An app the fleet does not list (yet) is still a valid address.
-    if (!new Set([...apps, JOURNAL, ""]).has(settings.app))
-      appSel.append(h("option", { value: settings.app }, settings.app));
-    appSel.value = settings.app;
-  };
-  fillApps();
-  const unsubApps = subscribe(fillApps);
-  const sinceSel = h(
-    "select",
-    { class: "kp-field__input", id: "logs-since" },
-    ...SINCE.map((c) => h("option", { value: c.value }, c.label)),
-  );
-  sinceSel.value = settings.since;
-  const text = h("input", {
-    class: "kp-field__input",
-    id: "logs-q",
-    type: "search",
-    placeholder: "Only lines containing…",
+  const checksList = el("ul", { class: "sh-checks", "aria-live": "polite" });
+  checksList.append(skeletonLines(6, "Reading the checks"));
+  const checkedAt = el("span", null, "checking…");
+  const healthy = section({
+    id: "healthy",
+    title: "Is it healthy?",
+    desc: "Every check the host runs on this stack, in one place — the answer to “why is it red?” when it is.",
   });
-  text.value = settings.q;
-  const follow = h("input", {
-    class: "kp-field__check",
-    type: "checkbox",
-    id: "logs-follow",
-  });
-  follow.checked = settings.follow;
-  const refresh = h(
-    "button",
-    { type: "button", class: "kp-button" },
-    "Refresh",
+  healthy.body.append(checksList);
+  healthy.el.append(
+    foot([
+      checkedAt,
+      link(
+        `${stackHref(name, "logs")}?lvl=e`,
+        `${name}/logs/errors`,
+        "Recent errors in Logs",
+      ),
+    ]),
   );
-  const ago = agoEl("read");
-  const logql = h("p", { class: "measured mono", id: "logs-logql" });
-  const t = tableBlock({
-    remember: "logs",
-    pageSize: 100,
-    pageSizes: "50,100,250,1000",
-    caption: `Logs of ${params.name}`,
-    search: "Search these lines",
-    state: "loading",
-    nothing:
-      "Loki holds no lines for this choice: widen the window or pick another app.",
-    columns: [
-      { label: "Time", sort: "time" },
-      { label: "App", sort: "text", filter: "choice" },
-      {
-        label: "Level",
-        sort: "text",
-        order: "critical,error,warn,info,debug,trace,—",
-        filter: "choice",
-      },
-      { label: "Line", sort: "text", cls: "wide" },
+  healthy.el.classList.add("sh-span-6");
+
+  const feedList = el("ul", { class: "sh-feed" });
+  feedList.append(skeletonLines(4, "Reading the history"));
+  const recent = section({
+    title: "Recent history",
+    desc: "What happened to this stack and who did it, newest first.",
+    tools: [
+      linkButton(
+        stackHref(name, "history"),
+        "All history",
+        "Every operation of the last 30 days, with filters",
+        `${name}/history/all-history`,
+      ),
     ],
   });
-  const field = (
-    /** @type {string} */ label,
-    /** @type {HTMLElement} */ control,
-  ) =>
-    h(
+  recent.body.append(feedList);
+  recent.el.classList.add("sh-span-6");
+
+  // checks.yml, folded: the editor Live view's `checks` form lands on.
+  const judged = section({
+    id: "stack-checks",
+    title: "Checks it is judged on",
+    desc: "The before/after checks, nightly probes and manual questions in checks.yml, one app at a time.",
+    collapsible: true,
+    open:
+      new URLSearchParams(location.search).get("section") === "checks" ||
+      driven(),
+  });
+  judged.el.classList.add("sh-span-12");
+  const judgedSummary = judged.el.querySelector("summary");
+  if (judgedSummary) drivable(judgedSummary, FOLD, `${name}/checks`);
+  const judgedHost = el("div");
+  judged.body.append(judgedHost);
+  stops.push(checksEditTab(judgedHost, { name }));
+
+  panel.replaceChildren(
+    el(
       "div",
-      { class: "kp-field logs-field" },
-      h("label", { class: "kp-field__label", for: control.id }, label),
-      control,
-    );
-  panel.replaceChildren(
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      `This stack's own log lines, filtered from the host's live log.`,
+      { class: "sh-stack" },
+      running,
+      band.el,
+      strip.el,
+      el("div", { class: "sh-grid" }, healthy.el, recent.el, judged.el),
     ),
-    h(
-      "form",
-      { class: "logs-controls", role: "search", "aria-label": "Which logs" },
-      field("App", appSel),
-      field("Window", sinceSel),
-      field("Lines containing", text),
-      h("label", { class: "logs-follow" }, follow, " Follow (every 5 s)"),
-      refresh,
-    ),
-    t.wrap,
-    h("p", null, ago),
-    logql,
   );
-  const detach = attachDataTables(panel, { compare: keys.compare(compare) });
-  const table = dataTable(t.wrap);
-  const unbind = bindTableUrl(table, "logs");
-  let abort = new AbortController();
-  /** @type {ReturnType<typeof setInterval> | null} */
-  let timer = null;
 
-  /** @param {boolean} [quiet] Follow's reads every 5 s refresh quietly */
-  const load = async (quiet = false) => {
-    abort.abort();
-    abort = new AbortController();
-    if (!quiet) t.loading({ words: "Asking Loki for the lines…" });
-    const r = await fetchJson(
-      logsUrl(params.name, settings),
-      "the logs",
-      abort.signal,
-    );
-    if (!r.ok) {
-      t.failed(r.error);
-      return;
-    }
-    const rows = logRows(r.body.lines ?? []);
-    t.tbody.replaceChildren(
-      ...rows.map((x) => {
-        const src = h(
-          "td",
-          null,
-          h("span", { "data-kp-source": x.source }, x.source),
-        );
-        return h(
-          "tr",
-          null,
-          td(keys.note("time", x.time, x.ms), "num"),
-          src,
-          x.tone ? badgeCell({ label: x.level, tone: x.tone }) : td(x.level),
-          td(x.line, "mono logline"),
-        );
-      }),
-    );
-    attachLogs(t.tbody);
-    t.ready();
-    logql.textContent = `${rows.length} lines · LogQL: ${r.body.logql}`;
-    setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
+  // running jobs on this stack, each with its live panel (feat-ops-6)
+  /** @type {Map<number, () => void>} */
+  const jobPanels = new Map();
+  const paintRunning = () => {
+    const live = act.jobs.filter((j) => j.stack === name && !finished(j.state));
+    const keep = new Set([...live.map((j) => j.job), ...jobPanels.keys()]);
+    for (const id of keep)
+      if (!jobPanels.has(id)) {
+        const p = mountJobPanel(id);
+        jobPanels.set(id, p.stop);
+        running.prepend(el("section", { class: "kp-card sh-job" }, p.element));
+      }
   };
+  stops.push(onAct("jobs", paintRunning));
+  paintRunning();
+  stops.push(() => {
+    for (const s of jobPanels.values()) s();
+  });
 
-  const apply = () => {
-    settings = {
-      app: appSel.value,
-      since: sinceSel.value,
-      q: text.value.trim(),
-      follow: follow.checked,
-    };
+  // readings this tab adds
+  /** @type {{times: number[] | null, noBackup: boolean}} */
+  const bk = { times: null, noBackup: false };
+  /** @type {number | null | undefined} */
+  let errors;
+  /** @type {number | null | undefined} */
+  let diskPct;
+  /** @type {any[] | null} */
+  let manual = null;
+  /** @type {import("../stackhub.js").Stale[]} */
+  let stale = [];
+  /** @type {any[] | null} */
+  let history = null;
+  let checkedAtS = 0;
+
+  const paint = () => {
+    const now = nowS();
+    const stand = backupStanding({
+      times: bk.times,
+      noBackup: bk.noBackup,
+      now,
+    });
+    const k = hubKpis({
+      s: S.s,
+      last: stand.last,
+      night: stand.night,
+      errors,
+      drift: S.drift,
+      now,
+    });
+    for (const t of k) {
+      const tile = strip.tiles.get(t.key);
+      if (!tile) continue;
+      tile.set({
+        label: t.label,
+        value: t.value,
+        unit: t.unit,
+        ctx: t.ctx,
+        tone: t.tone ?? null,
+        title: t.title,
+      });
+      if (S.fleetRead) delete tile.el.dataset.loading;
+    }
+    const dt = k.find((t) => t.key === "drift");
+    if (dt) {
+      if (S.driftRead) delete plain.dataset.loading;
+      plain.dataset.tone = dt.tone ?? "";
+      plain.title = dt.title ?? "";
+      compareBtn.removeAttribute("aria-busy");
+    }
+    const open = (manual ?? []).filter((m) => m.answer.tone !== "ok").length;
+    band.set(
+      attentionItems({
+        stack: name,
+        s: S.s,
+        drift: S.drift,
+        night: stand.night,
+        last: stand.last,
+        stale,
+        openChecks: open,
+        now,
+        inbox: inboxNow().items.filter((i) => i.stack === name),
+      })
+        .filter((p) => S.fleetRead || p.key !== "not-deployed")
+        .map((p) => ({
+          key: p.key,
+          tone: p.tone,
+          title: p.title,
+          text: p.text,
+          action: problemAction(c, p),
+        })),
+    );
+    if (S.fleetRead) {
+      const rows = healthChecks({
+        s: S.s,
+        night: stand.night,
+        diskPct,
+        drift: S.drift,
+        manual: manual ?? [],
+      });
+      checksList.replaceChildren(
+        ...rows.map((r) =>
+          el(
+            "li",
+            { "data-key": r.key },
+            dot(r.tone === "unknown" ? "" : r.tone, r.text),
+            r.check
+              ? el(
+                  "span",
+                  { class: "sh-checks__act" },
+                  el("span", null, r.verdict),
+                  answerButton(name, r.check, () => void readChecks()),
+                )
+              : el("span", null, r.verdict),
+          ),
+        ),
+      );
+      checkedAt.textContent = checkedAtS
+        ? `checked ${humanDuration(now - checkedAtS)} ago`
+        : "checking…";
+    }
+    if (history) {
+      const rows = historyFeed(history).slice(0, 4);
+      feedList.replaceChildren(
+        ...(rows.length
+          ? rows.map((r) => feedRow(r))
+          : [
+              el(
+                "li",
+                { class: "sh-feed__empty" },
+                `Nothing was done with ${name} in the last ${HISTORY_DAYS} days.`,
+              ),
+            ]),
+      );
+    }
+  };
+  stops.push(c.onChange(paint));
+  stops.push(onInbox(paint));
+
+  const readChecks = async () => {
+    const r = await fetchReport(
+      "/data/manual-checks",
+      "the manual checks",
+      c.signal,
+    );
+    if (r.ok) {
+      const now = r.report?.now ?? nowS();
+      manual = checkRows(stackChecks(r.report?.checks ?? [], name), now);
+    } else manual = [];
+    checkedAtS = nowS();
+    paint();
+  };
+  stops.push(onAnswered(() => void readChecks().catch(() => {})));
+
+  void (async () => {
+    const enc = encodeURIComponent(name);
+    const tasks = [
+      readChecks(),
+      (async () => {
+        const [b, cal] = await Promise.all([
+          fetchJson(`/data/backups/${enc}`, `${name}'s backups`, c.signal),
+          slowRead(
+            `/data/backup-calendar?stack=${enc}`,
+            `${name}'s backup nights`,
+            c.signal,
+          ).catch(() => ({ ok: false })),
+        ]);
+        const calBody = cal.ok ? /** @type {any} */ (cal).body : null;
+        bk.noBackup = (calBody?.no_backup ?? []).includes(name);
+        bk.times =
+          b.ok || calBody
+            ? backupTimes({
+                calendar: calBody?.stacks?.[name] ?? [],
+                repos: b.ok ? (b.body?.repos ?? []) : [],
+              })
+            : [];
+        paint();
+      })(),
+      (async () => {
+        const r = await fetchJson(
+          logsUrl(name, { since: "3600", app: "", q: "" }, LOG_LIMIT),
+          "the logs",
+          c.signal,
+        );
+        errors = r.ok ? errorCount(r.body.lines ?? []) : null;
+        paint();
+      })(),
+      (async () => {
+        const r = await fetchJson(
+          `/data/charts?stack=${enc}&range=1h`,
+          "the charts",
+          c.signal,
+        );
+        diskPct = r.ok ? diskOf(r.body) : null;
+        paint();
+      })(),
+      (async () => {
+        const r = await slowRead(
+          "/data/stale-images",
+          "stale images",
+          c.signal,
+        );
+        stale = r.ok ? staleFor(name, r.body.images ?? []) : [];
+        paint();
+      })(),
+      (async () => {
+        const since = nowS() - HISTORY_DAYS * 86400;
+        const r = await fetchReport(
+          `/data/history?since=${since}`,
+          "the history",
+          c.signal,
+        );
+        history = r.ok ? stackEntries(r.report?.entries ?? [], name) : [];
+        paint();
+      })(),
+    ];
+    await Promise.allSettled(tasks);
+  })();
+  paint();
+  return () => {
+    for (const s of stops.reverse()) s();
+  };
+}
+
+/**
+ * The newest "Disk used (root filesystem)" point of `/data/charts?stack=`.
+ * @param {any} body
+ * @returns {number | null}
+ */
+function diskOf(body) {
+  const p = (body?.panels ?? []).find((/** @type {any} */ x) =>
+    /^disk used/i.test(x?.panel?.title ?? ""),
+  );
+  const pts = p?.series?.[0]?.points ?? [];
+  const v = pts.at(-1)?.[1];
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * A manual check's Answer… (the catalog form `answer-check`).
+ * @param {string} stack
+ * @param {string} id
+ * @param {() => void} after
+ */
+function answerButton(stack, id, after) {
+  const b = el(
+    "button",
+    {
+      type: "button",
+      class: "kp-button kp-button--sm",
+      "data-action": "answer-check",
+      "data-check": id,
+      title: "Record your answer: ok, not ok, or not ok accepted for a while",
+    },
+    "Answer…",
+  );
+  viaForm(drivable(b, CHECK_ANSWER, `${stack}/${id}`), "answer-check");
+  b.addEventListener("click", async () => {
+    const ctl = await openAction("_host", "answer-check", {
+      preset: { check: id },
+    });
+    if (ctl) void ctl.closed.then(after);
+  });
+  return b;
+}
+
+/**
+ * The fix of one "needs you" row.
+ * @param {Ctx} c
+ * @param {import("../stackhub.js").Problem} p
+ * @returns {HTMLElement}
+ */
+function problemAction(c, p) {
+  const a = p.act;
+  switch (a.kind) {
+    case "action":
+      return actionButton(c, a.action, {
+        label: a.label,
+        title: a.title,
+        preset: a.preset,
+        drive: [FIX, `${c.name}/${p.key}`],
+      });
+    case "pin": {
+      const st = a.stale;
+      const b = drivable(
+        el(
+          "button",
+          { type: "button", class: "kp-button", title: a.title },
+          a.label,
+        ),
+        APP_UPDATE,
+        `${c.name}/${st.key}`,
+      );
+      b.addEventListener(
+        "click",
+        () =>
+          void openPinUpdate({
+            stack: c.name,
+            container: st.container,
+            key: /** @type {string} */ (st.key),
+            pinned: st.pinned,
+            latest: st.latest,
+            upstream: st.upstream,
+          }),
+      );
+      return b;
+    }
+    case "go": {
+      const b = el(
+        "a",
+        {
+          class: "kp-button",
+          href: `${stackHref(c.name, /** @type {any} */ (a.tab))}${a.section ? `?section=${a.section}` : ""}`,
+          title: a.title,
+        },
+        a.label,
+      );
+      return drivable(b, FIX, `${c.name}/${p.key}`);
+    }
+    case "href":
+    default:
+      return drivable(
+        el(
+          "a",
+          {
+            class: "kp-button",
+            href: /** @type {any} */ (a).href ?? "/inbox",
+            title: a.title,
+          },
+          a.label,
+        ),
+        FIX,
+        `${c.name}/${p.key}`,
+      );
+  }
+}
+
+/**
+ * One row of a history feed: the outcome's dot, what happened with who
+ * started it as a chip, its detail under it, and when.
+ * @param {ReturnType<typeof historyFeed>[number]} r
+ */
+function feedRow(r) {
+  return el(
+    "li",
+    { "data-who": r.who.key },
+    dot(r.tone),
+    el(
+      "span",
+      { class: "sh-feed__what" },
+      el("b", null, r.what),
+      chip({
+        label: r.who.label,
+        tone: r.who.key === "claude" ? "claude" : null,
+      }),
+      el("span", { class: "sh-feed__detail" }, r.detail),
+    ),
+    el(
+      "time",
+      {
+        datetime: new Date(r.start * 1000).toISOString(),
+        title: formatDateTime(r.start),
+      },
+      whenText(r.start),
+    ),
+  );
+}
+
+/** "1 h ago" for today, else the date and time. @param {number} unix */
+function whenText(unix) {
+  const d = nowS() - unix;
+  if (d < 86400) {
+    const p = agoParts(d);
+    return `${p.value} ${p.unit}`;
+  }
+  return formatDateTime(unix);
+}
+
+// ─────────────────────────────────────────────────────────────── Logs
+
+/**
+ * Logs (the hub demo): a side column of the apps (with counts) and the
+ * levels, one toolbar (Lines containing at its own width, the window, the
+ * count and Follow on the right), the lines, and a foot that says where
+ * they came from. The host's own log of what it did to this stack lives in
+ * Activity ▸ Host log, which the description says.
+ * @param {HTMLElement} panel
+ * @param {Ctx} c
+ */
+function logsTab(panel, c) {
+  const { name, S } = c;
+  const q0 = new URLSearchParams(location.search);
+  /** @type {{since: string, q: string, follow: boolean}} */
+  const st = {
+    since: logWindow(q0.get("since")),
+    q: q0.get("q") ?? "",
+    follow: q0.get("follow") !== "0",
+  };
+  /** @type {import("../logs.js").LogLine[]} */
+  let lines = [];
+  let readAt = 0;
+  let logql = "";
+  /** @type {import("../doctor.js").RouteError | null} */
+  let failed = null;
+  let loading = true;
+
+  const side = sideFilters({
+    label: "Log filters",
+    parts: [
+      { key: "apps", label: "Apps", values: [] },
+      {
+        key: "levels",
+        label: "Level",
+        values: LEVELS.map((l) => ({ value: l.value, label: l.label })),
+      },
+    ],
+    hint: "Each click turns one on or off. Esc shows everything again.",
+    onChange: () => {
+      only.app = null;
+      only.lvl = null;
+      writeUrl();
+      paint();
+    },
+    mark: (b, part, value) =>
+      drivable(b, LOG_FILTER, `${name}/${part}/${value}`),
+  });
+  // `?app=` (an Apps row's Logs) shows that one app; `?lvl=e` the errors —
+  // until the first click in the side column.
+  const only = { app: q0.get("app"), lvl: q0.get("lvl") };
+  if (only.lvl) side.only("levels", only.lvl);
+
+  const count = el(
+    "span",
+    { class: "sh-count-text", role: "status" },
+    "reading…",
+  );
+  const followIn = /** @type {HTMLInputElement} */ (
+    el("input", {
+      type: "checkbox",
+      class: "kp-switch__input",
+      role: "switch",
+      "aria-label": "Follow the newest lines",
+    })
+  );
+  followIn.checked = st.follow;
+  const followSw = el(
+    "label",
+    {
+      class: "kp-switch sh-follow",
+      title: "Read the newest lines every 5 s and keep the view at the bottom",
+    },
+    followIn,
+    el("span", null, "Follow"),
+  );
+  drivable(followIn, LOG_FOLLOW, name);
+  const win = segSwitch({
+    label: "Time window",
+    items: LOG_WINDOWS,
+    value: st.since,
+    onChange: (v) => {
+      st.since = v;
+      writeUrl();
+      void load(false).catch(() => {});
+    },
+    mark: (b, v) => drivable(b, LOG_WINDOW, `${name}/${v}`),
+  });
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let typing = null;
+  const tb = toolbar({
+    search: {
+      placeholder: "Lines containing",
+      value: st.q,
+      onInput: (v) => {
+        st.q = v.trim();
+        if (typing) clearTimeout(typing);
+        typing = setTimeout(() => {
+          writeUrl();
+          void load(false).catch(() => {});
+        }, 400);
+      },
+    },
+    groups: [
+      el(
+        "div",
+        { class: "nx-tb__group", role: "group", "aria-label": "Window" },
+        el("b", null, "Window"),
+        win.el,
+      ),
+    ],
+    state: [count, followSw],
+  });
+  if (tb.search) drivable(tb.search, LOG_SEARCH, name);
+  const pre = el("pre", {
+    class: "sh-log",
+    tabindex: "0",
+    "aria-label": `Log lines of ${name}`,
+  });
+  pre.append(skeletonLines(12, "Asking Loki for the lines"));
+  const footLeft = el("span", null, "Loki");
+  const footRight = el("span", null, "");
+  const card = el(
+    "section",
+    { class: "kp-card nx-card sh-logcard", "aria-labelledby": "logs-h" },
+    el(
+      "div",
+      { class: "nx-card__head" },
+      el("h2", { id: "logs-h" }, "Logs"),
+      el(
+        "p",
+        { class: "section-head__desc" },
+        "What the apps of this stack print, live. The host's own log of what it did to this stack is in ",
+        link(
+          "/activity?view=host-log",
+          `${name}/logs/host-log`,
+          "Activity, Host log",
+        ),
+        ".",
+      ),
+    ),
+    tb.el,
+    pre,
+    el("div", { class: "sh-foot" }, footLeft, footRight),
+  );
+  panel.replaceChildren(el("div", { class: "sh-side" }, side.el, card));
+
+  const writeUrl = () => {
     const search = setParams(location.search, {
-      app: settings.app,
-      since: settings.since === "3600" ? null : settings.since,
-      q: settings.q,
-      follow: settings.follow ? "1" : null,
+      since: st.since === "900" ? null : st.since,
+      q: st.q || null,
+      follow: st.follow ? null : "0",
+      app: null,
+      lvl: null,
     });
     history.replaceState(history.state, "", location.pathname + search);
+  };
+
+  const paint = () => {
+    /** @type {string[]} */
+    const apps = S.s?.apps?.map((a) => a.name) ?? S.edit?.manifest?.apps ?? [];
+    const sources = logSources(apps, lines);
+    side.setValues(
+      "apps",
+      sources.map((s) => ({ value: s, label: s })),
+    );
+    if (only.app) side.only("apps", only.app);
+    const v = logView(lines, side.off("apps"), side.off("levels"));
+    const pad = Math.max(12, ...v.shown.map((l) => (l.source || "—").length));
+    side.setCounts("apps", v.sources);
+    side.setCounts("levels", v.levels);
+    if (failed) {
+      pre.replaceChildren(
+        el(
+          "div",
+          { class: "kp-alert kp-alert--destructive", role: "alert" },
+          el("strong", null, "Loki did not answer"),
+          el("p", null, `${failed.why}${failed.fix ? ` — ${failed.fix}` : ""}`),
+          retryButton(),
+        ),
+      );
+      count.textContent = "no lines";
+      return;
+    }
+    if (loading) return;
+    const atBottom =
+      pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24 || st.follow;
+    if (v.total === 0)
+      pre.replaceChildren(
+        emptyState({
+          title: "No lines in this window",
+          text: st.q
+            ? `Loki holds no line containing “${st.q}” in the last ${winLabel(st.since)}; widen the window or clear the search.`
+            : `Loki holds no lines of ${name} in the last ${winLabel(st.since)}; widen the window.`,
+        }),
+      );
+    else
+      pre.replaceChildren(
+        ...v.shown.map((l) => {
+          const g = levelGroup(l.level);
+          return el(
+            "span",
+            { class: "sh-log__line", "data-src": l.source, "data-lvl": g },
+            el("span", { class: "sh-log__t" }, lineTime(l.ts_ms).split(" ")[1]),
+            " ",
+            el("span", { class: "sh-log__a" }, (l.source || "—").padEnd(pad)),
+            " ",
+            el(
+              "span",
+              { class: `sh-log__l sh-log__l--${g}` },
+              g === "e" ? "error" : g === "w" ? "warn " : "info ",
+            ),
+            " ",
+            l.line,
+            "\n",
+          );
+        }),
+      );
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
+    count.textContent =
+      v.shown.length === v.total
+        ? `${v.total} ${v.total === 1 ? "line" : "lines"}`
+        : `${v.shown.length} of ${v.total} lines`;
+    footLeft.textContent = `Loki, read ${humanDuration(nowS() - readAt)} ago${logql ? ` · ${logql}` : ""}`;
+    footRight.textContent = st.follow
+      ? "Following the newest line"
+      : "Paused: turn Follow on for new lines";
+  };
+  const retryButton = () => {
+    const b = el(
+      "button",
+      { type: "button", class: "kp-button kp-button--sm" },
+      "Try again",
+    );
+    drivable(b, LOG_RETRY, name);
+    b.addEventListener("click", () => void load(false).catch(() => {}));
+    return b;
+  };
+  /** @param {string} v */
+  const winLabel = (v) =>
+    ({ 900: "15 minutes", 3600: "hour", 86400: "24 hours", 604800: "7 days" })[
+      /** @type {900} */ (Number(v))
+    ] ?? "window";
+
+  let req = new AbortController();
+  c.signal.addEventListener("abort", () => req.abort());
+  /** @param {boolean} quiet */
+  const load = async (quiet) => {
+    req.abort();
+    req = new AbortController();
+    if (!quiet) {
+      loading = true;
+      failed = null;
+      pre.replaceChildren(skeletonLines(12, "Asking Loki for the lines"));
+      count.textContent = "reading…";
+    }
+    const r = await fetchJson(
+      logsUrl(name, { since: st.since, app: "", q: st.q }, LOG_LIMIT),
+      "the logs",
+      req.signal,
+    ).catch(() => null);
+    if (!r) return;
+    loading = false;
+    if (!r.ok) {
+      failed = r.error;
+      paint();
+      return;
+    }
+    failed = null;
+    lines = r.body.lines ?? [];
+    logql = r.body.logql ?? "";
+    readAt = r.body.measured_at ?? nowS();
+    paint();
+  };
+  /** @type {ReturnType<typeof setInterval> | null} */
+  let timer = null;
+  const follow = () => {
     if (timer) clearInterval(timer);
-    timer = settings.follow
+    timer = st.follow
       ? setInterval(() => void load(true).catch(() => {}), 5000)
       : null;
-    void load().catch(() => {});
   };
-  appSel.addEventListener("change", apply);
-  sinceSel.addEventListener("change", apply);
-  follow.addEventListener("change", apply);
-  text.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      apply();
-    }
+  followIn.addEventListener("change", () => {
+    st.follow = followIn.checked;
+    writeUrl();
+    follow();
+    paint();
   });
-  refresh.addEventListener("click", apply);
-  panel.addEventListener("kp-datatable-retry", apply);
-  apply();
+  /** @param {KeyboardEvent} e */
+  const esc = (e) => {
+    if (e.key !== "Escape" || document.querySelector("dialog[open]")) return;
+    if (side.reset()) paint();
+  };
+  document.addEventListener("keydown", esc);
+  const stopChange = c.onChange(paint);
+  follow();
+  void load(false).catch(() => {});
   return () => {
-    abort.abort();
-    unsubApps();
     if (timer) clearInterval(timer);
-    panel.removeEventListener("kp-datatable-retry", apply);
-    unbind();
+    if (typing) clearTimeout(typing);
+    req.abort();
+    stopChange();
+    document.removeEventListener("keydown", esc);
+  };
+}
+
+// ─────────────────────────────────────────────────────────────── Apps
+
+/**
+ * Apps (the hub demo): each app's state, the version its image is pinned
+ * to and whether a newer one exists, with Logs, Update… and Publish… per
+ * row. A kp datatable: sortable, Shift-click adds a key, remembered, cards
+ * on a phone.
+ * @param {HTMLElement} panel
+ * @param {Ctx} c
+ */
+function appsTab(panel, c) {
+  const { name, S } = c;
+  /** @type {import("../stackhub.js").Stale[] | null} */
+  let stale = null;
+  const tbody = el("tbody");
+  const table = datatable({
+    remember: "stack-apps",
+    columns: [
+      { label: "App", sort: "text" },
+      { label: "State", sort: "text" },
+      { label: "Version", sort: "text" },
+      { label: "Newer", sort: "text" },
+      { label: "Actions", cls: "sh-right" },
+    ],
+    tbody,
+  });
+  const body = el("div", null, skeletonTable(4, 5, "Reading the apps"));
+  const card = section({
+    title: "Apps",
+    desc: "The containers this stack runs, the version each is on, and whether a newer one exists.",
+  });
+  card.body.append(body);
+  card.el.append(
+    foot([
+      "Versions from the stack's files; newer ones from the fleet check's last run.",
+      link("/map", `${name}/apps/map`, "Every stale image in Map"),
+    ]),
+  );
+  panel.replaceChildren(card.el);
+  let attached = false;
+  /** @type {() => void} */
+  let detach = () => {};
+
+  const paint = () => {
+    if (!S.fleetRead) return;
+    const rows = appRows({
+      s: S.s,
+      manifestApps: S.edit?.manifest?.apps ?? [],
+      images: S.edit?.images ?? null,
+      stale: stale ?? [],
+    });
+    if (rows.length === 0) {
+      detach();
+      attached = false;
+      body.replaceChildren(
+        emptyState({
+          title: "This stack declares no apps",
+          text: "An app is added in Settings ▸ Files (Add an app), from a preset or by hand.",
+          action: linkButton(
+            `${stackHref(name, "settings")}?section=files`,
+            "Open the files",
+            "Settings ▸ Files",
+            `${name}/settings/files`,
+            "",
+          ),
+        }),
+      );
+      return;
+    }
+    tbody.replaceChildren(
+      ...rows.map((r) => {
+        const logs = linkButton(
+          `${stackHref(name, "logs")}?app=${encodeURIComponent(r.name)}`,
+          "Logs",
+          `${r.name}'s log lines`,
+          `${name}/logs/app-${r.name}`,
+        );
+        /** @type {HTMLElement[]} */
+        const acts = [logs];
+        if (r.newer?.key) {
+          const st = r.newer;
+          const up = drivable(
+            el(
+              "button",
+              {
+                type: "button",
+                class: "kp-button kp-button--sm kp-button--primary",
+                title: `Back up ${name}, move ${st.container} from ${st.pinned} to ${st.latest}, commit and deploy`,
+              },
+              "Update…",
+            ),
+            APP_UPDATE,
+            `${name}/${st.key}`,
+          );
+          up.addEventListener(
+            "click",
+            () =>
+              void openPinUpdate({
+                stack: name,
+                container: st.container,
+                key: /** @type {string} */ (st.key),
+                pinned: st.pinned,
+                latest: st.latest,
+                upstream: st.upstream,
+              }),
+          );
+          acts.push(up);
+        } else if (!r.extra && S.inFleet) {
+          acts.push(
+            actionButton(c, S.s?.native ? "update-native" : "update", {
+              label: "Update…",
+              title: `Pull the newest image for ${r.name} and recreate it, with rollback`,
+              cls: "kp-button--sm",
+              preset: S.s?.native ? undefined : { app: r.name },
+              drive: [APP_PULL, `${name}/${r.name}`],
+            }),
+          );
+        }
+        if (!r.extra) {
+          // feat-publish-1: a hostname and a port for this one app.
+          const pub = viaForm(
+            el(
+              "button",
+              {
+                type: "button",
+                class: "kp-button kp-button--sm kp-button--ghost",
+                title: `Give ${r.name} a hostname on the gateway (and a tile)`,
+              },
+              "Publish…",
+            ),
+            "publish",
+          );
+          drivable(pub, APP_PUBLISH, `${name}/${r.name}`);
+          pub.addEventListener("click", () =>
+            openPublishDialog(name, r.name, () => c.reloadEdit()),
+          );
+          acts.push(pub);
+        }
+        return el(
+          "tr",
+          { "data-kp-row-key": r.name },
+          el("td", { class: "id" }, r.name),
+          el(
+            "td",
+            { "data-label": "State", "data-sort": r.state ?? "" },
+            r.state
+              ? dot(r.state === "running" ? "ok" : "bad", r.state)
+              : el(
+                  "span",
+                  { class: "sh-muted" },
+                  r.extra ? "a sidecar image" : "not deployed",
+                ),
+          ),
+          el(
+            "td",
+            { "data-label": "Version", class: "mono", title: r.image || null },
+            r.version || el("span", { class: "sh-muted" }, "—"),
+          ),
+          el(
+            "td",
+            { "data-label": "Newer", "data-sort": r.newer?.latest ?? "" },
+            r.newer
+              ? [
+                  chip({ label: r.newer.latest, tone: "info" }),
+                  r.newer.major
+                    ? chip({
+                        label: "major",
+                        tone: "warn",
+                        title:
+                          "The first number changes: read the release notes first",
+                      })
+                    : null,
+                ]
+              : el(
+                  "span",
+                  { class: "sh-muted" },
+                  stale == null ? "checking…" : "up to date",
+                ),
+          ),
+          el("td", { class: "row-actions" }, acts),
+        );
+      }),
+    );
+    if (!attached) {
+      body.replaceChildren(table);
+      detach = attachDataTables(body);
+      attached = true;
+    }
+  };
+  const stop = c.onChange(paint);
+  void (async () => {
+    const r = await slowRead("/data/stale-images", "stale images", c.signal);
+    stale = r.ok ? staleFor(name, r.body.images ?? []) : [];
+    paint();
+  })().catch(() => {});
+  paint();
+  return () => {
+    stop();
     detach();
   };
 }
 
 /**
- * feat-checks-1 (B): this tab used to only read `checks.yml` (the manual
- * answers table below); it now also edits it, one app at a time, above
- * that table.
- * @type {(p: HTMLElement, params: Params) => () => void}
+ * A kp datatable without a search bar (a short list needs none):
+ * sortable, Shift-click adds a sort key, remembered per table, cards on a
+ * phone.
+ * @param {{remember: string, columns: {label: string, sort?: string,
+ *   cls?: string}[], tbody: HTMLElement}} spec
  */
-function checksTab(panel, params) {
-  const editHost = h("div");
-  const tableHost = h("div");
-  panel.replaceChildren(
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      `The manual checks a deploy left open for this stack; Answer records your verdict.`,
+function datatable(spec) {
+  return el(
+    "div",
+    {
+      class: "kp-datatable sh-table",
+      "data-kp-datatable": "",
+      "data-kp-sort-multi": "",
+      "data-kp-cards": "",
+      "data-kp-remember": spec.remember,
+      "data-kp-page-sizes": "none",
+    },
+    el(
+      "div",
+      { class: "kp-table-wrap" },
+      el(
+        "table",
+        { class: "kp-table" },
+        el(
+          "thead",
+          null,
+          el(
+            "tr",
+            null,
+            spec.columns.map((col) =>
+              el(
+                "th",
+                {
+                  "data-kp-sort": col.sort ?? null,
+                  class: col.cls ?? null,
+                },
+                col.label,
+              ),
+            ),
+          ),
+        ),
+        spec.tbody,
+      ),
     ),
-    editHost,
-    tableHost,
   );
-  const stopEdit = checksEditTab(editHost, params);
-  const keys = sortKeys();
-  /** @param {number | null} unix */
-  const time = (unix) =>
-    unix == null ? "never" : keys.note("time", formatDateTime(unix), unix);
-  const ago = agoEl("read");
-  const t = tableBlock({
-    remember: "stack-checks",
-    caption: `Manual checks of ${params.name}`,
-    search: "Search checks",
-    state: "loading",
-    nothing: `No manual checks are registered for ${params.name}.`,
-    columns: [
-      { label: "App", sort: "text" },
-      {
-        label: "Answer",
-        sort: "text",
-        order: "not ok,open,accepted,ok",
-        filter: "choice",
-      },
-      { label: "Question", sort: "text", cls: "wide" },
-      { label: "Answered", sort: "time" },
-      { label: "Note", sort: "text" },
-      { label: "Answer", sort: "text" },
-    ],
+}
+
+// ─────────────────────────────────────────────────────────────── Backups
+
+/**
+ * Backups (the hub demo): this stack's repositories, one per app — the
+ * newest snapshot, the last 14 nights, how many are kept — with Back up
+ * now and Restore… on the card and Restore… / Verify… per row.
+ * @param {HTMLElement} panel
+ * @param {Ctx} c
+ */
+function backupsTab(panel, c) {
+  const { name, S } = c;
+  const body = el("div", null, skeletonTable(4, 5, "Reading the backups"));
+  const native = () => S.s?.native === true;
+  const backupNow = actionButton(c, "backup", {
+    label: "Back up now",
+    title: "A snapshot of every app's data now",
+    drive: [BACKUP_CARD, `${name}/backup`],
   });
-  tableHost.replaceChildren(t.wrap, h("p", null, ago));
-  const detach = attachDataTables(tableHost, {
-    compare: keys.compare(compare),
+  const restore = actionButton(c, "restore", {
+    label: "Restore…",
+    title: "Bring one app's data back to a chosen night (a safety copy first)",
+    cls: "kp-button--primary",
+    drive: [BACKUP_CARD, `${name}/restore`],
   });
-  const table = dataTable(t.wrap);
-  const unbind = bindTableUrl(table, "checks");
-  const abort = new AbortController();
-  const load = async () => {
-    t.loading({ words: "Reading the manual checks from the host…" });
-    const r = await fetchReport(
-      "/data/manual-checks",
-      "the manual checks",
-      abort.signal,
-    );
-    if (!r.ok) {
-      t.failed(r.error);
+  const card = section({
+    title: "Backups of this stack",
+    desc: "One snapshot per app every night, kept as its retention says. Restore brings one app's data back to a chosen night.",
+    tools: [backupNow, restore],
+  });
+  card.body.append(body);
+  card.el.append(
+    foot([
+      el(
+        "span",
+        null,
+        "The schedule lives in ",
+        link(
+          "/activity?view=planned",
+          `${name}/backups/planned`,
+          "Activity ▸ Planned",
+        ),
+        "; every stack's backups in ",
+        link(
+          `/backups?stack=${encodeURIComponent(name)}`,
+          `${name}/backups/backups-page`,
+          "Backups",
+        ),
+        ".",
+      ),
+    ]),
+  );
+  panel.replaceChildren(card.el);
+  /** @type {any} */
+  let read = null;
+  /** @type {import("../doctor.js").RouteError | null} */
+  let failed = null;
+  let noBackup = false;
+  /** @type {() => void} */
+  let detach = () => {};
+
+  const paint = () => {
+    const nat = native() || read?.native === true;
+    for (const [b, a] of /** @type {[HTMLElement, string][]} */ ([
+      [backupNow, nat ? "backup-native" : "backup"],
+      [restore, nat ? "restore-native" : "restore"],
+    ])) {
+      b.dataset.action = a;
+      b.dataset.driveForm = a;
+    }
+    if (failed) {
+      detach();
+      body.replaceChildren(
+        el(
+          "div",
+          { class: "kp-alert kp-alert--destructive", role: "alert" },
+          el("strong", null, "The backups did not read"),
+          el("p", null, `${failed.why}${failed.fix ? ` — ${failed.fix}` : ""}`),
+        ),
+      );
       return;
     }
-    const now = r.report?.now ?? Math.floor(Date.now() / 1000);
-    const rows = checkRows(
-      stackChecks(r.report?.checks ?? [], params.name),
-      now,
-    );
-    t.tbody.replaceChildren(
-      ...rows.map((x) =>
-        h(
+    if (!read) return;
+    if (noBackup || (read.repos ?? []).length === 0) {
+      detach();
+      body.replaceChildren(
+        emptyState({
+          title: noBackup
+            ? `${name} keeps no data to back up`
+            : `${name} has no backup yet`,
+          text: noBackup
+            ? "It declares no app data, by design; there is nothing to snapshot."
+            : "The first snapshot is written tonight at the nightly round, or now with Back up now.",
+        }),
+      );
+      return;
+    }
+    const rows = backupRows({ repos: read.repos ?? [], now: nowS() });
+    const tbody = el(
+      "tbody",
+      null,
+      rows.map((r) =>
+        el(
           "tr",
-          null,
-          td(x.app),
-          badgeCell(x.answer),
-          td(x.text),
-          td(time(x.answered)),
-          td(x.note),
-          answerButton(x.id, () => void load().catch(() => {})),
+          { "data-kp-row-key": r.app },
+          el("td", { class: "id" }, r.app),
+          el(
+            "td",
+            {
+              "data-label": "Newest",
+              "data-sort": String(r.newest?.time ?? 0),
+            },
+            r.newest
+              ? [
+                  el("span", { class: "mono" }, r.newest.short_id || "—"),
+                  ` · ${whenText(r.newest.time)}`,
+                ]
+              : el("span", { class: "sh-muted" }, r.error ?? "none yet"),
+          ),
+          el(
+            "td",
+            { "data-label": "14 nights", "data-sort": String(r.missed) },
+            nightStrip(r.cells),
+          ),
+          el("td", { class: "num", "data-label": "Kept" }, String(r.kept)),
+          el(
+            "td",
+            { class: "row-actions" },
+            actionButton(c, nat ? "restore-native" : "restore", {
+              label: "Restore…",
+              title: `Bring ${r.app}'s data back from a snapshot`,
+              cls: "kp-button--sm",
+              preset: nat
+                ? r.newest?.short_id
+                  ? { snapshot: r.newest.short_id }
+                  : undefined
+                : {
+                    app: r.app,
+                    ...(r.newest?.short_id
+                      ? { snapshot: r.newest.short_id }
+                      : {}),
+                  },
+              drive: [BACKUP_ROW, `${name}/${r.app}/restore`],
+            }),
+            nat
+              ? null
+              : actionButton(c, "verify-restore", {
+                  label: "Verify…",
+                  title: `Prove ${r.app}'s newest snapshot restores, without touching live data`,
+                  cls: "kp-button--sm kp-button--ghost",
+                  preset: { app: r.app },
+                  drive: [BACKUP_ROW, `${name}/${r.app}/verify`],
+                }),
+          ),
         ),
       ),
     );
-    t.ready();
-    setAgo(ago, Date.now() / 1000);
-  };
-  const retry = () => void load().catch(() => {});
-  panel.addEventListener("kp-datatable-retry", retry);
-  retry();
-  return () => {
-    stopEdit();
-    abort.abort();
-    panel.removeEventListener("kp-datatable-retry", retry);
-    unbind();
     detach();
+    body.replaceChildren(
+      datatable({
+        remember: "stack-backups",
+        columns: [
+          { label: "App", sort: "text" },
+          { label: "Newest snapshot", sort: "number" },
+          { label: "Last 14 nights", sort: "number" },
+          { label: "Kept", sort: "number", cls: "num" },
+          { label: "Actions", cls: "sh-right" },
+        ],
+        tbody,
+      }),
+      el(
+        "p",
+        { class: "sh-legend" },
+        el("i", { class: "sh-strip__ok" }),
+        "snapshot that night",
+        el("i", { class: "sh-strip__miss" }),
+        "missed",
+        el("i", { class: "sh-strip__before" }),
+        "before its oldest kept snapshot",
+      ),
+    );
+    detach = attachDataTables(body);
+  };
+  const stop = c.onChange(paint);
+  void (async () => {
+    const enc = encodeURIComponent(name);
+    const [b, cal] = await Promise.all([
+      fetchJson(`/data/backups/${enc}`, `${name}'s backups`, c.signal),
+      slowRead(
+        `/data/backup-calendar?stack=${enc}`,
+        `${name}'s backup nights`,
+        c.signal,
+      ).catch(() => ({ ok: false })),
+    ]);
+    if (b.ok) read = b.body;
+    else failed = b.error;
+    /** @type {any} */
+    const calAny = cal;
+    noBackup = cal.ok ? (calAny.body?.no_backup ?? []).includes(name) : false;
+    paint();
+  })().catch(() => {});
+  return () => {
+    stop();
+    detach();
+  };
+}
+
+// ─────────────────────────────────────────────────────────────── History
+
+/**
+ * History (the hub demo): every operation on this stack over 30 days, who
+ * started it (You / Claude / Nightly round, plain-click chips) and how it
+ * ended, with a search; then its failed operations' incident bundles.
+ * @param {HTMLElement} panel
+ * @param {Ctx} c
+ */
+function historyTab(panel, c) {
+  const { name } = c;
+  const q0 = new URLSearchParams(location.search);
+  /** @type {Set<string>} */
+  const who = new Set((q0.get("by") ?? "").split(",").filter(Boolean));
+  let q = q0.get("q") ?? "";
+  /** @type {ReturnType<typeof historyFeed> | null} */
+  let rows = null;
+  /** @type {import("../doctor.js").RouteError | null} */
+  let failed = null;
+  const count = el(
+    "span",
+    { class: "sh-count-text", role: "status" },
+    "reading…",
+  );
+  const chips = [
+    { value: "you", label: "You" },
+    { value: "claude", label: "Claude" },
+    { value: "night", label: "Nightly round" },
+  ].map((ch) => {
+    const b = drivable(
+      el(
+        "button",
+        {
+          type: "button",
+          class: "nx-chip-toggle",
+          "aria-pressed": String(who.has(ch.value)),
+          "data-value": ch.value,
+          title: `Show only what ${ch.value === "you" ? "a person" : ch.label} started; each click turns it on or off`,
+        },
+        ch.label,
+      ),
+      WHO,
+      `${name}/${ch.value}`,
+    );
+    b.addEventListener("click", () => {
+      if (who.has(ch.value)) who.delete(ch.value);
+      else who.add(ch.value);
+      b.setAttribute("aria-pressed", String(who.has(ch.value)));
+      writeUrl();
+      paint();
+    });
+    return b;
+  });
+  const tb = toolbar({
+    search: {
+      placeholder: "Find: action, app, error",
+      label: "Find in history",
+      value: q,
+      onInput: (v) => {
+        q = v;
+        writeUrl();
+        paint();
+      },
+    },
+    groups: [
+      el(
+        "div",
+        {
+          class: "nx-tb__group",
+          role: "group",
+          "aria-label": "Started by, click to show or hide",
+        },
+        el("b", null, "Started by"),
+        el("span", { class: "nx-chips" }, chips),
+      ),
+    ],
+    state: [count],
+  });
+  if (tb.search) drivable(tb.search, HISTORY_SEARCH, name);
+  const list = el("ul", { class: "sh-feed sh-feed--full" });
+  list.append(skeletonLines(6, "Reading the history"));
+  const card = el(
+    "section",
+    { class: "kp-card nx-card", "aria-labelledby": "hist-h" },
+    el(
+      "div",
+      { class: "nx-card__head" },
+      el("h2", { id: "hist-h" }, "History"),
+      el(
+        "p",
+        { class: "section-head__desc" },
+        "Every operation on this stack, who started it, and how it ended.",
+      ),
+    ),
+    tb.el,
+    list,
+  );
+  const incList = el("ul", { class: "sh-feed" });
+  incList.append(skeletonLines(2, "Reading the incidents"));
+  const incidents = section({
+    title: "Incidents",
+    desc: "Each failed operation on this stack kept a bundle of what it saw; Show opens it.",
+  });
+  incidents.body.append(incList);
+  panel.replaceChildren(el("div", { class: "sh-stack" }, card, incidents.el));
+
+  const writeUrl = () => {
+    const search = setParams(location.search, {
+      by: who.size ? [...who].join(",") : null,
+      q: q || null,
+    });
+    history.replaceState(history.state, "", location.pathname + search);
+  };
+  const paint = () => {
+    if (failed) {
+      list.replaceChildren(
+        el(
+          "li",
+          { class: "kp-alert kp-alert--destructive", role: "alert" },
+          el("strong", null, "The history did not read"),
+          el(
+            "span",
+            null,
+            `${failed.why}${failed.fix ? ` — ${failed.fix}` : ""}`,
+          ),
+        ),
+      );
+      count.textContent = "";
+      return;
+    }
+    if (!rows) return;
+    const shown = filterFeed(rows, who, q);
+    count.textContent = `${shown.length === rows.length ? rows.length : `${shown.length} of ${rows.length}`} ${rows.length === 1 ? "operation" : "operations"}, ${HISTORY_DAYS} days`;
+    list.replaceChildren(
+      ...(shown.length
+        ? shown.map((r) => feedRow(r))
+        : [
+            el(
+              "li",
+              { class: "sh-feed__empty" },
+              rows.length
+                ? "Nothing matches: clear the search or turn a chip off."
+                : `Nothing was done with ${name} in the last ${HISTORY_DAYS} days.`,
+            ),
+          ]),
+    );
+  };
+  /** @param {KeyboardEvent} e */
+  const esc = (e) => {
+    if (e.key !== "Escape" || document.querySelector("dialog[open]")) return;
+    if (!who.size) return;
+    who.clear();
+    for (const b of chips) b.setAttribute("aria-pressed", "false");
+    writeUrl();
+    paint();
+  };
+  document.addEventListener("keydown", esc);
+  const load = async () => {
+    const since = nowS() - HISTORY_DAYS * 86400;
+    const [hr, ir] = await Promise.all([
+      fetchReport(`/data/history?since=${since}`, "the history", c.signal),
+      fetchReport("/data/incidents", "the incidents", c.signal),
+    ]);
+    if (hr.ok) {
+      failed = null;
+      rows = historyFeed(stackEntries(hr.report?.entries ?? [], name));
+    } else failed = hr.error;
+    paint();
+    if (ir.ok) {
+      const names = incidentRows(
+        stackIncidents(ir.report?.incidents ?? [], name),
+      );
+      incList.replaceChildren(
+        ...(names.length
+          ? names.map((x) => {
+              const b = drivable(
+                el(
+                  "button",
+                  {
+                    type: "button",
+                    class: "kp-button kp-button--sm kp-button--ghost",
+                    title: "Open what this operation saw when it failed",
+                  },
+                  "Show",
+                ),
+                INCIDENT,
+                `${name}/${x.name}`,
+              );
+              b.addEventListener("click", () => void openIncident(x.name));
+              return el(
+                "li",
+                null,
+                dot("bad"),
+                el(
+                  "span",
+                  { class: "sh-feed__what" },
+                  el("b", null, x.op),
+                  el("span", { class: "sh-feed__detail mono" }, x.name),
+                ),
+                el(
+                  "span",
+                  { class: "sh-feed__end" },
+                  x.at ? whenText(x.at) : "",
+                  b,
+                ),
+              );
+            })
+          : [
+              el(
+                "li",
+                { class: "sh-feed__empty" },
+                `No incidents: no operation on ${name} has failed.`,
+              ),
+            ]),
+      );
+    } else
+      incList.replaceChildren(
+        el(
+          "li",
+          { class: "kp-alert kp-alert--destructive", role: "alert" },
+          `The incidents did not read: ${ir.error.why}`,
+        ),
+      );
+  };
+  const reload = () => void load().catch(() => {});
+  const stopAnswers = onAnswered(reload);
+  reload();
+  return () => {
+    stopAnswers();
+    document.removeEventListener("keydown", esc);
+  };
+}
+
+// ─────────────────────────────────────────────────────────────── Settings
+
+/**
+ * Settings (the hub demo): Secrets and Size and network side by side, the
+ * Files with the editor, the Firewall (its summary always, its rules
+ * folded), and the Danger zone folded last. `?section=secrets|firewall|
+ * files|danger` opens and scrolls to that part; Live view's edit forms
+ * (settings, raw, add-app, firewall …) open theirs by themselves.
+ * @param {HTMLElement} panel
+ * @param {Ctx} c
+ */
+function settingsHub(panel, c) {
+  const { name, S } = c;
+  /** @type {(() => void)[]} */
+  const stops = [];
+  const want = new URLSearchParams(location.search).get("section");
+  const drive = driven();
+
+  const secrets = section({
+    id: "secrets",
+    title: "Secrets",
+    desc: "Passwords and tokens this stack's apps read, sealed with latch. Hidden until you press Reveal; hidden again when you leave.",
+  });
+  // The secrets pane draws its list and its change drawer side by side
+  // (secrets.js, `sx-md--one`): it needs the whole width.
+  secrets.el.classList.add("sh-span-12");
+  stops.push(mountSecrets(secrets.body, { stack: name }));
+
+  const sizeKv = el("dl", { class: "sh-kv" });
+  sizeKv.append(skeletonLines(5, "Reading the stack's files"));
+  const editBtn = drivable(
+    el(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--sm",
+        title:
+          "Open the editor at the container's settings (a change is saved as a commit and needs a deploy)",
+      },
+      "Edit…",
+    ),
+    OPEN_EDITOR,
+    `${name}/size`,
+  );
+  const size = section({
+    id: "size",
+    title: "Size and network",
+    desc: "What the container gets from the host. Changes are saved as a commit and need a deploy.",
+    tools: [editBtn],
+  });
+  size.body.append(sizeKv);
+  size.el.classList.add("sh-span-6");
+
+  const fileUl = el("ul", { class: "sh-feed sh-files" });
+  fileUl.append(skeletonLines(3, "Reading the stack's files"));
+  const editorHost = el("div", { class: "sh-editor" });
+  const editor = /** @type {HTMLDetailsElement} */ (
+    el(
+      "details",
+      { class: "sh-fold", open: want === "files" || drive ? true : null },
+      el(
+        "summary",
+        {
+          title:
+            "The settings form, the raw files, Add an app, storage, latch and tiles",
+        },
+        "The editor",
+      ),
+      editorHost,
+    )
+  );
+  const editorSummary = /** @type {HTMLElement} */ (
+    editor.querySelector("summary")
+  );
+  drivable(editorSummary, FOLD, `${name}/editor`);
+  const openEditor = el(
+    "button",
+    {
+      type: "button",
+      class: "kp-button kp-button--sm",
+      title: "Open the editor: edit, review the change, commit",
+    },
+    "Open the editor…",
+  );
+  drivable(openEditor, OPEN_EDITOR, `${name}/files`);
+  const files = section({
+    id: "files",
+    title: "Files",
+    desc: "The stack's files in the repository — the truth a deploy makes real. Edit, review the change, commit.",
+    tools: [openEditor],
+  });
+  files.body.append(fileUl, editor);
+  files.el.classList.add("sh-span-12");
+  // Mounted at once (folded or not): Live view's edit forms reach their
+  // fields through the handle the editor registers when it has read.
+  stops.push(settingsTab(editorHost, { name }));
+  const showEditor = () => {
+    editor.open = true;
+    queueMicrotask(() =>
+      (editorHost.querySelector("#settings") ?? editor).scrollIntoView({
+        block: "start",
+      }),
+    );
+  };
+  openEditor.addEventListener("click", showEditor);
+  editBtn.addEventListener("click", showEditor);
+
+  const fwSummary = el(
+    "p",
+    { class: "sh-fw-summary" },
+    "Reading the firewall…",
+  );
+  const fwHost = el("div");
+  const fwFold = /** @type {HTMLDetailsElement} */ (
+    el(
+      "details",
+      { class: "sh-fold", open: want === "firewall" || drive ? true : null },
+      el(
+        "summary",
+        { title: "Every rule, with Add, Edit and Remove" },
+        "Its rules",
+      ),
+      fwHost,
+    )
+  );
+  drivable(
+    /** @type {HTMLElement} */ (fwFold.querySelector("summary")),
+    FOLD,
+    `${name}/firewall`,
+  );
+  const firewall = section({
+    id: "firewall",
+    title: "Firewall",
+    desc: "What this stack's firewall lets through, and whether the host enforces it; every stack at once is in System ▸ Firewall.",
+    tools: [
+      linkButton(
+        "/firewall",
+        "All stacks",
+        "The fleet-wide firewall table",
+        `${name}/settings/fleet-firewall`,
+      ),
+    ],
+  });
+  firewall.body.append(fwSummary, fwFold);
+  firewall.el.classList.add("sh-span-6");
+  stops.push(firewallTab(fwHost, { name }));
+
+  const danger = /** @type {HTMLDetailsElement} */ (
+    el(
+      "details",
+      {
+        class: "kp-card nx-card nx-card--fold sh-danger sh-span-12",
+        id: "danger",
+        open: want === "danger" ? true : null,
+      },
+      el(
+        "summary",
+        null,
+        el(
+          "div",
+          { class: "nx-card__head" },
+          el("h2", null, "Danger zone"),
+          el(
+            "p",
+            { class: "section-head__desc" },
+            "Destroy, forget, wipe and prune: each asks you to type the stack's name before it runs.",
+          ),
+        ),
+      ),
+      el(
+        "div",
+        { class: "sh-actions actions-area" },
+        DANGER.map((d) => {
+          const b = el(
+            "button",
+            {
+              type: "button",
+              class: "sh-action sh-action--danger",
+              "data-action": d.action,
+              title: d.hint,
+            },
+            el("strong", null, d.label),
+            el("span", null, d.hint),
+          );
+          viaForm(drivable(b, DANGER_BTN, `${name}/${d.action}`), d.action);
+          b.addEventListener(
+            "click",
+            () => void openAction(name, d.action, { openRollback }),
+          );
+          return b;
+        }),
+      ),
+    )
+  );
+  drivable(
+    /** @type {HTMLElement} */ (danger.querySelector("summary")),
+    FOLD,
+    `${name}/danger`,
+  );
+
+  panel.replaceChildren(
+    el(
+      "div",
+      { class: "sh-grid" },
+      secrets.el,
+      size.el,
+      firewall.el,
+      files.el,
+      danger,
+    ),
+  );
+
+  const paint = () => {
+    const e = S.edit;
+    if (!e && !S.editError) return;
+    if (!e?.manifest) {
+      sizeKv.replaceChildren(
+        el(
+          "p",
+          { class: "sh-muted" },
+          `The stack's files do not read: ${S.editError ?? "no lxc-compose.yml"}.`,
+        ),
+      );
+    } else
+      sizeKv.replaceChildren(
+        ...sizeFacts({ manifest: e.manifest, diskPct }).flatMap((f) => [
+          el("dt", null, f.label),
+          el("dd", { class: f.mono ? "mono" : null }, f.value),
+        ]),
+      );
+    const paths = Object.keys(e?.texts ?? {});
+    fileUl.replaceChildren(
+      ...(paths.length
+        ? fileList(paths).map((f) =>
+            el(
+              "li",
+              null,
+              el(
+                "span",
+                { class: "sh-files__icon", "aria-hidden": "true" },
+                "▤",
+              ),
+              el(
+                "span",
+                { class: "sh-feed__what" },
+                el("b", { class: "mono" }, f.path),
+                f.what
+                  ? el("span", { class: "sh-feed__detail" }, f.what)
+                  : null,
+              ),
+              el("span", null),
+            ),
+          )
+        : [
+            el(
+              "li",
+              { class: "sh-feed__empty" },
+              e?.head
+                ? `The repository holds no files for ${name}.`
+                : "The working copy has no commit yet.",
+            ),
+          ]),
+    );
+    const fw = e?.manifest?.firewall;
+    const rules = Array.isArray(fw?.rules) ? fw.rules.length : 0;
+    fwSummary.replaceChildren(
+      ...(e?.manifest
+        ? [
+            dot(fw?.enabled ? "ok" : fw ? "warn" : ""),
+            fw
+              ? fw.enabled
+                ? `On: ${rules} ${rules === 1 ? "rule" : "rules"}; incoming ${String(fw.policy_in ?? "DROP").toLowerCase()} unless a rule allows it.`
+                : `Off: ${rules} ${rules === 1 ? "rule is" : "rules are"} declared but not enforced.`
+              : "No firewall is declared for this stack.",
+          ]
+        : ["The firewall is read from the stack's files, which do not read."]),
+    );
+  };
+  /** @type {number | null} */
+  let diskPct = null;
+  void (async () => {
+    const r = await fetchJson(
+      `/data/charts?stack=${encodeURIComponent(name)}&range=1h`,
+      "the charts",
+      c.signal,
+    );
+    diskPct = r.ok ? diskOf(r.body) : null;
+    paint();
+  })().catch(() => {});
+  stops.push(c.onChange(paint));
+  paint();
+
+  /** @param {string} s */
+  const open = (s) => {
+    /** @type {Record<string, [HTMLElement, HTMLDetailsElement | null]>} */
+    const parts = {
+      secrets: [secrets.el, null],
+      size: [size.el, null],
+      files: [files.el, editor],
+      firewall: [firewall.el, fwFold],
+      danger: [danger, danger],
+    };
+    const p = parts[s];
+    if (!p) return;
+    if (p[1]) p[1].open = true;
+    queueMicrotask(() => p[0].scrollIntoView({ block: "start" }));
+  };
+  if (want) open(want);
+  stops.push(c.onSection(open));
+  return () => {
+    for (const s of stops.reverse()) s();
   };
 }

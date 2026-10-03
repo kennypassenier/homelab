@@ -11843,6 +11843,30 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 deferred: None,
             }
         }
+        // redesign-flows-6: one stack's containers and `manual` images,
+        // read now (the dashboard's Update flow verifies a deploy with it).
+        Rpc::StackRuntime { stack } => {
+            let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+            let st = store.load().await.unwrap_or_default();
+            let read = match st.stacks.get(&stack) {
+                None => Err(format!("the host records no stack {stack}")),
+                Some(s) => homelab_core::ops::pins::read_runtime(&exec, s.vmid, unix_now()).await,
+            };
+            match read {
+                Ok(rt) => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: serde_json::json!({ "stack": stack, "runtime": rt }).to_string(),
+                    deferred: None,
+                },
+                Err(why) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: why,
+                    deferred: None,
+                },
+            }
+        }
         Rpc::ListManualChecks { json } => {
             let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
             let st = store.load().await.unwrap_or_default();

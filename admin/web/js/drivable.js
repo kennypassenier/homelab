@@ -31,8 +31,10 @@
  * "view" (redesign-backups: it only changes what the page shows — pins a night,
  * filters, folds, sorts).
  * @typedef {{id: string, page: string, what: string,
- *   opens: "dialog" | "run" | "view", row?: string,
+ *   opens: "dialog" | "run" | "view", row?: string, bar?: boolean,
  *   at?: (row: string | null) => string | null}} Control
+ *   `bar`: the control lives in the bar on every page (Help's "?"), so it
+ *   is found there without going to its page first.
  *   `at`: where the control is when it lives on a page per stack (the
  *   stack hub's), from its row; otherwise its page's own address.
  */

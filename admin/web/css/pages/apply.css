@@ -3,10 +3,9 @@
    kp-themes tokens only. */
 
 .ap-top {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 16px;
-  align-items: center;
+  display: flex;
+  justify-content: flex-end;
+  margin-block-start: 12px;
 }
 .ap-top p {
   margin: 0;
@@ -19,10 +18,10 @@
 }
 .ap-steps {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--ap-steps, 3), minmax(0, 1fr));
   gap: 8px;
   list-style: none;
-  margin: 16px 0 0;
+  margin: 0;
   padding: 0;
   counter-reset: ap-s;
 }
@@ -66,6 +65,34 @@
   background: var(--primary);
   color: var(--primary-foreground);
 }
+/* The compare runs inside its own step (redesign-flows-5). */
+.ap-steps__more {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  margin-block-start: 6px;
+}
+.ap-steps__more .drift-error:empty {
+  display: none;
+}
+.ap-compare {
+  display: grid;
+  gap: 6px;
+}
+/* Destroy is its own red step. */
+.ap-steps li[data-step="destroy"] {
+  border-color: color-mix(in oklab, var(--destructive) 45%, var(--border));
+}
+.ap-steps li[data-step="destroy"]::before {
+  background: color-mix(in oklab, var(--destructive) 15%, var(--muted));
+  color: var(--destructive);
+}
+.ap-steps li[data-step="destroy"].armed {
+  border-color: var(--destructive);
+  box-shadow: inset 0 0 0 1px var(--destructive);
+}
 .ap-body {
   display: grid;
   gap: 16px;
@@ -81,6 +108,19 @@ button.ap-tile {
   text-align: start;
   cursor: pointer;
   grid-template-rows: auto auto auto;
+  min-inline-size: 0;
+}
+/* A tile's label wraps on a phone instead of being cut off (review 13). */
+.ap-tile .nx-kpi__label {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+.ap-filter {
+  margin: 0;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
 }
 button.ap-tile:hover {
   border-color: var(--ring);
@@ -129,6 +169,9 @@ button.ap-tile[aria-pressed="true"] {
 }
 .ap-item {
   display: grid;
+  /* One column that never grows past the card: a long diff line scrolls
+     inside it instead of covering the next column (review item 1). */
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   padding: 12px;
   border: 1px solid var(--border);
@@ -146,6 +189,11 @@ button.ap-tile[aria-pressed="true"] {
 .ap-item__top .nx-sev {
   margin: 0;
   align-self: center;
+}
+/* An unarmed destroy: a neutral dot, not information (review item 12). */
+.nx-sev.ap-sev--none {
+  background: var(--muted-foreground);
+  opacity: 0.55;
 }
 .ap-item p {
   margin: 0;
@@ -184,8 +232,11 @@ button.ap-tile[aria-pressed="true"] {
 }
 .ap-diff {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow-x: auto;
 }
 .ap-col,
 .ap-item,
@@ -226,6 +277,61 @@ button.ap-tile[aria-pressed="true"] {
 .ap-go .kp-button:disabled {
   opacity: 0.55;
 }
+/* redesign-flows-5: the destroy, its own red step after the deploys. */
+.ap-destroy {
+  display: grid;
+  gap: 10px;
+  margin-block-start: 16px;
+  padding: var(--kp-space-md, 12px) var(--nx-pad, 16px);
+  border-radius: var(--nx-radius, 10px);
+  border: 1px solid var(--destructive);
+  background: color-mix(in oklab, var(--destructive) 5%, var(--card));
+}
+.ap-destroy[hidden] {
+  display: none;
+}
+.ap-destroy__head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 10px;
+  align-items: center;
+}
+.ap-destroy__head h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--destructive);
+}
+.ap-destroy__head .nx-sev {
+  margin: 0;
+}
+.ap-destroy__head p {
+  grid-column: 2;
+  margin: 0;
+}
+.ap-destroy__ack {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  font-size: var(--kp-text-sm);
+  color: var(--destructive);
+}
+.ap-destroy__ack input {
+  accent-color: var(--destructive);
+  margin-block-start: 3px;
+}
+.ap-destroy__go {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+.ap-destroy__go p {
+  margin: 0;
+}
+.ap-destroy .kp-button:disabled {
+  opacity: 0.55;
+}
 .ap-body .apply-row--skeleton {
   min-block-size: 6rem;
 }
@@ -243,8 +349,8 @@ button.ap-tile[aria-pressed="true"] {
   }
 }
 @media (max-width: 40rem) {
-  .ap-top,
-  .ap-go {
+  .ap-go,
+  .ap-destroy__go {
     grid-template-columns: minmax(0, 1fr);
   }
 }

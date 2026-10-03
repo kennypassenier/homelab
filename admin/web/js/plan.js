@@ -28,7 +28,9 @@
 export function fileViews(list) {
   return list.map((f) => ({
     path: f.path,
-    title: `${f.path} · ${f.status} · +${f.added} −${f.removed}`,
+    // Review item 7: the status is the badge's word; the title does not
+    // say it a second time ("changed … changed").
+    title: `${f.path} · +${f.added} −${f.removed}`,
     badge: {
       label: f.status,
       tone:

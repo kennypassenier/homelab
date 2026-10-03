@@ -17,6 +17,7 @@ import { showButton } from "../incident.js";
 import {
   badgeCell,
   bindTableUrl,
+  ensureStyle,
   errorBox,
   fetchJson,
   fetchReport,
@@ -50,7 +51,9 @@ import {
 } from "/static/kp/js/datatable.js";
 import { attachLogs } from "/static/kp/js/log.js";
 import { watchTabOverflow } from "/static/kp/js/overlays.js";
-import { viaForm } from "../drivable.js";
+import { declare, drivable, viaForm } from "../drivable.js";
+import { openPinRollback } from "../pinupdate.js";
+import { movesOf } from "../updateflow.js";
 import { mount as mountSecrets } from "./secrets.js";
 import { emptyState, section } from "../ui.js";
 
@@ -454,6 +457,107 @@ function appsTab(panel, params) {
   };
 }
 
+/** redesign-flows-6: an update's Roll back from the stack's History. */
+const UNDO_UPDATE = declare({
+  id: "stack-undo-update",
+  page: "stack",
+  opens: "dialog",
+  row: "<stack>/<app>/<service>",
+  at: (row) =>
+    row ? `/stacks/${encodeURIComponent(row.split("/")[0])}/history` : null,
+  what: "Roll back one app an Update moved in the last 7 days: its earlier image line, backed up, committed and deployed",
+});
+
+/**
+ * redesign-flows-6 (review item 4, the demo's "Roll back, 1 click, for 7
+ * days, from the stack's History"): the updates of this stack the Update
+ * flow made in the last 7 days, each pinned app with its Roll back….
+ * @param {string} stack
+ * @param {AbortSignal} signal
+ */
+function updatesCard(stack, signal) {
+  ensureStyle("/css/pages/update.css");
+  const list = h(
+    "div",
+    { class: "undo-updates__list" },
+    h("p", { class: "measured" }, "Reading the updates of the last 7 days…"),
+  );
+  const card = h(
+    "section",
+    {
+      class: "kp-card nx-card undo-updates",
+      "aria-labelledby": "undo-updates-h",
+    },
+    h(
+      "div",
+      { class: "nx-card__head" },
+      h("h3", { id: "undo-updates-h" }, "Updates you can undo"),
+      h(
+        "p",
+        { class: "section-head__desc" },
+        "Each app the Update flow moved in the last 7 days; Roll back puts its earlier version back the same way — backup, files, deploy.",
+      ),
+    ),
+    list,
+  );
+  void (async () => {
+    const r = await fetchJson(
+      `/data/update-flows?stack=${encodeURIComponent(stack)}`,
+      "the updates of the last 7 days",
+      signal,
+    );
+    if (signal.aborted) return;
+    if (!r.ok) {
+      list.replaceChildren(errorBox(r.error));
+      return;
+    }
+    const rows = (r.body.updates ?? []).flatMap((/** @type {any} */ u) =>
+      [...movesOf(u.items ?? []).values()]
+        .filter((m) => m.stack === stack)
+        .map((m) => {
+          const b = drivable(
+            h(
+              "button",
+              {
+                type: "button",
+                class: "kp-button kp-button--sm",
+                title: `Put ${m.from_version} back: backup, files, deploy`,
+              },
+              `Roll back to ${m.from_version}…`,
+            ),
+            UNDO_UPDATE,
+            `${stack}/${m.key}`,
+          );
+          b.addEventListener("click", () => openPinRollback(m));
+          return h(
+            "div",
+            { class: "undo-updates__row" },
+            h("strong", null, m.key),
+            h("span", null, `${m.from_version} → ${m.to_version}`),
+            h(
+              "span",
+              { class: "measured" },
+              `${formatDateTime(u.at)} · ${u.by}`,
+            ),
+            b,
+          );
+        }),
+    );
+    list.replaceChildren(
+      ...(rows.length
+        ? rows
+        : [
+            h(
+              "p",
+              { class: "measured" },
+              "No app of this stack was updated in the last 7 days.",
+            ),
+          ]),
+    );
+  })().catch(() => {});
+  return card;
+}
+
 /** @type {(p: HTMLElement, params: Params) => () => void} */
 function historyTab(panel, params) {
   const keys = sortKeys();
@@ -493,12 +597,15 @@ function historyTab(panel, params) {
       { label: "Read", sort: "text" },
     ],
   });
+  const updatesAbort = new AbortController();
+  const updates = updatesCard(params.name, updatesAbort.signal);
   panel.replaceChildren(
     h(
       "p",
       { class: "section-head__desc measured" },
       `Every operation the host ran on ${params.name}, and every one that failed, over the last ${HISTORY_DAYS} days.`,
     ),
+    updates,
     hist.wrap,
     inc.wrap,
     h("p", null, ago),
@@ -565,6 +672,7 @@ function historyTab(panel, params) {
   retry();
   return () => {
     abort.abort();
+    updatesAbort.abort();
     stopAnswers();
     panel.removeEventListener("kp-datatable-retry", retry);
     unbindH();

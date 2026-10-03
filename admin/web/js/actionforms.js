@@ -14,7 +14,8 @@ import SPEC from "./formspec.json" with { type: "json" };
  * @typedef {"force" | "confirm" | "snapshot" | "app" | "unit" |
  *   "skip_backup" | "skip_safety_copy" | "commit" | "vmid" | "command" |
  *   "tag" | "version" | "privileged" | "base" | "check" | "verdict" |
- *   "days" | "note" | "destroy"} ArgName
+ *   "days" | "note" | "destroy" | "leave_out" | "destroy_ids" |
+ *   "destroy_ack"} ArgName
  * @typedef {{action: string, target: "stack" | "host", label: string,
  *   what: string, scope: string, needs: string, args: ArgName[],
  *   confirm: boolean, refused_for_self: boolean,
@@ -53,7 +54,8 @@ import SPEC from "./formspec.json" with { type: "json" };
  *   skip_safety_copy?: boolean, commit?: string, vmid?: string,
  *   command?: string, tag?: string, version?: string, privileged?: boolean,
  *   base?: string, check?: string, verdict?: string, days?: string,
- *   note?: string, destroy?: string}} ActionArgs
+ *   note?: string, destroy?: string, leave_out?: string,
+ *   destroy_ids?: string, destroy_ack?: boolean}} ActionArgs
  */
 
 /** The step every form ends on. */
@@ -238,7 +240,14 @@ export function actionForm(entry, ctx) {
  * "Change" affordance instead of asking again (fix-216). `snapshot` is
  * never locked this way — it gets its own picker instead.
  */
-export const LOCKABLE_FIELDS = /** @type {const} */ (["app", "unit", "commit"]);
+export const LOCKABLE_FIELDS = /** @type {const} */ ([
+  "app",
+  "unit",
+  "commit",
+  "leave_out",
+  "destroy",
+  "destroy_ids",
+]);
 
 /**
  * Which of a form's fields should open locked: every `LOCKABLE_FIELDS`
@@ -476,6 +485,9 @@ const PER_RUN = new Set([
   "days",
   "note",
   "destroy",
+  "leave_out",
+  "destroy_ids",
+  "destroy_ack",
 ]);
 
 /**

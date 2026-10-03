@@ -48,17 +48,6 @@ export function el(tag, attrs, ...kids) {
   return e;
 }
 
-/** Load a page's own stylesheet once (the shell's index.html links only
- * app.css). @param {string} href */
-export function ensureStyle(href) {
-  if (document.querySelector(`link[data-page-style="${href}"]`)) return;
-  const l = document.createElement("link");
-  l.rel = "stylesheet";
-  l.href = href;
-  l.dataset.pageStyle = href;
-  document.head.append(l);
-}
-
 /**
  * The live freshness of a page or a card, ticking (ago.js).
  * @param {string} [verb]

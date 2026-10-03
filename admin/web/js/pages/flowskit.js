@@ -7,19 +7,6 @@
 import { h } from "../dom.js";
 
 /**
- * Load a page's own stylesheet once.
- * @param {string} href
- */
-export function ensureStyle(href) {
-  if (document.querySelector(`link[data-page-style="${href}"]`)) return;
-  const l = document.createElement("link");
-  l.rel = "stylesheet";
-  l.href = href;
-  l.dataset.pageStyle = href;
-  document.head.append(l);
-}
-
-/**
  * A flow's stepper (flows/update.html `.fx-steps`): one bar per step, the
  * done ones green, the current one in the primary colour and bold.
  * @param {string[]} labels

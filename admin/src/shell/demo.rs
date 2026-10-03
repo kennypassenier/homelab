@@ -267,6 +267,50 @@ fn metric_key(query: &str) -> &'static str {
 /// them, reads answer empty, and every command that would change something
 /// only prints three step lines and answers "complete". Nothing leaves the
 /// machine.
+/// redesign-flows-6: the demo host's `StackRuntime` — every service of the
+/// stack's compose files running, and each digest-pinned one running the
+/// image line the working copy holds now (generic: whatever the files say).
+pub fn demo_runtime(repo: &std::path::Path, stack: &str) -> homelab_core::ops::pins::StackRuntime {
+    let mut rt = homelab_core::ops::pins::StackRuntime::default();
+    let texts = super::workcopy::read_texts(&repo.join("stacks").join(stack));
+    for (path, text) in &texts {
+        if !path.ends_with("docker-compose.yml") {
+            continue;
+        }
+        let Ok(v) = serde_yaml::from_str::<serde_yaml::Value>(text) else {
+            continue;
+        };
+        let Some(serde_yaml::Value::Mapping(services)) = v.get("services") else {
+            continue;
+        };
+        for (service, s) in services {
+            let Some(service) = service.as_str() else {
+                continue;
+            };
+            let name = s
+                .get("container_name")
+                .and_then(|c| c.as_str())
+                .unwrap_or(service)
+                .to_string();
+            rt.containers.push((name.clone(), true));
+            if let Some(image) = s.get("image").and_then(|i| i.as_str())
+                && let Some((_, digest)) = image.split_once('@')
+            {
+                rt.images.insert(
+                    name,
+                    homelab_core::ops::pins::RunningImage {
+                        image: image.to_string(),
+                        digest: digest.to_string(),
+                        upstream: None,
+                        seen_at: now_s(),
+                    },
+                );
+            }
+        }
+    }
+    rt
+}
+
 /// fix-231: the demo host's stand-in for fix-83's pin check — one `Noted`
 /// finding per digest-pinned image in the working copy that declares an
 /// upstream (`com.homelab.update.upstream`), worded exactly as
@@ -622,6 +666,14 @@ pub async fn run_demo(
                             "findings": demo_stale_findings(&repo, &stacks),
                         }).to_string(),
                         Command::ListManualChecks { .. } => serde_json::json!({ "now": now_s(), "checks": [] }).to_string(),
+                        // redesign-flows-6: what a stack's containers run,
+                        // from the working copy: every service running, its
+                        // image the committed line, so the Update flow's
+                        // verify sees the version its commit moved to.
+                        Command::StackRuntime { stack } => serde_json::json!({
+                            "stack": stack,
+                            "runtime": demo_runtime(&repo, &stack),
+                        }).to_string(),
                         Command::ListTemplates => "clonable golden templates (fast):\nclone:996  debian-13-homelab-v4\n\nOS templates (full bootstrap):\n  local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst\n".into(),
                         Command::GetApplied { .. } => "[]".into(),
                         // fix-207: the demo host's stand-in for "what pve

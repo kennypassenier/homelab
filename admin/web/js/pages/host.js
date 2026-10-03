@@ -22,7 +22,7 @@ import { act, catalogReady, onAct } from "../act.js";
 import { openAction } from "../actiondialog.js";
 import { agoEl, setAgo } from "../ago.js";
 import { doctorRows } from "../doctor.js";
-import { fetchJson, slowReport } from "../dom.js";
+import { ensureStyle, fetchJson, slowReport } from "../dom.js";
 import { declare, drivable, viaForm } from "../drivable.js";
 import { humanDuration } from "../format.js";
 import {
@@ -52,7 +52,6 @@ import { current, subscribe } from "../store.js";
 import {
   attentionBand,
   el,
-  ensureStyle,
   keyRow,
   kpiStrip,
   moreMenu,

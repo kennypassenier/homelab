@@ -239,14 +239,15 @@ test("redesign-flows-2: plain-click kinds filter the rows (none on: all); the he
 });
 
 test("redesign-flows-1: the Update flow's address and scope", () => {
-  assert.equal(updateHref(), "/inbox?update=all");
-  assert.equal(updateHref("kp-soft"), "/inbox?update=kp-soft");
+  // redesign-flows-11: its own address since the review.
+  assert.equal(updateHref(), "/update?all=1");
+  assert.equal(updateHref("kp-soft"), "/update?stack=kp-soft");
   assert.equal(
     updateHref("beta-demo", "api/api"),
-    "/inbox?update=beta-demo&app=api%2Fapi",
+    "/update?stack=beta-demo&app=api%2Fapi",
   );
-  assert.deepEqual(scopeOf("?update=all"), { all: true });
-  assert.deepEqual(scopeOf("?update=beta-demo&app=api%2Fapi"), {
+  assert.deepEqual(scopeOf("?all=1"), { all: true });
+  assert.deepEqual(scopeOf("?stack=beta-demo&app=api%2Fapi"), {
     all: false,
     stack: "beta-demo",
     app: "api/api",
@@ -355,7 +356,10 @@ test("redesign-flows-1: the impact in words — downtime from the last deploy, w
       { who: "alpha-demo", what: "beta-demo/demo-web" },
     ],
   );
-  assert.equal(safetyNet(chosen).value, "Backup first, health checked");
+  // redesign-flows-6: the demo's own words, for pinned and moving-tag
+  // apps alike (the job rolls a pinned app back by itself now).
+  assert.equal(safetyNet(chosen).value, "Backup first, auto roll back");
+  assert.equal(safetyNet(chosen).ctx, "if the app is not healthy within 2 min");
   const pull = itemsFor(STALE, { all: false, stack: "notes" });
   assert.equal(safetyNet(pull).value, "Backup first, auto roll back");
 });

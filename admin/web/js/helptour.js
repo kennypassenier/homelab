@@ -13,10 +13,20 @@
 // by node tests.
 
 import { AREAS } from "./areas.js";
-import { h } from "./dom.js";
+import { ensureStyle, h } from "./dom.js";
 import { SHORTCUTS } from "./shortcuts.js";
-import { dialogControl } from "./drivable.js";
+import { declare, dialogControl } from "./drivable.js";
 import { isMac } from "/static/kp/js/palette.js";
+
+/** Review item 15: the bar's "?" (chrome.js), a Live view control on every
+ * page — `bar`: found in the bar, never by going to a page first. */
+export const HELP_OPEN = declare({
+  id: "help-open",
+  page: "home",
+  bar: true,
+  opens: "dialog",
+  what: "open Help: the six areas, the words, the keys and the tour",
+});
 
 /** Remembers that this browser has seen (or skipped) the tour. */
 export const TOURED_KEY = "homelab-toured";
@@ -246,12 +256,13 @@ export function startTour(i = 0) {
     // finds by name, and the page stays usable behind it.
     box = h(
       "dialog",
+      // Review item 17: named by its step's title, no aria-live on a
+      // dialog (opening it already announces it).
       {
         class: "tour",
-        "aria-label": "Tour",
-        "aria-live": "polite",
+        "aria-labelledby": "tour-title",
       },
-      h("h3", null, s.title),
+      h("h3", { id: "tour-title" }, s.title),
       h("p", null, s.text),
       h(
         "footer",
@@ -425,12 +436,4 @@ export function helpPanel() {
 }
 
 /** The panel's and the tour's own styles (css/pages/help.css). */
-function ensureHelpStyle() {
-  const href = "/css/pages/help.css";
-  if (document.querySelector(`link[data-page-style="${href}"]`)) return;
-  const l = document.createElement("link");
-  l.rel = "stylesheet";
-  l.href = href;
-  l.dataset.pageStyle = href;
-  document.head.append(l);
-}
+const ensureHelpStyle = () => ensureStyle("/css/pages/help.css");

@@ -18,7 +18,7 @@ import { act, loadNotices, send } from "../act.js";
 import { openAction, openBatch } from "../actiondialog.js";
 import { refusalCallout } from "../actui.js";
 import { answerBody } from "../asks.js";
-import { fetchJson, h, slowRead } from "../dom.js";
+import { ensureStyle, fetchJson, h, slowRead } from "../dom.js";
 import { declare, drivable } from "../drivable.js";
 import { inboxNow, onInbox } from "../inbox.js";
 import {
@@ -33,9 +33,8 @@ import {
 import { feedToday, feedUpdates, readChecks } from "../inboxsources.js";
 import { current, setAsks, subscribe } from "../store.js";
 import { pageHeader, skeletonLines, toggleChips, toolbar } from "../ui.js";
-import { updateHref, scopeOf } from "../updateflow.js";
-import { doneMark, ensureStyle, explainNote, segSwitch } from "./flowskit.js";
-import { mount as mountUpdate } from "./update.js";
+import { legacyUpdateHref, updateHref } from "../updateflow.js";
+import { doneMark, explainNote, segSwitch } from "./flowskit.js";
 
 const CHECK_AGAIN = declare({
   id: "inbox-check-again",
@@ -140,8 +139,14 @@ const rowId = (key) => key.replace(/[^a-z0-9-]/gi, "-");
  * @returns {() => void}
  */
 export function mount(root) {
-  const scope = scopeOf(location.search);
-  if (scope) return mountUpdate(root, scope);
+  // redesign-flows-11: the Update flow has its own address; the old
+  // `/inbox?update=…` is sent on to it.
+  const legacy = legacyUpdateHref(location.search);
+  if (legacy) {
+    history.replaceState(null, "", legacy);
+    queueMicrotask(() => dispatchEvent(new PopStateEvent("popstate")));
+    return () => {};
+  }
   ensureStyle("/css/pages/flows.css");
   ensureStyle("/css/pages/inbox.css");
 
@@ -165,6 +170,9 @@ export function mount(root) {
     live: "checked",
     actions: [again],
   });
+  // Review item 13: on a phone the header reads title, sentence, then the
+  // checked time with Check again (inbox.css).
+  head.el.classList.add("inbox-head");
 
   const note = explainNote("homelab-inbox-explained", [
     h("b", null, "This one list replaces"),
@@ -279,10 +287,11 @@ export function mount(root) {
       "summary",
       { title: "Fold or unfold what is worth a look but not urgent" },
       h("strong", null, "Worth a look", worthN),
+      // Review item 8: the section's one-sentence description.
       h(
         "span",
-        { class: "inbox-hint" },
-        "not urgent, not counted in the counter",
+        { class: "inbox-worth__desc" },
+        "Things that are fine today but deserve a look soon — backups never test-restored, a newer host release, the doctor's report — not urgent and not counted.",
       ),
     ),
     WORTH,

@@ -28,6 +28,7 @@ import {
   themeCommands,
 } from "./commands.js";
 import { h } from "./dom.js";
+import { drivable } from "./drivable.js";
 import {
   changed as notifyInbox,
   countText,
@@ -35,7 +36,7 @@ import {
   onInbox,
   wireInbox,
 } from "./inbox.js";
-import { helpPanel } from "./helptour.js";
+import { HELP_OPEN, helpPanel } from "./helptour.js";
 import { startInboxSources } from "./inboxsources.js";
 import { noMatchText, rankCommands } from "./intent.js";
 import { finished, stepText } from "./jobs.js";
@@ -527,16 +528,20 @@ export function mountChrome(where, ctx) {
       h("kbd", { class: "kp-palette__keys", "data-kp-palette-keys": "" }),
     ),
   );
-  const help = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--ghost help-button",
-      "data-kp-palette-open": "shortcuts",
-      "aria-label": "Help, words and shortcuts",
-      title: "Help, words and shortcuts (?)",
-    },
-    "?",
+  // Review item 15: the bar's ? is the Live view control help-open.
+  const help = drivable(
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--ghost help-button",
+        "data-kp-palette-open": "shortcuts",
+        "aria-label": "Help, words and shortcuts",
+        title: "Help, words and shortcuts (?)",
+      },
+      "?",
+    ),
+    HELP_OPEN,
   );
   const themes = h("div", { class: "theme-slot" });
   themes.innerHTML = themeMenuMarkup({

@@ -18,7 +18,7 @@
 
 import { act, onAct, send } from "../act.js";
 import { agoEl, setAgo } from "../ago.js";
-import { fetchJson, h } from "../dom.js";
+import { ensureStyle, fetchJson, h } from "../dom.js";
 import { declare, drivable } from "../drivable.js";
 import { stackHref } from "../router.js";
 import {
@@ -137,14 +137,7 @@ const UNDO_MS = 5000;
 const CLIPBOARD_MS = 30_000;
 
 /** The page's stylesheet, added once. */
-function ensureStyles() {
-  if (document.querySelector('link[data-page-css="secrets"]')) return;
-  const l = document.createElement("link");
-  l.rel = "stylesheet";
-  l.href = "/css/secrets.css";
-  l.dataset.pageCss = "secrets";
-  document.head.append(l);
-}
+const ensureStyles = () => ensureStyle("/css/secrets.css");
 
 /** LOCAL: one hue per stack, in the fleet's sorted order. @param {string} s @param {string[]} all */
 const stackColour = (s, all) =>

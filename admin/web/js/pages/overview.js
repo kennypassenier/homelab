@@ -115,8 +115,8 @@ export function mount(root, ctx) {
   // dashboard, so it runs when asked, not on every visit. fix-210 (Kenny,
   // 2026-10-02): the button used to sit loose at the top of the page,
   // meaning something different from the fleet-wide apply plan right next
-  // to it — both now live inside the one "Apply the whole fleet" section
-  // below, each its own clearly described step.
+  // to it — both now live inside the one "Deploy all changes" section
+  // below, the compare as its first step (redesign-flows-5).
   const compareBtn = h(
     "button",
     {
@@ -129,23 +129,22 @@ export function mount(root, ctx) {
     "Compare with the files",
   );
   const driftError = h("div", { class: "drift-error" });
-  // fix-210: the Apply page's whole functionality, as a collapsible
-  // section that starts loading only once opened (health.js's lazy-block
-  // pattern) — never a page nobody asked to read. `?section=apply`
-  // (`router.js` redirectFor's "apply" case, the old `/apply` address)
-  // opens it and scrolls it into view, the same convention Health already
-  // uses for `?block=`.
-  const applyStep1 = h(
-    "div",
-    { class: "apply-step" },
-    sectionHeader(
-      "Which stacks differ from their files",
-      "A quick per-stack check: marks each stack [CHANGED] in the table above when what runs does not match its stack files. Covers the whole fleet at once; a single stack's own page has the same check for just that stack.",
-      { level: "h3" },
-    ),
-    h("div", { class: "title-row" }, compareBtn),
-    driftError,
-  );
+  // redesign-flows-5 (review items 5 and 6): ONE heading, Deploy all
+  // changes, with one sentence, then its steps; the compare is step 1 of
+  // them, shown done only once a compare has actually run.
+  /** @type {number | null} */
+  let comparedAt = null;
+  /** @type {Set<() => void>} */
+  const compareSubs = new Set();
+  const compare = {
+    button: h("div", { class: "ap-compare" }, compareBtn, driftError),
+    at: () => comparedAt,
+    /** @param {() => void} f */
+    onChange: (f) => {
+      compareSubs.add(f);
+      return () => compareSubs.delete(f);
+    },
+  };
   const applyPlanBody = h("div", { class: "apply-step" });
   const applySection = /** @type {HTMLDetailsElement} */ (
     h(
@@ -155,12 +154,12 @@ export function mount(root, ctx) {
         "summary",
         null,
         sectionHeader(
-          "Apply the whole fleet",
-          "Plan and apply every pending change across the fleet in one confirmed batch, including a stack whose directory was deleted.",
+          "Deploy all changes",
+          "Every stack of the working copy against what the host last applied; nothing runs until you press Apply, and a stack whose directory is gone is destroyed only in its own red step.",
           { level: "h2" },
         ),
       ),
-      h("div", { class: "health-block__body" }, applyStep1, applyPlanBody),
+      h("div", { class: "health-block__body" }, applyPlanBody),
     )
   );
   let applyMounted = false;
@@ -168,16 +167,7 @@ export function mount(root, ctx) {
   const mountApplyOnce = () => {
     if (applyMounted) return;
     applyMounted = true;
-    applyPlanBody.replaceChildren(
-      sectionHeader(
-        "What applying would change",
-        "The full plan for every stack, read from the host and the working copy; nothing runs until Apply… is confirmed.",
-        { level: "h3" },
-      ),
-    );
-    const planBody = h("div");
-    applyPlanBody.append(planBody);
-    stopApply = mountApplySection(planBody);
+    stopApply = mountApplySection(applyPlanBody, { compare });
   };
   applySection.addEventListener("toggle", () => {
     if (applySection.open) mountApplyOnce();
@@ -314,6 +304,8 @@ export function mount(root, ctx) {
       return;
     }
     drift = r.body.stacks ?? {};
+    comparedAt = r.body.measured_at ?? null;
+    compareSubs.forEach((f) => f());
     render();
   };
   compareBtn.addEventListener(

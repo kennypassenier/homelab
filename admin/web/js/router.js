@@ -46,6 +46,7 @@ export const RETIRED_STACK_TABS = /** @type {const} */ (["checks", "firewall"]);
  *   {page: "system"} | {page: "host"} | {page: "metrics"} |
  *   {page: "fleetview"} | {page: "firewall"} | {page: "settings"} |
  *   {page: "presets"} | {page: "notifications"} | {page: "shell"} |
+ *   {page: "update"} |
  *   {page: "stack", name: string, tab: StackTab} |
  *   {page: "retired", from: string, name?: string} |
  *   {page: "notfound", path: string}} Route
@@ -77,6 +78,8 @@ export const CURRENT_PATHS = {
   presets: "presets",
   "system/notifications": "notifications",
   console: "shell",
+  // redesign-flows-11: the Update flow (`?all=1` or `?stack=…`).
+  update: "update",
 };
 
 /**
@@ -176,6 +179,7 @@ const FALLBACK_TITLE = /** @type {Record<string, string>} */ ({
   presets: "Presets",
   notifications: "Notification rules",
   shell: "Console",
+  update: "Update apps",
 });
 
 /**

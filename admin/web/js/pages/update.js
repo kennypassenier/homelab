@@ -9,80 +9,83 @@
 // Reached from the Inbox's "N apps have a newer version" row, a stack's
 // Update (hub header, Stacks row: actiondialog.js sends a person's Update
 // here), the palette ("update kp-soft", "Update apps with a newer
-// version…") and the Map's stale-image rows. It lives at the Inbox's
-// `?update=all` / `?update=<stack>[&app=<key>]`.
+// version…") and the Map's stale-image rows. It lives at its own address
+// since the review (redesign-flows-11): `/update?all=1` or
+// `/update?stack=<stack>[&app=<key>]`; the old `/inbox?update=…` is sent on.
 //
-// The steps run on the existing machinery: the stack's Backup action, the
-// stack editor's commit of `StackEdit::Settings { images }` with its
-// deploy (fix-231's pin update), and for apps on a moving tag the stack's
-// Update action (pull and recreate, rolled back when unhealthy). The run
-// is held at module level, so leaving the page (inside this tab) keeps it
-// going and coming back shows where it is.
+// redesign-flows-6 (review items 3 and 4): steps 3-5 are ONE job on the
+// dashboard's server (`update-apps`, admin/src/shell/actions_flow.rs) —
+// back up, commit the new image line, deploy, verify healthy at the new
+// version within 2 min, and roll a pinned app back by itself when it is
+// not. This page only starts it and follows it (its rows are the job's
+// `flow`), so a closed tab stops nothing, and the job is in Activity like
+// every other. The log comparison is read here from the job's deploy time.
 
 import { act, onAct, send } from "../act.js";
 import { refusalCallout } from "../actui.js";
-import { errorBox, fetchJson, h, slowRead } from "../dom.js";
+import { ensureStyle, errorBox, fetchJson, h, slowRead } from "../dom.js";
 import { declare, drivable } from "../drivable.js";
 import { diffBlocks } from "../editui.js";
 import { formatDateTime, humanDuration } from "../format.js";
 import { inboxNow } from "../inbox.js";
 import { feedUpdates } from "../inboxsources.js";
-import { jobEnd, openPinRollback } from "../pinupdate.js";
+import { openPinRollback } from "../pinupdate.js";
 import { planView } from "../plan.js";
 import { current } from "../store.js";
 import { emptyState, pageHeader, section, skeletonLines } from "../ui.js";
 import {
-  commitSubject,
-  doneWords,
   firstChosen,
+  flowRows,
   flowTitle,
   itemsFor,
   lastDeployS,
   logVerdict,
+  movesOf,
   restartWords,
-  runRows,
   safetyNet,
+  scopeMatches,
   stacksOf,
-  versionWords,
+  undoWords,
+  updatesBody,
   whoNotices,
 } from "../updateflow.js";
-import { checkList, doneMark, ensureStyle, stepper } from "./flowskit.js";
+import { checkList, doneMark, stepper } from "./flowskit.js";
 
 const PICK = declare({
   id: "update-pick",
-  page: "inbox",
+  page: "update",
   opens: "view",
   row: "<pin:stack:app/service | pull:stack>",
   what: "include or leave out one row of the Update flow's list (a plain click)",
 });
 const SEE = declare({
   id: "update-see-impact",
-  page: "inbox",
+  page: "update",
   opens: "view",
   what: "the Update flow's step 1 → 2: see what the update changes",
 });
 const BACK = declare({
   id: "update-back",
-  page: "inbox",
+  page: "update",
   opens: "view",
   what: "the Update flow's step 2 → 1: back to the list",
 });
 const MAJOR = declare({
   id: "update-major-read",
-  page: "inbox",
+  page: "update",
   opens: "view",
   row: "<pin:stack:app/service>",
   what: "tick “I read the release notes” for a major version",
 });
 const GO = declare({
   id: "update-go",
-  page: "inbox",
+  page: "update",
   opens: "run",
   what: "back up the chosen apps' stacks, update them and verify them",
 });
 const ROLL_BACK = declare({
   id: "update-roll-back",
-  page: "inbox",
+  page: "update",
   opens: "dialog",
   row: "<pin:stack:app/service>",
   what: "the result's Roll back…: put the earlier version back the same way",
@@ -90,36 +93,36 @@ const ROLL_BACK = declare({
 
 const NOTES = declare({
   id: "update-release-notes",
-  page: "inbox",
+  page: "update",
   opens: "view",
   row: "<pin:stack:app/service>",
   what: "a row's release notes, in a new tab",
 });
 const MAJOR_NOTES = declare({
   id: "update-major-notes",
-  page: "inbox",
+  page: "update",
   opens: "view",
   row: "<pin:stack:app/service>",
   what: "a major version's release notes, in a new tab",
 });
 const DIFF = declare({
   id: "update-diff",
-  page: "inbox",
+  page: "update",
   opens: "view",
   what: "fold or unfold the change to the stack files",
 });
 const LEAVE = declare({
   id: "update-leave",
-  page: "inbox",
+  page: "update",
   opens: "view",
-  what: "leave the running update (it keeps going while this tab stays open)",
+  what: "leave the running update (the job keeps going on the server)",
 });
 const AFTER = declare({
   id: "update-after",
-  page: "inbox",
+  page: "update",
   opens: "view",
-  row: "activity|stack|inbox|back",
-  what: "the result's links: Activity, the stack, back to the Inbox; or Back from an empty list",
+  row: "activity|stack|inbox|back|again",
+  what: "the result's links: Activity, the stack, back to the Inbox, or the list again; or Back from an empty list",
 });
 
 /** The six steps (flows/update.html). */
@@ -129,247 +132,48 @@ const STEPS = ["See", "Impact", "Back up", "Update", "Verify", "Done"];
  * @typedef {import("../updateflow.js").Item} Item
  * @typedef {import("../updateflow.js").Scope} Scope
  * @typedef {import("../pinupdate.js").Move} Move
- * @typedef {import("../updateflow.js").RunRow & {
- *   state: "wait" | "run" | "ok" | "bad" | "skip", t0?: number,
- *   time?: string, note?: string}} LiveRow
- * @typedef {{key: string, scope: Scope, title: string, chosen: Item[],
- *   moves: Map<string, Move>, rows: LiveRow[], step: number,
- *   started: number, ended: number | null, failed: string | null,
- *   logsBad: boolean, jobs: number[], notes: {ts: number, msg: string}[],
- *   commits: string[], deployFrom: number, listeners: Set<() => void>}} Run
+ * @typedef {import("../jobs.js").Job} Job
  */
 
-/** @type {Run | null} the update running (or last run) in this tab */
-let RUN = null;
+/**
+ * The update job this browser started, per scope: a reload or a tab
+ * opened again shows it, running or finished, until "Update more" (a
+ * per-viewer convenience; the job itself lives on the server).
+ */
+const STARTED = "homelab-update-jobs";
+const TAB_JOB = {
+  /** @param {string} k @returns {number | undefined} */
+  get(k) {
+    try {
+      const v = JSON.parse(localStorage.getItem(STARTED) ?? "{}")[k];
+      return typeof v === "number" ? v : undefined;
+    } catch {
+      return undefined;
+    }
+  },
+  /** @param {string} k @param {number | null} job */
+  set(k, job) {
+    try {
+      const all = JSON.parse(localStorage.getItem(STARTED) ?? "{}");
+      if (job == null) delete all[k];
+      else all[k] = job;
+      localStorage.setItem(STARTED, JSON.stringify(all));
+    } catch {
+      // No storage (a private window): the running job is still found.
+    }
+  },
+};
 
 /** @param {Scope} s */
 const scopeKey = (s) => (s.all ? "all" : `stack:${s.stack}`);
 
 const now = () => Date.now() / 1000;
 
-/** @param {Run} run */
-const changed = (run) => run.listeners.forEach((f) => f());
+/** How long a finished update stays on its flow's page after a reload. */
+const SHOW_DONE_S = 30 * 60;
 
-/**
- * @param {Run} run
- * @param {LiveRow["id"]} id
- * @param {LiveRow["state"]} state
- * @param {string} [note]
- */
-function setRow(run, id, state, note) {
-  const r = run.rows.find((x) => x.id === id);
-  if (!r) return;
-  if (state === "run") r.t0 = now();
-  if ((state === "ok" || state === "bad") && r.t0 != null)
-    r.time = humanDuration(now() - r.t0);
-  r.state = state;
-  if (note != null) r.note = note;
-  run.step = Math.max(run.step, r.step);
-  changed(run);
-}
-
-/** @param {Run} run @param {string} msg */
-function note(run, msg) {
-  run.notes.push({ ts: now(), msg });
-  changed(run);
-}
-
-/**
- * Stop the run at a failed step: the rest is skipped, step 6 says why.
- * @param {Run} run
- * @param {LiveRow["id"]} id
- * @param {string} words
- */
-function fail(run, id, words) {
-  setRow(run, id, "bad", words);
-  for (const r of run.rows) if (r.state === "wait") r.state = "skip";
-  run.failed = words;
-  run.ended = now();
-  run.step = 6;
-  changed(run);
-}
-
-/**
- * Follow one job to its end; its log lines show in the run's log.
- * @param {Run} run
- * @param {number} job
- */
-async function follow(run, job) {
-  run.jobs.push(job);
-  changed(run);
-  return jobEnd(job);
-}
-
-/** @param {number} ms */
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Steps 3-5, in order; any failure stops the run where it is.
- * @param {Run} run
- */
-async function runAll(run) {
-  const stacks = stacksOf(run.chosen);
-  const pins = run.chosen.filter((i) => i.kind === "pin");
-  const pulls = run.chosen.filter((i) => i.kind === "pull");
-
-  // 3 · Back up every stack the update touches.
-  setRow(run, "backup", "run");
-  for (const s of stacks) {
-    const b = await send(
-      "POST",
-      `/data/actions/${encodeURIComponent(s)}/backup`,
-      {},
-      `the backup of ${s}`,
-    );
-    if (!b.ok) {
-      fail(run, "backup", `The backup of ${s} was refused: ${b.error.why}.`);
-      return;
-    }
-    const end = await follow(run, /** @type {number} */ (b.body.job));
-    if (end !== "done") {
-      fail(
-        run,
-        "backup",
-        `The backup of ${s} ended ${end}, so nothing was changed.`,
-      );
-      return;
-    }
-  }
-  setRow(run, "backup", "ok", `${stacks.length} backed up`);
-
-  // 4 · Change the files (pinned images) and deploy; pull the rest.
-  /** @type {{stack: string, job: number}[]} */
-  const deploys = [];
-  if (pins.length) {
-    setRow(run, "commit", "run");
-    for (const s of stacksOf(pins)) {
-      const mine = pins.filter((i) => i.stack === s);
-      /** @type {Record<string, string>} */
-      const images = {};
-      for (const i of mine) {
-        const m = run.moves.get(i.id);
-        if (m) images[/** @type {string} */ (i.key)] = m.to;
-      }
-      const c = await send(
-        "POST",
-        `/data/stacks/${encodeURIComponent(s)}/commit`,
-        {
-          edit: { kind: "settings", images },
-          subject: commitSubject(mine),
-          follow: "deploy",
-        },
-        `the commit of ${s}`,
-      );
-      if (!c.ok) {
-        fail(run, "commit", `The commit of ${s} was refused: ${c.error.why}.`);
-        return;
-      }
-      const sha = String(c.body.committed?.commit ?? "").slice(0, 7);
-      if (sha) {
-        run.commits.push(sha);
-        note(run, `commit ${sha} ${commitSubject(mine)}`);
-      }
-      const f = c.body.follow;
-      if (!f || f.refused || f.job == null) {
-        fail(
-          run,
-          "commit",
-          `The commit of ${s} queued no deploy: ${f?.refused?.why ?? "the host gave no job"}. Deploy ${s} from its page.`,
-        );
-        return;
-      }
-      deploys.push({ stack: s, job: f.job });
-    }
-    setRow(run, "commit", "ok", run.commits.join(", "));
-  }
-  setRow(run, "deploy", "run");
-  run.deployFrom = now();
-  for (const p of pulls) {
-    const u = await send(
-      "POST",
-      `/data/actions/${encodeURIComponent(p.stack)}/update`,
-      {},
-      `the update of ${p.stack}`,
-    );
-    if (!u.ok) {
-      fail(
-        run,
-        "deploy",
-        `The update of ${p.stack} was refused: ${u.error.why}.`,
-      );
-      return;
-    }
-    deploys.push({ stack: p.stack, job: u.body.job });
-  }
-  for (const d of deploys) {
-    const end = await follow(run, d.job);
-    if (end !== "done") {
-      fail(
-        run,
-        "deploy",
-        `The deploy of ${d.stack} ended ${end}. ${pins.length ? "Roll back… puts the earlier version back." : "The Update action rolls back an app that is not healthy."}`,
-      );
-      return;
-    }
-  }
-  setRow(run, "deploy", "ok");
-
-  // 5 · Verify: the containers run (the deploy's health check answered),
-  // and the logs since the restart look like the hour before.
-  setRow(run, "health", "run");
-  const fleet = current().fleet?.stacks ?? [];
-  const words = stacks
-    .map((s) => fleet.find((x) => x.name === s))
-    .filter((s) => s != null)
-    .map((s) => `${s.name}: ${s.apps_running} of ${s.apps_total} running`);
-  setRow(
-    run,
-    "health",
-    "ok",
-    words.length ? words.join(" · ") : "the deploy's verify step passed",
-  );
-  setRow(run, "logs", "run");
-  await sleep(8000);
-  let after = 0;
-  let before = 0;
-  let bad = false;
-  /** @type {string[]} */
-  const unread = [];
-  for (const s of stacks) {
-    const since = Math.ceil(now() - run.deployFrom) + 3600;
-    const r = await fetchJson(
-      `/data/logs?${new URLSearchParams({ stack: s, since: String(since), limit: "5000" })}`,
-      `the logs of ${s}`,
-    );
-    if (!r.ok) {
-      unread.push(`${s}: ${r.error.why}`);
-      continue;
-    }
-    const v = logVerdict(r.body.lines ?? [], run.deployFrom, now());
-    after += v.after;
-    before += v.before;
-    if (!v.ok) bad = true;
-  }
-  if (unread.length === stacks.length)
-    setRow(
-      run,
-      "logs",
-      "skip",
-      `the logs could not be read (${unread.join("; ")}); look at the stack's Logs tab`,
-    );
-  else {
-    run.logsBad = bad;
-    setRow(
-      run,
-      "logs",
-      bad ? "bad" : "ok",
-      `${after} error${after === 1 ? "" : "s"} since the restart, ${before} in the hour before${bad ? " — read them on the stack's Logs tab" : ""}`,
-    );
-  }
-  run.ended = now();
-  run.step = 6;
-  changed(run);
-}
+/** @param {Job} j */
+const finishedJob = (j) => j.state !== "queued" && j.state !== "running";
 
 /**
  * @param {HTMLElement} root
@@ -392,7 +196,7 @@ export function mount(root, scope) {
       ];
   const head = pageHeader({
     title: scope.all ? "Update apps" : `Update ${scope.stack}`,
-    desc: "Moving an app to a newer version, in six visible steps. Nothing runs until step 2's button; after that you may leave this page — the job keeps going while this tab stays open, and the bar shows it.",
+    desc: "Moving an app to a newer version, in six visible steps. Nothing runs until step 2's button; after that you may leave this page — the job keeps going and the bar shows it.",
     crumbs,
   });
   const steps = stepper(STEPS.map((s) => s));
@@ -513,7 +317,7 @@ export function mount(root, scope) {
   // ---- 3-5 · Running ---------------------------------------------------
   const runCard = section({
     title: "Running",
-    desc: "You can leave this page: the steps keep going while this dashboard tab stays open, and the bar shows the running job.",
+    desc: "You can leave this page: the job runs on the host and the bar shows it until it ends.",
     tools: [
       drivable(
         h(
@@ -551,7 +355,10 @@ export function mount(root, scope) {
     runCard.el,
     doneCard,
   );
-  root.replaceChildren(head.el, steps.el, panels);
+  // Review item 7: the page at the demo's width.
+  root.replaceChildren(
+    h("div", { class: "uf-page" }, head.el, steps.el, panels),
+  );
 
   /** @type {Item[]} */
   let items = [];
@@ -709,9 +516,7 @@ export function mount(root, scope) {
         ? `Back up and update ${c.length} apps`
         : "Back up and update";
     /** @type {HTMLButtonElement} */ (go).disabled =
-      !ackOk ||
-      (pins && (!plansReady || plansBlocked)) ||
-      (RUN != null && RUN.ended == null);
+      !ackOk || (pins && (!plansReady || plansBlocked)) || running();
   };
 
   const toImpact = async () => {
@@ -746,11 +551,7 @@ export function mount(root, scope) {
       tile("Restarts", restartWords(c), "nothing else in the stack restarts"),
       tile("Safety net", net.value, net.ctx),
       pins.length
-        ? tile(
-            "Undo later",
-            "Roll back, 1 click",
-            "from the result below: the same backup → files → deploy",
-          )
+        ? tile("Undo later", undoWords().value, undoWords().ctx)
         : tile(
             "Undo later",
             "Restore the backup",
@@ -937,7 +738,7 @@ export function mount(root, scope) {
           ),
         );
       }
-      out.push(...diffBlocks(v.files));
+      out.push(...diffBlocks(v.files, { open: false }));
     }
     diff.replaceChildren(
       ...(out.length
@@ -948,38 +749,130 @@ export function mount(root, scope) {
     paintGo();
   };
 
-  // ---- 3-6 · the run ---------------------------------------------------
+  // ---- 3-6 · the job ---------------------------------------------------
+  /** @type {number | null} the update job this page follows */
+  let jobId = null;
+  /** @type {{state: string, note: string} | null} */
+  let logs = null;
+  /** @type {number | null} the job whose logs were read */
+  let logsFor = null;
+  const jobOf = () =>
+    jobId == null ? null : (act.jobs.find((j) => j.job === jobId) ?? null);
+  const running = () => {
+    const j = jobOf();
+    return j != null && !finishedJob(j);
+  };
+
+  /**
+   * The log comparison, read here once the job has deployed and ended:
+   * errors in the first 2 minutes after the restart against the hour
+   * before (it reads the past, so a reload reads the same).
+   * @param {Job} j
+   */
+  const readLogs = async (j) => {
+    const flow = j.flow;
+    const at = Number(flow?.deploy_at) || 0;
+    const healthOk = (flow?.rows ?? []).some(
+      (/** @type {any} */ r) => r.id === "health" && r.state !== "wait",
+    );
+    if (!at || !healthOk) {
+      logs = { state: "skip", note: "nothing was deployed" };
+      paintRun();
+      return;
+    }
+    logs = { state: "run", note: "reading the logs" };
+    paintRun();
+    const stacks = [
+      ...new Set((flow.items ?? []).map((/** @type {any} */ i) => i.stack)),
+    ];
+    let after = 0;
+    let before = 0;
+    let bad = false;
+    /** @type {string[]} */
+    const unread = [];
+    for (const s of stacks) {
+      const since = Math.ceil(now() - at) + 3600;
+      const r = await fetchJson(
+        `/data/logs?${new URLSearchParams({ stack: s, since: String(since), limit: "5000" })}`,
+        `the logs of ${s}`,
+        abort.signal,
+      );
+      if (abort.signal.aborted) return;
+      if (!r.ok) {
+        unread.push(`${s}: ${r.error.why}`);
+        continue;
+      }
+      const v = logVerdict(r.body.lines ?? [], at, Math.min(now(), at + 120));
+      after += v.after;
+      before += v.before;
+      if (!v.ok) bad = true;
+    }
+    logs =
+      unread.length === stacks.length
+        ? {
+            state: "skip",
+            note: `the logs could not be read (${unread.join("; ")}); look at the stack's Logs tab`,
+          }
+        : {
+            state: bad ? "bad" : "ok",
+            note: `${after} error${after === 1 ? "" : "s"} since the restart, ${before} in the hour before${bad ? " — read them on the stack's Logs tab" : ""}`,
+          };
+    paintRun();
+  };
+
   const paintRun = () => {
-    const run = RUN;
-    if (!run || run.key !== key) return;
-    step = run.step;
+    const j = jobOf();
+    if (!j) return;
+    const flow = j.flow ?? null;
+    const done = finishedJob(j);
+    step = done ? 6 : Math.min(5, Math.max(3, Number(flow?.step) || 3));
     show();
-    head.title.textContent = run.title;
-    runList.replaceChildren(checkList(run.rows));
-    const lines = [
-      ...run.jobs.flatMap((j) =>
-        (act.logs.get(j) ?? []).map((l) => ({ ts: l.ts, msg: l.msg })),
+    head.title.textContent = flowTitle(items, scope);
+    runList.replaceChildren(
+      checkList(
+        flowRows(
+          flow ?? {
+            rows: [
+              {
+                id: "backup",
+                step: 3,
+                title: "Queued",
+                desc: "the job starts as soon as the one before it ends",
+                state: "wait",
+              },
+            ],
+          },
+          done ? logs : null,
+        ),
       ),
-      ...run.notes,
-    ].sort((a, b) => a.ts - b.ts);
-    log.textContent = lines
+    );
+    log.textContent = (act.logs.get(j.job) ?? [])
       .slice(-14)
       .map(
         (l) => `${new Date(l.ts * 1000).toTimeString().slice(0, 8)}  ${l.msg}`,
       )
       .join("\n");
-    if (run.step === 6) paintDone(run);
+    if (done) {
+      if (logsFor !== j.job) {
+        logsFor = j.job;
+        void readLogs(j).catch(() => {});
+      }
+      paintDone(j);
+    }
+    paintGo();
   };
 
-  /** @param {Run} run */
-  const paintDone = (run) => {
-    const ok = !run.failed;
-    const pins = run.chosen.filter((i) => i.kind === "pin");
+  /** @param {Job} j */
+  const paintDone = (j) => {
+    const flow = j.flow ?? { items: [], rows: [], commits: [] };
+    const ok = j.state === "done";
+    const jobItems = /** @type {any[]} */ (flow.items ?? []);
+    const jobStacks = [...new Set(jobItems.map((i) => i.stack))];
+    const runMoves = movesOf(jobItems);
     const left = inboxNow().items.length;
-    const rollbacks = run.commits.length
-      ? pins
-          .filter((i) => run.moves.has(i.id))
-          .map((i) => {
+    const rollbacks =
+      ok && (flow.commits ?? []).length
+        ? [...runMoves.entries()].map(([id, m]) => {
             const b = drivable(
               h(
                 "button",
@@ -989,18 +882,37 @@ export function mount(root, scope) {
                   title:
                     "Put the previous version back the same way: backup, files, deploy",
                 },
-                pins.length > 1 ? `Roll back ${i.container}…` : "Roll back…",
+                runMoves.size > 1 ? `Roll back ${m.key}…` : "Roll back…",
               ),
               ROLL_BACK,
-              i.id,
+              id,
             );
-            b.addEventListener("click", () =>
-              openPinRollback(/** @type {Move} */ (run.moves.get(i.id))),
-            );
+            b.addEventListener("click", () => openPinRollback(m));
             return b;
           })
-      : [];
-    const backups = run.rows.find((r) => r.id === "backup");
+        : [];
+    const backups = (flow.rows ?? []).find(
+      (/** @type {any} */ r) => r.id === "backup",
+    );
+    const took =
+      j.started_at != null && j.finished_at != null
+        ? humanDuration(j.finished_at - j.started_at)
+        : "—";
+    const by =
+      j.origin?.from === "claude"
+        ? `Claude (Live view, ${j.origin.by})`
+        : j.origin?.from === "schedule"
+          ? "A schedule"
+          : scope.all
+            ? "You, from the Inbox"
+            : `You, from ${scope.stack}`;
+    const words = jobItems
+      .map((i) =>
+        i.kind === "pin"
+          ? `${i.stack}/${i.app ?? i.key} runs ${runMoves.get(`pin:${i.stack}:${i.key}`)?.to_version ?? "the new version"}`
+          : `${i.stack}'s apps on a moving tag run what their tags point at now`,
+      )
+      .join("; ");
     doneCard.replaceChildren(
       h(
         "div",
@@ -1010,15 +922,19 @@ export function mount(root, scope) {
           "h2",
           { id: "uf-done-h" },
           !ok
-            ? "The update stopped"
-            : run.logsBad
+            ? flow.rolled_back
+              ? "Not healthy — the earlier version is back"
+              : "The update stopped"
+            : logs?.state === "bad"
               ? "Updated — new errors in the logs"
               : "Updated and healthy",
         ),
         h(
           "p",
           { class: "uf-hint uf-done__text" },
-          doneWords(run.chosen, { failed: run.failed }),
+          ok
+            ? `${words}. It answered its health check, logs look like before, and the backup from step 3 stays for 7 days.`
+            : (j.message ?? flow.failed ?? "The job ended without a word."),
         ),
       ),
       h(
@@ -1029,21 +945,34 @@ export function mount(root, scope) {
           "dd",
           null,
           backups?.state === "ok"
-            ? `${stacksOf(run.chosen).join(", ")} · a new snapshot, taken in ${backups.time ?? "—"}`
+            ? `${jobStacks.join(", ")} · a new snapshot, taken in ${backups.took_s != null ? humanDuration(backups.took_s) : "—"}`
             : "not taken",
         ),
         h("dt", null, "Commit"),
-        h("dd", { class: "mono" }, run.commits.join(", ") || "none"),
+        h("dd", { class: "mono" }, (flow.commits ?? []).join(", ") || "none"),
         h("dt", null, "Took"),
-        h("dd", null, humanDuration((run.ended ?? now()) - run.started)),
+        h("dd", null, took),
         h("dt", null, "Started by"),
-        h(
-          "dd",
-          null,
-          run.scope.all
-            ? "You, from the Inbox"
-            : `You, from ${run.scope.stack}`,
-        ),
+        h("dd", null, by),
+        ...(ok && runMoves.size
+          ? [
+              h("dt", null, "Undo"),
+              h(
+                "dd",
+                null,
+                "Roll back, 1 click, for 7 days: here, or from ",
+                ...jobStacks.flatMap((s, i) => [
+                  ...(i ? [", "] : []),
+                  h(
+                    "a",
+                    { href: `/stacks/${encodeURIComponent(s)}/history` },
+                    `${s}'s History`,
+                  ),
+                ]),
+                ".",
+              ),
+            ]
+          : []),
       ),
       h(
         "div",
@@ -1057,8 +986,8 @@ export function mount(root, scope) {
               "a",
               {
                 class: "kp-button",
-                href: "/activity",
-                title: "Every step of this update in the history",
+                href: `/activity?view=running&job=${j.job}`,
+                title: "This update's job, with every step, in Activity",
               },
               "See it in Activity",
             ),
@@ -1070,13 +999,26 @@ export function mount(root, scope) {
               "a",
               {
                 class: "kp-button",
-                href: `/stacks/${encodeURIComponent(stacksOf(run.chosen)[0] ?? "")}`,
+                href: `/stacks/${encodeURIComponent(jobStacks[0] ?? "")}`,
                 title: "The stack's hub: its state, logs and history",
               },
               "Open the stack",
             ),
             AFTER,
             "stack",
+          ),
+          drivable(
+            h(
+              "button",
+              {
+                type: "button",
+                class: "kp-button",
+                title: "Show the list of apps with a newer version again",
+              },
+              "Update more",
+            ),
+            AFTER,
+            "again",
           ),
           drivable(
             h(
@@ -1094,6 +1036,15 @@ export function mount(root, scope) {
         ),
       ),
     );
+    doneCard
+      .querySelector("[data-drive-row=again]")
+      ?.addEventListener("click", () => {
+        jobId = null;
+        TAB_JOB.set(key, null);
+        step = 1;
+        show();
+        paintList();
+      });
   };
 
   // ---- wiring ----------------------------------------------------------
@@ -1108,77 +1059,91 @@ export function mount(root, scope) {
   });
   go.addEventListener("click", () => {
     if (/** @type {HTMLButtonElement} */ (go).disabled) return;
-    const c = chosenItems();
-    /** @type {Run} */
-    const run = {
-      key,
-      scope,
-      title: flowTitle(items, scope),
-      chosen: c,
-      moves,
-      rows: runRows(c).map((r) => ({ ...r, state: "wait" })),
-      step: 3,
-      started: now(),
-      ended: null,
-      failed: null,
-      logsBad: false,
-      jobs: [],
-      notes: [],
-      commits: [],
-      deployFrom: now(),
-      listeners: new Set(),
-    };
-    RUN = run;
-    run.listeners.add(paintRun);
-    paintRun();
-    void runAll(run).catch((e) =>
-      fail(run, "deploy", `The update stopped: ${String(e)}`),
-    );
+    /** @type {HTMLButtonElement} */ (go).disabled = true;
+    void (async () => {
+      const r = await send(
+        "POST",
+        "/data/actions/_host/update-apps",
+        updatesBody(chosenItems(), moves),
+        "the update",
+      );
+      if (!r.ok) {
+        blocked.replaceChildren(refusalCallout(r.error));
+        paintGo();
+        return;
+      }
+      jobId = /** @type {number} */ (r.body.job);
+      TAB_JOB.set(key, jobId);
+      logs = null;
+      logsFor = null;
+      step = 3;
+      show();
+      paintRun();
+    })().catch(() => paintGo());
   });
+
+  /**
+   * An update job of this flow's scope the server runs now (any tab's), or
+   * the one this browser started and has not left with "Update more" yet,
+   * finished in the last half hour: a reload or a closed tab finds it.
+   */
+  const adopt = () => {
+    if (jobId != null && jobOf()) return;
+    const mine = TAB_JOB.get(key);
+    const j = act.jobs.find(
+      (x) =>
+        x.action === "update-apps" &&
+        scopeMatches(x.flow?.items ?? [], scope) &&
+        (!finishedJob(x) ||
+          (x.job === mine && now() - (x.finished_at ?? 0) < SHOW_DONE_S)),
+    );
+    if (!j) return;
+    jobId = j.job;
+    TAB_JOB.set(key, jobId);
+    paintRun();
+  };
 
   offs.push(
     onAct("log", () => paintRun()),
-    onAct("jobs", () => paintRun()),
+    onAct("jobs", () => {
+      adopt();
+      paintRun();
+    }),
   );
 
-  if (RUN && RUN.key === key) {
-    // Back on a running (or finished) update: show where it is.
-    RUN.listeners.add(paintRun);
-    paintRun();
-  } else {
-    show();
-    list.replaceChildren(
-      skeletonLines(3, "Reading which apps have a newer version"),
+  show();
+  list.replaceChildren(
+    skeletonLines(3, "Reading which apps have a newer version"),
+  );
+  void (async () => {
+    const r = await slowRead(
+      "/data/stale-images",
+      "the apps with a newer version",
+      abort.signal,
+      got,
     );
-    void (async () => {
-      const r = await slowRead(
-        "/data/stale-images",
-        "the apps with a newer version",
-        abort.signal,
-        got,
-      );
-      if (abort.signal.aborted) return;
-      if (r.ok) got(r.body);
-      else if (!items.length) {
-        // The fleet check did not answer: one stack can still pull what
-        // its moving tags point at; the reason stays on top.
-        const err = errorBox(r.error);
-        if (scope.all) list.replaceChildren(err);
-        else {
-          items = itemsFor(null, scope);
-          chosen = firstChosen(items, scope);
-          picked = true;
-          paintList();
-          list.prepend(err);
-        }
+    if (abort.signal.aborted) return;
+    if (r.ok) got(r.body);
+    else if (!items.length) {
+      // The fleet check did not answer: one stack can still pull what
+      // its moving tags point at; the reason stays on top.
+      const err = errorBox(r.error);
+      if (scope.all) list.replaceChildren(err);
+      else {
+        items = itemsFor(null, scope);
+        chosen = firstChosen(items, scope);
+        picked = true;
+        paintList();
+        list.prepend(err);
       }
-    })().catch(() => {});
-  }
+    }
+  })().catch(() => {});
+  adopt();
+  paintRun();
 
   return () => {
     abort.abort();
     for (const f of offs) f();
-    RUN?.listeners.delete(paintRun);
     see.stop();
     impact.stop();
     runCard.stop();

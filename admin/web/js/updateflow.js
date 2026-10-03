@@ -7,6 +7,7 @@
 // the list holds, what is picked first, the impact in words, the steps the
 // run shows and the summary. No DOM, no fetch, no clock.
 
+import { humanDuration } from "./format.js";
 import { plural, staleApps } from "./inboxrows.js";
 import { releaseUrl } from "./staleimages.js";
 
@@ -23,30 +24,50 @@ import { releaseUrl } from "./staleimages.js";
  */
 
 /**
- * The flow's address: every app with a newer version, or one stack (and
- * one app of it picked).
+ * The flow's address (redesign-flows-11, its own route since the review):
+ * `/update?all=1` for every app with a newer version, `/update?stack=…`
+ * (and `&app=<key>` with one app picked) for one stack.
  * @param {string | null} [stack] null: everything with a newer version
  * @param {string | null} [app] the stale row's `<app>/<service>` key
  */
 export function updateHref(stack = null, app = null) {
-  const p = new URLSearchParams({ update: stack ?? "all" });
-  if (stack && app) p.set("app", app);
-  return `/inbox?${p}`;
+  if (!stack) return "/update?all=1";
+  const p = new URLSearchParams({ stack });
+  if (app) p.set("app", app);
+  return `/update?${p}`;
 }
 
 /**
- * The flow's scope from the Inbox page's query (`?update=all`,
- * `?update=<stack>&app=<key>`); null when the address is not the flow.
+ * The flow's scope from `/update`'s query; null when it names none.
  * @param {string} search
  * @returns {Scope | null}
  */
 export function scopeOf(search) {
   const q = new URLSearchParams(search);
+  const stack = q.get("stack");
+  if (stack) return { all: false, stack, app: q.get("app") };
+  if (q.get("all") != null) return { all: true };
+  return null;
+}
+
+/**
+ * The old address (`/inbox?update=all`, `/inbox?update=<stack>&app=…`)
+ * sent on to the flow's own; null when the query is not the flow's.
+ * @param {string} search
+ */
+export function legacyUpdateHref(search) {
+  const q = new URLSearchParams(search);
   const u = q.get("update");
   if (u == null) return null;
-  if (u === "" || u === "all") return { all: true };
-  return { all: false, stack: u, app: q.get("app") };
+  return u === "" || u === "all" ? updateHref() : updateHref(u, q.get("app"));
 }
+
+/**
+ * The area the nav marks: Stacks for one stack's update, the Inbox for all.
+ * @param {string} search
+ */
+export const flowArea = (search) =>
+  scopeOf(search)?.all === false ? "overview" : "inbox";
 
 /**
  * What the list holds: the pinned images with a newer version (all of
@@ -209,19 +230,81 @@ export function whoNotices(chosen, deps) {
  * @param {Item[]} chosen
  */
 export function safetyNet(chosen) {
-  const pins = chosen.some((i) => i.kind === "pin");
-  const pulls = chosen.some((i) => i.kind === "pull");
-  if (pulls && !pins)
-    return {
-      value: "Backup first, auto roll back",
-      ctx: "if the app is not healthy within 2 min",
-    };
+  // redesign-flows-6: the job rolls a pinned app back by itself, and the
+  // host's own update does it for an app on a moving tag — the demo's
+  // words hold for both.
+  void chosen;
   return {
-    value: "Backup first, health checked",
-    ctx: pulls
-      ? "a pinned app's deploy checks its health; a moving-tag app rolls back by itself within 2 min"
-      : "the deploy waits for the app's health check; Roll back puts the old version back",
+    value: "Backup first, auto roll back",
+    ctx: "if the app is not healthy within 2 min",
   };
+}
+
+/** The undo, as the demo's Undo later tile says it. */
+export const undoWords = () => ({
+  value: "Roll back, 1 click",
+  ctx: "for 7 days, from the stack's History",
+});
+
+/**
+ * The moves the one server job gets (`POST /data/actions/_host/
+ * update-apps`): a pin with the image lines step 2 resolved, a pull with
+ * its app when one is named.
+ * @param {Item[]} chosen
+ * @param {Map<string, import("./pinupdate.js").Move>} moves
+ * @returns {{updates: string}}
+ */
+export function updatesBody(chosen, moves) {
+  const out = chosen.map((i) => {
+    if (i.kind === "pull") return { stack: i.stack, kind: "pull" };
+    const m = moves.get(i.id);
+    return {
+      stack: i.stack,
+      kind: "pin",
+      key: i.key,
+      app: i.container,
+      from: m?.from,
+      to: m?.to,
+    };
+  });
+  return { updates: JSON.stringify(out) };
+}
+
+/**
+ * The rows the page shows: the job's own (`job.flow.rows`), then the log
+ * comparison the page reads itself once the job is past its verify.
+ * @param {{rows: {id: string, step: number, title: string, desc: string,
+ *   state: string, note?: string, took_s?: number}[]}} flow
+ * @param {{state: string, note: string} | null} logs
+ * @returns {{id: string, step: number, title: string, desc: string,
+ *   state: "wait" | "run" | "ok" | "bad" | "skip", note?: string,
+ *   time: string}[]}
+ */
+export function flowRows(flow, logs) {
+  /** @param {string} s */
+  const st = (s) =>
+    /** @type {"wait" | "run" | "ok" | "bad" | "skip"} */ (
+      ["wait", "run", "ok", "bad", "skip"].includes(s) ? s : "wait"
+    );
+  const rows = flow.rows.map((r) => ({
+    id: r.id,
+    step: r.step,
+    title: r.title,
+    desc: r.desc,
+    state: st(r.state),
+    note: r.note,
+    time: r.took_s != null ? humanDuration(r.took_s) : "",
+  }));
+  rows.push({
+    id: "logs",
+    step: 5,
+    title: "Verify: no new errors in the logs",
+    desc: "the first 2 minutes compared with the hour before",
+    state: st(logs?.state ?? "wait"),
+    note: logs?.note,
+    time: "",
+  });
+  return rows;
 }
 
 /**
@@ -326,5 +409,50 @@ export function doneWords(chosen, r) {
     parts.push(
       `${i.stack}'s apps on a moving tag run what their tags point at now`,
     );
-  return `${parts.join("; ")}. It answered its health check, the logs look like before, and the backup from step 3 holds the data as it was.`;
+  return `${parts.join("; ")}. It answered its health check, logs look like before, and the backup from step 3 stays for 7 days.`;
 }
+
+/**
+ * The version a pinned image line names (`…/demo-api:v3.0.0@sha256:…` →
+ * `v3.0.0`), as the host's `pinned_version` reads it.
+ * @param {string} line
+ */
+export function lineVersion(line) {
+  const name = line.split("@")[0];
+  const last = name.split("/").pop() ?? name;
+  const i = last.indexOf(":");
+  return i < 0 ? "" : last.slice(i + 1);
+}
+
+/**
+ * The Roll back… moves of a finished job, from the moves it ran (a reload
+ * or another tab has no step-2 state of its own).
+ * @param {{stack: string, kind: string, key?: string, from?: string,
+ *   to?: string}[]} items the job's `flow.items`
+ * @returns {Map<string, import("./pinupdate.js").Move>} by item id
+ */
+export function movesOf(items) {
+  /** @type {Map<string, import("./pinupdate.js").Move>} */
+  const out = new Map();
+  for (const i of items)
+    if (i.kind === "pin" && i.key && i.from && i.to)
+      out.set(`pin:${i.stack}:${i.key}`, {
+        stack: i.stack,
+        key: i.key,
+        file: `stacks/${i.stack}/${i.key.split("/")[0]}/docker-compose.yml`,
+        from: i.from,
+        to: i.to,
+        from_version: lineVersion(i.from),
+        to_version: lineVersion(i.to),
+      });
+  return out;
+}
+
+/**
+ * Whether an update job belongs on this flow's page: every app's page
+ * shows any, a stack's page one that touched that stack.
+ * @param {{stack: string}[]} items the job's `flow.items`
+ * @param {Scope} scope
+ */
+export const scopeMatches = (items, scope) =>
+  scope.all || items.some((i) => i.stack === scope.stack);

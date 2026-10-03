@@ -11,27 +11,31 @@
 // (why, the fix, and its stack file) — and one bar that says what Apply
 // will do before it is pressed.
 //
-// Apply runs the host's own `apply` (one confirmed batch) when the whole
-// plan is ticked; with stacks left out it deploys the ticked ones as a
-// batch instead, because `apply` takes the whole plan or nothing — and so
-// a destroy then waits for the whole plan. A plan with stacks that cannot
-// be planned is refused by `apply`, so the same batch deploy leaves those
-// alone.
+// redesign-flows-5 (the senior review, 2026-10-03, and the coordinator's
+// destroy rule): one heading "Deploy all changes" (the caller's) with one
+// sentence, then the steps — Compare (done only once the compare ran),
+// Review the plan, Apply, and Destroy as its own red step. Apply deploys
+// the ticked stacks (`leave_out` names the unticked ones and those that
+// cannot be planned); a destroy never rides along with a deploy: it is
+// armed by typing the stack's name, confirmed by its own tick, sent with the
+// CT number the plan showed, and only once no ticked deploy is waiting.
+// Pure half: js/applyplan.js.
 //
 // `mount` paints only the section's body (the caller — Stacks' "Deploy all
 // changes" — owns its heading and one-line description) and starts with a
 // skeleton in the final geometry before the plan has been read.
 
-import { openAction, openBatch } from "../actiondialog.js";
+import { act, onAct } from "../act.js";
+import { openAction } from "../actiondialog.js";
 import { agoEl, setAgo } from "../ago.js";
-import { errorBox, fetchJson, h } from "../dom.js";
+import { destroyStep, goPlan } from "../applyplan.js";
+import { ensureStyle, errorBox, fetchJson, h } from "../dom.js";
 import { declare, drivable, viaForm } from "../drivable.js";
 import { diffBlocks } from "../editui.js";
 import { fileViews } from "../plan.js";
 import { stackHref } from "../router.js";
 import { current } from "../store.js";
 import { stackMark } from "../ui.js";
-import { ensureStyle } from "./flowskit.js";
 
 const READ = declare({
   id: "deploy-all-plan-again",
@@ -74,65 +78,33 @@ const FILE = declare({
   row: "<stack>",
   what: "open the stack file of a stack that cannot be planned (its Settings)",
 });
+const SHOW_ALL = declare({
+  id: "deploy-all-show-all",
+  page: "overview",
+  opens: "view",
+  what: "show every column of the plan again (Esc does the same)",
+});
+const DESTROY_ACK = declare({
+  id: "deploy-all-destroy-confirm",
+  page: "overview",
+  opens: "view",
+  what: "tick the destroy step's own red confirmation",
+});
+const DESTROY = declare({
+  id: "deploy-all-destroy",
+  page: "overview",
+  opens: "dialog",
+  what: "open the destroy of the armed gone stacks, a separate confirmed step after the deploys",
+});
 
 /**
- * @typedef {{deploy: string[], new: string[], destroy: string[],
- *   broken: [string, string][], unchanged: string[], ephemeral: string[],
- *   reasons?: Record<string, string>}} Plan
+ * @typedef {import("../applyplan.js").Plan} Plan
  * @typedef {"deploy" | "destroy" | "broken" | "same"} Col
+ * @typedef {{button: HTMLElement, at: () => number | null,
+ *   onChange: (f: () => void) => () => void}} Compare
  */
 
-/**
- * The go bar's words and what Apply does (pure).
- * @param {Plan} p
- * @param {Set<string>} ticked
- * @param {Set<string>} typed the gone stacks whose names were typed
- */
-export function goPlan(p, ticked, typed) {
-  const nDeploy = p.deploy.filter((s) => ticked.has(s)).length;
-  const nDestroy = p.destroy.filter((s) => typed.has(s)).length;
-  const whole =
-    nDeploy === p.deploy.length &&
-    p.broken.length === 0 &&
-    nDeploy + nDestroy > 0;
-  const mode = whole ? "apply" : nDeploy > 0 ? "batch" : "none";
-  const left = [
-    ...(p.broken.length
-      ? [
-          `${p.broken.length} ${p.broken.length === 1 ? "stack that cannot be planned is" : "stacks that cannot be planned are"} left alone`,
-        ]
-      : []),
-    ...(nDeploy < p.deploy.length
-      ? [`${p.deploy.length - nDeploy} left out of this batch`]
-      : []),
-  ];
-  return {
-    mode,
-    nDeploy,
-    nDestroy,
-    title:
-      mode === "none"
-        ? nDestroy
-          ? "A destroy runs only with the whole plan"
-          : "Nothing selected to apply"
-        : `Apply ${nDeploy} deploy${nDeploy === 1 ? "" : "s"} and ${mode === "apply" ? nDestroy : 0} of ${p.destroy.length} destroys`,
-    note:
-      mode === "apply"
-        ? `${left.length ? `${left.join("; ")}. ` : ""}One confirmed batch; each stack is backed up first and shows its own progress in the stack list.`
-        : mode === "batch"
-          ? `${left.join("; ")}. The ticked stacks are deployed as one batch${nDestroy ? "; a destroy waits for the whole plan (tick every stack, fix what cannot be planned)" : ""}.`
-          : nDestroy
-            ? "Tick every stack to deploy and fix what cannot be planned; the host applies destroys only with the whole plan."
-            : "Tick a stack to deploy, or type a gone stack's name to destroy it.",
-    destructive: mode === "apply" && nDestroy > 0,
-    label:
-      mode === "apply" && nDestroy > 0
-        ? `Apply and destroy ${nDestroy}…`
-        : mode === "batch"
-          ? `Deploy ${nDeploy}…`
-          : "Apply…",
-  };
-}
+export { goPlan } from "../applyplan.js";
 
 /** The skeleton in the final geometry: tiles, three columns, the bar. */
 function skeleton() {
@@ -158,9 +130,11 @@ function skeleton() {
 
 /**
  * @param {HTMLElement} root
+ * @param {{compare?: Compare}} [opts] the Compare step's own button and
+ *   when it last ran (Stacks' "Compare with the files")
  * @returns {() => void}
  */
-export function mount(root) {
+export function mount(root, opts = {}) {
   ensureStyle("/css/pages/apply.css");
   const read = drivable(
     h(
@@ -176,28 +150,17 @@ export function mount(root) {
     READ,
   );
   const ago = agoEl("planned");
-  const steps = h(
-    "ol",
-    { class: "ap-steps", "aria-label": "Steps" },
+  const compared = agoEl("compared");
+  /** @param {string} key @param {string} title @param {string} what @param {...Node} more */
+  const stepLi = (key, title, what, ...more) =>
     h(
       "li",
-      { class: "done" },
-      h("strong", null, "Compare"),
-      h("span", null, "Each stack against its files"),
-    ),
-    h(
-      "li",
-      { class: "on", "aria-current": "step" },
-      h("strong", null, "Review the plan"),
-      h("span", null, "What applying would change; nothing runs yet"),
-    ),
-    h(
-      "li",
-      null,
-      h("strong", null, "Apply"),
-      h("span", null, "One confirmed batch, each stack backed up first"),
-    ),
-  );
+      { "data-step": key },
+      h("strong", null, title),
+      h("span", null, what),
+      ...(more.length ? [h("div", { class: "ap-steps__more" }, ...more)] : []),
+    );
+  const steps = h("ol", { class: "ap-steps", "aria-label": "Steps" });
   const err = h("div");
   const body = h("div", { class: "ap-body", id: "apply-body" });
   const go = h("div", {
@@ -207,21 +170,23 @@ export function mount(root) {
     id: "apply-head",
     "aria-live": "polite",
   });
+  const destroyBox = h("section", {
+    class: "ap-destroy",
+    id: "apply-destroy-step",
+    "aria-label": "Destroy",
+    hidden: "",
+  });
   root.replaceChildren(
+    steps,
     h(
       "div",
       { class: "ap-top" },
-      h(
-        "p",
-        { class: "section-head__desc" },
-        "Every stack of the working copy against what the host last applied. Nothing runs until you press Apply; a stack whose directory is gone is destroyed only when you type its name.",
-      ),
       h("div", { class: "ap-top__right" }, ago, read),
     ),
-    steps,
     err,
     body,
     go,
+    destroyBox,
   );
   body.replaceChildren(skeleton());
   const abort = new AbortController();
@@ -238,12 +203,67 @@ export function mount(root) {
   let open = null;
   /** @type {Map<string, Node[]>} */
   const diffs = new Map();
+  let ack = false;
+  /** @type {"none" | "pressed" | "running" | "done"} */
+  let applied = "none";
+  /** @type {number | null} unix seconds of this page's Apply press */
+  let pressedAt = null;
 
   const typed = () =>
     new Set((plan?.destroy ?? []).filter((s) => typedText.get(s) === s));
 
   const vmid = (/** @type {string} */ s) =>
     current().fleet?.stacks.find((x) => x.name === s)?.vmid ?? null;
+
+  const paintSteps = () => {
+    const at = opts.compare?.at() ?? null;
+    setAgo(compared, at);
+    const list = [
+      stepLi(
+        "compare",
+        "Compare",
+        at == null
+          ? "Each stack against its files; not compared yet"
+          : "Each stack against its files",
+        ...(opts.compare
+          ? [opts.compare.button, ...(at != null ? [compared] : [])]
+          : []),
+      ),
+      stepLi(
+        "review",
+        "Review the plan",
+        "What applying would change; nothing runs yet",
+      ),
+      stepLi(
+        "apply",
+        "Apply",
+        "The ticked deploys, one confirmed batch, each backed up first",
+      ),
+      ...(plan?.destroy.length
+        ? [
+            stepLi(
+              "destroy",
+              "Destroy",
+              "Its own red step after the deploys: typed names, one more confirmation",
+            ),
+          ]
+        : []),
+    ];
+    const mark = (/** @type {string} */ k, /** @type {string} */ cls) =>
+      list.find((l) => l.dataset.step === k)?.classList.add(cls);
+    if (at != null) mark("compare", "done");
+    if (applied === "done") mark("apply", "done");
+    if (plan) {
+      if (applied === "pressed" || applied === "running") mark("apply", "on");
+      else mark("review", "on");
+      if (plan.destroy.length && typed().size) mark("destroy", "armed");
+    } else mark("compare", "on");
+    for (const l of list)
+      if (l.classList.contains("on")) l.setAttribute("aria-current", "step");
+    steps.style.setProperty("--ap-steps", String(list.length));
+    steps.replaceChildren(...list);
+  };
+  const stopCompare = opts.compare?.onChange(paintSteps) ?? (() => {});
 
   /** @param {string} s */
   const loadDiff = async (s) => {
@@ -269,6 +289,7 @@ export function mount(root) {
   };
 
   const paint = () => {
+    paintSteps();
     const p = plan;
     if (!p) return;
     /** @param {Col} key @param {string} label @param {number} n @param {string} ctx @param {string} [tone] */
@@ -280,7 +301,8 @@ export function mount(root) {
             type: "button",
             class: `nx-kpi ap-tile${tone ? ` ap-tile--${tone}` : ""}`,
             "aria-pressed": String(only === key),
-            title: "Click to show only this column; again to show all",
+            title:
+              "Click to show only this column; again, Show all or Esc shows all",
           },
           h("span", { class: "nx-kpi__label" }, label),
           h("span", { class: "nx-kpi__value" }, String(n)),
@@ -391,7 +413,7 @@ export function mount(root) {
       const input = drivable(
         h("input", {
           class: "kp-field__input",
-          placeholder: `type ${s} to include it`,
+          placeholder: `type ${s} to arm it`,
           "aria-label": `Type ${s} to destroy it`,
           autocomplete: "off",
           spellcheck: "false",
@@ -423,8 +445,9 @@ export function mount(root) {
         h(
           "div",
           { class: "ap-item__top" },
+          // An unarmed destroy is neutral, not information (review item 12).
           h("span", {
-            class: `nx-sev ${armed ? "nx-sev--bad" : "nx-sev--info"}`,
+            class: `nx-sev ${armed ? "nx-sev--bad" : "ap-sev--none"}`,
             "aria-hidden": "true",
           }),
           stackMark(s, 16),
@@ -432,7 +455,7 @@ export function mount(root) {
           h(
             "span",
             { class: `kp-badge${armed ? " kp-badge--destructive" : ""}` },
-            armed ? "included" : "left out",
+            armed ? "armed" : "left alone",
           ),
         ),
         h(
@@ -484,6 +507,26 @@ export function mount(root) {
         ),
       );
     });
+    const showAll = only
+      ? [
+          drivable(
+            h(
+              "button",
+              {
+                type: "button",
+                class: "ap-link ap-showall",
+                title: "Show every column again (Esc)",
+              },
+              "Show all",
+            ),
+            SHOW_ALL,
+          ),
+        ]
+      : [];
+    showAll[0]?.addEventListener("click", () => {
+      only = null;
+      paint();
+    });
     body.replaceChildren(
       h(
         "section",
@@ -510,6 +553,9 @@ export function mount(root) {
         ),
         tile("same", "Unchanged", p.unchanged.length, "nothing to do"),
       ),
+      ...(showAll.length
+        ? [h("p", { class: "ap-filter" }, `Showing one column. `, ...showAll)]
+        : []),
       h(
         "div",
         { class: "ap-cols" },
@@ -526,7 +572,7 @@ export function mount(root) {
           "Will be destroyed",
           "bad",
           p.destroy.length,
-          "Their directory is gone from the working copy. Type a stack's name to include it; backups stay under Backups ▸ Kept from removed stacks.",
+          "Their directory is gone from the working copy. Type a stack's name to arm it for the separate Destroy step below.",
           destroyItems,
         ),
         col(
@@ -562,40 +608,139 @@ export function mount(root) {
           : []),
       ),
     );
-    const g = goPlan(p, ticked, typed());
+    const g = goPlan(p, ticked);
     const apply = viaForm(
       h(
         "button",
         {
           type: "button",
-          class: `kp-button ${g.destructive ? "kp-button--destructive" : "kp-button--primary"}`,
+          class: "kp-button kp-button--primary",
           id: "apply-open",
-          ...(g.mode === "none" ? { disabled: "" } : {}),
+          ...(g.n === 0 ? { disabled: "" } : {}),
           title:
-            g.mode === "batch"
-              ? "Deploy the ticked stacks as one batch, after one confirmation"
-              : "Apply the whole plan after one confirmation; each stack is backed up first",
+            "Deploy the ticked stacks after one confirmation; each stack is backed up first. Nothing is destroyed here.",
         },
         g.label,
       ),
       "apply",
     );
     apply.addEventListener("click", () => {
-      if (g.mode === "apply")
-        void openAction("_host", "apply", {
-          preset: { destroy: [...typed()].join(",") },
-        });
-      else if (g.mode === "batch")
-        void openBatch(
-          "deploy",
-          p.deploy.filter((s) => ticked.has(s)),
-        );
+      pressedAt = Date.now() / 1000 - 2;
+      applied = "pressed";
+      void openAction("_host", "apply", { preset: g.preset });
     });
     go.replaceChildren(
       h("div", null, h("strong", null, g.title), h("p", null, g.note)),
       h("div", { class: "ap-go__acts" }, apply),
     );
+    paintDestroy(p, g.n > 0 && applied !== "done");
   };
+
+  /** @param {Plan} p @param {boolean} deploysPending */
+  const paintDestroy = (p, deploysPending) => {
+    if (!p.destroy.length) {
+      destroyBox.hidden = true;
+      destroyBox.replaceChildren();
+      return;
+    }
+    destroyBox.hidden = false;
+    const d = destroyStep(p, typed(), vmid, { ack, deploysPending });
+    if (!d.armed.length) ack = false;
+    const tick = drivable(
+      h("input", {
+        type: "checkbox",
+        id: "apply-destroy-ack",
+        ...(d.armed.length ? {} : { disabled: "" }),
+      }),
+      DESTROY_ACK,
+    );
+    /** @type {HTMLInputElement} */ (tick).checked = ack && d.armed.length > 0;
+    tick.addEventListener("change", () => {
+      ack = /** @type {HTMLInputElement} */ (tick).checked;
+      paintDestroy(p, deploysPending);
+    });
+    const button = drivable(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--destructive",
+          id: "apply-destroy",
+          ...(d.ready ? {} : { disabled: "" }),
+          title:
+            "Destroy the armed stacks after one more confirmation: each is backed up and its backup restored as a check first",
+        },
+        d.label,
+      ),
+      DESTROY,
+    );
+    button.addEventListener("click", () => {
+      void openAction("_host", "apply", { preset: d.preset });
+    });
+    destroyBox.replaceChildren(
+      h(
+        "div",
+        { class: "ap-destroy__head" },
+        h("span", { class: "nx-sev nx-sev--bad", "aria-hidden": "true" }),
+        h("h3", null, "Destroy"),
+        h(
+          "p",
+          { class: "ap-hint" },
+          "A separate step after the deploys: only the stacks you armed by typing their name, only after this confirmation, each backed up and restore-checked first.",
+        ),
+      ),
+      h("strong", null, d.title),
+      h(
+        "label",
+        { class: "ap-destroy__ack", for: "apply-destroy-ack" },
+        tick,
+        h("span", null, d.ackLabel),
+      ),
+      h(
+        "div",
+        { class: "ap-destroy__go" },
+        h(
+          "p",
+          { class: "ap-hint", role: "status" },
+          d.why ?? "Ready to destroy.",
+        ),
+        button,
+      ),
+    );
+  };
+
+  // The deploys this page started: once that job is done the plan is read
+  // again, so the destroy step knows no ticked deploy is waiting.
+  const stopJobs = onAct("jobs", () => {
+    if (pressedAt == null) return;
+    const j = act.jobs.find(
+      (x) =>
+        x.action === "apply" &&
+        x.queued_at >= /** @type {number} */ (pressedAt) &&
+        !String(x.args?.destroy ?? ""),
+    );
+    if (!j) return;
+    if (j.state === "queued" || j.state === "running") {
+      if (applied !== "running") {
+        applied = "running";
+        paint();
+      }
+      return;
+    }
+    pressedAt = null;
+    applied = j.state === "done" ? "done" : "none";
+    void load().catch(() => {});
+  });
+
+  // Esc resets the tile filter (bound on mount, released on unmount).
+  /** @param {KeyboardEvent} e */
+  const onKey = (e) => {
+    if (e.key !== "Escape" || only == null || e.defaultPrevented) return;
+    if (document.querySelector("dialog[open]")) return;
+    only = null;
+    paint();
+  };
+  document.addEventListener("keydown", onKey);
 
   const load = async () => {
     read.setAttribute("disabled", "");
@@ -624,6 +769,12 @@ export function mount(root) {
     setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
   };
   read.addEventListener("click", () => void load().catch(() => {}));
+  paintSteps();
   void load().catch(() => {});
-  return () => abort.abort();
+  return () => {
+    abort.abort();
+    stopCompare();
+    stopJobs();
+    document.removeEventListener("keydown", onKey);
+  };
 }

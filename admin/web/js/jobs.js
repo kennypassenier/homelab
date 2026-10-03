@@ -19,7 +19,8 @@ import { formatDateTime, humanDuration } from "./format.js";
  *   args: Record<string, unknown>, state: JobState, queued_at: number,
  *   started_at: number | null, finished_at: number | null, reqs: number[],
  *   message: string | null, cli: string | null, progress: Progress | null,
- *   restarts_dashboard: boolean}} Job
+ *   restarts_dashboard: boolean, flow?: any}} Job
+ *   `flow` (redesign-flows-6): the Update flow job's own rows and moves.
  * @typedef {{job: number, req: number, level: string, source: string,
  *   msg: string, ts: number}} LogLine
  * @typedef {{job: number, stack: string, state: JobState,

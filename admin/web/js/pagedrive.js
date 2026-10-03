@@ -124,6 +124,12 @@ async function click(id, row, navigate, show) {
   }
   const page = () => document.getElementById("page");
   const c = control(id);
+  // A bar control (Help's "?") is on every page: found in the document.
+  if (c?.bar) {
+    const f = await find(() => document.body, false, want, 3000);
+    if (!f.el) return answer({ why: f.why, fix: f.fix });
+    return press(f.el, show, c.opens === "dialog");
+  }
   const home = c ? (c.at?.(row) ?? pageHref(c.page)) : null;
   // feat-shell-1: a pre-3.71.0 module shown as a view of its new home
   // (`/activity?view=planned` is Schedules) counts as that module's page.

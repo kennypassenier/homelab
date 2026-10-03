@@ -786,3 +786,19 @@ export function perstackChips(chips, opts = {}) {
     }),
   );
 }
+
+/**
+ * Load a page's own stylesheet once (the shell's index.html links only
+ * app.css). The one loader every page and kit imports (redesign-flows
+ * review item 10); a page's sheet is added on its first mount and kept.
+ * @param {string} href
+ */
+export function ensureStyle(href) {
+  if (typeof document === "undefined") return;
+  if (document.querySelector(`link[data-page-style="${href}"]`)) return;
+  const l = document.createElement("link");
+  l.rel = "stylesheet";
+  l.href = href;
+  l.dataset.pageStyle = href;
+  document.head.append(l);
+}

@@ -1035,9 +1035,25 @@ test("invariants: /apply lands on Stacks with Deploy all changes open", async ()
     const headingText = await page
       .locator("#apply-section > summary")
       .innerText();
+    // redesign-flows-5 (review item 5): one heading, Deploy all changes,
+    // with one sentence; no second-level headings stacked under it.
     assert.ok(
-      headingText.includes("Apply the whole fleet"),
-      "the opened section is not the apply section",
+      headingText.includes("Deploy all changes"),
+      `the opened section is not Deploy all changes: ${headingText}`,
+    );
+    assert.equal(
+      await page.locator("#apply-section > summary p").count(),
+      1,
+      "the heading carries more than one sentence",
+    );
+    const subs = await page
+      .locator("#apply-section h3")
+      .evaluateAll((l) => l.map((x) => x.textContent ?? ""));
+    assert.ok(
+      !subs.some((t) =>
+        /Which stacks differ|What applying would change/.test(t),
+      ),
+      `the old sub-headings are still stacked under the heading: ${subs.join(" | ")}`,
     );
   } finally {
     await browser.close();
@@ -1660,7 +1676,8 @@ test("invariants: a stale-image row offers Update with the from/to versions, and
     const to = (await major.first().getAttribute("data-to")) ?? "";
     assert.match(await major.first().innerText(), /Update to/);
     await major.first().click();
-    await page.waitForURL(/\/inbox\?update=[^&]+&app=/, { timeout: 5000 });
+    // redesign-flows-11: the flow's own address.
+    await page.waitForURL(/\/update\?stack=[^&]+&app=/, { timeout: 5000 });
     const items = page.locator("#page .uf-item");
     await items.first().waitFor({ timeout: 15000 });
     assert.equal(
@@ -3272,7 +3289,8 @@ test("invariants: Ctrl K finds an action by intent, in any word order, and Enter
     // Update flow (nothing runs before its step 2's button).
     await first("update kp-soft");
     await page.keyboard.press("Enter");
-    await page.waitForURL("**/inbox?update=kp-soft", { timeout: 5000 });
+    // redesign-flows-11: the flow's own address.
+    await page.waitForURL("**/update?stack=kp-soft", { timeout: 5000 });
     const title = await page.locator("#page h1").innerText();
     assert.match(title, /^Update kp-soft/, `the flow that opened: ${title}`);
     assert.equal(
@@ -4130,8 +4148,9 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
       if (r.method() === "POST") posts.push(new URL(r.url()).pathname);
     });
     await update.locator(".nx-inbox__acts a").last().click();
-    // `?update=all`, or the one stack when only one has newer apps.
-    await page.waitForURL(/\/inbox\?update=/, { timeout: 5000 });
+    // redesign-flows-11: its own address, `/update?all=1`, or the one stack
+    // when only one has newer apps.
+    await page.waitForURL(/\/update\?/, { timeout: 5000 });
     const now = () =>
       page.locator("#page .fl-steps li[data-s=now] span").innerText();
     assert.equal(await now(), "See");
@@ -4179,12 +4198,23 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
       { timeout: 10000 },
     );
     assert.match(await go.innerText(), /^Back up and update/);
+    // redesign-flows-6 (review items 3 and 16): the button starts ONE job
+    // on the dashboard's server — backup, commit, deploy, verify — waited
+    // for as a request, never a fixed sleep.
+    const started = page.waitForRequest(
+      (r) =>
+        r.method() === "POST" &&
+        new URL(r.url()).pathname === "/data/actions/_host/update-apps",
+      { timeout: 5000 },
+    );
     await go.click();
+    await started;
     await page.locator("#page .fl-check").waitFor({ timeout: 5000 });
-    assert.equal(await now(), "Back up");
-    // Back up first: the backup is the first thing sent.
-    await page.waitForTimeout(500);
-    assert.match(posts.find((p) => !p.endsWith("/plan")) ?? "", /\/backup$/);
+    assert.equal(
+      posts.find((p) => !p.endsWith("/plan")),
+      "/data/actions/_host/update-apps",
+      "the first thing sent is not the one update job",
+    );
     await page
       .locator("#page .uf-done h2")
       .waitFor({ state: "visible", timeout: 120000 });
@@ -4329,21 +4359,16 @@ test("invariants: Deploy all changes shows four count tiles that each show only 
     assert.equal(await tiles.nth(1).getAttribute("aria-pressed"), "true");
     await tiles.nth(1).click();
     assert.deepEqual(await shown(), ["deploy", "destroy", "broken"]);
-    // A stack that cannot be planned: Apply deploys the ticked as a batch.
+    // redesign-flows-5: Apply deploys the ticked stacks; the stack that
+    // cannot be planned and an unticked one are left alone, by name.
     const go = page.locator("#apply-open");
-    assert.equal((await go.innerText()).trim(), "Deploy 2…");
+    assert.equal((await go.innerText()).trim(), "Apply 2 deploys…");
     await page.getByLabel("Include alpha").uncheck();
-    assert.equal((await go.innerText()).trim(), "Deploy 1…");
-    // A destroy is included only when its name is typed, and then waits
-    // for the whole plan, which the bar says before Apply is pressed.
-    const gone = page.locator('#apply-section .ap-item[data-stack="gone"]');
-    assert.ok((await gone.innerText()).includes("left out"));
-    await page.getByLabel("Type gone to destroy it").fill("gone");
-    assert.ok((await gone.innerText()).includes("included"));
+    assert.equal((await go.innerText()).trim(), "Apply 1 deploy…");
     const bar = await page.locator("#apply-section .ap-go").innerText();
     assert.ok(
-      bar.includes("a destroy waits for the whole plan"),
-      `the bar does not say the destroy waits: ${bar}`,
+      bar.includes("alpha") && bar.includes("gamma"),
+      `the bar does not name what is left alone: ${bar}`,
     );
   } finally {
     await browser.close();
@@ -4776,6 +4801,440 @@ test("invariants: Schedules page: Live view reaches the drawer and its fields, t
       await step({ do: "done" });
     }
     await clearSchedules(page);
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── redesign-flows review (3.71.0, the senior review of 2026-10-03 and the
+// coordinator's destroy rule): Deploy all changes keeps its diff inside its
+// column, deploys a chosen subset and destroys only as its own confirmed
+// step; the Update flow is one job on the dashboard's server with its own
+// address; Help, the tour and the Inbox's details. ──
+
+test("invariants: Deploy all changes keeps a stack's diff inside its column", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1100 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks?deploy-all=1`);
+    const more = page.locator(
+      "#apply-section .ap-col[data-col=deploy] [data-drive=deploy-all-diff]",
+    );
+    await more.first().waitFor({ timeout: 20000 });
+    await more.first().click();
+    const diff = page.locator("#apply-section .ap-diff").first();
+    await diff.locator("details").first().waitFor({ timeout: 10000 });
+    for (const d of await diff.locator("details").all())
+      await d.evaluate((x) => {
+        /** @type {HTMLDetailsElement} */ (x).open = true;
+      });
+    const edges = await page.evaluate(() => {
+      const col = /** @type {HTMLElement} */ (
+        document.querySelector("#apply-section .ap-col[data-col=deploy]")
+      );
+      const next = /** @type {HTMLElement} */ (
+        document.querySelector("#apply-section .ap-col[data-col=destroy]")
+      );
+      // The boxes that show the diff (a long line scrolls inside its own
+      // box, so the lines themselves may run on under the scroll).
+      const right = Math.max(
+        ...[
+          ...col.querySelectorAll(
+            ".ap-diff, .ap-diff details, .ap-diff summary, .ap-diff pre",
+          ),
+        ].map((e) => e.getBoundingClientRect().right),
+      );
+      return {
+        right,
+        col: col.getBoundingClientRect().right,
+        next: next.getBoundingClientRect().left,
+      };
+    });
+    assert.ok(
+      edges.right <= edges.col + 1,
+      `the diff reaches ${edges.right}px, past its column's ${edges.col}px`,
+    );
+    assert.ok(edges.col <= edges.next, "the deploy column covers the next");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: Deploy all changes deploys the ticked subset and destroys only as its own confirmed red step", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1100 },
+    });
+    const page = await freshPage(context);
+    // oldstack (CT 905 on the demo host) is gone from the files.
+    await page.route("**/data/apply/plan", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          plan: {
+            deploy: ["alpha", "beta"],
+            new: [],
+            destroy: ["oldstack"],
+            broken: [["gamma", "compose.yaml did not parse :: fix line 3"]],
+            unchanged: [],
+            ephemeral: [],
+          },
+          pending: 3,
+          measured_at: Math.floor(Date.now() / 1000),
+        }),
+      }),
+    );
+    await page.goto(`${BASE}/stacks?deploy-all=1`);
+    await page.locator("#apply-open").waitFor({ timeout: 10000 });
+    await page.getByLabel("Include alpha").uncheck();
+    // Deploys alone never destroy, even with a name typed.
+    await page.getByLabel("Type oldstack to destroy it").fill("oldstack");
+    await page.locator("#apply-open").click();
+    const dialog = page.locator("dialog#action-dialog[open]");
+    await dialog.waitFor({ timeout: 5000 });
+    const val = (/** @type {string} */ id) =>
+      dialog.locator(`#${id}`).inputValue();
+    assert.equal(await val("act-leave-out"), "alpha, gamma");
+    assert.equal(
+      await val("act-destroy"),
+      "",
+      "a deploy press carries a destroy",
+    );
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "detached", timeout: 5000 }).catch(() => {});
+    // The destroy is its own red step: off until it is confirmed, and while
+    // a ticked deploy has not run.
+    const step = page.locator("#apply-section .ap-destroy");
+    const destroy = page.locator("#apply-destroy");
+    assert.equal(await destroy.isDisabled(), true);
+    assert.match(
+      await step.evaluate((e) => getComputedStyle(e).borderColor),
+      /rgb/,
+    );
+    const ack = page.locator("#apply-destroy-ack");
+    await ack.check();
+    assert.equal(
+      await destroy.isDisabled(),
+      true,
+      "the destroy is open while a ticked deploy has not run",
+    );
+    await page.getByLabel("Include beta").uncheck();
+    assert.equal(await destroy.isDisabled(), false);
+    // Un-arming it closes it again.
+    await page.getByLabel("Type oldstack to destroy it").fill("olds");
+    assert.equal(await destroy.isDisabled(), true);
+    await page.getByLabel("Type oldstack to destroy it").fill("oldstack");
+    await ack.check();
+    await destroy.click();
+    await dialog.waitFor({ timeout: 5000 });
+    assert.equal(await val("act-destroy"), "oldstack");
+    assert.equal(await val("act-destroy-ids"), "905");
+    assert.equal(await val("act-leave-out"), "alpha, beta, gamma");
+    await page.keyboard.press("Escape");
+    // The server refuses a destroy without its own confirmation or beside
+    // a deploy, before anything runs.
+    const post = (/** @type {Record<string, unknown>} */ args) =>
+      page.evaluate(async (a) => {
+        const r = await fetch("/data/actions/_host/apply", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(a),
+        });
+        return { status: r.status, body: await r.text() };
+      }, args);
+    const noAck = await post({ destroy: "oldstack", destroy_ids: "905" });
+    assert.equal(noAck.status, 400, noAck.body);
+    assert.match(noAck.body, /confirmation/);
+    const noBackup = await post({
+      destroy: "oldstack",
+      destroy_ids: "905",
+      destroy_ack: true,
+      skip_backup: true,
+    });
+    assert.equal(noBackup.status, 400, noBackup.body);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: Deploy all changes marks Compare done only once the compare ran, Esc and Show all reset the tile filter, and an unarmed destroy has a neutral dot", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1100 },
+    });
+    const page = await freshPage(context);
+    await page.route("**/data/drift", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ stacks: {}, measured_at: null }),
+      }),
+    );
+    await page.goto(`${BASE}/stacks?deploy-all=1`);
+    const compare = page.locator(
+      "#apply-section .ap-steps li[data-step=compare]",
+    );
+    await compare.waitFor({ timeout: 10000 });
+    assert.equal(
+      await compare.evaluate((e) => e.classList.contains("done")),
+      false,
+      "Compare is shown done before it ran",
+    );
+    await page.unroute("**/data/drift");
+    await compare.locator("#drift-compare").click();
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector("#apply-section .ap-steps li[data-step=compare]")
+          ?.classList.contains("done"),
+      null,
+      { timeout: 15000 },
+    );
+    // The tile filter: Show all appears while one is on; Esc resets.
+    const tiles = page.locator("#apply-section .ap-tile");
+    await tiles.first().waitFor({ timeout: 15000 });
+    await tiles.nth(1).click();
+    const showAll = page.locator("[data-drive=deploy-all-show-all]");
+    await showAll.waitFor({ timeout: 3000 });
+    await showAll.click();
+    assert.equal(await tiles.nth(1).getAttribute("aria-pressed"), "false");
+    assert.equal(await showAll.count(), 0);
+    await tiles.nth(2).click();
+    await page.keyboard.press("Escape");
+    assert.equal(await tiles.nth(2).getAttribute("aria-pressed"), "false");
+    // An unarmed destroy's dot is neutral, not the info blue.
+    const dot = page.locator(
+      "#apply-section .ap-item--destroy:not(.armed) .nx-sev",
+    );
+    if ((await dot.count()) > 0) {
+      const [c, info] = await page.evaluate(() => {
+        const d = /** @type {HTMLElement} */ (
+          document.querySelector(
+            "#apply-section .ap-item--destroy:not(.armed) .nx-sev",
+          )
+        );
+        const probe = document.createElement("span");
+        probe.className = "nx-sev nx-sev--info";
+        document.body.append(probe);
+        const out = [
+          getComputedStyle(d).backgroundColor,
+          getComputedStyle(probe).backgroundColor,
+        ];
+        probe.remove();
+        return out;
+      });
+      assert.notEqual(c, info, "an unarmed destroy shows the info dot");
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: on a phone the Deploy all changes tiles wrap their labels and the Inbox header reads title, sentence, then its button", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 900 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks?deploy-all=1`);
+    const labels = page.locator("#apply-section .ap-tile .nx-kpi__label");
+    await labels.first().waitFor({ timeout: 15000 });
+    for (const l of await labels.all())
+      assert.ok(
+        await l.evaluate((e) => e.scrollWidth <= e.clientWidth + 1),
+        `a tile label is cut off: ${await l.innerText()}`,
+      );
+    await page.goto(`${BASE}/inbox`);
+    const head = page.locator("#page .nx-head").first();
+    await head.waitFor({ timeout: 10000 });
+    const box = async (/** @type {string} */ sel) =>
+      /** @type {{x: number, y: number, width: number, height: number}} */ (
+        await head.locator(sel).first().boundingBox()
+      );
+    const title = await box("h1");
+    const desc = await box(".nx-head-desc");
+    const again = await box("[data-drive=inbox-check-again]");
+    assert.ok(
+      title.y < desc.y && desc.y < again.y,
+      "the header does not read title, sentence, button",
+    );
+    assert.ok(again.width < 390 - 32 - 40, "Check again stretches the row");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the Inbox's Worth a look carries a one-sentence description", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/inbox`);
+    const desc = page.locator(
+      "#page .inbox-worth > summary .inbox-worth__desc",
+    );
+    await desc.waitFor({ timeout: 10000 });
+    const t = (await desc.innerText()).trim();
+    assert.ok(/^[A-Z].*\.$/.test(t), `not one sentence: ${t}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the Update flow has its own address, the old one redirects, and the nav marks Stacks for one stack", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1100 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/inbox?update=kp-soft`);
+    await page.waitForURL(/\/update\?stack=kp-soft$/, { timeout: 5000 });
+    const current = () =>
+      page.locator(".kp-nav__link[aria-current=page]").innerText();
+    await page.locator("#page .fl-steps").waitFor({ timeout: 10000 });
+    assert.equal((await current()).trim(), "Stacks");
+    await page.goto(`${BASE}/update?all=1`);
+    await page.locator("#page .fl-steps").waitFor({ timeout: 10000 });
+    assert.match((await current()).trim(), /^Inbox/);
+    // The page is capped at the demo's width.
+    const w = await page
+      .locator("#page .uf-page")
+      .evaluate((e) => e.getBoundingClientRect().width);
+    assert.ok(w <= 1024 + 1, `the Update page is ${w}px wide`);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the Update flow folds the file change, names each file once, and keeps running as one job when the tab leaves", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/update?all=1`);
+    await page.locator("#page .uf-item").first().waitFor({ timeout: 20000 });
+    await page.locator("[data-drive=update-see-impact]").click();
+    const fold = page.locator("#page details.uf-fold");
+    await fold.waitFor({ timeout: 15000 });
+    assert.equal(
+      await fold.evaluate((d) => /** @type {HTMLDetailsElement} */ (d).open),
+      false,
+      "the change to the stack files is unfolded",
+    );
+    await fold.locator("summary").first().click();
+    const files = page.locator("#page .uf-diff > details");
+    await files.first().waitFor({ timeout: 15000 });
+    for (const f of await files.all()) {
+      assert.equal(
+        await f.evaluate((d) => /** @type {HTMLDetailsElement} */ (d).open),
+        false,
+        "a file is unfolded",
+      );
+      const s = await f.locator("summary").innerText();
+      assert.ok(
+        (s.match(/changed/g) ?? []).length <= 1,
+        `a file says changed twice: ${s}`,
+      );
+    }
+    for (const t of await page.locator("[data-drive=update-major-read]").all())
+      await t.check();
+    const started = page.waitForRequest(
+      (r) =>
+        r.method() === "POST" &&
+        new URL(r.url()).pathname === "/data/actions/_host/update-apps",
+      { timeout: 10000 },
+    );
+    await page.waitForFunction(
+      () =>
+        !(
+          /** @type {HTMLButtonElement | null} */ (
+            document.querySelector("[data-drive=update-go]")
+          )?.disabled ?? true
+        ),
+      null,
+      { timeout: 10000 },
+    );
+    await page.locator("[data-drive=update-go]").click();
+    const req = await started;
+    const job = /** @type {{job: number}} */ (
+      await (await req.response())?.json()
+    ).job;
+    // The tab leaves: the job goes on, on the server, and is in Activity.
+    await page.goto(`${BASE}/apps`);
+    const end = Date.now() + 120000;
+    /** @type {any} */
+    let seen = null;
+    while (Date.now() < end) {
+      seen = await page.evaluate(async (id) => {
+        const r = await fetch("/data/actions/jobs");
+        const b = await r.json();
+        return (b.jobs ?? []).find((/** @type {any} */ j) => j.job === id);
+      }, job);
+      if (seen && !["queued", "running"].includes(seen.state)) break;
+      await page.waitForTimeout(1000);
+    }
+    assert.equal(seen?.action, "update-apps");
+    assert.equal(seen?.state, "done", JSON.stringify(seen?.message));
+    // Back on the flow, it shows the job's end.
+    await page.goto(`${BASE}/update?all=1`);
+    await page
+      .locator("#page .uf-done h2")
+      .waitFor({ state: "visible", timeout: 20000 });
+    assert.match(
+      await page.locator("#page .uf-done h2").innerText(),
+      /^Updated/,
+    );
+    assert.match(
+      await page.locator("#page .uf-done").innerText(),
+      /7 days/,
+      "the undo is not offered for 7 days",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: Help's close button stays inside its panel, the bar's ? is the Live view control help-open, and the tour card is labelled by its step", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/apps`);
+    const open = page.locator("[data-drive=help-open]");
+    await open.waitFor({ timeout: 5000 });
+    await open.click();
+    const help = page.locator("dialog#shortcuts[open]");
+    await help.waitFor({ timeout: 3000 });
+    const [panel, close] = await Promise.all([
+      help.boundingBox(),
+      help.locator(".kp-dialog__close").first().boundingBox(),
+    ]);
+    assert.ok(panel && close);
+    assert.ok(
+      close.x + close.width <= panel.x + panel.width - 4 &&
+        close.x + close.width <= 1894 - 4,
+      `the close button is clipped: ${JSON.stringify({ panel, close })}`,
+    );
+    await help.getByText("Take the 1-minute tour").click();
+    const tour = page.locator("dialog.tour");
+    await tour.waitFor({ timeout: 3000 });
+    assert.equal(await tour.getAttribute("aria-live"), null);
+    const by = await tour.getAttribute("aria-labelledby");
+    assert.ok(by, "the tour card has no label");
+    assert.equal(
+      await page.locator(`#${by}`).innerText(),
+      await tour.locator("h3").innerText(),
+    );
   } finally {
     await browser.close();
   }

@@ -106,6 +106,15 @@ pub enum ActionKind {
     /// into the `Material` this command is built from. See
     /// `admin::shell::secrets`.
     ChangeSecret,
+    /// redesign-flows-6 (3.71.0, the Update flow, FLOWS.md §3.1): host-wide,
+    /// ONE job that moves apps to a newer version — back up every touched
+    /// stack, commit the new image lines (fix-231's `StackEdit::Settings
+    /// {images}`), deploy that commit (or pull a moving tag), verify each
+    /// app runs healthy at its new version within 2 min, and roll a pinned
+    /// app back by itself when it does not. Runs on the dashboard's server,
+    /// so a closed tab never stops it. Never in the catalog: only the
+    /// Update flow starts it, with the moves it showed.
+    UpdateApps,
 }
 
 /// What the shell has to read before the command can be built.
@@ -166,6 +175,14 @@ pub enum Arg {
     Note,
     /// apply: the gone stacks to destroy, each name typed, comma-separated.
     Destroy,
+    /// redesign-flows-5: apply: the stacks of the plan left out of this
+    /// press (unticked deploys, stacks that cannot be planned).
+    LeaveOut,
+    /// redesign-flows-5: apply: each destroyed stack's CT number, in the
+    /// order of `destroy`, as the plan showed it.
+    DestroyIds,
+    /// redesign-flows-5: apply: the destroy's own confirmation, ticked.
+    DestroyAck,
     /// feat-secrets-1/2: which secret (`SecretRef`, as JSON), from the
     /// Secrets page's own list.
     SecretRef,
@@ -173,6 +190,9 @@ pub enum Arg {
     /// the new value (`POST /data/secrets/{stack}/stage`) — never the
     /// value itself.
     StageToken,
+    /// redesign-flows-6: update-apps: the moves, as JSON
+    /// (`core::updateflow::UpdateItem`, a list).
+    Updates,
 }
 
 /// One row of the catalog the page draws its buttons from.
@@ -270,12 +290,21 @@ impl ActionKind {
             Apply => "apply",
             RestartHost => "restart-host",
             ChangeSecret => "change-secret",
+            UpdateApps => "update-apps",
         }
     }
 
     pub fn from_slug(s: &str) -> Option<ActionKind> {
-        ActionKind::ALL.iter().copied().find(|k| k.slug() == s)
+        ActionKind::ALL
+            .iter()
+            .chain(ActionKind::UNLISTED)
+            .copied()
+            .find(|k| k.slug() == s)
     }
+
+    /// redesign-flows-6: actions a page of its own starts (the Update flow),
+    /// never listed in the catalog, the palette or a schedule.
+    pub const UNLISTED: &'static [ActionKind] = &[ActionKind::UpdateApps];
 
     pub fn host_wide(self) -> bool {
         use ActionKind::*;
@@ -292,6 +321,7 @@ impl ActionKind {
                 | AnswerCheck
                 | Apply
                 | RestartHost
+                | UpdateApps
         )
     }
 
@@ -333,7 +363,14 @@ impl ActionKind {
             UpdateHost => &[Arg::Tag],
             AnswerCheck => &[Arg::Check, Arg::Verdict, Arg::Days, Arg::Note],
             InstallNative => &[Arg::Unit, Arg::Tag],
-            Apply => &[Arg::SkipBackup, Arg::Destroy, Arg::Force],
+            UpdateApps => &[Arg::Updates],
+            Apply => &[
+                Arg::Destroy,
+                Arg::Force,
+                Arg::LeaveOut,
+                Arg::DestroyIds,
+                Arg::DestroyAck,
+            ],
             _ => &[],
         }
     }
@@ -417,6 +454,7 @@ impl ActionKind {
             Apply => "Deploy all changes",
             RestartHost => "Restart the host",
             ChangeSecret => "Change a secret",
+            UpdateApps => "Update apps",
         }
     }
 
@@ -491,7 +529,10 @@ impl ActionKind {
                 "install a chosen release of a native service: the host downloads it, checks its signature and checksum, and installs it with an armed rollback (the latest release when no tag is named)"
             }
             Apply => {
-                "deploy every stack whose files differ from what the host applied; a stack whose directory is gone is destroyed only when its name is typed"
+                "deploy the ticked stacks whose files differ from what the host applied, leaving the rest alone; a stack whose directory is gone is destroyed only in its own confirmed step, its name typed, after a backup that restores"
+            }
+            UpdateApps => {
+                "move apps to a newer version as one job: back up each stack, commit the new image lines, deploy, verify each app runs healthy at its new version within 2 min, and roll a pinned app back by itself when it does not"
             }
             RestartHost => "restarts the host daemon; running jobs are refused while a job runs",
             ChangeSecret => {
@@ -577,6 +618,20 @@ pub struct ActionArgs {
     /// apply: the names typed, comma-separated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destroy: Option<String>,
+    /// redesign-flows-5: apply: the stacks left out of this press,
+    /// comma-separated. A dashboard before 3.71.0 refuses the unknown field
+    /// (`deny_unknown_fields`), so it never runs the whole plan instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leave_out: Option<String>,
+    /// redesign-flows-5: apply: the CT number of each stack in `destroy`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destroy_ids: Option<String>,
+    /// redesign-flows-5: apply: the destroy's own confirmation.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub destroy_ack: bool,
+    /// redesign-flows-6: update-apps: the moves, as JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updates: Option<String>,
     /// feat-secrets-2: which secret, as `SecretRef` JSON (the Secrets page
     /// sends back exactly what it listed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -628,6 +683,10 @@ impl ActionArgs {
             (self.days.is_some(), Arg::Days),
             (self.note.is_some(), Arg::Note),
             (self.destroy.is_some(), Arg::Destroy),
+            (self.leave_out.is_some(), Arg::LeaveOut),
+            (self.destroy_ids.is_some(), Arg::DestroyIds),
+            (self.destroy_ack, Arg::DestroyAck),
+            (self.updates.is_some(), Arg::Updates),
             (self.secret_ref.is_some(), Arg::SecretRef),
             (self.stage_token.is_some(), Arg::StageToken),
         ];
@@ -642,15 +701,31 @@ impl ActionArgs {
 
     /// apply: the typed names, in the order given.
     pub fn destroy_names(&self) -> Vec<String> {
-        self.destroy
-            .as_deref()
-            .unwrap_or("")
-            .split(',')
-            .map(str::trim)
-            .filter(|n| !n.is_empty())
-            .map(str::to_string)
+        list(self.destroy.as_deref())
+    }
+
+    /// redesign-flows-5: apply: the stacks left out, in the order given.
+    pub fn leave_out_names(&self) -> Vec<String> {
+        list(self.leave_out.as_deref())
+    }
+
+    /// redesign-flows-5: apply: the CT numbers given for the destroys; None
+    /// when one is not a number.
+    pub fn destroy_id_list(&self) -> Option<Vec<u16>> {
+        list(self.destroy_ids.as_deref())
+            .iter()
+            .map(|v| v.parse().ok())
             .collect()
     }
+}
+
+fn list(v: Option<&str>) -> Vec<String> {
+    v.unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// One requested action, as validated.
@@ -966,6 +1041,15 @@ fn validate_parity(kind: ActionKind, what: &str, args: &ActionArgs) -> Result<()
             );
         }
     }
+    if kind == UpdateApps
+        && let Err(why) =
+            crate::core::updateflow::parse_updates(args.updates.as_deref().unwrap_or(""))
+    {
+        return refuse(
+            why,
+            "start it from the Update flow, which sends the moves it shows",
+        );
+    }
     if kind == Apply {
         let names = args.destroy_names();
         let mut seen = std::collections::BTreeSet::new();
@@ -984,6 +1068,33 @@ fn validate_parity(kind: ActionKind, what: &str, args: &ActionArgs) -> Result<()
             }
             if !seen.insert(n.clone()) {
                 return refuse(format!("{n} is typed twice"), "type each name once");
+            }
+        }
+        for n in args.leave_out_names() {
+            if !valid_stack_name(&n) {
+                return refuse(
+                    format!("{n:?} is not a stack name"),
+                    "name the stacks to leave out as the plan lists them, comma-separated",
+                );
+            }
+        }
+        if !names.is_empty() {
+            // redesign-flows-5: a destroy is its own confirmed step, for
+            // the CT numbers the plan showed.
+            if !args.destroy_ack {
+                return refuse(
+                    "a destroy runs only after its own confirmation is ticked".into(),
+                    "tick the red confirmation of the destroy step",
+                );
+            }
+            match args.destroy_id_list() {
+                Some(ids) if ids.len() == names.len() => {}
+                _ => {
+                    return refuse(
+                        "each stack to destroy needs its CT number, in the same order".into(),
+                        "plan again; the page sends the CT numbers the plan shows",
+                    );
+                }
             }
         }
     }
@@ -1211,10 +1322,13 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
                 out.extend(deploy_commands(spec));
             }
             for name in destroy {
+                // redesign-flows-5: the backup and restore check the host
+                // takes before a destroy is never skipped from the
+                // dashboard's apply (its form has no such field).
                 out.push(Command::DestroyRecorded {
                     confirm: name.clone(),
                     stack: name,
-                    skip_backup: a.skip_backup,
+                    skip_backup: false,
                 });
             }
             out
@@ -1263,9 +1377,6 @@ pub fn cli_override(req: &ActionRequest, material: &Material) -> Option<String> 
         }
         (ActionKind::Apply, _) => {
             let mut line = "homelab apply --yes".to_string();
-            if req.args.skip_backup {
-                line.push_str(" --no-backup");
-            }
             if req.args.force {
                 line.push_str(" --force");
             }

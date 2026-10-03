@@ -5,6 +5,13 @@
 dialog.help-panel .nx-drawer__head .kp-dialog__close {
   grid-row: 1;
   grid-column: 2;
+  /* Review item 14: in the head's grid, never kp's absolute corner spot
+     that put it half past the panel's right edge. */
+  position: static;
+  inset: auto;
+  margin: 0;
+  justify-self: end;
+  align-self: start;
 }
 .help-panel__body {
   display: grid;

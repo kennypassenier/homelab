@@ -7,16 +7,9 @@
 //
 // Loading this module also loads the page's own stylesheet once.
 
-const SHEET = "/css/schedules.css";
-if (
-  typeof document !== "undefined" &&
-  !document.querySelector(`link[href="${SHEET}"]`)
-) {
-  const link = document.createElement("link");
-  link.rel = "stylesheet";
-  link.href = SHEET;
-  document.head.append(link);
-}
+import { ensureStyle } from "../dom.js";
+
+ensureStyle("/css/schedules.css");
 
 /**
  * @typedef {Node | string | null | undefined | false} Child

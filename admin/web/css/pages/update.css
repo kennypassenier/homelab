@@ -261,3 +261,37 @@
     justify-self: stretch;
   }
 }
+/* Review item 7: the Update flow at the demo's width. */
+.uf-page {
+  display: grid;
+  gap: var(--nx-gap, 16px);
+  max-inline-size: min(64rem, 100%);
+  margin-inline: auto;
+}
+.uf-page > * {
+  min-inline-size: 0;
+}
+/* redesign-flows-6: the stack History's "Updates you can undo". */
+.undo-updates {
+  display: grid;
+  gap: 10px;
+  margin-block-end: 16px;
+}
+.undo-updates__list {
+  display: grid;
+  gap: 8px;
+}
+.undo-updates__row {
+  display: grid;
+  grid-template-columns:
+    minmax(8rem, max-content) minmax(8rem, max-content)
+    minmax(0, 1fr) auto;
+  gap: 8px 16px;
+  align-items: center;
+  font-size: var(--kp-text-sm);
+}
+@media (max-width: 40rem) {
+  .undo-updates__row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}

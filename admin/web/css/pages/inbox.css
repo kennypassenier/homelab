@@ -86,3 +86,49 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* Review item 8: Worth a look's heading over its one-sentence
+   description. */
+.inbox-worth > summary {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+}
+.inbox-worth__desc {
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+/* Review item 13: on a phone the header reads title, its sentence, then
+   the checked time beside Check again at its own width. */
+@media (max-width: 40rem) {
+  .inbox-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .inbox-head .title-row {
+    display: contents;
+  }
+  .inbox-head h1 {
+    order: 1;
+  }
+  .inbox-head .nx-head-desc {
+    order: 2;
+    margin: 0;
+  }
+  .inbox-head .nx-head-right {
+    order: 3;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px 12px;
+    inline-size: 100%;
+  }
+  .inbox-head .nx-head-actions {
+    inline-size: auto;
+    flex: 0 0 auto;
+  }
+  .inbox-head .nx-head-actions .kp-button {
+    inline-size: auto;
+    flex: 0 0 auto;
+  }
+}

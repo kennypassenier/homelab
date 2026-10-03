@@ -25,6 +25,15 @@ The status shapes this gate accepts when a commit writes a status:
   measure-after <date>: <how>              released, measured on or after
                                            <date>; the release gate lets it
                                            wait until then, never longer
+  proven <date>: <tests> passed on the demo host (<duration>)
+                                           released, and proven by tests
+                                           instead of live: every test it
+                                           names (`fn_name`, or
+                                           `file.e2e.js: "case title"`) must
+                                           exist, "passed" and the run's
+                                           measured duration are said, and
+                                           the word "measured" is not (that
+                                           is for a live measurement)
   obsolete|superseded|closed|dropped|klopt <date>: <reason, 20+ chars>
   open|later|parked: <who> <date>, <why>   a gap someone holds
   anything else (doing: release 3.71.0, built …) is work in progress.
@@ -76,6 +85,15 @@ CLOSED = ("done",) + CLOSED_WORDS
 DONE = re.compile(rf"^done ({DATE_S}):\s*(.*)$", re.I | re.S)
 REASONED = re.compile(rf"^({'|'.join(CLOSED_WORDS)}) ({DATE_S}):\s*(.+)$", re.I | re.S)
 MEASURE_AFTER = re.compile(rf"^measure-after ({DATE_S}):\s*(.+)$", re.I | re.S)
+# measure2 (Kenny, 2026-10-03: only rows that truly need him may reach the
+# 3.71.0 Go form): a released row whose behaviour a whole-screen test on
+# the demo host, or a core/host test on the mock executor, pins — proven,
+# never called measured.
+PROVEN = re.compile(rf"^proven ({DATE_S}):\s*(.+)$", re.I | re.S)
+PROVEN_DURATION = re.compile(r"\([^)]*?\d+(?:\.\d+)?\s*(?:ms|s|min)\b[^)]*\)")
+BACKTICK = re.compile(r"`([^`]+)`")
+JS_REF = re.compile(r'^([\w./-]+\.js):\s*"(.+)"$', re.S)
+RUST_REF = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+){2,}$")
 HELD = re.compile(rf"^(open|later|parked):\s*(\S.*?)\s+({DATE_S}),\s*(\S.+)$", re.I | re.S)
 OPENISH = re.compile(r"^(open|later|parked)\b", re.I)
 
@@ -221,6 +239,8 @@ def judge_status(rid, st, today):
                 f"{rid}: measure-after {m.group(1)} lies in the past — measure it now "
                 f"(\"done <date>: measured …\")."
             )
+    elif low.startswith("proven"):
+        faults += proven_faults(rid, st, None, None)
     elif low.startswith(CLOSED_WORDS):
         m = REASONED.match(st)
         if not m or len(m.group(3).strip()) < 20:
@@ -242,6 +262,51 @@ def judge_status(rid, st, today):
             f"{rid}: released but not measured. Write \"measure-after <date>: <how>\" "
             f"until it can be, then \"done <date>: measured …\"."
         )
+    return faults
+
+
+def proven_refs(body):
+    """The tests a `proven` status names: ("name", fn_or_test_name) for a
+    backticked snake_case name, ("js", path, title) for
+    `file.e2e.js: "case title"`. Other backticked text (a command) is no
+    test."""
+    out = []
+    for span in BACKTICK.findall(body):
+        span = span.strip()
+        m = JS_REF.match(span)
+        if m:
+            out.append(("js", m.group(1), m.group(2)))
+        elif RUST_REF.match(span):
+            out.append(("name", span))
+    return out
+
+
+def proven_faults(rid, st, exists, js_exists):
+    """Faults of a `proven` status: its shape, and every test it names
+    existing (`exists`/`js_exists` None: shape only)."""
+    m = PROVEN.match(st)
+    if not m:
+        return [f"{rid}: write \"proven <date>: <tests> passed on the demo host (<duration>)\"."]
+    body = m.group(2)
+    refs = proven_refs(body)
+    faults = []
+    if not refs:
+        faults.append(
+            f"{rid}: proven by no named test. Name each one: `fn_name`, or "
+            f"`admin/web/test-e2e/invariants.e2e.js: \"<case title>\"`."
+        )
+    if not re.search(r"\bpassed\b", body, re.I) or not PROVEN_DURATION.search(body):
+        faults.append(f"{rid}: a proven row says the tests passed and how long the run took (\"passed … (41 s)\").")
+    if re.search(r"\bmeasured\b", BACKTICK.sub("", body), re.I):
+        faults.append(
+            f"{rid}: a test-proven row never says measured; that word is for a live measurement "
+            f"(\"done <date>: measured …\")."
+        )
+    for ref in refs:
+        if ref[0] == "name" and exists is not None and not exists(ref[1]):
+            faults.append(f"{rid}: `{ref[1]}` does not exist (renamed? deleted?); it is this row's proof.")
+        if ref[0] == "js" and js_exists is not None and not js_exists(ref[1], ref[2]):
+            faults.append(f"{rid}: does not exist in {ref[1]}: the case \"{ref[2][:70]}\", this row's proof.")
     return faults
 
 
@@ -319,6 +384,32 @@ def staged_test_exists(name):
     return node.returncode == 0
 
 
+def staged_js_case_exists(path, title):
+    r = subprocess.run(
+        ["git", "grep", "--cached", "-q", "-F", "-e", title, "--", f"*{path}"],
+        capture_output=True, check=False,
+    )
+    return r.returncode == 0
+
+
+def tree_js_case_exists(root):
+    cache = {}
+
+    def exists(path, title):
+        if path not in cache:
+            texts = []
+            for d, dirs, files in os.walk(root):
+                dirs[:] = [x for x in dirs if not (x.startswith("target") or x in (".git", ".claude", "node_modules"))]
+                for f in files:
+                    full = os.path.join(d, f)
+                    if f.endswith(".js") and full.endswith("/" + path.lstrip("/")) or f == path:
+                        texts.append(open(full, encoding="utf-8", errors="replace").read())
+            cache[path] = "\n".join(texts)
+        return title in cache[path]
+
+    return exists
+
+
 def tree_test_exists(root):
     rust, js = [], []
     for d, dirs, files in os.walk(root):
@@ -374,7 +465,7 @@ def rows_of(text):
     return {l for l in text.splitlines() if ROW_ID.match(l)}
 
 
-def commit_mode(diff_text, exists=None, parents=None, today=None):
+def commit_mode(diff_text, exists=None, parents=None, today=None, js_exists=None):
     """`parents`: the REGISTER.md text of every parent of a merge or
     cherry-pick; a row present verbatim in one of them is not judged."""
     removed = {}
@@ -401,6 +492,9 @@ def commit_mode(diff_text, exists=None, parents=None, today=None):
         faults += judge_changed_row(
             line, is_new=rid not in removed, old_status=removed.get(rid), today=today
         )
+        st = status_of(line)
+        if st.lower().startswith("proven") and removed.get(rid) != st:
+            faults += [f for f in proven_faults(rid, st, exists, js_exists) if "does not exist" in f]
         if exists is not None:
             for name in missing_tests(line, exists):
                 faults.append(
@@ -460,10 +554,10 @@ def group_rows(rows):
     return out
 
 
-def release_mode(register_text, version, today):
+def release_mode(register_text, version, today, exists=None, js_exists=None):
     """(row id, release, status) of every row of a release before `version`
-    that is not measured, and of every `measure-after` row whose date has
-    come."""
+    that is not measured, of every `measure-after` row whose date has
+    come, and of every `proven` row whose tests are gone."""
     target = version_tuple(version)
     out = []
     for line in register_text.splitlines():
@@ -472,6 +566,11 @@ def release_mode(register_text, version, today):
             continue
         st = status_of(line)
         low = st.lower()
+        if low.startswith("proven"):
+            faults = proven_faults(m.group(1), st, exists, js_exists)
+            if faults:
+                out.append((m.group(1), "proven by a test that does not hold", faults[0].split(": ", 1)[1]))
+            continue
         if low.startswith(CLOSED):
             continue
         after = MEASURE_AFTER.match(st)
@@ -524,7 +623,14 @@ def main(argv):
     if version:
         path = opt("--register") or REGISTER
         text = open(path, encoding="utf-8").read()
-        rows = release_mode(text, version, today)
+        known = opt("--known")
+        if known is not None:
+            names = set(filter(None, known.split(",")))
+            exists, js_exists = names.__contains__, (lambda _p, t: t in names)
+        else:
+            root = opt("--root") or (git_text("rev-parse", "--show-toplevel") or ".").strip()
+            exists, js_exists = tree_test_exists(root), tree_js_case_exists(root)
+        rows = release_mode(text, version, today, exists, js_exists)
         if not rows:
             print(f"register: every row of a release before {version} is measured or closed")
             return 0
@@ -604,6 +710,7 @@ def main(argv):
         diff_text = open(path, encoding="utf-8").read()
         known = set(filter(None, (opt("--known") or "").split(",")))
         exists = known.__contains__
+        js_exists = lambda _p, t: t in known
         inv_path = opt("--invariants")
         invariants = open(inv_path, encoding="utf-8").read() if inv_path else None
         code_path = opt("--code-diff")
@@ -611,6 +718,7 @@ def main(argv):
     else:
         diff_text = git_text("diff", "--cached", "-U0", "--", REGISTER) or ""
         exists = staged_test_exists
+        js_exists = staged_js_case_exists
         staged = (git_text("diff", "--cached", "--name-only") or "").split()
         invariants = git_text("show", f":{INVARIANTS}") if INVARIANTS in staged else None
         code_diff = git_text("diff", "--cached", "-U0", "--", "*.rs", "admin/web/js/*.js") or ""
@@ -622,7 +730,7 @@ def main(argv):
                 parents = [git_text("show", f"HEAD:{REGISTER}") or ""]
                 for sha in open(os.path.join(git_dir, head)).read().split():
                     parents.append(git_text("show", f"{sha}:{REGISTER}") or "")
-    faults = commit_mode(diff_text, exists, parents=parents, today=today)
+    faults = commit_mode(diff_text, exists, parents=parents, today=today, js_exists=js_exists)
     if invariants is not None:
         faults += numbering_faults(invariants)
     faults += ids_in_added_strings(code_diff)

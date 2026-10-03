@@ -170,6 +170,20 @@ test("arch-self: destroy and wipe are refused on the dashboard's own stack", () 
   );
 });
 
+// fix-229 (the 3.70.6 visual pass): kp-soft's page offered Adopt, Install a
+// release and Roll back binary, whose dialogs then had no unit to choose.
+test("fix_229_a_docker_stack_never_offers_the_native_actions", () => {
+  const offered = (/** @type {boolean | null} */ native) =>
+    stackActionGroups(catalog, "kp-soft", native)
+      .flatMap((g) => g.actions)
+      .map((a) => a.entry.action);
+  assert.ok(!offered(false).includes("rollback-native"), "docker stack");
+  assert.ok(offered(false).includes("deploy"));
+  // A native stack, and a host too old to say, keep them.
+  assert.ok(offered(true).includes("rollback-native"));
+  assert.ok(offered(null).includes("rollback-native"));
+});
+
 test("the body carries only what is set; the preview sends a typed name only once it is right", () => {
   const f = actionForm(find("restore"), ctx);
   const v = initialValues(f, { app: "sonarr", nonsense: "x" });

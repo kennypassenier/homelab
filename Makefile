@@ -10,7 +10,7 @@
 # TUI when the update badge appears.
 # ============================================================================
 
-.PHONY: help build test gate gate-full check advisories secrets secrets-staged msrv scanners admin-full invariants release-binaries fmt clippy release host-binary hooks install diagrams host-drift fail-first
+.PHONY: measure-due help build test gate gate-full check advisories secrets secrets-staged msrv scanners admin-full invariants release-binaries fmt clippy release host-binary hooks install diagrams host-drift fail-first
 
 help:
 	@echo "make build            debug build of the whole workspace"
@@ -24,6 +24,7 @@ help:
 	@echo "make hooks            wire the git-native commit gates (once per clone)"
 	@echo "make host-binary      release build of homelab-host for Debian 12 (via docker)"
 	@echo "make release VERSION=x.y.z"
+	@echo "make measure-due      run the due measure-after rows' read-only commands, write passes as done"
 	@echo "                      check, stamp version, commit, tag vx.y.z, build, push"
 	@echo "                      and publish the GitHub Release; roll out afterwards"
 	@echo "                      with 'homelab release-update' (or u in the TUI)."
@@ -191,6 +192,12 @@ fail-first:
 # never committed.
 RELEASE_RECORD_FILE = $(shell git rev-parse --absolute-git-dir 2>/dev/null)/release-overrides-$(VERSION).txt
 
+# measure2: the register rows waiting for a natural event (the next nightly,
+# the first deploy after a release) are measured by their own read-only
+# command once their day has come; passes are written as done.
+measure-due:
+	@python3 scripts/measure-due.py --run --write
+
 release:
 ifndef VERSION
 	$(error usage: make release VERSION=x.y.z)
@@ -213,6 +220,10 @@ endif
 	@# fix-guards review M2: a deliberate override is written into the
 	@# tag's annotation with the rows it went past, not only to stderr.
 	@rm -f "$(RELEASE_RECORD_FILE)"
+	@# measure2: a `measure-after` row whose day has come is measured first,
+	@# with the one read-only command it names; one that is not rewritten to
+	@# done blocks here (scripts/measure-due.py --run --write, then commit).
+	@python3 scripts/measure-due.py --run
 	@python3 .githooks/check-register.py --release $(VERSION) --record "$(RELEASE_RECORD_FILE)"
 	$(MAKE) host-drift RELEASE_RECORD="$(RELEASE_RECORD_FILE)"
 	# The scanners and the MSRV check have no side effect, so they run before

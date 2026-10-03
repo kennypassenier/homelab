@@ -451,6 +451,144 @@ fn the_release_gate_respects_measure_after_until_its_date() {
     assert!(err.contains("fix-1:"), "{err}");
 }
 
+/// A released row a test proves on the demo host (or a core test on the
+/// mock executor) closes as `proven`, never as measured: the gate accepts
+/// it only while every test it names exists, with "passed" and the run's
+/// duration said, at commit and at the release alike.
+///
+/// covers: fix-guards-10
+#[test]
+fn a_test_proven_row_closes_only_while_its_named_tests_exist() {
+    let case = "invariants: the bar stays in one row";
+    let good = format!(
+        "proven 2026-10-03: `fix_9_a` and `admin/web/test-e2e/invariants.e2e.js: \"{case}\"` passed on the demo host (41 s)"
+    );
+    let known = ["fix_9_a", case];
+    let commit = |status: &str, known: &[&str]| {
+        commit_check_with(
+            &changed(
+                "| fix-9 | x | built | doing: release 3.70.1 |",
+                &format!("| fix-9 | x | built | {status} |"),
+            ),
+            known,
+            None,
+        )
+    };
+    assert_eq!(commit(&good, &known).0, 0, "{}", commit(&good, &known).1);
+    // A named case that does not exist, either kind, is refused.
+    let (code, err) = commit(&good, &["fix_9_a"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("does not exist"), "{err}");
+    let (code, err) = commit(&good, &[case]);
+    assert_eq!(code, 1);
+    assert!(err.contains("`fix_9_a`"), "{err}");
+    // No test, no "passed", no duration, or a live claim: refused.
+    for bad in [
+        "proven 2026-10-03: the demo host showed it (41 s), passed",
+        "proven 2026-10-03: `fix_9_a` passed on the demo host",
+        "proven 2026-10-03: `fix_9_a` ran on the demo host (41 s)",
+        "proven 2026-10-03: `fix_9_a` passed and measured live (41 s)",
+    ] {
+        assert_eq!(commit(bad, &known).0, 1, "{bad} was accepted");
+    }
+    // The release gate: closed while the tests exist, listed once one is gone.
+    let register = format!("| fix-9 | a | b | {good} |\n");
+    let release = |known: &str| {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("REGISTER.md");
+        std::fs::write(&path, &register).unwrap();
+        let path_s = path.to_string_lossy().to_string();
+        run_check_register(
+            &[
+                "--release",
+                "3.71.0",
+                "--register",
+                &path_s,
+                "--today",
+                TODAY,
+                "--known",
+                known,
+            ],
+            dir.path(),
+            &[],
+        )
+    };
+    let (code, _, err) = release(&format!("fix_9_a,{case}"));
+    assert_eq!(code, 0, "{err}");
+    let (code, _, err) = release("fix_9_a");
+    assert_eq!(code, 1);
+    assert!(
+        err.contains("fix-9:") && err.contains("does not exist"),
+        "{err}"
+    );
+}
+
+/// `scripts/measure-due.py` (wired into `make release`): a `measure-after`
+/// row whose day has come is read with its one read-only command; a match
+/// of its `expect /…/` is written back as done, a command off the
+/// read-only list is never run, and a due row left unmeasured blocks.
+///
+/// covers: fix-guards-10
+#[test]
+fn measure_due_reads_a_due_row_with_its_own_read_only_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = dir.path().join("homelab");
+    std::fs::write(&fake, "#!/bin/sh\necho '{\"trigger\":\"nightly\"}'\n").unwrap();
+    Command::new("chmod").arg("+x").arg(&fake).status().unwrap();
+    let reg = dir.path().join("REGISTER.md");
+    let row = |status: &str| format!("| fix-9 | a | b | {status} |\n");
+    let run = |text: &str, today: &str| {
+        std::fs::write(&reg, text).unwrap();
+        let out = Command::new("python3")
+            .arg(repo_root().join("scripts/measure-due.py"))
+            .args(["--run", "--write", "--today", today, "--register"])
+            .arg(&reg)
+            .arg("--homelab")
+            .arg(&fake)
+            .env_remove("UNMEASURED_OK")
+            .output()
+            .unwrap();
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        (
+            out.status.code(),
+            text,
+            std::fs::read_to_string(&reg).unwrap(),
+        )
+    };
+    let waiting = row(
+        "measure-after 2026-10-04: `homelab snapshots stacks/x --json` shows the tag; expect /\"trigger\":\"nightly\"/",
+    );
+    // Before its day: nothing runs, nothing blocks.
+    let (code, text, after) = run(&waiting, "2026-10-03");
+    assert_eq!(code, Some(0), "{text}");
+    assert_eq!(after, waiting);
+    // On its day: read, matched, written as done.
+    let (code, text, after) = run(&waiting, "2026-10-04");
+    assert_eq!(code, Some(0), "{text}");
+    assert!(
+        after.contains("| done 2026-10-04: `homelab snapshots stacks/x --json` read"),
+        "{after}"
+    );
+    // A pattern the output lacks: fail, left as it was, blocks.
+    let missing = waiting.replace("nightly\"/", "manual\"/");
+    let (code, text, after) = run(&missing, "2026-10-04");
+    assert_eq!(code, Some(1), "{text}");
+    assert!(text.contains("fail:"), "{text}");
+    assert_eq!(after, missing);
+    // A command that writes is never run: needs eyes, blocks.
+    let writes = row("measure-after 2026-10-04: `homelab deploy stacks/x` then look; expect /ok/");
+    let (code, text, _) = run(&writes, "2026-10-04");
+    assert_eq!(code, Some(1), "{text}");
+    assert!(
+        text.contains("needs-eyes: its command is not on the read-only list"),
+        "{text}"
+    );
+}
+
 /// Review M2: an override is written where the tag's annotation reads it,
 /// with the rows it went past.
 ///

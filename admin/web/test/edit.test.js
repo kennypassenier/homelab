@@ -715,11 +715,14 @@ test("every stack's edit tabs and a new stack are palette commands, the open sta
   )({ fleet, themes: [], theme: null });
   // feat-shell-1/2: Deploy all changes joins New stack; each stack's
   // secrets and firewall live in its hub's Settings since 3.71.0.
+  // redesign-flows-1: the one Update flow over every app with a newer
+  // version follows them.
   assert.deepEqual(
     list.map((c) => c.id),
     [
       "edit:new-stack",
       "edit:deploy-all",
+      "edit:update-all",
       "edit:settings:media",
       "edit:secrets:media",
       "edit:firewall:media",
@@ -729,8 +732,9 @@ test("every stack's edit tabs and a new stack are palette commands, the open sta
     ],
   );
   assert.equal(list[1].href, "/stacks?deploy-all=1");
-  assert.equal(list[4].href, "/stacks/media/settings?section=firewall");
-  assert.equal(list[3].href, "/stacks/media/settings?section=secrets");
+  assert.equal(list[2].href, "/inbox?update=all");
+  assert.equal(list[5].href, "/stacks/media/settings?section=firewall");
+  assert.equal(list[4].href, "/stacks/media/settings?section=secrets");
   list[0].run?.();
   assert.equal(opened, 1);
 });

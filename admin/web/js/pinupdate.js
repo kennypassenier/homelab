@@ -15,14 +15,18 @@
 // A MAJOR version jump (the first number differs) is marked and needs an
 // explicit "I read the release notes for this major version" before
 // Confirm. Afterwards Roll back puts the old reference back the same way.
+//
+// redesign-flows-1 (3.71.0): the row's Update opens the one Update flow
+// (pages/update.js) with that app picked; this dialog stays as its Roll
+// back… (`openPinRollback`).
 
 import { act, onAct, send } from "./act.js";
 import { badge, openDialog, refusalCallout } from "./actui.js";
-import { fetchJson, h } from "./dom.js";
+import { h } from "./dom.js";
 import { diffBlocks } from "./editui.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { planView } from "./plan.js";
-import { majorJump, releaseUrl } from "./staleimages.js";
+import { updateHref } from "./updateflow.js";
 import { dialogControl } from "./drivable.js";
 
 /**
@@ -42,7 +46,7 @@ const TICK_LABEL = "I read the release notes for this major version";
  * @param {number} job
  * @returns {Promise<string>}
  */
-function jobEnd(job) {
+export function jobEnd(job) {
   return new Promise((resolve) => {
     /** @type {() => void} */
     let stop = () => {};
@@ -59,39 +63,52 @@ function jobEnd(job) {
 }
 
 /**
- * The Update of one stale-image row: reads the new reference first (the
- * registry's digest for the newer tag), then shows what changes.
+ * redesign-flows-1 (3.71.0, decision "one Update flow"): open the Update
+ * flow — the Inbox page's `?update=` view — from anywhere, through the
+ * app's own router (a new address plus the popstate it listens to).
+ * @param {string | null} [stack] null: every app with a newer version
+ * @param {string | null} [app] the stale row's `<app>/<service>` key
+ */
+export function openUpdateFlow(stack = null, app = null) {
+  history.pushState(null, "", updateHref(stack, app));
+  dispatchEvent(new PopStateEvent("popstate"));
+}
+
+/**
+ * The Update of one stale-image row (the Map's table): since 3.71.0 the
+ * one Update flow, with that app picked.
  * @param {StaleRow} row
  */
-export async function openPinUpdate(row) {
-  const status = h(
-    "p",
-    { class: "measured", role: "status" },
-    "Reading the newer image's digest from its registry…",
-  );
-  const body = h("div", { class: "act-body pin-update" }, status);
+export function openPinUpdate(row) {
+  openUpdateFlow(row.stack, row.key);
+}
+
+/**
+ * redesign-flows-1: the Update flow's Roll back… — the dialog that puts
+ * `move`'s earlier image back the same way (backup, commit, deploy).
+ * @param {Move} move the move as it ran (from → to)
+ */
+export function openPinRollback(move) {
   const d = openDialog({
-    title: `Update ${row.stack}/${row.container} to ${row.latest}`,
-    body: [body],
+    title: `Roll back ${move.stack}/${move.key} to ${move.from_version}`,
+    body: [h("div", { class: "act-body pin-update" })],
     id: "action-dialog",
   });
-  const q = new URLSearchParams({ key: row.key, latest: row.latest });
-  const r = await fetchJson(
-    `/data/stacks/${encodeURIComponent(row.stack)}/pin-target?${q}`,
-    "the newer image",
+  const body = /** @type {HTMLElement} */ (
+    d.dialog.querySelector(".pin-update")
   );
-  if (!d.dialog.open) return;
-  if (!r.ok) {
-    body.replaceChildren(refusalCallout(r.error), closeRow(d.close));
-    return;
-  }
-  /** @type {Move} */
-  const move = { stack: row.stack, ...r.body };
-  drawMove(d, body, move, {
-    major: majorJump(row.pinned, row.latest),
-    notes: releaseUrl(row.upstream, row.latest),
-    rollback: false,
-  });
+  void drawMove(
+    d,
+    body,
+    {
+      ...move,
+      from: move.to,
+      to: move.from,
+      from_version: move.to_version,
+      to_version: move.from_version,
+    },
+    { major: false, notes: null, rollback: true },
+  );
 }
 
 /** @param {() => void} close */

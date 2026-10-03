@@ -1,0 +1,192 @@
+/* redesign-flows (3.71.0): flowskit.js's shared pieces, loaded by the
+   Inbox and the Update flow alike: the explain note, the segmented
+   switch, the done mark, the stepper and the live step list (demos
+   flows/flows.css .fx-explain, .fx-steps, .fx-check). kp-themes tokens
+   only. */
+
+.fl-explain {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.fl-explain b {
+  color: var(--foreground);
+}
+.fl-explain__x {
+  all: unset;
+  cursor: pointer;
+  color: var(--muted-foreground);
+  padding-inline: 4px;
+}
+.fl-explain__x:focus-visible {
+  outline: 2px solid var(--ring);
+  border-radius: 4px;
+}
+.fl-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.fl-seg button {
+  font: inherit;
+  font-size: var(--kp-text-sm);
+  padding: 4px 12px;
+  border: 0;
+  background: var(--card);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fl-seg button + button {
+  border-inline-start: 1px solid var(--border);
+}
+.fl-seg button[aria-pressed="true"] {
+  background: var(--muted);
+  color: var(--foreground);
+  font-weight: 600;
+}
+.fl-seg button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.fl-done__mark {
+  inline-size: 64px;
+  block-size: 64px;
+}
+.fl-done__mark--ok {
+  color: var(--nx-ok, var(--success));
+}
+.fl-done__mark--bad {
+  color: var(--nx-bad, var(--destructive));
+}
+
+/* the flow stepper (flows.css .fx-steps) */
+.fl-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--n, 6), minmax(0, 1fr));
+  gap: 6px;
+  counter-reset: fl-s;
+}
+.fl-steps li {
+  display: grid;
+  gap: 6px;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+  counter-increment: fl-s;
+}
+.fl-steps li::before {
+  content: "";
+  block-size: 4px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+.fl-steps li span::before {
+  content: counter(fl-s) " · ";
+}
+.fl-steps li[data-s="done"]::before {
+  background: var(--nx-ok, var(--success));
+}
+.fl-steps li[data-s="now"]::before {
+  background: var(--primary);
+}
+.fl-steps li[data-s="now"] {
+  color: var(--foreground);
+  font-weight: 600;
+}
+@media (max-width: 40rem) {
+  .fl-steps li span {
+    visibility: hidden;
+    white-space: nowrap;
+  }
+  .fl-steps li[data-s="now"] span {
+    visibility: visible;
+  }
+}
+
+/* the live step list (flows.css .fx-check) */
+.fl-check {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.fl-check li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+}
+.fl-check__st {
+  inline-size: 18px;
+  block-size: 18px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.fl-check li[data-s="run"] .fl-check__st {
+  border-color: var(--primary);
+  border-inline-end-color: transparent;
+  animation: fl-rot 900ms linear infinite;
+}
+.fl-check li[data-s="ok"] .fl-check__st {
+  border-color: var(--nx-ok, var(--success));
+  background: var(--nx-ok, var(--success));
+  color: var(--card);
+}
+.fl-check li[data-s="ok"] .fl-check__st::after {
+  content: "✓";
+}
+.fl-check li[data-s="bad"] .fl-check__st {
+  border-color: var(--nx-bad, var(--destructive));
+  background: var(--nx-bad, var(--destructive));
+  color: var(--card);
+}
+.fl-check li[data-s="bad"] .fl-check__st::after {
+  content: "!";
+}
+.fl-check li[data-s="skip"] {
+  opacity: 0.6;
+}
+.fl-check li[data-s="skip"] .fl-check__st {
+  border-style: dashed;
+}
+.fl-check li small {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm);
+}
+.fl-check li time {
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+@keyframes fl-rot {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fl-check li[data-s="run"] .fl-check__st {
+    animation: none;
+  }
+}

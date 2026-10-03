@@ -1,0 +1,242 @@
+/* redesign-flows-1 (3.71.0, demo flows/update.html): the Update flow.
+   kp-themes tokens only; the stepper and the step list are flows.css. */
+
+.uf-panels {
+  display: grid;
+  gap: var(--nx-gap, 16px);
+}
+.uf-panels > [hidden] {
+  display: none;
+}
+.uf-panels .nx-card__body {
+  display: grid;
+  gap: 14px;
+}
+.uf-list {
+  display: grid;
+  gap: 10px;
+}
+.uf-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 4px 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  cursor: pointer;
+}
+.uf-item:has(input:checked) {
+  border-color: var(--primary);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+.uf-item input {
+  inline-size: 18px;
+  block-size: 18px;
+  margin: 0;
+}
+.uf-item small {
+  grid-column: 2 / -1;
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm);
+}
+.uf-item small a {
+  color: inherit;
+}
+.uf-ver {
+  font-family: var(--theme-font-mono, ui-monospace, monospace);
+  font-weight: 600;
+}
+.uf-ver s {
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+.uf-hint {
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.uf-foot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border-block-start: 1px solid var(--border);
+  padding-block-start: 14px;
+}
+.uf-foot > :first-child {
+  justify-self: start;
+}
+.uf-foot > :last-child {
+  justify-self: end;
+}
+/* kp's primary colour wins over its own :disabled look; a disabled step
+   button must read as one (the cursor and aria carry it too). */
+.uf-panels .kp-button:disabled {
+  opacity: 0.55;
+}
+.uf-foot__group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.uf-impact {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 12px;
+}
+.uf-tile {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+.uf-tile b {
+  font-size: var(--kp-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+.uf-sub {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: var(--background);
+  display: grid;
+  gap: 10px;
+}
+.uf-sub h3 {
+  margin: 0;
+}
+.uf-deps {
+  display: grid;
+  gap: 8px;
+}
+.uf-dep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--kp-text-sm);
+}
+.uf-dep__arrow {
+  color: var(--muted-foreground);
+}
+.uf-major {
+  display: grid;
+  gap: 10px;
+}
+.uf-major:empty {
+  display: none;
+}
+.uf-major__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+.uf-major__icon {
+  inline-size: 28px;
+  block-size: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  background: color-mix(in oklab, currentColor 15%, transparent);
+}
+.uf-major__text {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+.uf-major__text span {
+  font-size: var(--kp-text-sm);
+}
+.uf-major__ack {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.uf-fold > summary {
+  cursor: pointer;
+  padding-block: 4px;
+}
+.uf-diff {
+  display: grid;
+  gap: 8px;
+  padding-block-start: 8px;
+}
+.uf-log {
+  font-family: var(--theme-font-mono, ui-monospace, monospace);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-block-size: 7.5em;
+}
+.uf-done {
+  display: grid;
+  gap: 16px;
+}
+.uf-done[hidden] {
+  display: none;
+}
+.uf-done__hero {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  text-align: center;
+  padding-block: 18px 0;
+}
+.uf-done__hero h2 {
+  margin: 0;
+}
+.uf-done__text {
+  max-inline-size: 60ch;
+  margin: 0;
+  font-size: var(--kp-text-sm);
+}
+.uf-kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 18px;
+  margin: 0;
+  font-size: var(--kp-text-sm);
+}
+.uf-kv dt {
+  color: var(--muted-foreground);
+}
+.uf-kv dd {
+  margin: 0;
+}
+@media (max-width: 40rem) {
+  .uf-item {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .uf-item .uf-ver {
+    grid-column: 2;
+  }
+  .uf-major__item {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .uf-major__ack {
+    grid-column: 1 / -1;
+    white-space: normal;
+  }
+  .uf-foot {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .uf-foot > :last-child {
+    justify-self: stretch;
+  }
+}

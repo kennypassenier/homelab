@@ -69,8 +69,62 @@ async fn prom_query(Query(q): Query<PromQ>) -> Response {
     axum::Json(demo_metric_body(&q.query)).into_response()
 }
 
-async fn loki_query_range(Query(q): Query<PromQ>) -> Response {
+#[derive(serde::Deserialize)]
+struct LokiQ {
+    query: String,
+    #[serde(default)]
+    end: Option<String>,
+}
+
+async fn loki_query_range(Query(q): Query<LokiQ>) -> Response {
+    // redesign-flows-1: a log selector (`{stack="…"}`, the stack hub's Logs
+    // and the Update flow's "no new errors" check) answers made-up log
+    // streams; anything else is a metric query, as before.
+    if q.query.trim_start().starts_with("{stack=") {
+        let end_ns: u128 = q
+            .end
+            .as_deref()
+            .and_then(|e| e.parse().ok())
+            .unwrap_or(now_s() as u128 * 1_000_000_000);
+        return axum::Json(demo_log_streams(&q.query, end_ns)).into_response();
+    }
     axum::Json(demo_metric_body(&q.query)).into_response()
+}
+
+/// redesign-flows-1: one made-up `streams` answer for a log selector — a
+/// container's info lines every five minutes over the last hour and one
+/// warning forty minutes back, no errors (so the Update flow's log check
+/// passes on the demo host). Lines carry no real address or name.
+fn demo_log_streams(query: &str, end_ns: u128) -> serde_json::Value {
+    let container = query
+        .split("container_name=\"")
+        .nth(1)
+        .and_then(|r| r.split('"').next())
+        .unwrap_or("demo-app")
+        .to_string();
+    let min = 60u128 * 1_000_000_000;
+    let info: Vec<serde_json::Value> = (0..12u128)
+        .map(|i| {
+            serde_json::json!([
+                (end_ns - i * 5 * min - 30_000_000_000).to_string(),
+                format!("GET /healthz 200 in {} ms", 2 + i % 3)
+            ])
+        })
+        .collect();
+    let warn = vec![serde_json::json!([
+        (end_ns - 40 * min).to_string(),
+        "slow request: GET /api/items took 1.2 s"
+    ])];
+    let stream = |level: &str, values: Vec<serde_json::Value>| {
+        serde_json::json!({
+            "stream": { "container_name": &container, "detected_level": level, "stream": "stdout" },
+            "values": values,
+        })
+    };
+    serde_json::json!({
+        "status": "success",
+        "data": { "resultType": "streams", "result": [stream("info", info), stream("warn", warn)] },
+    })
 }
 
 /// Deliberately raw ids (fix-220's whole-screen invariant proves the

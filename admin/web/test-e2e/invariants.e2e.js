@@ -1648,8 +1648,10 @@ test("invariants: a stale-image row offers Update with the from/to versions, and
       assert.match(l.rel, /noopener/);
     }
 
-    // The row marked as a major jump: the dialog names from and to, warns,
-    // and keeps Confirm off until the release notes are ticked as read.
+    // redesign-flows-1: the row marked as a major jump opens the one Update
+    // flow with that app picked; its impact step names from and to, warns,
+    // and keeps "Back up and update" off until the release notes are
+    // ticked as read.
     const major = page.locator(
       'section[aria-label="Stale images"] button[data-pin-update][data-major]',
     );
@@ -1658,51 +1660,67 @@ test("invariants: a stale-image row offers Update with the from/to versions, and
     const to = (await major.first().getAttribute("data-to")) ?? "";
     assert.match(await major.first().innerText(), /Update to/);
     await major.first().click();
-    const dialog = page.locator("dialog#action-dialog[open]");
-    await dialog.waitFor({ timeout: 5000 });
-    const confirm = dialog.locator("button[data-pin-confirm]");
-    await confirm.waitFor({ timeout: 10000 });
-    const text = await dialog.innerText();
-    assert.ok(
-      text.includes(from),
-      `the dialog does not name the pinned ${from}`,
-    );
-    assert.ok(text.includes(to), `the dialog does not name the target ${to}`);
-    assert.match(text, /major/i);
-    const tick = dialog.getByLabel(
-      "I read the release notes for this major version",
-    );
-    assert.equal(await tick.isChecked(), false);
+    await page.waitForURL(/\/inbox\?update=[^&]+&app=/, { timeout: 5000 });
+    const items = page.locator("#page .uf-item");
+    await items.first().waitFor({ timeout: 15000 });
     assert.equal(
-      await confirm.isEnabled(),
+      await page.locator("#page .uf-item input:checked").count(),
+      1,
+      "only the row's own app starts ticked",
+    );
+    const see = page.locator("[data-drive=update-see-impact]");
+    await see.click();
+    const go = page.locator("[data-drive=update-go]");
+    const tick = page.locator("[data-drive=update-major-read]");
+    await tick.waitFor({ timeout: 5000 });
+    const text = await page.locator("#page").innerText();
+    assert.ok(text.includes(from), `the flow does not name the pinned ${from}`);
+    assert.ok(text.includes(to), `the flow does not name the target ${to}`);
+    assert.match(text, /is a major version/);
+    assert.equal(await tick.isChecked(), false);
+    // The file change is read first; the tick is still missing.
+    await page.waitForTimeout(1500);
+    assert.equal(
+      await go.isEnabled(),
       false,
-      "Confirm must stay off until the release notes are ticked",
+      "Back up and update must stay off until the release notes are ticked",
     );
     await tick.check();
-    assert.equal(
-      await confirm.isEnabled(),
-      true,
-      "the tick must enable Confirm",
+    await page.waitForFunction(
+      () =>
+        !(
+          /** @type {HTMLButtonElement | null} */ (
+            document.querySelector("[data-drive=update-go]")
+          )?.disabled ?? true
+        ),
+      null,
+      { timeout: 10000 },
     );
-    await page.keyboard.press("Escape");
-    await dialog.waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});
 
-    // A minor move asks no tick: Confirm is on at once.
+    // A minor move asks no tick: the button is on once the change is read.
+    await page.goto(`${BASE}/map`);
     const minor = page.locator(
       'section[aria-label="Stale images"] button[data-pin-update]:not([data-major])',
     );
-    assert.ok((await minor.count()) >= 1, "no minor-jump row in the demo");
+    await minor.first().waitFor({ timeout: 15000 });
     await minor.first().click();
-    await dialog.waitFor({ timeout: 5000 });
-    const confirm2 = dialog.locator("button[data-pin-confirm]");
-    await confirm2.waitFor({ timeout: 10000 });
-    assert.equal(
-      await dialog
-        .getByLabel("I read the release notes for this major version")
-        .count(),
-      0,
+    await page.locator("#page .uf-item").first().waitFor({ timeout: 15000 });
+    await page.locator("[data-drive=update-see-impact]").click();
+    await page.waitForFunction(
+      () =>
+        !(
+          /** @type {HTMLButtonElement | null} */ (
+            document.querySelector("[data-drive=update-go]")
+          )?.disabled ?? true
+        ),
+      null,
+      { timeout: 10000 },
     );
-    assert.equal(await confirm2.isEnabled(), true);
+    assert.equal(
+      await page.locator("[data-drive=update-major-read]").count(),
+      0,
+      "a minor move asks no release-notes tick",
+    );
   } finally {
     await browser.close();
   }
@@ -3250,13 +3268,18 @@ test("invariants: Ctrl K finds an action by intent, in any word order, and Enter
         `${q} → ${r.group}: ${r.label}`,
       );
     }
-    // Enter starts it: the action's own dialog opens (nothing runs yet).
+    // Enter starts it: redesign-flows-1, a person's Update is the one
+    // Update flow (nothing runs before its step 2's button).
     await first("update kp-soft");
     await page.keyboard.press("Enter");
-    const dialog = page.locator("dialog#action-dialog[open]");
-    await dialog.waitFor({ timeout: 5000 });
-    const title = await dialog.locator(".kp-dialog__title").first().innerText();
-    assert.match(title, /Update/, `the dialog that opened: ${title}`);
+    await page.waitForURL("**/inbox?update=kp-soft", { timeout: 5000 });
+    const title = await page.locator("#page h1").innerText();
+    assert.match(title, /^Update kp-soft/, `the flow that opened: ${title}`);
+    assert.equal(
+      await page.locator("#page .fl-steps li").count(),
+      6,
+      "the Update flow shows its six steps",
+    );
   } finally {
     await browser.close();
   }
@@ -3342,10 +3365,22 @@ test("invariants: the Inbox counter shows the exact number, never 9+, and equals
         width > 960
           ? page.locator("#nav a[data-area='inbox'] .nx-count")
           : page.locator(".nx-tabbar [data-area='inbox'] .nx-count");
-      assert.equal((await badge.innerText()).trim(), "12", `${width}px`);
-      const rows = await page.locator("#page .nx-inbox__row").count();
-      assert.equal(rows, 12, `${width}px: the Inbox shows ${rows} rows`);
-      assert.match(await page.title(), /^● 12 in the Inbox/);
+      // redesign-flows-2: the updates, setup, checks and Today sources
+      // add their rows to the twelve notices; the counter is the rows.
+      const rows = await page
+        .locator("#page .inbox-card .nx-inbox__row")
+        .count();
+      assert.ok(rows >= 12, `${width}px: the Inbox shows ${rows} rows`);
+      assert.equal(
+        (await badge.innerText()).trim(),
+        String(rows),
+        `${width}px: the counter is not the number of rows`,
+      );
+      assert.ok(
+        !/\+/.test(await badge.innerText()),
+        "the counter is never capped",
+      );
+      assert.match(await page.title(), new RegExp(`^● ${rows} in the Inbox`));
       await context.close();
     }
   } finally {
@@ -3918,6 +3953,269 @@ test("invariants: the Host page's actions are grouped by intent as described til
       await dialog.isVisible(),
       "the tile did not open the action dialog",
     );
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── redesign-flows: the Inbox with all its sources, the one Update flow,
+// Help and the first-use tour (redesign 3.71, approved by Kenny
+// 2026-10-03: demos flows/inbox.html, flows/update.html, flows/shell.js) ──
+
+test("invariants: every Inbox row says what and why and carries its fix, and a plain click on a kind shows only those", async () => {
+  const browser = await chromium.launch();
+  try {
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 1000 },
+      });
+      const page = await freshPage(context);
+      await page.goto(`${BASE}/inbox`);
+      // The demo host: an Updates row (its stale images), a Setup row
+      // (stacks without a sealed env) and Today's made-up item.
+      const update = page.locator(
+        "#page .inbox-card .nx-inbox__row[data-kind=update]",
+      );
+      await update.waitFor({ timeout: 20000 });
+      const setup = page.locator(
+        "#page .inbox-card .nx-inbox__row[data-kind=setup]",
+      );
+      await setup.waitFor({ timeout: 5000 });
+      assert.match(
+        await update.locator("strong").first().innerText(),
+        /^\d+ apps? (has|have) a newer version$/,
+      );
+      assert.ok(
+        (await update.locator(".nx-inbox__what > span").first().innerText())
+          .length > 10,
+        "the Updates row says why",
+      );
+      assert.match(
+        await update.locator(".nx-inbox__acts a").last().innerText(),
+        /^Review and update/,
+      );
+      assert.equal(
+        await setup.locator(".nx-inbox__acts button").last().innerText(),
+        "Push the envs…",
+      );
+      // Counter = rows, here as on every page.
+      const rows = await page
+        .locator("#page .inbox-card .nx-inbox__row")
+        .count();
+      const badge =
+        width > 960
+          ? page.locator("#nav a[data-area='inbox'] .nx-count")
+          : page.locator(".nx-tabbar [data-area='inbox'] .nx-count");
+      assert.equal((await badge.innerText()).trim(), String(rows));
+      // A plain click on Setup shows only the Setup row; again shows all.
+      const chip = page.locator("#page .nx-tb button[data-value=setup]");
+      await chip.click();
+      assert.equal(
+        await page.locator("#page .inbox-card .nx-inbox__row:visible").count(),
+        1,
+      );
+      assert.match(
+        await page.locator("#page .inbox-shown").innerText(),
+        new RegExp(`^1 of ${rows} shown$`),
+      );
+      await chip.click();
+      assert.equal(
+        await page.locator("#page .inbox-card .nx-inbox__row").count(),
+        rows,
+      );
+      // The counter on another page is the same number.
+      await page.goto(`${BASE}/stacks`);
+      await page.waitForTimeout(2500);
+      assert.equal(
+        (await badge.innerText()).trim(),
+        String(rows),
+        `${width}px: the counter on Stacks is not the Inbox's row count`,
+      );
+      const sideways = await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      );
+      assert.ok(sideways <= 0, `${width}px scrolls sideways by ${sideways}`);
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and Done from the Inbox, and nothing runs before step 2's button", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/inbox`);
+    const update = page.locator(
+      "#page .inbox-card .nx-inbox__row[data-kind=update]",
+    );
+    await update.waitFor({ timeout: 20000 });
+    /** @type {string[]} */
+    const posts = [];
+    page.on("request", (r) => {
+      if (r.method() === "POST") posts.push(new URL(r.url()).pathname);
+    });
+    await update.locator(".nx-inbox__acts a").last().click();
+    // `?update=all`, or the one stack when only one has newer apps.
+    await page.waitForURL(/\/inbox\?update=/, { timeout: 5000 });
+    const now = () =>
+      page.locator("#page .fl-steps li[data-s=now] span").innerText();
+    assert.equal(await now(), "See");
+    await page.locator("#page .uf-item").first().waitFor({ timeout: 15000 });
+    // A plain click on a row leaves it out, again includes it.
+    const first = page.locator("#page .uf-item input").first();
+    await page
+      .locator("#page .uf-item")
+      .first()
+      .click({ position: { x: 200, y: 12 } });
+    assert.equal(await first.isChecked(), false);
+    await page
+      .locator("#page .uf-item")
+      .first()
+      .click({ position: { x: 200, y: 12 } });
+    assert.equal(await first.isChecked(), true);
+    await page.locator("[data-drive=update-see-impact]").click();
+    assert.equal(await now(), "Impact");
+    const tiles = await page.locator("#page .uf-tile b").allInnerTexts();
+    assert.deepEqual(
+      tiles.map((t) => t.toLowerCase()),
+      ["downtime", "restarts", "safety net", "undo later"],
+    );
+    await page
+      .locator("#page .uf-deps .uf-dep, #page .uf-deps .uf-hint")
+      .first()
+      .waitFor({ timeout: 5000 });
+    // Only plans were asked so far: nothing ran.
+    assert.deepEqual(
+      posts.filter((p) => !p.endsWith("/plan")),
+      [],
+      `something ran before the button: ${posts.join(", ")}`,
+    );
+    for (const t of await page.locator("[data-drive=update-major-read]").all())
+      await t.check();
+    const go = page.locator("[data-drive=update-go]");
+    await page.waitForFunction(
+      () =>
+        !(
+          /** @type {HTMLButtonElement | null} */ (
+            document.querySelector("[data-drive=update-go]")
+          )?.disabled ?? true
+        ),
+      null,
+      { timeout: 10000 },
+    );
+    assert.match(await go.innerText(), /^Back up and update/);
+    await go.click();
+    await page.locator("#page .fl-check").waitFor({ timeout: 5000 });
+    assert.equal(await now(), "Back up");
+    // Back up first: the backup is the first thing sent.
+    await page.waitForTimeout(500);
+    assert.match(posts.find((p) => !p.endsWith("/plan")) ?? "", /\/backup$/);
+    await page
+      .locator("#page .uf-done h2")
+      .waitFor({ state: "visible", timeout: 120000 });
+    assert.equal(await now(), "Done");
+    assert.match(
+      await page.locator("#page .uf-done h2").innerText(),
+      /^Updated/,
+    );
+    const states = await page
+      .locator("#page .fl-check li")
+      .evaluateAll((l) => l.map((x) => x.getAttribute("data-s")));
+    assert.ok(
+      states.every((s) => s === "ok" || s === "skip"),
+      `a step did not pass: ${states.join(", ")}`,
+    );
+    assert.ok(
+      (await page.locator("[data-drive=update-roll-back]").count()) >= 1,
+      "the result offers Roll back…",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: ? opens Help with the six areas, the words and the keys, and its tour walks six steps on desktop and phone", async () => {
+  const browser = await chromium.launch();
+  try {
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 900 },
+      });
+      const page = await freshPage(context);
+      await page.goto(`${BASE}/apps`);
+      await page.waitForTimeout(800);
+      await page.keyboard.press("?");
+      const help = page.locator("dialog#shortcuts[open]");
+      await help.waitFor({ timeout: 3000 });
+      const text = await help.innerText();
+      for (const w of [
+        "Where things live",
+        "Apps",
+        "Inbox",
+        "Stacks",
+        "Activity",
+        "Backups",
+        "System",
+        "Words",
+        "Stack",
+        "App",
+        "Deploy",
+        "Update",
+        "Back up / snapshot",
+        "Restore",
+        "Secret",
+        "Job",
+        "Ctrl K",
+      ])
+        assert.ok(text.includes(w), `${width}px: Help does not say ${w}`);
+      await help.getByText("Take the 1-minute tour").click();
+      const tour = page.locator(".tour");
+      /** @type {string[]} */
+      const titles = [];
+      for (let i = 0; i < 6; i++) {
+        await tour.waitFor({ timeout: 3000 });
+        titles.push(await tour.locator("h3").innerText());
+        assert.equal(
+          await tour.locator("footer span").first().innerText(),
+          `${i + 1} of 6`,
+        );
+        assert.equal(
+          await page.locator(".tour-target").count(),
+          1,
+          `${width}px: step ${i + 1} points at nothing`,
+        );
+        const box = await tour.boundingBox();
+        assert.ok(
+          box && box.x >= 0 && box.x + box.width <= width + 1,
+          `${width}px: the tour card leaves the screen`,
+        );
+        await tour
+          .getByRole("button", { name: i === 5 ? "Done" : "Next" })
+          .click();
+      }
+      assert.deepEqual(titles, [
+        "One box for everything",
+        "Inbox",
+        "Stacks",
+        "Activity",
+        "Backups",
+        "System",
+      ]);
+      assert.equal(await page.locator(".tour").count(), 0);
+      assert.equal(
+        await page.evaluate(() => localStorage.getItem("homelab-toured")),
+        "1",
+        "the tour remembers it was seen",
+      );
+      await context.close();
+    }
   } finally {
     await browser.close();
   }

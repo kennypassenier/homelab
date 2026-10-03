@@ -16,21 +16,70 @@ fn script() -> PathBuf {
         .join(".githooks/check-register.py")
 }
 
-/// Run the commit mode over a constructed staged diff; (exit code, stderr).
+/// Run the commit mode over a constructed staged diff, every test name
+/// these cases cite existing; (exit code, stderr).
 fn commit_check(diff: &str) -> (i32, String) {
+    commit_check_with(
+        diff,
+        &["fix_9_a", "fix_9_b", "fix_300_the_thing_holds"],
+        None,
+    )
+}
+
+/// The commit mode with the test names that exist and an INVARIANTS.md.
+fn commit_check_with(diff: &str, known: &[&str], invariants: Option<&str>) -> (i32, String) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("staged.diff");
     std::fs::write(&path, diff).unwrap();
-    let out = Command::new("python3")
-        .arg(script())
+    let mut cmd = Command::new("python3");
+    cmd.arg(script())
         .arg("--diff")
         .arg(&path)
-        .output()
-        .expect("python3 runs the register gate");
+        .arg("--known")
+        .arg(known.join(","));
+    if let Some(doc) = invariants {
+        let inv = dir.path().join("INVARIANTS.md");
+        std::fs::write(&inv, doc).unwrap();
+        cmd.arg("--invariants").arg(&inv);
+    }
+    let out = cmd.output().expect("python3 runs the register gate");
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stderr).to_string(),
     )
+}
+
+/// covers: fix-guards-1
+#[test]
+fn the_commit_gate_refuses_a_row_naming_a_test_that_does_not_exist() {
+    let row = "| fix-9 | x | Tests `fix_9_renamed_since` failed first | doing: release 3.71.0 |";
+    let (code, err) = commit_check_with(&added(row), &["fix_9_the_real_one"], None);
+    assert_eq!(code, 1);
+    assert!(err.contains("fix_9_renamed_since"), "{err}");
+    assert_eq!(
+        commit_check_with(&added(row), &["fix_9_renamed_since"], None).0,
+        0
+    );
+    let gone = "| fix-9 | x | Tests `fix_9_renamed_since` (gone: removed, abc123) failed first | doing: release 3.71.0 |";
+    assert_eq!(commit_check_with(&added(gone), &[], None).0, 0);
+}
+
+/// covers: fix-guards-3
+#[test]
+fn the_commit_gate_refuses_a_staged_invariants_table_with_broken_numbering() {
+    let head = "| # | Invariant | Kenny said | Test(s) |\n|---|---|---|---|\n";
+    let collided = format!("{head}| 1 | a | b | `t` |\n| 2 | a | b | `t` |\n| 2 | c | d | `t` |\n");
+    let (code, err) = commit_check_with("", &[], Some(&collided));
+    assert_eq!(code, 1);
+    assert!(err.contains("row 2 appears twice"), "{err}");
+    let split = format!("{head}| 1 | a | b | `t` |\n\n| 2 | a | b | `t` |\n");
+    assert!(
+        commit_check_with("", &[], Some(&split))
+            .1
+            .contains("table is broken")
+    );
+    let good = format!("{head}| 1 | a | b | `t` |\n| 2 | a | b | `t` |\n");
+    assert_eq!(commit_check_with("", &[], Some(&good)).0, 0);
 }
 
 /// Run the release mode over a constructed register; (exit code, stderr).

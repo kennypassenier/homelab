@@ -31,6 +31,7 @@ import {
 import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
+import { viaForm } from "../drivable.js";
 
 /** Seconds between two readings of the container list. */
 const GUESTS_EVERY_S = 30;
@@ -144,6 +145,8 @@ export function mount(root, ctx) {
     { type: "button", class: "kp-button", id: "host-template-build" },
     "Build a template…",
   );
+  // fix-239: Live view reaches it as `homelab ui open template-build`.
+  viaForm(tplBuild, "template-build");
   tplBuild.addEventListener(
     "click",
     () => void openAction("_host", "template-build"),

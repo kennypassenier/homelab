@@ -33,6 +33,37 @@ import { formatDateTime } from "../format.js";
 import { mountJobPanel } from "../jobpanel.js";
 import { listen } from "../store.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
+import { declare, drivable, viaForm } from "../drivable.js";
+
+// fix-239: Live view reaches every control here: host.toml's rows through
+// the host-settings form (`homelab ui open host-settings`, `row edit
+// <key>`), the rest by `homelab ui click …`.
+const ISSUE_TOKEN = declare({
+  id: "issue-token",
+  page: "settings",
+  opens: "dialog",
+  what: "open the Issue a new token dialog",
+});
+const REVOKE_TOKEN = declare({
+  id: "revoke-token",
+  page: "settings",
+  opens: "dialog",
+  row: "<token name>",
+  what: "ask to revoke one machine's token",
+});
+const FETCH_NOW = declare({
+  id: "fetch-now",
+  page: "settings",
+  opens: "run",
+  what: "fetch the repository's working copy now",
+});
+const REPO_CHOICE = declare({
+  id: "repo-choice",
+  page: "settings",
+  opens: "run",
+  row: "push|rebase|drop",
+  what: "resolve unpushed commits: push them, rebase and push, or drop them",
+});
 
 /**
  * @typedef {import("../editforms.js").HostField} HostField
@@ -83,6 +114,7 @@ export function mount(root) {
     },
     "Issue token",
   );
+  drivable(issueBtn, ISSUE_TOKEN);
   const t = tableBlock({
     remember: "host-settings",
     caption: "host.toml on pve",
@@ -186,6 +218,8 @@ export function mount(root) {
       { type: "button", class: "kp-button kp-button--ghost" },
       "Discard",
     );
+    viaForm(review, "host-settings");
+    viaForm(drop, "host-settings");
     review.addEventListener("click", () => openReview());
     drop.addEventListener("click", () => {
       changes.clear();
@@ -223,6 +257,7 @@ export function mount(root) {
           },
           pending ? "Change again" : "Edit",
         );
+        viaForm(edit, "host-settings");
         if (!editable(f)) edit.disabled = true;
         edit.addEventListener("click", () => openKey(f));
         const value = pending
@@ -300,6 +335,7 @@ export function mount(root) {
           },
           "Revoke",
         );
+        drivable(revoke, REVOKE_TOKEN, v.name);
         if (v.name === "legacy") {
           revoke.disabled = true;
           revoke.title =
@@ -908,6 +944,7 @@ function drawRepo(box, v, reload) {
     { type: "button", class: "kp-button", id: "repo-sync" },
     "Fetch now",
   );
+  drivable(sync, FETCH_NOW);
   sync.addEventListener("click", async () => {
     sync.disabled = true;
     const x = await send(
@@ -999,6 +1036,7 @@ function resolveButton(choice, reload) {
     },
     { push: "Push", rebase: "Rebase and push", drop: "Drop them…" }[choice],
   );
+  drivable(b, REPO_CHOICE, choice);
   b.addEventListener("click", async () => {
     if (choice === "drop") {
       const typed = h("input", {

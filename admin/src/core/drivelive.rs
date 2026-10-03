@@ -195,6 +195,16 @@ pub fn describe(step: &UiStep, st: &DriveState) -> String {
                 format!("select {} in the fleet table", stacks.join(", "))
             }
         }
+        UiStep::Click { control, row } => {
+            let on = row
+                .as_deref()
+                .map(|r| format!(" on row {r}"))
+                .unwrap_or_default();
+            match st.page_dialog.as_ref() {
+                Some(d) if st.form.is_none() => format!("click {control} in {}", d.title),
+                _ => format!("click {control}{on}"),
+            }
+        }
         UiStep::Close => match title {
             Some(t) => format!("close {t}"),
             None => "close the dialog".into(),
@@ -404,6 +414,7 @@ impl DriveState {
                 self.announce = None;
                 self.plan = None;
                 self.form = None;
+                self.page_dialog = None;
                 self.active = false;
                 self.seq += 1;
                 Ok(())

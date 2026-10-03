@@ -19,6 +19,7 @@
 // A simulated "Claude" cursor glides to that target during the countdown,
 // clicks at 0 and sits in a field while Claude types (drivecursor.js).
 
+import { send } from "./act.js";
 import { openAction } from "./actiondialog.js";
 import { notify } from "./actui.js";
 import { fetchJson, h } from "./dom.js";
@@ -35,6 +36,7 @@ import {
 import { makeCursor } from "./drivecursor.js";
 import { REDUCED_TYPE_MS, typingDelays } from "./drivepace.js";
 import { openDriven } from "./editdrive.js";
+import { takeStep, topDialog } from "./pagedrive.js";
 import {
   FOLLOW_KEY,
   badgeText,
@@ -54,6 +56,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const reducedMotion = () =>
   !!globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 const now = () => Date.now() / 1000;
+
+/**
+ * fix-239: this page load's own name, for claiming a page-control step: of
+ * several tabs that follow, exactly one clicks (the server lets the first
+ * claim win, and keeps a page-level dialog's later steps with it).
+ */
+const TAB =
+  globalThis.crypto?.randomUUID?.() ??
+  `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 /** sessionStorage: per tab, kept over a reload; absent in a private window. */
 function storage() {
@@ -78,6 +89,13 @@ export function mountFollow(region, ctx) {
   /** @type {import("./actiondialog.js").ActionController |
    *   import("./editdrive.js").DrivenControl | null} */
   let ctl = null;
+  /** fix-239: the page-level dialog this tab opened for Claude, if any. */
+  /** @type {HTMLDialogElement | null} */
+  let pageDlg = null;
+  const closePageDlg = () => {
+    pageDlg?.close();
+    pageDlg = null;
+  };
   let queue = Promise.resolve();
 
   const toggle = h("input", {
@@ -138,7 +156,7 @@ export function mountFollow(region, ctx) {
   const paintLive = () => {
     const on = following && !!state && stillDriving(state, now());
     const v = on ? announceView(state, clock.left(), on) : null;
-    const d = ctl?.dialog;
+    const d = ctl?.dialog ?? pageDlg;
     const inDialog = !!d && !!dialogBar && d.contains(dialogBar.el);
     pageBar.paint(inDialog ? null : v, "");
     if (inDialog) dialogBar?.paint(v, idleText());
@@ -166,7 +184,7 @@ export function mountFollow(region, ctx) {
   /** A strip inside a driven dialog: a modal dialog makes the page's own
    * toggle unreachable, so the way out is in the dialog itself. */
   const banner = () => {
-    const d = ctl?.dialog;
+    const d = ctl?.dialog ?? pageDlg;
     if (!d) return;
     let b = /** @type {HTMLElement | null} */ (
       d.querySelector(".drive-banner")
@@ -214,6 +232,7 @@ export function mountFollow(region, ctx) {
         // last dialog was still open on screen. A page change always
         // closes the dialog first, the way a person would.
         ctl?.close();
+        closePageDlg();
         ctx.navigate(op.path);
         await sleep(250);
         return;
@@ -326,7 +345,48 @@ export function mountFollow(region, ctx) {
       case "close":
         ctl?.close();
         ctl = null;
+        closePageDlg();
         return;
+      case "tab": {
+        // fix-239: a page control (drivable.js). Only the tab the server
+        // lets claim this step takes it, so a click that starts work (a
+        // stale image's backup, commit and deploy) happens exactly once
+        // however many tabs follow; the others only mark it.
+        const claim = await send(
+          "POST",
+          "/data/drive/claim",
+          { seq: s.seq, tab: TAB },
+          "claiming Claude's step",
+        );
+        if (!claim.ok) {
+          await flash(findTarget(op.step, ctl, s), "drive-press", 420);
+          return;
+        }
+        const a = await takeStep(
+          /** @type {import("./pagedrive.js").TabStep} */ (op.step),
+          ctx.navigate,
+          async (el) => {
+            cursor.sit(el);
+            await flash(el, "drive-press", 420);
+          },
+        );
+        const opened = a.dialog ? topDialog() : null;
+        if (opened && opened !== pageDlg) {
+          opened.addEventListener("close", () => {
+            if (pageDlg === opened) pageDlg = null;
+          });
+        }
+        pageDlg = opened;
+        // Pause and Stop inside it: a modal dialog covers the page's bar.
+        banner();
+        await send(
+          "POST",
+          "/data/drive/taken",
+          { seq: s.seq, tab: TAB, ...a },
+          "answering Claude's step",
+        );
+        return;
+      }
       case "note":
         notify(`Claude's step was refused: ${op.refusal.why}.`, "warning");
         return;

@@ -9,6 +9,18 @@
 import { send } from "../act.js";
 import { errorBox, fetchJson, h } from "../dom.js";
 import { current, subscribe } from "../store.js";
+import { declare, drivable } from "../drivable.js";
+
+// fix-239: Live view reaches every secret's Reveal (`homelab ui click
+// reveal-secret <stack>/<secret>`); changing one is the catalog form
+// `homelab ui open change-secret <stack>`.
+const REVEAL_SECRET = declare({
+  id: "reveal-secret",
+  page: "secrets",
+  opens: "run",
+  row: "<stack>/<secret>",
+  what: "show one secret's value (once more hides it again)",
+});
 
 /**
  * @param {any} secret a `CurrentLatchFile` row or an app name
@@ -42,6 +54,11 @@ function secretRow(stack, kind, secret) {
       "data-action": "reveal-secret",
     },
     "Reveal",
+  );
+  drivable(
+    revealBtn,
+    REVEAL_SECRET,
+    `${stack}/${kind === "env" ? `${secret}/.env` : secret.dest}`,
   );
   revealBtn.addEventListener("click", async () => {
     if (revealBtn.dataset.revealed === "1") {

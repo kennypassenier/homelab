@@ -26,6 +26,7 @@ import { diffBlocks } from "../editui.js";
 import { applySummary } from "../parity.js";
 import { fileViews } from "../plan.js";
 import { stackHref } from "../router.js";
+import { viaForm } from "../drivable.js";
 
 /** A handful of skeleton rows shown the moment the section opens, so there
  * is never a blank body while the first plan read is in flight — the same
@@ -225,6 +226,8 @@ export function mount(root) {
     setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
   };
   read.addEventListener("click", () => void load().catch(() => {}));
+  // fix-239: Live view reaches it as `homelab ui open apply`.
+  viaForm(go, "apply");
   go.addEventListener("click", () => void openAction("_host", "apply"));
   void load().catch(() => {});
   return () => abort.abort();

@@ -37,6 +37,36 @@ import {
   dataTable,
 } from "/static/kp/js/datatable.js";
 import { attachSwitches, clearError, showError } from "/static/kp/js/forms.js";
+import { declare, dialogControl, drivable } from "../drivable.js";
+
+// fix-239: Live view reaches every schedule control (`homelab ui click …`).
+const NEW_SCHEDULE = declare({
+  id: "new-schedule",
+  page: "schedules",
+  opens: "dialog",
+  what: "open the New schedule dialog",
+});
+const EDIT_SCHEDULE = declare({
+  id: "edit-schedule",
+  page: "schedules",
+  opens: "dialog",
+  row: "<schedule id>",
+  what: "open one schedule's Edit dialog",
+});
+const DELETE_SCHEDULE = declare({
+  id: "delete-schedule",
+  page: "schedules",
+  opens: "dialog",
+  row: "<schedule id>",
+  what: "ask to delete one schedule (its dialog's Delete deletes it)",
+});
+const TOGGLE_SCHEDULE = declare({
+  id: "toggle-schedule",
+  page: "schedules",
+  opens: "run",
+  row: "<schedule id>",
+  what: "turn one schedule on or off",
+});
 
 /**
  * @param {HTMLElement} root
@@ -51,6 +81,7 @@ export function mount(root) {
     { type: "button", class: "kp-button kp-button--primary", id: "sched-new" },
     "New schedule",
   );
+  drivable(add, NEW_SCHEDULE);
   const t = tableBlock({
     remember: "schedules",
     caption: "Schedules",
@@ -99,6 +130,7 @@ export function mount(root) {
           "data-toggle": r.id,
         });
         sw.checked = r.enabled;
+        drivable(sw, TOGGLE_SCHEDULE, r.id);
         const edit = h(
           "button",
           {
@@ -108,6 +140,7 @@ export function mount(root) {
           },
           "Edit",
         );
+        drivable(edit, EDIT_SCHEDULE, r.id);
         const del = h(
           "button",
           {
@@ -117,6 +150,7 @@ export function mount(root) {
           },
           "Delete",
         );
+        drivable(del, DELETE_SCHEDULE, r.id);
         return h(
           "tr",
           { "data-schedule": r.id, "data-kp-row-key": r.id },
@@ -224,6 +258,7 @@ async function confirmDelete(s) {
     },
     "Delete",
   );
+  dialogControl(yes, "delete");
   const d = openDialog({
     title: "Delete this schedule?",
     description: `${actionLabel(s.action)} on ${s.stack === "_host" ? "the host" : s.stack}. Jobs it already ran stay in the Jobs list.`,
@@ -353,6 +388,7 @@ async function openScheduleForm(existing) {
     { type: "button", class: "kp-button kp-button--primary", id: "sched-save" },
     existing ? "Save" : "Create",
   );
+  dialogControl(save, "save");
   /** @type {Map<string, HTMLInputElement | HTMLSelectElement>} */
   let argInputs = new Map();
 

@@ -37,13 +37,35 @@ use super::actions::{Actions, Clock, HostPort, Origin, PauseGate, Publish};
 use super::edit::{self as ed, EditCtx};
 use super::host_link::Shared;
 use crate::core::actions::{self as act, ActionKind, Arg, Refusal};
-use crate::core::drive::{Applied, Ctx, DriveState, Effect, Family, JobRef, Sources, TabCaps};
+use crate::core::drive::{
+    Applied, Ctx, DriveState, Effect, Family, JobRef, Sources, TabAnswer, TabCaps,
+};
 use crate::core::driveedit::{self, EditCall, EditKind};
 use crate::core::drivelive::{self, Announce, Control};
 
 /// fix-185 (`homelab ui reload`): how long the driver waits for the driven
 /// tab to re-attach reporting the client's own version before giving up.
 pub const RELOAD_WAIT: Duration = Duration::from_secs(20);
+
+/// fix-239: how long a page-control step waits for the tab that follows to
+/// claim it, take it and answer (going to the control's own page and
+/// waiting for its rows included).
+pub const TAB_WAIT: Duration = Duration::from_secs(15);
+
+/// fix-239: the page-control step being taken now, as the tabs see it.
+#[derive(Default)]
+struct TabTurn {
+    /// The step's `seq`; a claim or an answer for another is refused.
+    seq: u64,
+    /// A step waits for a tab now.
+    open: bool,
+    /// The tab that claimed it: the only one that clicks.
+    claimed: Option<String>,
+    /// The tab holding the page-level dialog the last click opened: the
+    /// steps inside it are its alone.
+    holder: Option<String>,
+    answer: Option<TabAnswer>,
+}
 
 /// Live view's timing: how long a step is announced, and how long a paused
 /// step waits for Continue before it fails.
@@ -90,6 +112,8 @@ struct Inner {
     announced: AtomicU64,
     /// Who pressed Continue last, for the CLI's note.
     continued_by: Mutex<Option<String>>,
+    /// fix-239: the page-control step a tab takes now.
+    tab_turn: Mutex<TabTurn>,
 }
 
 #[derive(Clone)]
@@ -124,6 +148,7 @@ impl Driver {
                 deadline: Mutex::new(None),
                 announced: AtomicU64::new(0),
                 continued_by: Mutex::new(None),
+                tab_turn: Mutex::new(TabTurn::default()),
             }),
         }
     }
@@ -625,6 +650,7 @@ impl Driver {
             Ok(applied) => applied,
             Err(r) => Err(r),
         };
+        let mut published = false;
         let refusal = match applied {
             Err(r) => {
                 tracing::info!(by, step = step.verb(), why = %r.why, "a driven step was refused");
@@ -640,10 +666,20 @@ impl Driver {
                 Effect::Run(args) => self.run(by, *args).await,
                 Effect::Edit(call) => self.edit_call(by, call).await.or(held),
                 Effect::Reload => self.reload(client_version).await.or(held),
+                Effect::Tab => {
+                    published = true;
+                    self.tab_step(&step, hold).await.or(held)
+                }
             },
         };
         tracing::info!(by, step = step.verb(), "a driven step was applied");
-        self.publish(&step, true, refusal.as_ref());
+        if published {
+            // The step itself went out before the tab took it; what it
+            // changed (the page, the dialog) goes out now, as a state.
+            self.publish_live("control");
+        } else {
+            self.publish(&step, true, refusal.as_ref());
+        }
         reply(refusal.as_ref(), &self.snapshot())
     }
 
@@ -1010,6 +1046,121 @@ impl Driver {
         }
     }
 
+    /// fix-239: a page-control step. The step goes to every tab; the first
+    /// that follows claims it ([`Driver::claim`]) and takes it, the others
+    /// only mark it; its answer ([`Driver::taken`]) moves the shared state
+    /// (the page, the page-level dialog) and says whether it happened.
+    /// `Some`: why not, or that no tab answered within [`TAB_WAIT`].
+    async fn tab_step(&self, step: &UiStep, hold: Hold<'_>) -> Option<Refusal> {
+        let seq = self.lock().seq;
+        {
+            let mut t = self.tab_turn();
+            t.seq = seq;
+            t.open = true;
+            t.claimed = None;
+            t.answer = None;
+        }
+        hold(
+            UI_RELAY_WAIT_S + TAB_WAIT.as_secs(),
+            Some(format!(
+                "the tab in Live view takes `ui {}` itself",
+                step.verb()
+            )),
+        );
+        self.publish(step, true, None);
+        let deadline = Instant::now() + TAB_WAIT;
+        let answer = loop {
+            let woken = self.inner.wake.notified();
+            tokio::pin!(woken);
+            woken.as_mut().enable();
+            if let Some(a) = self.tab_turn().answer.take() {
+                break Some(a);
+            }
+            if Instant::now() >= deadline {
+                break None;
+            }
+            tokio::select! {
+                _ = &mut woken => {}
+                _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+            }
+        };
+        let claimed = {
+            let mut t = self.tab_turn();
+            t.open = false;
+            t.claimed.take()
+        };
+        let Some(a) = answer else {
+            let why = if claimed.is_some() {
+                format!(
+                    "the tab that took it did not answer within {} s",
+                    TAB_WAIT.as_secs()
+                )
+            } else {
+                format!(
+                    "no dashboard tab in Live view took it within {} s: a page's own control is clicked by the tab itself",
+                    TAB_WAIT.as_secs()
+                )
+            };
+            return Some(Refusal::new(
+                format!("ui {}", step.verb()),
+                why,
+                "turn Live view on in a dashboard tab (the switch at the top of every page), or `homelab ui reload` an older tab, then send the step again",
+            ));
+        };
+        let refusal = self.lock().taken(step, &a);
+        self.tab_turn().holder = a.dialog.is_some().then_some(claimed).flatten();
+        refusal
+    }
+
+    fn tab_turn(&self) -> std::sync::MutexGuard<'_, TabTurn> {
+        self.inner
+            .tab_turn
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// fix-239: a tab asks to take page-control step `seq`. The first claim
+    /// wins; while a page-level dialog is open only the tab holding it may.
+    pub fn claim(&self, seq: u64, tab: &str) -> Result<(), Refusal> {
+        let dialog_open = self.lock().page_dialog.is_some();
+        let mut t = self.tab_turn();
+        let refuse = |why: &str| {
+            Err(Refusal::new(
+                "claim",
+                why,
+                "another tab takes this step; this one only shows it",
+            ))
+        };
+        if !t.open || t.seq != seq {
+            return refuse("no page-control step waits at this seq");
+        }
+        if t.claimed.is_some() {
+            return refuse("another tab claimed it first");
+        }
+        if dialog_open && t.holder.as_deref().is_some_and(|h| h != tab) {
+            return refuse("the dialog it acts in is open in another tab");
+        }
+        t.claimed = Some(tab.to_string());
+        Ok(())
+    }
+
+    /// fix-239: the claiming tab's answer to step `seq`.
+    pub fn taken(&self, seq: u64, tab: &str, a: TabAnswer) -> Result<(), Refusal> {
+        {
+            let mut t = self.tab_turn();
+            if !t.open || t.seq != seq || t.claimed.as_deref() != Some(tab) {
+                return Err(Refusal::new(
+                    "taken",
+                    "this tab did not claim the step waiting now",
+                    "nothing to do",
+                ));
+            }
+            t.answer = Some(a);
+        }
+        self.inner.wake.notify_waiters();
+        Ok(())
+    }
+
     /// fix-185/fix-199: a following tab's own reported page version and
     /// capabilities, from `POST /data/drive/attach` — set on every page
     /// load/navigation, not only while Live view follows, so a step is
@@ -1330,12 +1481,44 @@ impl PauseGate for Driver {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct ClaimBody {
+    seq: u64,
+    tab: String,
+}
+
+/// fix-239: a tab that follows asks to take a page-control step.
+async fn claim(State(d): State<Driver>, Json(body): Json<ClaimBody>) -> Response {
+    match d.claim(body.seq, &body.tab) {
+        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err(r) => (StatusCode::CONFLICT, Json(r)).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct TakenBody {
+    seq: u64,
+    tab: String,
+    #[serde(flatten)]
+    answer: TabAnswer,
+}
+
+/// fix-239: the claiming tab says what its page-control step did.
+async fn taken(State(d): State<Driver>, Json(body): Json<TakenBody>) -> Response {
+    match d.taken(body.seq, &body.tab, body.answer) {
+        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err(r) => (StatusCode::CONFLICT, Json(r)).into_response(),
+    }
+}
+
 /// Mounted with `dashboard_routes`: behind the login and both locks.
 pub fn router(driver: Driver) -> Router {
     Router::new()
         .route("/data/drive", get(state))
         .route("/data/drive/control", post(control))
         .route("/data/drive/attach", post(attach))
+        .route("/data/drive/claim", post(claim))
+        .route("/data/drive/taken", post(taken))
         .with_state(driver)
 }
 

@@ -2492,9 +2492,6 @@ pub fn mount(
     app.dashboard_routes(super::backups::router(host.clone()));
     // feat-retired-1: the Retired page's one read-only route.
     app.dashboard_routes(super::retired::router(host.clone()));
-    // feat-secrets-1/2: the Secrets page (list, reveal, stage); the write
-    // itself rides `ActionKind::ChangeSecret` through `edit_ctx.actions`.
-    app.dashboard_routes(super::secrets::router(edit_ctx.clone()));
     // feat-platform-10: the driver, its catch-up route and its relay; it
     // drives the edit forms through the same editor.
     let driver = super::drive::Driver::with_edit(
@@ -2502,7 +2499,7 @@ pub fn mount(
         shared_for_drive,
         publish_for_drive,
         clock_for_drive,
-        Some(edit_ctx),
+        Some(edit_ctx.clone()),
     );
     driver.set_timing(super::drive::LiveTiming {
         announce: Duration::from_millis(cfg.live_announce_ms),
@@ -2514,6 +2511,14 @@ pub fn mount(
     // it registers itself once it exists (the queue was built first).
     actions.set_pause_gate(Arc::new(driver.clone()));
     app.dashboard_routes(super::drive::router(driver.clone()));
+    // feat-secrets-1/2: the Secrets page (list, reveal, stage); the write
+    // itself rides `ActionKind::ChangeSecret` through `edit_ctx.actions`.
+    // redesign-3.71: after the driver, which tells Claude's clicks apart.
+    app.dashboard_routes(super::secrets::router(super::secrets::SecretsCtx {
+        edit: edit_ctx,
+        driver: Some(driver.clone()),
+        viewer_name: cfg.viewer_name.clone(),
+    }));
     #[cfg(feature = "demo-host")]
     if demo_host {
         app.dashboard_routes(super::drive::demo_router(driver.clone()));

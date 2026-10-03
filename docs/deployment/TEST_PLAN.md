@@ -19,7 +19,7 @@ A test that is deleted or renamed disappears from this document on the next run.
 
 Described here: every test in the integration-test directories `core/tests` and `client/tests`.
 
-Counted but not described: the 320 unit tests inside the workspace crates' own `src/` trees (`core/src` 80, `proto/src` 3, `host/src` 99, `client/src` 48, `admin/src` 90). They run with `cargo test --workspace` like the rest; this document does not read them.
+Counted but not described: the 325 unit tests inside the workspace crates' own `src/` trees (`core/src` 81, `proto/src` 3, `host/src` 100, `client/src` 48, `admin/src` 93). They run with `cargo test --workspace` like the rest; this document does not read them.
 
 ## Running the tests
 

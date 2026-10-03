@@ -644,6 +644,13 @@ pub enum Command {
     RevealSecret {
         stack: String,
         secret: SecretRef,
+        /// redesign-3.71 secrets: who asked and why (reveal or copy), for
+        /// the history line Activity reads. Left out when absent, so a host
+        /// before 3.71.0 — which refuses a mutating command carrying a
+        /// field it does not know (fix-211) — still gets the old shape on
+        /// the dashboard's retry, and still audits the reveal in audit.log.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        audit: Option<RevealAudit>,
     },
     /// feat-secrets-2: change ONE secret, writing through latch exactly as
     /// `homelab deploy` reads one (`latch put <stack>/<app>/.env --env …` or
@@ -663,7 +670,7 @@ pub enum Command {
 // own but every other wire type that is also domain-shaped lives there —
 // see the `pub use homelab_core::...` block above), defined in
 // `homelab_core::ops::secrets` and re-exported here for the wire.
-pub use homelab_core::ops::secrets::SecretRef;
+pub use homelab_core::ops::secrets::{RevealAudit, RevealPurpose, SecretRef};
 
 /// Live view: the longest one `UiHold` may ask the host to wait. The
 /// dashboard's own longest pause (`HOMELAB_ADMIN_LIVE_MAX_PAUSE_S`, at most

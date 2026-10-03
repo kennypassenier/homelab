@@ -3768,6 +3768,96 @@ span_days = 7\n";
         assert_eq!(v["entries"][0]["name"], "backup");
     }
 
+    /// covers: feat-secrets-6 (Kenny, 2026-10-03, "Alle drie"): a
+    /// reveal and a copy each leave one history line — what Activity reads —
+    /// naming who and which secret, and neither history.jsonl nor audit.log
+    /// ever holds the value itself. A reveal from an old dashboard (no
+    /// audit) is still recorded, as a reveal.
+    #[tokio::test]
+    async fn redesign_371_a_reveal_is_audited_in_history_without_the_value() {
+        let dir = std::env::temp_dir().join(format!("homelab-reveal-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("secrets/gateway")).unwrap();
+        let value = "TUNNEL_TOKEN=never-in-a-log-7f3a";
+        std::fs::write(dir.join("secrets/gateway/traefik.env"), value).unwrap();
+        let state = test_state(config_from_text(&format!(
+            "token = \"0123456789abcdef0123\"\nstate_dir = \"{}\"\n",
+            dir.display()
+        )));
+        let secret = homelab_proto::SecretRef::Env {
+            app: "traefik".into(),
+        };
+        for (id, audit) in [
+            (
+                3,
+                Some(homelab_proto::RevealAudit {
+                    purpose: homelab_proto::RevealPurpose::Reveal,
+                    by: "Kenny".into(),
+                }),
+            ),
+            (
+                4,
+                Some(homelab_proto::RevealAudit {
+                    purpose: homelab_proto::RevealPurpose::Copy,
+                    by: "Claude (Live view)".into(),
+                }),
+            ),
+            (5, None),
+        ] {
+            let r = handle_rpc(
+                &state,
+                RpcRequest {
+                    id,
+                    command: Rpc::RevealSecret {
+                        stack: "gateway".into(),
+                        secret: secret.clone(),
+                        audit,
+                    },
+                },
+            )
+            .await;
+            assert!(r.ok, "{}", r.message);
+            assert_eq!(r.message, value, "the reveal itself still answers");
+        }
+        let history = std::fs::read_to_string(dir.join("history.jsonl")).unwrap_or_default();
+        let audit = std::fs::read_to_string(dir.join("audit.log")).unwrap_or_default();
+        assert!(!history.contains("never-in-a-log"), "{history}");
+        assert!(!audit.contains("never-in-a-log"), "{audit}");
+        let entries = homelab_core::history::parse(&history);
+        let said: Vec<(String, Option<String>, Option<String>)> = entries
+            .iter()
+            .filter_map(|e| match e {
+                homelab_core::history::HistoryEntry::Op {
+                    label, subject, by, ..
+                } => Some((label.clone(), subject.clone(), by.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            said,
+            vec![
+                (
+                    "reveal-secret".into(),
+                    Some("revealed gateway/traefik/.env".into()),
+                    Some("Kenny".into())
+                ),
+                (
+                    "copy-secret".into(),
+                    Some("copied gateway/traefik/.env".into()),
+                    Some("Claude (Live view)".into())
+                ),
+                (
+                    "reveal-secret".into(),
+                    Some("revealed gateway/traefik/.env".into()),
+                    None
+                ),
+            ],
+            "{history}"
+        );
+        assert!(audit.contains("copy-secret stack=gateway"), "{audit}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Decision notify-routing (2026-09-30): every event becomes a notice
     /// the dashboard reads after its cursor; only an urgent one tries the
     /// push, and what became of it is recorded; the sequence survives a
@@ -12258,16 +12348,49 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
         // feat-secrets-1: the value, read straight from the host's own
         // vault (never a process, never traced). Audited before the read,
         // naming what was asked for, never the value.
-        Rpc::RevealSecret { stack, secret } => {
+        //
+        // redesign-3.71 secrets: and one history line (history.jsonl, what
+        // the dashboard's Activity reads) naming who revealed or copied
+        // which secret — `audit.by` when the dashboard names the person or
+        // Live view, else the session's token name. Never the value.
+        Rpc::RevealSecret {
+            stack,
+            secret,
+            audit,
+        } => {
             let ts = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            let audit = format!("{} reveal-secret stack={} secret={:?}\n", ts, stack, secret);
-            if let Err(e) = append_audit(&format!("{}/audit.log", state.config.state_dir), &audit) {
+            let purpose = audit.as_ref().map(|a| a.purpose).unwrap_or_default();
+            let by = audit.map(|a| a.by).or_else(requested_by);
+            let line = format!(
+                "{} {} stack={} secret={:?} by={}\n",
+                ts,
+                purpose.label(),
+                stack,
+                secret,
+                by.as_deref().unwrap_or("-")
+            );
+            if let Err(e) = append_audit(&format!("{}/audit.log", state.config.state_dir), &line) {
                 tracing::warn!("audit.log: could not record the reveal :: {}", e);
             }
-            match crate::secrets::reveal(&state.config.state_dir, &stack, &secret).await {
+            let read = crate::secrets::reveal(&state.config.state_dir, &stack, &secret).await;
+            record_history(
+                state,
+                &homelab_core::ops::secrets::reveal_history(
+                    ts,
+                    &stack,
+                    &secret,
+                    purpose,
+                    by,
+                    (req.id != 0).then_some(req.id),
+                    read.as_ref()
+                        .err()
+                        .map(|_| "no sealed copy on the host".to_string()),
+                ),
+            );
+            match read {
                 Ok(content) => RpcResponse {
                     id: req.id,
                     ok: true,

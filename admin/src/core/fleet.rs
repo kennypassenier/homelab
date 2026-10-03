@@ -56,6 +56,10 @@ pub struct StackSummary {
     pub restarts: u32,
     pub ram_used_mb: Option<u32>,
     pub ram_max_mb: Option<u32>,
+    /// redesign-host-3: the guest's CPU share at the host's last status
+    /// reading, one core ×1000 (Proxmox's own measure), for the Host
+    /// page's container table. `None` before the first reading.
+    pub cpu_permille: Option<u32>,
     /// feat-stacks-1: the stack page's detail, from the same snapshot.
     pub hostname: String,
     pub apps: Vec<AppSummary>,
@@ -111,6 +115,7 @@ pub fn fleet_view(state: &FleetState, measured_at: u64) -> FleetView {
             restarts: s.apps.iter().map(|a| a.restarts).sum(),
             ram_used_mb: s.usage.as_ref().map(|u| u.ram_used_mb),
             ram_max_mb: s.usage.as_ref().map(|u| u.ram_max_mb),
+            cpu_permille: s.usage.as_ref().map(|u| u.cpu_permille),
             hostname: s.hostname.clone(),
             apps: s
                 .apps

@@ -4,20 +4,39 @@
 // extensionless path this app's web app (mounted at the root since
 // chassis-rs 3.1.0) does not already claim, so a deep link lands here too
 // (feat-overview-8). The palette, the shortcuts, the theme menu and the
-// host's questions sit around every page (chrome.js). The nav bar renders
-// from the page registry (`GET /api/kit/pages`, pages.js), which is also
-// how the kit's own pages (Status, Clients, Passkeys — `kit_pages_in_webapp`)
-// end up in it without this module naming them.
+// running pill sit around every page (chrome.js). The nav bar renders from
+// the page registry (`GET /api/kit/pages`, pages.js).
+//
+// feat-shell-1 (redesign 3.71.0, Kenny approved 2026-10-03): six areas,
+// `Apps · Inbox · Stacks · Activity │ Backups · System` (areas.js), the
+// Inbox's exact count on its link and in the tab title, the trail above
+// every page below an area's own (`Stacks / gateway / Logs`), and `/` that
+// opens the Inbox when it holds something and Apps otherwise. Every old
+// address redirects (router.js `redirectFor`). A page that a 3.71.0 page
+// does not draw yet is mounted as a view of its new home (`VIEWS`:
+// `/activity?view=planned` shows the Schedules module) until that page's
+// own redesign lands.
 
 import { startAgoTicker } from "./ago.js";
+import { areaOf, crumbs } from "./areas.js";
 import { mountChrome } from "./chrome.js";
 import { mountFollow } from "./drive.js";
 import { attachRowToggle } from "./rowtoggle.js";
 import { h } from "./dom.js";
+import { countText, inboxNow, onInbox, worst } from "./inbox.js";
 import { attachNavMenus, attachNavToggles } from "/static/kp/js/components.js";
 import { loadPages, pages, subscribePages } from "./pages.js";
-import { navEntries, pageTitle, redirectFor, route } from "./router.js";
+import {
+  STACK_TABS,
+  VIEWS,
+  navEntries,
+  needsFleet,
+  pageTitle,
+  redirectFor,
+  route,
+} from "./router.js";
 import { current, start, subscribe } from "./store.js";
+import { breadcrumbs, skeletonLines } from "./ui.js";
 import { mount as activity } from "./pages/activity.js";
 import { mount as backups } from "./pages/backups.js";
 import { mount as firewall } from "./pages/firewall.js";
@@ -26,7 +45,6 @@ import { mount as jobs } from "./pages/jobs.js";
 import { mount as notifications } from "./pages/notifications.js";
 import { mount as retired } from "./pages/retired.js";
 import { mount as schedules } from "./pages/schedules.js";
-import { mount as secrets } from "./pages/secrets.js";
 import { mount as settings } from "./pages/settings.js";
 import { mount as overview } from "./pages/overview.js";
 import { mount as stack } from "./pages/stack.js";
@@ -34,18 +52,20 @@ import { mount as hostLog } from "./pages/log.js";
 import { mount as shell } from "./pages/shell.js";
 import { mount as presets } from "./pages/presets.js";
 import { mount as homePage } from "./pages/home.js";
-import { mount as healthPage } from "./pages/health.js";
+import { mount as inboxPage } from "./pages/inbox.js";
+import { mount as systemPage } from "./pages/system.js";
 import { mount as metricsPage } from "./pages/metrics.js";
 import { mount as fleetviewPage } from "./pages/fleetview.js";
 import { mount as backupCalendarPage } from "./pages/backupcalendar.js";
 import { mount as passkeysPage } from "./pages/passkeys.js";
+import { mount as doctorPage } from "./pages/doctor.js";
 import { mountVersions } from "./versions.js";
 
 const page = /** @type {HTMLElement} */ (document.getElementById("page"));
 const nav = /** @type {HTMLElement} */ (document.getElementById("nav"));
 const bar = /** @type {HTMLElement} */ (document.getElementById("bar"));
 const brand = /** @type {HTMLElement} */ (document.getElementById("brand"));
-const asks = /** @type {HTMLElement} */ (document.getElementById("asks"));
+const trail = /** @type {HTMLElement} */ (document.getElementById("crumbs"));
 const link = /** @type {HTMLElement} */ (document.getElementById("link"));
 
 /** @type {() => void} */
@@ -73,59 +93,143 @@ function closeBar() {
 }
 
 /**
- * The nav bar, the brand link and the tab title — everything the page
- * registry (pages.js) drives — redrawn on its own, so the registry's
- * first answer (arriving async, after the first paint) does not have to
- * wait for a page remount to show up.
+ * The nav bar, the brand link, the trail and the tab title — everything
+ * the page registry (pages.js) and the Inbox drive — redrawn on their own,
+ * so the registry's first answer (async, after the first paint) and a new
+ * Inbox row show up without a page remount.
  */
 function renderNav() {
   const r = route(location.pathname);
   const ps = pages();
-  document.title = pageTitle(r, ps);
+  const { items } = inboxNow();
+  const n = items.length;
+  // FLOWS.md §1.2: the count is in the tab title too, so a background tab
+  // says it ("● 3 in the Inbox · Homelab · Stacks").
+  document.title = `${n > 0 ? `● ${n} in the Inbox · ` : ""}${pageTitle(r, ps)}`;
   // chassis-rs 3.2.0 (fix-15): App::brand_title("Homelab") makes
-  // ps.brand.title the display title instead of AppSpec.name
-  // ("homelab-admin"), so the registry's answer is safe to draw here again
-  // (fix-176 worked around the previous binary-name bug by freezing the
-  // text to index.html's static copy). The static text stays as the
+  // ps.brand.title the display title. The static text stays as the
   // first-paint value until the registry answers.
   if (ps) {
     brand.textContent = ps.brand.title;
     brand.setAttribute("href", ps.brand.href);
   }
+  const entries = navEntries(ps, r, areaOf);
+  const tone = worst(items);
   nav.replaceChildren(
-    ...navEntries(ps, r).map((n) => {
+    ...entries.flatMap((e, i) => {
       /** @type {Record<string, string>} */
-      const a = { class: "kp-nav__link", href: n.href };
-      if (n.current) a["aria-current"] = "page";
-      if (!n.items) return h("li", null, h("a", a, n.label));
-      a["aria-haspopup"] = "true";
-      return h(
-        "li",
-        null,
-        h("a", a, n.label),
-        h(
-          "ul",
-          { class: "kp-nav__menu" },
-          ...n.items.map((i) => {
-            /** @type {Record<string, string>} */
-            const ia = { href: i.href };
-            if (i.current) ia["aria-current"] = "page";
-            return h("li", null, h("a", ia, i.label));
-          }),
-        ),
-      );
+      const a = { class: "kp-nav__link", href: e.href };
+      if (e.current) a["aria-current"] = "page";
+      const p = ps?.pages.find((x) => x.path === e.href);
+      const out = [];
+      // The divider before the rarely needed areas (FLOWS.md §1).
+      if (p && p.id === "backups" && i > 0)
+        out.push(h("li", { class: "nx-nav-sep", "aria-hidden": "true" }));
+      const kids = [/** @type {Node | string} */ (e.label)];
+      if (p?.id === "inbox" && n > 0) {
+        kids.push(
+          h(
+            "span",
+            {
+              class: `kp-badge nx-count${tone === "bad" ? " kp-badge--destructive" : " kp-badge--warning"}`,
+              "aria-label": `${n} waiting`,
+              "data-inbox-count": String(n),
+            },
+            countText(n),
+          ),
+        );
+      }
+      if (p) a["data-area"] = p.id;
+      out.push(h("li", null, h("a", a, ...kids)));
+      return out;
     }),
   );
+  const list = crumbs(r, location.pathname, location.search, {
+    tabLabel: (t) => STACK_TABS.find((x) => x.tab === t)?.label ?? t,
+  });
+  trail.replaceChildren(...(list.length > 1 ? [breadcrumbs(list)] : []));
+  trail.hidden = list.length < 2;
+  chrome.repaint();
   queueMicrotask(fitBar);
 }
 
+/**
+ * A page that a 3.71.0 page has not redrawn yet, shown as a view of its
+ * new home (router.js `VIEWS`): the module mounted for `?view=` /
+ * `?section=`, or the page's own.
+ * @param {string} at the route's page
+ * @param {URLSearchParams} q
+ * @returns {string | null} the module's page id, or null for the page's own
+ */
+function viewOf(at, q) {
+  for (const [id, v] of Object.entries(VIEWS))
+    if (v.at === at && q.get(v.param) === v.value) return id;
+  return null;
+}
+
+/** @type {Record<string, (root: HTMLElement) => () => void>} */
+const VIEW_MOUNTS = {
+  jobs: (root) => jobs(root, { navigate }),
+  log: (root) => hostLog(root),
+  schedules: (root) => schedules(root),
+  backupcalendar: (root) => backupCalendarPage(root),
+  retired: (root) => retired(root),
+  passkeys: (root) => passkeysPage(root),
+  doctor: (root) => doctorPage(root),
+};
+
+/**
+ * `/`: the Inbox when it holds something, Apps otherwise (Kenny,
+ * 2026-10-03). Waits, with a skeleton, until the Inbox's live sources have
+ * answered once (at most 3 s), then sends the address on.
+ */
+function landing() {
+  page.replaceChildren(skeletonLines(4, "Opening the dashboard"));
+  const decide = () => {
+    const { items, ready } = inboxNow();
+    if (!ready && Date.now() - since < 3000) return false;
+    if (location.pathname !== "/") return true;
+    history.replaceState(
+      null,
+      "",
+      `${items.length > 0 ? "/inbox" : "/apps"}${location.search}`,
+    );
+    render();
+    return true;
+  };
+  const since = Date.now();
+  if (decide()) return () => {};
+  const off = onInbox(() => {
+    if (decide()) off();
+  });
+  const t = setTimeout(() => {
+    if (decide()) off();
+  }, 3100);
+  return () => {
+    off();
+    clearTimeout(t);
+  };
+}
+
 function render() {
-  // 2026-09-30: /start, /today, /doctor, /checks, /charts, /traffic and
-  // /timeline are retired, and /home is the pre-3.1.0 address of the tile
-  // page (now the root); fix-210 (2026-10-02): /apply moved into Overview
-  // as a collapsible section. Send every one of them on to its new home
-  // before mounting anything (redirectFor is null for every other route).
-  const target = redirectFor(route(location.pathname), location.search);
+  // Every retired address (router.js REDIRECTS) goes on to its new home
+  // before anything mounts; /secrets without ?stack= first waits for the
+  // fleet, to know its first stack.
+  const r0 = route(location.pathname);
+  if (needsFleet(r0, location.search) && !current().fleet) {
+    cleanup();
+    page.replaceChildren(skeletonLines(3, "Finding the stack"));
+    const off = subscribe(() => {
+      if (!current().fleet) return;
+      off();
+      render();
+    });
+    cleanup = () => off();
+    return;
+  }
+  const target = redirectFor(r0, location.search, {
+    stacks: (current().fleet?.stacks ?? []).map((s) => s.name),
+  });
   if (target != null) {
     history.replaceState(null, "", target);
     render();
@@ -135,15 +239,28 @@ function render() {
   cleanup = () => {};
   const r = route(location.pathname);
   renderNav();
+  const q = new URLSearchParams(location.search);
+  const view = viewOf(r.page, q);
+  if (view && VIEW_MOUNTS[view]) {
+    cleanup = VIEW_MOUNTS[view](page);
+    window.scrollTo(0, 0);
+    return;
+  }
   switch (r.page) {
-    case "overview":
-      cleanup = overview(page, { navigate });
+    case "landing":
+      cleanup = landing();
       break;
     case "home":
       cleanup = homePage(page);
       break;
-    case "health":
-      cleanup = healthPage(page);
+    case "inbox":
+      cleanup = inboxPage(page);
+      break;
+    case "overview":
+      cleanup = overview(page, { navigate });
+      break;
+    case "system":
+      cleanup = systemPage(page);
       break;
     case "metrics":
       cleanup = metricsPage(page, { navigate });
@@ -157,12 +274,6 @@ function render() {
     case "activity":
       cleanup = activity(page, { navigate });
       break;
-    case "jobs":
-      cleanup = jobs(page, { navigate });
-      break;
-    case "schedules":
-      cleanup = schedules(page);
-      break;
     case "notifications":
       cleanup = notifications(page);
       break;
@@ -172,39 +283,17 @@ function render() {
     case "backups":
       cleanup = backups(page);
       break;
-    case "retired":
-      cleanup = retired(page);
-      break;
-    case "secrets":
-      cleanup = secrets(page);
-      break;
     case "settings":
       cleanup = settings(page);
-      break;
-    case "log":
-      cleanup = hostLog(page);
       break;
     case "shell":
       cleanup = shell(page);
       break;
-    // fix-210: "apply" is never mounted directly — `render()`'s redirect
-    // check above always sends it to `/overview?section=apply` first
-    // (`router.js` `redirectFor`), the same way "status" never reaches
-    // this switch either.
     case "presets":
       cleanup = presets(page, { navigate });
       break;
     case "fleetview":
       cleanup = fleetviewPage(page);
-      break;
-    case "backupcalendar":
-      cleanup = backupCalendarPage(page);
-      break;
-    // The kit's own Passkeys page (chassis-rs 3.1.0, `kit_pages_in_webapp`):
-    // this app draws it from GET /api/kit/passkeys, in this same bar.
-    // Status and Clients are switched off (`disable_kit_page`, 2026-10-02).
-    case "passkeys":
-      cleanup = passkeysPage(page);
       break;
     default:
       page.replaceChildren(
@@ -213,17 +302,14 @@ function render() {
           "p",
           null,
           `There is no page at ${location.pathname}. `,
-          h("a", { href: "/" }, "Go to Apps"),
+          h("a", { href: "/" }, "Go to the start"),
         ),
       );
   }
   window.scrollTo(0, 0);
 }
 
-// Paths the kit answers itself, never this app's router (`/passkeys` is
-// its registration/login actions; `/status` and `/clients` without
-// `kit_pages_in_webapp` would be too, but the dashboard turns that on, so
-// their GET pages fall through to this app like any other route).
+// Paths the kit answers itself, never this app's router.
 const RESERVED = [
   "/api",
   "/static",
@@ -250,7 +336,7 @@ document.addEventListener("click", (e) => {
     return;
   if (/\.[a-z0-9]+$/i.test(url.pathname)) return;
   e.preventDefault();
-  navigate(url.pathname + url.search);
+  navigate(url.pathname + url.search + url.hash);
 });
 window.addEventListener("popstate", render);
 
@@ -259,8 +345,8 @@ subscribe(() => {
   link.textContent = s.link;
   link.dataset.up = String(s.up);
 });
-mountChrome(
-  { nav: bar, asks },
+const chrome = mountChrome(
+  { nav: bar },
   { navigate, route: () => route(location.pathname) },
 );
 // feat-platform-10: the "Live view" switch and badge, on every page.
@@ -273,8 +359,9 @@ startAgoTicker();
 start();
 render();
 // The registry answers after the first paint; redraw the nav (never the
-// mounted page) the moment it lands, and again if it ever changes.
+// mounted page) the moment it lands, and again whenever the Inbox moves.
 subscribePages(renderNav);
+onInbox(renderNav);
 void loadPages();
 // kp-themes' bar: the phone menu button, and dropdowns kept inside the window.
 attachNavToggles(bar);
@@ -282,8 +369,8 @@ attachNavMenus(bar);
 
 /**
  * The bar in one row in every theme (Kenny, 2026-09-29): a theme whose font
- * is wide (cyberpunk at 1280 px) would wrap the links onto a second row, so
- * the bar then folds its links behind kp's menu button, as on a phone.
+ * is wide would wrap the links onto a second row, so the bar then folds its
+ * links behind kp's menu button, as on a phone.
  */
 function fitBar() {
   bar.removeAttribute("data-fold");
@@ -302,13 +389,10 @@ function fitBar() {
 fitBar();
 addEventListener("resize", fitBar);
 attachRowToggle();
-// fix-176: the bar's content changes after the first paint — the registry's
-// links land async, the kit adds its search, bell and theme buttons, and the
-// link status swaps "connecting…" for a version or a long link-down reason.
-// A fold decided once on the early content stuck until the window resized,
-// so the bar is measured again whenever its content or its own size moves.
-// Only childList/characterData are watched: fitBar's own data-fold toggle
-// is an attribute change and cannot re-trigger it.
+// fix-176: the bar's content changes after the first paint, so it is
+// measured again whenever its content or its own size moves. Only
+// childList/characterData are watched: fitBar's own data-fold toggle is an
+// attribute change and cannot re-trigger it.
 new MutationObserver(fitBar).observe(bar, {
   childList: true,
   subtree: true,

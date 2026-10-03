@@ -79,19 +79,28 @@ test("pages, every stack with each tab, and the themes", () => {
   ];
   const all = allCommands({ fleet, themes, theme: "dark" });
   const ids = all.map((c) => c.id);
-  assert.ok(ids.includes("page:host"));
+  // feat-shell-2: the areas the registry lists, every page inside an
+  // area (areas.js), every stack's hub and tabs, all in "Go to".
+  assert.ok(ids.includes("page:home"));
   assert.ok(ids.includes("page:activity"));
+  assert.ok(ids.includes("page:host"), "System's Host page");
+  assert.ok(ids.includes("page:planned"), "Activity's Planned view");
+  assert.ok(!ids.includes("page:inbox"), "an area the registry did not list");
   assert.ok(!ids.includes("page:timeline"), "Timeline merged into Activity");
   assert.ok(ids.includes("stack:media:overview"));
   assert.ok(ids.includes("stack:media:logs"));
-  assert.equal(all.find((c) => c.id === "page:host")?.keys, "g h");
+  assert.equal(all.find((c) => c.id === "page:activity")?.keys, "g a");
+  assert.equal(
+    all.find((c) => c.id === "page:planned")?.href,
+    "/activity?view=planned",
+  );
   assert.equal(
     all.find((c) => c.id === "stack:media:logs")?.href,
     "/stacks/media/logs",
   );
   assert.equal(
     all.find((c) => c.id === "stack:media:overview")?.hint,
-    "CT 106",
+    "stack · CT 106",
   );
   const dark = all.find((c) => c.id === "theme:dark");
   assert.equal(dark?.hint, "current");
@@ -99,7 +108,7 @@ test("pages, every stack with each tab, and the themes", () => {
   assert.deepEqual(chosen, ["dark"]);
   assert.deepEqual(
     grouped(all).map((g) => g.group),
-    ["Pages", "Stacks", "Theme"],
+    ["Go to", "Theme"],
   );
   off.forEach((f) => f());
   assert.deepEqual(allCommands({ fleet, themes, theme: null }), []);

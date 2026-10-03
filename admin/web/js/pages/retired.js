@@ -196,7 +196,7 @@ export function mount(root) {
     ],
   });
   root.replaceChildren(
-    h("div", { class: "title-row" }, h("h1", null, "Retired")),
+    h("div", { class: "title-row" }, h("h1", null, "Removed stacks")),
     h(
       "p",
       null,

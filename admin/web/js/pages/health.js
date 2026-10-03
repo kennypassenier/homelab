@@ -22,9 +22,33 @@ const BLOCKS = /** @type {const} */ ([
  * @returns {() => void}
  */
 export function mount(root) {
-  const params = new URLSearchParams(location.search);
-  const wanted = params.get("block");
-  const block = BLOCKS.some((b) => b.id === wanted) ? wanted : "today";
+  const wanted = new URLSearchParams(location.search).get("block");
+  const blocks = h("div", { class: "health-blocks" });
+  root.replaceChildren(
+    h("h1", null, "Health"),
+    // fix-236: the page says what it is, like every other page (rule 8).
+    h(
+      "p",
+      { class: "section-head__desc measured" },
+      "Everything about the fleet that needs a look: today's open items, the fleet check against the repository, the host's own doctor and the checks only a person can answer.",
+    ),
+    blocks,
+  );
+  return mountHealthBlocks(blocks, wanted, "today");
+}
+
+/**
+ * feat-shell-4: the three blocks (Today, Doctor, Checks) on their own, for
+ * the Inbox, which took over Health in 3.71.0 (`/health?block=x` redirects
+ * to `/inbox?kind=x`). `wanted` opens and scrolls to that block; with none
+ * wanted, `fallback` opens (null: all folded).
+ * @param {HTMLElement} container
+ * @param {string | null} wanted
+ * @param {string | null} [fallback]
+ * @returns {() => void}
+ */
+export function mountHealthBlocks(container, wanted, fallback = null) {
+  const block = BLOCKS.some((b) => b.id === wanted) ? wanted : fallback;
 
   /** @type {(() => void)[]} */
   const cleanups = [];
@@ -47,16 +71,7 @@ export function mount(root) {
     return { spec: b, body, summary, details, mounted: false };
   });
 
-  root.replaceChildren(
-    h("h1", null, "Health"),
-    // fix-236: the page says what it is, like every other page (rule 8).
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      "Everything about the fleet that needs a look: today's open items, the fleet check against the repository, the host's own doctor and the checks only a person can answer.",
-    ),
-    ...sections.map((s) => s.details),
-  );
+  container.replaceChildren(...sections.map((s) => s.details));
 
   // A sub-page paints its own h1 beside its own buttons in one
   // `.title-row` (Doctor's Refresh, Today's Read again) — the right place

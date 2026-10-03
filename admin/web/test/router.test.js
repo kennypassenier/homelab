@@ -1,272 +1,81 @@
-// arch-frontend, feat-overview-8, feat-stacks-1, nav-decisions: the
-// router's pure half. The nav bar itself renders from the page registry
-// (pages.js, `GET /api/kit/pages`) rather than a list in this module, so
-// these tests build a small sample `PageSet` the way the server would.
+// arch-frontend, feat-overview-8, feat-stacks-1, nav-decisions, and
+// feat-shell-1/3 (redesign 3.71.0, Kenny approved 2026-10-03): the router's
+// pure half. Six areas `Apps · Inbox · Stacks · Activity │ Backups ·
+// System`; every address a page ever had redirects to its new home in one
+// hop. The nav bar renders from the page registry (pages.js), so these
+// tests build a `PageSet` the way admin/src/main.rs registers it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { AREAS, areaOf, crumbs } from "../js/areas.js";
 import {
+  DRIVABLE_PATHS,
+  PATH_TO_PAGE,
+  RETIRED_STACK_TABS,
   STACK_TABS,
   navEntries,
+  needsFleet,
+  pageHref,
   pageTitle,
   redirectFor,
   route,
+  shownPage,
   stackHref,
 } from "../js/router.js";
 
 /**
- * A page registry the way `GET /api/kit/pages` answers it.
- * @type {import("../js/pages.js").PageSet}
+ * @param {string} id @param {string} title @param {string} path
+ * @param {boolean} nav @param {string | null} [group]
+ * @returns {import("../js/pages.js").RegPage}
  */
+const reg = (id, title, path, nav, group = null) => ({
+  id,
+  title,
+  path,
+  group,
+  order: 0,
+  nav,
+  source: "app",
+  render: "app",
+});
+
+/** The registry as admin/src/main.rs registers it since 3.71.0. */
 const pageSet = {
   app: "admin",
-  brand: { title: "Homelab", href: "/overview" },
+  brand: { title: "Homelab", href: "/" },
   home: "/",
   pages: [
-    {
-      id: "home",
-      title: "Apps",
-      path: "/",
-      group: null,
-      order: 0,
-      nav: true,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "overview",
-      title: "Overview",
-      path: "/overview",
-      group: null,
-      order: 0,
-      nav: false,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "health",
-      title: "Health",
-      path: "/health",
-      group: null,
-      order: 0,
-      nav: true,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "metrics",
-      title: "Metrics",
-      path: "/charts",
-      group: null,
-      order: 0,
-      nav: true,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "activity",
-      title: "Activity",
-      path: "/activity",
-      group: null,
-      order: 0,
-      nav: true,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "host",
-      title: "Host",
-      path: "/host",
-      group: null,
-      order: 0,
-      nav: true,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "log",
-      title: "Live log",
-      path: "/log",
-      group: "Operations",
-      order: 0,
-      nav: true,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "jobs",
-      title: "Jobs",
-      path: "/jobs",
-      group: "Operations",
-      order: 0,
-      nav: true,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "apply",
-      title: "Apply",
-      path: "/apply",
-      group: "Operations",
-      order: 0,
-      nav: true,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "schedules",
-      title: "Schedules",
-      path: "/schedules",
-      group: "Operations",
-      order: 0,
-      nav: true,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "firewall",
-      title: "Firewall",
-      path: "/firewall",
-      group: "Configure",
-      order: 0,
-      nav: true,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "backups",
-      title: "Backups",
-      path: "/backups",
-      group: "Configure",
-      order: 0,
-      nav: true,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "secrets",
-      title: "Secrets",
-      path: "/secrets",
-      group: "Configure",
-      order: 0,
-      nav: true,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "settings",
-      title: "Settings",
-      path: "/settings",
-      group: "Configure",
-      order: 0,
-      nav: true,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "fleetview",
-      title: "Fleet view",
-      path: "/fleetview",
-      group: "Visuals",
-      order: 0,
-      nav: true,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "backupcalendar",
-      title: "Backup calendar",
-      path: "/backupcalendar",
-      group: "Visuals",
-      order: 0,
-      nav: true,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "notifications",
-      title: "Notifications",
-      path: "/notifications",
-      group: null,
-      order: 0,
-      nav: false,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "shell",
-      title: "Shell",
-      path: "/shell",
-      group: null,
-      order: 0,
-      nav: false,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "presets",
-      title: "Presets",
-      path: "/presets",
-      group: null,
-      order: 0,
-      nav: false,
-      source: "app",
-      render: "app",
-    },
-    {
-      id: "status",
-      title: "Status",
-      path: "/status",
-      group: null,
-      order: 1000,
-      nav: true,
-      source: "kit",
-      render: "app",
-    },
-    {
-      id: "clients",
-      title: "Clients",
-      path: "/clients",
-      group: null,
-      order: 1010,
-      nav: true,
-      source: "kit",
-      render: "app",
-    },
-    {
-      id: "passkeys",
-      title: "Passkeys",
-      path: "/passkeys",
-      group: null,
-      order: 1020,
-      nav: true,
-      source: "kit",
-      render: "app",
-    },
+    reg("home", "Apps", "/apps", true),
+    reg("inbox", "Inbox", "/inbox", true),
+    reg("overview", "Stacks", "/stacks", true),
+    reg("activity", "Activity", "/activity", true),
+    reg("backups", "Backups", "/backups", true),
+    reg("system", "System", "/system", true),
+    reg("host", "Host", "/host", false, "System"),
+    reg("metrics", "Metrics", "/charts", false, "System"),
+    reg("fleetview", "Map", "/map", false, "System"),
+    reg("passkeys", "Passkeys", "/passkeys", false, "System"),
   ],
 };
 
-test("every path lives at the root", () => {
-  assert.deepEqual(route("/"), { page: "home" });
-  assert.deepEqual(route("/overview"), { page: "overview" });
-  assert.deepEqual(route("/health"), { page: "health" });
+test("every current path lives at the root", () => {
+  assert.deepEqual(route("/"), { page: "landing" });
+  assert.deepEqual(route("/apps"), { page: "home" });
+  assert.deepEqual(route("/inbox"), { page: "inbox" });
+  assert.deepEqual(route("/stacks"), { page: "overview" });
+  assert.deepEqual(route("/activity?view=planned"), { page: "activity" });
+  assert.deepEqual(route("/backups"), { page: "backups" });
+  assert.deepEqual(route("/system"), { page: "system" });
   assert.deepEqual(route("/charts"), { page: "metrics" });
-  assert.deepEqual(route("/host"), { page: "host" });
-  assert.deepEqual(route("/activity"), { page: "activity" });
-  assert.deepEqual(route("/log?source=media"), { page: "log" });
-  assert.deepEqual(route("/shell"), { page: "shell" });
-  assert.deepEqual(route("/apply"), { page: "apply" });
-  assert.deepEqual(route("/presets"), { page: "presets" });
-  // 2026-10-02: Status and Clients are switched off; /status goes to
-  // Health, /clients is no page of this app.
-  assert.deepEqual(route("/status"), { page: "status-retired" });
-  assert.equal(redirectFor(route("/status"), ""), "/health");
-  assert.equal(route("/clients").page, "notfound");
-  assert.deepEqual(route("/passkeys"), { page: "passkeys" });
+  assert.deepEqual(route("/map"), { page: "fleetview" });
+  assert.deepEqual(route("/system/notifications"), { page: "notifications" });
+  assert.deepEqual(route("/console"), { page: "shell" });
   assert.deepEqual(route("/stacks/media"), {
     page: "stack",
     name: "media",
     tab: "overview",
   });
+  assert.equal(route("/clients").page, "notfound");
   assert.equal(route("/nope").page, "notfound");
   assert.equal(route("/constructor").page, "notfound");
   assert.equal(route("/stacks/a/b").page, "notfound");
@@ -274,134 +83,178 @@ test("every path lives at the root", () => {
   assert.equal(route("elsewhere").page, "notfound");
 });
 
-test("retired and pre-3.1.0 paths still parse, for an old link or a Live view script", () => {
-  assert.deepEqual(route("/start"), { page: "start" });
-  assert.deepEqual(route("/today"), { page: "today" });
-  assert.deepEqual(route("/doctor"), { page: "doctor" });
-  assert.deepEqual(route("/checks/"), { page: "checks" });
-  assert.deepEqual(route("/traffic"), { page: "traffic" });
-  assert.deepEqual(route("/timeline?days=3"), { page: "timeline" });
-  assert.deepEqual(route("/home"), { page: "home-legacy" });
+test("feat-shell-1: every old address redirects to its new home in one hop, its query kept", () => {
+  /** @type {[string, string][]} */
+  const cases = [
+    ["/overview", "/stacks"],
+    ["/overview?fleet.q=media", "/stacks?fleet.q=media"],
+    ["/overview?section=apply", "/stacks?deploy-all=1"],
+    ["/apply", "/stacks?deploy-all=1"],
+    ["/apply?fleet.q=media", "/stacks?fleet.q=media&deploy-all=1"],
+    ["/health", "/inbox"],
+    ["/health?block=doctor", "/inbox?kind=doctor"],
+    ["/needs-you", "/inbox"],
+    ["/jobs?job=3", "/activity?job=3&view=running"],
+    ["/log?source=media", "/activity?source=media&view=host-log"],
+    ["/schedules", "/activity?view=planned"],
+    ["/backupcalendar", "/backups?section=coverage"],
+    ["/retired", "/backups?section=removed"],
+    ["/fleetview?traffic=1", "/map?traffic=1"],
+    ["/notifications", "/inbox"],
+    ["/shell?vmid=104", "/console?vmid=104"],
+    ["/passkeys", "/settings?section=sign-in"],
+    ["/secrets?stack=gateway", "/stacks/gateway/settings?section=secrets"],
+    ["/status", "/inbox"],
+    ["/start", "/"],
+    ["/today", "/inbox?kind=today"],
+    ["/doctor?doctor.q=x", "/inbox?doctor.q=x&kind=doctor"],
+    ["/checks/", "/inbox?kind=checks"],
+    ["/traffic?range=7d", "/charts?range=7d&tab=traffic"],
+    ["/timeline?days=30", "/activity?days=30&view=timeline"],
+    ["/home", "/apps"],
+    ["/stacks/kp-soft/checks", "/stacks/kp-soft"],
+    ["/stacks/kp-soft/firewall", "/stacks/kp-soft/settings?section=firewall"],
+  ];
+  for (const [from, to] of cases) {
+    const [path, q = ""] = from.split("?");
+    const got = redirectFor(route(path), q ? `?${q}` : "", {
+      stacks: ["admin", "gateway"],
+    });
+    assert.equal(got, to, from);
+    const landed = route(/** @type {string} */ (got));
+    assert.notEqual(landed.page, "notfound", `${from} → ${got}`);
+    assert.equal(
+      redirectFor(landed, "", { stacks: ["admin"] }),
+      null,
+      `${from} → ${got} redirects again`,
+    );
+  }
+  // /secrets without a stack: the fleet's first stack's Settings, once the
+  // fleet is known; main.js waits for it (needsFleet).
+  assert.equal(
+    redirectFor(route("/secrets"), "", { stacks: ["admin", "gateway"] }),
+    "/stacks/admin/settings?section=secrets",
+  );
+  assert.equal(needsFleet(route("/secrets"), ""), true);
+  assert.equal(needsFleet(route("/secrets"), "?stack=x"), false);
+  // A current route has nothing to redirect.
+  for (const p of ["/", "/inbox", "/stacks", "/stacks/media/logs"])
+    assert.equal(redirectFor(route(p), ""), null, p);
 });
 
-test("redirectFor sends every retired or pre-3.1.0 path on to its home", () => {
-  assert.equal(redirectFor(route("/start"), ""), "/");
-  assert.equal(redirectFor(route("/home"), ""), "/");
-  assert.equal(redirectFor(route("/today"), ""), "/health?block=today");
-  assert.equal(
-    redirectFor(route("/doctor"), "?doctor.q=x"),
-    "/health?doctor.q=x&block=doctor",
-  );
-  assert.equal(redirectFor(route("/checks"), ""), "/health?block=checks");
-  assert.equal(
-    redirectFor(route("/traffic"), "?range=7d"),
-    "/charts?range=7d&tab=traffic",
-  );
-  assert.equal(
-    redirectFor(route("/timeline"), "?days=30"),
-    "/activity?days=30&view=timeline",
-  );
-  // Every other route: nothing to redirect.
-  assert.equal(redirectFor(route("/"), ""), null);
-  assert.equal(redirectFor(route("/health"), ""), null);
-  assert.equal(
-    redirectFor({ page: "stack", name: "media", tab: "overview" }, ""),
-    null,
-  );
+test("feat-shell-1: every address the router knows is drivable, retired ones included", () => {
+  for (const k of Object.keys(PATH_TO_PAGE)) {
+    const r = route(`/${k}`);
+    assert.notEqual(r.page, "notfound", k);
+  }
+  for (const k of ["overview", "apply", "health", "fleetview", "shell"])
+    assert.ok(DRIVABLE_PATHS.includes(k), k);
+  for (const k of ["", "apps", "inbox", "stacks", "system", "map", "console"])
+    assert.ok(DRIVABLE_PATHS.includes(k), k);
 });
 
-test("fix-210: /apply still resolves, redirected to Overview's own section", () => {
-  assert.deepEqual(route("/apply"), { page: "apply" });
-  assert.equal(redirectFor(route("/apply"), ""), "/overview?section=apply");
-  // The query string an old link carried survives the move.
-  assert.equal(
-    redirectFor(route("/apply"), "?fleet.q=media"),
-    "/overview?fleet.q=media&section=apply",
+test("every hub tab has its own path and round-trips; the merged tabs redirect", () => {
+  assert.deepEqual(
+    STACK_TABS.map((t) => t.tab),
+    ["overview", "logs", "apps", "backups", "history", "settings"],
   );
-});
-
-test("every stack tab has its own path and round-trips", () => {
   for (const { tab } of STACK_TABS) {
     const href = stackHref("odd name", tab);
     assert.deepEqual(route(href), { page: "stack", name: "odd name", tab });
   }
+  for (const tab of RETIRED_STACK_TABS)
+    assert.equal(route(`/stacks/media/${tab}`).page, "retired");
   assert.equal(stackHref("media"), "/stacks/media");
   assert.equal(stackHref("media", "logs"), "/stacks/media/logs");
-  assert.deepEqual(route("/stacks/media/logs?app=sonarr"), {
-    page: "stack",
-    name: "media",
-    tab: "logs",
-  });
 });
 
-test("the navigation renders from the registry and marks the current page", () => {
-  const cur = (/** @type {string} */ p) =>
-    navEntries(pageSet, route(p))
-      .filter((n) => n.current)
-      .map((n) => n.label);
-  assert.deepEqual(cur("/"), ["Apps"]);
-  assert.deepEqual(cur("/host"), ["Host"]);
-  assert.deepEqual(cur("/health"), ["Health"]);
-  assert.deepEqual(cur("/charts"), ["Metrics"]);
-  // Overview is hidden from the bar (the brand link opens it instead).
-  assert.deepEqual(cur("/overview"), []);
-  const top = navEntries(pageSet, route("/"));
+test("feat-shell-1: a page module shown as a view of its new home is found there", () => {
+  assert.equal(pageHref("schedules"), "/activity?view=planned");
+  assert.equal(pageHref("jobs"), "/activity?view=running");
+  assert.equal(pageHref("fleetview"), "/map");
+  assert.equal(pageHref("notifications"), "/system/notifications");
+  assert.equal(pageHref("passkeys"), "/settings?section=sign-in");
+  assert.equal(pageHref("nope"), null);
+  assert.equal(shownPage("/activity", "?view=planned"), "schedules");
+  assert.equal(shownPage("/activity", ""), "activity");
+  assert.equal(shownPage("/backups", "?section=coverage"), "backupcalendar");
+});
+
+test("feat-shell-1: the bar is the six areas, the current one marked from any page inside it", () => {
+  const top = navEntries(pageSet, route("/inbox"), areaOf);
   assert.deepEqual(
     top.map((n) => n.label),
-    [
-      "Apps",
-      "Health",
-      "Metrics",
-      "Activity",
-      "Host",
-      "Operations",
-      "Configure",
-      "Visuals",
-      "Status",
-      "Clients",
-      "Passkeys",
-    ],
+    ["Apps", "Inbox", "Stacks", "Activity", "Backups", "System"],
   );
-  // Every page of the bar is reachable from it, in a group or on its own.
-  const reached = top.flatMap((n) =>
-    (n.items ? n.items : [n]).map((i) => i.href),
-  );
-  assert.equal(reached.length, pageSet.pages.filter((p) => p.nav).length);
-  assert.equal(navEntries(null, route("/")).length, 0);
-  const onStack = navEntries(pageSet, route("/stacks/media/apps"));
-  assert.deepEqual(onStack[1], {
-    href: "/stacks/media",
-    label: "Stack media",
-    current: true,
-  });
+  const cur = (/** @type {string} */ p) =>
+    navEntries(pageSet, route(p), areaOf)
+      .filter((n) => n.current)
+      .map((n) => n.label);
+  assert.deepEqual(cur("/apps"), ["Apps"]);
+  assert.deepEqual(cur("/stacks/media/logs"), ["Stacks"]);
+  assert.deepEqual(cur("/map"), ["System"]);
+  assert.deepEqual(cur("/charts"), ["System"]);
+  assert.deepEqual(cur("/activity"), ["Activity"]);
   assert.deepEqual(cur("/nope"), []);
+  assert.equal(navEntries(null, route("/")).length, 0);
   assert.equal(pageTitle(route("/stacks/media")), "Homelab · media");
   assert.equal(
     pageTitle(route("/stacks/media/logs")),
     "Homelab · media · Logs",
   );
-  assert.equal(pageTitle(route("/health"), pageSet), "Homelab · Health");
+  assert.equal(pageTitle(route("/map"), pageSet), "Homelab · Map");
   // Before the registry has answered: the local fallback title, never blank.
-  assert.equal(pageTitle(route("/health")), "Homelab · Health");
+  assert.equal(pageTitle(route("/inbox")), "Homelab · Inbox");
   assert.equal(pageTitle(route("/x")), "Homelab · Not found");
-  assert.deepEqual(route("/jobs?job=3"), { page: "jobs" });
-  assert.deepEqual(route("/schedules"), { page: "schedules" });
-  assert.deepEqual(route("/notifications"), { page: "notifications" });
-  assert.equal(
-    pageTitle(route("/notifications"), pageSet),
-    "Homelab · Notifications",
+});
+
+test("feat-shell-1: the trail above a page names its area and links up", () => {
+  const tab = (/** @type {string} */ t) =>
+    STACK_TABS.find((x) => x.tab === t)?.label ?? t;
+  assert.deepEqual(
+    crumbs(route("/stacks/gateway/logs"), "/stacks/gateway/logs", "", {
+      tabLabel: tab,
+    }),
+    [
+      { label: "Stacks", href: "/stacks" },
+      { label: "gateway", href: "/stacks/gateway" },
+      { label: "Logs" },
+    ],
   );
-  assert.deepEqual(cur("/notifications"), []);
-  assert.deepEqual(cur("/jobs"), ["Operations"]);
-  assert.deepEqual(route("/firewall"), { page: "firewall" });
-  assert.deepEqual(route("/settings"), { page: "settings" });
-  assert.deepEqual(route("/stacks/kp-soft/firewall"), {
-    page: "stack",
-    name: "kp-soft",
-    tab: "firewall",
-  });
-  assert.equal(
-    pageTitle(route("/stacks/kp-soft/settings")),
-    "Homelab · kp-soft · Settings",
+  assert.deepEqual(crumbs(route("/stacks/gateway"), "/stacks/gateway", ""), [
+    { label: "Stacks", href: "/stacks" },
+    { label: "gateway" },
+  ]);
+  assert.deepEqual(crumbs(route("/map"), "/map", ""), [
+    { label: "System", href: "/system" },
+    { label: "Map" },
+  ]);
+  assert.deepEqual(
+    crumbs(route("/activity"), "/activity", "?view=planned&x=1"),
+    [{ label: "Activity", href: "/activity" }, { label: "Planned" }],
+  );
+  assert.deepEqual(
+    crumbs(route("/settings"), "/settings", "?section=sign-in"),
+    [{ label: "System", href: "/system" }, { label: "Sign-in" }],
+  );
+  assert.deepEqual(crumbs(route("/inbox"), "/inbox", ""), [{ label: "Inbox" }]);
+  assert.deepEqual(crumbs(route("/nope"), "/nope", ""), []);
+});
+
+test("feat-shell-1: the server registers exactly the six areas, in areas.js's order", () => {
+  const src = readFileSync(
+    new URL("../../src/main.rs", import.meta.url),
+    "utf8",
+  );
+  const shown = [
+    ...src.matchAll(
+      /Page::new\("([^"]+)",\s*"([^"]+)",\s*"([^"]+)"\)(\s*\.[a-z_]+\([^)]*\))*/g,
+    ),
+  ]
+    .filter((m) => !/\.hidden\(\)/.test(m[0]))
+    .map((m) => ({ id: m[1], label: m[2], href: m[3] }));
+  assert.deepEqual(
+    shown,
+    AREAS.map((a) => ({ id: a.id, label: a.label, href: a.href })),
   );
 });

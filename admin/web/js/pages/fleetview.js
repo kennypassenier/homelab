@@ -188,7 +188,7 @@ export function mount(root) {
   const staleStatus = h("p", { class: "measured" });
 
   root.replaceChildren(
-    h("div", { class: "title-row" }, h("h1", null, "Fleet view")),
+    h("div", { class: "title-row" }, h("h1", null, "Map")),
     h(
       "p",
       { class: "page-intro" },

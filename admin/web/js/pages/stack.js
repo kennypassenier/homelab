@@ -51,6 +51,8 @@ import {
 import { attachLogs } from "/static/kp/js/log.js";
 import { watchTabOverflow } from "/static/kp/js/overlays.js";
 import { viaForm } from "../drivable.js";
+import { mount as mountSecrets } from "./secrets.js";
+import { emptyState, section } from "../ui.js";
 
 /** How far back the history tab reads. */
 const HISTORY_DAYS = 30;
@@ -87,13 +89,14 @@ export function mount(root, params) {
       current: t.tab === params.tab,
     })),
   );
+  // feat-shell-1: the shell draws the trail above every page now
+  // (`Stacks / gateway / Logs`); the old "← Overview" link went to `/`.
   root.replaceChildren(
-    h("p", { class: "crumb" }, h("a", { href: "/" }, "← Overview")),
     h("div", { class: "title-row" }, title, h("span", null, state, flags)),
     h(
       "p",
       { class: "section-head__desc measured" },
-      "Everything about this one stack: its facts, apps, history, logs, checks and settings.",
+      "Everything about this one stack: its state, logs, apps, backups, history and settings.",
     ),
     missing,
     tabs,
@@ -108,7 +111,7 @@ export function mount(root, params) {
     const d = stackDetail(f, params.name);
     missing.hidden = d != null;
     if (!d) {
-      missing.textContent = `The host's fleet has no stack called "${params.name}" (a stack committed but not deployed yet has only its Settings and Firewall tabs).`;
+      missing.textContent = `The host's fleet has no stack called "${params.name}" (a stack committed but not deployed yet has only its Settings tab).`;
       state.replaceChildren();
       return;
     }
@@ -159,13 +162,12 @@ export function mount(root, params) {
 
   /** @type {Record<string, (p: HTMLElement, params: Params) => () => void>} */
   const panels = {
-    overview: overviewTab,
-    apps: appsTab,
-    history: historyTab,
+    overview: hubOverview,
     logs: logsTab,
-    checks: checksTab,
-    settings: settingsTab,
-    firewall: firewallTab,
+    apps: appsTab,
+    backups: backupsTab,
+    history: historyTab,
+    settings: hubSettings,
   };
   const stop = panels[params.tab](panel, params);
   return () => {
@@ -175,6 +177,90 @@ export function mount(root, params) {
     stopOverflow();
     stop();
   };
+}
+
+/**
+ * feat-shell-3 (FLOWS.md §1.3): the hub's Overview holds what the Checks
+ * tab held, as its "Is it healthy?" section, until the hub's own page
+ * helper redraws it (`/stacks/{s}/checks` redirects here).
+ * @type {(p: HTMLElement, params: Params) => () => void}
+ */
+function hubOverview(panel, params) {
+  const top = h("div", { class: "hub-part" });
+  const healthy = section({
+    id: "stack-healthy",
+    title: "Is it healthy?",
+    desc: "Every check on this stack in one list: the manual checks a deploy left open, and your answers to them.",
+    mount: (body) => checksTab(body, params),
+  });
+  panel.replaceChildren(top, healthy.el);
+  const stop = overviewTab(top, params);
+  return () => {
+    stop();
+    healthy.stop();
+  };
+}
+
+/**
+ * feat-shell-3: the hub's Settings with its Firewall and Secrets sections
+ * (the Firewall tab and the fleet Secrets page moved here, FLOWS.md §2);
+ * `?section=firewall` / `?section=secrets` opens that one.
+ * @type {(p: HTMLElement, params: Params) => () => void}
+ */
+function hubSettings(panel, params) {
+  const want = new URLSearchParams(location.search).get("section");
+  const top = h("div", { class: "hub-part" });
+  const secrets = section({
+    id: "stack-secrets",
+    title: "Secrets",
+    desc: "The passwords and tokens this stack declares, sealed with latch; Reveal shows one, Change… writes a new one.",
+    collapsible: true,
+    open: want === "secrets",
+    mount: (body) => mountSecrets(body, { stack: params.name }),
+  });
+  const firewall = section({
+    id: "stack-firewall",
+    title: "Firewall",
+    desc: "The rules this stack's firewall lets through, and whether the host enforces them.",
+    collapsible: true,
+    open: want === "firewall",
+    mount: (body) => firewallTab(body, params),
+  });
+  panel.replaceChildren(top, secrets.el, firewall.el);
+  const stop = settingsTab(top, params);
+  const target =
+    want === "secrets" ? secrets : want === "firewall" ? firewall : null;
+  if (target)
+    queueMicrotask(() => target.el.scrollIntoView({ block: "start" }));
+  return () => {
+    stop();
+    secrets.stop();
+    firewall.stop();
+  };
+}
+
+/**
+ * feat-shell-3: the hub's Backups tab, new in 3.71.0; until its page
+ * helper draws this stack's repositories and nights here, it points at the
+ * Backups area.
+ * @type {(p: HTMLElement, params: Params) => () => void}
+ */
+function backupsTab(panel, params) {
+  panel.replaceChildren(
+    emptyState({
+      title: "This stack's backups live on the Backups page for now",
+      text: "Every snapshot of every night, per stack, with Back up now and Restore… on each row.",
+      action: h(
+        "a",
+        {
+          class: "kp-button",
+          href: `/backups?stack=${encodeURIComponent(params.name)}`,
+        },
+        "Open Backups",
+      ),
+    }),
+  );
+  return () => {};
 }
 
 /** @type {(p: HTMLElement, params: Params) => () => void} */
@@ -200,8 +286,8 @@ function overviewTab(panel, params) {
   );
   const shellLink = h(
     "a",
-    { class: "kp-button", href: "/shell" },
-    "Open the shell",
+    { class: "kp-button", href: "/console" },
+    "Open the console",
   );
   links.append(shellLink);
   const compareBtn = h(
@@ -211,7 +297,7 @@ function overviewTab(panel, params) {
       class: "kp-button",
       id: "drift-compare",
       title:
-        "Check only this one stack against its files (for every stack at once, use Overview's Apply section).",
+        "Check only this one stack against its files (for every stack at once, use Deploy all changes on Stacks).",
     },
     "Compare with the files",
   );
@@ -250,7 +336,7 @@ function overviewTab(panel, params) {
     const d = stackDetail(f, params.name);
     if (!f || !d) return;
     const s = f.stacks.find((x) => x.name === params.name);
-    shellLink.setAttribute("href", `/shell?vmid=${s?.vmid ?? ""}`);
+    shellLink.setAttribute("href", `/console?vmid=${s?.vmid ?? ""}`);
     fillFacts(facts, [
       ...d.facts,
       {

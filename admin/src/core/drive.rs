@@ -1513,14 +1513,17 @@ impl DriveState {
                 Applied { effect, held: None }
             }
             UiStep::Select { stacks } => {
-                if self.page != "/overview" {
+                // feat-shell-1 (3.71.0): the fleet table is the Stacks
+                // page's, `/stacks`; `/overview` is its address from before
+                // and still redirects there.
+                if self.page != "/stacks" && self.page != "/overview" {
                     return Err(refused(
                         step,
                         format!(
-                            "the fleet table's selection lives on the Overview page, not {}",
+                            "the fleet table's selection lives on the Stacks page (Overview before 3.71.0), not {}",
                             self.page
                         ),
-                        "homelab ui goto /overview first",
+                        "homelab ui goto /stacks first",
                     ));
                 }
                 let mut unknown: Vec<&String> = stacks

@@ -1,30 +1,49 @@
 // The shell's furniture around every page: the command palette (Ctrl K,
-// feat-overview-3), the shortcut sheet ("?") and the keys it lists
-// (feat-overview-8), the theme menu (feat-settings-2) and the host's open
-// questions (feat-ops-2). All kp-themes components; this module only fills
-// them and wires them to the router and the store.
+// feat-overview-3), the help sheet ("?") with the keys it lists
+// (feat-overview-8), the theme menu (feat-settings-2), the running-job
+// pill, and on a phone the bottom tab bar with its More sheet. All
+// kp-themes components; this module only fills them and wires them to the
+// router and the store.
+//
+// feat-shell-1/2/4 (redesign 3.71.0, FLOWS.md §1.2, Kenny approved
+// 2026-10-03): the bell is gone (its notices are Inbox rows, counted on the
+// bar's Inbox link); the host's questions moved into the Inbox too, with a
+// toast when one arrives; the palette finds pages AND actions by intent
+// ("update jellyfin", "gateway logs"), grouped Inbox → Do → Go to → Theme;
+// the running pill follows a job from every page.
 
 import { act, onAct, startAct } from "./act.js";
 import { openAction } from "./actiondialog.js";
 import { notify } from "./actui.js";
-import { answerBody, askView, openAsks } from "./asks.js";
+import { AREAS, moreAreas, phoneTabs } from "./areas.js";
+import { openAsks } from "./asks.js";
 import {
   actionCommands,
   allCommands,
   editCommands,
-  grouped,
+  inboxCommands,
   pageCommands,
   registerCommands,
   stackCommands,
   themeCommands,
 } from "./commands.js";
 import { h } from "./dom.js";
-import { bell, snoozeState, toastOf } from "./notices.js";
+import {
+  changed as notifyInbox,
+  countText,
+  inboxNow,
+  onInbox,
+  wireInbox,
+} from "./inbox.js";
+import { noMatchText, rankCommands } from "./intent.js";
+import { finished, stepText } from "./jobs.js";
+import { mountJobPanel } from "./jobpanel.js";
+import { toastOf } from "./notices.js";
 import { openImport } from "./importstack.js";
 import { openNewStack } from "./newstack.js";
 import { openRollback } from "./rollbackdialog.js";
 import { SHORTCUTS, idle, keyAction } from "./shortcuts.js";
-import { current, listen, setAsks, subscribe } from "./store.js";
+import { current, listen, subscribe } from "./store.js";
 import {
   OPEN_EVENT,
   RUN_EVENT,
@@ -55,6 +74,10 @@ function chooseTheme(name) {
   storeTheme(name);
 }
 
+registerCommands(
+  "inbox",
+  inboxCommands(() => inboxNow().items),
+);
 registerCommands("pages", pageCommands);
 registerCommands("stacks", stackCommands);
 registerCommands("themes", themeCommands(chooseTheme));
@@ -62,7 +85,44 @@ registerCommands("themes", themeCommands(chooseTheme));
 /** @param {string} keys */
 const shown = (keys) => (keys === "Ctrl K" && isMac() ? "⌘ K" : keys);
 
-/** The palette's dialog; its options are written each time it opens. */
+/** The words the help sheet explains (FLOWS.md §1.2 "Help"). */
+const GLOSSARY = /** @type {const} */ ([
+  [
+    "Stack",
+    "One container on the host with the apps it runs, described by files in the repository.",
+  ],
+  ["App", "One program inside a stack, usually a Docker container."],
+  [
+    "Deploy",
+    "Make the stack match its files: create, change or restart what differs.",
+  ],
+  [
+    "Update",
+    "Move an app to a newer image; backed up first, rolled back if it does not come up healthy.",
+  ],
+  [
+    "Back up / snapshot",
+    "A dated copy of an app's data, every night and whenever you press Back up.",
+  ],
+  [
+    "Restore",
+    "Put an app's data back as it was in a snapshot; a safety copy of today's data is made first.",
+  ],
+  [
+    "Secret",
+    "A password or token a stack needs, sealed with latch, never shown until you press Reveal.",
+  ],
+  [
+    "Job",
+    "One action running on the host; follow it from the running pill or in Activity.",
+  ],
+  [
+    "Park",
+    "Take a stack out of the nightly round and start-on-boot; nothing is stopped.",
+  ],
+]);
+
+/** The palette's dialog; its options are written for every query. */
 function paletteDialog() {
   const list = h("ul", {
     class: "kp-palette__list",
@@ -70,6 +130,19 @@ function paletteDialog() {
     role: "listbox",
     "aria-label": "Commands",
   });
+  const input = /** @type {HTMLInputElement} */ (
+    h("input", {
+      class: "kp-palette__input",
+      type: "text",
+      role: "combobox",
+      "aria-label": "Search or do anything",
+      placeholder:
+        "Type a page, a stack or what you want to do, e.g. update gateway",
+      "aria-expanded": "true",
+      "aria-controls": "commands-list",
+      autocomplete: "off",
+    })
+  );
   const dialog = h(
     "dialog",
     {
@@ -77,37 +150,61 @@ function paletteDialog() {
       id: "commands",
       "data-kp-palette": "",
       "data-kp-hotkey": "k",
-      "aria-label": "Commands",
+      "aria-label": "Search or do anything",
     },
-    h("input", {
-      class: "kp-palette__input",
-      type: "text",
-      role: "combobox",
-      "aria-label": "Go to a page, a stack, an action or a theme",
-      placeholder: "Go to a page, a stack, an action or a theme…",
-      "aria-expanded": "true",
-      "aria-controls": "commands-list",
-      autocomplete: "off",
-    }),
+    input,
     list,
     h("p", {
       class: "kp-palette__status",
       role: "status",
       "aria-live": "polite",
     }),
+    h(
+      "p",
+      { class: "nx-palette__foot" },
+      "↑ ↓ choose · Enter opens or starts · Esc closes · actions open their dialog first: nothing runs without a confirm",
+    ),
   );
-  return { dialog, list };
+  return { dialog, list, input };
 }
 
-/** @param {HTMLElement} list @returns {import("./commands.js").Command[]} */
-function fillPalette(list) {
+/**
+ * Write the palette's rows for a query: only what answers it, Inbox → Do →
+ * Go to → Theme (intent.js); when nothing does, why not.
+ * @param {HTMLElement} list
+ * @param {string} query
+ * @param {string | null} here the stack whose hub is open
+ * @returns {import("./commands.js").Command[]}
+ */
+function fillPalette(list, query, here) {
   const commands = allCommands({
     fleet: current().fleet,
     themes: THEMES,
     theme: currentTheme(),
   });
+  const groups = rankCommands(commands, query, { here });
+  if (groups.length === 0) {
+    const verbs = [
+      ...new Set(
+        (act.catalog?.actions ?? [])
+          .filter((a) => a.target === "stack")
+          .map((a) => a.label),
+      ),
+    ];
+    list.replaceChildren(
+      h(
+        "li",
+        { role: "presentation", class: "nx-palette__empty" },
+        noMatchText(query, {
+          verbs,
+          stacks: (current().fleet?.stacks ?? []).map((s) => s.name),
+        }),
+      ),
+    );
+    return commands;
+  }
   list.replaceChildren(
-    ...grouped(commands).map((g) =>
+    ...groups.map((g) =>
       h(
         "li",
         {
@@ -127,16 +224,25 @@ function fillPalette(list) {
               "data-kp-option": "",
               "data-value": c.id,
             };
-            if (c.keys) a["data-kp-keys"] = c.keys;
-            const hint = c.hint
-              ? [h("span", { class: "kp-palette__description" }, c.hint)]
-              : [];
+            const extra = [
+              ...(c.hint
+                ? [h("span", { class: "kp-palette__description" }, c.hint)]
+                : []),
+              ...(c.keys
+                ? [h("kbd", { class: "kp-palette__keys" }, c.keys)]
+                : []),
+            ];
             return h(
               "li",
               { role: "presentation" },
               c.href
-                ? h("a", { ...a, href: c.href }, c.label, ...hint)
-                : h("span", a, c.label, ...hint),
+                ? h(
+                    "a",
+                    { ...a, href: c.href, tabindex: "-1" },
+                    c.label,
+                    ...extra,
+                  )
+                : h("span", a, c.label, ...extra),
             );
           }),
         ),
@@ -146,17 +252,51 @@ function fillPalette(list) {
   return commands;
 }
 
-/** The "?" sheet, drawn from the same list the keys obey. */
-function shortcutSheet() {
+/** The "?" sheet: where things live, the words, and the keys. */
+function helpSheet() {
   return h(
     "dialog",
     {
       class: "kp-shortcuts",
       id: "shortcuts",
       "data-kp-shortcuts": "",
-      "aria-label": "Keyboard shortcuts",
+      "aria-label": "Help, words and shortcuts",
     },
-    h("h2", { class: "kp-dialog__title" }, "Keyboard shortcuts"),
+    h("h2", { class: "kp-dialog__title" }, "Help"),
+    h(
+      "section",
+      { class: "kp-shortcuts__group" },
+      h("h3", { class: "kp-shortcuts__group-label" }, "Where things live"),
+      h(
+        "dl",
+        { class: "kp-shortcuts__list" },
+        ...AREAS.map((a) =>
+          h(
+            "div",
+            { class: "kp-shortcuts__row" },
+            h("dt", null, h("a", { href: a.href }, a.label)),
+            h("dd", null, a.what),
+          ),
+        ),
+      ),
+    ),
+    h(
+      "section",
+      { class: "kp-shortcuts__group" },
+      h("h3", { class: "kp-shortcuts__group-label" }, "Words"),
+      h(
+        "dl",
+        { class: "kp-shortcuts__list" },
+        ...GLOSSARY.map(([w, m]) =>
+          h(
+            "div",
+            { class: "kp-shortcuts__row" },
+            h("dt", null, w),
+            h("dd", null, m),
+          ),
+        ),
+      ),
+    ),
     ...SHORTCUTS.map((g) =>
       h(
         "section",
@@ -200,191 +340,287 @@ function notOurs(e) {
 }
 
 /**
- * The host's questions, above every page (feat-ops-2).
- * @param {HTMLElement} region
+ * The jobs the running pill counts: queued or running, oldest first.
+ * @param {import("./jobs.js").Job[]} jobs
  */
-function mountAsks(region) {
-  /** @type {Map<string, {box: HTMLElement, left: HTMLElement}>} */
-  const shownAsks = new Map();
+export const liveJobs = (jobs) =>
+  jobs
+    .filter((j) => !finished(j.state))
+    .sort((a, b) => a.queued_at - b.queued_at);
 
-  /** @param {import("./asks.js").Ask} a @param {boolean} allow @param {HTMLElement} box */
-  const answer = async (a, allow, box) => {
-    box.querySelectorAll("button").forEach((b) => (b.disabled = true));
-    const note = /** @type {HTMLElement} */ (box.querySelector(".ask-note"));
-    note.textContent = allow ? "Sending: allow…" : "Sending: stop…";
-    /** @type {any} */
-    let body = null;
-    let ok = false;
-    try {
-      const r = await fetch("/data/asks/answer", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json",
-        },
-        body: JSON.stringify(answerBody(a, allow)),
-      });
-      ok = r.ok;
-      body = await r.json().catch(() => null);
-    } catch {
-      body = { why: "the dashboard did not answer" };
-    }
-    if (ok) {
-      note.textContent = allow
-        ? "Allowed. The operation goes on."
-        : "Stopped. The operation stops here.";
-      setAsks(
-        current().asks.filter((x) => !(x.id === a.id && x.boot === a.boot)),
-      );
-      return;
-    }
-    note.textContent = `Not sent: ${body?.why ?? "unknown error"}${body?.fix ? `. ${body.fix}` : ""}`;
-    box.querySelectorAll("button").forEach((b) => (b.disabled = false));
-  };
-
-  const render = () => {
-    const now = Date.now() / 1000;
-    const open = openAsks(current().asks, now);
-    const keys = new Set(open.map((a) => askView(a, now).key));
-    for (const [k, v] of shownAsks)
-      if (!keys.has(k)) {
-        v.box.remove();
-        shownAsks.delete(k);
-      }
-    for (const a of open) {
-      const v = askView(a, now);
-      const known = shownAsks.get(v.key);
-      if (known) {
-        known.left.textContent = v.left;
-        known.box.dataset.urgent = String(v.urgent);
-        continue;
-      }
-      const left = h("p", { class: "measured ask-left" }, v.left);
-      const allow = h(
-        "button",
-        { type: "button", class: "kp-button" },
-        "Allow",
-      );
-      const stop = h(
-        "button",
-        { type: "button", class: "kp-button kp-button--destructive" },
-        "Stop",
-      );
-      const box = h(
-        "div",
-        {
-          class: "kp-alert kp-alert--warning ask",
-          role: "alert",
-          "data-ask": v.key,
-        },
-        h("strong", null, v.title),
-        h("p", null, v.what),
-        h(
-          "dl",
-          { class: "facts ask-consequences" },
-          h("dt", null, "Allow"),
-          h("dd", null, v.ifAllowed),
-          h("dt", null, "Stop"),
-          h("dd", null, v.ifStopped),
-        ),
-        h("div", { class: "ask-buttons" }, allow, stop),
-        left,
-        h("p", { class: "ask-note", role: "status", "aria-live": "polite" }),
-      );
-      allow.addEventListener("click", () => void answer(a, true, box));
-      stop.addEventListener("click", () => void answer(a, false, box));
-      region.append(box);
-      shownAsks.set(v.key, { box, left });
-    }
-    region.hidden = region.childElementCount === 0;
-  };
-  subscribe(render);
-  setInterval(render, 1000);
-  render();
+/**
+ * The pill's words: "1 running · Deploy kp-soft · step 4/6".
+ * @param {import("./jobs.js").Job[]} live
+ * @param {(action: string) => string} label
+ */
+export function pillText(live, label) {
+  if (live.length === 0) return { short: "", long: "" };
+  const j = live[0];
+  const short = `${live.length} running`;
+  const long = ` · ${label(j.action)} ${j.stack} · ${stepText(j)}`;
+  return { short, long };
 }
 
 /**
- * The bell (feat-overview-5): the unread count in the bar, a link to the
- * notification centre, and a kp toast for every notice that pops up.
+ * The running pill (FLOWS.md §1.2): shown only while a job runs; one click
+ * opens a drawer with the job's live panel, "Open the full flow" and "All
+ * jobs in Activity". Closing the drawer never stops the job.
  * @param {(href: string) => void} navigate
  */
-function mountBell(navigate) {
-  const count = h("span", {
-    class: "kp-badge bell-count",
-    "aria-hidden": "true",
-  });
-  const link = h(
-    "a",
+function mountRunningPill(navigate) {
+  const short = h("span", { class: "nx-pill__short" });
+  const long = h("span", { class: "nx-pill__long" });
+  const pill = h(
+    "button",
     {
-      class: "kp-button kp-button--ghost bell",
-      href: "/notifications",
-      id: "bell",
+      type: "button",
+      class: "nx-pill",
+      id: "running-pill",
+      hidden: "",
+      title: "Follow the running job",
     },
-    bellIcon(),
-    count,
+    h("span", { class: "nx-spin", "aria-hidden": "true" }),
+    short,
+    long,
   );
   const paint = () => {
-    const snap = act.notices;
-    const b = bell(snap?.unread ?? 0);
-    count.textContent = b.count;
-    count.hidden = b.count === "";
-    const sn = snoozeState(snap?.settings, Date.now() / 1000);
-    link.setAttribute("aria-label", sn.on ? `${b.label}; ${sn.text}` : b.label);
-    link.title = sn.on ? sn.text : b.label;
-    link.dataset.snoozed = String(sn.on);
-  };
-  onAct("notices", paint);
-  paint();
-  listen("notification", (ev) => {
-    if (!ev?.pop_up || !ev.notice) return;
-    const t = toastOf(ev.notice);
-    const job = ev.notice.job;
-    notify(
-      t.text,
-      /** @type {"success" | "warning" | "info" | "error"} */ (t.tone),
-      job
-        ? {
-            label: "Open the job",
-            onClick: () => navigate(`/jobs?job=${job}`),
-          }
-        : { label: "Open", onClick: () => navigate("/notifications") },
+    const live = liveJobs(act.jobs);
+    const t = pillText(
+      live,
+      (a) => act.catalog?.actions.find((x) => x.action === a)?.label ?? a,
     );
+    pill.hidden = live.length === 0;
+    short.textContent = t.short;
+    long.textContent = t.long;
+  };
+  pill.addEventListener("click", () => {
+    const live = liveJobs(act.jobs);
+    if (live.length === 0) return;
+    openJobDrawer(live[0].job, live.length, navigate);
   });
-  return link;
+  onAct("jobs", paint);
+  paint();
+  return pill;
 }
 
-/** A bell, drawn in the text colour. */
-function bellIcon() {
+/**
+ * The job drawer: a side panel on a native dialog with the job's own live
+ * panel (jobpanel.js).
+ * @param {number} jobId
+ * @param {number} count how many jobs run now
+ * @param {(href: string) => void} navigate
+ */
+function openJobDrawer(jobId, count, navigate) {
+  const panel = mountJobPanel(jobId, { compact: true });
+  const close = h(
+    "button",
+    {
+      type: "button",
+      class: "kp-button kp-button--ghost kp-dialog__close",
+      "aria-label": "Close",
+    },
+    "✕",
+  );
+  const all = h(
+    "a",
+    { class: "kp-button", href: "/activity?view=running" },
+    count > 1 ? `All ${count} jobs in Activity` : "All jobs in Activity",
+  );
+  const flow = h(
+    "a",
+    {
+      class: "kp-button kp-button--primary",
+      href: `/activity?view=running&job=${jobId}`,
+    },
+    "Open the full flow",
+  );
+  const d = /** @type {HTMLDialogElement} */ (
+    h(
+      "dialog",
+      { class: "kp-dialog nx-drawer", "aria-label": "Running job" },
+      h(
+        "div",
+        { class: "nx-drawer__head" },
+        h("h2", { class: "kp-dialog__title" }, "Running now"),
+        close,
+        h(
+          "p",
+          { class: "section-head__desc" },
+          "This job runs on the host; closing this panel or the page does not stop it.",
+        ),
+      ),
+      h("div", { class: "nx-drawer__body" }, panel.element),
+      h("div", { class: "nx-drawer__foot" }, all, flow),
+    )
+  );
+  const done = () => d.close();
+  close.addEventListener("click", done);
+  for (const a of [all, flow])
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      done();
+      navigate(
+        /** @type {HTMLAnchorElement} */ (a).getAttribute("href") ?? "/",
+      );
+    });
+  d.addEventListener("close", () => {
+    panel.stop();
+    d.remove();
+  });
+  document.body.append(d);
+  d.showModal();
+}
+
+/** @param {string} id */
+const icon = (id) => {
+  /** @type {Record<string, string[]>} */
+  const paths = {
+    home: ["M3 3h7v7H3z", "M14 3h7v7h-7z", "M3 14h7v7H3z", "M14 14h7v7h-7z"],
+    inbox: ["M4 13h4l2 3h4l2-3h4", "M5 5h14l1 8v6H4v-6z"],
+    overview: ["m12 3 9 5-9 5-9-5z", "m3 13 9 5 9-5"],
+    activity: ["M3 12h4l3-7 4 14 3-7h4"],
+    more: ["M5 12h.01", "M12 12h.01", "M19 12h.01"],
+  };
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("width", "18");
-  svg.setAttribute("height", "18");
   svg.setAttribute("aria-hidden", "true");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "2");
-  svg.setAttribute("stroke-linecap", "round");
-  svg.setAttribute("stroke-linejoin", "round");
-  for (const d of [
-    "M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9",
-    "M10.3 21a1.94 1.94 0 0 0 3.4 0",
-  ]) {
+  for (const d of paths[id] ?? []) {
     const p = document.createElementNS(ns, "path");
     p.setAttribute("d", d);
     svg.append(p);
   }
   return svg;
+};
+
+/**
+ * The phone's bottom tab bar (FLOWS.md §1.1 "Phone"): the four frequent
+ * areas within thumb reach, then More, whose sheet holds Backups, System,
+ * Search and Help. Hidden above 60 rem by app.css.
+ * @param {ChromeCtx} ctx
+ * @param {() => void} openPalette
+ * @param {() => void} openHelp
+ * @returns {{el: HTMLElement, paint: () => void}}
+ */
+function mountTabBar(ctx, openPalette, openHelp) {
+  const badge = h("span", { class: "kp-badge nx-count", hidden: "" });
+  const tabs = phoneTabs().map((a) =>
+    h(
+      "a",
+      { href: a.href, "data-area": a.id, class: "nx-tabbar__tab" },
+      icon(a.id),
+      h("span", null, a.label),
+      ...(a.id === "inbox" ? [badge] : []),
+    ),
+  );
+  const more = h(
+    "button",
+    { type: "button", class: "nx-tabbar__tab", "data-area": "more" },
+    icon("more"),
+    h("span", null, "More"),
+  );
+  const el = h(
+    "nav",
+    { class: "nx-tabbar", "aria-label": "Areas" },
+    ...tabs,
+    more,
+  );
+  more.addEventListener("click", () => {
+    const item = (
+      /** @type {string} */ title,
+      /** @type {string} */ what,
+      /** @type {() => void} */ go,
+    ) => {
+      const b = h(
+        "button",
+        { type: "button", class: "nx-action" },
+        h("strong", null, title),
+        h("span", null, what),
+      );
+      b.addEventListener("click", () => {
+        d.close();
+        go();
+      });
+      return b;
+    };
+    const close = h(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--ghost kp-dialog__close",
+        "aria-label": "Close",
+      },
+      "✕",
+    );
+    const d = /** @type {HTMLDialogElement} */ (
+      h(
+        "dialog",
+        { class: "kp-dialog nx-drawer nx-sheet", "aria-label": "More" },
+        h(
+          "div",
+          { class: "nx-drawer__head" },
+          h("h2", { class: "kp-dialog__title" }, "More"),
+          close,
+          h(
+            "p",
+            { class: "section-head__desc" },
+            "The two areas you need less often, plus search and help.",
+          ),
+        ),
+        h(
+          "div",
+          { class: "nx-drawer__body nx-actions" },
+          ...moreAreas().map((a) =>
+            item(a.label, a.what, () => ctx.navigate(a.href)),
+          ),
+          item(
+            "Search or do anything",
+            "Pages, stacks and actions in one box",
+            openPalette,
+          ),
+          item(
+            "Help and the words",
+            "What a stack, a deploy or a snapshot is",
+            openHelp,
+          ),
+        ),
+      )
+    );
+    close.addEventListener("click", () => d.close());
+    d.addEventListener("close", () => d.remove());
+    document.body.append(d);
+    d.showModal();
+  });
+  const paint = () => {
+    const r = ctx.route();
+    const areaId =
+      r.page === "stack"
+        ? "overview"
+        : (AREAS.find((a) => a.id === r.page)?.id ?? null);
+    for (const t of [...tabs, more]) t.removeAttribute("aria-current");
+    const hit = tabs.find((t) => t.dataset.area === areaId);
+    if (hit) hit.setAttribute("aria-current", "page");
+    else if (moreAreas().some((a) => a.id === areaId))
+      more.setAttribute("aria-current", "page");
+    const n = inboxNow().items.length;
+    badge.textContent = countText(n);
+    badge.hidden = n === 0;
+  };
+  onInbox(paint);
+  paint();
+  return { el, paint };
 }
 
 /**
- * Put the palette, the sheet, the theme menu and the questions in place.
- * @param {{nav: HTMLElement, asks: HTMLElement}} where
+ * Put the palette, the help sheet, the theme menu, the running pill and the
+ * phone tab bar in place.
+ * @param {{nav: HTMLElement}} where
  * @param {ChromeCtx} ctx
+ * @returns {{repaint: () => void}} repaint what depends on the route
  */
 export function mountChrome(where, ctx) {
-  const { dialog, list } = paletteDialog();
-  const sheet = shortcutSheet();
+  const { dialog, list, input } = paletteDialog();
+  const sheet = helpSheet();
   const trigger = h(
     "div",
     { class: "kp-nav__search" },
@@ -392,10 +628,11 @@ export function mountChrome(where, ctx) {
       "button",
       {
         type: "button",
-        class: "kp-nav__search-trigger",
+        class: "kp-nav__search-trigger nx-search-trigger",
         "data-kp-palette-open": "commands",
+        title: "Search pages, stacks and actions, or start one (Ctrl K)",
       },
-      "Go to… ",
+      h("span", { class: "nx-search-trigger__text" }, "Search or do anything…"),
       h("kbd", { class: "kp-palette__keys", "data-kp-palette-keys": "" }),
     ),
   );
@@ -405,8 +642,8 @@ export function mountChrome(where, ctx) {
       type: "button",
       class: "kp-button kp-button--ghost help-button",
       "data-kp-palette-open": "shortcuts",
-      "aria-label": "Keyboard shortcuts",
-      title: "Keyboard shortcuts (?)",
+      "aria-label": "Help, words and shortcuts",
+      title: "Help, words and shortcuts (?)",
     },
     "?",
   );
@@ -418,44 +655,60 @@ export function mountChrome(where, ctx) {
   // Milestone act: the catalog, the jobs, the notices and the schedules,
   // and every action as a palette command (feat-stacks-4).
   startAct();
+  wireInbox(() => ({
+    asks: current().asks,
+    notices: act.notices?.notices ?? (act.failed.notices ? [] : null),
+  }));
+  subscribe(() => notifyInbox());
+  onAct("notices", () => notifyInbox());
+  // A question's countdown moves on its own; re-count once a second only
+  // while one is open.
+  setInterval(() => {
+    if (openAsks(current().asks, Date.now() / 1000).length) notifyInbox();
+  }, 1000);
+  const here = () => {
+    const r = ctx.route();
+    return r.page === "stack" ? r.name : null;
+  };
   registerCommands(
     "actions",
     actionCommands(
       () => act.catalog,
-      () => {
-        const r = ctx.route();
-        return r.page === "stack" ? r.name : null;
-      },
+      here,
       (stack, action) => void openAction(stack, action, { openRollback }),
     ),
   );
-  // Milestone edit: a new stack and each stack's edit tabs.
+  // Milestone edit: a new stack, deploying every change, each stack's
+  // settings, secrets and firewall.
   registerCommands(
     "edit",
     editCommands(
-      () => {
-        const r = ctx.route();
-        return r.page === "stack" ? r.name : null;
-      },
+      here,
       () => void openNewStack(ctx.navigate),
       () => void openImport(ctx.navigate),
     ),
   );
-  where.nav.append(trigger, mountBell(ctx.navigate), help, themes);
+  const pill = mountRunningPill(ctx.navigate);
+  where.nav.append(trigger, pill, help, themes);
   document.body.append(dialog, sheet);
   attachThemePickers(themes);
   // The themes' pointer effects (the dark theme's cursor glow) follow the
-  // mouse only once attached; kyu does this, the dashboard never did
-  // (Kenny, 2026-09-29 05:53).
+  // mouse only once attached (Kenny, 2026-09-29 05:53).
   attachEffects(document);
-  attachPalettes(document, { hotkey: "k", sheetKey: "?" });
+  // feat-shell-2: the rows are written per query by intent.js's ranking,
+  // so kp's own filter keeps every row it is given.
+  attachPalettes(document, { hotkey: "k", sheetKey: "?", match: () => true });
 
   /** @type {import("./commands.js").Command[]} */
-  let commands = fillPalette(list);
+  let commands = fillPalette(list, "", here());
+  const refill = () => {
+    commands = fillPalette(list, input.value, here());
+    palette(dialog)?.refresh();
+  };
+  input.addEventListener("input", refill);
   dialog.addEventListener(OPEN_EVENT, (e) => {
     if (!(/** @type {CustomEvent} */ (e).detail?.open)) return;
-    commands = fillPalette(list);
-    palette(dialog)?.refresh();
+    refill();
   });
   dialog.addEventListener(RUN_EVENT, (e) => {
     const value = /** @type {CustomEvent} */ (e).detail?.value;
@@ -466,6 +719,51 @@ export function mountChrome(where, ctx) {
     if (c.href) ctx.navigate(c.href);
     else c.run?.();
   });
+
+  const tabbar = mountTabBar(
+    ctx,
+    () => palette(dialog)?.open(),
+    () => palette(sheet)?.open(),
+  );
+  document.body.append(tabbar.el);
+
+  // The notices the bell used to count: a pop-up one still toasts, and
+  // its Open goes to the Inbox (or the job's own flow).
+  listen("notification", (ev) => {
+    if (!ev?.pop_up || !ev.notice) return;
+    const t = toastOf(ev.notice);
+    const job = ev.notice.job;
+    notify(
+      t.text,
+      /** @type {"success" | "warning" | "info" | "error"} */ (t.tone),
+      job
+        ? {
+            label: "Open the job",
+            onClick: () => ctx.navigate(`/activity?view=running&job=${job}`),
+          }
+        : { label: "Open the Inbox", onClick: () => ctx.navigate("/inbox") },
+    );
+  });
+  // A new host question toasts once, wherever you are (the strip under
+  // the bar it used to be is the Inbox's top row now).
+  /** @type {Set<string>} */
+  const askedSeen = new Set();
+  const onAsks = () => {
+    for (const a of openAsks(current().asks, Date.now() / 1000)) {
+      const k = `${a.boot ?? ""}:${a.id}`;
+      if (askedSeen.has(k)) continue;
+      askedSeen.add(k);
+      notify(
+        `The host is asking: ${a.op} is waiting at "${a.step}"`,
+        "warning",
+        {
+          label: "Answer in the Inbox",
+          onClick: () => ctx.navigate("/inbox"),
+        },
+      );
+    }
+  };
+  subscribe(onAsks);
 
   let chord = idle();
   document.addEventListener("keydown", (e) => {
@@ -478,11 +776,10 @@ export function mountChrome(where, ctx) {
     if ("navigate" in a) ctx.navigate(a.navigate);
     else {
       const search = /** @type {HTMLInputElement | null} */ (
-        document.querySelector("#page .kp-datatable__search")
+        document.querySelector("#page .nx-search, #page .kp-datatable__search")
       );
       search?.focus();
     }
   });
-
-  mountAsks(where.asks);
+  return { repaint: () => tabbar.paint() };
 }

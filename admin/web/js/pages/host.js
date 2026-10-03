@@ -219,8 +219,12 @@ export function mount(root, ctx) {
     h(
       "p",
       { class: "actions-row host-links" },
-      h("a", { class: "kp-button", href: "/shell" }, "Open the shell"),
-      h("a", { class: "kp-button", href: "/log" }, "Live log"),
+      h("a", { class: "kp-button", href: "/console" }, "Open the console"),
+      h(
+        "a",
+        { class: "kp-button", href: "/activity?view=host-log" },
+        "Host log",
+      ),
       h("a", { class: "kp-button", href: "/presets" }, "Presets"),
       h(
         "a",

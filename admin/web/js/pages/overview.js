@@ -186,7 +186,7 @@ export function mount(root, ctx) {
     h(
       "div",
       { class: "title-row" },
-      h("h1", null, "Overview"),
+      h("h1", null, "Stacks"),
       h("span", { class: "actions-row" }, importBtn, newStack),
     ),
     h(
@@ -211,7 +211,10 @@ export function mount(root, ctx) {
     measured,
     applySection,
   );
-  if (new URLSearchParams(location.search).get("section") === "apply") {
+  // feat-shell-1: `/stacks?deploy-all=1` (Deploy all changes) is this
+  // section's 3.71.0 address; `?section=apply` from before still opens it.
+  const q = new URLSearchParams(location.search);
+  if (q.get("section") === "apply" || q.get("deploy-all") === "1") {
     applySection.open = true;
     mountApplyOnce();
     queueMicrotask(() => applySection.scrollIntoView({ block: "start" }));

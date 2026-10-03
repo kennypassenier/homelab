@@ -110,6 +110,37 @@ function rows(stack, native, repos) {
 }
 
 /**
+ * fix-258 (design review, 2026-10-03): a stack the host holds no restic
+ * repository for still has its row, saying so and why, instead of
+ * vanishing from the table without a word.
+ * @param {string} stack
+ */
+function noRepoRow(stack) {
+  return h(
+    "tr",
+    { "data-kp-row-key": `${stack}-none` },
+    h("td", null, h("a", { href: stackHref(stack) }, stack)),
+    h(
+      "td",
+      null,
+      h("em", null, "no repository"),
+      h(
+        "span",
+        { class: "measured" },
+        " — the host holds no restic repository for this stack: none of its apps keeps data, or it has never been backed up",
+      ),
+    ),
+    td("—"),
+    td("—"),
+    td("—"),
+    td("0"),
+    td("—"),
+    badgeCell({ label: "nothing to drill", tone: "neutral" }),
+    h("td", null),
+  );
+}
+
+/**
  * @param {string} stack
  * @param {boolean} native
  * @param {any} r
@@ -425,7 +456,12 @@ export function mount(root) {
     /** @type {Node[]} */
     const out = [];
     for (const [name, r] of Object.entries(results))
-      if (r.status === "ok") out.push(...rows(name, r.native, r.repos));
+      if (r.status === "ok")
+        out.push(
+          ...(r.repos.length
+            ? rows(name, r.native, r.repos)
+            : [noRepoRow(name)]),
+        );
     const progress = stackReadProgress(results);
     table.setNothing(
       out.length === 0 && progress.failed.length > 0

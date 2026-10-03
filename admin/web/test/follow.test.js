@@ -190,6 +190,7 @@ test("the form description is one file: the browser's checks match the cases the
       args: /** @type {any} */ (c.args),
       confirm: c.confirm,
       refused_for_self: false,
+      destructive: false,
     });
     const form = actionForm(entry, { stack: c.stack, selfStack: "admin" });
     const got = checkValues(

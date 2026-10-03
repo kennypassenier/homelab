@@ -17,7 +17,9 @@ import SPEC from "./formspec.json" with { type: "json" };
  *   "days" | "note" | "destroy"} ArgName
  * @typedef {{action: string, target: "stack" | "host", label: string,
  *   what: string, scope: string, needs: string, args: ArgName[],
- *   confirm: boolean, refused_for_self: boolean}} CatalogEntry
+ *   confirm: boolean, refused_for_self: boolean,
+ *   destructive: boolean}} CatalogEntry
+ *   destructive (fix-255): the one thing that paints an action red
  * @typedef {{actions: CatalogEntry[], host_target: string,
  *   self_stack: string}} Catalog
  */
@@ -219,7 +221,7 @@ export function actionForm(entry, ctx) {
     steps,
     confirmName: entry.confirm ? stack : null,
     refused,
-    destructive: entry.scope === "all",
+    destructive: entry.destructive === true,
     runPath: `/data/actions/${encodeURIComponent(stack)}/${entry.action}`,
     previewPath: `/data/actions/${encodeURIComponent(stack)}/${entry.action}/preview`,
     intro: /** @type {Record<string, string>} */ (SPEC.intro)[entry.action]

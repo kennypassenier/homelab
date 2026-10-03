@@ -76,6 +76,7 @@ const entry = (action, o = {}) =>
     args: [],
     confirm: false,
     refused_for_self: false,
+    destructive: false,
     ...o,
   });
 
@@ -101,8 +102,14 @@ const catalog = {
       confirm: true,
       refused_for_self: true,
       scope: "all",
+      destructive: true,
     }),
-    entry("wipe", { args: ["confirm"], refused_for_self: true, scope: "all" }),
+    entry("wipe", {
+      args: ["confirm"],
+      refused_for_self: true,
+      scope: "all",
+      destructive: true,
+    }),
     entry("patch", { target: "host", label: "Patch the fleet" }),
   ],
 };

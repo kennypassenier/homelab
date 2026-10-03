@@ -235,7 +235,7 @@ export function tableBlock(spec) {
     spec.busyOverlay !== false ? busyOverlay(wrap, status) : () => {};
 
   // ── Loading: kp's spinner, the page's words and kp's own counter ─────
-  /** @type {{text: string, since: number, given: boolean} | null} */
+  /** @type {{text: string, since: number, given: boolean, overlay?: boolean} | null} */
   let busy = null;
   /** @type {number | null} when the rows on screen were read */
   let readAt = null;
@@ -245,7 +245,14 @@ export function tableBlock(spec) {
     const hd = handle();
     if (!busy || busy.given || !hd) return;
     busy.given = true;
-    hd.busy({ text: busy.text, since: busy.since });
+    // fix-260: this load's overlay choice reaches kp's own busy() too
+    // (kp-themes now draws its own card; `overlay: false` keeps a page's
+    // last answer readable under it, as the shim below already did).
+    hd.busy({
+      text: busy.text,
+      since: busy.since,
+      ...(busy.overlay === undefined ? {} : { overlay: busy.overlay }),
+    });
   };
   const stopBusy = () => {
     const was = busy;
@@ -294,6 +301,7 @@ export function tableBlock(spec) {
       }),
       since: Date.now(),
       given: false,
+      overlay: o.overlay,
     };
     const hd = handle();
     if (hd && hd.view().state !== "loading") hd.state("loading");
@@ -376,7 +384,18 @@ function busyOverlay(wrap, status) {
   const wanted = () => chosen ?? wrap.hasAttribute("data-kp-busy-overlay");
   const sync = () => {
     const table = wrap.querySelector("table");
-    if (wrap.getAttribute("aria-busy") !== "true" || !wanted() || !table) {
+    // fix-260 (design review, 2026-10-03): kp-themes draws its own busy
+    // card now; with both, two spinners showed. The shim steps aside for
+    // kp's own layer whenever one exists.
+    const kpOwn = [
+      ...wrap.querySelectorAll(":scope > .kp-datatable__busy-overlay"),
+    ].some((l) => l !== layer);
+    if (
+      kpOwn ||
+      wrap.getAttribute("aria-busy") !== "true" ||
+      !wanted() ||
+      !table
+    ) {
       layer.hidden = true;
       return;
     }

@@ -27,7 +27,7 @@ export function health(h) {
  */
 export function doctorRows(report) {
   const rank = { bad: 0, warn: 1, ok: 2 };
-  return report.checks
+  return (report.checks ?? [])
     .map((c, i) => ({
       i,
       name: c.name,
@@ -43,7 +43,7 @@ export function doctorRows(report) {
  * @param {DoctorReport} report
  */
 export function doctorSummary(report) {
-  const rows = report.checks.map((c) => health(c.health).label);
+  const rows = (report.checks ?? []).map((c) => health(c.health).label);
   const count = (/** @type {string} */ l) => rows.filter((r) => r === l).length;
   return `${rows.length} checks · ${count("ok")} ok · ${count("warn")} warn · ${count("fail")} fail`;
 }

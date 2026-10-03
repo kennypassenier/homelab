@@ -68,7 +68,7 @@ export const STACK_TABS = /** @type {const} */ ([
  * fallback before the registry has answered.
  * @type {Record<string, Route["page"]>}
  */
-const PATH_TO_PAGE = {
+export const PATH_TO_PAGE = {
   "": "home",
   overview: "overview",
   health: "health",

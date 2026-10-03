@@ -160,6 +160,7 @@ async fn main() -> std::process::ExitCode {
         .disable_kit_page("status")
         .disable_kit_page("clients");
     app.dashboard_routes(live.router("/events"));
+    app.dashboard_routes(kit_paths_router());
     // Doctor reads for about a minute on pve (fix-68), so the pages wait up
     // to two for an answer.
     let (host_client, host_asks) = host_link::HostClient::new(std::time::Duration::from_secs(120));
@@ -304,4 +305,40 @@ fn demo_requested() -> Result<bool, String> {
         );
     }
     Ok(asked)
+}
+
+/// fix-256 (design review, 2026-10-03): chassis 3.4.0's root fallback
+/// answers "no such route" for every path the kit reserves, `/status` and
+/// `/passkeys` included, even with `kit_pages_in_webapp` (which only stops
+/// the kit drawing those pages itself) — so the Passkeys page and the old
+/// Status address were dead, in the real build as much as the demo. These
+/// two GET routes hand both to the web app's `index.html`, the same file
+/// the fallback serves for every other page: the client router draws
+/// Passkeys and sends `/status` on to Health (`router.js` `redirectFor`).
+/// Behind the same login as every other dashboard route.
+fn kit_paths_router() -> axum::Router {
+    use axum::http::header;
+    use axum::response::IntoResponse;
+    async fn index() -> axum::response::Response {
+        let body = FILES
+            .iter()
+            .find(|(p, _)| *p == "index.html")
+            .map(|(_, b)| *b)
+            .unwrap_or_default();
+        (
+            [
+                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                (header::CACHE_CONTROL, "no-cache"),
+                (
+                    header::CONTENT_SECURITY_POLICY,
+                    chassis::shell::webapp::DEFAULT_CSP,
+                ),
+            ],
+            body,
+        )
+            .into_response()
+    }
+    axum::Router::new()
+        .route("/status", axum::routing::get(index))
+        .route("/passkeys", axum::routing::get(index))
 }

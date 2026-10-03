@@ -943,7 +943,7 @@ export async function openBatch(action, stacks) {
     "button",
     {
       type: "button",
-      class: `kp-button ${entry.scope === "all" ? "kp-button--destructive" : "kp-button--primary"}`,
+      class: `kp-button ${entry.destructive ? "kp-button--destructive" : "kp-button--primary"}`,
       id: "batch-run",
     },
     form.submit,

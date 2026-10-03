@@ -191,6 +191,9 @@ pub struct CatalogEntry {
     pub confirm: bool,
     /// Refused for the dashboard's own stack (arch-self).
     pub refused_for_self: bool,
+    /// fix-255: deletes or overwrites something with no way back; the only
+    /// thing the page paints red (never the token scope).
+    pub destructive: bool,
 }
 
 impl ActionKind {
@@ -342,6 +345,20 @@ impl ActionKind {
             self,
             Restore | RestoreNative | PruneOrphans | Destroy | Forget
         )
+    }
+
+    /// fix-255 (design review, 2026-10-03): what can delete something
+    /// with no way back: a container and its record, a retired stack's
+    /// kept data, files the repository dropped, or whatever one shell
+    /// command does. Red on the page means this and only this; the token
+    /// scope (`scope`) is about who may ask, not about what is lost —
+    /// "Update the host", "Apply repository" and "Restart the host" need
+    /// full access and lose nothing (Apply destroys a stack only when its
+    /// name is typed in its own dialog). Restore keeps a copy of the
+    /// current data first.
+    pub fn destructive(self) -> bool {
+        use ActionKind::*;
+        matches!(self, PruneOrphans | Destroy | Forget | Wipe | Exec)
     }
 
     /// arch-self: what the dashboard never does to its own stack.
@@ -501,6 +518,7 @@ impl ActionKind {
             args: self.args(),
             confirm: self.confirm(),
             refused_for_self: self.refused_for_self(),
+            destructive: self.destructive(),
         }
     }
 }

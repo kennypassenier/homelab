@@ -11,10 +11,17 @@ import { choice, setParams } from "../urlstate.js";
 const SVG = "http://www.w3.org/2000/svg";
 const DAYS = /** @type {const} */ (["1", "3", "7", "14", "30"]);
 
-/** @type {Record<string, string>} */
+/**
+ * fix-251 (design review, 2026-10-03): marks are filled with the
+ * foreground-strength tokens. kp-themes' `--success`/`--warning` are the
+ * plates a badge's text sits on (dark: hsl(155 40% 16%) on a near-black
+ * page) and all but vanish as a fill; `--destructive` and `--chart-1` are
+ * already full-strength.
+ * @type {Record<string, string>}
+ */
 const FILL = {
-  ok: "var(--success)",
-  warn: "var(--warning)",
+  ok: "var(--success-foreground)",
+  warn: "var(--warning-foreground)",
   bad: "var(--destructive)",
   info: "var(--chart-1, var(--primary))",
 };
@@ -154,7 +161,7 @@ export function mount(root, ctx) {
         g.append(
           s("path", {
             d: `M${cx} ${cy - 7} L${cx + 7} ${cy} L${cx} ${cy + 7} L${cx - 7} ${cy} Z`,
-            fill: FILL[k.tone],
+            style: `fill: ${FILL[k.tone]}`,
           }),
         );
       } else {
@@ -165,7 +172,7 @@ export function mount(root, ctx) {
             width: k.w,
             height: k.h,
             rx: 3,
-            fill: FILL[k.tone],
+            style: `fill: ${FILL[k.tone]}`,
           }),
         );
       }

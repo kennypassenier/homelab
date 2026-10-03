@@ -74,10 +74,22 @@ export function mount(root) {
    *   shown while a new run reads again
    */
   const paint = (body, o = {}) => {
-    const report = body.report;
-    const hl = health(report.overall);
-    overall.className = `state ${hl.tone}`;
-    overall.replaceChildren(h("span", null, `overall ${hl.label}`));
+    const report = { checks: [], ...body.report };
+    // fix-260 (design review, 2026-10-03): no verdict until every check
+    // has answered — not while a run reads again over an earlier answer,
+    // and never from an answer that carries none (`health()` reads any
+    // unknown value as fail, which showed "overall fail" mid-run).
+    const known = ["ok", "warn", "fail"].includes(
+      String(report.overall).toLowerCase(),
+    );
+    if (o.last || !known) {
+      overall.className = "state";
+      overall.replaceChildren();
+    } else {
+      const hl = health(report.overall);
+      overall.className = `state ${hl.tone}`;
+      overall.replaceChildren(h("span", null, `overall ${hl.label}`));
+    }
     status.textContent =
       o.began != null && !o.last
         ? `${doctorSummary(report)} · asked ${formatDateTime(o.began / 1000)}, took ${humanDuration((Date.now() - o.began) / 1000)}`
@@ -95,6 +107,7 @@ export function mount(root) {
       ),
     );
     setAgo(ago, body.read_at ?? Date.now() / 1000);
+    ago.hidden = false;
     page.shown = body.read_run ?? null;
     if (!o.last) keepRead("/data/doctor", body);
   };
@@ -127,6 +140,9 @@ export function mount(root) {
     else {
       t.loading(words);
       status.textContent = "The doctor is running on the host.";
+      // fix-260: the table's busy card is the one loading sign; "not read
+      // yet" beside it says nothing more.
+      ago.hidden = true;
     }
     try {
       const r = await slowReport(

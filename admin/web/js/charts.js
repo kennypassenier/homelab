@@ -42,12 +42,14 @@ export function seriesHues(n) {
  * Dim every line and legend entry but `i` (`null` restores all) — the same
  * hover/focus isolation `admin/web/js/topology.js`'s `isolate` gives the
  * topology, so a busy panel's own line can be picked out from the rest.
- * @param {SVGElement} plot
+ * `plot` is the whole panel (fix-252: the SVG is redrawn at its shown
+ * width, so a reference to one SVG would go stale).
+ * @param {Element} plot
  * @param {HTMLElement} legend
  * @param {number | null} i
  */
 function isolateSeries(plot, legend, i) {
-  for (const el of plot.querySelectorAll(".chart__line")) {
+  for (const el of plot.querySelectorAll(".chart__line, .chart__point")) {
     el.classList.toggle(
       "chart__line--dim",
       i != null && el.getAttribute("data-i") !== String(i),
@@ -63,7 +65,7 @@ function isolateSeries(plot, legend, i) {
 
 /**
  * @param {Element} el
- * @param {SVGElement} plot
+ * @param {Element} plot
  * @param {HTMLElement} legend
  * @param {number} i
  */
@@ -179,65 +181,116 @@ export function panelEl(p, from, to) {
     box.append(h("p", { class: "chart__empty" }, "No data in this window."));
     return box;
   }
-  const L = layout(p.series, from, to, unit);
-  const hues = seriesHues(L.paths.length);
-  const plot = svg("svg", {
-    viewBox: `0 0 ${W} ${H}`,
-    class: "chart__svg",
-    role: "img",
-    "aria-label": p.panel.title,
-  });
-  for (const t of L.yTicks) {
+  const lone = p.series.every((/** @type {any} */ s) => s.points.length <= 1);
+  // fix-252 (design review, 2026-10-03): the plot is laid out at the width
+  // it is shown at, so its 11 px labels stay 11 px on a phone instead of a
+  // 560-wide viewBox scaled down to ~5 px. Drawn at W first, redrawn by the
+  // ResizeObserver below once the panel has a width.
+  const holder = h("div", { class: "chart__plot" });
+  const legend = h("ul", { class: "chart__legend" });
+  /** @param {number} width */
+  const draw = (width) => {
+    const L = layout(p.series, from, to, unit, width);
+    const hues = seriesHues(L.paths.length);
+    const plot = svg("svg", {
+      viewBox: `0 0 ${width} ${H}`,
+      class: "chart__svg",
+      role: "img",
+      "aria-label": p.panel.title,
+    });
+    for (const t of L.yTicks) {
+      plot.append(
+        svg("line", {
+          x1: String(L.x0),
+          x2: String(L.x1),
+          y1: String(t.y),
+          y2: String(t.y),
+          class: "chart__grid",
+        }),
+        svg(
+          "text",
+          {
+            x: String(L.x0 - 6),
+            y: String(t.y + 4),
+            class: "chart__tick chart__tick--y",
+            "text-anchor": "end",
+          },
+          t.label,
+        ),
+      );
+    }
     plot.append(
-      svg("line", {
-        x1: String(L.x0),
-        x2: String(L.x1),
-        y1: String(t.y),
-        y2: String(t.y),
-        class: "chart__grid",
-      }),
+      svg(
+        "text",
+        { x: String(L.x0), y: String(H - 4), class: "chart__tick" },
+        formatDateTime(from),
+      ),
       svg(
         "text",
         {
-          x: String(L.x0 - 6),
-          y: String(t.y + 4),
+          x: String(L.x1),
+          y: String(H - 4),
           class: "chart__tick",
           "text-anchor": "end",
         },
-        t.label,
+        formatDateTime(to),
       ),
     );
-  }
-  plot.append(
-    svg(
-      "text",
-      { x: String(L.x0), y: String(H - 4), class: "chart__tick" },
-      formatDateTime(from),
-    ),
-    svg(
-      "text",
-      {
-        x: String(L.x1),
-        y: String(H - 4),
-        class: "chart__tick",
-        "text-anchor": "end",
-      },
-      formatDateTime(to),
-    ),
-  );
-  L.paths.forEach((s, i) => {
-    const line = svg("path", {
-      d: s.d,
-      class: "chart__line",
-      style: `--chart-hue: ${hues[i]}`,
-      "data-i": String(i),
-      tabindex: "0",
+    L.paths.forEach((s, i) => {
+      const line = svg("path", {
+        d: s.d,
+        class: "chart__line",
+        style: `--chart-hue: ${hues[i]}`,
+        "data-i": String(i),
+        tabindex: "0",
+      });
+      plot.append(line);
+      wireIsolate(line, box, legend, i);
+      // fix-253 (design review, 2026-10-03): a lone reading is a path of
+      // one "M" and draws nothing; it shows as a point instead.
+      for (const d of s.dots) {
+        const dot = svg("circle", {
+          cx: d.x.toFixed(1),
+          cy: d.y.toFixed(1),
+          r: "3.5",
+          class: "chart__point",
+          style: `--chart-hue: ${hues[i]}`,
+          "data-i": String(i),
+        });
+        plot.append(dot);
+        wireIsolate(dot, box, legend, i);
+      }
     });
-    plot.append(line);
-  });
-  box.append(plot);
-  const legend = h("ul", { class: "chart__legend" });
-  L.paths.forEach((s, i) => {
+    holder.replaceChildren(plot);
+  };
+  draw(W);
+  let drawnAt = W;
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(() => {
+      const w = Math.round(holder.clientWidth);
+      if (w > 0 && w !== drawnAt) {
+        drawnAt = w;
+        draw(w);
+      }
+    }).observe(holder);
+  }
+  box.append(holder);
+  if (lone)
+    box.append(
+      h(
+        "p",
+        { class: "chart__note measured" },
+        "Only one reading so far: each series shows as a point until the next reading draws its line.",
+      ),
+    );
+  const hues = seriesHues(p.series.length);
+  p.series.forEach((/** @type {any} */ series, /** @type {number} */ i) => {
+    const s = {
+      label: series.label,
+      last: series.points.length
+        ? series.points[series.points.length - 1][1]
+        : null,
+    };
     const key = h(
       "li",
       {
@@ -252,15 +305,10 @@ export function panelEl(p, from, to) {
   });
   box.append(legend);
   // Hover/focus isolation (rule "al die items zijn amper van elkaar te
-  // distinguieren"): wired after both the lines and the legend exist, once
-  // per series, shared between a line and its legend entry.
-  L.paths.forEach((_s, i) => {
-    for (const el of [
-      plot.querySelector(`[data-i="${i}"]`),
-      legend.querySelector(`[data-i="${i}"]`),
-    ]) {
-      if (el) wireIsolate(el, plot, legend, i);
-    }
+  // distinguieren"): each legend entry here, each line and point in `draw`.
+  p.series.forEach((/** @type {any} */ _s, /** @type {number} */ i) => {
+    const el = legend.querySelector(`[data-i="${i}"]`);
+    if (el) wireIsolate(el, box, legend, i);
   });
   return box;
 }
@@ -308,8 +356,10 @@ export function formatValue(v, unit) {
  * @param {number} from unix seconds
  * @param {number} to unix seconds
  * @param {Unit} unit
+ * @param {number} [width] the plot's width in CSS px (fix-252: the width it
+ *   is shown at, so labels are never scaled down)
  */
-export function layout(series, from, to, unit) {
+export function layout(series, from, to, unit, width = W) {
   let lo = Infinity;
   let hi = -Infinity;
   for (const s of series)
@@ -325,7 +375,17 @@ export function layout(series, from, to, unit) {
   if (unit === "percent") hi = Math.max(hi, 100);
   if (unit === "flag") hi = Math.max(hi, 1);
   if (hi <= lo) hi = lo + 1;
-  const iw = W - PAD.left - PAD.right;
+  // fix-253 (design review, 2026-10-03): a small count range (0 to 1.3)
+  // read "0, 1, 1"; the top is raised to the next round number until every
+  // tick label differs.
+  const tickLabels = (/** @type {number} */ top) =>
+    [lo, (lo + top) / 2, top].map((v) => formatValue(v, unit));
+  for (let n = 0; n < 24; n++) {
+    const labels = tickLabels(hi);
+    if (new Set(labels).size === labels.length) break;
+    hi = lo + niceAbove(hi - lo);
+  }
+  const iw = width - PAD.left - PAD.right;
   const ih = H - PAD.top - PAD.bottom;
   const span = Math.max(1, to - from);
   const x = (/** @type {number} */ t) => PAD.left + ((t - from) / span) * iw;
@@ -339,10 +399,31 @@ export function layout(series, from, to, unit) {
       )
       .join(""),
     last: s.points.length ? s.points[s.points.length - 1][1] : null,
+    dots:
+      s.points.length === 1
+        ? s.points.map(([t, v]) => ({ x: x(t), y: y(v) }))
+        : [],
   }));
   const yTicks = [lo, (lo + hi) / 2, hi].map((v) => ({
     y: y(v),
     label: formatValue(v, unit),
   }));
-  return { paths, yTicks, x0: PAD.left, x1: W - PAD.right, y0: PAD.top + ih };
+  return {
+    paths,
+    yTicks,
+    x0: PAD.left,
+    x1: width - PAD.right,
+    y0: PAD.top + ih,
+  };
+}
+
+/**
+ * The next round number (1, 2, 2.5 or 5 times a power of ten) strictly
+ * above `v`.
+ * @param {number} v
+ */
+export function niceAbove(v) {
+  const p = 10 ** Math.floor(Math.log10(Math.max(v, 1e-9)));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * p > v * (1 + 1e-9)) return m * p;
+  return 10 * p;
 }

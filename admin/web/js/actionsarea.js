@@ -63,7 +63,10 @@ export function mountActionsArea(target) {
       "button",
       {
         type: "button",
-        class: `kp-button${entry.scope === "all" ? " kp-button--destructive" : ""}`,
+        // fix-255: red means destructive (the catalog's flag), never the
+        // token scope — Update the host and Apply need full access and lose
+        // nothing.
+        class: `kp-button${entry.destructive ? " kp-button--destructive" : ""}`,
         "data-action": entry.action,
         title: refused ? `${entry.what} (${refused})` : entry.what,
       },

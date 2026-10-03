@@ -1,23 +1,18 @@
-// Apply the whole fleet (TUI parity, ask-8's `homelab apply`, dash-apply:
+// Deploy all changes (TUI parity, ask-8's `homelab apply`, dash-apply:
 // "Yes, plan first"): every stack of the working copy against what the
 // host last applied, each changed stack's diff on request, then one
 // confirmation, the apply form, where a stack whose directory is gone is
 // destroyed only after its name is typed.
 //
-// fix-210 (Kenny, 2026-10-02, "die functionaliteit kan toch ingebouwd
-// worden in Overview?"): this used to be its own page at `/apply`; it is
-// now a collapsible section of Overview (`overview.js`'s "Apply the whole
-// fleet" section), mounted only once that section is opened, so visiting
-// Overview never pays for a plan read nobody asked for. `/apply` itself
-// still resolves (`router.js` `redirectFor`'s "apply" case sends it to
-// `/overview?section=apply`, Live view's `homelab ui goto apply` still
-// works because "apply" stays a known page in `formspec.json`).
-//
-// `mount` no longer paints its own `<h1>`/title row — the section's
-// heading and one-line description are the caller's `<summary>`
-// (`dom.js` `sectionHeader()`); this module owns only the section's body,
-// starting with a skeleton grid shown the instant it is opened, before
-// the plan has been read.
+// fix-210 made this a folded section of Overview; redesign-stacks (3.71.0,
+// FLOWS.md §1 row 3 and task 13, Kenny approved 2026-10-03) makes it the
+// body of the Stacks page's "Deploy all changes" side panel: the Stacks
+// header button says the count before you click, the panel reads the plan
+// only once it is opened (a skeleton first), and its foot holds the one
+// button that opens the existing apply dialog. `/apply` and
+// `/overview?section=apply` still land here (router.js `redirectFor`,
+// `/stacks?deploy-all=1`); Live view's `homelab ui open apply` still works
+// because "apply" stays a known form in `formspec.json`.
 
 import { openAction } from "../actiondialog.js";
 import { agoEl, setAgo } from "../ago.js";
@@ -26,27 +21,34 @@ import { diffBlocks } from "../editui.js";
 import { applySummary } from "../parity.js";
 import { fileViews } from "../plan.js";
 import { stackHref } from "../router.js";
-import { viaForm } from "../drivable.js";
+import { dialogControl, viaForm } from "../drivable.js";
 
-/** A handful of skeleton rows shown the moment the section opens, so there
- * is never a blank body while the first plan read is in flight — the same
- * shape (`kp-pulse`, reused from `backupcalendar.js`'s skeleton) as every
- * other page's first-paint loading state. */
+/** A handful of skeleton rows shown the moment the panel opens, so there
+ * is never a blank body while the first plan read is in flight. */
 function skeletonGrid() {
   return h(
     "div",
-    { class: "apply-grid apply-grid--skeleton", "aria-hidden": "true" },
+    {
+      class: "apply-grid apply-grid--skeleton",
+      role: "status",
+      "aria-label": "Reading the plan",
+      "data-kp-state": "loading",
+    },
     ...Array.from({ length: 3 }, () =>
-      h("div", { class: "apply-row apply-row--skeleton" }),
+      h("div", { class: "apply-row apply-row--skeleton kp-skeleton" }),
     ),
   );
 }
 
 /**
+ * The plan's body. `foot` (the panel's foot) receives the two buttons —
+ * "Read the plan again" and the one that opens the apply dialog; without
+ * it they sit at the top of the body.
  * @param {HTMLElement} root
+ * @param {{foot?: HTMLElement, onRead?: (pending: number) => void}} [opts]
  * @returns {() => void}
  */
-export function mount(root) {
+export function mount(root, opts = {}) {
   const read = h(
     "button",
     {
@@ -61,33 +63,38 @@ export function mount(root) {
     "button",
     {
       type: "button",
-      class: "kp-button kp-button--destructive",
+      class: "kp-button kp-button--primary",
       id: "apply-open",
       disabled: "",
       title:
-        "Apply every pending change at once, after one confirmation; a stack whose directory vanished is destroyed only once its name is typed there.",
+        "Deploy every pending change at once, after one confirmation; each stack is backed up first, and a stack whose directory vanished is destroyed only once its name is typed there.",
     },
-    "Apply…",
+    "Deploy all changes…",
   );
   const head = h("div", { "aria-live": "polite", id: "apply-head" });
   const err = h("div");
   const body = h("div", { class: "apply-grid", id: "apply-body" });
   const ago = agoEl("read");
+  const nothingYet = h(
+    "span",
+    { class: "sk-hint" },
+    "Nothing runs until the dialog is confirmed.",
+  );
+  if (opts.foot) opts.foot.replaceChildren(nothingYet, read, go);
   root.replaceChildren(
-    h(
-      "p",
-      { class: "measured" },
-      "This plans every stack of the working copy against what the host last applied — not one stack's own Compare, which only checks the stack you already opened. Nothing runs until Apply… is confirmed; a stack whose directory is gone is destroyed only when its name is typed there.",
-    ),
-    h(
-      "div",
-      { class: "title-row" },
-      h("span", { class: "actions-row" }, read, go),
-    ),
+    ...(opts.foot
+      ? []
+      : [
+          h(
+            "div",
+            { class: "title-row" },
+            h("span", { class: "actions-row" }, read, go),
+          ),
+        ]),
     err,
     head,
     body,
-    h("p", null, ago),
+    h("p", { class: "sk-hint" }, ago),
   );
   body.replaceChildren(skeletonGrid());
   const abort = new AbortController();
@@ -152,7 +159,7 @@ export function mount(root) {
       h(
         "p",
         { class: "measured" },
-        "Reading every stack (latch is asked for the secrets the host's hash covers)…",
+        "Reading every stack against its files (latch is asked for the secrets the host's hash covers)…",
       ),
     );
     const r = await fetchJson("/data/apply/plan", "the plan", abort.signal);
@@ -206,7 +213,7 @@ export function mount(root) {
               "p",
               { class: "apply-row" },
               h("strong", null, n),
-              " runs on the host; its directory is gone. Destroyed only when its name is typed in the apply form (backed up first, its data kept).",
+              " runs on the host; its directory is gone. Destroyed only when its name is typed in the deploy dialog (backed up first, its data kept).",
             ),
           ),
         ),
@@ -223,8 +230,14 @@ export function mount(root) {
     );
     body.replaceChildren(...groups);
     go.disabled = !s.pending || !!s.blocked;
+    nothingYet.textContent = s.pending
+      ? "Nothing has run yet: the dialog asks once more before it deploys."
+      : "Nothing to deploy: every stack matches its files.";
+    opts.onRead?.(p.deploy.length + p.destroy.length);
     setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
   };
+  dialogControl(read, "read-plan");
+  dialogControl(go, "deploy-all-changes");
   read.addEventListener("click", () => void load().catch(() => {}));
   // fix-239: Live view reaches it as `homelab ui open apply`.
   viaForm(go, "apply");

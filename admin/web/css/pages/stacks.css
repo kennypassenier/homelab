@@ -1,0 +1,887 @@
+/* Phone (DESIGN_LANGUAGE §1.1): the header's actions fold under the
+   description, the primary one full-width; the key row is for keyboards. */
+@media (max-width: 48rem) {
+  .sk-page .nx-head,
+  .ap-page .nx-head {
+    display: grid;
+  }
+  .sk-page .nx-head .title-row,
+  .ap-page .nx-head .title-row {
+    display: contents;
+  }
+  .sk-page .nx-head .title-row > h1,
+  .ap-page .nx-head .title-row > h1 {
+    order: 1;
+  }
+  .sk-page .nx-head .nx-head-desc,
+  .ap-page .nx-head .nx-head-desc {
+    order: 2;
+  }
+  .sk-page .nx-head .nx-head-right,
+  .ap-page .nx-head .nx-head-right {
+    order: 3;
+    margin-block-start: var(--kp-space-md, 12px);
+    justify-content: flex-start;
+  }
+  .sk-page .sk-keys {
+    display: none;
+  }
+}
+
+/* redesign-stacks (3.71.0): the Stacks and Apps pages as the approved demos
+   draw them (~/.local/share/homelab/redesign-3.71/overview.html, apps.html,
+   graphics.html, next.css), kp-themes tokens only. Everything sits under
+   `.sk-page` / `.ap-page` with the `sk-` / `ap-` prefixes, so it never
+   collides with the foundation's shared `nx-` classes; the stand-ins in
+   js/pages/stackskit.js and their rules here move into the foundation when
+   the pages are merged. */
+
+.sk-page,
+.ap-page,
+.sk-drawer {
+  --sk-gap: var(--nx-gap, 1.5rem);
+  --sk-line: color-mix(in oklab, var(--border) 85%, transparent);
+  --sk-ok: var(--success-foreground, var(--success));
+  --sk-warn: var(--warning-foreground, var(--warning));
+  --sk-bad: var(--destructive);
+  --sk-info: var(--info-foreground, var(--info));
+  --sk-ease: cubic-bezier(0.2, 0, 0.38, 0.9);
+}
+@media (max-width: 640px) {
+  .sk-page,
+  .ap-page {
+    --sk-gap: var(--kp-space-lg, 1rem);
+  }
+}
+/* The page's rhythm between its top-level pieces: 24 px, 32 on a wide
+   screen (DESIGN_LANGUAGE §3), never under the shared --section-gap. */
+main.shell.sk-page > * + *,
+main.shell.ap-page > * + * {
+  margin-block-start: max(var(--sk-gap), var(--section-gap)) !important;
+}
+main.shell.sk-page > [hidden],
+main.shell.ap-page > [hidden] {
+  display: none;
+}
+.sk-page .sk-band[hidden] + * {
+  margin-block-start: max(var(--sk-gap), var(--section-gap)) !important;
+}
+
+/* The header's actions sit in one row against the right edge (the shared
+   `.actions-row` grid stacks them when it is not a title row's own child). */
+.sk-page .nx-head-right > .actions-row,
+.ap-page .nx-head-right > .actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+@media (max-width: 48rem) {
+  .sk-page .nx-head-right,
+  .sk-page .nx-head-right > .actions-row {
+    justify-content: flex-start;
+  }
+  .sk-page .nx-head-right > .actions-row > .kp-button--primary {
+    flex: 1 1 100%;
+  }
+}
+.sk-keys code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.sk-mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.9em;
+}
+.sk-muted,
+.sk-hint {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm);
+}
+.sk-hint {
+  margin: 0;
+}
+.sk-num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* -- status dot + word: colour is never the only signal -- */
+.sk-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.sk-dot::before {
+  content: "";
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+  flex: none;
+}
+.sk-dot--ok::before {
+  background: var(--sk-ok);
+}
+.sk-dot--warn::before {
+  background: var(--sk-warn);
+}
+.sk-dot--bad::before {
+  background: var(--sk-bad);
+}
+.sk-dot--info::before {
+  background: var(--sk-info);
+}
+
+/* -- chips: filled only for the levels that need a person -- */
+.sk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: var(--kp-radius-pill, 999px);
+  font-size: var(--kp-text-xs);
+  font-weight: 500;
+  line-height: 1.6;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  background: var(--card);
+}
+.sk-chip--info {
+  background: var(--info);
+  color: var(--info-foreground);
+  border-color: transparent;
+}
+.sk-chip--warn {
+  background: var(--warning);
+  color: var(--warning-foreground);
+  border-color: transparent;
+}
+.sk-chip--bad {
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+  border-color: transparent;
+}
+
+/* -- meter: used of limit, 6 px (DESIGN_LANGUAGE §6) -- */
+.sk-meter {
+  display: block;
+  flex: 1;
+  min-inline-size: 48px;
+  block-size: 6px;
+  border-radius: var(--kp-radius-pill, 999px);
+  background: var(--muted);
+  overflow: hidden;
+}
+.sk-meter > span {
+  display: block;
+  block-size: 100%;
+  background: var(--primary);
+  border-radius: inherit;
+  transition: inline-size 400ms var(--sk-ease);
+}
+.sk-meter--warn > span {
+  background: var(--sk-warn);
+}
+.sk-meter--bad > span {
+  background: var(--sk-bad);
+}
+
+/* -- KPI tiles: the context line holds a dot or a meter before its words -- */
+.sk-kpi__ctx {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+.sk-kpi__words {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sk-kpi:has(.sk-meter) .sk-kpi__words {
+  flex: none;
+}
+a.sk-kpi {
+  transition: border-color 110ms var(--sk-ease);
+}
+
+/* -- the segmented view switch -- */
+.sk-seg {
+  display: inline-grid;
+  grid-auto-flow: column;
+  border: 1px solid var(--border);
+  border-radius: var(--kp-radius-sm, 8px);
+  overflow: hidden;
+}
+.sk-seg button {
+  font: inherit;
+  font-size: var(--kp-text-sm);
+  padding: 5px 12px;
+  background: transparent;
+  color: var(--muted-foreground);
+  border: 0;
+  cursor: pointer;
+}
+.sk-seg button + button {
+  border-inline-start: 1px solid var(--border);
+}
+.sk-seg button[aria-pressed="true"] {
+  background: var(--muted);
+  color: var(--foreground);
+  font-weight: 600;
+}
+.sk-seg button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.sk-count {
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sk-sort[hidden] {
+  display: none;
+}
+
+/* -- the key row under the card head -- */
+.sk-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0 0 var(--kp-space-md, 12px);
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.sk-keys > span {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+/* -- the batch bar, between the toolbar and the list -- */
+.sk-batch {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--kp-space-md, 12px);
+  align-items: center;
+  margin-block: var(--kp-space-md, 12px) 0;
+  padding: 8px 12px;
+  border-radius: var(--kp-radius-sm, 8px);
+  background: color-mix(in oklab, var(--primary) 8%, var(--card));
+  border: 1px solid color-mix(in oklab, var(--primary) 40%, var(--border));
+}
+.sk-batch[hidden] {
+  display: none;
+}
+.sk-batch > .sk-muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sk-batch__acts {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.sk-iconbtn {
+  min-inline-size: 30px;
+  justify-content: center;
+}
+
+/* -- the list: cards or a table, the same box in every state -- */
+.sk-list {
+  margin-block-start: var(--kp-space-md, 12px);
+}
+.sk-list[hidden],
+.sk-empty-slot[hidden],
+.sk-cards[hidden],
+.sk-table[hidden] {
+  display: none;
+}
+.sk-empty-slot {
+  margin-block-start: var(--kp-space-md, 12px);
+  min-block-size: 16rem;
+  align-content: center;
+  display: grid;
+  justify-items: center;
+  text-align: center;
+}
+.sk-empty-slot .kp-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+.sk-art {
+  color: var(--muted-foreground);
+  margin-block-end: 4px;
+}
+.sk-art__ok {
+  stroke: var(--sk-ok);
+}
+.sk-art__ok-fill {
+  stroke: var(--sk-ok);
+  fill: color-mix(in oklab, var(--sk-ok) 12%, transparent);
+}
+.sk-art__accent {
+  stroke: var(--chart-1);
+  fill: var(--card);
+}
+.sk-art__accent-line {
+  stroke: var(--chart-1);
+}
+
+.sk-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+  gap: var(--kp-space-md, 12px);
+}
+.sk-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto;
+  gap: 6px 10px;
+  align-items: center;
+  padding: var(--kp-space-md, 12px);
+  border: 1px solid var(--border);
+  border-radius: var(--nx-radius, 10px);
+  background: var(--background);
+  cursor: pointer;
+  transition: border-color 150ms var(--sk-ease);
+}
+.sk-card:hover {
+  border-color: var(--ring);
+}
+.sk-card.is-ticked {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+.sk-card.is-cursor,
+.sk-row.is-cursor {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.sk-card > input {
+  margin: 0;
+  position: relative;
+  z-index: 1;
+}
+.sk-card__id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+}
+.sk-card__name {
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sk-card__name:hover {
+  text-decoration: underline;
+}
+.sk-card__vmid {
+  color: var(--muted-foreground);
+}
+.sk-card__meta {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.sk-card__meta b {
+  color: var(--foreground);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.sk-card__bar {
+  grid-column: 2 / -1;
+  display: grid;
+  grid-template-columns: 3.2rem minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.sk-card--skeleton {
+  grid-template-columns: minmax(0, 1fr);
+  min-block-size: 7.5rem;
+  cursor: default;
+}
+.sk-card--skeleton .kp-skeleton {
+  display: block;
+  block-size: 1rem;
+}
+.sk-card--skeleton .kp-skeleton:last-child {
+  block-size: 28px;
+}
+
+.sk-cpu {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3rem;
+  gap: 8px;
+  align-items: center;
+  min-inline-size: 8rem;
+}
+.sk-cpu .sk-num {
+  text-align: end;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.sk-backup--bad {
+  color: var(--sk-bad);
+  font-weight: 500;
+}
+.sk-backup--warn {
+  color: var(--sk-warn);
+}
+
+/* -- the table view (kp datatable; DESIGN_LANGUAGE §6) -- */
+.sk-table .kp-table {
+  inline-size: 100%;
+  font-variant-numeric: tabular-nums;
+}
+.sk-table th {
+  font-size: var(--kp-text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.sk-table td {
+  vertical-align: middle;
+}
+.sk-table .num {
+  text-align: end;
+}
+.sk-table .sk-right {
+  text-align: end;
+}
+.sk-table .sk-tick {
+  inline-size: 36px;
+}
+.sk-row {
+  cursor: pointer;
+}
+.sk-row.is-ticked {
+  background: color-mix(in oklab, var(--primary) 6%, transparent);
+}
+.sk-id__wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sk-id__wrap a {
+  font-weight: 600;
+  color: inherit;
+  text-decoration: none;
+}
+.sk-id__wrap a:hover {
+  text-decoration: underline;
+}
+.sk-id__wrap small {
+  display: block;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.sk-ram {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 12rem;
+}
+.sk-ram .sk-meter {
+  max-inline-size: 90px;
+}
+.sk-ram .sk-num {
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.sk-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.sk-acts {
+  white-space: nowrap;
+}
+.sk-acts > * + * {
+  margin-inline-start: 6px;
+}
+@media (max-width: 75rem) {
+  .sk-table .sk-wide {
+    display: none;
+  }
+}
+@media (max-width: 48rem) {
+  .sk-table .sk-mid {
+    display: none;
+  }
+  .sk-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sk-batch {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .sk-batch > .sk-muted {
+    display: none;
+  }
+  .sk-batch__acts {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+.sk-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px 16px;
+  flex-wrap: wrap;
+  margin-block-start: var(--kp-space-md, 12px);
+  padding-block-start: var(--kp-space-sm, 8px);
+  border-block-start: 1px solid var(--sk-line);
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+
+/* -- the header's Deploy all changes count -- */
+.sk-badge {
+  display: inline-grid;
+  place-items: center;
+  min-inline-size: 1.4em;
+  margin-inline-start: 6px;
+  padding: 0 6px;
+  border-radius: var(--kp-radius-pill, 999px);
+  background: var(--warning);
+  color: var(--warning-foreground);
+  font-size: var(--kp-text-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.sk-badge[hidden] {
+  display: none;
+}
+
+/* -- side panels: Deploy all changes, New stack -- */
+.sk-drawer__body {
+  display: grid;
+  gap: var(--kp-space-lg, 16px);
+}
+.sk-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--kp-space-sm, 8px);
+  counter-reset: sk-step;
+}
+.sk-steps li {
+  counter-increment: sk-step;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 2px 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--kp-radius-sm, 8px);
+  background: var(--background);
+  font-size: var(--kp-text-sm);
+}
+.sk-steps li::before {
+  content: counter(sk-step);
+  grid-row: span 2;
+  inline-size: 24px;
+  block-size: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  font-size: var(--kp-text-xs);
+  background: var(--muted);
+}
+.sk-steps span {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-xs);
+}
+@media (max-width: 40rem) {
+  .sk-steps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.sk-drawer-part {
+  display: grid;
+  gap: 8px;
+}
+.sk-drawer-part h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.sk-drawer-part__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.sk-drawer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  inline-size: 100%;
+}
+.sk-drawer-foot > .sk-hint {
+  margin-inline-end: auto;
+}
+.sk-plan .apply-grid {
+  display: grid;
+  gap: 8px;
+}
+.sk-plan .apply-row--skeleton {
+  display: block;
+  block-size: 2.25rem;
+  border-radius: var(--kp-radius-sm, 8px);
+}
+.sk-routes {
+  display: grid;
+  gap: 8px;
+}
+.sk-route {
+  text-align: start;
+  font: inherit;
+  cursor: pointer;
+  inline-size: 100%;
+}
+
+/* ===== Apps (home when the Inbox is empty; apps.html) ================== */
+.ap-launch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--kp-space-md, 12px);
+  align-items: center;
+}
+.ap-launch .ap-search {
+  inline-size: 100%;
+  font-size: 1.15rem;
+  padding: 14px 16px;
+  border-radius: 12px;
+}
+.ap-verdict {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.ap-verdict strong {
+  color: var(--foreground);
+}
+.ap-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+  gap: var(--sk-gap);
+  align-items: start;
+}
+.ap-board > .ap-grp--wide {
+  grid-column: 1 / -1;
+}
+.ap-grp > h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: var(--kp-text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+}
+.ap-tiles {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-md, 12px);
+}
+.ap-grp--wide .ap-tiles {
+  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+  column-gap: var(--sk-gap);
+}
+.ap-tile {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  gap: 2px 12px;
+  align-items: center;
+  padding: 14px;
+  border-radius: var(--nx-radius, 10px);
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: inherit;
+  text-decoration: none;
+  transition:
+    border-color 110ms var(--sk-ease),
+    transform 110ms var(--sk-ease);
+}
+.ap-tile:hover,
+.ap-tile:focus-visible {
+  border-color: var(--ring);
+  transform: translateY(-2px);
+}
+.ap-tile:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.ap-tile.is-first {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+.ap-tile__icon {
+  grid-row: span 2;
+  inline-size: 44px;
+  block-size: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 1.05rem;
+  background: color-mix(in oklab, var(--c) 16%, var(--card));
+  color: var(--c);
+  border: 1px solid color-mix(in oklab, var(--c) 35%, transparent);
+}
+.ap-tile__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+  font-weight: 600;
+}
+.ap-tile__name > span:last-child,
+.ap-tile__desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ap-tile__desc {
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.ap-tile__lines {
+  grid-column: 2 / -1;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.ap-tile__pin {
+  all: unset;
+  cursor: pointer;
+  grid-row: 1;
+  grid-column: 3;
+  inline-size: 26px;
+  block-size: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  opacity: 0.45;
+}
+.ap-tile:hover .ap-tile__pin,
+.ap-tile__pin:focus-visible,
+.ap-tile__pin[aria-pressed="true"] {
+  opacity: 1;
+}
+.ap-tile__pin:focus-visible {
+  outline: 2px solid var(--ring);
+}
+.ap-tile__pin[aria-pressed="true"] {
+  color: var(--sk-warn);
+}
+.ap-tile__pin:hover {
+  background: var(--muted);
+}
+.ap-tile__go {
+  grid-row: 2;
+  grid-column: 3;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+  justify-self: center;
+}
+.ap-tile--skeleton {
+  min-block-size: 4.6rem;
+  grid-template-columns: 44px minmax(0, 1fr);
+}
+.ap-tile--skeleton .kp-skeleton {
+  display: block;
+  block-size: 0.9rem;
+}
+.ap-tile--skeleton .kp-skeleton:first-child {
+  grid-row: span 2;
+  block-size: 44px;
+  border-radius: 12px;
+}
+.ap-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.ap-page mark {
+  background: color-mix(in oklab, var(--warning) 80%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+.ap-empty {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 6px;
+}
+.ap-example {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--kp-radius-sm, 8px);
+  background: var(--muted);
+  font-size: var(--kp-text-sm);
+  text-align: start;
+  overflow-x: auto;
+}
+@media (max-width: 48rem) {
+  .ap-launch {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ap-launch .sk-keys {
+    display: none;
+  }
+  .ap-board,
+  .ap-grp--wide .ap-tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ap-tile,
+  .sk-card,
+  .sk-meter > span {
+    transition: none;
+  }
+  .ap-tile:hover,
+  .ap-tile:focus-visible {
+    transform: none;
+  }
+}

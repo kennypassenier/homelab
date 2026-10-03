@@ -315,6 +315,68 @@ fn demo_nights<'a>(stacks: &'a [String], stack: &'a str) -> impl Iterator<Item =
     (0..12u64).filter(move |i| !(gap && *i == 3))
 }
 
+/// redesign-stacks (Stacks redesign 3.71): a made-up but plausible last day
+/// for the Stacks page's sparklines — the demo host's own readings never
+/// change, so without this every line would be flat. Each stack and the
+/// host get their own deterministic wave around today's reading; nothing
+/// here is measured.
+fn demo_trend(view: &crate::core::fleet::FleetView, now: u64) -> crate::core::trend::Trend {
+    use crate::core::trend::{POINTS, STEP_S, Trend};
+    let mut t = Trend::default();
+    let wave = |k: u64, seed: u64| -> f64 {
+        let x = k as f64 / 40.0 + seed as f64;
+        (1.0 + 0.5 * x.sin() + 0.15 * (x * 3.1).cos()).max(0.2)
+    };
+    for k in (1..POINTS as u64).rev() {
+        let mut f = view.clone();
+        f.host.cpu_pct = f
+            .host
+            .cpu_pct
+            .map(|c| (c as f64 * wave(k, 1)).round() as u64);
+        f.host.load1_x100 = (f64::from(f.host.load1_x100) * wave(k, 2)).round() as u32;
+        for (i, st) in f.stacks.iter_mut().enumerate() {
+            st.cpu_permille = st
+                .cpu_permille
+                .map(|c| (f64::from(c) * wave(k, 3 + i as u64)).round() as u32);
+        }
+        t.record(&f, now.saturating_sub(k * STEP_S));
+    }
+    t.record(view, now);
+    t
+}
+
+/// redesign-stacks (the Apps page): the tiles the demo stacks' own files
+/// declare, as the real host's `Tiles` answers them — without a reading
+/// (nothing runs in a container here) and without a probe, so the minute
+/// watch never asks an address on the house network.
+fn demo_tiles(repo: &std::path::Path, stacks: &[String]) -> serde_json::Value {
+    use homelab_core::ops::tiles::{TileView, sort};
+    let mut tiles: Vec<TileView> = Vec::new();
+    for name in stacks {
+        let Ok(m) = homelab_client::spec::build_manifest(&repo.join("stacks").join(name)) else {
+            continue;
+        };
+        for (host, t) in &m.tiles {
+            tiles.push(TileView {
+                stack: name.clone(),
+                host: host.clone(),
+                url: t.url.clone().unwrap_or_else(|| format!("https://{host}/")),
+                probe: None,
+                watch_every: None,
+                down_after: None,
+                name: t.name.clone(),
+                group: t.group.clone(),
+                order: t.order,
+                description: t.description.clone(),
+                lines: Vec::new(),
+                error: None,
+            });
+        }
+    }
+    sort(&mut tiles);
+    serde_json::json!({ "tiles": tiles, "deploying_stack": null })
+}
+
 pub async fn run_demo(
     shared: Shared,
     live: Live,
@@ -400,7 +462,9 @@ pub async fn run_demo(
     };
     {
         let mut s = shared.write().await;
-        s.fleet = Some(fleet_view(&build(), now_s()));
+        let view = fleet_view(&build(), now_s());
+        s.trend = demo_trend(&view, now_s());
+        s.fleet = Some(view);
         s.host_version = Some(DEMO_VERSION.into());
         s.host_build = Some("demo host in homelab-admin".into());
         s.link_error = None;
@@ -545,6 +609,7 @@ pub async fn run_demo(
                         // every stack's container, one unmanaged container
                         // and the golden template, so the Host page's
                         // Containers table has every kind of row.
+                        Command::Tiles { .. } => demo_tiles(&repo, &stacks).to_string(),
                         Command::Status => {
                             let mut lines = vec!["pct list:".to_string(), "VMID       Status     Lock         Name".to_string()];
                             for (i, name) in stacks.iter().enumerate() {
@@ -714,7 +779,11 @@ pub async fn run_demo(
             }
             _ = tick.tick() => {
                 let f = fleet_view(&build(), now_s());
-                shared.write().await.fleet = Some(f.clone());
+                {
+                    let mut s = shared.write().await;
+                    s.trend.record(&f, now_s());
+                    s.fleet = Some(f.clone());
+                }
                 let _ = live.publish("fleet", &serde_json::json!({ "changed": false, "fleet": f }));
             }
         }

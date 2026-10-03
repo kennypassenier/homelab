@@ -40,6 +40,8 @@ import {
   manualRowFromValues,
   manualRowSummary,
   moveRule,
+  ruleIntent,
+  toggleRuleOff,
   originJson,
   parseJsonList,
   probeRowFields,
@@ -2563,6 +2565,29 @@ function drawFirewall(panel, stack, e, reload) {
   const m = /** @type {import("./editforms.js").ManifestView} */ (e.manifest);
   const original = m.firewall;
   let model = firewallModel(original);
+  // redesign-config-8: the Firewall page's "Move up" / "Disable" arrive as
+  // ?rule=<n>&do=up|disable|enable: staged here like any edit, reviewed
+  // and written through this editor's own Review and commit. The address
+  // forgets them at once, so a reload or the read after a commit does
+  // not stage them twice.
+  const q = new URLSearchParams(location.search);
+  /** @type {number | null} the staged rule's row, to point at */
+  let staged = null;
+  const act = q.get("do");
+  if (act && q.get("rule")) {
+    const n = Number(q.get("rule"));
+    const next = ruleIntent(model, n, act);
+    if (next !== model) staged = act === "up" ? n - 2 : n - 1;
+    model = next;
+    q.delete("do");
+    q.delete("rule");
+    const rest = q.toString();
+    history.replaceState(
+      history.state,
+      "",
+      `${location.pathname}${rest ? `?${rest}` : ""}`,
+    );
+  }
   const state = h("span", { class: "state" });
   const dirty = h("span", {
     class: "measured state-word",
@@ -2677,7 +2702,13 @@ function drawFirewall(panel, stack, e, reload) {
           {
             "data-kp-row-key": `${i}`,
             "data-rule": String(i),
-            class: re.origin === null ? "rule-new" : "",
+            class: [
+              re.origin === null ? "rule-new" : "",
+              r.disabled ? "rule-off" : "",
+              i === staged ? "rule-staged" : "",
+            ]
+              .filter(Boolean)
+              .join(" "),
           },
           td(String(i + 1), "num"),
           td(r.dir),
@@ -2688,13 +2719,22 @@ function drawFirewall(panel, stack, e, reload) {
           td((r.dir === "in" ? r.source : r.dest) ?? "anywhere", "mono"),
           td(r.proto ?? "any"),
           td(r.dport ?? (r.proto === "icmp" ? "—" : "any"), "mono"),
-          td([r.note, r.comment?.split("\n")[0]].filter(Boolean).join(" · ")),
+          td(
+            [
+              r.disabled ? "off: Proxmox skips it" : "",
+              r.note,
+              r.comment?.split("\n")[0],
+            ]
+              .filter(Boolean)
+              .join(" · "),
+          ),
           h(
             "td",
             { class: "row-buttons" },
             btn("Edit", "edit"),
             btn("Up", "up", i === 0),
             btn("Down", "down", i === model.rules.length - 1),
+            btn(r.disabled ? "Enable" : "Disable", "toggle"),
             btn("Delete", "delete"),
           ),
         );
@@ -2714,12 +2754,18 @@ function drawFirewall(panel, stack, e, reload) {
         model = moveRule(model, i, b.dataset.act === "up" ? -1 : 1);
         paintRules();
         break;
+      case "toggle":
+        model = toggleRuleOff(model, i);
+        paintRules();
+        break;
       case "delete":
         model = { ...model, rules: model.rules.filter((_, j) => j !== i) };
         paintRules();
         break;
       case "edit":
         openRuleDialog(model.rules[i].rule, (rule) => {
+          // The dialog edits the rule's fields; whether it is off stays.
+          if (model.rules[i].rule.disabled) rule = { ...rule, disabled: true };
           model = {
             ...model,
             rules: model.rules.map((x, j) => (j === i ? { ...x, rule } : x)),
@@ -2856,6 +2902,10 @@ function drawFirewall(panel, stack, e, reload) {
   const table = dataTable(t.wrap);
   paintOptions();
   paintRules();
+  if (staged !== null)
+    t.tbody
+      .querySelector(`tr[data-rule="${staged}"]`)
+      ?.scrollIntoView({ block: "center" });
   // feat-platform-10: the Live view replay works this very editor: its
   // model is the one Claude's steps built on the dashboard's server, and
   // the rule dialog is the one Add and Edit open.

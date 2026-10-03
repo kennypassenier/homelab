@@ -218,7 +218,52 @@ export function markFaults(file, src, declared) {
   ))
     bad.push(`${file}: writes ${m[0]} by hand (use drivable())`);
   const consts = boundTo(src, "declare");
+  // A module-local wrapper of declare() (`const ctl = (id, what) =>
+  // declare({…})`): what it returns is a declared id too.
+  for (const m of src.matchAll(
+    /(?:const (\w+) = \([^)]*\)\s*=>\s*declare\(|function (\w+)\([^)]*\)\s*\{\s*return declare\()/g,
+  ))
+    for (const c of boundTo(src, m[1] ?? m[2])) consts.add(c);
   const maps = declaredMaps(src);
+  /** An argument that names a declared control. @param {string} a */
+  const named = (a) => {
+    const lit = /^["']([^"']+)["']$/.exec(a);
+    if (lit) return declared.has(lit[1]);
+    if (/^[A-Z][A-Z0-9_]*$/.test(a)) return consts.has(a);
+    const mem = /^([A-Z][A-Z0-9_]*)\.(\w+)$/.exec(a);
+    return !!mem && !!maps.get(mem[1])?.has(mem[2]);
+  };
+  /**
+   * A parameter of the module-local function around line `at` that every
+   * call of that function fills with a declared control.
+   * @param {string} name @param {number} at
+   */
+  const passedDeclared = (name, at) => {
+    const before = src.split("\n").slice(0, at).join("\n");
+    const fns = [
+      ...before.matchAll(
+        /(?:function (\w+)\(([^)]*)\)|(?:const|let) (\w+) = \(([^)]*)\)\s*=>)/g,
+      ),
+    ];
+    for (const f of fns.reverse()) {
+      const fn = f[1] ?? f[3];
+      const params = (f[2] ?? f[4])
+        .split(",")
+        .map((x) => x.trim().split(/\s|=/)[0]);
+      const pos = params.indexOf(name);
+      if (pos < 0) continue;
+      const uses = calls(src, fn).filter(
+        (c) => !c.def && c.args.length > pos && c.at > 0,
+      );
+      // The definition itself matches `fn(` once for arrows; skip it.
+      const real = uses.filter((c) => !c.args[pos].startsWith("/**"));
+      return (
+        real.length > 0 &&
+        real.every((c) => named(c.args[pos]) || c.args[pos] === name)
+      );
+    }
+    return false;
+  };
   // A member read (`action.drive`) is fine when every `drive:` the module
   // writes is a declared constant.
   const driveProps = [...src.matchAll(/\bdrive:\s*([^,}\n]+)/g)].map((m) =>
@@ -258,6 +303,8 @@ export function markFaults(file, src, declared) {
         bad.push(
           `${file}:${at}: drivable(…, ${id}): ${name} is no object of declare() constants with ${key}`,
         );
+    } else if (/^[a-z]\w*$/.test(id) && passedDeclared(id, at)) {
+      // A helper's parameter that every caller fills with a declared id.
     } else if (/^\w+\.drive\.\w+$/.test(id)) {
       // A shared component marks a member of the object its caller passes
       // as `drive: NAME`, checked at the caller below.
@@ -314,6 +361,7 @@ test("redesign-drive-5: the undeclared-mark check catches every way around driva
     undeclaredMap: `const D = { a: declare({ id: "new-schedule" }), b: "x" };\ndrivable(e, D.a);`,
     undeclaredMapKey: `const D = { a: declare({ id: "new-schedule" }) };\ndrivable(e, D.z);`,
     undeclaredPassedMap: `const D = { a: "x" };\nmountHostLog(r, { drive: D });`,
+    undeclaredParam: `const go = (b, id) => drivable(b, id);\ngo(x, "nope-x");`,
     notConst: `const NOPE = "new-schedule";\ndrivable(b, NOPE);`,
     nested: `drivable(h("button", { a: 1, b: [2, 3] }, f(x, y)), "nope-x");`,
   };

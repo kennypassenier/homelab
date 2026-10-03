@@ -1104,6 +1104,14 @@ tr.unread td:first-child {
 tr.rule-new td {
   font-style: italic;
 }
+/* redesign-config-8: a rule switched off reads muted; the one the
+   Firewall page just staged is outlined until it is written. */
+tr.rule-off td {
+  color: var(--muted-foreground);
+}
+tr.rule-staged td {
+  background: color-mix(in oklab, var(--primary) 12%, transparent);
+}
 .fw-matrix td.cell {
   white-space: normal;
   font-size: 0.85rem;
@@ -4285,6 +4293,39 @@ details.nx-card--fold[open] > summary::before {
 }
 .nx-fail p {
   margin: 0;
+}
+/* one alert for every read a page lost (ui.js `failBand`), and the
+   blocks' muted line under it (`failNote`) */
+.nx-failband[hidden] {
+  display: none;
+}
+.nx-failnote {
+  margin: 0;
+  padding: var(--kp-space-md) 0;
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm);
+}
+/* a search's match inside a text (ui.js `highlight`): one element */
+.nx-hl {
+  display: inline;
+}
+.nx-mark {
+  padding: 0;
+  background: color-mix(in oklab, var(--warning) 80%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+/* chips beside the title in its row (pageHeader `titleMeta`); the
+   actions keep the right edge */
+.title-row > .nx-head-titlemeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kp-space-xs) var(--kp-space-md);
+  align-items: center;
+  min-inline-size: 0;
+}
+.title-row > .nx-head-titlemeta + * {
+  margin-inline-start: auto;
 }
 /* A key printed inside a button sits apart from its label. */
 .kp-button > .nx-kbd {

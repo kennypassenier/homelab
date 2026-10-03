@@ -1004,6 +1004,7 @@ fn tile_watch_rule_is_appended_by_with_tile_watch_and_rendered() {
 fn watcher_out_rule_is_prepended_before_declared_out_drop() {
     let mut fw = fw(KP_SOFT_116);
     fw.rules.push(FirewallRule {
+        disabled: false,
         dir: FwDir::Out,
         action: FwAction::Drop,
         source: None,
@@ -1142,4 +1143,61 @@ fn a_probe_on_a_device_outside_the_fleet_is_a_target_too() {
         Some(("10.10.10.6".to_string(), 8096))
     );
     assert_eq!(firewall::probe_target("10.10.10.6:8096"), None);
+}
+
+/// redesign-config-8 (the Firewall page's "Disable" on a rule): a rule
+/// switched off stays in the file, written `|IN …` as Proxmox writes a rule
+/// switched off in its own GUI, and no reading of the rules (`permits`)
+/// lets it decide anything — the next rule or the policy does.
+#[test]
+fn redesign_config_8_a_disabled_rule_is_written_off_and_decides_nothing() {
+    let spec = fw(r#"
+enabled: true
+policy_in: DROP
+policy_out: ACCEPT
+management_open: "lab only"
+rules:
+  - dir: in
+    action: ACCEPT
+    source: 10.0.0.5
+    proto: tcp
+    dport: "8080"
+    disabled: true
+  - dir: in
+    action: ACCEPT
+    source: 10.0.0.6
+    proto: tcp
+    dport: "8080"
+"#);
+    let text = render("demo", &spec);
+    assert!(
+        text.contains("\n|IN ACCEPT -source 10.0.0.5 -p tcp -dport 8080\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\nIN ACCEPT -source 10.0.0.6 -p tcp -dport 8080\n"),
+        "{text}"
+    );
+    let own = "10.0.0.9".parse().unwrap();
+    let off = "10.0.0.5".parse().unwrap();
+    let on = "10.0.0.6".parse().unwrap();
+    assert!(!firewall::permits(
+        &spec,
+        own,
+        FwDir::In,
+        off,
+        FwProto::Tcp,
+        Some(8080)
+    ));
+    assert!(firewall::permits(
+        &spec,
+        own,
+        FwDir::In,
+        on,
+        FwProto::Tcp,
+        Some(8080)
+    ));
+    // Written back unchanged: `disabled` only when it is on.
+    let back = serde_yaml::to_string(&spec).unwrap();
+    assert_eq!(back.matches("disabled: true").count(), 1, "{back}");
 }

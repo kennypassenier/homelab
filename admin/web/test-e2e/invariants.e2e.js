@@ -690,8 +690,11 @@ test("invariants: only one topology exists, on the Fleet view, and the traffic t
       0,
       "the firewall page must draw no topology of its own any more",
     );
-    // "Map": the Fleet view's name since 3.71.0 (the approved rename).
-    const link = page.locator("a", { hasText: "Map topology" });
+    // "Map": the Fleet view's name since 3.71.0 (the approved rename);
+    // redesign-firewall: the header's "Topology" action is that link.
+    const link = page.locator('#page a.kp-button[href^="/map"]', {
+      hasText: "Topology",
+    });
     assert.equal(await link.count(), 1, "no link to the Map's topology");
     const href = await link.getAttribute("href");
     assert.ok(href?.includes("traffic=1"), `link missing traffic=1: ${href}`);
@@ -940,11 +943,12 @@ test("invariants: a stack whose firewall the host enforces is shown as enforced 
     );
     // Same source, the firewall page's table: the row reads "in force",
     // not "declared but off", for the stack the host enforces.
+    // redesign-firewall: in the approved demo's words.
     await page.goto(`${BASE}/firewall`);
-    await page.waitForSelector("table", { timeout: 10000 });
-    const bodyText = await page.locator("body").innerText();
+    await page.waitForSelector("tr.fw-row", { timeout: 10000 });
+    const bodyText = await page.locator("#fw-stacks").innerText();
     assert.ok(
-      bodyText.includes("in force (repo differs)"),
+      bodyText.includes("live differs from files"),
       "the firewall table never shows a host-enforced-but-repo-disagrees row",
     );
   } finally {
@@ -6835,6 +6839,627 @@ test("invariants: review metrics — the wording is the demo's, Connections is g
       touch: true,
       keys: false,
     });
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── redesign-config (3.71.0): Firewall, Settings (with Sign-in), Presets ──
+// Kenny's approved demos (~/.local/share/homelab/redesign-3.71/
+// firewall.html, settings.html, presets.html), implemented exactly; these
+// pin what each page must always do.
+
+test("invariants: redesign-config Firewall shows its totals, one attention row per unprotected stack, and lights stacks up with plain clicks", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1100 },
+    });
+    const page = await freshPage(context);
+    const fw = await page.evaluate(async () =>
+      (await fetch("/data/firewall")).json(),
+    );
+    await page.goto(`${BASE}/firewall`);
+    await page.locator("tr.fw-row").first().waitFor({ timeout: 10000 });
+    const labels = await page
+      .locator(".nx-kpis .nx-kpi__label")
+      .allTextContents();
+    assert.deepEqual(
+      labels.map((l) => l.trim().toLowerCase()),
+      ["protected", "unprotected", "open paths", "rules"],
+    );
+    const rulesValue = await page
+      .locator('.nx-kpi:has(.nx-kpi__label:text-is("Rules")) .nx-kpi__value')
+      .innerText();
+    assert.equal(rulesValue.trim(), String(fw.matrix.rules.length));
+    const undeclared = fw.stacks.filter(
+      (/** @type {any} */ s) => !s.declared && !s.live_enforced,
+    ).length;
+    const bad = await page
+      .locator(".nx-attention .kp-alert--destructive")
+      .count();
+    assert.equal(bad, undeclared, "one red row per stack with no firewall");
+    // A plain click lights a stack up; the squares not in its row or
+    // column fade; a second click turns it off again; no modifier keys.
+    const name = fw.matrix.stacks[0];
+    const row = page.locator(`tr.fw-row[data-stack="${name}"]`);
+    await row.click({ position: { x: 300, y: 10 } });
+    const lit = () =>
+      page.evaluate(() => ({
+        pressed: [
+          ...document.querySelectorAll('.fw-mx__row[aria-pressed="true"]'),
+        ].map((b) => b.textContent?.trim()),
+        dim: document.querySelector(".fw-mx")?.classList.contains("has-focus"),
+      }));
+    assert.deepEqual(await lit(), { pressed: [name], dim: true });
+    assert.ok(new URL(page.url()).searchParams.get("lit")?.includes(name));
+    await row.click({ position: { x: 300, y: 10 } });
+    assert.deepEqual(await lit(), { pressed: [], dim: false });
+    // Two at once, then Esc resets.
+    await page.locator(".fw-mx__col").nth(0).click();
+    await page.locator(".fw-mx__col").nth(1).click();
+    assert.equal((await lit()).pressed.length, 2);
+    await page.keyboard.press("Escape");
+    assert.deepEqual(await lit(), { pressed: [], dim: false });
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: redesign-config Firewall pins a square with its story and outlines the squares a hovered rule decides", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1100 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/firewall`);
+    await page.locator(".fw-mx__cell--some").first().waitFor({
+      timeout: 10000,
+    });
+    const cell = page.locator(".fw-mx__cell--open").first();
+    const label = await cell.getAttribute("aria-label");
+    await cell.click();
+    assert.equal(await cell.getAttribute("aria-pressed"), "true");
+    const [from, to] = String(label).split(":")[0].split(" to ");
+    const story = await page.locator(".fw-path").innerText();
+    assert.ok(story.includes(`${from} → ${to}`), story);
+    assert.ok(/every port/.test(story), story);
+    assert.equal(new URL(page.url()).searchParams.get("cell"), `${from}>${to}`);
+    // A rule naming a managed stack outlines its squares while hovered.
+    const named = page.locator("tr.fw-rule:has(.nx-chip)").first();
+    await named.hover();
+    assert.ok(
+      (await page.locator(".fw-mx__cell.is-rule").count()) > 0,
+      "hovering a rule outlined no square",
+    );
+    // Inbound beside outbound, in Proxmox's order.
+    const sides = await page.$$eval(".fw-side h3", (hs) =>
+      hs.map((x) => x.firstChild?.textContent),
+    );
+    assert.deepEqual(sides, ["Inbound", "Outbound"]);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: redesign-config Settings stages an edit inline, counts it in the header, reviews it, and Discard can be undone", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1100 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/settings`);
+    const edit = page.locator('button[data-key="backup_concurrency"]');
+    await edit.waitFor({ timeout: 10000 });
+    assert.equal(
+      (await page.locator("#settings-save").innerText()).trim(),
+      "Check and write",
+    );
+    assert.ok(await page.locator("#settings-save").isDisabled());
+    await edit.click();
+    const input = page.locator("#key-backup-concurrency");
+    await input.fill("99");
+    await page.locator("#key-stage").click();
+    assert.ok(
+      await page.locator(".st-err").isVisible(),
+      "an out-of-range value was staged without a word",
+    );
+    await input.fill("2");
+    await input.press("Enter");
+    assert.equal(
+      (await page.locator("#settings-save").innerText()).trim(),
+      "Check and write 1…",
+    );
+    assert.equal(
+      (await page.locator(".nx-head-actions .cf-chip").innerText()).trim(),
+      "1 change staged",
+    );
+    assert.ok(
+      await page
+        .locator('[data-key="backup_concurrency"].st-set--staged')
+        .count(),
+    );
+    await page.locator("#settings-save").click();
+    const dialog = page.locator("dialog#settings-review[open]");
+    await dialog.waitFor({ timeout: 3000 });
+    assert.match(await dialog.innerText(), /backup_concurrency/);
+    await dialog.locator("button", { hasText: "Back" }).click();
+    // redesign-config-5: leaving the page and coming back keeps what is
+    // staged (for this tab), and the page says so.
+    // An in-app link, as the nav's: the page unmounts, the tab stays.
+    await page.evaluate(() => {
+      const a = document.createElement("a");
+      a.href = "/firewall";
+      a.id = "e2e-away";
+      a.textContent = "away";
+      document.body.append(a);
+    });
+    await page.locator("#e2e-away").click();
+    await page.waitForURL("**/firewall", { timeout: 5000 });
+    await page.locator("tr.fw-row").first().waitFor({ timeout: 10000 });
+    await page.goBack();
+    await page.locator('button[data-key="backup_concurrency"]').waitFor({
+      timeout: 10000,
+    });
+    await page
+      .locator("#settings-save", { hasText: "Check and write 1…" })
+      .waitFor({ timeout: 5000 });
+    await page
+      .locator(".nx-head-actions button", { hasText: "Discard" })
+      .click();
+    assert.ok(await page.locator("#settings-save").isDisabled());
+    await page.locator(".kp-toast button", { hasText: "Undo" }).click();
+    assert.equal(
+      (await page.locator("#settings-save").innerText()).trim(),
+      "Check and write 1…",
+      "Undo did not bring the staged change back",
+    );
+    // Keys the dashboard must never change offer the ssh way instead.
+    const how = page.locator(
+      '[data-drive="settings-how-to"][data-drive-row="listen"]',
+    );
+    await how.click();
+    assert.match(
+      await page.locator(".st-howto").innerText(),
+      /ssh pve, then set listen/,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: redesign-config Sign-in holds the passkeys beside the machine tokens, and /passkeys opens it", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/passkeys`);
+    await page.waitForURL("**/settings?section=sign-in", { timeout: 5000 });
+    await page.locator("#signin [data-token]").first().waitFor({
+      timeout: 10000,
+    });
+    const heads = await page.$$eval("#signin .si-col h3", (hs) =>
+      hs.map((x) => x.textContent?.trim()),
+    );
+    assert.deepEqual(heads, ["Passkeys", "Machine tokens"]);
+    assert.equal(
+      await page
+        .locator("#signin button", { hasText: "Register a passkey" })
+        .count(),
+      1,
+    );
+    const top = await page
+      .locator("#signin")
+      .evaluate((e) => Math.round(e.getBoundingClientRect().top));
+    assert.ok(top < 400, `Sign-in is not scrolled into view (top ${top})`);
+    // The side list names both dashboard sections and every host.toml group.
+    const side = await page.locator(".st-side a").allTextContents();
+    assert.ok(
+      side[0].startsWith("Working copy") && side[1].startsWith("Sign-in"),
+    );
+    assert.ok(side.length > 5, `${side}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: redesign-config Presets is a gallery: one card per preset, the empty one last, a search, and Use this preset opens the wizard on it", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const read = await page.evaluate(async () =>
+      (await fetch("/data/presets")).json(),
+    );
+    const withApps = read.presets.filter(
+      (/** @type {any} */ p) => p.apps.length > 0,
+    );
+    assert.ok(withApps.length > 2, "the fixture has no presets");
+    await page.goto(`${BASE}/presets`);
+    await page.locator("article.ps-card[data-preset]").first().waitFor({
+      timeout: 10000,
+    });
+    assert.equal(
+      await page.locator("article.ps-card[data-preset]").count(),
+      withApps.length,
+    );
+    assert.equal(
+      await page.locator(".ps-gallery > article:last-child h3").innerText(),
+      "Empty stack",
+    );
+    const count = await page.locator(".ps-tb .cf-count").innerText();
+    assert.ok(
+      count.startsWith(`${withApps.length} presets · next free container`),
+      count,
+    );
+    await page.locator(".ps-tb .nx-search").fill("vaapi");
+    assert.equal(await page.locator("article.ps-card[data-preset]").count(), 1);
+    assert.equal(
+      (await page.locator(".ps-tb .cf-count").innerText()).trim(),
+      `1 of ${withApps.length} presets`,
+    );
+    const name = await page
+      .locator("article.ps-card[data-preset]")
+      .getAttribute("data-preset");
+    await page.locator(`button[data-preset-use="${name}"]`).click();
+    const wizard = page.locator("dialog#new-stack-dialog[open]");
+    await wizard.waitFor({ timeout: 5000 });
+    assert.equal(
+      await wizard.locator("select").first().inputValue(),
+      name,
+      "the wizard did not open on the chosen preset",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: redesign-config pages show their skeleton from the first frame and never scroll sideways on a phone", async () => {
+  const browser = await chromium.launch();
+  try {
+    const bad = [];
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 900 },
+      });
+      const page = await freshPage(context);
+      // Each page's skeleton is its final geometry: the matrix's 5×5
+      // squares and the four KPI tiles, the host.toml group cards, eight
+      // preset cards.
+      /** @type {Record<string, [string, number][]>} */
+      const shapes = {
+        firewall: [
+          [".fw-mx__cell--sk", 25],
+          [".nx-kpi[data-loading]", 4],
+        ],
+        settings: [[".st-grp--sk", 4]],
+        presets: [[".ps-card--sk", 8]],
+      };
+      /** The content each page draws once its data is in. */
+      const filled = {
+        firewall: "tr.fw-row",
+        settings: "button[data-key]",
+        presets: "article.ps-card[data-preset]",
+      };
+      for (const path of /** @type {const} */ ([
+        "firewall",
+        "settings",
+        "presets",
+      ])) {
+        // Hold every read until the first frame is checked: what the
+        // page shows then is what it shows before any answer arrives.
+        /** @type {() => void} */
+        let release = () => {};
+        const held = new Promise((r) => (release = () => r(undefined)));
+        await page.route("**/data/**", async (r) => {
+          await held;
+          await r.continue().catch(() => {});
+        });
+        await page.goto(`${BASE}/${path}`);
+        for (const [sel, n] of shapes[path]) {
+          const got = await page.locator(`#page ${sel}`).count();
+          if (got < n)
+            bad.push(
+              `${width}px /${path}: ${got} of ${n} ${sel} in the first frame`,
+            );
+        }
+        release();
+        await page.unroute("**/data/**");
+        await page.locator(`#page ${filled[path]}`).first().waitFor({
+          timeout: 10000,
+        });
+        const over = await page.evaluate(
+          () => document.documentElement.scrollWidth - innerWidth,
+        );
+        if (over > 1) bad.push(`${width}px /${path}: ${over}px sideways`);
+      }
+      await context.close();
+    }
+    assert.deepEqual(bad, [], bad.join("; "));
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: redesign-config every control Firewall, Settings and Presets draw carries a declared Live view id", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1100 },
+    });
+    const page = await freshPage(context);
+    const declared = new Set(
+      await page.evaluate(async () => {
+        const m = await import("/js/drivable.js");
+        return m.controls().map((/** @type {any} */ c) => c.id);
+      }),
+    );
+    const bad = [];
+    /** @type {Record<string, string>} what each page draws once its data is in */
+    const filled = {
+      firewall: "tr.fw-rule",
+      settings: "button[data-key]",
+      presets: "article.ps-card[data-preset]",
+    };
+    for (const path of ["firewall", "settings", "presets"]) {
+      await page.goto(`${BASE}/${path}`);
+      await page.locator(`#page ${filled[path]}`).first().waitFor({
+        timeout: 10000,
+      });
+      // Open what folds, so the controls inside are on screen too.
+      if (path === "firewall") await page.locator("tr.fw-rule").first().click();
+      if (path === "settings")
+        await page.locator('[data-drive="settings-fold-all"]').click();
+      const found = await page.$$eval(
+        "#page a[href], #page button, #page summary, #page input, #page select, #page [tabindex]:not([tabindex='-1']), #page [role=button]",
+        (els) =>
+          els
+            .filter(
+              (e) => e.getClientRects().length > 0 && !e.closest("dialog"),
+            )
+            .filter(
+              (e) => !e.closest("[data-kp-datatable], .nx-crumbs, .nx-tip"),
+            )
+            .map((e) => ({
+              drive: /** @type {HTMLElement} */ (e).dataset.drive ?? null,
+              form: /** @type {HTMLElement} */ (e).dataset.driveForm ?? null,
+              label: (
+                e.getAttribute("aria-label") ||
+                e.textContent ||
+                e.tagName
+              )
+                .trim()
+                .slice(0, 40),
+            })),
+      );
+      for (const f of found)
+        if (!f.drive || !declared.has(f.drive))
+          bad.push(`/${path}: "${f.label}" (${f.drive ?? "no id"})`);
+    }
+    assert.deepEqual(
+      bad,
+      [],
+      `controls without a declared Live view id:\n${bad.join("\n")}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── redesign-config review (3.71.0 senior review of this branch) ────────
+
+test("invariants: redesign-config review Firewall on a phone: no Stacks cell draws over its neighbour, no KPI context is cut, and the rules toolbar reads toggles, search, count", async () => {
+  const browser = await chromium.launch();
+  try {
+    const phone = await browser.newContext({
+      viewport: { width: 390, height: 900 },
+    });
+    let page = await freshPage(phone);
+    await page.goto(`${BASE}/firewall`);
+    await page.locator("tr.fw-row").first().waitFor({ timeout: 10000 });
+    const spill = await page.$$eval(".fw-stacks tbody td", (tds) =>
+      tds.flatMap((td) => {
+        if (!td.getClientRects().length) return [];
+        const b = td.getBoundingClientRect();
+        return [...td.querySelectorAll("*")]
+          .filter((x) => x.getClientRects().length)
+          .map((x) => x.getBoundingClientRect())
+          .filter((r) => r.right > b.right + 1 || r.left < b.left - 1)
+          .map(
+            () =>
+              `${td.closest("tr")?.getAttribute("data-stack")} cell ${/** @type {HTMLTableCellElement} */ (td).cellIndex}`,
+          );
+      }),
+    );
+    assert.deepEqual([...new Set(spill)], [], "content drawn over a neighbour");
+    const clipped = await page.$eval(
+      "#fw-stacks .kp-table-wrap",
+      (w) => w.scrollWidth - w.clientWidth,
+    );
+    assert.ok(clipped <= 1, `the Stacks table is cut by ${clipped}px`);
+    const cut = await page.$$eval(".nx-kpi__ctx", (cs) =>
+      cs
+        .filter(
+          (c) =>
+            c.scrollWidth > c.clientWidth + 1 ||
+            c.scrollHeight > c.clientHeight + 1,
+        )
+        .map((c) => c.textContent),
+    );
+    assert.deepEqual(cut, [], "a KPI context is truncated");
+    await phone.close();
+
+    const wide = await browser.newContext({
+      viewport: { width: 1894, height: 1100 },
+    });
+    page = await freshPage(wide);
+    await page.goto(`${BASE}/firewall`);
+    await page.locator("tr.fw-rule").first().waitFor({ timeout: 10000 });
+    const order = await page.$eval("#fw-rules .nx-tb", (tb) => {
+      const x = (/** @type {Element | null} */ e) =>
+        e ? Math.round(e.getBoundingClientRect().left) : -1;
+      return {
+        toggles: x(tb.querySelector("button[data-v='ACCEPT']")),
+        search: x(tb.querySelector("input[type=search]")),
+        count: x(tb.querySelector(".cf-count")),
+      };
+    });
+    assert.ok(
+      order.toggles >= 0 &&
+        order.toggles < order.search &&
+        order.search < order.count,
+      `toolbar order ${JSON.stringify(order)}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: redesign-config review a rule's details count the whole stack, and Move up and Disable stage the change in the stack's firewall editor", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1100 },
+    });
+    const page = await freshPage(context);
+    const fw = await page.evaluate(async () =>
+      (await fetch("/data/firewall")).json(),
+    );
+    /** @type {Record<string, number>} */
+    const per = {};
+    for (const r of fw.matrix.rules) per[r.stack] = (per[r.stack] ?? 0) + 1;
+    const stack = Object.keys(per).find((n) =>
+      fw.matrix.rules.some(
+        (/** @type {any} */ r) => r.stack === n && r.dir === "in" && r.n > 1,
+      ),
+    );
+    assert.ok(stack, "the fixture has no stack with a later inbound rule");
+    await page.goto(`${BASE}/firewall?stack=${stack}`);
+    const row = page.locator('.fw-side[data-dir="in"] tr.fw-rule').last();
+    await row.waitFor({ timeout: 10000 });
+    await row.click();
+    const more = page.locator("tr.fw-rule-more");
+    await more.waitFor({ timeout: 3000 });
+    const text = await more.innerText();
+    const m = /rule (\d+) of (\d+) \((\d+) inbound\)/.exec(text);
+    assert.ok(m, text);
+    assert.equal(Number(m[2]), per[/** @type {string} */ (stack)]);
+    assert.ok(Number(m[1]) <= Number(m[2]), text);
+    await more.locator("a", { hasText: "Move up" }).waitFor({ timeout: 3000 });
+    await more.locator("a", { hasText: "Disable" }).click();
+    await page.waitForURL(`**/stacks/${stack}/settings**`, { timeout: 5000 });
+    await page.locator("tr.rule-off.rule-staged").waitFor({ timeout: 10000 });
+    assert.equal(
+      (await page.locator("#fw-dirty").innerText()).trim(),
+      "Changed; not committed.",
+    );
+    assert.ok(
+      !new URL(page.url()).searchParams.has("do"),
+      "the address still asks to stage it again",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: redesign-config review one failed read is one alert with one Try again, and Fetch now says it runs", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const down = (/** @type {import("playwright").Route} */ r) =>
+      r.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "the host does not answer" }),
+      });
+    await page.route("**/data/firewall", down);
+    await page.goto(`${BASE}/firewall`);
+    await page.locator("#page [role=alert]").first().waitFor({
+      timeout: 10000,
+    });
+    assert.equal(await page.locator("#page [role=alert]").count(), 1);
+    assert.equal(
+      await page.locator("#page button", { hasText: "Try again" }).count(),
+      1,
+    );
+    await page.unroute("**/data/firewall");
+
+    for (const p of ["**/data/repo", "**/data/host-settings", "**/data/tokens"])
+      await page.route(p, down);
+    await page.goto(`${BASE}/settings`);
+    const alert = page.locator("#page [role=alert]");
+    await alert
+      .filter({ hasText: "the tokens" })
+      .filter({ hasText: "the host settings" })
+      .filter({ hasText: "the working copy" })
+      .waitFor({ timeout: 10000 });
+    assert.equal(await alert.count(), 1);
+    for (const p of ["**/data/repo", "**/data/host-settings", "**/data/tokens"])
+      await page.unroute(p);
+    await page.locator("#page button", { hasText: "Try again" }).click();
+    await page.locator("button[data-key]").first().waitFor({ timeout: 10000 });
+    await alert.waitFor({ state: "detached", timeout: 5000 });
+
+    // Fetch now while the remote is slow: it says so, then comes back.
+    /** @type {() => void} */
+    let release = () => {};
+    const held = new Promise((r) => (release = () => r(undefined)));
+    await page.route("**/data/repo/sync", async (r) => {
+      await held;
+      await r.continue().catch(() => {});
+    });
+    const fetchNow = page.locator("#repo-sync");
+    await fetchNow.click();
+    await page
+      .locator("#repo-sync", { hasText: "Fetching the remote…" })
+      .waitFor({ timeout: 3000 });
+    assert.ok(await fetchNow.isDisabled());
+    release();
+    await page
+      .locator("#repo-sync", { hasText: "Fetch now" })
+      .waitFor({ timeout: 10000 });
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: redesign-config review a Presets search marks the match inside a chip without splitting its word", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/presets`);
+    await page.locator(".ps-apps .nx-chip").first().waitFor({
+      timeout: 10000,
+    });
+    const chips = () =>
+      page.$$eval(".ps-apps .nx-chip", (cs) =>
+        Object.fromEntries(
+          cs.map((c) => [
+            c.textContent,
+            Math.round(c.getBoundingClientRect().width),
+          ]),
+        ),
+      );
+    const before = await chips();
+    await page.locator(".ps-tb .nx-search").fill("a");
+    await page.locator(".ps-apps .nx-mark").first().waitFor({ timeout: 3000 });
+    const after = await chips();
+    const wider = Object.entries(after).filter(
+      ([t, w]) => before[t] === undefined || Math.abs(w - before[t]) > 1,
+    );
+    assert.deepEqual(wider, [], "a chip's word was split by the highlight");
   } finally {
     await browser.close();
   }

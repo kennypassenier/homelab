@@ -1,0 +1,171 @@
+/* redesign-presets (3.71.0): the Presets gallery as the approved demo
+   draws it (~/.local/share/homelab/redesign-3.71/presets.html). kp-themes
+   tokens only; shared pieces live in config.css. */
+
+.ps-tb.nx-tb {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.ps-tb .nx-tb__filters:empty {
+  display: none;
+}
+.ps-tb .nx-tb__search {
+  max-inline-size: none;
+}
+.ps-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+  gap: var(--kp-space-lg, 16px);
+}
+.ps-gallery[hidden] {
+  display: none;
+}
+.ps-below:empty {
+  display: none;
+}
+.ps-card {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto auto;
+  gap: 10px;
+  padding: var(--cf-pad);
+  border: 1px solid var(--border);
+  border-radius: var(--cf-r);
+  background: var(--card);
+  color: var(--card-foreground, inherit);
+  cursor: pointer;
+  min-inline-size: 0;
+  transition:
+    border-color 110ms var(--cf-ease),
+    transform 110ms var(--cf-ease);
+}
+.ps-card:hover,
+.ps-card:focus-visible {
+  border-color: var(--ring);
+  transform: translateY(-2px);
+}
+.ps-card:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.ps-card--sk {
+  cursor: default;
+}
+.ps-card--sk:hover {
+  transform: none;
+  border-color: var(--border);
+}
+.ps-card__top {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+.ps-card__mono {
+  inline-size: 40px;
+  block-size: 40px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  text-transform: uppercase;
+  background: color-mix(in oklab, var(--c, var(--muted)) 18%, var(--card));
+  color: var(--c, var(--muted-foreground));
+  border: 1px solid
+    color-mix(in oklab, var(--c, var(--border)) 35%, transparent);
+}
+.ps-card h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+.ps-card p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm);
+}
+.ps-apps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-block-size: 22px;
+  align-items: flex-start;
+  align-content: flex-start;
+}
+.ps-apps .cf-chip {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--kp-text-sm);
+  color: var(--foreground);
+}
+.ps-spec {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.ps-spec > div {
+  padding: 8px 10px;
+  display: grid;
+  gap: 2px;
+  min-inline-size: 0;
+}
+.ps-spec > div + div {
+  border-inline-start: 1px solid var(--border);
+}
+.ps-spec b {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ps-spec b.ps-def {
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+.ps-spec span {
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.ps-card__foot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.ps-card__foot .kp-button {
+  justify-content: center;
+}
+.ps-card--empty {
+  border-style: dashed;
+  background: transparent;
+}
+.ps-card--empty .ps-card__foot {
+  grid-template-columns: minmax(0, 1fr);
+}
+.ps-nomatch {
+  grid-column: 1 / -1;
+}
+.ps-next {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--kp-space-md, 12px);
+}
+.ps-next > div {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  justify-items: start;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.ps-next strong {
+  color: var(--foreground);
+}
+@media (max-width: 48rem) {
+  .ps-next {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ps-tb.nx-tb {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

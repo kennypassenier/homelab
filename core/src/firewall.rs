@@ -67,7 +67,12 @@ fn dir(d: FwDir) -> &'static str {
 
 /// One `[RULES]` line, in the option order Proxmox itself writes.
 pub fn rule_line(r: &FirewallRule) -> String {
-    let mut s = format!("{} {}", dir(r.dir), action(r.action));
+    let mut s = format!(
+        "{}{} {}",
+        if r.disabled { "|" } else { "" },
+        dir(r.dir),
+        action(r.action)
+    );
     if let Some(v) = &r.source {
         s.push_str(&format!(" -source {}", v));
     }
@@ -233,6 +238,7 @@ pub fn derive_watcher_out_rules(
                 .collect::<Vec<_>>()
                 .join(",");
             FirewallRule {
+                disabled: false,
                 dir: FwDir::Out,
                 action: FwAction::Accept,
                 source: None,
@@ -334,6 +340,7 @@ pub fn derive_tile_watch_rules(
         .collect::<Vec<_>>()
         .join(",");
     vec![FirewallRule {
+        disabled: false,
         dir: FwDir::In,
         action: FwAction::Accept,
         source: Some(source.to_string()),
@@ -375,6 +382,7 @@ fn tile_port_on(url: &str, own_ip: &str) -> Option<u16> {
 /// nothing else on the management network.
 fn guard_rules() -> Vec<FirewallRule> {
     let rule = |action, proto, dport: Option<&str>, dest: &str| FirewallRule {
+        disabled: false,
         dir: FwDir::Out,
         action,
         source: None,
@@ -432,7 +440,7 @@ pub fn permits(
         FwDir::In => (peer, own),
         FwDir::Out => (own, peer),
     };
-    for r in rules.iter().filter(|r| r.dir == dir) {
+    for r in rules.iter().filter(|r| r.dir == dir && !r.disabled) {
         if r.source.as_deref().is_some_and(|s| !addr_matches(s, src))
             || r.dest.as_deref().is_some_and(|d| !addr_matches(d, dst))
             || r.proto.is_some_and(|p| p != proto)

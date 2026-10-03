@@ -207,6 +207,11 @@ pub struct FirewallRule {
     /// rule's comment.
     #[serde(default)]
     pub note: Option<String>,
+    /// redesign-config-8: the rule stays in the file but Proxmox skips it
+    /// (written `|IN …`, as Proxmox writes a rule switched off in its own
+    /// GUI). Absent means on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

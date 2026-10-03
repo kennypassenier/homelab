@@ -301,6 +301,7 @@ pub fn rule_value(r: &FirewallRule) -> Value {
     );
     put("dport", r.dport.clone().map(Value::from));
     put("note", r.note.clone().map(Value::from));
+    put("disabled", r.disabled.then_some(Value::from(true)));
     Value::Mapping(m)
 }
 
@@ -1384,6 +1385,9 @@ pub fn rule_words(r: &FirewallRule) -> String {
         action_word(r.action),
         peer.unwrap_or("anywhere")
     );
+    if r.disabled {
+        s.insert_str(0, "(off) ");
+    }
     if let Some(p) = r.proto {
         s.push_str(match p {
             FwProto::Tcp => " tcp",

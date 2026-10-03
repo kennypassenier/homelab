@@ -470,6 +470,7 @@ mod tests {
             policy_out: FwAction::Accept,
             management_open: None,
             rules: vec![FirewallRule {
+                disabled: false,
                 dir: FwDir::In,
                 action: FwAction::Accept,
                 source: Some(src.into()),

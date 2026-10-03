@@ -63,7 +63,8 @@ const say = (key, w = {}) =>
  * @typedef {{dir: "in" | "out", action: "ACCEPT" | "DROP" | "REJECT",
  *   source?: string | null, dest?: string | null,
  *   proto?: "tcp" | "udp" | "icmp" | null, dport?: string | null,
- *   comment?: string | null, note?: string | null}} Rule
+ *   comment?: string | null, note?: string | null,
+ *   disabled?: boolean}} Rule
  * @typedef {{enabled: boolean, comment?: string | null,
  *   policy_in: "ACCEPT" | "DROP" | "REJECT",
  *   policy_out: "ACCEPT" | "DROP" | "REJECT",
@@ -1186,6 +1187,7 @@ function cleanRule(r) {
       /** @type {Record<string, unknown>} */ (out)[k] =
         k === "comment" ? v : String(v).trim();
   }
+  if (r.disabled) out.disabled = true;
   return out;
 }
 
@@ -1321,6 +1323,45 @@ export function moveRule(m, i, delta) {
   const rules = [...m.rules];
   [rules[i], rules[j]] = [rules[j], rules[i]];
   return { ...m, rules };
+}
+
+/**
+ * redesign-config-8: a rule switched off (kept in the file, skipped by
+ * Proxmox) or back on.
+ * @param {FirewallModel} m
+ * @param {number} i
+ * @returns {FirewallModel}
+ */
+export function toggleRuleOff(m, i) {
+  const x = m.rules[i];
+  if (!x) return m;
+  const { disabled, ...rest } = x.rule;
+  /** @type {Rule} */
+  const rule = disabled ? rest : { ...rest, disabled: true };
+  return {
+    ...m,
+    rules: m.rules.map((y, j) => (j === i ? { ...y, rule } : y)),
+  };
+}
+
+/**
+ * redesign-config-8: what the Firewall page's "Move up" and "Disable" ask
+ * the stack's editor to do to rule `n` (1-based, as both number it); the
+ * model as it was when it cannot.
+ * @param {FirewallModel} m
+ * @param {number} n
+ * @param {string} act "up" | "disable" | "enable"
+ * @returns {FirewallModel}
+ */
+export function ruleIntent(m, n, act) {
+  const i = n - 1;
+  if (!Number.isInteger(i) || i < 0 || i >= m.rules.length) return m;
+  if (act === "up") return i === 0 ? m : moveRule(m, i, -1);
+  if (act === "enable")
+    return m.rules[i].rule.disabled ? toggleRuleOff(m, i) : m;
+  if (act === "disable")
+    return m.rules[i].rule.disabled ? m : toggleRuleOff(m, i);
+  return m;
 }
 
 // ── feat-stacks-3: the new-stack wizard ──────────────────────────────────

@@ -145,7 +145,10 @@ export function liveStatus(verb = "updated") {
  * @typedef {{title: string, sub?: string, desc: string, crumbs?: Crumb[],
  *   live?: string | boolean, actions?: Node[], primary?: Node | null,
  *   more?: Node | null, meta?: Node[], level?: "h1" | "h2",
- *   split?: boolean}} HeaderSpec
+ *   split?: boolean, titleMeta?: Node[]}} HeaderSpec
+ *   `titleMeta`: chips right beside the title in its row (the Configure
+ *   pages' "working copy bb5dce9" / "read 3 s ago"), the actions still
+ *   against the right edge;
  *   `sub`: a muted part of the title ("Host demo");
  *   `split`: the next.css header (Secrets): the live status beside the
  *   title, the description under them, the actions against the right
@@ -225,7 +228,10 @@ export function pageHeader(spec) {
     );
     return { el: e, title, desc, actions, meta: null, live };
   }
-  const row = h("div", { class: "title-row" }, title);
+  const titleMeta = spec.titleMeta
+    ? h("div", { class: "nx-head-titlemeta" }, ...spec.titleMeta)
+    : null;
+  const row = h("div", { class: "title-row" }, title, titleMeta);
   if (live || actions.childElementCount > 0) {
     const right = h("div", { class: "nx-head-right" });
     if (live) right.append(live.el);
@@ -233,7 +239,7 @@ export function pageHeader(spec) {
     row.append(right);
   }
   const e = h("header", { class: "nx-head" }, ...crumbs, row, desc);
-  return { el: e, title, desc, actions, meta: null, live };
+  return { el: e, title, desc, actions, meta: titleMeta, live };
 }
 
 /**
@@ -1413,13 +1419,13 @@ export function hoverCard(opts = {}) {
   };
   /**
    * @param {HTMLElement} target
-   * @param {() => Node[] | null} fill
+   * @param {() => import("./dom.js").Child[] | null} fill
    */
   const attach = (target, fill) => {
     const show = () => {
       const c = fill();
       if (!c || !target.isConnected) return;
-      tip.replaceChildren(...c);
+      tip.replaceChildren(...h("div", null, c).childNodes);
       tip.hidden = false;
       const p = tipPlace(
         target.getBoundingClientRect(),
@@ -1436,6 +1442,18 @@ export function hoverCard(opts = {}) {
     target.addEventListener("blur", hide);
   };
   return { el: tip, attach, hide, stop: () => tip.remove() };
+}
+
+/** @type {ReturnType<typeof hoverCard> | null} */
+let pageCard = null;
+
+/**
+ * The one hover card a page shares (made on first use, made again after a
+ * page swap removed it): `pageTip().attach(target, fill)`, `.hide()`.
+ */
+export function pageTip() {
+  if (!pageCard?.el.isConnected) pageCard = hoverCard();
+  return pageCard;
 }
 
 /**
@@ -1832,7 +1850,7 @@ export function ensureStyle(href) {
 /**
  * A small status chip: a count, a state word ("3", "unreadable"), in a
  * tone. With `dot`, a status dot leads the word.
- * @param {string} text
+ * @param {import("./dom.js").Child} text
  * @param {{tone?: Tone, dot?: boolean, title?: string, label?: string}} [o]
  *   `label`: what a screen reader says instead of the text ("!")
  */
@@ -1968,6 +1986,9 @@ export function rowKeys(root, selector, onEnter) {
     const t = /** @type {HTMLElement | null} */ (e.target);
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (t?.closest("input, textarea, select, [contenteditable]")) return;
+    // redesign-config-12: a button or a link that is not itself a row
+    // keeps j / k / Enter to itself.
+    if (t && typingTarget(t.tagName) && !t.matches(selector)) return;
     const rows = /** @type {HTMLElement[]} */ ([
       ...root.querySelectorAll(selector),
     ]).filter((r) => !r.hidden && r.offsetParent !== null);
@@ -2148,6 +2169,93 @@ export function tableSlot(attachFn = attachDataTables) {
     stop: () => {
       stop?.();
       stop = null;
+    },
+  };
+}
+
+/**
+ * Whether a focused element keeps j / k / Enter to itself (a field, a
+ * button, a link); anchored, so a row, a card or a span never does
+ * (redesign-config-12).
+ * @param {string} tag
+ */
+export const typingTarget = (tag) =>
+  /^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(tag);
+
+/**
+ * The text with the query's first match marked (case-insensitive), as ONE
+ * element: a chip is a flex box, and loose text nodes beside a `<mark>`
+ * would each become a flex item with the chip's gap between them
+ * ("c a dvisor", redesign-config-4).
+ * @param {string | null | undefined} text
+ * @param {string} q lower-case
+ * @returns {import("./dom.js").Child}
+ */
+export function highlight(text, q) {
+  if (!text) return text ?? "";
+  if (!q) return text;
+  const i = text.toLowerCase().indexOf(q);
+  if (i < 0) return text;
+  return h(
+    "span",
+    { class: "nx-hl" },
+    text.slice(0, i),
+    h("mark", { class: "nx-mark" }, text.slice(i, i + q.length)),
+    text.slice(i + q.length),
+  );
+}
+
+/**
+ * A block's muted line while the page's one failure band says why.
+ * @param {string} text
+ */
+export const failNote = (text) => h("p", { class: "nx-failnote" }, text);
+
+/**
+ * One alert for every read a page lost at once (redesign-config-11): the
+ * cause once, under the header, with ONE Try again (the Live view control
+ * `drive`); the blocks only say they are empty (`failNote`). Hidden while
+ * nothing failed.
+ * @param {{drive: Drive}} spec
+ */
+export function failBand(spec) {
+  const box = h("div", { class: "nx-failband" });
+  box.hidden = true;
+  return {
+    el: box,
+    /**
+     * @param {{title: string, why: string, fix?: string | null} | null} f
+     * @param {() => void} retry
+     */
+    set: (f, retry) => {
+      box.hidden = !f;
+      if (!f) return box.replaceChildren();
+      box.replaceChildren(
+        h(
+          "div",
+          { class: "kp-alert kp-alert--destructive nx-fail", role: "alert" },
+          h(
+            "div",
+            { class: "kp-alert__body" },
+            h("strong", null, f.title),
+            h("p", null, `Why: ${f.why}`),
+            f.fix ? h("p", null, `What to do: ${f.fix}`) : null,
+            drive(
+              h(
+                "button",
+                {
+                  type: "button",
+                  class: "kp-button kp-button--sm",
+                  title: "Read it again",
+                  onclick: retry,
+                },
+                "Try again",
+              ),
+              spec.drive,
+            ),
+          ),
+        ),
+      );
     },
   };
 }

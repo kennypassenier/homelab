@@ -1,25 +1,34 @@
-// The settings page. The working copy (arch-edit-txn): where it stands
-// against the remote, and the push, rebase or drop of commits the remote
-// lacks. The host's settings (feat-settings-1): every host.toml key with
-// its value, read and written with commands answered to this session only,
-// so a TUI with unsaved edits in its settings screen keeps them. arch-self:
-// a key that can cut the dashboard off is shown, never changed; one that
-// can take its route or the backups down needs its name typed.
+// The Settings page (redesign-settings, release 3.71.0; Kenny approved
+// the demo 2026-10-03: ~/.local/share/homelab/redesign-3.71/settings.html,
+// implemented exactly). How this homelab is set up: the working copy it
+// applies from, who can sign in (passkeys and machine tokens, `/passkeys`
+// lands on the Sign-in section), and every key of the host's host.toml.
+//
+// Layout: the header carries the staged-change summary as its primary
+// action ("Check and write 2…", with Discard and the "2 changes staged"
+// chip whose tip lists them); a search over every setting; a side list
+// with scroll-spy (This dashboard: Working copy, Sign-in; host.toml: one
+// entry per group with its count); then the cards. host.toml's groups
+// are folded cards, each key one row: name, key and help · value (or
+// "default …") · when it takes effect and who may change it · Edit (an
+// inline editor: Stage / Cancel, Enter and Esc) or "How to…" (the ssh
+// way, for keys the dashboard must never change).
+//
+// What holds from before: arch-edit-txn (the working copy's push, rebase
+// or drop of commits the remote lacks), feat-settings-1 (host.toml read
+// and written with commands answered to this session only; the review
+// dialog checks with the host's start-up validation and restarts the host
+// when a key needs it), arch-self (a key that can cut the dashboard off is
+// shown, never changed; one that can take its route or the backups down
+// needs its key typed), fix-120 (per-machine tokens, issued and revoked
+// here), and every Live view hook (`host-settings`, `key`, `host-review`,
+// `tokens-issue`).
 
 import { send } from "../act.js";
 import { notify, openDialog, refusalAlarm, refusalCallout } from "../actui.js";
 import { agoEl, setAgo } from "../ago.js";
+import { fetchJson, h } from "../dom.js";
 import {
-  badgeCell,
-  bindTableUrl,
-  errorBox,
-  fetchJson,
-  h,
-  tableBlock,
-  td,
-} from "../dom.js";
-import {
-  ACCESS,
   editable,
   fieldText,
   hostSettingsBody,
@@ -29,10 +38,6 @@ import {
 } from "../editforms.js";
 import { markErrors } from "../editui.js";
 import { driven, register } from "../drivehooks.js";
-import { formatDateTime } from "../format.js";
-import { mountJobPanel } from "../jobpanel.js";
-import { listen } from "../store.js";
-import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 import {
   declare,
   declareField,
@@ -40,6 +45,76 @@ import {
   fieldId,
   viaForm,
 } from "../drivable.js";
+import { mountJobPanel } from "../jobpanel.js";
+import {
+  failSummary,
+  accessWords,
+  fieldShown,
+  foundText,
+  groupChip,
+  groupsOf,
+  repoState,
+  sectionTarget,
+  shortRemote,
+  keepStaged,
+  restoreStaged,
+  slug,
+  STAGED_STORE,
+  stagedWords,
+} from "../settingsview.js";
+import { listen } from "../store.js";
+import {
+  chip,
+  dot,
+  ensureStyle,
+  failBand,
+  failNote,
+  highlight,
+  pageHeader,
+  pageTip,
+  segSwitch,
+  skeleton,
+  toolbar,
+} from "../ui.js";
+import { setParams } from "../urlstate.js";
+import { mountPasskeys } from "./passkeys.js";
+
+// fix-239: Live view reaches every control here: host.toml's rows through
+// the host-settings form (`homelab ui open host-settings`, `row edit
+// <key>`), the rest by `homelab ui click …`.
+const ISSUE_TOKEN = declare({
+  id: "issue-token",
+  page: "settings",
+  opens: "dialog",
+  what: "open the Issue a new token dialog",
+});
+const REVOKE_TOKEN = declare({
+  id: "revoke-token",
+  page: "settings",
+  opens: "dialog",
+  row: "<token name>",
+  what: "ask to revoke one machine's token",
+});
+const FETCH_NOW = declare({
+  id: "fetch-now",
+  page: "settings",
+  opens: "run",
+  what: "fetch the repository's working copy now",
+});
+const TRY_AGAIN = declare({
+  id: "settings-try-again",
+  page: "settings",
+  opens: "view",
+  what: "read what failed again",
+});
+const REPO_CHOICE = declare({
+  id: "repo-choice",
+  page: "settings",
+  opens: "run",
+  row: "push|rebase|drop",
+  what: "resolve unpushed commits: push them, rebase and push, or drop them",
+  shows: "when the working copy holds commits that were not pushed",
+});
 
 // review M5: every page field Live view may set is declared (drivable.js
 // `declareField`); the client and the dashboard refuse any other.
@@ -74,337 +149,1329 @@ const DROP_CONFIRM = declareField({
   page: "settings",
   what: "type to confirm dropping unpushed commits",
 });
+const SHOW = declare({
+  id: "settings-show",
+  page: "settings",
+  opens: "view",
+  row: "all|changed|here",
+  what: "show every host setting, only those changed from the default, or only those editable here",
+});
+const FOLD_ALL = declare({
+  id: "settings-fold-all",
+  page: "settings",
+  opens: "view",
+  what: "open or close every host.toml group",
+});
+const HOW_TO = declare({
+  id: "settings-how-to",
+  page: "settings",
+  opens: "view",
+  row: "<key>",
+  what: "show how a key the dashboard may not change is changed over ssh",
+});
 
-// fix-239: Live view reaches every control here: host.toml's rows through
-// the host-settings form (`homelab ui open host-settings`, `row edit
-// <key>`), the rest by `homelab ui click …`.
-const ISSUE_TOKEN = declare({
-  id: "issue-token",
-  page: "settings",
-  opens: "dialog",
-  what: "open the Issue a new token dialog",
-});
-const REVOKE_TOKEN = declare({
-  id: "revoke-token",
-  page: "settings",
-  opens: "dialog",
-  row: "<token name>",
-  what: "ask to revoke one machine's token",
-});
-const FETCH_NOW = declare({
-  id: "fetch-now",
+const DISCARD = declare({
+  id: "settings-discard",
   page: "settings",
   opens: "run",
-  what: "fetch the repository's working copy now",
+  what: "drop every staged host.toml change (an Undo follows)",
 });
-const REPO_CHOICE = declare({
-  id: "repo-choice",
+const CHECK_WRITE = declare({
+  id: "settings-check-and-write",
   page: "settings",
-  opens: "run",
-  row: "push|rebase|drop",
-  what: "resolve unpushed commits: push them, rebase and push, or drop them",
-  shows: "when the working copy holds commits that were not pushed",
+  opens: "dialog",
+  what: "open the review of the staged changes (Check and write)",
+});
+const SEARCH = declare({
+  id: "settings-search",
+  page: "settings",
+  opens: "view",
+  what: "the search over every setting (name, key or what it does)",
+});
+const NAV = declare({
+  id: "settings-nav",
+  page: "settings",
+  opens: "view",
+  row: "wc|signin|<group slug>",
+  what: "jump to a section from the side list",
+});
+const GROUP = declare({
+  id: "settings-group",
+  page: "settings",
+  opens: "view",
+  row: "<group slug>",
+  what: "open or close one host.toml group",
+});
+const EDIT_KEY = declare({
+  id: "settings-edit",
+  page: "settings",
+  opens: "view",
+  row: "<key>",
+  what: "open the inline editor of one host.toml key",
+});
+const UNDO_KEY = declare({
+  id: "settings-undo",
+  page: "settings",
+  opens: "view",
+  row: "<key>",
+  what: "drop one staged change",
+});
+const STAGE = declare({
+  id: "settings-stage",
+  page: "settings",
+  opens: "view",
+  what: "stage the value typed in the open editor (nothing is written yet)",
+});
+const USE_DEFAULT = declare({
+  id: "settings-use-default",
+  page: "settings",
+  opens: "view",
+  what: "stage the open key's removal: the host takes its default",
+});
+const CANCEL_EDIT = declare({
+  id: "settings-cancel-edit",
+  page: "settings",
+  opens: "view",
+  what: "close the open editor and keep the old value",
+});
+const STAGED = declare({
+  id: "settings-staged",
+  page: "settings",
+  opens: "view",
+  what: "the header's staged-change chip; focus or hover lists the staged changes",
+});
+const CLEAR = declare({
+  id: "settings-clear-search",
+  page: "settings",
+  opens: "view",
+  what: "clear the search and show every setting",
 });
 
 /**
  * @typedef {import("../editforms.js").HostField} HostField
  * @typedef {{commit: string, subject: string, at: number}} CommitRef
+ * @typedef {import("../settingsview.js").Show} Show
  */
 
 /**
  * @param {HTMLElement} root
+ * @param {{section?: string}} [opts] the section to open at (Sign-in for
+ *   `/settings?section=sign-in`)
  * @returns {() => void}
  */
-export function mount(root) {
-  const repoBox = h(
-    "section",
-    { class: "kp-card", "aria-label": "Working copy", id: "repo" },
-    h("p", { class: "measured" }, "Reading the working copy…"),
-  );
-  const hostHead = h("p", { class: "measured" });
-  const staged = h("div", {
-    class: "staged",
-    role: "status",
-    "aria-live": "polite",
-  });
-  const ago = agoEl("read");
-  // fix-120 (per-machine tokens, owner decision 2026-10-01): one bearer per
-  // machine, named, hashed at rest (host.toml `[[tokens]]`) — issued and
-  // revoked here so a lost or retired machine's access ends without
-  // touching any other machine's token. The legacy single `token` key still
-  // works (shown as "legacy"); the migration note is in OPERATIONS_RUNBOOK.
-  const tokensAgo = agoEl("read");
-  const tk = tableBlock({
-    remember: "tokens",
-    caption: "Per-machine tokens",
-    search: "Search tokens",
-    state: "loading",
-    nothing: "No tokens yet: Issue a token adds one.",
-    columns: [
-      { label: "Name", sort: "text" },
-      { label: "Scope", sort: "text", filter: "choice" },
-      { label: "Revoke", sort: "text" },
-    ],
-  });
-  const issueBtn = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--primary",
-      id: "tokens-issue",
-    },
-    "Issue token",
-  );
-  drivable(issueBtn, ISSUE_TOKEN);
-  const t = tableBlock({
-    remember: "host-settings",
-    caption: "host.toml on pve",
-    search: "Search settings",
-    state: "loading",
-    nothing: "host.toml sets nothing.",
-    columns: [
-      { label: "Group", sort: "text", filter: "choice" },
-      { label: "Setting", sort: "text" },
-      { label: "Value", sort: "text", cls: "wide" },
-      { label: "Takes effect", sort: "text", filter: "choice" },
-      {
-        label: "Changed",
-        sort: "text",
-        order:
-          "ssh only (secret),ssh only (safety policy),ssh only (can cut the dashboard off),Here with the name typed,Here (secret, write-only),Here",
-        filter: "choice",
-      },
-      { label: "Edit", sort: "text" },
-    ],
-  });
-  root.replaceChildren(
-    h("h1", null, "Host settings"),
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      "The working copy, the host's own settings, and this dashboard's per-machine tokens.",
-    ),
-    h("h2", null, "Working copy"),
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      "The stacks repository the host applies from, and its current commit.",
-    ),
-    repoBox,
-    h("h2", null, "Host settings"),
-    h(
-      "p",
-      null,
-      "Every key of host.toml. Changes are collected here, checked with the host's start-up validation and written in one go; the TUI's settings screen keeps its own unsaved edits.",
-    ),
-    hostHead,
-    staged,
-    t.wrap,
-    h("p", null, ago),
-    h(
-      "div",
-      { class: "title-row" },
-      h("h2", null, "Per-machine tokens"),
-      issueBtn,
-    ),
-    h(
-      "p",
-      null,
-      "Each machine gets its own bearer, hashed at rest; revoking one never touches another's. The legacy single token (host.toml's bare `token` key, shown as “legacy”) still works until every machine has its own — see the migration note in the runbook.",
-    ),
-    tk.wrap,
-    h("p", null, tokensAgo),
-  );
-  const detach = attachDataTables(root);
-  const table = dataTable(t.wrap);
-  const tokensTable = dataTable(tk.wrap);
-  const unbind = bindTableUrl(table, "settings");
-  const unbindTokens = bindTableUrl(tokensTable, "tokens");
+export function mount(root, opts = {}) {
+  ensureStyle("/css/pages/config.css");
+  ensureStyle("/css/pages/settings.css");
+  root.classList.add("cf-page", "st-page");
   const abort = new AbortController();
-
-  // ── the working copy ──
-  const loadRepo = async () => {
-    const r = await fetchJson("/data/repo", "the working copy", abort.signal);
-    if (!r.ok) {
-      repoBox.replaceChildren(errorBox(r.error));
-      return;
-    }
-    drawRepo(repoBox, r.body, loadRepo);
+  /** @type {(() => void)[]} */
+  const stops = [];
+  // redesign-config-11: one alert under the header for every read the
+  // page lost, with one Try again that reads each of them again.
+  const band = failBand({ drive: { id: TRY_AGAIN } });
+  /** @type {Map<string, {error: import("../doctor.js").RouteError, retry: () => void}>} */
+  const fails = new Map();
+  /**
+   * @param {string} what
+   * @param {import("../doctor.js").RouteError | null} error
+   * @param {() => void} retry
+   */
+  const failed = (what, error, retry) => {
+    if (error) fails.set(what, { error, retry });
+    else fails.delete(what);
+    const now = [...fails].map(([w, f]) => ({ what: w, error: f.error }));
+    const again = [...fails.values()].map((f) => f.retry);
+    band.set(failSummary(now), () => again.forEach((r) => r()));
   };
+  const q0 = new URLSearchParams(location.search);
+  const S = {
+    q: (q0.get("q") ?? "").toLowerCase(),
+    /** @type {Show} */
+    show: /** @type {Show} */ (
+      ["changed", "here"].includes(q0.get("show") ?? "")
+        ? q0.get("show")
+        : "all"
+    ),
+    /** @type {string | null} the key being edited inline */
+    editing: null,
+    /** @type {string | null} the key whose ssh how-to is open */
+    howto: null,
+    /** @type {Set<string>} open groups (the first two start open) */
+    open: new Set(),
+    /** @type {string | null} the inline editor's error */
+    err: null,
+  };
+  const section = opts.section ?? q0.get("section");
+  const keepUrl = () =>
+    history.replaceState(
+      history.state,
+      "",
+      `${location.pathname}${setParams(location.search, {
+        q: S.q,
+        show: S.show === "all" ? null : S.show,
+      })}`,
+    );
 
-  // ── host.toml ──
-  /** @type {{sha256: string, path: string, fields: HostField[]} | null} */
+  /** @type {{sha256: string, path: string, fields: HostField[], unknown?: string[]} | null} */
   let page = null;
   /** @type {Map<string, {field: HostField, value: unknown}>} */
   const changes = new Map();
   /** @type {Set<string>} */
   const confirmed = new Set();
 
-  const paintStaged = () => {
-    if (!changes.size) {
-      staged.replaceChildren();
-      return;
-    }
-    const review = h(
+  // ── header: the staged-change summary IS the primary action ───────────
+  const ago = agoEl("read", null, { live: true });
+  const stagedChip = drivable(
+    h("span", { class: "cf-chip", tabindex: "0" }),
+    STAGED,
+  );
+  pageTip().attach(stagedChip, () =>
+    changes.size
+      ? [
+          h("b", null, "Staged, not written yet"),
+          ...[...changes.values()].map(({ field, value }) =>
+            h(
+              "span",
+              { class: "cf-tip__row" },
+              h(
+                "span",
+                { class: "cf-mono" },
+                `${field.key}: ${valueText(field)} → ${pendingText(field, value)}`,
+              ),
+              h(
+                "span",
+                { class: "cf-hint" },
+                field.apply === "live" ? "at once" : "next start",
+              ),
+            ),
+          ),
+          h(
+            "span",
+            { class: "cf-hint" },
+            "Check and write validates them together with the host's own start-up checks.",
+          ),
+        ]
+      : null,
+  );
+  const discard = /** @type {HTMLButtonElement} */ (
+    viaForm(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--secondary",
+          title: "Drop every staged change (you can undo)",
+          onclick: () => {
+            const before = new Map(changes);
+            const typed = new Set(confirmed);
+            changes.clear();
+            confirmed.clear();
+            paint();
+            notify(`Dropped ${before.size} staged change(s).`, "info", {
+              label: "Undo",
+              onClick: () => {
+                for (const [k, v] of before) changes.set(k, v);
+                for (const k of typed) confirmed.add(k);
+                paint();
+              },
+            });
+          },
+        },
+        "Discard",
+      ),
+      "host-settings",
+    )
+  );
+  const write = /** @type {HTMLButtonElement} */ (
+    viaForm(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--primary",
+          id: "settings-save",
+          title:
+            "Validate with the host's start-up checks, then write host.toml in one go",
+          onclick: () => openReview(),
+        },
+        "Check and write",
+      ),
+      "host-settings",
+    )
+  );
+  drivable(discard, DISCARD);
+  drivable(write, CHECK_WRITE);
+  const head = pageHeader({
+    title: "Settings",
+    desc: "How this homelab is set up: the working copy it applies from, who can sign in, and every key of the host's host.toml. Edits are staged, checked and written in one go.",
+    titleMeta: [h("span", { class: "cf-live" }, ago)],
+    actions: [stagedChip, discard],
+    primary: write,
+  });
+
+  // ── the search ────────────────────────────────────────────────────────
+  const found = h("span", { class: "cf-count" });
+  const tb = toolbar({
+    search: {
+      placeholder: "Find a setting by name, key or what it does",
+      label: "Find a setting",
+      value: S.q,
+      onInput: (v) => {
+        S.q = v.trim().toLowerCase();
+        keepUrl();
+        paintGroups();
+      },
+    },
+    groups: [],
+    state: [found],
+  });
+  tb.el.classList.add("st-tb");
+  if (tb.search) drivable(tb.search, SEARCH);
+
+  // ── working copy ──────────────────────────────────────────────────────
+  const wcBody = h("div", { class: "st-wc" }, skeleton("50%"), skeleton("30%"));
+  const wcFoot = h(
+    "div",
+    { class: "cf-card__foot" },
+    h("span", null, skeleton("20ch")),
+    h(
+      "span",
+      null,
+      "Push, rebase or drop appear here when the remote lacks commits",
+    ),
+  );
+  const fetchNow = drivable(
+    h(
       "button",
       {
         type: "button",
-        class: "kp-button kp-button--primary",
-        id: "settings-save",
+        class: "kp-button kp-button--sm",
+        id: "repo-sync",
+        title: "Fetch the remote now and compare",
       },
-      "Review and save…",
-    );
-    const drop = h(
+      "Fetch now",
+    ),
+    FETCH_NOW,
+  );
+  const wc = card({
+    id: "wc",
+    title: "Working copy",
+    desc: "The stacks repository the host applies from: where it stands against its remote.",
+    tools: [fetchNow],
+    body: [wcBody],
+    foot: wcFoot,
+  });
+
+  // ── sign-in ───────────────────────────────────────────────────────────
+  const passkeyCol = h("div", { class: "si-col" });
+  const tokenList = h(
+    "div",
+    { class: "si-list" },
+    skeleton("60%"),
+    skeleton("40%"),
+  );
+  const issueBtn = drivable(
+    h(
       "button",
-      { type: "button", class: "kp-button kp-button--ghost" },
-      "Discard",
-    );
-    viaForm(review, "host-settings");
-    viaForm(drop, "host-settings");
-    review.addEventListener("click", () => openReview());
-    drop.addEventListener("click", () => {
-      changes.clear();
-      confirmed.clear();
-      paintStaged();
-      paintRows();
-    });
-    staged.replaceChildren(
+      {
+        type: "button",
+        class: "kp-button kp-button--sm",
+        id: "tokens-issue",
+        title: "Issue a bearer token for one machine; it is shown once",
+      },
+      "Issue token…",
+    ),
+    ISSUE_TOKEN,
+  );
+  const tokenCol = h(
+    "div",
+    { class: "si-col" },
+    h(
+      "div",
+      { class: "si-col__head" },
+      h("h3", null, "Machine tokens"),
+      issueBtn,
+    ),
+    tokenList,
+  );
+  const signin = card({
+    id: "signin",
+    title: "Sign-in",
+    desc: "Who can reach this dashboard and the host: your passkeys for the browser, one token per machine for the CLI and TUI.",
+    body: [h("div", { class: "si-grid" }, passkeyCol, tokenCol)],
+  });
+  stops.push(
+    mountPasskeys(passkeyCol, (e, retry) => failed("the passkeys", e, retry)),
+  );
+
+  // ── host settings ─────────────────────────────────────────────────────
+  const hsDesc = h(
+    "p",
+    { class: "section-head__desc" },
+    "Every key of host.toml. Checked with the host's own start-up validation before anything is written.",
+  );
+  const showSeg = segSwitch({
+    label: "Show",
+    items: [
+      { value: "all", label: "All", hint: "Show every host setting" },
+      {
+        value: "changed",
+        label: "Changed from default",
+        hint: "Show only the settings host.toml changes (or one you staged)",
+      },
+      {
+        value: "here",
+        label: "Editable here",
+        hint: "Show only the settings this page may change",
+      },
+    ],
+    value: S.show,
+    onChange: (v) => {
+      S.show = /** @type {Show} */ (v);
+      keepUrl();
+      paintGroups();
+    },
+    mark: (b, v) => void drivable(b, SHOW, v),
+  });
+  const foldAll = drivable(
+    h(
+      "button",
+      {
+        type: "button",
+        class: "cf-linkbtn",
+        title: "Open or close every group",
+        onclick: () => {
+          if (!page) return;
+          const gs = groupsOf(page.fields);
+          S.open = S.open.size === gs.length ? new Set() : new Set(gs);
+          paintGroups();
+        },
+      },
+      "Open all / close all",
+    ),
+    FOLD_ALL,
+  );
+  const hsHead = h(
+    "div",
+    { class: "st-hs-head", id: "host-settings" },
+    h("div", null, h("h2", null, "Host settings"), hsDesc),
+    h("div", { class: "cf-row" }, showSeg.el, foldAll),
+  );
+  const groupBox = h(
+    "div",
+    { class: "st-groups" },
+    ...Array.from({ length: 4 }, () =>
       h(
         "div",
-        { class: "kp-alert kp-alert--info" },
-        h(
-          "span",
-          null,
-          `${changes.size} change(s) not saved yet: ${[...changes.keys()].join(", ")}. `,
+        { class: "kp-card nx-card st-grp st-grp--sk" },
+        skeleton("30%"),
+        skeleton("60%"),
+      ),
+    ),
+  );
+
+  // ── side list with scroll-spy ─────────────────────────────────────────
+  const side = h("nav", {
+    class: "st-side",
+    "aria-label": "Settings sections",
+  });
+  /** @param {string} current */
+  const paintSide = (current) => {
+    const gs = page ? groupsOf(page.fields) : [];
+    /** @param {string} id @param {string} label @param {string} n */
+    const link = (id, label, n) =>
+      drive(
+        "a",
+        NAV,
+        id,
+        {
+          href: `#${id}`,
+          "aria-current": String(id === current),
+          onclick: (/** @type {Event} */ e) => {
+            e.preventDefault();
+            const g = gs.find((x) => slug(x) === id);
+            if (g && !S.open.has(g)) {
+              S.open.add(g);
+              paintGroups();
+            }
+            document
+              .getElementById(id)
+              ?.scrollIntoView({ behavior: "smooth", block: "start" });
+          },
+        },
+        h("span", null, label),
+        h("span", { class: "st-side__n" }, n),
+      );
+    side.replaceChildren(
+      h("h4", null, "This dashboard"),
+      link("wc", "Working copy", ""),
+      link("signin", "Sign-in", ""),
+      h("h4", null, "host.toml"),
+      ...gs.map((g) =>
+        link(
+          slug(g),
+          g,
+          String(page?.fields.filter((f) => f.group === g).length ?? ""),
         ),
-        review,
-        " ",
-        drop,
       ),
     );
   };
+  paintSide("wc");
 
-  const paintRows = () => {
-    if (!page) return;
-    t.tbody.replaceChildren(
-      ...page.fields.map((f) => {
-        const pending = changes.get(f.key);
-        const edit = h(
-          "button",
-          {
-            type: "button",
-            class: "kp-button kp-button--sm",
-            "data-key": f.key,
-          },
-          pending ? "Change again" : "Edit",
-        );
-        viaForm(edit, "host-settings");
-        if (!editable(f)) edit.disabled = true;
-        edit.addEventListener("click", () => openKey(f));
-        const value = pending
-          ? `→ ${pendingText(f, pending.value)}`
-          : valueText(f);
-        return h(
-          "tr",
-          {
-            "data-kp-row-key": f.key,
-            "data-key": f.key,
-            class: pending ? "unread" : "",
-          },
-          td(f.group),
-          h(
-            "td",
-            null,
-            h("strong", null, f.label),
-            h("br"),
-            h("span", { class: "mono measured" }, f.key),
-          ),
-          td(value, f.kind.type === "table" ? "" : "mono"),
-          td(f.apply === "live" ? "at once" : "at the host's next start"),
-          badgeCell({
-            label: ACCESS[f.access],
-            tone: editable(f) ? "ok" : "info",
-          }),
-          h("td", null, edit),
-        );
-      }),
-    );
-    table?.refresh();
-  };
+  const main = h("div", { class: "st-main" }, wc, signin, hsHead, groupBox);
+  root.replaceChildren(
+    head.el,
+    band.el,
+    tb.el,
+    h("div", { class: "st-split" }, side, main),
+  );
 
+  let spyCurrent = "wc";
+  const spy = new IntersectionObserver(
+    (es) => {
+      const v = es
+        .filter((e) => e.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+      if (v && v.target.id !== spyCurrent) {
+        spyCurrent = v.target.id;
+        paintSide(spyCurrent);
+      }
+    },
+    { rootMargin: "-80px 0px -60% 0px" },
+  );
+  spy.observe(wc);
+  spy.observe(signin);
+  stops.push(() => spy.disconnect());
+
+  // ── painting the host settings ───────────────────────────────────────
   /** @param {HostField} f @param {unknown} v */
   const pendingText = (f, v) =>
     v == null
-      ? `remove (default: ${f.default})`
+      ? `default (${f.default})`
       : f.kind.type === "table"
         ? "new table"
-        : Array.isArray(v)
-          ? v.join(", ")
-          : String(v);
+        : isSecret(f)
+          ? "a new value (hidden)"
+          : Array.isArray(v)
+            ? v.join(", ")
+            : String(v);
 
+  // redesign-config-5: the staged changes outlive a look at another page
+  // (kept for this tab, never a secret), and closing the tab with some
+  // staged asks first.
+  // Nothing is written back until the first read has restored what was
+  // kept, so the page's first (empty) paint does not wipe it.
+  let restored = false;
+  const keep = () => {
+    if (!restored) return;
+    try {
+      if (changes.size)
+        sessionStorage.setItem(STAGED_STORE, keepStaged(changes, isSecret));
+      else sessionStorage.removeItem(STAGED_STORE);
+    } catch {
+      /* storage off: the changes live while the page does */
+    }
+  };
+  const restore = () => {
+    if (!page) return;
+    restored = true;
+    if (changes.size) return;
+    let raw = null;
+    try {
+      raw = sessionStorage.getItem(STAGED_STORE);
+    } catch {
+      return;
+    }
+    const back = restoreStaged(raw, page.fields);
+    for (const [k, value] of Object.entries(back)) {
+      const field = page.fields.find((f) => f.key === k);
+      if (field) changes.set(k, { field, value });
+    }
+    if (changes.size)
+      notify(
+        `${stagedWords(changes.size).chip}: kept from before you left this page.`,
+        "info",
+      );
+  };
+  /** @param {BeforeUnloadEvent} e */
+  const onUnload = (e) => {
+    if (!changes.size) return;
+    e.preventDefault();
+    e.returnValue = "";
+  };
+  addEventListener("beforeunload", onUnload);
+
+  const paint = () => {
+    keep();
+    const w = stagedWords(changes.size);
+    stagedChip.textContent = w.chip;
+    stagedChip.className = `cf-chip${changes.size ? " cf-chip--info" : ""}`;
+    discard.disabled = !changes.size;
+    write.disabled = !changes.size;
+    write.textContent = w.write;
+    paintGroups();
+  };
+
+  /** @param {HostField} f */
+  const valueView = (f) => {
+    const pending = changes.get(f.key);
+    if (pending)
+      return h(
+        "span",
+        { class: "cf-row" },
+        h("span", { class: "cf-mono" }, pendingText(f, pending.value)),
+        chip("staged", { tone: "info" }),
+      );
+    if (isSecret(f))
+      return h("span", { class: f.set ? "" : "st-def" }, valueText(f));
+    if (!f.set)
+      return h(
+        "span",
+        { class: "st-def" },
+        "default ",
+        h("span", { class: "cf-mono" }, highlight(f.default, S.q)),
+      );
+    return h("span", { class: "cf-mono" }, valueText(f));
+  };
+
+  /** @type {(() => void) | null} */
+  let unregisterKey = null;
+  const closeEditor = () => {
+    S.editing = null;
+    S.err = null;
+    unregisterKey?.();
+    unregisterKey = null;
+    paintGroups();
+  };
+
+  /** @param {HostField} f */
+  const editor = (f) => {
+    const key = f.key.replace(/_/g, "-");
+    const id = fieldId(HOST_KEY, key);
+    const confirmId = fieldId(HOST_KEY, `${key}-confirm`);
+    const pending = changes.get(f.key);
+    const start = pending
+      ? f.kind.type === "bool"
+        ? String(pending.value === true)
+        : pending.value == null
+          ? ""
+          : String(pending.value)
+      : f.kind.type === "bool"
+        ? String(f.value === true)
+        : fieldText(f);
+    /** @type {HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement} */
+    let input;
+    if (f.kind.type === "bool") {
+      input = /** @type {HTMLSelectElement} */ (
+        h(
+          "select",
+          { class: "kp-field__input", id, "aria-label": f.label },
+          h("option", { value: "true" }, "on"),
+          h("option", { value: "false" }, "off"),
+        )
+      );
+    } else if (f.kind.type === "table") {
+      input = /** @type {HTMLTextAreaElement} */ (
+        h("textarea", {
+          class: "kp-field__input cf-mono",
+          id,
+          rows: "6",
+          spellcheck: "false",
+          "aria-label": `${f.key} as TOML`,
+        })
+      );
+    } else {
+      const k = f.kind;
+      input = /** @type {HTMLInputElement} */ (
+        h("input", {
+          class: "kp-field__input",
+          // fix-143: a write-only field is masked while it is typed.
+          type: isSecret(f) ? "password" : k.type === "int" ? "number" : "text",
+          id,
+          min: k.type === "int" ? String(k.min) : null,
+          max: k.type === "int" ? String(k.max) : null,
+          placeholder: f.default,
+          autocomplete: "off",
+          spellcheck: "false",
+          "aria-label": f.label,
+        })
+      );
+    }
+    input.value = start;
+    const typed = /** @type {HTMLInputElement} */ (
+      h("input", {
+        class: "kp-field__input",
+        type: "text",
+        id: confirmId,
+        autocomplete: "off",
+        placeholder: f.key,
+        "aria-label": `Type ${f.key} to confirm`,
+      })
+    );
+    const err = h("span", { class: "st-err", role: "alert" }, S.err ?? "");
+    const stage = (/** @type {unknown} */ value) => {
+      // Live view: the change is kept on the dashboard's server.
+      if (driven()) return;
+      if (f.access === "confirm") {
+        if (typed.value.trim() !== f.key) {
+          markErrors(new Map([["confirm", typed]]), {
+            confirm: `Type ${f.key} exactly.`,
+          });
+          return;
+        }
+        confirmed.add(f.key);
+      }
+      const same =
+        value == null
+          ? !f.set
+          : f.set && JSON.stringify(value) === JSON.stringify(f.value);
+      if (same && f.kind.type !== "table" && !isSecret(f)) {
+        changes.delete(f.key);
+        confirmed.delete(f.key);
+      } else changes.set(f.key, { field: f, value });
+      S.editing = null;
+      S.err = null;
+      unregisterKey?.();
+      unregisterKey = null;
+      paint();
+    };
+    const save = viaForm(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--sm kp-button--primary",
+          id: "key-stage",
+          title: "Stage this value (Enter); nothing is written yet",
+          onclick: () => {
+            const p = parseKey(f, input.value);
+            if (!p.ok) {
+              S.err = p.why;
+              err.textContent = p.why;
+              input.setAttribute("aria-invalid", "true");
+              return;
+            }
+            stage(p.value);
+          },
+        },
+        "Stage",
+      ),
+      "host-settings",
+    );
+    const reset = viaForm(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--sm kp-button--ghost",
+          title: `Remove the key: the host takes its default (${f.default})`,
+          onclick: () => stage(null),
+        },
+        "Use the default",
+      ),
+      "host-settings",
+    );
+    const cancel = viaForm(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--sm kp-button--ghost",
+          title: "Keep the old value (Esc)",
+          onclick: closeEditor,
+        },
+        "Cancel",
+      ),
+      "host-settings",
+    );
+    input.addEventListener("keydown", (e) => {
+      const k = /** @type {KeyboardEvent} */ (e);
+      if (k.key === "Enter" && f.kind.type !== "table") {
+        k.preventDefault();
+        save.click();
+      }
+      if (k.key === "Escape") {
+        k.stopPropagation();
+        closeEditor();
+      }
+    });
+    drivable(save, STAGE);
+    drivable(reset, USE_DEFAULT);
+    drivable(cancel, CANCEL_EDIT);
+    unregisterKey?.();
+    unregisterKey = register("key", {
+      dialog: null,
+      key: f.key,
+      save: () => save,
+      default: () => reset,
+      cancel: () => cancel,
+      close: () => closeEditor(),
+    });
+    setTimeout(() => input.focus(), 0);
+    const hint =
+      f.kind.type === "table"
+        ? "Only this key: [[key]] or [key] sections. Empty removes it."
+        : isSecret(f)
+          ? `Currently ${f.set ? "set" : "not set"}; the value itself is never shown. Empty clears it.`
+          : f.kind.type === "int"
+            ? `A whole number, ${f.kind.min}–${f.kind.max}. Empty = default (${f.default}).`
+            : `Empty = default (${f.default}).`;
+    return [
+      h(
+        "span",
+        { class: "st-edit-row" },
+        input,
+        save,
+        f.set || changes.has(f.key) ? reset : null,
+        cancel,
+      ),
+      f.access === "confirm"
+        ? h(
+            "label",
+            { class: "st-confirm" },
+            h(
+              "span",
+              { class: "cf-hint" },
+              `Type ${f.key} to confirm: it can cut the dashboard's route or stop every backup.`,
+            ),
+            typed,
+          )
+        : null,
+      err,
+      h("span", { class: "cf-hint st-hint" }, hint),
+    ];
+  };
+
+  /** @param {HostField} f */
+  const row = (f) => {
+    const acc = accessWords(f);
+    const staged = changes.has(f.key);
+    const editing = S.editing === f.key;
+    /** @type {HTMLElement[]} */
+    let edit;
+    if (editable(f)) {
+      const editBtn = viaForm(
+        h(
+          "button",
+          {
+            type: "button",
+            class: `kp-button kp-button--sm${staged ? " kp-button--ghost" : ""}`,
+            "data-key": f.key,
+            title: staged ? "Change the staged value" : `Change ${f.key}`,
+            onclick: () => openKey(f),
+          },
+          "Edit",
+        ),
+        "host-settings",
+      );
+      drivable(editBtn, EDIT_KEY, f.key);
+      edit = editing
+        ? []
+        : staged
+          ? [
+              editBtn,
+              drive(
+                "button",
+                UNDO_KEY,
+                f.key,
+                {
+                  type: "button",
+                  class: "kp-button kp-button--sm kp-button--ghost",
+                  title: "Drop this staged change",
+                  onclick: () => {
+                    changes.delete(f.key);
+                    confirmed.delete(f.key);
+                    paint();
+                  },
+                },
+                "Undo",
+              ),
+            ]
+          : [editBtn];
+    } else {
+      edit = [
+        drivable(
+          h(
+            "button",
+            {
+              type: "button",
+              class: "kp-button kp-button--sm kp-button--ghost",
+              "aria-expanded": String(S.howto === f.key),
+              title: "Show the ssh command that changes this key",
+              onclick: () => {
+                S.howto = S.howto === f.key ? null : f.key;
+                paintGroups();
+              },
+            },
+            "How to…",
+          ),
+          HOW_TO,
+          f.key,
+        ),
+      ];
+    }
+    const when = h(
+      "span",
+      {
+        class: `cf-dot cf-dot--${f.apply === "live" ? "ok" : "info"}`,
+        title:
+          f.apply === "live"
+            ? "The host picks it up without a restart"
+            : "Written now, used after the host daemon restarts",
+      },
+      f.apply === "live" ? "applies at once" : "at the host's next start",
+    );
+    return h(
+      "div",
+      {
+        class: `st-set${staged ? " st-set--staged" : ""}${editing ? " st-set--editing" : ""}`,
+        id: `k-${f.key}`,
+        "data-key": f.key,
+        "data-set": f.set ? "1" : "0",
+      },
+      h(
+        "div",
+        { class: "st-set__name" },
+        h("strong", null, highlight(f.label, S.q)),
+        h("small", { class: "cf-mono" }, highlight(f.key, S.q)),
+        h(
+          "span",
+          { class: "st-set__help", title: f.help },
+          highlight(f.help, S.q),
+        ),
+      ),
+      h("div", { class: "st-set__val" }, editing ? editor(f) : valueView(f)),
+      h(
+        "div",
+        { class: "st-set__when" },
+        when,
+        acc ? h("span", { class: "st-lock", title: acc[1] }, acc[0]) : null,
+      ),
+      h("div", { class: "st-set__edit" }, edit),
+      S.howto === f.key
+        ? h(
+            "div",
+            { class: "st-howto" },
+            h("span", null, acc ? acc[1] : ""),
+            h(
+              "code",
+              null,
+              `ssh pve, then set ${f.key} = … in ${page?.path ?? "/etc/homelab/host.toml"}`,
+            ),
+            h(
+              "span",
+              { class: "cf-hint" },
+              "Edited on the host itself; the dashboard's token is never allowed to change it. Takes effect at the host's next start.",
+            ),
+          )
+        : null,
+    );
+  };
+
+  /** @type {Map<string, HTMLDetailsElement>} */
+  const groupEls = new Map();
+  const paintGroups = () => {
+    if (!page) return;
+    const pg = page;
+    const gs = groupsOf(pg.fields);
+    const narrowed = !!S.q || S.show !== "all";
+    let total = 0;
+    for (const g of groupEls.values()) spy.unobserve(g);
+    groupEls.clear();
+    const cards = gs.map((g) => {
+      const all = pg.fields.filter((f) => f.group === g);
+      const fs = all.filter((f) =>
+        fieldShown(f, S.q, S.show, editable, (k) => changes.has(k)),
+      );
+      total += fs.length;
+      if (!fs.length) return null;
+      const changed = all.filter((f) => f.set || changes.has(f.key)).length;
+      const open =
+        narrowed ||
+        S.open.has(g) ||
+        fs.some((f) => f.key === S.editing || f.key === S.howto);
+      const d = /** @type {HTMLDetailsElement} */ (
+        h(
+          "details",
+          {
+            class: "kp-card nx-card st-grp",
+            id: slug(g),
+            open: open ? true : null,
+            "data-group": g,
+          },
+          drive(
+            "summary",
+            GROUP,
+            slug(g),
+            { title: "Click to open or close this group" },
+            h("h2", null, g),
+            chip(groupChip(fs.length, all.length, changed)),
+            h(
+              "span",
+              { class: "st-grp__meta" },
+              fs
+                .slice(0, 4)
+                .map((f) => f.label)
+                .join(" · ") + (fs.length > 4 ? " …" : ""),
+            ),
+          ),
+          h("div", { class: "st-grp__body" }, fs.map(row)),
+        )
+      );
+      d.addEventListener("toggle", () => {
+        if (narrowed) return;
+        if (d.open) S.open.add(g);
+        else S.open.delete(g);
+      });
+      groupEls.set(g, d);
+      spy.observe(d);
+      return d;
+    });
+    groupBox.replaceChildren(
+      ...cards.filter((c) => c !== null),
+      ...(total
+        ? []
+        : [
+            h(
+              "div",
+              { class: "cf-empty" },
+              h("strong", null, "No setting matches"),
+              drive(
+                "button",
+                CLEAR,
+                null,
+                {
+                  type: "button",
+                  class: "cf-linkbtn",
+                  onclick: () => {
+                    S.q = "";
+                    if (tb.search) tb.search.value = "";
+                    S.show = "all";
+                    showSeg.set("all");
+                    keepUrl();
+                    paintGroups();
+                  },
+                },
+                "Clear the search",
+              ),
+            ),
+          ]),
+    );
+    found.textContent = foundText(total, pg.fields.length, narrowed);
+    const unknown = pg.unknown ?? [];
+    hsDesc.textContent = `Every key of ${pg.path}. Checked with the host's own start-up validation before anything is written.${unknown.length ? ` Keys the host does not read: ${unknown.join(", ")}.` : ""}`;
+  };
+
+  /** @param {HostField} f */
+  const openKey = (f) => {
+    S.editing = f.key;
+    S.err = null;
+    S.open.add(f.group);
+    paintGroups();
+    document.getElementById(`k-${f.key}`)?.scrollIntoView({ block: "nearest" });
+  };
+
+  // ── loading ───────────────────────────────────────────────────────────
   const loadHost = async () => {
-    t.loading({ words: "Reading host.toml from the host…" });
     const r = await fetchJson(
       "/data/host-settings",
       "the host settings",
       abort.signal,
     );
     if (!r.ok) {
-      t.failed(r.error);
+      groupBox.replaceChildren(
+        failNote("Not read: see the message at the top."),
+      );
+      found.textContent = "";
+      failed("the host settings", r.error, () => void loadHost());
       return;
     }
+    failed("the host settings", null, () => void loadHost());
+    const first = page === null;
     page = r.body.page;
-    const unknown = /** @type {string[]} */ (r.body.page.unknown ?? []);
-    hostHead.textContent = `${r.body.page.path} · version ${String(r.body.page.sha256).slice(0, 12)}${unknown.length ? ` · keys the host does not read: ${unknown.join(", ")}` : ""}`;
-    paintRows();
-    t.ready();
+    if (first && page)
+      for (const g of groupsOf(page.fields).slice(0, 2)) S.open.add(g);
+    // A staged change whose key the new read no longer has is dropped.
+    for (const k of [...changes.keys()])
+      if (!page?.fields.some((f) => f.key === k)) changes.delete(k);
+    if (first) restore();
+    paintSide(spyCurrent);
+    paint();
     setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
+    if (first) goToSection();
   };
 
-  // ── fix-120: per-machine tokens ──
-  const paintTokens = (
-    /** @type {{name: string, scope: string}[]} */ tokens,
-  ) => {
-    tk.tbody.replaceChildren(
-      ...tokens.map((v) => {
-        const revoke = h(
-          "button",
-          {
-            type: "button",
-            class: "kp-button kp-button--sm kp-button--destructive",
-            "data-token": v.name,
-          },
-          "Revoke",
-        );
-        drivable(revoke, REVOKE_TOKEN, v.name);
-        if (v.name === "legacy") {
-          revoke.disabled = true;
-          revoke.title =
-            "the single `token` key is cleared over ssh (see the migration note)";
-        } else {
-          revoke.addEventListener("click", () => revokeTokenDialog(v.name));
-        }
-        return h(
-          "tr",
-          { "data-kp-row-key": v.name },
-          td(v.name),
-          td(v.scope),
-          h("td", null, revoke),
-        );
-      }),
+  let wentTo = false;
+  const goToSection = () => {
+    if (wentTo || !section) return;
+    const id = sectionTarget(section, page ? groupsOf(page.fields) : []);
+    if (!id) return;
+    if (id !== "wc" && id !== "signin" && !page) return;
+    wentTo = true;
+    const g = page ? groupsOf(page.fields).find((x) => slug(x) === id) : null;
+    if (g && !S.open.has(g)) {
+      S.open.add(g);
+      paintGroups();
+    }
+    requestAnimationFrame(() =>
+      document.getElementById(id)?.scrollIntoView({ block: "start" }),
     );
-    tokensTable?.refresh();
   };
-  const loadTokens = async () => {
-    tk.loading({ words: "Reading the tokens from the host…" });
-    const r = await fetchJson("/data/tokens", "the tokens", abort.signal);
+
+  const loadRepo = async () => {
+    const r = await fetchJson("/data/repo", "the working copy", abort.signal);
     if (!r.ok) {
-      tk.failed(r.error);
+      wcBody.replaceChildren(failNote("Not read: see the message at the top."));
+      failed("the working copy", r.error, () => void loadRepo());
       return;
     }
+    failed("the working copy", null, () => void loadRepo());
+    drawRepo(r.body);
+  };
+
+  /**
+   * @param {{repo: {present: boolean, remote: string, branch: string,
+   *   head: CommitRef | null, unpushed: CommitRef[], behind: number,
+   *   dirty: string[], key_present: boolean | null, fetched_at: number | null,
+   *   error: string | null}, deployed_unpushed: {stack: string, commit: string}[]}} v
+   */
+  const drawRepo = (v) => {
+    const r = v.repo;
+    const st = repoState(r);
+    const fetched = agoEl("Last fetched", r.fetched_at ?? null);
+    wcFoot.replaceChildren(
+      h("span", null, r.fetched_at ? fetched : "Not fetched yet"),
+      h(
+        "span",
+        null,
+        "Push, rebase or drop appear here when the remote lacks commits",
+      ),
+    );
+    /** @type {Node[]} */
+    const alerts = [];
+    if (r.error)
+      alerts.push(
+        h(
+          "div",
+          { class: "kp-alert kp-alert--warning", role: "status" },
+          `The last fetch or clone failed: ${r.error}`,
+        ),
+      );
+    if (r.dirty.length)
+      alerts.push(
+        h(
+          "div",
+          { class: "kp-alert kp-alert--destructive", role: "alert" },
+          `Files differ from the last commit: ${r.dirty.join(", ")}. Edits are refused until that is looked at by hand.`,
+        ),
+      );
+    if (r.unpushed.length) {
+      const deployed = v.deployed_unpushed.map((d) => d.stack);
+      alerts.push(
+        h(
+          "div",
+          { class: "kp-alert kp-alert--warning", role: "status" },
+          h(
+            "div",
+            { class: "kp-alert__body" },
+            h(
+              "strong",
+              null,
+              `${r.unpushed.length} commit(s) here are not on the remote. `,
+            ),
+            deployed.length
+              ? `The host runs ${deployed.join(", ")} from one of them: push keeps the repository and the fleet in step.`
+              : "Push them, rebase them onto the remote, or drop them.",
+            h(
+              "ul",
+              null,
+              r.unpushed.map((c) =>
+                h(
+                  "li",
+                  { class: "cf-mono" },
+                  `${c.commit.slice(0, 10)} · ${c.subject}`,
+                ),
+              ),
+            ),
+            h(
+              "div",
+              { class: "cf-row" },
+              /** @type {const} */ (["push", "rebase", "drop"]).map((choice) =>
+                resolveButton(choice, loadRepo),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    wcBody.replaceChildren(
+      h(
+        "div",
+        { class: "st-wc__grid" },
+        h(
+          "div",
+          { class: "st-wc__commit" },
+          h("span", { class: "cf-hint" }, "At"),
+          h(
+            "strong",
+            null,
+            r.head ? r.head.subject : r.present ? "—" : "not cloned yet",
+          ),
+          h(
+            "span",
+            { class: "cf-row" },
+            r.head
+              ? h(
+                  "span",
+                  { class: "cf-chip cf-chip--mono", title: r.head.commit },
+                  r.head.commit.slice(0, 10),
+                )
+              : null,
+            chip(r.branch),
+            h(
+              "span",
+              { class: "cf-mono cf-muted st-remote", title: r.remote },
+              shortRemote(r.remote),
+            ),
+          ),
+        ),
+        h(
+          "div",
+          { class: "st-wc__chips" },
+          dot(st.tone, st.word),
+          h(
+            "span",
+            {
+              class: "cf-chip",
+              title: "Commits on the remote the host has not fetched",
+            },
+            `${r.behind} behind`,
+          ),
+          h(
+            "span",
+            {
+              class: "cf-chip",
+              title: "Commits here the remote lacks: push, rebase or drop them",
+            },
+            `${r.unpushed.length} unpushed`,
+          ),
+          h(
+            "span",
+            { class: "cf-chip", title: "Files changed but not committed" },
+            `${r.dirty.length} uncommitted`,
+          ),
+          r.key_present === null
+            ? null
+            : h(
+                "span",
+                {
+                  class: `cf-chip${r.key_present ? "" : " cf-chip--warn"}`,
+                  title: "The deploy key the dashboard pushes with",
+                },
+                r.key_present ? "deploy key present" : "deploy key missing",
+              ),
+        ),
+      ),
+      ...alerts,
+    );
+  };
+
+  // redesign-config-10: the fetch says it runs (it can take seconds on a
+  // slow remote), and a page left meanwhile neither toasts nor reads.
+  fetchNow.addEventListener("click", async () => {
+    const b = /** @type {HTMLButtonElement} */ (fetchNow);
+    b.disabled = true;
+    b.setAttribute("aria-busy", "true");
+    b.textContent = "Fetching the remote…";
+    const x = await send(
+      "POST",
+      "/data/repo/sync",
+      undefined,
+      "the working copy",
+    );
+    b.disabled = false;
+    b.removeAttribute("aria-busy");
+    b.textContent = "Fetch now";
+    if (abort.signal.aborted) return;
+    if (!x.ok) await refusalAlarm(x.error, x.status);
+    else notify("The working copy is up to date.", "success");
+    if (!abort.signal.aborted) void loadRepo();
+  });
+
+  // ── fix-120: per-machine tokens ──
+  /** @param {{name: string, scope: string}[]} tokens */
+  const paintTokens = (tokens) => {
+    if (!tokens.length) {
+      tokenList.replaceChildren(
+        h(
+          "div",
+          { class: "cf-empty" },
+          h("strong", null, "No token yet"),
+          h("span", null, "Issue token… adds one for a machine."),
+        ),
+      );
+      return;
+    }
+    tokenList.replaceChildren(
+      h(
+        "ul",
+        { class: "si-items" },
+        tokens.map((v) => {
+          const revoke = /** @type {HTMLButtonElement} */ (
+            drivable(
+              h(
+                "button",
+                {
+                  type: "button",
+                  class: "kp-button kp-button--sm kp-button--ghost si-danger",
+                  "data-token": v.name,
+                  title: `Revoke ${v.name}'s token: that machine can no longer reach the host`,
+                },
+                "Revoke",
+              ),
+              REVOKE_TOKEN,
+              v.name,
+            )
+          );
+          if (v.name === "legacy") {
+            revoke.disabled = true;
+            revoke.title =
+              "The single `token` key is cleared over ssh (see the migration note in the runbook)";
+          } else
+            revoke.addEventListener("click", () => revokeTokenDialog(v.name));
+          return h(
+            "li",
+            { class: "si-item" },
+            h(
+              "div",
+              { class: "si-item__id" },
+              h("strong", null, v.name),
+              h(
+                "span",
+                { class: "cf-hint" },
+                v.name === "legacy"
+                  ? "the single host.toml token every machine shared"
+                  : "its own bearer, hashed at rest",
+              ),
+            ),
+            chip(v.scope),
+            revoke,
+          );
+        }),
+      ),
+    );
+  };
+  const loadTokens = async () => {
+    const r = await fetchJson("/data/tokens", "the tokens", abort.signal);
+    if (!r.ok) {
+      tokenList.replaceChildren(
+        failNote("Not read: see the message at the top."),
+      );
+      failed("the tokens", r.error, () => void loadTokens());
+      return;
+    }
+    failed("the tokens", null, () => void loadTokens());
     paintTokens(r.body.tokens ?? []);
-    tk.ready();
-    setAgo(tokensAgo, Date.now() / 1000);
   };
   const issueTokenDialog = () => {
     const name = h("input", {
@@ -414,22 +1481,26 @@ export function mount(root) {
       autocomplete: "off",
       placeholder: "e.g. wsl, ct120-dev",
     });
-    const scope = h(
-      "select",
-      { class: "kp-field__input", id: TOKEN_SCOPE },
-      h("option", { value: "read" }, "read — look only"),
-      h("option", { value: "operate" }, "operate — act without destroying"),
+    const scope = /** @type {HTMLSelectElement} */ (
       h(
-        "option",
-        { value: "all" },
-        "all — everything, including the dashboard's own",
-      ),
+        "select",
+        { class: "kp-field__input", id: TOKEN_SCOPE },
+        h("option", { value: "read" }, "read — look only"),
+        h("option", { value: "operate" }, "operate — act without destroying"),
+        h(
+          "option",
+          { value: "all" },
+          "all — everything, including the dashboard's own",
+        ),
+      )
     );
     scope.value = "operate";
-    const go = h(
-      "button",
-      { type: "button", class: "kp-button kp-button--primary" },
-      "Issue",
+    const go = /** @type {HTMLButtonElement} */ (
+      h(
+        "button",
+        { type: "button", class: "kp-button kp-button--primary" },
+        "Issue",
+      )
     );
     const cancel = h(
       "button",
@@ -474,7 +1545,7 @@ export function mount(root) {
     cancel.addEventListener("click", () => d.close());
     go.addEventListener("click", async () => {
       if (driven()) return;
-      const n = name.value.trim();
+      const n = /** @type {HTMLInputElement} */ (name).value.trim();
       if (!n) {
         markErrors(new Map([["name", name]]), { name: "A name is needed." });
         return;
@@ -498,12 +1569,14 @@ export function mount(root) {
   };
   /** @param {{name: string, scope: string, token: string}} issued */
   const showIssuedToken = (issued) => {
-    const box = h("input", {
-      class: "kp-field__input mono",
-      type: "text",
-      readonly: "",
-      id: ISSUED_TOKEN,
-    });
+    const box = /** @type {HTMLInputElement} */ (
+      h("input", {
+        class: "kp-field__input cf-mono",
+        type: "text",
+        readonly: true,
+        id: ISSUED_TOKEN,
+      })
+    );
     box.value = issued.token;
     const copy = h("button", { type: "button", class: "kp-button" }, "Copy");
     copy.addEventListener("click", async () => {
@@ -531,17 +1604,21 @@ export function mount(root) {
     done.addEventListener("click", () => d.close());
   };
   const revokeTokenDialog = (/** @type {string} */ name) => {
-    const typed = h("input", {
-      class: "kp-field__input",
-      type: "text",
-      id: TOKEN_REVOKE_CONFIRM,
-      autocomplete: "off",
-      placeholder: name,
-    });
-    const go = h(
-      "button",
-      { type: "button", class: "kp-button kp-button--destructive" },
-      "Revoke",
+    const typed = /** @type {HTMLInputElement} */ (
+      h("input", {
+        class: "kp-field__input",
+        type: "text",
+        id: TOKEN_REVOKE_CONFIRM,
+        autocomplete: "off",
+        placeholder: name,
+      })
+    );
+    const go = /** @type {HTMLButtonElement} */ (
+      h(
+        "button",
+        { type: "button", class: "kp-button kp-button--destructive" },
+        "Revoke",
+      )
     );
     const cancel = h(
       "button",
@@ -593,167 +1670,11 @@ export function mount(root) {
       void loadTokens();
     });
   };
+  issueBtn.addEventListener("click", () => issueTokenDialog());
 
-  /** @param {HostField} f */
-  const openKey = (f) => {
-    const pending = changes.get(f.key);
-    const start = pending
-      ? f.kind.type === "bool"
-        ? pending.value === true
-        : String(pending.value ?? "")
-      : f.kind.type === "bool"
-        ? f.value === true
-        : fieldText(f);
-    const key = f.key.replace(/_/g, "-");
-    const id = fieldId(HOST_KEY, key);
-    const confirmId = fieldId(HOST_KEY, `${key}-confirm`);
-    /** @type {HTMLInputElement | HTMLTextAreaElement} */
-    let input;
-    if (f.kind.type === "bool") {
-      const c = h("input", { type: "checkbox", class: "kp-field__check", id });
-      c.checked = start === true;
-      input = c;
-    } else if (f.kind.type === "table") {
-      const ta = h("textarea", {
-        class: "kp-field__input mono",
-        id,
-        rows: "10",
-        spellcheck: "false",
-      });
-      ta.value = String(start);
-      input = ta;
-    } else {
-      const i = h("input", {
-        class: "kp-field__input",
-        // fix-143: a dashboard_secret field is write-only (the host never
-        // sends its value back, same as an ssh-only secret) — masked so it
-        // is not read over someone's shoulder while it is typed.
-        type: isSecret(f) ? "password" : "text",
-        id,
-        autocomplete: "off",
-        spellcheck: "false",
-      });
-      i.value = String(start);
-      input = i;
-    }
-    const typed = h("input", {
-      class: "kp-field__input",
-      type: "text",
-      id: confirmId,
-      autocomplete: "off",
-      placeholder: f.key,
-    });
-    const save = h(
-      "button",
-      {
-        type: "button",
-        class: "kp-button kp-button--primary",
-        id: "key-stage",
-      },
-      "Keep this change",
-    );
-    const reset = h(
-      "button",
-      { type: "button", class: "kp-button" },
-      "Use the default",
-    );
-    const cancel = h(
-      "button",
-      { type: "button", class: "kp-button kp-button--ghost" },
-      "Cancel",
-    );
-    const d = openDialog({
-      title: `${f.label} · ${f.key}`,
-      description: `${f.help} Default: ${f.default}. Takes effect ${f.apply === "live" ? "at once" : "at the host's next start"}.${isSecret(f) ? ` Currently ${f.set ? "set" : "not set"} — the value itself is never shown.` : ""}`,
-      id: "key-dialog",
-      body: [
-        h(
-          "div",
-          { class: "kp-field" },
-          f.kind.type === "bool"
-            ? h("label", { class: "kp-field__label", for: id }, input, " on")
-            : h(
-                "label",
-                { class: "kp-field__label", for: id },
-                f.kind.type === "table" ? `${f.key} as TOML` : "Value",
-              ),
-          ...(f.kind.type === "bool" ? [] : [input]),
-          h(
-            "span",
-            { class: "kp-field__help" },
-            f.kind.type === "table"
-              ? "Only this key: [[key]] or [key] sections. Empty removes it."
-              : isSecret(f)
-                ? "Leave empty and save to clear it; Cancel leaves it as it is."
-                : "Empty removes the key: the host takes the default.",
-          ),
-        ),
-        ...(f.access === "confirm"
-          ? [
-              h(
-                "div",
-                { class: "kp-field field-danger" },
-                h(
-                  "label",
-                  { class: "kp-field__label", for: confirmId },
-                  `Type ${f.key} to confirm`,
-                ),
-                typed,
-                h(
-                  "span",
-                  { class: "kp-field__help" },
-                  "This key can cut the dashboard's route or stop every backup (arch-self).",
-                ),
-              ),
-            ]
-          : []),
-        h("div", { class: "kp-dialog__actions" }, cancel, reset, save),
-      ],
-    });
-    const unregisterKey = register("key", {
-      dialog: d.dialog,
-      key: f.key,
-      save: () => save,
-      default: () => reset,
-      cancel: () => cancel,
-      close: () => d.close(),
-    });
-    d.closed.then(unregisterKey);
-    cancel.addEventListener("click", () => d.close());
-    const stage = (/** @type {unknown} */ value) => {
-      // Live view: the change is kept on the dashboard's server.
-      if (driven()) return;
-      if (f.access === "confirm") {
-        if (typed.value.trim() !== f.key) {
-          markErrors(new Map([["confirm", typed]]), {
-            confirm: `Type ${f.key} exactly.`,
-          });
-          return;
-        }
-        confirmed.add(f.key);
-      }
-      changes.set(f.key, { field: f, value });
-      paintStaged();
-      paintRows();
-      d.close();
-    };
-    reset.addEventListener("click", () => stage(null));
-    save.addEventListener("click", () => {
-      const raw =
-        input instanceof HTMLInputElement && input.type === "checkbox"
-          ? input.checked
-          : input.value;
-      const p = parseKey(f, raw);
-      if (!p.ok) {
-        markErrors(new Map([["value", input]]), { value: p.why });
-        return;
-      }
-      stage(p.value);
-    });
-  };
-
+  // ── review and write ───────────────────────────────────────────────────
   const openReview = () => {
-    if (!page) return;
+    if (!page || !changes.size) return;
     const body = hostSettingsBody(page.sha256, changes, confirmed);
     // Owner decision 2026-09-30 (item 2): a staged change whose key only
     // takes effect at the host's next start means one press both saves
@@ -765,7 +1686,7 @@ export function mount(root) {
     const list = h(
       "ul",
       { class: "batch-preview" },
-      ...[...changes.values()].map(({ field, value }) =>
+      [...changes.values()].map(({ field, value }) =>
         h(
           "li",
           null,
@@ -776,14 +1697,16 @@ export function mount(root) {
     );
     const runError = h("div");
     const jobBox = h("div");
-    const save = h(
-      "button",
-      {
-        type: "button",
-        class: "kp-button kp-button--primary",
-        id: "settings-write",
-      },
-      restartNeeded ? "Save and restart the host" : "Save",
+    const save = /** @type {HTMLButtonElement} */ (
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--primary",
+          id: "settings-write",
+        },
+        restartNeeded ? "Save and restart the host" : "Save",
+      )
     );
     const cancel = h("button", { type: "button", class: "kp-button" }, "Back");
     const d = openDialog({
@@ -869,13 +1792,13 @@ export function mount(root) {
     );
     changes.clear();
     confirmed.clear();
-    paintStaged();
+    paint();
     void loadHost();
   };
 
   // feat-platform-10: the Live view replay works this very page: the
-  // changes Claude kept on the dashboard's server, the key dialog and the
-  // review dialog are the ones Edit and Review open.
+  // changes Claude kept on the dashboard's server, the inline key editor
+  // and the review dialog are the ones Edit and Check and write open.
   let lastSaved = "";
   const unregister = register("host-settings", {
     ready: () => page !== null,
@@ -883,14 +1806,17 @@ export function mount(root) {
       const f = page?.fields.find((x) => x.key === key);
       if (f) openKey(f);
     },
-    rowButton: (/** @type {string} */ key) =>
-      /** @type {HTMLElement | null} */ (
-        t.tbody.querySelector(`button[data-key="${CSS.escape(key)}"]`)
-      ),
-    reviewButton: () =>
-      /** @type {HTMLElement | null} */ (
-        staged.querySelector("#settings-save")
-      ),
+    rowButton: (/** @type {string} */ key) => {
+      const f = page?.fields.find((x) => x.key === key);
+      if (f && !S.open.has(f.group)) {
+        S.open.add(f.group);
+        paintGroups();
+      }
+      return /** @type {HTMLElement | null} */ (
+        groupBox.querySelector(`button[data-key="${CSS.escape(key)}"]`)
+      );
+    },
+    reviewButton: () => (write.disabled ? null : write),
     setStaged: (
       /** @type {Record<string, unknown>} */ want,
       /** @type {string[]} */ typed,
@@ -909,8 +1835,7 @@ export function mount(root) {
         if (field) changes.set(k, { field, value: v });
       }
       for (const k of typed) confirmed.add(k);
-      paintStaged();
-      paintRows();
+      paint();
     },
     openReview: () => openReview(),
     showSaved: (/** @type {any} */ answer) => {
@@ -921,148 +1846,84 @@ export function mount(root) {
     },
   });
 
-  issueBtn.addEventListener("click", () => issueTokenDialog());
+  /** @param {KeyboardEvent} e */
+  const onKey = (e) => {
+    if (
+      e.key === "Escape" &&
+      S.editing &&
+      !document.querySelector("dialog[open]")
+    )
+      closeEditor();
+  };
+  document.addEventListener("keydown", onKey);
 
-  const offRepo = listen("repo", (v) => drawRepo(repoBox, v, loadRepo));
+  paint();
+  goToSection();
+  const offRepo = listen("repo", (v) => drawRepo(v));
   const offHost = listen("host_settings", () => void loadHost());
   const offTokens = listen("tokens", () => void loadTokens());
-  const retry = () => void loadHost().catch(() => {});
-  const retryTokens = () => void loadTokens().catch(() => {});
-  root.addEventListener("kp-datatable-retry", retry);
-  root.addEventListener("kp-datatable-retry", retryTokens);
   void loadRepo().catch(() => {});
-  retry();
-  retryTokens();
+  void loadHost().catch(() => {});
+  void loadTokens().catch(() => {});
   return () => {
     unregister();
+    unregisterKey?.();
     abort.abort();
     offRepo();
     offHost();
     offTokens();
-    root.removeEventListener("kp-datatable-retry", retry);
-    root.removeEventListener("kp-datatable-retry", retryTokens);
-    unbind();
-    unbindTokens();
-    detach();
+    pageTip().hide();
+    document.removeEventListener("keydown", onKey);
+    for (const s of stops) s();
+    removeEventListener("beforeunload", onUnload);
+    const secrets = [...changes.values()].filter((c) => isSecret(c.field));
+    if (secrets.length)
+      notify(
+        `A staged secret (${secrets.map((c) => c.field.key).join(", ")}) was dropped: secrets are never kept in the browser. The other staged changes wait on Settings.`,
+        "warning",
+      );
+    root.classList.remove("cf-page", "st-page");
   };
 }
 
 /**
- * The working copy panel.
- * @param {HTMLElement} box
- * @param {{repo: {present: boolean, remote: string, branch: string,
- *   head: CommitRef | null, unpushed: CommitRef[], behind: number,
- *   dirty: string[], key_present: boolean | null, fetched_at: number | null,
- *   error: string | null}, deployed_unpushed: {stack: string, commit: string}[]}} v
- * @param {() => Promise<void>} reload
+ * `el` that is also a declared Live view control (on `row` when it repeats).
+ * @param {keyof HTMLElementTagNameMap} tag
+ * @param {string} id
+ * @param {string | null} row
+ * @param {Record<string, any> | null} attrs
+ * @param {...import("../dom.js").Child} kids
  */
-function drawRepo(box, v, reload) {
-  const r = v.repo;
-  const facts = h(
-    "dl",
-    { class: "facts" },
-    h("dt", null, "Remote"),
-    h("dd", { class: "mono" }, `${r.remote} · ${r.branch}`),
-    h("dt", null, "At"),
+function drive(tag, id, row, attrs, ...kids) {
+  return drivable(h(tag, attrs, ...kids), id, row ?? undefined);
+}
+
+/**
+ * A card as the demo draws it: heading + one sentence left, tools right,
+ * the body, an optional footer line.
+ * @param {{id: string, title: string, desc: string, tools?: Node[],
+ *   body: Node[], foot?: Node}} spec
+ */
+function card(spec) {
+  return h(
+    "section",
+    {
+      class: "kp-card nx-card cf-card",
+      id: spec.id,
+      "aria-labelledby": `${spec.id}-h`,
+    },
     h(
-      "dd",
-      null,
-      r.head
-        ? `${r.head.commit.slice(0, 10)} · ${r.head.subject}`
-        : r.present
-          ? "—"
-          : "not cloned yet",
+      "div",
+      { class: "nx-card__head" },
+      h("h2", { id: `${spec.id}-h` }, spec.title),
+      h("p", { class: "section-head__desc" }, spec.desc),
+      spec.tools?.length
+        ? h("div", { class: "nx-card__tools" }, spec.tools)
+        : null,
     ),
-    h("dt", null, "Last fetched"),
-    h("dd", null, r.fetched_at ? formatDateTime(r.fetched_at) : "not yet"),
-    ...(r.key_present === null
-      ? []
-      : [
-          h("dt", null, "Deploy key"),
-          h("dd", null, r.key_present ? "present" : "missing"),
-        ]),
+    h("div", { class: "nx-card__body" }, spec.body),
+    spec.foot ?? null,
   );
-  const sync = h(
-    "button",
-    { type: "button", class: "kp-button", id: "repo-sync" },
-    "Fetch now",
-  );
-  drivable(sync, FETCH_NOW);
-  sync.addEventListener("click", async () => {
-    sync.disabled = true;
-    const x = await send(
-      "POST",
-      "/data/repo/sync",
-      undefined,
-      "the working copy",
-    );
-    sync.disabled = false;
-    if (!x.ok) await refusalAlarm(x.error, x.status);
-    else notify("The working copy is up to date.", "success");
-    void reload();
-  });
-  const parts = /** @type {Node[]} */ ([facts]);
-  if (r.error)
-    parts.push(
-      h(
-        "div",
-        { class: "kp-alert kp-alert--warning", role: "status" },
-        `The last fetch or clone failed: ${r.error}`,
-      ),
-    );
-  if (r.dirty.length)
-    parts.push(
-      h(
-        "div",
-        { class: "kp-alert kp-alert--destructive", role: "alert" },
-        `Files differ from the last commit: ${r.dirty.join(", ")}. Edits are refused until that is looked at by hand.`,
-      ),
-    );
-  if (r.unpushed.length) {
-    const deployed = v.deployed_unpushed.map((d) => d.stack);
-    parts.push(
-      h(
-        "div",
-        { class: "kp-alert kp-alert--warning", role: "status" },
-        h(
-          "strong",
-          null,
-          `${r.unpushed.length} commit(s) here are not on the remote. `,
-        ),
-        deployed.length
-          ? `The host runs ${deployed.join(", ")} from one of them: push keeps the repository and the fleet in step.`
-          : "Push them, rebase them onto the remote, or drop them.",
-        h(
-          "ul",
-          null,
-          ...r.unpushed.map((c) =>
-            h(
-              "li",
-              { class: "mono" },
-              `${c.commit.slice(0, 10)} · ${c.subject}`,
-            ),
-          ),
-        ),
-        h(
-          "div",
-          { class: "row-buttons" },
-          .../** @type {const} */ (["push", "rebase", "drop"]).map((choice) =>
-            resolveButton(choice, reload),
-          ),
-        ),
-      ),
-    );
-  }
-  if (r.behind)
-    parts.push(
-      h(
-        "p",
-        { class: "measured" },
-        `${r.behind} commit(s) on the remote are not here yet; the next edit or Fetch takes them.`,
-      ),
-    );
-  parts.push(h("div", { class: "row-buttons" }, sync));
-  box.replaceChildren(...parts);
 }
 
 /**
@@ -1074,20 +1935,27 @@ function resolveButton(choice, reload) {
     "button",
     {
       type: "button",
-      class: `kp-button${choice === "drop" ? " kp-button--destructive" : ""}`,
+      class: `kp-button kp-button--sm${choice === "drop" ? " kp-button--destructive" : ""}`,
       "data-choice": choice,
+      title: {
+        push: "Push the commits to the remote",
+        rebase: "Put the commits on top of the remote's, then push",
+        drop: "Throw the commits away; the working copy goes back to the remote",
+      }[choice],
     },
     { push: "Push", rebase: "Rebase and push", drop: "Drop them…" }[choice],
   );
   drivable(b, REPO_CHOICE, choice);
   b.addEventListener("click", async () => {
     if (choice === "drop") {
-      const typed = h("input", {
-        class: "kp-field__input",
-        type: "text",
-        id: DROP_CONFIRM,
-        placeholder: "drop",
-      });
+      const typed = /** @type {HTMLInputElement} */ (
+        h("input", {
+          class: "kp-field__input",
+          type: "text",
+          id: DROP_CONFIRM,
+          placeholder: "drop",
+        })
+      );
       const go = h(
         "button",
         { type: "button", class: "kp-button kp-button--destructive" },

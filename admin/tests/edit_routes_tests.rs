@@ -391,6 +391,10 @@ async fn feat_stacks_3_a_new_stack_is_scaffolded_committed_and_only_its_director
         .map(|x| x["name"].as_str().unwrap())
         .collect();
     assert_eq!(names, vec!["mealie", "custom"]);
+    // redesign-presets-1: the gallery says "default" where the preset
+    // leaves a size to the fleet, so the read says which ones it sets.
+    assert_eq!(p["presets"][0]["cores_set"], false, "{p}");
+    assert_eq!(p["presets"][0]["disk_set"], false, "{p}");
     // Clones on the way (the repo route or a plan clones it first).
     let v = p["suggest_vmid"].as_u64().unwrap();
     assert!(v >= 104 && ![104, 116, 120].contains(&v));

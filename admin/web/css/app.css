@@ -68,6 +68,51 @@ main.shell > * + * {
 .title-row > :first-child + * {
   margin-inline-start: auto;
 }
+/* fix-245: a title row's own group of buttons (`.actions-row`, a column
+   grid wherever it lists a stack's actions) is one row here, against the
+   right edge; it stacked Overview's Import and New stack, and Presets'
+   three buttons, into a column that made the title row 80-124 px tall. */
+.title-row > .actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+/* fix-245: on a phone the page title takes its own line and its controls
+   fold under it from the title's own left edge, instead of hanging off
+   the right edge of an otherwise empty line. */
+@media (max-width: 30rem) {
+  .title-row > h1 {
+    flex-basis: 100%;
+  }
+  .title-row > h1:first-child + * {
+    margin-inline-start: 0;
+  }
+  .title-row > h1 ~ .actions-row {
+    justify-content: flex-start;
+  }
+}
+/* fix-244: a page's one-sentence description is its title's subtitle: it
+   sits right under the title instead of a whole section gap (plus the
+   heading's own bottom margin) away, where it read as a section of its
+   own. The `!important` matches the shared section-gap rule above, which
+   would otherwise win for every top-level child. */
+main.shell > .title-row > h1,
+main.shell > h1 {
+  margin-block-end: 0;
+}
+main.shell > .title-row:has(> h1) + p,
+main.shell > h1 + p {
+  margin-block-start: 6px !important;
+}
+/* fix-247: a link drawn as a button (Export bundle, Open the shell, the
+   firewall table's Edit) looks like every other button; the page's own
+   link underline left it underlined beside plain buttons in one row. */
+a.kp-button,
+a.kp-button:hover,
+a.kp-button:visited {
+  text-decoration-line: none;
+}
 /* fix-210 (Kenny, 2026-10-02: "ik moet niet raden naar wat een functie
    doet, alles moet duidelijk zijn"): the one shared shape for a section's
    heading plus its one-sentence description (`dom.js` `sectionHeader()`),
@@ -241,9 +286,17 @@ main.shell > * + * {
 .num {
   font-variant-numeric: tabular-nums;
 }
+/* fix-246: the bare `monospace` fallback (no theme sets --font-mono) is
+   the one family Chromium sizes from a 13 px base, so with 0.85em on top
+   every address, key and port list read at 11 px beside 16 px text, and
+   sat high in its row. kp-themes' own `.kp-mono` stack and size instead:
+   the theme's mono face at 0.9em of its row. */
 .mono {
-  font-family: var(--font-mono, monospace);
-  font-size: 0.85em;
+  font-family: var(
+    --kp-mono-face,
+    var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)
+  );
+  font-size: var(--kp-mono-size, 0.9em);
 }
 .state {
   font-size: 0.85em;
@@ -642,10 +695,20 @@ p:has(> .measured:only-child):first-child {
   #action-dialog .act-field-locked {
     grid-template-columns: minmax(0, 1fr) auto;
   }
+  /* fix-248: the input and check rules above pin their control to row 1
+     with a stronger selector than `> *`, so on a phone every control sat
+     ABOVE its own label; they are named here too. */
   #action-dialog [data-kp-step] > .kp-field > *,
-  #action-dialog [data-kp-step] > .kp-field > .kp-field__label {
+  #action-dialog [data-kp-step] > .kp-field > .kp-field__label,
+  #action-dialog [data-kp-step] > .kp-field > .kp-field__input,
+  #action-dialog [data-kp-step] > .kp-field > .kp-field__check {
     grid-column: 1;
     grid-row: auto;
+  }
+  /* A check box's markup comes before its label: the label still reads
+     first. */
+  #action-dialog [data-kp-step] > .kp-field > .kp-field__label {
+    order: -1;
   }
 }
 .act-what {
@@ -1269,7 +1332,7 @@ td.stack-flags {
 /* The import dialog's bundle: a YAML file, pasted or uploaded. */
 #import-bundle {
   min-block-size: 12rem;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 0.9em;
 }
 
@@ -1952,6 +2015,14 @@ td.stack-flags {
 .health-block summary h2 {
   display: inline;
   margin: 0;
+}
+/* fix-250: a heading with its description (`sectionHeader`) is wider than
+   a phone's line beside the chevron, so the flex row wrapped it onto a
+   line of its own and left the chevron alone above it. It shrinks into
+   the space beside the chevron instead. */
+.health-block summary > .section-head {
+  flex: 1 1 12rem;
+  min-inline-size: 0;
 }
 /* The sub-page's own action buttons (Today's "Read again", Doctor's
    Refresh + its state badge) move into the summary itself (health.js

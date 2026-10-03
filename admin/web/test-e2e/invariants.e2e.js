@@ -769,6 +769,15 @@ test("invariants: every page keeps clear vertical spacing between its top-level 
         );
         const out = [];
         for (let i = 1; i < kids.length; i++) {
+          // fix-244: a page's one-sentence description belongs to its
+          // title (it sits 6 px under it, invariant 40) — title and
+          // description are one header block, not two sections.
+          const before = kids[i - 1];
+          const isTitle =
+            before.tagName === "H1" ||
+            (before.classList.contains("title-row") &&
+              !!before.querySelector(":scope > h1"));
+          if (isTitle && kids[i].tagName === "P") continue;
           const prev = kids[i - 1].getBoundingClientRect();
           const cur = kids[i].getBoundingClientRect();
           out.push(cur.top - prev.bottom);
@@ -2035,6 +2044,348 @@ test("invariants: every button that opens a dialog or runs an action is reachabl
       [],
       `page controls Live view could not drive: ${failed.join("; ")}`,
     );
+  } finally {
+    await browser.close();
+  }
+});
+
+// ui-pass-3 (Kenny, 2026-10-02: "vraag jezelf af of het next-level
+// frontend werk is of het nog beter kan, en verbeter het dan"): the shared
+// walk the cases below use — every drivable page plus a stack page.
+const UI_PASS_3_PATHS = [...DRIVABLE_PATHS, "stacks/kp-soft"];
+
+/**
+ * Opens every action dialog on a stack page and on the host page, calls
+ * `measure` with each open dialog's locator, and closes it again.
+ * @param {import("playwright").Page} page
+ * @param {(action: string, dialog: import("playwright").Locator) => Promise<void>} measure
+ */
+async function eachActionDialog(page, measure) {
+  for (const path of ["stacks/kp-soft", "host"]) {
+    await page.goto(`${BASE}/${path}`);
+    const buttons = page.locator("button[data-action]");
+    await buttons.first().waitFor({ timeout: 15000 });
+    const actions = await buttons.evaluateAll((bs) => [
+      ...new Set(bs.map((b) => b.getAttribute("data-action")).filter(Boolean)),
+    ]);
+    for (const action of actions) {
+      const btn = page.locator(`button[data-action="${action}"]`).first();
+      if (!(await btn.isVisible()) || !(await btn.isEnabled())) continue;
+      await btn.click();
+      const dialog = page.locator("dialog#action-dialog[open]");
+      await dialog.waitFor({ timeout: 1500 }).catch(() => {});
+      if (await dialog.isVisible().catch(() => false))
+        await measure(`${path} ${action}`, dialog);
+      for (const close of await page
+        .locator("dialog[open] .kp-dialog__close")
+        .all())
+        await close.click().catch(() => {});
+      await page
+        .locator("dialog[open]")
+        .first()
+        .waitFor({ state: "detached", timeout: 5000 })
+        .catch(() => {});
+    }
+  }
+}
+
+// fix-244: a page's one-sentence description is its title's subtitle — it
+// sits right under the title (and under the title row's own controls when
+// a phone folds them below it), never a full section gap away where it
+// reads as a section of its own.
+test("invariants: every page's description sits directly under its title, never a section gap away", async () => {
+  const browser = await chromium.launch();
+  try {
+    const bad = [];
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 1000 },
+      });
+      const page = await freshPage(context);
+      for (const path of UI_PASS_3_PATHS) {
+        await page.goto(`${BASE}/${path}`);
+        await page.waitForTimeout(600);
+        const gap = await page.evaluate(() => {
+          const h1 = document.querySelector("main h1");
+          if (!h1) return null;
+          const head = h1.closest(".title-row") ?? h1;
+          const desc = head.nextElementSibling;
+          if (!desc || desc.tagName !== "P") return null;
+          // The title block's own visible content, without its margins.
+          const parts =
+            head === h1
+              ? [h1]
+              : [...head.children].filter(
+                  (c) => /** @type {HTMLElement} */ (c).offsetParent,
+                );
+          const bottom = Math.max(
+            ...parts.map((p) => p.getBoundingClientRect().bottom),
+          );
+          return Math.round(desc.getBoundingClientRect().top - bottom);
+        });
+        if (gap !== null && (gap > 12 || gap < 0))
+          bad.push(`${width}px /${path}: ${gap}px`);
+      }
+      await context.close();
+    }
+    assert.deepEqual(
+      bad,
+      [],
+      `descriptions detached from their title: ${bad.join("; ")}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-245: a page title row's controls are one row beside the title on a
+// desktop — never a column stacked under each other — and on a phone, once
+// they fold under the title, they start on the title's own left edge
+// instead of hanging off the right.
+test("invariants: a title row's controls sit in one row beside the title, and fold under it left-aligned on a phone", async () => {
+  const browser = await chromium.launch();
+  try {
+    const bad = [];
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 1000 },
+      });
+      const page = await freshPage(context);
+      for (const path of UI_PASS_3_PATHS) {
+        await page.goto(`${BASE}/${path}`);
+        await page.waitForTimeout(600);
+        const r = await page.evaluate(() => {
+          const h1 = document.querySelector("main h1");
+          const row = h1?.closest(".title-row");
+          if (!h1 || !row) return null;
+          const t = h1.getBoundingClientRect();
+          const ctls = [
+            ...row.querySelectorAll("button, a.kp-button, .state, .badge"),
+          ]
+            .filter((e) => /** @type {HTMLElement} */ (e).offsetParent)
+            .map((e) => e.getBoundingClientRect())
+            .filter((b) => b.width > 0);
+          if (!ctls.length) return null;
+          // Stacked: one control sits wholly under another (badges of
+          // different heights centred on one line are still one row).
+          const stacked = ctls.some((a) =>
+            ctls.some((b) => b.top >= a.bottom - 1),
+          );
+          const below = ctls.filter((b) => b.top >= t.bottom - 2);
+          return {
+            stacked,
+            belowLeft: below.length
+              ? Math.round(Math.min(...below.map((b) => b.left)) - t.left)
+              : null,
+          };
+        });
+        if (!r) continue;
+        if (width > 800 && r.stacked)
+          bad.push(`${width}px /${path}: controls stacked in a column`);
+        if (r.belowLeft !== null && Math.abs(r.belowLeft) > 2)
+          bad.push(
+            `${width}px /${path}: folded controls start ${r.belowLeft}px from the title's edge`,
+          );
+      }
+      await context.close();
+    }
+    assert.deepEqual(bad, [], bad.join("; "));
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-246: code-like text (an address, a key, a port list) is set in the
+// theme's monospace at a readable size — never the browser's bare
+// `monospace` fallback, whose 13 px base shrank it to 11 px beside 16 px
+// text.
+test("invariants: monospace text reads at nearly its row's own size, in the theme's mono font", async () => {
+  const browser = await chromium.launch();
+  try {
+    const bad = [];
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    for (const path of UI_PASS_3_PATHS) {
+      await page.goto(`${BASE}/${path}`);
+      await page.waitForTimeout(900);
+      const found = await page.evaluate(() =>
+        [...document.querySelectorAll("main .mono")]
+          .filter((e) => /** @type {HTMLElement} */ (e).offsetParent)
+          .map((e) => {
+            const own = parseFloat(getComputedStyle(e).fontSize);
+            const parent = parseFloat(
+              getComputedStyle(/** @type {Element} */ (e.parentElement))
+                .fontSize,
+            );
+            return { own, ratio: own / parent, text: e.textContent ?? "" };
+          })
+          .filter((m) => m.ratio < 0.8 || m.own < 12)
+          .slice(0, 2)
+          .map((m) => `"${m.text.trim().slice(0, 30)}" ${m.own}px`),
+      );
+      for (const f of found) bad.push(`/${path}: ${f}`);
+    }
+    assert.deepEqual(bad, [], `undersized monospace: ${bad.join("; ")}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-247: a link drawn as a button looks like every other button — no
+// underline on one ("Export bundle") beside a plain one ("Compare with the
+// files") in the same row.
+test("invariants: a link drawn as a button is never underlined", async () => {
+  const browser = await chromium.launch();
+  try {
+    const bad = [];
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    for (const path of UI_PASS_3_PATHS) {
+      await page.goto(`${BASE}/${path}`);
+      await page.waitForTimeout(900);
+      const found = await page.evaluate(() =>
+        [...document.querySelectorAll("a.kp-button")]
+          .filter((a) => /** @type {HTMLElement} */ (a).offsetParent)
+          .filter((a) =>
+            getComputedStyle(a).textDecorationLine.includes("underline"),
+          )
+          .map((a) => (a.textContent ?? "").trim() || a.outerHTML.slice(0, 60)),
+      );
+      for (const f of found) bad.push(`/${path}: "${f}"`);
+    }
+    assert.deepEqual(bad, [], `underlined button links: ${bad.join("; ")}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-248: on a phone, every action dialog field reads label first, then
+// its control — never the control above the label it belongs to.
+test("invariants: on a phone every action dialog field shows its label above its control", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await freshPage(context);
+    const bad = [];
+    let measured = 0;
+    await eachActionDialog(page, async (action, dialog) => {
+      const r = await dialog.evaluate((d) => {
+        const step = [...d.querySelectorAll("[data-kp-step]")].find(
+          (s) => !(/** @type {HTMLElement} */ (s).hidden),
+        );
+        if (!step) return { n: 0, inverted: [] };
+        const pairs = [...step.querySelectorAll(":scope > .kp-field")]
+          .filter((f) => /** @type {HTMLElement} */ (f).offsetParent)
+          .map((f) => {
+            const l = f.querySelector(".kp-field__label");
+            const c = f.querySelector(".kp-field__input, .kp-field__check");
+            if (!l || !c) return null;
+            const cb = c.getBoundingClientRect();
+            if (!cb.height) return null;
+            return {
+              label: (l.textContent ?? "").trim(),
+              inverted: cb.top < l.getBoundingClientRect().top - 2,
+            };
+          })
+          .filter((p) => p !== null);
+        return {
+          n: pairs.length,
+          inverted: pairs.filter((p) => p.inverted).map((p) => p.label),
+        };
+      });
+      measured += r.n;
+      for (const l of r.inverted) bad.push(`${action}: "${l}"`);
+    });
+    assert.ok(measured >= 5, `only ${measured} fields measured`);
+    assert.deepEqual(bad, [], `controls above their label: ${bad.join("; ")}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-249: an action dialog says what it does once — its own description
+// at the top — and the review step does not repeat it in other words.
+test("invariants: an action dialog describes what it does once, never twice", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const bad = [];
+    let seen = 0;
+    await eachActionDialog(page, async (action, dialog) => {
+      const r = await dialog.evaluate((d) => ({
+        intro: !!d.querySelector(".act-intro"),
+        what: d.querySelectorAll(".act-what").length,
+      }));
+      if (r.intro) seen++;
+      if (r.intro && r.what > 0)
+        bad.push(`${action}: its description and a second "what" line`);
+    });
+    assert.ok(seen >= 5, `only ${seen} dialogs with a description`);
+    assert.deepEqual(bad, [], bad.join("; "));
+  } finally {
+    await browser.close();
+  }
+});
+
+// fix-250: a collapsible block's chevron sits beside its heading at every
+// width — at phone width it wrapped onto a line of its own above the
+// heading and description (Overview's "Apply the whole fleet").
+test("invariants: a collapsible block's heading stays beside its chevron, on desktop and phone", async () => {
+  const browser = await chromium.launch();
+  try {
+    const bad = [];
+    let seen = 0;
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 1000 },
+      });
+      const page = await freshPage(context);
+      for (const path of ["overview", "health"]) {
+        await page.goto(`${BASE}/${path}`);
+        await page.locator("details.health-block").first().waitFor();
+        const found = await page.evaluate(() =>
+          [...document.querySelectorAll("details.health-block > summary")]
+            .filter((s) => /** @type {HTMLElement} */ (s).offsetParent)
+            .map((s) => {
+              const head = s.querySelector("h2, h3");
+              if (!head) return null;
+              const st = getComputedStyle(s);
+              const contentLeft =
+                s.getBoundingClientRect().left +
+                parseFloat(st.paddingInlineStart) +
+                parseFloat(st.borderInlineStartWidth);
+              return {
+                name: (head.textContent ?? "").trim(),
+                indent: Math.round(
+                  head.getBoundingClientRect().left - contentLeft,
+                ),
+              };
+            })
+            .filter((x) => x !== null),
+        );
+        for (const f of found) {
+          seen++;
+          // The chevron is 0.5rem plus its margins: a heading beside it
+          // starts at least ~12 px in; one wrapped under it starts at 0.
+          if (f.indent < 10)
+            bad.push(
+              `${width}px /${path}: "${f.name}" wrapped under its chevron`,
+            );
+        }
+      }
+      await context.close();
+    }
+    assert.ok(seen >= 4, `only ${seen} collapsible blocks found`);
+    assert.deepEqual(bad, [], bad.join("; "));
   } finally {
     await browser.close();
   }

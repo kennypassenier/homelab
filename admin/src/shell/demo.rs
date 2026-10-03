@@ -315,6 +315,236 @@ fn demo_nights<'a>(stacks: &'a [String], stack: &'a str) -> impl Iterator<Item =
     (0..12u64).filter(move |i| !(gap && *i == 3))
 }
 
+/// redesign-activity: the stack a command is about, read from its own
+/// serialised form (the first `"stack"` string in it), so the demo can
+/// record a job the way the real host records an operation.
+fn command_stack(c: &Command) -> Option<String> {
+    fn find(v: &serde_json::Value) -> Option<String> {
+        match v {
+            serde_json::Value::Object(m) => m
+                .get("stack")
+                .and_then(|s| s.as_str().map(str::to_string))
+                .or_else(|| m.values().find_map(find)),
+            _ => None,
+        }
+    }
+    find(&serde_json::to_value(c).ok()?)
+}
+
+/// A small deterministic number stream for the made-up history.
+struct DemoRng(u64);
+impl DemoRng {
+    fn next(&mut self, n: u64) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (self.0 >> 33) % n.max(1)
+    }
+}
+
+/// redesign-activity (3.71.0): thirty days of made-up history before this
+/// start, in the real host's shapes (`HistoryEntry`): a nightly backup round
+/// each night at 03:00 UTC (a phase and one `scheduled-backup` per stack),
+/// and a few daytime operations a day by "Kenny", "Claude (Live view)" or a
+/// workstation session. Two failures: last night's backup of the last
+/// stack (still failing, so Activity shows an open incident) and the third
+/// stack's backup nine nights ago (fixed by every night since). Plainly
+/// made up; nothing in it names a real host or address.
+pub fn activity_demo_history(
+    stacks: &[String],
+    now: u64,
+) -> Vec<homelab_core::history::HistoryEntry> {
+    use homelab_core::history::{HistoryEntry, StepTiming};
+    let mut r = DemoRng(9);
+    let mut out = Vec::new();
+    let today = now - now % 86_400;
+    let step = |name: &str, start: u64, end: u64| StepTiming {
+        step: name.into(),
+        start,
+        end,
+        changed: true,
+    };
+    for d in (0..30u64).rev() {
+        let day = today - d * 86_400;
+        let n0 = day + 3 * 3_600 + r.next(300);
+        if n0 + 2_000 > now {
+            continue;
+        }
+        let mut t = n0 + 60;
+        let mut phase_end = t;
+        for (i, st) in stacks.iter().enumerate() {
+            let took = 90 + r.next(80);
+            let fail_last = d == 0 && i + 1 == stacks.len();
+            let fail_old = d == 9 && i == 2.min(stacks.len().saturating_sub(1));
+            let error = if fail_last {
+                Some("restic: repository is already locked by PID 41190 on pve".to_string())
+            } else if fail_old {
+                Some("rclone: 403 rate limit exceeded on gdrive".to_string())
+            } else {
+                None
+            };
+            let ok = error.is_none();
+            out.push(HistoryEntry::Op {
+                start: t,
+                end: t + took,
+                label: "scheduled-backup".into(),
+                subject: Some(format!("backup-{st}")),
+                req: None,
+                by: None,
+                ok,
+                deferred: None,
+                error,
+                steps: vec![
+                    step("stop writers", t, t + 4),
+                    step("restic backup", t + 4, t + took - 10),
+                    step(
+                        if ok {
+                            "start again"
+                        } else {
+                            "restic backup failed"
+                        },
+                        t + took - 10,
+                        t + took,
+                    ),
+                ],
+            });
+            t += took + 80;
+            phase_end = t;
+        }
+        out.push(HistoryEntry::Phase {
+            start: n0,
+            end: phase_end + 60,
+            name: "backup".into(),
+            count: stacks.len(),
+        });
+        let k = 2 + r.next(4);
+        for j in 0..k {
+            let at = day + (9 + r.next(12)) * 3_600 + r.next(3_600);
+            if at + 600 > now || stacks.is_empty() {
+                continue;
+            }
+            let label = ["deploy", "update", "backup", "resize", "guards"][r.next(5) as usize];
+            let st = &stacks[r.next(stacks.len() as u64) as usize];
+            let by = ["Kenny", "Kenny", "Claude (Live view)", "wsl"][r.next(4) as usize];
+            let took = 20 + r.next(400);
+            let fail = d == 6 && j == 0;
+            out.push(HistoryEntry::Op {
+                start: at,
+                end: at + took,
+                label: label.into(),
+                subject: Some(format!("{label}-{st}")),
+                req: Some(4_000 + d * 10 + j),
+                by: Some(by.into()),
+                ok: !fail,
+                deferred: None,
+                error: fail.then(|| "health check timed out after 120 s".to_string()),
+                steps: vec![
+                    step("prepare", at, at + 4),
+                    step(label, at + 4, at + took - 3),
+                    step("record", at + took - 3, at + took),
+                ],
+            });
+        }
+    }
+    out.sort_by_key(|e| e.start());
+    out
+}
+
+/// The incident bundles the made-up failures left, by name
+/// (`<unix seconds>-<operation>`), newest first.
+pub fn activity_demo_incidents(history: &[homelab_core::history::HistoryEntry]) -> Vec<String> {
+    let mut v: Vec<(u64, String)> = history
+        .iter()
+        .filter_map(|e| match e {
+            homelab_core::history::HistoryEntry::Op {
+                end,
+                ok: false,
+                subject: Some(s),
+                ..
+            } => Some((*end, format!("{end}-{s}"))),
+            _ => None,
+        })
+        .collect();
+    v.sort_by(|a, b| b.0.cmp(&a.0));
+    v.into_iter().map(|(_, n)| n).collect()
+}
+
+/// redesign-console (3.71.0): a made-up stretch of host lines from the last
+/// few minutes, so Console and Activity's Host log open on lines of every
+/// level and several sources. Shaped as the real host's `CurrentOp` answer,
+/// which seeds the dashboard's ring when it starts.
+pub fn demo_current_op(stacks: &[String], now: u64) -> homelab_proto::CurrentOpView {
+    use homelab_proto::LogLevel;
+    let s = |i: usize| {
+        stacks
+            .get(i % stacks.len().max(1))
+            .cloned()
+            .unwrap_or_else(|| "HOST".into())
+    };
+    let t = now.saturating_sub(160);
+    let lines: Vec<(u64, LogLevel, String, String, bool)> = vec![
+        (
+            0,
+            LogLevel::Info,
+            "HOST".into(),
+            format!("nightly round: {} stacks, backup_concurrency 3", stacks.len()),
+            false,
+        ),
+        (2, LogLevel::Info, s(0), "backup: pausing the writers".into(), false),
+        (
+            3,
+            LogLevel::Info,
+            s(0),
+            "restic backup /appdata → snapshot demo100 (4.1 MB added)".into(),
+            false,
+        ),
+        (9, LogLevel::Info, s(1), "restic backup /appdata → snapshot demo101".into(), false),
+        (14, LogLevel::Warn, s(0), "health check answered in 2.8 s (limit 3 s)".into(), false),
+        (
+            21,
+            LogLevel::Info,
+            s(1),
+            "deploy requested by this dashboard: pin update web 1.4.2 → 1.5.0".into(),
+            true,
+        ),
+        (22, LogLevel::Info, s(1), "compose pull web … done in 3 s".into(), true),
+        (
+            40,
+            LogLevel::Error,
+            s(2),
+            "restic snapshots: rclone: couldn't connect to gdrive (timeout after 120 s), retry in 5 min"
+                .into(),
+            false,
+        ),
+        (61, LogLevel::Info, "HOST".into(), "watch: 7 targets up, 0 down".into(), false),
+        (
+            90,
+            LogLevel::Info,
+            s(3),
+            "backup: no data directory changed since last snapshot, skipped".into(),
+            false,
+        ),
+    ];
+    homelab_proto::CurrentOpView {
+        holder: None,
+        started_unix: None,
+        lines: lines
+            .into_iter()
+            .map(|(dt, level, source, msg, asked)| ServerMsg::Log {
+                level,
+                source,
+                msg,
+                req: asked.then_some(4_100 + dt),
+                ts: Some(t + dt),
+                step: None,
+                plan: None,
+                by: asked.then(|| "admin".to_string()),
+            })
+            .collect(),
+    }
+}
+
 pub async fn run_demo(
     shared: Shared,
     live: Live,
@@ -413,7 +643,17 @@ pub async fn run_demo(
     // redesign-3.71 secrets: what this demo host was asked to reveal or
     // copy, as the real host records it in history.jsonl (never a value),
     // so the screen tests can see Activity name it.
-    let mut history: Vec<homelab_core::history::HistoryEntry> = Vec::new();
+    // redesign-activity (3.71.0): and the weeks before this start, made
+    // up (`activity_demo_history`), so Activity's KPI strip, timeline and History
+    // have nightly rounds, daytime operations by several people and Claude,
+    // and two failures to show. Shared with the action tasks, which record
+    // each demo job as the real host records an operation.
+    let history: std::sync::Arc<std::sync::Mutex<Vec<homelab_core::history::HistoryEntry>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(activity_demo_history(
+            &stacks,
+            now_s(),
+        )));
+    let incidents = activity_demo_incidents(&history.lock().unwrap_or_else(|e| e.into_inner()));
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     loop {
         tokio::select! {
@@ -429,7 +669,7 @@ pub async fn run_demo(
                 // records it.
                 if let Command::RevealSecret { stack, secret, audit } = &command {
                     let purpose = audit.as_ref().map(|a| a.purpose).unwrap_or_default();
-                    history.push(homelab_core::ops::secrets::reveal_history(
+                    history.lock().unwrap_or_else(|e| e.into_inner()).push(homelab_core::ops::secrets::reveal_history(
                         now_s(),
                         stack,
                         secret,
@@ -445,9 +685,9 @@ pub async fn run_demo(
                 if command.is_read_only() {
                     let body = match command {
                         Command::History { since, limit } => serde_json::json!({
-                            "entries": homelab_core::history::select(history.clone(), since, limit),
+                            "entries": homelab_core::history::select(history.lock().unwrap_or_else(|e| e.into_inner()).clone(), since, limit),
                         }).to_string(),
-                        Command::Incidents { .. } => serde_json::json!({ "incidents": [] }).to_string(),
+                        Command::Incidents { .. } => serde_json::json!({ "incidents": &incidents }).to_string(),
                         // One made-up notice, so the notification centre has
                         // an expandable row for the screen tests to click.
                         Command::Notices { .. } => serde_json::json!({ "notices": [{
@@ -460,7 +700,9 @@ pub async fn run_demo(
                             "page": "/stack/films", "urgent": false,
                             "routed": "centre", "push": "",
                         }], "last_seq": 1 }).to_string(),
-                        Command::CurrentOp => serde_json::to_string(&homelab_proto::CurrentOpView::default()).unwrap_or_default(),
+                        // redesign-console: a made-up stretch of host lines, so
+                        // Console and Activity's Host log open on something.
+                        Command::CurrentOp => serde_json::to_string(&demo_current_op(&stacks, now_s())).unwrap_or_default(),
                         // The TUI parity pages' reads, in the shapes the real
                         // host answers (empty, or plainly made up and said so).
                         Command::Today { .. } => serde_json::json!({ "items": [{
@@ -692,6 +934,9 @@ pub async fn run_demo(
                 }
                 let events = asks.events.clone();
                 let name = command.name().to_string();
+                let stack = command_stack(&command);
+                let recorded = history.clone();
+                let started = now_s();
                 tokio::spawn(async move {
                     let op = format!("{}-demo", name.split('_').next().unwrap_or("op"));
                     for step in ["prepare", "apply", "verify"] {
@@ -709,6 +954,24 @@ pub async fn run_demo(
                             tokio::time::sleep(Duration::from_millis(600)).await;
                         }
                     }
+                    // redesign-activity: the job lands in History as the
+                    // real host records an operation.
+                    let label = name.replace('_', "-");
+                    let end = now_s();
+                    recorded.lock().unwrap_or_else(|e| e.into_inner()).push(
+                        homelab_core::history::HistoryEntry::Op {
+                            start: started,
+                            end,
+                            subject: stack.map(|s| format!("{label}-{s}")),
+                            label,
+                            req: Some(id),
+                            by: Some("admin".into()),
+                            ok: true,
+                            deferred: None,
+                            error: None,
+                            steps: Vec::new(),
+                        },
+                    );
                     let _ = reply.send(Ok(answer(format!("{name} complete (demo host: nothing ran)"))));
                 });
             }

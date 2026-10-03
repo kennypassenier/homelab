@@ -1,14 +1,15 @@
-// Jobs (feat-ops-6): every job the dashboard ran or runs, newest first, as
-// a kp datatable; the one in `?job=` gets its live panel above the table.
+// Every job (feat-ops-6; redesign-activity 3.71.0): every job the
+// dashboard ran or runs, newest first, as a kp datatable inside Activity's
+// folded "Every job" section. A row opens that job live in a dialog (its
+// log scrolls inside the dialog, invariant 47).
 
 import { act, actionLabel, loadJobs, onAct } from "../act.js";
 import { agoEl, setAgo } from "../ago.js";
 import { badgeCell, bindTableUrl, h, tableBlock, td } from "../dom.js";
 import { formatDateTime } from "../format.js";
 import { STATE_ORDER, jobRows } from "../jobs.js";
-import { mountJobPanel } from "../jobpanel.js";
 import { sortKeys } from "../sortkeys.js";
-import { setParams } from "../urlstate.js";
+import { openJobDialog } from "./activitykit.js";
 import {
   attachDataTables,
   compare,
@@ -17,16 +18,14 @@ import {
 
 /**
  * @param {HTMLElement} root
- * @param {{navigate: (href: string) => void}} ctx
  * @returns {() => void}
  */
-export function mount(root, ctx) {
+export function mountJobsTable(root) {
   const keys = sortKeys();
-  const selected = h("div", { id: "job-selected" });
   const ago = agoEl("updated");
   const t = tableBlock({
     remember: "jobs",
-    caption: "Jobs, newest first (the last 200)",
+    caption: "Every job, newest first (the last 200)",
     search: "Search jobs",
     state: "loading",
     nothing: "No jobs yet: an action from any stack's page starts one.",
@@ -42,65 +41,19 @@ export function mount(root, ctx) {
       { label: "Message", sort: "text", cls: "wide" },
     ],
   });
-  t.tbody.id = "jobs";
-  root.replaceChildren(
-    h("h1", null, "Jobs"),
-    h(
-      "p",
-      { class: "measured" },
-      "What the dashboard sent to the host, live. Pick a row to follow that job.",
-    ),
-    selected,
-    t.wrap,
-    h("p", null, ago),
-  );
+  t.tbody.id = "jobs-table";
+  root.replaceChildren(t.wrap, h("p", { class: "measured" }, ago));
   const detach = attachDataTables(root, { compare: keys.compare(compare) });
   const table = dataTable(t.wrap);
   const unbind = bindTableUrl(table, "jobs");
 
-  /** @type {{job: number, stop: () => void} | null} */
-  let panel = null;
-  const showJob = () => {
-    const id = Number(new URLSearchParams(location.search).get("job"));
-    if (!Number.isInteger(id) || id <= 0) {
-      panel?.stop();
-      panel = null;
-      selected.replaceChildren();
-      return;
-    }
-    if (panel?.job === id) return;
-    panel?.stop();
-    const p = mountJobPanel(id);
-    panel = { job: id, stop: p.stop };
-    const close = h(
-      "button",
-      { type: "button", class: "kp-button kp-button--ghost" },
-      "Stop following",
-    );
-    close.addEventListener("click", () => {
-      history.replaceState(
-        history.state,
-        "",
-        location.pathname + setParams(location.search, { job: null }),
-      );
-      showJob();
-    });
-    selected.replaceChildren(p.element, close);
-  };
-
   t.tbody.addEventListener("click", (e) => {
     const target = /** @type {Element} */ (e.target);
     if (target.closest("a")) return;
-    const tr = target.closest("tr");
-    const id = tr?.dataset.job;
-    if (!id) return;
-    history.replaceState(
-      history.state,
-      "",
-      location.pathname + setParams(location.search, { job: id }),
+    const id = Number(
+      /** @type {HTMLElement | null} */ (target.closest("tr"))?.dataset.job,
     );
-    showJob();
-    window.scrollTo(0, 0);
+    if (Number.isInteger(id) && id > 0) openJobDialog(id);
   });
 
   let shown = "";
@@ -135,6 +88,7 @@ export function mount(root, ctx) {
             class: "link-row",
             "data-job": String(r.job),
             "data-kp-row-key": String(r.job),
+            title: "Open this job: its steps and its log",
           },
           td(String(r.job), "num"),
           td(keys.note("time", formatDateTime(r.queued), r.queued)),
@@ -162,13 +116,10 @@ export function mount(root, ctx) {
   root.addEventListener("kp-datatable-retry", retry);
   const timer = setInterval(render, 5000);
   render();
-  showJob();
-  void ctx;
   return () => {
     offJobs();
     root.removeEventListener("kp-datatable-retry", retry);
     clearInterval(timer);
-    panel?.stop();
     unbind();
     detach();
   };

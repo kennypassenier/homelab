@@ -1,0 +1,938 @@
+/* redesign-activity + redesign-console (3.71.0): Activity and Console as
+   the approved demos draw them (~/.local/share/homelab/redesign-3.71/
+   activity.html, console.html), kp-themes tokens only. `ac-` is Activity's,
+   `hl-` the host-log explorer both pages share, `con-` Console's shell bar.
+   The foundation's `nx-` classes (ui.js) carry the header, KPI strip,
+   attention band, toolbar and cards. */
+
+.ac-page,
+.con-page {
+  --ac-line: color-mix(in oklab, var(--border) 85%, transparent);
+  --ac-soft: color-mix(in oklab, var(--muted) 45%, var(--card));
+  --ac-ease: var(--nx-ease, cubic-bezier(0.2, 0, 0.38, 0.9));
+}
+
+/* ── page rhythm ─────────────────────────────────────────────────────── */
+main.shell.ac-page > .ac-tabs {
+  margin-block-start: var(--kp-space-lg, 1rem) !important;
+}
+.ac-body {
+  display: grid;
+  gap: var(--nx-gap);
+  min-inline-size: 0;
+}
+.ac-body > * {
+  margin: 0 !important;
+  min-inline-size: 0;
+}
+.ac-body > [hidden] {
+  display: none;
+}
+
+/* ── header: the Window segmented control ────────────────────────────── */
+.ac-seg {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--ac-soft);
+}
+.ac-seg__btn {
+  font: inherit;
+  font-size: var(--kp-text-sm);
+  padding: 4px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ac-seg__btn:hover {
+  color: var(--foreground);
+}
+.ac-seg__btn[aria-pressed="true"] {
+  background: var(--card);
+  color: var(--foreground);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px var(--border);
+}
+.ac-seg__btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* ── card foot (source / count left, link right) ─────────────────────── */
+.ac-foot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 16px;
+  align-items: center;
+  padding-block-start: var(--kp-space-md, 12px);
+  margin-block-start: var(--kp-space-md, 12px);
+  border-block-start: 1px solid var(--ac-line);
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.ac-hint {
+  text-align: end;
+}
+.ac-muted {
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+.ac-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.ac-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin: 0;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+
+/* ── Running now ─────────────────────────────────────────────────────── */
+.ac-jobs {
+  display: grid;
+  gap: var(--kp-space-lg, 16px);
+}
+.ac-job {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 24px;
+  align-items: center;
+}
+.ac-job + .ac-job {
+  padding-block-start: var(--kp-space-lg, 16px);
+  border-block-start: 1px solid var(--ac-line);
+}
+.ac-job__title {
+  font-weight: 600;
+}
+.ac-job__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.ac-job__facts b {
+  color: var(--foreground);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ac-job__steps {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+.ac-step {
+  display: grid;
+  gap: 6px;
+  min-inline-size: 0;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.ac-step i {
+  display: block;
+  block-size: 6px;
+  border-radius: 3px;
+  background: var(--muted);
+  position: relative;
+  overflow: hidden;
+}
+.ac-step[data-s="done"] i {
+  background: var(--success-foreground);
+}
+.ac-step[data-s="run"] i::after {
+  content: "";
+  position: absolute;
+  inset: 0 40% 0 0;
+  border-radius: 3px;
+  background: var(--chart-1, var(--primary));
+}
+.ac-step--whole[data-s="run"] i::after {
+  inset: 0;
+  animation: ac-busy 1.6s var(--ac-ease) infinite;
+  transform-origin: left;
+}
+@keyframes ac-busy {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ac-step--whole[data-s="run"] i::after {
+    animation: none;
+    inset: 0 40% 0 0;
+  }
+}
+.ac-step[data-s="run"] {
+  color: var(--foreground);
+  font-weight: 600;
+}
+.ac-step span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The log tail scrolls inside its own fixed box: a job that printed two
+   lines and one that printed five hundred take the same room, and the
+   card never grows as lines arrive (invariant 47). */
+.ac-job__log {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 12px;
+  block-size: 6.6em;
+  overflow: auto;
+  background: var(--ac-soft);
+  border-radius: calc(var(--radius, 0.5rem) * 0.6);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+  white-space: pre;
+}
+.ac-job__log[hidden] {
+  display: block;
+  visibility: hidden;
+}
+
+/* ── Timeline ────────────────────────────────────────────────────────── */
+.ac-tl {
+  margin: 0;
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: pan-y;
+  min-block-size: 94px;
+}
+.ac-tl svg {
+  inline-size: 100%;
+  block-size: auto;
+}
+.ac-tl .lane {
+  fill: var(--ac-soft);
+  opacity: 1;
+}
+.ac-tl .tick {
+  stroke: var(--ac-line);
+}
+.ac-tl__today {
+  fill: color-mix(in oklab, var(--chart-1, var(--primary)) 8%, transparent);
+}
+.ac-tl__brush {
+  fill: color-mix(in oklab, var(--chart-1, var(--primary)) 14%, transparent);
+  stroke: var(--chart-1, var(--primary));
+  stroke-dasharray: 3 3;
+}
+.ac-tl .timeline-legend,
+.ac-foot .timeline-legend {
+  gap: 6px 16px;
+  font-size: var(--kp-text-xs);
+}
+
+/* ── History ─────────────────────────────────────────────────────────── */
+.ac-count {
+  font-variant-numeric: tabular-nums;
+}
+.ac-range {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  white-space: nowrap;
+}
+.ac-range[hidden] {
+  display: none;
+}
+.ac-feed {
+  margin: var(--kp-space-md, 12px) calc(-1 * var(--nx-pad))
+    calc(-1 * var(--nx-pad));
+  min-inline-size: 0;
+}
+.ac-feed > .nx-skeleton,
+.ac-feed > .nx-empty,
+.ac-feed > .kp-alert {
+  margin: var(--nx-pad);
+}
+/* History's pager (DESIGN_LANGUAGE §12): the count left, the next page
+   right, at the foot of the card. */
+.ac-more {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px var(--nx-pad);
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.ac-dayhead {
+  position: sticky;
+  top: var(--nx-sticky-top, 52px);
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 10px var(--nx-pad);
+  background: var(--card);
+  border-block: 1px solid var(--ac-line);
+  font-size: var(--kp-text-sm);
+}
+.ac-dayhead b {
+  font-weight: 600;
+}
+.ac-dayhead > span {
+  color: var(--muted-foreground);
+}
+.ac-bad {
+  color: var(--destructive);
+  font-weight: 600;
+}
+.ac-row {
+  display: grid;
+  grid-template-columns: 56px 112px minmax(0, 1fr) 10rem 88px 24px;
+  gap: 12px;
+  align-items: center;
+  padding: 9px var(--nx-pad);
+  border-block-end: 1px solid var(--ac-line);
+  font-size: var(--kp-text-sm);
+  cursor: pointer;
+}
+.ac-row:hover {
+  background: color-mix(in oklab, var(--muted) 45%, transparent);
+}
+.ac-row:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.ac-row[data-tone="bad"] {
+  box-shadow: inset 3px 0 0 var(--destructive);
+}
+.ac-row[data-tone="bad"] .ac-st {
+  color: var(--destructive);
+  font-weight: 600;
+}
+.ac-row--phase .ac-w {
+  color: var(--muted-foreground);
+}
+.ac-t,
+.ac-took {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
+.ac-took {
+  text-align: end;
+}
+.ac-st {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.ac-dot {
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--muted-foreground);
+}
+.ac-dot--ok {
+  background: var(--success-foreground);
+}
+.ac-dot--bad {
+  background: var(--destructive);
+}
+.ac-dot--warn {
+  background: var(--warning-foreground);
+}
+.ac-dot--info {
+  background: var(--chart-1, var(--primary));
+}
+.ac-w {
+  min-inline-size: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ac-w a {
+  font-weight: 500;
+}
+.ac-by {
+  justify-self: start;
+  min-inline-size: 0;
+}
+.ac-by-chip {
+  display: inline-block;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--kp-text-xs);
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ac-line);
+  color: var(--muted-foreground);
+}
+.ac-by-chip--claude {
+  border-color: color-mix(
+    in oklab,
+    var(--chart-2, var(--primary)) 55%,
+    var(--border)
+  );
+  color: var(--foreground);
+}
+.ac-chev {
+  color: var(--muted-foreground);
+  transition: transform 150ms var(--ac-ease);
+}
+.ac-row[aria-expanded="true"] .ac-chev {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ac-chev {
+    transition: none;
+  }
+}
+.ac-detail {
+  display: grid;
+  gap: 12px;
+  padding: 8px var(--nx-pad) 16px calc(var(--nx-pad) + 68px);
+  border-block-end: 1px solid var(--ac-line);
+  background: color-mix(in oklab, var(--muted) 30%, transparent);
+}
+.ac-gantt {
+  display: grid;
+  gap: 4px;
+  font-size: var(--kp-text-xs);
+}
+.ac-gantt > div {
+  display: grid;
+  grid-template-columns: minmax(0, 180px) minmax(0, 1fr) 64px;
+  gap: 10px;
+  align-items: center;
+}
+.ac-gantt > div > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ac-gantt i {
+  display: block;
+  block-size: 8px;
+  border-radius: 4px;
+  background: var(--chart-1, var(--primary));
+}
+.ac-gantt i.bad {
+  background: var(--destructive);
+}
+.ac-gantt em {
+  font-style: normal;
+  text-align: end;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.ac-err {
+  padding: 8px 10px;
+  border-radius: calc(var(--radius, 0.5rem) * 0.6);
+  border: 1px solid color-mix(in oklab, var(--destructive) 40%, var(--border));
+  background: color-mix(in oklab, var(--destructive) 6%, var(--card));
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 47.5rem) {
+  .ac-row {
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "t w took"
+      "t st by";
+    row-gap: 2px;
+  }
+  .ac-t {
+    grid-area: t;
+  }
+  .ac-w {
+    grid-area: w;
+  }
+  .ac-st {
+    grid-area: st;
+  }
+  .ac-by {
+    grid-area: by;
+    justify-self: end;
+  }
+  .ac-took {
+    grid-area: took;
+  }
+  .ac-chev {
+    display: none;
+  }
+  .ac-detail {
+    padding-inline-start: var(--nx-pad);
+  }
+  .ac-gantt > div {
+    grid-template-columns: minmax(0, 110px) minmax(0, 1fr) 52px;
+  }
+}
+@media (max-width: 40rem) {
+  .ac-job {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ac-job__steps span {
+    display: none;
+  }
+  .ac-foot {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ac-hint {
+    text-align: start;
+  }
+  .ac-seg {
+    grid-auto-columns: minmax(0, 1fr);
+  }
+}
+
+/* ── the host-log explorer (Console, Activity ▸ Host log) ────────────── */
+.hl {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr);
+  gap: var(--nx-gap);
+  align-items: start;
+  min-inline-size: 0;
+}
+.hl-side {
+  display: grid;
+  gap: var(--kp-space-lg, 16px);
+  position: sticky;
+  top: 72px;
+  min-inline-size: 0;
+}
+.hl-group h3 {
+  margin: 0 0 6px;
+  font-size: var(--kp-text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+}
+.hl-opts {
+  display: grid;
+  gap: 2px;
+}
+.hl-opt {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: var(--kp-text-sm);
+  cursor: pointer;
+}
+.hl-opt:hover {
+  background: color-mix(in oklab, var(--muted) 60%, transparent);
+}
+.hl-opt small {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.hl-opt--off {
+  opacity: 0.55;
+}
+.hl-opt__name {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hl-only {
+  all: unset;
+  cursor: pointer;
+  font-size: var(--kp-text-xs);
+  color: var(--primary);
+  visibility: hidden;
+}
+.hl-opt:hover .hl-only,
+.hl-opt:focus-within .hl-only {
+  visibility: visible;
+}
+.hl-only:focus-visible {
+  outline: 2px solid var(--ring);
+}
+.hl-sw {
+  display: inline-block;
+  inline-size: 12px;
+  block-size: 12px;
+  border-radius: 3px;
+  background: var(--muted-foreground);
+  flex: none;
+}
+.hl-dot {
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+}
+.hl-dot--info {
+  background: var(--chart-1, var(--primary));
+}
+.hl-dot--warn {
+  background: var(--warning-foreground);
+}
+.hl-dot--bad {
+  background: var(--destructive);
+}
+.hl-hint {
+  margin: 0;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+
+.hl-term {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border: 1px solid var(--border);
+  border-radius: var(--nx-radius);
+  overflow: hidden;
+  background: var(--card);
+  min-inline-size: 0;
+}
+.nx-card .hl-term {
+  border-radius: calc(var(--nx-radius) * 0.8);
+}
+.hl-bar {
+  padding: 10px var(--nx-pad);
+  border-block-end: 1px solid var(--border);
+}
+.hl-count {
+  font-variant-numeric: tabular-nums;
+}
+.hl-hints {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.hl-outwrap {
+  position: relative;
+  min-block-size: 0;
+}
+/* The lines scroll inside this fixed box; the page never grows with them. */
+.hl-out {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  padding: 8px 0;
+  block-size: min(36rem, 62vh);
+  overflow: auto;
+  background: color-mix(in oklab, var(--muted) 35%, var(--card));
+}
+.hl-out:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.hl-out > .hl-lines > .nx-empty,
+.hl-out > .hl-lines > .kp-alert {
+  margin: 16px var(--nx-pad);
+  font-family: var(--theme-font, inherit);
+}
+.hl-xfer {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px var(--nx-pad);
+  border-block-end: 1px solid var(--border);
+  font-size: var(--kp-text-sm);
+}
+.hl-meter {
+  display: block;
+  block-size: 6px;
+  border-radius: 3px;
+  background: var(--muted);
+  overflow: hidden;
+}
+.hl-meter > span {
+  display: block;
+  block-size: 100%;
+  background: var(--primary);
+  border-radius: 3px;
+}
+.hl-ln {
+  display: grid;
+  grid-template-columns: 6.2rem 3.4rem 7rem minmax(0, 1fr);
+  gap: 0 12px;
+  padding: 1px var(--nx-pad);
+  align-items: center;
+  cursor: pointer;
+}
+.hl-ln:hover {
+  background: color-mix(in oklab, var(--muted) 70%, transparent);
+}
+.hl-ln:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.hl-ln[aria-expanded="true"] {
+  background: color-mix(in oklab, var(--accent) 45%, transparent);
+}
+.hl-ln--sk {
+  padding-block: 5px;
+  cursor: default;
+}
+.hl-ln--sk .kp-skeleton {
+  display: block;
+  block-size: 0.9em;
+}
+.hl-ln time {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.hl-lv {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+}
+.hl-lv--warn {
+  color: var(--warning-foreground);
+}
+.hl-lv--error {
+  color: var(--destructive);
+}
+.hl-ln--warn {
+  background: color-mix(in oklab, var(--warning) 35%, transparent);
+}
+.hl-ln--error {
+  background: color-mix(in oklab, var(--destructive) 10%, transparent);
+  box-shadow: inset 3px 0 0 var(--destructive);
+}
+.hl-src {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 0;
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hl-msg {
+  overflow-wrap: anywhere;
+}
+.hl-msg em {
+  font-style: normal;
+  color: var(--muted-foreground);
+}
+.hl-msg mark {
+  background: color-mix(in oklab, var(--warning) 80%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+.hl-ln.is-new {
+  animation: hl-flash 900ms ease-out;
+}
+@keyframes hl-flash {
+  from {
+    background: color-mix(in oklab, var(--info) 70%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hl-ln.is-new {
+    animation: none;
+  }
+}
+.hl-more {
+  display: grid;
+  gap: 6px;
+  margin: 0 var(--nx-pad) 6px calc(var(--nx-pad) + 6.2rem + 12px);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  font-family: var(--theme-font, inherit);
+  font-size: var(--kp-text-sm);
+}
+.hl-kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 12px;
+  margin: 0;
+}
+.hl-kv dt {
+  color: var(--muted-foreground);
+}
+.hl-kv dd {
+  margin: 0;
+}
+.hl-more__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.hl-newpill {
+  position: absolute;
+  inset-block-end: 10px;
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
+}
+.hl-newpill[hidden] {
+  display: none;
+}
+@media (max-width: 64rem) {
+  .hl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .hl-side {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .hl-opts {
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+  .hl-opt {
+    border: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .hl-hint,
+  .hl-side > .kp-button {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 40rem) {
+  .hl-side {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .hl-ln {
+    grid-template-columns: 4.6rem minmax(0, 1fr);
+  }
+  .hl-lv {
+    display: none;
+  }
+  .hl-src {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .hl-msg {
+    grid-column: 1 / -1;
+  }
+  .hl-more {
+    margin-inline-start: var(--nx-pad);
+  }
+  .hl-xfer {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .hl-xfer .hl-meter {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .hl-hints {
+    display: none;
+  }
+}
+
+/* ── Console: the live chip beside the title, the shell bar ──────────── */
+.con-live[data-paused="true"]::before {
+  background: var(--nx-warn);
+}
+.con-body {
+  min-inline-size: 0;
+}
+.con-shell {
+  display: grid;
+  grid-template-columns: 13rem minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px var(--nx-pad);
+  border-block-start: 1px solid var(--border);
+}
+.con-shell select {
+  min-inline-size: 0;
+}
+.con-prompt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--background);
+}
+.con-prompt:focus-within {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.con-prompt b {
+  font-family: var(--font-mono, monospace);
+  color: var(--muted-foreground);
+}
+.con-prompt input {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none;
+  inline-size: 100%;
+  min-inline-size: 0;
+  padding-inline: 0;
+}
+.con-off {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.con-off[hidden] {
+  display: none;
+}
+.con-exec {
+  margin: 8px var(--nx-pad);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  overflow: hidden;
+  font-family: var(--theme-font, inherit);
+}
+.con-exec__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+  border-block-end: 1px solid var(--border);
+}
+.con-exec__state[data-tone="bad"] {
+  color: var(--destructive);
+}
+.con-exec__state[data-tone="ok"] {
+  color: var(--success-foreground);
+}
+.con-exec__out {
+  margin: 0;
+  padding: 8px 10px;
+  max-block-size: 20rem;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.con-exec > .kp-alert {
+  margin: 8px 10px;
+}
+@media (max-width: 40rem) {
+  .con-shell {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .con-shell select {
+    grid-column: 1 / -1;
+  }
+}

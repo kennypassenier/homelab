@@ -223,7 +223,8 @@ async fn fix_239_a_click_while_a_server_form_is_open_says_to_press_or_close() {
     );
 }
 
-/// covers: drive-reach (Kenny, 2026-10-03: "Claude must always be able to
+/// covers: redesign-drive-1
+/// drive-reach (Kenny, 2026-10-03: "Claude must always be able to
 /// reach every control"). A name no page declares is answered by the
 /// dashboard itself, before any tab looks, with the closest real controls
 /// and the line that clicks one; the refusal is kept, with its control, in
@@ -268,7 +269,8 @@ async fn drive_reach_an_unknown_control_is_refused_with_the_closest_and_recorded
     assert!(ids.contains(&"schedule-menu") && ids.len() > 40, "{ids:?}");
 }
 
-/// covers: drive-reach. An old control name still goes to the tab, which
+/// covers: redesign-drive-1
+/// drive-reach. An old control name still goes to the tab, which
 /// clicks what it became (drivable.js `resolve`).
 #[tokio::test(start_paused = true)]
 async fn drive_reach_an_old_control_name_is_not_refused_by_the_dashboard() {
@@ -302,7 +304,8 @@ async fn drive_reach_an_old_control_name_is_not_refused_by_the_dashboard() {
     assert_eq!(pending.await.unwrap()["ok"], true);
 }
 
-/// covers: drive-reach. `goto` takes every address the router knows, the
+/// covers: redesign-drive-2
+/// drive-reach. `goto` takes every address the router knows, the
 /// retired ones included, and keeps where the router's redirect lands it.
 #[tokio::test(start_paused = true)]
 async fn drive_reach_goto_an_old_address_lands_on_its_new_home() {

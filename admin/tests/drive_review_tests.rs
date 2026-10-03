@@ -111,7 +111,8 @@ async fn open_dialog(d: &Driver, live: &Recorder, controls: Value, fields: Value
     assert_eq!(pending.await.unwrap()["ok"], true);
 }
 
-/// covers: drive-reach review "older client". A name the catalog does not
+/// covers: redesign-drive-5
+/// drive-reach review "older client". A name the catalog does not
 /// know, sent by a client that skipped its own check, is answered to that
 /// caller alone: nothing about it is published to the tabs (it showed on
 /// Kenny's screen as a toast before).
@@ -137,7 +138,8 @@ async fn drive_review_an_unknown_name_is_answered_to_the_caller_only() {
     assert!(after.is_empty(), "published to the tabs: {after:?}");
 }
 
-/// covers: drive-reach review "page-level dialog open" and H3. With a
+/// covers: redesign-drive-5
+/// drive-reach review "page-level dialog open" and H3. With a
 /// page-level dialog open, a click or press is checked against the buttons
 /// that dialog offers (by name or by label) before any tab is asked.
 #[tokio::test(start_paused = true)]
@@ -186,7 +188,8 @@ async fn drive_review_inside_a_page_dialog_only_its_own_buttons_go_out() {
     assert_eq!(pending.await.unwrap()["ok"], true);
 }
 
-/// covers: drive-reach review M5. Fields are checked like clicks: a page
+/// covers: redesign-drive-5
+/// drive-reach review M5. Fields are checked like clicks: a page
 /// field no page declares is refused with the closest; inside a page-level
 /// dialog, a field it does not hold is refused naming the ones it has.
 #[tokio::test(start_paused = true)]
@@ -239,7 +242,8 @@ async fn drive_review_fields_are_checked_like_clicks() {
     );
 }
 
-/// covers: drive-reach review H4. The refusal log keeps the verb, the
+/// covers: redesign-drive-5
+/// drive-reach review H4. The refusal log keeps the verb, the
 /// field and the length of what was typed, never the text itself.
 #[tokio::test(start_paused = true)]
 async fn drive_review_the_refusal_log_never_keeps_typed_text() {
@@ -276,7 +280,8 @@ async fn drive_review_the_refusal_log_never_keeps_typed_text() {
     assert_eq!(first["text_len"], typed.len(), "{v}");
 }
 
-/// covers: drive-reach review M3. A `state` answer names the catalog by
+/// covers: redesign-drive-5
+/// drive-reach review M3. A `state` answer names the catalog by
 /// hash and carries neither the catalog nor the refusals; `controls`
 /// answers the catalog text that hash names; `refusals` the log.
 #[tokio::test(start_paused = true)]
@@ -310,7 +315,8 @@ async fn drive_review_state_is_small_and_names_the_catalog_by_hash() {
     assert_eq!(r["refusals"]["total"], 1, "{r}");
 }
 
-/// covers: drive-reach review M4. A step the client refused itself is
+/// covers: redesign-drive-5
+/// drive-reach review M4. A step the client refused itself is
 /// counted in the dashboard's log as the verb and the name, and changes
 /// nothing on screen.
 #[tokio::test(start_paused = true)]
@@ -339,7 +345,8 @@ async fn drive_review_a_local_refusal_is_counted() {
     );
 }
 
-/// covers: drive-reach review (15 s no-answer). An old name that became a
+/// covers: redesign-drive-5
+/// drive-reach review (15 s no-answer). An old name that became a
 /// menu item is clicked as its control, and the press goes to the tab as
 /// a step of its own (the tab no longer presses inside the click's budget).
 #[tokio::test(start_paused = true)]
@@ -371,7 +378,8 @@ async fn drive_review_an_alias_with_a_press_is_two_tab_steps() {
     assert_eq!(a["state"]["page_dialog"]["title"], "Edit schedule");
 }
 
-/// covers: drive-reach review (15 s no-answer). A step that waited out
+/// covers: redesign-drive-5
+/// drive-reach review (15 s no-answer). A step that waited out
 /// TAB_WAIT is closed to the tabs (they drop it, also mid-search), and the
 /// answer tells a claimed step that went quiet from one nobody claimed.
 #[tokio::test(start_paused = true)]
@@ -397,7 +405,8 @@ async fn drive_review_a_closed_step_is_dropped_and_its_no_answer_says_why() {
     assert!(why.contains("nobody claimed it"), "{a}");
 }
 
-/// covers: drive-reach review (15 s no-answer). The tab's own budget for
+/// covers: redesign-drive-5
+/// drive-reach review (15 s no-answer). The tab's own budget for
 /// one step (pagedrive.js, carried in the generated catalog) stays below
 /// the dashboard's wait for its answer, with a margin for the claim and
 /// the answer's round trips.
@@ -414,7 +423,8 @@ fn drive_review_the_tab_budget_fits_inside_the_dashboard_wait() {
     );
 }
 
-/// covers: drive-reach review (15 s no-answer). The tab holding a page-level
+/// covers: redesign-drive-5
+/// drive-reach review (15 s no-answer). The tab holding a page-level
 /// dialog reloads (a new name for the same browser tab, the old one
 /// reported as `was_tab`): the hold goes with the dialog, so the next step
 /// is not refused as "open in another tab".

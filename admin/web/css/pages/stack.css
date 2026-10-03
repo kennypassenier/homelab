@@ -291,6 +291,14 @@
   margin: 0;
   align-content: start;
 }
+/* A stack whose files do not read says so across the whole list, its
+   words wrapping, never one max-content column wider than a phone
+   (redesign-integrate-6). */
+.sh-kv > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
 .sh-kv dt {
   color: var(--muted-foreground);
   font-size: var(--kp-text-sm);

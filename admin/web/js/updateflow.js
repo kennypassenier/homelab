@@ -20,7 +20,10 @@ import { releaseUrl } from "./staleimages.js";
  * @typedef {{id: string, kind: "pin" | "pull", stack: string,
  *   container: string, key: string | null, from: string, to: string,
  *   major: boolean, notes: string | null}} Item
- * @typedef {{all: true} | {all: false, stack: string, app?: string | null}} Scope
+ * @typedef {{all: true, only?: string[]} |
+ *   {all: false, stack: string, app?: string | null}} Scope
+ *   `only`: the stacks a Stacks batch ticked (every app of those stacks
+ *   with a newer version; redesign-integrate-5)
  */
 
 /**
@@ -38,6 +41,16 @@ export function updateHref(stack = null, app = null) {
 }
 
 /**
+ * The flow's address for the stacks a Stacks batch ticked: one stack's own
+ * flow, or every newer app of those stacks (redesign-integrate-5).
+ * @param {string[]} stacks
+ */
+export function updateHrefFor(stacks) {
+  if (stacks.length === 1) return updateHref(stacks[0]);
+  return `/update?${new URLSearchParams({ all: "1", only: stacks.join(",") })}`;
+}
+
+/**
  * The flow's scope from `/update`'s query; null when it names none.
  * @param {string} search
  * @returns {Scope | null}
@@ -46,7 +59,9 @@ export function scopeOf(search) {
   const q = new URLSearchParams(search);
   const stack = q.get("stack");
   if (stack) return { all: false, stack, app: q.get("app") };
-  if (q.get("all") != null) return { all: true };
+  const only = (q.get("only") ?? "").split(",").filter(Boolean);
+  if (q.get("all") != null)
+    return only.length ? { all: true, only } : { all: true };
   return null;
 }
 
@@ -66,8 +81,10 @@ export function legacyUpdateHref(search) {
  * The area the nav marks: Stacks for one stack's update, the Inbox for all.
  * @param {string} search
  */
-export const flowArea = (search) =>
-  scopeOf(search)?.all === false ? "overview" : "inbox";
+export const flowArea = (search) => {
+  const s = scopeOf(search);
+  return s && (!s.all || s.only) ? "overview" : "inbox";
+};
 
 /**
  * What the list holds: the pinned images with a newer version (all of
@@ -79,7 +96,11 @@ export const flowArea = (search) =>
 export function itemsFor(staleBody, scope) {
   /** @type {Item[]} */
   const out = staleApps(staleBody)
-    .filter((a) => scope.all || a.stack === scope.stack)
+    .filter((a) =>
+      scope.all
+        ? !scope.only || scope.only.includes(a.stack)
+        : a.stack === scope.stack,
+    )
     .map((a) => ({
       id: `pin:${a.stack}:${a.key}`,
       kind: "pin",
@@ -455,4 +476,6 @@ export function movesOf(items) {
  * @param {Scope} scope
  */
 export const scopeMatches = (items, scope) =>
-  scope.all || items.some((i) => i.stack === scope.stack);
+  scope.all
+    ? !scope.only || items.some((i) => scope.only?.includes(i.stack))
+    : items.some((i) => i.stack === scope.stack);

@@ -1,12 +1,13 @@
 // redesign-3.71 secrets (Kenny, 2026-10-03: the approved demo plus "Alle
 // drie"): the Secrets page as a person sees it, on the demo host
 // (scripts/invariants-run.sh starts it and runs every test-e2e/*.e2e.js).
-// One whole-screen case for the layout at 1894 and 390 px, one for the
+// One whole-screen case for a stack hub's Secrets at 1894 and 390 px
+// (the fleet-wide page became each hub's since feat-shell-1), one for the
 // reveal → 30 s → hidden cycle, the Copy, and the audit trail Activity
 // reads ("Kenny revealed gateway/traefik/.env"), never the value.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chromium } from "playwright";
+import { launch } from "./harness.js";
 
 const BASE = process.env.INVARIANTS_BASE_URL ?? "http://127.0.0.1:8099";
 const TOKEN = process.env.INVARIANTS_TOKEN ?? "test-invariants-token-1234";
@@ -26,92 +27,105 @@ async function login(context) {
 /** @param {import("playwright").Page} page */
 const panes = (page) =>
   page.evaluate(() => {
-    const box = (/** @type {string} */ sel) => {
-      const e = document.querySelector(sel);
+    const box = (/** @type {Element | null} */ e) => {
       if (!e) return null;
       const r = e.getBoundingClientRect();
       return { x: r.x, y: r.y + scrollY, w: r.width, h: r.height };
     };
+    const root = document.querySelector("#secrets .sx--one");
+    const detail = root?.querySelector(".sx-one-detail") ?? null;
     return {
-      list: box(".sx-stacks"),
-      detail: box(".sx-md > section"),
-      drawer: box(".sx-drawer"),
-      header: box(".sx .nx-head"),
+      list: box(document.querySelector(".sx-stacks")),
+      detail: box(detail),
+      drawer: box(root?.querySelector(".sx-drawer--one") ?? null),
+      // review 5: inside the hub the pane is no second card: no heading of
+      // its own, no Open stack, no other stack to move to.
+      heads: detail ? detail.querySelectorAll("h2, h3").length : -1,
+      cardInCard: detail?.classList.contains("kp-card") ?? null,
+      openStack: [...(detail?.querySelectorAll("a") ?? [])].some(
+        (a) => (a.textContent ?? "").trim() === "Open stack",
+      ),
+      keys: detail?.querySelector(".nx-card__foot")?.textContent ?? "",
+      rows: [...document.querySelectorAll("[data-drive=reveal-secret]")].map(
+        (b) => b.getAttribute("data-drive-row"),
+      ),
       scrollW: document.documentElement.scrollWidth,
       viewW: innerWidth,
-      chips: [...document.querySelectorAll(".sx-stacks button")].map((b) => [
-        b.getAttribute("data-drive-row"),
-        b.querySelector(".nx-chip")?.textContent ?? null,
-      ]),
-      skeletons: document.querySelectorAll(".sx .sk").length,
+      skeletons: root ? root.querySelectorAll(".sk").length : -1,
     };
   });
 
-test("secrets: three panes side by side at 1894 px, stacked at 390 px, every count exact", async () => {
-  const browser = await chromium.launch();
+// feat-shell-1 moved the Secrets page into each stack hub's Settings
+// (`/secrets` redirects there), so the fleet-wide three panes are gone;
+// this case holds the hub's one-stack Secrets instead (redesign-stackhub
+// review 5, redesign-integrate-3).
+test("secrets: a stack hub's Secrets lists exactly that stack's secrets beside its change drawer at 1894 px, stacked at 390 px, no card in a card", async () => {
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
     });
     const page = await login(context);
-    // The page's own read, to hold the chips to.
+    // The page's own read, to hold the rows to.
     const declared = await page.evaluate(async () => {
       const r = await fetch("/data/secrets");
       return (await r.json()).stacks;
     });
-    await page.goto(`${BASE}/secrets`);
-    await page.waitForSelector(".sx-stacks button");
+    const stack = Object.keys(declared).find(
+      (s) =>
+        !declared[s].unreadable &&
+        declared[s].secrets.length + declared[s].files.length > 0,
+    );
+    assert.ok(
+      stack,
+      `no demo stack declares a secret: ${JSON.stringify(declared)}`,
+    );
+    await page.goto(`${BASE}/stacks/${stack}/settings?section=secrets`);
+    await page.waitForSelector("[data-drive=reveal-secret]", {
+      timeout: 10000,
+    });
     await page.waitForTimeout(600);
     const wide = await panes(page);
-    assert.ok(wide.list && wide.detail && wide.drawer, JSON.stringify(wide));
+    assert.ok(wide.detail && wide.drawer, JSON.stringify(wide));
+    assert.equal(wide.list, null, "a fleet-wide stack list inside the hub");
     assert.equal(wide.skeletons, 0, "a skeleton left after the read");
-    // One row: stacks | secrets | change drawer, tops aligned (rule 6).
-    assert.ok(wide.list.x + wide.list.w <= wide.detail.x, "list beside detail");
+    assert.equal(wide.heads, 0, "the pane carries a heading of its own");
+    assert.equal(wide.cardInCard, false, "the pane is a card inside the card");
+    assert.equal(wide.openStack, false, "the pane links to the stack it is on");
+    assert.doesNotMatch(wide.keys, /stack ·/, "the keys offer another stack");
+    // One row: the secrets and the change drawer, tops aligned (rule 6).
     assert.ok(
       wide.detail.x + wide.detail.w <= wide.drawer.x,
-      "detail beside drawer",
+      "the secrets beside the drawer",
     );
-    assert.equal(Math.round(wide.list.y), Math.round(wide.detail.y));
     assert.equal(Math.round(wide.detail.y), Math.round(wide.drawer.y));
     assert.ok(wide.scrollW <= wide.viewW, "no sideways scroll at 1894 px");
-    // Exact counters: every chip is that stack's secrets + files.
-    assert.ok(wide.chips.length >= 3, JSON.stringify(wide.chips));
-    for (const [stack, chip] of wide.chips) {
-      const d = declared[stack ?? ""];
-      const want = d
-        ? d.unreadable
-          ? "!"
-          : String(d.secrets.length + d.files.length)
-        : "0";
-      assert.equal(chip, want, `${stack}'s chip`);
-    }
-    // The detail pane lists exactly what the chosen stack declares.
-    const shown = await page.$$eval("[data-drive=reveal-secret]", (b) =>
-      b.map((x) => x.getAttribute("data-drive-row")),
+    // Exactly what this stack declares, and only this stack.
+    const d = declared[stack];
+    assert.equal(wide.rows.length, d.secrets.length + d.files.length);
+    assert.ok(
+      wide.rows.every((r) => (r ?? "").startsWith(`${stack}/`)),
+      JSON.stringify(wide.rows),
     );
-    const stack = new URL(page.url()).searchParams.get("stack") ?? "gateway";
-    const d = declared[stack] ?? declared.gateway;
-    assert.equal(shown.length, d.secrets.length + d.files.length);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForTimeout(300);
     const phone = await panes(page);
-    assert.ok(phone.list && phone.detail && phone.drawer);
-    assert.ok(phone.list.y + phone.list.h <= phone.detail.y, "list above");
+    assert.ok(phone.detail && phone.drawer);
     assert.ok(
       phone.detail.y + phone.detail.h <= phone.drawer.y,
-      "detail above drawer",
+      "the secrets above the drawer",
     );
     assert.ok(phone.scrollW <= 390, `sideways scroll: ${phone.scrollW} px`);
-    for (const p of [phone.list, phone.detail, phone.drawer])
-      assert.ok(p.x >= 0 && p.x + p.w <= 390, "a pane runs off the phone");
+    for (const b of [phone.detail, phone.drawer])
+      assert.ok(b.x >= 0 && b.x + b.w <= 390, "a pane runs off the phone");
   } finally {
     await browser.close();
   }
 });
 
 test("secrets: a reveal hides itself after 30 s, Copy copies, and Activity names who did both, never the value", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },

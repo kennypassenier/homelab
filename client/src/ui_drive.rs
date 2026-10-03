@@ -376,7 +376,8 @@ mod tests {
             .block_on(drive(line, step, cache))
     }
 
-    /// covers: drive-reach review L3/M3. The state is read, the catalog
+    /// covers: redesign-drive-5
+    /// drive-reach review L3/M3. The state is read, the catalog
     /// fetched once by its hash and kept; the second click reads it from
     /// the cache (no `controls` step), and the click goes out.
     #[test]
@@ -405,7 +406,8 @@ mod tests {
         );
     }
 
-    /// covers: drive-reach review H2. An older dashboard (no catalog named
+    /// covers: redesign-drive-5
+    /// drive-reach review H2. An older dashboard (no catalog named
     /// in its state) is driven unchecked, and the driver is told so.
     #[test]
     fn drive_reach_an_older_dashboard_is_driven_unchecked_with_a_note() {
@@ -423,7 +425,8 @@ mod tests {
         );
     }
 
-    /// covers: drive-reach review H2. A catalog the state names but that
+    /// covers: redesign-drive-5
+    /// drive-reach review H2. A catalog the state names but that
     /// cannot be read (a newer schema, a broken answer, a hash that does
     /// not match) refuses the step here: nothing reaches the screen.
     #[test]
@@ -454,7 +457,8 @@ mod tests {
         assert!(!line.verbs().contains(&"click"), "{:?}", line.verbs());
     }
 
-    /// covers: drive-reach review M4/L3. An unknown name is refused here
+    /// covers: redesign-drive-5
+    /// drive-reach review M4/L3. An unknown name is refused here
     /// (exit 1), and the refusal is reported to the dashboard's log as the
     /// verb and the name only.
     #[test]
@@ -479,7 +483,8 @@ mod tests {
         );
     }
 
-    /// covers: drive-reach review L3. An old name is sent as the click and
+    /// covers: redesign-drive-5
+    /// drive-reach review L3. An old name is sent as the click and
     /// the press, in order; a refused first step ends the line with its
     /// answer and the press is never sent.
     #[test]
@@ -511,7 +516,8 @@ mod tests {
         assert_eq!(d.end, End::HostGone);
     }
 
-    /// covers: drive-reach review H3. Inside a page-level dialog a button is
+    /// covers: redesign-drive-5
+    /// drive-reach review H3. Inside a page-level dialog a button is
     /// checked against what that dialog offers (its names and labels), not
     /// against the page catalog: a label the dashboard allows is sent, a
     /// button the dialog lacks is refused here.
@@ -564,7 +570,8 @@ mod tests {
         );
     }
 
-    /// covers: drive-reach review M5. A page field is checked like a click:
+    /// covers: redesign-drive-5
+    /// drive-reach review M5. A page field is checked like a click:
     /// an unknown one is refused with the closest, an old id rewritten, a
     /// field per row accepted by its row.
     #[test]
@@ -642,7 +649,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// covers: drive-reach review L1. `/stacks/…` is checked against the
+    /// covers: redesign-drive-5
+    /// drive-reach review L1. `/stacks/…` is checked against the
     /// router's shape: a tab the hub never had is refused; a retired tab
     /// says where it lands.
     #[test]

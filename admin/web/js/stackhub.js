@@ -8,6 +8,7 @@
 // draws (test/stackhub.test.js).
 
 import { historyRows } from "./activity.js";
+import { ownerOf } from "./activityview.js";
 import { cellState, nightKey, nightRange, nightsNow } from "./backupsview.js";
 import { humanMb, stackState } from "./fleet.js";
 import { canonicalLevel } from "./logs.js";
@@ -939,7 +940,9 @@ export function whoOf(e) {
       key: "claude",
       label: /live view/i.test(by) ? "Claude · Live view" : by,
     };
-  if (by) return { key: "you", label: by };
+  // A workstation's own token names its owner as Activity's By does
+  // ("Kenny · CLI on wsl"; activityview.js `ownerOf`, one rule for both).
+  if (by) return { key: "you", label: ownerOf(by) };
   if (e.req != null) return { key: "you", label: PERSON };
   return { key: "night", label: "nightly round" };
 }

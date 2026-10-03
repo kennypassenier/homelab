@@ -920,37 +920,44 @@
   margin-inline-start: auto;
 }
 /* The demo's phone header: title + chip, the description, "Run a
-   command" across the width, then Pause and Download side by side. */
-@media (max-width: 40rem) {
-  .con-head {
+   command" across the width, then Pause and Download side by side; the
+   selectors outweigh the kit's own narrow header (app.css). */
+@media (max-width: 48rem) {
+  .con-page .nx-head.con-head:not(.nx-head--meta) {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px 10px;
   }
-  .con-head .title-row,
-  .con-head .nx-head-right,
-  .con-head .nx-head-actions {
+  .con-page .nx-head.con-head:not(.nx-head--meta) .title-row,
+  .con-page .nx-head.con-head:not(.nx-head--meta) .nx-head-right,
+  .con-page .nx-head.con-head:not(.nx-head--meta) .nx-head-actions {
     display: contents;
   }
-  .con-head .title-row > h1 {
+  .con-page .nx-head.con-head:not(.nx-head--meta) .title-row > h1 {
     order: 1;
     flex: none;
   }
-  .con-head .con-live {
+  .con-page .nx-head.con-head:not(.nx-head--meta) .con-live {
     order: 2;
   }
-  .con-head .nx-head-desc {
+  .con-page .nx-head.con-head:not(.nx-head--meta) .nx-head-desc {
     order: 3;
     flex: 1 1 100%;
     margin-block-start: 0 !important;
   }
-  .con-head .nx-head-actions > .kp-button--primary {
+  .con-page
+    .nx-head.con-head:not(.nx-head--meta)
+    .nx-head-actions
+    > .kp-button--primary {
     order: 4;
     flex: 1 1 100%;
     justify-content: center;
   }
-  .con-head .nx-head-actions > .kp-button--secondary {
+  .con-page
+    .nx-head.con-head:not(.nx-head--meta)
+    .nx-head-actions
+    > .kp-button--secondary {
     order: 5;
     flex: 1 1 0;
     justify-content: center;

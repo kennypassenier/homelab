@@ -256,3 +256,19 @@ summarised here for the corrections record.
 7. **Hoe en wanneer meten we dat het werkt.** After the 3.71.0 rollout: `homelab snapshots stacks/inbox` lists the `inbox` repository with the snapshot doctor dates; `status --json` `disk_detail.root_disk_device` names a disk and `root_disk_total_gb` > 0; `homelab checks` shows the same open answers `homelab today` counts; `homelab check` keeps saying "edge: Cloudflare agrees".
 8. **Fallback.** If one still disagrees live, the row stays "doing" and the reading is reported with the command output, not reasoned away.
 9. **Wanneer herzien we de maatregel.** At the measurement in field 7.
+
+---
+
+## Correction · redesign-integrate-7 — a whole-screen run stalled 12 minutes on one case
+
+**Draft — awaiting Kenny.**
+
+1. **Wat ging er mis.** On 2026-10-03 the 3.71.0 integration's whole-screen run (59 cases) stood still for 12 minutes on one case and named none; the coordinator stopped it at 18:20 (its browser alive 8 min 45 s with 4 s of CPU, the PC idle). The case was the Live view sweep "drive-reach: Live view finds and presses every declared control", which after the merges presses about twice as many controls and had no deadline per control.
+2. **Welke poort liet het door.** None: the runner gave a case no deadline (`node --test` without `--test-timeout`), and only contexts made through `freshPage` had Playwright's per-step defaults; a case that opened its own context or waited inside `page.evaluate` could wait for ever.
+3. **Waar dezelfde fout nog zit.** Every case that launched its own browser (all 153 in `invariants.e2e.js` and `secrets.e2e.js` called `chromium.launch()` directly) and every loop over a catalog (the sweep, the walk of every route).
+4. **Hoe voorkomen we herhaling.** `scripts/invariants-run.sh` passes every `node --test` a per-test deadline (`INVARIANTS_TEST_TIMEOUT_MS`, 300 s by default); `admin/web/test-e2e/harness.js` is the one place a browser is launched and gives every context 20 s per step and per navigation; the sweep gives each control's try 45 s and names it, with a progress line per control when `INVARIANTS_PROGRESS` is set.
+5. **Kost.** Small: one harness file, one flag, a mechanical rewrite of the launches.
+6. **Handhaving.** Code: `admin/web/test/e2e_deadlines.test.js` ("redesign-integrate-7: every whole-screen case runs under a per-test deadline and per-step defaults", in `npm run check`, so at commit) refuses a run line without `--test-timeout`, a `chromium.launch(` or a Playwright import outside the harness, and a `timeout: 0`.
+7. **Hoe en wanneer meten we dat het werkt.** At the next whole-screen run: no case runs past its deadline without failing by name; the 3.71.0 Go form's run reports every case's duration.
+8. **Fallback.** If a case still hangs inside its deadline window often, the deadline drops to the longest measured case plus a margin and that case is split.
+9. **Wanneer herzien we de maatregel.** At the 3.71.0 retrospective.

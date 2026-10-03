@@ -359,7 +359,9 @@ export function kpi(k) {
   let loading = false;
   const set = (/** @type {Partial<Kpi> & {loading?: boolean}} */ next) => {
     const { loading: l, ...rest } = next;
+    // A value arriving ends the skeleton unless the caller says otherwise.
     if (l != null) loading = l;
+    else if ("value" in rest) loading = false;
     cur = { ...cur, ...rest };
     label.textContent = cur.label;
     if (loading) e.dataset.loading = "";
@@ -2056,7 +2058,8 @@ export function drawer(spec) {
       "button",
       {
         type: "button",
-        class: "nx-icon-btn",
+        // kp-dialog__close: the same ✕ every dialog of the app has.
+        class: "nx-icon-btn kp-dialog__close",
         "aria-label": "Close",
         title: "Close (Esc)",
         onclick: close,

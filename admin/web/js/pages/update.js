@@ -180,7 +180,8 @@ const TAB_JOB = {
 };
 
 /** @param {Scope} s */
-const scopeKey = (s) => (s.all ? "all" : `stack:${s.stack}`);
+const scopeKey = (s) =>
+  s.all ? (s.only ? `only:${s.only.join(",")}` : "all") : `stack:${s.stack}`;
 
 const now = () => Date.now() / 1000;
 
@@ -198,25 +199,31 @@ const finishedJob = (j) => j.state !== "queued" && j.state !== "running";
 export function mount(root, scope) {
   ensureStyle("/css/pages/update.css");
   const key = scopeKey(scope);
-  const crumbs = scope.all
-    ? [{ label: "Inbox", href: "/inbox" }, { label: "Update apps" }]
-    : [
-        { label: "Stacks", href: "/stacks" },
-        {
-          label: scope.stack,
-          href: `/stacks/${encodeURIComponent(scope.stack)}`,
-        },
-        { label: "Update" },
-      ];
+  // A Stacks batch (`only`) belongs to Stacks, every app to the Inbox.
+  const fromStacks = scope.all && !!scope.only;
+  const crumbs = fromStacks
+    ? [{ label: "Stacks", href: "/stacks" }, { label: "Update apps" }]
+    : scope.all
+      ? [{ label: "Inbox", href: "/inbox" }, { label: "Update apps" }]
+      : [
+          { label: "Stacks", href: "/stacks" },
+          {
+            label: scope.stack,
+            href: `/stacks/${encodeURIComponent(scope.stack)}`,
+          },
+          { label: "Update" },
+        ];
   const head = pageHeader({
     title: scope.all ? "Update apps" : `Update ${scope.stack}`,
     desc: "Moving an app to a newer version, in six visible steps. Nothing runs until step 2's button; after that you may leave this page — the job keeps going and the bar shows it.",
     crumbs,
   });
   const steps = stepper(STEPS.map((s) => s));
-  const back = scope.all
-    ? "/inbox"
-    : `/stacks/${encodeURIComponent(scope.stack)}`;
+  const back = fromStacks
+    ? "/stacks"
+    : scope.all
+      ? "/inbox"
+      : `/stacks/${encodeURIComponent(scope.stack)}`;
 
   // ---- 1 · See -------------------------------------------------------
   const see = section({
@@ -415,7 +422,11 @@ export function mount(root, scope) {
                 href: back,
                 title: "Nothing to update: go back",
               },
-              scope.all ? "Back to the Inbox" : "Back to the stack",
+              fromStacks
+                ? "Back to Stacks"
+                : scope.all
+                  ? "Back to the Inbox"
+                  : "Back to the stack",
             ),
             AFTER,
             "back",
@@ -917,9 +928,11 @@ export function mount(root, scope) {
         ? `Claude (Live view, ${j.origin.by})`
         : j.origin?.from === "schedule"
           ? "A schedule"
-          : scope.all
-            ? "You, from the Inbox"
-            : `You, from ${scope.stack}`;
+          : fromStacks
+            ? "You, from Stacks"
+            : scope.all
+              ? "You, from the Inbox"
+              : `You, from ${scope.stack}`;
     const words = jobItems
       .map((i) =>
         i.kind === "pin"

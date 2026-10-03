@@ -27,6 +27,7 @@ import { gb } from "../fleet.js";
 import { openImport } from "../importstack.js";
 import { inboxNow, onInbox } from "../inbox.js";
 import { openNewStack } from "../newstack.js";
+import { updateHrefFor } from "../updateflow.js";
 import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
 import {
@@ -453,9 +454,8 @@ export function mount(root, ctx) {
     "Deploy every ticked stack, one after the other, each backed up first",
     true,
   );
-  // Update… is the Update flow, not a blind batch: each ticked stack's own
-  // Update dialog in turn (`openAction(stack, "update")`, the one entry
-  // point the Update flow routes), the next once the previous closes.
+  // Update… is the one Update flow (invariant 149), not a blind batch: the
+  // ticked stacks' apps with a newer version, seen before anything runs.
   const batchUpdate = drivable(
     viaForm(
       h(
@@ -465,7 +465,7 @@ export function mount(root, ctx) {
           class: "kp-button kp-button--sm",
           "data-batch": "update",
           title:
-            "Update the ticked stacks: each stack's Update dialog in turn, where you see what changes before it runs",
+            "Update the ticked stacks in the Update flow: see what changes, then back up, update and verify",
         },
         "Update…",
       ),
@@ -474,7 +474,11 @@ export function mount(root, ctx) {
     BATCH,
     "update",
   );
-  batchUpdate.addEventListener("click", () => void updateEach([...ticked]));
+  // redesign-integrate-5: the one Update flow (invariant 149) for every
+  // ticked stack at once.
+  batchUpdate.addEventListener("click", () =>
+    ctx.navigate(updateHrefFor([...ticked])),
+  );
   const untick = drivable(
     h(
       "button",
@@ -1165,19 +1169,6 @@ export function mount(root, ctx) {
         : n === 0
           ? "Every stack matched its files at the last comparison; open to compare again"
           : `${n} ${n === 1 ? "stack differs" : "stacks differ"} from ${n === 1 ? "its" : "their"} files (new and removed ones included); deploy them in one confirmed batch, each backed up first`;
-  };
-
-  /**
-   * Each stack's Update dialog in turn; closing one opens the next, and a
-   * dialog that could not open ends the round.
-   * @param {string[]} stacks
-   */
-  const updateEach = async (stacks) => {
-    for (const s of stacks) {
-      const c = await openAction(s, "update");
-      if (!c) return;
-      await c.closed;
-    }
   };
 
   // ── side panels ──────────────────────────────────────────────────────

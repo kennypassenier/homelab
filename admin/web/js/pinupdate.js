@@ -328,8 +328,84 @@ async function drawMove(d, body, move, o) {
 
   confirm.addEventListener("click", () => {
     if (/** @type {HTMLButtonElement} */ (confirm).disabled) return;
-    void run(d, body, move, edit);
+    // redesign-integrate-4: a roll back runs on the dashboard's server as
+    // the Update flow's own job, so a closed tab never stops it half-way.
+    void (o.rollback ? runOnServer(d, body, move) : run(d, body, move, edit));
   });
+}
+
+/**
+ * The body of the server's one update job (`POST /data/actions/_host/
+ * update-apps`, admin/src/shell/actions_flow.rs) for one pinned app moving
+ * from `move.from` to `move.to`: back up, commit the image line, deploy,
+ * verify, and on a failed verify put the image it ran back by itself.
+ * @param {Move} move
+ */
+export function pinJobBody(move) {
+  return {
+    updates: JSON.stringify([
+      {
+        stack: move.stack,
+        kind: "pin",
+        key: move.key,
+        app: move.key.split("/")[0],
+        from: move.from,
+        to: move.to,
+      },
+    ]),
+  };
+}
+
+/**
+ * A roll back as one server job, followed in the shared job panel; the
+ * job goes on when this dialog or its tab is closed (Activity has it).
+ * @param {{dialog: HTMLDialogElement, close: () => void}} d
+ * @param {HTMLElement} body
+ * @param {Move} move the roll back: from the image it runs to the earlier one
+ */
+async function runOnServer(d, body, move) {
+  const panelSlot = h("div", { class: "pin-update__panel" });
+  const end = h("div", { class: "pin-update__end" });
+  body.replaceChildren(
+    h(
+      "p",
+      { class: "measured", role: "status" },
+      `Backing up ${move.stack}, then committing and deploying ${move.key} at ${move.to_version}. This runs on the dashboard: closing this dialog or the tab does not stop it; Activity shows it.`,
+    ),
+    panelSlot,
+    end,
+  );
+  const r = await send(
+    "POST",
+    "/data/actions/_host/update-apps",
+    pinJobBody(move),
+    `the roll back of ${move.key}`,
+  );
+  if (!r.ok) {
+    end.replaceChildren(refusalCallout(r.error), closeRow(d.close));
+    return;
+  }
+  const job = /** @type {number} */ (r.body.job);
+  const p = mountJobPanel(job, { compact: true });
+  d.dialog.addEventListener("close", () => p.stop(), { once: true });
+  panelSlot.replaceChildren(p.element);
+  const state = await jobEnd(job);
+  if (!d.dialog.open) return;
+  end.replaceChildren(
+    h(
+      "p",
+      {
+        class:
+          state === "done"
+            ? "measured"
+            : "kp-alert kp-alert--destructive error",
+      },
+      state === "done"
+        ? `${move.key} runs ${move.to_version} again.`
+        : `The roll back ended ${state}; the job above says why, and the backup it took holds the data as it was.`,
+    ),
+    closeRow(d.close),
+  );
 }
 
 /**

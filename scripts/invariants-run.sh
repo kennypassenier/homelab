@@ -196,12 +196,35 @@ cd admin/web
 # fail-before / pass-after run), never a substitute for the full run a
 # release gate makes. INVARIANTS_SCRIPT: run another script against the same
 # demo host instead (a screenshot pass), with the same two variables set.
+# redesign-integrate-7: every case has a deadline of its own
+# (INVARIANTS_TEST_TIMEOUT_MS, 300 s by default), and an outer watchdog
+# (scripts/e2e-watchdog.py) kills the whole run when no case started or
+# ended for 90 s while its browsers did no work — a hang the in-test
+# deadline cannot see (a stuck browser or driver connection) — and names
+# the last case it started.
 if [ -n "${INVARIANTS_SCRIPT:-}" ]; then
   INVARIANTS_BASE_URL="$base_url" INVARIANTS_TOKEN="$token" node "$INVARIANTS_SCRIPT"
-elif [ -n "${INVARIANTS_ONLY:-}" ]; then
-  INVARIANTS_BASE_URL="$base_url" INVARIANTS_TOKEN="$token" \
-    node --test --test-concurrency=1 --test-name-pattern="$INVARIANTS_ONLY" test-e2e/*.e2e.js
 else
+  progress="$workdir/progress.tap"
+  : > "$progress"
+  only=()
+  [ -n "${INVARIANTS_ONLY:-}" ] && only=(--test-name-pattern="$INVARIANTS_ONLY")
   INVARIANTS_BASE_URL="$base_url" INVARIANTS_TOKEN="$token" \
-    node --test --test-concurrency=1 test-e2e/*.e2e.js
+  INVARIANTS_PROGRESS_FILE="$progress" \
+    node --test --test-concurrency=1 \
+      --test-timeout="${INVARIANTS_TEST_TIMEOUT_MS:-300000}" \
+      --test-reporter=spec --test-reporter-destination=stdout \
+      --test-reporter=tap --test-reporter-destination="$progress" \
+      "${only[@]}" test-e2e/*.e2e.js &
+  run_pid=$!
+  python3 "$root/scripts/e2e-watchdog.py" "$run_pid" "$progress" &
+  watchdog_pid=$!
+  rc=0
+  wait "$run_pid" || rc=$?
+  wait "$watchdog_pid" 2>/dev/null || true
+  if [ -f "$progress.fired" ]; then
+    cat "$progress.fired" >&2
+    exit 3
+  fi
+  exit "$rc"
 fi

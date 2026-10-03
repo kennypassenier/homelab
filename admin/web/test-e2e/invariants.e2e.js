@@ -14,7 +14,7 @@
 // INVARIANTS_BASE_URL.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chromium } from "playwright";
+import { launch } from "./harness.js";
 // fix-210: this import was missing — the fix-206 spacing sweep below has
 // referenced DRIVABLE_PATHS since it was written without ever importing
 // it, a ReferenceError this suite's own runs apparently never surfaced
@@ -84,7 +84,7 @@ async function openStackMore(page) {
 }
 
 test("invariants: the nav bar stays inline, with brand Homelab and the version beside the search box, at 1600/1920/2560 CSS px and at 1894 in the widest themes", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -128,7 +128,7 @@ test("invariants: the nav bar stays inline, with brand Homelab and the version b
 });
 
 test("invariants: Pause and Stop are visible in every Live view drive state", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -164,7 +164,7 @@ test("invariants: Pause and Stop are visible in every Live view drive state", as
 });
 
 test("invariants: the backup calendar shows its skeleton grid immediately, before any stack has answered", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -189,7 +189,7 @@ test("invariants: the backup calendar shows its skeleton grid immediately, befor
 });
 
 test("invariants: the job dialog's panel does not shift sideways between its running and done states", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -233,7 +233,7 @@ test("invariants: the job dialog's panel does not shift sideways between its run
 });
 
 test("invariants: an expandable row opens and closes from a click anywhere in it, never from its own controls", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -282,7 +282,7 @@ test("invariants: an expandable row opens and closes from a click anywhere in it
 });
 
 test("invariants: the kit's Status and Clients pages are switched off, Passkeys stays", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -315,7 +315,7 @@ test("invariants: the kit's Status and Clients pages are switched off, Passkeys 
 });
 
 test("invariants: a table's data loads once; live updates never duplicate its rows", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -352,7 +352,7 @@ test("invariants: a version difference never blocks — Live view still drives a
   // still drives what that version knows, refuses only the one page/form
   // it does not, by name, and still opens the update path's own dialog —
   // never a blanket refusal naming two version numbers.
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -447,7 +447,7 @@ test("invariants: a version difference never blocks — Live view still drives a
 // minuten zie ik nog altijd niks van data laden. nog altijd 11/13") ────────
 
 test("invariants: the backup calendar paints a stack's own cells as soon as it answers, without waiting for the rest", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -479,7 +479,7 @@ test("invariants: the backup calendar paints a stack's own cells as soon as it a
 });
 
 test("invariants: a stack with nothing to back up is named at once, never left pending", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -514,7 +514,7 @@ test("invariants: a stack with nothing to back up is named at once, never left p
 });
 
 test("invariants: the backup calendar's grid uses at least 75% of the content area at 1920px", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -537,7 +537,7 @@ test("invariants: the backup calendar's grid uses at least 75% of the content ar
 // ── fix-214: the backup calendar is a month view (a date picker) ─────────
 
 test("invariants: the backup calendar shows a month heading, and prev/next change the month", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -560,7 +560,7 @@ test("invariants: the backup calendar shows a month heading, and prev/next chang
 });
 
 test("invariants: the backup calendar grid is never more than 6 week rows, in every month", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -583,7 +583,7 @@ test("invariants: the backup calendar grid is never more than 6 week rows, in ev
 });
 
 test("invariants: clicking a day in the backup calendar shows its detail with the stacks", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -612,7 +612,7 @@ test("invariants: clicking a day in the backup calendar shows its detail with th
 // ── fix-224: a stuck per-stack read is named and offers a Retry ──────────
 
 test("invariants: a stack that never answers is named in the progress and turns into a timed-out state with Retry", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -674,7 +674,7 @@ test("invariants: a stack that never answers is named in the progress and turns 
 // ── fix-215: one topology, not a near-identical second one ───────────────
 
 test("invariants: only one topology exists, on the Fleet view, and the traffic toggle works", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -741,7 +741,7 @@ test("invariants: only one topology exists, on the Fleet view, and the traffic t
 // met niks gelinked?") ──────────────────────────────────────────────────
 
 test("invariants: fleet view shows a legend and an edge for a stack whose own files name another stack's address", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -771,7 +771,7 @@ test("invariants: fleet view shows a legend and an edge for a stack whose own fi
 });
 
 test("invariants: every page keeps clear vertical spacing between its top-level sections and is drawn in kp-themes styling", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -858,7 +858,7 @@ test("invariants: every page keeps clear vertical spacing between its top-level 
 // row, so each stack's colour lives on its own node (and its mark in the
 // side panel and the list), and a hover on the node isolates its edges.
 test("invariants: the topology gives every stack its own colour", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -891,7 +891,7 @@ test("invariants: the topology gives every stack its own colour", async () => {
 });
 
 test("invariants: hovering a stack in the topology isolates its own edges, leaving restores them", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -940,7 +940,7 @@ test("invariants: hovering a stack in the topology isolates its own edges, leavi
 });
 
 test("invariants: a stack whose firewall the host enforces is shown as enforced even when the repository disagrees", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -971,7 +971,7 @@ test("invariants: a stack whose firewall the host enforces is shown as enforced 
 });
 
 test("invariants: Deploy all changes reads its plan only once its panel is opened, and shows a loading state first", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -1023,7 +1023,7 @@ test("invariants: Deploy all changes reads its plan only once its panel is opene
 });
 
 test("invariants: /apply lands on Stacks with Deploy all changes open", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -1061,7 +1061,7 @@ test("invariants: /apply lands on Stacks with Deploy all changes open", async ()
 });
 
 test("invariants: every data-loading page shows a loading indicator before its data (or error) arrives", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -1109,7 +1109,7 @@ test("invariants: every data-loading page shows a loading indicator before its d
 });
 
 test("invariants: every top-level section on Overview and the stack page has a heading and a non-empty description", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -1172,7 +1172,7 @@ test("invariants: opening Restore from an app's row never asks for the app again
   // Backups rows are a real case of "the row already said which app" — the
   // demo host answers GetBackups with a few nights of made-up snapshots per
   // app (admin/src/shell/demo.rs).
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -1226,7 +1226,7 @@ test("invariants: opening Restore from an app's row never asks for the app again
 });
 
 test("invariants: no /charts series label matches a raw-id pattern and every chart has a description", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -1291,7 +1291,7 @@ test("invariants: no /charts series label matches a raw-id pattern and every cha
 });
 
 test("invariants: the Drive health panel draws a status table naming each drive's own state, not an overlapping line", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -1332,7 +1332,7 @@ test("invariants: the Drive health panel draws a status table naming each drive'
 });
 
 test("invariants: a refused /data/traffic read shows the standard error box, never raw page text", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -1373,7 +1373,7 @@ test("invariants: a refused /data/traffic read shows the standard error box, nev
 });
 
 test("invariants: the Host page's Disk section names the root volume's device and size, and the biggest directories", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -1416,7 +1416,7 @@ test("invariants: the Host page's Disk section names the root volume's device an
 // field: every label starts on one edge and every control on another, to
 // the right of the labels.
 test("invariants: every action dialog lays its fields on one grid — labels on one edge, controls on another", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -1517,7 +1517,7 @@ test("invariants: every action dialog lays its fields on one grid — labels on 
 // its last block ends where the grid ends, never a dead empty track on the
 // right — on the System and the Traffic tab alike, at Kenny's own width.
 test("invariants: chart blocks fill their grid's width, with no empty track left over", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -1548,7 +1548,7 @@ test("invariants: chart blocks fill their grid's width, with no empty track left
 // has the same shape — the title on the left edge, whatever acts on the
 // page grouped against the right edge.
 test("invariants: every page's title row puts the title left and its controls against the right edge", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -1596,7 +1596,7 @@ test("invariants: every page's title row puts the title left and its controls ag
 // zijn geen actions aan verbonden?"; "en de links werken niet") ──────────
 
 test("invariants: every Fleet view block has a heading and a one-sentence description, and no table repeats its heading as a caption", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1920, height: 1080 },
@@ -1644,7 +1644,7 @@ test("invariants: every Fleet view block has a heading and a one-sentence descri
 });
 
 test("invariants: a stale-image row offers Update with the from/to versions, and a major jump requires the release-notes tick", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -1767,7 +1767,7 @@ test("invariants: a stale-image row offers Update with the from/to versions, and
 });
 
 test("invariants: every link on every drivable page has an absolute http(s) href or a same-site path that resolves", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -1851,7 +1851,7 @@ test("invariants: every link on every drivable page has an absolute http(s) href
 // doet"): every page says under its title what it is for, not only
 // Overview and the stack page.
 test("invariants: every page has a one-sentence description right under its title", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -1888,7 +1888,7 @@ test("invariants: every page has a one-sentence description right under its titl
 // fix-236: an action button's label never wraps onto a second line and is
 // never cut off, at desktop and at phone width.
 test("invariants: every action button's label fits on one line, uncut, on desktop and phone", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const bad = [];
     for (const width of [1894, 390]) {
@@ -1991,7 +1991,7 @@ async function eachActionDialog(page, measure) {
 // a phone folds them below it), never a full section gap away where it
 // reads as a section of its own.
 test("invariants: every page's description sits directly under its title, never a section gap away", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const bad = [];
     for (const width of [1894, 390]) {
@@ -2040,7 +2040,7 @@ test("invariants: every page's description sits directly under its title, never 
 // they fold under the title, they start on the title's own left edge
 // instead of hanging off the right.
 test("invariants: a title row's controls sit in one row beside the title, and fold under it left-aligned on a phone", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const bad = [];
     for (const width of [1894, 390]) {
@@ -2056,9 +2056,14 @@ test("invariants: a title row's controls sit in one row beside the title, and fo
           const row = h1?.closest(".title-row");
           if (!h1 || !row) return null;
           const t = h1.getBoundingClientRect();
+          // A segmented switch (ui.js `segSwitch`) is one control with a
+          // frame of its own: its edge counts, not its buttons inside.
           const ctls = [
-            ...row.querySelectorAll("button, a.kp-button, .state, .badge"),
+            ...row.querySelectorAll(
+              "button, a.kp-button, .state, .badge, .nx-seg",
+            ),
           ]
+            .filter((e) => !e.parentElement?.closest(".nx-seg"))
             .filter((e) => /** @type {HTMLElement} */ (e).offsetParent)
             .map((e) => e.getBoundingClientRect())
             .filter((b) => b.width > 0);
@@ -2097,7 +2102,7 @@ test("invariants: a title row's controls sit in one row beside the title, and fo
 // `monospace` fallback, whose 13 px base shrank it to 11 px beside 16 px
 // text.
 test("invariants: monospace text reads at nearly its row's own size, in the theme's mono font", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const bad = [];
     const context = await browser.newContext({
@@ -2134,7 +2139,7 @@ test("invariants: monospace text reads at nearly its row's own size, in the them
 // underline on one ("Export bundle") beside a plain one ("Compare with the
 // files") in the same row.
 test("invariants: a link drawn as a button is never underlined", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const bad = [];
     const context = await browser.newContext({
@@ -2163,7 +2168,7 @@ test("invariants: a link drawn as a button is never underlined", async () => {
 // fix-248: on a phone, every action dialog field reads label first, then
 // its control — never the control above the label it belongs to.
 test("invariants: on a phone every action dialog field shows its label above its control", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 390, height: 844 },
@@ -2209,7 +2214,7 @@ test("invariants: on a phone every action dialog field shows its label above its
 // fix-249: an action dialog says what it does once — its own description
 // at the top — and the review step does not repeat it in other words.
 test("invariants: an action dialog describes what it does once, never twice", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -2236,8 +2241,13 @@ test("invariants: an action dialog describes what it does once, never twice", as
 // fix-250: a collapsible block's chevron sits beside its heading at every
 // width — at phone width it wrapped onto a line of its own above the
 // heading and description (Overview's "Apply the whole fleet").
+// fix-250, carried to the 3.71.0 kit (redesign-integrate-6): Overview and
+// Health, where the old `details.health-block` lived, are Stacks and the
+// Inbox now; a folded block is ui.js's `section({collapsible})`
+// (`details.nx-card--fold`), its chevron at the head's right edge. Its
+// heading stays on the chevron's line at both widths.
 test("invariants: a collapsible block's heading stays beside its chevron, on desktop and phone", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const bad = [];
     let seen = 0;
@@ -2246,36 +2256,35 @@ test("invariants: a collapsible block's heading stays beside its chevron, on des
         viewport: { width, height: 1000 },
       });
       const page = await freshPage(context);
-      for (const path of ["overview", "health"]) {
+      for (const path of ["host", "backups", "stacks/films"]) {
         await page.goto(`${BASE}/${path}`);
-        await page.locator("details.health-block").first().waitFor();
+        await page.locator("details.nx-card--fold > summary").first().waitFor();
         const found = await page.evaluate(() =>
-          [...document.querySelectorAll("details.health-block > summary")]
+          [...document.querySelectorAll("details.nx-card--fold > summary")]
             .filter((s) => /** @type {HTMLElement} */ (s).offsetParent)
             .map((s) => {
               const head = s.querySelector("h2, h3");
-              if (!head) return null;
-              const st = getComputedStyle(s);
-              const contentLeft =
-                s.getBoundingClientRect().left +
-                parseFloat(st.paddingInlineStart) +
-                parseFloat(st.borderInlineStartWidth);
+              const chev = s.querySelector(".nx-chev");
+              if (!head || !chev) return null;
+              const a = head.getBoundingClientRect();
+              const b = chev.getBoundingClientRect();
+              const desc = s.querySelector(".section-head__desc");
+              const end = desc ? desc.getBoundingClientRect().bottom : a.bottom;
               return {
                 name: (head.textContent ?? "").trim(),
-                indent: Math.round(
-                  head.getBoundingClientRect().left - contentLeft,
-                ),
+                // The chevron beside the heading and its sentence (the
+                // kit centres it on them), never alone on a line of its own
+                // above or below them.
+                beside: b.left > a.left + 20 && b.top < end && b.bottom > a.top,
               };
             })
             .filter((x) => x !== null),
         );
         for (const f of found) {
           seen++;
-          // The chevron is 0.5rem plus its margins: a heading beside it
-          // starts at least ~12 px in; one wrapped under it starts at 0.
-          if (f.indent < 10)
+          if (!f.beside)
             bad.push(
-              `${width}px /${path}: "${f.name}" wrapped under its chevron`,
+              `${width}px /${path}: "${f.name}" is not on its chevron's line`,
             );
         }
       }
@@ -2291,7 +2300,7 @@ test("invariants: a collapsible block's heading stays beside its chevron, on des
 test("invariants: a running job's log scrolls inside its dialog and never makes the dialog taller", async () => {
   // fix-261 (Kenny, 2026-10-03: "tijdens de deploy in de dialog, de logs
   // daarin maakten de dialog langer verticaal, dat moet scrollbaar zijn").
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -2345,7 +2354,7 @@ test("invariants: a running job's log scrolls inside its dialog and never makes 
 // on a near-black page, all but invisible. Every timeline mark and legend
 // swatch must stand out from the page by WCAG's 3:1 for graphics.
 test("invariants: every timeline mark and legend swatch contrasts at least 3:1 with the page, in light and dark", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -2433,7 +2442,7 @@ test("invariants: every timeline mark and legend swatch contrasts at least 3:1 w
 // in a fixed 560-wide viewBox that a phone scales down to ~5 px text; every
 // chart and timeline label must render at 11 px or more at 390 px.
 test("invariants: every chart and timeline axis label renders at 11 px or more on a 390 px phone", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 390, height: 900 },
@@ -2482,7 +2491,7 @@ test("invariants: every chart and timeline axis label renders at 11 px or more o
 // path is a lone "M" and draws nothing, so every chart looked empty; and a
 // small count range labelled its y axis "1, 1, 0".
 test("invariants: a chart with one reading per series shows a visible point and says so, and its y ticks are distinct", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -2550,7 +2559,7 @@ test("invariants: a chart with one reading per series shows a visible point and 
 // fix-254 (design review, 2026-10-03): the gateway's access log sometimes
 // carries no client address; the busiest-clients table showed a bare "—".
 test("invariants: the busiest-clients table names an empty client address instead of a bare dash", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -2602,7 +2611,7 @@ test("invariants: the busiest-clients table names an empty client address instea
 // scope is full access. Whole-screen: every red action button on the host
 // and a stack page is an action the catalog marks destructive.
 test("invariants: every red action button belongs to an action the catalog marks destructive", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -2653,7 +2662,7 @@ test("invariants: every red action button belongs to an action the catalog marks
 // web app. Every address the router knows, retired ones included, renders
 // a page or redirects to one.
 test("invariants: every address the router knows renders a page or redirects to one, never no such route", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -2687,7 +2696,7 @@ test("invariants: every address the router knows renders a page or redirects to 
 // "invalid type: map, expected a sequence" — the demo host answered
 // TokenList with `{}` where the real host answers a list.
 test("invariants: Settings lists the per-machine tokens without a read error", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -2717,7 +2726,7 @@ test("invariants: Settings lists the per-machine tokens without a read error", a
 // holds no repository for without a word. Every stack of the fleet has a
 // row, and one without a repository says so and why.
 test("invariants: Backups has a row for every stack, naming why one has no repository", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -2768,7 +2777,7 @@ test("invariants: Backups has a row for every stack, naming why one has no repos
 // screen, both themes: every status cell, legend swatch and read chip uses
 // the status token its state means.
 test("invariants: the backup calendar's status colours are the status tokens, in light and dark", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -2831,7 +2840,7 @@ test("invariants: the backup calendar's status colours are the status tokens, in
 // While a run reads: no verdict, one visible spinner, no "not read yet";
 // the verdict appears once every check has answered.
 test("invariants: the Doctor shows no verdict and one loading indicator until every check has answered", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -2943,7 +2952,7 @@ test("invariants: the Doctor shows no verdict and one loading indicator until ev
 // to another and click it; the node clicked is the one hovered, the same
 // element as before any hover.
 test("invariants: hovering the Fleet view topology never redraws a node, so a click right after a move lands", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -2995,7 +3004,7 @@ test("invariants: hovering the Fleet view topology never redraws a node, so a cl
 // is on every page, and counters are exact ─────────────────────────────
 
 test("invariants: every pre-3.71.0 address lands on its new home", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -3050,7 +3059,7 @@ test("invariants: every pre-3.71.0 address lands on its new home", async () => {
 });
 
 test("invariants: Ctrl K finds an action by intent, in any word order, and Enter opens its dialog", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -3122,7 +3131,7 @@ test("invariants: Ctrl K finds an action by intent, in any word order, and Enter
 });
 
 test("invariants: the kp-themes theme picker is in the bar on every page, desktop and phone", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const bad = [];
     for (const width of [1894, 390]) {
@@ -3156,7 +3165,7 @@ test("invariants: the kp-themes theme picker is in the bar on every page, deskto
 });
 
 test("invariants: the Inbox counter shows the exact number, never 9+, and equals the Inbox's rows", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     for (const width of [1600, 390]) {
       const context = await browser.newContext({
@@ -3240,7 +3249,7 @@ async function fleetNames(page) {
 }
 
 test("invariants: the Backups heatmap has a row for every stack and a whole-fleet row, one cell per night", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -3292,7 +3301,7 @@ test("invariants: the Backups heatmap has a row for every stack and a whole-flee
 });
 
 test("invariants: the Backups heatmap paints status in the status tokens, in light and dark", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -3372,7 +3381,7 @@ test("invariants: the Backups heatmap paints status in the status tokens, in lig
 });
 
 test("invariants: hovering a Backups heatmap night shows its snapshot time and every app's snapshot id", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -3419,7 +3428,7 @@ test("invariants: hovering a Backups heatmap night shows its snapshot time and e
 });
 
 test("invariants: clicking a Backups heatmap night pins it into the address and the side panel; Esc, Unpin and Today go back to last night", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -3482,7 +3491,7 @@ test("invariants: clicking a Backups heatmap night pins it into the address and 
 // the redesigned Host page, in the demo host's own data. ─────────────────
 
 test("invariants: the Host page lays out two columns, Containers first, the line and the facts on the right", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const bad = [];
     for (const width of [1894, 390]) {
@@ -3578,7 +3587,7 @@ test("invariants: the Host page lays out two columns, Containers first, the line
 // did not send before 3.71.0. The demo host sends every one, so nothing on
 // the page may read "not reported", and each shows its real value.
 test("invariants: the Host page shows every host fact the demo host sends, none reported missing", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const bad = [];
     for (const width of [1894, 390]) {
@@ -3643,7 +3652,7 @@ test("invariants: the Host page shows every host fact the demo host sends, none 
 });
 
 test("invariants: the Host page's Containers filter toggles with a plain click and / focuses its search", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -3703,7 +3712,7 @@ test("invariants: the Host page's Containers filter toggles with a plain click a
 });
 
 test("invariants: Host settings show only the values host.toml changes until All is picked", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -3784,7 +3793,7 @@ test("invariants: Host settings show only the values host.toml changes until All
 });
 
 test("invariants: the Host page's actions are grouped by intent as described tiles, red only when destructive", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -3867,7 +3876,7 @@ test("invariants: the Host page's actions are grouped by intent as described til
 // 2026-10-03: demos flows/inbox.html, flows/update.html, flows/shell.js) ──
 
 test("invariants: every Inbox row says what and why and carries its fix, and a plain click on a kind shows only those", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     for (const width of [1894, 390]) {
       const context = await browser.newContext({
@@ -3949,7 +3958,7 @@ test("invariants: every Inbox row says what and why and carries its fix, and a p
 });
 
 test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and Done from the Inbox, and nothing runs before step 2's button", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -4058,7 +4067,7 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
 });
 
 test("invariants: ? opens Help with the six areas, the words and the keys, and its tour walks six steps on desktop and phone", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     for (const width of [1894, 390]) {
       const context = await browser.newContext({
@@ -4067,6 +4076,11 @@ test("invariants: ? opens Help with the six areas, the words and the keys, and i
       const page = await freshPage(context);
       await page.goto(`${BASE}/apps`);
       await page.waitForTimeout(800);
+      // Apps focuses its launcher search on a desktop (redesign-stacks),
+      // where "?" is a character typed; Help's key works outside a field.
+      await page.evaluate(() =>
+        /** @type {HTMLElement | null} */ (document.activeElement)?.blur(),
+      );
       await page.keyboard.press("?");
       const help = page.locator("dialog#shortcuts[open]");
       await help.waitFor({ timeout: 3000 });
@@ -4138,7 +4152,7 @@ test("invariants: ? opens Help with the six areas, the words and the keys, and i
 });
 
 test("invariants: Deploy all changes shows four count tiles that each show only their column, and its bar says what Apply will do", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -4193,83 +4207,11 @@ test("invariants: Deploy all changes shows four count tiles that each show only 
   }
 });
 
-// ── redesign-schedules (release 3.71.0, Kenny approved the demo 2026-10-03):
-// the Schedules page as the approved demo draws it — a week calendar with
-// the host's nightly round for reference, a plain-click switch with Undo, a
-// sentence-builder drawer that previews its next three runs, and an empty
-// state with templates. Each case clears the demo host's schedules first
-// and again at its end, so the rest of this suite sees what it always saw.
-
-/**
- * One JSON call from inside the page (its session cookie included).
- * @param {import("playwright").Page} page
- * @param {string} method
- * @param {string} url
- * @param {unknown} [body]
- */
-async function schedApi(page, method, url, body) {
-  return page.evaluate(
-    async ([m, u, b]) => {
-      const r = await fetch(/** @type {string} */ (u), {
-        method: /** @type {string} */ (m),
-        headers: b == null ? {} : { "content-type": "application/json" },
-        body: b == null ? undefined : JSON.stringify(b),
-      });
-      const t = await r.text();
-      return { status: r.status, body: t ? JSON.parse(t) : null };
-    },
-    [method, url, body ?? null],
-  );
-}
-
-/** @param {import("playwright").Page} page */
-async function clearSchedules(page) {
-  const l = await schedApi(page, "GET", "/data/schedules");
-  for (const v of l.body?.schedules ?? [])
-    await schedApi(page, "DELETE", `/data/schedules/${v.schedule.id}`);
-}
-
-/**
- * @param {import("playwright").Page} page
- * @param {string} stack
- * @param {string} action
- * @param {unknown} when
- */
-async function addSchedule(page, stack, action, when) {
-  const r = await schedApi(page, "POST", "/data/schedules", {
-    stack,
-    action,
-    args: {},
-    when,
-    enabled: true,
-    note: "",
-  });
-  assert.equal(r.status, 201, `creating a schedule: ${JSON.stringify(r.body)}`);
-  return /** @type {string} */ (r.body.schedule.id);
-}
-
-/** The Europe/Brussels wall clock of a unix second, as named parts. */
-function brussels(/** @type {number} */ unix) {
-  return Object.fromEntries(
-    new Intl.DateTimeFormat("en-GB", {
-      timeZone: "Europe/Brussels",
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    })
-      .formatToParts(new Date(unix * 1000))
-      .map((x) => [x.type, x.value]),
-  );
-}
-
 // ── redesign-stacks (3.71.0, the approved Stacks and Apps demos:
 // redesign-3.71/overview.html under FLOWS.md §1 row 3, and apps.html) ──
 
 test("invariants: Stacks lists every stack once as a card and as a table row, with its identity mark and its hub link; a card's click opens the hub, its tick only ticks (redesign-stacks)", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -4349,7 +4291,7 @@ test("invariants: Stacks lists every stack once as a card and as a table row, wi
 });
 
 test("invariants: Stacks keeps its ticks across Table/Cards and live updates, the batch bar names the exact count, and Esc unticks (redesign-stacks)", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -4449,7 +4391,7 @@ test("invariants: Stacks keeps its ticks across Table/Cards and live updates, th
 });
 
 test("invariants: Stacks has the host strip, Deploy all changes and New stack; New stack's panel reaches the preset and bundle forms (redesign-stacks)", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -4557,7 +4499,7 @@ test("invariants: Stacks has the host strip, Deploy all changes and New stack; N
 });
 
 test("invariants: Stacks and Apps fit a 390 px phone with no sideways scroll, in light and dark (redesign-stacks)", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 390, height: 844 },
@@ -4620,8 +4562,8 @@ test("invariants: Stacks and Apps fit a 390 px phone with no sideways scroll, in
   }
 });
 
-test("invariants: Deploy all changes marks its steps, says what each part holds, shows a stack that does not build as what/why/fix and keeps its button off (redesign-stacks)", async () => {
-  const browser = await chromium.launch();
+test("invariants: Deploy all changes marks its steps, says what each column holds and shows a stack that cannot be planned with its fix (redesign-stacks, redesign-flows-4)", async () => {
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -4637,53 +4579,54 @@ test("invariants: Deploy all changes marks its steps, says what each part holds,
       "the header's 'updated' is not beside the title",
     );
     const panel = page.locator("dialog[open]");
-    await panel.locator(".apply-group").first().waitFor({ timeout: 10000 });
-    const steps = await panel
-      .locator(".sk-steps li")
-      .evaluateAll((els) =>
-        els.map((e) => /** @type {HTMLElement} */ (e).dataset.s ?? ""),
-      );
-    assert.deepEqual(
-      steps,
-      ["done", "now", ""],
-      "the steps say where it stands",
-    );
-    const text = await panel.innerText();
-    assert.doesNotMatch(
-      text,
-      /Not compared yet/,
-      "a filled plan says it never compared",
-    );
-    assert.doesNotMatch(text, /\(s\)/, "bracketed plurals");
-    assert.doesNotMatch(text, / :: |\/tmp\//, "raw error text in the panel");
-    const groups = await panel.locator(".apply-group").evaluateAll((els) =>
-      els.map((g) => ({
-        title: g.querySelector("h3")?.textContent?.trim(),
-        desc: g.querySelector(".apply-group__desc")?.textContent?.trim() ?? "",
+    // The 3.71.0 merge: the panel's body is the approved apply demo
+    // (apply.js), its Compare step the panel's Compare again.
+    await panel.locator(".ap-col").first().waitFor({ timeout: 10000 });
+    const steps = await panel.locator(".ap-steps li").evaluateAll((els) =>
+      els.map((e) => ({
+        step: /** @type {HTMLElement} */ (e).dataset.step,
+        done: e.classList.contains("done"),
+        on: e.classList.contains("on"),
       })),
     );
-    assert.ok(groups.length > 0);
-    for (const g of groups)
+    assert.deepEqual(
+      steps.slice(0, 3).map((x) => x.step),
+      ["compare", "review", "apply"],
+    );
+    assert.ok(steps[0].done, "a filled plan says it never compared");
+    assert.ok(steps[1].on, "the steps do not say where it stands");
+    assert.equal(
+      await panel.locator(".ap-steps #drift-compare").count(),
+      1,
+      "Compare again is not the plan's Compare step",
+    );
+    const text = await panel.innerText();
+    assert.doesNotMatch(text, /\(s\)/, "bracketed plurals");
+    assert.doesNotMatch(text, / :: |\/tmp\//, "raw error text in the panel");
+    const cols = await panel.locator(".ap-col").evaluateAll((els) =>
+      els.map((g) => ({
+        title: g.querySelector("h3")?.textContent?.trim(),
+        desc: g.querySelector(".ap-hint")?.textContent?.trim() ?? "",
+      })),
+    );
+    assert.ok(cols.length > 0);
+    for (const g of cols)
       assert.ok(g.desc.length > 10, `${g.title} has no description`);
-    // The demo's alpha-demo declares no apps, so it does not build: shown
-    // as what / why / what to do, and the deploy button stays off.
-    const broken = panel.locator(".apply-broken");
+    // The demo's alpha-demo declares no apps, so it cannot be planned:
+    // shown with what is wrong and its fix.
+    const broken = panel.locator(".ap-item--broken");
     assert.ok(
       (await broken.count()) > 0,
-      "the stack that does not build is not shown",
+      "the stack that cannot be planned is not shown",
     );
-    assert.match(
-      await broken.first().innerText(),
-      /does not build[\s\S]*Why:[\s\S]*What to do:/,
-    );
-    assert.equal(await panel.locator("#apply-open").isDisabled(), true);
+    assert.match(await broken.first().innerText(), /Fix:/);
   } finally {
     await browser.close();
   }
 });
 
-test("invariants: a row's Update and the batch Update… open the Update dialog of each stack, never a link away (redesign-stacks)", async () => {
-  const browser = await chromium.launch();
+test("invariants: a row's Update and the batch Update… open the one Update flow for the ticked stacks, never a link-free blind batch (redesign-stacks, redesign-integrate-5)", async () => {
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -4700,21 +4643,32 @@ test("invariants: a row's Update and the batch Update… open the Update dialog 
       0,
       "a row's Update is still a link",
     );
+    // invariant 149: whichever Update opened it, it is the one flow.
     await page.locator(`.sk-table [data-tick="${names[0]}"]`).check();
+    await page.locator(`.sk-table [data-tick="${names[1]}"]`).check();
     const upd = page.locator(".sk-batch [data-batch=update]");
     assert.equal((await upd.innerText()).trim(), "Update…");
     await upd.click();
-    const dialog = page.locator("dialog#action-dialog[open]");
-    await dialog.waitFor({ timeout: 5000 });
-    assert.match(await dialog.innerText(), new RegExp(names[0]));
-    assert.equal(new URL(page.url()).pathname, "/stacks");
+    await page.waitForURL("**/update?**", { timeout: 5000 });
+    const q = new URL(page.url()).searchParams;
+    assert.equal(q.get("all"), "1");
+    assert.deepEqual(
+      (q.get("only") ?? "").split(",").sort(),
+      [names[0], names[1]].sort(),
+    );
+    await page.locator("#page .nx-steps").waitFor({ timeout: 10000 });
+    assert.match(
+      await page.locator("#page .nx-crumbs").innerText(),
+      /Stacks/,
+      "the batch's flow does not lead back to Stacks",
+    );
   } finally {
     await browser.close();
   }
 });
 
 test("invariants: Apps groups the stacks' tiles, each opening in a new tab; the search narrows them and a star survives a reload (redesign-stacks)", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -4868,7 +4822,7 @@ function brussels(/** @type {number} */ unix) {
 }
 
 test("invariants: Schedules page: the next 7 days show every run by time, the host's nightly round dashed, a now-line, and a pill finds its row", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1100 },
@@ -4959,7 +4913,7 @@ test("invariants: Schedules page: the next 7 days show every run by time, the ho
 });
 
 test("invariants: Schedules page: a plain click turns a schedule off, greys its row and pills, and Undo turns it back on", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1100 },
@@ -5057,7 +5011,7 @@ test("invariants: Schedules page: a plain click turns a schedule off, greys its 
 });
 
 test("invariants: Schedules page: the drawer reads as a sentence, warns near the nightly round and previews the next 3 runs", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1100 },
@@ -5132,7 +5086,7 @@ test("invariants: Schedules page: the drawer reads as a sentence, warns near the
 });
 
 test("invariants: Schedules page: with no schedules it offers three templates, each opening the drawer filled in", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1100 },
@@ -5158,7 +5112,7 @@ test("invariants: Schedules page: with no schedules it offers three templates, e
 });
 
 test("invariants: Schedules page: Live view reaches the drawer and its fields, the row menu, the switch and Undo", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -5231,7 +5185,7 @@ test("invariants: Schedules page: Live view reaches the drawer and its fields, t
 // The tab row scrolls sideways inside itself, every tab stays whole, and
 // the page itself never scrolls sideways.
 test("invariants: on a 390 px phone a stack's tab row scrolls inside itself with every tab whole, never the page", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 390, height: 900 },
@@ -5296,30 +5250,36 @@ test("invariants: redesign-kit: a narrow page header reads the title with its li
   // plain one (Backups) and the meta one (Host; Schedules, drawn as
   // Activity's Planned view: the live status in the meta row under the
   // description) — read title, description, actions.
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     for (const theme of ["light", "dark"])
       for (const path of ["/backups", "/host", "/schedules"]) {
         const { context, page } = await phonePage(browser, theme);
         await page.goto(`${BASE}${path}`);
-        await page.locator("main .nx-head h1").waitFor({ timeout: 10000 });
-        const order = await page.evaluate(() => {
-          const head = /** @type {HTMLElement} */ (
-            document.querySelector("main .nx-head")
-          );
-          const top = (/** @type {string} */ sel) =>
-            head.querySelector(sel)?.getBoundingClientRect().top ?? -1;
+        // Schedules sits under Activity's own title since the 3.71.0 merge:
+        // its header is the one inside `.sch-root`, its title an h2.
+        const sel =
+          path === "/schedules" ? "main .sch-root .nx-head" : "main .nx-head";
+        await page
+          .locator(`${sel} :is(h1, h2)`)
+          .first()
+          .waitFor({ timeout: 10000 });
+        const order = await page.evaluate((sel) => {
+          const head = /** @type {HTMLElement} */ (document.querySelector(sel));
+          const top = (/** @type {string} */ q) =>
+            head.querySelector(q)?.getBoundingClientRect().top ?? -1;
           return {
             meta: head.classList.contains("nx-head--meta"),
-            title: top("h1"),
+            title: top(":is(h1, h2)"),
             titleBottom:
-              head.querySelector("h1")?.getBoundingClientRect().bottom ?? -1,
+              head.querySelector(":is(h1, h2)")?.getBoundingClientRect()
+                .bottom ?? -1,
             live: top(".nx-live"),
             desc: top(".nx-head-desc"),
             metaRow: top(".nx-head-meta"),
             actions: top(".nx-head-actions"),
           };
-        });
+        }, sel);
         const where = `${theme} ${path}`;
         // A meta header may carry its freshness as a chip of its own
         // (Schedules' "read 4 s ago") instead of a live status.
@@ -5359,7 +5319,7 @@ test("invariants: redesign-kit: a narrow page header reads the title with its li
 });
 
 test("invariants: redesign-kit: a bad attention item is a soft red tint with a red border and the page's text colour", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     for (const theme of ["light", "dark"]) {
       const { context, page } = await phonePage(browser, theme);
@@ -5410,7 +5370,7 @@ test("invariants: redesign-kit: a bad attention item is a soft red tint with a r
 });
 
 test("invariants: redesign-kit: a row menu opened near the foot of the screen sits above its button and leaves the page where it was", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -5465,7 +5425,7 @@ test("invariants: redesign-kit: a row menu opened near the foot of the screen si
 });
 
 test("invariants: redesign-kit-17: no page scrolls sideways at 390 px, and no table's box overflows its card", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const { context, page } = await phonePage(browser, "light");
     /** @type {string[]} */
@@ -5536,7 +5496,7 @@ test("invariants: redesign-kit-17: no page scrolls sideways at 390 px, and no ta
 });
 
 test("invariants: redesign-kit-13: a row menu's right edge lines up with its button's", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -5583,7 +5543,7 @@ test("invariants: redesign-kit-13: a row menu's right edge lines up with its but
 });
 
 test("invariants: redesign-kit-10: Esc on Host shows every container again, and its sorted headers are Live view controls that keep their sort", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -5630,7 +5590,7 @@ test("invariants: redesign-kit-10: Esc on Host shows every container again, and 
 });
 
 test("invariants: redesign-kit-18: Backups keeps its KPI context whole at 390 px, its search hint inside the box at 1894 px, and the newest snapshot's age in one phrase", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     {
       const { context, page } = await phonePage(browser, "light");
@@ -5889,7 +5849,7 @@ test("invariants: drive-reach: every button that opens a dialog or runs an actio
     with: { type: "json" },
   });
   const forms = new Set(SPEC.forms);
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -6179,7 +6139,7 @@ async function untwinned(page, byId) {
 
 test("invariants: drive-reach: Live view finds and presses every declared control, and each press has its effect", async (t) => {
   const started = Date.now();
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -6312,7 +6272,25 @@ test("invariants: drive-reach: Live view finds and presses every declared contro
           // The page as the control before left it first (no navigation
           // when it is already there); once more freshly drawn when that
           // state was in the way.
-          const why = (await attempt(false)) && (await attempt(true));
+          // Every try has a deadline: a press that waits on a selector or a
+          // read that never comes is named, never a run that hangs.
+          /** @param {boolean} fresh */
+          const timed = (fresh) =>
+            Promise.race([
+              attempt(fresh),
+              new Promise((res) =>
+                setTimeout(
+                  () => res("hung: the try took more than 45 s"),
+                  45000,
+                ),
+              ),
+            ]);
+          const t0 = Date.now();
+          const why = (await timed(false)) && (await timed(true));
+          if (process.env.INVARIANTS_PROGRESS)
+            console.error(
+              `sweep ${c.id}${why ? ` ✖ ${why}` : ""} (${Date.now() - t0} ms)`,
+            );
           if (why) failed.push(`${c.id}: ${why}`);
           else
             conditional.splice(
@@ -6354,7 +6332,7 @@ test("invariants: drive-reach: Live view finds and presses every declared contro
 });
 
 test("invariants: drive-reach: every old control name a declaration keeps still clicks", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -6413,7 +6391,7 @@ test("invariants: drive-reach: every old control name a declaration keeps still 
 });
 
 test("invariants: drive-reach: ui goto accepts every address the router knows and lands where the browser's own redirect does", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -6467,7 +6445,7 @@ test("invariants: drive-reach: ui goto accepts every address the router knows an
 // timeline, History, Schedules and the host log are one page with three
 // views, each its own address, and every old address opens its view.
 test("invariants: Activity is one page with Now and history, Planned and Host log, and the old addresses open their view", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const bad = [];
     for (const width of [1894, 390]) {
@@ -6545,7 +6523,7 @@ test("invariants: Activity is one page with Now and history, Planned and Host lo
 // address (senior review, finding 7); a failed row
 // opens in place with its error and its fixes.
 test("invariants: Activity's History filters with a plain click, keeps it in the address, and a failed row opens with its fixes", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -6611,7 +6589,7 @@ test("invariants: Activity's History filters with a plain click, keeps it in the
 // in Running now scrolls inside its own box; the card never grows as lines
 // arrive.
 test("invariants: a running job's log in Activity scrolls inside its box and never makes Running now taller", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -6677,7 +6655,7 @@ test("invariants: a running job's log in Activity scrolls inside its box and nev
 // the left at its own width and the count and follow against the right
 // edge; one column on a phone, never a sideways scroll.
 test("invariants: the host log puts its filters in a side column and its toolbar in three zones, on Console and Activity", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const bad = [];
     for (const width of [1894, 390]) {
@@ -6764,7 +6742,7 @@ test("invariants: the host log puts its filters in a side column and its toolbar
 // redesign-console (3.71.0): Console is the host's lines and the shell in
 // one place — the shell bar under the lines, a line opens its details.
 test("invariants: Console shows the host's lines with the shell bar under them, and a line opens its details", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -6851,7 +6829,7 @@ const hostLine = (seq, source, msg) => ({
 // every snapshot line. Finding 3: the side column is built once, so a
 // focused source keeps focus while lines (and a new source) arrive.
 test("invariants: review-activity: the host log merges early live lines with its snapshot and keeps side-column focus", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -6924,7 +6902,7 @@ test("invariants: review-activity: the host log merges early live lines with its
 // turns back into "Copy line", and the side column's hint and reset use
 // the demo's words.
 test("invariants: review-activity: a host line opens with Space, Copy line comes back, and the hint reads as the demo", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -7004,7 +6982,7 @@ test("invariants: review-activity: a host line opens with Space, Copy line comes
 // phone header order, the first container chosen, and the exec hint there
 // from the first frame even when the host's settings cannot be read.
 test("invariants: review-activity: Console's header and shell bar are the demo's", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const bad = [];
     for (const width of [1894, 390]) {
@@ -7093,7 +7071,7 @@ test("invariants: review-activity: Console's header and shell bar are the demo's
 // Download together and its key hints once, its description true on a
 // phone, and a cancelled touch leaves no brush on the timeline.
 test("invariants: review-activity: History's Show switch counts, By names owners, the Host log groups its buttons, the brush never sticks", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -7185,7 +7163,7 @@ test("invariants: review-activity: History's Show switch counts, By names owners
 // Finding 4: a minute's reread that fails keeps the rows, with a note,
 // and the focused row keeps focus across the repaint.
 test("invariants: review-activity: a failed History reread keeps the rows and the focused row", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -7233,7 +7211,7 @@ test("invariants: review-activity: a failed History reread keeps the rows and th
 // as the approved demos, every chart the shared time chart ──────────────
 
 test("invariants: the Metrics page is laid out as the approved demo, every chart a shared time chart with the host's events marked", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -7293,7 +7271,7 @@ test("invariants: the Metrics page is laid out as the approved demo, every chart
 });
 
 test("invariants: a plain click on a Metrics chart source turns it on or off, several stay on, Show all resets", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -7334,7 +7312,7 @@ test("invariants: a plain click on a Metrics chart source turns it on or off, se
 });
 
 test("invariants: hovering a Metrics chart shows the reading and the change over the hour before on every chart at once; a drag zooms them all", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -7391,7 +7369,7 @@ test("invariants: hovering a Metrics chart shows the reading and the change over
 });
 
 test("invariants: the Traffic tab stacks requests by status class, and a plain click on a hostname row switches it on or off in its chart", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -7438,7 +7416,7 @@ test("invariants: the Traffic tab stacks requests by status class, and a plain c
 });
 
 test("invariants: the Map is laid out as the approved demo, and a plain click on a node selects it into the address, a second releases it, Esc clears", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -7515,7 +7493,7 @@ test("invariants: the Map is laid out as the approved demo, and a plain click on
 // metrics" so a fix's own run is INVARIANTS_ONLY="review metrics".
 
 test("invariants: review metrics — Metrics and the Map fit a phone: no table scrolls sideways, Stale images are cards, Disk growth rows are two lines, KPI context lines are whole", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -7614,7 +7592,7 @@ test("invariants: review metrics — Metrics and the Map fit a phone: no table s
 });
 
 test("invariants: review metrics — the tiles are skeletons until the read lands, and a failed read says not read instead of pulsing", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -7666,7 +7644,7 @@ test("invariants: review metrics — the tiles are skeletons until the read land
 });
 
 test("invariants: review metrics — hostname rows follow the chart (Esc and Show all clear them), the legend's totals are the table's, chart controls are Live view controls, the sixth line is dashed", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -7742,7 +7720,7 @@ test("invariants: review metrics — hostname rows follow the chart (Esc and Sho
 });
 
 test("invariants: review metrics — a pointer resting on a chart keeps that chart through the 30 s refresh", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -7772,7 +7750,7 @@ test("invariants: review metrics — a pointer resting on a chart keeps that cha
 });
 
 test("invariants: review metrics — the wording is the demo's, Connections is green and amber, no chip row, and a touch screen shows no pointer hints", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -7848,7 +7826,7 @@ test("invariants: review metrics — the wording is the demo's, Connections is g
 // pin what each page must always do.
 
 test("invariants: redesign-config Firewall shows its totals, one attention row per unprotected stack, and lights stacks up with plain clicks", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1100 },
@@ -7905,7 +7883,7 @@ test("invariants: redesign-config Firewall shows its totals, one attention row p
 });
 
 test("invariants: redesign-config Firewall pins a square with its story and outlines the squares a hovered rule decides", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1100 },
@@ -7942,7 +7920,7 @@ test("invariants: redesign-config Firewall pins a square with its story and outl
 });
 
 test("invariants: redesign-config Settings stages an edit inline, counts it in the header, reviews it, and Discard can be undone", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1100 },
@@ -8029,7 +8007,7 @@ test("invariants: redesign-config Settings stages an edit inline, counts it in t
 });
 
 test("invariants: redesign-config Sign-in holds the passkeys beside the machine tokens, and /passkeys opens it", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -8066,7 +8044,7 @@ test("invariants: redesign-config Sign-in holds the passkeys beside the machine 
 });
 
 test("invariants: redesign-config Presets is a gallery: one card per preset, the empty one last, a search, and Use this preset opens the wizard on it", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -8119,7 +8097,7 @@ test("invariants: redesign-config Presets is a gallery: one card per preset, the
 });
 
 test("invariants: redesign-config pages show their skeleton from the first frame and never scroll sideways on a phone", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const bad = [];
     for (const width of [1894, 390]) {
@@ -8186,7 +8164,7 @@ test("invariants: redesign-config pages show their skeleton from the first frame
 });
 
 test("invariants: redesign-config every control Firewall, Settings and Presets draw carries a declared Live view id", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1100 },
@@ -8253,7 +8231,7 @@ test("invariants: redesign-config every control Firewall, Settings and Presets d
 // ── redesign-config review (3.71.0 senior review of this branch) ────────
 
 test("invariants: redesign-config review Firewall on a phone: no Stacks cell draws over its neighbour, no KPI context is cut, and the rules toolbar reads toggles, search, count", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const phone = await browser.newContext({
       viewport: { width: 390, height: 900 },
@@ -8320,7 +8298,7 @@ test("invariants: redesign-config review Firewall on a phone: no Stacks cell dra
 });
 
 test("invariants: redesign-config review a rule's details count the whole stack, and Move up and Disable stage the change in the stack's firewall editor", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1100 },
@@ -8367,7 +8345,7 @@ test("invariants: redesign-config review a rule's details count the whole stack,
 });
 
 test("invariants: redesign-config review one failed read is one alert with one Try again, and Fetch now says it runs", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -8431,7 +8409,7 @@ test("invariants: redesign-config review one failed read is one alert with one T
 });
 
 test("invariants: redesign-config review a Presets search marks the match inside a chip without splitting its word", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -8464,7 +8442,7 @@ test("invariants: redesign-config review a Presets search marks the match inside
 });
 
 test("invariants: Apps loads as its grouped board, its group labels are the body face at weight 500, and the legend says deploying (redesign-stacks)", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -8514,7 +8492,7 @@ test("invariants: Apps loads as its grouped board, its group labels are the body
 // whole-screen shape of one stack's hub, in the demo host's own data. ────
 
 test("invariants: stack hub — the header keeps Back up · Update · Deploy (primary) · More, with b u d . and a grouped More", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -8576,7 +8554,7 @@ test("invariants: stack hub — the header keeps Back up · Update · Deploy (pr
 });
 
 test("invariants: stack hub — six tabs; Overview has five KPI tiles, Is it healthy? and Recent history with who did it", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -8643,7 +8621,7 @@ test("invariants: stack hub — six tabs; Overview has five KPI tiles, Is it hea
 });
 
 test("invariants: stack hub — Logs' side column turns an app or a level on and off with a plain click; Esc shows all again", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -8685,7 +8663,7 @@ test("invariants: stack hub — Logs' side column turns an app or a level on and
 });
 
 test("invariants: stack hub — History's Started by chips filter with a plain click, several at once", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -8726,7 +8704,7 @@ test("invariants: stack hub — History's Started by chips filter with a plain c
 });
 
 test("invariants: stack hub — Apps and Backups are kp datatables; Backups draws 14 nights per app; Settings ends in a folded Danger zone", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -8789,7 +8767,7 @@ test("invariants: stack hub — Apps and Backups are kp datatables; Backups draw
 });
 
 test("invariants: stack hub — every tab fits 390 and 1894 px in light and dark, no sideways scroll, nothing clipped inside a card", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const bad = [];
     for (const theme of ["formal", "dark"])
@@ -8873,40 +8851,45 @@ test("invariants: stack hub — every tab fits 390 and 1894 px in light and dark
 
 // ── senior review of redesign-stackhub (2026-10-03) ─────────────────────
 
-test("invariants: stack hub review — Update and the u key open the Update dialog", async () => {
-  const browser = await chromium.launch();
+// The hub's review asked for Update and its u key to open the Update;
+// since the 3.71.0 merge every person's Update is the one Update flow
+// (invariant 149), so both land on that stack's flow.
+test("invariants: stack hub review — Update and the u key open the stack's Update flow", async () => {
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
     });
     const page = await freshPage(context);
-    await page.goto(`${BASE}/stacks/gateway`);
-    const dialog = page.locator("dialog#action-dialog[open]");
-    const title = dialog.locator(".kp-dialog__title");
-    await page
-      .locator('[data-drive="stack-head"][data-drive-row="gateway/update"]')
-      .click({ timeout: 10000 });
-    await dialog.waitFor({ timeout: 5000 });
-    assert.match((await title.textContent()) ?? "", /Update/);
-    await page.keyboard.press("Escape");
-    await dialog.waitFor({ state: "detached", timeout: 5000 }).catch(() => {});
-    await page.locator("dialog#action-dialog[open]").waitFor({
-      state: "hidden",
-      timeout: 5000,
-    });
-    await page
-      .locator("body")
-      .click({ position: { x: 5, y: 500 }, timeout: 5000 });
-    await page.keyboard.press("u");
-    await dialog.waitFor({ timeout: 5000 });
-    assert.match((await title.textContent()) ?? "", /Update/);
+    for (const how of ["button", "key"]) {
+      await page.goto(`${BASE}/stacks/gateway`);
+      const btn = page.locator(
+        '[data-drive="stack-head"][data-drive-row="gateway/update"]',
+      );
+      await btn.waitFor({ timeout: 10000 });
+      if (how === "button") await btn.click();
+      else {
+        await page.waitForTimeout(500);
+        await page
+          .locator("body")
+          .click({ position: { x: 5, y: 500 }, timeout: 5000 });
+        await page.keyboard.press("u");
+      }
+      await page.waitForURL("**/update?stack=gateway**", { timeout: 5000 });
+      await page.locator("#page .nx-steps").waitFor({ timeout: 10000 });
+      assert.match(
+        await page.locator("#page h1").innerText(),
+        /Update gateway/,
+        `${how}: not gateway's Update flow`,
+      );
+    }
   } finally {
     await browser.close();
   }
 });
 
 test("invariants: stack hub review — the More menu keeps the keyboard focus across fleet pushes", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -8964,7 +8947,7 @@ test("invariants: stack hub review — the More menu keeps the keyboard focus ac
 });
 
 test("invariants: stack hub review — Settings ▸ Secrets is this stack's pane: no stack list, no Open stack, no ↑ ↓, no card in a card", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -8984,7 +8967,10 @@ test("invariants: stack hub review — Settings ▸ Secrets is this stack's pane
           /open stack/i.test(a.textContent ?? ""),
         ).length,
         arrows: /↑\s*↓/.test(sec.textContent ?? ""),
-        cards: sec.querySelectorAll(".nx-card, .kp-card").length,
+        // A framed card: the kit's plain sections (no frame, the panes
+        // since the 3.71.0 merge) are not cards in the card.
+        cards: sec.querySelectorAll(".kp-card, .nx-card:not(.nx-card--plain)")
+          .length,
       };
     });
     assert.deepEqual(r, { list: 0, open: 0, arrows: false, cards: 0 });
@@ -8994,7 +8980,7 @@ test("invariants: stack hub review — Settings ▸ Secrets is this stack's pane
 });
 
 test("invariants: stack hub review — Restarts counts 24 h with a sparkline and opens the charts; Is it healthy? has each app's health check and its web addresses", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -9043,7 +9029,7 @@ test("invariants: stack hub review — Restarts counts 24 h with a sparkline and
 });
 
 test("invariants: stack hub review — the no-env row's Push the env… opens the seal-env action", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -9069,7 +9055,7 @@ test("invariants: stack hub review — the no-env row's Push the env… opens th
 });
 
 test("invariants: stack hub review — History says Kenny in chip and rows, dates read 30 Sep 12:14, and no incidents reads as no bundles kept", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -9092,7 +9078,9 @@ test("invariants: stack hub review — History says Kenny in chip and rows, date
       .locator('.sh-feed--full li[data-who="you"] .nx-chip')
       .allTextContents();
     assert.ok(
-      you.length > 0 && you.every((t) => t.trim() === "Kenny"),
+      // A CLI session reads "Kenny · CLI on wsl", as Activity names it.
+      you.length > 0 &&
+        you.every((t) => /^Kenny( · CLI on \S+)?$/.test(t.trim())),
       you.join(),
     );
     const times = await page
@@ -9125,7 +9113,7 @@ test("invariants: stack hub review — History says Kenny in chip and rows, date
 // address; Help, the tour and the Inbox's details. ──
 
 test("invariants: Deploy all changes keeps a stack's diff inside its column", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1100 },
@@ -9176,7 +9164,7 @@ test("invariants: Deploy all changes keeps a stack's diff inside its column", as
 });
 
 test("invariants: Deploy all changes deploys the ticked subset and destroys only as its own confirmed red step", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1100 },
@@ -9274,7 +9262,7 @@ test("invariants: Deploy all changes deploys the ticked subset and destroys only
 });
 
 test("invariants: Deploy all changes marks Compare done only once the compare ran, Esc and Show all reset the tile filter, and an unarmed destroy has a neutral dot", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1100 },
@@ -9347,7 +9335,7 @@ test("invariants: Deploy all changes marks Compare done only once the compare ra
 });
 
 test("invariants: on a phone the Deploy all changes tiles wrap their labels and the Inbox header reads title, sentence, then its button", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 390, height: 900 },
@@ -9382,7 +9370,7 @@ test("invariants: on a phone the Deploy all changes tiles wrap their labels and 
 });
 
 test("invariants: the Inbox's Worth a look carries a one-sentence description", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
@@ -9399,7 +9387,7 @@ test("invariants: the Inbox's Worth a look carries a one-sentence description", 
 });
 
 test("invariants: the Update flow has its own address, the old one redirects, and the nav marks Stacks for one stack", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1100 },
@@ -9425,7 +9413,7 @@ test("invariants: the Update flow has its own address, the old one redirects, an
 });
 
 test("invariants: the Update flow folds the file change, names each file once, and keeps running as one job when the tab leaves", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
@@ -9515,7 +9503,7 @@ test("invariants: the Update flow folds the file change, names each file once, a
 });
 
 test("invariants: Help's close button stays inside its panel, the bar's ? is the Live view control help-open, and the tour card is labelled by its step", async () => {
-  const browser = await chromium.launch();
+  const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1894, height: 1000 },
@@ -9547,6 +9535,55 @@ test("invariants: Help's close button stays inside its panel, the bar's ? is the
       await page.locator(`#${by}`).innerText(),
       await tour.locator("h3").innerText(),
     );
+  } finally {
+    await browser.close();
+  }
+});
+
+// redesign-integrate-1 (the 3.71.0 consolidation's open item from the
+// kit's review): at 390 px the Firewall's Inbound and Outbound rules
+// tables scrolled sideways inside their card and cut off Ports. On a phone
+// each rule is a card with its cells labelled (kp-themes' card layout),
+// never a table to scroll.
+test("invariants: redesign-integrate-1: on a 390 px phone the Firewall's rules tables never scroll sideways, every rule's Ports in view", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/firewall`);
+    await page.locator("tr.fw-rule").first().waitFor({ timeout: 10000 });
+    const r = await page.evaluate(() => {
+      const tables = [...document.querySelectorAll("table.fw-rules")];
+      return {
+        n: tables.length,
+        sideways: tables
+          .map((t) => {
+            const wrap = /** @type {HTMLElement} */ (t.parentElement);
+            return wrap.scrollWidth - wrap.clientWidth;
+          })
+          .filter((d) => d > 1),
+        portsOff: [...document.querySelectorAll("tr.fw-rule")]
+          .map((tr) => {
+            const td = /** @type {HTMLElement} */ (tr.children[3]);
+            const b = td.getBoundingClientRect();
+            return b.width === 0 || b.right > innerWidth + 1
+              ? (tr.getAttribute("data-rule") ?? "?")
+              : null;
+          })
+          .filter(Boolean),
+        unlabelled: [...document.querySelectorAll("tr.fw-rule > td")]
+          .filter((td) => !td.getAttribute("data-label"))
+          .map((td) => td.textContent ?? ""),
+        page: document.documentElement.scrollWidth - innerWidth,
+      };
+    });
+    assert.ok(r.n >= 1, "no rules table on the Firewall page");
+    assert.deepEqual(r.sideways, [], "a rules table scrolls sideways by px");
+    assert.deepEqual(r.portsOff, [], "rules whose Ports are cut off");
+    assert.deepEqual(r.unlabelled, [], "rule cells without their column name");
+    assert.ok(r.page <= 1, `the page scrolls sideways by ${r.page} px`);
   } finally {
     await browser.close();
   }

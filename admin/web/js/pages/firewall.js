@@ -1006,12 +1006,15 @@ export function mount(root) {
               : `${rs.length} of ${all.length}`,
           ),
         ),
+        // redesign-integrate-1: on a phone each rule is a card with its
+        // cells labelled (kp-themes' card layout, decided by this wrap's
+        // own width), never a table scrolling sideways inside its card.
         h(
           "div",
-          { class: "cf-table-wrap" },
+          { class: "kp-table-wrap cf-table-wrap" },
           h(
             "table",
-            { class: "kp-table fw-rules" },
+            { class: "kp-table fw-rules", "data-kp-cards": "" },
             h(
               "thead",
               null,
@@ -1117,16 +1120,16 @@ export function mount(root) {
           paintMx();
         },
       },
-      h("td", { class: "num cf-muted" }, String(r.n)),
+      h("td", { class: "num cf-muted", "data-label": "#" }, String(r.n)),
       h(
         "td",
-        null,
+        { "data-label": "Action" },
         h("span", { class: `fw-act fw-act--${r.action}` }, r.action),
         r.disabled ? chip("off") : null,
       ),
       h(
         "td",
-        { class: "fw-peer" },
+        { class: "fw-peer", "data-label": r.dir === "in" ? "From" : "To" },
         h("span", { class: "cf-mono" }, highlight(r.peer, S.q)),
         r.peer_stacks.length
           ? h(
@@ -1136,8 +1139,16 @@ export function mount(root) {
             )
           : null,
       ),
-      h("td", { class: "cf-mono nowrap" }, highlight(portsText(r), S.q)),
-      h("td", { class: "fw-note fw-hide-sm" }, highlight(r.note, S.q) || "—"),
+      h(
+        "td",
+        { class: "cf-mono nowrap", "data-label": "Ports" },
+        highlight(portsText(r), S.q),
+      ),
+      h(
+        "td",
+        { class: "fw-note fw-hide-sm", "data-label": "Why" },
+        highlight(r.note, S.q) || "—",
+      ),
     );
     drivable(tr, RULE, key);
     if (!open) return [tr];

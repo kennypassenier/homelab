@@ -232,6 +232,12 @@ test("who started an operation: a person, Claude, the nightly round", () => {
     steps: [],
   };
   assert.equal(whoOf({ ...op, by: "Kenny", req: 1 }).key, "you");
+  // redesign-integrate-6: a workstation's token names its owner, as
+  // Activity's By does.
+  assert.deepEqual(whoOf({ ...op, by: "wsl", req: 1 }), {
+    key: "you",
+    label: "Kenny · CLI on wsl",
+  });
   assert.deepEqual(whoOf({ ...op, by: "Claude (Live view)", req: 1 }), {
     key: "claude",
     label: "Claude · Live view",

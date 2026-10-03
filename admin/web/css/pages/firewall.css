@@ -271,6 +271,28 @@
 .fw-rule-more__acts {
   margin-block-start: 8px;
 }
+/* redesign-integrate-1: on a phone a rule is a card (kp-themes' card
+   layout, by the table wrap's own width); its detail row drops the empty
+   cell that keeps the "#" column on a desktop. */
+@container kp-table (max-width: 40rem) {
+  .fw-rules[data-kp-cards] .fw-rule-more > td:empty {
+    display: none;
+  }
+  .fw-rules[data-kp-cards] .fw-rule-more > td::before {
+    content: none;
+  }
+  /* A card breaks a long value (a port list, an address) instead of
+     widening; the Ports cell's desktop nowrap gives way here. */
+  .cf-page .fw-rules[data-kp-cards] td,
+  .cf-page .fw-rules[data-kp-cards] td.nowrap {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    min-inline-size: 0;
+  }
+  .cf-page .fw-rules[data-kp-cards] td > * {
+    min-inline-size: 0;
+  }
+}
 .fw-peer {
   display: grid;
   gap: 2px;

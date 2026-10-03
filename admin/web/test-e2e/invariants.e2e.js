@@ -3517,7 +3517,7 @@ test("invariants: hovering a Backups heatmap night shows its snapshot time and e
     await page.waitForTimeout(500);
     const night = (await cell.getAttribute("data-drive-row"))?.split("/")[1];
     await cell.hover();
-    const tip = page.locator(".bk-tip[role=tooltip]");
+    const tip = page.locator(".nx-tip[role=tooltip]");
     await tip.waitFor({ state: "visible", timeout: 3000 });
     const text = await tip.innerText();
     assert.match(text, /gateway/);
@@ -3638,14 +3638,14 @@ test("invariants: the Host page lays out two columns, Containers first, the line
           side,
           containers: box("#host-containers"),
           connection: box("#host-connection"),
-          kpis: [...document.querySelectorAll(".hk-kpi")].map(
+          kpis: [...document.querySelectorAll(".nx-kpi")].map(
             (k) => /** @type {HTMLElement} */ (k).dataset.key,
           ),
-          kpiText: [...document.querySelectorAll(".hk-kpi")].map(
+          kpiText: [...document.querySelectorAll(".nx-kpi")].map(
             (k) => k.textContent ?? "",
           ),
           primary: [
-            ...document.querySelectorAll(".hk-head__actions .kp-button"),
+            ...document.querySelectorAll(".nx-head-actions .kp-button"),
           ].map((b) => ({
             label: (b.textContent ?? "").trim(),
             primary: b.classList.contains("kp-button--primary"),
@@ -3729,7 +3729,7 @@ test("invariants: the Host page shows every host fact the demo host sends, none 
             .trim();
         return {
           all: text("main") || document.body.textContent || "",
-          pool: text(".hk-kpi[data-key='pool']"),
+          pool: text(".nx-kpi[data-key='pool']"),
           promised: text("#host-pool-promised"),
           written: text("#host-pool-written"),
           disk: text("#host-disk .hk-disk-line"),
@@ -4204,7 +4204,7 @@ test("invariants: Schedules page: a plain click turns a schedule off, greys its 
       false,
       "the host still has it on",
     );
-    const toast = page.locator(".sch-toast");
+    const toast = page.locator(".nx-toast");
     assert.match((await toast.textContent()) ?? "", /is off/);
     await toast.getByRole("button", { name: "Undo" }).click();
     await page.waitForTimeout(400);
@@ -4222,7 +4222,7 @@ test("invariants: Schedules page: a plain click turns a schedule off, greys its 
     await page.waitForTimeout(400);
     assert.equal(await row.evaluate((r) => r.classList.contains("off")), true);
     await page
-      .locator(".sch-toast")
+      .locator(".nx-toast")
       .getByRole("button", { name: "Undo" })
       .click();
     await page.waitForTimeout(400);
@@ -4233,10 +4233,10 @@ test("invariants: Schedules page: a plain click turns a schedule off, greys its 
       if (r.method() === "DELETE") deletes.push(r.url());
     });
     await row.locator('[data-drive="schedule-menu"]').click();
-    await page.locator('dialog.sch-menu[open] [data-drive="delete"]').click();
+    await page.locator('dialog.nx-rowmenu[open] [data-drive="delete"]').click();
     assert.equal(await row.isVisible(), false, "a deleted row still shows");
     await page
-      .locator(".sch-toast")
+      .locator(".nx-toast")
       .getByRole("button", { name: "Undo" })
       .click();
     await page.waitForTimeout(300);
@@ -4392,7 +4392,7 @@ test("invariants: Schedules page: Live view reaches the drawer and its fields, t
       assert.equal(await page.locator("dialog.sch-drawer[open]").count(), 0);
       r = await step({ do: "click", control: "schedule-menu", row: id });
       assert.ok(r.ok, `schedule-menu: ${JSON.stringify(r.refusal)}`);
-      await page.locator("dialog.sch-menu[open]").waitFor({ timeout: 3000 });
+      await page.locator("dialog.nx-rowmenu[open]").waitFor({ timeout: 3000 });
       r = await step({ do: "press", button: "delete" });
       assert.ok(r.ok, `press delete: ${JSON.stringify(r.refusal)}`);
       assert.equal(await row.isVisible(), false, "the deleted row still shows");
@@ -4416,6 +4416,166 @@ test("invariants: Schedules page: Live view reaches the drawer and its fields, t
     } finally {
       await step({ do: "done" });
     }
+    await clearSchedules(page);
+  } finally {
+    await browser.close();
+  }
+});
+
+/**
+ * A page at phone width in one theme.
+ * @param {import("playwright").Browser} browser @param {string} theme
+ */
+async function phonePage(browser, theme) {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+  });
+  await context.addInitScript((t) => {
+    try {
+      localStorage.setItem("theme", t);
+    } catch {}
+  }, theme);
+  return { context, page: await freshPage(context) };
+}
+
+test("invariants: redesign-kit: a narrow page header reads the title with its live status, the description, then the actions", async () => {
+  const browser = await chromium.launch();
+  try {
+    for (const theme of ["light", "dark"]) {
+      const { context, page } = await phonePage(browser, theme);
+      await page.goto(`${BASE}/backups`);
+      await page.locator("main .nx-head h1").waitFor({ timeout: 10000 });
+      const order = await page.evaluate(() => {
+        const head = /** @type {HTMLElement} */ (
+          document.querySelector("main .nx-head")
+        );
+        const top = (/** @type {string} */ sel) =>
+          head.querySelector(sel)?.getBoundingClientRect().top ?? -1;
+        return {
+          title: top("h1"),
+          titleBottom:
+            head.querySelector("h1")?.getBoundingClientRect().bottom ?? -1,
+          live: top(".nx-live"),
+          desc: top(".nx-head-desc"),
+          actions: top(".nx-head-actions"),
+        };
+      });
+      for (const [k, v] of Object.entries(order))
+        assert.ok(v >= 0, `${theme}: the header has no ${k}`);
+      assert.ok(
+        order.title < order.live &&
+          order.live < order.titleBottom &&
+          order.titleBottom <= order.desc &&
+          order.desc < order.actions,
+        `${theme}: the narrow header is not title, live, description, actions: ${JSON.stringify(order)}`,
+      );
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: redesign-kit: a bad attention item is a soft red tint with a red border and the page's text colour", async () => {
+  const browser = await chromium.launch();
+  try {
+    for (const theme of ["light", "dark"]) {
+      const { context, page } = await phonePage(browser, theme);
+      await page.goto(`${BASE}/backups`);
+      await page.locator("main .nx-head h1").waitFor({ timeout: 10000 });
+      const att = await page.evaluate(async () => {
+        const ui = await import("/js/ui.js");
+        const band = ui.attentionBand([
+          { tone: "bad", title: "Two stacks missed", text: "a test item" },
+        ]);
+        document.querySelector("main")?.prepend(band.el);
+        const item = /** @type {HTMLElement} */ (
+          band.el.querySelector(".nx-attention__item")
+        );
+        const probe = document.createElement("span");
+        probe.style.color = "var(--foreground)";
+        probe.style.backgroundColor = "var(--destructive)";
+        document.body.append(probe);
+        const p = getComputedStyle(probe);
+        const s = getComputedStyle(item);
+        const out = {
+          bg: s.backgroundColor,
+          fg: s.color,
+          border: s.borderTopColor,
+          solid: p.backgroundColor,
+          text: p.color,
+        };
+        probe.remove();
+        band.el.remove();
+        return out;
+      });
+      assert.notEqual(att.bg, att.solid, `${theme}: a bad item is solid red`);
+      assert.equal(
+        att.fg,
+        att.text,
+        `${theme}: a bad item's text is not the page's text colour`,
+      );
+      assert.notEqual(
+        att.border,
+        att.bg,
+        `${theme}: a bad item has no border of its own`,
+      );
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: redesign-kit: a row menu opened near the foot of the screen sits above its button and leaves the page where it was", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+      timezoneId: "Europe/Brussels",
+    });
+    const page = await freshPage(context);
+    await clearSchedules(page);
+    await addSchedule(page, "films", "backup", { every: "day", at: "10:00" });
+    const id = await addSchedule(page, "notes", "backup", {
+      every: "day",
+      at: "11:00",
+    });
+    await page.goto(`${BASE}/schedules`);
+    const sel = `tr[data-id="${id}"] [data-drive="schedule-menu"]`;
+    await page.locator(sel).waitFor({ timeout: 10000 });
+    // Put the button near the foot, where its menu cannot fit under it.
+    await page.evaluate((q) => {
+      const r = /** @type {HTMLElement} */ (
+        document.querySelector(q)
+      ).getBoundingClientRect();
+      scrollBy(0, r.bottom - innerHeight + 40);
+    }, sel);
+    const before = await page.evaluate(() => scrollY);
+    await page.locator(sel).click();
+    await page.locator("dialog.nx-rowmenu[open]").waitFor({ timeout: 3000 });
+    const placed = await page.evaluate((q) => {
+      const b = /** @type {HTMLElement} */ (document.querySelector(q));
+      const m = /** @type {HTMLElement} */ (
+        document.querySelector("dialog.nx-rowmenu[open]")
+      );
+      return {
+        scrollY,
+        button: b.getBoundingClientRect().top,
+        menuTop: m.getBoundingClientRect().top,
+        menuBottom: m.getBoundingClientRect().bottom,
+      };
+    }, sel);
+    assert.equal(
+      placed.scrollY,
+      before,
+      "opening the row menu scrolled the page",
+    );
+    assert.ok(
+      placed.menuBottom <= placed.button && placed.menuTop >= 0,
+      `the row menu is not above its button on the screen: ${JSON.stringify(placed)}`,
+    );
+    await page.keyboard.press("Escape");
     await clearSchedules(page);
   } finally {
     await browser.close();

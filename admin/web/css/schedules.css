@@ -1,11 +1,11 @@
 /* redesign-schedules (release 3.71.0): the Schedules page as the demo Kenny
    approved on 2026-10-03 (~/.local/share/homelab/redesign-3.71/schedules.html,
-   ops-kit.css). Every class is prefixed `sch-` so this sheet cannot touch
-   another page, and the stand-in components (header, card, toast) can be
-   swapped for the shared ones in ui.js without hunting for collisions.
+   ops-kit.css), linked from index.html. Every class is prefixed `sch-` so
+   this sheet cannot touch another page; the header, cards, toast, row menu
+   and key line are ui.js's shared blocks in their `.nx-ops` look (app.css).
    Tokens only (kp-themes): no hex colours, no new fonts. */
 
-:where(.sch-root, .sch-drawer, .sch-menu, .sch-toast) {
+:where(.sch-root, .sch-drawer) {
   --sch-r: var(--radius, 0.5rem);
   --sch-r-sm: calc(var(--radius, 0.5rem) * 0.6);
   --sch-line: color-mix(in oklab, var(--border) 85%, transparent);
@@ -23,80 +23,15 @@
 .sch-muted {
   color: var(--muted-foreground);
 }
-.sch-vh {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
+/* ---------- header chips ---------------------------------------------- */
+/* The page's key caps are flat (no under-shadow). */
+.sch-root .nx-kbd {
+  box-shadow: none;
 }
-
-/* ---------- page header (stand-in for ui.js pageHeader) -------------- */
-.sch-ph {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "t a" "d a" "m a";
-  column-gap: 24px;
-  row-gap: 6px;
-  align-items: start;
-}
-.sch-ph h1 {
-  grid-area: t;
-  margin: 0;
-  font-family: var(--theme-font-display, inherit);
-  font-size: min(var(--kp-text-display, 2.25rem), 2.25rem);
-  line-height: 1.1;
-  letter-spacing: -0.01em;
-}
-.sch-ph__desc {
-  grid-area: d;
-  margin: 0;
-  color: var(--muted-foreground);
-  max-width: 72ch;
-}
-.sch-ph__meta {
-  grid-area: m;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  align-items: center;
-  margin-top: 6px;
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-}
-.sch-ph__actions {
-  grid-area: a;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  align-self: center;
-}
-@media (max-width: 640px) {
-  .sch-ph {
-    grid-template-columns: 1fr;
-    grid-template-areas: "t" "d" "m" "a";
-  }
-  .sch-ph__actions {
-    justify-content: flex-start;
-    margin-top: 8px;
-  }
-  .sch-ph__actions .kp-button--primary {
-    flex: 1 1 100%;
-  }
-}
-.sch-kbd {
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.72rem;
-  border: 1px solid var(--border);
-  border-bottom-width: 2px;
-  border-radius: 4px;
-  padding: 0 5px;
-  color: var(--muted-foreground);
-  background: var(--card);
-  margin-left: 6px;
+/* The "read 4 s ago" line keeps `.measured`'s own block margin here, so the
+   meta row is as tall as the demo's. */
+.sch-root .nx-head-meta .measured {
+  margin-block: 0.3em;
 }
 .sch-chip {
   display: inline-flex;
@@ -137,56 +72,6 @@
   white-space: nowrap;
 }
 
-/* ---------- card (stand-in for ui.js section) ------------------------- */
-.sch-card {
-  background: var(--card);
-  color: var(--card-foreground);
-  border: 1px solid var(--sch-line);
-  border-radius: var(--sch-r);
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  min-width: 0;
-}
-.sch-card__h {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 4px 16px;
-  padding: 16px 16px 0;
-  align-items: start;
-}
-.sch-card__h h2 {
-  margin: 0;
-  font-size: 1.0625rem;
-  font-weight: 600;
-  line-height: 1.3;
-}
-.sch-card__h p {
-  margin: 2px 0 0;
-  grid-column: 1;
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-}
-.sch-card__b {
-  padding: 12px 16px 16px;
-  min-width: 0;
-}
-.sch-card__f {
-  padding: 10px 16px;
-  border-top: 1px solid var(--sch-line);
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-@media (max-width: 640px) {
-  .sch-card__h {
-    padding: 12px 12px 0;
-  }
-  .sch-card__b {
-    padding: 10px 12px 12px;
-  }
-  .sch-card__f {
-    padding: 8px 12px;
-  }
-}
 .sch-label {
   font-size: var(--kp-text-xs);
   text-transform: uppercase;
@@ -584,24 +469,6 @@ tr.sch-flash td {
   }
 }
 
-/* ---------- keys line -------------------------------------------------- */
-.sch-keys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 18px;
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-  margin: 0;
-}
-.sch-keys span {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-.sch-keys .sch-kbd {
-  margin-left: 0;
-}
-
 /* ---------- empty state ------------------------------------------------ */
 .sch-templates {
   display: grid;
@@ -636,76 +503,6 @@ tr.sch-flash td {
 .sch-tpl span {
   font-size: var(--kp-text-sm);
   color: var(--muted-foreground);
-}
-
-/* ---------- toast with Undo (stand-in for ui.js toast) ----------------- */
-.sch-toast {
-  position: fixed;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
-  z-index: 60;
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  padding: 12px 16px;
-  border-radius: var(--sch-r);
-  background: var(--foreground);
-  color: var(--background);
-  font-size: var(--kp-text-sm);
-  box-shadow: 0 12px 32px
-    color-mix(in oklab, var(--foreground) 30%, transparent);
-  max-width: calc(100vw - 32px);
-}
-.sch-toast button {
-  all: unset;
-  cursor: pointer;
-  font-weight: 700;
-  text-decoration: underline;
-}
-.sch-toast button:focus-visible {
-  outline: 2px solid var(--background);
-}
-
-/* ---------- the row menu (a non-modal dialog, so Live view reaches it) - */
-dialog.sch-menu {
-  position: absolute;
-  inset: auto;
-  margin: 0;
-  z-index: 50;
-  width: 260px;
-  background: var(--popover);
-  color: var(--popover-foreground);
-  border: 1px solid var(--sch-line);
-  border-radius: var(--sch-r);
-  padding: 6px;
-  box-shadow: 0 12px 32px
-    color-mix(in oklab, var(--foreground) 18%, transparent);
-}
-dialog.sch-menu[open] {
-  display: grid;
-}
-.sch-menu button {
-  all: unset;
-  cursor: pointer;
-  display: grid;
-  gap: 1px;
-  padding: 8px 10px;
-  border-radius: var(--sch-r-sm);
-}
-.sch-menu button:hover,
-.sch-menu button:focus-visible {
-  background: var(--sch-soft);
-}
-.sch-menu b {
-  font-size: var(--kp-text-sm);
-}
-.sch-menu span {
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-.sch-menu .danger b {
-  color: var(--destructive);
 }
 
 /* ---------- the New / Edit drawer (a modal dialog) --------------------- */

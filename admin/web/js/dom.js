@@ -29,6 +29,55 @@ export function h(tag, attrs, ...children) {
 }
 
 /**
+ * @typedef {Node | string | number | null | undefined | false | Child[]}
+ *   Child
+ * @typedef {Record<string, string | number | boolean | null | undefined |
+ *   ((e: any) => void)>} Attrs
+ */
+
+/**
+ * `h` for a page with handlers (redesign 3.71, from the Host and Schedules
+ * kits): an `on…` attribute holding a function becomes a listener, a
+ * `null` / `false` / `undefined` attribute is left out, `true` is an empty
+ * attribute, and children may be nested arrays, numbers or empty.
+ * @template {keyof HTMLElementTagNameMap} K
+ * @param {K} tag
+ * @param {Attrs | null} [attrs]
+ * @param {...Child} kids
+ * @returns {HTMLElementTagNameMap[K]}
+ */
+export function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs ?? {})) {
+    if (v == null || v === false) continue;
+    if (typeof v === "function") e.addEventListener(k.slice(2), v);
+    else if (k === "class") e.className = String(v);
+    else e.setAttribute(k, v === true ? "" : String(v));
+  }
+  /** @param {Child} c */
+  const add = (c) => {
+    if (c == null || c === false) return;
+    if (Array.isArray(c)) c.forEach(add);
+    else e.append(typeof c === "number" ? String(c) : c);
+  };
+  kids.forEach(add);
+  return e;
+}
+
+/**
+ * Add a listener and hand the element back, for building in one expression.
+ * @template {EventTarget} E
+ * @param {E} target
+ * @param {string} ev
+ * @param {(e: any) => void} fn
+ * @returns {E}
+ */
+export function on(target, ev, fn) {
+  target.addEventListener(ev, fn);
+  return target;
+}
+
+/**
  * A table cell; a number cell is marked so it lines up.
  * @param {string} text
  * @param {string} [cls]

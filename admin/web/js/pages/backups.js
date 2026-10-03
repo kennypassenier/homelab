@@ -20,11 +20,11 @@
 // Restore, Verify restore (fix-237) and the drills are the existing action
 // dialogs; "Show a file…" (fix-241) is the existing read-only dialog.
 //
-// The shared-looking pieces (header, KPI strip, attention band, cards,
-// hover card) come from `backupskit.js`, a stand-in with the foundation's
-// names for when this page moves onto the redesign's shell.
+// The shared pieces (header, KPI strip, attention band, cards, hover card,
+// sort headers, filter chips) are ui.js's; the page's root carries
+// `bk-page`, under which app.css measures them the way the demo does.
 
-import { fetchJson, h, slowRead, tableBlock } from "../dom.js";
+import { fetchJson, h, on, slowRead, tableBlock } from "../dom.js";
 import { formatDateTime, humanDuration } from "../format.js";
 import { openAction, openBatch } from "../actiondialog.js";
 import { openDialog } from "../actui.js";
@@ -61,15 +61,18 @@ import {
   button,
   filterChip,
   hoverCard,
+  hueColour,
   kbd,
   kpiStrip,
-  on,
   pageHeader,
   section,
   skeleton,
   sortHead,
-  stackMark,
-} from "./backupskit.js";
+  swatch,
+} from "../ui.js";
+
+/** A stack's colour square, in the topology's hue. @param {number} hue */
+const stackMark = (hue) => swatch(hueColour(hue));
 
 /**
  * @typedef {import("../backupsview.js").StackRead} StackRead
@@ -260,8 +263,9 @@ export function mount(root) {
   let readAt = null;
   const abort = new AbortController();
   const tip = hoverCard();
+  root.classList.add("bk-page");
   /** @type {(() => void)[]} */
-  const cleanups = [() => tip.stop()];
+  const cleanups = [() => tip.stop(), () => root.classList.remove("bk-page")];
   const N = () => (innerWidth < 640 ? 14 : 30);
   /** @type {Map<string, number>} */
   let hues = new Map();
@@ -336,7 +340,7 @@ export function mount(root) {
             paintKpis();
             paintRepos();
           },
-          drive: (el) => drivable(el, UNDRILLED),
+          drive: { id: UNDRILLED },
         },
       },
       { key: "retired", label: "Kept from retired" },
@@ -344,7 +348,7 @@ export function mount(root) {
     { loading: true },
   );
   const tile = (/** @type {string} */ k) =>
-    /** @type {ReturnType<typeof import("./backupskit.js").kpi>} */ (
+    /** @type {ReturnType<typeof import("../ui.js").kpi>} */ (
       strip.tiles.get(k)
     );
 
@@ -593,7 +597,7 @@ export function mount(root) {
 
   /** @param {ReturnType<typeof kpis>} k */
   const paintBand = (k) => {
-    /** @type {import("./backupskit.js").Attention[]} */
+    /** @type {import("../ui.js").Attention[]} */
     const items = [];
     if (k.lastNight.missed.length)
       items.push({
@@ -629,7 +633,7 @@ export function mount(root) {
     /** @type {Node[]} */
     const out = [h("b", null, `${s} · ${shortDate(night)}`)];
     const dot = (/** @type {string} */ tone, /** @type {string} */ w) =>
-      h("span", { class: `bk-dot bk-dot--${tone}` }, w);
+      h("span", { class: `nx-dot nx-dot--${tone}` }, w);
     if (n.state === "ok")
       out.push(
         dot("ok", `snapshot at ${n.times.map(hhmm).join(", ")}`),
@@ -722,7 +726,7 @@ export function mount(root) {
             : h(
                 "span",
                 {
-                  class: `bk-dot bk-dot--${f.ok === f.expected ? "ok" : f.ok ? "warn" : "bad"}`,
+                  class: `nx-dot nx-dot--${f.ok === f.expected ? "ok" : f.ok ? "warn" : "bad"}`,
                 },
                 `${f.ok} of ${f.expected} stacks backed up`,
               ),
@@ -823,11 +827,10 @@ export function mount(root) {
       covActive.replaceChildren(
         h("span", null, "Showing"),
         ...[...S.stacks].sort().map((s) =>
-          filterChip(
-            s,
-            () => toggleStack(s),
-            (el) => drivable(el, CLEAR, `stack:${s}`),
-          ),
+          filterChip(s, () => toggleStack(s), {
+            id: CLEAR,
+            row: `stack:${s}`,
+          }),
         ),
         all,
       );
@@ -962,7 +965,7 @@ export function mount(root) {
           else if (sn.state === "ok")
             state = h(
               "span",
-              { class: "bk-dot bk-dot--ok mono" },
+              { class: "nx-dot nx-dot--ok mono" },
               sn.times.length > 1
                 ? `${hhmm(sn.times[0])}–${hhmm(sn.times[sn.times.length - 1])}`
                 : hhmm(sn.times[0]),
@@ -974,8 +977,8 @@ export function mount(root) {
           else if (sn.state === "wait")
             state = h("span", { class: "bk-muted" }, "not run yet");
           else if (sn.state === "unread")
-            state = h("span", { class: "bk-dot bk-dot--bad" }, "not read");
-          else state = h("span", { class: "bk-dot bk-dot--bad" }, "missed");
+            state = h("span", { class: "nx-dot nx-dot--bad" }, "not read");
+          else state = h("span", { class: "nx-dot nx-dot--bad" }, "missed");
           /** @type {Node} */
           let act = h("span");
           if (sn.state === "ok" && r.status === "ok" && r.repos.length) {
@@ -1174,7 +1177,7 @@ export function mount(root) {
               newest
                 ? h(
                     "span",
-                    { class: `bk-dot bk-dot--${fresh ? "ok" : "bad"}` },
+                    { class: `nx-dot nx-dot--${fresh ? "ok" : "bad"}` },
                     `${humanDuration(now - newest.time)} ago`,
                   )
                 : h("span", { class: "bk-muted" }, "—"),
@@ -1210,7 +1213,7 @@ export function mount(root) {
               h(
                 "span",
                 {
-                  class: `bk-dot bk-dot--${d === "never" ? "warn" : d === "failed" ? "bad" : "ok"} bk-drill`,
+                  class: `nx-dot nx-dot--${d === "never" ? "warn" : d === "failed" ? "bad" : "ok"} bk-drill`,
                   tabindex: "0",
                 },
                 drillWords(d),
@@ -1338,7 +1341,7 @@ export function mount(root) {
           writeUrl();
           paintRepos();
         },
-        { cls, drive: (el) => drivable(el, SORT, key) },
+        { cls, drive: { id: SORT, row: key } },
       );
     repoBox.replaceChildren(
       h(
@@ -1356,7 +1359,7 @@ export function mount(root) {
             head("Snapshots", "snaps", "bk-num"),
             head("Size", "size", "bk-num"),
             head("Restore drill", "drill"),
-            h("th", { scope: "col" }, h("span", { class: "bk-sr" }, "Actions")),
+            h("th", { scope: "col" }, h("span", { class: "nx-vh" }, "Actions")),
           ),
         ),
         tbody,
@@ -1368,7 +1371,7 @@ export function mount(root) {
       /** @type {string} */ label,
       /** @type {string} */ row,
       /** @type {() => void} */ clear,
-    ) => filterChip(label, clear, (el) => drivable(el, CLEAR, row));
+    ) => filterChip(label, clear, { id: CLEAR, row });
     if (S.q.trim())
       act.push(
         chipOf(`“${S.q.trim()}”`, "text", () => {

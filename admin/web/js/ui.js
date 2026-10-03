@@ -5,27 +5,61 @@
 // kp-button) and only kp-themes tokens in app.css's `nx-` layout classes;
 // no second design system.
 //
-//   pageHeader   title, one-sentence description, breadcrumbs, live
-//                status ("updated 4 s ago"), one primary action slot
-//   kpiStrip     3-6 KPI tiles: label, value, context line, sparkline,
-//                each tile a link to its filtered detail
+//   pageHeader   title (+ a muted `sub`), one-sentence description,
+//                breadcrumbs, live status, the actions with ONE primary and
+//                an overflow slot; with `meta` the chips row under the
+//                description and the actions spanning the header's rows
+//   kpiStrip     3-6 KPI tiles: label, value, context line, a sparkline or
+//                a meter (fill, tick mark, tone), each tile a link to its
+//                filtered detail or a toggle of a filter on the page
 //   attention    one kp-alert per problem, worst first, each with its fix;
 //                zero height when all is well
 //   toolbar      §12: search · labelled filter groups · view & state,
 //                plus the active-filter row; toggleChips is the plain-click
-//                on/off chip group (several allowed, Esc / Show all resets)
+//                on/off chip group (several allowed, Esc / Show all resets),
+//                toggleGroup the same in the segmented look with "All" as
+//                its reset and a count per value, segSwitch the one-of
 //   section      a card: heading + one sentence + tools, optionally
-//                collapsible and mounted only when first opened
+//                collapsible (tools inside its summary) and mounted only
+//                when first opened, with a foot line (source left, "read
+//                4 s ago" right)
+//   toast        one short message at the foot of the screen, drawn inside
+//                #page so Live view can press its Undo
+//   rowMenu      a row's menu as a non-modal <dialog> of named items
+//   moreMenu     the header's overflow `···` menu of links
+//   hoverCard    one floating detail card for hover and keyboard focus
+//   sortHead / sortableTable   sortable column headers
+//   kbd / keysLine            a key, and the page's line of shortcuts
 //   skeleton…    loading in the final geometry from the first frame
 //   emptyState   why it is empty and what fills it, plus that action
 //   stackMark    the per-stack identity mark (hue + mirrored 5×5 pattern
-//                from the name), the same in every table and header
+//                from the name), the same in every table and header;
+//                swatch the small square of a stack's colour
 //   sparkline    a 28 px trend line for a tile or a table row
+//
+// Every block that draws something clickable takes the Live view control
+// it is (a declared id, or a dialog control name) from its caller, so no
+// page grows an undeclared control (invariant 39).
+//
+// Two looks of the same blocks, both approved demos: the default one
+// (next.css: Backups, Secrets, the stack hub) and `.nx-ops` on a page's
+// root (ops-kit.css: Host, Schedules, Activity, Metrics, Notifications) —
+// flush cards with a ruled foot, a segmented control, a quieter KPI.
 //
 // The shared time chart lives in timechart.js.
 
 import { agoEl, setAgo } from "./ago.js";
-import { h } from "./dom.js";
+import { el, h } from "./dom.js";
+import { dialogControl, drivable } from "./drivable.js";
+
+/**
+ * The Live view control a clickable block is: a declared id (drivable.js),
+ * with its row when the control repeats per row.
+ * @typedef {{id: string, row?: string}} Drive
+ */
+
+/** @param {HTMLElement} e @param {Drive} d */
+const drive = (e, d) => drivable(e, d.id, d.row);
 
 /** @typedef {{label: string, href?: string}} Crumb */
 
@@ -62,22 +96,41 @@ export function breadcrumbs(trail) {
 /**
  * The live freshness of a page or a card: a dot and "updated 4 s ago",
  * ticking (ago.js), greyed out once it is older than three minutes.
+ * `set(at, words)`: `words` stand in for the time while something is under
+ * way ("reading 3 of 6 stacks…"); `data-state` says none / ok / busy.
  * @param {string} [verb] "updated", "read", "measured"
- * @returns {{el: HTMLElement, set: (at: number | null) => void}}
+ * @returns {{el: HTMLElement,
+ *   set: (at: number | null, words?: string) => void}}
  */
 export function liveStatus(verb = "updated") {
   const ago = agoEl(verb, null, { live: true });
-  const el = h("span", { class: "nx-live", role: "status" }, ago);
-  return { el, set: (at) => setAgo(ago, at) };
+  const words = h("span", { class: "nx-live__words" });
+  const e = h("span", { class: "nx-live", role: "status" }, ago, words);
+  /** @param {number | null} at @param {string} [w] */
+  const set = (at, w) => {
+    setAgo(ago, at);
+    ago.hidden = w != null;
+    words.hidden = w == null;
+    words.textContent = w ?? "";
+    e.dataset.state = w != null ? "busy" : at == null ? "none" : "ok";
+  };
+  set(null);
+  return { el: e, set };
 }
 
 /**
- * @typedef {{title: string, desc: string, crumbs?: Crumb[],
- *   live?: string | boolean, actions?: Node[], primary?: Node | null}}
- *   HeaderSpec
+ * @typedef {{title: string, sub?: string, desc: string, crumbs?: Crumb[],
+ *   live?: string | boolean, actions?: Node[], primary?: Node | null,
+ *   more?: Node | null, meta?: Node[]}} HeaderSpec
+ *   `sub`: a muted part of the title ("Host demo");
  *   `live`: show a live status (true, or the verb: "updated", "read");
- *   `actions`: at most two secondary actions (and an overflow menu);
- *   `primary`: the ONE primary action, last on the right.
+ *   `actions`: at most two secondary actions;
+ *   `primary`: the ONE primary action, after them;
+ *   `more`: the overflow menu (`moreMenu`), last;
+ *   `meta`: chips and facts in a row under the description (the live
+ *   status joins them); the header then takes the demo's grid, its
+ *   actions against the right edge spanning the title, description and
+ *   meta rows (one column on a phone, actions last).
  */
 
 /**
@@ -86,14 +139,20 @@ export function liveStatus(verb = "updated") {
  * edge, the primary one last), then the page's one-sentence description
  * right under it. Markup the whole-screen invariants read: `.title-row`
  * holding the `h1`, the description its next sibling `p` (rows 32, 36, 40,
- * 41).
+ * 41); with `meta`, the description is the `h1`'s own next sibling.
  * @param {HeaderSpec} spec
  * @returns {{el: HTMLElement, title: HTMLHeadingElement,
  *   desc: HTMLParagraphElement, actions: HTMLElement,
+ *   meta: HTMLElement | null,
  *   live: ReturnType<typeof liveStatus> | null}}
  */
 export function pageHeader(spec) {
-  const title = h("h1", null, spec.title);
+  const title = h(
+    "h1",
+    null,
+    spec.title,
+    ...(spec.sub ? [h("span", { class: "nx-head-sub" }, ` ${spec.sub}`)] : []),
+  );
   const live =
     spec.live === undefined || spec.live === false
       ? null
@@ -103,7 +162,28 @@ export function pageHeader(spec) {
     { class: "actions-row nx-head-actions" },
     ...(spec.actions ?? []),
     ...(spec.primary ? [spec.primary] : []),
+    ...(spec.more ? [spec.more] : []),
   );
+  const desc = h("p", { class: "section-head__desc nx-head-desc" }, spec.desc);
+  const crumbs = spec.crumbs?.length ? [breadcrumbs(spec.crumbs)] : [];
+  if (spec.meta) {
+    const meta = h(
+      "div",
+      { class: "nx-head-meta" },
+      ...spec.meta,
+      ...(live ? [live.el] : []),
+    );
+    const e = h(
+      "header",
+      { class: "nx-head nx-head--meta" },
+      ...crumbs,
+      title,
+      desc,
+      meta,
+      actions,
+    );
+    return { el: e, title, desc, actions, meta, live };
+  }
   const row = h("div", { class: "title-row" }, title);
   if (live || actions.childElementCount > 0) {
     const right = h("div", { class: "nx-head-right" });
@@ -111,88 +191,175 @@ export function pageHeader(spec) {
     right.append(actions);
     row.append(right);
   }
-  const desc = h("p", { class: "section-head__desc nx-head-desc" }, spec.desc);
-  const el = h(
-    "header",
-    { class: "nx-head" },
-    ...(spec.crumbs?.length ? [breadcrumbs(spec.crumbs)] : []),
-    row,
-    desc,
-  );
-  return { el, title, desc, actions, live };
+  const e = h("header", { class: "nx-head" }, ...crumbs, row, desc);
+  return { el: e, title, desc, actions, meta: null, live };
 }
 
 /**
- * @typedef {{key?: string, label: string, value?: string, unit?: string,
- *   ctx?: string, tone?: "ok" | "warn" | "bad" | null, href?: string,
- *   spark?: number[], title?: string}} Kpi
+ * @typedef {{pct: number | null, mark?: number | null, markTitle?: string,
+ *   tone?: "" | "warn" | "bad" | null}} Meter
+ *   a bar `pct` percent full, with a tick at `mark` percent (what is
+ *   promised, a limit), in the warn / bad colour when `tone` says so
  */
 
 /**
+ * @typedef {{key?: string, label: string, value?: string, unit?: string,
+ *   ctx?: string, ctxTone?: "ok" | "warn" | "bad" | null,
+ *   tone?: "" | "warn" | "bad" | null, href?: string,
+ *   spark?: number[], meter?: Meter, title?: string,
+ *   toggle?: {pressed: boolean, onToggle: () => void, drive?: Drive}}} Kpi
+ *   `spark` or `meter` fill the tile's fourth row (a tile given neither
+ *   has three rows). `href`: the tile links to its filtered detail;
+ *   `toggle`: the tile is a button turning a filter on this page on or
+ *   off (`aria-pressed`), the Live view control `drive` (required when the
+ *   tile is made; a later `set` may leave it out). `ctxTone` puts a
+ *   status dot before the context line.
+ */
+
+/**
+ * A meter's geometry, clamped to its bar.
+ * @param {Meter | null | undefined} m
+ * @returns {{fill: number, mark: number | null, tone: string}}
+ */
+export function meterParts(m) {
+  const clamp = (/** @type {number} */ n) =>
+    Math.max(0, Math.min(100, Number.isFinite(n) ? n : 0));
+  return {
+    fill: clamp(m?.pct ?? 0),
+    mark: m?.mark == null ? null : clamp(m.mark),
+    tone: m?.tone ?? "",
+  };
+}
+
+/**
+ * A pulsing placeholder of a given width (DESIGN_LANGUAGE §7), inline.
+ * @param {string} [width]
+ */
+export function skeleton(width = "70%") {
+  return h("span", {
+    class: "kp-skeleton nx-sk",
+    style: `inline-size: ${width}`,
+    "aria-hidden": "true",
+  });
+}
+
+/**
  * One KPI tile (DESIGN_LANGUAGE §1.2): label (xs uppercase), value
- * (tabular), a context line, an optional sparkline; a tile with an `href`
- * is a link to its filtered detail. `set` repaints it in place, so the
- * strip never reflows (rule 6).
+ * (tabular), a context line, an optional sparkline or meter; a tile with
+ * an `href` is a link to its filtered detail, one with a `toggle` a
+ * button. `set` repaints it in place, so the strip never reflows (rule 6);
+ * `set({loading: true})` shows skeletons in the value and the context.
  * @param {Kpi} k
- * @returns {{el: HTMLElement, set: (k: Partial<Kpi>) => void}}
+ * @returns {{el: HTMLElement,
+ *   set: (k: Partial<Kpi> & {loading?: boolean}) => void}}
  */
 export function kpi(k) {
   const label = h("span", { class: "nx-kpi__label" });
+  const hint = h("span", { class: "nx-kpi__hint", "aria-hidden": "true" });
   const value = h("span", { class: "nx-kpi__value" });
   const ctx = h("span", { class: "nx-kpi__ctx" });
-  const spark = h("span", { class: "nx-kpi__spark", "aria-hidden": "true" });
-  const el = h(
-    k.href ? "a" : "div",
-    { class: "nx-kpi", ...(k.href ? { href: k.href } : {}) },
-    label,
-    value,
-    ctx,
-    spark,
-  );
+  const foot = k.meter
+    ? h("div", { class: "nx-meter", "aria-hidden": "true" })
+    : k.spark
+      ? h("span", { class: "nx-kpi__spark", "aria-hidden": "true" })
+      : null;
+  /** @type {HTMLElement} */
+  const e = k.toggle
+    ? h("button", { type: "button", class: "nx-kpi nx-kpi--toggle" })
+    : h(k.href ? "a" : "div", {
+        class: "nx-kpi",
+        ...(k.href ? { href: k.href } : {}),
+      });
+  if (!foot) e.classList.add("nx-kpi--bare");
+  e.append(label, ...(k.toggle ? [hint] : []), value, ctx);
+  if (foot) e.append(foot);
   /** @type {Kpi} */
   let cur = { ...k };
-  const set = (/** @type {Partial<Kpi>} */ next) => {
-    cur = { ...cur, ...next };
+  if (k.toggle) {
+    if (!k.toggle.drive)
+      throw new Error(`the KPI toggle ${k.label} needs its Live view control`);
+    drive(e, k.toggle.drive);
+    e.addEventListener("click", () => cur.toggle?.onToggle());
+  }
+  let loading = false;
+  const set = (/** @type {Partial<Kpi> & {loading?: boolean}} */ next) => {
+    const { loading: l, ...rest } = next;
+    if (l != null) loading = l;
+    cur = { ...cur, ...rest };
     label.textContent = cur.label;
+    if (loading) e.dataset.loading = "";
+    else delete e.dataset.loading;
     value.replaceChildren(
-      cur.value ?? "—",
-      ...(cur.unit ? [h("small", null, cur.unit)] : []),
+      ...(loading
+        ? [skeleton("3ch")]
+        : [
+            cur.value ?? "—",
+            ...(cur.unit ? [h("small", null, cur.unit)] : []),
+          ]),
     );
-    ctx.textContent = cur.ctx ?? "";
-    el.dataset.tone = cur.tone ?? "";
-    if (cur.title) el.title = cur.title;
-    spark.replaceChildren(
-      ...(cur.spark && cur.spark.length > 1 ? [sparkline(cur.spark)] : []),
+    ctx.replaceChildren(
+      loading
+        ? skeleton("80%")
+        : cur.ctxTone
+          ? h("span", { class: `nx-dot nx-dot--${cur.ctxTone}` }, cur.ctx ?? "")
+          : (cur.ctx ?? ""),
     );
-    if (cur.href && el instanceof HTMLAnchorElement) el.href = cur.href;
+    e.dataset.tone = cur.tone ?? "";
+    e.dataset.key = cur.key ?? cur.label;
+    if (cur.title) e.title = cur.title;
+    if (cur.toggle) {
+      e.setAttribute("aria-pressed", String(cur.toggle.pressed));
+      hint.textContent = cur.toggle.pressed ? "filtering ×" : "filter";
+    }
+    if (foot && cur.meter) {
+      const m = meterParts(cur.meter);
+      foot.className = `nx-meter${m.tone ? ` nx-meter--${m.tone}` : ""}`;
+      const fill = h("i");
+      fill.style.width = `${m.fill}%`;
+      /** @type {HTMLElement[]} */
+      const parts = [fill];
+      if (m.mark != null) {
+        const tick = h(
+          "b",
+          cur.meter.markTitle ? { title: cur.meter.markTitle } : null,
+        );
+        tick.style.left = `${m.mark}%`;
+        parts.push(tick);
+      }
+      foot.replaceChildren(...parts);
+    } else if (foot)
+      foot.replaceChildren(
+        ...(cur.spark && cur.spark.length > 1 ? [sparkline(cur.spark)] : []),
+      );
+    if (cur.href && e instanceof HTMLAnchorElement) e.href = cur.href;
   };
   set({});
-  return { el, set };
+  return { el: e, set };
 }
 
 /**
  * A row of 3 to 6 KPI tiles; while `loading` each tile is its own skeleton
  * in the final geometry.
  * @param {Kpi[]} tiles
- * @param {{loading?: boolean}} [opts]
+ * @param {{loading?: boolean, label?: string}} [opts]
  * @returns {{el: HTMLElement, tiles: Map<string, ReturnType<typeof kpi>>}}
  */
 export function kpiStrip(tiles, opts = {}) {
   /** @type {Map<string, ReturnType<typeof kpi>>} */
   const map = new Map();
-  const el = h("div", {
+  const e = h("div", {
     class: "nx-kpis",
     role: "group",
-    "aria-label": "Key figures",
+    "aria-label": opts.label ?? "Key figures",
   });
-  el.style.setProperty("--kpi-n", String(Math.max(1, tiles.length)));
+  e.style.setProperty("--kpi-n", String(Math.max(1, tiles.length)));
   for (const t of tiles) {
-    const k = kpi(opts.loading ? { ...t, value: "" } : t);
-    if (opts.loading) k.el.dataset.loading = "";
+    const k = kpi(t);
+    if (opts.loading) k.set({ loading: true });
     map.set(t.key ?? t.label, k);
-    el.append(k.el);
+    e.append(k.el);
   }
-  return { el, tiles: map };
+  return { el: e, tiles: map };
 }
 
 /**
@@ -437,30 +604,74 @@ export function toolbar(spec) {
 }
 
 /**
+ * @typedef {{title?: string, desc?: string, label?: string, id?: string,
+ *   tools?: Node[], badge?: Node | null, foot?: import("./dom.js").Child[],
+ *   body?: import("./dom.js").Child, collapsible?: boolean, open?: boolean,
+ *   mount?: (body: HTMLElement) => (() => void) | void,
+ *   level?: "h2" | "h3", tag?: "section" | "aside", cls?: string,
+ *   plain?: boolean}}
+ *   SectionSpec
+ *   `title` + `desc`: the head (rule 8); a card without a title (a hero)
+ *   names itself with `label` instead. `badge`: a count beside the title.
+ *   `foot`: the foot line, each item a span spread from left to right
+ *   (the source, then "read 4 s ago"); without it the returned `foot` is
+ *   hidden, for a caller that fills it later. `body`: children to start
+ *   with; `mount`: fills the body the first time the card is open.
+ *   `plain`: a flat card without kp-card's themed frame (no corner cut or
+ *   glow in the dark themes), for a page whose demo draws plain cards.
+ */
+
+/**
  * A section of a page as a kp card (DESIGN_LANGUAGE §5): a header row with
  * its title and one sentence (rule 8) on the left and its tools on the
- * right, then the body. `collapsible` makes it a `<details>` (rarely used
- * or destructive things go last, folded); `mount` fills the body, the
- * first time it is open — so a folded section never pays for its read —
- * and its cleanup runs with `stop()`.
- * @param {{title: string, desc: string, id?: string, tools?: Node[],
- *   collapsible?: boolean, open?: boolean,
- *   mount?: (body: HTMLElement) => (() => void) | void,
- *   level?: "h2" | "h3"}} spec
- * @returns {{el: HTMLElement, body: HTMLElement, stop: () => void,
- *   open: () => void}}
+ * right, then the body, then an optional foot line. `collapsible` makes
+ * it a `<details>` whose summary is the whole head, tools included
+ * (rarely used or destructive things go last, folded); `mount` fills the
+ * body, the first time it is open — so a folded section never pays for
+ * its read — and its cleanup runs with `stop()`.
+ * @param {SectionSpec} spec
+ * @returns {{el: HTMLElement, head: HTMLElement, body: HTMLElement,
+ *   foot: HTMLElement, stop: () => void, open: () => void}}
  */
 export function section(spec) {
-  const head = h(
+  const level = spec.level ?? "h2";
+  const titleEl = spec.title
+    ? h(level, spec.id ? { id: `${spec.id}-h` } : null, spec.title)
+    : null;
+  const head = titleEl
+    ? h(
+        "div",
+        { class: "nx-card__head" },
+        titleEl,
+        ...(spec.badge ? [spec.badge] : []),
+        h("p", { class: "section-head__desc" }, spec.desc ?? ""),
+        ...(spec.tools?.length || spec.collapsible
+          ? [
+              h(
+                "div",
+                { class: "nx-card__tools" },
+                ...(spec.tools ?? []),
+                ...(spec.collapsible
+                  ? [
+                      h(
+                        "span",
+                        { class: "nx-chev", "aria-hidden": "true" },
+                        "›",
+                      ),
+                    ]
+                  : []),
+              ),
+            ]
+          : []),
+      )
+    : h("span", { class: "nx-card__nohead" });
+  const body = el("div", { class: "nx-card__body" }, spec.body ?? null);
+  const foot = el(
     "div",
-    { class: "nx-card__head" },
-    h(spec.level ?? "h2", null, spec.title),
-    h("p", { class: "section-head__desc" }, spec.desc),
-    ...(spec.tools?.length
-      ? [h("div", { class: "nx-card__tools" }, ...spec.tools)]
-      : []),
+    { class: "nx-card__foot" },
+    (spec.foot ?? []).map((x) => el("span", null, x)),
   );
-  const body = h("div", { class: "nx-card__body" });
+  foot.hidden = !spec.foot;
   /** @type {(() => void) | null} */
   let cleanup = null;
   let mounted = false;
@@ -469,41 +680,54 @@ export function section(spec) {
     mounted = true;
     cleanup = spec.mount(body) ?? null;
   };
+  /** @type {Record<string, string>} */
+  const named = titleEl?.id
+    ? { "aria-labelledby": titleEl.id }
+    : spec.title || spec.label
+      ? { "aria-label": spec.title || spec.label || "" }
+      : {};
+  const cls = (/** @type {string} */ c) =>
+    `${spec.plain ? "nx-card nx-card--plain" : "kp-card nx-card"}${c}${spec.cls ? ` ${spec.cls}` : ""}`;
   /** @type {HTMLElement} */
-  let el;
+  let e;
   if (spec.collapsible) {
     const d = /** @type {HTMLDetailsElement} */ (
       h(
         "details",
         {
-          class: "kp-card nx-card nx-card--fold",
+          class: cls(" nx-card--fold"),
           ...(spec.id ? { id: spec.id } : {}),
+          ...named,
           ...(spec.open ? { open: "" } : {}),
         },
         h("summary", null, head),
         body,
+        foot,
       )
     );
     d.addEventListener("toggle", () => {
       if (d.open) fill();
     });
     if (spec.open) fill();
-    el = d;
+    e = d;
   } else {
-    el = h(
-      "section",
-      { class: "kp-card nx-card", ...(spec.id ? { id: spec.id } : {}) },
+    e = h(
+      spec.tag ?? "section",
+      { class: cls(""), ...(spec.id ? { id: spec.id } : {}), ...named },
       head,
       body,
+      foot,
     );
     fill();
   }
   return {
-    el,
+    el: e,
+    head,
     body,
+    foot,
     stop: () => cleanup?.(),
     open: () => {
-      if (el instanceof HTMLDetailsElement) el.open = true;
+      if (e instanceof HTMLDetailsElement) e.open = true;
       fill();
     },
   };
@@ -712,4 +936,683 @@ export function sparkline(values, opts = {}) {
   l.setAttribute("d", line);
   svg.append(a, l);
   return svg;
+}
+
+/**
+ * A plain button. `cls` adds kp modifiers ("kp-button--primary", …).
+ * @param {string} label
+ * @param {{cls?: string, title?: string, onClick?: (e: MouseEvent) => void,
+ *   attrs?: Record<string, string>}} [o]
+ */
+export function button(label, o = {}) {
+  const b = h(
+    "button",
+    {
+      type: "button",
+      class: `kp-button ${o.cls ?? ""}`.trim(),
+      ...(o.title ? { title: o.title } : {}),
+      ...(o.attrs ?? {}),
+    },
+    label,
+  );
+  if (o.onClick) b.addEventListener("click", o.onClick);
+  return b;
+}
+
+/**
+ * One value of a plain-click toggle group turned on or off: several may be
+ * on, and every value on is the same as none (back to All).
+ * @param {Set<string>} on
+ * @param {string} value
+ * @param {number} total how many values the group has
+ * @returns {Set<string>}
+ */
+export function toggleValue(on, value, total) {
+  const next = new Set(on);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  if (next.size >= total) next.clear();
+  return next;
+}
+
+/**
+ * Plain-click toggles in the segmented look (DESIGN_LANGUAGE §10, §12):
+ * each click turns one value on or off, several may be on, and "All"
+ * (pressed while none is) turns them all off again; `counts` writes the
+ * exact number beside each. Every button is the Live view control
+ * `drive.id` on its own value's row ("all" for All).
+ * @param {{label: string, all: {label: string, hint?: string},
+ *   chips: {value: string, label: string, hint?: string}[],
+ *   onChange: (on: Set<string>) => void, drive: {id: string}}} spec
+ * @returns {{el: HTMLElement, selected: () => Set<string>,
+ *   reset: () => void, counts: (n: Record<string, number>) => void}}
+ */
+export function toggleGroup(spec) {
+  /** @type {Set<string>} */
+  let on = new Set();
+  /** @type {Map<string, HTMLElement>} */
+  const counts = new Map();
+  const countEl = (/** @type {string} */ v) => {
+    const c = h("span", { class: "nx-seg__count" });
+    counts.set(v, c);
+    return c;
+  };
+  const changed = () => {
+    paint();
+    spec.onChange(new Set(on));
+  };
+  const allBtn = el(
+    "button",
+    {
+      type: "button",
+      "data-v": "all",
+      title: spec.all.hint ?? "Show every row",
+      onclick: () => {
+        on = new Set();
+        changed();
+      },
+    },
+    spec.all.label,
+    countEl("all"),
+  );
+  drive(allBtn, { id: spec.drive.id, row: "all" });
+  const btns = spec.chips.map((c) =>
+    drive(
+      el(
+        "button",
+        {
+          type: "button",
+          "data-v": c.value,
+          title:
+            c.hint ??
+            "Click to show or hide these; each click turns one on or off",
+          onclick: () => {
+            on = toggleValue(on, c.value, spec.chips.length);
+            changed();
+          },
+        },
+        c.label,
+        countEl(c.value),
+      ),
+      { id: spec.drive.id, row: c.value },
+    ),
+  );
+  const e = h(
+    "div",
+    { class: "nx-seg", role: "group", "aria-label": spec.label },
+    allBtn,
+    ...btns,
+  );
+  const paint = () => {
+    allBtn.setAttribute("aria-pressed", String(on.size === 0));
+    btns.forEach((b, i) =>
+      b.setAttribute("aria-pressed", String(on.has(spec.chips[i].value))),
+    );
+  };
+  paint();
+  return {
+    el: e,
+    selected: () => new Set(on),
+    reset: () => {
+      if (on.size === 0) return;
+      on = new Set();
+      changed();
+    },
+    counts: (n) => {
+      for (const [v, c] of counts)
+        c.textContent = n[v] == null ? "" : String(n[v]);
+    },
+  };
+}
+
+/**
+ * A one-of segmented switch ("Changed" / "All"); each button is the Live
+ * view control `drive.id` on its value's row.
+ * @param {{label: string, items: {value: string, label: string,
+ *   hint?: string}[], value: string, onChange: (v: string) => void,
+ *   drive: {id: string}}} spec
+ * @returns {{el: HTMLElement, counts: (n: Record<string, number>) => void}}
+ */
+export function segSwitch(spec) {
+  /** @type {Map<string, HTMLElement>} */
+  const counts = new Map();
+  let cur = spec.value;
+  const btns = spec.items.map((it) => {
+    const c = h("span", { class: "nx-seg__count" });
+    counts.set(it.value, c);
+    return drive(
+      el(
+        "button",
+        {
+          type: "button",
+          "data-v": it.value,
+          title: it.hint ?? null,
+          onclick: () => {
+            cur = it.value;
+            paint();
+            spec.onChange(cur);
+          },
+        },
+        it.label,
+        c,
+      ),
+      { id: spec.drive.id, row: it.value },
+    );
+  });
+  const paint = () =>
+    btns.forEach((b, i) =>
+      b.setAttribute("aria-pressed", String(spec.items[i].value === cur)),
+    );
+  paint();
+  return {
+    el: h(
+      "div",
+      { class: "nx-seg", role: "group", "aria-label": spec.label },
+      ...btns,
+    ),
+    counts: (n) => {
+      for (const [v, c] of counts)
+        c.textContent = n[v] == null ? "" : String(n[v]);
+    },
+  };
+}
+
+/**
+ * The next state of a column sorted by clicks: ascending, descending, then
+ * back to the original order.
+ * @param {string | null} now `aria-sort`'s value
+ * @returns {"ascending" | "descending" | null}
+ */
+export const nextSortDir = (now) =>
+  now === "ascending"
+    ? "descending"
+    : now === "descending"
+      ? null
+      : "ascending";
+
+/**
+ * What a cell sorts by: its `data-sort` or its text, numbers as numbers.
+ * @param {string} v
+ * @returns {number | string}
+ */
+export function sortValue(v) {
+  const n = Number(v);
+  return v !== "" && Number.isFinite(n) ? n : v.toLowerCase();
+}
+
+/**
+ * Makes a plain table's headers sort it (DESIGN_LANGUAGE §12): click a
+ * header for ascending, again descending, a third time the original
+ * order; Enter / Space do the same; `aria-sort` says which. A cell's
+ * `data-sort` overrides its text.
+ * @param {HTMLTableElement} table
+ */
+export function sortableTable(table) {
+  const head = table.tHead?.rows[0];
+  if (!head) return;
+  const ths = [...head.cells];
+  ths.forEach((th, ci) => {
+    if (!th.textContent?.trim()) return;
+    th.classList.add("nx-sortable");
+    th.tabIndex = 0;
+    th.title =
+      "Sort by this column; click again to reverse, a third time for the original order";
+    const go = () => {
+      const dir = nextSortDir(th.getAttribute("aria-sort"));
+      ths.forEach((x) => x.removeAttribute("aria-sort"));
+      const body = table.tBodies[0];
+      const rows = [...body.rows];
+      rows.forEach((r, i) => {
+        if (r.dataset.order == null) r.dataset.order = String(i);
+      });
+      if (!dir) {
+        rows.sort((a, b) => Number(a.dataset.order) - Number(b.dataset.order));
+        body.append(...rows);
+        return;
+      }
+      th.setAttribute("aria-sort", dir);
+      /** @param {HTMLTableRowElement} r */
+      const key = (r) => {
+        const c = r.cells[ci];
+        return sortValue(c?.dataset.sort ?? c?.textContent?.trim() ?? "");
+      };
+      rows.sort((a, b) => {
+        const A = key(a);
+        const B = key(b);
+        return (A > B ? 1 : A < B ? -1 : 0) * (dir === "ascending" ? 1 : -1);
+      });
+      body.append(...rows);
+    };
+    th.addEventListener("click", go);
+    th.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        go();
+      }
+    });
+  });
+}
+
+/**
+ * A sortable column header whose order the page keeps (several keys, in
+ * the address): click sorts (ascending, descending, none), Shift+click
+ * adds a further key. The button is the Live view control `drive`.
+ * @param {string} label
+ * @param {{key: string, dir: number}[]} sort
+ * @param {string} key
+ * @param {(add: boolean) => void} onSort
+ * @param {{cls?: string, drive: Drive}} o
+ */
+export function sortHead(label, sort, key, onSort, o) {
+  const i = sort.findIndex((s) => s.key === key);
+  const s = sort[i];
+  const btn = h(
+    "button",
+    {
+      type: "button",
+      class: "nx-sort",
+      title:
+        "Sort: click for ascending, again for descending, a third time for none · Shift+click adds a second sort",
+    },
+    label,
+    h(
+      "span",
+      { class: "nx-sort__mark", "aria-hidden": "true" },
+      s ? `${s.dir > 0 ? "↑" : "↓"}${sort.length > 1 ? i + 1 : ""}` : "↕",
+    ),
+  );
+  btn.addEventListener("click", (e) => onSort(e.shiftKey));
+  drive(btn, o.drive);
+  return h(
+    "th",
+    {
+      scope: "col",
+      ...(o.cls ? { class: o.cls } : {}),
+      "aria-sort": s ? (s.dir > 0 ? "ascending" : "descending") : "none",
+    },
+    btn,
+  );
+}
+
+/**
+ * An active-filter chip: what is on, × turns it off (the Live view
+ * control `drive`).
+ * @param {string} label
+ * @param {() => void} onClear
+ * @param {Drive} d
+ */
+export function filterChip(label, onClear, d) {
+  const x = h(
+    "button",
+    {
+      type: "button",
+      "aria-label": `Clear ${label}`,
+      title: "Turn this filter off",
+    },
+    "×",
+  );
+  x.addEventListener("click", onClear);
+  drive(x, d);
+  return h("span", { class: "nx-filterchip" }, label, x);
+}
+
+/**
+ * Where a floating card goes: centred under its element, above it when
+ * there is no room below, never past the screen's edges (8 px margin).
+ * @param {{left: number, top: number, bottom: number, width: number}} r
+ *   the element's box
+ * @param {number} w the card's width
+ * @param {number} ht the card's height
+ * @param {{w: number, h: number}} view the viewport
+ * @returns {{left: number, top: number}}
+ */
+export function tipPlace(r, w, ht, view) {
+  const left = Math.min(
+    Math.max(8, r.left + r.width / 2 - w / 2),
+    view.w - w - 8,
+  );
+  let top = r.bottom + 8;
+  if (top + ht > view.h - 8) top = r.top - ht - 8;
+  return { left: Math.round(left), top: Math.round(top) };
+}
+
+/**
+ * One floating detail card for hover AND keyboard focus (DESIGN_LANGUAGE
+ * §10). It sits under (or above) its element, never under the pointer, so
+ * it never blocks the next hover. One per page; `stop()` removes it.
+ * `cls` adds a page's own class to it (it lives on <body>).
+ * @param {{cls?: string}} [opts]
+ */
+export function hoverCard(opts = {}) {
+  const tip = h("div", {
+    class: `nx-tip${opts.cls ? ` ${opts.cls}` : ""}`,
+    role: "tooltip",
+  });
+  tip.hidden = true;
+  document.body.append(tip);
+  const hide = () => {
+    tip.hidden = true;
+  };
+  /**
+   * @param {HTMLElement} target
+   * @param {() => Node[] | null} fill
+   */
+  const attach = (target, fill) => {
+    const show = () => {
+      const c = fill();
+      if (!c || !target.isConnected) return;
+      tip.replaceChildren(...c);
+      tip.hidden = false;
+      const p = tipPlace(
+        target.getBoundingClientRect(),
+        tip.offsetWidth,
+        tip.offsetHeight,
+        { w: innerWidth, h: innerHeight },
+      );
+      tip.style.left = `${p.left}px`;
+      tip.style.top = `${p.top}px`;
+    };
+    target.addEventListener("pointerenter", show);
+    target.addEventListener("pointerleave", hide);
+    target.addEventListener("focus", show);
+    target.addEventListener("blur", hide);
+  };
+  return { el: tip, attach, hide, stop: () => tip.remove() };
+}
+
+/**
+ * Which earlier toasts a new one replaces: by default every plain one but
+ * never one still offering its action (an Undo stays reachable); with
+ * "all", every one.
+ * @param {{action: boolean}[]} shown
+ * @param {"plain" | "all"} replace
+ * @returns {number[]} their indexes
+ */
+export const toastsToDrop = (shown, replace) =>
+  shown.flatMap((t, i) => (replace === "all" || !t.action ? [i] : []));
+
+/** How long a toast stays by default, in milliseconds. */
+export const TOAST_MS = 6000;
+
+/**
+ * A short message at the foot of the screen (DESIGN_LANGUAGE §8), gone
+ * after `ms`; with an `action`, its button (Undo) runs it and closes the
+ * toast. Drawn inside `host` (a page's own root) or else `#page`, never on
+ * <body>: Live view finds a page's controls only in `#page` and open
+ * dialogs, so the action is a declared control (`action.drive`) it can
+ * press. Returns a function that closes it now.
+ * @param {string} text
+ * @param {{action?: {label: string, run: () => void, drive: Drive,
+ *   cls?: string}, ms?: number, host?: HTMLElement | null,
+ *   replace?: "plain" | "all", cls?: string}} [opts]
+ *   `cls`: a page's own class on the toast; `action.cls`: the button's
+ *   classes instead of the plain underlined one
+ * @returns {() => void}
+ */
+export function toast(text, opts = {}) {
+  const host =
+    (opts.host?.isConnected ? opts.host : null) ??
+    document.getElementById("page") ??
+    document.body;
+  let box = /** @type {HTMLElement | null} */ (
+    host.querySelector(":scope > .nx-toasts")
+  );
+  if (!box) {
+    box = h("div", { class: "nx-toasts" });
+    host.append(box);
+  }
+  const shown = /** @type {HTMLElement[]} */ ([...box.children]);
+  for (const i of toastsToDrop(
+    shown.map((t) => ({ action: t.dataset.action != null })),
+    opts.replace ?? "plain",
+  ))
+    shown[i].remove();
+  const t = h(
+    "div",
+    { class: `nx-toast${opts.cls ? ` ${opts.cls}` : ""}`, role: "status" },
+    h("span", null, text),
+  );
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  const close = () => {
+    clearTimeout(timer);
+    t.remove();
+  };
+  const a = opts.action;
+  if (a) {
+    t.dataset.action = "";
+    const b = h(
+      "button",
+      { type: "button", class: a.cls ?? "nx-toast__act" },
+      a.label,
+    );
+    drive(b, a.drive);
+    b.addEventListener("click", () => {
+      close();
+      a.run();
+    });
+    t.append(b);
+  }
+  box.append(t);
+  timer = setTimeout(close, opts.ms ?? TOAST_MS);
+  return close;
+}
+
+/**
+ * Where a row menu opens: under its button's right edge, or above the
+ * button near the foot of the screen so every item shows.
+ * @param {{top: number, bottom: number, right: number}} r the button's box
+ * @param {number} ht the menu's height
+ * @param {{w: number, h: number, x: number, y: number}} view viewport size
+ *   and scroll
+ * @param {number} width the menu's width
+ * @returns {{top: number, left: number}} document coordinates
+ */
+export function menuPlace(r, ht, view, width) {
+  const left = Math.max(8, r.right + view.x - width);
+  const top =
+    r.bottom + ht + 8 > view.h
+      ? Math.max(8, r.top + view.y - ht - 4)
+      : r.bottom + view.y + 4;
+  return { top, left };
+}
+
+/** @type {{close: () => void} | null} */
+let openRowMenu = null;
+
+/**
+ * A row's menu (Edit…, Run now, Delete) as a NON-modal `<dialog>`, so the
+ * page stays usable and Live view presses its items by their dialog
+ * control `name` (drivable.js) while it is open. One open at a time;
+ * Escape, a click outside or picking an item closes it and Escape gives
+ * the focus back to its button.
+ * @param {{anchor: HTMLElement, label: string, title: string,
+ *   items: {name: string, label: string, hint: string, run: () => void,
+ *   danger?: boolean}[], width?: number}} spec
+ * @returns {{el: HTMLDialogElement, close: () => void}}
+ */
+export function rowMenu(spec) {
+  openRowMenu?.close();
+  const width = spec.width ?? 260;
+  const r = spec.anchor.getBoundingClientRect();
+  const m = /** @type {HTMLDialogElement} */ (
+    el(
+      "dialog",
+      { class: "nx-rowmenu", role: "menu", "aria-label": spec.label },
+      el("h2", { class: "kp-dialog__title nx-vh" }, spec.title),
+      spec.items.map((it) =>
+        dialogControl(
+          el(
+            "button",
+            {
+              type: "button",
+              role: "menuitem",
+              class: it.danger ? "danger" : null,
+              onclick: () => {
+                close();
+                it.run();
+              },
+            },
+            el("b", null, it.label),
+            el("span", null, it.hint),
+          ),
+          it.name,
+        ),
+      ),
+    )
+  );
+  m.style.width = `${width}px`;
+  const close = () => {
+    if (m.open) m.close();
+    m.remove();
+  };
+  const outside = (/** @type {PointerEvent} */ e) => {
+    if (!m.contains(/** @type {Node} */ (e.target)) && e.target !== spec.anchor)
+      close();
+  };
+  m.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+      spec.anchor.focus();
+    }
+  });
+  m.addEventListener("close", () => {
+    document.removeEventListener("pointerdown", outside);
+    m.remove();
+  });
+  const handle = { el: m, close };
+  m.addEventListener("close", () => {
+    if (openRowMenu === handle) openRowMenu = null;
+  });
+  document.addEventListener("pointerdown", outside);
+  // show() focuses the first item, which scrolls the page to wherever the
+  // dialog sits at that moment; keep the page where the user clicked and
+  // place the menu against the button from there.
+  const view = { w: innerWidth, h: innerHeight, x: scrollX, y: scrollY };
+  m.style.top = `${r.bottom + view.y + 4}px`;
+  m.style.left = `${Math.max(8, r.right + view.x - width)}px`;
+  document.body.append(m);
+  m.show();
+  if (scrollX !== view.x || scrollY !== view.y) scrollTo(view.x, view.y);
+  const p = menuPlace(r, m.offsetHeight, view, width);
+  m.style.top = `${p.top}px`;
+  m.style.left = `${p.left}px`;
+  openRowMenu = handle;
+  /** @type {HTMLElement | null} */ (m.querySelector("button"))?.focus({
+    preventScroll: true,
+  });
+  return handle;
+}
+
+/**
+ * The header's overflow `···` menu: a button (the Live view control
+ * `drive`) and a small list of links, closed by Escape, a click outside or
+ * picking an item.
+ * @param {{label: string, items: {label: string, hint: string,
+ *   href: string, download?: string}[], drive: Drive}} spec
+ * @returns {{el: HTMLElement, stop: () => void}}
+ */
+export function moreMenu(spec) {
+  const list = el(
+    "div",
+    { class: "nx-menu", role: "menu", hidden: true },
+    spec.items.map((it) =>
+      el(
+        "a",
+        {
+          role: "menuitem",
+          href: it.href,
+          download: it.download ?? null,
+          onclick: () => close(),
+        },
+        el("b", null, it.label),
+        el("span", null, it.hint),
+      ),
+    ),
+  );
+  const btn = el(
+    "button",
+    {
+      type: "button",
+      class: "nx-icon-btn",
+      "aria-label": spec.label,
+      "aria-haspopup": "menu",
+      "aria-expanded": "false",
+      title: spec.label,
+      onclick: () => (list.hidden ? open() : close()),
+    },
+    "···",
+  );
+  drive(btn, spec.drive);
+  const open = () => {
+    list.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+  };
+  const close = () => {
+    list.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+  };
+  const wrap = el("div", { class: "nx-more" }, btn, list);
+  /** @param {MouseEvent} e */
+  const outside = (e) => {
+    if (!wrap.contains(/** @type {Node} */ (e.target))) close();
+  };
+  /** @param {KeyboardEvent} e */
+  const esc = (e) => {
+    if (e.key === "Escape" && !list.hidden) close();
+  };
+  document.addEventListener("click", outside);
+  document.addEventListener("keydown", esc);
+  return {
+    el: wrap,
+    stop: () => {
+      document.removeEventListener("click", outside);
+      document.removeEventListener("keydown", esc);
+    },
+  };
+}
+
+/**
+ * A keyboard key, as printed beside the action it triggers.
+ * @param {string} k
+ */
+export const kbd = (k) => h("kbd", { class: "nx-kbd" }, k);
+
+/**
+ * The page's compact line of shortcuts ("/ search containers · …").
+ * @param {[string, string][]} pairs key, what it does
+ */
+export const keysLine = (pairs) =>
+  h(
+    "p",
+    { class: "nx-keys", "aria-label": "Keyboard shortcuts" },
+    ...pairs.map(([k, what]) => h("span", null, kbd(k), what)),
+  );
+
+/**
+ * A stack's colour from the topology's hues (`stackHues`), readable on
+ * light and dark.
+ * @param {number} hue
+ */
+export const hueColour = (hue) =>
+  `light-dark(hsl(${hue} 65% 42%), hsl(${hue} 70% 64%))`;
+
+/**
+ * A stack's colour by its place in the fleet's sorted names: one of the
+ * five chart colours.
+ * @param {string} name
+ * @param {string[]} all
+ */
+export const chartColour = (name, all) =>
+  `var(--chart-${(Math.max(0, [...all].sort().indexOf(name)) % 5) + 1})`;
+
+/**
+ * The small square of a stack's colour beside its name.
+ * @param {string} colour a CSS colour (`hueColour`, `chartColour`)
+ */
+export function swatch(colour) {
+  const s = h("span", { class: "nx-swatch", "aria-hidden": "true" });
+  s.style.setProperty("--c", colour);
+  return s;
 }

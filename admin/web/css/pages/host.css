@@ -1,9 +1,9 @@
 /* redesign-host (3.71.0): the Host page as the approved demo draws it
    (~/.local/share/homelab/redesign-3.71/host.html + ops-kit.css), kp-themes
-   tokens only. Everything sits under `.hk-page` with the `hk-` prefix, so
-   it never collides with the foundation's shared `nx-` classes; when the
-   shared ui.js lands, the stand-ins in js/pages/hostkit.js and most of
-   this sheet go away. */
+   tokens only, linked from index.html. The header, KPI strip, attention
+   band, cards, segmented toggles, sortable headers, the overflow menu and
+   the key line are ui.js's shared blocks in their `.nx-ops` look (app.css);
+   this sheet holds only what is the Host page's own, under `.hk-page`. */
 
 .hk-page {
   --hk-gap: var(--kp-space-xl, 1.5rem);
@@ -47,68 +47,7 @@ main.shell.hk-page > [hidden] {
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------- page header ---------- */
-.hk-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "t a" "d a" "m a";
-  column-gap: 24px;
-  row-gap: 6px;
-  align-items: start;
-}
-.hk-head h1 {
-  grid-area: t;
-  margin: 0;
-  font-size: min(var(--kp-text-display, 2.25rem), 2.25rem);
-  line-height: 1.1;
-  letter-spacing: -0.01em;
-}
-.hk-head__sub {
-  color: var(--muted-foreground);
-  font-weight: 400;
-}
-.hk-head .hk-head__desc {
-  grid-area: d;
-  margin: 0 !important;
-  color: var(--muted-foreground);
-  max-width: 72ch;
-}
-.hk-head__meta {
-  grid-area: m;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  align-items: center;
-  margin-top: 6px;
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-}
-.hk-head__meta .measured {
-  margin: 0;
-}
-.hk-page .hk-head__actions.actions-row {
-  grid-area: a;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  align-self: center;
-}
-@media (max-width: 640px) {
-  .hk-head {
-    grid-template-columns: 1fr;
-    grid-template-areas: "t" "d" "m" "a";
-  }
-  .hk-page .hk-head__actions.actions-row {
-    justify-content: flex-start;
-    margin-top: 8px;
-  }
-  .hk-head__actions .kp-button--primary {
-    flex: 1 1 100%;
-    justify-content: center;
-  }
-}
+/* ---------- header chips ---------- */
 .hk-chip {
   display: inline-flex;
   align-items: center;
@@ -164,176 +103,6 @@ main.shell.hk-page > [hidden] {
   gap: 8px;
   white-space: nowrap;
 }
-.hk-icon-btn {
-  all: unset;
-  cursor: pointer;
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--hk-r-sm);
-  color: var(--muted-foreground);
-  font-weight: 700;
-  letter-spacing: 1px;
-}
-.hk-icon-btn:hover,
-.hk-icon-btn[aria-expanded="true"] {
-  background: var(--muted);
-  color: var(--foreground);
-}
-.hk-icon-btn:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-.hk-more {
-  position: relative;
-}
-.hk-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 50;
-  width: 260px;
-  background: var(--popover);
-  color: var(--popover-foreground);
-  border: 1px solid var(--hk-line);
-  border-radius: var(--hk-r);
-  padding: 6px;
-  box-shadow: 0 12px 32px
-    color-mix(in oklab, var(--foreground) 18%, transparent);
-  display: grid;
-}
-.hk-menu[hidden] {
-  display: none;
-}
-.hk-menu a {
-  display: grid;
-  gap: 1px;
-  padding: 8px 10px;
-  border-radius: var(--hk-r-sm);
-  text-decoration: none;
-  color: inherit;
-}
-.hk-menu a:hover,
-.hk-menu a:focus-visible {
-  background: var(--hk-soft);
-}
-.hk-menu b {
-  font-size: var(--kp-text-sm);
-}
-.hk-menu span {
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-@media (max-width: 640px) {
-  .hk-menu {
-    right: auto;
-    left: 0;
-  }
-}
-
-/* ---------- attention band ---------- */
-.hk-attention {
-  display: grid;
-  gap: 8px;
-}
-.hk-attention__item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 4px 14px;
-  align-items: center;
-}
-.hk-attention__item p {
-  margin: 2px 0 0;
-}
-
-/* ---------- KPI strip ---------- */
-.hk-kpis {
-  display: grid;
-  grid-template-columns: repeat(var(--kpi-n, 5), minmax(0, 1fr));
-  gap: 12px;
-}
-@media (max-width: 1199px) {
-  .hk-kpis {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-@media (max-width: 640px) {
-  .hk-kpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-}
-.hk-kpi {
-  display: grid;
-  grid-template-rows: auto auto auto 28px;
-  row-gap: 2px;
-  padding: 14px 16px 12px;
-  background: var(--card);
-  border: 1px solid var(--hk-line);
-  border-radius: var(--hk-r);
-  min-width: 0;
-}
-.hk-kpi__label {
-  font-size: var(--kp-text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted-foreground);
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.hk-kpi__value {
-  font-size: 1.75rem;
-  font-weight: 600;
-  line-height: 1.15;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.hk-kpi__value small {
-  font-size: 0.55em;
-  font-weight: 500;
-  color: var(--muted-foreground);
-  margin-left: 3px;
-  letter-spacing: 0;
-}
-.hk-kpi__ctx {
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.hk-meter {
-  height: 6px;
-  border-radius: 3px;
-  background: var(--muted);
-  position: relative;
-  align-self: center;
-}
-.hk-meter > i {
-  position: absolute;
-  inset: 0 auto 0 0;
-  background: var(--chart-1);
-  border-radius: 3px;
-}
-.hk-meter > b {
-  position: absolute;
-  top: -3px;
-  bottom: -3px;
-  width: 2px;
-  background: var(--foreground);
-  opacity: 0.7;
-}
-.hk-meter--warn > i {
-  background: var(--hk-warn);
-}
-.hk-meter--bad > i {
-  background: var(--hk-bad);
-}
-
 /* ---------- two columns, 8 + 4 ---------- */
 .hk-cols {
   display: grid;
@@ -352,108 +121,7 @@ main.shell.hk-page > [hidden] {
   }
 }
 
-/* ---------- cards ---------- */
-.hk-page .hk-card {
-  padding: 0;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  /* One track that never grows past the card's own width (a phone's
-     settings toolbar pushed a folded card 60 px past the screen). */
-  grid-template-columns: minmax(0, 1fr);
-  min-width: 0;
-  margin: 0;
-  border: 1px solid var(--hk-line);
-  border-radius: var(--hk-r);
-  background: var(--card);
-  color: var(--card-foreground);
-}
-.hk-card__h {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 4px 16px;
-  padding: 16px 16px 0;
-  align-items: start;
-}
-.hk-card__h h2,
-.hk-card__h h3 {
-  margin: 0;
-  font-size: 1.0625rem;
-  font-weight: 600;
-  line-height: 1.3;
-}
-.hk-card__h .section-head__desc {
-  margin: 2px 0 0 !important;
-  grid-column: 1;
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-}
-.hk-card__tools {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.hk-card__tools:empty {
-  display: none;
-}
-.hk-card__b {
-  padding: 12px 16px 16px;
-  min-width: 0;
-}
-.hk-card__f {
-  padding: 10px 16px;
-  border-top: 1px solid var(--hk-line);
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-.hk-card__f .measured {
-  margin: 0;
-}
-@media (max-width: 640px) {
-  .hk-card__h {
-    padding: 12px 12px 0;
-  }
-  .hk-card__b {
-    padding: 10px 12px 12px;
-  }
-  .hk-card__f {
-    padding: 8px 12px;
-  }
-}
-details.hk-card > summary {
-  display: block;
-  min-width: 0;
-  list-style: none;
-  cursor: pointer;
-}
-details.hk-card > summary::-webkit-details-marker {
-  display: none;
-}
-details.hk-card > summary .hk-card__h {
-  padding-bottom: 16px;
-}
-.hk-chev {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border-radius: 6px;
-  border: 1px solid var(--hk-line);
-  transition: transform 150ms var(--hk-ease);
-}
-details[open] .hk-chev {
-  transform: rotate(90deg);
-}
-details.hk-card > .hk-card__b {
-  padding-top: 0;
-}
-
-/* ---------- toolbar, segmented toggles, search ---------- */
+/* ---------- toolbar: filters and search ---------- */
 .hk-filters {
   display: flex;
   gap: 8px;
@@ -474,51 +142,6 @@ details.hk-card > .hk-card__b {
   outline: 2px solid var(--ring);
   outline-offset: 1px;
 }
-.hk-seg {
-  display: inline-grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(max-content, 1fr);
-  border: 1px solid var(--border);
-  border-radius: var(--hk-r);
-  background: var(--hk-soft);
-  padding: 3px;
-  gap: 2px;
-}
-.hk-seg button {
-  all: unset;
-  cursor: pointer;
-  text-align: center;
-  padding: 5px 12px;
-  border-radius: var(--hk-r-sm);
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
-.hk-seg button:hover {
-  color: var(--foreground);
-}
-.hk-seg button[aria-pressed="true"] {
-  background: var(--card);
-  color: var(--foreground);
-  font-weight: 600;
-  box-shadow:
-    0 1px 2px color-mix(in oklab, var(--foreground) 14%, transparent),
-    0 0 0 1px var(--hk-line);
-}
-.hk-seg button:focus-visible {
-  outline: 2px solid var(--ring);
-}
-.hk-seg__count {
-  margin-left: 6px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--muted);
-  font-size: 0.72rem;
-}
-.hk-seg__count:empty {
-  display: none;
-}
-
 /* ---------- tables ---------- */
 .hk-scroll {
   overflow-x: auto;
@@ -578,30 +201,6 @@ details.hk-card > .hk-card__b {
 }
 .hk-tbl tr[hidden] {
   display: none;
-}
-th.hk-sortable {
-  cursor: pointer;
-  user-select: none;
-}
-th.hk-sortable::after {
-  content: " ↕";
-  opacity: 0.35;
-  font-size: 0.9em;
-}
-th.hk-sortable[aria-sort="ascending"]::after {
-  content: " ↑";
-  opacity: 1;
-}
-th.hk-sortable[aria-sort="descending"]::after {
-  content: " ↓";
-  opacity: 1;
-}
-th.hk-sortable:hover {
-  color: var(--foreground);
-}
-th.hk-sortable:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
 }
 .hk-bar {
   display: grid;
@@ -917,29 +516,4 @@ th.hk-sortable:focus-visible {
   grid-column: 2;
   color: var(--muted-foreground);
   font-size: var(--kp-text-xs);
-}
-
-/* ---------- key row ---------- */
-.hk-keys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 18px;
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-  margin: 0;
-}
-.hk-keys span {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-.hk-kbd {
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.72rem;
-  border: 1px solid var(--border);
-  border-bottom-width: 2px;
-  border-radius: 4px;
-  padding: 0 5px;
-  color: var(--muted-foreground);
-  background: var(--card);
 }

@@ -22,7 +22,7 @@ import { act, catalogReady, onAct } from "../act.js";
 import { openAction } from "../actiondialog.js";
 import { agoEl, setAgo } from "../ago.js";
 import { doctorRows } from "../doctor.js";
-import { fetchJson, slowReport } from "../dom.js";
+import { el, fetchJson, slowReport } from "../dom.js";
 import { declare, drivable, viaForm } from "../drivable.js";
 import { humanDuration } from "../format.js";
 import {
@@ -51,17 +51,15 @@ import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
 import {
   attentionBand,
-  el,
-  ensureStyle,
-  keyRow,
+  keysLine,
   kpiStrip,
   moreMenu,
   pageHeader,
   section,
   segSwitch,
-  sortable,
+  sortableTable,
   toggleGroup,
-} from "./hostkit.js";
+} from "../ui.js";
 
 /** Seconds between two readings of the container list and the ping. */
 const EVERY_S = 30;
@@ -126,8 +124,8 @@ const dot = (tone) =>
  * @returns {() => void}
  */
 export function mount(root, ctx) {
-  ensureStyle("/css/pages/host.css");
-  root.classList.add("hk-page");
+  // `nx-ops`: the shared blocks in the ops-kit look the Host demo uses.
+  root.classList.add("hk-page", "nx-ops");
   const abort = new AbortController();
   /** @type {(() => void)[]} */
   const stops = [];
@@ -171,7 +169,7 @@ export function mount(root, ctx) {
         download: "DR_RUNBOOK.md",
       },
     ],
-    mark: (b) => void drivable(b, MORE),
+    drive: { id: MORE },
   });
   stops.push(menu.stop);
   const head = pageHeader({
@@ -204,7 +202,7 @@ export function mount(root, ctx) {
     more: menu.el,
   });
   const sub = /** @type {HTMLElement | null} */ (
-    head.title.querySelector(".hk-head__sub")
+    head.title.querySelector(".nx-head-sub")
   );
 
   const attention = attentionBand();
@@ -264,7 +262,7 @@ export function mount(root, ctx) {
       gShow = on;
       filterGuests();
     },
-    mark: (b, v) => void drivable(b, GUEST_FILTER, v),
+    drive: { id: GUEST_FILTER },
   });
   const gBody = el("tbody", { id: "host-guests" });
   const gTable = /** @type {HTMLTableElement} */ (
@@ -292,7 +290,7 @@ export function mount(root, ctx) {
       gBody,
     )
   );
-  sortable(gTable);
+  sortableTable(gTable);
   const guestsAgo = agoEl("read");
   const guestsCard = section({
     id: "host-containers",
@@ -1105,7 +1103,7 @@ export function mount(root, ctx) {
       sAll = v === "all";
       filterSettings();
     },
-    mark: (b, v) => void drivable(b, SETTINGS_VIEW, v),
+    drive: { id: SETTINGS_VIEW },
   });
   const sSearch = el("input", {
     class: "hk-search",
@@ -1137,7 +1135,7 @@ export function mount(root, ctx) {
       sBody,
     )
   );
-  sortable(sTable);
+  sortableTable(sTable);
   const settingsCard = section({
     id: "host-settings-card",
     title: "Host settings",
@@ -1274,7 +1272,7 @@ export function mount(root, ctx) {
       ),
     ),
     settingsCard.el,
-    keyRow([
+    keysLine([
       ["/", "search containers"],
       ["click a header", "sort"],
       ["G H", "go to Host"],
@@ -1292,6 +1290,7 @@ export function mount(root, ctx) {
         meter: {
           pct: k.meter.pct,
           mark: k.meter.mark,
+          markTitle: "promised to stacks",
           tone: meterTone(k.meter),
         },
       });
@@ -1354,6 +1353,6 @@ export function mount(root, ctx) {
     document.removeEventListener("keydown", keys);
     stops.forEach((s) => s());
     for (const s of panels.values()) s();
-    root.classList.remove("hk-page");
+    root.classList.remove("hk-page", "nx-ops");
   };
 }

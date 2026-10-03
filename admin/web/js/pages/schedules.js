@@ -18,7 +18,7 @@ import {
 import { scheduleArgFields, schedulableActions } from "../actionforms.js";
 import { fieldEl, refusalCallout } from "../actui.js";
 import { agoEl, setAgo } from "../ago.js";
-import { fetchJson } from "../dom.js";
+import { el, fetchJson } from "../dom.js";
 import { declare, dialogControl, drivable } from "../drivable.js";
 import {
   EVERY_WORDS,
@@ -43,14 +43,29 @@ import {
 } from "../schedules.js";
 import { current } from "../store.js";
 import {
-  el,
+  TOAST_MS,
   kbd,
   keysLine,
   pageHeader,
+  rowMenu,
   section,
   toast,
-  UNDO_MS,
-} from "./scheduleskit.js";
+} from "../ui.js";
+
+/** How long a change can be undone: as long as its toast shows. */
+const UNDO_MS = TOAST_MS;
+
+/**
+ * One of the page's cards (ui.js `section`), its foot one line of text.
+ * @param {{title?: string, desc?: string, body: import("../dom.js").Child,
+ *   foot?: string, id?: string, label?: string}} spec
+ */
+const card = (spec) =>
+  section({
+    ...spec,
+    plain: true,
+    foot: spec.foot ? [spec.foot] : undefined,
+  }).el;
 
 /**
  * @typedef {import("../schedules.js").ScheduleView} ScheduleView
@@ -148,7 +163,8 @@ const titleOf = (s) =>
  * @returns {() => void}
  */
 export function mount(root) {
-  root.classList.add("sch-root");
+  // `nx-ops`: the shared blocks in the ops-kit look the Schedules demo uses.
+  root.classList.add("sch-root", "nx-ops");
   /** @type {number | null | undefined} undefined: not read (yet) */
   let nightly;
   /** Deletes waiting out their Undo: id → timer. */
@@ -160,9 +176,12 @@ export function mount(root) {
   /** A toast on this page; its Undo is a control Live view can press. */
   /** @param {string} text @param {() => void} [undo] */
   const say = (text, undo) =>
-    toast(text, undo, {
+    toast(text, {
       host: root,
-      mark: (b) => void drivable(b, UNDO_CHANGE),
+      replace: "all",
+      action: undo
+        ? { label: "Undo", run: undo, drive: { id: UNDO_CHANGE } }
+        : undefined,
     });
 
   const zone = () => act.schedules?.zone ?? DEFAULT_ZONE;
@@ -191,8 +210,8 @@ export function mount(root) {
     title: "Schedules",
     desc: "What the dashboard runs on its own, and when. A slot missed while the dashboard was down is skipped and you get a notice; it never runs late.",
     meta: [zoneChip, count, read],
-    actions: add,
-  });
+    actions: [add],
+  }).el;
   const body = el("div", { class: "sch-body" });
   // The page's top-level pieces sit straight in `root`, so the shell's one
   // section gap (fix-206) spaces them.
@@ -224,7 +243,7 @@ export function mount(root) {
   const loading = () => {
     count.textContent = "";
     show([
-      section({
+      card({
         label: "Reading the schedules",
         body: el(
           "div",
@@ -250,7 +269,7 @@ export function mount(root) {
           el("span"),
         ),
       }),
-      section({
+      card({
         title: "The next 7 days",
         desc: "Every run on the calendar, read from the schedules below.",
         body: el("span", {
@@ -258,7 +277,7 @@ export function mount(root) {
           style: `height:${COL_PX + 24}px`,
         }),
       }),
-      section({
+      card({
         title: "All schedules",
         desc: "Turn one off with its switch; its slots are kept but nothing runs.",
         body: el(
@@ -279,7 +298,7 @@ export function mount(root) {
       "Read again",
     );
     show([
-      section({
+      card({
         title: "The schedules could not be read",
         desc: "Nothing changed; the dashboard's answer is below.",
         body: el(
@@ -315,7 +334,7 @@ export function mount(root) {
         ? `Nothing runs on its own apart from the host's nightly round at ${pad(nightly)}:00.`
         : "Nothing runs on its own yet.";
     return [
-      section({
+      card({
         title: "No schedules yet",
         desc: `${round} Start from one of these, or make your own with New schedule.`,
         body: el(
@@ -354,7 +373,7 @@ export function mount(root) {
     );
     return [
       hero(next, z, t),
-      section({
+      card({
         title: "The next 7 days",
         desc:
           typeof nightly === "number"
@@ -365,7 +384,7 @@ export function mount(root) {
         body: [week(all, z, t, colour), agendaList(all, z, t)],
         id: "sched-week",
       }),
-      section({
+      card({
         title: "All schedules",
         desc: "Turn one off with its switch; its slots are kept but nothing runs.",
         body: el("div", { class: "sch-scroll" }, table(all, z, t)),
@@ -388,7 +407,7 @@ export function mount(root) {
     /** @type {number} */ t,
   ) => {
     if (!next || next.next_run == null)
-      return section({
+      return card({
         label: "Next run",
         id: "sched-hero",
         body: el(
@@ -435,7 +454,7 @@ export function mount(root) {
       "Skip this run",
     );
     drivable(skip, SKIP_NEXT);
-    return section({
+    return card({
       label: "Next run",
       id: "sched-hero",
       body: el(
@@ -661,7 +680,7 @@ export function mount(root) {
           b,
         );
       }),
-      el("th", null, el("span", { class: "sch-vh" }, "Actions")),
+      el("th", null, el("span", { class: "nx-vh" }, "Actions")),
     );
     return el(
       "table",
@@ -916,95 +935,40 @@ export function mount(root) {
   };
 
   // ── the row menu: a non-modal dialog, so Live view can press its items ──
-  /** @type {HTMLDialogElement | null} */
-  let menuEl = null;
+  /** @type {ReturnType<typeof rowMenu> | null} */
+  let menu = null;
   const closeMenu = () => {
-    menuEl?.close();
-    menuEl?.remove();
-    menuEl = null;
+    menu?.close();
+    menu = null;
   };
   /** @param {HTMLElement} btn @param {Schedule} s */
   const openMenu = (btn, s) => {
-    closeMenu();
-    const r = btn.getBoundingClientRect();
-    /**
-     * @param {string} name
-     * @param {string} label
-     * @param {string} hint
-     * @param {() => void} fn
-     * @param {boolean} [danger]
-     */
-    const item = (name, label, hint, fn, danger = false) =>
-      dialogControl(
-        el(
-          "button",
-          {
-            type: "button",
-            role: "menuitem",
-            class: danger ? "danger" : null,
-            onclick: () => {
-              closeMenu();
-              fn();
-            },
-          },
-          el("b", null, label),
-          el("span", null, hint),
-        ),
-        name,
-      );
-    const m = el(
-      "dialog",
-      {
-        class: "sch-menu",
-        role: "menu",
-        "aria-label": `${titleOf(s)}: edit, run now or delete`,
-        style: `top:${r.bottom + scrollY + 4}px;left:${Math.max(8, r.right + scrollX - 260)}px`,
-      },
-      el("h2", { class: "kp-dialog__title sch-vh" }, `${titleOf(s)}`),
-      item(
-        "edit",
-        "Edit…",
-        "change what, where or when",
-        () => void openDrawer(s, null),
-      ),
-      item(
-        "run-now",
-        "Run now",
-        "start it once as a job; its times stay",
-        () => void runNowFor(s),
-      ),
-      item(
-        "delete",
-        "Delete",
-        "remove it; jobs it ran stay on Activity; Undo for 6 s",
-        () => remove(s),
-        true,
-      ),
-    );
-    m.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        closeMenu();
-        btn.focus();
-      }
+    menu = rowMenu({
+      anchor: btn,
+      label: `${titleOf(s)}: edit, run now or delete`,
+      title: titleOf(s),
+      items: [
+        {
+          name: "edit",
+          label: "Edit…",
+          hint: "change what, where or when",
+          run: () => void openDrawer(s, null),
+        },
+        {
+          name: "run-now",
+          label: "Run now",
+          hint: "start it once as a job; its times stay",
+          run: () => void runNowFor(s),
+        },
+        {
+          name: "delete",
+          label: "Delete",
+          hint: "remove it; jobs it ran stay on Activity; Undo for 6 s",
+          run: () => remove(s),
+          danger: true,
+        },
+      ],
     });
-    const outside = (/** @type {PointerEvent} */ e) => {
-      if (!m.contains(/** @type {Node} */ (e.target)) && e.target !== btn)
-        closeMenu();
-    };
-    document.addEventListener("pointerdown", outside);
-    m.addEventListener("close", () => {
-      document.removeEventListener("pointerdown", outside);
-      m.remove();
-      if (menuEl === m) menuEl = null;
-    });
-    document.body.append(m);
-    m.show();
-    // Near the foot of the screen it opens upwards, so all three items show.
-    if (r.bottom + m.offsetHeight + 8 > innerHeight)
-      m.style.top = `${Math.max(8, r.top + scrollY - m.offsetHeight - 4)}px`;
-    menuEl = m;
-    /** @type {HTMLElement | null} */ (m.querySelector("button"))?.focus();
   };
 
   // ── the New / Edit drawer ──
@@ -1452,7 +1416,7 @@ export function mount(root) {
   });
   // The relative times ("in 2 h 14 min") move on.
   const tick = setInterval(() => {
-    if (!document.querySelector("dialog.sch-menu[open]")) render();
+    if (!document.querySelector("dialog.nx-rowmenu[open]")) render();
   }, 30_000);
   first();
   render();
@@ -1467,7 +1431,7 @@ export function mount(root) {
       .forEach((d) => /** @type {HTMLDialogElement} */ (d).close());
     // A delete still waiting out its Undo goes through now.
     for (const id of [...pendingDeletes.keys()]) void commitDelete(id);
-    root.classList.remove("sch-root");
+    root.classList.remove("sch-root", "nx-ops");
   };
 }
 

@@ -12,9 +12,9 @@
 // same job trail as every other dashboard write; the value never becomes a
 // URL, a query parameter or part of `ActionArgs`.
 //
-// Self-contained on purpose (the redesign's shared shell is built beside
-// it): the hover card, the toast and the stack colour are small local
-// helpers below, marked LOCAL, for the foundation's components to replace.
+// The hover card, the toast and the stack colour square are ui.js's
+// (`hoverCard`, `toast`, `swatch`); secrets.css, linked from index.html,
+// measures them the way the demo does (`sx-tip`, `sx-toast`).
 
 import { act, onAct, send } from "../act.js";
 import { agoEl, setAgo } from "../ago.js";
@@ -30,6 +30,7 @@ import {
   stackLine,
 } from "../secretsview.js";
 import { current, subscribe } from "../store.js";
+import { chartColour, hoverCard, swatch, toast } from "../ui.js";
 
 // fix-239 / invariant 39: Live view reaches every control on this page —
 // `homelab ui click <id> [row]`, the row being `<stack>/<app>/.env` (or
@@ -136,109 +137,22 @@ const UNDO_MS = 5000;
 /** The clipboard is cleared this long after a copy. */
 const CLIPBOARD_MS = 30_000;
 
-/** The page's stylesheet, added once. */
-function ensureStyles() {
-  if (document.querySelector('link[data-page-css="secrets"]')) return;
-  const l = document.createElement("link");
-  l.rel = "stylesheet";
-  l.href = "/css/secrets.css";
-  l.dataset.pageCss = "secrets";
-  document.head.append(l);
-}
-
-/** LOCAL: one hue per stack, in the fleet's sorted order. @param {string} s @param {string[]} all */
-const stackColour = (s, all) =>
-  `var(--chart-${(Math.max(0, [...all].sort().indexOf(s)) % 5) + 1})`;
-
 /** @param {HTMLElement} el @param {Record<string, string>} props */
 function styled(el, props) {
   for (const [k, v] of Object.entries(props)) el.style.setProperty(k, v);
   return el;
 }
 
-/** LOCAL: the colour swatch. @param {string} s @param {string[]} all */
-const swatch = (s, all) =>
-  styled(h("span", { class: "sw", "aria-hidden": "true" }), {
-    "--c": stackColour(s, all),
-  });
-
 /** A skeleton bar. @param {string} w */
 const sk = (w) => styled(h("span", { class: "sk" }, "·"), { "--w": w });
 
 /**
- * LOCAL: a short message at the bottom of the screen, with an optional
- * action (Undo). Returns a function that removes it.
+ * A plain message at the foot of the screen (ui.js `toast`, drawn the
+ * page's way); a newer one replaces it.
  * @param {string} msg
- * @param {{label: string, drive?: string, onClick: () => void}} [action]
  * @param {number} [ms]
  */
-function toast(msg, action, ms = 5000) {
-  const t = h(
-    "div",
-    { class: "sx-toast", role: "status" },
-    h("span", null, msg),
-  );
-  if (action) {
-    const b = h(
-      "button",
-      { class: "kp-button kp-button--sm kp-button--ghost", type: "button" },
-      action.label,
-    );
-    if (action.drive) drivable(b, action.drive);
-    b.addEventListener("click", () => {
-      t.remove();
-      action.onClick();
-    });
-    t.append(b);
-  }
-  // One stack of toasts: a plain message replaces the plain one before it,
-  // never a toast still offering Undo.
-  let box = document.querySelector(".sx-toasts");
-  if (!box) {
-    box = h("div", { class: "sx-toasts" });
-    document.body.append(box);
-  }
-  box
-    .querySelectorAll(".sx-toast:not([data-action])")
-    .forEach((x) => x.remove());
-  if (action) t.dataset.action = "";
-  box.append(t);
-  const timer = setTimeout(() => t.remove(), ms);
-  return () => {
-    clearTimeout(timer);
-    t.remove();
-  };
-}
-
-/**
- * LOCAL: one floating card for hover AND keyboard focus, under the element
- * (above when there is no room), never under the pointer.
- * @param {HTMLElement} tip
- * @param {HTMLElement} el
- * @param {() => Node[]} fill
- */
-function tipOn(tip, el, fill) {
-  const show = () => {
-    tip.replaceChildren(...fill());
-    tip.hidden = false;
-    const r = el.getBoundingClientRect();
-    const tw = tip.offsetWidth;
-    const th = tip.offsetHeight;
-    const left = Math.min(
-      Math.max(8, r.left + r.width / 2 - tw / 2),
-      innerWidth - tw - 8,
-    );
-    let top = r.bottom + 8;
-    if (top + th > innerHeight - 8) top = r.top - th - 8;
-    tip.style.left = `${left + scrollX}px`;
-    tip.style.top = `${top + scrollY}px`;
-  };
-  const hide = () => (tip.hidden = true);
-  el.addEventListener("pointerenter", show);
-  el.addEventListener("pointerleave", hide);
-  el.addEventListener("focus", show);
-  el.addEventListener("blur", hide);
-}
+const say = (msg, ms = 5000) => void toast(msg, { cls: "sx-toast", ms });
 
 /**
  * Ask the host for one value, recorded as a reveal or a copy. `driven` is
@@ -275,11 +189,7 @@ function deployAfter(job, stack) {
       return;
     off();
     if (j.state !== "done") {
-      toast(
-        `The write ${j.state}; ${stack} was not restarted`,
-        undefined,
-        8000,
-      );
+      say(`The write ${j.state}; ${stack} was not restarted`, 8000);
       return;
     }
     void send(
@@ -288,11 +198,10 @@ function deployAfter(job, stack) {
       {},
       `deploy ${stack}`,
     ).then((r) =>
-      toast(
+      say(
         r.ok
           ? `Restarting ${stack}: deploy queued · see Activity`
           : `Could not restart ${stack}: ${r.error.why}`,
-        undefined,
         8000,
       ),
     );
@@ -309,10 +218,8 @@ function deployAfter(job, stack) {
  */
 export function mount(root, opts = {}) {
   const one = opts.stack ?? null;
-  ensureStyles();
   const abort = new AbortController();
-  const tip = h("div", { class: "sx-tip", role: "tooltip", hidden: "" });
-  document.body.append(tip);
+  const tip = hoverCard({ cls: "sx-tip" });
 
   /** @type {{stack: string | null, reading: boolean,
    *   summary: Record<string, import("../secretsview.js").Declared> | null,
@@ -384,7 +291,7 @@ export function mount(root, opts = {}) {
     const d = S.stack ? entry(S.stack) : null;
     const first = d && S.stack ? secretRows(S.stack, d)[0] : null;
     if (first) openChange(first);
-    else toast(`${S.stack ?? "This stack"} declares no secret to change`);
+    else say(`${S.stack ?? "This stack"} declares no secret to change`);
   });
 
   const list = h("nav", { class: "nx-card sx-stacks", "aria-label": "Stacks" });
@@ -484,7 +391,7 @@ export function mount(root, opts = {}) {
               "aria-current": String(s === S.stack),
               "aria-label": `${s}: ${stackLine(d)}`,
             },
-            swatch(s, names),
+            swatch(chartColour(s, names)),
             h("span", null, s, h("small", null, stackLine(d))),
             chip,
           ),
@@ -492,7 +399,7 @@ export function mount(root, opts = {}) {
           s,
         );
         b.addEventListener("click", () => pick(s));
-        tipOn(tip, b, () => {
+        tip.attach(b, () => {
           const e = entry(s);
           const kk = stackKind(e);
           return [
@@ -665,7 +572,7 @@ export function mount(root, opts = {}) {
     const done = () => {
       S.errors.delete(row.key);
       paintDetail();
-      toast(`Copied ${row.name} · the clipboard clears in 30 s`);
+      say(`Copied ${row.name} · the clipboard clears in 30 s`);
       setTimeout(() => {
         if (document.hasFocus())
           navigator.clipboard?.writeText("").catch(() => {});
@@ -696,7 +603,7 @@ export function mount(root, opts = {}) {
         sel.removeAllRanges();
         sel.addRange(range);
       }
-      toast(`Press Ctrl C to copy ${row.name} · it hides in 30 s`);
+      say(`Press Ctrl C to copy ${row.name} · it hides in 30 s`);
     };
     if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
       const blob = asked.then((v) => new Blob([v], { type: "text/plain" }));
@@ -792,7 +699,7 @@ export function mount(root, opts = {}) {
         h(
           "h2",
           { id: "sd-h" },
-          h("span", { class: "nx-row" }, swatch(s, names), s),
+          h("span", { class: "nx-row" }, swatch(chartColour(s, names)), s),
         ),
         h(
           "p",
@@ -1067,25 +974,26 @@ export function mount(root, opts = {}) {
         "change the secret",
       );
       if (!r.ok) {
-        toast(`Could not write ${row.name}: ${r.error.why}`, undefined, 10000);
+        say(`Could not write ${row.name}: ${r.error.why}`, 10000);
         return;
       }
-      toast(`Writing ${row.name} through latch · job queued`, undefined, 6000);
+      say(`Writing ${row.name} through latch · job queued`, 6000);
       if (restart && typeof r.body?.job === "number")
         deployAfter(r.body.job, stack);
     }, UNDO_MS);
-    const dismiss = toast(
-      `Writing ${row.name} through latch in 5 s`,
-      {
+    const dismiss = toast(`Writing ${row.name} through latch in 5 s`, {
+      cls: "sx-toast",
+      ms: UNDO_MS,
+      action: {
         label: "Undo",
-        drive: UNDO_WRITE,
-        onClick: () => {
+        drive: { id: UNDO_WRITE },
+        cls: "kp-button kp-button--sm kp-button--ghost",
+        run: () => {
           clearTimeout(timer);
-          toast("Write cancelled before it ran");
+          say("Write cancelled before it ran");
         },
       },
-      UNDO_MS,
-    );
+    });
   }
 
   // ---- data --------------------------------------------------------------
@@ -1218,6 +1126,6 @@ export function mount(root, opts = {}) {
     clearInterval(ticker);
     document.removeEventListener("keydown", onKey);
     off();
-    tip.remove();
+    tip.stop();
   };
 }

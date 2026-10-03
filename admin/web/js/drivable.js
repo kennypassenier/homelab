@@ -27,8 +27,11 @@
 
 /**
  * One declared page control.
+ * `opens`: "dialog" (the click opens one), "run" (it runs something), or
+ * "view" (redesign-backups: it only changes what the page shows — pins a night,
+ * filters, folds, sorts).
  * @typedef {{id: string, page: string, what: string,
- *   opens: "dialog" | "run", row?: string}} Control
+ *   opens: "dialog" | "run" | "view", row?: string}} Control
  */
 
 /** @type {Map<string, Control>} */

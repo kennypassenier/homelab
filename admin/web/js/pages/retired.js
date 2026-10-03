@@ -36,6 +36,22 @@ import { attachDataTables } from "/static/kp/js/datatable.js";
 const NOTHING = "Nothing retired is kept right now.";
 
 /**
+ * The retired table's columns; redesign-backups: shared with the Backups page.
+ * @type {import("../dom.js").Column[]}
+ */
+export const RETIRED_COLUMNS = [
+  { label: "Kind", sort: "text", filter: "choice" },
+  { label: "Key", sort: "text" },
+  { label: "Retired by", sort: "text", filter: "choice" },
+  { label: "Age", sort: "text" },
+  { label: "Restic", sort: "text" },
+  { label: "/appdata", sort: "text" },
+  { label: "Vault", sort: "text" },
+  { label: "Kept", sort: "text", filter: "choice" },
+  { label: "", sort: "none" },
+];
+
+/**
  * @param {number | null | undefined} unixSeconds
  */
 function age(unixSeconds) {
@@ -75,9 +91,11 @@ function pathsCell(removed, kept, noun) {
 }
 
 /**
+ * One retired entry's row; redesign-backups: the Backups page's "Kept from retired
+ * stacks" section draws the same rows.
  * @param {import("../retiredview.js").RetiredEntry} entry
  */
-function row(entry) {
+export function retiredRow(entry) {
   const status = wipeStatus(entry);
   // live-finding 2026-10-02: a refused key is NOT "0 removable, 0 kept" —
   // it is the whole record still in use, so every cell says "still in use"
@@ -183,17 +201,7 @@ export function mount(root) {
     nothing: NOTHING,
     pageSize: 50,
     pageSizes: "25,50,100,250",
-    columns: [
-      { label: "Kind", sort: "text", filter: "choice" },
-      { label: "Key", sort: "text" },
-      { label: "Retired by", sort: "text", filter: "choice" },
-      { label: "Age", sort: "text" },
-      { label: "Restic", sort: "text" },
-      { label: "/appdata", sort: "text" },
-      { label: "Vault", sort: "text" },
-      { label: "Kept", sort: "text", filter: "choice" },
-      { label: "", sort: "none" },
-    ],
+    columns: RETIRED_COLUMNS,
   });
   root.replaceChildren(
     h("div", { class: "title-row" }, h("h1", null, "Retired")),
@@ -220,7 +228,7 @@ export function mount(root) {
       return;
     }
     const entries = r.body?.retired ?? [];
-    table.tbody.replaceChildren(...entries.map(row));
+    table.tbody.replaceChildren(...entries.map(retiredRow));
     table.ready();
   };
   const retry = () => void load().catch(() => {});

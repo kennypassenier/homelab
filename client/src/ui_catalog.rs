@@ -108,7 +108,14 @@ fn check_one(
             | UiStep::Pick { field, .. }
             | UiStep::Check { field, .. } => {
                 if let Some(fields) = &d.fields {
-                    dialog_field(fields, &d.title, field, catalog).map_err(bad)?;
+                    dialog_field(
+                        fields,
+                        d.controls.as_deref().unwrap_or(&[]),
+                        &d.title,
+                        field,
+                        catalog,
+                    )
+                    .map_err(bad)?;
                 }
                 return Ok(vec![step]);
             }

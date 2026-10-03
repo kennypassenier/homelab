@@ -169,6 +169,18 @@ impl Driver {
     /// Decision "23 constants": `idle_s` and `release_after_job_s`, from
     /// `ActConfig` (mount only); `core::drive::IDLE_S` and
     /// `RELEASE_AFTER_JOB_S` otherwise.
+    /// redesign-integrate-8 (demo host): the tab's press flash, `None` for
+    /// its own 420 ms; answers the one it replaced.
+    #[cfg(feature = "demo-host")]
+    pub fn set_press_ms(&self, ms: Option<u64>) -> Option<u64> {
+        let mut s = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        std::mem::replace(&mut s.press_ms, ms)
+    }
+
     pub fn set_limits(&self, idle_s: i64, release_after_job_s: i64) {
         let mut s = self
             .inner
@@ -1754,7 +1766,13 @@ async fn demo_timing(State(d): State<Driver>, Json(body): Json<Value>) -> Json<V
             ..before
         });
     }
-    Json(json!({ "announce_ms": before.announce.as_millis() as u64 }))
+    // redesign-integrate-8: the press flash too (`null` puts the tab's own
+    // pace back).
+    let press = match body.get("press_ms") {
+        Some(v) => d.set_press_ms(v.as_u64()),
+        None => d.snapshot().press_ms,
+    };
+    Json(json!({ "announce_ms": before.announce.as_millis() as u64, "press_ms": press }))
 }
 
 #[cfg(feature = "demo-host")]

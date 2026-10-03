@@ -504,6 +504,12 @@ pub fn dialog_click(
     if labelled == 1 {
         return Ok(());
     }
+    if drawn_later(offer, catalog, |c| match catalog.click(name) {
+        Click::Known(k) | Click::Renamed { control: k, .. } => k.page == c.page,
+        _ => false,
+    }) {
+        return Ok(());
+    }
     let mut names: Vec<String> = offer
         .iter()
         .map(|c| {
@@ -531,10 +537,29 @@ pub fn dialog_click(
     ))
 }
 
+/// redesign-integrate-8: a page drawn as a dialog (Stacks' Deploy all
+/// changes) draws its declared controls and fields after its own read,
+/// after the snapshot of the dialog the tab reported when it opened. A
+/// declared control or field of the same page module as a control the
+/// dialog offers is the tab's to find (it waits for one as for a page's),
+/// never refused from that stale snapshot.
+fn drawn_later(
+    offer: &[DialogControl],
+    catalog: &Catalog,
+    same_page: impl Fn(&Control) -> bool,
+) -> bool {
+    offer
+        .iter()
+        .filter_map(|o| catalog.control(&o.id))
+        .any(same_page)
+}
+
 /// A field typed into, picked or ticked inside the open page-level dialog,
-/// checked against the field ids the tab reported it holds (review M5/H3).
+/// checked against the field ids the tab reported it holds (review M5/H3),
+/// or a declared field of the page the dialog draws (`drawn_later`).
 pub fn dialog_field(
     fields: &[String],
+    offer: &[DialogControl],
     title: &str,
     name: &str,
     catalog: &Catalog,
@@ -544,6 +569,11 @@ pub fn dialog_field(
         .map(|f| f.id.as_str())
         .unwrap_or(name);
     if fields.iter().any(|f| f == name || f == now) {
+        return Ok(());
+    }
+    if let FieldName::Known(f) | FieldName::Renamed { field: f, .. } = catalog.field(name)
+        && drawn_later(offer, catalog, |c| c.page == f.page)
+    {
         return Ok(());
     }
     Err((
@@ -858,6 +888,27 @@ mod tests {
         assert_eq!(
             ids(c.list(&["edit".into(), "schedule".into()])),
             ["schedule-menu"]
+        );
+    }
+
+    /// redesign-integrate-8: Stacks' Deploy all changes is a page drawn as
+    /// a dialog; its plan's controls come after its own read, after the
+    /// snapshot the tab sent when it opened. A declared control of the same
+    /// page as one the dialog offers goes to the tab (which waits for it);
+    /// one of another page is still refused from the snapshot.
+    #[test]
+    fn redesign_integrate_8_a_dialog_page_s_later_controls_are_the_tab_s_to_find() {
+        let c = cat();
+        let offer = [DialogControl {
+            id: "new-schedule".into(),
+            label: "New schedule".into(),
+        }];
+        assert_eq!(dialog_click(&offer, "Planned", "schedule-menu", &c), Ok(()));
+        assert_eq!(dialog_click(&offer, "Planned", "edit-schedule", &c), Ok(()));
+        let (why, _) = dialog_click(&offer, "Planned", "reveal-secret", &c).unwrap_err();
+        assert!(
+            why.contains("there is no control reveal-secret in Planned"),
+            "{why}"
         );
     }
 }

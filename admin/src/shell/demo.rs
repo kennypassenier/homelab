@@ -638,7 +638,7 @@ pub fn activity_demo_incidents(history: &[homelab_core::history::HistoryEntry]) 
             _ => None,
         })
         .collect();
-    v.sort_by(|a, b| b.0.cmp(&a.0));
+    v.sort_by_key(|x| std::cmp::Reverse(x.0));
     v.into_iter().map(|(_, n)| n).collect()
 }
 

@@ -758,6 +758,12 @@ pub struct DriveState {
     /// page-control step, if any.
     #[serde(default)]
     pub page_dialog: Option<PageDialog>,
+    /// redesign-integrate-8: how long a tab shows its press flash on a
+    /// control before it clicks (`drive.js`, 420 ms when `None`). Only the
+    /// demo host's `/data/drive/demo-timing` sets it, so the whole-screen
+    /// sweep of every control does not wait out a person's pace 276 times.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub press_ms: Option<u64>,
 }
 
 impl Default for DriveState {
@@ -774,6 +780,7 @@ impl Default for DriveState {
             last_at: 0,
             idle_s: IDLE_S,
             release_after_job_s: RELEASE_AFTER_JOB_S,
+            press_ms: None,
             announce: None,
             paused_by: None,
             stopped_by: None,
@@ -1703,8 +1710,14 @@ impl DriveState {
                     .map_err(|(why, fix)| refused(step, why, fix))?;
             }
             if let (Some(f), Some(fields)) = (field, &d.fields) {
-                dialog_field(fields, &d.title, f, catalog())
-                    .map_err(|(why, fix)| refused(step, why, fix))?;
+                dialog_field(
+                    fields,
+                    d.controls.as_deref().unwrap_or(&[]),
+                    &d.title,
+                    f,
+                    catalog(),
+                )
+                .map_err(|(why, fix)| refused(step, why, fix))?;
             }
             return Ok(());
         }

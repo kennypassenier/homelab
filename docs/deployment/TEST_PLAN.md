@@ -19,7 +19,7 @@ A test that is deleted or renamed disappears from this document on the next run.
 
 Described here: every test in the integration-test directories `core/tests` and `client/tests`.
 
-Counted but not described: the 361 unit tests inside the workspace crates' own `src/` trees (`core/src` 87, `proto/src` 3, `host/src` 104, `client/src` 64, `admin/src` 103). They run with `cargo test --workspace` like the rest; this document does not read them.
+Counted but not described: the 362 unit tests inside the workspace crates' own `src/` trees (`core/src` 88, `proto/src` 3, `host/src` 104, `client/src` 64, `admin/src` 103). They run with `cargo test --workspace` like the rest; this document does not read them.
 
 ## Running the tests
 
@@ -1721,7 +1721,7 @@ Findings these tests pin:
 - **fix-guards-8**: Text a person reads named register ids.
 - **fix-guards-9**: Two worktrees committing at once built in one target directory.
 - **redesign-drive-5**: Senior review of the Live view catalog (2026-10-03): four paths still put a wrong id on Kenny's screen, and the sweep could pass on a broken control.
-- **redesign-integrate-8**: Five green merge commits let 54 Live view controls in that the sweep could not reach.
+- **redesign-integrate-8**: Five green merge commits let 107 Live view controls in that the sweep could not reach or that did nothing.
 
 Tests:
 

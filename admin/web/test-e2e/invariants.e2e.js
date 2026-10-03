@@ -3703,6 +3703,74 @@ test("invariants: the Host page lays out two columns, Containers first, the line
   }
 });
 
+// redesign-host-4: the seven facts the approved demo shows that the host
+// did not send before 3.71.0. The demo host sends every one, so nothing on
+// the page may read "not reported", and each shows its real value.
+test("invariants: the Host page shows every host fact the demo host sends, none reported missing", async () => {
+  const browser = await chromium.launch();
+  try {
+    const bad = [];
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 1000 },
+      });
+      const page = await freshPage(context);
+      await page.goto(`${BASE}/host`);
+      await page
+        .locator("#host-guests tr[data-vmid='113']")
+        .waitFor({ timeout: 10000 });
+      await page
+        .locator("#host-growth", { hasText: /Root/ })
+        .waitFor({ timeout: 10000 });
+      const r = await page.evaluate(() => {
+        const text = (/** @type {string} */ sel) =>
+          (document.querySelector(sel)?.textContent ?? "")
+            .replace(/\s+/g, " ")
+            .trim();
+        return {
+          all: text("main") || document.body.textContent || "",
+          pool: text(".hk-kpi[data-key='pool']"),
+          promised: text("#host-pool-promised"),
+          written: text("#host-pool-written"),
+          disk: text("#host-disk .hk-disk-line"),
+          about: text("#host-about"),
+          signature: text("#host-daemon-signature"),
+          metrics: text("#host-guests tr[data-vmid='113']"),
+          growth: text("#host-growth"),
+        };
+      });
+      if (/not reported/i.test(r.all))
+        bad.push(
+          `${width}px: the page still says "not reported": ${r.all.match(/.{0,60}not reported.{0,40}/i)?.[0]}`,
+        );
+      if (!/41\s*%/.test(r.pool) || !/460 GB free of 780 GB/.test(r.pool))
+        bad.push(`${width}px: pool KPI "${r.pool}"`);
+      if (!/412 GB/.test(r.promised))
+        bad.push(`${width}px: promised "${r.promised}"`);
+      if (!/320 GB · 41%/.test(r.written))
+        bad.push(`${width}px: written "${r.written}"`);
+      if (!/\(932 GB SSD\)/.test(r.disk))
+        bad.push(`${width}px: root disk line "${r.disk}"`);
+      if (!/Up for ?12 days 3 h/.test(r.about))
+        bad.push(`${width}px: about "${r.about}"`);
+      if (!/\(signed release\)/.test(r.signature))
+        bad.push(`${width}px: daemon "${r.signature}"`);
+      // The unmanaged container's memory and CPU (hidden columns on a
+      // phone still carry the text).
+      if (!/3\.0 \/ 8\.0 GiB/.test(r.metrics) || !/13%/.test(r.metrics))
+        bad.push(`${width}px: CT 113 row "${r.metrics}"`);
+      if (
+        !/^Root grows 0\.2 GB a week — full in about \d+ years/.test(r.growth)
+      )
+        bad.push(`${width}px: growth "${r.growth}"`);
+      await context.close();
+    }
+    assert.deepEqual(bad, [], bad.join("; "));
+  } finally {
+    await browser.close();
+  }
+});
+
 test("invariants: the Host page's Containers filter toggles with a plain click and / focuses its search", async () => {
   const browser = await chromium.launch();
   try {
@@ -3918,6 +3986,437 @@ test("invariants: the Host page's actions are grouped by intent as described til
       await dialog.isVisible(),
       "the tile did not open the action dialog",
     );
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── redesign-schedules (release 3.71.0, Kenny approved the demo 2026-10-03):
+// the Schedules page as the approved demo draws it — a week calendar with
+// the host's nightly round for reference, a plain-click switch with Undo, a
+// sentence-builder drawer that previews its next three runs, and an empty
+// state with templates. Each case clears the demo host's schedules first
+// and again at its end, so the rest of this suite sees what it always saw.
+
+/**
+ * One JSON call from inside the page (its session cookie included).
+ * @param {import("playwright").Page} page
+ * @param {string} method
+ * @param {string} url
+ * @param {unknown} [body]
+ */
+async function schedApi(page, method, url, body) {
+  return page.evaluate(
+    async ([m, u, b]) => {
+      const r = await fetch(/** @type {string} */ (u), {
+        method: /** @type {string} */ (m),
+        headers: b == null ? {} : { "content-type": "application/json" },
+        body: b == null ? undefined : JSON.stringify(b),
+      });
+      const t = await r.text();
+      return { status: r.status, body: t ? JSON.parse(t) : null };
+    },
+    [method, url, body ?? null],
+  );
+}
+
+/** @param {import("playwright").Page} page */
+async function clearSchedules(page) {
+  const l = await schedApi(page, "GET", "/data/schedules");
+  for (const v of l.body?.schedules ?? [])
+    await schedApi(page, "DELETE", `/data/schedules/${v.schedule.id}`);
+}
+
+/**
+ * @param {import("playwright").Page} page
+ * @param {string} stack
+ * @param {string} action
+ * @param {unknown} when
+ */
+async function addSchedule(page, stack, action, when) {
+  const r = await schedApi(page, "POST", "/data/schedules", {
+    stack,
+    action,
+    args: {},
+    when,
+    enabled: true,
+    note: "",
+  });
+  assert.equal(r.status, 201, `creating a schedule: ${JSON.stringify(r.body)}`);
+  return /** @type {string} */ (r.body.schedule.id);
+}
+
+/** The Europe/Brussels wall clock of a unix second, as named parts. */
+function brussels(/** @type {number} */ unix) {
+  return Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Brussels",
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(unix * 1000))
+      .map((x) => [x.type, x.value]),
+  );
+}
+
+test("invariants: Schedules page: the next 7 days show every run by time, the host's nightly round dashed, a now-line, and a pill finds its row", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1100 },
+      timezoneId: "Europe/Brussels",
+    });
+    const page = await freshPage(context);
+    await clearSchedules(page);
+    const daily = await addSchedule(page, "films", "backup", {
+      every: "day",
+      at: "10:00",
+    });
+    await addSchedule(page, "_host", "patch", {
+      every: "week",
+      days: [0, 3],
+      at: "22:00",
+    });
+    await page.goto(`${BASE}/schedules`);
+    const week = page.locator(".sch-week");
+    await week.waitFor({ timeout: 10000 });
+    const heads = await page.locator(".sch-week__day").allTextContents();
+    assert.equal(heads.length, 7, `the calendar shows ${heads.length} days`);
+    assert.equal(heads[0].trim(), "Today");
+    // The nightly round: one dashed block a day, at the host's hour.
+    await page.locator(".sch-pill--host").first().waitFor({ timeout: 10000 });
+    const host = await page.locator(".sch-pill--host").allTextContents();
+    assert.equal(host.length, 7, `nightly round blocks: ${host.length}`);
+    assert.ok(
+      host.every((t) => /03:00\s*nightly round/.test(t)),
+      `nightly round blocks read ${host[0]}`,
+    );
+    const style = await page
+      .locator(".sch-pill--host")
+      .first()
+      .evaluate((e) => getComputedStyle(e).borderTopStyle);
+    assert.equal(style, "dashed");
+    // The daily backup is on all seven days; the patch on its own two.
+    assert.equal(
+      await page.locator(`.sch-pill[data-id="${daily}"]`).count(),
+      7,
+    );
+    assert.equal(
+      await page
+        .locator(".sch-week__col")
+        .first()
+        .locator(".sch-nowline")
+        .count(),
+      1,
+      "today's column has no now-line",
+    );
+    assert.equal(await page.locator(".sch-nowline").count(), 1);
+    const patches = await page
+      .locator(".sch-pill:not(.sch-pill--host)")
+      .filter({ hasText: "Patch the fleet" })
+      .count();
+    assert.equal(patches, 2, `patch pills: ${patches}`);
+    // A pill finds its row.
+    await page.locator(`.sch-pill[data-id="${daily}"]`).nth(3).click();
+    const row = page.locator(`tr[data-id="${daily}"]`);
+    await page.waitForTimeout(200);
+    assert.equal(
+      await row.evaluate((r) => r.classList.contains("sch-flash")),
+      true,
+      "the clicked pill's row is not marked",
+    );
+    assert.equal(
+      await row.evaluate((r) => document.activeElement === r),
+      true,
+      "the clicked pill's row has no focus",
+    );
+    // On a phone the week becomes an agenda list.
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.waitForTimeout(200);
+    assert.equal(
+      await week.isVisible(),
+      false,
+      "the week grid shows at 390 px",
+    );
+    const agenda = page.locator(".sch-agenda > div");
+    assert.ok((await agenda.count()) >= 3, "the agenda lists the coming runs");
+    assert.match(
+      (await agenda.first().textContent()) ?? "",
+      /\d\d:\d\d.*(Back up films|Patch the fleet)/,
+    );
+    await clearSchedules(page);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: Schedules page: a plain click turns a schedule off, greys its row and pills, and Undo turns it back on", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1100 },
+      timezoneId: "Europe/Brussels",
+    });
+    const page = await freshPage(context);
+    await clearSchedules(page);
+    const id = await addSchedule(page, "films", "backup", {
+      every: "day",
+      at: "10:00",
+    });
+    await addSchedule(page, "notes", "backup", { every: "day", at: "11:00" });
+    await page.goto(`${BASE}/schedules`);
+    const row = page.locator(`tr[data-id="${id}"]`);
+    await row.waitFor({ timeout: 10000 });
+    assert.equal(
+      ((await page.locator("#sched-count").textContent()) ?? "").trim(),
+      "2 schedules · 2 on",
+    );
+    // The switch is the row's first cell.
+    assert.equal(
+      await row.locator("td").first().locator('input[role="switch"]').count(),
+      1,
+      "the on/off switch is not the first cell",
+    );
+    await row.locator('input[role="switch"]').click();
+    await page.waitForTimeout(400);
+    assert.equal(await row.evaluate((r) => r.classList.contains("off")), true);
+    const pills = page.locator(`.sch-pill[data-id="${id}"]`);
+    assert.ok((await pills.count()) > 0);
+    assert.equal(
+      await pills.evaluateAll((ps) =>
+        ps.every((p) => p.classList.contains("off")),
+      ),
+      true,
+      "its pills are not greyed",
+    );
+    assert.equal(
+      ((await page.locator("#sched-count").textContent()) ?? "").trim(),
+      "2 schedules · 1 on",
+    );
+    let list = await schedApi(page, "GET", "/data/schedules");
+    assert.equal(
+      list.body.schedules.find((/** @type {any} */ v) => v.schedule.id === id)
+        .schedule.enabled,
+      false,
+      "the host still has it on",
+    );
+    const toast = page.locator(".sch-toast");
+    assert.match((await toast.textContent()) ?? "", /is off/);
+    await toast.getByRole("button", { name: "Undo" }).click();
+    await page.waitForTimeout(400);
+    assert.equal(await row.evaluate((r) => r.classList.contains("off")), false);
+    list = await schedApi(page, "GET", "/data/schedules");
+    assert.equal(
+      list.body.schedules.find((/** @type {any} */ v) => v.schedule.id === id)
+        .schedule.enabled,
+      true,
+      "Undo did not turn it back on",
+    );
+    // Space on a focused row toggles too.
+    await row.focus();
+    await page.keyboard.press(" ");
+    await page.waitForTimeout(400);
+    assert.equal(await row.evaluate((r) => r.classList.contains("off")), true);
+    await page
+      .locator(".sch-toast")
+      .getByRole("button", { name: "Undo" })
+      .click();
+    await page.waitForTimeout(400);
+    // Delete from the row menu is undoable: nothing is sent while Undo shows.
+    /** @type {string[]} */
+    const deletes = [];
+    page.on("request", (r) => {
+      if (r.method() === "DELETE") deletes.push(r.url());
+    });
+    await row.locator('[data-drive="schedule-menu"]').click();
+    await page.locator('dialog.sch-menu[open] [data-drive="delete"]').click();
+    assert.equal(await row.isVisible(), false, "a deleted row still shows");
+    await page
+      .locator(".sch-toast")
+      .getByRole("button", { name: "Undo" })
+      .click();
+    await page.waitForTimeout(300);
+    assert.equal(
+      await row.isVisible(),
+      true,
+      "Undo did not bring the row back",
+    );
+    assert.deepEqual(deletes, [], "Undo still deleted it");
+    await clearSchedules(page);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: Schedules page: the drawer reads as a sentence, warns near the nightly round and previews the next 3 runs", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1100 },
+      timezoneId: "Europe/Brussels",
+    });
+    const page = await freshPage(context);
+    await clearSchedules(page);
+    await addSchedule(page, "films", "backup", { every: "day", at: "10:00" });
+    await page.goto(`${BASE}/schedules`);
+    await page.locator("tr[data-id]").first().waitFor({ timeout: 10000 });
+    await page.keyboard.press("n");
+    const drawer = page.locator("dialog.sch-drawer[open]");
+    await drawer.waitFor({ timeout: 3000 });
+    assert.match(
+      ((await drawer.locator(".sch-sentence").textContent()) ?? "").replace(
+        /\s+/g,
+        " ",
+      ),
+      /^Run .* on .* at/,
+    );
+    // The demo's defaults: chosen weekdays at 02:30, inside an hour of 03:00.
+    await drawer.locator("#sched-every").selectOption("week");
+    await drawer.locator("#sched-at").fill("02:30");
+    await page.waitForTimeout(150);
+    assert.equal(await drawer.locator("#sched-near").isVisible(), true);
+    const shown = (
+      await drawer.locator(".sch-preview [data-slot]").allTextContents()
+    ).map((t) => t.replace(/\s+/g, " ").trim());
+    assert.equal(shown.length, 3, `the preview lists ${shown.length} runs`);
+    // The same three, worked out here from the host's wall clock.
+    const days = await drawer
+      .locator('[data-drive^="day-"][aria-pressed="true"]')
+      .evaluateAll((bs) => bs.map((b) => b.getAttribute("data-drive") ?? ""));
+    const want = new Set(days.map((d) => d.slice(4)));
+    const now = Math.floor(Date.now() / 1000);
+    /** @type {string[]} */
+    const expected = [];
+    for (let t = now - (now % 60) + 60; expected.length < 3; t += 60) {
+      const p = brussels(t);
+      if (
+        p.hour === "02" &&
+        p.minute === "30" &&
+        want.has(p.weekday.toLowerCase())
+      )
+        expected.push(`${p.weekday} ${p.day} ${p.month}, 02:30`);
+    }
+    for (const [i, e] of expected.entries())
+      assert.ok(
+        shown[i].startsWith(e),
+        `run ${i + 1}: "${shown[i]}", expected ${e}`,
+      );
+    // Away from the round, the warning goes.
+    await drawer.locator("#sched-at").fill("05:00");
+    await page.waitForTimeout(150);
+    assert.equal(await drawer.locator("#sched-near").isVisible(), false);
+    assert.match(
+      (await drawer
+        .locator(".sch-preview [data-slot]")
+        .first()
+        .textContent()) ?? "",
+      /05:00/,
+    );
+    // Adding it lists it.
+    await drawer.locator('[data-drive="save"]').click();
+    await page.waitForTimeout(800);
+    assert.equal(await page.locator("dialog.sch-drawer[open]").count(), 0);
+    assert.equal(await page.locator("tr[data-id]").count(), 2);
+    await clearSchedules(page);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: Schedules page: with no schedules it offers three templates, each opening the drawer filled in", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1100 },
+      timezoneId: "Europe/Brussels",
+    });
+    const page = await freshPage(context);
+    await clearSchedules(page);
+    await page.goto(`${BASE}/schedules`);
+    const cards = page.locator(".sch-tpl");
+    await cards.first().waitFor({ timeout: 10000 });
+    assert.equal(await cards.count(), 3);
+    assert.equal(await page.locator(".sch-week").count(), 0);
+    await cards.nth(1).click();
+    const drawer = page.locator("dialog.sch-drawer[open]");
+    await drawer.waitFor({ timeout: 3000 });
+    assert.equal(await drawer.locator("#sched-action").inputValue(), "patch");
+    assert.equal(await drawer.locator("#sched-every").inputValue(), "week");
+    assert.equal(await drawer.locator("#sched-at").inputValue(), "22:00");
+    assert.equal(await drawer.locator(".sch-preview [data-slot]").count(), 3);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: Schedules page: Live view reaches the drawer and its fields, the row menu, the switch and Undo", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+      timezoneId: "Europe/Brussels",
+    });
+    const page = await freshPage(context);
+    await clearSchedules(page);
+    const id = await addSchedule(page, "films", "backup", {
+      every: "day",
+      at: "10:00",
+    });
+    await page.goto(`${BASE}/schedules`);
+    const row = page.locator(`tr[data-id="${id}"]`);
+    await row.waitFor({ timeout: 10000 });
+    await page.check("#live-view");
+    const step = (/** @type {any} */ s) =>
+      page.evaluate(
+        (body) =>
+          fetch("/data/drive/demo-step", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }).then((r) => r.json()),
+        s,
+      );
+    try {
+      let r = await step({ do: "click", control: "new-schedule" });
+      assert.ok(r.ok, `new-schedule: ${JSON.stringify(r.refusal)}`);
+      await page.locator("dialog.sch-drawer[open]").waitFor({ timeout: 3000 });
+      r = await step({ do: "pick", field: "sched-every", value: "day" });
+      assert.ok(r.ok, `pick sched-every: ${JSON.stringify(r.refusal)}`);
+      assert.equal(await page.locator("#sched-every").inputValue(), "day");
+      r = await step({ do: "press", button: "cancel" });
+      assert.ok(r.ok, `press cancel: ${JSON.stringify(r.refusal)}`);
+      assert.equal(await page.locator("dialog.sch-drawer[open]").count(), 0);
+      r = await step({ do: "click", control: "schedule-menu", row: id });
+      assert.ok(r.ok, `schedule-menu: ${JSON.stringify(r.refusal)}`);
+      await page.locator("dialog.sch-menu[open]").waitFor({ timeout: 3000 });
+      r = await step({ do: "press", button: "delete" });
+      assert.ok(r.ok, `press delete: ${JSON.stringify(r.refusal)}`);
+      assert.equal(await row.isVisible(), false, "the deleted row still shows");
+      r = await step({ do: "click", control: "undo-schedule-change" });
+      assert.ok(r.ok, `undo: ${JSON.stringify(r.refusal)}`);
+      await row.waitFor({ timeout: 3000 });
+      r = await step({ do: "click", control: "toggle-schedule", row: id });
+      assert.ok(r.ok, `toggle: ${JSON.stringify(r.refusal)}`);
+      await page.waitForTimeout(400);
+      assert.equal(
+        await row.evaluate((x) => x.classList.contains("off")),
+        true,
+      );
+      r = await step({ do: "click", control: "undo-schedule-change" });
+      assert.ok(r.ok, `undo the switch: ${JSON.stringify(r.refusal)}`);
+      await page.waitForTimeout(400);
+      assert.equal(
+        await row.evaluate((x) => x.classList.contains("off")),
+        false,
+      );
+    } finally {
+      await step({ do: "done" });
+    }
+    await clearSchedules(page);
   } finally {
     await browser.close();
   }

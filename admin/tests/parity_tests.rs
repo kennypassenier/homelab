@@ -20,7 +20,7 @@ use homelab_admin::core::drift::{DriftState, drift_state};
 use homelab_admin::shell::actions::{Actions, ActionsDeps, JobState, Origin};
 use homelab_admin::shell::actions_notify::NotifyCenter;
 use homelab_admin::shell::hostlog::{After, HostLog};
-use homelab_admin::shell::releases::Releases;
+use homelab_admin::shell::releases::{HostBinary, Releases};
 use homelab_admin::shell::workcopy::provision_credentials;
 use homelab_proto::{Command, LogLevel, ServerMsg};
 
@@ -267,10 +267,13 @@ impl Releases for FakeGitHub {
     fn host_binary<'a>(
         &'a self,
         tag: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'a>>
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<HostBinary, String>> + Send + 'a>>
     {
         self.asked.lock().unwrap().push(format!("binary {tag}"));
-        let b = self.binary.clone();
+        let b = self.binary.clone().map(|binary_b64| HostBinary {
+            binary_b64,
+            proof: None,
+        });
         Box::pin(async move { b })
     }
     fn list<'a>(

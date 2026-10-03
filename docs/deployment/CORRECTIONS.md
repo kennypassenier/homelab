@@ -360,3 +360,17 @@ summarised here for the corrections record.
 7. **Hoe en wanneer meten we dat het werkt.** At the 3.71.0 gate's full run.
 8. **Fallback.** A counter that deliberately counts less names what it counts in its label.
 9. **Wanneer herzien we de maatregel.** At the 3.71.0 retrospective.
+
+## Correction · redesign-final-11 — four whole-screen cases red on the integration branch
+
+**Draft — awaiting Kenny.**
+
+1. **Wat ging er mis.** On redesign-371 (c6334fc9) four whole-screen cases failed although every page branch had passed its own: Deploy all changes' Compare and Esc case, the Doctor's loading case, Activity's view case and the Inbox's filter case. Two hid real faults: Esc closed the Deploy all changes sheet instead of resetting its filter, and Host's checks stopped for good on a first answer without checks.
+2. **Welke poort liet het door.** Each branch ran only its own new cases; a merge ran the commit checks (catalog, gates) but no whole-screen case, and the kit's renames (`data-value` → `data-v`, `.sch-ph` gone) and the plan's move into a sheet broke cases of other pages.
+3. **Waar dezelfde fout nog zit.** Any merge that changes a page another branch's cases open; until now caught only by the full run at the release gate.
+4. **Hoe voorkomen we herhaling.** The gap is closed (redesign-final-12): a merge runs the whole-screen cases of the pages it changes (`.githooks/merge-cases.sh`, the mapping derived from the code by `admin/web/scripts/merge-cases.mjs`) and is refused on any failure, naming the cases.
+5. **Kost.** About 20 s to 45 s of cases for a merge that touches one page (9 to 22 cases), more for a shared file (ui.js reaches 167 cases).
+6. **Handhaving.** Code: `.githooks/pre-merge-commit` → `pre-commit` → `merge-cases.sh`; `admin/web/test/mergecases.test.js`; INVARIANTS.md row 167.
+7. **Hoe en wanneer meten we dat het werkt.** Measured 2026-10-04 in a throwaway clone: a merge undoing the C4 fix was refused naming its case; a clean merge passed. Next: the next page branch merged into redesign-371.
+8. **Fallback.** A merge that cannot wait for its cases is made with `--no-verify` as a conscious act; the release gate's full run still runs every case.
+9. **Wanneer herzien we de maatregel.** At the 3.71.0 retrospective, with the merges' measured hook durations.

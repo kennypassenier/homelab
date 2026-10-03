@@ -266,6 +266,18 @@ export function findTarget(step, ctl, s) {
       return ctl?.row?.(t.op, t.target) ?? null;
     case "select":
       return q("table.fleet");
+    case "control": {
+      // fix-239: the declared control (drivable.js), in the dialog on top
+      // when one is open, else on the page.
+      const open = [...document.querySelectorAll("dialog[open]")].at(-1);
+      const root = open ?? document.getElementById("page");
+      const row =
+        t.row == null ? "" : `[data-drive-row="${CSS.escape(t.row)}"]`;
+      return /** @type {HTMLElement | null} */ (
+        root?.querySelector(`[data-drive="${CSS.escape(t.control)}"]${row}`) ??
+          null
+      );
+    }
     case "close":
       return /** @type {HTMLElement | null} */ (
         ctl?.dialog?.querySelector(".kp-dialog__close") ?? null

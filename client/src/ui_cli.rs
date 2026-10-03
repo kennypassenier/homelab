@@ -13,7 +13,7 @@ use serde_json::Value;
 
 /// The steps, for the usage line and the verb's help.
 pub const STEPS: &str = "goto <path> | open <form> [stack] | open batch <action> [<stack>,<stack>] | \
-select <stack>,<stack>|none | type <field> <text> | \
+select <stack>,<stack>|none | click <control> [row] | type <field> <text> | \
 pick <field> <value> | check <field> on|off | edit <field> <file|-> | \
 row add|edit|up|down|delete [n|key] | press next|back|save|cancel|default | \
 press confirm [--wait] | finish | close | reload | state | done | plan \"<step>\" \"<step>\" … | plan --file <file|->";
@@ -264,6 +264,14 @@ pub fn parse_with(
             };
             UiStep::Check { field, on }
         }
+        // fix-239: a page's own control (a row's Update, New schedule,
+        // Issue token…), clicked by the tab that follows; inside the
+        // page-level dialog it opens, type/pick/check/press reach its
+        // fields and buttons the same way.
+        "click" => UiStep::Click {
+            control: word(1)?,
+            row: args.get(2).cloned(),
+        },
         "press" => UiStep::Press { button: word(1)? },
         "close" => UiStep::Close,
         // fix-185: tell the driven tab to take the dashboard's current
@@ -281,7 +289,8 @@ pub fn parse_with(
         | UiStep::Pick { .. }
         | UiStep::Check { .. }
         | UiStep::Edit { .. }
-        | UiStep::Row { .. } => args.len() > 3,
+        | UiStep::Row { .. }
+        | UiStep::Click { .. } => args.len() > 3,
         UiStep::Select { .. } => args.len() > 2,
         UiStep::Close | UiStep::Reload | UiStep::State | UiStep::Done => args.len() > 1,
         UiStep::Type { .. } | UiStep::Plan { .. } => false,
@@ -414,9 +423,19 @@ pub fn render(message: &str) -> Result<String, String> {
                 out.push_str(&format!("  next {}\n", text(&next["text"])));
             }
         }
+        // fix-239: a page-level dialog a `ui click` opened.
+        let pd = &s["page_dialog"];
+        if !pd.is_null() {
+            out.push_str(&format!(
+                "dialog {} (a page's own dialog: click, type, pick, check and press act in it; close closes it)\n",
+                text(&pd["title"])
+            ));
+        }
         let f = &s["form"];
         if f.is_null() {
-            out.push_str("form   none open\n");
+            if pd.is_null() {
+                out.push_str("form   none open\n");
+            }
         } else {
             let steps: Vec<String> = f["steps"]
                 .as_array()
@@ -609,6 +628,24 @@ mod tests {
         assert_eq!(parse(&words("reload")).unwrap(), UiStep::Reload);
         assert!(parse(&words("reload now")).is_err());
         assert!(STEPS.contains("reload"));
+        // fix-239: a page's own control, with or without its row.
+        assert_eq!(
+            parse(&words("click pin-update media/jellyfin/jellyfin")).unwrap(),
+            UiStep::Click {
+                control: "pin-update".into(),
+                row: Some("media/jellyfin/jellyfin".into()),
+            }
+        );
+        assert_eq!(
+            parse(&words("click new-schedule")).unwrap(),
+            UiStep::Click {
+                control: "new-schedule".into(),
+                row: None,
+            }
+        );
+        assert!(parse(&words("click")).is_err());
+        assert!(parse(&words("click a b c")).is_err());
+        assert!(STEPS.contains("click <control> [row]"));
         // The edit forms' steps.
         assert_eq!(
             parse(&words("open batch update media,drill")).unwrap(),

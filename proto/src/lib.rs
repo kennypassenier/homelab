@@ -677,6 +677,17 @@ pub enum UiStep {
     /// opened from that selection (`homelab ui select <stack>,<stack>`,
     /// `homelab ui select none` clears it). Only on the Overview page.
     Select { stacks: Vec<String> },
+    /// fix-239: click a page's own control — a row's button (a stale
+    /// image's Update), a page-level button (New schedule, Issue token) or
+    /// a button inside the page-level dialog such a click opened — by the
+    /// id the page declared it under (`admin/web/js/drivable.js`), with the
+    /// row's key when it repeats per row. The tab that follows clicks it as
+    /// a person would and answers what is on screen afterwards.
+    Click {
+        control: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        row: Option<String>,
+    },
     /// Close the open dialog.
     Close,
     /// fix-185: tell the driven tab to take the dashboard's current page
@@ -718,6 +729,7 @@ impl UiStep {
             UiStep::Edit { .. } => "edit",
             UiStep::Row { .. } => "row",
             UiStep::Select { .. } => "select",
+            UiStep::Click { .. } => "click",
             UiStep::Close => "close",
             UiStep::Reload => "reload",
             UiStep::State => "state",
@@ -1415,6 +1427,14 @@ mod wire_tests {
                 stacks: vec!["media".into(), "uptime".into()],
             },
             UiStep::Select { stacks: vec![] },
+            UiStep::Click {
+                control: "pin-update".into(),
+                row: Some("media/jellyfin/jellyfin".into()),
+            },
+            UiStep::Click {
+                control: "new-schedule".into(),
+                row: None,
+            },
             UiStep::Close,
             UiStep::Reload,
             UiStep::State,

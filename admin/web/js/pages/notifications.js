@@ -36,6 +36,62 @@ import {
   dataTable,
 } from "/static/kp/js/datatable.js";
 import { attachSwitches } from "/static/kp/js/forms.js";
+import { declare, drivable } from "../drivable.js";
+
+// fix-239: Live view reaches every notification control (`homelab ui
+// click …`; the digest time and the snooze length are `homelab ui type
+// notify-digest 07:30` and `homelab ui pick notify-snooze-minutes 60`).
+const PUSH_TO_PHONE = declare({
+  id: "push-to-phone",
+  page: "notifications",
+  opens: "run",
+  what: "turn pushing urgent notifications to the phone on or off",
+});
+const STACK_PUSH = declare({
+  id: "stack-push",
+  page: "notifications",
+  opens: "run",
+  row: "<stack>",
+  what: "turn one stack's pushes on or off (muted: the centre only)",
+});
+const SAVE_DIGEST = declare({
+  id: "save-digest",
+  page: "notifications",
+  opens: "run",
+  what: "save the bulletin time",
+});
+const SNOOZE = declare({
+  id: "snooze",
+  page: "notifications",
+  opens: "run",
+  what: "snooze every push for the chosen time",
+});
+const END_SNOOZE = declare({
+  id: "end-snooze",
+  page: "notifications",
+  opens: "run",
+  what: "end the snooze now",
+});
+const MARK_ALL_READ = declare({
+  id: "mark-all-read",
+  page: "notifications",
+  opens: "run",
+  what: "mark every notification read",
+});
+const MARK_READ = declare({
+  id: "mark-read",
+  page: "notifications",
+  opens: "run",
+  row: "<notification id>",
+  what: "mark one notification read",
+});
+const NOTICE_FIX = declare({
+  id: "notice-fix",
+  page: "notifications",
+  opens: "dialog",
+  row: "<notification id>:<n>",
+  what: "run a notification's suggested fix (the n-th, from 0)",
+});
 
 /**
  * A kp switch. In a table cell it goes without its On/Off words (both are
@@ -72,6 +128,7 @@ export function mount(root) {
   const keys = sortKeys();
   const err = h("div");
   const push = switchEl("notify-push", "Push to the phone");
+  drivable(push.input, PUSH_TO_PHONE);
   const digestInput = h("input", {
     class: "kp-field__input",
     type: "time",
@@ -83,6 +140,7 @@ export function mount(root) {
     { type: "button", class: "kp-button", id: "notify-digest-save" },
     "Save",
   );
+  drivable(digestSave, SAVE_DIGEST);
   const digestText_ = h("p", {
     class: "measured",
     id: "notify-digest-last",
@@ -101,6 +159,7 @@ export function mount(root) {
     { type: "button", class: "kp-button", id: "notify-snooze" },
     "Snooze",
   );
+  drivable(snoozeBtn, SNOOZE);
   const unsnooze = h(
     "button",
     {
@@ -110,6 +169,7 @@ export function mount(root) {
     },
     "End the snooze",
   );
+  drivable(unsnooze, END_SNOOZE);
   const snoozeText = h("p", {
     class: "snooze-state",
     id: "snooze-state",
@@ -120,6 +180,7 @@ export function mount(root) {
     { type: "button", class: "kp-button", id: "notify-read-all" },
     "Mark all read",
   );
+  drivable(markAll, MARK_ALL_READ);
   const unreadText = h("span", { class: "measured", id: "notify-unread" });
 
   const notices = tableBlock({
@@ -293,14 +354,18 @@ export function mount(root) {
                 "div",
                 { class: "notice-actions" },
                 ...r.fixes.map((f, i) =>
-                  h(
-                    "button",
-                    {
-                      type: "button",
-                      class: "kp-button kp-button--sm",
-                      "data-fix": `${r.id}:${i}`,
-                    },
-                    fixLabel(f),
+                  drivable(
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        class: "kp-button kp-button--sm",
+                        "data-fix": `${r.id}:${i}`,
+                      },
+                      fixLabel(f),
+                    ),
+                    NOTICE_FIX,
+                    `${r.id}:${i}`,
                   ),
                 ),
                 ...(r.link ? [h("a", { href: r.link }, "Open the page")] : []),
@@ -476,14 +541,18 @@ export function mount(root) {
               ? h(
                   "td",
                   null,
-                  h(
-                    "button",
-                    {
-                      type: "button",
-                      class: "kp-button kp-button--sm",
-                      "data-read": String(r.id),
-                    },
-                    "Mark read",
+                  drivable(
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        class: "kp-button kp-button--sm",
+                        "data-read": String(r.id),
+                      },
+                      "Mark read",
+                    ),
+                    MARK_READ,
+                    String(r.id),
                   ),
                 )
               : h("td", null, h("span", { class: "read-mark" }, "read")),
@@ -504,6 +573,7 @@ export function mount(root) {
           const word = stateWord("on", ["on", "muted"]);
           const sw = switchEl(`mute-${r.stack}`, word, false);
           sw.input.dataset.mute = r.stack;
+          drivable(sw.input, STACK_PUSH, r.stack);
           sw.input.setAttribute("aria-label", `Push for ${r.stack}`);
           const unread = td("", "num");
           stackRows.set(r.stack, { input: sw.input, word, unread });

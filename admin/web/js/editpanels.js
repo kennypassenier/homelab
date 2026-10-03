@@ -82,6 +82,21 @@ import { badgeCell, errorBox, fetchJson, h, tableBlock, td } from "./dom.js";
 import { driven, handle, register } from "./drivehooks.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 import { attachSwitches, showError } from "/static/kp/js/forms.js";
+import { viaForm } from "./drivable.js";
+
+/**
+ * fix-239: every card of a stack's settings tab is one edit form, which
+ * Live view opens as `homelab ui open <form> <stack>`; the card says which,
+ * so each of its buttons is reachable through it.
+ * @template {Node} N
+ * @param {N} node
+ * @param {string} form
+ * @returns {N}
+ */
+const card = (node, form) => {
+  if (node instanceof HTMLElement) viaForm(node, form);
+  return node;
+};
 
 /**
  * @typedef {{unit: string, path: string, unit_file_path: string,
@@ -166,7 +181,7 @@ export function settingsTab(panel, params) {
     }
     const e = /** @type {EditRead} */ (r.body);
     const parts = /** @type {Node[]} */ ([...headLine(e)]);
-    if (e.manifest) parts.push(settingsCard(stack, e, load));
+    if (e.manifest) parts.push(card(settingsCard(stack, e, load), "settings"));
     else
       parts.push(
         h(
@@ -175,24 +190,25 @@ export function settingsTab(panel, params) {
           `The settings form needs a readable lxc-compose.yml: ${e.manifest_error ?? "none"}. The raw editor below still works.`,
         ),
       );
-    parts.push(filesCard(stack, e, load));
-    if (e.manifest && e.presets.length) parts.push(addAppCard(stack, e, load));
+    parts.push(card(filesCard(stack, e, load), "raw"));
+    if (e.manifest && e.presets.length)
+      parts.push(card(addAppCard(stack, e, load), "add-app"));
     let settingsExt = null;
     let apps = null;
     let latch = null;
     let tiles = null;
     if (e.manifest) {
       settingsExt = settingsExtCard(stack, e, load);
-      parts.push(settingsExt.node);
+      parts.push(card(settingsExt.node, "settings-ext"));
       apps = appsEditCard(stack, e, load);
-      parts.push(apps.node);
+      parts.push(card(apps.node, "apps"));
       latch = latchEditCard(stack, e, load);
-      parts.push(latch.node);
+      parts.push(card(latch.node, "latch"));
       tiles = tilesEditCard(stack, e, load);
-      parts.push(tiles.node);
+      parts.push(card(tiles.node, "tiles"));
     }
     if (e.manifest && (e.manifest.native_only || e.natives.length))
-      parts.push(nativeCard(stack, e, load));
+      parts.push(card(nativeCard(stack, e, load), "native"));
     panel.replaceChildren(...parts);
     // feat-platform-10: the row tables' kp datatables need their wraps in
     // the live document first (drawFirewall's own order, at the panel
@@ -1725,6 +1741,8 @@ function tilesEditCard(stack, e, reload) {
  */
 export function checksEditTab(panel, params) {
   const stack = params.name;
+  // fix-239: `homelab ui open checks <stack>/<app>` reaches this tab's rows.
+  viaForm(panel, "checks");
   const abort = new AbortController();
   panel.replaceChildren(
     h("p", { class: "measured" }, "Reading the stack's files…"),
@@ -2499,6 +2517,8 @@ function nativeCard(stack, e, reload) {
  */
 export function firewallTab(panel, params) {
   const stack = params.name;
+  // fix-239: `homelab ui open firewall <stack>` reaches this tab's rows.
+  viaForm(panel, "firewall");
   const abort = new AbortController();
   panel.replaceChildren(
     h("p", { class: "measured" }, "Reading the stack's firewall…"),

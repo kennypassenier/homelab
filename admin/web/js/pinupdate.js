@@ -23,6 +23,7 @@ import { diffBlocks } from "./editui.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { planView } from "./plan.js";
 import { majorJump, releaseUrl } from "./staleimages.js";
+import { dialogControl } from "./drivable.js";
 
 /**
  * One stale-image row, as the Fleet view has it.
@@ -279,6 +280,9 @@ async function drawMove(d, body, move, o) {
     "Cancel",
   );
   cancel.addEventListener("click", () => d.close());
+  // fix-239: `homelab ui press confirm` (or `click confirm`) in Live view;
+  // the major-version tick is `homelab ui check pin-major-read on`.
+  dialogControl(confirm, "confirm");
   const ready = () => {
     const ok = !v.blocked && (!tick || tick.input.checked);
     /** @type {HTMLButtonElement} */ (confirm).disabled = !ok;
@@ -431,6 +435,7 @@ async function run(d, body, move, edit) {
     { type: "button", class: "kp-button", "data-pin-rollback": "" },
     `Roll back to ${move.from_version}`,
   );
+  dialogControl(back, "roll-back");
   back.addEventListener("click", () => {
     d.close();
     const dd = openDialog({

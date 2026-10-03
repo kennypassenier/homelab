@@ -241,6 +241,18 @@ function hrefOf(r) {
 }
 
 /**
+ * fix-239: the address of a page by its registry name (`"fleetview"` →
+ * `/fleetview`), so a Live view control declared on a page is found there
+ * whatever the page's address is now; null for a name no route answers.
+ * @param {string} page
+ * @returns {string | null}
+ */
+export function pageHref(page) {
+  const rest = Object.entries(PATH_TO_PAGE).find(([, p]) => p === page)?.[0];
+  return rest == null ? null : `/${rest}`;
+}
+
+/**
  * @typedef {{href: string, label: string, current: boolean}} NavLink
  * @typedef {NavLink & {items?: NavLink[]}} NavEntry a link, or a group whose
  *   own link opens its first page and whose `items` fill its dropdown

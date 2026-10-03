@@ -41,6 +41,17 @@ import { majorJump, releaseUrl } from "../staleimages.js";
 import { topologyFigure } from "../topology.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 import { attachSwitches } from "/static/kp/js/forms.js";
+import { declare, drivable } from "../drivable.js";
+
+// fix-239: Live view reaches every stale image's Update (`homelab ui click
+// pin-update <stack>/<app>/<service>`).
+const PIN_UPDATE = declare({
+  id: "pin-update",
+  page: "fleetview",
+  opens: "dialog",
+  row: "<stack>/<app>/<service>",
+  what: "a stale image's Update: back up the stack, move its pinned image to the newer release, commit and deploy",
+});
 
 /**
  * A kp switch (shared shape with notifications.js's own, kept local here
@@ -87,6 +98,7 @@ function updateButton(x, stack, container, major) {
     },
     `Update to ${x.latest}`,
   );
+  drivable(btn, PIN_UPDATE, `${stack}/${x.key}`);
   btn.addEventListener("click", () => {
     void openPinUpdate({
       stack,

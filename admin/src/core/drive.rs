@@ -651,6 +651,37 @@ impl FormDesc {
     }
 }
 
+/// fix-239: a page-level dialog a `ui click` opened. The dashboard's server
+/// does not model it (its work runs in the tab: a stale image's Update
+/// backs up, commits and deploys from there); the tab that took the click
+/// holds it and answers each later step inside it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PageDialog {
+    /// The control whose click opened it.
+    pub control: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row: Option<String>,
+    /// Its title, as the tab read it.
+    pub title: String,
+}
+
+/// fix-239: what the tab that took a page-control step answered.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+pub struct TabAnswer {
+    pub ok: bool,
+    #[serde(default)]
+    pub why: Option<String>,
+    #[serde(default)]
+    pub fix: Option<String>,
+    /// The page the tab is on afterwards (it goes to a control's own page
+    /// first when the control is not on screen).
+    #[serde(default)]
+    pub page: Option<String>,
+    /// The title of the dialog open afterwards; `None`: none is.
+    #[serde(default)]
+    pub dialog: Option<String>,
+}
+
 /// The one shared "Claude is driving" state.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DriveState {
@@ -693,6 +724,10 @@ pub struct DriveState {
     /// permissive, never a reason to refuse a step.
     #[serde(default)]
     pub tab_caps: Option<TabCaps>,
+    /// fix-239: the page-level dialog open in the tab that took the last
+    /// page-control step, if any.
+    #[serde(default)]
+    pub page_dialog: Option<PageDialog>,
 }
 
 impl Default for DriveState {
@@ -716,6 +751,7 @@ impl Default for DriveState {
             selected: Vec::new(),
             tab_page_version: None,
             tab_caps: None,
+            page_dialog: None,
         }
     }
 }
@@ -763,6 +799,9 @@ pub enum Effect {
     /// fix-185 (`homelab ui reload`): tell the driven tab to take the
     /// dashboard's current page and wait, bounded, for it to re-attach.
     Reload,
+    /// fix-239: a page-control step: the tab that follows takes it (one
+    /// tab, by claim) and answers ([`DriveState::taken`]).
+    Tab,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1220,6 +1259,7 @@ impl DriveState {
     /// the tabs are the viewer's again. One step on, so every tab hears it.
     pub fn release(&mut self, now: i64) {
         self.form = None;
+        self.page_dialog = None;
         self.active = false;
         self.announce = None;
         self.paused_by = None;
@@ -1283,9 +1323,69 @@ impl DriveState {
             UiStep::State | UiStep::Plan { .. } => return Ok(plain),
             UiStep::Done => {
                 self.form = None;
+                self.page_dialog = None;
                 self.active = false;
                 self.bump(cx, false);
                 return Ok(plain);
+            }
+            // fix-239: with no server-modelled form open, a field is the
+            // page's own or its page-level dialog's: the tab sets it.
+            UiStep::Type { .. }
+            | UiStep::Edit { .. }
+            | UiStep::Pick { .. }
+            | UiStep::Check { .. }
+                if self.form.is_none() =>
+            {
+                Applied {
+                    effect: Effect::Tab,
+                    held: None,
+                }
+            }
+            UiStep::Press { button } if self.in_page_dialog() && button != "close" => Applied {
+                effect: Effect::Tab,
+                held: None,
+            },
+            UiStep::Close | UiStep::Press { .. } if self.in_page_dialog() => {
+                self.page_dialog = None;
+                plain
+            }
+            UiStep::Click { control, .. } => {
+                if let Some(f) = &self.form {
+                    return Err(refused(
+                        step,
+                        format!(
+                            "the dialog {} is open; the dashboard drives its buttons itself",
+                            f.title
+                        ),
+                        format!(
+                            "homelab ui press {}, or homelab ui close first",
+                            f.buttons.join("|")
+                        ),
+                    ));
+                }
+                if control.trim().is_empty() {
+                    return Err(refused(
+                        step,
+                        "no control was named",
+                        "homelab ui click <control> [row]",
+                    ));
+                }
+                Applied {
+                    effect: Effect::Tab,
+                    held: None,
+                }
+            }
+            UiStep::Goto { .. } | UiStep::Open { .. } if self.page_dialog.is_some() => {
+                let title = self
+                    .page_dialog
+                    .as_ref()
+                    .map(|d| d.title.clone())
+                    .unwrap_or_default();
+                return Err(refused(
+                    step,
+                    format!("the dialog {title} is open"),
+                    "homelab ui close first",
+                ));
             }
             UiStep::Goto { path } => {
                 if let Some(f) = &self.form {
@@ -1532,6 +1632,46 @@ impl DriveState {
         if let Some(f) = self.form.as_mut() {
             f.refresh();
         }
+    }
+
+    /// fix-239: a page-level dialog is on top, and no server-modelled form.
+    pub fn in_page_dialog(&self) -> bool {
+        self.form.is_none() && self.page_dialog.is_some()
+    }
+
+    /// fix-239: the tab that took `step` answered `a`: the page it is on
+    /// and the page-level dialog open now follow it. `Some`: why the step
+    /// did not happen, for the driver.
+    pub fn taken(&mut self, step: &UiStep, a: &TabAnswer) -> Option<Refusal> {
+        if let Some(p) = a.page.as_deref().filter(|p| p.starts_with('/')) {
+            self.page = p.split(['?', '#']).next().unwrap_or(p).to_string();
+        }
+        self.page_dialog = match (&a.dialog, self.page_dialog.take(), step) {
+            (None, _, _) => None,
+            (Some(title), Some(d), _) => Some(PageDialog {
+                title: title.clone(),
+                ..d
+            }),
+            (Some(title), None, UiStep::Click { control, row }) => Some(PageDialog {
+                control: control.clone(),
+                row: row.clone(),
+                title: title.clone(),
+            }),
+            (Some(title), None, _) => Some(PageDialog {
+                control: String::new(),
+                row: None,
+                title: title.clone(),
+            }),
+        };
+        (!a.ok).then(|| {
+            refused(
+                step,
+                a.why
+                    .clone()
+                    .unwrap_or_else(|| "the tab could not take it".into()),
+                a.fix.clone().unwrap_or_else(|| "homelab ui state".into()),
+            )
+        })
     }
 
     pub fn open_form(&mut self, step: &UiStep) -> Result<&mut OpenForm, Refusal> {

@@ -1818,3 +1818,224 @@ test("invariants: every action button's label fits on one line, uncut, on deskto
     await browser.close();
   }
 });
+
+// fix-239 (Kenny, 2026-10-02: "waarom gebruik je live view niet?"; standing
+// rule: Claude can always drive every dashboard command through Live view,
+// even when pages are renamed or moved). Every drivable page is walked as it
+// draws itself in the demo host; every visible button (or switch) whose
+// click opens a dialog or sends a change — found by doing it, with every
+// change request held back, never from a list — must be reachable through
+// the Live view driver: a server-modelled form (`data-action` /
+// `data-drive-form` naming one of formspec.json's forms, `homelab ui open`)
+// or a page control its page declared (drivable.js, `homelab ui click`).
+// Each page control found is then driven for real: `ui click` through the
+// demo host's driver, with Live view on, must take it and have the same
+// effect a click has.
+test("invariants: every button that opens a dialog or runs an action is reachable through Live view", async (t) => {
+  const { default: SPEC } = await import("../js/formspec.json", {
+    with: { type: "json" },
+  });
+  const forms = new Set(SPEC.forms);
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    /** @type {string[]} */
+    const changes = [];
+    await page.route("**/data/**", (r) => {
+      const req = r.request();
+      if (req.method() !== "GET" && !req.url().includes("/data/drive/")) {
+        changes.push(`${req.method()} ${new URL(req.url()).pathname}`);
+        return r.abort();
+      }
+      return r.continue();
+    });
+    const paths = [
+      ...DRIVABLE_PATHS.map((p) => `/${p}`),
+      ...[
+        "",
+        "/apps",
+        "/history",
+        "/logs",
+        "/checks",
+        "/settings",
+        "/firewall",
+      ].map((t) => `/stacks/beta-demo${t}`),
+    ];
+    const SEL =
+      "#page button:not([disabled]), #page [role=button], #page [role=switch]:not([disabled])";
+    /** Every candidate on screen, outside a dialog, as the page marks it. */
+    const describe = () =>
+      page.$$eval(SEL, (els) =>
+        els
+          .filter((e) => e.getClientRects().length > 0 && !e.closest("dialog"))
+          .map((e) => {
+            const el = /** @type {HTMLElement} */ (e);
+            const label = (
+              el.getAttribute("aria-label") ||
+              el.textContent ||
+              ""
+            )
+              .trim()
+              .replace(/\s+/g, " ")
+              .slice(0, 60);
+            return {
+              key: `${label.replace(/\d+/g, "#")}|${el.dataset.drive ?? ""}`,
+              label,
+              drive: el.dataset.drive ?? null,
+              row: el.dataset.driveRow ?? null,
+              form:
+                el.dataset.action ??
+                /** @type {HTMLElement | null} */ (
+                  el.closest("[data-drive-form]")
+                )?.dataset.driveForm ??
+                null,
+            };
+          }),
+      );
+    const visibleHandles = async () => {
+      const out = [];
+      for (const e of await page.$$(SEL))
+        if (
+          await e.evaluate(
+            (x) => x.getClientRects().length > 0 && !x.closest("dialog"),
+          )
+        )
+          out.push(e);
+      return out;
+    };
+    // The page's own declarations, from the module the dashboard loaded.
+    const declared = new Set(
+      await page.evaluate(async () => {
+        const m = await import("/js/drivable.js").catch(() => null);
+        return m ? m.controls().map((/** @type {any} */ c) => c.id) : [];
+      }),
+    );
+    const effect = async () => {
+      for (let i = 0; i < 12; i += 1) {
+        const open = await page.$$eval("dialog[open]", (d) => d.length);
+        if (open || changes.length) break;
+        await page.waitForTimeout(100);
+      }
+      const dialogs = await page.$$eval("dialog[open]", (d) =>
+        d.map((x) =>
+          (x.querySelector(".kp-dialog__title")?.textContent ?? "").trim(),
+        ),
+      );
+      return [
+        ...dialogs.map((t) => `opens "${t}"`),
+        ...changes.map((c) => `sends ${c}`),
+      ].join(", ");
+    };
+    const closeDialogs = () =>
+      page.evaluate(() =>
+        document
+          .querySelectorAll("dialog[open]")
+          .forEach((d) => /** @type {HTMLDialogElement} */ (d).close()),
+      );
+    /** @type {string[]} */
+    const unreachable = [];
+    /** @type {Map<string, {path: string, row: string | null}>} the path is
+     * where the walk found it, for the failure message only */
+    const toDrive = new Map();
+    let walked = 0;
+    for (const path of paths) {
+      await page.goto(`${BASE}${path}`);
+      await page.waitForTimeout(1500);
+      const seen = new Set();
+      for (const c of await describe()) {
+        if (seen.has(c.key)) continue;
+        seen.add(c.key);
+        walked += 1;
+        if (new URL(page.url()).pathname !== path) {
+          await page.goto(`${BASE}${path}`);
+          await page.waitForTimeout(1500);
+        }
+        const i = (await describe()).findIndex((x) => x.key === c.key);
+        if (i < 0) continue;
+        changes.length = 0;
+        const handles = await visibleHandles();
+        await handles[i]?.click({ timeout: 2000 }).catch(() => {});
+        const did = await effect();
+        await closeDialogs();
+        if (!did) continue;
+        const viaForm = c.form != null && forms.has(c.form);
+        const viaControl = c.drive != null && declared.has(c.drive);
+        if (!viaForm && !viaControl)
+          unreachable.push(`${path}: "${c.label}" ${did}`);
+        if (viaControl && c.drive && !toDrive.has(c.drive))
+          toDrive.set(c.drive, { path, row: c.row });
+        // A change was held back: the page may show its error; start clean.
+        if (changes.length) {
+          await page.goto(`${BASE}${path}`);
+          await page.waitForTimeout(1500);
+        }
+      }
+    }
+    assert.ok(
+      walked > 50,
+      `only ${walked} buttons were walked: the pages did not draw`,
+    );
+    assert.deepEqual(
+      unreachable,
+      [],
+      `buttons Live view cannot reach (declare them in drivable.js, or mark the form that reaches them): ${unreachable.join("; ")}`,
+    );
+    assert.ok(
+      toDrive.has("pin-update"),
+      "the stale image's Update was never found to drive",
+    );
+
+    // Every page control found, driven through the Live view driver.
+    await page.check("#live-view");
+    const step = (/** @type {any} */ s) =>
+      page.evaluate(
+        (body) =>
+          fetch("/data/drive/demo-step", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }).then((r) => r.json()),
+        s,
+      );
+    /** @type {string[]} */
+    const failed = [];
+    try {
+      for (const [control, at] of toDrive) {
+        // From another page: the tab goes to the control's own page itself
+        // (its declaration names it), so a page that moves keeps working.
+        await page.goto(`${BASE}/jobs`);
+        await page.waitForTimeout(1000);
+        changes.length = 0;
+        const r = await step({
+          do: "click",
+          control,
+          ...(at.row == null ? {} : { row: at.row }),
+        });
+        const did = await effect();
+        if (!r.ok)
+          failed.push(
+            `${control} (found on ${at.path}): refused, ${r.refusal?.why}; ${r.refusal?.fix}`,
+          );
+        else if (!did)
+          failed.push(`${control}: taken, but nothing opened or was sent`);
+        if (r.state?.page_dialog) await step({ do: "close" });
+        await closeDialogs();
+      }
+    } finally {
+      await step({ do: "done" });
+    }
+    t.diagnostic(
+      `walked ${walked} buttons; drove ${toDrive.size} page controls through Live view: ${[...toDrive.keys()].join(", ")}`,
+    );
+    assert.deepEqual(
+      failed,
+      [],
+      `page controls Live view could not drive: ${failed.join("; ")}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});

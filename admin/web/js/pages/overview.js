@@ -27,6 +27,7 @@ import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
 import { mount as mountApplySection } from "./apply.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
+import { viaForm } from "../drivable.js";
 
 /** @typedef {{navigate: (href: string) => void}} Ctx */
 
@@ -59,6 +60,9 @@ export function mount(root, ctx) {
     { type: "button", class: "kp-button kp-button--primary", id: "batch-open" },
     "Run on the selected…",
   );
+  // fix-239: Live view reaches these through their forms: `homelab ui open
+  // batch <action>`, `open new-stack`, `open import`.
+  viaForm(batchRun, "batch");
   const t = tableBlock({
     remember: "fleet",
     select: {
@@ -97,6 +101,7 @@ export function mount(root, ctx) {
     { type: "button", class: "kp-button", id: "new-stack" },
     "New stack…",
   );
+  viaForm(newStack, "new-stack");
   newStack.addEventListener("click", () => void openNewStack(ctx.navigate));
   // TUI parity: `homelab import`, a bundle as a new stack.
   const importBtn = h(
@@ -104,6 +109,7 @@ export function mount(root, ctx) {
     { type: "button", class: "kp-button", id: "import-stack" },
     "Import…",
   );
+  viaForm(importBtn, "import");
   importBtn.addEventListener("click", () => void openImport(ctx.navigate));
   // TUI parity ([CHANGED]): comparing runs latch once per stack on the
   // dashboard, so it runs when asked, not on every visit. fix-210 (Kenny,

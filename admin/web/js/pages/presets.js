@@ -13,6 +13,7 @@ import {
   compare,
   dataTable,
 } from "/static/kp/js/datatable.js";
+import { viaForm } from "../drivable.js";
 
 /**
  * The preset's name, as a button that opens the presets editor
@@ -26,6 +27,8 @@ function presetNameCell(name, onChanged) {
     { type: "button", class: "kp-link-button", "data-preset-edit": name },
     name,
   );
+  // fix-239: Live view reaches it as `homelab ui open preset <name>`.
+  viaForm(btn, "preset");
   btn.addEventListener("click", () => void openPresetEditor(name, onChanged));
   return btn;
 }
@@ -64,18 +67,22 @@ export function mount(root, ctx) {
     },
     "New stack from a preset…",
   );
+  // fix-239: `homelab ui open new-stack`, `open import`, `open new-preset`.
+  viaForm(newStack, "new-stack");
   newStack.addEventListener("click", () => void openNewStack(ctx.navigate));
   const importBtn = h(
     "button",
     { type: "button", class: "kp-button", id: "presets-import" },
     "Import a bundle…",
   );
+  viaForm(importBtn, "import");
   importBtn.addEventListener("click", () => void openImport(ctx.navigate));
   const newPreset = h(
     "button",
     { type: "button", class: "kp-button", id: "presets-new-preset" },
     "New preset…",
   );
+  viaForm(newPreset, "new-preset");
   newPreset.addEventListener("click", () => void openPresetEditor(null, retry));
   root.replaceChildren(
     h(

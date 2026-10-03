@@ -50,6 +50,7 @@ import {
 } from "/static/kp/js/datatable.js";
 import { attachLogs } from "/static/kp/js/log.js";
 import { watchTabOverflow } from "/static/kp/js/overlays.js";
+import { viaForm } from "../drivable.js";
 
 /** How far back the history tab reads. */
 const HISTORY_DAYS = 30;
@@ -329,6 +330,8 @@ function appsTab(panel, params) {
           { type: "button", class: "kp-button kp-button--small" },
           "Publish…",
         );
+        // fix-239: `homelab ui open publish <stack>/<app>`.
+        viaForm(publish, "publish");
         publish.addEventListener("click", () => {
           openPublishDialog(params.name, a.name, () => void render());
         });

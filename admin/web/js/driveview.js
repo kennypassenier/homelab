@@ -37,10 +37,14 @@
  *   form: DriveForm | null, last_at: number, idle_s: number,
  *   announce?: DriveAnnounce | null, paused_by?: string | null,
  *   stopped_by?: string | null, plan?: DrivePlan | null,
- *   selected?: string[]}} DriveState
+ *   selected?: string[], page_dialog?: DrivePageDialog | null}} DriveState
+ * @typedef {{control: string, row?: string | null, title: string}}
+ *   DrivePageDialog fix-239: a page-level dialog a `ui click` opened, which
+ *   the server does not model (the tab that took the click holds it)
  * @typedef {{do: string, path?: string, form?: string, target?: string,
  *   field?: string, text?: string, value?: string, on?: boolean,
- *   button?: string, op?: string, stacks?: string[]}} DriveStep
+ *   button?: string, op?: string, stacks?: string[], control?: string,
+ *   row?: string | null}} DriveStep
  * @typedef {{kind?: "step" | "announce" | "control" | "reload", seq: number,
  *   step: DriveStep, applied: boolean,
  *   refusal: DriveRefusal | null, state: DriveState}} DriveEvent
@@ -55,11 +59,13 @@
  *   {op: "select", stacks: string[]} |
  *   {op: "press", button: string} | {op: "sync"} | {op: "close"} |
  *   {op: "note", refusal: DriveRefusal} |
- *   {op: "highlight", step: DriveStep}} Op
+ *   {op: "highlight", step: DriveStep} |
+ *   {op: "tab", step: DriveStep}} Op
  * @typedef {{kind: "link", path: string} | {kind: "action", action: string} |
  *   {kind: "field", id: string} | {kind: "button", button: string} |
  *   {kind: "row", op: string, target?: string} | {kind: "close"} |
- *   {kind: "select"} | {kind: "none"}} Target
+ *   {kind: "select"} | {kind: "control", control: string,
+ *   row?: string | null} | {kind: "none"}} Target
  */
 
 /** Where the Live view switch is remembered: per tab (sessionStorage). */
@@ -187,6 +193,20 @@ const openOp = (f) =>
     ? { op: "open", action: f.action, stack: f.stack, edit: true }
     : { op: "open", action: f.action, stack: f.stack };
 
+/** fix-239: field steps with no server-modelled form open: the page's own
+ * fields, or its page-level dialog's, set by the tab. */
+const FIELD_STEPS = new Set(["type", "edit", "pick", "check"]);
+
+/**
+ * fix-239: is `step` one the tab takes itself (pagedrive.js)?
+ * @param {DriveStep} step
+ * @param {DriveState} s the state it was applied to
+ */
+export const tabStep = (step, s) =>
+  step.do === "click" ||
+  (!s.form && FIELD_STEPS.has(step.do)) ||
+  (!s.form && !!s.page_dialog && step.do === "press");
+
 /**
  * The operations one applied step animates.
  * @param {Local} local
@@ -195,6 +215,11 @@ const openOp = (f) =>
  * @returns {Op[]}
  */
 export function animate(local, step, s) {
+  // fix-239: a page control, a page's own field, or a step inside the
+  // page-level dialog a click opened, is taken by the tab itself
+  // (pagedrive.js): the server models none of them, and only the one tab
+  // it lets claim the step acts on it.
+  if (tabStep(step, s)) return [{ op: "tab", step }];
   switch (step.do) {
     case "goto":
       return [{ op: "goto", path: s.page }];
@@ -273,7 +298,8 @@ export function animate(local, step, s) {
     }
     case "close":
     case "done":
-      return local.form ? [{ op: "close" }] : [];
+      // fix-239: also a page-level dialog, which `local.form` never names.
+      return [{ op: "close" }];
     default:
       return catchUp(local, s);
   }
@@ -303,7 +329,15 @@ export function plan(local, ev, following) {
   const ops =
     ev.seq === local.seq + 1
       ? animate(local, ev.step, ev.state)
-      : catchUp(local, ev.state);
+      : // fix-239: a tab that has not caught up yet (just loaded, or it
+        // missed a step) still takes a page-control step after catching
+        // up: no other tab may be there to claim it.
+        tabStep(ev.step, ev.state)
+        ? [
+            ...catchUp(local, ev.state),
+            /** @type {Op} */ ({ op: "tab", step: ev.step }),
+          ]
+        : catchUp(local, ev.state);
   return { ops, local: localOf(ev.state) };
 }
 
@@ -460,6 +494,12 @@ export function targetOf(step) {
       return { kind: "row", op: step.op ?? "", target: step.target };
     case "select":
       return { kind: "select" };
+    case "click":
+      return {
+        kind: "control",
+        control: step.control ?? "",
+        row: step.row ?? null,
+      };
     case "close":
       return { kind: "close" };
     default:

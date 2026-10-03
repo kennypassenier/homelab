@@ -1718,7 +1718,7 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 src.commit_body()
             ),
             None => format!(
-                "deploy {}\n\nsource not reported (a client older than fix-141)\n",
+                "deploy {}\n\nsource not reported (the client is too old to report it)\n",
                 m.stack_name
             ),
         };

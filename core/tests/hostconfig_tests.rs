@@ -296,3 +296,34 @@ fn fix_191_only_named_keys_may_move() {
     assert_eq!(keys, vec!["backup_hour", "zfs_jobs"]);
     assert!(shown[1].to.is_none(), "a dropped key shows as dropped");
 }
+
+/// fix-guards-7: the fix-240 shape — the repository says 600, the host's
+/// own host.toml says 120 — is drift `homelab host diff` reports (and
+/// `make release` refuses on); a key only spelled out at its default on
+/// one side is not.
+///
+/// covers: fix-guards-7
+#[test]
+fn fix_guards_7_host_diff_reports_the_ask_timeout_drift_and_not_a_spelled_out_default() {
+    use homelab_core::hostconfig::{declared_changes, drift_lines, effective_drift};
+    let repo: std::collections::BTreeMap<String, serde_json::Value> = [
+        ("ask_timeout_s".to_string(), json!(600)),
+        // Spelled out at its compiled default; the host leaves it unset.
+        ("log_level".to_string(), json!("info")),
+    ]
+    .into_iter()
+    .collect();
+    let host: std::collections::BTreeMap<String, serde_json::Value> =
+        [("ask_timeout_s".to_string(), json!(120))]
+            .into_iter()
+            .collect();
+    let drift = effective_drift(declared_changes(&repo, &host));
+    let keys: Vec<&str> = drift.iter().map(|c| c.key.as_str()).collect();
+    assert_eq!(keys, vec!["ask_timeout_s"]);
+    assert_eq!(
+        drift_lines(&drift),
+        vec!["ask_timeout_s: the host runs 120, config/host.toml says 600"]
+    );
+    let agreed = effective_drift(declared_changes(&repo, &repo));
+    assert!(agreed.is_empty());
+}

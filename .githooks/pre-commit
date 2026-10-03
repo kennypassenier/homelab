@@ -35,6 +35,15 @@ else
   echo "warning: .githooks/check-internal-ips.sh is missing; the internal-address gate did not run." >&2
 fi
 
+# fix-guards-2/4/5: a register row this commit adds or changes may not claim
+# more than was measured — "done" needs a dated live measurement, an open
+# gap needs someone holding it, a new row's tests must have failed first.
+if [ -x "$root/.githooks/check-register.py" ]; then
+  python3 "$root/.githooks/check-register.py" || exit 1
+else
+  echo "warning: .githooks/check-register.py is missing; the register gate did not run." >&2
+fi
+
 # The scans GitHub's CI ran until 2026-09-29 (Kenny: every build and check
 # runs locally), on what this commit changes: gitleaks over the staged diff,
 # and cargo-deny's advisories when Cargo.lock moves. `make release` scans the

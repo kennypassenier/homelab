@@ -1000,7 +1000,7 @@ pub fn evaluate_big_logs(facts: &[BigLogFact]) -> Vec<Finding> {
                     .into()
             } else {
                 "nothing rotates it — declare `rotate:` on this data mount in the stack file \
-                 (fix-24) and deploy"
+                 and deploy"
                     .into()
             },
         })
@@ -2050,7 +2050,7 @@ pub fn evaluate(
                 subject: name.clone(),
                 what: format!(
                     "automatic updates parked since {} after a failed nightly update or a \
-                     `homelab rollback-native` (fix-114); the nightly backup still runs",
+                     `homelab rollback-native`; the nightly backup still runs",
                     crate::state::ymd(*since)
                 ),
                 remedy: format!(

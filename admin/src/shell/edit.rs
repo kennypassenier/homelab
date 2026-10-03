@@ -1710,7 +1710,7 @@ async fn host_new_enough(c: &EditCtx) -> Result<(), Refusal> {
                 HOST_SETTINGS_SINCE.1,
                 HOST_SETTINGS_SINCE.2
             ),
-            "update the host to the release that carries feat-settings-1; until then the TUI's settings screen edits the three live keys",
+            "update the host to a newer release; until then host settings change through `homelab host apply`",
         )),
         None => Err(Refusal::new(
             "the host settings",

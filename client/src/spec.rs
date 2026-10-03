@@ -2026,7 +2026,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          password file `{pw}`. (`BackupCfg::default()` in core/src/ops/backup.rs; \
          `restic_base` and `restic_password_file` in `{toml}` override both.)\n\
          - **A second copy** of every repository, when `second_copy_dataset` is set in \
-         `{toml}` (fix-96): each night after the backups, `restic copy` writes \
+         `{toml}`: each night after the backups, `restic copy` writes \
          `<owner>-config` into a local repository of the same name on that ZFS dataset \
          (`HDD4TB/restic` mounts at `/HDD4TB/restic`), with the same password file and the \
          same retention, and the ZFS replication carries it to its replica pool. When Google \
@@ -2099,7 +2099,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          {units}\
          **The certificate pin.** The daemon's certificate is `{state}/tls-cert.pem` with \
          `{state}/tls-key.pem`; when either is missing, empty or unreadable at start it makes a \
-         new pair, each file written whole (fix-128) \
+         new pair, each file written whole \
          (host/src/tls.rs). The client trusts one certificate: the fingerprint built into \
          the client, taken from `pin` in `config/client.toml` when it was compiled. It refuses \
          any other, on a first connection too, and it also refuses when that `pin` or the \
@@ -2178,7 +2178,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          account, places the program from the unit's release where none exists (it never \
          replaces one), puts back env and credential files from the vault, and starts a unit \
          only when all of that is present. A unit that is not running and whose data \
-         directories are empty gets its newest snapshot unpacked back first (fix-146); a \
+         directories are empty gets its newest snapshot unpacked back first; a \
          unit archived from its own copy (`backup_from_newest`) is then left stopped \
          until that copy is put in place as the live file. A unit left unstarted is named in the output; a \
          missing program is installed with `homelab install-native stacks/<stack>/<unit>` (or \
@@ -2268,11 +2268,11 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          core/src/ops/backup.rs). It asks for the stack name first (`--yes` for scripts) \
          and, with the stack down, copies the current data to \
          `/var/lib/homelab/pre-restore/<stack>-<unix time>/` before restic writes over it \
-         (fix-64; `--no-safety-copy` skips that copy). With that copy taken it empties each \
+         (`--no-safety-copy` skips that copy). With that copy taken it empties each \
          data directory first, so no file the snapshot lacks stays behind. `--app <app>` \
          restores one app and leaves the others running. A stack with several repositories \
          is restored to one night: the newest `run-<unix time>` tag every one of its \
-         repositories has, or the night of the snapshot ID given (fix-112):\n\n```sh\n\
+         repositories has, or the night of the snapshot ID given:\n\n```sh\n\
          pct exec <vmid> -- sh -c 'cd /opt/<stack>/<app> && docker compose down'   # every app\n\
          export RESTIC_REPOSITORY={base}/<app>-config                   # every repository of the stack\n\
          restic snapshots --tag run-<unix time>                          # the same night in each\n\
@@ -2296,7 +2296,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          restic dump --path /<unit>-data.tar latest /<unit>-data.tar | pct exec <vmid> -- tar -xf - -C /\n\
          pct exec <vmid> -- systemctl start <unit>\n\
          ```\n\n\
-         `homelab restore` refuses a native stack (gap-28): the compose route's `restic \
+         `homelab restore` refuses a native stack: the compose route's `restic \
          restore latest --target /` would write the archive itself to `/<unit>-data.tar` on \
          the host and unpack nothing. For the same reason a rebuild's automatic restore \
          finds no snapshot for a native unit's directory and leaves it empty: its data \
@@ -2319,9 +2319,9 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          or a full send when the target dataset does not exist yet or holds no snapshots at \
          all. It prunes only snapshots whose name starts with `{prefix}`: the source with \
          the configured tiers, the replica with its own longer ones, keeping whatever either \
-         policy keeps (fix-85). Scheduled snapshots and snapshots taken on demand are \
+         policy keeps. Scheduled snapshots and snapshots taken on demand are \
          thinned each on their own, so a run by hand never removes that day's nightly \
-         snapshot (fix-243).\n\n\
+         snapshot.\n\n\
          The replica keeps its own history. A snapshot destroyed on the source stays on the \
          replica until the replica's retention thins it; a dataset destroyed on the source \
          stays on the replica untouched, is never pruned, and is named in a warning every \
@@ -2440,7 +2440,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          --fetch-from iso --answer-file answer.toml`: attached as a second CD beside the \
          stock ISO, the 2026-10-01 rehearsal's answer file set the network, hostname and \
          disk but not `root-password` or `root-ssh-keys`, which left the new host \
-         unreachable (fix-212). After the install, a changed boot order only takes effect \
+         unreachable. After the install, a changed boot order only takes effect \
          on a full `qm stop` and `qm start` of a rehearsal VM, never on `qm reset`.\n\
          2. Import the ZFS pools the stack files mount from ({pools}), and any pool named in \
          `[[zfs_jobs]]`. Check replica mountpoints before anything mounts (Layer 5).\n\

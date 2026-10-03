@@ -220,3 +220,286 @@ fn as_citation_ignores_non_test_backticks() {
     assert!(as_citation("core/src/runner.rs").is_none());
     assert!(as_citation("jobs.js percent()").is_none());
 }
+
+// ── fix-guards-3: the numbers are one sequence and every citation is current ──
+//
+// The rows are hand-numbered and several helper branches append to the table
+// at once, each "after the current last number" (the coordinator renumbers
+// on merge). Two faults came out of that by 2026-10-03, both silent: the
+// table was split in two by a blank line between rows 17 and 18 (Markdown
+// renders rows 18 onwards as a loose paragraph of pipes), and fix-239's
+// register row cited "INVARIANTS row 38" for the rule that is row 39 —
+// row 38 is fix-238's retention lanes. Nothing compared a number with
+// anything. These checks do, on the text alone.
+
+/// The number in a table row's first cell, if the line is a numbered row.
+fn row_number(line: &str) -> Option<u32> {
+    let rest = line.trim().strip_prefix('|')?;
+    rest.split('|').next()?.trim().parse().ok()
+}
+
+/// Every fault in the table's numbering: a blank or foreign line inside the
+/// table, a number used twice, or a number that is not the previous one
+/// plus one. Pure, so a constructed bad table can prove it fails.
+fn numbering_faults(doc: &str) -> Vec<String> {
+    let lines: Vec<&str> = doc.lines().collect();
+    let Some(header) = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with("| # |"))
+    else {
+        return vec!["no `| # |` table header found".to_string()];
+    };
+    // The table ends at the last numbered row; everything between the header
+    // (and its `---` separator) and that row has to be a numbered row.
+    let last = lines
+        .iter()
+        .rposition(|l| row_number(l).is_some())
+        .unwrap_or(header);
+    let mut faults = Vec::new();
+    let mut seen: std::collections::BTreeMap<u32, usize> = Default::default();
+    let mut previous: Option<u32> = None;
+    for (i, line) in lines.iter().enumerate().take(last + 1).skip(header + 2) {
+        let Some(n) = row_number(line) else {
+            faults.push(format!(
+                "line {}: the table is broken here (a blank or non-row line between rows) — \
+                 every row after it renders as plain text",
+                i + 1
+            ));
+            continue;
+        };
+        if let Some(first) = seen.insert(n, i + 1) {
+            faults.push(format!(
+                "row {n} appears twice (lines {first} and {}) — two branches appended the same \
+                 number; give the later one the next free number and move its citations with it",
+                i + 1
+            ));
+        } else if let Some(p) = previous {
+            if n != p + 1 {
+                faults.push(format!(
+                    "line {}: row {n} follows row {p} — the numbers must run 1, 2, 3 … with no gap",
+                    i + 1
+                ));
+            }
+        } else if n != 1 {
+            faults.push(format!("the first row is {n}, not 1"));
+        }
+        previous = Some(n);
+    }
+    faults
+}
+
+/// Does `text` name register id `id` as a whole word (`fix-17` is not in
+/// `fix-172`)?
+fn names_id(text: &str, id: &str) -> bool {
+    let part =
+        |c: Option<char>| c.is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    text.match_indices(id).any(|(at, _)| {
+        !part(text[..at].chars().next_back()) && !part(text[at + id.len()..].chars().next())
+    })
+}
+
+/// The invariant numbers a line cites: "invariant 14", "invariants 32, 36
+/// and 40", "INVARIANTS row 38".
+fn cited_rows(line: &str) -> Vec<u32> {
+    let lower = line.to_ascii_lowercase();
+    let mut out = Vec::new();
+    let mut rest = lower.as_str();
+    while let Some(at) = rest.find("invariant") {
+        let mut tail = &rest[at + "invariant".len()..];
+        tail = tail.strip_prefix('s').unwrap_or(tail);
+        tail = tail.strip_prefix(".md").unwrap_or(tail);
+        let t = tail.trim_start();
+        let mut list = t.strip_prefix("row").map(str::trim_start).unwrap_or(t);
+        loop {
+            let digits: String = list.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if digits.is_empty() {
+                break;
+            }
+            out.push(digits.parse().unwrap_or(0));
+            list = &list[digits.len()..];
+            let next = list.trim_start();
+            match next.strip_prefix(',').or_else(|| next.strip_prefix("and ")) {
+                Some(more) => list = more.trim_start(),
+                None => break,
+            }
+        }
+        rest = &rest[at + "invariant".len()..];
+    }
+    out
+}
+
+/// A house-scheme register id: a lowercase kind (dashes allowed), a dash and
+/// a number (`fix-239`, `feat-shell-1`).
+fn is_register_id(s: &str) -> bool {
+    s.rsplit_once('-').is_some_and(|(kind, n)| {
+        !kind.is_empty()
+            && kind.chars().all(|c| c.is_ascii_lowercase() || c == '-')
+            && !n.is_empty()
+            && n.chars().all(|c| c.is_ascii_digit())
+    })
+}
+
+/// The register id a line speaks for: the row's own id in a register table
+/// (`| fix-239 | …`), or an id written right before the citation in code
+/// (`// fix-239 / invariant 39`).
+fn owner_of(line: &str) -> Option<String> {
+    if let Some(rest) = line.strip_prefix("| ") {
+        let id = rest.split(" |").next().unwrap_or("").trim();
+        if is_register_id(id) {
+            return Some(id.to_string());
+        }
+    }
+    let at = line.to_ascii_lowercase().find("invariant")?;
+    let before = line[..at].trim_end().strip_suffix('/')?.trim_end();
+    let word = before
+        .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+        .next()?;
+    is_register_id(word).then(|| word.to_string())
+}
+
+/// Every citation of an invariant row that points away from the row(s) that
+/// name the citing id: when some row of the table names `fix-239`, a line
+/// speaking for fix-239 may only cite one of those rows. A citation by an
+/// id no row names (a row that merely obeys an invariant) is not judged.
+fn stale_citations(invariants: &str, sources: &[(String, String)]) -> Vec<String> {
+    let rows: Vec<(u32, &str)> = invariants
+        .lines()
+        .filter_map(|l| Some((row_number(l)?, l)))
+        .collect();
+    let mut out = Vec::new();
+    for (name, text) in sources {
+        for (i, line) in text.lines().enumerate() {
+            let cited = cited_rows(line);
+            if cited.is_empty() {
+                continue;
+            }
+            let Some(owner) = owner_of(line) else {
+                continue;
+            };
+            let naming: Vec<u32> = rows
+                .iter()
+                .filter(|(_, l)| names_id(l, &owner))
+                .map(|(n, _)| *n)
+                .collect();
+            if naming.is_empty() {
+                continue;
+            }
+            for n in cited {
+                if !naming.contains(&n) {
+                    out.push(format!(
+                        "{name}:{}: {owner} cites invariant {n}, but the row(s) naming {owner} \
+                         are {naming:?} — a renumber or a collision moved the row and left this \
+                         citation behind",
+                        i + 1
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// covers: fix-guards-3
+#[test]
+fn invariant_numbers_run_one_to_n_in_one_unbroken_table() {
+    let doc = std::fs::read_to_string(repo_root().join("docs/INVARIANTS.md")).unwrap();
+    let faults = numbering_faults(&doc);
+    assert!(
+        faults.is_empty(),
+        "docs/INVARIANTS.md's numbering is broken:\n{}",
+        faults.join("\n")
+    );
+}
+
+#[test]
+fn numbering_faults_catches_a_collision_a_gap_and_a_split_table() {
+    let head = "| # | Invariant | Kenny said | Test(s) |\n|---|---|---|---|\n";
+    let good = format!("{head}| 1 | a | b | `t` |\n| 2 | a | b | `t` |\n");
+    assert!(numbering_faults(&good).is_empty());
+    let collided = format!("{head}| 1 | a | b | `t` |\n| 2 | a | b | `t` |\n| 2 | c | d | `t` |\n");
+    assert!(
+        numbering_faults(&collided)
+            .iter()
+            .any(|f| f.contains("row 2 appears twice"))
+    );
+    let gap = format!("{head}| 1 | a | b | `t` |\n| 3 | a | b | `t` |\n");
+    assert!(
+        numbering_faults(&gap)
+            .iter()
+            .any(|f| f.contains("row 3 follows row 1"))
+    );
+    let split = format!("{head}| 1 | a | b | `t` |\n\n| 2 | a | b | `t` |\n");
+    assert!(
+        numbering_faults(&split)
+            .iter()
+            .any(|f| f.contains("table is broken"))
+    );
+}
+
+/// covers: fix-guards-3
+#[test]
+fn every_citation_of_an_invariant_row_points_at_the_row_that_names_it() {
+    let root = repo_root();
+    let invariants = std::fs::read_to_string(root.join("docs/INVARIANTS.md")).unwrap();
+    let mut sources: Vec<(String, String)> = [
+        "docs/deployment/REGISTER.md",
+        "docs/deployment/CORRECTIONS.md",
+    ]
+    .iter()
+    .map(|p| {
+        (
+            p.to_string(),
+            std::fs::read_to_string(root.join(p)).unwrap(),
+        )
+    })
+    .collect();
+    for ext in ["rs", "js"] {
+        for (p, t) in sources_with_ext(&root, ext) {
+            // This file's own fixtures are bad on purpose.
+            if p.ends_with("invariants_doc_tests.rs") {
+                continue;
+            }
+            let rel = p.strip_prefix(&root).unwrap_or(&p).display().to_string();
+            sources.push((rel, t));
+        }
+    }
+    let stale = stale_citations(&invariants, &sources);
+    assert!(
+        stale.is_empty(),
+        "stale invariant citations:\n{}",
+        stale.join("\n")
+    );
+}
+
+#[test]
+fn stale_citations_catches_the_fix_239_shape() {
+    let inv =
+        "| 38 | lanes | fix-238 | `t` |\n| 39 | Live view reaches every button | fix-239 | `t` |\n";
+    let bad = vec![(
+        "REGISTER.md".to_string(),
+        "| fix-239 | x | the e2e case (INVARIANTS row 38) failed first | done |".to_string(),
+    )];
+    assert_eq!(stale_citations(inv, &bad).len(), 1);
+    let code = vec![(
+        "a.js".to_string(),
+        "// fix-239 / invariant 38: …".to_string(),
+    )];
+    assert_eq!(stale_citations(inv, &code).len(), 1);
+    let good = vec![(
+        "REGISTER.md".to_string(),
+        "| fix-239 | x | INVARIANTS row 39 | done |".to_string(),
+    )];
+    assert!(stale_citations(inv, &good).is_empty());
+    // A row no invariant names (it obeys one, it did not create it) is free
+    // to cite any row.
+    let obeys = vec![(
+        "R".to_string(),
+        "| feat-x-1 | keeps invariant 38 | done |".to_string(),
+    )];
+    assert!(stale_citations(inv, &obeys).is_empty());
+    assert!(!names_id("fix-172 and more", "fix-17"));
+    assert_eq!(
+        cited_rows("(invariants 32, 36, 40 and 41)"),
+        vec![32, 36, 40, 41]
+    );
+}

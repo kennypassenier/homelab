@@ -785,7 +785,12 @@ async fn run(explicit_host: Option<String>) {
             // like a stack — `config/host.toml` sent whole, the host keeps
             // its own secrets and writes it. The repository's path unless
             // one is given.
-            Some("apply") => {
+            // fix-guards-7: `diff` is `apply` without the write — every key
+            // whose effective value differs between config/host.toml and
+            // the host, exit 1 when there is one. `make release` runs it:
+            // 2026-10-03, fix-240 was "done" with ask_timeout_s 600 in the
+            // repository and 120 on the host, and nothing compared them.
+            Some(sub @ ("apply" | "diff")) => {
                 let path = args
                     .get(3)
                     .map(std::path::PathBuf::from)
@@ -825,6 +830,24 @@ async fn run(explicit_host: Option<String>) {
                     .collect();
                 let changes =
                     homelab_core::hostconfig::declared_changes(&declared, &current.values);
+                if sub == "diff" {
+                    let drift = homelab_core::hostconfig::effective_drift(changes);
+                    for line in homelab_core::hostconfig::drift_lines(&drift) {
+                        println!("{}  {}{}", C_YELLOW, line, C_RESET);
+                    }
+                    if drift.is_empty() {
+                        println!(
+                            "{}✓ config/host.toml and the host's host.toml agree{}",
+                            C_GREEN, C_RESET
+                        );
+                        std::process::exit(0);
+                    }
+                    println!(
+                        "  {} key(s) differ; `homelab host apply` sends the repository's values",
+                        drift.len()
+                    );
+                    std::process::exit(1);
+                }
                 if changes.is_empty() {
                     println!(
                         "{}✓ nothing to apply — the host already runs these settings{}",
@@ -894,7 +917,7 @@ async fn run(explicit_host: Option<String>) {
                 }
             }
             other => die(&format!(
-                "usage: homelab host restart | homelab host apply [path] (got {:?})",
+                "usage: homelab host restart | homelab host apply [path] | homelab host diff [path] (got {:?})",
                 other.unwrap_or("nothing")
             )),
         },

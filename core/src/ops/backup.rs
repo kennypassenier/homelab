@@ -1216,7 +1216,7 @@ pub fn resolve_night(
     };
     let Some(run) = snap.run else {
         return Err(format!(
-            "snapshot '{}' of '{}' carries no night tag (it is older than fix-112), so the \
+            "snapshot '{}' of '{}' carries no night tag (it was taken before snapshots carried one), so the \
              other repositories cannot be matched to it — restore that app alone with `--app \
              {}`, or restore 'latest'. Nothing has been stopped",
             wanted, owner, owner
@@ -1334,8 +1334,8 @@ pub fn restore_confirmed(stack: &str, confirm: Option<&str>) -> Result<(), CoreE
             stack, typed
         ))),
         None => Err(CoreError::SafetyAbort(format!(
-            "restore of '{}' refused: the request carries no typed stack name — a client from \
-             before fix-64 cannot restore; update it (`homelab restore` asks for the name, \
+            "restore of '{}' refused: the request carries no typed stack name — a client too old to send \
+             one cannot restore; update it (`homelab restore` asks for the name, \
              `--yes` answers it for scripts)",
             stack
         ))),
@@ -1666,7 +1666,7 @@ pub async fn restore_app(
             format!(
                 "[restore] --no-safety-copy: the current data of {} is overwritten without a \
                  copy, and restic writes over it in place — files the snapshot does not have \
-                 stay behind (fix-112)",
+                 stay behind",
                 m.stack_name
             ),
         );

@@ -109,6 +109,18 @@ gate_glob suite '*.rs' 'Cargo.toml' 'Cargo.lock' '*/Cargo.toml' \
       -u HOMELAB_TOKEN -u HOMELAB_HOST -u HOMELAB_CONFIG -u HOMELAB_LISTEN \
       "${gate_suite_cmd[@]}"
 
+# fix-guards-1/3/6 (2026-10-03): the register and invariants checks read
+# documents, and a commit that touches only a document skipped the suite
+# above — so a stale test name or a doubled invariant number went in with
+# a green gate. These four test binaries run in seconds whenever one of
+# the documents (or the check itself) moves.
+gate_glob docs-claims 'docs/deployment/REGISTER.md' 'docs/deployment/CORRECTIONS.md' \
+  'docs/INVARIANTS.md' '.githooks/check-register.py' -- \
+  env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
+      -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+      cargo test -q -p homelab-core --test register_tests --test register_guard_tests \
+        --test register_hook_tests --test invariants_doc_tests
+
 # tech-js-checks (homelab-admin, 2026-09-28): the dashboard's browser code
 # is plain ES modules; tsc checks its JSDoc types (checkJs, strict, no
 # emit), prettier its layout, node --test its pure view models.

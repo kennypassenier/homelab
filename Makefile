@@ -10,7 +10,7 @@
 # TUI when the update badge appears.
 # ============================================================================
 
-.PHONY: help build test gate gate-full check advisories secrets secrets-staged msrv scanners admin-full invariants release-binaries fmt clippy release host-binary hooks install diagrams
+.PHONY: help build test gate gate-full check advisories secrets secrets-staged msrv scanners admin-full invariants release-binaries fmt clippy release host-binary hooks install diagrams host-drift fail-first
 
 help:
 	@echo "make build            debug build of the whole workspace"
@@ -154,6 +154,26 @@ host-binary:
 		cargo build --release -p homelab-host --target-dir target-debian
 	@echo "→ target-debian/release/homelab-host"
 
+# fix-guards-7: config/host.toml against the host's own host.toml, through
+# this tree's client (`homelab host diff`: reads only, never writes). A
+# refusal names every key; `homelab host apply` reconciles them.
+host-drift:
+	@if [ -n "$$HOST_DRIFT_OK" ]; then \
+		echo "host drift check skipped on purpose: $$HOST_DRIFT_OK"; \
+	elif cargo run -q -p homelab-client --bin homelab -- host diff </dev/null; then \
+		true; \
+	else \
+		echo "RELEASE BLOCKED — the repository's config/host.toml and the host disagree (above), or the host did not answer." >&2; \
+		echo "Reconcile with 'homelab host apply', or go ahead deliberately: HOST_DRIFT_OK=\"<why>\" make release …" >&2; \
+		exit 1; \
+	fi
+
+# fix-guards-5: run the tests a branch added against the code before it.
+# A test that passes there proves nothing about the fix (BASE defaults to
+# the branch's merge-base with main).
+fail-first:
+	@scripts/fail-first.py $(BASE)
+
 release:
 ifndef VERSION
 	$(error usage: make release VERSION=x.y.z)
@@ -167,6 +187,14 @@ endif
 	@# branch was checked out (expert panel 2026-09-27, make-release-guard-no-wait).
 	@test "$$(git rev-parse --abbrev-ref HEAD)" = main || { echo "refusing: releases are cut from main, not $$(git rev-parse --abbrev-ref HEAD)"; exit 1; }
 	@git rev-parse "v$(VERSION)" >/dev/null 2>&1 && { echo "tag v$(VERSION) already exists"; exit 1; } || true
+	# fix-guards-2: no release on top of an earlier release's unmeasured
+	# rows (3.70.1 to 3.70.7 each went out on the last one's; 110 rows by
+	# 2026-10-03). fix-guards-7: no release while config/host.toml and the
+	# host's own host.toml disagree (fix-240: 600 in the repository, 120 on
+	# the host, the row closed as done). Both read only; both have a named,
+	# visible override: UNMEASURED_OK="<why>", HOST_DRIFT_OK="<why>".
+	@python3 .githooks/check-register.py --release $(VERSION)
+	$(MAKE) host-drift
 	# The scanners and the MSRV check have no side effect, so they run before
 	# DRY=1 stops. Until 2026-09-29 this spot asked GitHub for the CI verdict on HEAD
 	# and refused a red base; there is no CI any more, and these are the checks

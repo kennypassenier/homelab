@@ -317,7 +317,7 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
                 remedy: Some(format!(
                     "redeploy {} (`homelab deploy stacks/{}`, or `homelab adopt stacks/{}` for an \
                      adopted service) so the vault takes a copy; without it a lost container \
-                     cannot get its secrets back without latch (gap-27)",
+                     cannot get its secrets back without latch",
                     s.name, s.name, s.name
                 )),
             });
@@ -531,7 +531,7 @@ fn security_and_recovery(p: &Probes) -> Vec<Check> {
                 Health::Warn,
                 format!("readable beyond root: {}", loose.join(", ")),
                 "chmod go-rwx on each (0600 files, 0700 directories); the daemon fixes its \
-                 own records at start (fix-125), the rest were made by hand",
+                 own records at start, the rest were made by hand",
             )
         });
     }

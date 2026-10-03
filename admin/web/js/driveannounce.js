@@ -265,7 +265,7 @@ export function findTarget(step, ctl, s) {
     case "row":
       return ctl?.row?.(t.op, t.target) ?? null;
     case "select":
-      return q("table.fleet");
+      return q('[data-drive-list="stacks"]');
     case "control": {
       // fix-239: the declared control (drivable.js), in the dialog on top
       // when one is open, else on the page.

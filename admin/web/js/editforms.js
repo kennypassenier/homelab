@@ -1335,12 +1335,16 @@ export function moveRule(m, i, delta) {
  * The wizard, as data: its steps in order, every field with a stable id.
  * The data step's fields depend on the preset and are made by
  * `dataFields` when that step opens.
+ * redesign-stacks-8: `empty` is New stack's "Empty" route — no preset
+ * step, no preset sent (the server scaffolds a stack with no apps that
+ * says so), the size from the defaults.
  * @param {Preset[]} presets
  * @param {number | null} suggestVmid
+ * @param {{empty?: boolean}} [opts]
  * @returns {{id: string, title: string, steps: EditStep[]}}
  */
-export function newStackWizard(presets, suggestVmid) {
-  const first = presets[0];
+export function newStackWizard(presets, suggestVmid, opts = {}) {
+  const first = opts.empty ? undefined : presets[0];
   const d = E.new_defaults;
   /** @type {Record<string, string>} */
   const now = {
@@ -1354,22 +1358,26 @@ export function newStackWizard(presets, suggestVmid) {
   return {
     id: "new-stack",
     title: "New stack",
-    steps: E.new_stack.map((s) => ({
-      id: s.id,
-      label: s.label,
-      fields: /** @type {EditField[]} */ (s.fields).map((f) => ({
-        ...f,
-        ...(f.name === "preset"
-          ? {
-              choices: presets.map((p) => ({
-                value: p.name,
-                label: `${p.name} · ${p.description}`,
-              })),
-            }
-          : {}),
-        ...(f.name in now && f.name !== "name" ? { current: now[f.name] } : {}),
+    steps: E.new_stack
+      .filter((s) => !(opts.empty && s.id === "preset"))
+      .map((s) => ({
+        id: s.id,
+        label: s.label,
+        fields: /** @type {EditField[]} */ (s.fields).map((f) => ({
+          ...f,
+          ...(f.name === "preset"
+            ? {
+                choices: presets.map((p) => ({
+                  value: p.name,
+                  label: `${p.name} · ${p.description}`,
+                })),
+              }
+            : {}),
+          ...(f.name in now && f.name !== "name"
+            ? { current: now[f.name] }
+            : {}),
+        })),
       })),
-    })),
   };
 }
 

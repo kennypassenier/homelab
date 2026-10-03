@@ -226,6 +226,7 @@ fn plan_modal_previews_changes() {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        no_apps_yet: false,
         on_demand: false,
         syslog_receivers: vec![],
         firewall: None,
@@ -274,6 +275,7 @@ fn plan_modal_previews_changes() {
         ],
         spec: Box::new(DeploySpec {
             secret_files: Vec::new(),
+            backup_first: false,
             client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
             source: None,
             native_binaries: Default::default(),
@@ -1780,6 +1782,7 @@ fn d6_plan_diff_skip_update_and_line_previews() {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        no_apps_yet: false,
         on_demand: false,
         syslog_receivers: vec![],
         firewall: None,
@@ -1819,6 +1822,7 @@ fn d6_plan_diff_skip_update_and_line_previews() {
     m.hostname = "108-app-test".into();
     let spec = DeploySpec {
         secret_files: Vec::new(),
+        backup_first: false,
         client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),
@@ -2059,6 +2063,7 @@ fn the_runbook_names_the_repositories_restic_actually_uses() {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        no_apps_yet: false,
         on_demand: false,
         syslog_receivers: vec![],
         firewall: None,

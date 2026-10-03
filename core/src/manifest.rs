@@ -55,6 +55,14 @@ pub struct StackManifest {
     /// installs it. None of that is docker's business.
     #[serde(default)]
     pub native_only: bool,
+    /// redesign-stacks-8 (New stack's "Empty" route): a stack that has no
+    /// apps YET and says so, the same way `native_only` says a container
+    /// runs no docker — so an empty `apps` is never mistaken for a list
+    /// somebody forgot to fill in. Its container is created bare; adding
+    /// the first app (the hub's Add app) clears it, and declaring apps
+    /// while it is set is refused.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_apps_yet: bool,
     /// A stack that exists only while it is used, like the rollback drill:
     /// created and destroyed in one sitting. The fleet check does not report
     /// it as "declared but never deployed" (Kenny, 2026-09-29, batch form
@@ -825,6 +833,18 @@ pub struct DeploySpec {
     #[serde(default)]
     pub secret_files: Vec<SecretFile>,
 
+    /// redesign-stacks-6 (3.71.0 review, "the UI promises a backup that
+    /// never happens"): take a backup of the stack's data first, and change
+    /// nothing when that backup fails. Set by the dashboard's Deploy all
+    /// changes and its batch Deploy, which both say "each stack is backed
+    /// up first". Absent (false) from everything else, which deploys as
+    /// before. Skipped from the wire when false, so a host that does not
+    /// know the field only ever sees it when it was asked for, and then
+    /// refuses the deploy by name (fix-211) instead of deploying without
+    /// the promised backup. Never part of the intent hash.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub backup_first: bool,
+
     /// fix-199: [`CURRENT_CLIENT_SCHEMA`] as of the client that built this
     /// spec (`homelab_client::spec::build_spec`) — so the host can tell "this
     /// client declares none of this" from "this client's struct has no field
@@ -978,11 +998,26 @@ fn collect_manifest_problems(m: &StackManifest, problems: &mut Vec<String>) {
                 .into(),
         );
     }
-    if m.apps.is_empty() && !m.native_only {
+    if m.apps.is_empty() && !m.native_only && !m.no_apps_yet {
         problems.push(
             "a stack needs at least one app :: a container that deliberately runs no docker \
-             says so with `native_only: true`, so that an empty list is never mistaken for a \
-             list somebody forgot to fill in"
+             says so with `native_only: true`, and a stack whose apps come later with \
+             `no_apps_yet: true`, so that an empty list is never mistaken for a list \
+             somebody forgot to fill in"
+                .into(),
+        );
+    }
+    if m.no_apps_yet && !m.apps.is_empty() {
+        problems.push(format!(
+            "no_apps_yet is set but the stack declares apps ({}) :: remove `no_apps_yet: true` \
+             now that it has them",
+            m.apps.join(", ")
+        ));
+    }
+    if m.no_apps_yet && m.native_only {
+        problems.push(
+            "no_apps_yet and native_only are both set :: a stack is either waiting for its \
+             first app or runs natives only"
                 .into(),
         );
     }

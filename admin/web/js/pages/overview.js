@@ -20,7 +20,7 @@
 // fleet check's own kept run) and the Inbox (the verdict and its tile).
 
 import { openAction, openBatch } from "../actiondialog.js";
-import { fetchJson, h, slowRead } from "../dom.js";
+import { errorBox, fetchJson, h, slowRead } from "../dom.js";
 import { declare, dialogControl, drivable, viaForm } from "../drivable.js";
 import { register } from "../drivehooks.js";
 import { gb } from "../fleet.js";
@@ -34,7 +34,6 @@ import {
   SORTS,
   deployCount,
   hostStrip,
-  nextSort,
   newerByStack,
   onlyCounts,
   parseQuery,
@@ -83,7 +82,7 @@ const NEW_STACK = declare({
   id: "stacks-new",
   page: "overview",
   opens: "dialog",
-  what: "open New stack: from a preset or from a bundle",
+  what: "open New stack: from a preset, from a bundle or empty",
 });
 const VIEW = declare({
   id: "stacks-view",
@@ -103,7 +102,8 @@ const SORT = declare({
   id: "stacks-sort",
   page: "overview",
   opens: "view",
-  what: "change the cards' order: vmid, name, busiest first",
+  row: "vmid|name|cpu",
+  what: "order the cards by vmid, by name or busiest first",
 });
 const CLEAR = declare({
   id: "stacks-untick",
@@ -135,7 +135,7 @@ const BATCH = declare({
   page: "overview",
   opens: "dialog",
   row: "backup|update|deploy",
-  what: "open the batch dialog for the ticked stacks: back up, update or deploy",
+  what: "act on the ticked stacks: back up or deploy them in one batch dialog, or update them (each stack's Update dialog in turn)",
 });
 const OPEN = declare({
   id: "stacks-open",
@@ -149,7 +149,14 @@ const ROW_ACTION = declare({
   page: "overview",
   opens: "dialog",
   row: "<stack>",
-  what: "a stack's one suggested action: Deploy, Back up (their dialogs), Update or Logs (its hub tab)",
+  what: "a stack's one suggested action that opens its dialog: Deploy, Update or Back up",
+});
+const ROW_LOGS = declare({
+  id: "stacks-row-logs",
+  page: "overview",
+  opens: "view",
+  row: "<stack>",
+  what: "a stack's suggested Logs: open its hub's Logs tab",
 });
 const KPI = declare({
   id: "stacks-kpi",
@@ -162,7 +169,7 @@ const INBOX = declare({
   id: "stacks-open-inbox",
   page: "overview",
   opens: "view",
-  what: "the attention band's Open the Inbox",
+  what: "the attention band's Inbox button: open the Inbox",
 });
 const SHOW_ALL = declare({
   id: "stacks-show-all",
@@ -239,6 +246,8 @@ export function mount(root, ctx) {
   let cursor = null;
   /** @type {any} */
   let drift = null;
+  /** @type {number | null} what the plan itself counted, once read */
+  let planCount = null;
   /** @type {any} */
   let calendar = null;
   /** @type {Map<string, number>} */
@@ -298,6 +307,11 @@ export function mount(root, ctx) {
     actions: [deployAll],
     primary: newStack,
   });
+  // Both demos put "updated … ago" beside the title, not with the buttons.
+  if (head.live) {
+    head.title.after(head.live.el);
+    head.el.classList.add("sk-head");
+  }
 
   // ── attention band and host strip ───────────────────────────────────
   const band = attentionBand([]);
@@ -309,7 +323,7 @@ export function mount(root, ctx) {
       { key: "ram", label: "RAM", href: "/host" },
       { key: "disk", label: "Root disk", href: "/host" },
       { key: "load", label: "Load (1 min)", href: "/charts" },
-      { key: "inbox", label: "Needs you", href: "/inbox" },
+      { key: "inbox", label: "Inbox", href: "/inbox" },
     ],
     { loading: !current().fleet },
   );
@@ -317,23 +331,24 @@ export function mount(root, ctx) {
 
   // ── the stacks card ─────────────────────────────────────────────────
   const count = h("span", { class: "sk-count", "aria-live": "polite" });
-  const sortBtn = drivable(
-    h(
-      "button",
-      {
-        type: "button",
-        class: "kp-button kp-button--sm kp-button--ghost sk-sort",
-        title: "Change the cards' order: vmid, name, busiest first",
-      },
-      "",
-    ),
-    SORT,
-  );
-  sortBtn.addEventListener("click", () => {
-    ui.sort = nextSort(ui.sort);
-    writeUrl();
-    paint();
+  // The cards' order: every option shown, the active one pressed (the
+  // table sorts by its own headers).
+  const sorts = segSwitch({
+    label: "Sort the cards",
+    value: ui.sort,
+    options: SORTS.map((o) => ({
+      value: o.key,
+      label: o.label,
+      hint: `Order the cards by ${o.key === "cpu" ? "CPU, busiest first" : o.key === "name" ? "name" : "vmid"}`,
+    })),
+    onChange: (v) => {
+      ui.sort = v;
+      writeUrl();
+      paint();
+    },
+    mark: (b, v) => void drivable(b, SORT, v),
   });
+  sorts.el.classList.add("sk-sorts");
   const views = segSwitch({
     label: "View",
     value: ui.view,
@@ -392,7 +407,7 @@ export function mount(root, ctx) {
       },
     },
     groups: [chips.el],
-    state: [count, sortBtn, views.el],
+    state: [count, sorts.el, views.el],
   });
   if (tb.search) drivable(tb.search, SEARCH);
 
@@ -432,6 +447,28 @@ export function mount(root, ctx) {
     "Deploy every ticked stack, one after the other, each backed up first",
     true,
   );
+  // Update… is the Update flow, not a blind batch: each ticked stack's own
+  // Update dialog in turn (`openAction(stack, "update")`, the one entry
+  // point the Update flow routes), the next once the previous closes.
+  const batchUpdate = drivable(
+    viaForm(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--sm",
+          "data-batch": "update",
+          title:
+            "Update the ticked stacks: each stack's Update dialog in turn, where you see what changes before it runs",
+        },
+        "Update…",
+      ),
+      "update",
+    ),
+    BATCH,
+    "update",
+  );
+  batchUpdate.addEventListener("click", () => void updateEach([...ticked]));
   const untick = drivable(
     h(
       "button",
@@ -463,11 +500,7 @@ export function mount(root, ctx) {
       "div",
       { class: "sk-batch__acts" },
       batchBtn("backup", "Back up", "Back up every ticked stack now"),
-      batchBtn(
-        "update",
-        "Update",
-        "Pull and restart the unpinned apps of every ticked stack",
-      ),
+      batchUpdate,
       batchDeploy,
       untick,
     ),
@@ -524,9 +557,9 @@ export function mount(root, ctx) {
             "tr",
             null,
             h("th", { class: "sk-tick" }, selectAll),
-            th("Stack"),
-            th("State", "text"),
-            th("Apps up", "number", "num"),
+            th("Stack", "text", "sk-id"),
+            th("State", "text", "sk-state"),
+            th("Apps up", "number", "num sk-apps"),
             th("Restarts", "number", "num sk-wide"),
             th("RAM used of limit", "number", "sk-wide"),
             th("CPU · 24 h", "number", "sk-wide"),
@@ -539,7 +572,13 @@ export function mount(root, ctx) {
       ),
     ),
   );
-  const listBox = h("div", { class: "sk-list" }, cards, tableWrap);
+  // Live view's `ui select` flashes this, whichever view is on.
+  const listBox = h(
+    "div",
+    { class: "sk-list", "data-drive-list": "stacks" },
+    cards,
+    tableWrap,
+  );
   const empty = h("div", { class: "sk-empty-slot", hidden: "" });
   const card = section({
     title: "Stacks",
@@ -571,7 +610,23 @@ export function mount(root, ctx) {
       h("code", { class: "sk-mono" }, "flag:newer"),
     ),
   );
-  card.body.append(keys, tb.el, batch, listBox, empty, foot);
+  // One line per source that could not be read (the comparison, the
+  // backups, the newer versions, the CPU lines): what, why, what to do.
+  const errs = h("div", { class: "sk-errors", "aria-live": "polite" });
+  /** @type {Map<string, HTMLElement>} */
+  const errBySource = new Map();
+  /**
+   * @param {string} source
+   * @param {import("../doctor.js").RouteError | null} e null: it read fine
+   */
+  const sourceError = (source, e) => {
+    if (e) errBySource.set(source, errorBox(e));
+    else errBySource.delete(source);
+    errs.replaceChildren(...errBySource.values());
+    errs.hidden = errBySource.size === 0;
+  };
+  errs.hidden = true;
+  card.body.append(keys, tb.el, errs, batch, listBox, empty, foot);
 
   root.replaceChildren(head.el, band.el, strip.el, card.el);
 
@@ -609,7 +664,9 @@ export function mount(root, ctx) {
   /** @param {Row} r */
   const actionEl = (r) => {
     const a = r.action;
-    if (a.kind === "deploy" || a.kind === "backup") {
+    // Deploy, Back up and Update open their dialogs; Update through the
+    // same `openAction(stack, "update")` the Update flow routes.
+    if (a.kind === "deploy" || a.kind === "backup" || a.kind === "update") {
       const b = h(
         "button",
         {
@@ -623,20 +680,19 @@ export function mount(root, ctx) {
       b.addEventListener("click", () => void openAction(r.name, a.kind));
       return drivable(b, ROW_ACTION, r.name);
     }
-    // Update lives in the stack hub's Apps tab (FLOWS.md §1.3: every app's
-    // version and whether a newer one exists, with Update… per row), where
-    // the Update flow starts; Logs is the hub's second tab.
+    // Logs is the hub's second tab.
     return drivable(
       h(
         "a",
         {
           class: "kp-button kp-button--sm",
-          href: stackHref(r.name, a.kind === "update" ? "apps" : "logs"),
+          href: stackHref(r.name, "logs"),
+          "data-action": "logs",
           title: a.title,
         },
         a.label,
       ),
-      ROW_ACTION,
+      ROW_LOGS,
       r.name,
     );
   };
@@ -700,6 +756,12 @@ export function mount(root, ctx) {
               : r.backup.text,
           ),
         ),
+      ),
+      // Its own row, kept (empty) when there is no flag, so every card has
+      // the same height in every state.
+      h(
+        "div",
+        { class: "sk-card__flags", "aria-label": "Flags" },
         ...r.flags.map(flagChip),
       ),
       h("div", { class: "sk-card__bar" }, h("span", null, "CPU"), sparkCell(r)),
@@ -740,6 +802,13 @@ export function mount(root, ctx) {
           h(
             "span",
             null,
+            // On a phone the State column folds into this dot.
+            h("span", {
+              class: `${dotClass(r.state.tone)} sk-phone-dot`,
+              role: "img",
+              "aria-label": r.state.label,
+              title: r.state.label,
+            }),
             drivable(h("a", { href: stackHref(r.name) }, r.name), OPEN, r.name),
             h("small", { class: "sk-mono" }, `vmid ${r.vmid}`),
           ),
@@ -747,10 +816,10 @@ export function mount(root, ctx) {
       ),
       h(
         "td",
-        null,
+        { class: "sk-state" },
         h("span", { class: dotClass(r.state.tone) }, r.state.label),
       ),
-      h("td", { class: "num" }, `${r.appsUp} of ${r.appsTotal}`),
+      h("td", { class: "num sk-apps" }, `${r.appsUp} of ${r.appsTotal}`),
       h("td", { class: "num sk-wide" }, String(r.restarts)),
       h("td", { class: "sk-wide" }, ram),
       h("td", { class: "sk-wide" }, sparkCell(r)),
@@ -808,24 +877,91 @@ export function mount(root, ctx) {
     );
   };
 
+  /** @type {Map<string, {sig: string, el: HTMLElement}>} built rows, by view and stack */
+  const built = new Map();
+  /** @param {string} kind */
+  const forget = (kind) => {
+    for (const k of [...built.keys()])
+      if (k.startsWith(`${kind}:`)) built.delete(k);
+  };
+  /**
+   * Draw `shown` into `box`, rebuilding only the rows whose content
+   * changed; the others keep their node (and so their focus and hover).
+   * `ordered`: the order is ours (cards); the table keeps its own sort.
+   * @param {HTMLElement} box
+   * @param {Row[]} shown
+   * @param {(r: Row) => HTMLElement} make
+   * @param {string} kind
+   * @param {boolean} ordered
+   * @returns {boolean} whether anything changed
+   */
+  const patch = (box, shown, make, kind, ordered) => {
+    const want = shown.map((r) => {
+      const sig = JSON.stringify([r, ticked.has(r.name), cursor === r.name]);
+      const key = `${kind}:${r.name}`;
+      const prev = built.get(key);
+      if (prev && prev.sig === sig && prev.el.isConnected) return prev.el;
+      const el = make(r);
+      built.set(key, { sig, el });
+      return el;
+    });
+    const cur = /** @type {HTMLElement[]} */ ([...box.children]);
+    const sameRows =
+      cur.length === want.length &&
+      (ordered
+        ? cur.every((c, i) => c.dataset.stack === want[i].dataset.stack)
+        : want.every((w) =>
+            cur.some((c) => c.dataset.stack === w.dataset.stack),
+          ));
+    if (!sameRows) {
+      box.replaceChildren(...want);
+      return true;
+    }
+    let changed = false;
+    for (const w of want) {
+      const c = cur.find((x) => x.dataset.stack === w.dataset.stack);
+      if (c && c !== w) {
+        c.replaceWith(w);
+        changed = true;
+      }
+    }
+    return changed;
+  };
+
   /** Loading: skeletons in the final geometry of whichever view is on. */
   const paintLoading = () => {
+    built.clear();
+    const tableOn = ui.view === "table";
+    // The skeleton card has the filled card's rows (id, meta, flags, CPU
+    // line), so nothing moves when the fleet arrives.
+    const bone = (/** @type {string} */ cls) =>
+      h("span", { class: `kp-skeleton ${cls}` });
     cards.replaceChildren(
-      ...Array.from({ length: 6 }, () =>
-        h(
-          "div",
-          {
-            class: "sk-card sk-card--skeleton",
-            role: "status",
-            "aria-label": "Reading the fleet",
-            "data-kp-state": "loading",
-          },
-          h("span", { class: "kp-skeleton" }),
-          h("span", { class: "kp-skeleton" }),
-          h("span", { class: "kp-skeleton" }),
-        ),
-      ),
+      ...(tableOn
+        ? []
+        : Array.from({ length: 6 }, () =>
+            h(
+              "div",
+              {
+                class: "sk-card sk-card--skeleton",
+                role: "status",
+                "aria-label": "Reading the fleet",
+                "data-kp-state": "loading",
+              },
+              h("span", { class: "sk-card__tickbone" }),
+              h("div", { class: "sk-card__id" }, bone("sk-bone--id")),
+              bone("sk-bone--state"),
+              h("div", { class: "sk-card__meta" }, bone("sk-bone--meta")),
+              h("div", { class: "sk-card__flags" }, bone("sk-bone--flag")),
+              h("div", { class: "sk-card__bar" }, bone("sk-bone--bar")),
+            ),
+          )),
     );
+    if (!tableOn) {
+      tbody.replaceChildren();
+      count.textContent = "reading…";
+      return;
+    }
     tbody.replaceChildren(
       ...Array.from({ length: 4 }, () =>
         h(
@@ -847,10 +983,9 @@ export function mount(root, ctx) {
     const tableOn = ui.view === "table";
     cards.hidden = tableOn;
     tableWrap.hidden = !tableOn;
-    sortBtn.hidden = tableOn;
+    sorts.el.hidden = tableOn;
     views.set(ui.view);
-    const sortLabel = SORTS.find((s) => s.key === ui.sort)?.label ?? "";
-    sortBtn.textContent = `Sort: ${sortLabel}`;
+    sorts.set(ui.sort);
     if (!f) {
       paintLoading();
       return;
@@ -870,21 +1005,32 @@ export function mount(root, ctx) {
     );
     markChips();
     count.textContent = `${shown.length} of ${rows.length}`;
-    // Keep the focused control's place across a live repaint.
+    // Keep the focused control across a live repaint: only rows whose
+    // content changed are rebuilt (by key), and a control that was
+    // rebuilt anyway gets its focus back by its Live view id and row.
     const focus = /** @type {HTMLElement | null} */ (
       document.activeElement instanceof HTMLElement &&
       listBox.contains(document.activeElement)
         ? document.activeElement
         : null
     );
-    const focusTick = focus?.dataset.tick ?? null;
-    cards.replaceChildren(...shown.map(cardEl));
-    tbody.replaceChildren(...shown.map(rowEl));
-    table?.refresh();
-    if (focusTick)
+    const focusDrive = focus?.dataset.drive ?? null;
+    const focusRow = focus?.dataset.driveRow ?? null;
+    // Only the view that is on is drawn, so a Live view lookup never
+    // lands on a hidden twin.
+    if (tableOn) {
+      cards.replaceChildren();
+      forget("card");
+      if (patch(tbody, shown, rowEl, "row", false)) table?.refresh();
+    } else {
+      tbody.replaceChildren();
+      forget("row");
+      patch(cards, shown, cardEl, "card", true);
+    }
+    if (focus && document.activeElement !== focus && focusDrive)
       /** @type {HTMLElement | null} */ (
         listBox.querySelector(
-          `${tableOn ? "tbody" : ".sk-cards"} [data-tick="${CSS.escape(focusTick)}"]`,
+          `[data-drive="${CSS.escape(focusDrive)}"]${focusRow == null ? "" : `[data-drive-row="${CSS.escape(focusRow)}"]`}`,
         )
       )?.focus();
     selectAll.checked =
@@ -980,7 +1126,7 @@ export function mount(root, ctx) {
                     href: "/inbox",
                     title: "Open the Inbox: every waiting item with its fix",
                   },
-                  "Open the Inbox",
+                  "Inbox",
                 ),
                 INBOX,
               ),
@@ -1006,7 +1152,7 @@ export function mount(root, ctx) {
     });
     paint();
     repaintHost();
-    const n = deployCount(drift);
+    const n = planCount ?? deployCount(drift);
     deployBadge.hidden = n == null || n === 0;
     deployBadge.textContent = n == null ? "" : String(n);
     deployAll.title =
@@ -1014,7 +1160,20 @@ export function mount(root, ctx) {
         ? "Make every stack match its files in one confirmed batch (not compared yet: the panel compares first)"
         : n === 0
           ? "Every stack matched its files at the last comparison; open to compare again"
-          : `${n} stack${n === 1 ? " differs" : "s differ"} from ${n === 1 ? "its" : "their"} files; deploy them in one confirmed batch`;
+          : `${n} ${n === 1 ? "stack differs" : "stacks differ"} from ${n === 1 ? "its" : "their"} files (new and removed ones included); deploy them in one confirmed batch, each backed up first`;
+  };
+
+  /**
+   * Each stack's Update dialog in turn; closing one opens the next, and a
+   * dialog that could not open ends the round.
+   * @param {string[]} stacks
+   */
+  const updateEach = async (stacks) => {
+    for (const s of stacks) {
+      const c = await openAction(s, "update");
+      if (!c) return;
+      await c.closed;
+    }
   };
 
   // ── side panels ──────────────────────────────────────────────────────
@@ -1033,48 +1192,65 @@ export function mount(root, ctx) {
         id: "drift-compare",
         "data-drive": "compare-now",
         title:
-          "Check every stack against its files now and mark the ones that differ in the list",
+          "Check every stack against its files again now and mark the ones that differ in the list",
       },
-      "Compare now",
+      "Compare again",
     );
+    /** @param {string} label @param {string} text */
+    const stepEl = (label, text) =>
+      h("li", null, h("strong", null, label), h("span", null, text));
+    const stepCompare = stepEl("Compare", "Each stack against its files.");
+    const stepReview = stepEl(
+      "Review the plan",
+      "Every change per stack. Nothing runs yet.",
+    );
+    const stepDeploy = stepEl(
+      "Deploy",
+      "One confirmed batch, each stack backed up first.",
+    );
+    const steps = h(
+      "ol",
+      { class: "sk-steps", "aria-label": "Steps" },
+      stepCompare,
+      stepReview,
+      stepDeploy,
+    );
+    /** @type {{pending: number, broken: number} | null} */
+    let planRead = null;
+    // The steps say where the panel stands: done, now, or still to come.
+    const paintSteps = () => {
+      const compared = planRead != null || deployCount(drift) != null;
+      stepCompare.dataset.s = compared ? "done" : "now";
+      if (compared) stepReview.dataset.s = "now";
+      else delete stepReview.dataset.s;
+      delete stepDeploy.dataset.s;
+      for (const li of [stepCompare, stepReview, stepDeploy])
+        if (li.dataset.s === "now") li.setAttribute("aria-current", "step");
+        else li.removeAttribute("aria-current");
+    };
     const paintCompare = () => {
-      const n = deployCount(drift);
+      const n = planRead ? planRead.pending : deployCount(drift);
+      const stacks = (/** @type {number} */ k) =>
+        `${k} ${k === 1 ? "stack" : "stacks"}`;
       compareNote.textContent =
         n == null
-          ? "Not compared yet."
-          : `${n} stack${n === 1 ? "" : "s"} differ${n === 1 ? "s" : ""} from ${n === 1 ? "its" : "their"} files · marked in the list.`;
+          ? "Comparing every stack with its files…"
+          : n === 0
+            ? "Every stack matches its files."
+            : `${stacks(n)} ${n === 1 ? "differs" : "differ"} from ${n === 1 ? "its" : "their"} files, new and removed ones included · marked in the list.`;
+      paintSteps();
     };
     paintCompare();
     compareBtn.addEventListener("click", () => {
       compareBtn.disabled = true;
       compareNote.textContent = "Comparing every stack with its files…";
-      void readDrift(true).finally(() => {
-        compareBtn.disabled = false;
-        paintCompare();
-      });
+      void readDrift(true)
+        .catch(unlessAborted)
+        .finally(() => {
+          compareBtn.disabled = false;
+          paintCompare();
+        });
     });
-    const steps = h(
-      "ol",
-      { class: "sk-steps", "aria-label": "Steps" },
-      h(
-        "li",
-        null,
-        h("strong", null, "Compare"),
-        h("span", null, "Each stack against its files."),
-      ),
-      h(
-        "li",
-        null,
-        h("strong", null, "Review the plan"),
-        h("span", null, "Every change per stack. Nothing runs yet."),
-      ),
-      h(
-        "li",
-        null,
-        h("strong", null, "Deploy"),
-        h("span", null, "One confirmed batch, each stack backed up first."),
-      ),
-    );
     const planBody = h("div", { class: "sk-plan", id: "apply-section" });
     const footSlot = h("div", { class: "sk-drawer-foot" });
     const compare = h(
@@ -1092,6 +1268,11 @@ export function mount(root, ctx) {
       "section",
       { class: "sk-drawer-part" },
       h("h3", null, "What deploying would change"),
+      h(
+        "p",
+        { class: "sk-hint" },
+        "Per stack what changes; open one to read its diff.",
+      ),
       planBody,
     );
     let stopPlan = () => {};
@@ -1108,13 +1289,24 @@ export function mount(root, ctx) {
           history.replaceState(history.state, "", location.pathname + s);
       },
     });
-    stopPlan = mountPlan(planBody, { foot: footSlot });
+    stopPlan = mountPlan(planBody, {
+      foot: footSlot,
+      // The plan's own count is the exact one: it goes on the header
+      // button and into the compare line, and the list's flags follow.
+      onRead: (read) => {
+        planRead = read;
+        planCount = read.pending;
+        paintCompare();
+        recompute();
+        void readDrift(false).catch(unlessAborted);
+      },
+    });
     const s = setParams(location.search, { "deploy-all": "1" });
     if (s !== location.search)
       history.replaceState(history.state, "", location.pathname + s);
   };
 
-  /** New stack: the two routes, each ending on the same review. */
+  /** New stack: the three routes, each ending on the same review. */
   const openNew = () => {
     panel?.close();
     /**
@@ -1122,8 +1314,10 @@ export function mount(root, ctx) {
      * @param {string} text
      * @param {string} form
      * @param {() => void} run
+     * @param {string} [name] its Live view name in the panel (the form's
+     *   own by default)
      */
-    const route = (title, text, form, run) => {
+    const route = (title, text, form, run, name = form) => {
       const b = viaForm(
         dialogControl(
           h(
@@ -1132,7 +1326,7 @@ export function mount(root, ctx) {
             h("strong", null, title),
             h("span", null, text),
           ),
-          form,
+          name,
         ),
         form,
       );
@@ -1161,11 +1355,18 @@ export function mount(root, ctx) {
             "import",
             () => void openImport(ctx.navigate),
           ),
+          route(
+            "Empty",
+            "Start from a blank stack and add apps yourself, from its hub",
+            "new-stack",
+            () => void openNewStack(ctx.navigate, { empty: true }),
+            "new-empty",
+          ),
         ),
         h(
           "p",
           { class: "sk-hint" },
-          "Both end on the same review: what will be created, which address it gets, and a deploy you confirm. ",
+          "Every route ends on the same review: what will be created, which address it gets, and a deploy you confirm. ",
           dialogControl(
             h("a", { href: "/presets" }, "See every preset"),
             "see-presets",
@@ -1255,6 +1456,7 @@ export function mount(root, ctx) {
       "the comparison with the files",
       abort.signal,
     );
+    sourceError("drift", r.ok ? null : r.error);
     if (r.ok) {
       drift = r.body;
       recompute();
@@ -1263,18 +1465,26 @@ export function mount(root, ctx) {
   const readTrend = async () => {
     const r = await fetchJson(
       "/data/fleet-trend",
-      "the fleet's last day",
+      "the fleet's last day (the CPU lines)",
       abort.signal,
     );
+    sourceError("trend", r.ok ? null : r.error);
     if (r.ok) {
       trend = r.body;
       recompute();
     }
   };
-  void readDrift(false).catch(() => {});
-  void readTrend().catch(() => {});
+  /** An abort (the page closed) is not an error to show. @param {unknown} e */
+  const unlessAborted = (e) => {
+    if (!abort.signal.aborted) throw e;
+  };
+  // FLOWS.md §3 #13: the count on Deploy all changes shows before the
+  // click, so the comparison is read with the page (the server reuses a
+  // recent one rather than asking latch again).
+  void readDrift(true).catch(unlessAborted);
+  void readTrend().catch(unlessAborted);
   const trendTimer = setInterval(
-    () => void readTrend().catch(() => {}),
+    () => void readTrend().catch(unlessAborted),
     300_000,
   );
   void slowRead(
@@ -1287,10 +1497,11 @@ export function mount(root, ctx) {
     },
   )
     .then((r) => {
+      sourceError("calendar", r.ok ? null : r.error);
       calendar = r.ok ? r.body : { stacks: {}, no_backup: [] };
       recompute();
     })
-    .catch(() => {});
+    .catch(unlessAborted);
   void slowRead(
     "/data/stale-images",
     "newer versions",
@@ -1301,10 +1512,11 @@ export function mount(root, ctx) {
     },
   )
     .then((r) => {
+      sourceError("newer", r.ok ? null : r.error);
       if (r.ok) newer = newerByStack(r.body.images ?? []);
       recompute();
     })
-    .catch(() => {});
+    .catch(unlessAborted);
 
   stops.push(subscribe(recompute));
   stops.push(onInbox(repaintHost));

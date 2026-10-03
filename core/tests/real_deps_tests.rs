@@ -147,6 +147,7 @@ fn spec(files_content: &str) -> DeploySpec {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        no_apps_yet: false,
         on_demand: false,
         syslog_receivers: vec![],
         firewall: None,
@@ -186,6 +187,7 @@ fn spec(files_content: &str) -> DeploySpec {
     m.hostname = m.canonical_hostname();
     DeploySpec {
         secret_files: Vec::new(),
+        backup_first: false,
         client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),

@@ -4022,6 +4022,14 @@ test("invariants: Stacks lists every stack once as a card and as a table row, wi
       if (view === "table")
         await page.click(".sk-seg button[data-value=table]");
       const got = await read(sel);
+      // Only the view that is on is drawn, so a Live view lookup by id and
+      // row never lands on the hidden twin (redesign-stacks review 6).
+      const hidden = view === "table" ? ".sk-cards" : ".sk-table tbody";
+      assert.equal(
+        await page.locator(`${hidden} [data-drive]`).count(),
+        0,
+        `${view}: the hidden view still holds controls`,
+      );
       assert.deepEqual(
         got.map((g) => g.stack).sort(),
         [...names].sort(),
@@ -4103,9 +4111,42 @@ test("invariants: Stacks keeps its ticks across Table/Cards and live updates, th
       [...two].sort(),
       "Table lost the ticks",
     );
-    // The demo host pushes the fleet every 5 s: the ticks survive it.
-    await page.waitForTimeout(6000);
+    // The demo host pushes the fleet every 5 s: the ticks, the focused
+    // control and the rows themselves (so their hover) survive it.
+    const link = page.locator(
+      `.sk-table [data-drive="stacks-open"][data-drive-row="${two[0]}"]`,
+    );
+    await link.focus();
+    await page.evaluate((n) => {
+      const tr = document.querySelector(`.sk-table tr[data-stack="${n}"]`);
+      if (tr) /** @type {any} */ (tr).__kept = true;
+    }, two[0]);
+    const at0 = await page.getAttribute(
+      ".sk-head [data-ago-at]",
+      "data-ago-at",
+    );
+    await page.waitForFunction(
+      (a) =>
+        document
+          .querySelector(".sk-head [data-ago-at]")
+          ?.getAttribute("data-ago-at") !== a,
+      at0,
+      { timeout: 15000 },
+    );
     assert.equal(await bar(), "2 ticked", "a live update dropped the ticks");
+    const kept = await page.evaluate((n) => {
+      const a = document.activeElement;
+      const tr = document.querySelector(`.sk-table tr[data-stack="${n}"]`);
+      return {
+        focus:
+          a instanceof HTMLElement &&
+          a.dataset.drive === "stacks-open" &&
+          a.dataset.driveRow === n,
+        node: !!(/** @type {any} */ (tr)?.__kept),
+      };
+    }, two[0]);
+    assert.ok(kept.focus, "a live update took the keyboard focus away");
+    assert.ok(kept.node, "a live update rebuilt an unchanged row (hover lost)");
     // The header's tick-all counts what is shown, never more.
     await page.click(".sk-table thead input[type=checkbox]");
     assert.equal(await bar(), `${names.length} ticked`);
@@ -4158,12 +4199,37 @@ test("invariants: Stacks has the host strip, Deploy all changes and New stack; N
         "RAM",
         "Root disk",
         "Load (1 min)",
-        "Needs you",
+        "Inbox",
       ],
     );
     assert.ok(
       tiles.every((t) => t.href?.startsWith("/")),
       "a host tile is not a link to its detail",
+    );
+    assert.notEqual(
+      tiles[0].href,
+      "/stacks",
+      "Stacks online links to the page it is on",
+    );
+    // The count on Deploy all changes is there before any click (FLOWS.md
+    // §3 #13), and it is the plan's own: deploys, new ones and removed
+    // ones together.
+    const plan = await page.evaluate(async () => {
+      const r = await (await fetch("/data/apply/plan")).json();
+      return r.plan.deploy.length + r.plan.destroy.length;
+    });
+    await page.waitForFunction(
+      () =>
+        !document
+          .querySelector("#deploy-all .sk-badge")
+          ?.hasAttribute("hidden"),
+      null,
+      { timeout: 10000 },
+    );
+    assert.equal(
+      (await page.locator("#deploy-all .sk-badge").innerText()).trim(),
+      String(plan),
+      "the header's count is not what Deploy all changes would do",
     );
     assert.equal(
       new Set(tiles.map((t) => t.h)).size,
@@ -4191,7 +4257,25 @@ test("invariants: Stacks has the host strip, Deploy all changes and New stack; N
     const forms = await page.$$eval("dialog[open] [data-drive-form]", (els) =>
       els.map((e) => /** @type {HTMLElement} */ (e).dataset.driveForm),
     );
-    assert.deepEqual(forms, ["new-stack", "import"]);
+    // Three routes, as FLOWS.md §1.5 draws them: preset, bundle, empty.
+    assert.deepEqual(forms, ["new-stack", "import", "new-stack"]);
+    assert.ok(
+      await page.locator('dialog[open] [data-drive="new-empty"]').isVisible(),
+      "New stack has no Empty route",
+    );
+    assert.equal(
+      await page.locator("dialog[open] .kp-dialog__close").count(),
+      1,
+      "the panel's ✕ is not the dialogs' close button",
+    );
+    await page.click('dialog[open] [data-drive="new-empty"]');
+    const wiz = page.locator("dialog#new-stack-dialog[open]");
+    await wiz.waitFor({ timeout: 5000 });
+    assert.equal(
+      await wiz.locator('[data-step="preset"]').count(),
+      0,
+      "the Empty route still asks for a preset",
+    );
   } finally {
     await browser.close();
   }
@@ -4210,13 +4294,145 @@ test("invariants: Stacks and Apps fit a 390 px phone with no sideways scroll, in
       for (const path of ["/stacks", "/stacks?view=table", "/apps"]) {
         await page.evaluate((t) => localStorage.setItem("theme", t), theme);
         await page.goto(`${BASE}${path}`);
-        await page.waitForTimeout(1500);
+        await page.waitForSelector(
+          path === "/apps"
+            ? ".ap-board .ap-grp:not(.ap-grp--skeleton), .ap-board .sk-empty-slot, .ap-board .ap-empty"
+            : ".sk-list [data-stack]",
+          { timeout: 10000 },
+        );
         const over = await page.evaluate(
           () => document.documentElement.scrollWidth - window.innerWidth,
         );
         if (over > 1) bad.push(`${path} in ${theme}: ${over}px`);
+        // No box scrolls sideways inside the page either, and every row's
+        // action is on screen (redesign-stacks review 5).
+        const inner = await page.$$eval(".kp-table-wrap", (els) =>
+          els
+            .filter((e) => e.getClientRects().length > 0)
+            .map((e) => e.scrollWidth - e.clientWidth),
+        );
+        for (const d of inner)
+          if (d > 1) bad.push(`${path} in ${theme}: a table scrolls ${d}px`);
+        // The toolbar's switches stay on screen (none cut off by the card).
+        const cut = await page.$$eval(".sk-page .nx-tb__state button", (els) =>
+          els
+            .filter((e) => e.getClientRects().length > 0)
+            .filter((e) => e.getBoundingClientRect().right > window.innerWidth)
+            .map((e) => e.textContent?.trim()),
+        );
+        if (cut.length)
+          bad.push(`${path} in ${theme}: toolbar cut off: ${cut.join(", ")}`);
+        if (path.includes("table")) {
+          const off = await page.$$eval(
+            ".sk-table tbody tr[data-stack] .sk-acts > *:first-child",
+            (els) =>
+              els
+                .filter((e) => {
+                  const r = e.getBoundingClientRect();
+                  return r.right > window.innerWidth || r.left < 0;
+                })
+                .map((e) => e.closest("tr")?.getAttribute("data-stack")),
+          );
+          if (off.length)
+            bad.push(
+              `${path} in ${theme}: actions off screen: ${off.join(", ")}`,
+            );
+        }
       }
     assert.deepEqual(bad, [], `sideways scroll: ${bad.join("; ")}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: Deploy all changes marks its steps, says what each part holds, shows a stack that does not build as what/why/fix and keeps its button off (redesign-stacks)", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks?deploy-all=1`);
+    // Both demos put the live status beside the title.
+    assert.equal(
+      await page
+        .locator(".sk-page .nx-head .title-row > h1 + .nx-live")
+        .count(),
+      1,
+      "the header's 'updated' is not beside the title",
+    );
+    const panel = page.locator("dialog[open]");
+    await panel.locator(".apply-group").first().waitFor({ timeout: 10000 });
+    const steps = await panel
+      .locator(".sk-steps li")
+      .evaluateAll((els) =>
+        els.map((e) => /** @type {HTMLElement} */ (e).dataset.s ?? ""),
+      );
+    assert.deepEqual(
+      steps,
+      ["done", "now", ""],
+      "the steps say where it stands",
+    );
+    const text = await panel.innerText();
+    assert.doesNotMatch(
+      text,
+      /Not compared yet/,
+      "a filled plan says it never compared",
+    );
+    assert.doesNotMatch(text, /\(s\)/, "bracketed plurals");
+    assert.doesNotMatch(text, / :: |\/tmp\//, "raw error text in the panel");
+    const groups = await panel.locator(".apply-group").evaluateAll((els) =>
+      els.map((g) => ({
+        title: g.querySelector("h3")?.textContent?.trim(),
+        desc: g.querySelector(".apply-group__desc")?.textContent?.trim() ?? "",
+      })),
+    );
+    assert.ok(groups.length > 0);
+    for (const g of groups)
+      assert.ok(g.desc.length > 10, `${g.title} has no description`);
+    // The demo's alpha-demo declares no apps, so it does not build: shown
+    // as what / why / what to do, and the deploy button stays off.
+    const broken = panel.locator(".apply-broken");
+    assert.ok(
+      (await broken.count()) > 0,
+      "the stack that does not build is not shown",
+    );
+    assert.match(
+      await broken.first().innerText(),
+      /does not build[\s\S]*Why:[\s\S]*What to do:/,
+    );
+    assert.equal(await panel.locator("#apply-open").isDisabled(), true);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: a row's Update and the batch Update… open the Update dialog of each stack, never a link away (redesign-stacks)", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const names = await fleetNames(page);
+    await page.goto(`${BASE}/stacks?view=table`);
+    await page
+      .locator(".sk-table tbody tr[data-stack]")
+      .first()
+      .waitFor({ timeout: 8000 });
+    assert.equal(
+      await page.locator('.sk-table a[data-action="update"]').count(),
+      0,
+      "a row's Update is still a link",
+    );
+    await page.locator(`.sk-table [data-tick="${names[0]}"]`).check();
+    const upd = page.locator(".sk-batch [data-batch=update]");
+    assert.equal((await upd.innerText()).trim(), "Update…");
+    await upd.click();
+    const dialog = page.locator("dialog#action-dialog[open]");
+    await dialog.waitFor({ timeout: 5000 });
+    assert.match(await dialog.innerText(), new RegExp(names[0]));
+    assert.equal(new URL(page.url()).pathname, "/stacks");
   } finally {
     await browser.close();
   }
@@ -4303,7 +4519,6 @@ test("invariants: Apps groups the stacks' tiles, each opening in a new tab; the 
     await browser.close();
   }
 });
-
 
 // ── redesign-schedules (release 3.71.0, Kenny approved the demo 2026-10-03):
 // the Schedules page as the approved demo draws it — a week calendar with
@@ -4731,6 +4946,52 @@ test("invariants: Schedules page: Live view reaches the drawer and its fields, t
       await step({ do: "done" });
     }
     await clearSchedules(page);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: Apps loads as its grouped board, its group labels are the body face at weight 500, and the legend says deploying (redesign-stacks)", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    // Hold the tiles back so the loading board can be read.
+    await page.route("**/data/tiles*", async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.continue();
+    });
+    await page.goto(`${BASE}/apps`);
+    const skel = page.locator(".ap-board .ap-grp--skeleton");
+    await skel.first().waitFor({ timeout: 5000 });
+    assert.ok(
+      (await skel.count()) > 1,
+      "the loading state is not the grouped board",
+    );
+    const groups = page.locator(
+      ".ap-board .ap-grp:not(.ap-grp--skeleton) > h2",
+    );
+    await groups.first().waitFor({ timeout: 10000 });
+    const font = await groups.first().evaluate((e) => {
+      const cs = getComputedStyle(e);
+      return {
+        family: cs.fontFamily,
+        body: getComputedStyle(document.body).fontFamily,
+        weight: cs.fontWeight,
+      };
+    });
+    assert.equal(font.family, font.body, "a group label is not the body face");
+    assert.equal(font.weight, "500");
+    const text = await page.locator(".ap-page").innerText();
+    assert.match(text, /deploying/);
+    assert.doesNotMatch(text, /a known outage/);
+    // The live status sits beside the title, not with the buttons.
+    assert.equal(
+      await page.locator(".nx-head .title-row > h1 + .nx-live").count(),
+      1,
+    );
   } finally {
     await browser.close();
   }

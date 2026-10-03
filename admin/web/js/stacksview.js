@@ -19,11 +19,13 @@ import { humanDuration } from "./format.js";
  * @typedef {{step_s: number, from: number | null, points: number,
  *   host: {cpu_pct: (number | null)[], load_x100: (number | null)[]},
  *   stacks: Record<string, (number | null)[]>}} Trend `/data/fleet-trend`
- * @typedef {"same" | "changed" | "unknown"} DriftState
+ * @typedef {"same" | "changed" | "new" | "no_local_files" | "never_applied"
+ *   | "not_compared" | "unknown"} DriftState
  * @typedef {{state: "ok" | "missed" | "none" | "unknown" | "nodata",
  *   at: number | null, text: string, tone: "ok" | "warn" | "bad" | ""}}
  *   Backup
- * @typedef {{key: "newer" | "noenv" | "drift" | "backup" | "parked",
+ * @typedef {{key: "newer" | "noenv" | "drift" | "gone" | "broken" | "backup"
+ *   | "parked",
  *   label: string, tone: "info" | "warn" | "bad" | "", title: string}} Flag
  * @typedef {{kind: "update" | "deploy" | "backup" | "logs", label: string,
  *   title: string}} RowAction
@@ -142,7 +144,7 @@ export function rowAction(r) {
 /**
  * Every stack as the list shows it, in the host's order (vmid).
  * @param {Fleet} fleet
- * @param {{newer?: Map<string, number>, drift?: Record<string, {state:
+ * @param {{newer?: Map<string, number>, drift?: Record<string, {why?: string | null, state:
  *   DriftState}>, calendar?: Calendar | null, trend?: Trend | null,
  *   now: number}} ctx
  * @returns {Row[]}
@@ -151,7 +153,15 @@ export function stackRows(fleet, ctx) {
   return fleet.stacks.map((s) => {
     const state = stackState(s);
     const newer = ctx.newer?.get(s.name) ?? 0;
-    const drift = ctx.drift?.[s.name]?.state === "changed";
+    // redesign-stacks-7: the plan's own words (the server's drift answer):
+    // changed is redeployed, gone from the files is destroyed, and one
+    // that does not build blocks Deploy all changes. All three differ from
+    // their files.
+    const d = ctx.drift?.[s.name];
+    const changed = d?.state === "changed";
+    const gone = d?.state === "no_local_files";
+    const broken = d?.state === "not_compared" && !!d?.why;
+    const drift = changed || gone || broken;
     const backup = backupOf(ctx.calendar ?? null, s.name, ctx.now);
     const ramUsed = s.ram_used_mb ?? null;
     const ramMax = s.ram_max_mb ?? null;
@@ -164,13 +174,28 @@ export function stackRows(fleet, ctx) {
         tone: "info",
         title: "An app of this stack has a newer version than the one it runs",
       });
-    if (drift)
+    if (changed)
       flags.push({
         key: "drift",
         label: "differs from files",
         tone: "",
         title:
           "What runs differs from the stack's files: a deploy makes them match",
+      });
+    if (gone)
+      flags.push({
+        key: "gone",
+        label: "will be destroyed",
+        tone: "bad",
+        title:
+          "Its directory is gone from the files: Deploy all changes destroys it once its name is typed (backed up first)",
+      });
+    if (broken)
+      flags.push({
+        key: "broken",
+        label: "does not build",
+        tone: "bad",
+        title: `Its files do not build, so Deploy all changes waits for it: ${d?.why ?? ""}`,
       });
     if (backup.state === "missed" || backup.state === "none")
       flags.push({
@@ -193,7 +218,7 @@ export function stackRows(fleet, ctx) {
         tone: "",
         title: "Parked: out of the nightly round and not started on boot",
       });
-    const base = { drift, newer, backup, state };
+    const base = { drift: changed, newer, backup, state };
     return {
       name: s.name,
       vmid: s.vmid,
@@ -379,8 +404,13 @@ export function hostStrip(fleet, trend, inbox) {
       ctx: `${offline ? `${offline} offline` : c.online === c.stacks ? "all running" : `${c.stacks - c.online} not running`} · ${c.parked} parked`,
       dot: offline ? "bad" : "ok",
       tone: offline ? "bad" : null,
-      href: offline ? "/stacks?only=problems" : "/stacks",
-      title: "Show the stacks that are not running",
+      // Not all running: the list, only its problems; all running: the
+      // Host page's containers, the detail behind the number.
+      href: c.online < c.stacks ? "/stacks?only=problems" : "/host",
+      title:
+        c.online < c.stacks
+          ? `Show the ${c.stacks - c.online} ${c.stacks - c.online === 1 ? "stack" : "stacks"} not running`
+          : "Every stack runs; open the Host page for its containers",
     },
     {
       key: "cpu",
@@ -434,7 +464,7 @@ export function hostStrip(fleet, trend, inbox) {
     },
     {
       key: "inbox",
-      label: "Needs you",
+      label: "Inbox",
       value: String(inbox.count),
       ctx:
         inbox.count === 0
@@ -460,22 +490,29 @@ export function verdict(items) {
   const first = items[0];
   return {
     tone: first.severity === "bad" ? "bad" : "warn",
-    title: `${n} ${n === 1 ? "thing needs" : "things need"} you`,
+    title: `${n} ${n === 1 ? "item" : "items"} in the Inbox`,
     text: n === 1 ? first.title : `${first.title} · and ${n - 1} more`,
   };
 }
 
 /**
  * "Deploy all changes" says its count before you click (FLOWS.md task 13):
- * the stacks the last comparison found differing; null before any
- * comparison, so the button never claims "nothing to deploy" it never
- * checked.
+ * what its plan would deploy or destroy, new stacks included (the server's
+ * `counts`, the plan's own numbers); without them, the changed, gone and
+ * new stacks of the comparison. null before any comparison, so the button
+ * never claims "nothing to deploy" it never checked.
  * @param {{measured_at?: number | null, stacks?: Record<string,
- *   {state: DriftState}>} | null} drift
+ *   {state: DriftState, why?: string | null}>, counts?: {deploy: number, new: number,
+ *   destroy: number, broken: number}} | null} drift
  * @returns {number | null}
  */
 export function deployCount(drift) {
   if (!drift || drift.measured_at == null) return null;
-  return Object.values(drift.stacks ?? {}).filter((d) => d.state === "changed")
-    .length;
+  if (drift.counts) return drift.counts.deploy + drift.counts.destroy;
+  return Object.values(drift.stacks ?? {}).filter(
+    (d) =>
+      d.state === "changed" ||
+      d.state === "no_local_files" ||
+      d.state === "new",
+  ).length;
 }

@@ -1022,6 +1022,10 @@ pub enum BackupTrigger {
     /// Taken automatically, immediately before `destroy` removes the
     /// container (`destroy_impl`, core/src/ops/destroy.rs).
     PreDestroy,
+    /// Taken automatically right before a deploy changes the stack, when
+    /// the deploy was asked for it (`DeploySpec::backup_first`:
+    /// the dashboard's Deploy all changes and batch Deploy).
+    PreDeploy,
 }
 
 impl BackupTrigger {
@@ -1031,6 +1035,7 @@ impl BackupTrigger {
             BackupTrigger::Nightly => "trigger:nightly",
             BackupTrigger::Manual => "trigger:manual",
             BackupTrigger::PreDestroy => "trigger:pre-destroy",
+            BackupTrigger::PreDeploy => "trigger:pre-deploy",
         }
     }
 
@@ -1040,6 +1045,7 @@ impl BackupTrigger {
             BackupTrigger::Nightly => "nightly",
             BackupTrigger::Manual => "manual",
             BackupTrigger::PreDestroy => "pre-destroy",
+            BackupTrigger::PreDeploy => "pre-deploy",
         }
     }
 
@@ -1052,6 +1058,7 @@ impl BackupTrigger {
             "nightly" => Some(BackupTrigger::Nightly),
             "manual" => Some(BackupTrigger::Manual),
             "pre-destroy" => Some(BackupTrigger::PreDestroy),
+            "pre-deploy" => Some(BackupTrigger::PreDeploy),
             _ => None,
         }
     }

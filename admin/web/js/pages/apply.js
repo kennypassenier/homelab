@@ -18,7 +18,7 @@ import { openAction } from "../actiondialog.js";
 import { agoEl, setAgo } from "../ago.js";
 import { errorBox, fetchJson, h } from "../dom.js";
 import { diffBlocks } from "../editui.js";
-import { applySummary } from "../parity.js";
+import { applySummary, brokenView } from "../parity.js";
 import { fileViews } from "../plan.js";
 import { stackHref } from "../router.js";
 import { dialogControl, viaForm } from "../drivable.js";
@@ -45,7 +45,8 @@ function skeletonGrid() {
  * "Read the plan again" and the one that opens the apply dialog; without
  * it they sit at the top of the body.
  * @param {HTMLElement} root
- * @param {{foot?: HTMLElement, onRead?: (pending: number) => void}} [opts]
+ * @param {{foot?: HTMLElement, onRead?: (read: {pending: number,
+ *   broken: number}) => void}} [opts]
  * @returns {() => void}
  */
 export function mount(root, opts = {}) {
@@ -189,51 +190,111 @@ export function mount(root, opts = {}) {
         ...(s.blocked ? [h("span", { class: "refusal-line" }, s.blocked)] : []),
       ),
     );
+    /**
+     * One group of the plan: a heading, one line saying what it holds, its
+     * rows.
+     * @param {string} title
+     * @param {string} desc
+     * @param {Node[]} rows
+     */
+    const group = (title, desc, rows) =>
+      h(
+        "div",
+        { class: "apply-group" },
+        h("h3", null, title),
+        h("p", { class: "sk-hint apply-group__desc" }, desc),
+        ...rows,
+      );
     /** @type {HTMLElement[]} */
     const groups = [];
+    if (p.broken.length)
+      groups.push(
+        group(
+          "Does not build",
+          "These stacks' files cannot be read into a deploy; nothing is deployed until they are fixed.",
+          p.broken.map((/** @type {[string, string]} */ [n, why]) => {
+            const v = brokenView(n, why);
+            return h(
+              "div",
+              {
+                class: "kp-alert kp-alert--destructive apply-row apply-broken",
+                role: "alert",
+                "data-stack": n,
+              },
+              h("strong", null, v.what),
+              h("p", null, `Why: ${v.why}`),
+              h("p", null, `What to do: ${v.fix}`),
+            );
+          }),
+        ),
+      );
     if (p.deploy.length)
       groups.push(
-        h(
-          "div",
-          { class: "apply-group" },
-          h("h3", null, "To deploy"),
-          ...p.deploy.map((/** @type {string} */ n) =>
+        group(
+          "To deploy",
+          "Each of these is backed up and then made to match its files; a new one gets its container.",
+          p.deploy.map((/** @type {string} */ n) =>
             stackBlock(n, p.new.includes(n), p.reasons?.[n]),
           ),
         ),
       );
     if (p.destroy.length)
       groups.push(
-        h(
-          "div",
-          { class: "apply-group" },
-          h("h3", null, "Gone from the files"),
-          ...p.destroy.map((/** @type {string} */ n) =>
+        group(
+          "Gone from the files",
+          "These run on the host but their directory is gone: each is destroyed only when its name is typed in the deploy dialog.",
+          p.destroy.map((/** @type {string} */ n) =>
             h(
               "p",
-              { class: "apply-row" },
+              { class: "apply-row", "data-stack": n },
               h("strong", null, n),
-              " runs on the host; its directory is gone. Destroyed only when its name is typed in the deploy dialog (backed up first, its data kept).",
+              " will be destroyed once its name is typed (backed up first, its data kept).",
             ),
           ),
         ),
       );
-    groups.push(
-      h(
-        "div",
-        { class: "apply-group" },
-        h("h3", null, "The rest"),
-        ...s.lines
-          .filter((l) => !l.startsWith("↑") && !l.startsWith("✗"))
-          .map((l) => h("p", { class: "apply-row measured" }, l)),
-      ),
-    );
+    const rest = [
+      ...(p.unchanged.length
+        ? [
+            h(
+              "p",
+              { class: "apply-row measured" },
+              `${p.unchanged.length} ${p.unchanged.length === 1 ? "stack matches its" : "stacks match their"} files: ${p.unchanged.join(", ")}.`,
+            ),
+          ]
+        : []),
+      ...(p.ephemeral.length
+        ? [
+            h(
+              "p",
+              { class: "apply-row measured" },
+              `${p.ephemeral.join(", ")}: deployed by name only (ephemeral), never by Deploy all changes.`,
+            ),
+          ]
+        : []),
+    ];
+    if (rest.length)
+      groups.push(
+        group("The rest", "Stacks this deploy leaves alone, and why.", rest),
+      );
     body.replaceChildren(...groups);
+    // The primary button stays off while any stack does not build: apply
+    // refuses then anyway, and the panel says why above.
     go.disabled = !s.pending || !!s.blocked;
-    nothingYet.textContent = s.pending
-      ? "Nothing has run yet: the dialog asks once more before it deploys."
-      : "Nothing to deploy: every stack matches its files.";
-    opts.onRead?.(p.deploy.length + p.destroy.length);
+    const nd = p.deploy.length;
+    go.textContent =
+      nd > 0
+        ? `Back up and deploy ${nd} ${nd === 1 ? "stack" : "stacks"}…`
+        : "Deploy all changes…";
+    nothingYet.textContent = s.blocked
+      ? "Nothing can be deployed while a stack does not build."
+      : s.pending
+        ? "Nothing has run yet: the dialog asks once more before it deploys."
+        : "Nothing to deploy: every stack matches its files.";
+    opts.onRead?.({
+      pending: p.deploy.length + p.destroy.length,
+      broken: p.broken.length,
+    });
     setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
   };
   dialogControl(read, "read-plan");

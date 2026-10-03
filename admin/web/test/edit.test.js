@@ -1271,3 +1271,15 @@ test("a tile row's fields and the sparse tilesBody (delete needs a tombstone)", 
     ],
   });
 });
+
+test("redesign-stacks-8: New stack's Empty route skips the preset step and asks for no preset", () => {
+  const w = newStackWizard([], 121, { empty: true });
+  assert.deepEqual(
+    w.steps.map((s) => s.id),
+    ["identity", "size", "data", "tile", "plan"],
+  );
+  const v = startValues(w);
+  assert.equal(v.vmid, "121");
+  assert.equal(newStackBody({ ...v, name: "blank" }).preset, "");
+  assert.ok(Number(v.ram_mb) > 0, "the size starts from the defaults");
+});

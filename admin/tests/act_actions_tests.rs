@@ -663,3 +663,68 @@ fn parity_a_check_answer_follows_the_cli_rules() {
         assert!(r.why.contains(why), "{r}");
     }
 }
+
+/// redesign-stacks-6: the Stacks page promises "each stack is backed up
+/// first" for its batch Deploy and for Deploy all changes. The server keeps
+/// that promise: every deploy of a batch, and every deploy Apply sends,
+/// asks the host to back up first; Apply's "Skip the backup" opts out, and a
+/// single Deploy from the stack hub deploys as before. The page cannot ask
+/// for it either way (the field is never read from a body).
+#[test]
+fn redesign_stacks_6_batch_deploy_and_apply_ask_the_host_to_back_up_first() {
+    let deploy_flag = |cmds: &[Command]| -> Vec<bool> {
+        cmds.iter()
+            .filter_map(|c| match c {
+                Command::DeployStack(s) => Some(s.backup_first),
+                _ => None,
+            })
+            .collect()
+    };
+    let batch = validate_batch(BatchRequest {
+        action: "deploy".into(),
+        stacks: vec!["kyu".into(), "media".into()],
+        args: ActionArgs::default(),
+        confirms: Default::default(),
+    })
+    .unwrap();
+    for req in &batch {
+        let cmds = commands(req, Material::Spec(Box::new(spec(&req.stack)))).unwrap();
+        assert_eq!(
+            deploy_flag(&cmds),
+            vec![true],
+            "batch deploy of {}",
+            req.stack
+        );
+    }
+    let single = validate("media", "deploy", ActionArgs::default()).unwrap();
+    let cmds = commands(&single, Material::Spec(Box::new(spec("media")))).unwrap();
+    assert_eq!(deploy_flag(&cmds), vec![false], "a single deploy");
+
+    for (skip, want) in [(false, true), (true, false)] {
+        let req = validate(
+            HOST_TARGET,
+            "apply",
+            ActionArgs {
+                skip_backup: skip,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let cmds = commands(
+            &req,
+            Material::Apply {
+                deploy: vec![spec("media"), spec("kyu")],
+                destroy: vec![],
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            deploy_flag(&cmds),
+            vec![want, want],
+            "apply, skip_backup {skip}"
+        );
+    }
+    let from_body: ActionArgs = serde_json::from_str(r#"{"force":true}"#).unwrap();
+    assert!(!from_body.backup_first);
+    assert!(serde_json::from_str::<ActionArgs>(r#"{"backup_first":true}"#).is_err());
+}

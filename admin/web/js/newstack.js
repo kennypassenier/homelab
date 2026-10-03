@@ -33,8 +33,12 @@ import {
 
 /**
  * @param {(href: string) => void} [navigate]
+ * @param {{empty?: boolean}} [opts] redesign-stacks-8: New stack's "Empty"
+ *   route — no preset step; a stack with no apps that says so, its first
+ *   app added from its hub.
  */
-export async function openNewStack(navigate) {
+export async function openNewStack(navigate, opts = {}) {
+  const empty = opts.empty === true;
   const r = await fetchJson("/data/presets", "the presets");
   if (!r.ok) {
     await refusalAlarm(r.error, 0);
@@ -42,7 +46,7 @@ export async function openNewStack(navigate) {
   }
   /** @type {import("./editforms.js").Preset[]} */
   const presets = r.body.presets ?? [];
-  if (!presets.length) {
+  if (!presets.length && !empty) {
     await refusalAlarm(
       {
         what: "a new stack",
@@ -59,8 +63,9 @@ export async function openNewStack(navigate) {
     names: /** @type {string[]} */ (r.body.taken?.names ?? []),
     vmids: /** @type {number[]} */ (r.body.taken?.vmids ?? []),
   };
-  const w = newStackWizard(presets, r.body.suggest_vmid ?? null);
+  const w = newStackWizard(presets, r.body.suggest_vmid ?? null, { empty });
   const values = startValues(w);
+  if (empty) values.preset = "";
   /** @type {Map<string, HTMLElement>} */
   const inputs = new Map();
   /** @param {import("./editforms.js").EditField} f */
@@ -144,9 +149,10 @@ export async function openNewStack(navigate) {
   );
   const body = h("div", { class: "act-body" }, wiz);
   const d = openDialog({
-    title: "New stack",
-    description:
-      "From one of the repository's presets; committed under stacks/<name>/ and pushed, then deployed if you choose.",
+    title: empty ? "New empty stack" : "New stack",
+    description: empty
+      ? "A stack with no apps yet: its container and address, committed under stacks/<name>/ and pushed, then deployed if you choose. Add its first app from its hub."
+      : "From one of the repository's presets; committed under stacks/<name>/ and pushed, then deployed if you choose.",
     body: [body],
     id: "new-stack-dialog",
     wide: true,

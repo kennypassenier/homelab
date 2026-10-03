@@ -199,9 +199,16 @@ main.shell.ap-page > [hidden] {
   align-items: center;
   gap: 8px;
 }
+/* The context line wraps rather than cutting its words ("0 park…"). */
+.sk-kpi__ctx {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
 .sk-kpi__words {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 1 1 0;
+  min-inline-size: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .sk-kpi:has(.sk-meter) .sk-kpi__words {
   flex: none;
@@ -346,7 +353,9 @@ a.sk-kpi {
   position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-rows: auto auto auto;
+  /* Fixed rows (identity, meta, flags, CPU line), kept in every state —
+     loading, no flag, several — so every card is the same height. */
+  grid-template-rows: 1.75rem 1.25rem 1.5rem 28px;
   gap: 6px 10px;
   align-items: center;
   padding: var(--kp-space-md, 12px);
@@ -397,7 +406,9 @@ a.sk-kpi {
 .sk-card__meta {
   grid-column: 2 / -1;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
   gap: 6px 14px;
   align-items: center;
   font-size: var(--kp-text-sm);
@@ -417,17 +428,40 @@ a.sk-kpi {
   font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
 }
+.sk-card__flags {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  align-items: center;
+  overflow: hidden;
+}
 .sk-card--skeleton {
-  grid-template-columns: minmax(0, 1fr);
-  min-block-size: 7.5rem;
   cursor: default;
+}
+.sk-card__tickbone {
+  inline-size: 16px;
 }
 .sk-card--skeleton .kp-skeleton {
   display: block;
-  block-size: 1rem;
+  block-size: 0.9rem;
 }
-.sk-card--skeleton .kp-skeleton:last-child {
-  block-size: 28px;
+.sk-bone--id {
+  inline-size: 9rem;
+}
+.sk-bone--state {
+  inline-size: 4.5rem;
+}
+.sk-bone--meta {
+  inline-size: 16rem;
+  max-inline-size: 100%;
+}
+.sk-bone--flag {
+  inline-size: 6rem;
+}
+.sk-card--skeleton .sk-bone--bar {
+  inline-size: 100%;
+  block-size: 20px;
 }
 
 .sk-cpu {
@@ -528,9 +562,35 @@ a.sk-kpi {
     display: none;
   }
 }
+/* A phone shows only tick · stack (its state as a dot) · action, so the
+   table never scrolls sideways and every row's action is on screen. */
+.sk-phone-dot {
+  display: none;
+}
 @media (max-width: 48rem) {
-  .sk-table .sk-mid {
+  .sk-table .sk-mid,
+  .sk-table .sk-state,
+  .sk-table .sk-apps {
     display: none;
+  }
+  .sk-table .sk-phone-dot {
+    display: inline-flex;
+    vertical-align: middle;
+    margin-inline-end: 6px;
+  }
+  .sk-table .kp-table {
+    min-inline-size: 0;
+    inline-size: 100%;
+  }
+  .sk-table .sk-id {
+    max-inline-size: 0;
+    inline-size: 100%;
+  }
+  .sk-table .sk-id__wrap,
+  .sk-table .sk-id__wrap > span {
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .sk-cards {
     grid-template-columns: minmax(0, 1fr);
@@ -617,6 +677,23 @@ a.sk-kpi {
 .sk-steps span {
   color: var(--muted-foreground);
   font-size: var(--kp-text-xs);
+}
+/* Where the panel stands, as the demo marks it: done, now, still to come. */
+.sk-steps li[data-s="done"]::before {
+  content: "✓";
+  background: var(--sk-ok);
+  color: var(--background);
+}
+.sk-steps li[data-s="now"] {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+.sk-steps li[data-s="now"]::before {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.sk-steps li:not([data-s]) {
+  opacity: 0.75;
 }
 @media (max-width: 40rem) {
   .sk-steps {
@@ -707,6 +784,9 @@ a.sk-kpi {
   align-items: center;
   gap: 8px;
   margin: 0 0 10px;
+  /* The demo's group label is the body face (a theme's heading face can
+     be a serif), at weight 500. */
+  font-family: var(--theme-font-body, inherit);
   font-size: var(--kp-text-xs);
   font-weight: 500;
   text-transform: uppercase;
@@ -883,5 +963,78 @@ a.sk-kpi {
   .ap-tile:hover,
   .ap-tile:focus-visible {
     transform: none;
+  }
+}
+
+/* The header: "updated … ago" sits beside the title, as both demos draw it. */
+.sk-page .sk-head .title-row > .nx-live,
+.ap-page .sk-head .title-row > .nx-live {
+  align-self: center;
+  margin-inline-start: 0;
+  font-size: var(--kp-text-sm);
+}
+.sk-page .sk-head .title-row > .nx-head-right,
+.ap-page .sk-head .title-row > .nx-head-right {
+  margin-inline-start: auto;
+}
+@media (max-width: 48rem) {
+  .sk-page .sk-head .title-row > .nx-live,
+  .ap-page .sk-head .title-row > .nx-live {
+    order: 1;
+  }
+}
+
+/* The cards' order: every option shown, the active one pressed. */
+.sk-sorts[hidden] {
+  display: none;
+}
+
+/* One line per source that could not be read. */
+.sk-errors {
+  display: grid;
+  gap: 8px;
+  margin-block: var(--kp-space-sm, 8px);
+}
+.sk-errors[hidden] {
+  display: none;
+}
+
+/* Deploy all changes: each group of the plan says what it holds. */
+.apply-group__desc {
+  margin: 0 0 6px;
+}
+/* What, why and what to do read top to bottom, not as three columns. */
+.apply-broken,
+#apply-head > .kp-alert {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+}
+.apply-broken p {
+  margin: 0;
+}
+
+/* The Apps skeleton is the grouped board itself: a label bone per group. */
+.ap-grp--skeleton > h2 .kp-skeleton {
+  display: inline-block;
+  inline-size: 7rem;
+  block-size: 0.8rem;
+}
+
+/* Phone: the toolbar's count, sort and view switch wrap onto their own
+   lines instead of running out of the card. */
+@media (max-width: 48rem) {
+  .sk-page .nx-tb__state {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 8px;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+  }
+  .sk-page .sk-card__meta > span {
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }

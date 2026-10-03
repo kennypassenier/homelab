@@ -733,3 +733,42 @@ async fn feat_stacks_files_create_delete_rename_and_checks_schema() {
     );
     let _ = commit1;
 }
+
+/// redesign-stacks-8: New stack's third route, "Empty" (FLOWS.md §1.5, §2,
+/// §3 #6): the same plan and commit routes scaffold a stack with no apps
+/// when no preset is named — no preset file needed — and the commit holds
+/// only that stack's directory with an empty app list.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn redesign_stacks_8_an_empty_stack_is_scaffolded_with_no_apps_and_no_preset() {
+    let w = world("empty").await;
+    let (st, _) = call(&w.app, "GET", "/data/presets", None).await;
+    assert_eq!(st, StatusCode::OK);
+    let req = serde_json::json!({ "name": "blank", "vmid": 122, "preset": "", "ram_mb": 1024, "cores": 1, "disk_gb": 8 });
+    let (st, paths) = call(
+        &w.app,
+        "POST",
+        "/data/stacks-new/appdata",
+        Some(serde_json::json!({ "preset": "", "name": "blank", "vmid": 122 })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(paths["appdata"], serde_json::json!([]), "{paths}");
+    let (st, plan) = call(&w.app, "POST", "/data/stacks-new/plan", Some(req.clone())).await;
+    assert_eq!(st, StatusCode::OK, "{plan}");
+    assert_eq!(plan["valid"], true, "{plan}");
+    let (st, v) = call(
+        &w.app,
+        "POST",
+        "/data/stacks-new/commit",
+        Some(serde_json::json!({ "stack": req })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let files = git(&w.bare, &["show", "--name-only", "--format=", "main"]);
+    assert_eq!(files.trim(), "stacks/blank/lxc-compose.yml", "{files}");
+    let manifest = git(&w.bare, &["show", "main:stacks/blank/lxc-compose.yml"]);
+    assert!(
+        manifest.contains("apps: []") && manifest.contains("no_apps_yet: true"),
+        "an empty stack declares no apps:\n{manifest}"
+    );
+}

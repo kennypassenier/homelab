@@ -44,6 +44,7 @@ fn paperwork() -> StackManifest {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        no_apps_yet: false,
         on_demand: false,
         syslog_receivers: vec![],
         natives: Vec::new(),

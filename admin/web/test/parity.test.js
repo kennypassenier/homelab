@@ -23,6 +23,7 @@ import {
   todayView,
   transferView,
   versionNotes,
+  brokenView,
 } from "../js/parity.js";
 
 /** @param {string} action @param {Partial<import("../js/actionforms.js").CatalogEntry>} o */
@@ -293,7 +294,12 @@ test("the version warnings, the apply plan and a shell line in words", () => {
     ephemeral: [],
     broken: [["media", "latch failed"]],
   });
-  assert.match(blocked.blocked, /do not build/);
+  assert.match(blocked.blocked, /^1 stack does not build/);
+  assert.doesNotMatch(
+    blocked.blocked,
+    /\(s\)/,
+    "proper plurals, never stack(s)",
+  );
   assert.deepEqual(
     shellResult({ state: "done", message: "exit 0\n/dev/sda1 30G\n" }),
     {
@@ -406,4 +412,36 @@ test("fix-answer-days: the days ask only with accept, and accept asks the reason
     days: "30",
     note: "known",
   });
+});
+
+test("redesign-stacks: a stack that does not build reads as what, why and what to do — no temp path, no :: separators", () => {
+  const v = brokenView(
+    "notes",
+    "manifest parse: missing field `vmid` at line 3 :: fix that value in /tmp/homelab-wc-x1/repo/stacks/notes/lxc-compose.yml and run `homelab plan` again",
+  );
+  assert.equal(v.what, "notes does not build");
+  assert.equal(v.why, "manifest parse: missing field `vmid` at line 3");
+  assert.equal(
+    v.fix,
+    "Fix that value in stacks/notes/lxc-compose.yml and run `homelab plan` again.",
+  );
+  assert.doesNotMatch(`${v.why} ${v.fix}`, /\/tmp|::/);
+  const bare = brokenView(
+    "notes",
+    "cannot read /tmp/x/y/stacks/notes/lxc-compose.yml",
+  );
+  assert.equal(bare.why, "cannot read stacks/notes/lxc-compose.yml");
+  assert.match(bare.fix, /stacks\/notes/);
+  const two = applySummary({
+    deploy: [],
+    new: [],
+    unchanged: [],
+    destroy: [],
+    ephemeral: [],
+    broken: [
+      ["a", "x"],
+      ["b", "y"],
+    ],
+  });
+  assert.match(two.blocked, /^2 stacks do not build/);
 });

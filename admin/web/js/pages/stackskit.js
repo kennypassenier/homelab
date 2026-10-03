@@ -3,9 +3,9 @@
 // ui.js would give them, so they can move there when the pages are merged
 // (the brief: never edit ui.js from a page helper):
 //
-//   kpiStrip / kpi  ui.js's tile plus a `meter` (used of limit, 6 px bar),
-//                   a status `dot` before the context line and a 28 px
-//                   sparkline drawn from the trend
+//   kpiStrip        ui.js's own strip; only a tile's context line gains
+//                   a `meter` (used of limit, 6 px bar) or a status `dot`
+//                   (ui.js's Kpi should take both)
 //   segSwitch       a segmented view switch (Table / Cards), aria-pressed
 //   drawer          a side panel on a native <dialog> (DESIGN_LANGUAGE §6,
 //                   the shell's nx-drawer classes) with a head, body, foot
@@ -15,7 +15,7 @@
 //   ensureStyle     load a page's own stylesheet once
 
 import { h } from "../dom.js";
-import { sparkline } from "../ui.js";
+import { kpiStrip as uiKpiStrip } from "../ui.js";
 
 /** @param {string} href */
 export function ensureStyle(href) {
@@ -28,98 +28,69 @@ export function ensureStyle(href) {
 }
 
 /**
- * @typedef {{key?: string, label: string, value?: string, unit?: string,
- *   ctx?: string, tone?: "ok" | "warn" | "bad" | null, href?: string,
- *   spark?: number[], meter?: number | null, dot?: "ok" | "warn" | "bad",
- *   title?: string}} Kpi
+ * @typedef {import("../ui.js").Kpi & {meter?: number | null,
+ *   dot?: "ok" | "warn" | "bad"}} Kpi
  */
 
 /**
- * One KPI tile: label, value, a context line (with a status dot or a
- * used-of-limit meter in front), a sparkline; a link to its detail. `set`
- * repaints it in place, so the strip never reflows.
- * @param {Kpi} k
- * @returns {{el: HTMLElement, set: (k: Partial<Kpi>) => void}}
- */
-export function kpi(k) {
-  const label = h("span", { class: "nx-kpi__label" });
-  const value = h("span", { class: "nx-kpi__value" });
-  const ctx = h("span", { class: "nx-kpi__ctx sk-kpi__ctx" });
-  const spark = h("span", { class: "nx-kpi__spark", "aria-hidden": "true" });
-  const el = h(
-    k.href ? "a" : "div",
-    { class: "nx-kpi sk-kpi", ...(k.href ? { href: k.href } : {}) },
-    label,
-    value,
-    ctx,
-    spark,
-  );
-  /** @type {Kpi} */
-  let cur = { ...k };
-  const set = (/** @type {Partial<Kpi>} */ next) => {
-    cur = { ...cur, ...next };
-    label.textContent = cur.label;
-    value.replaceChildren(
-      cur.value ?? "—",
-      ...(cur.unit ? [h("small", null, cur.unit)] : []),
-    );
-    /** @type {Node[]} */
-    const parts = [];
-    if (cur.meter != null) {
-      const fill = h("span");
-      fill.style.inlineSize = `${Math.max(0, Math.min(100, cur.meter))}%`;
-      parts.push(
-        h(
-          "span",
-          {
-            class: `sk-meter${cur.tone === "bad" ? " sk-meter--bad" : cur.tone === "warn" ? " sk-meter--warn" : ""}`,
-            role: "meter",
-            "aria-valuenow": String(Math.round(cur.meter)),
-            "aria-valuemin": "0",
-            "aria-valuemax": "100",
-            "aria-label": `${cur.label}: ${Math.round(cur.meter)}%`,
-          },
-          fill,
-        ),
-      );
-    }
-    if (cur.dot) parts.push(h("span", { class: `sk-dot sk-dot--${cur.dot}` }));
-    if (cur.ctx) parts.push(h("span", { class: "sk-kpi__words" }, cur.ctx));
-    ctx.replaceChildren(...parts);
-    el.dataset.tone = cur.tone ?? "";
-    if (cur.title) el.title = cur.title;
-    spark.replaceChildren(
-      ...(cur.spark && cur.spark.length > 1 ? [sparkline(cur.spark)] : []),
-    );
-    if (cur.href && el instanceof HTMLAnchorElement) el.href = cur.href;
-  };
-  set({});
-  return { el, set };
-}
-
-/**
- * A row of 3 to 6 tiles; while `loading` each is its own skeleton in the
- * final geometry (rule 6).
+ * ui.js's KPI strip, with what the Stacks demo adds to a tile's context
+ * line: a used-of-limit `meter` (6 px bar) or a status `dot` before its
+ * words. Everything else is ui.js's own `kpiStrip` / `kpi`; only the
+ * context line is drawn here, after ui.js has drawn the tile.
  * @param {Kpi[]} tiles
  * @param {{loading?: boolean}} [opts]
- * @returns {{el: HTMLElement, tiles: Map<string, ReturnType<typeof kpi>>}}
+ * @returns {{el: HTMLElement, tiles: Map<string, {el: HTMLElement,
+ *   set: (k: Partial<Kpi>) => void}>}}
  */
 export function kpiStrip(tiles, opts = {}) {
-  /** @type {Map<string, ReturnType<typeof kpi>>} */
+  const strip = uiKpiStrip(tiles, opts);
+  strip.el.classList.add("sk-kpis");
+  strip.el.setAttribute("aria-label", "The host at a glance");
+  /** @type {Map<string, {el: HTMLElement, set: (k: Partial<Kpi>) => void}>} */
   const map = new Map();
-  const el = h("div", {
-    class: "nx-kpis sk-kpis",
-    role: "group",
-    "aria-label": "The host at a glance",
-  });
-  el.style.setProperty("--kpi-n", String(Math.max(1, tiles.length)));
   for (const t of tiles) {
-    const k = kpi(opts.loading ? { ...t, value: "" } : t);
-    if (opts.loading) k.el.dataset.loading = "";
-    map.set(t.key ?? t.label, k);
-    el.append(k.el);
+    const key = t.key ?? t.label;
+    const base = strip.tiles.get(key);
+    if (!base) continue;
+    base.el.classList.add("sk-kpi");
+    const ctx = /** @type {HTMLElement} */ (
+      base.el.querySelector(".nx-kpi__ctx")
+    );
+    ctx.classList.add("sk-kpi__ctx");
+    /** @type {Kpi} */
+    let cur = { ...t };
+    const set = (/** @type {Partial<Kpi>} */ next) => {
+      cur = { ...cur, ...next };
+      base.set(next);
+      /** @type {Node[]} */
+      const parts = [];
+      if (cur.meter != null) {
+        const fill = h("span");
+        fill.style.inlineSize = `${Math.max(0, Math.min(100, cur.meter))}%`;
+        parts.push(
+          h(
+            "span",
+            {
+              class: `sk-meter${cur.tone === "bad" ? " sk-meter--bad" : cur.tone === "warn" ? " sk-meter--warn" : ""}`,
+              role: "meter",
+              "aria-valuenow": String(Math.round(cur.meter)),
+              "aria-valuemin": "0",
+              "aria-valuemax": "100",
+              "aria-label": `${cur.label}: ${Math.round(cur.meter)}%`,
+            },
+            fill,
+          ),
+        );
+      }
+      if (cur.dot)
+        parts.push(h("span", { class: `sk-dot sk-dot--${cur.dot}` }));
+      if (cur.ctx) parts.push(h("span", { class: "sk-kpi__words" }, cur.ctx));
+      ctx.replaceChildren(...parts);
+    };
+    if (!opts.loading) set({});
+    map.set(key, { el: base.el, set });
   }
-  return { el, tiles: map };
+  return { el: strip.el, tiles: map };
 }
 
 /**
@@ -175,7 +146,7 @@ export function drawer(spec) {
     "button",
     {
       type: "button",
-      class: "kp-button kp-button--ghost kp-button--sm",
+      class: "kp-button kp-button--ghost kp-button--sm kp-dialog__close",
       "aria-label": "Close",
       title: "Close this panel (Esc)",
     },

@@ -252,7 +252,7 @@ test("redesign-stacks: the host strip has the demo's six tiles, each a link", ()
       "RAM",
       "Root disk",
       "Load (1 min)",
-      "Needs you",
+      "Inbox",
     ],
   );
   assert.ok(t.every((x) => x.href.startsWith("/")));
@@ -277,7 +277,7 @@ test("redesign-stacks: the verdict is absent when nothing waits, one sentence ot
   const one = verdict([{ title: "Backup missed", severity: "warn" }]);
   assert.deepEqual(one, {
     tone: "warn",
-    title: "1 thing needs you",
+    title: "1 item in the Inbox",
     text: "Backup missed",
   });
   const many = verdict([
@@ -285,22 +285,72 @@ test("redesign-stacks: the verdict is absent when nothing waits, one sentence ot
     { title: "x", severity: "warn" },
   ]);
   assert.equal(many?.tone, "bad");
-  assert.equal(many?.title, "2 things need you");
+  assert.equal(many?.title, "2 items in the Inbox");
   assert.equal(many?.text, "gateway is down · and 1 more");
 });
 
-test("redesign-stacks: Deploy all changes counts only what a comparison found", () => {
+test("redesign-stacks: Deploy all changes counts changed, gone and new stacks, as its plan does", () => {
   assert.equal(deployCount(null), null);
   assert.equal(deployCount({ measured_at: null, stacks: {} }), null);
+  // The server's own counts (the plan's) win.
+  assert.equal(
+    deployCount({
+      measured_at: 1,
+      stacks: {},
+      counts: { deploy: 3, new: 1, destroy: 1, broken: 2 },
+    }),
+    4,
+  );
+  // Without them: changed + gone + new; a stack that does not build is
+  // not deployed (it blocks), so it is not counted.
   assert.equal(
     deployCount({
       measured_at: 1,
       stacks: {
         a: { state: "changed" },
         b: { state: "same" },
-        c: { state: "changed" },
+        c: { state: "no_local_files" },
+        d: { state: "new" },
+        e: { state: "not_compared", why: "bad yaml" },
       },
     }),
-    2,
+    3,
   );
+});
+
+test("redesign-stacks: a stack gone from the files says it will be destroyed, one that does not build says so; both differ from files", () => {
+  const r = stackRows(fleet(), {
+    drift: {
+      gateway: { state: "no_local_files" },
+      "kp-soft": { state: "not_compared", why: "lxc-compose.yml: bad yaml" },
+    },
+    now: NOW,
+  });
+  const [gw, kp] = r;
+  const gone = gw.flags.find((f) => f.key === "gone");
+  assert.equal(gone?.label, "will be destroyed");
+  assert.equal(gone?.tone, "bad");
+  assert.equal(gw.drift, true);
+  const broken = kp.flags.find((f) => f.key === "broken");
+  assert.equal(broken?.label, "does not build");
+  assert.match(broken?.title ?? "", /bad yaml/);
+  assert.equal(kp.drift, true);
+  assert.equal(onlyCounts(r).drift, 2);
+  assert.notEqual(
+    gw.action.kind,
+    "deploy",
+    "a gone stack is never offered Deploy",
+  );
+});
+
+test("redesign-stacks: Stacks online links to the stacks not running, or to the Host page when all run", () => {
+  const off = hostStrip(fleet(), null, { count: 0, urgent: 0 })[0];
+  assert.equal(off.href, "/stacks?only=problems");
+  assert.match(off.title, /not running/);
+  const f = fleet();
+  f.stacks[1].online = true;
+  f.counts.online = 3;
+  const all = hostStrip(f, null, { count: 0, urgent: 0 })[0];
+  assert.equal(all.href, "/host");
+  assert.doesNotMatch(all.title, /not running/);
 });

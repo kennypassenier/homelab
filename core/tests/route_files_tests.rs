@@ -44,6 +44,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        no_apps_yet: false,
         on_demand: false,
         syslog_receivers: vec![],
         natives: Vec::new(),
@@ -103,6 +104,7 @@ fn extra(filename: &str, content: &str) -> GatewayRoute {
 fn spec(vmid: u16, stack: &str, extras: Vec<GatewayRoute>) -> DeploySpec {
     DeploySpec {
         secret_files: Vec::new(),
+        backup_first: false,
         client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_manifests: Default::default(),

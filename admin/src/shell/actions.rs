@@ -1720,7 +1720,7 @@ impl Actions {
         if plan_producing.clone().count() > 1 {
             let total: usize = plan_producing
                 .map(|c| match c {
-                    Command::DeployStack(_) => homelab_core::ops::deploy::STEPS.len(),
+                    Command::DeployStack(spec) => homelab_core::ops::deploy::plan_names(spec).len(),
                     Command::DestroyRecorded { stack, .. } => {
                         homelab_core::ops::destroy::destroy_plan_names(stack).len()
                     }
@@ -2303,6 +2303,7 @@ fn preview_line(a: &Actions, req: &ActionRequest, typed: bool) -> Result<String,
             {
                 Material::Manifest(m) => Material::Spec(Box::new(homelab_proto::DeploySpec {
                     secret_files: Vec::new(),
+                    backup_first: false,
                     client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
                     manifest: *m,
                     files: Vec::new(),

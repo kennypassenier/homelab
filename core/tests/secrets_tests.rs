@@ -22,6 +22,7 @@ fn spec_with_secret() -> DeploySpec {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        no_apps_yet: false,
         on_demand: false,
         syslog_receivers: vec![],
         firewall: None,
@@ -62,6 +63,7 @@ fn spec_with_secret() -> DeploySpec {
     env.insert("app".into(), format!("API_KEY={}\n", SECRET));
     DeploySpec {
         secret_files: Vec::new(),
+        backup_first: false,
         client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),

@@ -1065,6 +1065,7 @@ fn spec_without_binaries(
 
     Ok(DeploySpec {
         secret_files,
+        backup_first: false,
         source: None,
         manifest: stack_file.manifest,
         files,

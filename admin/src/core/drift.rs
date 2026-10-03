@@ -18,6 +18,10 @@ pub enum DriftState {
     NeverApplied,
     /// The local hash could not be computed (yet).
     NotCompared,
+    /// redesign-stacks-7: in the working copy, not on the host yet: the
+    /// next Deploy all changes creates its container. Dashboard only (the
+    /// TUI lists the host's stacks).
+    New,
 }
 
 impl DriftState {
@@ -28,6 +32,7 @@ impl DriftState {
             DriftState::NoLocalFiles => "unknown (no local files)",
             DriftState::NeverApplied => "unknown (nothing applied recorded)",
             DriftState::NotCompared => "not compared yet",
+            DriftState::New => "new: in the files, not on the host yet",
         }
     }
 }
@@ -41,5 +46,67 @@ pub fn drift_state(applied_hash: &str, local: Option<&Result<String, String>>) -
         Some(Err(_)) => DriftState::NotCompared,
         Some(Ok(h)) if h == applied_hash => DriftState::Same,
         Some(Ok(_)) => DriftState::Changed,
+    }
+}
+
+/// redesign-stacks-7 (3.71.0 review, "the differs-from-files count is
+/// wrong"): every stack the next Deploy all changes touches, in the same
+/// words as its plan (`applyview::plan`), so the Stacks page's count, its
+/// flags and the plan can never disagree. `host` is every stack the host
+/// records with the hash it applied; the others are `LocalStacks`' fields.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct DriftAnswer {
+    /// Per stack: its state and, for one that does not build, why.
+    pub stacks: std::collections::BTreeMap<String, (DriftState, Option<String>)>,
+    /// What Deploy all changes would do: deploy (new ones included),
+    /// create, destroy, and how many stacks block it by not building.
+    pub deploy: usize,
+    pub new: usize,
+    pub destroy: usize,
+    pub broken: usize,
+}
+
+pub fn drift_answer(
+    host: &[(String, String)],
+    hashes: &[(String, Result<String, String>)],
+    dirs: &[String],
+    ephemeral: &[String],
+) -> DriftAnswer {
+    let view = super::applyview::plan(hashes, dirs, host, ephemeral);
+    let mut stacks = std::collections::BTreeMap::new();
+    for (name, applied) in host {
+        let local = hashes.iter().find(|(n, _)| n == name).map(|(_, h)| h);
+        let mut state = drift_state(applied, local);
+        // "No local files" means gone from the files only when the plan
+        // destroys it; a directory that declares nothing (an ephemeral
+        // stack, a half-written one) is not compared, never "gone".
+        if state == DriftState::NoLocalFiles && !view.destroy.contains(name) {
+            state = DriftState::NotCompared;
+        }
+        stacks.insert(name.clone(), (state, None));
+    }
+    for n in &view.deploy {
+        let state = if view.new.contains(n) {
+            DriftState::New
+        } else {
+            DriftState::Changed
+        };
+        stacks.insert(n.clone(), (state, None));
+    }
+    for n in &view.destroy {
+        stacks.insert(n.clone(), (DriftState::NoLocalFiles, None));
+    }
+    for (n, why) in &view.broken {
+        stacks.insert(n.clone(), (DriftState::NotCompared, Some(why.clone())));
+    }
+    for n in &view.unchanged {
+        stacks.insert(n.clone(), (DriftState::Same, None));
+    }
+    DriftAnswer {
+        stacks,
+        deploy: view.deploy.len(),
+        new: view.new.len(),
+        destroy: view.destroy.len(),
+        broken: view.broken.len(),
     }
 }

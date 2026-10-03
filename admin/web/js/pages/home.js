@@ -141,22 +141,22 @@ export function mount(root) {
     ),
     STACKS,
   );
+  const watched = h(
+    "span",
+    {
+      class: "nx-live",
+      title: "The dashboard asks every app once a minute whether it answers",
+    },
+    "watched every minute",
+  );
   const head = pageHeader({
     title: "Apps",
     desc: "Every app the fleet runs, one click away. Type to find one, Enter opens it in a new tab; star the ones you use most.",
-    actions: [
-      h(
-        "span",
-        {
-          class: "nx-live",
-          title:
-            "The dashboard asks every app once a minute whether it answers",
-        },
-        "watched every minute",
-      ),
-      stacksLink,
-    ],
+    actions: [stacksLink],
   });
+  // As the demo: the live status beside the title, the link on the right.
+  head.title.after(watched);
+  head.el.classList.add("sk-head");
   const verdictDot = h("span", { class: "sk-dot" });
   const verdictText = h("strong", null, "Reading the apps…");
   const verdictAgo = agoEl("checked");
@@ -200,7 +200,7 @@ export function mount(root) {
       ["ok", "answers"],
       ["warn", "failing, not yet down"],
       ["bad", "down"],
-      ["info", "deploying (a known outage, no alarm)"],
+      ["info", "deploying"],
       ["", "not watched"],
     ].map(([tone, words]) =>
       h("span", { class: `sk-dot${tone ? ` sk-dot--${tone}` : ""}` }, words),
@@ -305,26 +305,32 @@ export function mount(root) {
     return a;
   };
 
+  // Loading: the grouped board the page fills in (22rem columns, a label
+  // per group), so nothing moves when the tiles arrive (rule 6).
   const paintLoading = () => {
     body.replaceChildren(
-      h(
-        "section",
-        { class: "ap-grp ap-grp--wide", "aria-label": "Reading the apps" },
+      ...[3, 2, 2].map((n, i) =>
         h(
-          "div",
+          "section",
           {
-            class: "ap-tiles",
-            role: "status",
+            class: "ap-grp ap-grp--skeleton",
             "aria-label": "Reading the apps",
+            role: "status",
             "data-kp-state": "loading",
+            ...(i === 0 ? {} : { "aria-hidden": "true" }),
           },
-          ...Array.from({ length: 6 }, () =>
-            h(
-              "div",
-              { class: "ap-tile ap-tile--skeleton" },
-              h("span", { class: "kp-skeleton" }),
-              h("span", { class: "kp-skeleton" }),
-              h("span", { class: "kp-skeleton" }),
+          h("h2", null, h("span", { class: "kp-skeleton" })),
+          h(
+            "div",
+            { class: "ap-tiles" },
+            ...Array.from({ length: n }, () =>
+              h(
+                "div",
+                { class: "ap-tile ap-tile--skeleton" },
+                h("span", { class: "kp-skeleton" }),
+                h("span", { class: "kp-skeleton" }),
+                h("span", { class: "kp-skeleton" }),
+              ),
             ),
           ),
         ),

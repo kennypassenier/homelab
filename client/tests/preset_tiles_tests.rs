@@ -139,3 +139,22 @@ fn the_default_preset_meta_still_scaffolds_the_custom_empty_stack() {
     let presets = homelab_client::scaffold::synthetic_presets();
     assert!(presets.iter().any(|p| p.name == "custom"));
 }
+
+/// redesign-stacks-8: a stack scaffolded with no preset (New stack's
+/// "Empty" route) is a real, parseable manifest with an empty app list —
+/// it used to write a bare `apps:` (null), which no plan could read.
+#[test]
+fn redesign_stacks_8_an_empty_stack_scaffolds_a_parseable_manifest_with_no_apps() {
+    let tmp = scratch("emptystack");
+    let unused = synth_preset("app", "nginx:latest", BTreeMap::new());
+    let p = StackParams {
+        preset: None,
+        ..params("blank", &unused)
+    };
+    scaffold_stack(&tmp, &tmp.join("presets"), &p).unwrap();
+    let text = std::fs::read_to_string(tmp.join("blank/lxc-compose.yml")).unwrap();
+    let m: StackManifest = serde_yaml::from_str(&text).unwrap();
+    assert!(m.apps.is_empty(), "{text}");
+    assert!(m.no_apps_yet, "it says its apps come later: {text}");
+    homelab_core::manifest::validate_manifest(&m).expect("an empty stack is valid");
+}

@@ -37,7 +37,9 @@ main.shell.hk-page > [hidden] {
 
 .hk-page .mono {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.9em;
+  /* fix-246's invariant: monospace never reads under 12 px (0.9em of a
+     small-text cell was 11.7 px in the Containers table). */
+  font-size: max(0.9em, 12px);
 }
 .hk-page .hk-muted {
   color: var(--muted-foreground);

@@ -4421,3 +4421,52 @@ test("invariants: Schedules page: Live view reaches the drawer and its fields, t
     await browser.close();
   }
 });
+
+// fix-233 (the 3.70.6 visual pass, proven here for the 3.71.0 Go): at phone
+// width a stack's tabs ran off the edge ("Ch…" cut, Settings out of reach).
+// The tab row scrolls sideways inside itself, every tab stays whole, and
+// the page itself never scrolls sideways.
+test("invariants: on a 390 px phone a stack's tab row scrolls inside itself with every tab whole, never the page", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 900 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/kp-soft`);
+    await page.locator(".kp-tabs__list .kp-tab").first().waitFor();
+    const r = await page.evaluate(() => {
+      const list = /** @type {HTMLElement} */ (
+        document.querySelector(".kp-tabs__list")
+      );
+      const tabs = [...list.querySelectorAll(".kp-tab")].map((t) => ({
+        name: (t.textContent ?? "").trim(),
+        cut: t.scrollWidth > t.clientWidth + 1,
+      }));
+      return {
+        overflowX: getComputedStyle(list).overflowX,
+        wider: list.scrollWidth > list.clientWidth + 1,
+        tabs,
+        pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
+      };
+    });
+    assert.ok(r.tabs.length >= 4, `only ${r.tabs.length} tabs found`);
+    assert.deepEqual(
+      r.tabs.filter((t) => t.cut).map((t) => t.name),
+      [],
+      "tabs cut short",
+    );
+    if (r.wider)
+      assert.ok(
+        ["auto", "scroll"].includes(r.overflowX),
+        `the tab row is wider than the phone but its overflow-x is ${r.overflowX}`,
+      );
+    assert.ok(
+      r.pageOverflow <= 1,
+      `the page scrolls sideways by ${r.pageOverflow} px`,
+    );
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+});

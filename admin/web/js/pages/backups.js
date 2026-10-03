@@ -21,6 +21,7 @@ import { openDialog } from "../actui.js";
 import { snapshotPickerRows } from "../snapshotpicker.js";
 import { snapshotFileUrl, snapshotFileView } from "../snapshotfile.js";
 import { stackChips, stackReadProgress, withStackResult } from "../perstack.js";
+import { declare, drivable } from "../drivable.js";
 import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
@@ -173,6 +174,17 @@ function verifyCell(stack, r) {
   return [btn];
 }
 
+// fix-239/241: "Show a file…" opens a page dialog (no catalog action), so
+// Live view reaches it as a declared control: `homelab ui click
+// snapshot-file <stack>/<app>`.
+const SNAPSHOT_FILE = declare({
+  id: "snapshot-file",
+  page: "backups",
+  opens: "dialog",
+  row: "<stack>/<app>",
+  what: "read one file of a snapshot without restoring anything",
+});
+
 /**
  * fix-241: "Show a file…" — one file of one snapshot of this app, read-only.
  * A native unit's snapshot is one tar stream, not a tree of files, so its
@@ -189,12 +201,12 @@ function fileCell(stack, native, r) {
     {
       class: "kp-button kp-button--sm kp-button--ghost",
       type: "button",
-      "data-action": "snapshot-file",
       title:
         "Read one file as this snapshot holds it, without restoring anything",
     },
     "Show a file…",
   );
+  drivable(btn, SNAPSHOT_FILE, `${stack}/${r.owner}`);
   btn.addEventListener("click", () => openFileDialog(stack, r));
   return [btn];
 }

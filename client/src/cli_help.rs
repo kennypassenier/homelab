@@ -87,6 +87,13 @@ pub const VERBS: &[Verb] = &[
     ),
     v(
         Daily,
+        "answer",
+        "[<operation>|<stack>|<question id>] allow|stop",
+        "answer a question a running operation is waiting on, from any terminal (the run that raised it may be headless); without a name it answers the one open question, and is refused when more are open",
+        "homelab answer deploy-mystack allow",
+    ),
+    v(
+        Daily,
         "status",
         "[--json]",
         "the fleet as the host records it, one line per stack (--json: the raw FleetState)",
@@ -397,7 +404,7 @@ pub const VERBS: &[Verb] = &[
         Dashboard,
         "ui",
         "<step> [--json]",
-        "one step in the dashboard: goto <path>, open <action> [stack], type <field> <text>, pick <field> <value>, check <field> on|off, press next|back|confirm, press confirm --wait (the press, then as finish), finish (waits for the open dialog's job to end, prints its outcome, then closes the dialog and hands the dashboard back at once), close, state, done, plan \"<step>\" … (the whole sequence up front); answers what is on screen once the step ran (a tab in Live view announces each step with a 3 s countdown, and a viewer may pause or stop it), and the final press runs the action once on the dashboard's side",
+        "one step in the dashboard: goto <path>, open <action> [stack], type <field> <text>, pick <field> <value>, check <field> on|off, press next|back|confirm, press confirm --wait (the press, then as finish), finish (waits for the open dialog's job to end, prints its outcome, then closes the dialog and hands the dashboard back at once), answer [operation] allow|stop (the banner's Allow/Stop for a running operation's question), close, state, done, plan \"<step>\" … (the whole sequence up front); answers what is on screen once the step ran (a tab in Live view announces each step with a 3 s countdown, and a viewer may pause or stop it), and the final press runs the action once on the dashboard's side",
         "homelab ui open deploy mystack",
     ),
     v(

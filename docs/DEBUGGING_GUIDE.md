@@ -722,13 +722,14 @@ The decision tree:
 
 During a deploy, the `service checks` step compares readings taken before and
 after. When one went down it asks instead of deciding
-(`core/src/ops/deploy.rs:2565-2589`). The command line prints the question
-and cannot answer it (`client/src/main.rs:1173-1182`). Because the CLI
-session is connected, the host waits the full `ask_timeout_s`, default 120 s
-(`host/src/main.rs:669-671`, `1739-1748`), then treats it as unattended and
-fails the step with the reason `nobody answered within 120s`
-(`core/src/ops/deploy.rs:2599-2610`). To decide instead, run the operation
-from `homelab tui`. When no client is connected at all, as in the nightly
+(`core/src/ops/deploy.rs:2565-2589`). A headless command line (stdin not a
+terminal, no `--answer`) prints the question and how to answer it elsewhere.
+The host raises it as an urgent notice (pushed) and waits `ask_timeout_s`,
+default 600 s (fix-240). Answer it from any other terminal with
+`homelab answer <operation> allow|stop` (or the stack, or the question id),
+from Live view with `homelab ui answer <operation> allow|stop`, or with the
+dashboard banner's Allow/Stop. Unanswered, the step fails with the reason
+`nobody answered within 10 min — the operation did not guess`. When no client is connected at all, as in the nightly
 round, the answer is immediately unattended
 (`host/src/main.rs:1720-1722`).
 

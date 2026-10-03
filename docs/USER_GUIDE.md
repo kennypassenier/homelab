@@ -366,10 +366,13 @@ before starting the TUI anywhere else:
   down, the host pauses and asks. Only `a` (allow) and `s` (stop) do anything
   until it is answered (`client/src/tui/model.rs:620-633`). The window
   shows `[a] allow` and `[s] stop` (`client/src/tui/view/focus.rs:138-142`).
-  Unanswered, it times out after `ask_timeout_s` seconds, 120 by default, and
-  counts as a stop (`host/src/main.rs:146-152,669-671`,
-  `core/src/ops/deploy.rs:2617-2659`). On the command line the question is
-  printed and cannot be answered there (`client/src/main.rs:1173-1182`).
+  Unanswered, it times out after `ask_timeout_s` seconds, 600 by default, and
+  fails the step (`host/src/main.rs:146-152,669-671`,
+  `core/src/ops/deploy.rs:2617-2659`). The question is also pushed as an
+  urgent notice. A headless command line prints it and how to answer it;
+  any other terminal answers it with `homelab answer <operation> allow|stop`,
+  Live view with `homelab ui answer <operation> allow|stop`, the dashboard
+  with its banner (fix-240).
 - **Typed confirmation** (restore): type the stack name and `ENTER`. Anything
   else answers `typed name does not match '<stack>' — nothing was done`
   (`client/src/tui/model.rs:1364-1392`).

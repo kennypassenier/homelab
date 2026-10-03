@@ -120,10 +120,13 @@ refused and the message ends in `"run 'homelab release-update' first"`
 (`client/src/main.rs:1203-1213`). `release-update` itself is exempt
 (`client/src/version.rs:15-30`).
 
-**Questions.** A step that must ask (for example, an app is in use) cannot
-be answered from the command line: the CLI prints the question and the host
-answers `Unattended` after `ask_timeout_s`, default 120 s
-(`client/src/main.rs:1173-1182`, `host/src/main.rs:669-671`, `:1750-1759`).
+**Questions.** A step that must ask (for example, an app is in use) is
+raised as an urgent notice and waits `ask_timeout_s`, default 600 s, then
+answers `Unattended` and fails (fix-240). A headless CLI run cannot answer
+its own question; `homelab answer <operation> allow|stop` from another
+terminal, `homelab ui answer <operation> allow|stop` in Live view or the
+dashboard banner can (`client/src/main.rs:1173-1182`,
+`host/src/main.rs:669-671`, `:1750-1759`).
 In the TUI the question takes the keyboard: `a` allows, `s` stops
 (`client/src/tui/model.rs:624-633`).
 

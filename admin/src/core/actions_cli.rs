@@ -230,6 +230,14 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
                 push(note)?;
             }
         }
+        // fix-240: answer a running operation's question from any session.
+        AnswerOpen { op, allow } => {
+            push("answer")?;
+            if let Some(op) = op {
+                push(op)?;
+            }
+            push(if *allow { "allow" } else { "stop" })?;
+        }
         BuildTemplate {
             temp_vmid,
             version,

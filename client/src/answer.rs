@@ -51,9 +51,87 @@ pub fn parse_pre_answer_flag(value: Option<&str>) -> Result<Option<bool>, String
     }
 }
 
+/// fix-240: the words after `homelab answer` (or `homelab ui answer`): one
+/// `allow` or `stop`, and at most one other word naming the question (its
+/// operation `deploy-media`, its subject `media`, or its id), in either
+/// order. No name answers the one open question; the host refuses when
+/// more than one is open.
+pub fn parse_answer_words(words: &[String]) -> Result<(Option<String>, bool), String> {
+    let usage = "usage: homelab answer [<operation>|<stack>|<question id>] allow|stop";
+    let choices: Vec<bool> = words
+        .iter()
+        .filter_map(|w| match w.as_str() {
+            "allow" => Some(true),
+            "stop" => Some(false),
+            _ => None,
+        })
+        .collect();
+    let names: Vec<&String> = words
+        .iter()
+        .filter(|w| !matches!(w.as_str(), "allow" | "stop"))
+        .collect();
+    match (choices.as_slice(), names.as_slice()) {
+        ([allow], []) => Ok((None, *allow)),
+        ([allow], [name]) => Ok((Some((*name).clone()), *allow)),
+        ([], _) => Err(format!("say allow or stop; {}", usage)),
+        _ => Err(usage.to_string()),
+    }
+}
+
+/// fix-240: what a run that cannot answer its own question prints, so the
+/// person (or Claude) reading its output knows how to answer it from
+/// elsewhere and how long there is.
+pub fn answer_elsewhere_hint(op: &str, wait_s: Option<u64>) -> String {
+    let within = wait_s
+        .map(|s| format!(" within {}", homelab_core::ask::wait_words(s)))
+        .unwrap_or_default();
+    format!(
+        "  no answer from here: answer it{} with `homelab answer {} allow|stop` \
+         (another terminal), `homelab ui answer {} allow|stop` or the dashboard's \
+         banner; `homelab <verb> --answer allow|stop` answers without waiting. \
+         Unanswered, the operation fails",
+        within, op, op
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn w(s: &str) -> Vec<String> {
+        s.split_whitespace().map(str::to_string).collect()
+    }
+
+    /// covers: fix-240
+    #[test]
+    fn fix_240_answer_words_take_one_choice_and_at_most_one_name() {
+        assert_eq!(parse_answer_words(&w("allow")), Ok((None, true)));
+        assert_eq!(
+            parse_answer_words(&w("deploy-media stop")),
+            Ok((Some("deploy-media".into()), false))
+        );
+        assert_eq!(
+            parse_answer_words(&w("allow media")),
+            Ok((Some("media".into()), true))
+        );
+        assert!(parse_answer_words(&w("media")).is_err());
+        assert!(parse_answer_words(&w("allow stop")).is_err());
+        assert!(parse_answer_words(&w("a b allow")).is_err());
+        assert!(parse_answer_words(&[]).is_err());
+    }
+
+    /// covers: fix-240
+    #[test]
+    fn fix_240_a_headless_run_says_how_to_answer_from_elsewhere() {
+        let hint = answer_elsewhere_hint("deploy-media", Some(600));
+        assert!(
+            hint.contains("homelab answer deploy-media allow|stop"),
+            "{hint}"
+        );
+        assert!(hint.contains("homelab ui answer deploy-media"), "{hint}");
+        assert!(hint.contains("within 10 min"), "{hint}");
+        assert!(hint.contains("fails"), "{hint}");
+    }
 
     #[test]
     fn fix_66_a_pre_answer_is_used_whatever_stdin_is() {

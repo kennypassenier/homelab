@@ -605,6 +605,14 @@ fn on_backend(model: &mut Model, ev: BackendEvent) {
                 model.status_line =
                     "the host is waiting for an answer — a to allow, s to stop".into();
             }
+            // fix-240: answered elsewhere (another session, Live view, the
+            // dashboard) or its wait ran out: the prompt for it goes.
+            ServerMsg::AskSettled { id, how, .. } => {
+                if model.pending_ask.as_ref().is_some_and(|a| a.id == id) {
+                    model.pending_ask = None;
+                    model.status_line = format!("the question is settled: {}", how);
+                }
+            }
             ServerMsg::Transfer {
                 label, done, total, ..
             } => {

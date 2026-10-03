@@ -71,7 +71,7 @@ watch_url = "http://10.10.10.20:8090/healthz"
 watch_stack = "admin"
 watch_interval_s = 60
 watch_down_after_s = 300
-ask_timeout_s = 120
+ask_timeout_s = 600
 
 # ── Coverage and monitoring ─────────────────────────────────────────────────
 prometheus_url = "http://10.10.10.13:9090"

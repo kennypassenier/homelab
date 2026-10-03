@@ -3224,7 +3224,7 @@ dialog.nx-drawer[open] {
   padding: 14px 20px;
   border-block-start: 1px solid var(--border);
 }
-@media (max-width: 40rem) {
+@media (max-width: 48rem) {
   dialog.nx-drawer {
     inline-size: 100vw;
   }
@@ -3251,7 +3251,7 @@ dialog.nx-drawer[open] {
 .nx-head .nx-crumbs {
   margin-block-end: var(--kp-space-sm, 8px);
 }
-.nx-head .title-row > h1 {
+.nx-head .title-row > :is(h1, h2) {
   margin: 0;
   font-size: min(var(--kp-text-display, 2.25rem), 2.25rem);
   line-height: 1.1;
@@ -3268,13 +3268,63 @@ dialog.nx-drawer[open] {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+/* The header's actions are one row against the right edge (fix-245's
+   title-row rule), never `.actions-row`'s 13 rem column grid. */
+.nx-head-right > .actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .nx-head-right > .actions-row:empty {
   display: none;
 }
-@media (max-width: 30rem) {
-  .title-row > h1 ~ .nx-head-right,
+@media (max-width: 48rem) {
+  .title-row > :is(h1, h2) ~ .nx-head-right,
   .nx-head-right > .actions-row {
     justify-content: flex-start;
+  }
+}
+/* On a narrow screen the header reads top to bottom as the demos draw it:
+   the title with its live status beside it, the one-sentence description,
+   then the actions. The markup keeps the title row (the whole-screen
+   checks read `.title-row` and the `p` after it); only the boxes are laid
+   out in this order. */
+@media (max-width: 48rem) {
+  .nx-head:not(.nx-head--meta, .nx-head--split) {
+    display: grid;
+    grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+    column-gap: var(--kp-space-md, 12px);
+    align-items: center;
+  }
+  .nx-head:not(.nx-head--meta, .nx-head--split) > .title-row,
+  .nx-head:not(.nx-head--meta, .nx-head--split) > .title-row > .nx-head-right {
+    display: contents;
+  }
+  .nx-head:not(.nx-head--meta, .nx-head--split) > .nx-crumbs {
+    grid-column: 1 / -1;
+    order: 0;
+  }
+  .nx-head:not(.nx-head--meta, .nx-head--split) > .title-row > :is(h1, h2) {
+    grid-column: 1;
+    order: 1;
+  }
+  .nx-head:not(.nx-head--meta, .nx-head--split) .nx-head-right > .nx-live {
+    grid-column: 2;
+    justify-self: start;
+    order: 2;
+  }
+  .nx-head:not(.nx-head--meta, .nx-head--split) > .nx-head-desc {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+  .nx-head:not(.nx-head--meta, .nx-head--split)
+    .nx-head-right
+    > .nx-head-actions {
+    grid-column: 1 / -1;
+    order: 4;
+    justify-content: flex-start;
+    margin-block-start: var(--kp-space-md, 12px);
   }
 }
 .nx-live {
@@ -3295,6 +3345,69 @@ dialog.nx-drawer[open] {
 .nx-live:has([data-stale="true"])::before {
   background: var(--nx-warn);
 }
+.nx-live[data-state="none"]::before {
+  background: var(--muted-foreground);
+}
+.nx-live[data-state="failed"]::before {
+  background: var(--nx-bad);
+}
+
+/* -- the split header (pageHeader({split: true}), next.css's): the live
+      status beside the title, the actions spanning title and description
+      against the right edge; one column on a phone, actions last -- */
+.nx-head--split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "title actions" "desc actions";
+  column-gap: var(--kp-space-xl);
+  align-items: end;
+}
+.nx-head--split:has(> .nx-crumbs) {
+  grid-template-areas: "crumbs crumbs" "title actions" "desc actions";
+}
+.nx-head--split > .nx-crumbs {
+  grid-area: crumbs;
+}
+.nx-head--split > .title-row {
+  grid-area: title;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--kp-space-sm) var(--kp-space-md);
+}
+.nx-head--split > .title-row > :is(h1, h2) {
+  letter-spacing: -0.01em;
+}
+.nx-head--split > .title-row > .nx-live {
+  padding-inline-end: var(--kp-space-sm);
+}
+.nx-head--split > .nx-head-desc {
+  grid-area: desc;
+  font-size: var(--kp-text-md);
+}
+.nx-head--split > .nx-head-actions.actions-row {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--kp-space-sm);
+}
+@media (max-width: 48rem) {
+  .nx-head--split,
+  .nx-head--split:has(> .nx-crumbs) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "crumbs" "title" "desc" "actions";
+  }
+  .nx-head--split > .nx-head-actions.actions-row {
+    justify-content: flex-start;
+    margin-block-start: var(--kp-space-md);
+  }
+  .nx-head--split > .nx-head-actions > .kp-button--primary {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+}
 
 /* -- KPI strip (DESIGN_LANGUAGE §1.2) -- */
 .nx-kpis {
@@ -3307,7 +3420,7 @@ dialog.nx-drawer[open] {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
-@media (max-width: 30rem) {
+@media (max-width: 48rem) {
   .nx-kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--kp-space-sm, 8px);
@@ -3359,6 +3472,12 @@ a.nx-kpi:hover {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* A context line led by a status dot wraps under its dot rather than
+   being cut off in a narrow tile. */
+.nx-kpi__ctx > .nx-dot {
+  white-space: normal;
+  align-items: baseline;
+}
 .nx-kpi[data-tone="warn"] {
   box-shadow: inset 3px 0 0 var(--nx-warn);
 }
@@ -3371,17 +3490,6 @@ a.nx-kpi:hover {
 }
 .nx-kpi[data-tone="bad"] .nx-kpi__value {
   color: var(--nx-bad);
-}
-.nx-kpi[data-loading] .nx-kpi__value {
-  border-radius: 4px;
-  background: var(--muted);
-  color: transparent;
-  animation: nx-pulse 1.4s ease-in-out infinite;
-}
-@keyframes nx-pulse {
-  50% {
-    opacity: 0.55;
-  }
 }
 .nx-spark {
   display: block;
@@ -3425,6 +3533,21 @@ a.nx-kpi:hover {
   font-weight: 700;
   background: color-mix(in oklab, currentColor 14%, transparent);
 }
+/* A "bad" item is a soft red tint with a red border and the page's own
+   text colour (the ops-kit demos), never kp-alert's solid destructive
+   plate with white text. */
+.nx-attention__item.kp-alert--destructive {
+  background: color-mix(in oklab, var(--nx-bad) 8%, var(--card));
+  color: var(--foreground);
+  border-color: color-mix(in oklab, var(--nx-bad) 45%, var(--nx-line));
+}
+.nx-attention__item.kp-alert--destructive .nx-attention__icon {
+  background: var(--nx-bad);
+  color: var(--destructive-foreground);
+}
+.nx-attention__item.kp-alert--destructive .nx-attention__text span {
+  color: var(--muted-foreground);
+}
 .nx-attention__text strong {
   display: block;
 }
@@ -3437,7 +3560,7 @@ a.nx-kpi:hover {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-@media (max-width: 30rem) {
+@media (max-width: 48rem) {
   .nx-attention__item {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -3557,9 +3680,6 @@ a.nx-kpi:hover {
 .nx-tb__active[hidden] {
   display: none;
 }
-.nx-tb__chip {
-  cursor: pointer;
-}
 @media (max-width: 48rem) {
   .nx-tb,
   .nx-tb--nosearch {
@@ -3604,6 +3724,12 @@ a.nx-kpi:hover {
   font-size: var(--kp-text-sm);
   color: var(--muted-foreground);
 }
+/* A card's description sits right under its title (next.css); the
+   2 px of `.section-head__desc` is for loose section heads, and the
+   ops-kit look restates its own below. */
+.nx-card__head > p.section-head__desc {
+  margin-block-start: 0 !important;
+}
 .nx-card__tools {
   grid-row: 1 / span 2;
   grid-column: 2;
@@ -3643,6 +3769,17 @@ details.nx-card--fold[open] > summary::before {
 .hub-part + .nx-card,
 .nx-card + .nx-card {
   margin-block-start: var(--section-gap);
+}
+/* `section({plain: true})`: a flat card, drawn without kp-card (no
+   corner cut or glow in the dark themes) — next.css's card; `.nx-ops`
+   restates its padding, rows and line for the ops-kit look. */
+.nx-card--plain {
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--nx-radius);
+  padding: var(--nx-pad);
+  grid-template-rows: auto 1fr auto;
 }
 
 /* -- loading, empty (DESIGN_LANGUAGE §7) -- */
@@ -3730,7 +3867,7 @@ details.nx-card--fold[open] > summary::before {
   gap: 8px;
   justify-content: flex-end;
 }
-@media (max-width: 40rem) {
+@media (max-width: 48rem) {
   .nx-inbox__row {
     grid-template-columns: 10px minmax(0, 1fr);
   }
@@ -4018,97 +4155,40 @@ details.nx-card--fold[open] > summary::before {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-@media (prefers-reduced-motion: reduce) {
-  .nx-spin,
-  .nx-kpi[data-loading] .nx-kpi__value {
-    animation: none;
-  }
-  details.nx-card--fold > summary::before {
-    transition: none;
-  }
+/* -- redesign-kit-1: the blocks the Backups, Host, Schedules and Secrets
+      pages brought along (their local kits), now ui.js's. -- */
+:root {
+  --nx-line: color-mix(in oklab, var(--border) 85%, transparent);
+  --nx-soft: color-mix(in oklab, var(--muted) 55%, var(--card));
+  --nx-r-sm: calc(var(--radius, 0.5rem) * 0.6);
 }
-/* ==== END redesign 3.71.0 foundation ==== */
-
-/* ── redesign-backups: the Backups page (redesign 3.71, the approved demo
-   `redesign-3.71/backups.html`). Tokens only. The first block is the
-   page's own copy of the foundation's shared pieces (page header, KPI
-   strip, attention band, cards, hover card, chips; `pages/backupskit.js`):
-   delete it when the page moves onto the foundation's shell. ────────── */
-.bk-head .title-row {
-  align-items: center;
+.nx-live > [hidden] {
+  display: none;
 }
-.bk-head__right {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px 12px;
+.nx-live[data-state="busy"]::before {
+  background: var(--nx-info, var(--primary));
 }
-.bk-head__actions.actions-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
+.nx-sk {
+  display: inline-block;
+  block-size: 0.9em;
+  vertical-align: middle;
+  border-radius: 4px;
 }
-@media (min-width: 30.01rem) {
-  .bk-card__tools {
-    flex-wrap: nowrap;
-  }
-}
-.bk-head .title-row > h1 {
-  margin: 0;
-  font-size: min(var(--kp-text-display, 2.25rem), 2.25rem);
-  line-height: 1.1;
-}
-main.shell > .bk-head > .bk-head__desc,
-.bk-head__desc {
-  margin: 6px 0 0;
-  color: var(--muted-foreground);
-  max-width: 70ch;
-}
-.bk-live {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--kp-text-sm, 0.875rem);
-  color: var(--muted-foreground);
+.nx-vh {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
   white-space: nowrap;
 }
-.bk-live::before {
-  content: "";
-  inline-size: 8px;
-  block-size: 8px;
-  border-radius: 50%;
-  background: var(--muted-foreground);
-}
-.bk-live[data-state="ok"]::before {
-  background: var(--success-foreground);
-}
-.bk-live[data-state="busy"]::before {
-  background: var(--info-foreground, var(--primary));
-}
-@media (max-width: 30rem) {
-  .bk-head__right {
-    justify-content: flex-start;
-    flex-basis: 100%;
-  }
-  .bk-head__actions {
-    display: grid !important;
-    grid-template-columns: 1fr 1fr;
-    inline-size: 100%;
-  }
-  .bk-head__actions > .kp-button--primary {
-    grid-column: 1 / -1;
-    order: -1;
-  }
-}
-.bk-dot {
+.nx-dot {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--kp-space-xs);
   white-space: nowrap;
 }
-.bk-dot::before {
+.nx-dot::before {
   content: "";
   inline-size: 8px;
   block-size: 8px;
@@ -4116,291 +4196,371 @@ main.shell > .bk-head > .bk-head__desc,
   background: var(--muted-foreground);
   flex: none;
 }
-.bk-dot--ok::before {
-  background: var(--success-foreground);
+.nx-dot--ok::before {
+  background: var(--nx-ok);
 }
-.bk-dot--warn::before {
-  background: var(--warning-foreground);
+.nx-dot--warn::before {
+  background: var(--nx-warn);
 }
-.bk-dot--bad::before {
-  background: var(--destructive);
+.nx-dot--bad::before {
+  background: var(--nx-bad);
 }
-.bk-kpis {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-  gap: var(--kp-space-md, 0.75rem);
+.nx-swatch {
+  inline-size: 10px;
+  block-size: 10px;
+  border-radius: 3px;
+  flex: none;
+  display: inline-block;
+  background: var(--c, var(--chart-1));
 }
-.bk-kpi {
-  position: relative;
-  display: grid;
-  grid-template-rows: auto auto auto;
-  gap: 4px;
-  min-width: 0;
-  padding: var(--kp-space-md, 0.75rem) var(--kp-space-lg, 1rem);
+/* a small status chip (ui.js `chip`): a count or a state word */
+.nx-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--kp-space-xs);
+  padding: 1px var(--kp-space-sm);
+  border-radius: 999px;
+  font-size: var(--kp-text-xs);
+  font-weight: 500;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  color: var(--muted-foreground);
   background: var(--card);
-  color: var(--card-foreground, inherit);
+  white-space: nowrap;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+.nx-chip--warn {
+  background: var(--warning);
+  color: var(--warning-foreground);
+  border-color: transparent;
+}
+.nx-chip--bad {
+  background: var(--destructive);
+  color: var(--destructive-foreground, var(--background));
+  border-color: transparent;
+}
+.nx-chip--ok {
+  color: var(--nx-ok);
+}
+.nx-chip--info,
+.nx-chip--live {
+  color: var(--nx-info);
+}
+.nx-chip--dot::before {
+  content: "";
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+/* a row's share of a whole (ui.js `shareBar`): bar, then its number */
+.nx-share {
+  display: grid;
+  grid-template-columns: minmax(3rem, 1fr) auto;
+  gap: var(--kp-space-sm);
+  align-items: center;
+}
+.nx-share__bar {
+  display: block;
+  block-size: 6px;
+  border-radius: 3px;
+  background: var(--muted);
+  overflow: hidden;
+}
+.nx-share__bar > i {
+  display: block;
+  block-size: 100%;
+  background: var(--c, var(--chart-1));
+}
+.nx-share__num {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--kp-text-sm);
+}
+/* a block's error state (ui.js `failBox`), in the block's own footprint */
+.nx-fail .kp-alert__body {
+  display: grid;
+  gap: var(--kp-space-xs);
+  justify-items: start;
+}
+.nx-fail p {
+  margin: 0;
+}
+/* A key printed inside a button sits apart from its label. */
+.kp-button > .nx-kbd {
+  margin-inline-start: var(--kp-space-xs);
+}
+
+/* the page header with a meta row: title, description and meta on the
+   left, the actions against the right edge spanning all three rows */
+.nx-head--meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "t a" "d a" "m a";
+  column-gap: var(--kp-space-xl);
+  row-gap: var(--kp-space-xs);
+  align-items: start;
+}
+.nx-head--meta:has(> .nx-crumbs) {
+  grid-template-areas: "c c" "t a" "d a" "m a";
+}
+.nx-head--meta > .nx-crumbs {
+  grid-area: c;
+}
+.nx-head--meta > :is(h1, h2) {
+  grid-area: t;
+  margin: 0;
+  font-size: min(var(--kp-text-display, 2.25rem), 2.25rem);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+.nx-head-sub {
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+.nx-head--meta > .nx-head-desc {
+  grid-area: d;
+  margin: 0 !important;
+  color: var(--muted-foreground);
+  max-inline-size: 72ch;
+}
+.nx-head-meta {
+  grid-area: m;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kp-space-sm) var(--kp-space-lg);
+  align-items: center;
+  margin-block-start: var(--kp-space-xs);
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.nx-head-meta .measured {
+  margin: 0;
+}
+/* In the ops look the live status reads as one more fact of the row: a
+   plain line of text, no dot. */
+.nx-ops .nx-head-meta > .nx-live {
+  display: block;
+}
+.nx-ops .nx-head-meta > .nx-live > .measured {
+  display: inline;
+}
+.nx-ops .nx-head-meta > .nx-live::before {
+  display: none;
+}
+.nx-head--meta > .nx-head-actions.actions-row {
+  grid-area: a;
+  display: flex;
+  gap: var(--kp-space-sm);
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-self: center;
+}
+@media (max-width: 48rem) {
+  .nx-head--meta {
+    grid-template-columns: 1fr;
+    grid-template-areas: "t" "d" "m" "a";
+  }
+  .nx-head--meta:has(> .nx-crumbs) {
+    grid-template-areas: "c" "t" "d" "m" "a";
+  }
+  .nx-head--meta > .nx-head-actions.actions-row {
+    justify-content: flex-start;
+    margin-block-start: var(--kp-space-sm);
+  }
+  .nx-head--meta > .nx-head-actions > .kp-button--primary {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+}
+
+/* KPI: a tile with no trend row, a tile that toggles a filter, a meter */
+.nx-kpi--bare {
+  grid-template-rows: auto auto auto;
+}
+.nx-kpi {
+  position: relative;
+}
+.nx-kpi--toggle {
   font: inherit;
   text-align: start;
-}
-.bk-kpi--toggle {
   cursor: pointer;
-  transition: border-color 150ms cubic-bezier(0.2, 0, 0.38, 0.9);
+  transition: border-color 150ms var(--nx-ease);
 }
-.bk-kpi--toggle:hover {
+.nx-kpi--toggle:hover {
   border-color: var(--ring);
 }
-.bk-kpi--toggle[aria-pressed="true"] {
+.nx-kpi--toggle[aria-pressed="true"] {
   border-color: var(--primary);
   box-shadow: inset 0 0 0 1px var(--primary);
 }
-.bk-kpi__label {
-  font-size: var(--kp-text-xs, 0.75rem);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted-foreground);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.bk-kpi__hint {
+.nx-kpi__hint {
   position: absolute;
-  inset-block-start: 10px;
-  inset-inline-end: 12px;
-  font-size: var(--kp-text-xs, 0.75rem);
+  inset-block-start: var(--kp-space-sm);
+  inset-inline-end: var(--kp-space-md);
+  font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
 }
-.bk-kpi__hint:empty {
+.nx-kpi__hint:empty {
   display: none;
 }
-.bk-kpi__value {
-  font-size: 1.75rem;
-  font-weight: 600;
-  line-height: 1.15;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  min-block-size: 1.15em;
-}
-.bk-kpi__value small {
-  font-size: 0.55em;
-  font-weight: 500;
-  color: var(--muted-foreground);
-  margin-inline-start: 4px;
-}
-.bk-kpi__ctx {
-  font-size: var(--kp-text-sm, 0.875rem);
-  color: var(--muted-foreground);
-  min-block-size: 1.4em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.bk-kpi[data-tone="warn"] {
-  border-color: color-mix(
-    in oklab,
-    var(--warning-foreground) 45%,
-    var(--border)
-  );
-}
-.bk-kpi[data-tone="warn"] .bk-kpi__value {
-  color: var(--warning-foreground);
-}
-.bk-kpi[data-tone="bad"] {
-  border-color: color-mix(in oklab, var(--destructive) 45%, var(--border));
-}
-.bk-kpi[data-tone="bad"] .bk-kpi__value {
-  color: var(--destructive);
-}
-@media (max-width: 30rem) {
-  .bk-kpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--kp-space-sm, 0.5rem);
-  }
-  .bk-kpis > :last-child:nth-child(odd) {
-    grid-column: 1 / -1;
-  }
-  .bk-kpi__value {
-    font-size: 1.4rem;
-  }
-  .bk-kpi__hint {
+@media (max-width: 48rem) {
+  .nx-kpi__hint {
     display: none;
   }
 }
-.bk-attention {
-  display: grid;
-  gap: var(--kp-space-sm, 0.5rem);
+.nx-meter {
+  display: block;
+  block-size: 6px;
+  border-radius: 3px;
+  background: var(--muted);
+  position: relative;
+  align-self: center;
 }
-.bk-attention[hidden] {
-  display: none;
+.nx-meter > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--chart-1);
+  border-radius: 3px;
 }
-.bk-attention__item.kp-alert {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--kp-space-md, 0.75rem);
-  margin: 0;
+.nx-meter > b {
+  position: absolute;
+  inset-block: -3px;
+  inline-size: 2px;
+  background: var(--foreground);
+  opacity: 0.7;
 }
-.bk-attention__icon {
-  inline-size: 28px;
-  block-size: 28px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-weight: 700;
-  background: color-mix(in oklab, currentColor 14%, transparent);
+.nx-meter--warn > i {
+  background: var(--nx-warn);
 }
-.bk-attention__text {
-  display: grid;
-  gap: 2px;
+.nx-meter--bad > i {
+  background: var(--nx-bad);
 }
-.bk-attention__text span {
-  font-size: var(--kp-text-sm, 0.875rem);
-}
-@media (max-width: 30rem) {
-  .bk-attention__item.kp-alert {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-  .bk-attention__act {
-    grid-column: 1 / -1;
-  }
-}
-.bk-card.kp-card {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  gap: var(--kp-space-md, 0.75rem);
-  min-width: 0;
-  margin: 0;
-  padding: var(--kp-space-lg, 1rem);
-}
-.bk-card__head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px var(--kp-space-md, 0.75rem);
-  align-items: start;
-}
-.bk-card__head h2 {
-  margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-  line-height: 1.3;
-}
-.bk-card__desc {
-  grid-column: 1;
-  margin: 0;
-  font-size: var(--kp-text-sm, 0.875rem);
-  color: var(--muted-foreground);
-}
-.bk-card__tools {
-  grid-row: 1 / span 2;
-  grid-column: 2;
-  display: flex;
-  gap: var(--kp-space-sm, 0.5rem);
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-.bk-card__body {
-  display: grid;
-  gap: var(--kp-space-sm, 0.5rem);
-  align-content: start;
-  min-width: 0;
-}
-.bk-card__foot {
+
+/* a card's foot line, and the chevron a folded card shows in its tools */
+.nx-card__foot {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
   gap: var(--kp-space-md, 0.75rem);
-  font-size: var(--kp-text-xs, 0.75rem);
+  font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
   border-block-start: 1px solid var(--border);
   padding-block-start: var(--kp-space-sm, 0.5rem);
 }
-.bk-card__foot[hidden] {
+.nx-card__foot[hidden] {
   display: none;
 }
-details.bk-card > summary {
-  list-style: none;
-  cursor: pointer;
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  gap: 2px 10px;
-  align-items: start;
+.nx-card__foot .measured {
+  margin: 0;
 }
-details.bk-card > summary::-webkit-details-marker {
+.nx-chev,
+.nx-card__tools:has(> .nx-chev:only-child) {
   display: none;
 }
-details.bk-card > summary::before {
-  content: "";
-  inline-size: 8px;
-  block-size: 8px;
-  margin-block-start: 0.55em;
-  border-inline-end: 2px solid currentColor;
-  border-block-end: 2px solid currentColor;
-  transform: rotate(-45deg);
-  transition: transform 150ms cubic-bezier(0.2, 0, 0.38, 0.9);
-}
-details.bk-card[open] > summary::before {
-  transform: rotate(45deg);
-}
-details.bk-card:not([open]) {
-  grid-template-rows: auto;
-}
-details.bk-card > summary .bk-card__head {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-details.bk-card > summary .bk-count {
-  grid-row: 1;
-  grid-column: 2;
-}
-@media (max-width: 30rem) {
-  .bk-card__head {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .bk-card__tools {
-    grid-row: auto;
-    grid-column: 1;
-    justify-content: flex-start;
-  }
-}
-.bk-tip {
-  position: fixed;
-  z-index: 50;
-  pointer-events: none;
-  max-inline-size: 24rem;
-  display: grid;
-  gap: 4px;
-  padding: 10px 12px;
+
+/* segmented plain-click toggles (toggleGroup, segSwitch) */
+.nx-seg {
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(max-content, 1fr);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--popover, var(--card));
-  color: var(--popover-foreground, var(--foreground));
-  font-size: var(--kp-text-sm, 0.875rem);
-  box-shadow: 0 10px 28px -8px
-    color-mix(in oklab, var(--foreground) 30%, transparent);
+  border-radius: var(--nx-radius);
+  background: var(--nx-soft);
+  padding: 3px;
+  gap: 2px;
 }
-.bk-tip[hidden] {
+.nx-seg button {
+  all: unset;
+  cursor: pointer;
+  text-align: center;
+  padding: var(--kp-space-xs) var(--kp-space-md);
+  border-radius: var(--nx-r-sm);
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.nx-seg button:hover {
+  color: var(--foreground);
+}
+.nx-seg button[aria-pressed="true"] {
+  background: var(--card);
+  color: var(--foreground);
+  font-weight: 600;
+  box-shadow:
+    0 1px 2px color-mix(in oklab, var(--foreground) 14%, transparent),
+    0 0 0 1px var(--nx-line);
+}
+.nx-seg button:focus-visible {
+  outline: 2px solid var(--ring);
+}
+.nx-seg__count {
+  margin-inline-start: var(--kp-space-xs);
+  padding: 0 var(--kp-space-xs);
+  border-radius: 999px;
+  background: var(--muted);
+  font-size: 0.72rem;
+}
+.nx-seg__count:empty {
   display: none;
 }
-.bk-tip b {
-  font-weight: 600;
+
+/* sortable headers: a plain table's (sortableTable), a kept order's
+   (sortHead) */
+th.nx-sortable {
+  cursor: pointer;
+  user-select: none;
 }
-.bk-tip__ids {
-  color: var(--muted-foreground);
-  overflow-wrap: anywhere;
+th.nx-sortable::after {
+  content: " " attr(data-mark);
+  opacity: 0.35;
+  font-size: 0.9em;
 }
-.bk-chip {
+th.nx-sortable:is([aria-sort="ascending"], [aria-sort="descending"])::after {
+  opacity: 1;
+}
+th.nx-sortable:hover {
+  color: var(--foreground);
+}
+th.nx-sortable:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.nx-sort {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  gap: var(--kp-space-xs);
+  align-items: center;
+}
+.nx-sort:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.nx-sort__mark {
+  opacity: 0.45;
+}
+th[aria-sort="ascending"] .nx-sort__mark,
+th[aria-sort="descending"] .nx-sort__mark {
+  opacity: 1;
+  color: var(--primary);
+}
+
+/* an active filter as a chip with its × */
+.nx-filterchip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 4px 2px 10px;
+  gap: var(--kp-space-xs);
+  padding: 2px var(--kp-space-xs) 2px var(--kp-space-sm);
   border-radius: 999px;
   background: var(--accent);
   color: var(--accent-foreground);
-  font-size: var(--kp-text-xs, 0.75rem);
+  font-size: var(--kp-text-xs);
   font-weight: 500;
 }
-.bk-chip button {
+.nx-filterchip button {
   all: unset;
   cursor: pointer;
   inline-size: 18px;
@@ -4409,37 +4569,469 @@ details.bk-card > summary .bk-count {
   place-items: center;
   border-radius: 50%;
 }
-.bk-chip button:hover {
+.nx-filterchip button:hover {
   background: color-mix(in oklab, currentColor 15%, transparent);
 }
-.bk-chip button:focus-visible {
+.nx-filterchip button:focus-visible {
   outline: 2px solid var(--ring);
 }
-.bk-mark {
-  inline-size: 10px;
-  block-size: 10px;
-  border-radius: 3px;
-  flex: none;
-  display: inline-block;
-  background: light-dark(
-    hsl(var(--stack-hue, 210) 65% 42%),
-    hsl(var(--stack-hue, 210) 70% 64%)
-  );
-}
-.bk-kbd {
-  font: 500 var(--kp-text-xs, 0.75rem) / 1
-    var(--kp-mono-face, var(--font-mono, ui-monospace, monospace));
+
+/* the hover card */
+.nx-tip {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  max-inline-size: 24rem;
+  display: grid;
+  gap: var(--kp-space-xs);
+  padding: var(--kp-space-sm) var(--kp-space-md);
   border: 1px solid var(--border);
-  border-block-end-width: 2px;
-  border-radius: 4px;
-  padding: 2px 5px;
+  border-radius: 8px;
+  background: var(--popover, var(--card));
+  color: var(--popover-foreground, var(--foreground));
+  font-size: var(--kp-text-sm);
+  box-shadow: 0 10px 28px -8px
+    color-mix(in oklab, var(--foreground) 30%, transparent);
+}
+.nx-tip[hidden] {
+  display: none;
+}
+.nx-tip b {
+  font-weight: 600;
+}
+.nx-tip .nx-dot {
+  white-space: normal;
+}
+.nx-tip__hint {
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+  margin-block-start: 2px;
+}
+
+/* toasts, inside #page so Live view reaches their Undo */
+.nx-toasts {
+  position: fixed;
+  inset-block-end: var(--kp-space-xl);
+  inset-inline-end: auto;
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: grid;
+  gap: var(--kp-space-sm);
+  justify-items: center;
+  pointer-events: none;
+}
+.nx-toast {
+  pointer-events: auto;
+  border: 0;
+  display: flex;
+  gap: var(--kp-space-lg);
+  align-items: center;
+  padding: var(--kp-space-md) var(--kp-space-lg);
+  border-radius: var(--nx-radius);
+  background: var(--foreground);
+  color: var(--background);
+  font-size: var(--kp-text-sm);
+  box-shadow: 0 12px 32px
+    color-mix(in oklab, var(--foreground) 30%, transparent);
+  max-inline-size: calc(100vw - 32px);
+}
+.nx-toast__act {
+  all: unset;
+  cursor: pointer;
+  font-weight: 700;
+  text-decoration: underline;
+}
+.nx-toast__act:focus-visible {
+  outline: 2px solid var(--background);
+}
+
+/* a row's menu: a non-modal dialog */
+dialog.nx-rowmenu {
+  position: absolute;
+  inset: auto;
+  margin: 0;
+  z-index: 50;
+  inline-size: 260px;
+  box-sizing: border-box;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--nx-line);
+  border-radius: var(--nx-radius);
+  padding: var(--kp-space-xs);
+  box-shadow: 0 12px 32px
+    color-mix(in oklab, var(--foreground) 18%, transparent);
+}
+dialog.nx-rowmenu[open] {
+  display: grid;
+}
+.nx-rowmenu button {
+  all: unset;
+  cursor: pointer;
+  display: grid;
+  gap: 1px;
+  padding: var(--kp-space-sm) var(--kp-space-sm);
+  border-radius: var(--nx-r-sm);
+}
+.nx-rowmenu button:hover,
+.nx-rowmenu button:focus-visible {
+  background: var(--nx-soft);
+}
+.nx-rowmenu b,
+.nx-menu b {
+  font-size: var(--kp-text-sm);
+}
+.nx-rowmenu span,
+.nx-menu span {
+  font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
 }
-.bk-sk {
-  display: inline-block;
-  block-size: 0.9em;
-  vertical-align: middle;
-  border-radius: 4px;
+.nx-rowmenu .danger b {
+  color: var(--destructive);
+}
+
+/* the header's overflow menu */
+.nx-icon-btn {
+  all: unset;
+  cursor: pointer;
+  inline-size: 30px;
+  block-size: 30px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--nx-r-sm);
+  color: var(--muted-foreground);
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.nx-icon-btn:hover,
+.nx-icon-btn[aria-expanded="true"] {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.nx-icon-btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.nx-more {
+  position: relative;
+}
+.nx-menu {
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-start: calc(100% + var(--kp-space-xs));
+  z-index: 50;
+  inline-size: 260px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--nx-line);
+  border-radius: var(--nx-radius);
+  padding: var(--kp-space-xs);
+  box-shadow: 0 12px 32px
+    color-mix(in oklab, var(--foreground) 18%, transparent);
+  display: grid;
+}
+.nx-menu[hidden] {
+  display: none;
+}
+.nx-menu a {
+  display: grid;
+  gap: 1px;
+  padding: var(--kp-space-sm) var(--kp-space-sm);
+  border-radius: var(--nx-r-sm);
+  text-decoration: none;
+  color: inherit;
+}
+.nx-menu a:hover,
+.nx-menu a:focus-visible {
+  background: var(--nx-soft);
+}
+@media (max-width: 48rem) {
+  .nx-menu {
+    inset-inline: 0 auto;
+  }
+}
+
+/* the page's line of shortcuts */
+.nx-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kp-space-xs) var(--kp-space-lg);
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+  margin: 0;
+}
+.nx-keys span {
+  display: inline-flex;
+  gap: var(--kp-space-xs);
+  align-items: center;
+}
+
+/* -- `.nx-ops`: the ops-kit look (Host, Schedules; the demos built on
+      ops-kit.css), set on a page's root: flush cards with a ruled foot,
+      a quieter KPI strip, the plain alert, a lighter key cap. -- */
+.nx-ops .nx-kpis {
+  grid-template-columns: repeat(var(--kpi-n, 5), minmax(0, 1fr));
+  gap: var(--kp-space-md);
+}
+@media (max-width: 1199px) {
+  .nx-ops .nx-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 48rem) {
+  .nx-ops .nx-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--kp-space-sm);
+  }
+}
+.nx-ops .nx-kpi {
+  padding: var(--kp-space-md) var(--kp-space-lg) var(--kp-space-md);
+  border-color: var(--nx-line);
+}
+.nx-ops .nx-kpi__value {
+  letter-spacing: -0.01em;
+}
+.nx-ops .nx-kpi__value small {
+  letter-spacing: 0;
+}
+.nx-ops .nx-kpi__ctx {
+  min-block-size: 0;
+}
+.nx-ops .nx-attention__item {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--kp-space-xs) var(--kp-space-md);
+}
+.nx-ops .nx-attention__icon {
+  display: none;
+}
+.nx-ops .nx-attention__text span {
+  display: block;
+  margin-block-start: 2px;
+  font-size: inherit;
+}
+.nx-ops .nx-card {
+  padding: 0;
+  gap: 0;
+  grid-template-rows: auto 1fr auto;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0;
+  border-color: var(--nx-line);
+}
+.nx-ops .nx-card + .nx-card {
+  margin-block-start: 0;
+}
+.nx-ops .nx-card__head {
+  gap: var(--kp-space-xs) var(--kp-space-lg);
+  padding: var(--kp-space-lg) var(--kp-space-lg) 0;
+}
+.nx-ops .nx-card__head > h2,
+.nx-ops .nx-card__head > h3 {
+  font-size: 1.0625rem;
+}
+.nx-ops .nx-card__head > p {
+  margin: 2px 0 0 !important;
+}
+.nx-ops .nx-card__tools {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+}
+.nx-ops .nx-card__body {
+  padding: var(--kp-space-md) var(--kp-space-lg) var(--kp-space-lg);
+}
+.nx-ops .nx-card__foot {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--kp-space-md);
+  padding: var(--kp-space-sm) var(--kp-space-lg);
+  border-block-start-color: var(--nx-line);
+}
+@media (max-width: 48rem) {
+  .nx-ops .nx-card__head {
+    padding: var(--kp-space-md) var(--kp-space-md) 0;
+  }
+  .nx-ops .nx-card__body {
+    padding: var(--kp-space-sm) var(--kp-space-md) var(--kp-space-md);
+  }
+  .nx-ops .nx-card__foot {
+    padding: var(--kp-space-sm) var(--kp-space-md);
+  }
+}
+.nx-ops details.nx-card--fold > summary {
+  display: block;
+  min-inline-size: 0;
+}
+.nx-ops details.nx-card--fold > summary::before {
+  content: none;
+}
+.nx-ops details.nx-card--fold > summary .nx-card__head {
+  padding-block-end: var(--kp-space-lg);
+}
+.nx-ops details.nx-card--fold > .nx-card__body {
+  padding-block-start: 0;
+}
+.nx-ops .nx-chev {
+  inline-size: 28px;
+  block-size: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  border: 1px solid var(--nx-line);
+  transition: transform 150ms var(--nx-ease);
+}
+.nx-ops .nx-card__tools:has(> .nx-chev:only-child) {
+  display: flex;
+}
+.nx-ops details[open] .nx-chev {
+  transform: rotate(90deg);
+}
+.nx-ops .nx-kbd {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.72rem;
+  font-weight: inherit;
+  line-height: inherit;
+  padding: 0 var(--kp-space-xs);
+  background: var(--card);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-spin {
+    animation: none;
+  }
+  details.nx-card--fold > summary::before {
+    transition: none;
+  }
+}
+/* redesign-kit-17: a table in kp-themes' card layout (tableBlock's
+   `data-kp-cards`, in a box of 40 rem or less) breaks a long value — a
+   path, a key, an id — inside its card instead of pushing the card past
+   its box. */
+@container kp-table (max-width: 40rem) {
+  .kp-datatable[data-kp-cards] .kp-table td,
+  .kp-datatable[data-kp-cards] .kp-table td :is(code, span, a, .mono) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    min-inline-size: 0;
+  }
+}
+/* ==== END redesign 3.71.0 foundation ==== */
+
+/* ── redesign-backups: the Backups page (redesign 3.71, the approved demo
+   `redesign-3.71/backups.html`). Tokens only. Built from ui.js's shared
+   blocks; the first part below is only where the demo measures them
+   differently from the foundation's default. ────────── */
+.bk-page .nx-head-right {
+  gap: 8px 12px;
+}
+.bk-page .nx-live[data-state="ok"]::before {
+  background: var(--nx-ok);
+}
+.bk-page .nx-live .measured {
+  margin: 0;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  box-shadow: none;
+}
+@media (max-width: 48rem) {
+  .bk-page .nx-head-right {
+    justify-content: flex-start;
+    flex-basis: 100%;
+  }
+  .bk-page .nx-head-right > .nx-head-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    inline-size: 100%;
+  }
+  .bk-page .nx-head-actions > .kp-button--primary {
+    grid-column: 1 / -1;
+    order: -1;
+  }
+}
+.bk-page .nx-kpis {
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--kp-space-md, 0.75rem);
+}
+.bk-page .nx-kpi {
+  gap: 4px;
+  border-radius: 10px;
+  color: var(--card-foreground, inherit);
+}
+.bk-page .nx-kpi__value {
+  min-block-size: 1.15em;
+}
+.bk-page .nx-kpi__value small {
+  margin-inline-start: 4px;
+}
+.bk-page .nx-kpi__ctx {
+  white-space: normal;
+}
+.bk-page .nx-kpi[data-tone="warn"],
+.bk-page .nx-kpi[data-tone="bad"] {
+  box-shadow: none;
+}
+.bk-page .nx-kpi[data-tone="warn"] {
+  border-color: color-mix(in oklab, var(--nx-warn) 45%, var(--border));
+}
+.bk-page .nx-kpi[data-tone="bad"] {
+  border-color: color-mix(in oklab, var(--nx-bad) 45%, var(--border));
+}
+.bk-page .nx-kpi--toggle[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+@media (max-width: 48rem) {
+  .bk-page .nx-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--kp-space-sm, 0.5rem);
+  }
+  .bk-page .nx-kpis > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .bk-page .nx-kpi__value {
+    font-size: 1.4rem;
+  }
+}
+.bk-page .nx-attention__item {
+  gap: var(--kp-space-md, 0.75rem);
+}
+.bk-page .nx-attention__text {
+  display: grid;
+  gap: 2px;
+}
+.bk-page .nx-attention__act {
+  display: block;
+}
+.bk-page .nx-card {
+  grid-template-rows: auto 1fr auto;
+  margin: 0;
+}
+.bk-page .nx-card__body {
+  display: grid;
+  gap: var(--kp-space-sm, 0.5rem);
+  align-content: start;
+}
+.bk-page details.nx-card--fold > summary {
+  gap: 2px 10px;
+}
+.bk-page details.nx-card--fold:not([open]) {
+  grid-template-rows: auto;
+}
+.bk-page details.nx-card--fold > summary .bk-count {
+  grid-row: 1;
+  grid-column: 2;
+}
+@media (max-width: 48rem) {
+  .bk-page .nx-card__head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .bk-page .nx-card__tools {
+    grid-row: auto;
+    grid-column: 1;
+    justify-content: flex-start;
+  }
+}
+.bk-tip__ids {
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
 }
 .bk-hint {
   font-size: var(--kp-text-xs, 0.75rem);
@@ -4447,13 +5039,6 @@ details.bk-card > summary .bk-count {
 }
 .bk-muted {
   color: var(--muted-foreground);
-}
-.bk-sr {
-  position: absolute;
-  inline-size: 1px;
-  block-size: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
 }
 .bk-active {
   display: flex;
@@ -4675,7 +5260,7 @@ details.bk-card > summary .bk-count {
 .bk-legend__keys {
   margin-inline-start: auto;
 }
-@media (max-width: 40rem) {
+@media (max-width: 48rem) {
   .bk-heat {
     grid-template-columns: 5.5rem minmax(0, 1fr);
     gap: 6px 8px;
@@ -4735,7 +5320,7 @@ details.bk-card > summary .bk-count {
 }
 /* invariant 42: a mono face never under 12 px beside sm text */
 .bk-night .mono,
-.bk-tip .mono {
+.nx-tip .mono {
   font-size: max(12px, 0.9em);
 }
 .bk-night li:last-child {
@@ -4745,6 +5330,10 @@ details.bk-card > summary .bk-count {
   justify-self: end;
 }
 /* the repositories, grouped per stack */
+.bk-searchbox {
+  inline-size: 16rem;
+  max-inline-size: 100%;
+}
 .bk-search {
   inline-size: min(16rem, 100%);
   font: inherit;
@@ -4798,26 +5387,6 @@ details.bk-card > summary .bk-count {
   display: inline-grid;
   grid-auto-flow: column;
   gap: 6px;
-}
-.bk-sort {
-  all: unset;
-  cursor: pointer;
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-}
-.bk-sort:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-  border-radius: 3px;
-}
-.bk-sort__mark {
-  opacity: 0.45;
-}
-th[aria-sort="ascending"] .bk-sort__mark,
-th[aria-sort="descending"] .bk-sort__mark {
-  opacity: 1;
-  color: var(--primary);
 }
 .bk-repo-group td {
   background: color-mix(in oklab, var(--muted) 55%, transparent);
@@ -4963,6 +5532,85 @@ th[aria-sort="descending"] .bk-sort__mark {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* On a phone each repository is a card, as on Host and Schedules: the app
+   and its actions on top, then the newest snapshot, its age, the count,
+   the size and the drill as labelled pairs; nothing scrolls sideways. */
+@media (max-width: 48rem) {
+  .bk-table,
+  .bk-table tbody {
+    display: block;
+  }
+  .bk-table thead {
+    display: none;
+  }
+  .bk-table tr.bk-repo-group,
+  .bk-table tr.bk-repo {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: var(--kp-space-md);
+    align-items: center;
+    border-block-end: 1px solid var(--border);
+  }
+  .bk-table tr.bk-repo-group > td,
+  .bk-table tr.bk-repo > td {
+    border-block-end: 0;
+    min-inline-size: 0;
+  }
+  .bk-table tr.bk-repo-group > td:first-child {
+    grid-column: 1;
+  }
+  .bk-table tr.bk-repo-group > td.bk-meta {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    padding-block-start: 0;
+  }
+  .bk-table tr.bk-repo-group > td.bk-row-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .bk-table tr.bk-repo {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+    padding-block: var(--kp-space-sm);
+  }
+  .bk-table tr.bk-repo > td {
+    padding-block: var(--kp-space-xs);
+  }
+  .bk-table tr.bk-repo > td.bk-app {
+    grid-column: 1 / 3;
+    grid-row: 1;
+    padding-inline-start: var(--kp-space-sm);
+    font-weight: 600;
+  }
+  .bk-table tr.bk-repo > td.bk-row-actions {
+    grid-column: 3;
+    grid-row: 1 / span 4;
+    align-self: start;
+  }
+  .bk-table tr.bk-repo > td[data-label] {
+    display: grid;
+    gap: 2px;
+    text-align: start;
+    padding-inline-start: var(--kp-space-sm);
+  }
+  .bk-table tr.bk-repo > td[data-label]::before {
+    content: attr(data-label);
+    font-size: var(--kp-text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted-foreground);
+  }
+  .bk-table .bk-actions {
+    grid-auto-flow: row;
+  }
+  .bk-table tr.bk-snaps {
+    display: block;
+  }
+  .bk-table tr.bk-snaps > td {
+    display: block;
+    padding: 0 var(--kp-space-sm) var(--kp-space-md);
+    overflow-x: auto;
+  }
+}
 .bk-dlg {
   display: grid;
   gap: var(--kp-space-md, 0.75rem);
@@ -4984,8 +5632,7 @@ th[aria-sort="descending"] .bk-sort__mark {
 @media (prefers-reduced-motion: reduce) {
   .bk-heat__cell,
   .bk-heat__cell--load,
-  .bk-caret,
-  details.bk-card > summary::before {
+  .bk-caret {
     animation: none;
     transition: none;
   }

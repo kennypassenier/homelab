@@ -36,7 +36,7 @@ const panes = (page) =>
       list: box(".sx-stacks"),
       detail: box(".sx-md > section"),
       drawer: box(".sx-drawer"),
-      header: box(".sx .nx-header"),
+      header: box(".sx .nx-head"),
       scrollW: document.documentElement.scrollWidth,
       viewW: innerWidth,
       chips: [...document.querySelectorAll(".sx-stacks button")].map((b) => [
@@ -155,8 +155,8 @@ test("secrets: a reveal hides itself after 30 s, Copy copies, and Activity names
     await page
       .locator(`[data-drive=copy-secret][data-drive-row="${row}"]`)
       .click();
-    await page.waitForSelector(".sx-toast");
-    const toast = (await page.textContent(".sx-toast")) ?? "";
+    await page.waitForSelector("#page .kp-toasts .kp-toast");
+    const toast = (await page.textContent("#page .kp-toasts .kp-toast")) ?? "";
     assert.match(toast, /Copied traefik\/\.env|Press Ctrl C/);
     if (toast.startsWith("Copied"))
       assert.equal(

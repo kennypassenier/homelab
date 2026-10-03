@@ -12,12 +12,12 @@
 // same job trail as every other dashboard write; the value never becomes a
 // URL, a query parameter or part of `ActionArgs`.
 //
-// Self-contained on purpose (the redesign's shared shell is built beside
-// it): the hover card, the toast and the stack colour are small local
-// helpers below, marked LOCAL, for the foundation's components to replace.
+// The header, the three cards, the hover card, the toast and the stack
+// colour square are ui.js's (`pageHeader` in its split look, `section`,
+// `hoverCard`, `toast`, `swatch`); secrets.css, loaded with the page, holds
+// only what is this page's own.
 
 import { act, onAct, send } from "../act.js";
-import { agoEl, setAgo } from "../ago.js";
 import { fetchJson, h } from "../dom.js";
 import { declare, drivable } from "../drivable.js";
 import { stackHref } from "../router.js";
@@ -30,6 +30,17 @@ import {
   stackLine,
 } from "../secretsview.js";
 import { current, subscribe } from "../store.js";
+import {
+  chartColour,
+  chip,
+  kbd,
+  hoverCard,
+  liveStatus,
+  pageHeader,
+  section,
+  swatch,
+  toast,
+} from "../ui.js";
 
 // fix-239 / invariant 39: Live view reaches every control on this page —
 // `homelab ui click <id> [row]`, the row being `<stack>/<app>/.env` (or
@@ -136,109 +147,22 @@ const UNDO_MS = 5000;
 /** The clipboard is cleared this long after a copy. */
 const CLIPBOARD_MS = 30_000;
 
-/** The page's stylesheet, added once. */
-function ensureStyles() {
-  if (document.querySelector('link[data-page-css="secrets"]')) return;
-  const l = document.createElement("link");
-  l.rel = "stylesheet";
-  l.href = "/css/secrets.css";
-  l.dataset.pageCss = "secrets";
-  document.head.append(l);
-}
-
-/** LOCAL: one hue per stack, in the fleet's sorted order. @param {string} s @param {string[]} all */
-const stackColour = (s, all) =>
-  `var(--chart-${(Math.max(0, [...all].sort().indexOf(s)) % 5) + 1})`;
-
 /** @param {HTMLElement} el @param {Record<string, string>} props */
 function styled(el, props) {
   for (const [k, v] of Object.entries(props)) el.style.setProperty(k, v);
   return el;
 }
 
-/** LOCAL: the colour swatch. @param {string} s @param {string[]} all */
-const swatch = (s, all) =>
-  styled(h("span", { class: "sw", "aria-hidden": "true" }), {
-    "--c": stackColour(s, all),
-  });
-
 /** A skeleton bar. @param {string} w */
 const sk = (w) => styled(h("span", { class: "sk" }, "·"), { "--w": w });
 
 /**
- * LOCAL: a short message at the bottom of the screen, with an optional
- * action (Undo). Returns a function that removes it.
+ * A plain message at the foot of the screen (ui.js `toast`, drawn the
+ * page's way); a newer one replaces it.
  * @param {string} msg
- * @param {{label: string, drive?: string, onClick: () => void}} [action]
  * @param {number} [ms]
  */
-function toast(msg, action, ms = 5000) {
-  const t = h(
-    "div",
-    { class: "sx-toast", role: "status" },
-    h("span", null, msg),
-  );
-  if (action) {
-    const b = h(
-      "button",
-      { class: "kp-button kp-button--sm kp-button--ghost", type: "button" },
-      action.label,
-    );
-    if (action.drive) drivable(b, action.drive);
-    b.addEventListener("click", () => {
-      t.remove();
-      action.onClick();
-    });
-    t.append(b);
-  }
-  // One stack of toasts: a plain message replaces the plain one before it,
-  // never a toast still offering Undo.
-  let box = document.querySelector(".sx-toasts");
-  if (!box) {
-    box = h("div", { class: "sx-toasts" });
-    document.body.append(box);
-  }
-  box
-    .querySelectorAll(".sx-toast:not([data-action])")
-    .forEach((x) => x.remove());
-  if (action) t.dataset.action = "";
-  box.append(t);
-  const timer = setTimeout(() => t.remove(), ms);
-  return () => {
-    clearTimeout(timer);
-    t.remove();
-  };
-}
-
-/**
- * LOCAL: one floating card for hover AND keyboard focus, under the element
- * (above when there is no room), never under the pointer.
- * @param {HTMLElement} tip
- * @param {HTMLElement} el
- * @param {() => Node[]} fill
- */
-function tipOn(tip, el, fill) {
-  const show = () => {
-    tip.replaceChildren(...fill());
-    tip.hidden = false;
-    const r = el.getBoundingClientRect();
-    const tw = tip.offsetWidth;
-    const th = tip.offsetHeight;
-    const left = Math.min(
-      Math.max(8, r.left + r.width / 2 - tw / 2),
-      innerWidth - tw - 8,
-    );
-    let top = r.bottom + 8;
-    if (top + th > innerHeight - 8) top = r.top - th - 8;
-    tip.style.left = `${left + scrollX}px`;
-    tip.style.top = `${top + scrollY}px`;
-  };
-  const hide = () => (tip.hidden = true);
-  el.addEventListener("pointerenter", show);
-  el.addEventListener("pointerleave", hide);
-  el.addEventListener("focus", show);
-  el.addEventListener("blur", hide);
-}
+const say = (msg, ms = 5000) => void toast(msg, { ms });
 
 /**
  * Ask the host for one value, recorded as a reveal or a copy. `driven` is
@@ -275,11 +199,7 @@ function deployAfter(job, stack) {
       return;
     off();
     if (j.state !== "done") {
-      toast(
-        `The write ${j.state}; ${stack} was not restarted`,
-        undefined,
-        8000,
-      );
+      say(`The write ${j.state}; ${stack} was not restarted`, 8000);
       return;
     }
     void send(
@@ -288,11 +208,10 @@ function deployAfter(job, stack) {
       {},
       `deploy ${stack}`,
     ).then((r) =>
-      toast(
+      say(
         r.ok
           ? `Restarting ${stack}: deploy queued · see Activity`
           : `Could not restart ${stack}: ${r.error.why}`,
-        undefined,
         8000,
       ),
     );
@@ -309,10 +228,8 @@ function deployAfter(job, stack) {
  */
 export function mount(root, opts = {}) {
   const one = opts.stack ?? null;
-  ensureStyles();
   const abort = new AbortController();
-  const tip = h("div", { class: "sx-tip", role: "tooltip", hidden: "" });
-  document.body.append(tip);
+  const tip = hoverCard();
 
   /** @type {{stack: string | null, reading: boolean,
    *   summary: Record<string, import("../secretsview.js").Declared> | null,
@@ -346,15 +263,6 @@ export function mount(root, opts = {}) {
   };
   const entry = (/** @type {string} */ s) => S.summary?.[s];
 
-  const live = agoEl("read");
-  const liveWrap = h(
-    "span",
-    { class: "nx-live", "data-state": "loading" },
-    live,
-  );
-  live.className = "";
-  live.textContent = "reading…";
-
   const hideAllBtn = drivable(
     h(
       "button",
@@ -384,15 +292,71 @@ export function mount(root, opts = {}) {
     const d = S.stack ? entry(S.stack) : null;
     const first = d && S.stack ? secretRows(S.stack, d)[0] : null;
     if (first) openChange(first);
-    else toast(`${S.stack ?? "This stack"} declares no secret to change`);
+    else say(`${S.stack ?? "This stack"} declares no secret to change`);
   });
 
-  const list = h("nav", { class: "nx-card sx-stacks", "aria-label": "Stacks" });
-  const detail = h("section", { class: "nx-card", "aria-labelledby": "sd-h" });
-  const drawer = h("aside", {
-    class: "nx-card sx-drawer",
-    "aria-labelledby": "ch-h",
+  const listCard = section({
+    tag: "nav",
+    label: "Stacks",
+    plain: true,
+    cls: "sx-stacks",
   });
+  const list = listCard.body;
+  const openStack = h(
+    "a",
+    {
+      class: "kp-button kp-button--sm kp-button--ghost",
+      title: "Open this stack's page",
+    },
+    "Open stack",
+  );
+  const detailCard = section({
+    id: "sd",
+    title: "Secrets",
+    desc: "What this stack's lxc-compose.yml lists under latch_secrets and latch_files.",
+    tools: [openStack],
+    foot: [
+      "Every reveal and change is written to the host's audit log",
+      [kbd("↑ ↓"), " stack · ", kbd("Esc"), " hide all"],
+    ],
+    plain: true,
+  });
+  const detail = detailCard.body;
+  const closeBtn = drivable(
+    h(
+      "button",
+      {
+        class: "kp-button kp-button--sm kp-button--ghost",
+        type: "button",
+        "aria-label": "Close",
+        title: "Close without writing (Esc)",
+        onclick: () => closeChange(),
+      },
+      "×",
+    ),
+    CLOSE_DRAWER,
+  );
+  const drawerCard = section({
+    tag: "aside",
+    id: "ch",
+    title: "Change a secret",
+    desc: "Pick Change… on a secret to stage a new value here. Nothing is written until you press Write.",
+    tools: [closeBtn],
+    plain: true,
+    cls: "sx-drawer",
+  });
+  const drawer = drawerCard.body;
+
+  const head = pageHeader({
+    title: "Secrets",
+    desc: "The latch secrets and files each stack declares. Values stay hidden until you reveal one; it hides again after 30 seconds or when you leave. A change is written through latch, the same way the CLI reads it.",
+    split: true,
+    live: "read",
+    actions: [hideAllBtn],
+    primary: changeBtn,
+  });
+  const live = /** @type {ReturnType<typeof liveStatus>} */ (head.live);
+  live.set(null, "reading…");
 
   if (one != null) {
     // In the hub the hub carries the header; Hide all and Change a secret
@@ -401,8 +365,8 @@ export function mount(root, opts = {}) {
       h(
         "div",
         { class: "sx sx--one" },
-        h("div", { class: "nx-header__actions" }, hideAllBtn, changeBtn),
-        h("div", { class: "sx-md sx-md--one" }, detail, drawer),
+        h("div", { class: "sx-actions" }, hideAllBtn, changeBtn),
+        h("div", { class: "sx-md sx-md--one" }, detailCard.el, drawerCard.el),
       ),
     );
   } else
@@ -410,23 +374,8 @@ export function mount(root, opts = {}) {
       h(
         "div",
         { class: "sx" },
-        h(
-          "header",
-          { class: "nx-header" },
-          h(
-            "div",
-            { class: "nx-header__title" },
-            h("h1", null, "Secrets"),
-            liveWrap,
-          ),
-          h(
-            "p",
-            { class: "nx-header__desc" },
-            "The latch secrets and files each stack declares. Values stay hidden until you reveal one; it hides again after 30 seconds or when you leave. A change is written through latch, the same way the CLI reads it.",
-          ),
-          h("div", { class: "nx-header__actions" }, hideAllBtn, changeBtn),
-        ),
-        h("div", { class: "sx-md" }, list, detail, drawer),
+        head.el,
+        h("div", { class: "sx-md" }, listCard.el, detailCard.el, drawerCard.el),
       ),
     );
 
@@ -465,17 +414,10 @@ export function mount(root, opts = {}) {
       ...names.map((s) => {
         const d = entry(s);
         const k = stackKind(d);
-        const chip =
+        const badge =
           k === "unreadable"
-            ? h(
-                "span",
-                {
-                  class: "nx-chip nx-chip--warn",
-                  "aria-label": "unreadable",
-                },
-                "!",
-              )
-            : h("span", { class: "nx-chip" }, String(stackCount(d)));
+            ? chip("!", { tone: "warn", label: "unreadable" })
+            : chip(String(stackCount(d)));
         const b = drivable(
           h(
             "button",
@@ -484,15 +426,15 @@ export function mount(root, opts = {}) {
               "aria-current": String(s === S.stack),
               "aria-label": `${s}: ${stackLine(d)}`,
             },
-            swatch(s, names),
+            swatch(chartColour(s, names)),
             h("span", null, s, h("small", null, stackLine(d))),
-            chip,
+            badge,
           ),
           PICK_STACK,
           s,
         );
         b.addEventListener("click", () => pick(s));
-        tipOn(tip, b, () => {
+        tip.attach(b, () => {
           const e = entry(s);
           const kk = stackKind(e);
           return [
@@ -514,7 +456,7 @@ export function mount(root, opts = {}) {
                 : h("span", null, "No latch_secrets or latch_files declared."),
             h(
               "span",
-              { class: "hint" },
+              { class: "nx-tip__hint" },
               "Click to open · ↑ ↓ move between stacks",
             ),
           ];
@@ -665,7 +607,7 @@ export function mount(root, opts = {}) {
     const done = () => {
       S.errors.delete(row.key);
       paintDetail();
-      toast(`Copied ${row.name} · the clipboard clears in 30 s`);
+      say(`Copied ${row.name} · the clipboard clears in 30 s`);
       setTimeout(() => {
         if (document.hasFocus())
           navigator.clipboard?.writeText("").catch(() => {});
@@ -696,7 +638,7 @@ export function mount(root, opts = {}) {
         sel.removeAllRanges();
         sel.addRange(range);
       }
-      toast(`Press Ctrl C to copy ${row.name} · it hides in 30 s`);
+      say(`Press Ctrl C to copy ${row.name} · it hides in 30 s`);
     };
     if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
       const blob = asked.then((v) => new Blob([v], { type: "text/plain" }));
@@ -709,21 +651,11 @@ export function mount(root, opts = {}) {
   function paintDetail() {
     const s = S.stack;
     const names = fleet();
+    const title = /** @type {HTMLElement} */ (detailCard.title);
     if (!s) {
-      detail.replaceChildren(
-        h(
-          "div",
-          { class: "nx-card__head" },
-          h("h2", { id: "sd-h" }, sk("8rem")),
-          h(
-            "p",
-            null,
-            "What this stack's lxc-compose.yml lists under latch_secrets and latch_files.",
-          ),
-        ),
-        h("div", null, ...skRows()),
-        foot(),
-      );
+      title.replaceChildren(sk("8rem"));
+      openStack.hidden = true;
+      detail.replaceChildren(...skRows());
       return;
     }
     const d = entry(s);
@@ -767,7 +699,7 @@ export function mount(root, opts = {}) {
       body = [
         h(
           "div",
-          { class: "nx-empty" },
+          { class: "sx-empty" },
           h("strong", null, `${s} declares no secrets`),
           h(
             "span",
@@ -785,37 +717,13 @@ export function mount(root, opts = {}) {
       (x) => x instanceof HTMLElement && x.classList.contains("hint"),
     );
     if (hintP instanceof HTMLElement) hintP.style.margin = "12px 0 0";
-    detail.replaceChildren(
-      h(
-        "div",
-        { class: "nx-card__head" },
-        h(
-          "h2",
-          { id: "sd-h" },
-          h("span", { class: "nx-row" }, swatch(s, names), s),
-        ),
-        h(
-          "p",
-          null,
-          "What this stack's lxc-compose.yml lists under latch_secrets and latch_files.",
-        ),
-        h(
-          "div",
-          { class: "nx-card__tools" },
-          h(
-            "a",
-            {
-              class: "kp-button kp-button--sm kp-button--ghost",
-              href: stackHref(s),
-              title: `Open ${s}'s page`,
-            },
-            "Open stack",
-          ),
-        ),
-      ),
-      h("div", null, ...body),
-      foot(),
+    title.replaceChildren(
+      h("span", { class: "sx-row" }, swatch(chartColour(s, names)), s),
     );
+    openStack.hidden = false;
+    openStack.setAttribute("href", stackHref(s));
+    openStack.title = `Open ${s}'s page`;
+    detail.replaceChildren(...body);
   }
   const skRows = () =>
     [1, 2].map(() =>
@@ -827,25 +735,6 @@ export function mount(root, opts = {}) {
         h("div", { class: "sx-sec__btns" }, sk("12rem")),
       ),
     );
-  const foot = () =>
-    h(
-      "div",
-      { class: "nx-card__foot" },
-      h(
-        "span",
-        null,
-        "Every reveal and change is written to the host's audit log",
-      ),
-      h(
-        "span",
-        null,
-        h("kbd", { class: "nx-kbd" }, "↑ ↓"),
-        " stack · ",
-        h("kbd", { class: "nx-kbd" }, "Esc"),
-        " hide all",
-      ),
-    );
-
   // ---- right pane: the change drawer -------------------------------------
   /** @param {import("../secretsview.js").SecretRow} row */
   function openChange(row) {
@@ -868,18 +757,14 @@ export function mount(root, opts = {}) {
   }
 
   function paintDrawer() {
+    const dTitle = /** @type {HTMLElement} */ (drawerCard.title);
+    const dDesc = /** @type {HTMLElement} */ (drawerCard.desc);
+    closeBtn.hidden = !S.change;
     if (!S.change) {
+      dTitle.textContent = "Change a secret";
+      dDesc.textContent =
+        "Pick Change… on a secret to stage a new value here. Nothing is written until you press Write.";
       drawer.replaceChildren(
-        h(
-          "div",
-          { class: "nx-card__head" },
-          h("h2", { id: "ch-h" }, "Change a secret"),
-          h(
-            "p",
-            null,
-            "Pick Change… on a secret to stage a new value here. Nothing is written until you press Write.",
-          ),
-        ),
         h(
           "ol",
           { class: "sx-steps" },
@@ -936,20 +821,6 @@ export function mount(root, opts = {}) {
     );
     restart.checked = S.restart;
     restart.addEventListener("change", () => (S.restart = restart.checked));
-    const close = drivable(
-      h(
-        "button",
-        {
-          class: "kp-button kp-button--sm kp-button--ghost",
-          type: "button",
-          "aria-label": "Close",
-          title: "Close without writing (Esc)",
-        },
-        "×",
-      ),
-      CLOSE_DRAWER,
-    );
-    close.addEventListener("click", closeChange);
     const back = S.stage
       ? drivable(
           h(
@@ -981,18 +852,10 @@ export function mount(root, opts = {}) {
       S.token = null;
       paintDrawer();
     });
+    dTitle.textContent = `Change ${row.name}`;
+    dDesc.textContent =
+      "The new value never enters a URL or the job's arguments; latch stores it.";
     drawer.replaceChildren(
-      h(
-        "div",
-        { class: "nx-card__head" },
-        h("h2", { id: "ch-h" }, `Change ${row.name}`),
-        h(
-          "p",
-          null,
-          "The new value never enters a URL or the job's arguments; latch stores it.",
-        ),
-        h("div", { class: "nx-card__tools" }, close),
-      ),
       h(
         "ol",
         { class: "sx-steps" },
@@ -1026,7 +889,7 @@ export function mount(root, opts = {}) {
             `Could not stage it: ${S.stageError}`,
           )
         : "",
-      h("div", { class: "nx-row sx-drawer__btns" }, back, next),
+      h("div", { class: "sx-row sx-drawer__btns" }, back, next),
     );
   }
 
@@ -1067,25 +930,24 @@ export function mount(root, opts = {}) {
         "change the secret",
       );
       if (!r.ok) {
-        toast(`Could not write ${row.name}: ${r.error.why}`, undefined, 10000);
+        say(`Could not write ${row.name}: ${r.error.why}`, 10000);
         return;
       }
-      toast(`Writing ${row.name} through latch · job queued`, undefined, 6000);
+      say(`Writing ${row.name} through latch · job queued`, 6000);
       if (restart && typeof r.body?.job === "number")
         deployAfter(r.body.job, stack);
     }, UNDO_MS);
-    const dismiss = toast(
-      `Writing ${row.name} through latch in 5 s`,
-      {
+    const dismiss = toast(`Writing ${row.name} through latch in 5 s`, {
+      ms: UNDO_MS,
+      action: {
         label: "Undo",
-        drive: UNDO_WRITE,
-        onClick: () => {
+        drive: { id: UNDO_WRITE },
+        run: () => {
           clearTimeout(timer);
-          toast("Write cancelled before it ran");
+          say("Write cancelled before it ran");
         },
       },
-      UNDO_MS,
-    );
+    });
   }
 
   // ---- data --------------------------------------------------------------
@@ -1130,16 +992,13 @@ export function mount(root, opts = {}) {
     if (!r) return;
     if (!r.ok) {
       S.failed = r.error;
-      liveWrap.dataset.state = "failed";
-      live.textContent = "not read";
+      live.fail("not read");
       paintAll();
       return;
     }
     S.summary = r.body.stacks ?? {};
     S.failed = null;
-    liveWrap.dataset.state = "";
-    live.className = "";
-    setAgo(live, Date.now() / 1000);
+    live.set(Date.now() / 1000);
     choose();
     paintAll();
   }
@@ -1218,6 +1077,6 @@ export function mount(root, opts = {}) {
     clearInterval(ticker);
     document.removeEventListener("keydown", onKey);
     off();
-    tip.remove();
+    tip.stop();
   };
 }

@@ -12,20 +12,69 @@ import { busyWords, emptyWords, failReason } from "./tablestate.js";
 import { VIEW_EVENT, dataTable } from "/static/kp/js/datatable.js";
 
 /**
+ * @typedef {Node | string | number | null | undefined | false | Child[]}
+ *   Child
+ * @typedef {Record<string, string | number | boolean | null | undefined |
+ *   ((e: any) => void)>} Attrs
+ */
+
+/**
+ * The one element factory: `class` sets the class name, an `on…`
+ * attribute holding a function becomes a listener, a `null` / `false` /
+ * `undefined` attribute is left out and `true` is an empty attribute;
+ * children may be nested arrays, numbers or empty (null, false).
  * @template {keyof HTMLElementTagNameMap} K
  * @param {K} tag
- * @param {Record<string, string> | null} [attrs]
- * @param {...(Node | string)} children
+ * @param {Attrs | null} [attrs]
+ * @param {...Child} kids
  * @returns {HTMLElementTagNameMap[K]}
  */
-export function h(tag, attrs, ...children) {
+export function h(tag, attrs, ...kids) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs ?? {})) {
-    if (k === "class") e.className = v;
-    else e.setAttribute(k, v);
+    if (v == null || v === false) continue;
+    if (typeof v === "function") e.addEventListener(k.slice(2), v);
+    else if (k === "class") e.className = String(v);
+    else e.setAttribute(k, v === true ? "" : String(v));
   }
-  e.append(...children);
+  /** @param {Child} c */
+  const add = (c) => {
+    if (c == null || c === false) return;
+    if (Array.isArray(c)) c.forEach(add);
+    else e.append(typeof c === "number" ? String(c) : c);
+  };
+  kids.forEach(add);
   return e;
+}
+
+/**
+ * Keeps every cell of `tbody` labelled with its column's header
+ * (`data-label`, which kp-themes' card layout prints before the value on a
+ * phone), as rows are added. A cell spanning columns, or one a page
+ * labelled itself, is left alone.
+ * @param {HTMLElement} tbody
+ * @param {() => string[]} labels the header of each column, in order
+ */
+export function labelCells(tbody, labels) {
+  const stamp = () => {
+    const names = labels();
+    for (const tr of /** @type {HTMLTableRowElement[]} */ ([
+      ...tbody.children,
+    ])) {
+      let at = 0;
+      for (const td of /** @type {HTMLTableCellElement[]} */ ([
+        ...tr.children,
+      ])) {
+        const span = Number(td.getAttribute("colspan") ?? 1);
+        if (span === 1 && !td.hasAttribute("data-label") && names[at])
+          td.setAttribute("data-label", names[at]);
+        at += span;
+      }
+    }
+  };
+  stamp();
+  if (typeof MutationObserver !== "undefined")
+    new MutationObserver(stamp).observe(tbody, { childList: true });
 }
 
 /**
@@ -131,6 +180,10 @@ export function tableBlock(spec) {
   const wrapAttrs = {
     class: "kp-datatable",
     "data-kp-datatable": "",
+    // redesign-kit-17: in a narrow box (a phone) each row is a card with
+    // its cells labelled, never a table scrolling sideways (kp-themes'
+    // card layout; `labelCells` writes the labels it reads).
+    "data-kp-cards": "",
     "data-kp-sort-multi": "",
     "data-kp-remember": spec.remember,
     "data-kp-page-sizes": spec.pageSizes ?? "none",
@@ -340,6 +393,10 @@ export function tableBlock(spec) {
   const setNothing = (text) => {
     noneTitle.textContent = text;
   };
+  labelCells(tbody, () => [
+    ...(spec.select ? [""] : []),
+    ...spec.columns.map((c) => c.label),
+  ]);
   return { wrap, tbody, loading, ready, failed: fail, setNothing };
 }
 

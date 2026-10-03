@@ -184,6 +184,12 @@ const CANCEL_EDIT = declare({
   opens: "view",
   what: "close the open editor and keep the old value",
 });
+const STAGED = declare({
+  id: "settings-staged",
+  page: "settings",
+  opens: "view",
+  what: "the header's staged-change chip; focus or hover lists the staged changes",
+});
 const CLEAR = declare({
   id: "settings-clear-search",
   page: "settings",
@@ -247,7 +253,10 @@ export function mount(root, opts = {}) {
 
   // ── header: the staged-change summary IS the primary action ───────────
   const ago = agoEl("read", null, { live: true });
-  const stagedChip = el("span", { class: "cf-chip", tabindex: "0" });
+  const stagedChip = drivable(
+    el("span", { class: "cf-chip", tabindex: "0" }),
+    STAGED,
+  );
   tipOn(stagedChip, () =>
     changes.size
       ? [

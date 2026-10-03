@@ -4233,3 +4233,60 @@ test("invariants: redesign-config pages show their skeleton from the first frame
     await browser.close();
   }
 });
+
+test("invariants: redesign-config every control Firewall, Settings and Presets draw carries a declared Live view id", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1100 },
+    });
+    const page = await freshPage(context);
+    const declared = new Set(
+      await page.evaluate(async () => {
+        const m = await import("/js/drivable.js");
+        return m.controls().map((/** @type {any} */ c) => c.id);
+      }),
+    );
+    const bad = [];
+    for (const path of ["firewall", "settings", "presets"]) {
+      await page.goto(`${BASE}/${path}`);
+      await page.waitForTimeout(2000);
+      // Open what folds, so the controls inside are on screen too.
+      if (path === "firewall") await page.locator("tr.fw-rule").first().click();
+      if (path === "settings")
+        await page.locator('[data-drive="settings-fold-all"]').click();
+      const found = await page.$$eval(
+        "#page a[href], #page button, #page summary, #page input, #page select, #page [tabindex]:not([tabindex='-1']), #page [role=button]",
+        (els) =>
+          els
+            .filter(
+              (e) => e.getClientRects().length > 0 && !e.closest("dialog"),
+            )
+            .filter(
+              (e) => !e.closest("[data-kp-datatable], .nx-crumbs, .cf-tip"),
+            )
+            .map((e) => ({
+              drive: /** @type {HTMLElement} */ (e).dataset.drive ?? null,
+              form: /** @type {HTMLElement} */ (e).dataset.driveForm ?? null,
+              label: (
+                e.getAttribute("aria-label") ||
+                e.textContent ||
+                e.tagName
+              )
+                .trim()
+                .slice(0, 40),
+            })),
+      );
+      for (const f of found)
+        if (!f.drive || !declared.has(f.drive))
+          bad.push(`/${path}: "${f.label}" (${f.drive ?? "no id"})`);
+    }
+    assert.deepEqual(
+      bad,
+      [],
+      `controls without a declared Live view id:\n${bad.join("\n")}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});

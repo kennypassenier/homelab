@@ -71,12 +71,15 @@ const END_SNOOZE = declare({
   page: "notifications",
   opens: "run",
   what: "end the snooze now",
+  shows: "while notifications are snoozed",
+  reach: [{ do: "click", control: "snooze" }],
 });
 const MARK_ALL_READ = declare({
   id: "mark-all-read",
   page: "notifications",
   opens: "run",
   what: "mark every notification read",
+  shows: "while a notification is unread",
 });
 const MARK_READ = declare({
   id: "mark-read",
@@ -84,6 +87,7 @@ const MARK_READ = declare({
   opens: "run",
   row: "<notification id>",
   what: "mark one notification read",
+  shows: "on an unread notification",
 });
 const NOTICE_FIX = declare({
   id: "notice-fix",
@@ -91,6 +95,7 @@ const NOTICE_FIX = declare({
   opens: "dialog",
   row: "<notification id>:<n>",
   what: "run a notification's suggested fix (the n-th, from 0)",
+  shows: "on a notification that suggests a fix",
 });
 
 /**

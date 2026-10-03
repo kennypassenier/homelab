@@ -141,23 +141,42 @@ export const PATH_TO_PAGE = {
  * The addresses a driven `goto` may land on (core::drive's `known_page`):
  * every address of `PATH_TO_PAGE`, retired ones included, so a Live view
  * script naming an old page still works (invariant 19). A web test holds
- * this equal to `formspec.json`'s `pages` (follow.test.js). The 2026-09-30
- * aliases and the kit's Status were never drivable and stay out.
+ * this equal to `formspec.json`'s `pages` (follow.test.js). drive-reach
+ * (Kenny, 2026-10-03): every address the router knows, the 2026-09-30
+ * aliases and the kit's old Status included; `goto /status` was refused
+ * before the tab moved while a browser simply landed on the Inbox.
  */
-export const DRIVABLE_PATHS = Object.keys(PATH_TO_PAGE).filter(
-  (k) =>
-    ![
-      "start",
-      "today",
-      "doctor",
-      "checks",
-      "traffic",
-      "timeline",
-      "home",
-      "status",
-      "needs-you",
-    ].includes(k),
-);
+export const DRIVABLE_PATHS = Object.keys(PATH_TO_PAGE);
+
+/** drive-reach: the placeholder a redirect table entry names a stack by. */
+export const STACK_SLOT = "{stack}";
+
+/**
+ * drive-reach: every retired address's new home as plain data, for the
+ * dashboard's server (`drivecatalog.json`, built by
+ * scripts/drivecatalog.mjs): the target `redirectFor` itself answers for
+ * the address with no query string, a stack named by `STACK_SLOT` (the
+ * merged stack tabs, and `/secrets`, whose target is the fleet's first
+ * stack). Generated, never written by hand, so it cannot drift from the
+ * redirect the browser takes.
+ * @returns {Record<string, string>}
+ */
+export function redirectTable() {
+  const slot = encodeURIComponent(STACK_SLOT);
+  const fill = (/** @type {string} */ s) => s.split(slot).join(STACK_SLOT);
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const k of Object.keys(REDIRECTS)) {
+    const to = redirectFor(route(`/${k}`), "", { stacks: [STACK_SLOT] });
+    if (to != null) out[k] = fill(to);
+  }
+  for (const tab of RETIRED_STACK_TABS) {
+    const r = route(`/stacks/${slot}/${tab}`);
+    const to = redirectFor(r, "");
+    if (to != null) out[`stacks/${STACK_SLOT}/${tab}`] = fill(to);
+  }
+  return out;
+}
 
 /** Fallback titles for a page before the registry has answered. */
 const FALLBACK_TITLE = /** @type {Record<string, string>} */ ({

@@ -193,6 +193,20 @@ pub fn spec() -> &'static FormSpec {
     SPEC.get_or_init(|| serde_json::from_str(FORM_SPEC_JSON).expect("formspec.json reads"))
 }
 
+/// drive-reach: the Live view control catalog, generated from the page
+/// modules' own declarations and the router (`admin/web/scripts/
+/// drivecatalog.mjs`), compiled into this release and served to `homelab ui`.
+pub const DRIVE_CATALOG_JSON: &str = include_str!("../../web/js/drivecatalog.json");
+
+/// The catalog, read once. Compiled in and covered by a test, like `spec`.
+pub fn catalog() -> &'static homelab_core::drivecatalog::Catalog {
+    static CATALOG: OnceLock<homelab_core::drivecatalog::Catalog> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        homelab_core::drivecatalog::Catalog::parse(DRIVE_CATALOG_JSON)
+            .expect("drivecatalog.json reads")
+    })
+}
+
 /// `{word}` placeholders filled, the way `actionforms.js` `fill` does.
 pub fn fill(template: &str, words: &[(&str, &str)]) -> String {
     let mut out = template.to_string();
@@ -1199,35 +1213,33 @@ impl OpenForm {
 /// which a web test holds equal to the router's. nav-decisions
 /// (chassis-rs 3.1.0): every page lives at the root now, so `path` is
 /// checked as-is rather than stripped of an `/app` prefix.
+///
+/// drive-reach (Kenny, 2026-10-03): every address the router knows is a
+/// page, its retired ones included, and the state keeps where it lands —
+/// through the redirect table generated from the router itself
+/// (`catalog().land`), with the view the address names in its query string
+/// (`/jobs` is `/activity?view=running`).
 fn known_page(path: &str, stacks: &[String]) -> Result<String, String> {
     let p = path.split(['?', '#']).next().unwrap_or("");
-    if !p.starts_with('/') {
-        return Err(format!("{path} is not an absolute path"));
-    }
     let rest = p.trim_start_matches('/').trim_end_matches('/');
-    if spec().pages.iter().any(|x| x == rest) {
-        return Ok(format!("/{rest}"));
-    }
     let parts: Vec<&str> = rest.split('/').collect();
-    if parts.first() == Some(&"stacks") && (parts.len() == 2 || parts.len() == 3) {
-        let name = parts[1];
-        if !stacks.iter().any(|s| s == name) {
-            return Err(format!("the fleet has no stack {name}"));
-        }
-        let tab = parts.get(2).copied().unwrap_or("overview");
-        if !spec().stack_tabs.iter().any(|t| t == tab) {
-            return Err(format!(
-                "a stack page has no tab {tab}; its tabs are {}",
-                spec().stack_tabs.join(", ")
-            ));
-        }
-        return Ok(if tab == "overview" {
-            format!("/stacks/{name}")
-        } else {
-            format!("/stacks/{name}/{tab}")
-        });
+    if parts.first() == Some(&"stacks")
+        && parts.len() == 3
+        && !spec().stack_tabs.iter().any(|t| t == parts[2])
+    {
+        return Err(format!(
+            "a stack page has no tab {}; its tabs are {}",
+            parts[2],
+            spec().stack_tabs.join(", ")
+        ));
     }
-    Err(format!("there is no page at {path}"))
+    let landing = catalog().land(path, stacks)?;
+    // `/stacks/<name>/overview` is the hub's own address without its tab.
+    Ok(landing
+        .path
+        .strip_suffix("/overview")
+        .map(str::to_string)
+        .unwrap_or(landing.path))
 }
 
 impl DriveState {
@@ -1369,6 +1381,16 @@ impl DriveState {
                         "no control was named",
                         "homelab ui click <control> [row]",
                     ));
+                }
+                // drive-reach: a name no page declares, nor ever did, is
+                // answered here with the closest real ones, before any tab
+                // looks for it. A dialog's own button is not declared: with
+                // a page-level dialog open, its label decides.
+                if self.page_dialog.is_none()
+                    && let homelab_core::drivecatalog::Click::Unknown { why, fix } =
+                        catalog().click(control)
+                {
+                    return Err(refused(step, why, fix));
                 }
                 Applied {
                     effect: Effect::Tab,
@@ -1516,7 +1538,8 @@ impl DriveState {
                 // feat-shell-1 (3.71.0): the fleet table is the Stacks
                 // page's, `/stacks`; `/overview` is its address from before
                 // and still redirects there.
-                if self.page != "/stacks" && self.page != "/overview" {
+                let path = self.page.split(['?', '#']).next().unwrap_or("");
+                if path != "/stacks" && path != "/overview" {
                     return Err(refused(
                         step,
                         format!(

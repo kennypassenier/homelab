@@ -124,6 +124,8 @@ const UNPIN = declare({
   page: "backups",
   opens: "view",
   what: "unpin the night and show last night again",
+  shows: "while a night is pinned",
+  reach: [{ do: "click", control: "backup-fleet-night", row: "*" }],
 });
 const EARLIER = declare({
   id: "backup-nights-earlier",
@@ -136,6 +138,8 @@ const LATER = declare({
   page: "backups",
   opens: "view",
   what: "show the nights after the ones on screen",
+  shows: "once the strip shows earlier nights",
+  reach: [{ do: "click", control: "backup-nights-earlier" }],
 });
 const TODAY = declare({
   id: "backup-nights-today",
@@ -156,6 +160,8 @@ const CLEAR = declare({
   opens: "view",
   row: "<filter>",
   what: "turn one active filter off (stack:<name>, text, drills, sort, all)",
+  shows: "while a filter is on",
+  reach: [{ do: "click", control: "backups-undrilled-filter" }],
 });
 const FOLD = declare({
   id: "backup-repo-group",
@@ -184,6 +190,7 @@ const RETRY = declare({
   opens: "view",
   row: "<stack>",
   what: "read one stack's repositories again after its read failed",
+  shows: "on a stack whose repositories could not be read",
 });
 // fix-239/241: "Show a file…" opens a page dialog (no catalog action).
 const SNAPSHOT_FILE = declare({

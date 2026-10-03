@@ -24,6 +24,10 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tower::ServiceExt as _;
 
+/// drive-reach: `/jobs` is a pre-3.71.0 address; the drive keeps where the
+/// router's own redirect lands it, the Activity page's Running view.
+const JOBS_LANDS: &str = "/activity?view=running";
+
 struct World {
     host: Arc<MockHost>,
     live: Arc<Recorder>,
@@ -130,7 +134,7 @@ async fn follow_live_a_step_is_announced_and_held_for_the_countdown() {
     let answer = pending.await.unwrap();
     assert_eq!(answer["ok"], true, "{answer}");
     assert!(t0.elapsed() >= Duration::from_secs(3), "{:?}", t0.elapsed());
-    assert_eq!(answer["state"]["page"], "/jobs");
+    assert_eq!(answer["state"]["page"], JOBS_LANDS);
     assert!(answer["state"]["announce"].is_null());
     assert!(
         holds.lock().unwrap().is_empty(),
@@ -221,7 +225,7 @@ async fn follow_live_pause_holds_the_step_until_continue_or_the_longest_pause() 
         .unwrap();
     let answer = pending.await.unwrap();
     assert_eq!(answer["ok"], true, "{answer}");
-    assert_eq!(answer["state"]["page"], "/jobs");
+    assert_eq!(answer["state"]["page"], JOBS_LANDS);
     let notes: Vec<String> = holds
         .lock()
         .unwrap()
@@ -254,7 +258,7 @@ async fn follow_live_pause_holds_the_step_until_continue_or_the_longest_pause() 
         "{why}"
     );
     assert!(!r["refusal"]["fix"].as_str().unwrap().is_empty());
-    assert_eq!(r["state"]["page"], "/jobs", "nothing was taken");
+    assert_eq!(r["state"]["page"], JOBS_LANDS, "nothing was taken");
     assert!(r["state"]["paused_by"].is_null() && r["state"]["announce"].is_null());
 }
 
@@ -589,7 +593,7 @@ async fn fix_185_a_stale_stop_never_reaches_into_a_later_round() {
     // Round two's step still runs, undisturbed by the stale Stop.
     let r = round_two.await.unwrap();
     assert_eq!(r["ok"], true, "{r}");
-    assert_eq!(r["state"]["page"], "/jobs");
+    assert_eq!(r["state"]["page"], JOBS_LANDS);
     assert!(r["state"]["stopped_by"].is_null());
 
     // A Stop with no seq at all (an older tab) keeps working as before.
@@ -675,7 +679,7 @@ async fn fix_199_a_step_is_refused_only_for_a_page_or_form_the_tab_does_not_know
     announced(&w).await;
     let r = pending.await.unwrap();
     assert_eq!(r["ok"], true, "{r}");
-    assert_eq!(r["state"]["page"], "/jobs");
+    assert_eq!(r["state"]["page"], JOBS_LANDS);
 }
 
 /// fix-199: a tab that has never reported any capabilities (an old tab from

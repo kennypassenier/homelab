@@ -72,6 +72,7 @@ const SCHEDULE_TEMPLATE = declare({
   opens: "dialog",
   row: "<template id>",
   what: "open the New schedule drawer filled in from a template (empty page only)",
+  shows: "on an empty Schedules page",
 });
 const TOGGLE_SCHEDULE = declare({
   id: "toggle-schedule",
@@ -86,6 +87,11 @@ const SCHEDULE_MENU = declare({
   opens: "dialog",
   row: "<schedule id>",
   what: "open one schedule's menu: press edit, run-now or delete",
+  // drive-reach: 3.71.0 moved a row's Edit and Delete into this menu.
+  was: [
+    { id: "edit-schedule", press: "edit" },
+    { id: "delete-schedule", press: "delete" },
+  ],
 });
 const RUN_NEXT = declare({
   id: "run-next-now",
@@ -104,6 +110,11 @@ const UNDO_CHANGE = declare({
   page: "schedules",
   opens: "run",
   what: "undo the last switch or delete while its toast shows (6 s)",
+  shows: "for 6 s after a switch or a delete",
+  reach: [
+    { do: "click", control: "schedule-menu", row: "*" },
+    { do: "press", button: "delete" },
+  ],
 });
 const FIND_SCHEDULE = declare({
   id: "find-schedule",

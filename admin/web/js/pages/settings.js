@@ -63,6 +63,7 @@ const REPO_CHOICE = declare({
   opens: "run",
   row: "push|rebase|drop",
   what: "resolve unpushed commits: push them, rebase and push, or drop them",
+  shows: "when the working copy holds commits that were not pushed",
 });
 
 /**

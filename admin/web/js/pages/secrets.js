@@ -54,6 +54,8 @@ const PICK_STACK = declare({
   // feat-shell-1: the secrets live in each stack hub's Settings.
   at: secretsAt,
   what: "show one stack's secrets (re-reads what it declares)",
+  shows:
+    "on the fleet-wide Secrets list, which no address draws since 3.71.0 (each stack's Settings shows its own: homelab ui goto /stacks/<stack>/settings?section=secrets)",
 });
 const REVEAL_SECRET = declare({
   id: "reveal-secret",
@@ -99,36 +101,63 @@ const STAGE_SECRET = declare({
   page: "secrets",
   opens: "run",
   what: "stage the typed value (nothing is written yet)",
+  shows: "in the change drawer, once a value is typed",
+  reach: [
+    { do: "click", control: "change-a-secret" },
+    { do: "type", field: "secret-value", text: "DEMO=1" },
+  ],
 });
 const WRITE_SECRET = declare({
   id: "write-secret",
   page: "secrets",
   opens: "run",
   what: "write the staged value through latch after a 5 s Undo window, then restart when ticked",
+  shows: "in the change drawer, once the value is staged",
+  reach: [
+    { do: "click", control: "change-a-secret" },
+    { do: "type", field: "secret-value", text: "DEMO=1" },
+    { do: "click", control: "stage-secret" },
+  ],
 });
 const EDIT_STAGED = declare({
   id: "edit-staged-secret",
   page: "secrets",
   opens: "run",
   what: "go back from the staged value to editing it",
+  shows: "in the change drawer, once the value is staged",
+  reach: [
+    { do: "click", control: "change-a-secret" },
+    { do: "type", field: "secret-value", text: "DEMO=1" },
+    { do: "click", control: "stage-secret" },
+  ],
 });
 const CLOSE_DRAWER = declare({
   id: "close-secret-change",
   page: "secrets",
   opens: "run",
   what: "close the change drawer without writing",
+  shows: "while the change drawer is open",
+  reach: [{ do: "click", control: "change-a-secret" }],
 });
 const UNDO_WRITE = declare({
   id: "undo-secret-write",
   page: "secrets",
   opens: "run",
   what: "cancel a write in its 5 s Undo window, before it runs",
+  shows: "for 5 s after Write",
+  reach: [
+    { do: "click", control: "change-a-secret" },
+    { do: "type", field: "secret-value", text: "DEMO=1" },
+    { do: "click", control: "stage-secret" },
+    { do: "click", control: "write-secret" },
+  ],
 });
 const RETRY_STACK = declare({
   id: "secrets-try-again",
   page: "secrets",
   opens: "run",
   what: "read an unreadable stack's file again",
+  shows: "on a stack whose secrets file could not be read",
 });
 
 /** How long Write waits for an Undo before it sends anything. */

@@ -342,6 +342,34 @@ async fn run(explicit_host: Option<String>) {
                 ui_repo_preflight(&host, &token).await;
             }
             let step = match call {
+                // drive-reach: the running dashboard's catalog and refusals.
+                UiCall::List(filter) => {
+                    let reply = ui_state_reply(&host, &token).await;
+                    match homelab_client::ui_catalog::catalog_of(&reply.message) {
+                        Some(c) => {
+                            print!("{}", homelab_client::ui_catalog::render_list(&c, &filter));
+                            std::process::exit(0);
+                        }
+                        None => die(
+                            "this dashboard serves no control catalog (it predates drive-reach): \
+                             `homelab ui reload` once it is updated, or `homelab ui state`",
+                        ),
+                    }
+                }
+                UiCall::Refusals => {
+                    let reply = ui_state_reply(&host, &token).await;
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    match homelab_client::ui_catalog::render_refusals(&reply.message, now) {
+                        Ok(text) => {
+                            print!("{text}");
+                            std::process::exit(0);
+                        }
+                        Err(e) => die(&e),
+                    }
+                }
                 UiCall::Step(step) => step,
                 UiCall::Finish => ui_finish(&host, &token, json).await,
                 UiCall::PressWait(step) => {
@@ -364,11 +392,56 @@ async fn run(explicit_host: Option<String>) {
                     ui_finish(&host, &token, json).await
                 }
             };
+            // drive-reach (Kenny, 2026-10-03: guessing a name must stop): a
+            // click, a goto or a plan is checked here against the catalog of
+            // the dashboard that is running, before anything reaches the
+            // tab; an unknown name is refused locally with the closest ones,
+            // an old one is sent as what it is now.
+            let mut steps = vec![step];
+            if matches!(
+                steps[0],
+                UiStep::Click { .. } | UiStep::Goto { .. } | UiStep::Plan { .. }
+            ) {
+                let state = ui_state_reply(&host, &token).await;
+                if let Some(cat) = homelab_client::ui_catalog::catalog_of(&state.message) {
+                    match homelab_client::ui_catalog::check(steps.remove(0), &cat) {
+                        Ok(c) => {
+                            for n in &c.notes {
+                                eprintln!("note: {n}");
+                            }
+                            steps = c.steps;
+                        }
+                        Err(e) => {
+                            eprintln!("{e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+            let last = steps.pop().unwrap_or(UiStep::State);
+            for step in steps {
+                let reply = rpc_reply(
+                    &host,
+                    &token,
+                    Command::Ui {
+                        step,
+                        client_version: CLIENT_VERSION.to_string(),
+                    },
+                )
+                .await
+                .unwrap_or_else(|| die("the host closed the line before it answered"));
+                let refused = serde_json::from_str::<serde_json::Value>(&reply.message)
+                    .map(|v| v["ok"] != serde_json::Value::Bool(true))
+                    .unwrap_or(true);
+                if refused {
+                    ui_print(&reply, json);
+                }
+            }
             let reply = rpc_reply(
                 &host,
                 &token,
                 Command::Ui {
-                    step,
+                    step: last,
                     client_version: CLIENT_VERSION.to_string(),
                 },
             )
@@ -2321,6 +2394,22 @@ async fn rpc_collect(
 ) -> (bool, Option<homelab_proto::FleetState>) {
     let (ok, fleet, _) = rpc_exchange(host, token, command, true).await;
     (ok, fleet)
+}
+
+/// drive-reach: the dashboard's answer to `ui state` (the screen, its
+/// control catalog and its recent refusals); the process ends when the host
+/// does not answer.
+async fn ui_state_reply(host: &str, token: &str) -> homelab_proto::RpcResponse {
+    rpc_reply(
+        host,
+        token,
+        Command::Ui {
+            step: UiStep::State,
+            client_version: CLIENT_VERSION.to_string(),
+        },
+    )
+    .await
+    .unwrap_or_else(|| die("the host closed the line before it answered"))
 }
 
 /// A `homelab ui` answer printed, and the process ended with its code.

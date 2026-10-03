@@ -137,6 +137,14 @@ export function badgeText(s, now) {
 }
 
 /**
+ * drive-reach: an address's path, without its query: the server keeps the
+ * view a `goto` named (`/activity?view=running`, an old address's new
+ * home), while a tab records only where it is.
+ * @param {string} p
+ */
+const pathOf = (p) => p.split(/[?#]/)[0];
+
+/**
  * The tab's own record of where it is, after it caught up with `s`.
  * @param {DriveState} s
  * @returns {Local}
@@ -170,7 +178,8 @@ export function catchUp(local, s) {
     local.form.action === f.action &&
     local.form.stack === f.stack;
   if (local.form && !same) ops.push({ op: "close" });
-  if (local.page !== s.page) ops.push({ op: "goto", path: s.page });
+  if (pathOf(local.page) !== pathOf(s.page))
+    ops.push({ op: "goto", path: s.page });
   if (s.selected) ops.push({ op: "select", stacks: s.selected });
   if (f && !same) ops.push(openOp(f));
   if (f) {
@@ -222,12 +231,15 @@ export function animate(local, step, s) {
   if (tabStep(step, s)) return [{ op: "tab", step }];
   switch (step.do) {
     case "goto":
-      return [{ op: "goto", path: s.page }];
+      // drive-reach: the address the driver named, so an old one goes
+      // through the browser's own redirect (router.js), exactly.
+      return [{ op: "goto", path: step.path ?? s.page }];
     case "open": {
       if (!s.form) return catchUp(local, s);
       /** @type {Op[]} */
       const ops = [];
-      if (local.page !== s.page) ops.push({ op: "goto", path: s.page });
+      if (pathOf(local.page) !== pathOf(s.page))
+        ops.push({ op: "goto", path: s.page });
       ops.push(openOp(s.form));
       ops.push({ op: "sync" });
       return ops;

@@ -13,6 +13,7 @@ pub mod checks;
 pub mod compose;
 pub mod diskgrowth;
 pub mod doctor;
+pub mod drivecatalog;
 pub mod error;
 pub mod executor;
 pub mod firewall;

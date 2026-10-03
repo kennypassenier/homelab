@@ -42,6 +42,7 @@ use crate::core::drive::{
 };
 use crate::core::driveedit::{self, EditCall, EditKind};
 use crate::core::drivelive::{self, Announce, Control};
+use crate::core::driverefusals::RefusalLog;
 
 /// fix-185 (`homelab ui reload`): how long the driver waits for the driven
 /// tab to re-attach reporting the client's own version before giving up.
@@ -114,6 +115,8 @@ struct Inner {
     continued_by: Mutex<Option<String>>,
     /// fix-239: the page-control step a tab takes now.
     tab_turn: Mutex<TabTurn>,
+    /// drive-reach: every refused step, bounded (`core::driverefusals`).
+    refusals: Mutex<RefusalLog>,
 }
 
 #[derive(Clone)]
@@ -149,6 +152,7 @@ impl Driver {
                 announced: AtomicU64::new(0),
                 continued_by: Mutex::new(None),
                 tab_turn: Mutex::new(TabTurn::default()),
+                refusals: Mutex::new(RefusalLog::default()),
             }),
         }
     }
@@ -617,9 +621,15 @@ impl Driver {
         client_version: &str,
         hold: Hold<'_>,
     ) -> Value {
-        // Reading the screen never waits behind a held step.
+        // Reading the screen never waits behind a held step. drive-reach:
+        // the answer also carries this release's control catalog and the
+        // recent refusals, so `homelab ui list`, `ui refusals` and the
+        // client's own check of a `click`/`goto` read the running version.
         if step == UiStep::State {
-            return reply(None, &self.snapshot());
+            let mut v = reply(None, &self.snapshot());
+            v["catalog"] = catalog_value().clone();
+            v["refusals"] = self.refusals_view(STATE_REFUSALS);
+            return v;
         }
         // The lock is taken and dropped on its own line, never inside the
         // `if`'s condition: a MutexGuard born in a let-chain's condition
@@ -627,12 +637,7 @@ impl Driver {
         // same lock again — nested, that deadlocks a step forever.
         let tab_caps = self.lock().tab_caps.clone();
         if let Some(r) = drivelive::missing_capability(&step, tab_caps.as_ref()) {
-            tracing::info!(
-                by,
-                step = step.verb(),
-                why = %r.why,
-                "a driven step was refused: the tab does not know it"
-            );
+            self.record_refusal(by, &step, &r);
             self.publish(&step, false, Some(&r));
             return reply(Some(&r), &self.snapshot());
         }
@@ -653,7 +658,7 @@ impl Driver {
         let mut published = false;
         let refusal = match applied {
             Err(r) => {
-                tracing::info!(by, step = step.verb(), why = %r.why, "a driven step was refused");
+                self.record_refusal(by, &step, &r);
                 self.publish(&step, false, Some(&r));
                 return reply(Some(&r), &self.snapshot());
             }
@@ -672,7 +677,12 @@ impl Driver {
                 }
             },
         };
-        tracing::info!(by, step = step.verb(), "a driven step was applied");
+        // drive-reach: a step a tab could not take (no such control on
+        // screen) was logged as "applied" before; it is a refusal.
+        match &refusal {
+            Some(r) => self.record_refusal(by, &step, r),
+            None => tracing::info!(by, step = step.verb(), "a driven step was applied"),
+        }
         if published {
             // The step itself went out before the tab took it; what it
             // changed (the page, the dialog) goes out now, as a state.
@@ -1112,6 +1122,47 @@ impl Driver {
         refusal
     }
 
+    /// drive-reach: keep a refused step (bounded) and put it in the journal
+    /// with its control, row and page, so refusals can be counted.
+    fn record_refusal(&self, by: &str, step: &UiStep, r: &Refusal) {
+        let page = self.lock().page.clone();
+        let (control, row) = match step {
+            UiStep::Click { control, row } => (control.as_str(), row.as_deref().unwrap_or("")),
+            _ => ("", ""),
+        };
+        tracing::info!(
+            by,
+            step = step.verb(),
+            control,
+            row,
+            page = %page,
+            why = %r.why,
+            "a driven step was refused"
+        );
+        let now = self.now();
+        self.inner
+            .refusals
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .record(now, by, step, &page, r);
+    }
+
+    /// The refusal log, its newest `last` entries (all when `None`).
+    pub fn refusals_view(&self, last: usize) -> Value {
+        let mut v = self
+            .inner
+            .refusals
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .view();
+        if let Some(a) = v["refusals"].as_array_mut()
+            && a.len() > last
+        {
+            a.drain(..a.len() - last);
+        }
+        v
+    }
+
     fn tab_turn(&self) -> std::sync::MutexGuard<'_, TabTurn> {
         self.inner
             .tab_turn
@@ -1392,6 +1443,18 @@ fn job_ref(v: &super::actions::JobView) -> JobRef {
     }
 }
 
+/// drive-reach: how many of the newest refusals a `state` answer carries.
+const STATE_REFUSALS: usize = 50;
+
+/// The compiled-in control catalog as JSON, parsed once.
+fn catalog_value() -> &'static Value {
+    static V: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    V.get_or_init(|| {
+        serde_json::from_str(crate::core::drive::DRIVE_CATALOG_JSON)
+            .expect("drivecatalog.json reads")
+    })
+}
+
 fn reply(refusal: Option<&Refusal>, state: &DriveState) -> Value {
     json!({ "ok": refusal.is_none(), "refusal": refusal, "state": state })
 }
@@ -1519,7 +1582,20 @@ pub fn router(driver: Driver) -> Router {
         .route("/data/drive/attach", post(attach))
         .route("/data/drive/claim", post(claim))
         .route("/data/drive/taken", post(taken))
+        .route("/data/drive/controls", get(controls))
+        .route("/data/drive/refusals", get(refusals))
         .with_state(driver)
+}
+
+/// drive-reach: this release's Live view control catalog (every declared
+/// control, its page, old names and the router's addresses and redirects).
+async fn controls() -> Json<Value> {
+    Json(catalog_value().clone())
+}
+
+/// drive-reach: the refused steps kept (bounded), oldest first.
+async fn refusals(State(d): State<Driver>) -> Json<Value> {
+    Json(d.refusals_view(usize::MAX))
 }
 
 /// The demo host only (`HOMELAB_ADMIN_DEMO_HOST`, in a `demo-host` build): a
@@ -1530,9 +1606,26 @@ async fn demo_step(State(d): State<Driver>, Json(step): Json<UiStep>) -> Json<Va
     Json(d.step("demo", Scope::Operate, step).await)
 }
 
+/// The demo host only: set Live view's announcement (`{"announce_ms": n}`)
+/// and answer the one it replaced, so a whole-screen sweep of every control
+/// (drive-reach) does not wait out a 3 s countdown per step and can put the
+/// old one back.
+#[cfg(feature = "demo-host")]
+async fn demo_timing(State(d): State<Driver>, Json(body): Json<Value>) -> Json<Value> {
+    let before = d.timing();
+    if let Some(ms) = body["announce_ms"].as_u64() {
+        d.set_timing(LiveTiming {
+            announce: Duration::from_millis(ms),
+            ..before
+        });
+    }
+    Json(json!({ "announce_ms": before.announce.as_millis() as u64 }))
+}
+
 #[cfg(feature = "demo-host")]
 pub fn demo_router(driver: Driver) -> Router {
     Router::new()
         .route("/data/drive/demo-step", axum::routing::post(demo_step))
+        .route("/data/drive/demo-timing", axum::routing::post(demo_timing))
         .with_state(driver)
 }

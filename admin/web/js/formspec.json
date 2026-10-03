@@ -299,7 +299,16 @@
     "notifications",
     "shell",
     "passkeys",
-    "secrets"
+    "secrets",
+    "status",
+    "start",
+    "today",
+    "doctor",
+    "checks",
+    "traffic",
+    "timeline",
+    "home",
+    "needs-you"
   ],
   "stack_tabs": [
     "overview",

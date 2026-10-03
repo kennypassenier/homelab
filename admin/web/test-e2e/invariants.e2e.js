@@ -1882,214 +1882,9 @@ test("invariants: every action button's label fits on one line, uncut, on deskto
 // Each page control found is then driven for real: `ui click` through the
 // demo host's driver, with Live view on, must take it and have the same
 // effect a click has.
-test("invariants: every button that opens a dialog or runs an action is reachable through Live view", async (t) => {
-  const { default: SPEC } = await import("../js/formspec.json", {
-    with: { type: "json" },
-  });
-  const forms = new Set(SPEC.forms);
-  const browser = await chromium.launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1600, height: 1000 },
-    });
-    const page = await freshPage(context);
-    /** @type {string[]} */
-    const changes = [];
-    await page.route("**/data/**", (r) => {
-      const req = r.request();
-      if (req.method() !== "GET" && !req.url().includes("/data/drive/")) {
-        changes.push(`${req.method()} ${new URL(req.url()).pathname}`);
-        return r.abort();
-      }
-      return r.continue();
-    });
-    const paths = [
-      ...DRIVABLE_PATHS.map((p) => `/${p}`),
-      ...[
-        "",
-        "/apps",
-        "/history",
-        "/logs",
-        "/checks",
-        "/settings",
-        "/firewall",
-      ].map((t) => `/stacks/beta-demo${t}`),
-    ];
-    const SEL =
-      "#page button:not([disabled]), #page [role=button], #page [role=switch]:not([disabled])";
-    /** Every candidate on screen, outside a dialog, as the page marks it. */
-    const describe = () =>
-      page.$$eval(SEL, (els) =>
-        els
-          .filter((e) => e.getClientRects().length > 0 && !e.closest("dialog"))
-          .map((e) => {
-            const el = /** @type {HTMLElement} */ (e);
-            const label = (
-              el.getAttribute("aria-label") ||
-              el.textContent ||
-              ""
-            )
-              .trim()
-              .replace(/\s+/g, " ")
-              .slice(0, 60);
-            return {
-              key: `${label.replace(/\d+/g, "#")}|${el.dataset.drive ?? ""}`,
-              label,
-              drive: el.dataset.drive ?? null,
-              row: el.dataset.driveRow ?? null,
-              form:
-                el.dataset.action ??
-                /** @type {HTMLElement | null} */ (
-                  el.closest("[data-drive-form]")
-                )?.dataset.driveForm ??
-                null,
-            };
-          }),
-      );
-    const visibleHandles = async () => {
-      const out = [];
-      for (const e of await page.$$(SEL))
-        if (
-          await e.evaluate(
-            (x) => x.getClientRects().length > 0 && !x.closest("dialog"),
-          )
-        )
-          out.push(e);
-      return out;
-    };
-    // The page's own declarations, from the module the dashboard loaded.
-    const declared = new Set(
-      await page.evaluate(async () => {
-        const m = await import("/js/drivable.js").catch(() => null);
-        return m ? m.controls().map((/** @type {any} */ c) => c.id) : [];
-      }),
-    );
-    const effect = async () => {
-      for (let i = 0; i < 12; i += 1) {
-        const open = await page.$$eval("dialog[open]", (d) => d.length);
-        if (open || changes.length) break;
-        await page.waitForTimeout(100);
-      }
-      const dialogs = await page.$$eval("dialog[open]", (d) =>
-        d.map((x) =>
-          (x.querySelector(".kp-dialog__title")?.textContent ?? "").trim(),
-        ),
-      );
-      return [
-        ...dialogs.map((t) => `opens "${t}"`),
-        ...changes.map((c) => `sends ${c}`),
-      ].join(", ");
-    };
-    const closeDialogs = () =>
-      page.evaluate(() =>
-        document
-          .querySelectorAll("dialog[open]")
-          .forEach((d) => /** @type {HTMLDialogElement} */ (d).close()),
-      );
-    /** @type {string[]} */
-    const unreachable = [];
-    /** @type {Map<string, {path: string, row: string | null}>} the path is
-     * where the walk found it, for the failure message only */
-    const toDrive = new Map();
-    let walked = 0;
-    for (const path of paths) {
-      await page.goto(`${BASE}${path}`);
-      await page.waitForTimeout(1500);
-      const seen = new Set();
-      for (const c of await describe()) {
-        if (seen.has(c.key)) continue;
-        seen.add(c.key);
-        walked += 1;
-        if (new URL(page.url()).pathname !== path) {
-          await page.goto(`${BASE}${path}`);
-          await page.waitForTimeout(1500);
-        }
-        const i = (await describe()).findIndex((x) => x.key === c.key);
-        if (i < 0) continue;
-        changes.length = 0;
-        const handles = await visibleHandles();
-        await handles[i]?.click({ timeout: 2000 }).catch(() => {});
-        const did = await effect();
-        await closeDialogs();
-        if (!did) continue;
-        const viaForm = c.form != null && forms.has(c.form);
-        const viaControl = c.drive != null && declared.has(c.drive);
-        if (!viaForm && !viaControl)
-          unreachable.push(`${path}: "${c.label}" ${did}`);
-        if (viaControl && c.drive && !toDrive.has(c.drive))
-          toDrive.set(c.drive, { path, row: c.row });
-        // A change was held back: the page may show its error; start clean.
-        if (changes.length) {
-          await page.goto(`${BASE}${path}`);
-          await page.waitForTimeout(1500);
-        }
-      }
-    }
-    assert.ok(
-      walked > 50,
-      `only ${walked} buttons were walked: the pages did not draw`,
-    );
-    assert.deepEqual(
-      unreachable,
-      [],
-      `buttons Live view cannot reach (declare them in drivable.js, or mark the form that reaches them): ${unreachable.join("; ")}`,
-    );
-    assert.ok(
-      toDrive.has("pin-update"),
-      "the stale image's Update was never found to drive",
-    );
-
-    // Every page control found, driven through the Live view driver.
-    await page.check("#live-view");
-    const step = (/** @type {any} */ s) =>
-      page.evaluate(
-        (body) =>
-          fetch("/data/drive/demo-step", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          }).then((r) => r.json()),
-        s,
-      );
-    /** @type {string[]} */
-    const failed = [];
-    try {
-      for (const [control, at] of toDrive) {
-        // From another page: the tab goes to the control's own page itself
-        // (its declaration names it), so a page that moves keeps working.
-        await page.goto(`${BASE}/jobs`);
-        await page.waitForTimeout(1000);
-        changes.length = 0;
-        const r = await step({
-          do: "click",
-          control,
-          ...(at.row == null ? {} : { row: at.row }),
-        });
-        const did = await effect();
-        if (!r.ok)
-          failed.push(
-            `${control} (found on ${at.path}): refused, ${r.refusal?.why}; ${r.refusal?.fix}`,
-          );
-        else if (!did)
-          failed.push(`${control}: taken, but nothing opened or was sent`);
-        if (r.state?.page_dialog) await step({ do: "close" });
-        await closeDialogs();
-      }
-    } finally {
-      await step({ do: "done" });
-    }
-    t.diagnostic(
-      `walked ${walked} buttons; drove ${toDrive.size} page controls through Live view: ${[...toDrive.keys()].join(", ")}`,
-    );
-    assert.deepEqual(
-      failed,
-      [],
-      `page controls Live view could not drive: ${failed.join("; ")}`,
-    );
-  } finally {
-    await browser.close();
-  }
-});
+// fix-239's button walk (every button on every page, 1.5 s reloads) is folded
+// into the drive-reach sweep below, which clicks only the unmarked buttons and
+// drives every declared control from the served catalog (coordinator, 2026-10-03).
 
 // ui-pass-3 (Kenny, 2026-10-02: "vraag jezelf af of het next-level
 // frontend werk is of het nog beter kan, en verbeter het dan"): the shared
@@ -4417,6 +4212,576 @@ test("invariants: Schedules page: Live view reaches the drawer and its fields, t
       await step({ do: "done" });
     }
     await clearSchedules(page);
+  } finally {
+    await browser.close();
+  }
+});
+
+// drive-reach (Kenny, 2026-10-03: "Claude must always be able to reach
+// every control, also after a control is renamed or moved"; he kept seeing
+// "there is no control X on screen" in Live view). The three cases below
+// iterate the catalog the running dashboard serves (`/data/drive/controls`,
+// generated from drivable.js declarations and the router), so a page that
+// merges later is covered without touching this file.
+
+/**
+ * One Live view step through the demo host's driver: the same
+ * `Driver::step` a `homelab ui` line reaches through the host relay.
+ * @param {import("playwright").Page} page
+ * @param {any} s
+ */
+const reachStep = (page, s) =>
+  page.evaluate(
+    (body) =>
+      fetch("/data/drive/demo-step", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then((r) => r.json()),
+    s,
+  );
+
+/**
+ * The first row key of control `id` on screen that can be pressed, waiting
+ * (2.5 s at most) for the page to draw one; null when none comes.
+ * @param {import("playwright").Page} page
+ * @param {string} id
+ */
+async function firstRow(page, id) {
+  const sel = `[data-drive="${id}"][data-drive-row]`;
+  const h = await page
+    .waitForFunction(
+      (s) =>
+        [...document.querySelectorAll(s)]
+          .filter(
+            (e) =>
+              e.getClientRects().length > 0 &&
+              !(/** @type {HTMLButtonElement} */ (e).disabled),
+          )
+          .map((e) => /** @type {HTMLElement} */ (e).dataset.driveRow)[0] ??
+        null,
+      sel,
+      { timeout: 2500 },
+    )
+    .catch(() => null);
+  return h ? /** @type {string | null} */ (await h.jsonValue()) : null;
+}
+
+/**
+ * The control catalog the RUNNING dashboard serves (`/data/drive/controls`,
+ * generated from the declarations and compiled into the release), each
+ * control with the address a driver sends it to: its own, or for one that
+ * lives per stack its page's old address, which the router sends on.
+ * @param {import("playwright").Page} page
+ */
+async function catalogOf(page) {
+  const cat = await page.evaluate(() =>
+    fetch("/data/drive/controls", {
+      headers: { accept: "application/json" },
+    }).then((r) => r.json()),
+  );
+  return {
+    cat,
+    /** @type {any[]} */
+    all: cat.controls.map((/** @type {any} */ c) => ({
+      ...c,
+      home: !c.href || /[<{]/.test(c.href) ? `/${c.page}` : c.href,
+    })),
+  };
+}
+
+/**
+ * Live view without its 3 s countdown per step (the demo host's
+ * `/data/drive/demo-timing`); answers the function that puts it back.
+ * @param {import("playwright").Page} page
+ */
+async function noCountdown(page) {
+  const set = (/** @type {object} */ body) =>
+    page.evaluate(
+      (b) =>
+        fetch("/data/drive/demo-timing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(b),
+        }).then((r) => r.json()),
+      body,
+    );
+  const before = await set({ announce_ms: 0 });
+  return () => set({ announce_ms: before.announce_ms ?? 3000 });
+}
+
+/**
+ * Change requests a sweep lets through: Live view's own, staging a secret
+ * (nothing is written) and the snooze (its End is pressed right after).
+ */
+const PASSES = [
+  "/data/drive/",
+  "/data/secrets/stage",
+  "/data/notifications/snooze",
+];
+
+/**
+ * Hold back every other change request, so nothing a sweep presses changes
+ * the demo for the cases after it (the press itself still happened); `seen`
+ * hears each one held back.
+ * @param {import("playwright").Page} page
+ * @param {(what: string) => void} [seen]
+ */
+const holdChanges = (page, seen) =>
+  page.route("**/data/**", (r) => {
+    const req = r.request();
+    const url = new URL(req.url());
+    if (
+      req.method() !== "GET" &&
+      !PASSES.some((x) => url.pathname.startsWith(x))
+    ) {
+      seen?.(`${req.method()} ${url.pathname}`);
+      return r.abort();
+    }
+    return r.continue();
+  });
+
+/**
+ * Wait (8 s at most) until the page is newly drawn: the content `markOld`
+ * marked is gone, a title is there, and no skeleton is left.
+ * @param {import("playwright").Page} page
+ */
+const drawn = (page) =>
+  page
+    .waitForFunction(
+      () => {
+        const p = document.getElementById("page");
+        if (!p || p.querySelector("[data-sweep-old]")) return false;
+        const busy = [...p.querySelectorAll(".kp-skeleton")].some(
+          (e) => e.getClientRects().length > 0,
+        );
+        return !!p.querySelector("h1") && !busy;
+      },
+      null,
+      { timeout: 8000 },
+    )
+    .catch(() => {});
+
+/**
+ * Mark what the page shows now, so `drawn` sees it replaced.
+ * @param {import("playwright").Page} page
+ */
+const markOld = (page) =>
+  page.evaluate(() =>
+    [...(document.getElementById("page")?.children ?? [])].forEach((e) =>
+      e.setAttribute("data-sweep-old", ""),
+    ),
+  );
+
+/**
+ * `homelab ui goto <path>` through the demo host's driver, then wait until
+ * the tab has drawn it, freshly even when it is there now (it goes to
+ * /apps first), so no state an earlier press left carries over.
+ * @param {import("playwright").Page} page
+ * @param {string} path
+ * @param {Map<string, string>} landed where each path ended up last time
+ * @returns {Promise<any>} the step's answer
+ */
+async function liveGo(page, path, landed) {
+  const u = new URL(page.url());
+  if (
+    path !== "/apps" &&
+    (landed.get(path) === page.url() || u.pathname + u.search === path)
+  )
+    await liveGo(page, "/apps", landed);
+  await markOld(page);
+  const r = await reachStep(page, { do: "goto", path });
+  if (!r.ok) return r;
+  await drawn(page);
+  landed.set(path, page.url());
+  return r;
+}
+
+/** Close every dialog a press left open. @param {import("playwright").Page} page */
+const closeAll = (page) =>
+  page.evaluate(() =>
+    document
+      .querySelectorAll("dialog[open]")
+      .forEach((d) => /** @type {HTMLDialogElement} */ (d).close()),
+  );
+
+test("invariants: drive-reach: every page button is declared, and Live view finds and presses every declared control", async (t) => {
+  const started = Date.now();
+  const { default: SPEC } = await import("../js/formspec.json", {
+    with: { type: "json" },
+  });
+  const forms = new Set(SPEC.forms);
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+      timezoneId: "Europe/Brussels",
+    });
+    // One page for the whole sweep: every route and every control reuse it.
+    const page = await freshPage(context);
+    page.setDefaultTimeout(10000);
+    // A row for the controls that repeat per schedule.
+    const sched = await addSchedule(page, "films", "backup", {
+      every: "day",
+      at: "10:00",
+    });
+    const restore = await noCountdown(page);
+    /**
+     * A route on page `p`, opened directly (Live view off), once drawn.
+     * @param {import("playwright").Page} p
+     * @param {string} href
+     */
+    const show = async (p, href) => {
+      await markOld(p);
+      await p.goto(`${BASE}${href}`, { waitUntil: "domcontentloaded" });
+      await drawn(p);
+    };
+    const dialogs = () => page.$$eval("dialog[open]", (d) => d.length);
+
+    // 1. Every route: a button that opens a dialog or sends a change must
+    // carry a Live view mark: a declared control or a server form. Only
+    // the unmarked buttons are clicked; the declared ones are driven in 2.
+    // Three pages walk the routes side by side, each reused route after
+    // route (Live view is off here, so they do not meet).
+    const routes = [
+      ...Object.entries(PATH_TO_PAGE)
+        .filter(([, p]) => p !== "retired")
+        .map(([k]) => `/${k}`),
+      ...["", "/apps", "/logs", "/backups", "/history", "/settings"].map(
+        (x) => `/stacks/beta-demo${x}`,
+      ),
+    ];
+    const SEL =
+      "#page button:not([disabled]), #page [role=button], #page [role=switch]:not([disabled])";
+    /** @type {string[]} */
+    const unreachable = [];
+    let looked = 0;
+    const queue = [...routes];
+    /** @param {import("playwright").Page} p */
+    const walk = async (p) => {
+      /** @type {string[]} change requests held back since the last look */
+      const changes = [];
+      /** @type {(() => void) | null} */
+      let heard = null;
+      await holdChanges(p, (what) => {
+        changes.push(what);
+        heard?.();
+      });
+      /** What a click did: a dialog or a change request, 400 ms at most. */
+      const effect = async (/** @type {number} */ open0) => {
+        const sent = new Promise((r) => (heard = () => r(null)));
+        await Promise.race([
+          sent,
+          p
+            .waitForFunction(
+              (n) => document.querySelectorAll("dialog[open]").length > n,
+              open0,
+              { timeout: 400 },
+            )
+            .catch(() => {}),
+        ]);
+        heard = null;
+        const titles = await p.$$eval("dialog[open]", (d) =>
+          d.map((x) =>
+            (x.querySelector(".kp-dialog__title")?.textContent ?? "").trim(),
+          ),
+        );
+        return [
+          ...titles.slice(open0).map((x) => `opens "${x}"`),
+          ...changes.map((c) => `sends ${c}`),
+        ].join(", ");
+      };
+      const unmarked = () =>
+        p.$$eval(
+          SEL,
+          (els, known) =>
+            els
+              .map((e, i) => ({ e: /** @type {HTMLElement} */ (e), i }))
+              .filter(
+                ({ e }) =>
+                  e.getClientRects().length > 0 &&
+                  !e.closest("dialog") &&
+                  !e.dataset.drive &&
+                  !(
+                    e.dataset.action ??
+                    /** @type {HTMLElement | null} */ (
+                      e.closest("[data-drive-form]")
+                    )?.dataset.driveForm
+                  )
+                    ?.split(" ")
+                    .some((f) => known.includes(f)),
+              )
+              .map(({ e, i }) => ({
+                i,
+                label: (e.getAttribute("aria-label") || e.textContent || "")
+                  .trim()
+                  .replace(/\s+/g, " ")
+                  .slice(0, 60),
+              })),
+          [...forms],
+        );
+      for (let route = queue.shift(); route; route = queue.shift()) {
+        await show(p, route);
+        const here = p.url();
+        const seen = new Set();
+        for (;;) {
+          const next = (await unmarked()).find((x) => !seen.has(x.label));
+          if (!next) break;
+          seen.add(next.label);
+          looked += 1;
+          changes.length = 0;
+          const open0 = await p.$$eval("dialog[open]", (d) => d.length);
+          await p
+            .locator(SEL)
+            .nth(next.i)
+            .click({ timeout: 1000 })
+            .catch(() => {});
+          const did = await effect(open0);
+          await closeAll(p);
+          if (did) unreachable.push(`${route}: "${next.label}" ${did}`);
+          if (p.url() !== here || changes.length) await show(p, route);
+        }
+      }
+    };
+    const helpers = [await context.newPage(), await context.newPage()];
+    await Promise.all([page, ...helpers].map(walk));
+    await page.unroute("**/data/**");
+    await holdChanges(page);
+    await Promise.all(helpers.map((p) => p.close()));
+    const step1 = Math.round((Date.now() - started) / 1000);
+    assert.deepEqual(
+      unreachable,
+      [],
+      `buttons Live view cannot reach (declare them in drivable.js, or mark the form that reaches them): ${unreachable.join("; ")}`,
+    );
+
+    // 2. Every control of the catalog the running dashboard serves, driven
+    // as `homelab ui click <id> [row]` is: navigation through `ui goto`
+    // only, as a driver has it. The first control of each page that needs
+    // no row and no reach steps is sent from another page (the tab goes to
+    // its home itself); every other one from its home, freshly drawn, after
+    // the reach steps its declaration names.
+    await show(page, "/apps");
+    await page.check("#live-view");
+    const { all } = await catalogOf(page);
+    assert.ok(all.length > 40, `only ${all.length} controls are declared`);
+    /** @type {Map<string, any[]>} */
+    const byHome = new Map();
+    for (const c of all) byHome.set(c.home, [...(byHome.get(c.home) ?? []), c]);
+    /** @type {Map<string, string>} */
+    const landed = new Map();
+    /** @type {string[]} */
+    const failed = [];
+    /** @type {string[]} */
+    const conditional = [];
+    try {
+      for (const [home, list] of byHome) {
+        let fromElsewhere = true;
+        for (const c of list) {
+          const first = fromElsewhere && !c.row && !c.reach.length;
+          if (first) fromElsewhere = false;
+          /**
+           * One try: from its home as the tab has it now (or freshly drawn),
+           * the reach steps, the click. Answers what went wrong, or null.
+           * @param {boolean} fresh
+           * @returns {Promise<string | null>}
+           */
+          const attempt = async (fresh) => {
+            if (first) {
+              if (new URL(page.url()).pathname !== "/apps")
+                await liveGo(page, "/apps", landed);
+            } else if (fresh || landed.get(home) !== page.url()) {
+              const g = await liveGo(page, home, landed);
+              if (!g.ok) return `ui goto ${home} refused: ${g.refusal?.why}`;
+            }
+            for (const s of c.reach) {
+              const body = { ...s };
+              if (body.row === "*")
+                body.row = await firstRow(page, body.control ?? "");
+              const r = await reachStep(page, body);
+              if (!r.ok)
+                return `its reach step ${JSON.stringify(s)} was refused: ${r.refusal?.why}`;
+            }
+            const row = c.row ? await firstRow(page, c.id) : null;
+            const open0 = await dialogs();
+            const r = await reachStep(page, {
+              do: "click",
+              control: c.id,
+              ...(row == null ? {} : { row }),
+            });
+            try {
+              if (!r.ok) {
+                // Only a control its declaration says shows in a state the
+                // demo host cannot draw may be refused, naming that state.
+                if (
+                  c.shows &&
+                  !c.reach.length &&
+                  String(r.refusal?.why).includes(c.shows)
+                ) {
+                  conditional.push(c.id);
+                  return null;
+                }
+                return `${row ? `${row}: ` : ""}refused, ${r.refusal?.why}; ${r.refusal?.fix}`;
+              }
+              if (
+                c.opens === "dialog" &&
+                !(await page
+                  .waitForFunction(
+                    (n) => document.querySelectorAll("dialog[open]").length > n,
+                    open0,
+                    { timeout: 3000 },
+                  )
+                  .then(() => true)
+                  .catch(() => false))
+              )
+                return "pressed, but no dialog opened";
+              return null;
+            } finally {
+              if (r.state?.page_dialog || (await dialogs()))
+                await reachStep(page, { do: "close" });
+              await closeAll(page);
+            }
+          };
+          // The page as the control before left it first (no navigation
+          // when it is already there); once more freshly drawn when that
+          // state was in the way.
+          const why = (await attempt(false)) && (await attempt(true));
+          if (why) failed.push(`${c.id}: ${why}`);
+          // The tab went to the first control's home itself.
+          if (first && new URL(page.url()).pathname === home.split("?")[0])
+            landed.set(home, page.url());
+        }
+      }
+    } finally {
+      await reachStep(page, { do: "done" });
+      await restore();
+      await page.unroute("**/data/**");
+      await schedApi(page, "DELETE", `/data/schedules/${sched}`);
+    }
+    t.diagnostic(
+      `looked at ${looked} unmarked buttons on ${routes.length} routes in ${step1} s; pressed ${all.length - conditional.length} of ${all.length} catalog controls; ${Math.round((Date.now() - started) / 1000)} s in all; shown only in a state the demo host cannot draw (refused naming it): ${conditional.join(", ") || "none"}`,
+    );
+    assert.deepEqual(
+      failed,
+      [],
+      `controls Live view could not reach:\n${failed.join("\n")}`,
+    );
+    // A bound, so "shows in a state" never becomes a way out of the sweep:
+    // give the demo host the state instead.
+    assert.ok(
+      conditional.length <= 8,
+      `too many controls the sweep cannot press: ${conditional.join(", ")}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: drive-reach: every old control name a declaration keeps still clicks", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+      timezoneId: "Europe/Brussels",
+    });
+    const page = await freshPage(context);
+    const sched = await addSchedule(page, "films", "backup", {
+      every: "day",
+      at: "10:00",
+    });
+    await holdChanges(page);
+    await page.goto(`${BASE}/apps`);
+    await page.check("#live-view");
+    const restore = await noCountdown(page);
+    const { all } = await catalogOf(page);
+    const old = all.flatMap((c) =>
+      c.was.map((/** @type {any} */ w) => ({ c, w })),
+    );
+    // 3.71.0 replaced Edit and Delete on a schedule's row by its menu.
+    for (const id of ["edit-schedule", "delete-schedule"])
+      assert.ok(
+        old.some((x) => x.w.id === id),
+        `no declaration keeps the old name ${id}`,
+      );
+    /** @type {Map<string, string>} */
+    const landed = new Map();
+    /** @type {string[]} */
+    const failed = [];
+    try {
+      for (const { c, w } of old) {
+        // The row as its home shows it, then the old name sent from
+        // another page: the tab goes back there itself.
+        await liveGo(page, c.home, landed);
+        const row = c.row ? await firstRow(page, c.id) : null;
+        await liveGo(page, "/apps", landed);
+        const r = await reachStep(page, {
+          do: "click",
+          control: w.id,
+          ...(row == null ? {} : { row }),
+        });
+        if (!r.ok)
+          failed.push(`${w.id} (now ${c.id}): refused, ${r.refusal?.why}`);
+        if (r.state?.page_dialog) await reachStep(page, { do: "close" });
+        await closeAll(page);
+      }
+    } finally {
+      await reachStep(page, { do: "done" });
+      await restore();
+      await page.unroute("**/data/**");
+      await schedApi(page, "DELETE", `/data/schedules/${sched}`);
+    }
+    assert.deepEqual(failed, [], failed.join("\n"));
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: drive-reach: ui goto accepts every address the router knows and lands where the browser's own redirect does", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const { redirectFor: target } = await import("../js/router.js");
+    await page.goto(`${BASE}/apps`);
+    await page.check("#live-view");
+    const restore = await noCountdown(page);
+    const stacks = await page.evaluate(async () => {
+      const r = await fetch("/data/fleet", {
+        headers: { accept: "application/json" },
+      });
+      const b = await r.json();
+      return (b.fleet?.stacks ?? []).map((/** @type {any} */ s) => s.name);
+    });
+    const addresses = [
+      ...Object.keys(PATH_TO_PAGE).map((k) => `/${k}`),
+      "/stacks/kp-soft/checks",
+      "/stacks/kp-soft/firewall",
+    ];
+    /** @type {string[]} */
+    const bad = [];
+    try {
+      for (const from of addresses) {
+        const r = await reachStep(page, { do: "goto", path: from });
+        if (!r.ok) {
+          bad.push(`${from}: refused, ${r.refusal?.why}`);
+          continue;
+        }
+        const want = target(route(from), "", { stacks }) ?? from;
+        const landed = (/** @type {URL} */ u) =>
+          want === "/"
+            ? ["/", "/inbox", "/apps"].includes(u.pathname)
+            : u.pathname === new URL(want, BASE).pathname;
+        await page.waitForURL(landed, { timeout: 5000 }).catch(() => {});
+        const u = new URL(page.url());
+        if (!landed(u)) bad.push(`${from} → ${u.pathname} (wanted ${want})`);
+      }
+    } finally {
+      await reachStep(page, { do: "done" });
+      await restore();
+    }
+    assert.deepEqual(bad, [], `addresses ui goto missed:\n${bad.join("\n")}`);
   } finally {
     await browser.close();
   }

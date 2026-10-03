@@ -554,7 +554,7 @@ pub(crate) async fn backup_impl<'a>(
             }
             return Err(CoreError::SafetyAbort(format!(
                 "stack '{}' would back up into the repository '{}-config', which stack '{}' \
-                 already owns :: repositories are named after the owning app (D25), so both \
+                 already owns :: repositories are named after the owning app, so both \
                  stacks write into ONE history and the retention pass afterwards applies this \
                  stack's tiers to the other stack's snapshots. The stack recorded first keeps \
                  the repository; rename the app in this stack file",
@@ -568,7 +568,7 @@ pub(crate) async fn backup_impl<'a>(
             Level::Warn,
             format!(
                 "[owner] stack '{}' also claims '{}' but was recorded later — it is the \
-                 newcomer and ITS backup is refused, not this one (T82)",
+                 newcomer and ITS backup is refused, not this one",
                 other, owner
             ),
         );

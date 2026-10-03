@@ -155,17 +155,29 @@ host-binary:
 	@echo "→ target-debian/release/homelab-host"
 
 # fix-guards-7: config/host.toml against the host's own host.toml, through
-# this tree's client (`homelab host diff`: reads only, never writes). A
-# refusal names every key; `homelab host apply` reconciles them.
+# this tree's client built as the release builds it (`homelab host diff`:
+# reads only, never writes). Exit 3 is drift and names every key; any other
+# failure means the host could not be asked, which is no verdict on drift
+# and says so. `homelab host apply` reconciles drift. RELEASE_RECORD (set
+# by `make release`) collects a deliberate skip for the tag's annotation.
+HOST_DIFF ?= cargo run --release -q -p homelab-client --bin homelab -- host diff
 host-drift:
 	@if [ -n "$$HOST_DRIFT_OK" ]; then \
 		echo "host drift check skipped on purpose: $$HOST_DRIFT_OK"; \
-	elif cargo run -q -p homelab-client --bin homelab -- host diff </dev/null; then \
-		true; \
+		if [ -n "$(RELEASE_RECORD)" ]; then \
+			echo "Host drift not checked. HOST_DRIFT_OK: $$HOST_DRIFT_OK" >>"$(RELEASE_RECORD)"; \
+		fi; \
 	else \
-		echo "RELEASE BLOCKED — the repository's config/host.toml and the host disagree (above), or the host did not answer." >&2; \
-		echo "Reconcile with 'homelab host apply', or go ahead deliberately: HOST_DRIFT_OK=\"<why>\" make release …" >&2; \
-		exit 1; \
+		rc=0; $(HOST_DIFF) </dev/null || rc=$$?; \
+		case $$rc in \
+		0) ;; \
+		3) echo "RELEASE BLOCKED — config/host.toml and the host's host.toml disagree on the keys above." >&2; \
+		   echo "Reconcile with 'homelab host apply', or go ahead deliberately: HOST_DRIFT_OK=\"<why>\" make release …" >&2; \
+		   exit 1 ;; \
+		*) echo "RELEASE BLOCKED — the host could not be asked (exit $$rc: unreachable, refused, or the client did not build)." >&2; \
+		   echo "This is not a drift verdict: drift is unknown. Reach the host and run 'make host-drift' again, or go ahead deliberately: HOST_DRIFT_OK=\"<why>\" make release …" >&2; \
+		   exit 1 ;; \
+		esac; \
 	fi
 
 # fix-guards-5: run the tests a branch added against the code before it.
@@ -173,6 +185,11 @@ host-drift:
 # the branch's merge-base with main).
 fail-first:
 	@scripts/fail-first.py $(BASE)
+
+# Where `make release` collects the overrides it went past (UNMEASURED_OK,
+# HOST_DRIFT_OK) for the tag's annotation; inside the git dir, so it is
+# never committed.
+RELEASE_RECORD_FILE = $(shell git rev-parse --absolute-git-dir 2>/dev/null)/release-overrides-$(VERSION).txt
 
 release:
 ifndef VERSION
@@ -193,8 +210,11 @@ endif
 	# host's own host.toml disagree (fix-240: 600 in the repository, 120 on
 	# the host, the row closed as done). Both read only; both have a named,
 	# visible override: UNMEASURED_OK="<why>", HOST_DRIFT_OK="<why>".
-	@python3 .githooks/check-register.py --release $(VERSION)
-	$(MAKE) host-drift
+	@# fix-guards review M2: a deliberate override is written into the
+	@# tag's annotation with the rows it went past, not only to stderr.
+	@rm -f "$(RELEASE_RECORD_FILE)"
+	@python3 .githooks/check-register.py --release $(VERSION) --record "$(RELEASE_RECORD_FILE)"
+	$(MAKE) host-drift RELEASE_RECORD="$(RELEASE_RECORD_FILE)"
 	# The scanners and the MSRV check have no side effect, so they run before
 	# DRY=1 stops. Until 2026-09-29 this spot asked GitHub for the CI verdict on HEAD
 	# and refused a red base; there is no CI any more, and these are the checks
@@ -229,7 +249,11 @@ else
 		git add Cargo.toml Cargo.lock && \
 		git commit -m "release: v$(VERSION) [meta]"; \
 	fi
-	git tag -a "v$(VERSION)" -m "homelab v$(VERSION)"
+	@{ echo "homelab v$(VERSION)"; \
+	   if [ -s "$(RELEASE_RECORD_FILE)" ]; then echo; echo "Released past these gates on purpose:"; cat "$(RELEASE_RECORD_FILE)"; fi; \
+	 } >"$(RELEASE_RECORD_FILE).msg"
+	git tag -a "v$(VERSION)" -F "$(RELEASE_RECORD_FILE).msg"
+	@rm -f "$(RELEASE_RECORD_FILE)" "$(RELEASE_RECORD_FILE).msg"
 	$(MAKE) release-binaries
 	git push origin HEAD --follow-tags
 	gh release create "v$(VERSION)" --verify-tag --title "homelab v$(VERSION)" --generate-notes \

@@ -185,7 +185,7 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
             health: Health::Fail,
             detail: format!("{}% free", free),
             remedy: Some(
-                "free space on pve-root; runaway guards (B2) cap logs but check backups/images"
+                "free space on pve-root; the runaway guards cap logs but check backups/images"
                     .into(),
             ),
         },
@@ -302,10 +302,7 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
                 name: format!("stack {}", s.name),
                 health: Health::Fail,
                 detail: "container missing".into(),
-                remedy: Some(format!(
-                    "redeploy {} — auto-restore (E3) refills config",
-                    s.name
-                )),
+                remedy: Some(format!("redeploy {} — auto-restore refills config", s.name)),
             });
             continue;
         }
@@ -353,7 +350,7 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
                 name: format!("stack {} backup", s.name),
                 health: Health::Warn,
                 detail: format!("last backup {}h ago", h),
-                remedy: Some("run a backup; the scheduler (E4) may be stalled".into()),
+                remedy: Some("run a backup; the scheduler may be stalled".into()),
             }),
             None => checks.push(Check {
                 name: format!("stack {} backup", s.name),
@@ -397,8 +394,7 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
                 // gap-27: it added "local backups still run", but every
                 // repository lives behind rclone on Google Drive: with the
                 // token dead, no backup runs at all until it is refreshed.
-                "refresh the rclone Google Drive token (E5); until then no backup can be written"
-                    .into()
+                "refresh the rclone Google Drive token; until then no backup can be written".into()
             }),
         });
     }
@@ -480,7 +476,7 @@ pub fn diagnose(p: &Probes) -> Vec<Check> {
             name: "interrupted operations".into(),
             health: Health::Warn,
             detail: p.interrupted_ops.join(", "),
-            remedy: Some("re-run the listed operation(s); re-running is always safe (B1)".into()),
+            remedy: Some("re-run the listed operation(s); re-running is always safe".into()),
         });
     }
 

@@ -66,6 +66,19 @@ fi
 # way.
 . "$(git rev-parse --show-toplevel)/.githooks/gate-cache.sh"
 
+# fix-guards-9 (coordinator, 2026-10-03): a linked worktree builds in its
+# own target directory. With the one shared directory ~/.cargo/config.toml
+# sets, two worktrees committing at once compiled each other's sources
+# (one hook failed on a `proof` field its own tree does not have). The main
+# checkout keeps the shared, incremental one; an explicit CARGO_TARGET_DIR
+# wins; the script also removes the directory of a worktree that is gone
+# and caps how many are kept.
+gate_target=$("$(git rev-parse --show-toplevel)/.githooks/worktree-target.sh")
+if [ -n "$gate_target" ]; then
+  export CARGO_TARGET_DIR="$gate_target"
+  echo "gates: building in this worktree's own target directory $gate_target"
+fi
+
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 # `git commit` exports GIT_DIR (and friends) into its hooks. Tests that
@@ -109,17 +122,14 @@ gate_glob suite '*.rs' 'Cargo.toml' 'Cargo.lock' '*/Cargo.toml' \
       -u HOMELAB_TOKEN -u HOMELAB_HOST -u HOMELAB_CONFIG -u HOMELAB_LISTEN \
       "${gate_suite_cmd[@]}"
 
-# fix-guards-1/3/6 (2026-10-03): the register and invariants checks read
-# documents, and a commit that touches only a document skipped the suite
-# above — so a stale test name or a doubled invariant number went in with
-# a green gate. These four test binaries run in seconds whenever one of
-# the documents (or the check itself) moves.
-gate_glob docs-claims 'docs/deployment/REGISTER.md' 'docs/deployment/CORRECTIONS.md' \
-  'docs/INVARIANTS.md' '.githooks/check-register.py' -- \
-  env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
-      -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
-      cargo test -q -p homelab-core --test register_tests --test register_guard_tests \
-        --test register_hook_tests --test invariants_doc_tests
+# fix-guards-1/3/6: the Rust checks that read REGISTER.md, CORRECTIONS.md
+# and INVARIANTS.md (register_tests, register_guard_tests,
+# register_hook_tests, invariants_doc_tests) run with the suite above, which
+# gate-cache.sh only runs when GATE_FULL=1 or GATE_TESTS=1 — so at commit
+# their cheap halves run in .githooks/pre-commit instead, through
+# .githooks/check-register.py (the one implementation both call). A block
+# here that ran them on a document-only commit never ran: gate_glob skipped
+# its `cargo test` like every other one (removed 2026-10-03).
 
 # tech-js-checks (homelab-admin, 2026-09-28): the dashboard's browser code
 # is plain ES modules; tsc checks its JSDoc types (checkJs, strict, no

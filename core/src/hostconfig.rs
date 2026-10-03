@@ -1181,15 +1181,44 @@ pub fn declared_changes(
         .collect()
 }
 
+/// fix-guards-7: the exit code of `homelab host diff` when the two
+/// disagree; `make host-drift` tells it apart from an unreachable host
+/// (any other non-zero code), which says nothing about drift.
+pub const DRIFT_EXIT_CODE: i32 = 3;
+
+/// fix-guards-7: what a host reports about its own binary for a drift
+/// check: every key it reads, and the compiled default of each key that
+/// has one (`GetHostConfig`'s `known_keys` and `defaults`). Pure.
+pub fn host_facts() -> (Vec<String>, BTreeMap<String, serde_json::Value>) {
+    let known = KEYS.iter().map(|k| k.key.to_string()).collect();
+    let defaults = KEYS
+        .iter()
+        .filter_map(|k| default_effective(k.key).map(|v| (k.key.to_string(), v)))
+        .collect();
+    (known, defaults)
+}
+
 /// fix-guards-7: the changes that are real drift — a key whose EFFECTIVE
-/// value differs. A key the host leaves unset while the repository spells
-/// out its default (or the other way round) changes nothing the host does,
-/// so it is not drift (the same rule as fix-181's fleet check). Pure.
-pub fn effective_drift(changes: Vec<KeyChange>) -> Vec<KeyChange> {
+/// value differs on the RUNNING host. A key the host leaves unset while
+/// the repository spells out its default (or the other way round) changes
+/// nothing the host does, so it is not drift (the same rule as fix-181's
+/// fleet check), and the default is the host binary's own (`host_defaults`)
+/// where it reports one. A key the running host does not read
+/// (`host_known`, when it reports the list) is a key of a later release:
+/// it arrives with that release, not through `host apply`. Pure.
+pub fn effective_drift(
+    changes: Vec<KeyChange>,
+    host_known: &[String],
+    host_defaults: &BTreeMap<String, serde_json::Value>,
+) -> Vec<KeyChange> {
     changes
         .into_iter()
+        .filter(|c| host_known.is_empty() || host_known.iter().any(|k| k == &c.key))
         .filter(|c| {
-            let d = default_effective(&c.key);
+            let d = host_defaults
+                .get(&c.key)
+                .cloned()
+                .or_else(|| default_effective(&c.key));
             c.from.clone().or_else(|| d.clone()) != c.to.clone().or(d)
         })
         .collect()

@@ -100,7 +100,7 @@ pub const CADVISOR_COMPOSE: &str = r#"services:
 # see that host's containers, and a stack network exists only on its own
 # stack. Prometheus scrapes the published port over the LAN, identically
 # everywhere.
-"#;
+"#; // id-ok: a comment inside a generated file, for its maintainer; rewording it would make every deployed copy differ from what the host renders (the fleet check compares firewall files line by line)
 
 pub const JOURNALD_LIMITS: &str =
     "[Journal]\nSystemMaxUse=100M\nRuntimeMaxUse=50M\nMaxRetentionSec=1month\n";

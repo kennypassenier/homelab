@@ -24,8 +24,28 @@ import { fileURLToPath } from "node:url";
 
 const web = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-const ID =
-  /(?<![\w-])(?:fix|feat|gap|redesign|arch|step|scope|ask|tech)-(?:[a-z]+-)*\d+(?![\w.-]*\d)(?![\w-])/;
+/**
+ * The kinds of a register id, from the one list the commit gate
+ * (.githooks/check-register.py) and core/tests/user_text_ids_tests.rs read:
+ * lowercase kinds (fix-240, feat-shell-1) and uppercase prefixes (H8, D9).
+ * @returns {RegExp}
+ */
+export function idPattern() {
+  const lines = readFileSync(
+    join(web, "..", "..", ".githooks", "register-id-kinds.txt"),
+    "utf8",
+  )
+    .split("\n")
+    .map((l) => l.split("#")[0].trim())
+    .filter(Boolean);
+  const upper = lines.filter((l) => /^[A-Z]+$/.test(l));
+  const lower = lines.filter((l) => !/^[A-Z]+$/.test(l));
+  return new RegExp(
+    `(?<![\\w-])(?:(?:${lower.join("|")})-(?:[a-z]+-)*\\d+|(?:${upper.join("|")})\\d+)(?![\\w.-]*\\d)(?![\\w-])`,
+  );
+}
+
+const ID = idPattern();
 const ISO = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
 
 /**
@@ -258,6 +278,8 @@ test("the user-text lexer finds strings, skips comments, and judges only prose",
     'const d = "feat-stacks-3"; const e = "chore: x [fix-110]";',
     'const f = "redesign-3.71/backups.html";',
     'const g = "taken 2026-10-03T12:36 local";',
+    'const h = "updates parked (H8): investigate";',
+    'const i = "sha-256 and utf-8, KEY_B64 and v3.70.2";',
   ].join("\n");
   const strings = stringsOf(src);
   assert.ok(!strings.some((s) => s.includes("a comment")));
@@ -268,6 +290,7 @@ test("the user-text lexer finds strings, skips comments, and judges only prose",
       "Every stack a destroy retired (ask-9) is kept",
       "Restart   now, fix-129 says so",
       "taken 2026-10-03T12:36 local",
+      "updates parked (H8): investigate",
     ],
   );
 });

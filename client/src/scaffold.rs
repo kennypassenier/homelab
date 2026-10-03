@@ -386,7 +386,7 @@ pub fn scaffold_stack_with(
         .collect::<Vec<_>>()
         .join("\n");
     let manifest_head = format!(
-        "# Scaffolded by the homelab wizard (G2). Intent only — no state.\n\
+        "# Scaffolded by the homelab wizard. Intent only — no state.\n\
          stack_name: {name}\n\
          vmid: {vmid}\n\
          hostname: {vmid}-app-{name}\n\n\
@@ -481,7 +481,7 @@ pub fn scaffold_stack_with(
             .iter()
             .map(|path| {
                 let hollow = if no_data_paths.iter().any(|n| n == path) {
-                    "\n    # Declared to keep nothing of its own: this app gets no restic\n    # repository at all, so an empty directory here is the design rather\n    # than a backup that silently stopped (F154).\n    no_data: true"
+                    "\n    # Declared to keep nothing of its own: this app gets no restic\n    # repository at all, so an empty directory here is the design rather\n    # than a backup that silently stopped.\n    no_data: true"
                 } else {
                     ""
                 };
@@ -624,7 +624,7 @@ fn copy_app_templates(
 
 fn generic_compose(app: &str, image: &str, name: &str) -> String {
     format!(
-        "services:\n  {app}:\n    image: {image}\n    container_name: {app}\n    restart: unless-stopped\n    labels:\n      # backup: stop this container while it is snapshotted (E4)\n      - com.homelab.backup.pause=true\n      # managed updates (D9): manual by default; set auto or auto-after-Nd\n      - com.homelab.update.policy=manual\n    networks:\n      - {name}_net\n\nnetworks:\n  {name}_net:\n    external: true\n    name: {name}_net\n"
+        "services:\n  {app}:\n    image: {image}\n    container_name: {app}\n    restart: unless-stopped\n    labels:\n      # backup: stop this container while it is snapshotted\n      - com.homelab.backup.pause=true\n      # managed updates: manual by default; set auto or auto-after-Nd\n      - com.homelab.update.policy=manual\n    networks:\n      - {name}_net\n\nnetworks:\n  {name}_net:\n    external: true\n    name: {name}_net\n"
     )
 }
 

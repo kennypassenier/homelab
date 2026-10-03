@@ -1060,6 +1060,15 @@ pub struct HostConfigFile {
     /// Dotted paths the file sets that the host does not read (F186).
     #[serde(default)]
     pub unknown: Vec<String>,
+    /// fix-guards-7: every key this host's binary reads, so `homelab host
+    /// diff` leaves a later release's keys out. Empty from a host built
+    /// before this field.
+    #[serde(default)]
+    pub known_keys: Vec<String>,
+    /// fix-guards-7: the compiled default of each key that has one, as
+    /// this host's binary applies it. Empty from an older host.
+    #[serde(default)]
+    pub defaults: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// feat-settings-1: what `SetHostConfig` answers when it wrote the file.

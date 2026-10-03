@@ -52,6 +52,16 @@ use crate::core::yamledit;
 /// asks only a host at least this new: the next release, 3.63.0.
 pub const HOST_SETTINGS_SINCE: (u64, u64, u64) = crate::core::hostversion::NEXT_RELEASE;
 
+/// What a person can do while the host is older than
+/// [`HOST_SETTINGS_SINCE`]. Not `homelab host apply`: it reads the host's
+/// file with `GetHostConfig` first, which such a host does not answer
+/// (fix-guards review: the advice sent people to a command that cannot
+/// work there). The TUI's own settings screen is gone (tui-host-settings),
+/// so the host's file on its own disk is what remains.
+pub const OLD_HOST_SETTINGS_ADVICE: &str = "update the host with `homelab release-update`; \
+     until then host.toml changes only on the host itself (/etc/homelab/host.toml over ssh), \
+     and takes effect with `systemctl restart homelab-host`";
+
 #[derive(Clone)]
 pub struct EditCtx {
     pub wc: Arc<WorkingCopy>,
@@ -1710,7 +1720,7 @@ async fn host_new_enough(c: &EditCtx) -> Result<(), Refusal> {
                 HOST_SETTINGS_SINCE.1,
                 HOST_SETTINGS_SINCE.2
             ),
-            "update the host to a newer release; until then host settings change through `homelab host apply`",
+            OLD_HOST_SETTINGS_ADVICE,
         )),
         None => Err(Refusal::new(
             "the host settings",

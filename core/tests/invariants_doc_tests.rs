@@ -19,44 +19,10 @@
 //! one test that is real, not that every test mentioned in a row's prose
 //! exists.
 
-use std::path::{Path, PathBuf};
+mod common;
 
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("core/ has a parent")
-        .to_path_buf()
-}
-
-fn sources_with_ext(root: &Path, ext: &str) -> Vec<(PathBuf, String)> {
-    fn walk(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for e in entries.flatten() {
-            let p = e.path();
-            let name = e.file_name().to_string_lossy().to_string();
-            if p.is_dir() {
-                if name.starts_with("target")
-                    || name == ".git"
-                    || name == ".claude"
-                    || name == "node_modules"
-                {
-                    continue;
-                }
-                walk(&p, ext, out);
-            } else if p.extension().is_some_and(|x| x == ext) {
-                out.push(p);
-            }
-        }
-    }
-    let mut paths = Vec::new();
-    walk(root, ext, &mut paths);
-    paths
-        .into_iter()
-        .filter_map(|p| std::fs::read_to_string(&p).ok().map(|t| (p, t)))
-        .collect()
-}
+use common::{repo_root, run_check_register, sources_with_ext, split_cells};
+use std::path::Path;
 
 /// One row's citation: either a Rust function name, or a JS file + the
 /// exact description string of a `test(...)` in it.
@@ -123,22 +89,19 @@ fn invariant_rows(root: &Path) -> Vec<(String, String)> {
         if !trimmed.starts_with('|') {
             continue;
         }
-        let cells: Vec<&str> = trimmed
-            .trim_matches('|')
-            .split('|')
-            .map(str::trim)
-            .collect();
+        // A `\|` inside a cell is part of the cell (fix-guards review, M5).
+        let cells = split_cells(trimmed);
         if cells.len() != 4 {
             continue;
         }
-        let id = cells[0];
+        let id = cells[0].as_str();
         if id.is_empty() || id == "#" || id.chars().all(|c| c == '-' || c == ':') {
             continue; // header or the `---|---|---|---` separator
         }
         if !id.chars().all(|c| c.is_ascii_digit()) {
             continue; // not a numbered row (defensive; should not happen)
         }
-        out.push((id.to_string(), cells[3].to_string()));
+        out.push((id.to_string(), cells[3].clone()));
     }
     out
 }
@@ -236,56 +199,6 @@ fn as_citation_ignores_non_test_backticks() {
 fn row_number(line: &str) -> Option<u32> {
     let rest = line.trim().strip_prefix('|')?;
     rest.split('|').next()?.trim().parse().ok()
-}
-
-/// Every fault in the table's numbering: a blank or foreign line inside the
-/// table, a number used twice, or a number that is not the previous one
-/// plus one. Pure, so a constructed bad table can prove it fails.
-fn numbering_faults(doc: &str) -> Vec<String> {
-    let lines: Vec<&str> = doc.lines().collect();
-    let Some(header) = lines
-        .iter()
-        .position(|l| l.trim_start().starts_with("| # |"))
-    else {
-        return vec!["no `| # |` table header found".to_string()];
-    };
-    // The table ends at the last numbered row; everything between the header
-    // (and its `---` separator) and that row has to be a numbered row.
-    let last = lines
-        .iter()
-        .rposition(|l| row_number(l).is_some())
-        .unwrap_or(header);
-    let mut faults = Vec::new();
-    let mut seen: std::collections::BTreeMap<u32, usize> = Default::default();
-    let mut previous: Option<u32> = None;
-    for (i, line) in lines.iter().enumerate().take(last + 1).skip(header + 2) {
-        let Some(n) = row_number(line) else {
-            faults.push(format!(
-                "line {}: the table is broken here (a blank or non-row line between rows) — \
-                 every row after it renders as plain text",
-                i + 1
-            ));
-            continue;
-        };
-        if let Some(first) = seen.insert(n, i + 1) {
-            faults.push(format!(
-                "row {n} appears twice (lines {first} and {}) — two branches appended the same \
-                 number; give the later one the next free number and move its citations with it",
-                i + 1
-            ));
-        } else if let Some(p) = previous {
-            if n != p + 1 {
-                faults.push(format!(
-                    "line {}: row {n} follows row {p} — the numbers must run 1, 2, 3 … with no gap",
-                    i + 1
-                ));
-            }
-        } else if n != 1 {
-            faults.push(format!("the first row is {n}, not 1"));
-        }
-        previous = Some(n);
-    }
-    faults
 }
 
 /// Does `text` name register id `id` as a whole word (`fix-17` is not in
@@ -402,38 +315,16 @@ fn stale_citations(invariants: &str, sources: &[(String, String)]) -> Vec<String
 /// covers: fix-guards-3
 #[test]
 fn invariant_numbers_run_one_to_n_in_one_unbroken_table() {
-    let doc = std::fs::read_to_string(repo_root().join("docs/INVARIANTS.md")).unwrap();
-    let faults = numbering_faults(&doc);
-    assert!(
-        faults.is_empty(),
-        "docs/INVARIANTS.md's numbering is broken:\n{}",
-        faults.join("\n")
-    );
+    // One implementation: the commit hook's (.githooks/check-register.py),
+    // whose constructed bad tables are in register_hook_tests.rs.
+    let (code, _, err) = run_check_register(&["--tree", "numbering"], &repo_root(), &[]);
+    assert_eq!(code, 0, "docs/INVARIANTS.md's numbering is broken:\n{err}");
 }
 
 #[test]
-fn numbering_faults_catches_a_collision_a_gap_and_a_split_table() {
-    let head = "| # | Invariant | Kenny said | Test(s) |\n|---|---|---|---|\n";
-    let good = format!("{head}| 1 | a | b | `t` |\n| 2 | a | b | `t` |\n");
-    assert!(numbering_faults(&good).is_empty());
-    let collided = format!("{head}| 1 | a | b | `t` |\n| 2 | a | b | `t` |\n| 2 | c | d | `t` |\n");
-    assert!(
-        numbering_faults(&collided)
-            .iter()
-            .any(|f| f.contains("row 2 appears twice"))
-    );
-    let gap = format!("{head}| 1 | a | b | `t` |\n| 3 | a | b | `t` |\n");
-    assert!(
-        numbering_faults(&gap)
-            .iter()
-            .any(|f| f.contains("row 3 follows row 1"))
-    );
-    let split = format!("{head}| 1 | a | b | `t` |\n\n| 2 | a | b | `t` |\n");
-    assert!(
-        numbering_faults(&split)
-            .iter()
-            .any(|f| f.contains("table is broken"))
-    );
+fn a_test_column_holding_an_escaped_pipe_is_still_the_fourth_cell() {
+    let cells = split_cells(r"| 7 | a \| b | said | `t` |");
+    assert_eq!(cells, vec!["7", r"a \| b", "said", "`t`"]);
 }
 
 /// covers: fix-guards-3

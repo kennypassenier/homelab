@@ -306,7 +306,7 @@ The daemon replicates the datasets named in `[[zfs_jobs]]` (`source`, `target`) 
 
 The replica keeps its own history. A snapshot destroyed on the source stays on the replica until the replica's retention thins it; a dataset destroyed on the source stays on the replica untouched, is never pruned, and is named in a warning every night. When the replica's newest snapshot of a dataset has left the source, that dataset is not sent: receiving from an older shared snapshot would roll the replica back and destroy what came after it, so the job fails and names it.
 
-`-x mountpoint` keeps a replica from arriving with its source's mountpoint, which would put the copy at the live path (F177, a replica claiming the live path of what it copies). A replica received before that change can still carry it, so check before mounting anything:
+`-x mountpoint` keeps a replica from arriving with its source's mountpoint, which would put the copy at the live path (a replica claiming the live path of what it copies). A replica received before that change can still carry it, so check before mounting anything:
 
 ```sh
 grep -A2 zfs_jobs /etc/homelab/host.toml

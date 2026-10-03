@@ -1148,12 +1148,15 @@ fn host_config_view(path: &str, raw: &str) -> Result<homelab_proto::HostConfigFi
         let json = serde_json::to_value(v).map_err(|e| e.to_string())?;
         values.insert(key.clone(), homelab_core::hostconfig::redact(key, &json));
     }
+    let (known_keys, defaults) = homelab_core::hostconfig::host_facts();
     Ok(homelab_proto::HostConfigFile {
         path: path.to_string(),
         sha256: homelab_core::manifest::sha256_hex(raw.as_bytes()),
         values,
         secrets_set,
         unknown: unknown_keys(&table),
+        known_keys,
+        defaults,
     })
 }
 
@@ -12000,7 +12003,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             if let Err(e) = append_audit(&audit_path, &audit) {
                 tracing::warn!("audit.log: could not record the exec :: {}", e);
             }
-            info!("A6 {}", audit.trim_end());
+            info!("audit: {}", audit.trim_end());
             match homelab_core::executor::pct_sh(&exec, vmid, &command, 120).await {
                 Ok(out) => RpcResponse {
                     id: req.id,
@@ -12602,7 +12605,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         .settings
                         .write()
                         .unwrap_or_else(PoisonError::into_inner) = *view;
-                    info!("settings updated via G8");
+                    info!("settings updated by a client");
                     RpcResponse {
                         id: req.id,
                         ok: true,

@@ -2329,7 +2329,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          dataset is not sent: receiving from an older shared snapshot would roll the \
          replica back and destroy what came after it, so the job fails and names it.\n\n\
          `-x mountpoint` keeps a replica from arriving with its source's mountpoint, which \
-         would put the copy at the live path (F177, a replica claiming the live path of what \
+         would put the copy at the live path (a replica claiming the live path of what \
          it copies). A replica received before that change can still carry it, so check \
          before mounting anything:\n\n```sh\n\
          grep -A2 zfs_jobs {toml}\n\

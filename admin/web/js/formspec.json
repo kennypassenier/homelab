@@ -1081,7 +1081,7 @@
         "id": "storage-host-path",
         "kind": "text",
         "label": "Host path",
-        "help": "Under /appdata/, named <app>-config; the owning app keeps its own backup history across a move (D25).",
+        "help": "Under /appdata/, named <app>-config; the owning app keeps its own backup history across a move.",
         "pattern": "/appdata/[A-Za-z0-9._\\-/]+",
         "required": true
       },

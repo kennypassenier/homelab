@@ -21,14 +21,10 @@
 //!
 //! The browser half of the same rule is `admin/web/test/user_text.test.js`.
 
-use std::path::{Path, PathBuf};
+mod common;
 
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("core/ has a parent")
-        .to_path_buf()
-}
+use common::repo_root;
+use std::path::{Path, PathBuf};
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -151,8 +147,10 @@ fn string_literals(src: &str) -> Vec<(usize, String)> {
                     k += 1;
                 }
                 let text = &src[start..k.min(n)];
-                keep(&mut out, line, text.to_string(), skipping);
+                // Reported at its LAST line, like a plain literal, so an
+                // `id-ok:` marker after the closing quote is found.
                 line += text.matches('\n').count();
+                keep(&mut out, line, text.to_string(), skipping);
                 i = k + close.len();
                 continue;
             }
@@ -201,25 +199,39 @@ fn string_literals(src: &str) -> Vec<(usize, String)> {
     out
 }
 
+/// The kinds of a register id, from the one list the commit gate and the
+/// dashboard's check read too: (lowercase kinds, uppercase prefixes).
+fn kinds() -> (Vec<String>, Vec<String>) {
+    let text = std::fs::read_to_string(repo_root().join(".githooks/register-id-kinds.txt"))
+        .expect(".githooks/register-id-kinds.txt lists the id kinds");
+    let mut lower = Vec::new();
+    let mut upper = Vec::new();
+    for line in text.lines() {
+        let k = line.split('#').next().unwrap_or("").trim();
+        if k.is_empty() {
+            continue;
+        }
+        if k.chars().all(|c| c.is_ascii_uppercase()) {
+            upper.push(k.to_string());
+        } else {
+            lower.push(k.to_string());
+        }
+    }
+    (lower, upper)
+}
+
 /// The register id `text` shows a person, if any: `fix-240`,
-/// `feat-shell-1`, `gap-26` outside `[brackets]`. A version-like tail
-/// (`redesign-3.71`) is not an id.
+/// `feat-shell-1`, `gap-26`, `H8`, `D9` outside `[brackets]`. A
+/// version-like tail (`redesign-3.71`) is not an id. Every line of the
+/// literal is judged, one starting with `#` or `//` too: a literal is text
+/// some reader gets (a runbook heading is read by a person), and a source
+/// comment is not a literal. A generated file's own comment that must
+/// carry an id is marked `// id-ok: <why>` at the literal.
 fn bare_id(text: &str) -> Option<String> {
     if !text.trim().contains(char::is_whitespace) {
         return None; // a key or an identifier, not prose
     }
-    // A comment line inside a generated file (`# Written by homelab …
-    // (fix-88)`, `// GENERATED …`) is read by whoever maintains that file,
-    // the way a code comment is: it may carry the id.
-    let unescaped = text.replace("\\n", "\n");
-    let text: String = unescaped
-        .lines()
-        .filter(|l| {
-            let l = l.trim_start();
-            !(l.starts_with('#') || l.starts_with("//"))
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let text = text.replace("\\n", "\n");
     let mut plain = String::new();
     let mut depth = 0;
     for c in text.chars() {
@@ -230,18 +242,22 @@ fn bare_id(text: &str) -> Option<String> {
             _ => {}
         }
     }
-    const KINDS: [&str; 9] = [
-        "fix", "feat", "gap", "redesign", "arch", "step", "scope", "ask", "tech",
-    ];
+    let (lower, upper) = kinds();
     let words: Vec<&str> = plain
-        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '.'))
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '_'))
         .collect();
     for w in words {
         let w = w.trim_end_matches('.');
+        if upper.iter().any(|p| {
+            w.strip_prefix(p.as_str())
+                .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+        }) {
+            return Some(w.to_string());
+        }
         let Some((kind, rest)) = w.split_once('-') else {
             continue;
         };
-        if !KINDS.contains(&kind) {
+        if !lower.iter().any(|k| k == kind) {
             continue;
         }
         let Some((_, num)) = rest.rsplit_once('-').or(Some(("", rest))) else {
@@ -306,7 +322,7 @@ fn no_text_a_person_reads_names_a_register_id() {
 
 #[test]
 fn bare_id_and_the_lexer_judge_what_a_person_reads() {
-    let src = r##"
+    let src = r###"
 // a comment naming fix-240 is fine
 /* so is feat-shell-1 */
 fn a() -> &'static str { "outside the night window (fix-129)" }
@@ -316,12 +332,21 @@ fn d() -> &'static str { r#"gap-26: journal.jsonl is cut back"# }
 fn e() -> char { '"' }
 fn f() -> &'static str { "see redesign-3.71/backups.html for it" }
 fn g() -> &'static str { "# Written by homelab (fix-88): edit the stack\nport = 1" }
+fn h() -> &'static str { "## Restore a stack (gap-28)\n\nRun it" }
+fn i() -> &'static str { "backups continue (H8): investigate" }
+fn j() -> &'static str { "see E1 and D9/B6 for why" }
+fn k() -> &'static str { "sha-256 and utf-8 are not ids, nor is v3.70.2 or KEY_B64" }
 #[cfg(test)]
 mod tests { fn t() { let _ = "fix-1 in a test is fine"; } }
-"##;
+"###;
     let judged: Vec<String> = string_literals(src)
         .into_iter()
         .filter_map(|(_, t)| bare_id(&t))
         .collect();
-    assert_eq!(judged, vec!["fix-129", "gap-26"]);
+    // A `#` or `//` line inside a literal is text some reader gets (the
+    // runbook's headings are read by a person); an uppercase id is an id.
+    assert_eq!(
+        judged,
+        vec!["fix-129", "gap-26", "fix-88", "gap-28", "H8", "E1"]
+    );
 }

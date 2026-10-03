@@ -10,15 +10,25 @@ written in register rows from memory, never checked.
 
 What this does, for BASE..HEAD (BASE defaults to the merge-base with main):
 
-1. Finds the tests the range ADDS that claim a fix: a Rust `#[test]` whose
-   doc block carries `covers: <id>`, in a `*/tests/*.rs` file, and a node
-   `test("<id>: …")` in `admin/web/test/*.test.js`.
-2. Checks BASE out into a throwaway worktree under ~/.cache, copies only
-   those test FILES from HEAD over it — the old code, the new tests — and
-   runs each claimed test by name.
-3. A test that PASSES there is reported: it does not fail without the fix.
-   A test that does not even build against the old code counts as failing
-   (it needs the new code), and says so.
+1. Finds the tests the range ADDS that claim a fix, read from HEAD (not the
+   working tree): a Rust `#[test]` whose doc block carries `covers: <id>`,
+   in a `*/tests/*.rs` file, and a node `test("<id>: …")` in
+   `admin/web/test/*.test.js`. A new Rust test WITHOUT `covers:` is listed
+   too: nothing claims it, so nothing proves it.
+2. Checks BASE out into a throwaway worktree under ~/.cache, copies every
+   file the range added or changed under a crate's `tests/` and under
+   `admin/web/test/` from HEAD over it (helpers in `common/`, fixtures
+   included) — the old code, the new tests — and runs each claimed test by
+   name. Cargo builds in a target directory INSIDE that worktree, which is
+   deleted with it, so nothing piles up on disk.
+3. A verdict per test, from what the runner reported:
+     fails on the old code   ≥1 failed — the proof;
+     PASSES on the old code  it does not fail without the fix (refused);
+     DOES NOT BUILD          against the old code: no proof either way
+                             (refused: rewrite it against the old API, or
+                             mark `fail-first: <why>` with the constructed
+                             case that proves it);
+     NOT FOUND               0 tests matched the name (refused).
 
 A test whose guard found nothing in the tree when it was added (a guard
 for a future mistake, proven by a constructed bad case instead) carries
@@ -28,7 +38,7 @@ Tests inside a source file's own `mod tests` cannot be separated from the
 code they sit in, so they are listed as not checkable rather than guessed.
 
 Usage: scripts/fail-first.py [BASE]      (make fail-first BASE=<ref>)
-Exit 1 when any claimed test passes on the old code.
+Exit 1 when any claimed test is not proven to fail on the old code.
 """
 import os
 import re
@@ -40,14 +50,15 @@ import time
 COVERS = re.compile(r"^\s*///?\s*covers:\s*(\S.*)$")
 EXEMPT = re.compile(r"^\s*///?\s*fail-first:\s*(\S.*)$")
 NODE_TEST = re.compile(r"""^\+\s*test\(\s*(["'`])((?:[a-z]+-)+\d+:[^"'`]*)\1""")
+TESTS_TREE = re.compile(r"^(?:[^/]+/tests/.+|admin/web/test/.+)$")
 
 
 def git(*args, cwd=None):
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout
 
 
-def rust_claims(path_text):
-    """(name, exempt reason or None) for every covers:-marked test fn."""
+def rust_tests(path_text):
+    """(name, covers?, exempt reason or None) for every #[test] fn."""
     lines = path_text.splitlines()
     out = []
     for i, line in enumerate(lines):
@@ -67,24 +78,29 @@ def rust_claims(path_text):
             if not s.strip():
                 break
             j -= 1
-        if is_test and covers:
-            out.append((m.group(1), exempt))
+        if is_test:
+            out.append((m.group(1), covers, exempt))
     return out
 
 
+def changed_files(base):
+    return git("diff", "--name-only", "--diff-filter=AM", f"{base}..HEAD").split()
+
+
 def added_tests(base):
-    """{file: [(kind, name, exempt)]} for the claimed tests BASE..HEAD adds."""
-    files = git("diff", "--name-only", "--diff-filter=AM", f"{base}..HEAD").split()
-    found = {}
-    for f in files:
+    """({file: [(kind, name, exempt)]}, [unclaimed "file :: name"]) for the
+    tests BASE..HEAD adds, read from HEAD."""
+    found, unclaimed = {}, []
+    for f in changed_files(base):
         if re.match(r"[^/]+/tests/[^/]+\.rs$", f):
-            new = rust_claims(open(f, encoding="utf-8").read())
+            new = rust_tests(git("show", f"HEAD:{f}"))
             try:
                 old_text = git("show", f"{base}:{f}")
             except subprocess.CalledProcessError:
                 old_text = ""
-            old = {n for n, _ in rust_claims(old_text)}
-            claims = [("rust", n, e) for n, e in new if n not in old]
+            old = {n for n, _, _ in rust_tests(old_text)}
+            claims = [("rust", n, e) for n, c, e in new if n not in old and c]
+            unclaimed += [f"{f} :: {n}" for n, c, _ in new if n not in old and not c]
             if claims:
                 found[f] = claims
         elif re.match(r"admin/web/test/[^/]+\.test\.js$", f):
@@ -92,13 +108,13 @@ def added_tests(base):
             claims = [("node", m.group(2), None) for m in map(NODE_TEST.match, diff.splitlines()) if m]
             if claims:
                 found[f] = claims
-    return found
+    return found, unclaimed
 
 
 def in_source_tests(base):
     """Claimed tests added inside src/ files (not separable)."""
     out = []
-    for f in git("diff", "--name-only", "--diff-filter=AM", f"{base}..HEAD").split():
+    for f in changed_files(base):
         if f.endswith(".rs") and "/src/" in f:
             diff = git("diff", "-U0", f"{base}..HEAD", "--", f)
             if re.search(r"^\+\s*///?\s*covers:", diff, re.M):
@@ -107,8 +123,34 @@ def in_source_tests(base):
 
 
 def package_of(path):
-    toml = open(os.path.join(path.split("/")[0], "Cargo.toml"), encoding="utf-8").read()
+    toml = git("show", f"HEAD:{path.split('/')[0]}/Cargo.toml")
     return re.search(r'^name\s*=\s*"([^"]+)"', toml, re.M).group(1)
+
+
+def rust_verdict(out):
+    """The verdict from cargo's own report, never from its exit code alone."""
+    if "error[E" in out or "could not compile" in out:
+        return "DOES NOT BUILD against the old code"
+    ran = re.search(r"test result: \w+\. (\d+) passed; (\d+) failed", out)
+    if not ran:
+        last = next((l for l in reversed(out.splitlines()) if l.strip()), "no output")
+        return f"COULD NOT RUN ({last.strip()[:80]})"
+    if int(ran.group(1)) + int(ran.group(2)) == 0:
+        return "NOT FOUND (0 tests matched)"
+    if int(ran.group(2)) >= 1:
+        return "fails on the old code"
+    return "PASSES on the old code"
+
+
+def node_verdict(out):
+    text = out.replace("ℹ", "#")
+    fail = re.search(r"^# fail (\d+)", text, re.M)
+    passed = re.search(r"^# pass (\d+)", text, re.M)
+    if fail and int(fail.group(1)) >= 1:
+        return "fails on the old code"
+    if passed and int(passed.group(1)) >= 1:
+        return "PASSES on the old code"
+    return "NOT FOUND (0 tests matched)"
 
 
 def main(argv):
@@ -116,9 +158,11 @@ def main(argv):
     os.chdir(root)
     base = argv[1] if len(argv) > 1 else git("merge-base", "HEAD", "main").strip()
     base_sha = git("rev-parse", "--short", base).strip()
-    found = added_tests(base)
+    found, unclaimed = added_tests(base)
     for f in in_source_tests(base):
         print(f"not checkable (a test module inside a source file): {f}")
+    for u in unclaimed:
+        print(f"{'no covers: (nothing claims it)':<46} {u}")
     if not found:
         print(f"fail-first: no claimed tests added since {base_sha}")
         return 0
@@ -128,10 +172,17 @@ def main(argv):
         shutil.rmtree(work, ignore_errors=True)
     os.makedirs(os.path.dirname(work), exist_ok=True)
     git("worktree", "add", "--detach", work, base)
-    passed_on_old, results = [], []
+    env = dict(os.environ, CARGO_TARGET_DIR=os.path.join(work, ".fail-first-target"))
+    refused, results = [], []
     try:
-        for f in found:
-            shutil.copyfile(f, os.path.join(work, f))
+        # Every test-side file the range touched, from HEAD: the claimed
+        # tests' own files and the helpers and fixtures they read.
+        for f in changed_files(base):
+            if TESTS_TREE.match(f):
+                dest = os.path.join(work, f)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, "w", encoding="utf-8") as out:
+                    out.write(git("show", f"HEAD:{f}"))
         if any(k == "node" for c in found.values() for k, _, _ in c):
             nm = os.path.join(root, "admin/web/node_modules")
             if os.path.isdir(nm) and not os.path.exists(os.path.join(work, "admin/web/node_modules")):
@@ -145,33 +196,27 @@ def main(argv):
                 if kind == "rust":
                     stem = os.path.splitext(os.path.basename(f))[0]
                     cmd = ["cargo", "test", "-q", "-p", package_of(f), "--test", stem, "--", "--exact", name]
-                    r = subprocess.run(cmd, cwd=work, capture_output=True, text=True, stdin=subprocess.DEVNULL)
-                    out = r.stdout + r.stderr
-                    built = "error[E" not in out and "could not compile" not in out
-                    ran = re.search(r"test result: \w+\. (\d+) passed; (\d+) failed", out)
-                    if r.returncode == 0 and ran and ran.group(1) == "1":
-                        verdict = "PASSES on the old code"
-                    elif not built:
-                        verdict = "fails (does not build against the old code)"
-                    else:
-                        verdict = "fails"
+                    r = subprocess.run(cmd, cwd=work, capture_output=True, text=True,
+                                       stdin=subprocess.DEVNULL, env=env)
+                    verdict = rust_verdict(r.stdout + r.stderr)
                 else:
                     cmd = ["node", "--test", "--test-name-pattern", "^" + re.escape(name) + "$",
                            os.path.relpath(f, "admin/web")]
                     r = subprocess.run(cmd, cwd=os.path.join(work, "admin/web"), capture_output=True, text=True)
-                    out = r.stdout + r.stderr
-                    verdict = "PASSES on the old code" if r.returncode == 0 and "# pass 1" in out.replace("ℹ", "#") else "fails"
+                    verdict = node_verdict(r.stdout + r.stderr)
                 took = time.time() - start
                 results.append((verdict, f, name, f"{int(took // 60)} min {took % 60:.1f} s"))
-                if verdict.startswith("PASSES"):
-                    passed_on_old.append(name)
+                if not verdict.startswith("fails"):
+                    refused.append(name)
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", work], capture_output=True)
+        shutil.rmtree(work, ignore_errors=True)
     for verdict, f, name, note in results:
         print(f"{verdict:<46} {f} :: {name}  ({note})")
-    if passed_on_old:
-        print(f"\nFAIL-FIRST REFUSED — {len(passed_on_old)} test(s) pass against {base_sha}, "
-              "the code before the fix, so they prove nothing about it.", file=sys.stderr)
+    if refused:
+        print(f"\nFAIL-FIRST REFUSED — {len(refused)} claimed test(s) are not proven to fail against "
+              f"{base_sha}, the code before the fix (passing, not building, or not found).",
+              file=sys.stderr)
         return 1
     print(f"\nfail-first: every claimed test fails against {base_sha}")
     return 0

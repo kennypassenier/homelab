@@ -317,13 +317,63 @@ fn fix_guards_7_host_diff_reports_the_ask_timeout_drift_and_not_a_spelled_out_de
         [("ask_timeout_s".to_string(), json!(120))]
             .into_iter()
             .collect();
-    let drift = effective_drift(declared_changes(&repo, &host));
+    let none = std::collections::BTreeMap::new();
+    let drift = effective_drift(declared_changes(&repo, &host), &[], &none);
     let keys: Vec<&str> = drift.iter().map(|c| c.key.as_str()).collect();
     assert_eq!(keys, vec!["ask_timeout_s"]);
     assert_eq!(
         drift_lines(&drift),
         vec!["ask_timeout_s: the host runs 120, config/host.toml says 600"]
     );
-    let agreed = effective_drift(declared_changes(&repo, &repo));
+    let agreed = effective_drift(declared_changes(&repo, &repo), &[], &none);
     assert!(agreed.is_empty());
+}
+
+/// fix-guards-7 (review H5b, H5c): the drift is judged against the RUNNING
+/// host. A key its binary does not read is a later release's key, not
+/// drift; a default is the host binary's own where it reports it, so a
+/// default that moved between releases is not mistaken either way.
+///
+/// covers: fix-guards-7
+#[test]
+fn fix_guards_7_host_diff_ignores_keys_the_host_does_not_know_and_uses_its_defaults() {
+    use homelab_core::hostconfig::{declared_changes, effective_drift, host_facts};
+    use std::collections::BTreeMap;
+    let repo: BTreeMap<String, serde_json::Value> = [
+        // A key a newer release adds; the running host has never heard of it.
+        ("a_key_of_the_next_release".to_string(), json!(5)),
+        // Spelled out at 300, which is the RUNNING host's compiled default
+        // (this tree's default for it is different).
+        ("ask_timeout_s".to_string(), json!(300)),
+    ]
+    .into_iter()
+    .collect();
+    let host: BTreeMap<String, serde_json::Value> = BTreeMap::new();
+    let known = vec!["ask_timeout_s".to_string()];
+    let defaults: BTreeMap<String, serde_json::Value> = [("ask_timeout_s".to_string(), json!(300))]
+        .into_iter()
+        .collect();
+    let drift = effective_drift(declared_changes(&repo, &host), &known, &defaults);
+    assert!(
+        drift.is_empty(),
+        "an unknown key or the host's own default counted as drift: {:?}",
+        drift.iter().map(|c| &c.key).collect::<Vec<_>>()
+    );
+    // The same value against a host whose default is something else IS drift.
+    let other: BTreeMap<String, serde_json::Value> = [("ask_timeout_s".to_string(), json!(120))]
+        .into_iter()
+        .collect();
+    let drift = effective_drift(declared_changes(&repo, &host), &known, &other);
+    assert_eq!(drift.len(), 1);
+    // An older host reports neither list: every key counts, this tree's
+    // defaults stand in.
+    let old = effective_drift(declared_changes(&repo, &host), &[], &BTreeMap::new());
+    assert!(old.iter().any(|c| c.key == "a_key_of_the_next_release"));
+    // What this tree's host reports about itself.
+    let (keys, defaults) = host_facts();
+    assert!(keys.iter().any(|k| k == "ask_timeout_s"));
+    assert_eq!(
+        defaults.get("ask_timeout_s"),
+        homelab_core::hostconfig::default_effective("ask_timeout_s").as_ref()
+    );
 }

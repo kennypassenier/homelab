@@ -21,6 +21,16 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
+# fix-guards review (LOW): the register gate below is python3. Without it
+# `python3 …` failed with "command not found" in the middle of the hook,
+# which reads like a broken gate rather than a missing tool.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "COMMIT BLOCKED — python3 not found, so the register gate cannot run." >&2
+  echo "Remedy: install python3, or commit with --no-verify if you are" >&2
+  echo "deliberately committing from a machine without it." >&2
+  exit 1
+fi
+
 # fix-25: refuse a webhook id before spending minutes on the full suite.
 if [ -x "$root/.githooks/check-secrets.sh" ]; then
   "$root/.githooks/check-secrets.sh" || exit 1
@@ -35,9 +45,12 @@ else
   echo "warning: .githooks/check-internal-ips.sh is missing; the internal-address gate did not run." >&2
 fi
 
-# fix-guards-2/4/5: a register row this commit adds or changes may not claim
-# more than was measured — "done" needs a dated live measurement, an open
-# gap needs someone holding it, a new row's tests must have failed first.
+# fix-guards-2/4/5/6/8: a register row this commit adds or changes may not
+# claim more than was measured — "done" needs a dated live measurement, an
+# open gap someone holding it, a new row's tests a fail-first run, a status
+# no future date; a staged INVARIANTS.md must number 1..N; a string a person
+# reads may not carry a register id. The Rust checks over the same documents
+# run only with the suite (GATE_FULL/GATE_TESTS), so these run here.
 if [ -x "$root/.githooks/check-register.py" ]; then
   python3 "$root/.githooks/check-register.py" || exit 1
 else

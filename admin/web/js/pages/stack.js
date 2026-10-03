@@ -224,10 +224,13 @@ const seg = (row, i) => (row ?? "").split("/")[i] ?? "";
 const HEAD = declare({
   id: "stack-head",
   page: "stack",
+  // redesign-openpoints-1: Back up and Deploy open their dialog, Update the
+  // one Update flow (an address); Live view answers as soon as the address
+  // moved (pagedrive.js press), it does not wait for a dialog.
   opens: "dialog",
   row: "<stack>/<backup|update|deploy>",
   at: at("overview"),
-  what: "the header's Back up, Update or Deploy (b, u, d): opens that action's dialog",
+  what: "the header's Back up, Update or Deploy (b, u, d): Back up and Deploy open that action's dialog, Update opens the stack's Update flow",
 });
 const MENU_ITEM = declare({
   id: "stack-more-item",

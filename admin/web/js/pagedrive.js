@@ -310,6 +310,7 @@ async function click(id, row, navigate, show, budget) {
 async function press(el, show, opensDialog, budget) {
   const before = topDialog();
   await show(el);
+  const href = location.href;
   if (budget.cancelled())
     return answer({
       why: "the dashboard stopped waiting for this step",
@@ -332,9 +333,14 @@ async function press(el, show, opensDialog, budget) {
     el.focus({ preventScroll: true });
   // A dialog that reads first draws its title at once; wait for it, within
   // the step's budget.
+  // redesign-openpoints-1: a press that went to another address (a control
+  // whose rows differ: the hub header's Update is the Update flow, its Back
+  // up and Deploy are dialogs) opens no dialog; it answers at once.
   if (opensDialog) {
     const end = Date.now() + Math.min(3000, left(budget));
-    while (topDialog() === before && Date.now() < end) await sleep(50);
+    while (topDialog() === before && location.href === href && Date.now() < end)
+      await sleep(50);
+    if (location.href !== href) await sleep(150);
   } else await sleep(150);
   return answer({ ok: true });
 }

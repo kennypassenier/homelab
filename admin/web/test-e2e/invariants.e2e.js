@@ -7195,8 +7195,10 @@ test(
  * catalog entry.
  * @param {string} path
  * @param {string} id
+ * @param {string | null} [want] the row to press (redesign-openpoints-1);
+ *   default: its first row on screen
  */
-async function liveClick(path, id) {
+async function liveClick(path, id, want = null) {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -7213,15 +7215,18 @@ async function liveClick(path, id) {
     const landed = new Map();
     const g = await liveGo(page, path, landed);
     assert.ok(g.ok, `ui goto ${path}: ${g.refusal?.why}`);
-    const row = entry?.row ? await firstRow(page, id) : null;
+    const row = want ?? (entry?.row ? await firstRow(page, id) : null);
+    const t0 = Date.now();
     const r = await reachStep(page, {
       do: "click",
       control: id,
       ...(row == null ? {} : { row }),
     });
+    const ms = Date.now() - t0;
     await page.waitForTimeout(800);
     const out = {
       r,
+      ms,
       entry,
       row,
       url: new URL(page.url()),
@@ -7271,6 +7276,19 @@ test("invariants: redesign-integrate-8: Live view's press of the Map's stale-ima
   assert.equal(x.url.searchParams.get("stack"), stack);
   assert.equal(x.url.searchParams.get("app"), app.join("/"));
   assert.equal(x.dialogs, 0);
+});
+
+// redesign-openpoints-1: the hub header's Update is the one Update flow (an
+// address) like every other Update press, but stack-head (whose Back up and
+// Deploy rows do open dialogs) is declared as opening a dialog, so Live
+// view waited 3 s for one before it answered.
+test("invariants: redesign-openpoints-1: Live view's press of the stack hub header's Update opens the stack's Update flow and answers at once, no 3 s wait for a dialog", async () => {
+  const x = await liveClick("/stacks/gateway", "stack-head", "gateway/update");
+  assert.ok(x.r.ok, `refused: ${x.r.refusal?.why}`);
+  assert.equal(x.url.pathname, "/update");
+  assert.equal(x.url.searchParams.get("stack"), "gateway");
+  assert.equal(x.dialogs, 0);
+  assert.ok(x.ms < 2000, `Live view answered after ${x.ms} ms`);
 });
 
 // redesign-integrate-8: a Map node is an SVG <g>, which has no click();
@@ -9472,7 +9490,7 @@ test("invariants: stack hub — the header keeps Back up · Update · Deploy (pr
     await actions.waitFor({ timeout: 10000 });
     const order = await actions.evaluate((a) =>
       [...a.children].map((c) => ({
-        text: (c.matches(".sh-menu")
+        text: (c.matches(".nx-more")
           ? c.firstElementChild
           : c
         )?.textContent?.trim(),
@@ -9498,17 +9516,32 @@ test("invariants: stack hub — the header keeps Back up · Update · Deploy (pr
       .click({ position: { x: 5, y: 500 }, timeout: 5000 });
     await page.keyboard.press(".");
     const groups = await page
-      .locator(".sh-menu__list:not([hidden]) .sh-menu__group")
+      .locator(".sh-head .nx-menu:not([hidden]) .nx-menu__group")
       .allTextContents();
     assert.deepEqual(groups, ["Data", "Change", "Pause", "Tools", "Remove"]);
     for (const a of ["restore", "deploy-commit", "resize", "guards", "disable"])
       assert.equal(
-        await page.locator(`.sh-menu__list [data-action="${a}"]`).count(),
+        await page.locator(`.sh-head .nx-menu [data-action="${a}"]`).count(),
         1,
         `More has no ${a}`,
       );
     await page.keyboard.press("Escape");
-    assert.equal(await page.locator(".sh-menu__list").isHidden(), true);
+    assert.equal(await page.locator(".sh-head .nx-menu").isHidden(), true);
+    // redesign-openpoints-3 (the shared ui.js menu): Esc gives the focus
+    // back to More, and a click outside closes it.
+    assert.equal(
+      await page.evaluate(
+        () =>
+          /** @type {HTMLElement} */ (document.activeElement)?.dataset.drive,
+      ),
+      "stack-more",
+    );
+    await page.keyboard.press("Enter");
+    assert.equal(await page.locator(".sh-head .nx-menu").isVisible(), true);
+    await page
+      .locator("body")
+      .click({ position: { x: 5, y: 500 }, timeout: 5000 });
+    assert.equal(await page.locator(".sh-head .nx-menu").isHidden(), true);
     // `b` opens the Back up dialog, as the button does.
     await page.keyboard.press("b");
     const dialog = page.locator("dialog#action-dialog[open]");
@@ -9857,6 +9890,50 @@ test("invariants: stack hub review — Update and the u key open the stack's Upd
   }
 });
 
+// redesign-openpoints-2: an app's Update… in the hub's Apps tab opened the
+// Update flow for the whole stack (openAction dropped the app it was
+// given); it opens the flow with only that app picked.
+test("invariants: redesign-openpoints-2: an app's Update… in the stack hub opens the Update flow with only that app picked", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/gateway/apps`);
+    const btn = page.locator('[data-drive="stack-app-pull"]').first();
+    await btn.waitFor({ timeout: 10000 });
+    const row = String(await btn.getAttribute("data-drive-row"));
+    const app = row.split("/").slice(1).join("/");
+    assert.ok(app, `no app in the row ${row}`);
+    await btn.click();
+    await page.waitForURL("**/update?**", { timeout: 5000 });
+    const u = new URL(page.url());
+    assert.equal(u.searchParams.get("stack"), "gateway");
+    assert.equal(u.searchParams.get("app"), app, "the flow names the app");
+    await page.locator("#page .nx-steps").waitFor({ timeout: 10000 });
+    await page
+      .locator('#page [data-drive="update-pick"]')
+      .first()
+      .waitFor({ timeout: 10000 });
+    const ticked = await page.$$eval('#page [data-drive="update-pick"]', (bs) =>
+      bs
+        .filter((b) => /** @type {HTMLInputElement} */ (b).checked)
+        .map(
+          (b) => b.closest(".uf-item")?.querySelector("strong")?.textContent,
+        ),
+    );
+    assert.equal(ticked.length, 1, `ticked: ${ticked.join(" | ")}`);
+    assert.equal(ticked[0], `gateway / ${app}`);
+    assert.match(
+      await page.locator("#page h1").innerText(),
+      new RegExp(`Update gateway/${app}`),
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
 test("invariants: stack hub review — the More menu keeps the keyboard focus across fleet pushes", async () => {
   const browser = await launch();
   try {
@@ -9899,14 +9976,14 @@ test("invariants: stack hub review — the More menu keeps the keyboard focus ac
     assert.ok(Number(pushes) >= 2, `only ${pushes} fleet pushes arrived`);
     const after = await page.evaluate(() => ({
       text: document.activeElement?.textContent?.trim(),
-      inMenu: !!document.activeElement?.closest(".sh-menu__list"),
+      inMenu: !!document.activeElement?.closest(".sh-head .nx-menu"),
     }));
     assert.equal(after.inMenu, true, "the focus left the menu");
     assert.equal(after.text, before);
     await page.keyboard.press("ArrowDown");
     assert.equal(
       await page.evaluate(
-        () => !!document.activeElement?.closest(".sh-menu__list"),
+        () => !!document.activeElement?.closest(".sh-head .nx-menu"),
       ),
       true,
     );

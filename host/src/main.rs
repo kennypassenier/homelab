@@ -3448,9 +3448,23 @@ span_days = 7\n";
         // and store its answer — it fails fast here (no `restic` binary in
         // this test environment), which is itself still a cache entry
         // (`SnapshotCache::refresh` caches the error too), not a hang.
-        tokio::time::sleep(Duration::from_millis(300)).await;
-
-        let second = handle_rpc(&state, ask()).await;
+        // fix-262: a fixed 300 ms was not enough under a loaded gate run (the
+        // release gate of 3.70.7 failed here once); poll until the entry is
+        // stored, up to 10 s, instead of guessing how long the kick takes.
+        let unread = |b: &serde_json::Value| {
+            b["skipped"]
+                .as_array()
+                .is_some_and(|a| a.iter().any(|s| s.as_str() == Some("inbox: not read yet")))
+        };
+        let mut second = handle_rpc(&state, ask()).await;
+        for _ in 0..100 {
+            let b: serde_json::Value = serde_json::from_str(&second.message).unwrap();
+            if !unread(&b) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            second = handle_rpc(&state, ask()).await;
+        }
         assert!(second.ok);
         let body: serde_json::Value = serde_json::from_str(&second.message).unwrap();
         assert!(

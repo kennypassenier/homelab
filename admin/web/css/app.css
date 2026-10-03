@@ -3124,7 +3124,12 @@ td.measured.stale__action {
   .nx-search-trigger {
     min-inline-size: 0;
   }
+  /* The long words make way for one short one, so the box never empties. */
+  .nx-search-trigger::before {
+    content: "Search";
+  }
   .nx-search-trigger__text,
+  .nx-search-trigger [data-kp-palette-keys],
   .nx-pill__long {
     display: none;
   }

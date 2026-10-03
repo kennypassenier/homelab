@@ -2874,12 +2874,11 @@ test("invariants: Backups has a row for every stack, naming why one has no repos
       `no fleet read: ${JSON.stringify(fleet).slice(0, 200)}`,
     );
     await page.goto(`${BASE}/backups`);
-    // Every stack's own read settled (no chip still reading).
+    // Every stack's own read settled (redesign-backups: the repositories card's foot
+    // says "N of N stacks answered" and marks the moment it is so).
     await page.waitForFunction(
-      (n) =>
-        document.querySelectorAll(".perstack-chip").length >= n &&
-        !document.querySelector(".perstack-chip--reading"),
-      names.length,
+      () => document.querySelector("[data-bk-read='all']") != null,
+      null,
       { timeout: 15000 },
     );
     await page.waitForTimeout(500);
@@ -3344,6 +3343,259 @@ test("invariants: the Inbox counter shows the exact number, never 9+, and equals
       assert.match(await page.title(), /^● 12 in the Inbox/);
       await context.close();
     }
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── redesign-backups: the Backups page's nightly coverage heatmap (redesign 3.71,
+// approved by Kenny 2026-10-03: stacks × 30 nights replaces the month
+// calendar, with a whole-fleet row, a hover card per night, a click that
+// pins the night into the address, and Esc / Unpin / Today to go back) ──
+
+/** Fleet stack names, from the dashboard's own fleet read. */
+async function fleetNames(page) {
+  const fleet = await page.evaluate(async () =>
+    (await fetch("/data/fleet")).json(),
+  );
+  return (fleet.stacks ?? fleet.fleet?.stacks ?? []).map(
+    (/** @type {any} */ s) => s.name,
+  );
+}
+
+test("invariants: the Backups heatmap has a row for every stack and a whole-fleet row, one cell per night", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const names = await fleetNames(page);
+    assert.ok(names.length > 1, "no fleet read");
+    await page.goto(`${BASE}/backups`);
+    await page
+      .locator(".bk-heat__cell--ok")
+      .first()
+      .waitFor({ timeout: 15000 });
+    await page.waitForFunction(
+      () => !document.querySelector(".bk-heat__cell--load"),
+      null,
+      { timeout: 15000 },
+    );
+    const got = await page.evaluate((stacks) => {
+      const cells = (/** @type {string} */ s) =>
+        document.querySelectorAll(
+          `.bk-heat [data-drive="backup-night"][data-drive-row^="${s}/"]`,
+        ).length;
+      return {
+        labels: stacks.filter(
+          (/** @type {string} */ s) =>
+            !document.querySelector(
+              `.bk-heat__label[data-stack="${CSS.escape(s)}"]`,
+            ),
+        ),
+        perStack: Object.fromEntries(
+          stacks.map((/** @type {string} */ s) => [s, cells(s)]),
+        ),
+        fleet: document.querySelectorAll(
+          '.bk-heat [data-drive="backup-fleet-night"]',
+        ).length,
+      };
+    }, names);
+    assert.deepEqual(got.labels, [], "stacks without a heatmap row label");
+    for (const n of names)
+      assert.equal(
+        got.perStack[n],
+        30,
+        `${n} has ${got.perStack[n]} night cells, not 30`,
+      );
+    assert.equal(got.fleet, 30, "the whole-fleet row is not 30 nights");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the Backups heatmap paints status in the status tokens, in light and dark", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const bad = [];
+    const seen = { ok: 0, miss: 0, fleet: 0 };
+    for (const theme of ["dark", "light"]) {
+      await page.evaluate((t) => localStorage.setItem("theme", t), theme);
+      await page.goto(`${BASE}/backups`);
+      await page
+        .locator(".bk-heat__cell--ok")
+        .first()
+        .waitFor({ timeout: 15000 });
+      await page.waitForTimeout(300);
+      const found = await page.evaluate(() => {
+        const probe = document.createElement("div");
+        document.body.append(probe);
+        const paint = (/** @type {string} */ v) => {
+          probe.style.background = v;
+          return getComputedStyle(probe).backgroundColor;
+        };
+        const ok = paint(
+          "color-mix(in oklab, var(--success-foreground) 70%, var(--card))",
+        );
+        const miss = paint("var(--destructive)");
+        const warn = paint("var(--warning-foreground)");
+        const charts = [1, 2, 3, 4, 5].map((i) => paint(`var(--chart-${i})`));
+        /** @type {string[]} */
+        const out = [];
+        const n = { ok: 0, miss: 0, fleet: 0 };
+        const check = (
+          /** @type {string} */ sel,
+          /** @type {string} */ want,
+          /** @type {"ok" | "miss" | "fleet"} */ key,
+        ) => {
+          for (const el of document.querySelectorAll(sel)) {
+            n[key]++;
+            const got = getComputedStyle(el).backgroundColor;
+            if (got !== want) out.push(`${sel} is ${got}, not ${want}`);
+            if (charts.includes(got))
+              out.push(`${sel} is a decorative chart colour (${got})`);
+          }
+        };
+        check(
+          ".bk-heat__row:not(.bk-heat__fleet) .bk-heat__cell--ok",
+          ok,
+          "ok",
+        );
+        check(".bk-heat__cell--miss", miss, "miss");
+        check(
+          ".bk-heat__fleet .bk-heat__cell:not(.bk-heat__cell--warn) i",
+          ok,
+          "fleet",
+        );
+        check(".bk-heat__fleet .bk-heat__cell--warn i", warn, "fleet");
+        check(".bk-legend__ok", ok, "ok");
+        check(".bk-legend__miss", miss, "miss");
+        probe.remove();
+        return { out: [...new Set(out)], n };
+      });
+      seen.ok += found.n.ok;
+      seen.miss += found.n.miss;
+      seen.fleet += found.n.fleet;
+      for (const f of found.out) bad.push(`${theme}: ${f}`);
+    }
+    assert.ok(seen.ok > 0, "no backed-up cell on the heatmap");
+    assert.ok(
+      seen.miss > 0,
+      "no missed cell on the heatmap (the demo host misses one night)",
+    );
+    assert.ok(seen.fleet > 0, "no whole-fleet bar on the heatmap");
+    assert.deepEqual(bad, [], `status painted off-token:\n${bad.join("\n")}`);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: hovering a Backups heatmap night shows its snapshot time and every app's snapshot id", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/backups`);
+    const cell = page
+      .locator(
+        '.bk-heat [data-drive="backup-night"][data-drive-row^="gateway/"].bk-heat__cell--ok',
+      )
+      .last();
+    await cell.waitFor({ timeout: 15000 });
+    await page.waitForTimeout(500);
+    const night = (await cell.getAttribute("data-drive-row"))?.split("/")[1];
+    await cell.hover();
+    const tip = page.locator(".bk-tip[role=tooltip]");
+    await tip.waitFor({ state: "visible", timeout: 3000 });
+    const text = await tip.innerText();
+    assert.match(text, /gateway/);
+    assert.match(text, /snapshot at \d{2}:\d{2}/, `no snapshot time: ${text}`);
+    // Every app of the stack that wrote a snapshot that night names its id:
+    // a night runs from noon to noon and carries its evening's date.
+    const want = await page.evaluate(async (n) => {
+      const r = await (await fetch("/data/backups/gateway")).json();
+      const key = (/** @type {number} */ t) => {
+        const d = new Date((t - 12 * 3600) * 1000);
+        const p = (/** @type {number} */ x) => String(x).padStart(2, "0");
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+      };
+      return r.repos.flatMap((/** @type {any} */ x) =>
+        x.snapshots
+          .filter((/** @type {any} */ s) => key(s.time) === n)
+          .map((/** @type {any} */ s) => `${x.owner} ${s.short_id}`),
+      );
+    }, night);
+    assert.ok(want.length > 1, `gateway wrote too few snapshots on ${night}`);
+    for (const w of want)
+      assert.ok(text.includes(w), `the hover card misses "${w}": ${text}`);
+    await page.mouse.move(2, 2);
+    await tip.waitFor({ state: "hidden", timeout: 3000 });
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: clicking a Backups heatmap night pins it into the address and the side panel; Esc, Unpin and Today go back to last night", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/backups`);
+    const cells = page.locator(
+      '.bk-heat [data-drive="backup-night"][data-drive-row^="gateway/"].bk-heat__cell--ok',
+    );
+    await cells.first().waitFor({ timeout: 15000 });
+    await page.waitForTimeout(500);
+    const label = page.locator("#bk-night .bk-night__label");
+    assert.match(await label.innerText(), /Last night/);
+    const pinOne = async () => {
+      const cell = cells.nth((await cells.count()) - 2);
+      const night = (await cell.getAttribute("data-drive-row"))?.split("/")[1];
+      await cell.click();
+      await page.waitForTimeout(150);
+      return night;
+    };
+    const night = await pinOne();
+    const param = () => new URL(page.url()).searchParams.get("night");
+    assert.equal(param(), night, "the pinned night is not in the address");
+    assert.match(await label.innerText(), /Pinned night/);
+    assert.ok(
+      (await page.locator(".bk-heat__cell.is-col").count()) > 1,
+      "the pinned night's column is not marked",
+    );
+    // The address carries it: a reload (or a shared link) shows it pinned.
+    await page.reload();
+    await cells.first().waitFor({ timeout: 15000 });
+    await page.waitForTimeout(500);
+    assert.match(await label.innerText(), /Pinned night/);
+    assert.equal(param(), night);
+    // Esc on the grid unpins.
+    await page.locator(`.bk-heat [data-drive-row="gateway/${night}"]`).focus();
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(150);
+    assert.equal(param(), null, "Esc left the night in the address");
+    assert.match(await label.innerText(), /Last night/);
+    // Unpin does the same.
+    await pinOne();
+    await page.locator('[data-drive="backup-night-unpin"]').click();
+    await page.waitForTimeout(150);
+    assert.equal(param(), null, "Unpin left the night in the address");
+    assert.match(await label.innerText(), /Last night/);
+    // Today as well.
+    await pinOne();
+    await page.locator('[data-drive="backup-nights-today"]').click();
+    await page.waitForTimeout(150);
+    assert.equal(param(), null, "Today left the night in the address");
+    assert.match(await label.innerText(), /Last night/);
   } finally {
     await browser.close();
   }

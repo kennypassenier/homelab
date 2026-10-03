@@ -304,6 +304,17 @@ pub fn demo_resolve(
     )))
 }
 
+/// redesign-backups (Backups redesign 3.71): the nights (0 = the newest, one day
+/// apart) a demo stack wrote a snapshot on: twelve of them, except that the
+/// third stack of `HOMELAB_ADMIN_DEMO_STACKS` (whichever name it has, never
+/// hard-coded) missed night 3, so the coverage heatmap shows a missed night
+/// and a whole-fleet night short of every stack. `BackupCalendar` and
+/// `GetBackups` both read it, so the two answers agree.
+fn demo_nights<'a>(stacks: &'a [String], stack: &'a str) -> impl Iterator<Item = u64> + 'a {
+    let gap = stacks.len() > 2 && stacks[2] == stack;
+    (0..12u64).filter(move |i| !(gap && *i == 3))
+}
+
 pub async fn run_demo(
     shared: Shared,
     live: Live,
@@ -504,8 +515,9 @@ pub async fn run_demo(
                                     measured_at.insert(name.clone(), serde_json::json!(now));
                                     continue;
                                 }
-                                let nights: Vec<u64> =
-                                    (0..5).map(|i| now - i * 86_400 - 3600).collect();
+                                let nights: Vec<u64> = demo_nights(&stacks, name)
+                                    .map(|i| now - i * 86_400 - 3600)
+                                    .collect();
                                 by_stack.insert(name.clone(), serde_json::json!(nights));
                                 measured_at.insert(name.clone(), serde_json::json!(now));
                             }
@@ -534,15 +546,17 @@ pub async fn run_demo(
                                 .map(|m| if native { m.natives } else { m.apps })
                                 .unwrap_or_default();
                             let now = now_s();
+                            let last = owners.len().saturating_sub(1);
+                            let at = stacks.iter().position(|s| *s == stack);
                             let repos: Vec<serde_json::Value> = owners
                                 .iter()
                                 .enumerate()
                                 .map(|(oi, owner)| {
-                                    let snaps: Vec<serde_json::Value> = (0..4)
+                                    let snaps: Vec<serde_json::Value> = demo_nights(&stacks, &stack)
                                         .map(|i| {
                                             let t = now
                                                 - (oi as u64) * 1_800
-                                                - (i as u64) * 86_400
+                                                - i * 86_400
                                                 - 3_600;
                                             serde_json::json!({
                                                 "id": format!("demo{oi}{i:02}snapshotidfortest"),
@@ -552,13 +566,42 @@ pub async fn run_demo(
                                             })
                                         })
                                         .collect();
-                                    serde_json::json!({
+                                    // redesign-backups (Backups redesign 3.71): a size for
+                                    // every repository but a several-app
+                                    // stack's last (the real host has none
+                                    // when `restic stats` failed: "—"), and
+                                    // a drill verdict on two: the second
+                                    // stack's first repository passed, the
+                                    // third stack's last one failed.
+                                    let size = (last == 0 || oi < last)
+                                        .then(|| 48_234_496_u64 * (oi as u64 + 1));
+                                    let drill = match (at, oi) {
+                                        (Some(1), 0) => Some(serde_json::json!({
+                                            "last_attempt": now - 2 * 86_400,
+                                            "last_pass": now - 2 * 86_400,
+                                            "last_error": null,
+                                        })),
+                                        (Some(2), o) if o == last && last > 0 => Some(serde_json::json!({
+                                            "last_attempt": now - 86_400,
+                                            "last_pass": 0,
+                                            "last_error": "restored 0 files (demo)",
+                                        })),
+                                        _ => None,
+                                    };
+                                    let mut repo = serde_json::json!({
                                         "owner": owner,
                                         "newest_snapshot": snaps.first(),
                                         "snapshot_count": snaps.len(),
                                         "snapshots": snaps,
                                         "measured_at": now,
-                                    })
+                                    });
+                                    if let Some(b) = size {
+                                        repo["size_bytes"] = serde_json::json!(b);
+                                    }
+                                    if let Some(d) = drill {
+                                        repo["drill"] = d;
+                                    }
+                                    repo
                                 })
                                 .collect();
                             serde_json::json!({ "native": native, "repos": repos }).to_string()

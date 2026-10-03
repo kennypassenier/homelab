@@ -27,8 +27,11 @@
 
 /**
  * One declared page control.
+ * `opens`: "dialog" (the click opens one), "run" (it runs something), or
+ * "view" (redesign-backups: it only changes what the page shows — pins a night,
+ * filters, folds, sorts).
  * @typedef {{id: string, page: string, what: string,
- *   opens: "dialog" | "run", row?: string,
+ *   opens: "dialog" | "run" | "view", row?: string,
  *   at?: (row: string | null) => string | null}} Control
  *   `at`: where the control is when it lives on a page per stack (the
  *   stack hub's), from its row; otherwise its page's own address.

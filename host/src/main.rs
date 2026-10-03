@@ -4383,6 +4383,7 @@ span_days = 7\n";
                     4,
                     Rpc::SelfUpdateHost {
                         binary_b64: String::new(),
+                        proof: None,
                     },
                 ),
             ],
@@ -5871,6 +5872,9 @@ struct AppState {
     /// once `DISK_DETAIL_REFRESH_S` has passed since it was taken (it runs
     /// `du` over the whole root filesystem) — never on every status poll.
     disk_detail: Arc<std::sync::RwLock<Option<homelab_proto::HostDiskDetail>>>,
+    /// redesign-host-4: whether this running binary is a signed release,
+    /// verified once (the binary does not change while it runs).
+    release_verdict: Arc<std::sync::OnceLock<homelab_proto::ReleaseVerdict>>,
     /// feat-platform-3: the newest operation lines, for `CurrentOp`.
     recent: Arc<std::sync::Mutex<std::collections::VecDeque<ServerMsg>>>,
     /// arch-host-link: this start of the host, stamped on every question.
@@ -5984,6 +5988,7 @@ impl AppState {
             host_cpu_pct: Arc::new(std::sync::RwLock::new(None)),
             host_cpu_prev: Arc::new(std::sync::RwLock::new(None)),
             disk_detail: Arc::new(std::sync::RwLock::new(None)),
+            release_verdict: Arc::new(std::sync::OnceLock::new()),
             recent: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
             boot_id: format!(
                 "{}-{}",
@@ -7532,6 +7537,18 @@ async fn build_fleet_state(state: &AppState, exec: &RealExecutor) -> homelab_pro
         }
     }
     let disk_detail = state.disk_detail.read().ok().and_then(|d| d.clone());
+    // redesign-host-4: the host's uptime, and whether this binary is a
+    // signed release (verified once, against the signature recorded when it
+    // was installed).
+    let uptime_s = exec
+        .read_file("/proc/uptime")
+        .await
+        .ok()
+        .and_then(|t| homelab_core::ops::fleetcheck::parse_proc_uptime(&t));
+    let release = state
+        .release_verdict
+        .get_or_init(|| own_release_verdict(&state.config.state_dir))
+        .clone();
     let (_, fingerprint) = tls::ensure_cert(&state.config.state_dir, "homelab-host").unwrap_or((
         tls::CertPaths {
             cert_pem: String::new(),
@@ -7619,10 +7636,54 @@ async fn build_fleet_state(state: &AppState, exec: &RealExecutor) -> homelab_pro
             cores_total: cap.3,
             load1_x100: cap.4,
             disk_detail,
+            uptime_s,
+            release: Some(release),
+            // redesign-host-4: every guest Proxmox reports, managed or not
+            // (the Host page's Containers table).
+            guests_usage: reading.as_ref().map(|r| {
+                r.guests
+                    .values()
+                    .map(|g| homelab_proto::GuestUse {
+                        vmid: g.vmid,
+                        usage: homelab_proto::GuestUsage {
+                            cpu_permille: g.cpu_permille,
+                            ram_used_mb: g.mem_used_mb,
+                            ram_max_mb: g.mem_max_mb,
+                            uptime_s: g.uptime_s,
+                        },
+                    })
+                    .collect()
+            }),
         },
         stacks,
     }
 }
+
+/// redesign-host-4: the running binary (`/proc/self/exe`, which still reads
+/// after the file on disk was replaced) against the signature recorded when
+/// it was installed.
+fn own_release_verdict(state_dir: &str) -> homelab_proto::ReleaseVerdict {
+    match std::fs::read("/proc/self/exe") {
+        Ok(exe) => {
+            let v = homelab_core::release_sig::running_verdict(
+                std::path::Path::new(state_dir),
+                SELF_ASSET,
+                &exe,
+            );
+            homelab_proto::ReleaseVerdict {
+                signed: v.signed,
+                detail: v.detail,
+            }
+        }
+        Err(e) => homelab_proto::ReleaseVerdict {
+            signed: false,
+            detail: format!("the host could not read its own binary to check it: {e}"),
+        },
+    }
+}
+
+/// The host binary's asset name in a homelab release.
+const SELF_ASSET: &str = "homelab-host";
 
 /// feat-platform-2: one reading every `status_interval_s`, the managed
 /// stacks taken from state.json each time so a new stack is read at once.
@@ -10409,6 +10470,33 @@ async fn gather_host_disk_detail(exec: &dyn Executor, now: u64) -> homelab_proto
     {
         out.thin_pool_size_gb = gb;
     }
+    // redesign-host-4: how full that pool is and what its volumes are
+    // promised (every volume whose pool is `data`, summed), one `lvs`.
+    if let Ok(o) = exec
+        .run(&Cmd::new(
+            "lvs",
+            &[
+                "--reportformat",
+                "json",
+                "--units",
+                "g",
+                "--nosuffix",
+                "-o",
+                "lv_name,lv_size,pool_lv,data_percent,metadata_percent",
+                "pve",
+            ],
+            15,
+        ))
+        .await
+        && let Some(r) = homelab_core::ops::fleetcheck::parse_thin_pool_report(&o.stdout, "data")
+    {
+        out.thin_pool = Some(homelab_proto::ThinPoolUse {
+            data_pct: r.data_pct,
+            metadata_pct: r.metadata_pct,
+            promised_gb: r.promised_gb,
+            volumes: r.volumes,
+        });
+    }
     if let Ok(o) = exec
         .run(&Cmd::new(
             "pvs",
@@ -10424,8 +10512,19 @@ async fn gather_host_disk_detail(exec: &dyn Executor, now: u64) -> homelab_proto
             .await
             && let Some(gb) = parse_blockdev_bytes(&o.stdout)
         {
-            out.root_disk_device = disk;
+            out.root_disk_device = disk.clone();
             out.root_disk_total_gb = gb;
+        }
+        // redesign-host-4: the disk's kind (SSD, HDD, NVMe SSD).
+        if let Ok(o) = exec
+            .run(&Cmd::new(
+                "lsblk",
+                &["-d", "-n", "-o", "ROTA,TRAN", &disk],
+                15,
+            ))
+            .await
+        {
+            out.root_disk_kind = homelab_core::ops::fleetcheck::parse_disk_kind(&o.stdout);
         }
     }
     if let Ok(o) = exec
@@ -12767,7 +12866,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 },
             }
         }
-        Rpc::SelfUpdateHost { binary_b64 } => {
+        Rpc::SelfUpdateHost { binary_b64, proof } => {
             use base64::Engine as _;
             let bytes = match base64::engine::general_purpose::STANDARD.decode(&binary_b64) {
                 Ok(b) => b,
@@ -12780,6 +12879,27 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     };
                 }
             };
+            // redesign-host-4: a release's signature is verified here too
+            // and recorded, so the new daemon can report itself a signed
+            // release. One that does not verify is refused, never recorded;
+            // a binary shipped without one installs as before and reports
+            // itself unsigned.
+            if let Some(p) = &proof
+                && let Err(e) = homelab_core::release_sig::record_proof(
+                    std::path::Path::new(&state.config.state_dir),
+                    SELF_ASSET,
+                    &bytes,
+                    &p.sums,
+                    &p.sig,
+                )
+            {
+                return RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: format!("refused: the release signature sent with the binary: {e}"),
+                    deferred: None,
+                };
+            }
             let cfg = homelab_core::ops::selfupdate::SelfUpdateCfg::default();
             // Stage outside the op so the (large) write is done before the
             // op-lock is taken. Raw bytes, not write_file (which is text).
@@ -13519,5 +13639,54 @@ async fn gather_probes(
         password_file_ok: None,
         drive: None,
         unowned_route_files: None,
+    }
+}
+
+/// redesign-host-4 (3.71.0): the disk facts the Host page shows beside the
+/// root volume — how full the thin pool is, what its volumes are promised,
+/// and the root disk's kind — gathered with the fix-222 reading.
+#[cfg(test)]
+mod redesign_host_4_tests {
+    use super::*;
+    use homelab_core::executor::{CmdOutput, MockExecutor};
+
+    const LVS_JSON: &str = r#"{"report":[{"lv":[
+        {"lv_name":"data","lv_size":"794.30","pool_lv":"","data_percent":"41.20","metadata_percent":"2.53"},
+        {"lv_name":"root","lv_size":"96.00","pool_lv":"","data_percent":"","metadata_percent":""},
+        {"lv_name":"vm-104-disk-0","lv_size":"8.00","pool_lv":"data","data_percent":"55.10","metadata_percent":""},
+        {"lv_name":"vm-113-disk-0","lv_size":"500.00","pool_lv":"data","data_percent":"60.00","metadata_percent":""}
+    ]}]}"#;
+
+    #[tokio::test]
+    async fn redesign_host_4_the_disk_reading_carries_the_pools_use_and_the_disks_kind() {
+        let exec = MockExecutor::new();
+        exec.respond_always("lv_size pve/root", CmdOutput::ok("  96.00g\n"));
+        exec.respond_always("lv_size pve/data", CmdOutput::ok("  794.30g\n"));
+        exec.respond_always("--reportformat json", CmdOutput::ok(LVS_JSON));
+        exec.respond_always("pv_name pve", CmdOutput::ok("  /dev/sda3\n"));
+        exec.respond_always("--getsize64", CmdOutput::ok("1000204886016\n"));
+        exec.respond_always("ROTA,TRAN /dev/sda", CmdOutput::ok("   0 sata\n"));
+        exec.respond_always("--max-depth=2", CmdOutput::ok("1024\t/var\n"));
+        let d = gather_host_disk_detail(&exec, 7).await;
+        assert_eq!(d.root_disk_device, "/dev/sda");
+        assert_eq!(d.root_disk_kind.as_deref(), Some("SSD"));
+        let pool = d.thin_pool.expect("the pool's use is read");
+        assert_eq!(pool.data_pct, 41.2);
+        assert_eq!(pool.metadata_pct, 2.53);
+        assert_eq!(pool.promised_gb, 508.0);
+        assert_eq!(pool.volumes, 2);
+        assert!(exec.unused_rules().is_empty(), "{:?}", exec.unused_rules());
+    }
+
+    #[tokio::test]
+    async fn redesign_host_4_an_unreadable_pool_or_disk_is_absent_never_invented() {
+        let exec = MockExecutor::new();
+        exec.respond_always("--reportformat json", CmdOutput::failed(5, "no such vg"));
+        exec.respond_always("pv_name pve", CmdOutput::ok("  /dev/nvme0n1p3\n"));
+        exec.respond_always("--getsize64", CmdOutput::ok("1000204886016\n"));
+        exec.respond_always("ROTA,TRAN", CmdOutput::failed(32, "not a block device"));
+        let d = gather_host_disk_detail(&exec, 7).await;
+        assert_eq!(d.thin_pool, None);
+        assert_eq!(d.root_disk_kind, None);
     }
 }

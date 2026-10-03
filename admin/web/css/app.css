@@ -865,7 +865,10 @@ p:has(> .measured:only-child):first-child {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-block-size: min(60vh, 30rem);
+  /* fix-261 (Kenny, 2026-10-03): a fixed height, not a minimum — with only
+     a minimum the log grew with every line and the dialog with it (650 →
+     968 px for a long deploy). The log is the one region that scrolls. */
+  block-size: min(60vh, 30rem);
 }
 .job-panel--compact .job-log-wrap {
   display: flex;
@@ -876,7 +879,18 @@ p:has(> .measured:only-child):first-child {
 .job-panel--compact .job-log {
   flex: 1 1 auto;
   min-block-size: 0;
-  max-block-size: none;
+}
+/* fix-261: a <details> wraps its content in a ::details-content box that
+   is not a flex item, so without this the log ignored the flex column and
+   ran past the panel instead of scrolling. Where the pseudo-element is not
+   supported the log keeps its own 18rem cap and scrolls inside that. */
+@supports selector(::details-content) {
+  .job-panel--compact .job-log-wrap::details-content {
+    display: contents;
+  }
+  .job-panel--compact .job-log {
+    max-block-size: none;
+  }
 }
 .job-log {
   max-block-size: 18rem;

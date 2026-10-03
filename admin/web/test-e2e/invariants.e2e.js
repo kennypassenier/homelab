@@ -2390,3 +2390,50 @@ test("invariants: a collapsible block's heading stays beside its chevron, on des
     await browser.close();
   }
 });
+
+test("invariants: a running job's log scrolls inside its dialog and never makes the dialog taller", async () => {
+  // fix-261 (Kenny, 2026-10-03: "tijdens de deploy in de dialog, de logs
+  // daarin maakten de dialog langer verticaal, dat moet scrollbaar zijn").
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/films`);
+    await page.waitForTimeout(600);
+    await page
+      .getByRole("button", { name: "Disable", exact: true })
+      .click({ timeout: 5000 });
+    await page.waitForTimeout(300);
+    await page.locator("#action-dialog #act-run").click();
+    const log = page.locator("#action-dialog .job-log").first();
+    await log.waitFor({ timeout: 5000 });
+    const dialog = page.locator("#action-dialog");
+    const before = await dialog.boundingBox();
+    assert.ok(before, "the dialog is not on screen");
+    // A long deploy prints hundreds of lines; append them the way the
+    // panel does (one element per line) and measure again.
+    await log.evaluate((el) => {
+      for (let i = 0; i < 400; i += 1) {
+        const line = document.createElement("div");
+        line.textContent = `HOST  [run ] step ${i} of a long deploy`;
+        el.append(line);
+      }
+    });
+    await page.waitForTimeout(200);
+    const after = await dialog.boundingBox();
+    assert.ok(after, "the dialog left the screen");
+    assert.equal(
+      Math.round(after.height),
+      Math.round(before.height),
+      `the dialog grew from ${before.height} to ${after.height} px as log lines arrived`,
+    );
+    const scrolls = await log.evaluate(
+      (el) => el.scrollHeight > el.clientHeight + 1,
+    );
+    assert.ok(scrolls, "the log does not scroll inside its own region");
+  } finally {
+    await browser.close();
+  }
+});

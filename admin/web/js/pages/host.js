@@ -12,10 +12,11 @@
 // /data/host/guests (pct list, every 30 s), /data/ping (every 30 s: the
 // chip and the latency strip), /data/templates, /data/host-settings,
 // /data/disk-growth (the growth line, when Prometheus answers),
-// /data/doctor on request, and the action catalog. Not sent by the host
-// yet, so said plainly instead of invented: how full the thin pool is,
-// what the guests are promised and really wrote on it, per-guest memory
-// and CPU of containers it does not manage, and its own uptime.
+// /data/doctor on request, and the action catalog. redesign-host-4: the
+// host sends how full the thin pool is, what the guests are promised on
+// it, every guest's memory and CPU, its own uptime, the root disk's kind
+// and whether its daemon is a signed release; a host older than 3.71.0
+// does not, and the page says so instead of inventing a number.
 
 import { act, catalogReady, onAct } from "../act.js";
 import { openAction } from "../actiondialog.js";
@@ -26,6 +27,7 @@ import { declare, drivable, viaForm } from "../drivable.js";
 import { humanDuration } from "../format.js";
 import {
   actionBlurb,
+  daemonSignature,
   diskBreakdown,
   gib,
   guestTable,
@@ -34,9 +36,11 @@ import {
   hostChecks,
   hostKpis,
   hostSettingsView,
+  hostUptime,
   latencyBars,
   meterTone,
   rootGrowth,
+  rootVolumeLine,
   settingVisible,
   versionText,
 } from "../host.js";
@@ -404,7 +408,9 @@ export function mount(root, ctx) {
                   {
                     class: "hk-muted",
                     title: g.running
-                      ? "The host measures only the containers it manages"
+                      ? current().fleet?.host.guests_usage
+                        ? "Not in the host's last reading yet"
+                        : "This host version measures only the containers it manages"
                       : null,
                   },
                   "—",
@@ -625,7 +631,7 @@ export function mount(root, ctx) {
           "span",
           null,
           el("b", null, "Root volume"),
-          ` · ${Math.round(d.rootGb)} GB on ${d.device || "an unknown disk"}${d.diskGb ? ` (${d.diskGb.toFixed(0)} GB disk)` : ""}`,
+          ` · ${f ? rootVolumeLine(f) : ""}`,
         ),
         el("span", { class: "num" }, `${d.usedPct}% used`),
       ),
@@ -661,15 +667,27 @@ export function mount(root, ctx) {
         ),
         el(
           "div",
-          null,
+          { id: "host-pool-promised" },
           el("span", null, "Promised to guests"),
-          el("b", { class: "hk-muted" }, "not reported by the host"),
+          d.pool
+            ? el("b", { title: d.pool.promisedNote }, d.pool.promised)
+            : el(
+                "b",
+                { class: "hk-muted" },
+                "not reported by this host version",
+              ),
         ),
         el(
           "div",
-          null,
+          { id: "host-pool-written" },
           el("span", null, "Really written"),
-          el("b", { class: "hk-muted" }, "not reported by the host"),
+          d.pool
+            ? el("b", null, d.pool.written)
+            : el(
+                "b",
+                { class: "hk-muted" },
+                "not reported by this host version",
+              ),
         ),
       ),
     );
@@ -861,10 +879,24 @@ export function mount(root, ctx) {
     const f = s.fleet;
     if (!f) return;
     const d = f.host.disk_detail;
+    const sig = daemonSignature(f.host);
+    const up = hostUptime(f.host);
     /** @type {[string, Node | string][]} */
     const rows = [
       ["Name", f.host.name],
-      ["Daemon", versionText(s.hostVersion, s.hostBuild)],
+      [
+        "Daemon",
+        el(
+          "span",
+          { id: "host-daemon-signature", title: sig.title },
+          `${versionText(s.hostVersion, s.hostBuild)} `,
+          el(
+            "span",
+            { class: sig.tone === "ok" ? null : "hk-muted" },
+            `(${sig.text})`,
+          ),
+        ),
+      ],
       [
         "Hardware",
         `${f.host.cores_total ? `${f.host.cores_total} cores · ` : ""}${gib(f.host.ram_total_mb).replace(/\.0$/, "")} GiB RAM`,
@@ -875,7 +907,15 @@ export function mount(root, ctx) {
           ? `${d.root_disk_device || "unknown"} · ${d.root_disk_total_gb.toFixed(0)} GB`
           : "not read yet",
       ],
-      ["Up for", el("span", { class: "hk-muted" }, "not reported by the host")],
+      [
+        "Up for",
+        up ??
+          el(
+            "span",
+            { class: "hk-muted" },
+            "not reported by this host version",
+          ),
+      ],
     ];
     about.replaceChildren(
       ...rows.flatMap(([k, v]) => [el("dt", null, k), el("dd", null, v)]),

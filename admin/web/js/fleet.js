@@ -12,14 +12,21 @@ import { agoText, humanDuration } from "./format.js";
  *   hostname?: string, apps?: App[], uptime_s?: number | null,
  *   applied_source?: string | null, env_sealed?: boolean,
  *   native?: boolean}} Stack
+ * @typedef {{data_pct: number, metadata_pct: number, promised_gb: number,
+ *   volumes: number}} ThinPool
  * @typedef {{root_lv_size_gb: number, root_disk_device: string,
  *   root_disk_total_gb: number, thin_pool_size_gb: number,
+ *   root_disk_kind?: string, thin_pool?: ThinPool,
  *   top_dirs: [string, number][], measured_at: number}} HostDiskDetail
+ * @typedef {{vmid: number, cpu_permille: number, ram_used_mb: number,
+ *   ram_max_mb: number, uptime_s: number}} GuestUse
  * @typedef {{name: string, cpu_pct: number | null, ram_used_mb: number,
  *   ram_total_mb: number, disk_pct: number, ram_committed_mb?: number,
  *   cores_total?: number, load1_x100?: number,
  *   tls_fingerprint?: string,
- *   disk_detail?: HostDiskDetail | null}} Host
+ *   disk_detail?: HostDiskDetail | null, uptime_s?: number,
+ *   release?: {signed: boolean, detail: string},
+ *   guests_usage?: GuestUse[]}} Host
  * @typedef {{measured_at: number, host: Host, stacks: Stack[],
  *   counts: {stacks: number, online: number, parked: number}}} Fleet
  */

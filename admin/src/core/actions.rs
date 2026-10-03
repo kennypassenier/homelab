@@ -999,6 +999,8 @@ pub enum Material {
     HostRelease {
         tag: String,
         binary_b64: String,
+        /// redesign-host-4: the signed checksum list it came with.
+        proof: Option<homelab_proto::ReleaseProof>,
     },
     /// install-native: the unit's manifest and unit file from the working
     /// copy, the tag to install, and the directory the CLI names
@@ -1174,8 +1176,13 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
                     .flatten(),
             }]
         }
-        (UpdateHost, Material::HostRelease { binary_b64, .. }) => {
-            vec![Command::SelfUpdateHost { binary_b64 }]
+        (
+            UpdateHost,
+            Material::HostRelease {
+                binary_b64, proof, ..
+            },
+        ) => {
+            vec![Command::SelfUpdateHost { binary_b64, proof }]
         }
         (
             InstallNative,

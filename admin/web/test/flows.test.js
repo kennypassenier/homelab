@@ -73,11 +73,17 @@ test("redesign-flows-2: the stale images are ONE Updates row naming every app th
   const rows = updateRows(STALE);
   assert.equal(rows.length, 1);
   const r = rows[0];
-  assert.equal(r.title, "3 apps have a newer version");
+  // redesign-final-h1: every app with a newer version, the one that comes
+  // with a homelab release included and said so (Stacks counts it too).
+  assert.equal(r.title, "4 apps have a newer version");
+  assert.match(
+    r.why,
+    /admin\/demo-agent v0\.1\.0 → v0\.2\.0 \(with a homelab release\)/,
+  );
   assert.equal(kindOf(r), "update");
   assert.match(r.why, /beta-demo\/api v2\.3\.0 → v3\.0\.0 \(major\)/);
   assert.match(r.why, /kp-soft\/demo-agent 0\.1\.4 → 0\.2\.0(?! \(major\))/);
-  assert.deepEqual(r.stacks, ["beta-demo", "kp-soft"]);
+  assert.deepEqual(r.stacks, ["admin", "beta-demo", "kp-soft"]);
   assert.equal(r.href, "/inbox?update=all");
   assert.deepEqual(updateRows({ images: [] }), []);
   assert.deepEqual(updateRows(null), []);
@@ -264,6 +270,7 @@ test("redesign-flows-1: all apps vs one stack (which also offers its moving-tag 
       "pin:beta-demo:api/api",
       "pin:beta-demo:web/web",
       "pin:kp-soft:agent/agent",
+      "release:admin:demo-agent",
     ],
   );
   assert.equal(all[0].major, true);
@@ -309,7 +316,9 @@ test("redesign-flows-1: all apps vs one stack (which also offers its moving-tag 
 });
 
 test("redesign-flows-1: the impact in words — downtime from the last deploy, who notices, the safety net", () => {
-  const chosen = itemsFor(STALE, { all: true }).slice(0, 2);
+  const chosen = itemsFor(STALE, { all: true })
+    .filter((i) => i.kind === "pin")
+    .slice(0, 2);
   /** @type {any[]} */
   const jobs = [
     {
@@ -366,7 +375,7 @@ test("redesign-flows-1: the impact in words — downtime from the last deploy, w
 });
 
 test("redesign-flows-1: the run's rows — back up, commit only for pinned apps, deploy, two verifies", () => {
-  const pins = itemsFor(STALE, { all: true });
+  const pins = itemsFor(STALE, { all: true }).filter((i) => i.kind === "pin");
   assert.deepEqual(
     runRows(pins).map((r) => [r.id, r.step]),
     [

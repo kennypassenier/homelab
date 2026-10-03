@@ -8,7 +8,7 @@
 // run shows and the summary. No DOM, no fetch, no clock.
 
 import { humanDuration } from "./format.js";
-import { plural, staleApps } from "./inboxrows.js";
+import { newerApps, plural } from "./inboxrows.js";
 import { releaseUrl } from "./staleimages.js";
 
 /**
@@ -17,7 +17,7 @@ import { releaseUrl } from "./staleimages.js";
  * moved from `from` to `to` by a commit and a deploy; `pull`: the stack's
  * apps on a moving tag (like `:latest`), pulled and recreated by the
  * stack's Update action, which rolls an app back when it is not healthy.
- * @typedef {{id: string, kind: "pin" | "pull", stack: string,
+ * @typedef {{id: string, kind: "pin" | "pull" | "release", stack: string,
  *   container: string, key: string | null, from: string, to: string,
  *   major: boolean, notes: string | null, app?: string | null}} Item
  *   `app` (pull only, redesign-openpoints-2): the one app the pull is for,
@@ -97,16 +97,21 @@ export const flowArea = (search) => {
  * @returns {Item[]}
  */
 export function itemsFor(staleBody, scope) {
+  // redesign-final-h1: every app with a newer version (`newerApps`, the
+  // one source Stacks and the Inbox count from); one that comes with a
+  // homelab release is listed as such, never ticked.
   /** @type {Item[]} */
-  const out = staleApps(staleBody)
+  const out = newerApps(staleBody)
     .filter((a) =>
       scope.all
         ? !scope.only || scope.only.includes(a.stack)
         : a.stack === scope.stack,
     )
     .map((a) => ({
-      id: `pin:${a.stack}:${a.key}`,
-      kind: "pin",
+      id: a.release
+        ? `release:${a.stack}:${a.container}`
+        : `pin:${a.stack}:${a.key}`,
+      kind: /** @type {"pin" | "release"} */ (a.release ? "release" : "pin"),
       stack: a.stack,
       container: a.container,
       key: a.key,
@@ -114,7 +119,11 @@ export function itemsFor(staleBody, scope) {
       to: a.to,
       major: a.major,
       notes: releaseUrl(a.upstream, a.to),
-    }));
+    }))
+    // The apps this flow moves first; the release ones after them.
+    .sort(
+      (x, y) => Number(x.kind === "release") - Number(y.kind === "release"),
+    );
   // redesign-openpoints-2: an opener that picked an app no pinned row is
   // (an app on a moving tag) gets the pull row for that app alone. A pin
   // key (`<app>/<service>`) whose newer version is gone is no app name.
@@ -122,7 +131,11 @@ export function itemsFor(staleBody, scope) {
     !scope.all &&
     scope.app &&
     !scope.app.includes("/") &&
-    !out.some((i) => i.key === scope.app)
+    !out.some(
+      (i) =>
+        i.key === scope.app ||
+        (i.kind === "release" && i.container === scope.app),
+    )
       ? scope.app
       : null;
   if (!scope.all)
@@ -154,9 +167,17 @@ export function firstChosen(items, scope) {
       (i) => i.key === scope.app || (i.kind === "pull" && i.app === scope.app),
     );
     if (one) return new Set([one.id]);
+    // redesign-final-h1: the app comes with a homelab release: nothing
+    // here moves it, so nothing starts ticked.
+    if (items.some((i) => i.kind === "release" && i.container === scope.app))
+      return new Set();
   }
   const pins = items.filter((i) => i.kind === "pin");
-  return new Set((pins.length ? pins : items).map((i) => i.id));
+  return new Set(
+    (pins.length ? pins : items.filter((i) => i.kind !== "release")).map(
+      (i) => i.id,
+    ),
+  );
 }
 
 /**

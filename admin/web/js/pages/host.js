@@ -1049,13 +1049,21 @@ export function mount(root, ctx) {
     );
     return rows.length;
   };
+  /** The note with the one spinner a running read shows. @param {string} t */
+  const busyNote = (t) =>
+    checksNote.replaceChildren(
+      h("span", { class: "kp-spinner", "aria-hidden": "true" }),
+      " ",
+      t,
+    );
   let checking = false;
   const loadChecks = async () => {
     if (checking) return;
     checking = true;
     runChecks.setAttribute("disabled", "");
     checksBtn.setAttribute("disabled", "");
-    checksNote.textContent = "The doctor is running on the host (about 30 s)…";
+    // Invariant 55 (a slow read): one loading indicator while it runs.
+    busyNote("The doctor is running on the host (about 30 s)…");
     const began = Date.now();
     try {
       const r = await slowReport(
@@ -1064,7 +1072,9 @@ export function mount(root, ctx) {
         abort.signal,
         (b) => {
           const n = paintChecks(b.report);
-          checksNote.textContent = `${n} host-level checks, the last reading, while the host runs the doctor again.`;
+          busyNote(
+            `${n} host-level checks, the last reading, while the host runs the doctor again.`,
+          );
         },
       );
       const secs = Math.round((Date.now() - began) / 1000);

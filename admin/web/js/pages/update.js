@@ -449,6 +449,28 @@ export function mount(root, scope) {
     } else
       list.replaceChildren(
         ...items.map((i) => {
+          // redesign-final-h1: an app that comes with a homelab release is
+          // listed (Stacks and the Inbox count it), says so, and has no
+          // tick: nothing here moves it.
+          if (i.kind === "release")
+            return h(
+              "div",
+              { class: "uf-item uf-item--release", "data-item": i.id },
+              h("span", { class: "uf-norow", "aria-hidden": "true" }, "—"),
+              h("strong", null, `${i.stack} / ${i.container}`),
+              h(
+                "span",
+                { class: "uf-ver" },
+                h("s", null, i.from),
+                ` → ${i.to}`,
+              ),
+              h(
+                "small",
+                null,
+                h("span", { class: "kp-badge" }, "with a homelab release"),
+                " part of the homelab itself: it moves when the host is updated (System › Host › Update the host…), not from here",
+              ),
+            );
           const box = drivable(
             h("input", {
               type: "checkbox",
@@ -523,7 +545,8 @@ export function mount(root, scope) {
   };
   const paintChosen = () => {
     const n = chosenItems().length;
-    chosenN.textContent = `${n} of ${items.length} chosen · click a row to include or leave it out`;
+    const can = items.filter((i) => i.kind !== "release").length;
+    chosenN.textContent = `${n} of ${can} chosen · click a row to include or leave it out`;
     /** @type {HTMLButtonElement} */ (next).disabled = n === 0;
   };
 

@@ -772,11 +772,17 @@ export function mount(root, opts = {}) {
   /** @param {KeyboardEvent} e */
   const onKey = (e) => {
     if (e.key !== "Escape" || only == null || e.defaultPrevented) return;
-    if (document.querySelector("dialog[open]")) return;
+    // redesign-final (a case red on the base): the plan lives in the Deploy
+    // all changes sheet since 3.71.0; Esc there resets the filter first
+    // and closes the sheet only once no filter is on. Another dialog on
+    // top keeps its own Esc.
+    const top = [...document.querySelectorAll("dialog[open]")].pop();
+    if (top && !top.contains(root)) return;
+    e.preventDefault();
     only = null;
     paint();
   };
-  document.addEventListener("keydown", onKey);
+  document.addEventListener("keydown", onKey, true);
 
   const load = async () => {
     read.setAttribute("disabled", "");
@@ -815,6 +821,6 @@ export function mount(root, opts = {}) {
     abort.abort();
     stopCompare();
     stopJobs();
-    document.removeEventListener("keydown", onKey);
+    document.removeEventListener("keydown", onKey, true);
   };
 }

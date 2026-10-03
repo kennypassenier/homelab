@@ -2884,7 +2884,9 @@ test("invariants: the Doctor shows no verdict and one loading indicator until ev
           },
         });
       });
-      await page.goto(`${BASE}/doctor`);
+      // redesign-final-h5: the Doctor's report lives in Host's checks card
+      // (`/host?section=doctor`); `/doctor` itself goes to the Inbox.
+      await page.goto(`${BASE}/host?section=doctor`);
       await page.waitForTimeout(1500);
       const during = await page.evaluate(() => {
         const shown = (/** @type {Element} */ el) => {
@@ -2905,11 +2907,7 @@ test("invariants: the Doctor shows no verdict and one loading indicator until ev
           return r.width > 0 && r.height > 0;
         };
         const main =
-          document
-            .querySelector('[data-kp-remember="doctor"]')
-            ?.closest("details") ??
-          document.querySelector("main") ??
-          document.body;
+          document.querySelector("#host-checks-card") ?? document.body;
         return {
           verdict: [...main.querySelectorAll(".state")]
             .map((s) => s.textContent ?? "")
@@ -2917,7 +2915,8 @@ test("invariants: the Doctor shows no verdict and one loading indicator until ev
           spinners: [...main.querySelectorAll(".kp-spinner")].filter(shown)
             .length,
           notRead: [...main.querySelectorAll("p, span")].some(
-            (e) => shown(e) && (e.textContent ?? "").trim() === "not read yet",
+            (e) =>
+              shown(e) && /^not read yet/i.test((e.textContent ?? "").trim()),
           ),
         };
       });
@@ -2933,23 +2932,17 @@ test("invariants: the Doctor shows no verdict and one loading indicator until ev
       );
       assert.equal(during.notRead, false, `"not read yet" beside the loading`);
       await page.waitForFunction(
-        () =>
-          document
-            .querySelector('[data-kp-remember="doctor"]')
-            ?.closest("details")
-            ?.querySelector(".state")
-            ?.textContent?.includes("overall"),
+        () => !!document.querySelector("#host-checks li[data-health]"),
         null,
         { timeout: 10000 },
       );
-      const after = await page.evaluate(
-        () =>
-          document
-            .querySelector('[data-kp-remember="doctor"]')
-            ?.closest("details")
-            ?.querySelector(".state")?.textContent ?? "",
-      );
-      assert.match(after ?? "", /overall ok/);
+      const after = await page.evaluate(() => ({
+        rows: document.querySelector("#host-checks")?.textContent ?? "",
+        spinners: document.querySelectorAll("#host-checks-card .kp-spinner")
+          .length,
+      }));
+      assert.match(after.rows, /disk · ok/);
+      assert.equal(after.spinners, 0, "a spinner after the read ended");
       await page.close();
     }
   } finally {
@@ -3932,7 +3925,8 @@ test("invariants: every Inbox row says what and why and carries its fix, and a p
           : page.locator(".nx-tabbar [data-area='inbox'] .nx-count");
       assert.equal((await badge.innerText()).trim(), String(rows));
       // A plain click on Setup shows only the Setup row; again shows all.
-      const chip = page.locator("#page .nx-tb button[data-value=setup]");
+      // The kit (redesign-kit-1) marks a chip with data-v.
+      const chip = page.locator("#page .nx-tb button[data-v=setup]");
       await chip.click();
       assert.equal(
         await page.locator("#page .inbox-card .nx-inbox__row:visible").count(),
@@ -7445,7 +7439,9 @@ test("invariants: Activity is one page with Now and history, Planned and Host lo
         ["/jobs", "Now and history", "#running"],
         ["/timeline", "Now and history", "#timeline .timeline svg"],
         ["/log", "Host log", ".hl-side .hl-opt"],
-        ["/schedules", "Planned", ".sch-ph h2"],
+        // The kit (redesign-kit-1) drew the header with ui.js pageHeader;
+        // .sch-ph is gone. Hosted, it is a section (redesign-final-h5).
+        ["/schedules", "Planned", ".sch-head--hosted h2"],
       ]) {
         await page.goto(`${BASE}${from}`);
         const found = await page
@@ -10320,17 +10316,28 @@ test("invariants: Deploy all changes marks Compare done only once the compare ra
         body: JSON.stringify({ stacks: {}, measured_at: null }),
       }),
     );
+    // redesign-final (the base's failing case): since redesign-stacks-7
+    // the plan read on opening IS a compare (its answer marks the list), so
+    // "not compared yet" also holds the plan back until the case lets it go.
+    /** @type {import("playwright").Route[]} */
+    const heldPlan = [];
+    await page.route("**/data/apply/plan", (route) => {
+      heldPlan.push(route);
+    });
     await page.goto(`${BASE}/stacks?deploy-all=1`);
     const compare = page.locator(
       "#apply-section .ap-steps li[data-step=compare]",
     );
     await compare.waitFor({ timeout: 10000 });
+    await page.waitForTimeout(500);
     assert.equal(
       await compare.evaluate((e) => e.classList.contains("done")),
       false,
       "Compare is shown done before it ran",
     );
     await page.unroute("**/data/drift");
+    for (const r of heldPlan) await r.continue();
+    await page.unroute("**/data/apply/plan");
     await compare.locator("#drift-compare").click();
     await page.waitForFunction(
       () =>
@@ -11159,6 +11166,87 @@ test("invariants: redesign-final-h4: System groups its pages under The host, The
     assert.match(r.line ?? "", /^CPU \d+% · disk \d+% · \d+\.\d+\.\d+/);
     assert.equal(r.state, "host healthy");
     assert.equal(r.runbook, "DR_RUNBOOK.md");
+  } finally {
+    await browser.close();
+  }
+});
+
+// H1: "newer version" meant three things: Stacks flagged kp-soft and admin
+// (demo-agent, a pin in the homelab binary) while the Inbox counted only
+// beta-demo's two apps and Update kp-soft offered only its moving-tag apps.
+test("invariants: redesign-final-h1: Stacks, the Inbox and the Update flow name the same apps with a newer version, and a stack's flag leads to a flow that lists them", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks`);
+    await page.locator(".sk-chip").first().waitFor({ timeout: 10000 });
+    await page.waitForTimeout(1500);
+    const flags = await page.evaluate(() => {
+      /** @type {Record<string, number>} */
+      const out = {};
+      for (const c of document.querySelectorAll(".sk-card .sk-chip")) {
+        const m = /^(\d+ )?newer versions?$/.exec((c.textContent ?? "").trim());
+        if (!m) continue;
+        const card = /** @type {HTMLElement} */ (c.closest(".sk-card"));
+        const name = card.getAttribute("data-stack") ?? "";
+        out[name] = m[1] ? Number(m[1]) : 1;
+      }
+      return out;
+    });
+    const total = Object.values(flags).reduce((a, b) => a + b, 0);
+    assert.ok(
+      total >= 1,
+      `no stack flags a newer version (${JSON.stringify(flags)})`,
+    );
+
+    await page.goto(`${BASE}/inbox`);
+    const updates = page.locator(
+      "text=/\\d+ apps? (has|have) a newer version/",
+    );
+    await updates.first().waitFor({ timeout: 10000 });
+    const title = await updates.first().innerText();
+    // The Inbox counts the apps Update all lists (a stack the host does not
+    // run yet, beta-demo, has no card on Stacks but its apps still count).
+    await page.goto(`${BASE}/update?all=1`);
+    await page.locator(".uf-item").first().waitFor({ timeout: 10000 });
+    const listedAll = await page
+      .locator('.uf-item:not([data-item^="pull:"])')
+      .count();
+    assert.equal(
+      Number(/(\d+)/.exec(title)?.[1]),
+      listedAll,
+      `Inbox "${title}", Update all lists ${listedAll}`,
+    );
+    for (const [stack, n] of Object.entries(flags))
+      assert.ok(
+        (await page.locator(`.uf-item[data-item*=":${stack}:"]`).count()) === n,
+        `Update all lists ${stack}'s apps differently from its flag (${n})`,
+      );
+
+    for (const [stack, n] of Object.entries(flags)) {
+      await page.goto(`${BASE}/update?stack=${encodeURIComponent(stack)}`);
+      await page.locator(".uf-item").first().waitFor({ timeout: 10000 });
+      const listed = await page
+        .locator('.uf-item:not([data-item^="pull:"])')
+        .count();
+      assert.equal(
+        listed,
+        n,
+        `Update ${stack} lists ${listed}, its flag says ${n}`,
+      );
+    }
+    await page.goto(`${BASE}/update?stack=kp-soft`);
+    const rel = page.locator('.uf-item[data-item^="release:kp-soft:"]');
+    await rel.first().waitFor({ timeout: 10000 });
+    assert.match(await rel.first().innerText(), /with a homelab release/);
+    assert.equal(
+      await rel.locator("input").count(),
+      0,
+      "a release row has a tick",
+    );
   } finally {
     await browser.close();
   }

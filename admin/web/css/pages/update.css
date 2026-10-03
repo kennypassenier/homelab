@@ -52,6 +52,17 @@
   border-color: var(--primary);
   box-shadow: inset 3px 0 0 var(--primary);
 }
+/* redesign-final-h1: an app that comes with a homelab release: listed,
+   never ticked. */
+.uf-item--release {
+  cursor: default;
+  border-style: dashed;
+}
+.uf-norow {
+  inline-size: 18px;
+  text-align: center;
+  color: var(--muted-foreground);
+}
 .uf-item input {
   inline-size: 18px;
   block-size: 18px;

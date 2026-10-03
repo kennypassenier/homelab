@@ -21,8 +21,11 @@ import { majorJump } from "./staleimages.js";
  * @typedef {{stack: string, container: string, key: string, from: string,
  *   to: string, upstream: string, major: boolean}} StaleApp
  *   one app the Update flow can move (`key`: `<app>/<service>` of its file)
+ * @typedef {Omit<StaleApp, "key"> & {key: string | null, release: boolean}}
+ *   NewerApp one app with a newer version (redesign-final-h1): `release`
+ *   when it comes with a homelab release (no key)
  * @typedef {import("./inbox.js").InboxItem & {kind?: Kind,
- *   chips?: SrcChip[], stacks?: string[], apps?: StaleApp[],
+ *   chips?: SrcChip[], stacks?: string[], apps?: NewerApp[],
  *   fix?: import("./notices.js").Fix | null, check?: string,
  *   checkState?: "open" | "not ok"}} Row
  */
@@ -49,9 +52,41 @@ export function kindOf(r) {
 }
 
 /**
+ * redesign-final-h1: THE apps with a newer version, every place's one
+ * source (Stacks' flag, the hub, the Inbox's Updates row, the Update
+ * flow): each stale-image row, a pin a stack file holds (`key`, the Update
+ * flow moves it) or one that comes with a homelab release (`release`: no
+ * key, it lives in the homelab binary).
+ * @param {{images?: {where_: string, pinned: string, latest: string,
+ *   upstream: string, key: string | null}[]} | null | undefined} body
+ * @returns {NewerApp[]}
+ */
+export function newerApps(body) {
+  return (body?.images ?? [])
+    .map((x) => {
+      const [stack, ...rest] = String(x.where_).split("/");
+      return {
+        stack,
+        container: rest.join("/"),
+        key: x.key ?? null,
+        release: !x.key,
+        from: x.pinned,
+        to: x.latest,
+        upstream: x.upstream,
+        major: majorJump(x.pinned, x.latest),
+      };
+    })
+    .sort(
+      (a, b) =>
+        a.stack.localeCompare(b.stack) ||
+        a.container.localeCompare(b.container),
+    );
+}
+
+/**
  * The stale-image rows the Update flow can move: a pin a stack file holds
- * (`key`), with its version jump. A row without a key is updated with a
- * homelab release, not from the dashboard, so it is no Inbox row.
+ * (`key`), with its version jump (`newerApps` without the ones that come
+ * with a homelab release).
  * @param {{images?: {where_: string, pinned: string, latest: string,
  *   upstream: string, key: string | null}[]} | null | undefined} body
  * @returns {StaleApp[]}
@@ -89,7 +124,9 @@ export const plural = (n, one, many = `${one}s`) =>
  * @returns {Row[]}
  */
 export function updateRows(body) {
-  const apps = staleApps(body);
+  // redesign-final-h1: every app with a newer version, the ones that come
+  // with a homelab release included (said so), as Stacks counts them.
+  const apps = newerApps(body);
   if (!apps.length) return [];
   const at = Number(body?.measured_at) || 0;
   const stacks = [...new Set(apps.map((a) => a.stack))];
@@ -102,7 +139,7 @@ export function updateRows(body) {
       why: `${apps
         .map(
           (a) =>
-            `${a.stack}/${a.container} ${a.from} → ${a.to}${a.major ? " (major)" : ""}`,
+            `${a.stack}/${a.container} ${a.from} → ${a.to}${a.major ? " (major)" : ""}${a.release ? " (with a homelab release)" : ""}`,
         )
         .join(
           " · ",

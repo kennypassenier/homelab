@@ -173,7 +173,9 @@ export function guestRows(guests, fleet) {
  * @param {import("./doctor.js").DoctorReport} report
  */
 export function hostChecks(report) {
-  return report.checks.filter((c) => !/^stack\s/i.test(c.name));
+  // A run's first answer may carry no checks yet (`{report: {}, refreshing}`,
+  // the demo host's shape); reading it as none keeps the read going.
+  return (report?.checks ?? []).filter((c) => !/^stack\s/i.test(c.name));
 }
 
 // ── redesign-host (3.71.0, the approved Host demo): the view models the

@@ -224,3 +224,19 @@ summarised here for the corrections record.
 7. **Hoe en wanneer meten we dat het werkt.** At the 3.70.4 → next release rollout: the 3.70.4 tab updates itself through Live view without the CLI.
 8. **Fallback.** `homelab install-native stacks/admin <tag>` from the CLI, announced in the thread.
 9. **Wanneer herzien we de maatregel.** At the measurement in field 7.
+
+---
+
+## Correction · fix-238 — manual backups displaced the nightly of 2026-10-02
+
+**Ratified 2026-10-03 (Kenny: Klopt).**
+
+1. **Wat ging er mis.** The manual backups taken before the image updates and the Jellyfin 12.1 upgrade replaced the 2026-10-02 nightly snapshot on 7 stacks (jellyfin 78e2cae5, alertmanager, qbittorrent, actual, stirling, paperless, paperless-db, traefik, crowdsec), measured with `homelab snapshots`.
+2. **Welke poort liet het door.** None: retention (one snapshot per day) was only ever tested with nightly snapshots, never with a manual one beside them.
+3. **Waar dezelfde fout nog zit.** ZFS retention (an on-demand `zfs-replicate` on a day the nightly ran), fix-243. Searched with `grep -rn "forget_list(" core/src`: four restic call sites, three ZFS call sites.
+4. **Hoe voorkomen we herhaling.** Two lanes: scheduled and on-demand snapshots are thinned separately (`retention::forget_list_by_lane`, through `ops::backup::retention_doomed`; ZFS `…-manual` names).
+5. **Kost.** A few more on-demand snapshots kept (one per day, one per two weeks, …).
+6. **Handhaving.** Code: invariant 38, `core/tests/retention_lanes_tests.rs`, `core/tests/fix_243_zfs_lanes_tests.rs`.
+7. **Hoe en wanneer meten we dat het werkt.** After the first manual backup once 3.70.7 is live, that day's nightly is still listed by `homelab snapshots`. Until then Claude takes no manual backups (the release waits on the UI round, Kenny 2026-10-03).
+8. **Fallback.** Claude stops taking manual backups until the cause is found and reports at once.
+9. **Wanneer herzien we de maatregel.** At the next change to the retention settings.

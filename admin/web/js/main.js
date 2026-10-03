@@ -57,7 +57,6 @@ import { mount as metricsPage } from "./pages/metrics.js";
 import { mount as fleetviewPage } from "./pages/fleetview.js";
 import { mount as backupCalendarPage } from "./pages/backupcalendar.js";
 import { mount as passkeysPage } from "./pages/passkeys.js";
-import { mount as doctorPage } from "./pages/doctor.js";
 import { mountVersions } from "./versions.js";
 
 const page = /** @type {HTMLElement} */ (document.getElementById("page"));
@@ -174,7 +173,8 @@ const VIEW_MOUNTS = {
   backupcalendar: (root) => backupCalendarPage(root),
   retired: (root) => retired(root),
   passkeys: (root) => passkeysPage(root),
-  doctor: (root) => doctorPage(root),
+  // redesign-final-h5: the Doctor's old address opens Host on its checks.
+  doctor: (root) => host(root, { navigate, focus: "checks" }),
 };
 
 /**

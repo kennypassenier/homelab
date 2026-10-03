@@ -562,6 +562,19 @@ main.shell.ap-page > [hidden] {
   display: grid;
   gap: var(--kp-space-lg, 16px);
 }
+/* redesign-final-c1: Deploy all changes is the approved apply.html in a
+   sheet: wide enough for its four steps, four tiles and three columns, the
+   whole window on a phone (the plan lays out by its own width). */
+dialog.nx-drawer.sk-drawer--plan {
+  /* kp-dialog caps a dialog at 32rem; this sheet is the plan's page. */
+  inline-size: min(82rem, calc(100vw - 4rem));
+  max-inline-size: 100vw;
+}
+@media (max-width: 48rem) {
+  dialog.nx-drawer.sk-drawer--plan {
+    inline-size: 100vw;
+  }
+}
 .sk-steps {
   list-style: none;
   margin: 0;

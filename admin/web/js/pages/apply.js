@@ -173,6 +173,8 @@ function skeleton() {
  */
 export function mount(root, opts = {}) {
   ensureStyle("/css/pages/apply.css");
+  // redesign-final-c1: the plan lays out by its own width (apply.css).
+  root.classList.add("ap-root");
   const read = drivable(
     h(
       "button",

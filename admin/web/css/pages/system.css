@@ -1,0 +1,25 @@
+/* redesign-final-h4 (3.71.0): the System landing as the approved
+   flows/system.html — four headed groups of page cards, the host's live
+   line on the Host card. kp-themes tokens only. */
+
+.sy-links {
+  margin: 0;
+}
+.sy-links a.nx-action {
+  text-decoration: none;
+  color: inherit;
+}
+.sy-kpi {
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.sy-kpi[hidden] {
+  display: none;
+}
+.sy-state {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}

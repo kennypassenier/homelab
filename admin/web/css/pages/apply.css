@@ -110,6 +110,21 @@ button.ap-tile {
   grid-template-rows: auto auto auto;
   min-inline-size: 0;
 }
+/* redesign-final-c1: the Apps page's own `.ap-tile` (stacks.css, an icon
+   column beside the name) laid these tiles out in three columns, so
+   "Will deploy" broke per letter and the number was cut; a plan tile is
+   one column: label, number, context. */
+.ap-root button.ap-tile {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  align-items: start;
+  padding: var(--kp-space-md, 12px) var(--nx-pad, 16px);
+}
+.ap-root button.ap-tile .nx-kpi__ctx {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
 /* A tile's label wraps on a phone instead of being cut off (review 13). */
 .ap-tile .nx-kpi__label {
   white-space: normal;
@@ -335,12 +350,19 @@ button.ap-tile[aria-pressed="true"] {
 .ap-body .apply-row--skeleton {
   min-block-size: 6rem;
 }
-@media (max-width: 75rem) {
+/* redesign-final-c1: the plan lays itself out by its own width, not the
+   window's. The Deploy all changes sheet is narrower than the window, and
+   viewport queries squeezed four steps, four tiles and three columns into
+   it until words broke per letter. */
+.ap-root {
+  container: ap-plan / inline-size;
+}
+@container ap-plan (max-width: 66rem) {
   .ap-cols {
     grid-template-columns: minmax(0, 1fr);
   }
 }
-@media (max-width: 48rem) {
+@container ap-plan (max-width: 52rem) {
   .ap-steps {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -348,9 +370,12 @@ button.ap-tile[aria-pressed="true"] {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
-@media (max-width: 40rem) {
+@container ap-plan (max-width: 36rem) {
   .ap-go,
   .ap-destroy__go {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .ap-go__acts {
+    flex-wrap: wrap;
   }
 }

@@ -1265,7 +1265,9 @@ export function mount(root, ctx) {
     const planBody = h("div", { class: "sk-plan", id: "apply-section" });
     let stopPlan = () => {};
     panel = drawer({
-      cls: "sk-drawer",
+      // redesign-final-c1: a wide sheet (stacks.css), the plan's steps,
+      // tiles and columns at the approved apply.html's size.
+      cls: "sk-drawer sk-drawer--plan",
       title: "Deploy all changes",
       desc: "Make every stack match its files in the repository, in one confirmed batch. Each stack is backed up before it changes.",
       body: [planBody],

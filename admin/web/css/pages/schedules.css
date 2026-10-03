@@ -17,6 +17,13 @@
   --sch-ease: cubic-bezier(0.2, 0, 0.38, 0.9);
 }
 
+/* redesign-final-h5: in Activity's Planned view the schedules are one
+   section of that page: a section-sized heading, not a second page title. */
+.sch-root .sch-head--hosted > h2,
+.sch-root .sch-head--hosted .title-row > h2 {
+  font-size: var(--kp-text-xl, 1.25rem);
+  margin: 0;
+}
 .sch-root .sch-num {
   font-variant-numeric: tabular-nums;
 }

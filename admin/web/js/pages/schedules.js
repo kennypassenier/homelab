@@ -44,7 +44,6 @@ import {
 import { current } from "../store.js";
 import {
   TOAST_MS,
-  kbd,
   keyRow,
   pageHeader,
   rowMenu,
@@ -248,8 +247,9 @@ export function mount(root, opts = {}) {
       title: "Pick an action, a target and when it runs (N)",
       onclick: () => void openDrawer(null, null),
     },
+    // redesign-final-h5: no key badge on this one button; N is in its
+    // description, as every other button's key is.
     "New schedule",
-    kbd("N"),
   );
   drivable(add, NEW_SCHEDULE);
   const header = pageHeader({
@@ -259,6 +259,9 @@ export function mount(root, opts = {}) {
     meta: [zoneChip, count, read],
     actions: [add],
   }).el;
+  // redesign-final-h5: hosted in Activity's Planned view this is a section
+  // of that page (an h2 at section size), never a second page title.
+  if (opts.level === "h2") header.classList.add("sch-head--hosted");
   const body = h("div", { class: "sch-body" });
   // The page's top-level pieces sit straight in `root`, so the shell's one
   // section gap (fix-206) spaces them.

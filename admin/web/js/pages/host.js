@@ -143,7 +143,7 @@ const dot = (tone) =>
 
 /**
  * @param {HTMLElement} root
- * @param {{navigate: (href: string) => void}} ctx
+ * @param {{navigate: (href: string) => void, focus?: "checks"}} ctx `focus`: the card to open on (redesign-final-h5)
  * @returns {() => void}
  */
 export function mount(root, ctx) {
@@ -1356,7 +1356,15 @@ export function mount(root, ctx) {
     void loadGuests().catch(() => {});
     void ping().catch(() => {});
   }, EVERY_S * 1000);
-  void ctx;
+  // redesign-final-h5: `/host?section=doctor` (the old Doctor's address)
+  // opens this page on its Host checks card and reads them, instead of
+  // mounting the retired Doctor page inside it.
+  if (ctx.focus === "checks") {
+    requestAnimationFrame(() =>
+      checksCard.el.scrollIntoView({ block: "start" }),
+    );
+    void loadChecks().catch(() => {});
+  }
   return () => {
     abort.abort();
     clearInterval(timer);

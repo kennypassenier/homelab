@@ -343,7 +343,12 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
     if (i > 0) sec.hidden = true;
     if (s.id === REVIEW) {
       sec.append(
-        h("p", { class: "act-what" }, capital(form.what), "."),
+        // fix-249: a dialog with its own description (`form.intro`, at the
+        // top) says what it does once; the short `what` line only stands
+        // in for a form that has none.
+        ...(form.intro
+          ? []
+          : [h("p", { class: "act-what" }, capital(form.what), ".")]),
         previewBox,
         guardBox,
         ...(forceWrap ? [forceWrap] : []),

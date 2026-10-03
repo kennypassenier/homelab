@@ -88,6 +88,40 @@ const ROLL_BACK = declare({
   what: "the result's Roll back…: put the earlier version back the same way",
 });
 
+const NOTES = declare({
+  id: "update-release-notes",
+  page: "inbox",
+  opens: "view",
+  row: "<pin:stack:app/service>",
+  what: "a row's release notes, in a new tab",
+});
+const MAJOR_NOTES = declare({
+  id: "update-major-notes",
+  page: "inbox",
+  opens: "view",
+  row: "<pin:stack:app/service>",
+  what: "a major version's release notes, in a new tab",
+});
+const DIFF = declare({
+  id: "update-diff",
+  page: "inbox",
+  opens: "view",
+  what: "fold or unfold the change to the stack files",
+});
+const LEAVE = declare({
+  id: "update-leave",
+  page: "inbox",
+  opens: "view",
+  what: "leave the running update (it keeps going while this tab stays open)",
+});
+const AFTER = declare({
+  id: "update-after",
+  page: "inbox",
+  opens: "view",
+  row: "activity|stack|inbox|back",
+  what: "the result's links: Activity, the stack, back to the Inbox; or Back from an empty list",
+});
+
 /** The six steps (flows/update.html). */
 const STEPS = ["See", "Impact", "Back up", "Update", "Verify", "Done"];
 
@@ -427,7 +461,17 @@ export function mount(root, scope) {
   const diffFold = h(
     "details",
     { class: "uf-fold" },
-    h("summary", null, "The change to the stack files"),
+    drivable(
+      h(
+        "summary",
+        {
+          title:
+            "Fold or unfold the diff of the stack files this update changes",
+        },
+        "The change to the stack files",
+      ),
+      DIFF,
+    ),
     diff,
   );
   const blocked = h("div");
@@ -471,14 +515,17 @@ export function mount(root, scope) {
     title: "Running",
     desc: "You can leave this page: the steps keep going while this dashboard tab stays open, and the bar shows the running job.",
     tools: [
-      h(
-        "a",
-        {
-          class: "kp-button kp-button--sm",
-          href: back,
-          title: "Go back; the update keeps running",
-        },
-        "Leave — keep it running",
+      drivable(
+        h(
+          "a",
+          {
+            class: "kp-button kp-button--sm",
+            href: back,
+            title: "Go back; the update keeps running",
+          },
+          "Leave — keep it running",
+        ),
+        LEAVE,
       ),
     ],
   });
@@ -539,10 +586,18 @@ export function mount(root, scope) {
         emptyState({
           title: "Nothing has a newer version",
           text: "The fleet check found no pinned app with a newer release. When one comes out it shows here and in the Inbox.",
-          action: h(
-            "a",
-            { class: "kp-button", href: back },
-            scope.all ? "Back to the Inbox" : "Back to the stack",
+          action: drivable(
+            h(
+              "a",
+              {
+                class: "kp-button",
+                href: back,
+                title: "Nothing to update: go back",
+              },
+              scope.all ? "Back to the Inbox" : "Back to the stack",
+            ),
+            AFTER,
+            "back",
           ),
         }),
       );
@@ -599,15 +654,19 @@ export function mount(root, scope) {
               ...(i.notes
                 ? [
                     " · ",
-                    h(
-                      "a",
-                      {
-                        href: i.notes,
-                        target: "_blank",
-                        rel: "noopener noreferrer",
-                        title: `The ${i.to} release notes, in a new tab`,
-                      },
-                      "release notes",
+                    drivable(
+                      h(
+                        "a",
+                        {
+                          href: i.notes,
+                          target: "_blank",
+                          rel: "noopener noreferrer",
+                          title: `The ${i.to} release notes, in a new tab`,
+                        },
+                        "release notes",
+                      ),
+                      NOTES,
+                      i.id,
                     ),
                   ]
                 : []),
@@ -739,14 +798,19 @@ export function mount(root, scope) {
               ...(i.notes
                 ? [
                     " ",
-                    h(
-                      "a",
-                      {
-                        href: i.notes,
-                        target: "_blank",
-                        rel: "noopener noreferrer",
-                      },
-                      "Read the release notes",
+                    drivable(
+                      h(
+                        "a",
+                        {
+                          href: i.notes,
+                          target: "_blank",
+                          rel: "noopener noreferrer",
+                          title: `The ${i.to} release notes, in a new tab`,
+                        },
+                        "Read the release notes",
+                      ),
+                      MAJOR_NOTES,
+                      i.id,
                     ),
                   ]
                 : []),
@@ -988,32 +1052,44 @@ export function mount(root, scope) {
         h(
           "span",
           { class: "uf-foot__group" },
-          h(
-            "a",
-            {
-              class: "kp-button",
-              href: "/activity",
-              title: "Every step of this update in the history",
-            },
-            "See it in Activity",
+          drivable(
+            h(
+              "a",
+              {
+                class: "kp-button",
+                href: "/activity",
+                title: "Every step of this update in the history",
+              },
+              "See it in Activity",
+            ),
+            AFTER,
+            "activity",
           ),
-          h(
-            "a",
-            {
-              class: "kp-button",
-              href: `/stacks/${encodeURIComponent(stacksOf(run.chosen)[0] ?? "")}`,
-              title: "The stack's hub: its state, logs and history",
-            },
-            "Open the stack",
+          drivable(
+            h(
+              "a",
+              {
+                class: "kp-button",
+                href: `/stacks/${encodeURIComponent(stacksOf(run.chosen)[0] ?? "")}`,
+                title: "The stack's hub: its state, logs and history",
+              },
+              "Open the stack",
+            ),
+            AFTER,
+            "stack",
           ),
-          h(
-            "a",
-            {
-              class: "kp-button kp-button--primary",
-              href: "/inbox",
-              title: "What else waits for you",
-            },
-            left ? `Back to the Inbox · ${left} left` : "Back to the Inbox",
+          drivable(
+            h(
+              "a",
+              {
+                class: "kp-button kp-button--primary",
+                href: "/inbox",
+                title: "What else waits for you",
+              },
+              left ? `Back to the Inbox · ${left} left` : "Back to the Inbox",
+            ),
+            AFTER,
+            "inbox",
           ),
         ),
       ),

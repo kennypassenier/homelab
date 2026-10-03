@@ -63,6 +63,8 @@ dialog.help-panel .nx-drawer__head .kp-dialog__close {
 .tour {
   box-sizing: border-box;
   position: fixed;
+  margin: 0;
+  inset: auto;
   z-index: 60;
   inline-size: min(22rem, calc(100vw - 32px));
   background: var(--card);

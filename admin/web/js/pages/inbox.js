@@ -90,6 +90,40 @@ const PUSH_ENVS = declare({
   opens: "dialog",
   what: "deploy every stack without a sealed env, so the host's vault takes a copy (one confirm)",
 });
+const REVIEW = declare({
+  id: "inbox-review-updates",
+  page: "inbox",
+  opens: "view",
+  row: "all|<stack>",
+  what: "open the Update flow from the Updates row: every app with a newer version, or one stack's",
+});
+const SEE_WHAT = declare({
+  id: "inbox-see-what-happened",
+  page: "inbox",
+  opens: "view",
+  row: "<row key>",
+  what: "a notice's See what happened: open where it happened",
+});
+const SOURCE = declare({
+  id: "inbox-source",
+  page: "inbox",
+  opens: "view",
+  row: "<row key>:<chip label>",
+  what: "a row's source chip: open its stack or Activity",
+});
+const WORTH = declare({
+  id: "inbox-worth",
+  page: "inbox",
+  opens: "view",
+  what: "fold or unfold Worth a look (not counted in the counter)",
+});
+const WORTH_OPEN = declare({
+  id: "inbox-worth-open",
+  page: "inbox",
+  opens: "view",
+  row: "worth:drills|worth:host-release|worth:doctor",
+  what: "a Worth a look row's button: drill the backups, update the host, the doctor report",
+});
 const ANSWER_CHECK = declare({
   id: "inbox-answer-check",
   page: "inbox",
@@ -240,12 +274,10 @@ export function mount(root) {
   // Worth a look: folded, not counted.
   const worthList = h("ul", { class: "nx-inbox inbox-list" });
   const worthN = h("span", null, "");
-  const worth = h(
-    "details",
-    { class: "kp-card nx-card inbox-worth" },
+  const worthSummary = drivable(
     h(
       "summary",
-      null,
+      { title: "Fold or unfold what is worth a look but not urgent" },
       h("strong", null, "Worth a look", worthN),
       h(
         "span",
@@ -253,6 +285,12 @@ export function mount(root) {
         "not urgent, not counted in the counter",
       ),
     ),
+    WORTH,
+  );
+  const worth = h(
+    "details",
+    { class: "kp-card nx-card inbox-worth" },
+    worthSummary,
     worthList,
   );
 
@@ -342,20 +380,28 @@ export function mount(root) {
       return [
         ...(stacks.length > 1
           ? [
-              link(
-                updateHref(stacks[0]),
-                `Only ${stacks[0]}…`,
-                `Update only ${stacks[0]}'s apps`,
+              drivable(
+                link(
+                  updateHref(stacks[0]),
+                  `Only ${stacks[0]}…`,
+                  `Update only ${stacks[0]}'s apps`,
+                ),
+                REVIEW,
+                stacks[0],
               ),
             ]
           : []),
-        link(
-          stacks.length === 1 ? updateHref(stacks[0]) : updateHref(null),
-          stacks.length === 1 && n === 1
-            ? "Review and update…"
-            : `Review and update all ${n}…`,
-          "See what changes, then back up, update and verify; nothing runs until you confirm",
-          true,
+        drivable(
+          link(
+            stacks.length === 1 ? updateHref(stacks[0]) : updateHref(null),
+            stacks.length === 1 && n === 1
+              ? "Review and update…"
+              : `Review and update all ${n}…`,
+            "See what changes, then back up, update and verify; nothing runs until you confirm",
+            true,
+          ),
+          REVIEW,
+          stacks.length === 1 ? stacks[0] : "all",
         ),
       ];
     }
@@ -413,10 +459,14 @@ export function mount(root) {
       r.source === "notices" ? Number(r.key.slice("notice:".length)) : null;
     if (r.source === "notices")
       out.push(
-        link(
-          r.href || "/activity",
-          "See what happened",
-          "Open where this happened",
+        drivable(
+          link(
+            r.href || "/activity",
+            "See what happened",
+            "Open where this happened",
+          ),
+          SEE_WHAT,
+          r.key,
         ),
       );
     const fix =
@@ -505,7 +555,19 @@ export function mount(root) {
           { class: "inbox-src" },
           ...chipsOf(r).map((c) =>
             c.href
-              ? h("a", { class: "kp-badge", href: c.href }, c.label)
+              ? drivable(
+                  h(
+                    "a",
+                    {
+                      class: "kp-badge",
+                      href: c.href,
+                      title: `Open ${c.label}`,
+                    },
+                    c.label,
+                  ),
+                  SOURCE,
+                  `${r.key}:${c.label}`,
+                )
               : h("span", { class: "kp-badge" }, c.label),
           ),
         ),
@@ -621,12 +683,18 @@ export function mount(root) {
           h(
             "div",
             { class: "nx-inbox__acts" },
-            link(
-              r.href,
-              r.key === "worth:drills" ? "Drill them now…" : "Update the host…",
-              r.key === "worth:drills"
-                ? "Backups, showing only the repositories never drilled"
-                : "The Host page, where the host updates itself",
+            drivable(
+              link(
+                r.href,
+                r.key === "worth:drills"
+                  ? "Drill them now…"
+                  : "Update the host…",
+                r.key === "worth:drills"
+                  ? "Backups, showing only the repositories never drilled"
+                  : "The Host page, where the host updates itself",
+              ),
+              WORTH_OPEN,
+              r.key,
             ),
           ),
         ),
@@ -652,10 +720,14 @@ export function mount(root) {
         h(
           "div",
           { class: "nx-inbox__acts" },
-          link(
-            "/host?section=doctor",
-            "Open the report",
-            "System ▸ Host, the doctor section",
+          drivable(
+            link(
+              "/host?section=doctor",
+              "Open the report",
+              "System ▸ Host, the doctor section",
+            ),
+            WORTH_OPEN,
+            "worth:doctor",
           ),
         ),
       ),

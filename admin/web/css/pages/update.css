@@ -10,7 +10,28 @@
 }
 .uf-panels .nx-card__body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
+}
+.uf-panels > *,
+.uf-panels .nx-card__body > * {
+  min-inline-size: 0;
+}
+.uf-diff,
+.uf-fold {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+.uf-diff > details {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+.uf-diff summary {
+  overflow-wrap: anywhere;
+}
+.uf-diff pre {
+  max-inline-size: 100%;
+  overflow-x: auto;
 }
 .uf-list {
   display: grid;
@@ -82,7 +103,7 @@
 }
 .uf-impact {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
   gap: 12px;
 }
 .uf-tile {

@@ -242,11 +242,12 @@ export function startTour(i = 0) {
     dialogControl(skip, "tour-skip");
     next.addEventListener("click", () => show(n + 1));
     skip.addEventListener("click", finish);
+    // A non-modal <dialog>: its Next and Skip are dialog controls Live view
+    // finds by name, and the page stays usable behind it.
     box = h(
-      "div",
+      "dialog",
       {
         class: "tour",
-        role: "dialog",
         "aria-label": "Tour",
         "aria-live": "polite",
       },
@@ -260,6 +261,7 @@ export function startTour(i = 0) {
       ),
     );
     document.body.append(box);
+    /** @type {HTMLDialogElement} */ (box).show();
     place();
     next.focus();
   };
@@ -376,7 +378,16 @@ export function helpPanel() {
           kv(
             AREAS.map((a) => [
               a.label,
-              h("span", null, a.what, " · ", h("a", { href: a.href }, "open")),
+              h(
+                "span",
+                null,
+                a.what,
+                " · ",
+                dialogControl(
+                  h("a", { href: a.href, title: `Go to ${a.label}` }, "open"),
+                  `open-${a.id}`,
+                ),
+              ),
             ]),
           ),
         ),
@@ -390,6 +401,7 @@ export function helpPanel() {
       h("div", { class: "nx-drawer__foot" }, tour),
     )
   );
+  dialogControl(close, "close");
   close.addEventListener("click", () => d.close());
   tour.addEventListener("click", () => {
     d.close();

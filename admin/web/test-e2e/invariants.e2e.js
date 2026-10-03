@@ -4220,3 +4220,64 @@ test("invariants: ? opens Help with the six areas, the words and the keys, and i
     await browser.close();
   }
 });
+
+test("invariants: Deploy all changes shows four count tiles that each show only their column, and its bar says what Apply will do", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    // redesign-flows-4: a fixed plan, so every column has a stack.
+    await page.route("**/data/apply/plan", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          plan: {
+            deploy: ["alpha", "beta"],
+            new: ["beta"],
+            destroy: ["gone"],
+            broken: [["gamma", "compose.yaml did not parse :: fix line 3"]],
+            unchanged: ["delta"],
+            ephemeral: [],
+          },
+          pending: 3,
+          measured_at: Math.floor(Date.now() / 1000),
+        }),
+      }),
+    );
+    await page.goto(`${BASE}/stacks?deploy-all=1`);
+    const tiles = page.locator("#apply-section .ap-tile");
+    await tiles.first().waitFor({ timeout: 10000 });
+    assert.equal(await tiles.count(), 4, "not four count tiles");
+    const shown = () =>
+      page.$$eval("#apply-section .ap-col", (cs) =>
+        cs
+          .filter((c) => !(/** @type {HTMLElement} */ (c).hidden))
+          .map((c) => c.getAttribute("data-col")),
+      );
+    assert.deepEqual(await shown(), ["deploy", "destroy", "broken"]);
+    // A plain click shows only that column; again shows all.
+    await tiles.nth(1).click();
+    assert.deepEqual(await shown(), ["destroy"]);
+    assert.equal(await tiles.nth(1).getAttribute("aria-pressed"), "true");
+    await tiles.nth(1).click();
+    assert.deepEqual(await shown(), ["deploy", "destroy", "broken"]);
+    // A stack that cannot be planned: Apply deploys the ticked as a batch.
+    const go = page.locator("#apply-open");
+    assert.equal((await go.innerText()).trim(), "Deploy 2…");
+    await page.getByLabel("Include alpha").uncheck();
+    assert.equal((await go.innerText()).trim(), "Deploy 1…");
+    // A destroy is included only when its name is typed, and then waits
+    // for the whole plan, which the bar says before Apply is pressed.
+    const gone = page.locator('#apply-section .ap-item[data-stack="gone"]');
+    assert.ok((await gone.innerText()).includes("left out"));
+    await page.getByLabel("Type gone to destroy it").fill("gone");
+    assert.ok((await gone.innerText()).includes("included"));
+    const bar = await page.locator("#apply-section .ap-go").innerText();
+    assert.ok(
+      bar.includes("a destroy waits for the whole plan"),
+      `the bar does not say the destroy waits: ${bar}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});

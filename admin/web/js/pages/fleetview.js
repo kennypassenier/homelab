@@ -41,7 +41,15 @@ import { majorJump, releaseUrl } from "../staleimages.js";
 import { topologyFigure } from "../topology.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
 import { attachSwitches } from "/static/kp/js/forms.js";
-import { declare, drivable } from "../drivable.js";
+import { declare, declareField, drivable } from "../drivable.js";
+
+// review M5: every page field Live view may set is declared (drivable.js
+// `declareField`); the client and the dashboard refuse any other.
+const FLEET_TRAFFIC = declareField({
+  id: "fleetview-traffic",
+  page: "fleetview",
+  what: "show the measured traffic on the map",
+});
 
 // fix-239: Live view reaches every stale image's Update (`homelab ui click
 // pin-update <stack>/<app>/<service>`).
@@ -124,7 +132,7 @@ export function mount(root) {
     { class: "fleetview__topology" },
     h("p", null, "Loading…"),
   );
-  const trafficSwitch = switchEl("fleetview-traffic", "Show measured traffic");
+  const trafficSwitch = switchEl(FLEET_TRAFFIC, "Show measured traffic");
   trafficSwitch.input.checked = trafficWanted;
   const capacity = tableBlock({
     remember: "capacity-map",

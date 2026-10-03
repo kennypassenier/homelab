@@ -22,11 +22,6 @@ import {
   plan,
   readFollow,
 } from "../js/driveview.js";
-import {
-  DRIVABLE_PATHS,
-  RETIRED_STACK_TABS,
-  STACK_TABS,
-} from "../js/router.js";
 import SPEC from "../js/formspec.json" with { type: "json" };
 import CASES from "./formspec-cases.json" with { type: "json" };
 
@@ -204,14 +199,10 @@ test("the form description is one file: the browser's checks match the cases the
     );
     assert.deepEqual(got, c.errors, JSON.stringify(c));
   }
-  // The pages a driven `goto` may name are the router's.
-  assert.deepEqual([...SPEC.pages].sort(), [...DRIVABLE_PATHS].sort());
-  // feat-shell-3: the hub's tabs, and the two merged ones a Live view
-  // `goto` may still name (they redirect).
-  assert.deepEqual(SPEC.stack_tabs, [
-    ...STACK_TABS.map((t) => t.tab),
-    ...RETIRED_STACK_TABS,
-  ]);
+  // The pages a driven `goto` may name are the router's, carried by the
+  // generated control catalog (review M8: formspec.json keeps no copy).
+  assert.equal(/** @type {any} */ (SPEC).pages, undefined);
+  assert.equal(/** @type {any} */ (SPEC).stack_tabs, undefined);
 });
 
 /** An edit form's state, as the dashboard's server sends it. */

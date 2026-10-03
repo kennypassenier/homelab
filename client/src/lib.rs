@@ -25,6 +25,7 @@ pub mod tls;
 pub mod tui;
 pub mod ui_catalog;
 pub mod ui_cli;
+pub mod ui_drive;
 pub mod ui_preflight;
 pub mod updatepolicy;
 pub mod version;

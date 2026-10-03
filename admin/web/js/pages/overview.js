@@ -27,7 +27,15 @@ import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
 import { mount as mountApplySection } from "./apply.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
-import { viaForm } from "../drivable.js";
+import { declareField, viaForm } from "../drivable.js";
+
+// review M5: every page field Live view may set is declared (drivable.js
+// `declareField`); the client and the dashboard refuse any other.
+const BATCH_ACTION = declareField({
+  id: "batch-action",
+  page: "overview",
+  what: "the action a batch runs on the selected stacks",
+});
 
 /** @typedef {{navigate: (href: string) => void}} Ctx */
 
@@ -50,7 +58,7 @@ export function mount(root, ctx) {
     "select",
     {
       class: "kp-field__input batch-action",
-      id: "batch-action",
+      id: BATCH_ACTION,
       "aria-label": "Action for the selected stacks",
     },
     h("option", { value: "" }, "Choose an action…"),

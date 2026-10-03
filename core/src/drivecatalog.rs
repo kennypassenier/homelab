@@ -14,10 +14,27 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+/// The catalog's shape this build reads (`schema` in the file). A catalog
+/// of another schema is one this side cannot read: the client refuses a
+/// step against it rather than send it unchecked (review H2).
+pub const SCHEMA: u32 = 1;
+
+/// The hash a dashboard names its catalog by in every `ui state` answer
+/// (review M3): the client keeps the catalog by it and fetches it again only
+/// when it changes. SHA-256 of the exact text, hex.
+pub fn hash_text(text: &str) -> String {
+    let d = Sha256::digest(text.as_bytes());
+    d.iter().map(|b| format!("{b:02x}")).collect()
+}
 
 /// The whole catalog, as the generator writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Catalog {
+    /// The file's shape ([`SCHEMA`]); 0 when absent.
+    #[serde(default)]
+    pub schema: u32,
     pub controls: Vec<Control>,
     /// The page fields a redesign renamed, each with its old ids (a page
     /// field is otherwise found by its element id, undeclared).
@@ -33,6 +50,15 @@ pub struct Catalog {
     /// The placeholder `redirects` names a stack by (`{stack}`).
     #[serde(default)]
     pub stack_slot: String,
+    /// A stack hub's tabs (`/stacks/<name>/<tab>`), the retired ones (which
+    /// redirect) included: the router's own list (review M8, L1).
+    #[serde(default)]
+    pub stack_tabs: Vec<String>,
+    /// The longest a tab spends on one page-control step (navigation, the
+    /// search for the control, the dialog it opens), in ms: pagedrive.js's
+    /// own budget, below the dashboard's wait for the tab's answer.
+    #[serde(default)]
+    pub tab_budget_ms: u64,
 }
 
 /// One declared page control.
@@ -59,9 +85,13 @@ pub struct Control {
     /// The steps that bring it on screen from its page.
     #[serde(default)]
     pub reach: Vec<serde_json::Value>,
+    /// Drawn more than once without rows on purpose (a drawer's x and its
+    /// Cancel), each press doing the same (review M6).
+    #[serde(default)]
+    pub twins: bool,
 }
 
-/// A declared page field (`ui type/pick/check <field>`).
+/// A declared page field (`ui type/pick/check/edit <field>`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Field {
     pub id: String,
@@ -70,6 +100,31 @@ pub struct Field {
     /// The ids it had before.
     #[serde(default)]
     pub was: Vec<String>,
+    /// Set when the field repeats per row (a host.toml key): its element id
+    /// is `<id>-<row>`, and this is the row's shape.
+    #[serde(default)]
+    pub row: Option<String>,
+}
+
+/// A button the open page-level dialog offers, as the tab reported it:
+/// its Live view name (empty when it has none) and its visible label.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DialogControl {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+}
+
+/// What a field name a driver used means.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldName<'a> {
+    /// A declared field, by its id (`row` set for a field per row).
+    Known(&'a Field),
+    /// An old id: the field's id now.
+    Renamed { field: &'a Field, now: String },
+    /// No page field has or had that name: why, and the fix to print.
+    Unknown { why: String, fix: String },
 }
 
 /// An old id of a control, and the press that picks it from the control's
@@ -118,6 +173,95 @@ impl Catalog {
     /// The field an old field id became, if a declaration keeps that id.
     pub fn renamed_field(&self, name: &str) -> Option<&Field> {
         self.fields.iter().find(|f| f.was.iter().any(|w| w == name))
+    }
+
+    /// A page field name, checked (review M5): a declared field (or one row
+    /// of a field per row), an old id of one, or nothing with the closest.
+    pub fn field(&self, name: &str) -> FieldName<'_> {
+        if let Some(f) = self.fields.iter().find(|f| {
+            f.id == name
+                || (f.row.is_some()
+                    && name
+                        .strip_prefix(f.id.as_str())
+                        .and_then(|r| r.strip_prefix('-'))
+                        .is_some_and(|r| !r.is_empty()))
+        }) {
+            return FieldName::Known(f);
+        }
+        if let Some(f) = self.renamed_field(name) {
+            return FieldName::Renamed {
+                field: f,
+                now: f.id.clone(),
+            };
+        }
+        let mut near: Vec<(usize, &Field)> = self
+            .fields
+            .iter()
+            .map(|f| (distance(name, &f.id), f))
+            .filter(|(d, f)| {
+                *d <= (name.chars().count() / 3).max(3)
+                    || words(name).iter().any(|w| words(&f.id).contains(w))
+            })
+            .collect();
+        near.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)));
+        let fix = if near.is_empty() {
+            "`homelab ui list fields` lists every page field".to_string()
+        } else {
+            format!(
+                "the closest: {}; `homelab ui list fields` lists every page field",
+                near.iter()
+                    .take(4)
+                    .map(|(_, f)| match &f.row {
+                        Some(r) => format!("{}-{r} (on {}: {})", f.id, f.page, f.what),
+                        None => format!("{} (on {}: {})", f.id, f.page, f.what),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )
+        };
+        FieldName::Unknown {
+            why: format!("no page declares a field {name}"),
+            fix,
+        }
+    }
+
+    /// `/stacks/<name>[/<tab>]` checked against the router's own shape
+    /// (review L1): one or two parts after `stacks`, the tab one the hub
+    /// has or had. Whether the stack exists is the dashboard's to say.
+    /// `Ok(Some(note))`: a retired tab, and where it lands now.
+    pub fn stack_path(&self, path: &str) -> Result<Option<String>, String> {
+        let p = path.split(['?', '#']).next().unwrap_or("");
+        let rest = p.trim_start_matches('/').trim_end_matches('/');
+        let parts: Vec<&str> = rest.split('/').collect();
+        if parts.first() != Some(&"stacks") || !(2..=3).contains(&parts.len()) {
+            return Err(format!(
+                "there is no page at {path}; a stack's page is /stacks/<name>[/<tab>]"
+            ));
+        }
+        if parts[1].is_empty() {
+            return Err(format!("{path} names no stack"));
+        }
+        let Some(tab) = parts.get(2) else {
+            return Ok(None);
+        };
+        if !self.stack_tabs.is_empty() && !self.stack_tabs.iter().any(|t| t == tab) {
+            return Err(format!(
+                "a stack page has no tab {tab}; its tabs are {}",
+                self.stack_tabs.join(", ")
+            ));
+        }
+        let slot = if self.stack_slot.is_empty() {
+            "{stack}"
+        } else {
+            self.stack_slot.as_str()
+        };
+        Ok(self
+            .redirects
+            .get(&format!("stacks/{slot}/{tab}"))
+            .map(|to| {
+                let to = to.replace(slot, &encode_segment(parts[1]));
+                format!("{p} is an old address; it is {to} now")
+            }))
     }
 
     /// A clicked name, checked: a control, an old name of one, or nothing
@@ -254,14 +398,28 @@ impl Catalog {
         let fill = |to: &str, stack: &str| to.replace(slot, &encode_segment(stack));
         if let Some(to) = self.redirects.get(rest) {
             let first = stacks.first().map(String::as_str);
-            let to = match first {
-                Some(s) => fill(to, s),
-                // The router itself, with no stack known yet: the stack list.
-                None if to.contains(slot) => "/stacks".to_string(),
-                None => to.clone(),
+            let (to, note) = match first {
+                Some(s) if to.contains(slot) => {
+                    let to = fill(to, s);
+                    let note =
+                        format!("{p} is an old address; it lands on the first stack's page, {to}");
+                    (to, note)
+                }
+                Some(_) => (to.clone(), format!("{p} is an old address; it is {to} now")),
+                // Not known here (the client has no fleet): the router
+                // sends it to the first stack's page, or to the stack list
+                // when there is none (review L1: it is never just /stacks).
+                None if to.contains(slot) => (
+                    "/stacks".to_string(),
+                    format!(
+                        "{p} is an old address; it lands on the first stack's page, {} (the stack list when there is no stack)",
+                        to.replace(slot, "<first stack>")
+                    ),
+                ),
+                None => (to.clone(), format!("{p} is an old address; it is {to} now")),
             };
             return Ok(Landing {
-                note: Some(format!("{p} is an old address; it is {to} now")),
+                note: Some(note),
                 path: merge_query(&to, query),
             });
         }
@@ -315,6 +473,87 @@ impl Catalog {
         v.sort();
         v.into_iter().take(n).map(|(_, a)| a).collect()
     }
+}
+
+/// A name clicked or pressed inside the open page-level dialog, checked
+/// against the buttons the tab reported it offers (review H3): by its Live
+/// view name (an old name of a declared control counts as the one it
+/// became), or by its visible label when exactly one button wears it, the
+/// way the tab's `pick` finds it. `Err`: why and the fix, for a refusal.
+pub fn dialog_click(
+    offer: &[DialogControl],
+    title: &str,
+    name: &str,
+    catalog: &Catalog,
+) -> Result<(), (String, String)> {
+    let now = match catalog.click(name) {
+        Click::Renamed { control, .. } => control.id.as_str(),
+        _ => name,
+    };
+    if offer
+        .iter()
+        .any(|c| !c.id.is_empty() && (c.id == name || c.id == now))
+    {
+        return Ok(());
+    }
+    let want = name.trim().to_lowercase();
+    let labelled = offer
+        .iter()
+        .filter(|c| c.label.trim().to_lowercase() == want)
+        .count();
+    if labelled == 1 {
+        return Ok(());
+    }
+    let mut names: Vec<String> = offer
+        .iter()
+        .map(|c| {
+            if c.id.is_empty() {
+                format!("\"{}\"", c.label.trim())
+            } else {
+                c.id.clone()
+            }
+        })
+        .filter(|n| n != "\"\"")
+        .collect();
+    names.sort();
+    names.dedup();
+    Err((
+        if labelled > 1 {
+            format!("{labelled} buttons in {title} are labelled {name}")
+        } else {
+            format!("there is no control {name} in {title}")
+        },
+        if names.is_empty() {
+            format!("{title} offers no button; homelab ui close")
+        } else {
+            format!("its buttons are: {}", names.join(", "))
+        },
+    ))
+}
+
+/// A field typed into, picked or ticked inside the open page-level dialog,
+/// checked against the field ids the tab reported it holds (review M5/H3).
+pub fn dialog_field(
+    fields: &[String],
+    title: &str,
+    name: &str,
+    catalog: &Catalog,
+) -> Result<(), (String, String)> {
+    let now = catalog
+        .renamed_field(name)
+        .map(|f| f.id.as_str())
+        .unwrap_or(name);
+    if fields.iter().any(|f| f == name || f == now) {
+        return Ok(());
+    }
+    Err((
+        format!("{title} has no field {name}"),
+        if fields.is_empty() {
+            format!("{title} has no field")
+        } else {
+            format!("its fields are: {}", fields.join(", "))
+        },
+    ))
 }
 
 /// The exact `homelab ui` line that clicks `c`, the row as its declared
@@ -516,6 +755,93 @@ mod tests {
                 .unwrap_err()
                 .contains("no stack nope")
         );
+    }
+
+    /// review M7: the tab's `closest` (drivable.js) and this one name the
+    /// same controls in the same order, over one shared fixture with names
+    /// whose UTF-16 length is not their length in chars.
+    #[test]
+    fn drive_reach_closest_matches_the_tab_on_the_shared_fixture() {
+        let fx: serde_json::Value = serde_json::from_str(include_str!(
+            "../../admin/web/test/fixtures/drive-closest.json"
+        ))
+        .unwrap();
+        let controls: Vec<Control> = fx["controls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| {
+                let mut c = c.clone();
+                c["opens"] = serde_json::json!("run");
+                serde_json::from_value(c).unwrap()
+            })
+            .collect();
+        let cat = Catalog {
+            controls,
+            ..Catalog::default()
+        };
+        for case in fx["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let n = case["n"].as_u64().unwrap() as usize;
+            let got: Vec<&str> = cat.closest(name, n).iter().map(|c| c.id.as_str()).collect();
+            let want: Vec<&str> = case["want"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|w| w.as_str().unwrap())
+                .collect();
+            assert_eq!(got, want, "{name}");
+        }
+    }
+
+    /// review M5/L1/H2: fields per row, a stack address's shape, the hash.
+    #[test]
+    fn drive_reach_fields_stack_paths_and_the_hash() {
+        let mut c = cat();
+        c.fields = vec![
+            Field {
+                id: "key".into(),
+                page: "settings".into(),
+                what: "a host.toml key".into(),
+                was: vec![],
+                row: Some("<key>".into()),
+            },
+            Field {
+                id: "shell-target".into(),
+                page: "shell".into(),
+                what: "the container".into(),
+                was: vec!["shell-vmid".into()],
+                row: None,
+            },
+        ];
+        c.stack_tabs = vec!["overview".into(), "logs".into(), "checks".into()];
+        assert!(matches!(c.field("key-ask-timeout"), FieldName::Known(f) if f.id == "key"));
+        assert!(matches!(c.field("key"), FieldName::Known(_)));
+        assert!(matches!(c.field("key-"), FieldName::Unknown { .. }));
+        assert!(
+            matches!(c.field("shell-vmid"), FieldName::Renamed { now, .. } if now == "shell-target")
+        );
+        let FieldName::Unknown { fix, .. } = c.field("shell-targt") else {
+            panic!()
+        };
+        assert!(fix.contains("shell-target"), "{fix}");
+        assert_eq!(c.stack_path("/stacks/films/logs"), Ok(None));
+        assert!(
+            c.stack_path("/stacks/films/nope")
+                .unwrap_err()
+                .contains("no tab nope")
+        );
+        assert!(
+            c.stack_path("/stacks/films/checks")
+                .unwrap()
+                .unwrap()
+                .contains("it is /stacks/films now")
+        );
+        assert!(c.stack_path("/stacks/a/b/c").is_err());
+        assert_eq!(hash_text("abc").len(), 64);
+        // A retired address that names a stack, with no fleet known here.
+        let note = c.land("/secrets", &[]).unwrap().note.unwrap();
+        assert!(note.contains("the first stack's page"), "{note}");
     }
 
     #[test]

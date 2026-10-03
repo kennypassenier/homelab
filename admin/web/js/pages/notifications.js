@@ -36,7 +36,31 @@ import {
   dataTable,
 } from "/static/kp/js/datatable.js";
 import { attachSwitches } from "/static/kp/js/forms.js";
-import { declare, drivable } from "../drivable.js";
+import { declare, declareField, drivable, fieldId } from "../drivable.js";
+
+// review M5: every page field Live view may set is declared (drivable.js
+// `declareField`); the client and the dashboard refuse any other.
+const NOTIFY_PUSH = declareField({
+  id: "notify-push",
+  page: "notifications",
+  what: "push notifications to the phone",
+});
+const NOTIFY_DIGEST = declareField({
+  id: "notify-digest",
+  page: "notifications",
+  what: "the time of the daily digest",
+});
+const NOTIFY_SNOOZE = declareField({
+  id: "notify-snooze-minutes",
+  page: "notifications",
+  what: "how long a snooze lasts",
+});
+const MUTE = declareField({
+  id: "mute",
+  page: "notifications",
+  what: "mute one stack's notifications",
+  row: "<stack>",
+});
 
 // fix-239: Live view reaches every notification control (`homelab ui
 // click …`; the digest time and the snooze length are `homelab ui type
@@ -89,13 +113,21 @@ const MARK_READ = declare({
   what: "mark one notification read",
   shows: "on an unread notification",
 });
+const OPEN_NOTICE = declare({
+  id: "open-notice",
+  page: "notifications",
+  opens: "view",
+  row: "<notification id>",
+  what: "open (or fold) one notification's details: what to do and its fixes",
+});
 const NOTICE_FIX = declare({
   id: "notice-fix",
   page: "notifications",
   opens: "dialog",
   row: "<notification id>:<n>",
   what: "run a notification's suggested fix (the n-th, from 0)",
-  shows: "on a notification that suggests a fix",
+  shows: "in an opened notification that suggests a fix",
+  reach: [{ do: "click", control: "open-notice", row: "*" }],
 });
 
 /**
@@ -132,12 +164,12 @@ function switchEl(id, label, words = true) {
 export function mount(root) {
   const keys = sortKeys();
   const err = h("div");
-  const push = switchEl("notify-push", "Push to the phone");
+  const push = switchEl(NOTIFY_PUSH, "Push to the phone");
   drivable(push.input, PUSH_TO_PHONE);
   const digestInput = h("input", {
     class: "kp-field__input",
     type: "time",
-    id: "notify-digest",
+    id: NOTIFY_DIGEST,
     "aria-describedby": "notify-digest-help",
   });
   const digestSave = h(
@@ -153,7 +185,7 @@ export function mount(root) {
   });
   const snoozeSel = h(
     "select",
-    { class: "kp-field__input", id: "notify-snooze-minutes" },
+    { class: "kp-field__input", id: NOTIFY_SNOOZE },
     ...SNOOZE_CHOICES.map((c) =>
       h("option", { value: String(c.minutes) }, c.label),
     ),
@@ -533,38 +565,42 @@ export function mount(root) {
       for (const r of rows) noticeById.set(r.id, r);
       notices.tbody.replaceChildren(
         ...rows.map((r) =>
-          h(
-            "tr",
-            {
-              "data-notice": String(r.id),
-              "data-kp-row-key": String(r.id),
-              class: r.read === "unread" ? "unread" : "",
-            },
-            td(keys.note("time", formatDateTime(r.at), r.at), "num"),
-            badgeCell(r.level),
-            badgeCell(r.kind),
-            td(r.stack),
-            td(r.title, "notify-title"),
-            td(r.push),
-            r.read === "unread"
-              ? h(
-                  "td",
-                  null,
-                  drivable(
-                    h(
-                      "button",
-                      {
-                        type: "button",
-                        class: "kp-button kp-button--sm",
-                        "data-read": String(r.id),
-                      },
-                      "Mark read",
+          drivable(
+            h(
+              "tr",
+              {
+                "data-notice": String(r.id),
+                "data-kp-row-key": String(r.id),
+                class: r.read === "unread" ? "unread" : "",
+              },
+              td(keys.note("time", formatDateTime(r.at), r.at), "num"),
+              badgeCell(r.level),
+              badgeCell(r.kind),
+              td(r.stack),
+              td(r.title, "notify-title"),
+              td(r.push),
+              r.read === "unread"
+                ? h(
+                    "td",
+                    null,
+                    drivable(
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          class: "kp-button kp-button--sm",
+                          "data-read": String(r.id),
+                        },
+                        "Mark read",
+                      ),
+                      MARK_READ,
+                      String(r.id),
                     ),
-                    MARK_READ,
-                    String(r.id),
-                  ),
-                )
-              : h("td", null, h("span", { class: "read-mark" }, "read")),
+                  )
+                : h("td", null, h("span", { class: "read-mark" }, "read")),
+            ),
+            OPEN_NOTICE,
+            String(r.id),
           ),
         ),
       );
@@ -580,7 +616,7 @@ export function mount(root) {
       stacks.tbody.replaceChildren(
         ...mrows.map((r) => {
           const word = stateWord("on", ["on", "muted"]);
-          const sw = switchEl(`mute-${r.stack}`, word, false);
+          const sw = switchEl(fieldId(MUTE, r.stack), word, false);
           sw.input.dataset.mute = r.stack;
           drivable(sw.input, STACK_PUSH, r.stack);
           sw.input.setAttribute("aria-label", `Push for ${r.stack}`);

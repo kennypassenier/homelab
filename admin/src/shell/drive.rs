@@ -38,7 +38,7 @@ use super::edit::{self as ed, EditCtx};
 use super::host_link::Shared;
 use crate::core::actions::{self as act, ActionKind, Arg, Refusal};
 use crate::core::drive::{
-    Applied, Ctx, DriveState, Effect, Family, JobRef, Sources, TabAnswer, TabCaps,
+    Applied, Ctx, DriveState, Effect, Family, JobRef, Sources, TabAnswer, TabCaps, catalog,
 };
 use crate::core::driveedit::{self, EditCall, EditKind};
 use crate::core::drivelive::{self, Announce, Control};
@@ -621,15 +621,48 @@ impl Driver {
         client_version: &str,
         hold: Hold<'_>,
     ) -> Value {
-        // Reading the screen never waits behind a held step. drive-reach:
-        // the answer also carries this release's control catalog and the
-        // recent refusals, so `homelab ui list`, `ui refusals` and the
-        // client's own check of a `click`/`goto` read the running version.
-        if step == UiStep::State {
-            let mut v = reply(None, &self.snapshot());
-            v["catalog"] = catalog_value().clone();
-            v["refusals"] = self.refusals_view(STATE_REFUSALS);
-            return v;
+        // Reading the screen never waits behind a held step. drive-reach
+        // (review M3): the answer names this release's control catalog by
+        // its hash only; the client keeps the catalog by that hash and asks
+        // for it (`Controls`) only when it changed. The refused steps are
+        // read on their own (`Refusals`), so a `state` answer stays small.
+        match &step {
+            UiStep::State => {
+                let mut v = reply(None, &self.snapshot());
+                v["catalog_hash"] = json!(catalog_hash());
+                v["catalog_schema"] = json!(catalog().schema);
+                return v;
+            }
+            UiStep::Controls => {
+                return json!({
+                    "ok": true,
+                    "hash": catalog_hash(),
+                    "schema": catalog().schema,
+                    "text": crate::core::drive::DRIVE_CATALOG_JSON,
+                });
+            }
+            UiStep::Refusals => {
+                return json!({ "ok": true, "refusals": self.refusals_view(usize::MAX) });
+            }
+            // review M4: a step the client refused itself, counted here.
+            UiStep::RefusedLocally { verb, name } => {
+                let r = Refusal::new(
+                    format!("ui {verb}"),
+                    format!("refused by the client against the catalog: {name}"),
+                    "the client printed the closest names",
+                );
+                self.record_refusal(by, &step, &r);
+                return json!({ "ok": true });
+            }
+            _ => {}
+        }
+        // review "older client": a name the catalog does not know is
+        // answered to the caller alone, before anything is announced; it
+        // never reaches a tab's screen as a toast.
+        let checked = self.lock().catalog_check(&step);
+        if let Err(r) = checked {
+            self.record_refusal(by, &step, &r);
+            return reply(Some(&r), &self.snapshot());
         }
         // The lock is taken and dropped on its own line, never inside the
         // `if`'s condition: a MutexGuard born in a let-chain's condition
@@ -673,7 +706,22 @@ impl Driver {
                 Effect::Reload => self.reload(client_version).await.or(held),
                 Effect::Tab => {
                     published = true;
-                    self.tab_step(&step, hold).await.or(held)
+                    match self.tab_step(&step, hold).await {
+                        Some(r) => Some(r),
+                        // review (15 s no-answer): an old name that became
+                        // an item of its control's menu is clicked as that
+                        // control, and the menu press goes to the tab as a
+                        // step of its own, with its own wait.
+                        None => match alias_press(&step) {
+                            Some(button) => {
+                                let press = UiStep::Press { button };
+                                self.lock().seq += 1;
+                                self.tab_step(&press, hold).await
+                            }
+                            None => None,
+                        },
+                    }
+                    .or(held)
                 }
             },
         };
@@ -1100,17 +1148,18 @@ impl Driver {
             t.claimed.take()
         };
         let Some(a) = answer else {
-            let why = if claimed.is_some() {
-                format!(
-                    "the tab that took it did not answer within {} s",
-                    TAB_WAIT.as_secs()
-                )
-            } else {
-                format!(
-                    "no dashboard tab in Live view took it within {} s: a page's own control is clicked by the tab itself",
-                    TAB_WAIT.as_secs()
-                )
-            };
+            // review (15 s no-answer): the tabs drop this step at once,
+            // also one still looking for its control.
+            self.inner
+                .publish
+                .publish("drive", json!({ "kind": "closed", "seq": seq }));
+            let why = no_answer_why(claimed.as_deref());
+            tracing::info!(
+                seq,
+                step = step.verb(),
+                claimed = claimed.as_deref().unwrap_or(""),
+                "a page-control step got no answer"
+            );
             return Some(Refusal::new(
                 format!("ui {}", step.verb()),
                 why,
@@ -1128,6 +1177,11 @@ impl Driver {
         let page = self.lock().page.clone();
         let (control, row) = match step {
             UiStep::Click { control, row } => (control.as_str(), row.as_deref().unwrap_or("")),
+            UiStep::Type { field, .. }
+            | UiStep::Edit { field, .. }
+            | UiStep::Pick { field, .. }
+            | UiStep::Check { field, .. } => (field.as_str(), ""),
+            UiStep::RefusedLocally { name, .. } => (name.as_str(), ""),
             _ => ("", ""),
         };
         tracing::info!(
@@ -1175,7 +1229,18 @@ impl Driver {
     pub fn claim(&self, seq: u64, tab: &str) -> Result<(), Refusal> {
         let dialog_open = self.lock().page_dialog.is_some();
         let mut t = self.tab_turn();
+        // review (15 s no-answer): every refused claim is in the journal
+        // with its reason, so a step no tab took can be explained.
+        let waiting = (t.open, t.seq);
         let refuse = |why: &str| {
+            tracing::info!(
+                tab,
+                seq,
+                open = waiting.0,
+                waiting_seq = waiting.1,
+                why,
+                "a tab's claim of a page-control step was refused"
+            );
             Err(Refusal::new(
                 "claim",
                 why,
@@ -1221,7 +1286,37 @@ impl Driver {
     /// keeps whatever it already had rather than wiping it to empty, since
     /// "no capabilities reported this time" must never read as "this tab
     /// now knows nothing" — the permissive default stays permissive.
-    fn report_tab(&self, version: String, caps: Option<TabCaps>) {
+    ///
+    /// review: also the tab's name for this page load and
+    /// the one it had before a reload (review, 15 s no-answer): a tab that
+    /// held the page-level dialog and reloaded holds nothing any more (a
+    /// reload closes every dialog), so the hold and the dialog go; before,
+    /// every later claim was refused as "open in another tab".
+    pub fn report_tab_as(
+        &self,
+        version: String,
+        caps: Option<TabCaps>,
+        tab: Option<&str>,
+        was_tab: Option<&str>,
+    ) {
+        if let Some(was) = was_tab.filter(|w| Some(*w) != tab) {
+            let held = {
+                let mut t = self.tab_turn();
+                let held = t.holder.as_deref() == Some(was);
+                if held {
+                    t.holder = None;
+                }
+                held
+            };
+            if held {
+                tracing::info!(
+                    was,
+                    now = tab.unwrap_or(""),
+                    "the tab holding the page-level dialog reloaded: the dialog is gone"
+                );
+                self.lock().page_dialog = None;
+            }
+        }
         let mut st = self.lock();
         st.tab_page_version = Some(version);
         if let Some(caps) = caps {
@@ -1443,9 +1538,6 @@ fn job_ref(v: &super::actions::JobView) -> JobRef {
     }
 }
 
-/// drive-reach: how many of the newest refusals a `state` answer carries.
-const STATE_REFUSALS: usize = 50;
-
 /// The compiled-in control catalog as JSON, parsed once.
 fn catalog_value() -> &'static Value {
     static V: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
@@ -1453,6 +1545,38 @@ fn catalog_value() -> &'static Value {
         serde_json::from_str(crate::core::drive::DRIVE_CATALOG_JSON)
             .expect("drivecatalog.json reads")
     })
+}
+
+/// review M3: the hash `state` names the compiled-in catalog by.
+pub fn catalog_hash() -> &'static str {
+    static H: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    H.get_or_init(|| homelab_core::drivecatalog::hash_text(crate::core::drive::DRIVE_CATALOG_JSON))
+}
+
+/// The menu item an old control name became, when the click names one.
+fn alias_press(step: &UiStep) -> Option<String> {
+    let UiStep::Click { control, .. } = step else {
+        return None;
+    };
+    match catalog().click(control) {
+        homelab_core::drivecatalog::Click::Renamed { press, .. } => press,
+        _ => None,
+    }
+}
+
+/// review (15 s no-answer): why a page-control step got no answer, telling
+/// a tab that claimed it and went quiet from no tab claiming it at all.
+pub fn no_answer_why(claimed: Option<&str>) -> String {
+    match claimed {
+        Some(tab) => format!(
+            "claimed but no answer: the tab {tab} took it and did not answer within {} s (it may still be looking for the control, or it reloaded)",
+            TAB_WAIT.as_secs()
+        ),
+        None => format!(
+            "nobody claimed it: no dashboard tab in Live view took it within {} s; a page's own control is clicked by the tab itself",
+            TAB_WAIT.as_secs()
+        ),
+    }
 }
 
 fn reply(refusal: Option<&Refusal>, state: &DriveState) -> Value {
@@ -1514,6 +1638,12 @@ struct AttachBody {
     /// `formspec.json` lists (`SPEC.forms`).
     #[serde(default)]
     known_forms: Vec<String>,
+    /// This page load's own name (drive.js `TAB`).
+    #[serde(default)]
+    tab: Option<String>,
+    /// The name the same browser tab had before it reloaded.
+    #[serde(default)]
+    was_tab: Option<String>,
 }
 
 /// fix-185/fix-199: a tab reports the dashboard version its loaded page
@@ -1527,7 +1657,12 @@ async fn attach(State(d): State<Driver>, Json(body): Json<AttachBody>) -> Json<V
         pages: body.known_pages.into_iter().collect(),
         forms: body.known_forms.into_iter().collect(),
     });
-    d.report_tab(body.page_version, caps);
+    d.report_tab_as(
+        body.page_version,
+        caps,
+        body.tab.as_deref(),
+        body.was_tab.as_deref(),
+    );
     Json(json!({ "state": d.snapshot() }))
 }
 

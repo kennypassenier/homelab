@@ -33,7 +33,8 @@
  * @typedef {{id: string, page: string, what: string,
  *   opens: "dialog" | "run" | "view", row?: string,
  *   at?: (row: string | null) => string | null,
- *   was?: (string | Was)[], shows?: string, reach?: Reach[]}} Control
+ *   was?: (string | Was)[], shows?: string, reach?: Reach[],
+ *   twins?: boolean}} Control
  *   `at`: where the control is when it lives on a page per stack (the
  *   stack hub's), from its row; otherwise its page's own address.
  *   `was` (drive-reach, Kenny 2026-10-03: "Claude must always be able to
@@ -47,12 +48,15 @@
  *   `reach`: the Live view steps that bring it on screen from its page,
  *   `"*"` as a row meaning the first row on screen. The whole-screen sweep
  *   takes them before it clicks, and a refusal names them.
+ *   `twins` (review M6): the control is drawn more than once without rows
+ *   on purpose (a drawer's x and its Cancel), each press doing the same;
+ *   any other control found twice on screen is refused, never guessed.
  * @typedef {{id: string, press?: string}} Was
  * @typedef {{do: string, control?: string, row?: string, field?: string,
  *   text?: string, button?: string}} Reach
  * @typedef {{id: string, page: string, what: string, opens: string,
  *   row: string | null, href: string | null, was: Was[],
- *   shows: string | null, reach: Reach[]}} CatalogEntry
+ *   shows: string | null, reach: Reach[], twins: boolean}} CatalogEntry
  */
 
 /** @type {Map<string, Control>} */
@@ -130,23 +134,28 @@ const words = (s) =>
     .filter(Boolean);
 
 /**
- * Levenshtein distance, for a mistyped id.
+ * Levenshtein distance, for a mistyped id, over code points (review M7:
+ * the client's Rust copy counts `char`s, so a name with an emoji or an
+ * accent scores the same on both sides; test/fixtures/drive-closest.json
+ * holds them to it).
  * @param {string} a
  * @param {string} b
  */
-function distance(a, b) {
-  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i += 1) {
+export function distance(a, b) {
+  const x = [...a];
+  const y = [...b];
+  let prev = Array.from({ length: y.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= x.length; i += 1) {
     const cur = [i];
-    for (let j = 1; j <= b.length; j += 1)
+    for (let j = 1; j <= y.length; j += 1)
       cur[j] = Math.min(
         prev[j] + 1,
         cur[j - 1] + 1,
-        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+        prev[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1),
       );
     prev = cur;
   }
-  return prev[b.length];
+  return prev[y.length];
 }
 
 /**
@@ -174,7 +183,7 @@ export function closest(name, n = 5, among = controls()) {
       )
         hits += 1;
     }
-    const near = typo <= Math.max(2, Math.floor(name.length / 4));
+    const near = typo <= Math.max(2, Math.floor([...name].length / 4));
     return { c, score: hits * 10 + (near ? 30 - typo : 0) };
   });
   return scored
@@ -239,14 +248,20 @@ export const entry = (c, href) => ({
   was: (c.was ?? []).map((w) => (typeof w === "string" ? { id: w } : w)),
   shows: c.shows ?? null,
   reach: c.reach ?? [],
+  twins: c.twins === true,
 });
 
 /**
  * drive-reach: a page field Live view types into, picks or ticks (`ui type
  * <field>`), by its element id. Declared beside the field when a redesign
  * renamed it, its old ids in `was`, so `ui pick shell-vmid 104` still
- * reaches the field that replaced it.
- * @typedef {{id: string, page: string, what: string, was?: string[]}} Field
+ * reaches the field that replaced it. review M5: every page field Live
+ * view may set is declared (the commit gate's static check holds the page
+ * modules to it), and the client and the dashboard refuse an undeclared one
+ * before a tab is asked. A field drawn once per row (a host.toml key) is
+ * declared once with `row`, its elements' ids made by `fieldId`.
+ * @typedef {{id: string, page: string, what: string, was?: string[],
+ *   row?: string}} Field
  */
 
 /** @type {Map<string, Field>} */
@@ -285,6 +300,34 @@ export function declareField(spec) {
 /** Every declared page field, by id. */
 export const fields = () =>
   [...FIELDS.values()].sort((a, b) => a.id.localeCompare(b.id));
+
+/**
+ * The element id of a declared field's row (`fieldId("key", "ask-timeout")`
+ * is `key-ask-timeout`).
+ * @param {string} id a field declared with `row`
+ * @param {string} row
+ */
+export function fieldId(id, row) {
+  const f = FIELDS.get(id);
+  if (!f) throw new Error(`the Live view field ${id} was never declared`);
+  if (!f.row) throw new Error(`the Live view field ${id} has no rows`);
+  return `${id}-${row}`;
+}
+
+/**
+ * The declared field a name a driver used means: by its id, an old id, or
+ * as one row of a field per row. `null`: no page declares it.
+ * @param {string} name
+ * @returns {Field | null}
+ */
+export function declaredField(name) {
+  const f = FIELDS.get(currentField(name));
+  if (f) return f;
+  for (const g of FIELDS.values())
+    if (g.row && name.startsWith(`${g.id}-`) && name.length > g.id.length + 1)
+      return g;
+  return null;
+}
 
 /** @param {string} id @returns {Control | null} */
 export const control = (id) => CONTROLS.get(current(id)) ?? null;
@@ -344,21 +387,27 @@ export function viaForm(el, form) {
  * @param {{id: string, row: string | null}} want
  * @param {{id: string, row: string | null, label: string}[]} here the
  *   marked controls on screen now (a dialog's own buttons by label too)
+ * @param {boolean} [byLabel] a button may be named by its visible label (in
+ *   a dialog; a page's own controls answer to their declared id only)
  * @returns {{index: number} | {why: string, fix: string}}
  */
-export function pick(want, here) {
+export function pick(want, here, byLabel = true) {
   want = { ...want, id: current(want.id) };
   const same = here
     .map((x, index) => ({ ...x, index }))
     .filter((x) => x.id === want.id);
   if (same.length === 0) {
-    const label = here
-      .map((x, index) => ({ ...x, index }))
-      .filter(
-        (x) =>
-          x.label.trim().toLowerCase() === want.id.trim().toLowerCase() &&
-          want.row == null,
-      );
+    // In a dialog a button is found by its visible label too (the page's
+    // own controls are found by their declared id only).
+    const label = byLabel
+      ? here
+          .map((x, index) => ({ ...x, index }))
+          .filter(
+            (x) =>
+              x.label.trim().toLowerCase() === want.id.trim().toLowerCase() &&
+              want.row == null,
+          )
+      : [];
     if (label.length === 1) return { index: label[0].index };
     const ids = [...new Set(here.map((x) => x.id).filter(Boolean))].sort();
     return {
@@ -369,10 +418,18 @@ export function pick(want, here) {
     };
   }
   if (want.row == null) {
-    // drive-reach: a control with no rows drawn twice (a drawer's x and its
-    // Cancel) is one control: either press does the same.
-    if (same.length === 1 || same.every((x) => x.row == null))
-      return { index: same[0].index };
+    // review M6: a control drawn twice without rows is one control only
+    // when its declaration says so (`twins`: a drawer's x and its Cancel,
+    // either press doing the same); otherwise which one is meant is not
+    // guessed.
+    if (same.length === 1) return { index: same[0].index };
+    if (same.every((x) => x.row == null)) {
+      if (CONTROLS.get(want.id)?.twins) return { index: same[0].index };
+      return {
+        why: `${want.id} is on screen ${same.length} times and is not declared as twins`,
+        fix: "declare it with twins: true when every copy does the same, or give each its own id",
+      };
+    }
     const rows = same.map((x) => x.row ?? "").sort();
     return {
       why: `${want.id} is on ${same.length} rows`,

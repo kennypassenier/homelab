@@ -412,6 +412,14 @@ test("invariants: a version difference never blocks — Live view still drives a
     );
     assert.equal(openUpdate.ok, true, JSON.stringify(openUpdate));
     assert.equal(openUpdate.state.form?.action, "install-native");
+    // Let go of the drive: a form left open refused the next case's click.
+    await page.evaluate(() =>
+      fetch("/data/drive/demo-step", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ do: "done" }),
+      }),
+    );
   } finally {
     await browser.close();
   }
@@ -4405,7 +4413,7 @@ const closeAll = (page) =>
       .forEach((d) => /** @type {HTMLDialogElement} */ (d).close()),
   );
 
-test("invariants: drive-reach: every page button is declared, and Live view finds and presses every declared control", async (t) => {
+test("invariants: drive-reach: every button that opens a dialog or runs an action is reachable through Live view (the walk of every route)", async (t) => {
   const started = Date.now();
   const { default: SPEC } = await import("../js/formspec.json", {
     with: { type: "json" },
@@ -4420,12 +4428,6 @@ test("invariants: drive-reach: every page button is declared, and Live view find
     // One page for the whole sweep: every route and every control reuse it.
     const page = await freshPage(context);
     page.setDefaultTimeout(10000);
-    // A row for the controls that repeat per schedule.
-    const sched = await addSchedule(page, "films", "backup", {
-      every: "day",
-      at: "10:00",
-    });
-    const restore = await noCountdown(page);
     /**
      * A route on page `p`, opened directly (Live view off), once drawn.
      * @param {import("playwright").Page} p
@@ -4545,8 +4547,6 @@ test("invariants: drive-reach: every page button is declared, and Live view find
     };
     const helpers = [await context.newPage(), await context.newPage()];
     await Promise.all([page, ...helpers].map(walk));
-    await page.unroute("**/data/**");
-    await holdChanges(page);
     await Promise.all(helpers.map((p) => p.close()));
     const step1 = Math.round((Date.now() - started) / 1000);
     assert.deepEqual(
@@ -4554,92 +4554,289 @@ test("invariants: drive-reach: every page button is declared, and Live view find
       [],
       `buttons Live view cannot reach (declare them in drivable.js, or mark the form that reaches them): ${unreachable.join("; ")}`,
     );
+    t.diagnostic(
+      `looked at ${looked} unmarked buttons on ${routes.length} routes in ${step1} s`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
 
-    // 2. Every control of the catalog the running dashboard serves, driven
-    // as `homelab ui click <id> [row]` is: navigation through `ui goto`
-    // only, as a driver has it. The first control of each page that needs
-    // no row and no reach steps is sent from another page (the tab goes to
-    // its home itself); every other one from its home, freshly drawn, after
-    // the reach steps its declaration names.
-    await show(page, "/apps");
+/**
+ * drive-reach review H1: the state each control that shows only in some
+ * state needs, drawn for the sweep: a read answered differently for this
+ * one press (Playwright routes, undone after it) and, where the state lives
+ * on one stack, the address that shows it. The demo host itself draws the
+ * notification centre's unread notice with a fix (shell/demo.rs
+ * `seed_unread_notice`); `holdChanges` keeps it unread.
+ * @type {Record<string, {home?: string, set?: (p: import("playwright").Page) => Promise<() => Promise<void>>}>}
+ */
+const STATES = {
+  // A working copy holding a commit its upstream lacks.
+  "repo-choice": {
+    set: async (p) => {
+      const url = "**/data/repo";
+      await p.route(url, async (r) => {
+        const res = await r.fetch();
+        const body = await res.json();
+        body.repo.unpushed = [
+          {
+            commit: "0123456789ab",
+            subject: "demo: an unpushed commit",
+            at: 1790000000,
+          },
+        ];
+        await r.fulfill({ response: res, json: body });
+      });
+      return () => p.unroute(url);
+    },
+  },
+  // An empty Schedules page (the sweep's own schedule hidden).
+  "schedule-template": {
+    set: async (p) => {
+      const url = "**/data/schedules";
+      await p.route(url, (r) =>
+        r.request().method() === "GET" ? r.fulfill({ json: [] }) : r.fallback(),
+      );
+      return () => p.unroute(url);
+    },
+  },
+  // One stack whose repositories could not be read.
+  "backup-stack-retry": {
+    set: async (p) => {
+      const url = "**/data/backups/films*";
+      await p.route(url, (r) =>
+        r.fulfill({
+          status: 502,
+          json: {
+            what: "films's backups",
+            why: "the demo read fails on purpose for the sweep",
+            fix: "Retry",
+          },
+        }),
+      );
+      return () => p.unroute(url);
+    },
+  },
+  // One stack whose secrets file could not be read.
+  "secrets-try-again": {
+    home: "/stacks/films/settings?section=secrets",
+    set: async (p) => {
+      const why = "the demo read fails on purpose for the sweep";
+      // The list of every stack's secrets names films unreadable, and the
+      // read Try again sends fails the same way.
+      await p.route("**/data/secrets", async (r) => {
+        const res = await r.fetch();
+        const body = await res.json();
+        body.stacks = {
+          ...(body.stacks ?? {}),
+          films: { secrets: [], files: [], unreadable: `${why} :: read again` },
+        };
+        await r.fulfill({ response: res, json: body });
+      });
+      await p.route("**/data/secrets/films", (r) =>
+        r.fulfill({
+          status: 502,
+          json: { what: "films's secrets", why, fix: "read again" },
+        }),
+      );
+      return async () => {
+        await p.unroute("**/data/secrets");
+        await p.unroute("**/data/secrets/films");
+      };
+    },
+  },
+};
+
+/**
+ * Count what changes on screen from now on, Live view's own marks left
+ * out (its bar, cursor, banner, the press flash's class and style).
+ * @param {import("playwright").Page} page
+ */
+const watchScreen = (page) =>
+  page.evaluate(() => {
+    const w = /** @type {any} */ (window);
+    if (w.__sweepObs) return;
+    w.__sweepMut = 0;
+    const ours =
+      ".drive-banner, .drive-announce, .drive-plan, .drive-cursor, #follow";
+    w.__sweepObs = new MutationObserver((list) => {
+      for (const m of list) {
+        const el =
+          m.target instanceof Element ? m.target : m.target.parentElement;
+        if (el?.closest(ours)) continue;
+        if (
+          m.type === "attributes" &&
+          ["class", "style"].includes(m.attributeName ?? "")
+        )
+          continue;
+        w.__sweepMut += 1;
+      }
+    });
+    w.__sweepObs.observe(document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+    });
+  });
+
+/**
+ * review M6: declared controls drawn more than once without rows, which
+ * are not declared twins; and every control's copies on screen now.
+ * @param {import("playwright").Page} page
+ * @param {Map<string, any>} byId the catalog's controls
+ * @returns {Promise<string[]>}
+ */
+async function untwinned(page, byId) {
+  const counts = await page.$$eval(
+    "[data-drive]:not([data-drive-row])",
+    (els) => {
+      /** @type {Record<string, number>} */
+      const n = {};
+      for (const e of els) {
+        if (e.getClientRects().length === 0) continue;
+        const id = /** @type {HTMLElement} */ (e).dataset.drive ?? "";
+        n[id] = (n[id] ?? 0) + 1;
+      }
+      return n;
+    },
+  );
+  return Object.entries(counts)
+    .filter(([id, k]) => k > 1 && byId.has(id) && !byId.get(id).twins)
+    .map(([id, k]) => `${id} ×${k}`);
+}
+
+test("invariants: drive-reach: Live view finds and presses every declared control, and each press has its effect", async (t) => {
+  const started = Date.now();
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1600, height: 1000 },
+      timezoneId: "Europe/Brussels",
+    });
+    const page = await freshPage(context);
+    page.setDefaultTimeout(10000);
+    // A row for the controls that repeat per schedule.
+    const sched = await addSchedule(page, "films", "backup", {
+      every: "day",
+      at: "10:00",
+    });
+    const restore = await noCountdown(page);
+    /** Change requests held back since the last look. @type {string[]} */
+    const held = [];
+    await holdChanges(page, (what) => held.push(what));
+    const dialogs = () => page.$$eval("dialog[open]", (d) => d.length);
+    await markOld(page);
+    await page.goto(`${BASE}/apps`, { waitUntil: "domcontentloaded" });
+    await drawn(page);
     await page.check("#live-view");
     const { all } = await catalogOf(page);
     assert.ok(all.length > 40, `only ${all.length} controls are declared`);
+    const byId = new Map(all.map((c) => [c.id, c]));
     /** @type {Map<string, any[]>} */
     const byHome = new Map();
-    for (const c of all) byHome.set(c.home, [...(byHome.get(c.home) ?? []), c]);
+    for (const c of all) {
+      const home = STATES[c.id]?.home ?? c.home;
+      byHome.set(home, [...(byHome.get(home) ?? []), c]);
+    }
     /** @type {Map<string, string>} */
     const landed = new Map();
     /** @type {string[]} */
     const failed = [];
-    /** @type {string[]} */
+    /** @type {string[]} controls refused naming the state they show in */
     const conditional = [];
+    /** @type {Set<string>} */
+    const twins = new Set();
     try {
       for (const [home, list] of byHome) {
         let fromElsewhere = true;
         for (const c of list) {
-          const first = fromElsewhere && !c.row && !c.reach.length;
+          const state = STATES[c.id];
+          const first = fromElsewhere && !c.row && !c.reach.length && !state;
           if (first) fromElsewhere = false;
           /**
            * One try: from its home as the tab has it now (or freshly drawn),
-           * the reach steps, the click. Answers what went wrong, or null.
+           * the reach steps, the click, and its effect. Answers what went
+           * wrong, or null.
            * @param {boolean} fresh
            * @returns {Promise<string | null>}
            */
           const attempt = async (fresh) => {
-            if (first) {
-              if (new URL(page.url()).pathname !== "/apps")
-                await liveGo(page, "/apps", landed);
-            } else if (fresh || landed.get(home) !== page.url()) {
-              const g = await liveGo(page, home, landed);
-              if (!g.ok) return `ui goto ${home} refused: ${g.refusal?.why}`;
-            }
-            for (const s of c.reach) {
-              const body = { ...s };
-              if (body.row === "*")
-                body.row = await firstRow(page, body.control ?? "");
-              const r = await reachStep(page, body);
-              if (!r.ok)
-                return `its reach step ${JSON.stringify(s)} was refused: ${r.refusal?.why}`;
-            }
-            const row = c.row ? await firstRow(page, c.id) : null;
-            const open0 = await dialogs();
-            const r = await reachStep(page, {
-              do: "click",
-              control: c.id,
-              ...(row == null ? {} : { row }),
-            });
+            const undo = state?.set ? await state.set(page) : null;
             try {
-              if (!r.ok) {
-                // Only a control its declaration says shows in a state the
-                // demo host cannot draw may be refused, naming that state.
-                if (
-                  c.shows &&
-                  !c.reach.length &&
-                  String(r.refusal?.why).includes(c.shows)
-                ) {
-                  conditional.push(c.id);
-                  return null;
-                }
-                return `${row ? `${row}: ` : ""}refused, ${r.refusal?.why}; ${r.refusal?.fix}`;
+              if (first) {
+                if (new URL(page.url()).pathname !== "/apps")
+                  await liveGo(page, "/apps", landed);
+              } else if (fresh || state || landed.get(home) !== page.url()) {
+                const g = await liveGo(page, home, landed);
+                if (!g.ok) return `ui goto ${home} refused: ${g.refusal?.why}`;
               }
-              if (
-                c.opens === "dialog" &&
-                !(await page
+              for (const s of c.reach) {
+                const body = { ...s };
+                if (body.row === "*")
+                  body.row = await firstRow(page, body.control ?? "");
+                const r = await reachStep(page, body);
+                if (!r.ok)
+                  return `its reach step ${JSON.stringify(s)} was refused: ${r.refusal?.why}`;
+              }
+              for (const x of await untwinned(page, byId))
+                twins.add(`${home}: ${x}`);
+              const row = c.row ? await firstRow(page, c.id) : null;
+              const open0 = await dialogs();
+              await watchScreen(page);
+              const before = {
+                url: page.url(),
+                held: held.length,
+                mut: await page.evaluate(
+                  () => /** @type {any} */ (window).__sweepMut,
+                ),
+              };
+              const r = await reachStep(page, {
+                do: "click",
+                control: c.id,
+                ...(row == null ? {} : { row }),
+              });
+              try {
+                if (!r.ok) {
+                  if (c.shows && String(r.refusal?.why).includes(c.shows)) {
+                    conditional.push(c.id);
+                    return `shows only ${c.shows}, and the sweep did not draw that state: ${r.refusal?.why}`;
+                  }
+                  return `${row ? `${row}: ` : ""}refused, ${r.refusal?.why}; ${r.refusal?.fix}`;
+                }
+                // review H1: "no error" is not enough; the press did what
+                // it does: a dialog opened, a change was sent (and held
+                // back), the address or the screen changed.
+                const opened = await page
                   .waitForFunction(
                     (n) => document.querySelectorAll("dialog[open]").length > n,
                     open0,
-                    { timeout: 3000 },
+                    { timeout: c.opens === "dialog" ? 3000 : 1 },
                   )
                   .then(() => true)
-                  .catch(() => false))
-              )
-                return "pressed, but no dialog opened";
-              return null;
+                  .catch(() => false);
+                if (c.opens === "dialog")
+                  return opened ? null : "pressed, but no dialog opened";
+                const moved = await page
+                  .waitForFunction(
+                    (b) =>
+                      location.href !== b.url ||
+                      /** @type {any} */ (window).__sweepMut > b.mut,
+                    before,
+                    { timeout: 2000 },
+                  )
+                  .then(() => true)
+                  .catch(() => false);
+                if (opened || moved || held.length > before.held) return null;
+                return `pressed, but nothing happened: no dialog, no change sent, the address and the screen as they were`;
+              } finally {
+                if (r.state?.page_dialog || (await dialogs()))
+                  await reachStep(page, { do: "close" });
+                await closeAll(page);
+              }
             } finally {
-              if (r.state?.page_dialog || (await dialogs()))
-                await reachStep(page, { do: "close" });
-              await closeAll(page);
+              await undo?.();
             }
           };
           // The page as the control before left it first (no navigation
@@ -4647,6 +4844,12 @@ test("invariants: drive-reach: every page button is declared, and Live view find
           // state was in the way.
           const why = (await attempt(false)) && (await attempt(true));
           if (why) failed.push(`${c.id}: ${why}`);
+          else
+            conditional.splice(
+              0,
+              conditional.length,
+              ...conditional.filter((x) => x !== c.id),
+            );
           // The tab went to the first control's home itself.
           if (first && new URL(page.url()).pathname === home.split("?")[0])
             landed.set(home, page.url());
@@ -4659,18 +4862,21 @@ test("invariants: drive-reach: every page button is declared, and Live view find
       await schedApi(page, "DELETE", `/data/schedules/${sched}`);
     }
     t.diagnostic(
-      `looked at ${looked} unmarked buttons on ${routes.length} routes in ${step1} s; pressed ${all.length - conditional.length} of ${all.length} catalog controls; ${Math.round((Date.now() - started) / 1000)} s in all; shown only in a state the demo host cannot draw (refused naming it): ${conditional.join(", ") || "none"}`,
+      `pressed ${all.length - failed.length} of ${all.length} catalog controls, each with its effect, in ${Math.round((Date.now() - started) / 1000)} s; conditional: ${conditional.join(", ") || "none"}`,
     );
     assert.deepEqual(
       failed,
       [],
       `controls Live view could not reach:\n${failed.join("\n")}`,
     );
-    // A bound, so "shows in a state" never becomes a way out of the sweep:
-    // give the demo host the state instead.
-    assert.ok(
-      conditional.length <= 8,
-      `too many controls the sweep cannot press: ${conditional.join(", ")}`,
+    // review H1: no control may be excused as "shows only in a state": the
+    // sweep draws every state (STATES, and the demo host's notice).
+    assert.deepEqual(conditional, [], "controls the sweep did not draw");
+    // review M6: copies of one control on screen only from declared twins.
+    assert.deepEqual(
+      [...twins],
+      [],
+      "controls drawn twice that are not declared twins",
     );
   } finally {
     await browser.close();

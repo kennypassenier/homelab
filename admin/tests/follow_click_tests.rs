@@ -165,6 +165,7 @@ async fn fix_239_what_the_tab_could_not_do_reaches_the_driver() {
             fix: Some("its rows are: media/web/web".into()),
             page: Some("/fleetview".into()),
             dialog: None,
+            ..TabAnswer::default()
         },
     )
     .unwrap();
@@ -250,14 +251,17 @@ async fn drive_reach_an_unknown_control_is_refused_with_the_closest_and_recorded
             .any(|e| e["kind"] == "step" && e["applied"] == true),
         "a refused name reached the tabs"
     );
-    let state = d.step("wsl", Scope::Read, UiStep::State).await;
+    // review M3: the refusals are read on their own, not in every state.
+    let state = d.step("wsl", Scope::Read, UiStep::Refusals).await;
     assert_eq!(state["refusals"]["total"], 1, "{state}");
     let r = &state["refusals"]["refusals"][0];
     assert_eq!(r["control"], "edit-schedul");
     assert_eq!(r["row"], "s1");
     assert_eq!(r["verb"], "click");
-    // The answer carries this release's catalog, for the client's own check.
-    let ids: Vec<&str> = state["catalog"]["controls"]
+    // The catalog this release serves, for the client's own check.
+    let c = d.step("wsl", Scope::Read, UiStep::Controls).await;
+    let cat: Value = serde_json::from_str(c["text"].as_str().unwrap_or("{}")).unwrap();
+    let ids: Vec<&str> = cat["controls"]
         .as_array()
         .map(|a| a.iter().filter_map(|c| c["id"].as_str()).collect())
         .unwrap_or_default();
@@ -271,6 +275,19 @@ async fn drive_reach_an_old_control_name_is_not_refused_by_the_dashboard() {
     let (d, live) = driver("old-name");
     let pending = send(&d, click("edit-schedule", Some("s1")));
     let seq = waiting(&d, &live, 1).await;
+    d.claim(seq, "tab-a").unwrap();
+    d.taken(
+        seq,
+        "tab-a",
+        TabAnswer {
+            ok: true,
+            dialog: Some("Schedule s1".into()),
+            ..TabAnswer::default()
+        },
+    )
+    .unwrap();
+    // review: the menu press goes to the tab as a step of its own.
+    let seq = waiting(&d, &live, 2).await;
     d.claim(seq, "tab-a").unwrap();
     d.taken(
         seq,

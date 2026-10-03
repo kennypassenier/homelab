@@ -20,6 +20,22 @@ use super::actions::Refusal;
 /// How many refusals are kept, newest last.
 pub const KEEP: usize = 200;
 
+/// The longest name (control, field, row, page, path) a refusal keeps.
+pub const NAME_MAX: usize = 120;
+/// The longest why or fix a refusal keeps.
+pub const TEXT_MAX: usize = 600;
+
+/// `s`, at most `max` characters (an ellipsis marks a cut).
+fn cap(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let mut t: String = s.chars().take(max.saturating_sub(1)).collect();
+        t.push('…');
+        t
+    }
+}
+
 /// One refused step.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Refused {
@@ -27,15 +43,24 @@ pub struct Refused {
     pub at: i64,
     /// The token that sent it.
     pub by: String,
-    /// The step as `homelab ui` sends it.
-    pub step: serde_json::Value,
-    /// The verb (`click`, `goto`, …).
+    /// The verb (`click`, `goto`, …). review H4: the step itself is never
+    /// kept — a `type` or `edit` carries what was typed, possibly a secret,
+    /// and this log is handed out (`homelab ui refusals`).
     pub verb: String,
-    /// The control a click named, and its row.
+    /// The control a click named (or the name a client refused), its row.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub control: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub row: Option<String>,
+    /// The field a `type`/`edit`/`pick`/`check` named.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
+    /// How many characters were typed (`type`, `edit`), never the text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_len: Option<usize>,
+    /// Where a `goto` went.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     /// The page the drive was on.
     pub page: String,
     pub why: String,
@@ -52,21 +77,37 @@ pub struct RefusalLog {
 
 impl RefusalLog {
     pub fn record(&mut self, at: i64, by: &str, step: &UiStep, page: &str, r: &Refusal) {
-        let (control, row) = match step {
-            UiStep::Click { control, row } => (Some(control.clone()), row.clone()),
-            _ => (None, None),
-        };
-        self.items.push_back(Refused {
+        let mut e = Refused {
             at,
-            by: by.to_string(),
-            step: serde_json::to_value(step).unwrap_or_default(),
+            by: cap(by, NAME_MAX),
             verb: step.verb().to_string(),
-            control,
-            row,
-            page: page.to_string(),
-            why: r.why.clone(),
-            fix: r.fix.clone(),
-        });
+            control: None,
+            row: None,
+            field: None,
+            text_len: None,
+            path: None,
+            page: cap(page, NAME_MAX),
+            why: cap(&r.why, TEXT_MAX),
+            fix: cap(&r.fix, TEXT_MAX),
+        };
+        match step {
+            UiStep::Click { control, row } => {
+                e.control = Some(cap(control, NAME_MAX));
+                e.row = row.as_deref().map(|r| cap(r, NAME_MAX));
+            }
+            UiStep::RefusedLocally { name, .. } => e.control = Some(cap(name, NAME_MAX)),
+            UiStep::Press { button } => e.control = Some(cap(button, NAME_MAX)),
+            UiStep::Type { field, text } | UiStep::Edit { field, text } => {
+                e.field = Some(cap(field, NAME_MAX));
+                e.text_len = Some(text.chars().count());
+            }
+            UiStep::Pick { field, .. } | UiStep::Check { field, .. } => {
+                e.field = Some(cap(field, NAME_MAX));
+            }
+            UiStep::Goto { path } => e.path = Some(cap(path, NAME_MAX)),
+            _ => {}
+        }
+        self.items.push_back(e);
         self.total += 1;
         while self.items.len() > KEEP {
             self.items.pop_front();
@@ -124,5 +165,27 @@ mod tests {
         assert_eq!(log.len(), KEEP);
         assert_eq!(log.view()["total"], KEEP as u64 + 51);
         assert!(log.view()["refusals"][0].get("control").is_none());
+    }
+
+    /// review H4: typed text is never kept, only its length; long names
+    /// and reasons are capped, so one entry stays small.
+    #[test]
+    fn drive_reach_typed_text_is_never_kept_and_an_entry_is_bounded() {
+        let mut log = RefusalLog::default();
+        let r = Refusal::new("ui type", "x".repeat(5000), "y");
+        log.record(
+            1,
+            "claude",
+            &UiStep::Type {
+                field: "f".repeat(500),
+                text: "hunter2".into(),
+            },
+            "/",
+            &r,
+        );
+        let text = log.view().to_string();
+        assert!(!text.contains("hunter2"), "{text}");
+        assert_eq!(log.view()["refusals"][0]["text_len"], 7);
+        assert!(text.len() < 1500, "{} bytes", text.len());
     }
 }

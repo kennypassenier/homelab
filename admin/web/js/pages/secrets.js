@@ -19,7 +19,7 @@
 import { act, onAct, send } from "../act.js";
 import { agoEl, setAgo } from "../ago.js";
 import { fetchJson, h } from "../dom.js";
-import { declare, drivable } from "../drivable.js";
+import { declare, declareField, drivable } from "../drivable.js";
 import { stackHref } from "../router.js";
 import {
   createReveals,
@@ -30,6 +30,19 @@ import {
   stackLine,
 } from "../secretsview.js";
 import { current, subscribe } from "../store.js";
+
+// review M5: every page field Live view may set is declared (drivable.js
+// `declareField`); the client and the dashboard refuse any other.
+const SECRET_VALUE = declareField({
+  id: "secret-value",
+  page: "secrets",
+  what: "the new value of a secret (Change drawer)",
+});
+const SECRET_RESTART = declareField({
+  id: "secret-restart",
+  page: "secrets",
+  what: "restart the stack after writing (Change drawer)",
+});
 
 // fix-239 / invariant 39: Live view reaches every control on this page —
 // `homelab ui click <id> [row]`, the row being `<stack>/<app>/.env` (or
@@ -46,17 +59,6 @@ const secretsAt = (row) =>
   row
     ? `/stacks/${encodeURIComponent(row.split("/")[0])}/settings?section=secrets`
     : null;
-const PICK_STACK = declare({
-  id: "secrets-stack",
-  page: "secrets",
-  opens: "run",
-  row: "<stack>",
-  // feat-shell-1: the secrets live in each stack hub's Settings.
-  at: secretsAt,
-  what: "show one stack's secrets (re-reads what it declares)",
-  shows:
-    "on the fleet-wide Secrets list, which no address draws since 3.71.0 (each stack's Settings shows its own: homelab ui goto /stacks/<stack>/settings?section=secrets)",
-});
 const REVEAL_SECRET = declare({
   id: "reveal-secret",
   page: "secrets",
@@ -138,6 +140,8 @@ const CLOSE_DRAWER = declare({
   what: "close the change drawer without writing",
   shows: "while the change drawer is open",
   reach: [{ do: "click", control: "change-a-secret" }],
+  // review M6: its x and its Cancel, each closing the drawer.
+  twins: true,
 });
 const UNDO_WRITE = declare({
   id: "undo-secret-write",
@@ -505,20 +509,18 @@ export function mount(root, opts = {}) {
                 "!",
               )
             : h("span", { class: "nx-chip" }, String(stackCount(d)));
-        const b = drivable(
-          h(
-            "button",
-            {
-              type: "button",
-              "aria-current": String(s === S.stack),
-              "aria-label": `${s}: ${stackLine(d)}`,
-            },
-            swatch(s, names),
-            h("span", null, s, h("small", null, stackLine(d))),
-            chip,
-          ),
-          PICK_STACK,
-          s,
+        // The fleet-wide list (no address draws it since 3.71.0: each
+        // stack's Settings shows its own) is no Live view control.
+        const b = h(
+          "button",
+          {
+            type: "button",
+            "aria-current": String(s === S.stack),
+            "aria-label": `${s}: ${stackLine(d)}`,
+          },
+          swatch(s, names),
+          h("span", null, s, h("small", null, stackLine(d))),
+          chip,
         );
         b.addEventListener("click", () => pick(s));
         tipOn(tip, b, () => {
@@ -925,7 +927,7 @@ export function mount(root, opts = {}) {
     const ta = /** @type {HTMLTextAreaElement} */ (
       h("textarea", {
         class: "kp-field__input",
-        id: "secret-value",
+        id: SECRET_VALUE,
         name: "secret-value",
         placeholder: "KEY=value, one per line",
         "aria-label": "New value",
@@ -959,7 +961,7 @@ export function mount(root, opts = {}) {
     const restart = /** @type {HTMLInputElement} */ (
       h("input", {
         type: "checkbox",
-        id: "secret-restart",
+        id: SECRET_RESTART,
         name: "secret-restart",
       })
     );

@@ -222,6 +222,14 @@ test("redesign-activity: an id a redesign renamed (`was`) still reaches the cont
 });
 
 test("drive-reach: a control with no rows drawn twice is one control, pressed once", () => {
+  // review M6: only when its declaration says so.
+  declare({
+    id: "test-close-drawer",
+    page: "test",
+    opens: "run",
+    what: "close the test drawer (its x and its Cancel)",
+    twins: true,
+  });
   const twice = [
     { id: "test-close-drawer", row: null, label: "×" },
     { id: "test-close-drawer", row: null, label: "Cancel" },

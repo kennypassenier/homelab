@@ -4,12 +4,31 @@
 // host writes it to its audit log. No typed confirmation (Kenny: "we hebben
 // genoeg security"); the host refuses unless exec_enabled = true.
 
+import { declareField } from "../drivable.js";
 import { act, onAct, send } from "../act.js";
 import { refusalCallout } from "../actui.js";
 import { h } from "../dom.js";
 import { shellResult, shellTargets } from "../parity.js";
 import { current, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
+
+// review M5: every page field Live view may set is declared (drivable.js
+// `declareField`); the client and the dashboard refuse any other.
+const SHELL_TARGET = declareField({
+  id: "shell-target",
+  page: "shell",
+  what: "the container a command runs in",
+});
+const SHELL_VMID = declareField({
+  id: "shell-vmid",
+  page: "shell",
+  what: "a container by its number, when it is not in the list",
+});
+const SHELL_LINE = declareField({
+  id: "shell-line",
+  page: "shell",
+  what: "the command to run",
+});
 
 /** Lines the Up key recalls. */
 const RECALL = 50;
@@ -20,10 +39,10 @@ const RECALL = 50;
  */
 export function mount(root) {
   const params = new URLSearchParams(location.search);
-  const target = h("select", { class: "kp-field__input", id: "shell-target" });
+  const target = h("select", { class: "kp-field__input", id: SHELL_TARGET });
   const other = h("input", {
     class: "kp-field__input",
-    id: "shell-vmid",
+    id: SHELL_VMID,
     type: "text",
     inputmode: "numeric",
     pattern: "\\d{3,5}",
@@ -32,7 +51,7 @@ export function mount(root) {
   });
   const line = h("input", {
     class: "kp-field__input mono",
-    id: "shell-line",
+    id: SHELL_LINE,
     type: "text",
     autocomplete: "off",
     spellcheck: "false",

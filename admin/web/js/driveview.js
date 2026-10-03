@@ -45,7 +45,7 @@
  *   field?: string, text?: string, value?: string, on?: boolean,
  *   button?: string, op?: string, stacks?: string[], control?: string,
  *   row?: string | null}} DriveStep
- * @typedef {{kind?: "step" | "announce" | "control" | "reload", seq: number,
+ * @typedef {{kind?: "step" | "announce" | "control" | "reload" | "closed", seq: number,
  *   step: DriveStep, applied: boolean,
  *   refusal: DriveRefusal | null, state: DriveState}} DriveEvent
  * @typedef {{seq: number, page: string,

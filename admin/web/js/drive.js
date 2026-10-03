@@ -37,6 +37,7 @@ import { makeCursor } from "./drivecursor.js";
 import { REDUCED_TYPE_MS, typingDelays } from "./drivepace.js";
 import { openDriven } from "./editdrive.js";
 import { takeStep, topDialog } from "./pagedrive.js";
+import { TAB } from "./tabname.js";
 import {
   FOLLOW_KEY,
   badgeText,
@@ -56,15 +57,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const reducedMotion = () =>
   !!globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 const now = () => Date.now() / 1000;
-
-/**
- * fix-239: this page load's own name, for claiming a page-control step: of
- * several tabs that follow, exactly one clicks (the server lets the first
- * claim win, and keeps a page-level dialog's later steps with it).
- */
-const TAB =
-  globalThis.crypto?.randomUUID?.() ??
-  `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 /** sessionStorage: per tab, kept over a reload; absent in a private window. */
 function storage() {
@@ -97,6 +89,13 @@ export function mountFollow(region, ctx) {
     pageDlg = null;
   };
   let queue = Promise.resolve();
+  /**
+   * review (the 15 s no-answer): the page-control steps the dashboard
+   * stopped waiting for; one still queued here, or still being looked for,
+   * is dropped at once rather than clicked late. Bounded: the newest 50.
+   * @type {number[]}
+   */
+  const closed = [];
 
   const toggle = h("input", {
     class: "kp-switch__input",
@@ -352,6 +351,7 @@ export function mountFollow(region, ctx) {
         // lets claim this step takes it, so a click that starts work (a
         // stale image's backup, commit and deploy) happens exactly once
         // however many tabs follow; the others only mark it.
+        if (closed.includes(s.seq)) return;
         const claim = await send(
           "POST",
           "/data/drive/claim",
@@ -369,7 +369,9 @@ export function mountFollow(region, ctx) {
             cursor.sit(el);
             await flash(el, "drive-press", 420);
           },
+          () => closed.includes(s.seq),
         );
+        if (closed.includes(s.seq)) return;
         const opened = a.dialog ? topDialog() : null;
         if (opened && opened !== pageDlg) {
           opened.addEventListener("close", () => {
@@ -469,6 +471,12 @@ export function mountFollow(region, ctx) {
     // waits for the viewer's own toggle the way a driven step does.
     if (ev.kind === "reload") {
       location.reload();
+      return;
+    }
+    // review (the 15 s no-answer): the dashboard gave up on this step.
+    if (ev.kind === "closed") {
+      closed.push(ev.seq);
+      if (closed.length > 50) closed.shift();
       return;
     }
     state = ev.state;

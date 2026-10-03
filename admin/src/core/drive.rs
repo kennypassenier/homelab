@@ -152,12 +152,11 @@ pub struct FormSpec {
     pub patterns: BTreeMap<String, String>,
     pub fields: BTreeMap<String, FieldDef>,
     pub messages: Messages,
-    pub pages: Vec<String>,
-    pub stack_tabs: Vec<String>,
     /// fix-199: every `Open{form}` target Claude or a click can name — the
     /// edit forms' slugs (`EditKind::ALL`) and the action forms' slugs
-    /// (`ActionKind::ALL`), one list, read by the browser the same way
-    /// `pages` already is. A test (`drivelive::tests`) holds it equal to
+    /// (`ActionKind::ALL`), one list, read by the browser. (The pages and
+    /// a stack's tabs are the router's, in the generated control catalog:
+    /// review M8 removed their hand-kept copies here.) A test (`drivelive::tests`) holds it equal to
     /// those two enums, so a kind added to either and forgotten here fails
     /// the build rather than silently under-reporting what this version
     /// knows.
@@ -677,6 +676,13 @@ pub struct PageDialog {
     pub row: Option<String>,
     /// Its title, as the tab read it.
     pub title: String,
+    /// review H3: the buttons it offers, as the tab reported them; `None`
+    /// from a tab that does not report them (nothing is checked then).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controls: Option<Vec<homelab_core::drivecatalog::DialogControl>>,
+    /// review M5: the ids of the fields it holds, likewise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Vec<String>>,
 }
 
 /// fix-239: what the tab that took a page-control step answered.
@@ -694,6 +700,12 @@ pub struct TabAnswer {
     /// The title of the dialog open afterwards; `None`: none is.
     #[serde(default)]
     pub dialog: Option<String>,
+    /// review H3: that dialog's buttons (Live view name and label).
+    #[serde(default)]
+    pub controls: Option<Vec<homelab_core::drivecatalog::DialogControl>>,
+    /// review M5: that dialog's field ids.
+    #[serde(default)]
+    pub fields: Option<Vec<String>>,
 }
 
 /// The one shared "Claude is driving" state.
@@ -1223,15 +1235,8 @@ fn known_page(path: &str, stacks: &[String]) -> Result<String, String> {
     let p = path.split(['?', '#']).next().unwrap_or("");
     let rest = p.trim_start_matches('/').trim_end_matches('/');
     let parts: Vec<&str> = rest.split('/').collect();
-    if parts.first() == Some(&"stacks")
-        && parts.len() == 3
-        && !spec().stack_tabs.iter().any(|t| t == parts[2])
-    {
-        return Err(format!(
-            "a stack page has no tab {}; its tabs are {}",
-            parts[2],
-            spec().stack_tabs.join(", ")
-        ));
+    if parts.first() == Some(&"stacks") && parts.len() == 3 {
+        catalog().stack_path(p)?;
     }
     let landing = catalog().land(path, stacks)?;
     // `/stacks/<name>/overview` is the hub's own address without its tab.
@@ -1240,6 +1245,21 @@ fn known_page(path: &str, stacks: &[String]) -> Result<String, String> {
         .strip_suffix("/overview")
         .map(str::to_string)
         .unwrap_or(landing.path))
+}
+
+/// The fix a refused `goto` names: every current address the router knows
+/// (review M8: from the generated catalog, never a hand-kept list).
+fn goto_fix() -> String {
+    let c = catalog();
+    format!(
+        "pages: /, /{}; a stack: /stacks/<name>[/<tab>]",
+        c.addresses
+            .iter()
+            .filter(|p| !p.is_empty() && !c.redirects.contains_key(*p))
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", /")
+    )
 }
 
 impl DriveState {
@@ -1332,7 +1352,11 @@ impl DriveState {
             held: None,
         };
         let applied = match step {
-            UiStep::State | UiStep::Plan { .. } => return Ok(plain),
+            UiStep::State
+            | UiStep::Plan { .. }
+            | UiStep::Controls
+            | UiStep::Refusals
+            | UiStep::RefusedLocally { .. } => return Ok(plain),
             UiStep::Done => {
                 self.form = None;
                 self.page_dialog = None;
@@ -1348,15 +1372,19 @@ impl DriveState {
             | UiStep::Check { .. }
                 if self.form.is_none() =>
             {
+                self.catalog_check(step)?;
                 Applied {
                     effect: Effect::Tab,
                     held: None,
                 }
             }
-            UiStep::Press { button } if self.in_page_dialog() && button != "close" => Applied {
-                effect: Effect::Tab,
-                held: None,
-            },
+            UiStep::Press { button } if self.in_page_dialog() && button != "close" => {
+                self.catalog_check(step)?;
+                Applied {
+                    effect: Effect::Tab,
+                    held: None,
+                }
+            }
             UiStep::Close | UiStep::Press { .. } if self.in_page_dialog() => {
                 self.page_dialog = None;
                 plain
@@ -1384,14 +1412,8 @@ impl DriveState {
                 }
                 // drive-reach: a name no page declares, nor ever did, is
                 // answered here with the closest real ones, before any tab
-                // looks for it. A dialog's own button is not declared: with
-                // a page-level dialog open, its label decides.
-                if self.page_dialog.is_none()
-                    && let homelab_core::drivecatalog::Click::Unknown { why, fix } =
-                        catalog().click(control)
-                {
-                    return Err(refused(step, why, fix));
-                }
+                // looks for it (the shell checks it first, unpublished).
+                self.catalog_check(step)?;
                 Applied {
                     effect: Effect::Tab,
                     held: None,
@@ -1417,22 +1439,8 @@ impl DriveState {
                         "homelab ui close first",
                     ));
                 }
-                let page = known_page(path, cx.stacks).map_err(|why| {
-                    refused(
-                        step,
-                        why,
-                        format!(
-                            "pages: /, /{}; a stack: /stacks/<name>[/<tab>]",
-                            spec()
-                                .pages
-                                .iter()
-                                .filter(|p| !p.is_empty())
-                                .cloned()
-                                .collect::<Vec<_>>()
-                                .join(", /")
-                        ),
-                    )
-                })?;
+                let page =
+                    known_page(path, cx.stacks).map_err(|why| refused(step, why, goto_fix()))?;
                 self.page = page;
                 plain
             }
@@ -1660,6 +1668,68 @@ impl DriveState {
         }
     }
 
+    /// drive-reach (review: "a wrong id never shows on Kenny's screen"): a
+    /// step that names a page control, a page field or an address, checked
+    /// against this release's catalog, or against what the open page-level
+    /// dialog offers, before any tab is asked. The shell runs it before the
+    /// step is announced and answers a refusal from it to the caller only
+    /// (an older client that skipped its own check never puts it on a
+    /// tab's screen). With a server-modelled form open the form's own
+    /// description decides, so nothing is checked here.
+    pub fn catalog_check(&self, step: &UiStep) -> Result<(), Refusal> {
+        use homelab_core::drivecatalog::{Click, FieldName, dialog_click, dialog_field};
+        if self.form.is_some() {
+            return Ok(());
+        }
+        let field = match step {
+            UiStep::Type { field, .. }
+            | UiStep::Edit { field, .. }
+            | UiStep::Pick { field, .. }
+            | UiStep::Check { field, .. } => Some(field.as_str()),
+            _ => None,
+        };
+        if let Some(d) = &self.page_dialog {
+            let name = match step {
+                UiStep::Click { control, .. } => Some(control.as_str()),
+                UiStep::Press { button } if button != "close" => Some(button.as_str()),
+                _ => None,
+            };
+            if let (Some(n), Some(offer)) = (name, &d.controls) {
+                dialog_click(offer, &d.title, n, catalog())
+                    .map_err(|(why, fix)| refused(step, why, fix))?;
+            }
+            if let (Some(f), Some(fields)) = (field, &d.fields) {
+                dialog_field(fields, &d.title, f, catalog())
+                    .map_err(|(why, fix)| refused(step, why, fix))?;
+            }
+            return Ok(());
+        }
+        match step {
+            UiStep::Click { control, .. } => match catalog().click(control) {
+                Click::Unknown { why, fix } => Err(refused(step, why, fix)),
+                _ => Ok(()),
+            },
+            UiStep::Goto { path } => {
+                let bare = path.split(['?', '#']).next().unwrap_or("");
+                if bare.starts_with("/stacks/") {
+                    // Whether the stack exists needs the fleet: apply says.
+                    return catalog()
+                        .stack_path(bare)
+                        .map(|_| ())
+                        .map_err(|why| refused(step, why, goto_fix()));
+                }
+                catalog()
+                    .land(path, &[])
+                    .map(|_| ())
+                    .map_err(|why| refused(step, why, goto_fix()))
+            }
+            _ => match field.map(|f| catalog().field(f)) {
+                Some(FieldName::Unknown { why, fix }) => Err(refused(step, why, fix)),
+                _ => Ok(()),
+            },
+        }
+    }
+
     /// fix-239: a page-level dialog is on top, and no server-modelled form.
     pub fn in_page_dialog(&self) -> bool {
         self.form.is_none() && self.page_dialog.is_some()
@@ -1676,17 +1746,23 @@ impl DriveState {
             (None, _, _) => None,
             (Some(title), Some(d), _) => Some(PageDialog {
                 title: title.clone(),
+                controls: a.controls.clone(),
+                fields: a.fields.clone(),
                 ..d
             }),
             (Some(title), None, UiStep::Click { control, row }) => Some(PageDialog {
                 control: control.clone(),
                 row: row.clone(),
                 title: title.clone(),
+                controls: a.controls.clone(),
+                fields: a.fields.clone(),
             }),
             (Some(title), None, _) => Some(PageDialog {
                 control: String::new(),
                 row: None,
                 title: title.clone(),
+                controls: a.controls.clone(),
+                fields: a.fields.clone(),
             }),
         };
         (!a.ok).then(|| {

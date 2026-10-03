@@ -853,3 +853,102 @@ fn fail_first_proves_only_a_test_that_fails_on_the_old_code() {
         .unwrap();
     assert!(String::from_utf8_lossy(&verdict.stdout).starts_with("NOT FOUND"));
 }
+
+/// A scratch repository holding this tree's dashboard web code (its
+/// node_modules linked, not copied) and the catalog hook, committed.
+fn web_scratch(dir: &Path) -> std::path::PathBuf {
+    let repo = dir.join("repo");
+    let web = repo.join("admin/web");
+    std::fs::create_dir_all(repo.join(".githooks")).unwrap();
+    std::fs::create_dir_all(&web).unwrap();
+    let src = repo_root().join("admin/web");
+    for part in ["js", "scripts", "test", "package.json"] {
+        let ok = Command::new("cp")
+            .arg("-a")
+            .arg(src.join(part))
+            .arg(&web)
+            .status()
+            .unwrap();
+        assert!(ok.success(), "cp {part}");
+    }
+    std::os::unix::fs::symlink(src.join("node_modules"), web.join("node_modules")).unwrap();
+    std::fs::copy(
+        repo_root().join(".githooks/drivecatalog.sh"),
+        repo.join(".githooks/drivecatalog.sh"),
+    )
+    .unwrap();
+    // The node hook finds the kit's components through Cargo.lock's pin.
+    std::fs::copy(repo_root().join("Cargo.lock"), repo.join("Cargo.lock")).unwrap();
+    std::fs::write(repo.join(".gitignore"), "node_modules\n").unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "base"]);
+    repo
+}
+
+/// The catalog hook in `repo`: (exit code, stdout + stderr).
+fn catalog_hook(repo: &Path) -> (i32, String) {
+    let out = Command::new("bash")
+        .arg(repo.join(".githooks/drivecatalog.sh"))
+        .current_dir(repo)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_WORK_TREE")
+        .output()
+        .unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ),
+    )
+}
+
+/// drive-reach review M1: the commit gate never ran the catalog checks
+/// (gates.sh skips node tests at commit). The hook regenerates a stale
+/// catalog and stages it, and runs its test alone, refusing a declaration
+/// the catalog cannot hold.
+///
+/// covers: redesign-drive-5
+#[test]
+fn the_commit_gate_regenerates_the_control_catalog_and_runs_its_test() {
+    if Command::new("node").arg("--version").output().is_err()
+        || !repo_root().join("admin/web/node_modules").is_dir()
+    {
+        panic!("this test needs node and admin/web/node_modules (npm ci)");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let repo = web_scratch(dir.path());
+    let cat = repo.join("admin/web/js/drivecatalog.json");
+    let good = std::fs::read_to_string(&cat).unwrap();
+    // A commit that changed the declarations but staged the old catalog.
+    std::fs::write(&cat, "{}\n").unwrap();
+    git(&repo, &["add", "admin/web/js/drivecatalog.json"]);
+    let (code, out) = catalog_hook(&repo);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("regenerated and staged"), "{out}");
+    assert!(out.contains("drivecatalog.test.js passed"), "{out}");
+    assert_eq!(std::fs::read_to_string(&cat).unwrap(), good);
+    let staged = git(&repo, &["show", ":admin/web/js/drivecatalog.json"]);
+    assert_eq!(
+        staged.trim(),
+        good.trim(),
+        "the staged catalog is not the built one"
+    );
+    // A page that marks an element by hand fails the commit.
+    let page = repo.join("admin/web/js/pages/shell.js");
+    let mut src = std::fs::read_to_string(&page).unwrap();
+    src.push_str("\nexport const bad = (el) => el.setAttribute(\"data-drive\", \"x\");\n");
+    std::fs::write(&page, src).unwrap();
+    let (code, out) = catalog_hook(&repo);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("COMMIT BLOCKED"), "{out}");
+    // pre-commit calls it whenever the dashboard's web code moves.
+    let hook = std::fs::read_to_string(repo_root().join(".githooks/pre-commit")).unwrap();
+    assert!(
+        hook.contains(".githooks/drivecatalog.sh"),
+        "pre-commit does not call it"
+    );
+}

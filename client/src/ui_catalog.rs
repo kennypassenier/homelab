@@ -20,16 +20,11 @@
 //! step is then sent as it is, as before (a version check informs, it never
 //! blocks).
 
-use homelab_core::drivecatalog::{Catalog, Click, click_line, reach_line};
+use homelab_core::drivecatalog::{
+    Catalog, Click, DialogControl, FieldName, click_line, dialog_click, dialog_field, reach_line,
+};
 use homelab_proto::UiStep;
 use serde_json::Value;
-
-/// The catalog a `state` answer carries; `None` from an older dashboard.
-pub fn catalog_of(state_reply: &str) -> Option<Catalog> {
-    let v: Value = serde_json::from_str(state_reply).ok()?;
-    let c = v.get("catalog").filter(|c| !c.is_null())?;
-    serde_json::from_value(c.clone()).ok()
-}
 
 /// What to send for one line, after the check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,18 +36,85 @@ pub struct Checked {
     pub notes: Vec<String>,
 }
 
-/// Check `step` against `catalog`. `Err`: refused here, nothing is sent.
-pub fn check(step: UiStep, catalog: &Catalog) -> Result<Checked, String> {
+/// What is on Kenny's screen, as the `state` answer says: a server-modelled
+/// form open, or a page-level dialog and what it offers.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Screen {
+    pub form_open: bool,
+    pub dialog: Option<Dialog>,
+}
+
+/// The open page-level dialog (`state.page_dialog`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Dialog {
+    pub title: String,
+    pub controls: Option<Vec<DialogControl>>,
+    pub fields: Option<Vec<String>>,
+}
+
+impl Screen {
+    /// The screen from a `state` answer's `state` object (review H3: the
+    /// client reads the open dialog from the state it already fetched).
+    pub fn of(state: &Value) -> Screen {
+        let d = &state["page_dialog"];
+        Screen {
+            form_open: !state["form"].is_null(),
+            dialog: d.is_object().then(|| Dialog {
+                title: d["title"].as_str().unwrap_or("the dialog").to_string(),
+                controls: serde_json::from_value(d["controls"].clone()).ok(),
+                fields: serde_json::from_value(d["fields"].clone()).ok(),
+            }),
+        }
+    }
+}
+
+/// Check `step` against `catalog` and what `screen` shows. `Err`: refused
+/// here, nothing is sent.
+pub fn check(step: UiStep, catalog: &Catalog, screen: &Screen) -> Result<Checked, String> {
     let mut notes = Vec::new();
-    let steps = check_one(step, catalog, &mut notes)?;
+    let steps = check_one(step, catalog, screen, &mut notes)?;
     Ok(Checked { steps, notes })
+}
+
+fn refusal(verb: &str, why: &str, fix: &str) -> String {
+    format!("refused here, nothing was sent to the dashboard: ui {verb} — {why}\n  fix: {fix}")
 }
 
 fn check_one(
     step: UiStep,
     catalog: &Catalog,
+    screen: &Screen,
     notes: &mut Vec<String>,
 ) -> Result<Vec<UiStep>, String> {
+    // A server-modelled form: the dashboard checks every step against the
+    // form's own description.
+    if screen.form_open && !matches!(step, UiStep::Plan { .. }) {
+        return Ok(vec![step]);
+    }
+    // review H3: inside a page-level dialog, what that dialog offers
+    // decides (the tab finds its buttons by name or by label).
+    if let Some(d) = &screen.dialog {
+        let verb = step.verb();
+        let bad = |(why, fix): (String, String)| refusal(verb, &why, &fix);
+        match &step {
+            UiStep::Click { control: n, .. } | UiStep::Press { button: n } if n != "close" => {
+                if let Some(offer) = &d.controls {
+                    dialog_click(offer, &d.title, n, catalog).map_err(bad)?;
+                }
+                return Ok(vec![step]);
+            }
+            UiStep::Type { field, .. }
+            | UiStep::Edit { field, .. }
+            | UiStep::Pick { field, .. }
+            | UiStep::Check { field, .. } => {
+                if let Some(fields) = &d.fields {
+                    dialog_field(fields, &d.title, field, catalog).map_err(bad)?;
+                }
+                return Ok(vec![step]);
+            }
+            _ => {}
+        }
+    }
     match step {
         UiStep::Click { control, row } => match catalog.click(&control) {
             Click::Known(_) => Ok(vec![UiStep::Click { control, row }]),
@@ -83,71 +145,120 @@ fn check_one(
                 }
                 Ok(v)
             }
-            Click::Unknown { why, fix } => Err(format!(
-                "refused here, nothing was sent to the dashboard: ui click — {why}\n  fix: {fix}"
-            )),
+            Click::Unknown { why, fix } => Err(refusal("click", &why, &fix)),
         },
         UiStep::Goto { path } => {
-            // A stack's own page: whether the stack exists is the
-            // dashboard's to say (the fleet is not in the catalog).
             let bare = path.split(['?', '#']).next().unwrap_or("");
+            // review L1: a stack's own page, against the router's shape
+            // (whether the stack exists is the dashboard's to say: the
+            // fleet is not in the catalog).
             if bare.starts_with("/stacks/") {
-                return Ok(vec![UiStep::Goto { path }]);
+                return match catalog.stack_path(bare) {
+                    Ok(note) => {
+                        notes.extend(note);
+                        Ok(vec![UiStep::Goto { path }])
+                    }
+                    Err(why) => Err(refusal(
+                        "goto",
+                        &why,
+                        "`homelab ui list` ends with every address the router knows",
+                    )),
+                };
             }
             match catalog.land(&path, &[]) {
                 Ok(l) => {
-                    if let Some(n) = l.note {
-                        notes.push(n);
-                    }
+                    notes.extend(l.note);
                     Ok(vec![UiStep::Goto { path }])
                 }
-                Err(why) => Err(format!(
-                    "refused here, nothing was sent to the dashboard: ui goto — {why}\n  \
-                     fix: `homelab ui list` ends with every address the router knows"
+                Err(why) => Err(refusal(
+                    "goto",
+                    &why,
+                    "`homelab ui list` ends with every address the router knows",
                 )),
             }
         }
         UiStep::Plan { steps } => {
+            // Later steps run on a screen this check cannot see: after a
+            // click that opens a dialog (or a form), its own buttons and
+            // fields are the dialog's to check, so they go unchecked here.
             let mut out = Vec::new();
+            let mut inside = screen.clone();
             for (i, s) in steps.into_iter().enumerate() {
-                let checked = check_one(s, catalog, notes)
-                    .map_err(|e| format!("plan step {}: {e}", i + 1))?;
+                let opens = match &s {
+                    UiStep::Click { control, .. } => match catalog.click(control) {
+                        Click::Known(c) => c.opens == "dialog",
+                        Click::Renamed { control, press, .. } => {
+                            control.opens == "dialog" || press.is_some()
+                        }
+                        Click::Unknown { .. } => false,
+                    },
+                    UiStep::Open { .. } => true,
+                    _ => false,
+                };
+                let closes = matches!(
+                    s,
+                    UiStep::Close | UiStep::Done | UiStep::Goto { .. } | UiStep::Reload
+                );
+                let checked = if inside.form_open || inside.dialog.is_some() {
+                    match &s {
+                        UiStep::Goto { .. } | UiStep::Plan { .. } => {
+                            check_one(s, catalog, &Screen::default(), notes)
+                        }
+                        _ => Ok(vec![s]),
+                    }
+                } else {
+                    check_one(s, catalog, &Screen::default(), notes)
+                }
+                .map_err(|e| format!("plan step {}: {e}", i + 1))?;
                 out.extend(checked);
+                if closes {
+                    inside = Screen::default();
+                } else if opens {
+                    inside = Screen {
+                        form_open: true,
+                        dialog: None,
+                    };
+                }
             }
             Ok(vec![UiStep::Plan { steps: out }])
         }
-        // drive-reach: a page field a redesign renamed, by its old id.
+        // review M5: a page field is declared like a control; an old id is
+        // rewritten and the driver told.
         UiStep::Type { field, text } => Ok(vec![UiStep::Type {
-            field: field_now(catalog, field, notes),
+            field: field_now(catalog, "type", field, notes)?,
             text,
         }]),
         UiStep::Edit { field, text } => Ok(vec![UiStep::Edit {
-            field: field_now(catalog, field, notes),
+            field: field_now(catalog, "edit", field, notes)?,
             text,
         }]),
         UiStep::Pick { field, value } => Ok(vec![UiStep::Pick {
-            field: field_now(catalog, field, notes),
+            field: field_now(catalog, "pick", field, notes)?,
             value,
         }]),
         UiStep::Check { field, on } => Ok(vec![UiStep::Check {
-            field: field_now(catalog, field, notes),
+            field: field_now(catalog, "check", field, notes)?,
             on,
         }]),
         other => Ok(vec![other]),
     }
 }
 
-/// The id a field has now; an old one is rewritten and the driver told.
-fn field_now(catalog: &Catalog, field: String, notes: &mut Vec<String>) -> String {
-    match catalog.renamed_field(&field) {
-        Some(f) => {
-            notes.push(format!(
-                "field {field} is called {} now (on {})",
-                f.id, f.page
-            ));
-            f.id.clone()
+/// The id a page field has now: a declared one as it is, an old one
+/// rewritten (the driver told), an unknown one refused with the closest.
+fn field_now(
+    catalog: &Catalog,
+    verb: &str,
+    field: String,
+    notes: &mut Vec<String>,
+) -> Result<String, String> {
+    match catalog.field(&field) {
+        FieldName::Known(_) => Ok(field),
+        FieldName::Renamed { field: f, now } => {
+            notes.push(format!("field {field} is called {now} now (on {})", f.page));
+            Ok(now)
         }
-        None => field,
+        FieldName::Unknown { why, fix } => Err(refusal(verb, &why, &fix)),
     }
 }
 
@@ -155,6 +266,28 @@ fn field_now(catalog: &Catalog, field: String, notes: &mut Vec<String>) -> Strin
 /// where it lives, what it does and the line that clicks it; with no
 /// filter, the router's addresses and old addresses after them.
 pub fn render_list(catalog: &Catalog, filter: &[String]) -> String {
+    // review M5: `ui list fields` — every page field `ui type/pick/check/edit`
+    // may name, with its page and what it holds.
+    if let [one] = filter
+        && one == "fields"
+    {
+        let mut out = String::new();
+        for f in &catalog.fields {
+            let id = match &f.row {
+                Some(r) => format!("{}-{r}", f.id),
+                None => f.id.clone(),
+            };
+            out.push_str(&format!("{id}  · {} · {}\n", f.page, f.what));
+            if !f.was.is_empty() {
+                out.push_str(&format!("    was: {}\n", f.was.join(", ")));
+            }
+        }
+        out.push_str(&format!(
+            "\n{} page fields; a dialog's own fields and buttons are in `homelab ui state --json` (page_dialog) while it is open\n",
+            catalog.fields.len()
+        ));
+        return out;
+    }
     let picked = catalog.list(filter);
     let mut out = String::new();
     if picked.is_empty() {
@@ -248,11 +381,20 @@ pub fn render_refusals(state_reply: &str, now: i64) -> Result<String, String> {
     );
     for x in &items {
         let s = |k: &str| x[k].as_str().unwrap_or("").to_string();
-        let what = match (s("control"), s("row")) {
-            (c, r) if !c.is_empty() && !r.is_empty() => format!("{} {c} {r}", s("verb")),
-            (c, _) if !c.is_empty() => format!("{} {c}", s("verb")),
-            _ => s("verb"),
-        };
+        let name = [s("control"), s("field"), s("path")]
+            .into_iter()
+            .find(|n| !n.is_empty())
+            .unwrap_or_default();
+        let mut what = s("verb");
+        for part in [name, s("row")] {
+            if !part.is_empty() {
+                what.push(' ');
+                what.push_str(&part);
+            }
+        }
+        if let Some(n) = x["text_len"].as_u64() {
+            what.push_str(&format!(" ({n} characters typed)"));
+        }
         out.push_str(&format!(
             "{:>12}  {what} on {} by {}\n    why: {}\n    fix: {}\n",
             ago(now - x["at"].as_i64().unwrap_or(now)),
@@ -316,6 +458,11 @@ mod tests {
         .to_string()
     }
 
+    fn cat() -> Catalog {
+        let v: Value = serde_json::from_str(&reply()).unwrap();
+        Catalog::parse(&v["catalog"].to_string()).unwrap()
+    }
+
     fn click(c: &str, row: Option<&str>) -> UiStep {
         UiStep::Click {
             control: c.into(),
@@ -325,25 +472,26 @@ mod tests {
 
     #[test]
     fn drive_reach_an_unknown_control_is_refused_locally_with_the_closest() {
-        let cat = catalog_of(&reply()).unwrap();
-        let e = check(click("new-schedul", None), &cat).unwrap_err();
+        let cat = cat();
+        let e = check(click("new-schedul", None), &cat, &Screen::default()).unwrap_err();
         assert!(e.contains("nothing was sent"), "{e}");
         assert!(e.contains("new-schedule (on schedules"), "{e}");
         assert!(e.contains("homelab ui click new-schedule"), "{e}");
-        let ok = check(click("new-schedule", None), &cat).unwrap();
+        let ok = check(click("new-schedule", None), &cat, &Screen::default()).unwrap();
         assert_eq!(ok.steps, [click("new-schedule", None)]);
         assert!(ok.notes.is_empty());
     }
 
     #[test]
     fn drive_reach_an_old_field_name_is_rewritten_to_the_field_it_became() {
-        let cat = catalog_of(&reply()).unwrap();
+        let cat = cat();
         let c = check(
             UiStep::Pick {
                 field: "shell-vmid".into(),
                 value: "104".into(),
             },
             &cat,
+            &Screen::default(),
         )
         .unwrap();
         assert_eq!(
@@ -358,24 +506,23 @@ mod tests {
             "{:?}",
             c.notes
         );
-        // A field no declaration renamed goes as it is (most page fields
-        // are found by their element id and are not in the catalog).
-        let same = check(
+        // review M5: a page field no page declares is refused like a click.
+        let e = check(
             UiStep::Type {
                 field: "notify-digest".into(),
                 text: "07:30".into(),
             },
             &cat,
+            &Screen::default(),
         )
-        .unwrap();
-        assert!(same.notes.is_empty());
-        assert!(matches!(&same.steps[0], UiStep::Type { field, .. } if field == "notify-digest"));
+        .unwrap_err();
+        assert!(e.contains("no page declares a field notify-digest"), "{e}");
     }
 
     #[test]
     fn drive_reach_an_old_control_name_becomes_the_click_and_the_press() {
-        let cat = catalog_of(&reply()).unwrap();
-        let c = check(click("edit-schedule", Some("s1")), &cat).unwrap();
+        let cat = cat();
+        let c = check(click("edit-schedule", Some("s1")), &cat, &Screen::default()).unwrap();
         assert_eq!(
             c.steps,
             [
@@ -392,6 +539,7 @@ mod tests {
                 steps: vec![click("edit-schedule", Some("s1"))],
             },
             &cat,
+            &Screen::default(),
         )
         .unwrap();
         assert!(matches!(&p.steps[0], UiStep::Plan { steps } if steps.len() == 2));
@@ -400,7 +548,8 @@ mod tests {
                 UiStep::Plan {
                     steps: vec![click("zzz", None)]
                 },
-                &cat
+                &cat,
+                &Screen::default()
             )
             .unwrap_err()
             .starts_with("plan step 1:")
@@ -409,24 +558,19 @@ mod tests {
 
     #[test]
     fn drive_reach_goto_is_checked_and_an_old_address_says_its_new_home() {
-        let cat = catalog_of(&reply()).unwrap();
+        let cat = cat();
         let g = |p: &str| UiStep::Goto { path: p.into() };
-        let c = check(g("/status"), &cat).unwrap();
+        let c = check(g("/status"), &cat, &Screen::default()).unwrap();
         assert_eq!(c.steps, [g("/status")]);
         assert!(c.notes[0].contains("it is /inbox now"), "{:?}", c.notes);
-        assert!(check(g("/stacks/anything/logs"), &cat).is_ok());
-        let e = check(g("/inbx"), &cat).unwrap_err();
+        assert!(check(g("/stacks/anything/logs"), &cat, &Screen::default()).is_ok());
+        let e = check(g("/inbx"), &cat, &Screen::default()).unwrap_err();
         assert!(e.contains("the closest: /inbox"), "{e}");
     }
 
     #[test]
-    fn drive_reach_an_older_dashboard_without_a_catalog_is_not_checked() {
-        assert!(catalog_of(r#"{"ok":true,"state":{}}"#).is_none());
-    }
-
-    #[test]
     fn drive_reach_list_names_where_each_control_lives_and_its_line() {
-        let cat = catalog_of(&reply()).unwrap();
+        let cat = cat();
         let all = render_list(&cat, &[]);
         assert!(
             all.contains("schedule-menu  · /activity?view=planned · opens a dialog"),
@@ -455,6 +599,9 @@ mod tests {
         // A half-remembered old name still finds what it became.
         let half = render_list(&cat, &["edit-schedul".into()]);
         assert!(half.starts_with("schedule-menu"), "{half}");
+        let fields = render_list(&cat, &["fields".into()]);
+        assert!(fields.starts_with("shell-target  · shell"), "{fields}");
+        assert!(fields.contains("was: shell-vmid"), "{fields}");
         let none = render_list(&cat, &["menu-schedulez".into()]);
         assert!(none.starts_with("no control matches"), "{none}");
         assert!(none.contains("the closest: schedule-menu"), "{none}");

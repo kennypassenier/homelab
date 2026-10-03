@@ -759,6 +759,17 @@ pub enum UiStep {
     /// mark each step as it is taken. A later step that is not the next one
     /// of the plan is still taken, and marks the plan "changed".
     Plan { steps: Vec<UiStep> },
+    /// drive-reach (review M3): change nothing; answer the dashboard's Live
+    /// view control catalog (`{hash, schema, text}`), which `state` names
+    /// only by its hash.
+    Controls,
+    /// drive-reach (review M3): change nothing; answer the refused steps the
+    /// dashboard keeps (`homelab ui refusals`).
+    Refusals,
+    /// drive-reach (review M4): change nothing on screen; the client refused
+    /// a step itself against the catalog, and the dashboard counts it with
+    /// the ones it refused. Only the verb and the name, never typed text.
+    RefusedLocally { verb: String, name: String },
 }
 
 impl UiStep {
@@ -767,7 +778,9 @@ impl UiStep {
     /// action's own scope.
     pub fn scope(&self) -> Scope {
         match self {
-            UiStep::State => Scope::Read,
+            UiStep::State | UiStep::Controls | UiStep::Refusals | UiStep::RefusedLocally { .. } => {
+                Scope::Read
+            }
             _ => Scope::Operate,
         }
     }
@@ -790,6 +803,9 @@ impl UiStep {
             UiStep::State => "state",
             UiStep::Done => "done",
             UiStep::Plan { .. } => "plan",
+            UiStep::Controls => "controls",
+            UiStep::Refusals => "refusals",
+            UiStep::RefusedLocally { .. } => "refused_locally",
         }
     }
 }

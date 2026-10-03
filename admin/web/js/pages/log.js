@@ -4,12 +4,36 @@
 // source selector), per level and by text; follow the tail or scroll back.
 // The transfers' byte counters sit on top while they run.
 
+import { declareField } from "../drivable.js";
 import { fetchJson, h, progressGroup } from "../dom.js";
 import { logLine } from "../jobs.js";
 import { lineMatches, transferView, whoText } from "../parity.js";
 import { current, listen, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
 import { attachLogs } from "/static/kp/js/log.js";
+
+// review M5: every page field Live view may set is declared (drivable.js
+// `declareField`); the client and the dashboard refuse any other.
+const LOG_SOURCE = declareField({
+  id: "log-source",
+  page: "log",
+  what: "the host log source",
+});
+const LOG_LEVEL = declareField({
+  id: "log-level",
+  page: "log",
+  what: "the lowest level shown",
+});
+const LOG_Q = declareField({
+  id: "log-q",
+  page: "log",
+  what: "filter the lines by text",
+});
+const LOG_FOLLOW = declareField({
+  id: "log-follow",
+  page: "log",
+  what: "follow new lines as they come",
+});
 
 /** Lines kept in the page, as the server's ring. */
 const KEEP = 2000;
@@ -26,10 +50,10 @@ export function mount(root) {
     level: params.get("level") ?? "",
     q: params.get("q") ?? "",
   };
-  const sourceSel = h("select", { class: "kp-field__input", id: "log-source" });
+  const sourceSel = h("select", { class: "kp-field__input", id: LOG_SOURCE });
   const levelSel = h(
     "select",
-    { class: "kp-field__input", id: "log-level" },
+    { class: "kp-field__input", id: LOG_LEVEL },
     h("option", { value: "" }, "Every level"),
     h("option", { value: "info" }, "Info and up"),
     h("option", { value: "warn" }, "Warnings and errors"),
@@ -38,7 +62,7 @@ export function mount(root) {
   levelSel.value = filter.level;
   const text = h("input", {
     class: "kp-field__input",
-    id: "log-q",
+    id: LOG_Q,
     type: "search",
     placeholder: "Only lines containing…",
   });
@@ -46,7 +70,7 @@ export function mount(root) {
   const follow = h("input", {
     class: "kp-field__check",
     type: "checkbox",
-    id: "log-follow",
+    id: LOG_FOLLOW,
   });
   follow.checked = true;
   const tail = h(

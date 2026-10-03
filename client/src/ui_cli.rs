@@ -313,6 +313,8 @@ pub fn parse_with(
         UiStep::Select { .. } => args.len() > 2,
         UiStep::Close | UiStep::Reload | UiStep::State | UiStep::Done => args.len() > 1,
         UiStep::Type { .. } | UiStep::Plan { .. } => false,
+        // Never parsed from words: the client sends these itself.
+        UiStep::Controls | UiStep::Refusals | UiStep::RefusedLocally { .. } => false,
     };
     if extra {
         return Err(format!("too many words for ui {verb}; {}", usage()));

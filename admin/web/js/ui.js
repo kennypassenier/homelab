@@ -54,6 +54,7 @@
 import { agoEl, setAgo } from "./ago.js";
 import { h } from "./dom.js";
 import { dialogControl, drivable } from "./drivable.js";
+import { attachDataTables } from "/static/kp/js/datatable.js";
 import { toast as kpToast } from "/static/kp/js/overlays.js";
 import { applySort, keepSort, nextSort, rememberedSort } from "./sortstate.js";
 
@@ -244,16 +245,23 @@ export function pageHeader(spec) {
 
 /**
  * @typedef {{key?: string, label: string, value?: string, unit?: string,
- *   ctx?: string, ctxTone?: "ok" | "warn" | "bad" | null,
+ *   ctx?: string, ctxTone?: "ok" | "warn" | "bad" | "" | null,
+ *   ctxParts?: {text: string, tone?: "ok" | "warn" | "bad" | ""}[] | null,
+ *   colour?: string, target?: string,
  *   tone?: "" | "warn" | "bad" | null, href?: string,
- *   spark?: number[], meter?: Meter, title?: string,
+ *   spark?: number[], meter?: Meter | null, title?: string,
  *   toggle?: {pressed: boolean, onToggle: () => void, drive?: Drive}}} Kpi
  *   `spark` or `meter` fill the tile's fourth row (a tile given neither
  *   has three rows). `href`: the tile links to its filtered detail;
  *   `toggle`: the tile is a button turning a filter on this page on or
  *   off (`aria-pressed`), the Live view control `drive` (required when the
  *   tile is made; a later `set` may leave it out). `ctxTone` puts a
- *   status dot before the context line.
+ *   status dot before the context line; `ctxParts` draws the context as
+ *   pieces, each with its own dot ("7 enforced" green, "2 open" amber).
+ *   `colour`: the sparkline's colour. `target`: the id of the card on this
+ *   page the tile sums up; the tile is a same-site link to it and scrolls
+ *   there (Metrics, the Map). A tile made without a spark or meter grows
+ *   its fourth row when a later `set` brings one.
  */
 
 /**
@@ -298,24 +306,38 @@ export function kpi(k) {
   const hint = h("span", { class: "nx-kpi__hint", "aria-hidden": "true" });
   const value = h("span", { class: "nx-kpi__value" });
   const ctx = h("span", { class: "nx-kpi__ctx" });
-  const m = k.meter ? meter(k.meter) : null;
-  const foot = m
+  let m = k.meter ? meter(k.meter) : null;
+  /** @type {HTMLElement | null} */
+  let foot = m
     ? m.el
     : k.spark
       ? h("span", { class: "nx-kpi__spark", "aria-hidden": "true" })
       : null;
+  // A same-site path (invariant 35), the card's id as its hash.
+  const href = k.target
+    ? `${location.pathname}${location.search}#${k.target}`
+    : k.href;
   /** @type {HTMLElement} */
   const e = k.toggle
     ? h("button", { type: "button", class: "nx-kpi nx-kpi--toggle" })
-    : h(k.href ? "a" : "div", {
+    : h(href ? "a" : "div", {
         class: "nx-kpi",
-        ...(k.href ? { href: k.href } : {}),
+        ...(href ? { href } : {}),
       });
   if (!foot) e.classList.add("nx-kpi--bare");
   e.append(label, ...(k.toggle ? [hint] : []), value, ctx);
   if (foot) e.append(foot);
   /** @type {Kpi} */
   let cur = { ...k };
+  if (k.target)
+    e.addEventListener("click", (ev) => {
+      if (!cur.target) return;
+      // The page's own scroll, never a navigation (main.js routes links).
+      ev.preventDefault();
+      document
+        .getElementById(cur.target)
+        ?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
   if (k.toggle) {
     if (!k.toggle.drive)
       throw new Error(`the KPI toggle ${k.label} needs its Live view control`);
@@ -339,11 +361,26 @@ export function kpi(k) {
           ]),
     );
     ctx.replaceChildren(
-      loading
-        ? skeleton("80%")
-        : cur.ctxTone
-          ? h("span", { class: `nx-dot nx-dot--${cur.ctxTone}` }, cur.ctx ?? "")
-          : (cur.ctx ?? ""),
+      ...(loading
+        ? [skeleton("80%")]
+        : cur.ctxParts?.length
+          ? cur.ctxParts.flatMap((p, i) => [
+              ...(i ? [" · "] : []),
+              h(
+                "span",
+                p.tone ? { class: `nx-dot nx-dot--${p.tone}` } : null,
+                p.text,
+              ),
+            ])
+          : [
+              cur.ctxTone
+                ? h(
+                    "span",
+                    { class: `nx-dot nx-dot--${cur.ctxTone}` },
+                    cur.ctx ?? "",
+                  )
+                : (cur.ctx ?? ""),
+            ]),
     );
     e.dataset.tone = cur.tone ?? "";
     e.dataset.key = cur.key ?? cur.label;
@@ -352,12 +389,26 @@ export function kpi(k) {
       e.setAttribute("aria-pressed", String(cur.toggle.pressed));
       hint.textContent = cur.toggle.pressed ? "filtering ×" : "filter";
     }
-    if (m && cur.meter) {
-      m.set(cur.meter);
-    } else if (foot)
-      foot.replaceChildren(
-        ...(cur.spark && cur.spark.length > 1 ? [sparkline(cur.spark)] : []),
-      );
+    if (!foot && (cur.meter || (cur.spark && cur.spark.length > 1))) {
+      foot = h("span", { class: "nx-kpi__spark", "aria-hidden": "true" });
+      e.classList.remove("nx-kpi--bare");
+      e.append(foot);
+    }
+    if (cur.meter) {
+      if (m) m.set(cur.meter);
+      else if (foot) {
+        m = meter(cur.meter);
+        foot.replaceChildren(m.el);
+      }
+    } else if (foot) {
+      if (m && foot !== m.el) m = null;
+      if (!m)
+        foot.replaceChildren(
+          ...(cur.spark && cur.spark.length > 1
+            ? [sparkline(cur.spark, cur.colour ? { colour: cur.colour } : {})]
+            : []),
+        );
+    }
     if (cur.href && e instanceof HTMLAnchorElement) e.href = cur.href;
   };
   set({});
@@ -368,7 +419,9 @@ export function kpi(k) {
  * A row of 3 to 6 KPI tiles; while `loading` each tile is its own skeleton
  * in the final geometry.
  * @param {Kpi[]} tiles
- * @param {{loading?: boolean, label?: string}} [opts]
+ * @param {{loading?: boolean, label?: string, drive?: {id: string}}} [opts]
+ *   `drive`: the Live view control every tile is, on its own row (the
+ *   tile's key)
  * @returns {{el: HTMLElement, tiles: Map<string, ReturnType<typeof kpi>>}}
  */
 export function kpiStrip(tiles, opts = {}) {
@@ -382,6 +435,7 @@ export function kpiStrip(tiles, opts = {}) {
   e.style.setProperty("--kpi-n", String(Math.max(1, tiles.length)));
   for (const t of tiles) {
     const k = kpi(t);
+    if (opts.drive) drive(k.el, { id: opts.drive.id, row: t.key ?? t.label });
     if (opts.loading) k.set({ loading: true });
     map.set(t.key ?? t.label, k);
     e.append(k.el);
@@ -2020,3 +2074,80 @@ let drawers = 0;
  * `uikit.test.js` holds the stylesheet to this one number).
  */
 export const PHONE = "(max-width: 48rem)";
+
+/**
+ * A kp datatable with no search bar of its own: sortable headers,
+ * Shift-click for a second key, the sort remembered under `remember`; the
+ * caller fills `tbody`, then wires it with a `tableSlot` (or
+ * `attachDataTables`). `cls` adds the page's own class (Metrics, the Map).
+ * @param {{remember: string, caption: string, cls?: string,
+ *   columns: {label: string, sort?: string, cls?: string}[]}} spec
+ */
+export function dataTable(spec) {
+  const tbody = h("tbody");
+  const wrap = h(
+    "div",
+    {
+      class: `kp-datatable${spec.cls ? ` ${spec.cls}` : ""}`,
+      "data-kp-datatable": "",
+      "data-kp-sort-multi": "",
+      "data-kp-remember": spec.remember,
+      "data-kp-page-sizes": "none",
+      "data-kp-page-size": "500",
+    },
+    h(
+      "div",
+      { class: "kp-table-wrap" },
+      h(
+        "table",
+        { class: "kp-table" },
+        h("caption", { class: "kp-sr-only" }, spec.caption),
+        h(
+          "thead",
+          null,
+          h(
+            "tr",
+            null,
+            ...spec.columns.map((c) =>
+              h(
+                "th",
+                {
+                  ...(c.sort && c.sort !== "none"
+                    ? { "data-kp-sort": c.sort }
+                    : {}),
+                  ...(c.cls ? { class: c.cls } : {}),
+                },
+                c.label,
+              ),
+            ),
+          ),
+        ),
+        tbody,
+      ),
+    ),
+  );
+  return { wrap, tbody };
+}
+
+/**
+ * One card's datatable behaviour: `attach(body)` wires the table just put
+ * in `body` and stops the one it replaced, so a page that repaints every
+ * 30 s keeps one listener set per card, not one per repaint.
+ * @param {(root: HTMLElement) => () => void} [attachFn] attachDataTables
+ *   (a test passes its own)
+ */
+export function tableSlot(attachFn = attachDataTables) {
+  /** @type {(() => void) | null} */
+  let stop = null;
+  return {
+    /** @param {HTMLElement} body */
+    attach: (body) => {
+      stop?.();
+      stop = attachFn(body);
+    },
+    stop: () => {
+      stop?.();
+      stop = null;
+    },
+  };
+}

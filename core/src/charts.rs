@@ -411,7 +411,7 @@ pub mod humanize {
 
     fn ct_label(vmid: u16, stacks: &[Stack]) -> String {
         match by_vmid(stacks, vmid) {
-            Some(name) => format!("CT {vmid} ({name})"),
+            Some(name) => format!("CT {vmid} · {name}"),
             None => format!("CT {vmid}"),
         }
     }
@@ -441,7 +441,7 @@ pub mod humanize {
     }
 
     /// A network device name (Prometheus' `device` label): a guest's own
-    /// virtual device becomes "CT \<vmid\> (\<stack\>)"; the hypervisor's own
+    /// virtual device becomes "CT \<vmid\> · \<stack\>"; the hypervisor's own
     /// bridge or physical NIC becomes "host uplink \<name\>"; anything else
     /// (a drive device name on the SMART panels, which also carry a
     /// `device` label) passes through unchanged, since it is already a
@@ -466,7 +466,7 @@ pub mod humanize {
     }
 
     /// A cgroup/Proxmox resource id (`id` label), e.g. `lxc/117`, becomes
-    /// "CT \<vmid\> (\<stack\>)"; anything that does not parse passes
+    /// "CT \<vmid\> · \<stack\>"; anything that does not parse passes
     /// through unchanged.
     pub fn cgroup_id(raw: &str, stacks: &[Stack]) -> String {
         if let Some(vmid) = raw
@@ -642,11 +642,11 @@ mod humanize_tests {
 
     #[test]
     fn fwbr_veth_and_tap_map_to_the_stack_that_owns_the_vmid() {
-        assert_eq!(iface("fwbr117i0", &stacks()), "CT 117 (registry)");
-        assert_eq!(iface("veth117i0", &stacks()), "CT 117 (registry)");
-        assert_eq!(iface("tap118i0", &stacks()), "CT 118 (gateway)");
-        assert_eq!(iface("fwln117i0", &stacks()), "CT 117 (registry)");
-        assert_eq!(iface("fwpr118p0", &stacks()), "CT 118 (gateway)");
+        assert_eq!(iface("fwbr117i0", &stacks()), "CT 117 · registry");
+        assert_eq!(iface("veth117i0", &stacks()), "CT 117 · registry");
+        assert_eq!(iface("tap118i0", &stacks()), "CT 118 · gateway");
+        assert_eq!(iface("fwln117i0", &stacks()), "CT 117 · registry");
+        assert_eq!(iface("fwpr118p0", &stacks()), "CT 118 · gateway");
     }
 
     #[test]
@@ -670,7 +670,7 @@ mod humanize_tests {
 
     #[test]
     fn cgroup_id_maps_lxc_slash_vmid() {
-        assert_eq!(cgroup_id("lxc/117", &stacks()), "CT 117 (registry)");
+        assert_eq!(cgroup_id("lxc/117", &stacks()), "CT 117 · registry");
         assert_eq!(cgroup_id("lxc/42", &stacks()), "CT 42");
         assert_eq!(cgroup_id("not-an-id", &stacks()), "not-an-id");
     }
@@ -693,8 +693,8 @@ mod humanize_tests {
             serde_json::json!({"label": "veth117i0", "points": []}),
         ];
         let out = super::humanize::series(raw, Some("device"), &stacks());
-        assert_eq!(out[0]["label"], "CT 117 (registry)");
-        assert_eq!(out[1]["label"], "CT 117 (registry) #2");
+        assert_eq!(out[0]["label"], "CT 117 · registry");
+        assert_eq!(out[1]["label"], "CT 117 · registry #2");
     }
 
     #[test]

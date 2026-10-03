@@ -317,7 +317,7 @@ const VIEWS = /** @type {const} */ ([
  */
 export function mount(root, ctx) {
   ensureStyle("/css/pages/activity.css");
-  root.classList.add("ac-page");
+  root.classList.add("ac-page", "nx-ops");
   const params = new URLSearchParams(location.search);
   const asked = params.get("view") ?? "";
   const view = asked === "planned" || asked === "host-log" ? asked : "";
@@ -375,7 +375,7 @@ export function mount(root, ctx) {
     const stop = mountSchedules(body, { level: "h2" });
     return () => {
       stop();
-      root.classList.remove("ac-page");
+      root.classList.remove("ac-page", "nx-ops");
     };
   }
   if (view === "host-log") {
@@ -433,13 +433,13 @@ export function mount(root, ctx) {
     );
     return () => {
       ex.cleanup();
-      root.classList.remove("ac-page");
+      root.classList.remove("ac-page", "nx-ops");
     };
   }
   const stop = mountNow(body, { days, header, ctx });
   return () => {
     stop();
-    root.classList.remove("ac-page");
+    root.classList.remove("ac-page", "nx-ops");
   };
 }
 

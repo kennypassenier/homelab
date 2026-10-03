@@ -438,58 +438,7 @@ async fn traffic(State(c): State<ReadCtx>, Query(q): Query<ChartQuery>) -> Respo
             "use one of 1h, 6h, 24h, 7d, 30d",
         );
     };
-    let job = job.replace('"', "");
-    let sel = format!("{{job=\"{job}\"}} | json | __error__=\"\"");
-    let end = now_s();
-    let start = end.saturating_sub(span);
-    let per = |by: &str| format!("topk(8, sum by ({by}) (count_over_time({sel} [{step}s])))");
-    let panels = [
-        (
-            "Requests per hostname",
-            "How many requests each hostname behind the proxy received in \
-             this window, from its access log.",
-            per("RequestHost"),
-            "RequestHost",
-        ),
-        (
-            "Requests per status",
-            "How many requests answered with each HTTP status in this \
-             window; a rising share of 4xx/5xx is worth a look.",
-            per("DownstreamStatus"),
-            "DownstreamStatus",
-        ),
-    ];
-    let mut out = Vec::new();
-    for (title, desc, query, legend) in panels {
-        let panel = serde_json::json!({ "title": title, "desc": desc, "query": query, "unit": "count", "legend": legend });
-        out.push(
-            match loki
-                .metric_range(&query, start, end, step, Some(legend))
-                .await
-            {
-                Ok(series) => serde_json::json!({ "panel": panel, "series": series }),
-                Err(e) => serde_json::json!({ "panel": panel, "series": [], "error": e }),
-            },
-        );
-    }
-    let top = |by: &str| format!("topk(20, sum by ({by}) (count_over_time({sel} [{span}s])))");
-    let hosts = loki
-        .metric_now(&top("RequestHost"), end, "RequestHost")
-        .await;
-    let clients = loki.metric_now(&top("ClientHost"), end, "ClientHost").await;
-    let table = |r: Result<Vec<(String, f64)>, String>| match r {
-        Ok(rows) => serde_json::json!({ "rows": rows }),
-        Err(e) => serde_json::json!({ "rows": [], "error": e }),
-    };
-    Json(serde_json::json!({
-        "panels": out,
-        "hosts": table(hosts),
-        "clients": table(clients),
-        "from": start,
-        "to": end,
-        "step": step,
-    }))
-    .into_response()
+    Json(super::traffic::read(loki, job, span, step, now_s()).await).into_response()
 }
 
 /// The stack names the fleet currently reports, for a fleet-wide Prometheus

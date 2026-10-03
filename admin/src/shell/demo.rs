@@ -59,152 +59,30 @@ pub async fn spawn_demo_metrics() -> String {
 #[derive(serde::Deserialize)]
 struct PromQ {
     query: String,
+    #[serde(default)]
+    start: Option<String>,
+    #[serde(default)]
+    end: Option<String>,
+    #[serde(default)]
+    step: Option<String>,
 }
 
-/// One made-up `matrix`/`vector` answer, chosen by matching a fragment of
-/// the query text — the same thing a real Prometheus would answer for that
-/// `by (...)` clause, with one point per series (good enough for both
-/// `query` and `query_range`: `panelEl` only ever reads the last point).
+/// redesign-371-metrics: one made-up answer over the window asked for
+/// (shell/demo_metrics.rs) — a time series for `query_range`, one point
+/// for an instant `query`.
 async fn prom_query(Query(q): Query<PromQ>) -> Response {
-    axum::Json(demo_metric_body(&q.query)).into_response()
+    let now = now_s();
+    let w = super::demo_metrics::Window::from_params(
+        q.start.as_deref(),
+        q.end.as_deref(),
+        q.step.as_deref(),
+        now,
+    );
+    axum::Json(super::demo_metrics::body(&q.query, &w, now)).into_response()
 }
 
-async fn loki_query_range(Query(q): Query<PromQ>) -> Response {
-    axum::Json(demo_metric_body(&q.query)).into_response()
-}
-
-/// Deliberately raw ids (fix-220's whole-screen invariant proves the
-/// dashboard never shows one of these as a series label):
-/// - `fwbr117i0` / `veth117i0` — a guest's own firewall bridge and virtual
-///   NIC, vmid 117 embedded by Proxmox's own naming.
-/// - `0000:00:01_0_0000:01:00_0` — an hwmon chip id, the sysfs PCI path with
-///   `/` and `.` turned into `_` (exactly what Kenny saw live).
-/// - `lxc/117` — a Proxmox cgroup id, same vmid.
-///
-/// One SMART drive answers "not ok" (`sdb`) so the health table has both
-/// states to show, not one flat "ok" line.
-fn demo_metric_body(query: &str) -> serde_json::Value {
-    let at = now_s();
-    if let Some(body) = demo_host_disk_history(query, at) {
-        return body;
-    }
-    let series = |pairs: &[(&str, f64)]| -> serde_json::Value {
-        let result: Vec<serde_json::Value> = pairs
-            .iter()
-            .map(|(label, v)| {
-                serde_json::json!({
-                    "metric": { metric_key(query): label },
-                    "value": [at, v.to_string()],
-                    "values": [[at, v.to_string()]],
-                })
-            })
-            .collect();
-        serde_json::json!({ "status": "success", "data": { "resultType": "matrix", "result": result } })
-    };
-    if query.contains("node_hwmon_temp_celsius") {
-        return series(&[
-            ("0000:00:01_0_0000:01:00_0", 46.0),
-            ("0000:00:02_0_0000:02:00_0", 52.0),
-        ]);
-    }
-    if query.contains("smart_device_health_ok") {
-        return series(&[("sda", 1.0), ("sdb", 0.0)]);
-    }
-    if query.contains("smart_device_pending_sectors") {
-        return series(&[("sda", 0.0), ("sdb", 12.0)]);
-    }
-    if query.contains("smart_device_reallocated_sectors") {
-        return series(&[("sda", 0.0), ("sdb", 3.0)]);
-    }
-    if query.contains("smart_device_temperature_celsius") {
-        return series(&[("sda", 34.0), ("sdb", 41.0)]);
-    }
-    if query.contains("smart_device_power_on_hours") {
-        return series(&[("sda", 8760.0), ("sdb", 12000.0)]);
-    }
-    if query.contains("pve_memory_usage_bytes") {
-        return series(&[("lxc/117", 2_147_483_648.0), ("lxc/118", 1_073_741_824.0)]);
-    }
-    if query.contains("node_network_receive_bytes_total") {
-        return series(&[
-            ("vmbr0", 120_000.0),
-            ("fwbr117i0", 4_200.0),
-            ("veth118i0", 1_800.0),
-        ]);
-    }
-    if query.contains("node_load") {
-        return series(&[("", 1.25)]);
-    }
-    if query.contains("RequestHost") {
-        return series(&[("demo.example.org", 42.0), ("films.example.org", 7.0)]);
-    }
-    if query.contains("DownstreamStatus") {
-        return series(&[("200", 44.0), ("404", 3.0), ("500", 1.0)]);
-    }
-    // CPU/memory/disk and anything else: one plain series, no legend.
-    series(&[("", 12.5)])
-}
-
-/// redesign-host-4: the hypervisor's own filesystems
-/// (`homelab_core::charts::host_disk_growth_query`) with a week of history,
-/// one point every six hours, so `/data/disk-growth` has a real fit and the
-/// Host page's Disk card a real growth line: root 31 % full and growing
-/// 0.03 % of 96 GB a day (about 0.2 GB a week), a second filesystem flat.
-/// Every other query keeps its one-point answer.
-pub fn demo_host_disk_history(query: &str, at: u64) -> Option<serde_json::Value> {
-    if !(query.contains("node_filesystem_avail_bytes") && query.contains("host=")) {
-        return None;
-    }
-    let week = |now_pct: f64, per_day: f64| -> Vec<serde_json::Value> {
-        (0..=28u64)
-            .rev()
-            .map(|k| {
-                let t = at.saturating_sub(k * 6 * 3_600);
-                let pct = now_pct - per_day * (k as f64) / 4.0;
-                serde_json::json!([t, format!("{pct:.4}")])
-            })
-            .collect()
-    };
-    let one = |mount: &str, values: Vec<serde_json::Value>| {
-        let last = values.last().cloned();
-        serde_json::json!({
-            "metric": { "mountpoint": mount },
-            "values": values,
-            "value": last,
-        })
-    };
-    Some(serde_json::json!({
-        "status": "success",
-        "data": {
-            "resultType": "matrix",
-            "result": [one("/", week(31.0, 0.03)), one("/boot/efi", week(1.0, 0.0))],
-        },
-    }))
-}
-
-/// The `by (...)` label this query groups on, read straight out of the
-/// query text — the same label the real admin passes as `legend`, so the
-/// made-up `metric` map always carries the field `routes.rs` asks for.
-fn metric_key(query: &str) -> &'static str {
-    if query.contains("smart_device") {
-        "device"
-    } else if query.contains("by (chip)") {
-        "chip"
-    } else if query.contains("by (device)") {
-        "device"
-    } else if query.contains("by (id)") {
-        "id"
-    } else if query.contains("by (name)") {
-        "name"
-    } else if query.contains("RequestHost") {
-        "RequestHost"
-    } else if query.contains("DownstreamStatus") {
-        "DownstreamStatus"
-    } else if query.contains("node_filesystem") {
-        "mountpoint"
-    } else {
-        "stack"
-    }
+async fn loki_query_range(q: Query<PromQ>) -> Response {
+    prom_query(q).await
 }
 
 /// feat-platform-10: a host that lives in this process, for the browser

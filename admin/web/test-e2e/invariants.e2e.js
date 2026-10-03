@@ -61,6 +61,10 @@ async function logIn(context) {
  * @param {import("playwright").BrowserContext} context
  */
 async function freshPage(context) {
+  // A case that can hang for minutes is a defect: every Playwright wait in
+  // a case's context ends after 20 s unless the case asks for longer.
+  context.setDefaultTimeout(20000);
+  context.setDefaultNavigationTimeout(20000);
   await logIn(context);
   const page = await context.newPage();
   await page.goto(`${BASE}/stacks`);
@@ -682,7 +686,7 @@ test("invariants: only one topology exists, on the Fleet view, and the traffic t
     await page.goto(`${BASE}/firewall`);
     await page.waitForSelector("table", { timeout: 10000 });
     assert.equal(
-      await page.locator(".topology__svg").count(),
+      await page.locator(".topology__svg, .mp-svg").count(),
       0,
       "the firewall page must draw no topology of its own any more",
     );
@@ -693,21 +697,22 @@ test("invariants: only one topology exists, on the Fleet view, and the traffic t
     assert.ok(href?.includes("traffic=1"), `link missing traffic=1: ${href}`);
 
     await page.goto(`${BASE}/fleetview`);
-    await page.waitForSelector(".topology__svg", { timeout: 10000 });
+    // redesign-371-map: the Map's own renderer (js/pages/mapgraph.js).
+    await page.waitForSelector(".mp-svg", { timeout: 10000 });
     assert.equal(
-      await page.locator(".topology__svg").count(),
+      await page.locator(".mp-svg, .topology__svg").count(),
       1,
-      "the fleet view must draw exactly one topology",
+      "the Map must draw exactly one topology",
     );
     const toggle = page.locator("#fleetview-traffic");
     assert.equal(
-      await page.locator(".topology__traffic-ring").count(),
+      await page.locator(".mp-ring--traffic").count(),
       0,
       "a traffic ring is drawn before the toggle is on",
     );
     await toggle.check();
     await page.waitForFunction(
-      () => document.querySelectorAll(".topology__traffic-ring").length > 0,
+      () => document.querySelectorAll(".mp-ring--traffic").length > 0,
       { timeout: 5000 },
     );
   } finally {
@@ -725,9 +730,7 @@ test("invariants: fleet view shows a legend and an edge for a stack whose own fi
     const page = await freshPage(context);
     await page.goto(`${BASE}/fleetview`);
     await page.waitForTimeout(600);
-    const legendItems = await page
-      .locator(".topology__legend .topology__key")
-      .count();
+    const legendItems = await page.locator(".mp-kinds .mp-kind").count();
     assert.ok(legendItems > 0, "the topology has no legend");
     // scripts/invariants-run.sh's fixture working copy: alpha-demo names
     // beta-demo's address (10.10.10.91:8080) directly in its own manifest,
@@ -737,10 +740,10 @@ test("invariants: fleet view shows a legend and an edge for a stack whose own fi
     // other on the circle layout draw a dead-straight vertical curve) —
     // present in the DOM is what matters here, not CSS visibility.
     await page.waitForFunction(
-      () => document.querySelectorAll(".topology__edge--named").length > 0,
+      () => document.querySelectorAll(".mp-edge--named").length > 0,
       { timeout: 5000 },
     );
-    const named = page.locator(".topology__edge--named");
+    const named = page.locator(".mp-edge--named");
     assert.ok(
       (await named.count()) > 0,
       "no named edge for alpha-demo -> beta-demo",
@@ -834,53 +837,37 @@ test("invariants: every page keeps clear vertical spacing between its top-level 
   }
 });
 
-test("invariants: the topology's legend gives every stack its own colour", async () => {
+// Review of redesign-371-map (2026-10-03): the demo has no per-stack chip
+// row, so each stack's colour lives on its own node (and its mark in the
+// side panel and the list), and a hover on the node isolates its edges.
+test("invariants: the topology gives every stack its own colour", async () => {
   const browser = await chromium.launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
     await page.goto(`${BASE}/fleetview`);
-    await page.waitForSelector(".topology__stack-key", { timeout: 10000 });
-    const hues = await page
-      .locator(".topology__stack-key")
+    await page.waitForSelector(".mp-node:not(.mp-node--ext)", {
+      timeout: 10000,
+    });
+    const nodeHues = await page
+      .locator(".mp-node:not(.mp-node--ext)")
       .evaluateAll((els) =>
         els.map((el) => el.style.getPropertyValue("--stack-hue")),
       );
     assert.ok(
-      hues.length >= 2,
-      `expected at least two stacks, got ${hues.length}`,
+      nodeHues.length >= 2,
+      `expected at least two stacks, got ${nodeHues.length}`,
     );
     assert.equal(
-      new Set(hues).size,
-      hues.length,
-      `every stack's legend swatch must have its own hue, got ${hues}`,
+      new Set(nodeHues).size,
+      nodeHues.length,
+      `every stack's node must have its own hue, got ${nodeHues}`,
     );
-    // Each node's own hue (in the graph) matches its legend entry.
-    const nodeHues = await page
-      .locator(".topology__node")
-      .evaluateAll((els) =>
-        els.map((el) => [
-          el.getAttribute("data-stack"),
-          el.style.getPropertyValue("--stack-hue"),
-        ]),
-      );
-    const byStack = Object.fromEntries(
-      await page
-        .locator(".topology__stack-key")
-        .evaluateAll((els) =>
-          els.map((el) => [
-            el.textContent.trim(),
-            el.style.getPropertyValue("--stack-hue"),
-          ]),
-        ),
+    assert.equal(
+      await page.locator(".mp-stackkeys, .mp-stackkey").count(),
+      0,
+      "the demo has no per-stack chip row",
     );
-    for (const [stack, hue] of nodeHues) {
-      assert.equal(
-        byStack[stack],
-        hue,
-        `${stack}'s node hue must match its legend swatch`,
-      );
-    }
   } finally {
     await browser.close();
   }
@@ -892,31 +879,28 @@ test("invariants: hovering a stack in the topology isolates its own edges, leavi
     const context = await browser.newContext();
     const page = await freshPage(context);
     await page.goto(`${BASE}/fleetview`);
-    await page.waitForSelector(".topology__stack-key", { timeout: 10000 });
+    await page.waitForSelector(".mp-node:not(.mp-node--ext)", {
+      timeout: 10000,
+    });
     const stacks = await page
-      .locator(".topology__stack-key")
-      .evaluateAll((els) => els.map((el) => el.textContent.trim()));
+      .locator(".mp-node:not(.mp-node--ext)")
+      .evaluateAll((els) => els.map((el) => el.getAttribute("data-stack")));
     assert.ok(
       stacks.length >= 2,
       "need at least two stacks to prove isolation",
     );
     const target = stacks[0];
-    const before = await page.locator(".topology__edge--dim").count();
+    const before = await page.locator(".mp-edge.is-dim").count();
     assert.equal(before, 0, "nothing is dimmed before any hover");
-    await page
-      .locator(".topology__stack-key", { hasText: target })
-      .first()
-      .hover();
+    await page.locator(`.mp-node[data-stack="${target}"]`).first().hover();
     await page.waitForTimeout(50);
-    const edgeStates = await page
-      .locator(".topology__edge")
-      .evaluateAll((els) =>
-        els.map((el) => ({
-          from: el.getAttribute("data-from"),
-          to: el.getAttribute("data-to"),
-          dim: el.classList.contains("topology__edge--dim"),
-        })),
-      );
+    const edgeStates = await page.locator(".mp-edge").evaluateAll((els) =>
+      els.map((el) => ({
+        from: el.getAttribute("data-from"),
+        to: el.getAttribute("data-to"),
+        dim: el.classList.contains("is-dim"),
+      })),
+    );
     for (const e of edgeStates) {
       const touches = e.from === target || e.to === target;
       assert.equal(
@@ -929,7 +913,7 @@ test("invariants: hovering a stack in the topology isolates its own edges, leavi
     await page.mouse.move(0, 0);
     await page.waitForTimeout(50);
     assert.equal(
-      await page.locator(".topology__edge--dim").count(),
+      await page.locator(".mp-edge.is-dim").count(),
       0,
       "leaving the stack must restore every edge",
     );
@@ -948,10 +932,8 @@ test("invariants: a stack whose firewall the host enforces is shown as enforced 
     // that the first such stack is enforced on pve anyway, with the
     // mismatch flagged — Kenny's own "5 van de 11" case.
     await page.goto(`${BASE}/fleetview`);
-    await page.waitForSelector(".topology__node", { timeout: 10000 });
-    const mismatchRings = await page
-      .locator(".topology__fw-ring--mismatch")
-      .count();
+    await page.waitForSelector(".mp-node", { timeout: 10000 });
+    const mismatchRings = await page.locator(".mp-node .mp-fwring").count();
     assert.ok(
       mismatchRings > 0,
       "no node shows a host/repository firewall mismatch on the topology",
@@ -1225,26 +1207,34 @@ test("invariants: no /charts series label matches a raw-id pattern and every cha
     await page.goto(`${BASE}/charts`, { waitUntil: "load" });
     // The host's own charts (no ?stack=) carry the temperature/SMART/
     // network/memory panels the demo metrics server answers with raw ids.
-    await page.waitForSelector(".chart, .chart--health", { timeout: 5000 });
+    // redesign-371-metrics: each chart is a card (`.mk-card`) drawing the
+    // shared time chart; its sources are the legend's items, the drives
+    // the Drives table's first column.
+    await page.waitForSelector(".mk-card .tc-plot svg", { timeout: 8000 });
     await page.waitForTimeout(300);
     const found = await page.evaluate(() => {
       /** @type {string[]} */
       const labels = [];
-      for (const li of document.querySelectorAll(".chart__key"))
+      for (const li of document.querySelectorAll(
+        ".tc-legend__item > span, .tc-tip__row > span:nth-child(2)",
+      ))
         labels.push(li.textContent ?? "");
       for (const td of document.querySelectorAll(
-        ".chart--health td:first-child",
+        '[data-key="drives"] tbody td:first-child',
       ))
         labels.push(td.textContent ?? "");
       /** @type {string[]} */
       const noDesc = [];
-      for (const fig of document.querySelectorAll(".chart, .chart--health")) {
-        const cap = fig.querySelector("figcaption")?.textContent?.trim();
-        const desc = fig.querySelector(".chart__desc")?.textContent?.trim();
-        if (!desc || desc.length < 10) noDesc.push(cap ?? "(no caption)");
+      for (const card of document.querySelectorAll(".mk-card")) {
+        const cap = card.querySelector(".nx-card__head > h3")?.textContent;
+        const desc = card
+          .querySelector(".nx-card__head > p")
+          ?.textContent?.trim();
+        if (!desc || desc.length < 10) noDesc.push(cap ?? "(no title)");
       }
       return { labels, noDesc };
     });
+    assert.ok(found.labels.length >= 6, "no chart source labels found");
     const patterns = [
       /^(fwbr|fwln|fwpr|veth|tap)\d+[ip]?\d*$/,
       /^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}[_.][0-9a-f]/i,
@@ -1280,22 +1270,30 @@ test("invariants: the Drive health panel draws a status table naming each drive'
     const context = await browser.newContext();
     const page = await freshPage(context);
     await page.goto(`${BASE}/charts`, { waitUntil: "load" });
-    await page.waitForSelector(".chart--health", { timeout: 5000 });
-    const rows = await page.evaluate(() => {
-      const table = [...document.querySelectorAll(".chart--health")].find((f) =>
-        f.querySelector("figcaption")?.textContent?.includes("Drive health"),
-      );
-      return [...(table?.querySelectorAll("tbody tr") ?? [])].map((tr) => ({
-        device: tr.children[0]?.textContent?.trim() ?? "",
-        state: tr.children[1]?.textContent?.trim() ?? "",
-      }));
+    // redesign-371-metrics: the Drives card's table, one row per drive;
+    // a failing drive's state reads "not ok, since …".
+    await page.waitForSelector('[data-key="drives"] tbody tr', {
+      timeout: 8000,
     });
+    const rows = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-key="drives"] tbody tr')].map(
+        (tr) => ({
+          device: tr.children[0]?.textContent?.trim() ?? "",
+          state: tr.children[1]?.textContent?.trim() ?? "",
+        }),
+      ),
+    );
     assert.ok(
       rows.length >= 2,
       `expected at least 2 drives, got: ${JSON.stringify(rows)}`,
     );
+    assert.equal(
+      await page.locator('[data-key="drives"] .tc-plot').count(),
+      0,
+      "drive health must never be drawn as lines",
+    );
     assert.ok(
-      rows.some((r) => r.state === "not ok"),
+      rows.some((r) => r.state.startsWith("not ok")),
       `expected at least one "not ok" drive (the demo's sdb): ${JSON.stringify(rows)}`,
     );
     assert.ok(
@@ -1499,7 +1497,8 @@ test("invariants: chart blocks fill their grid's width, with no empty track left
     const page = await freshPage(context);
     for (const tab of ["system", "traffic"]) {
       await page.goto(`${BASE}/charts?tab=${tab}`);
-      const grid = page.locator(".chart-grid").first();
+      // redesign-371-metrics: the cards' 3-column grid.
+      const grid = page.locator(".mk-panels").first();
       await grid.waitFor({ timeout: 15000 });
       await page.waitForTimeout(1500);
       const gap = await grid.evaluate((g) => {
@@ -1577,11 +1576,15 @@ test("invariants: every Fleet view block has a heading and a one-sentence descri
     const page = await freshPage(context);
     await page.goto(`${BASE}/fleetview`);
     await page.waitForTimeout(600);
+    // redesign-371-map: each block is a card (ui.js `section`); Capacity
+    // and Disk growth sit side by side in one grid row, and Dependencies
+    // is the topology's List view since 3.71.0.
+    await page.waitForSelector("#page section.nx-card", { timeout: 10000 });
     const blocks = await page.evaluate(() =>
-      [...document.querySelectorAll("#page > section")].map((s) => {
-        const head = s.querySelector(":scope > .section-head h2");
+      [...document.querySelectorAll("#page section.nx-card")].map((s) => {
+        const head = s.querySelector(":scope > .nx-card__head h2");
         const desc = s.querySelector(
-          ":scope > .section-head .section-head__desc",
+          ":scope > .nx-card__head .section-head__desc",
         );
         const captions = [...s.querySelectorAll("caption")].filter(
           (c) => c.getBoundingClientRect().height > 1,
@@ -1594,7 +1597,7 @@ test("invariants: every Fleet view block has a heading and a one-sentence descri
         };
       }),
     );
-    assert.ok(blocks.length >= 5, `expected 5 blocks, got ${blocks.length}`);
+    assert.ok(blocks.length >= 4, `expected 4 blocks, got ${blocks.length}`);
     for (const b of blocks) {
       assert.ok(b.heading.length > 0, `block "${b.label}" has no h2 heading`);
       assert.ok(
@@ -1627,7 +1630,7 @@ test("invariants: a stale-image row offers Update with the from/to versions, and
     // A pin that lives in code (the demo's made-up agent on several stacks)
     // says where it is updated instead of offering a button.
     const elsewhere = page.locator('section[aria-label="Stale images"] td', {
-      hasText: "updated with a homelab release, not from here",
+      hasText: "with a homelab release",
     });
     assert.ok(
       (await elsewhere.count()) >= 1,
@@ -2390,7 +2393,7 @@ test("invariants: every chart and timeline axis label renders at 11 px or more o
     for (const path of ["charts", "charts?tab=traffic", "timeline"]) {
       await page.goto(`${BASE}/${path}`);
       await page
-        .waitForSelector(".chart__svg text, .timeline svg text", {
+        .waitForSelector(".tc-plot svg text, .timeline svg text", {
           timeout: 8000,
         })
         .catch(() => {});
@@ -2399,7 +2402,7 @@ test("invariants: every chart and timeline axis label renders at 11 px or more o
         const out = [];
         let n = 0;
         for (const t of document.querySelectorAll(
-          ".chart__svg text, .timeline svg text",
+          ".tc-plot svg text, .timeline svg text",
         )) {
           const svg = /** @type {SVGSVGElement | null} */ (t.closest("svg"));
           if (!svg) continue;
@@ -2441,16 +2444,18 @@ test("invariants: a chart with one reading per series shows a visible point and 
         for (const s of p.series ?? []) s.points = s.points.slice(-1);
       await route.fulfill({ response: r, json: body });
     });
+    // redesign-371-metrics: each card draws the shared time chart; its y
+    // ticks are the end-anchored `.tc-tick`s, a lone reading a `.tc-point`.
     await page.goto(`${BASE}/charts`);
-    await page.waitForSelector(".chart__svg", { timeout: 8000 });
+    await page.waitForSelector(".mk-card .tc-plot svg", { timeout: 8000 });
     await page.waitForTimeout(300);
     const charts = await page.evaluate(() =>
-      [...document.querySelectorAll(".chart:not(.chart--health)")]
-        .filter((f) => f.querySelector(".chart__svg"))
+      [...document.querySelectorAll(".mk-card")]
+        .filter((f) => f.querySelector(".tc-plot svg"))
         .map((f) => ({
-          title: f.querySelector("figcaption")?.textContent ?? "",
-          series: f.querySelectorAll(".chart__key").length,
-          points: [...f.querySelectorAll(".chart__point")].filter((c) => {
+          title: f.querySelector(".nx-card__head > h3")?.textContent ?? "",
+          series: Math.max(1, f.querySelectorAll(".tc-legend__item").length),
+          points: [...f.querySelectorAll(".tc-point")].filter((c) => {
             const r = c.getBoundingClientRect();
             return r.width >= 4 && r.height >= 4;
           }).length,
@@ -2464,10 +2469,10 @@ test("invariants: a chart with one reading per series shows a visible point and 
     // one-reading one above.
     const dupAt = async () =>
       page.evaluate(() =>
-        [...document.querySelectorAll(".chart")]
+        [...document.querySelectorAll(".mk-card")]
           .map((f) => ({
-            title: f.querySelector("figcaption")?.textContent ?? "",
-            ticks: [...f.querySelectorAll(".chart__tick--y")].map(
+            title: f.querySelector(".nx-card__head > h3")?.textContent ?? "",
+            ticks: [...f.querySelectorAll('.tc-tick[text-anchor="end"]')].map(
               (t) => t.textContent ?? "",
             ),
           }))
@@ -2476,10 +2481,10 @@ test("invariants: a chart with one reading per series shows a visible point and 
     const dupOne = await dupAt();
     await page.unroute("**/data/charts*");
     await page.goto(`${BASE}/charts`);
-    await page.waitForSelector(".chart__svg", { timeout: 8000 });
+    await page.waitForSelector(".mk-card .tc-plot svg", { timeout: 8000 });
     await page.waitForTimeout(300);
-    const yTicks = await page.locator(".chart__tick--y").count();
-    assert.ok(yTicks > 0, "no y tick labels found (.chart__tick--y)");
+    const yTicks = await page.locator('.tc-tick[text-anchor="end"]').count();
+    assert.ok(yTicks > 0, "no y tick labels found");
     const dupMany = await dupAt();
     assert.deepEqual(
       [...dupOne, ...dupMany],
@@ -2511,12 +2516,13 @@ test("invariants: the busiest-clients table names an empty client address instea
       await route.fulfill({ response: r, json: body });
     });
     await page.goto(`${BASE}/charts?tab=traffic`);
-    await page.waitForSelector("table caption", { timeout: 8000 });
+    // redesign-371-metrics: the Busiest clients card's table.
+    await page.waitForSelector('[data-key="clients"] tbody tr', {
+      timeout: 8000,
+    });
     await page.waitForTimeout(300);
     const cells = await page.evaluate(() => {
-      const t = [...document.querySelectorAll("table")].find((x) =>
-        x.querySelector("caption")?.textContent?.includes("client"),
-      );
+      const t = document.querySelector('[data-key="clients"] table');
       return [...(t?.querySelectorAll("tbody tr td:first-child") ?? [])].map(
         (td) => ({
           text: (td.textContent ?? "").trim(),
@@ -2532,13 +2538,8 @@ test("invariants: the busiest-clients table names an empty client address instea
       !cells.some((c) => c.text === "—" || c.text === ""),
       `a bare dash or empty client cell: ${JSON.stringify(cells)}`,
     );
-    const named = cells.find((c) =>
-      c.text.includes("not logged by the gateway"),
-    );
-    assert.ok(
-      named,
-      `no "not logged by the gateway" row: ${JSON.stringify(cells)}`,
-    );
+    const named = cells.find((c) => c.text.includes("not logged"));
+    assert.ok(named, `no "unknown (not logged)" row: ${JSON.stringify(cells)}`);
     assert.ok(named.hint.length > 20, "the empty-address label has no hint");
   } finally {
     await browser.close();
@@ -2898,18 +2899,16 @@ test("invariants: hovering the Fleet view topology never redraws a node, so a cl
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/fleetview`);
-    await page.locator(".topology__node").nth(1).waitFor({ timeout: 10000 });
+    await page.locator(".mp-node").nth(1).waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
     const stacks = await page.evaluate(() => {
       /** @type {any} */ (window).__clicks = [];
-      const nodes = [...document.querySelectorAll(".topology__node")];
+      const nodes = [...document.querySelectorAll(".mp-node")];
       /** @type {any} */ (window).__nodes = nodes;
       document.addEventListener(
         "click",
         (e) => {
-          const g = /** @type {Element} */ (e.target).closest?.(
-            ".topology__node",
-          );
+          const g = /** @type {Element} */ (e.target).closest?.(".mp-node");
           /** @type {any} */ (window).__clicks.push(
             g ? g.getAttribute("data-stack") : null,
           );
@@ -2918,7 +2917,7 @@ test("invariants: hovering the Fleet view topology never redraws a node, so a cl
       );
       return nodes.map((n) => n.getAttribute("data-stack"));
     });
-    const dots = page.locator(".topology__node .topology__dot");
+    const dots = page.locator(".mp-node .mp-ring");
     const a = await dots.nth(0).boundingBox();
     const b = await dots.nth(1).boundingBox();
     assert.ok(a && b, "no node to point at");
@@ -2929,7 +2928,7 @@ test("invariants: hovering the Fleet view topology never redraws a node, so a cl
     await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
     const out = await page.evaluate(() => ({
       clicks: /** @type {any} */ (window).__clicks,
-      same: [...document.querySelectorAll(".topology__node")].every(
+      same: [...document.querySelectorAll(".mp-node")].every(
         (n, i) => n === /** @type {any} */ (window).__nodes[i],
       ),
     }));
@@ -6168,7 +6167,7 @@ test("invariants: review-activity: History's Show switch counts, By names owners
       return {
         outside,
         inBar: !!document.querySelector(".hl-bar .hl-follow"),
-        keys: document.querySelector(".hk-keys, .ac-keys")?.textContent ?? "",
+        keys: document.querySelector(".nx-keys, .ac-keys")?.textContent ?? "",
         desc: card?.textContent ?? "",
       };
     });
@@ -6222,6 +6221,620 @@ test("invariants: review-activity: a failed History reread keeps the rows and th
     assert.equal(r.rows, before);
     assert.match(r.stale, /Not refreshed/);
     assert.equal(r.focus, key, "the focused row lost focus");
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── redesign-371-metrics / redesign-371-map (Kenny approved the demos
+// 2026-10-03: metrics.html, fleetview.html): the Metrics page and the Map
+// as the approved demos, every chart the shared time chart ──────────────
+
+test("invariants: the Metrics page is laid out as the approved demo, every chart a shared time chart with the host's events marked", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/charts`);
+    // Loading shows in the final geometry from the first frame.
+    await page.waitForSelector(".nx-kpis .nx-kpi", { timeout: 8000 });
+    await page.waitForSelector(".mk-card .tc-plot svg", { timeout: 10000 });
+    await page.waitForTimeout(400);
+    const got = await page.evaluate(() => ({
+      chip: document.querySelector(".nx-head-meta .nx-chip")?.textContent,
+      views: [
+        ...document.querySelectorAll(
+          '.nx-seg[aria-label="Metrics view"] button',
+        ),
+      ].map((b) => b.textContent),
+      windows: [
+        ...document.querySelectorAll(
+          '.mk-toolbar .nx-seg[aria-label="Window"] button',
+        ),
+      ].map((b) => b.textContent),
+      pressed: document.querySelector(
+        '.nx-seg[aria-label="Window"] [aria-pressed="true"]',
+      )?.textContent,
+      tiles: [...document.querySelectorAll(".nx-kpis .nx-kpi__label")].map(
+        (l) => l.textContent,
+      ),
+      attention: document.querySelector(".nx-attention")?.textContent ?? "",
+      sections: [...document.querySelectorAll(".mk-section__head h2")].map(
+        (x) => x.textContent,
+      ),
+      charts: document.querySelectorAll(".mk-card .tc-plot svg").length,
+      marks: document.querySelectorAll(".mk-card .tc-mark").length,
+      window: document.querySelector(".mk-window")?.textContent ?? "",
+    }));
+    assert.match(got.chip ?? "", /Live · reads every 30 s/);
+    assert.deepEqual(got.views, ["System", "Traffic"]);
+    assert.deepEqual(got.windows, ["1h", "6h", "24h", "7d", "30d"]);
+    assert.equal(got.pressed, "24h");
+    assert.deepEqual(got.tiles, [
+      "CPU",
+      "Memory",
+      "Root disk",
+      "Load (1 min)",
+      "Hottest chip",
+      "Drives",
+    ]);
+    assert.match(got.attention, /Drive sdb reports SMART not ok/);
+    assert.deepEqual(got.sections, ["Compute", "Storage and temperature"]);
+    assert.ok(got.charts >= 7, `only ${got.charts} time charts`);
+    assert.ok(got.marks > 0, "no event marked on the charts");
+    assert.match(got.window, /events? marked · drag across a chart to zoom/);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: a plain click on a Metrics chart source turns it on or off, several stay on, Show all resets", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/charts`);
+    const card = page.locator('[data-key="net"]');
+    await card.locator(".tc-legend__item").nth(2).waitFor({ timeout: 10000 });
+    const items = card.locator(".tc-legend__item");
+    const state = () =>
+      items.evaluateAll((els) =>
+        els.map((e) =>
+          e.getAttribute("aria-pressed") === "true"
+            ? "on"
+            : e.hasAttribute("data-off")
+              ? "off"
+              : "all",
+        ),
+      );
+    assert.deepEqual(await state(), ["all", "all", "all"]);
+    await items.nth(0).click();
+    assert.deepEqual(await state(), ["on", "off", "off"]);
+    // A second source, plain click: both stay on (no Shift).
+    await items.nth(1).click();
+    assert.deepEqual(await state(), ["on", "on", "off"]);
+    await items.nth(0).click();
+    assert.deepEqual(await state(), ["off", "on", "off"]);
+    await card.locator(".tc-legend__reset").click();
+    assert.deepEqual(await state(), ["all", "all", "all"]);
+    // Esc on the chart resets it too.
+    await items.nth(2).click();
+    await card.locator(".tc-plot").focus();
+    await page.keyboard.press("Escape");
+    assert.deepEqual(await state(), ["all", "all", "all"]);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: hovering a Metrics chart shows the reading and the change over the hour before on every chart at once; a drag zooms them all", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/charts`);
+    const plot = page.locator('[data-key="cpu"] .tc-plot');
+    await plot.locator("svg").waitFor({ timeout: 10000 });
+    await plot.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+    const box = await plot.boundingBox();
+    assert.ok(box, "no CPU chart");
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+    await page.waitForTimeout(100);
+    const tip = await page
+      .locator('[data-key="cpu"] .tc-tip')
+      .evaluate((t) => ({
+        hidden: /** @type {HTMLElement} */ (t).hidden,
+        text: t.textContent ?? "",
+      }));
+    assert.equal(tip.hidden, false, "no reading on hover");
+    assert.match(tip.text, /change over the hour before/);
+    assert.match(tip.text, /[▲▼]|±0/);
+    const synced = await page.evaluate(() => ({
+      charts: document.querySelectorAll(".mk-card .tc-plot svg").length,
+      lines: document.querySelectorAll(".mk-card .tc-xhair").length,
+    }));
+    assert.equal(
+      synced.lines,
+      synced.charts,
+      "the crosshair is not on every chart",
+    );
+    const ticks = () =>
+      page
+        .locator('[data-key="mem"] .tc-tick[text-anchor="middle"]')
+        .allTextContents();
+    const before = await ticks();
+    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.5, {
+      steps: 6,
+    });
+    await page.mouse.up();
+    const chip = page.locator(".mk-toolbar .tc-zoom");
+    await chip.waitFor({ state: "visible", timeout: 3000 });
+    assert.match((await chip.textContent()) ?? "", /Zoomed/);
+    assert.notDeepEqual(await ticks(), before, "the other charts did not zoom");
+    await chip.locator("button").click();
+    await chip.waitFor({ state: "hidden", timeout: 3000 });
+    assert.deepEqual(await ticks(), before);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the Traffic tab stacks requests by status class, and a plain click on a hostname row switches it on or off in its chart", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/charts?tab=traffic`);
+    await page.waitForSelector('[data-key="hostnames"] tbody tr', {
+      timeout: 10000,
+    });
+    const tiles = await page
+      .locator(".nx-kpis .nx-kpi__label")
+      .allTextContents();
+    assert.deepEqual(tiles, [
+      "Requests",
+      "Server errors (5xx)",
+      "Client errors (4xx)",
+      "Hostnames",
+      "Client addresses",
+    ]);
+    // Exact counters, never "38.1k".
+    const req =
+      (await page
+        .locator('.nx-kpi[data-key="requests"] .nx-kpi__value')
+        .textContent()) ?? "";
+    assert.match(req, /^\d{1,3}(,\d{3})*$/);
+    const classes = await page
+      .locator('[data-key="requests"] .tc-legend__item > span')
+      .allTextContents();
+    assert.deepEqual(classes, ["2xx", "3xx", "4xx", "5xx"]);
+    const legend = page.locator('[data-key="perhost"] .tc-legend__item');
+    const row = page.locator('[data-key="hostnames"] tbody tr').first();
+    const name = ((await row.locator("td").first().textContent()) ?? "").trim();
+    const labels = await legend.locator("span").allTextContents();
+    const idx = labels.indexOf(name);
+    assert.ok(idx >= 0, `${name} is not in the chart's legend`);
+    await row.click();
+    assert.equal(await legend.nth(idx).getAttribute("aria-pressed"), "true");
+    assert.match((await row.getAttribute("class")) ?? "", /is-on/);
+    await row.click();
+    assert.equal(await legend.nth(idx).getAttribute("aria-pressed"), "false");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the Map is laid out as the approved demo, and a plain click on a node selects it into the address, a second releases it, Esc clears", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/map`);
+    await page.waitForSelector(".mp-node", { timeout: 10000 });
+    const layout = await page.evaluate(() => ({
+      title: document.querySelector("#page h1")?.textContent,
+      tiles: [...document.querySelectorAll(".nx-kpis .nx-kpi__label")].map(
+        (l) => l.textContent,
+      ),
+      blocks: [...document.querySelectorAll("#page section.nx-card h2")].map(
+        (x) => x.textContent,
+      ),
+      side: document.querySelector(".mp-side h3")?.textContent,
+      half: [...document.querySelectorAll(".mp-grid > section")].map((s) =>
+        Math.round(s.getBoundingClientRect().top),
+      ),
+    }));
+    assert.equal(layout.title, "Map");
+    assert.deepEqual(layout.tiles, [
+      "Stacks in the graph",
+      "Connections",
+      "Firewall",
+      "Stale images",
+    ]);
+    assert.deepEqual(layout.blocks, [
+      "Topology",
+      "Capacity",
+      "Disk growth",
+      "Stale images",
+    ]);
+    assert.equal(layout.side, "Nothing selected");
+    assert.equal(
+      new Set(layout.half).size,
+      1,
+      "Capacity and Disk growth are not side by side",
+    );
+
+    const node = page.locator('.mp-node[data-stack="gateway"]');
+    await node.locator(".mp-ring").click();
+    assert.equal(await node.getAttribute("aria-pressed"), "true");
+    assert.match(page.url(), /select=gateway/);
+    assert.match(
+      (await page.locator(".mp-side").textContent()) ?? "",
+      /1 selected/,
+    );
+    // A second node joins the selection with a plain click.
+    const other = page.locator('.mp-node[data-stack="admin"]');
+    await other.locator(".mp-ring").click();
+    assert.equal(await other.getAttribute("aria-pressed"), "true");
+    assert.equal(await node.getAttribute("aria-pressed"), "true");
+    await other.locator(".mp-ring").click();
+    assert.equal(await other.getAttribute("aria-pressed"), "false");
+    await page.mouse.move(5, 5);
+    await page.keyboard.press("Escape");
+    assert.equal(await node.getAttribute("aria-pressed"), "false");
+    assert.doesNotMatch(page.url(), /select=/);
+    // List view: one row per stack, the graph hidden; back again.
+    const seg = page.locator('.nx-seg[aria-label="View"] button');
+    await seg.filter({ hasText: "List" }).click();
+    await page.locator(".mp-list tbody tr").first().waitFor({ timeout: 3000 });
+    assert.equal(await page.locator(".mp-topo").isVisible(), false);
+    await seg.filter({ hasText: "Graph" }).click();
+    assert.equal(await page.locator(".mp-topo").isVisible(), true);
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── review of redesign-371-metrics / redesign-371-map (2026-10-03): the
+// findings a whole screen proves. Every case's name starts with "review
+// metrics" so a fix's own run is INVARIANTS_ONLY="review metrics".
+
+test("invariants: review metrics — Metrics and the Map fit a phone: no table scrolls sideways, Stale images are cards, Disk growth rows are two lines, KPI context lines are whole", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    /** No KPI context line cut off with an ellipsis. */
+    const cutCtx = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll(".nx-kpi__ctx")]
+          .filter((e) => e.scrollWidth > e.clientWidth + 1)
+          .map((e) => e.textContent),
+      );
+    for (const [path, ready] of [
+      ["/charts", "#chart-drives tbody tr"],
+      ["/charts?tab=traffic", "#chart-hostnames tbody tr"],
+      ["/map", "#stale tbody tr"],
+    ]) {
+      await page.setViewportSize({ width: 1894, height: 1000 });
+      await page.goto(`${BASE}${path}`);
+      await page.waitForSelector(ready);
+      await page.waitForSelector(".nx-kpi:not([data-loading])");
+      assert.deepEqual(await cutCtx(), [], `${path} at 1894: cut KPI lines`);
+      await page.setViewportSize({ width: 390, height: 900 });
+      await page.waitForTimeout(300);
+      const r = await page.evaluate(() => ({
+        wraps: [...document.querySelectorAll(".kp-table-wrap")]
+          .filter((e) => e.scrollWidth > e.clientWidth + 1)
+          .map(
+            (e) =>
+              `${e.closest("[id]")?.id}: ${e.scrollWidth - e.clientWidth}px`,
+          ),
+        page:
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+        cols: getComputedStyle(
+          /** @type {Element} */ (document.querySelector(".nx-kpis")),
+        ).gridTemplateColumns.split(" ").length,
+      }));
+      assert.deepEqual(r.wraps, [], `${path} at 390: a table scrolls sideways`);
+      assert.equal(r.page, 0, `${path} at 390: the page scrolls sideways`);
+      assert.equal(r.cols, 2, `${path} at 390: two KPI tiles a row`);
+      assert.deepEqual(await cutCtx(), [], `${path} at 390: cut KPI lines`);
+    }
+    // The Map at 390: Stale images as cards, every Update in reach.
+    assert.equal(
+      await page
+        .locator("#stale thead")
+        .evaluate((e) => getComputedStyle(e).display),
+      "none",
+      "Stale images keep their head row on a phone",
+    );
+    const reach = await page
+      .locator("#stale [data-pin-update]")
+      .evaluateAll((els) =>
+        els.map((e) => {
+          const b = e.getBoundingClientRect();
+          return b.width > 0 && b.left >= 0 && b.right <= 390;
+        }),
+      );
+    assert.ok(reach.length > 0, "no Update button on the phone");
+    assert.ok(reach.every(Boolean), "an Update button is out of reach");
+    // Disk growth at 390: no head row, two lines a row.
+    await page.waitForSelector(".mp-growth[role=row] .mp-g-full");
+    const g = await page.evaluate(() => {
+      const head = document.querySelector(
+        '[aria-label="Disk growth per filesystem"] .mp-cap--head',
+      );
+      const rows = [...document.querySelectorAll(".mp-growth[role=row]")]
+        .filter((r) => !r.classList.contains("mp-cap--head"))
+        .map((r) => {
+          const top = (/** @type {string} */ s) =>
+            Math.round(
+              /** @type {Element} */ (
+                r.querySelector(s)
+              ).getBoundingClientRect().top,
+            );
+          return {
+            line1: top(".mp-g-name") === top(".mp-g-full"),
+            line2: top(".mp-g-bar") === top(".mp-g-trend"),
+            below: top(".mp-g-bar") > top(".mp-g-name"),
+            label: r.querySelector(".mp-g-full .mp-inl")?.checkVisibility(),
+          };
+        });
+      return { head: head ? getComputedStyle(head).display : "none", rows };
+    });
+    assert.equal(g.head, "none", "Disk growth keeps its head row on a phone");
+    assert.ok(g.rows.length > 0);
+    for (const row of g.rows)
+      assert.deepEqual(row, {
+        line1: true,
+        line2: true,
+        below: true,
+        label: true,
+      });
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: review metrics — the tiles are skeletons until the read lands, and a failed read says not read instead of pulsing", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    /** @type {(v?: unknown) => void} */
+    let release = () => {};
+    const held = new Promise((r) => (release = r));
+    await page.route("**/data/charts**", async (route) => {
+      await held;
+      await route.fulfill({
+        status: 502,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "Prometheus did not answer",
+          fix: "check Prometheus",
+        }),
+      });
+    });
+    await page.goto(`${BASE}/charts`);
+    await page.waitForSelector(".nx-kpi[data-loading]");
+    const loading = await page.evaluate(() => ({
+      tiles: document.querySelectorAll(".nx-kpi[data-loading]").length,
+      skeletons: document.querySelectorAll(
+        ".mk-card .kp-skeleton[data-kp-state=loading]",
+      ).length,
+    }));
+    assert.equal(loading.tiles, 6, "six tile skeletons before the read");
+    assert.ok(loading.skeletons >= 6, "every chart card a skeleton");
+    release();
+    await page.waitForSelector(".mk-card-error");
+    await page.waitForTimeout(300);
+    const after = await page.evaluate(() => ({
+      loading: document.querySelectorAll(".nx-kpi[data-loading]").length,
+      values: [...document.querySelectorAll(".nx-kpi__value")].map((e) =>
+        e.textContent?.trim(),
+      ),
+      ctx: [...document.querySelectorAll(".nx-kpi__ctx")].map((e) =>
+        e.textContent?.trim(),
+      ),
+      band: document.querySelectorAll(".hk-attention > *, .nx-attention > *")
+        .length,
+    }));
+    assert.equal(after.loading, 0, "a tile still pulses after the failure");
+    assert.deepEqual(after.values, Array(6).fill("—"));
+    assert.deepEqual(after.ctx, Array(6).fill("not read"));
+    assert.equal(after.band, 0, "the attention band kept an old alert");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: review metrics — hostname rows follow the chart (Esc and Show all clear them), the legend's totals are the table's, chart controls are Live view controls, the sixth line is dashed", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.setViewportSize({ width: 1894, height: 1000 });
+    await page.goto(`${BASE}/charts?tab=traffic`);
+    await page.waitForSelector("#chart-hostnames tbody tr");
+    await page.waitForSelector("#chart-perhost .tc-legend__item");
+    await page.mouse.move(0, 0);
+    // The legend's total and the table's Requests are one number.
+    const pairs = await page.evaluate(() => {
+      const table = new Map(
+        [...document.querySelectorAll("#chart-hostnames tbody tr")].map(
+          (tr) => [
+            /** @type {HTMLElement} */ (tr).dataset.kpRowKey || "no hostname",
+            tr.querySelector("td.mk-n")?.textContent?.trim(),
+          ],
+        ),
+      );
+      return [
+        ...document.querySelectorAll("#chart-perhost .tc-legend__item"),
+      ].map((b) => ({
+        host: b.querySelector("span")?.textContent,
+        legend: b.querySelector(".tc-num")?.textContent?.trim(),
+        table: table.get(b.querySelector("span")?.textContent ?? ""),
+        drive: /** @type {HTMLElement} */ (b).dataset.drive,
+        row: /** @type {HTMLElement} */ (b).dataset.driveRow,
+      }));
+    });
+    assert.ok(
+      pairs.length >= 6,
+      `six hostnames in the demo, got ${pairs.length}`,
+    );
+    for (const p of pairs) {
+      assert.equal(p.legend, p.table, `${p.host}: legend and table differ`);
+      assert.equal(p.drive, "chart-source");
+      assert.equal(p.row, `perhost/${p.host}`);
+    }
+    assert.equal(
+      await page
+        .locator("#chart-perhost .tc-legend__reset")
+        .getAttribute("data-drive"),
+      "chart-show-all",
+    );
+    assert.equal(
+      await page.locator(".tc-zoom__reset").first().getAttribute("data-drive"),
+      "chart-zoom-reset",
+    );
+    // The sixth source's line is dashed, the first five are not.
+    const dashes = await page
+      .locator("#chart-perhost .tc-line")
+      .evaluateAll((els) => els.map((e) => e.getAttribute("stroke-dasharray")));
+    assert.deepEqual(dashes.slice(0, 5), Array(5).fill(null));
+    assert.ok(dashes[5], "the sixth line repeats colour 1 undashed");
+    // A plain click on a row turns it on; Esc on the chart clears it.
+    const row = page.locator("#chart-hostnames tbody tr").first();
+    const state = async () =>
+      row.evaluate((r) => [
+        r.classList.contains("is-on"),
+        r.getAttribute("aria-pressed"),
+      ]);
+    await row.click();
+    assert.deepEqual(await state(), [true, "true"], "the click did not take");
+    await page.locator("#chart-perhost .tc-plot").focus();
+    await page.keyboard.press("Escape");
+    assert.deepEqual(await state(), [false, "false"], "Esc left the row on");
+    await row.click();
+    assert.deepEqual(await state(), [true, "true"]);
+    await page.locator("#chart-perhost .tc-legend__reset").click();
+    assert.deepEqual(await state(), [false, "false"], "Show all left it on");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: review metrics — a pointer resting on a chart keeps that chart through the 30 s refresh", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.clock.install();
+    await page.setViewportSize({ width: 1894, height: 1000 });
+    await page.goto(`${BASE}/charts`);
+    await page.waitForSelector("#chart-cpu .tc-plot");
+    await page.locator("#chart-cpu .tc-plot").hover();
+    await page.evaluate(() => {
+      /** @type {any} */ (window).__plot = document.querySelector(
+        "#chart-cpu .tc-plot",
+      );
+    });
+    await page.clock.runFor(31_000);
+    await page.waitForTimeout(1500);
+    assert.ok(
+      await page.evaluate(
+        () =>
+          /** @type {any} */ (window).__plot ===
+          document.querySelector("#chart-cpu .tc-plot"),
+      ),
+      "the refresh replaced the chart under the pointer",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: review metrics — the wording is the demo's, Connections is green and amber, no chip row, and a touch screen shows no pointer hints", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    const page = await freshPage(context);
+    await page.setViewportSize({ width: 1894, height: 1000 });
+    await page.goto(`${BASE}/charts`);
+    await page.waitForSelector("#chart-drives tbody tr");
+    const sys = await page.evaluate(() => ({
+      back: [
+        ...document.querySelectorAll("[data-drive=metrics-drive-backups]"),
+      ].map((e) => e.textContent?.trim()),
+      foot: document.querySelector("#chart-drives .nx-card__foot")?.textContent,
+      ct: [
+        ...document.querySelectorAll("#chart-ctmem .tc-legend__item > span"),
+      ].map((e) => e.textContent),
+    }));
+    assert.deepEqual(sys.back, ["Back up devices now"]);
+    assert.match(sys.foot ?? "", /smartctl via node-exporter/);
+    assert.ok(
+      sys.ct.includes("CT 903 · films"),
+      `the container legend names its stack: ${sys.ct}`,
+    );
+    await page.goto(`${BASE}/map`);
+    await page.waitForSelector(
+      '.nx-kpi[data-key="connections"]:not([data-loading])',
+    );
+    const conn = await page.evaluate(() => {
+      const c = document.querySelector(
+        '.nx-kpi[data-key="connections"] .nx-kpi__ctx',
+      );
+      return {
+        ok: c?.querySelector(".nx-dot--ok")?.textContent,
+        warn: c?.querySelector(".nx-dot--warn")?.textContent,
+      };
+    });
+    assert.match(conn.ok ?? "", /enforced$/);
+    assert.match(conn.warn ?? "", /open$/);
+    assert.equal(await page.locator(".mp-stackkey").count(), 0);
+    // A touch screen: no hover, so no "hover"/"point at" hints.
+    const touch = await browser.newContext({
+      viewport: { width: 390, height: 900 },
+      isMobile: true,
+      hasTouch: true,
+    });
+    const t = await freshPage(touch);
+    await t.goto(`${BASE}/charts`);
+    await t.waitForSelector(".tc-legend__hint");
+    const hints = await t.evaluate(() => ({
+      hover: matchMedia("(hover: none)").matches,
+      pointer: [
+        ...document.querySelectorAll(".tc-hint--pointer, .mk-pointer-only"),
+      ].some((e) => /** @type {HTMLElement} */ (e).checkVisibility()),
+      touch: [...document.querySelectorAll(".tc-hint--touch")].some((e) =>
+        /** @type {HTMLElement} */ (e).checkVisibility(),
+      ),
+      keys: [...document.querySelectorAll(".mk-page .nx-keys")].some((e) =>
+        /** @type {HTMLElement} */ (e).checkVisibility(),
+      ),
+    }));
+    assert.deepEqual(hints, {
+      hover: true,
+      pointer: false,
+      touch: true,
+      keys: false,
+    });
   } finally {
     await browser.close();
   }

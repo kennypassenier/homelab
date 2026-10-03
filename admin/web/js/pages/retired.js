@@ -208,7 +208,7 @@ export function mount(root) {
     h(
       "p",
       null,
-      "Every stack, app or native unit a destroy, forget or deploy retired (ask-9): nothing here is deleted on its own. Wipe deletes exactly what one entry kept — its restic repositories, /appdata directories and vault copies — after you type its key to confirm; what a managed stack still uses is kept even then.",
+      "Every stack, app or native unit a destroy, forget or deploy retired: nothing here is deleted on its own. Wipe deletes exactly what one entry kept — its restic repositories, /appdata directories and vault copies — after you type its key to confirm; what a managed stack still uses is kept even then.",
     ),
     table.wrap,
   );

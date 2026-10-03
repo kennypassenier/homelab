@@ -1,7 +1,7 @@
-//! feat-backup-1/3: the Backups page's two read-only routes. Restore itself
+//! feat-backup-1/3, fix-241: the Backups page's read-only routes. Restore itself
 //! is `ActionKind::Restore`/`RestoreNative` (`shell::actions`), so it gets
 //! the job/progress machinery and Live-view driving every other write
-//! action gets; these two routes only ever show data.
+//! action gets; these routes only ever show data.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -93,9 +93,50 @@ async fn ls(
     }
 }
 
+#[derive(Deserialize)]
+struct FileQuery {
+    path: String,
+}
+
+/// fix-241: one file of one snapshot, read-only (`restic dump`, capped by
+/// the host). `?path=` is relative to the app's backed-up directory or
+/// absolute under it; the host resolves it against the stack's manifest.
+async fn file(
+    State(host): State<Arc<dyn HostPort>>,
+    UrlPath((stack, owner, snapshot)): UrlPath<(String, String, String)>,
+    Query(q): Query<FileQuery>,
+) -> Response {
+    if !crate::core::actions::valid_stack_name(&stack) {
+        return refusal(StatusCode::BAD_REQUEST, "not a stack name");
+    }
+    match host
+        .ask_traced(
+            Command::ReadSnapshotFile {
+                stack,
+                owner,
+                snapshot,
+                path: q.path,
+            },
+            // The chassis request guard cuts every request at 30 s; a dump
+            // that needs longer is `homelab snapshot-file`'s, which waits.
+            ASK_TIMEOUT,
+            None,
+        )
+        .await
+    {
+        Ok(r) if r.ok => match serde_json::from_str::<serde_json::Value>(&r.message) {
+            Ok(v) => Json(v).into_response(),
+            Err(_) => refusal(StatusCode::BAD_GATEWAY, "the host's answer did not read"),
+        },
+        Ok(r) => refusal(StatusCode::BAD_GATEWAY, r.message),
+        Err(e) => refusal(StatusCode::BAD_GATEWAY, e),
+    }
+}
+
 pub fn router(host: Arc<dyn HostPort>) -> Router {
     Router::new()
         .route("/data/backups/{stack}", get(status))
         .route("/data/backups/{owner}/{snapshot}/ls", get(ls))
+        .route("/data/backups/{stack}/{owner}/{snapshot}/file", get(file))
         .with_state(host)
 }

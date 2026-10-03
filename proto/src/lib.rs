@@ -588,6 +588,19 @@ pub enum Command {
         #[serde(default)]
         path: String,
     },
+    /// fix-241: one file of one snapshot, read with `restic dump` and capped
+    /// at `ops::backup::SNAPSHOT_FILE_CAP` — no restore, nothing written.
+    /// `owner` as for `BrowseSnapshot` (an app of the compose stack `stack`);
+    /// `snapshot` an id or `latest`; `path` relative to the app's backed-up
+    /// directory, or absolute under it (`ops::backup::resolve_snapshot_path`,
+    /// against the stack's manifest in host state). Answers
+    /// `ops::backup::SnapshotFile`.
+    ReadSnapshotFile {
+        stack: String,
+        owner: String,
+        snapshot: String,
+        path: String,
+    },
     /// feat-backup-2: restore a native (adopted) service from a snapshot
     /// (default "latest"). Unpacks the archive `restic dump` emits straight
     /// into the container with `tar`, the same pipeline the auto-restore of
@@ -833,7 +846,8 @@ impl Command {
             | TokenList
             | GetBackups { .. }
             | GetRetired
-            | BrowseSnapshot { .. } => Scope::Read,
+            | BrowseSnapshot { .. }
+            | ReadSnapshotFile { .. } => Scope::Read,
             Ui { step, .. } => step.scope(),
             DeployStack(_)
             | StageNativeBinary { .. }
@@ -949,6 +963,7 @@ impl Command {
             GetBackups { .. } => "get_backups",
             GetRetired => "get_retired",
             BrowseSnapshot { .. } => "browse_snapshot",
+            ReadSnapshotFile { .. } => "read_snapshot_file",
             RestoreNative { .. } => "restore_native",
             RevealSecret { .. } => "reveal_secret",
             SetSecret { .. } => "set_secret",

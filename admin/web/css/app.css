@@ -2339,6 +2339,44 @@ td.stack-flags {
 .backups__chips-wrap {
   margin-block-end: 8px;
 }
+/* fix-241: Restore and "Show a file…" side by side in one cell, a grid so
+ * both buttons keep their place on every row. */
+.backups__actions {
+  display: grid;
+  grid-auto-flow: column;
+  justify-content: start;
+  gap: 6px;
+}
+/* fix-241: the "Show a file…" dialog — fields, the button, the status and
+ * the file, one grid; the file pane keeps its height before, during and
+ * after a read, so nothing moves when the answer arrives (rule 6). */
+.snapfile {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+.snapfile__go {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+.snapfile__status {
+  margin: 0;
+  min-height: 2.6em;
+}
+.snapfile__status[data-tone="warn"] {
+  color: var(--kp-color-warning, inherit);
+}
+.snapfile__out {
+  margin: 0;
+  height: 50vh;
+  overflow: auto;
+  white-space: pre;
+  padding: 8px;
+  border: 1px solid var(--kp-color-border, currentColor);
+  border-radius: 6px;
+}
 
 /* fix-214: month navigation (prev/next/Today + the "Month Year" heading)
  * and the calendar/detail two-column layout — a grid, per rule 6, so the

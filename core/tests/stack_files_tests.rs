@@ -1007,3 +1007,101 @@ fn fix_145_inbox_declares_ct_118_as_it_runs_today() {
         "469fabcc71edda36ef1c87d836ce9c7db40888ead6a8a9e92700c552a5a0f039"
     );
 }
+
+/// Every YAML file under stacks/, recursively, with its path from stacks/.
+fn all_stack_yaml() -> Vec<(String, serde_yaml::Value)> {
+    fn walk(dir: &Path, base: &Path, out: &mut Vec<(String, serde_yaml::Value)>) {
+        let mut entries: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        entries.sort();
+        for p in entries {
+            if p.is_dir() {
+                walk(&p, base, out);
+            } else if matches!(
+                p.extension().and_then(|e| e.to_str()),
+                Some("yml") | Some("yaml")
+            ) {
+                let rel = p.strip_prefix(base).unwrap().display().to_string();
+                let text = std::fs::read_to_string(&p).unwrap();
+                let v: serde_yaml::Value = serde_yaml::from_str(&text)
+                    .unwrap_or_else(|e| panic!("stacks/{} does not parse: {}", rel, e));
+                out.push((rel, v));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let base = stacks_dir();
+    walk(&base, &base, &mut out);
+    out
+}
+
+/// fix-242 (2026-10-02, jellyfin#18100): no command in a stack file opens a
+/// database with `sqlite3`. Every database a stack command could reach is
+/// an app's LIVE one, and Jellyfin reports corruption when another process
+/// opens and closes its database right after a migrating boot — exactly
+/// what the probes did on 2026-10-02 during the 12.1 upgrade. A probe gets
+/// its key from a file the stack provides (`latch_files`) or from the app's
+/// own API, never from the app's database file. Prose fields (a check's
+/// name, its blind spot, comments) may still mention the word.
+///
+/// covers: fix-242
+#[test]
+fn fix_242_no_stack_command_opens_a_live_database_with_sqlite3() {
+    const PROSE: &[&str] = &[
+        "name",
+        "blind_spot",
+        "comment",
+        "note",
+        "text",
+        "description",
+        "restore_note",
+        "no_backup",
+        "management_open",
+    ];
+    fn visit(v: &serde_yaml::Value, key: &str, at: &str, bad: &mut Vec<String>) {
+        match v {
+            serde_yaml::Value::String(s) => {
+                let runs_it = s
+                    .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                    .any(|w| w == "sqlite3");
+                if runs_it && !PROSE.contains(&key) {
+                    bad.push(format!(
+                        "{} ({}): {}",
+                        at,
+                        key,
+                        s.lines().next().unwrap_or("")
+                    ));
+                }
+            }
+            serde_yaml::Value::Sequence(items) => {
+                for i in items {
+                    visit(i, key, at, bad);
+                }
+            }
+            serde_yaml::Value::Mapping(m) => {
+                for (k, val) in m {
+                    let k = k.as_str().unwrap_or(key);
+                    visit(val, k, at, bad);
+                }
+            }
+            serde_yaml::Value::Tagged(t) => visit(&t.value, key, at, bad),
+            _ => {}
+        }
+    }
+    let files = all_stack_yaml();
+    assert!(files.len() > 50, "found only {} YAML files", files.len());
+    let mut bad = Vec::new();
+    for (rel, v) in &files {
+        visit(v, "", rel, &mut bad);
+    }
+    assert!(
+        bad.is_empty(),
+        "a stack command opens a database with sqlite3 (jellyfin#18100: a live \
+         database opened by another process can corrupt) — read the key from a \
+         `latch_files` file or the app's API instead:\n  {}",
+        bad.join("\n  ")
+    );
+}

@@ -12042,6 +12042,61 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 },
             }
         }
+        // fix-241: one file from a snapshot, read-only: `restic dump` to
+        // stdout, capped; nothing restored, nothing written, nothing stopped.
+        Rpc::ReadSnapshotFile {
+            stack,
+            owner,
+            snapshot,
+            path,
+        } => {
+            let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+            let target = match store.load().await {
+                Ok(hs) => {
+                    homelab_core::ops::backup::snapshot_file_target(&hs, &stack, &owner, &path)
+                }
+                Err(e) => Err(format!("state unreadable: {}", e)),
+            };
+            let path = match target {
+                Ok(p) => p,
+                Err(e) => {
+                    return RpcResponse {
+                        id: req.id,
+                        ok: false,
+                        message: e,
+                        deferred: None,
+                    };
+                }
+            };
+            let tiers = state
+                .settings
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retention
+                .clone();
+            let cfg = homelab_core::ops::backup::BackupCfg {
+                tiers,
+                ..state.config.backup.clone()
+            };
+            match homelab_core::ops::backup::read_snapshot_file(
+                &exec, &cfg, &owner, &snapshot, &path,
+            )
+            .await
+            {
+                Ok(file) => RpcResponse {
+                    id: req.id,
+                    ok: true,
+                    message: serde_json::to_string(&file).unwrap_or_else(|_| "{}".into()),
+                    deferred: None,
+                },
+                Err(e) => RpcResponse {
+                    id: req.id,
+                    ok: false,
+                    message: e.to_string(),
+                    deferred: None,
+                },
+            }
+        }
         Rpc::RestoreNative {
             stack,
             snapshot,

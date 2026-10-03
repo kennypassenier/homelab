@@ -106,6 +106,20 @@ data_mounts:
 
 apps: [jellyfin, sonarr, radarr, prowlarr, bazarr, seerr, flaresolverr, recyclarr]
 
+# fix-242 (2026-10-02): Jellyfin's "Homelab" API key, for the probes in
+# jellyfin/checks.yml and the tile below. They read it with sqlite3 from the
+# live jellyfin.db until jellyfin#18100 (a database opened and closed by
+# another process right after a migrating boot can corrupt). Now the key is
+# a file of its own, from latch (`stacks` project, prod), root-only and on
+# the container's own disk — outside /appdata, so it is in no app's backup
+# and nothing of Jellyfin's ever sees it. Rotating the key in Jellyfin means
+# `latch put media/jellyfin/api-key --env prod` and a deploy.
+latch_files:
+  - from: jellyfin/api-key
+    dest: /etc/homelab/jellyfin-api-key
+    mode: "600"
+    owner: root:root
+
 gateway_route:
   filename: 106-app-media.yml
   gateway_vmid: 104
@@ -193,7 +207,7 @@ tiles:
     order: 101
     description: "Films and series"
     reading: |
-      K=$(sqlite3 "file:/appdata/media/jellyfin-config/data/jellyfin.db?mode=ro" "select AccessToken from ApiKeys where Name='Homelab';")
+      K=$(cat /etc/homelab/jellyfin-api-key) || exit 1
       C=$(mktemp); trap 'rm -f "$C"' EXIT; printf 'header = Authorization: MediaBrowser Token="%s"\n' "$K" > "$C"
       wget --config="$C" -qO- http://localhost:8096/Items/Counts | jq -r '"\(.MovieCount) films, \(.SeriesCount) series"'
       wget --config="$C" -qO- http://localhost:8096/Sessions | jq -r '[.[]|select(.NowPlayingItem != null)]|length|if . == 0 then empty else "\(.) watching" end'

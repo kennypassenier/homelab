@@ -1290,6 +1290,42 @@ async fn run(explicit_host: Option<String>) {
                 }
             }
         }
+        // fix-241: one file of one snapshot, read-only (`restic dump` on the
+        // host, capped) — the exact old settings without a live restore.
+        "snapshot-file" => {
+            let a = homelab_client::snapshots::snapshot_file_args(args.get(2..).unwrap_or(&[]))
+                .unwrap_or_else(|e| die(&e));
+            let stack = homelab_client::repo_config::stack_name(&a.stack);
+            let reply = rpc_reply(
+                &host,
+                &token,
+                Command::ReadSnapshotFile {
+                    stack,
+                    owner: a.app,
+                    snapshot: a.snapshot,
+                    path: a.path,
+                },
+            )
+            .await
+            .unwrap_or_else(|| die("the host did not answer"));
+            if !reply.ok {
+                die(&reply.message);
+            }
+            if a.json {
+                println!("{}", reply.message);
+            } else {
+                match serde_json::from_str::<homelab_core::ops::backup::SnapshotFile>(
+                    &reply.message,
+                ) {
+                    Ok(f) => {
+                        let (text, note) = homelab_client::snapshots::render_snapshot_file(&f);
+                        eprintln!("{}{}{}", C_YELLOW, note, C_RESET);
+                        print!("{}", text);
+                    }
+                    Err(_) => println!("{}", reply.message),
+                }
+            }
+        }
         // fix-120 (per-machine tokens, owner decision 2026-10-01): a token
         // per machine, so one can be revoked without touching the others.
         "token" => match args.get(2).map(String::as_str) {

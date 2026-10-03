@@ -308,6 +308,10 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         | GetBackups { .. }
         | GetRetired
         | BrowseSnapshot { .. }
+        // fix-241: the CLI has its own verb (`homelab snapshot-file`), but
+        // it resolves a typed path against the local stack file, which the
+        // dashboard's read does not mirror as a copyable line.
+        | ReadSnapshotFile { .. }
         | RevealSecret { .. }
         | SetSecret { .. } => return None,
     }

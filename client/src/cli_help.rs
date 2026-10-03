@@ -122,6 +122,13 @@ pub const VERBS: &[Verb] = &[
     ),
     v(
         Daily,
+        "snapshot-file",
+        "stacks/<name> <snapshot|latest> --app <app> <path> [--json]",
+        "print one file as a snapshot holds it, read-only (no restore; cut at 1 MiB, and said so); the path is relative to the app's backed-up directory",
+        "homelab snapshot-file stacks/mystack latest --app myapp config/settings.xml",
+    ),
+    v(
+        Daily,
         "ping",
         "",
         "is the host there, which version, and where the address came from",

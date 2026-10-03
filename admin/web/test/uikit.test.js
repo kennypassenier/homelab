@@ -10,7 +10,6 @@ import {
   hueColour,
   menuPlace,
   meterParts,
-  nextSortDir,
   sortValue,
   tipPlace,
   toastsToDrop,
@@ -50,11 +49,7 @@ test("redesign-kit-1: a toggle group click turns one value on or off; every valu
   assert.deepEqual([...before], ["a"], "the old set is left alone");
 });
 
-test("redesign-kit-1: a sortable header cycles ascending, descending, original; numbers sort as numbers", () => {
-  assert.equal(nextSortDir(null), "ascending");
-  assert.equal(nextSortDir("none"), "ascending");
-  assert.equal(nextSortDir("ascending"), "descending");
-  assert.equal(nextSortDir("descending"), null);
+test("redesign-kit-1: a sortable header's cells sort numbers as numbers", () => {
   assert.equal(sortValue("120"), 120);
   assert.equal(sortValue("Gateway"), "gateway");
   assert.equal(sortValue(""), "");
@@ -115,7 +110,6 @@ test("redesign-kit-1: a stack's colour is stable: its topology hue, or its place
   const all = ["notes", "admin", "gateway"];
   assert.equal(chartColour("admin", all), "var(--chart-1)");
   assert.equal(chartColour("notes", all), "var(--chart-3)");
-  assert.equal(chartColour("gone", all), "var(--chart-1)");
   assert.equal(
     chartColour("f", ["a", "b", "c", "d", "e", "f"]),
     "var(--chart-1)",

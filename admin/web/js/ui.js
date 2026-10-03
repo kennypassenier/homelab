@@ -7,50 +7,65 @@
 //
 //   pageHeader   title (+ a muted `sub`), one-sentence description,
 //                breadcrumbs, live status, the actions with ONE primary and
-//                an overflow slot; with `meta` the chips row under the
-//                description and the actions spanning the header's rows
+//                an overflow slot; `meta` adds the chips row under the
+//                description with the actions spanning the header's rows,
+//                `split` puts the live status beside the title (next.css),
+//                `level: "h2"` when another page carries the h1
 //   kpiStrip     3-6 KPI tiles: label, value, context line, a sparkline or
-//                a meter (fill, tick mark, tone), each tile a link to its
-//                filtered detail or a toggle of a filter on the page
+//                a meter, each tile a link to its filtered detail or a
+//                toggle of a filter on the page
 //   attention    one kp-alert per problem, worst first, each with its fix;
 //                zero height when all is well
-//   toolbar      §12: search · labelled filter groups · view & state,
-//                plus the active-filter row; toggleChips is the plain-click
-//                on/off chip group (several allowed, Esc / Show all resets),
-//                toggleGroup the same in the segmented look with "All" as
-//                its reset and a count per value, segSwitch the one-of
+//   toolbar      §12: search · labelled filter groups · view & state, plus
+//                the active-filter row of filterChips
+//   toggleGroup  the plain-click toggle group (several on, every one on is
+//                All, Esc / All / Show all resets), segmented or as chips
+//                (`toggleChips`); segSwitch the one-of switch
 //   section      a card: heading + one sentence + tools, optionally
-//                collapsible (tools inside its summary) and mounted only
-//                when first opened, with a foot line (source left, "read
-//                4 s ago" right)
-//   toast        one short message at the foot of the screen, drawn inside
-//                #page so Live view can press its Undo
-//   rowMenu      a row's menu as a non-modal <dialog> of named items
-//   moreMenu     the header's overflow `···` menu of links
+//                collapsible and mounted only when first opened, with a
+//                foot line (source left, "read 4 s ago" right)
+//   sortHead / sortableTable / nextSort / applySort / rememberedSort
+//                sorting on several keys, remembered per table
+//   toast        kp-themes' toast in a region inside #page, so Live view
+//                can press its Undo
+//   rowMenu / moreMenu   a row's menu (a non-modal <dialog>) and the
+//                header's overflow `···` menu, both keyboard menus
+//   drawer       a side panel on a modal <dialog>
 //   hoverCard    one floating detail card for hover and keyboard focus
-//   sortHead / sortableTable   sortable column headers
-//   kbd / keysLine            a key, and the page's line of shortcuts
-//   skeleton…    loading in the final geometry from the first frame
-//   emptyState   why it is empty and what fills it, plus that action
-//   stackMark    the per-stack identity mark (hue + mirrored 5×5 pattern
-//                from the name), the same in every table and header;
-//                swatch the small square of a stack's colour
+//   chip / dot / meter / shareBar / swatch / stackMark   small marks
+//   failBox / skeleton… / emptyState   the error, loading and empty states
+//                in the block's own footprint
+//   rowKeys / kbd / keyRow   keyboard: list rows, a key, the shortcut line
 //   sparkline    a 28 px trend line for a tile or a table row
 //
 // Every block that draws something clickable takes the Live view control
 // it is (a declared id, or a dialog control name) from its caller, so no
 // page grows an undeclared control (invariant 39).
 //
-// Two looks of the same blocks, both approved demos: the default one
-// (next.css: Backups, Secrets, the stack hub) and `.nx-ops` on a page's
-// root (ops-kit.css: Host, Schedules, Activity, Metrics, Notifications) —
-// flush cards with a ruled foot, a segmented control, a quieter KPI.
+// Two looks of the same blocks, both approved demos, and app.css draws
+// both: the default one is the demos' next.css (Secrets; Backups too, with
+// `.bk-page` where its demo measures differently), and `.nx-ops` on a
+// page's root is ops-kit.css's (Host and Schedules today) — flush cards
+// with a ruled foot, a segmented control, a quieter KPI. A page picks its
+// look by its demo; the blocks never ask.
 //
 // The shared time chart lives in timechart.js.
 
 import { agoEl, setAgo } from "./ago.js";
-import { el, h } from "./dom.js";
+import { h } from "./dom.js";
 import { dialogControl, drivable } from "./drivable.js";
+import { toast as kpToast } from "/static/kp/js/overlays.js";
+import { applySort, keepSort, nextSort, rememberedSort } from "./sortstate.js";
+
+export {
+  applySort,
+  compareValues,
+  keepSort,
+  nextSort,
+  rememberedSort,
+} from "./sortstate.js";
+
+/** @typedef {import("./sortstate.js").SortKey} SortKey */
 
 /**
  * The Live view control a clickable block is: a declared id (drivable.js),
@@ -99,8 +114,10 @@ export function breadcrumbs(trail) {
  * `set(at, words)`: `words` stand in for the time while something is under
  * way ("reading 3 of 6 stacks…"); `data-state` says none / ok / busy.
  * @param {string} [verb] "updated", "read", "measured"
+ * `fail(words)`: the read failed ("not read"), a red dot.
  * @returns {{el: HTMLElement,
- *   set: (at: number | null, words?: string) => void}}
+ *   set: (at: number | null, words?: string) => void,
+ *   fail: (words: string) => void}}
  */
 export function liveStatus(verb = "updated") {
   const ago = agoEl(verb, null, { live: true });
@@ -115,14 +132,26 @@ export function liveStatus(verb = "updated") {
     e.dataset.state = w != null ? "busy" : at == null ? "none" : "ok";
   };
   set(null);
-  return { el: e, set };
+  /** @param {string} w */
+  const fail = (w) => {
+    set(null, w);
+    e.dataset.state = "failed";
+  };
+  return { el: e, set, fail };
 }
 
 /**
  * @typedef {{title: string, sub?: string, desc: string, crumbs?: Crumb[],
  *   live?: string | boolean, actions?: Node[], primary?: Node | null,
- *   more?: Node | null, meta?: Node[]}} HeaderSpec
+ *   more?: Node | null, meta?: Node[], level?: "h1" | "h2",
+ *   split?: boolean}} HeaderSpec
  *   `sub`: a muted part of the title ("Host demo");
+ *   `split`: the next.css header (Secrets): the live status beside the
+ *   title, the description under them, the actions against the right
+ *   edge spanning both rows (one column on a phone, actions last);
+ *   `level`: the title's heading level, `h1` by default; `h2` when the
+ *   page is embedded under another page's title (Schedules as Activity's
+ *   "Planned" view);
  *   `live`: show a live status (true, or the verb: "updated", "read");
  *   `actions`: at most two secondary actions;
  *   `primary`: the ONE primary action, after them;
@@ -148,7 +177,7 @@ export function liveStatus(verb = "updated") {
  */
 export function pageHeader(spec) {
   const title = h(
-    "h1",
+    spec.level ?? "h1",
     null,
     spec.title,
     ...(spec.sub ? [h("span", { class: "nx-head-sub" }, ` ${spec.sub}`)] : []),
@@ -183,6 +212,17 @@ export function pageHeader(spec) {
       actions,
     );
     return { el: e, title, desc, actions, meta, live };
+  }
+  if (spec.split) {
+    const e = h(
+      "header",
+      { class: "nx-head nx-head--split" },
+      ...crumbs,
+      h("div", { class: "title-row" }, title, live?.el ?? null),
+      desc,
+      actions,
+    );
+    return { el: e, title, desc, actions, meta: null, live };
   }
   const row = h("div", { class: "title-row" }, title);
   if (live || actions.childElementCount > 0) {
@@ -258,8 +298,9 @@ export function kpi(k) {
   const hint = h("span", { class: "nx-kpi__hint", "aria-hidden": "true" });
   const value = h("span", { class: "nx-kpi__value" });
   const ctx = h("span", { class: "nx-kpi__ctx" });
-  const foot = k.meter
-    ? h("div", { class: "nx-meter", "aria-hidden": "true" })
+  const m = k.meter ? meter(k.meter) : null;
+  const foot = m
+    ? m.el
     : k.spark
       ? h("span", { class: "nx-kpi__spark", "aria-hidden": "true" })
       : null;
@@ -311,22 +352,8 @@ export function kpi(k) {
       e.setAttribute("aria-pressed", String(cur.toggle.pressed));
       hint.textContent = cur.toggle.pressed ? "filtering ×" : "filter";
     }
-    if (foot && cur.meter) {
-      const m = meterParts(cur.meter);
-      foot.className = `nx-meter${m.tone ? ` nx-meter--${m.tone}` : ""}`;
-      const fill = h("i");
-      fill.style.width = `${m.fill}%`;
-      /** @type {HTMLElement[]} */
-      const parts = [fill];
-      if (m.mark != null) {
-        const tick = h(
-          "b",
-          cur.meter.markTitle ? { title: cur.meter.markTitle } : null,
-        );
-        tick.style.left = `${m.mark}%`;
-        parts.push(tick);
-      }
-      foot.replaceChildren(...parts);
+    if (m && cur.meter) {
+      m.set(cur.meter);
     } else if (foot)
       foot.replaceChildren(
         ...(cur.spark && cur.spark.length > 1 ? [sparkline(cur.spark)] : []),
@@ -418,87 +445,6 @@ export function attentionBand(items = []) {
 }
 
 /**
- * @typedef {{value: string, label: string, count?: number | null,
- *   hint?: string}} Chip
- */
-
-/**
- * A group of toggle chips (DESIGN_LANGUAGE §10, §12; Kenny 2026-10-03: "of
- * meerdere kunnen aanklikken"): a plain click turns one value on or off,
- * several may be on, no modifier keys; none on means everything is shown.
- * `reset()` (Show all, Esc) turns them all off again.
- * @param {{label: string, chips: Chip[], selected?: Iterable<string>,
- *   onChange: (selected: Set<string>) => void}} spec
- * @returns {{el: HTMLElement, selected: () => Set<string>,
- *   set: (values: Iterable<string>) => void, reset: () => void,
- *   setChips: (chips: Chip[]) => void}}
- */
-export function toggleChips(spec) {
-  /** @type {Set<string>} */
-  const sel = new Set(spec.selected ?? []);
-  const values = h("span", { class: "nx-chips" });
-  const el = h(
-    "div",
-    { class: "nx-tb__group", role: "group", "aria-label": spec.label },
-    h("b", null, spec.label),
-    values,
-  );
-  /** @type {Chip[]} */
-  let chips = spec.chips;
-  const paint = () => {
-    values.replaceChildren(
-      ...chips.map((c) => {
-        const b = h(
-          "button",
-          {
-            type: "button",
-            class: "nx-chip-toggle",
-            "aria-pressed": String(sel.has(c.value)),
-            "data-value": c.value,
-            title:
-              c.hint ??
-              `Show or hide ${c.label}; each click turns it on or off`,
-          },
-          c.label,
-          ...(c.count != null
-            ? [h("span", { class: "nx-chip-toggle__count" }, String(c.count))]
-            : []),
-        );
-        b.addEventListener("click", () => {
-          if (sel.has(c.value)) sel.delete(c.value);
-          else sel.add(c.value);
-          paint();
-          spec.onChange(new Set(sel));
-        });
-        return b;
-      }),
-    );
-  };
-  paint();
-  return {
-    el,
-    selected: () => new Set(sel),
-    set: (v) => {
-      sel.clear();
-      for (const x of v) sel.add(x);
-      paint();
-    },
-    reset: () => {
-      if (sel.size === 0) return;
-      sel.clear();
-      paint();
-      spec.onChange(new Set(sel));
-    },
-    setChips: (next) => {
-      chips = next;
-      for (const v of [...sel])
-        if (!chips.some((c) => c.value === v)) sel.delete(v);
-      paint();
-    },
-  };
-}
-
-/**
  * The toolbar of a list, a table, a log or a chart (DESIGN_LANGUAGE §12):
  * three zones on one grid row inside the card it filters — the search at
  * its own width with its `/` hint inside the box, the labelled filter
@@ -511,7 +457,10 @@ export function toggleChips(spec) {
  *   state?: Node[]}} spec
  * @returns {{el: HTMLElement, search: HTMLInputElement | null,
  *   state: HTMLElement, setActive: (chips: {label: string,
- *   clear: () => void}[], clearAll?: () => void) => void}}
+ *   clear: () => void, drive: Drive}[],
+ *   clearAll?: {run: () => void, drive: Drive}) => void}}
+ *   `setActive`: one `filterChip` per active filter, each the Live view
+ *   control its `drive` names, and Clear all (its own control)
  */
 export function toolbar(spec) {
   /** @type {HTMLInputElement | null} */
@@ -567,34 +516,22 @@ export function toolbar(spec) {
     setActive: (chips, clearAll) => {
       active.replaceChildren(
         h("span", { class: "nx-tb__active-label" }, "Showing only"),
-        ...chips.map((c) => {
-          const x = h(
-            "button",
-            {
-              type: "button",
-              class: "kp-tag nx-tb__chip",
-              title: `Remove this filter: ${c.label}`,
-            },
-            c.label,
-            h("span", { "aria-hidden": "true" }, " ✕"),
-          );
-          x.addEventListener("click", c.clear);
-          return x;
-        }),
+        ...chips.map((c) => filterChip(c.label, c.clear, c.drive)),
         ...(clearAll
           ? [
-              (() => {
-                const b = h(
+              drive(
+                h(
                   "button",
                   {
                     type: "button",
                     class: "kp-button kp-button--ghost kp-button--sm",
+                    title: "Turn every filter off",
+                    onclick: clearAll.run,
                   },
                   "Clear all",
-                );
-                b.addEventListener("click", clearAll);
-                return b;
-              })(),
+                ),
+                clearAll.drive,
+              ),
             ]
           : []),
       );
@@ -608,7 +545,7 @@ export function toolbar(spec) {
  *   tools?: Node[], badge?: Node | null, foot?: import("./dom.js").Child[],
  *   body?: import("./dom.js").Child, collapsible?: boolean, open?: boolean,
  *   mount?: (body: HTMLElement) => (() => void) | void,
- *   level?: "h2" | "h3", tag?: "section" | "aside", cls?: string,
+ *   level?: "h2" | "h3", tag?: "section" | "aside" | "nav", cls?: string,
  *   plain?: boolean}}
  *   SectionSpec
  *   `title` + `desc`: the head (rule 8); a card without a title (a hero)
@@ -631,47 +568,48 @@ export function toolbar(spec) {
  * its read — and its cleanup runs with `stop()`.
  * @param {SectionSpec} spec
  * @returns {{el: HTMLElement, head: HTMLElement, body: HTMLElement,
- *   foot: HTMLElement, stop: () => void, open: () => void}}
+ *   foot: HTMLElement, title: HTMLElement | null,
+ *   desc: HTMLElement | null, tools: HTMLElement | null,
+ *   stop: () => void, open: () => void}}
+ *   `title`, `desc`, `tools`: the head's parts, for a card whose heading
+ *   follows what it shows (a stack's name)
  */
 export function section(spec) {
   const level = spec.level ?? "h2";
   const titleEl = spec.title
     ? h(level, spec.id ? { id: `${spec.id}-h` } : null, spec.title)
     : null;
+  const descEl = titleEl
+    ? h("p", { class: "section-head__desc" }, spec.desc ?? "")
+    : null;
+  const toolsEl =
+    titleEl && (spec.tools?.length || spec.collapsible)
+      ? h(
+          "div",
+          { class: "nx-card__tools" },
+          ...(spec.tools ?? []),
+          ...(spec.collapsible
+            ? [h("span", { class: "nx-chev", "aria-hidden": "true" }, "›")]
+            : []),
+        )
+      : null;
   const head = titleEl
     ? h(
         "div",
         { class: "nx-card__head" },
         titleEl,
-        ...(spec.badge ? [spec.badge] : []),
-        h("p", { class: "section-head__desc" }, spec.desc ?? ""),
-        ...(spec.tools?.length || spec.collapsible
-          ? [
-              h(
-                "div",
-                { class: "nx-card__tools" },
-                ...(spec.tools ?? []),
-                ...(spec.collapsible
-                  ? [
-                      h(
-                        "span",
-                        { class: "nx-chev", "aria-hidden": "true" },
-                        "›",
-                      ),
-                    ]
-                  : []),
-              ),
-            ]
-          : []),
+        spec.badge ?? null,
+        descEl,
+        toolsEl,
       )
     : h("span", { class: "nx-card__nohead" });
-  const body = el("div", { class: "nx-card__body" }, spec.body ?? null);
-  const foot = el(
+  const body = h("div", { class: "nx-card__body" }, spec.body ?? null);
+  const foot = h(
     "div",
     { class: "nx-card__foot" },
-    (spec.foot ?? []).map((x) => el("span", null, x)),
+    (spec.foot ?? []).map((x) => h("span", null, x)),
   );
-  foot.hidden = !spec.foot;
+  foot.hidden = !spec.foot?.length;
   /** @type {(() => void) | null} */
   let cleanup = null;
   let mounted = false;
@@ -725,6 +663,9 @@ export function section(spec) {
     head,
     body,
     foot,
+    title: titleEl,
+    desc: descEl,
+    tools: toolsEl,
     stop: () => cleanup?.(),
     open: () => {
       if (e instanceof HTMLDetailsElement) e.open = true;
@@ -976,128 +917,201 @@ export function toggleValue(on, value, total) {
 }
 
 /**
- * Plain-click toggles in the segmented look (DESIGN_LANGUAGE §10, §12):
- * each click turns one value on or off, several may be on, and "All"
- * (pressed while none is) turns them all off again; `counts` writes the
- * exact number beside each. Every button is the Live view control
- * `drive.id` on its own value's row ("all" for All).
- * @param {{label: string, all: {label: string, hint?: string},
- *   chips: {value: string, label: string, hint?: string}[],
- *   onChange: (on: Set<string>) => void, drive: {id: string}}} spec
+ * @typedef {{value: string, label: string, count?: number | null,
+ *   hint?: string}} Chip
+ */
+
+/**
+ * @typedef {{label: string, chips: Chip[], onChange: (on: Set<string>) => void,
+ *   drive: {id: string}, selected?: Iterable<string>,
+ *   all?: {label: string, hint?: string} | null,
+ *   look?: "seg" | "chips"}} ToggleSpec
+ *   `drive`: the Live view control every button is, on its own value's
+ *   row ("all" for All) — required, a toggle nobody can press from Live
+ *   view is a defect (invariant 39). `all`: an "All" button first, pressed
+ *   while nothing is on. `look`: "seg" (the segmented control, the
+ *   default) or "chips" (labelled chips in a toolbar group).
+ */
+
+/**
+ * The plain-click toggle group (DESIGN_LANGUAGE §10, §12; Kenny
+ * 2026-10-03: "of meerdere kunnen aanklikken"): each click turns one value
+ * on or off, several may be on, no modifier keys; none on means everything
+ * is shown, and turning the last one on is the same as none — the group
+ * goes back to All (one rule for every look). `reset()` — All, Show all,
+ * Esc — turns them all off; counts sit beside each value, exact.
+ * @param {ToggleSpec} spec
  * @returns {{el: HTMLElement, selected: () => Set<string>,
- *   reset: () => void, counts: (n: Record<string, number>) => void}}
+ *   set: (values: Iterable<string>) => void, reset: () => void,
+ *   counts: (n: Record<string, number | null | undefined>) => void,
+ *   setChips: (chips: Chip[]) => void}}
  */
 export function toggleGroup(spec) {
+  if (!spec.drive?.id)
+    throw new Error(
+      `the toggle group ${spec.label} needs its Live view control`,
+    );
+  const chipsLook = spec.look === "chips";
+  /** @type {Chip[]} */
+  let chips = spec.chips;
   /** @type {Set<string>} */
-  let on = new Set();
-  /** @type {Map<string, HTMLElement>} */
-  const counts = new Map();
-  const countEl = (/** @type {string} */ v) => {
-    const c = h("span", { class: "nx-seg__count" });
-    counts.set(v, c);
-    return c;
-  };
+  let on = new Set(spec.selected ?? []);
+  if (on.size >= chips.length) on = new Set();
+  /** @type {Record<string, number | null | undefined>} */
+  let n = Object.fromEntries(chips.map((c) => [c.value, c.count]));
+  const box = h("span", { class: chipsLook ? "nx-chips" : "nx-seg__btns" });
+  const e = chipsLook
+    ? h(
+        "div",
+        { class: "nx-tb__group", role: "group", "aria-label": spec.label },
+        h("b", null, spec.label),
+        box,
+      )
+    : h("div", { class: "nx-seg", role: "group", "aria-label": spec.label });
   const changed = () => {
     paint();
     spec.onChange(new Set(on));
   };
-  const allBtn = el(
-    "button",
-    {
-      type: "button",
-      "data-v": "all",
-      title: spec.all.hint ?? "Show every row",
-      onclick: () => {
-        on = new Set();
-        changed();
-      },
-    },
-    spec.all.label,
-    countEl("all"),
-  );
-  drive(allBtn, { id: spec.drive.id, row: "all" });
-  const btns = spec.chips.map((c) =>
-    drive(
-      el(
+  /**
+   * @param {string} value @param {string} label @param {string} title
+   * @param {() => void} click
+   */
+  const btn = (value, label, title, click) => {
+    const c = n[value];
+    return drive(
+      h(
         "button",
         {
           type: "button",
-          "data-v": c.value,
-          title:
-            c.hint ??
-            "Click to show or hide these; each click turns one on or off",
-          onclick: () => {
-            on = toggleValue(on, c.value, spec.chips.length);
+          class: chipsLook ? "nx-chip-toggle" : null,
+          "data-v": value,
+          "aria-pressed": String(
+            value === "all" ? on.size === 0 : on.has(value),
+          ),
+          title,
+          onclick: click,
+        },
+        label,
+        h(
+          "span",
+          { class: chipsLook ? "nx-chip-toggle__count" : "nx-seg__count" },
+          c == null ? "" : String(c),
+        ),
+      ),
+      { id: spec.drive.id, row: value },
+    );
+  };
+  const paint = () => {
+    const btns = [
+      ...(spec.all
+        ? [
+            btn(
+              "all",
+              spec.all.label,
+              spec.all.hint ?? "Show every row",
+              () => {
+                on = new Set();
+                changed();
+              },
+            ),
+          ]
+        : []),
+      ...chips.map((c) =>
+        btn(
+          c.value,
+          c.label,
+          c.hint ?? `Show or hide ${c.label}; each click turns it on or off`,
+          () => {
+            on = toggleValue(on, c.value, chips.length);
             changed();
           },
-        },
-        c.label,
-        countEl(c.value),
+        ),
       ),
-      { id: spec.drive.id, row: c.value },
-    ),
-  );
-  const e = h(
-    "div",
-    { class: "nx-seg", role: "group", "aria-label": spec.label },
-    allBtn,
-    ...btns,
-  );
-  const paint = () => {
-    allBtn.setAttribute("aria-pressed", String(on.size === 0));
-    btns.forEach((b, i) =>
-      b.setAttribute("aria-pressed", String(on.has(spec.chips[i].value))),
-    );
+    ];
+    const focused = e.querySelector(":focus");
+    const v = focused instanceof HTMLElement ? focused.dataset.v : null;
+    (chipsLook ? box : e).replaceChildren(...btns);
+    if (v != null)
+      /** @type {HTMLElement | undefined} */ (
+        btns.find((b) => b.dataset.v === v)
+      )?.focus();
   };
   paint();
   return {
     el: e,
     selected: () => new Set(on),
+    set: (values) => {
+      on = new Set(values);
+      if (on.size >= chips.length) on = new Set();
+      paint();
+    },
     reset: () => {
       if (on.size === 0) return;
       on = new Set();
       changed();
     },
-    counts: (n) => {
-      for (const [v, c] of counts)
-        c.textContent = n[v] == null ? "" : String(n[v]);
+    counts: (next) => {
+      n = { ...n, ...next };
+      paint();
+    },
+    setChips: (next) => {
+      chips = next;
+      for (const c of chips) if (c.count !== undefined) n[c.value] = c.count;
+      for (const v of [...on])
+        if (!chips.some((c) => c.value === v)) on.delete(v);
+      paint();
     },
   };
 }
 
 /**
- * A one-of segmented switch ("Changed" / "All"); each button is the Live
- * view control `drive.id` on its value's row.
+ * The same toggle group in the chips look, for a toolbar's filter groups.
+ * @param {Omit<ToggleSpec, "look">} spec
+ */
+export const toggleChips = (spec) => toggleGroup({ ...spec, look: "chips" });
+
+/**
+ * A one-of segmented switch ("Changed" / "All"). Each button is the Live
+ * view control `drive.id` on its value's row, or — for a page that marks
+ * its own — `mark(button, value)` declares it; one of the two is required.
+ * `set(v)` moves the switch without calling `onChange` (the address moved
+ * it); `value()` reads it.
  * @param {{label: string, items: {value: string, label: string,
  *   hint?: string}[], value: string, onChange: (v: string) => void,
- *   drive: {id: string}}} spec
- * @returns {{el: HTMLElement, counts: (n: Record<string, number>) => void}}
+ *   drive?: {id: string},
+ *   mark?: (button: HTMLElement, value: string) => void}} spec
+ * @returns {{el: HTMLElement, set: (v: string) => void,
+ *   value: () => string,
+ *   counts: (n: Record<string, number>) => void}}
  */
 export function segSwitch(spec) {
+  if (!spec.drive && !spec.mark)
+    throw new Error(`the switch ${spec.label} needs its Live view control`);
   /** @type {Map<string, HTMLElement>} */
   const counts = new Map();
   let cur = spec.value;
   const btns = spec.items.map((it) => {
     const c = h("span", { class: "nx-seg__count" });
     counts.set(it.value, c);
-    return drive(
-      el(
-        "button",
-        {
-          type: "button",
-          "data-v": it.value,
-          title: it.hint ?? null,
-          onclick: () => {
-            cur = it.value;
-            paint();
-            spec.onChange(cur);
-          },
+    const b = h(
+      "button",
+      {
+        type: "button",
+        "data-v": it.value,
+        title: it.hint ?? null,
+        onclick: () => {
+          if (cur === it.value) return;
+          cur = it.value;
+          paint();
+          spec.onChange(cur);
         },
-        it.label,
-        c,
-      ),
-      { id: spec.drive.id, row: it.value },
+      },
+      it.label,
+      c,
     );
+    if (spec.drive) drive(b, { id: spec.drive.id, row: it.value });
+    else spec.mark?.(b, it.value);
+    return b;
   });
   const paint = () =>
     btns.forEach((b, i) =>
@@ -1110,25 +1124,17 @@ export function segSwitch(spec) {
       { class: "nx-seg", role: "group", "aria-label": spec.label },
       ...btns,
     ),
+    set: (v) => {
+      cur = v;
+      paint();
+    },
+    value: () => cur,
     counts: (n) => {
       for (const [v, c] of counts)
         c.textContent = n[v] == null ? "" : String(n[v]);
     },
   };
 }
-
-/**
- * The next state of a column sorted by clicks: ascending, descending, then
- * back to the original order.
- * @param {string | null} now `aria-sort`'s value
- * @returns {"ascending" | "descending" | null}
- */
-export const nextSortDir = (now) =>
-  now === "ascending"
-    ? "descending"
-    : now === "descending"
-      ? null
-      : "ascending";
 
 /**
  * What a cell sorts by: its `data-sort` or its text, numbers as numbers.
@@ -1140,98 +1146,156 @@ export function sortValue(v) {
   return v !== "" && Number.isFinite(n) ? n : v.toLowerCase();
 }
 
-/**
- * Makes a plain table's headers sort it (DESIGN_LANGUAGE §12): click a
- * header for ascending, again descending, a third time the original
- * order; Enter / Space do the same; `aria-sort` says which. A cell's
- * `data-sort` overrides its text.
- * @param {HTMLTableElement} table
- */
-export function sortableTable(table) {
-  const head = table.tHead?.rows[0];
-  if (!head) return;
-  const ths = [...head.cells];
-  ths.forEach((th, ci) => {
-    if (!th.textContent?.trim()) return;
-    th.classList.add("nx-sortable");
-    th.tabIndex = 0;
-    th.title =
-      "Sort by this column; click again to reverse, a third time for the original order";
-    const go = () => {
-      const dir = nextSortDir(th.getAttribute("aria-sort"));
-      ths.forEach((x) => x.removeAttribute("aria-sort"));
-      const body = table.tBodies[0];
-      const rows = [...body.rows];
-      rows.forEach((r, i) => {
-        if (r.dataset.order == null) r.dataset.order = String(i);
-      });
-      if (!dir) {
-        rows.sort((a, b) => Number(a.dataset.order) - Number(b.dataset.order));
-        body.append(...rows);
-        return;
-      }
-      th.setAttribute("aria-sort", dir);
-      /** @param {HTMLTableRowElement} r */
-      const key = (r) => {
-        const c = r.cells[ci];
-        return sortValue(c?.dataset.sort ?? c?.textContent?.trim() ?? "");
-      };
-      rows.sort((a, b) => {
-        const A = key(a);
-        const B = key(b);
-        return (A > B ? 1 : A < B ? -1 : 0) * (dir === "ascending" ? 1 : -1);
-      });
-      body.append(...rows);
-    };
-    th.addEventListener("click", go);
-    th.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        go();
-      }
-    });
-  });
-}
+/** The mark a sorted column shows: ↑ / ↓, numbered when several keys sort. */
+export const sortMark = (
+  /** @type {SortKey[]} */ sort,
+  /** @type {string} */ key,
+) => {
+  const i = sort.findIndex((s) => s.key === key);
+  if (i < 0) return "↕";
+  return `${sort[i].dir > 0 ? "↑" : "↓"}${sort.length > 1 ? i + 1 : ""}`;
+};
 
 /**
- * A sortable column header whose order the page keeps (several keys, in
- * the address): click sorts (ascending, descending, none), Shift+click
- * adds a further key. The button is the Live view control `drive`.
- * @param {string} label
- * @param {{key: string, dir: number}[]} sort
- * @param {string} key
- * @param {(add: boolean) => void} onSort
- * @param {{cls?: string, drive: Drive}} o
+ * @typedef {{label: string, key: string, sort: SortKey[],
+ *   onSort: (next: SortKey[]) => void, drive: Drive, remember?: string,
+ *   cls?: string}} SortHeadSpec
+ *   `sort`: the table's sort now; `onSort` gets the next one (plain click:
+ *   this column alone, ascending → descending → none; Shift+click adds it
+ *   as a further key); `remember`: the table's name, to keep the sort for
+ *   the next visit (`rememberedSort` reads it back); `drive`: the Live view
+ *   control the header's button is.
  */
-export function sortHead(label, sort, key, onSort, o) {
-  const i = sort.findIndex((s) => s.key === key);
-  const s = sort[i];
+
+/**
+ * A sortable column header (DESIGN_LANGUAGE §12; Kenny: multi-sort,
+ * remembered per table): a `th` with `aria-sort` holding a button and the
+ * column's mark (↕, or ↑ / ↓ numbered when several keys sort).
+ * @param {SortHeadSpec} spec
+ * @returns {HTMLTableCellElement}
+ */
+export function sortHead(spec) {
+  const s = spec.sort.find((x) => x.key === spec.key);
   const btn = h(
     "button",
     {
       type: "button",
       class: "nx-sort",
       title:
-        "Sort: click for ascending, again for descending, a third time for none · Shift+click adds a second sort",
+        "Sort: click for ascending, again for descending, a third time for none · Shift+click adds a further sort",
+      onclick: (/** @type {MouseEvent} */ e) => {
+        const next = nextSort(spec.sort, spec.key, e.shiftKey);
+        if (spec.remember) keepSort(spec.remember, next);
+        spec.onSort(next);
+      },
     },
-    label,
+    spec.label,
     h(
       "span",
       { class: "nx-sort__mark", "aria-hidden": "true" },
-      s ? `${s.dir > 0 ? "↑" : "↓"}${sort.length > 1 ? i + 1 : ""}` : "↕",
+      sortMark(spec.sort, spec.key),
     ),
   );
-  btn.addEventListener("click", (e) => onSort(e.shiftKey));
-  drive(btn, o.drive);
+  drive(btn, spec.drive);
   return h(
     "th",
     {
       scope: "col",
-      ...(o.cls ? { class: o.cls } : {}),
+      class: spec.cls ?? null,
       "aria-sort": s ? (s.dir > 0 ? "ascending" : "descending") : "none",
     },
     btn,
   );
+}
+
+/**
+ * The key a plain table's column sorts under: its `data-key`, else its
+ * header text in lower-case words ("Memory" → "memory").
+ * @param {HTMLTableCellElement} th
+ */
+const columnKey = (th) =>
+  th.dataset.key ??
+  (th.textContent ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+
+/**
+ * Makes a plain table's headers sort it (DESIGN_LANGUAGE §12) with the
+ * same rule as `sortHead`: a click sorts by that column (ascending,
+ * descending, the original order), Shift+click adds it as a further key,
+ * Enter / Space do the same; `aria-sort` and the header's mark say which.
+ * A cell's `data-sort` overrides its text. Each header is the Live view
+ * control `drive.id` on its column's row; with `remember` the table keeps
+ * its sort for the next visit. Returns `apply()`, which sorts the body
+ * again after the page refilled it.
+ * @param {HTMLTableElement} table
+ * @param {{drive: {id: string}, remember?: string}} opts
+ * @returns {{apply: () => void, sort: () => SortKey[]}}
+ */
+export function sortableTable(table, opts) {
+  if (!opts?.drive?.id)
+    throw new Error("a sortable table's headers need their Live view control");
+  const head = table.tHead?.rows[0];
+  /** @type {SortKey[]} */
+  let sort = opts.remember ? rememberedSort(opts.remember) : [];
+  const ths = head ? [...head.cells] : [];
+  const keyed = ths
+    .map((th, ci) => ({ th, ci, key: columnKey(th) }))
+    .filter((x) => x.key);
+  const apply = () => {
+    for (const { th, key } of keyed) {
+      const i = sort.findIndex((s) => s.key === key);
+      if (i < 0) th.setAttribute("aria-sort", "none");
+      else
+        th.setAttribute(
+          "aria-sort",
+          sort[i].dir > 0 ? "ascending" : "descending",
+        );
+      th.dataset.mark = sortMark(sort, key);
+    }
+    const body = table.tBodies[0];
+    if (!body) return;
+    const rows = [...body.rows];
+    rows.forEach((r, i) => {
+      if (r.dataset.order == null) r.dataset.order = String(i);
+    });
+    const col = new Map(keyed.map((x) => [x.key, x.ci]));
+    const sorted = applySort(
+      [...rows].sort(
+        (a, b) => Number(a.dataset.order) - Number(b.dataset.order),
+      ),
+      sort,
+      (r, key) => {
+        const c = r.cells[col.get(key) ?? -1];
+        return sortValue(c?.dataset.sort ?? c?.textContent?.trim() ?? "");
+      },
+    );
+    body.append(...sorted);
+  };
+  for (const { th, key } of keyed) {
+    th.classList.add("nx-sortable");
+    th.tabIndex = 0;
+    th.title =
+      "Sort by this column: click again to reverse, a third time for the original order · Shift+click adds a further sort";
+    drive(th, { id: opts.drive.id, row: key });
+    /** @param {boolean} add */
+    const go = (add) => {
+      sort = nextSort(sort, key, add);
+      if (opts.remember) keepSort(opts.remember, sort);
+      apply();
+    };
+    th.addEventListener("click", (e) => go(e.shiftKey));
+    th.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        go(e.shiftKey);
+      }
+    });
+  }
+  apply();
+  return { apply, sort: () => [...sort] };
 }
 
 /**
@@ -1335,67 +1399,82 @@ export const toastsToDrop = (shown, replace) =>
 export const TOAST_MS = 6000;
 
 /**
- * A short message at the foot of the screen (DESIGN_LANGUAGE §8), gone
- * after `ms`; with an `action`, its button (Undo) runs it and closes the
- * toast. Drawn inside `host` (a page's own root) or else `#page`, never on
- * <body>: Live view finds a page's controls only in `#page` and open
- * dialogs, so the action is a declared control (`action.drive`) it can
- * press. Returns a function that closes it now.
+ * The page's toast region: kp-themes' `.kp-toasts` live region, kept
+ * inside `#page` (created there on first use) so Live view, which finds a
+ * page's controls only in `#page` and open dialogs, can press an Undo.
+ * @param {HTMLElement | null} [host] a page's own root, else `#page`
+ * @returns {HTMLElement}
+ */
+export function toastRegion(host) {
+  const page =
+    (host?.isConnected ? host : null) ??
+    document.getElementById("page") ??
+    document.body;
+  let region = /** @type {HTMLElement | null} */ (
+    page.querySelector(":scope > .kp-toasts")
+  );
+  if (!region) {
+    region = h("div", {
+      class: "kp-toasts nx-toasts",
+      role: "status",
+      "aria-live": "polite",
+    });
+    page.append(region);
+  }
+  return region;
+}
+
+/**
+ * A short message at the foot of the screen (DESIGN_LANGUAGE §8): kp-themes'
+ * own `toast()` in the page's region (`toastRegion`), gone after `ms`; with
+ * an `action`, its button (Undo) runs it and closes the toast, and is the
+ * declared Live view control `action.drive`. Returns a function that
+ * closes it now.
  * @param {string} text
- * @param {{action?: {label: string, run: () => void, drive: Drive,
- *   cls?: string}, ms?: number, host?: HTMLElement | null,
- *   replace?: "plain" | "all", cls?: string}} [opts]
- *   `cls`: a page's own class on the toast; `action.cls`: the button's
- *   classes instead of the plain underlined one
+ * @param {{action?: {label: string, run: () => void, drive: Drive},
+ *   ms?: number, host?: HTMLElement | null,
+ *   replace?: "plain" | "all"}} [opts]
  * @returns {() => void}
  */
 export function toast(text, opts = {}) {
-  const host =
-    (opts.host?.isConnected ? opts.host : null) ??
-    document.getElementById("page") ??
-    document.body;
-  let box = /** @type {HTMLElement | null} */ (
-    host.querySelector(":scope > .nx-toasts")
-  );
-  if (!box) {
-    box = h("div", { class: "nx-toasts" });
-    host.append(box);
-  }
-  const shown = /** @type {HTMLElement[]} */ ([...box.children]);
+  const region = toastRegion(opts.host);
+  const shown = /** @type {(HTMLElement & {dismiss?: () => void})[]} */ ([
+    ...region.children,
+  ]);
   for (const i of toastsToDrop(
     shown.map((t) => ({ action: t.dataset.action != null })),
     opts.replace ?? "plain",
   ))
-    shown[i].remove();
-  const t = h(
-    "div",
-    { class: `nx-toast${opts.cls ? ` ${opts.cls}` : ""}`, role: "status" },
-    h("span", null, text),
-  );
-  /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let timer;
-  const close = () => {
-    clearTimeout(timer);
-    t.remove();
-  };
+    (shown[i].dismiss ?? (() => shown[i].remove()))();
   const a = opts.action;
+  /** @type {(HTMLElement & {dismiss: () => void}) | null} */
+  let t = null;
+  t = kpToast(text, {
+    region,
+    ms: opts.ms ?? TOAST_MS,
+    className: "kp-toast nx-toast",
+    ...(a
+      ? {
+          action: {
+            label: a.label,
+            onClick: () => {
+              t?.dismiss();
+              a.run();
+            },
+          },
+        }
+      : {}),
+  });
   if (a) {
     t.dataset.action = "";
-    const b = h(
-      "button",
-      { type: "button", class: a.cls ?? "nx-toast__act" },
-      a.label,
-    );
-    drive(b, a.drive);
-    b.addEventListener("click", () => {
-      close();
-      a.run();
-    });
-    t.append(b);
+    const b = t.querySelector("button");
+    if (b) {
+      b.classList.add("nx-toast__act");
+      drive(b, a.drive);
+    }
   }
-  box.append(t);
-  timer = setTimeout(close, opts.ms ?? TOAST_MS);
-  return close;
+  const made = t;
+  return () => made.dismiss();
 }
 
 /**
@@ -1417,32 +1496,68 @@ export function menuPlace(r, ht, view, width) {
   return { top, left };
 }
 
-/** @type {{close: () => void} | null} */
+/**
+ * The keys of an open `role=menu`: ↓ / ↑ move the focus to the next or
+ * previous item (wrapping), Home / End to the first or last.
+ * @param {HTMLElement} menu
+ * @param {KeyboardEvent} e
+ * @returns {boolean} whether the key was one of them
+ */
+export function menuKey(menu, e) {
+  const items = /** @type {HTMLElement[]} */ ([
+    ...menu.querySelectorAll('[role="menuitem"]'),
+  ]);
+  if (!items.length) return false;
+  const i = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
+  const to =
+    e.key === "ArrowDown"
+      ? (i + 1) % items.length
+      : e.key === "ArrowUp"
+        ? (i - 1 + items.length) % items.length
+        : e.key === "Home"
+          ? 0
+          : e.key === "End"
+            ? items.length - 1
+            : null;
+  if (to == null) return false;
+  e.preventDefault();
+  items[to].focus({ preventScroll: true });
+  return true;
+}
+
+/** @type {{close: () => void, anchor: HTMLElement} | null} */
 let openRowMenu = null;
 
 /**
  * A row's menu (Edit…, Run now, Delete) as a NON-modal `<dialog>`, so the
  * page stays usable and Live view presses its items by their dialog
- * control `name` (drivable.js) while it is open. One open at a time;
- * Escape, a click outside or picking an item closes it and Escape gives
- * the focus back to its button.
+ * control `name` (drivable.js) while it is open. One open at a time; a
+ * second click on its button, Escape, a click outside or picking an item
+ * closes it, and Escape gives the focus back to its button; ↑ ↓ Home End
+ * move between the items. The button says whether it is open
+ * (`aria-expanded`).
  * @param {{anchor: HTMLElement, label: string, title: string,
  *   items: {name: string, label: string, hint: string, run: () => void,
  *   danger?: boolean}[], width?: number}} spec
- * @returns {{el: HTMLDialogElement, close: () => void}}
+ * @returns {{el: HTMLDialogElement, close: () => void} | null} null when
+ *   the click closed the menu its button had open
  */
 export function rowMenu(spec) {
+  if (openRowMenu?.anchor === spec.anchor) {
+    openRowMenu.close();
+    return null;
+  }
   openRowMenu?.close();
   const width = spec.width ?? 260;
   const r = spec.anchor.getBoundingClientRect();
   const m = /** @type {HTMLDialogElement} */ (
-    el(
+    h(
       "dialog",
       { class: "nx-rowmenu", role: "menu", "aria-label": spec.label },
-      el("h2", { class: "kp-dialog__title nx-vh" }, spec.title),
+      h("h2", { class: "kp-dialog__title nx-vh" }, spec.title),
       spec.items.map((it) =>
         dialogControl(
-          el(
+          h(
             "button",
             {
               type: "button",
@@ -1453,8 +1568,8 @@ export function rowMenu(spec) {
                 it.run();
               },
             },
-            el("b", null, it.label),
-            el("span", null, it.hint),
+            h("b", null, it.label),
+            h("span", null, it.hint),
           ),
           it.name,
         ),
@@ -1467,58 +1582,61 @@ export function rowMenu(spec) {
     m.remove();
   };
   const outside = (/** @type {PointerEvent} */ e) => {
-    if (!m.contains(/** @type {Node} */ (e.target)) && e.target !== spec.anchor)
-      close();
+    const t = /** @type {Node} */ (e.target);
+    if (!m.contains(t) && !spec.anchor.contains(t)) close();
   };
   m.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       e.preventDefault();
       close();
       spec.anchor.focus();
-    }
+    } else menuKey(m, e);
   });
+  const handle = { el: m, close, anchor: spec.anchor };
   m.addEventListener("close", () => {
     document.removeEventListener("pointerdown", outside);
+    spec.anchor.setAttribute("aria-expanded", "false");
     m.remove();
-  });
-  const handle = { el: m, close };
-  m.addEventListener("close", () => {
     if (openRowMenu === handle) openRowMenu = null;
   });
   document.addEventListener("pointerdown", outside);
+  spec.anchor.setAttribute("aria-haspopup", "menu");
+  spec.anchor.setAttribute("aria-expanded", "true");
   // show() focuses the first item, which scrolls the page to wherever the
   // dialog sits at that moment; keep the page where the user clicked and
-  // place the menu against the button from there.
+  // place the menu against the button from there, by its real width.
   const view = { w: innerWidth, h: innerHeight, x: scrollX, y: scrollY };
   m.style.top = `${r.bottom + view.y + 4}px`;
   m.style.left = `${Math.max(8, r.right + view.x - width)}px`;
   document.body.append(m);
   m.show();
   if (scrollX !== view.x || scrollY !== view.y) scrollTo(view.x, view.y);
-  const p = menuPlace(r, m.offsetHeight, view, width);
+  const p = menuPlace(r, m.offsetHeight, view, m.offsetWidth);
   m.style.top = `${p.top}px`;
   m.style.left = `${p.left}px`;
   openRowMenu = handle;
   /** @type {HTMLElement | null} */ (m.querySelector("button"))?.focus({
     preventScroll: true,
   });
-  return handle;
+  return { el: m, close };
 }
 
 /**
  * The header's overflow `···` menu: a button (the Live view control
- * `drive`) and a small list of links, closed by Escape, a click outside or
- * picking an item.
+ * `drive`) and a small list of links. A second click on the button,
+ * Escape (the focus back on the button), a click outside or picking an
+ * item closes it; ↑ ↓ Home End move between the items. It listens on the
+ * document only while it is open.
  * @param {{label: string, items: {label: string, hint: string,
  *   href: string, download?: string}[], drive: Drive}} spec
  * @returns {{el: HTMLElement, stop: () => void}}
  */
 export function moreMenu(spec) {
-  const list = el(
+  const list = h(
     "div",
     { class: "nx-menu", role: "menu", hidden: true },
     spec.items.map((it) =>
-      el(
+      h(
         "a",
         {
           role: "menuitem",
@@ -1526,12 +1644,12 @@ export function moreMenu(spec) {
           download: it.download ?? null,
           onclick: () => close(),
         },
-        el("b", null, it.label),
-        el("span", null, it.hint),
+        h("b", null, it.label),
+        h("span", null, it.hint),
       ),
     ),
   );
-  const btn = el(
+  const btn = h(
     "button",
     {
       type: "button",
@@ -1545,32 +1663,37 @@ export function moreMenu(spec) {
     "···",
   );
   drive(btn, spec.drive);
-  const open = () => {
-    list.hidden = false;
-    btn.setAttribute("aria-expanded", "true");
-  };
-  const close = () => {
-    list.hidden = true;
-    btn.setAttribute("aria-expanded", "false");
-  };
-  const wrap = el("div", { class: "nx-more" }, btn, list);
+  const wrap = h("div", { class: "nx-more" }, btn, list);
   /** @param {MouseEvent} e */
   const outside = (e) => {
     if (!wrap.contains(/** @type {Node} */ (e.target))) close();
   };
   /** @param {KeyboardEvent} e */
-  const esc = (e) => {
-    if (e.key === "Escape" && !list.hidden) close();
+  const keys = (e) => {
+    if (list.hidden) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+      btn.focus();
+    } else if (
+      list.contains(/** @type {Node} */ (e.target)) ||
+      e.target === btn
+    )
+      menuKey(list, e);
   };
-  document.addEventListener("click", outside);
-  document.addEventListener("keydown", esc);
-  return {
-    el: wrap,
-    stop: () => {
-      document.removeEventListener("click", outside);
-      document.removeEventListener("keydown", esc);
-    },
+  const open = () => {
+    list.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    document.addEventListener("click", outside);
+    document.addEventListener("keydown", keys);
   };
+  const close = () => {
+    list.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+    document.removeEventListener("click", outside);
+    document.removeEventListener("keydown", keys);
+  };
+  return { el: wrap, stop: close };
 }
 
 /**
@@ -1580,19 +1703,28 @@ export function moreMenu(spec) {
 export const kbd = (k) => h("kbd", { class: "nx-kbd" }, k);
 
 /**
- * The page's compact line of shortcuts ("/ search containers · …").
- * @param {[string, string][]} pairs key, what it does
+ * The page's compact line of shortcuts ("/ search containers · …"). A key
+ * may be several keys for one action (`[["↑", "↓"], "move"]`).
+ * @param {[string | string[], string][]} pairs keys, what they do
  */
-export const keysLine = (pairs) =>
+export const keyRow = (pairs) =>
   h(
     "p",
     { class: "nx-keys", "aria-label": "Keyboard shortcuts" },
-    ...pairs.map(([k, what]) => h("span", null, kbd(k), what)),
+    ...pairs.map(([k, what]) =>
+      h("span", null, ...(Array.isArray(k) ? k : [k]).map(kbd), what),
+    ),
   );
+
+/** The same block under its first name. */
+export const keysLine = keyRow;
 
 /**
  * A stack's colour from the topology's hues (`stackHues`), readable on
- * light and dark.
+ * light and dark. The one place outside the stack mark where a page
+ * computes a colour instead of reading a kp-themes token: a stack's hue
+ * is its identity (DESIGN_LANGUAGE §11), and no token holds a colour per
+ * stack.
  * @param {number} hue
  */
 export const hueColour = (hue) =>
@@ -1600,12 +1732,18 @@ export const hueColour = (hue) =>
 
 /**
  * A stack's colour by its place in the fleet's sorted names: one of the
- * five chart colours.
+ * five chart colours; a name the fleet does not list is neutral, never
+ * mistaken for the first stack.
  * @param {string} name
  * @param {string[]} all
  */
-export const chartColour = (name, all) =>
-  `var(--chart-${(Math.max(0, [...all].sort().indexOf(name)) % 5) + 1})`;
+export const chartColour = (name, all) => {
+  const i = [...all].sort().indexOf(name);
+  return i < 0 ? NEUTRAL_COLOUR : `var(--chart-${(i % 5) + 1})`;
+};
+
+/** The colour of a name the fleet does not list: no chart colour of its own. */
+export const NEUTRAL_COLOUR = "var(--muted-foreground)";
 
 /**
  * The small square of a stack's colour beside its name.
@@ -1616,3 +1754,269 @@ export function swatch(colour) {
   s.style.setProperty("--c", colour);
   return s;
 }
+
+/**
+ * Loads a page's own stylesheet (`/css/pages/<page>.css`) once, when the
+ * page is first drawn, instead of every page's sheet on every page.
+ * @param {string} href
+ * @returns {HTMLLinkElement}
+ */
+export function ensureStyle(href) {
+  const had = /** @type {HTMLLinkElement | null} */ (
+    document.querySelector(`link[data-page-style="${CSS.escape(href)}"]`)
+  );
+  if (had) return had;
+  const l = /** @type {HTMLLinkElement} */ (
+    h("link", { rel: "stylesheet", href, "data-page-style": href })
+  );
+  document.head.append(l);
+  return l;
+}
+
+/** @typedef {"ok" | "warn" | "bad" | "info" | "live" | ""} Tone */
+
+/**
+ * A small status chip: a count, a state word ("3", "unreadable"), in a
+ * tone. With `dot`, a status dot leads the word.
+ * @param {string} text
+ * @param {{tone?: Tone, dot?: boolean, title?: string, label?: string}} [o]
+ *   `label`: what a screen reader says instead of the text ("!")
+ */
+export function chip(text, o = {}) {
+  return h(
+    "span",
+    {
+      class: `nx-chip${o.tone ? ` nx-chip--${o.tone}` : ""}${o.dot ? " nx-chip--dot" : ""}`,
+      title: o.title ?? null,
+      "aria-label": o.label ?? null,
+    },
+    text,
+  );
+}
+
+/**
+ * A status dot, with its word beside it (the word is what a screen reader
+ * reads; a dot without one is decorative).
+ * @param {Tone} tone
+ * @param {string} [word]
+ */
+export function dot(tone, word) {
+  return h(
+    "span",
+    {
+      class: `nx-dot${tone ? ` nx-dot--${tone}` : ""}`,
+      "aria-hidden": word ? null : "true",
+    },
+    word ?? "",
+  );
+}
+
+/**
+ * A meter on its own (a KPI tile's, a table cell's): a bar `pct` full,
+ * with a tick at `mark` and the warn / bad tone (`meterParts`).
+ * @param {Meter} m
+ * @returns {{el: HTMLElement, set: (m: Meter) => void}}
+ */
+export function meter(m) {
+  const e = h("span", { class: "nx-meter", "aria-hidden": "true" });
+  const set = (/** @type {Meter} */ next) => {
+    const p = meterParts(next);
+    e.className = `nx-meter${p.tone ? ` nx-meter--${p.tone}` : ""}`;
+    const fill = h("i");
+    fill.style.width = `${p.fill}%`;
+    /** @type {HTMLElement[]} */
+    const parts = [fill];
+    if (p.mark != null) {
+      const tick = h("b", next.markTitle ? { title: next.markTitle } : null);
+      tick.style.left = `${p.mark}%`;
+      parts.push(tick);
+    }
+    e.replaceChildren(...parts);
+  };
+  set(m);
+  return { el: e, set };
+}
+
+/**
+ * One row's share of a whole as a bar with its number beside it ("41 %",
+ * "2.1 GB"): the bar in `colour` (a stack's) or the first chart colour.
+ * @param {number | null} pct
+ * @param {string} text the number the bar stands for, always shown
+ * @param {string} [colour]
+ */
+export function shareBar(pct, text, colour) {
+  const fill = h("i");
+  fill.style.width = `${meterParts({ pct }).fill}%`;
+  const e = h(
+    "span",
+    { class: "nx-share" },
+    h("span", { class: "nx-share__bar", "aria-hidden": "true" }, fill),
+    h("span", { class: "nx-share__num" }, text),
+  );
+  if (colour) e.style.setProperty("--c", colour);
+  return e;
+}
+
+/**
+ * The error state of a block (DESIGN_LANGUAGE §7: loading, empty, error
+ * and filled take the same footprint): what could not be read, why, the
+ * fix, and Try again (the Live view control `retry.drive`).
+ * @param {{what: string, why: string, fix?: string | null}} err
+ * @param {{run: () => void, drive: Drive, label?: string} | null} [retry]
+ */
+export function failBox(err, retry = null) {
+  return h(
+    "div",
+    {
+      class: "kp-alert kp-alert--destructive nx-fail",
+      role: "alert",
+      "data-kp-state": "error",
+    },
+    h(
+      "div",
+      { class: "kp-alert__body" },
+      h("strong", null, err.what),
+      h("p", null, err.why),
+      err.fix ? h("p", null, `Fix: ${err.fix}`) : null,
+      retry
+        ? drive(
+            h(
+              "button",
+              {
+                type: "button",
+                class: "kp-button kp-button--sm",
+                title: "Read it again",
+                onclick: retry.run,
+              },
+              retry.label ?? "Try again",
+            ),
+            retry.drive,
+          )
+        : null,
+    ),
+  );
+}
+
+/**
+ * Keyboard navigation over a list's rows (DESIGN_LANGUAGE §10): j / ↓ and
+ * k / ↑ move the focus to the next or previous visible row matching
+ * `selector` inside `root`, Home / End to the first or last, Enter opens
+ * it; never while typing in a field or with a modifier. Returns the
+ * function that stops listening.
+ * @param {HTMLElement} root
+ * @param {string} selector the rows (focusable: give them tabindex)
+ * @param {(row: HTMLElement) => void} [onEnter]
+ * @returns {() => void}
+ */
+export function rowKeys(root, selector, onEnter) {
+  /** @param {KeyboardEvent} e */
+  const key = (e) => {
+    const t = /** @type {HTMLElement | null} */ (e.target);
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (t?.closest("input, textarea, select, [contenteditable]")) return;
+    const rows = /** @type {HTMLElement[]} */ ([
+      ...root.querySelectorAll(selector),
+    ]).filter((r) => !r.hidden && r.offsetParent !== null);
+    if (!rows.length) return;
+    const at = rows.findIndex((r) => r === t || r.contains(t));
+    const to =
+      e.key === "j" || e.key === "ArrowDown"
+        ? Math.min(rows.length - 1, at + 1)
+        : e.key === "k" || e.key === "ArrowUp"
+          ? Math.max(0, at < 0 ? 0 : at - 1)
+          : e.key === "Home"
+            ? 0
+            : e.key === "End"
+              ? rows.length - 1
+              : null;
+    if (to != null) {
+      e.preventDefault();
+      rows[to].focus();
+    } else if (e.key === "Enter" && at >= 0 && rows[at] === t && onEnter) {
+      e.preventDefault();
+      onEnter(rows[at]);
+    }
+  };
+  root.addEventListener("keydown", key);
+  return () => root.removeEventListener("keydown", key);
+}
+
+/**
+ * A side panel (DESIGN_LANGUAGE §6): a modal `<dialog>` against the right
+ * edge (the whole width on a phone) with a head (title, one sentence,
+ * Close), a body and a foot of actions. Escape, Close and a click on the
+ * backdrop close it; its buttons are found by Live view among the open
+ * dialog's own (Close is the dialog control `close`).
+ * @param {{title: string, desc: string, body?: import("./dom.js").Child,
+ *   foot?: import("./dom.js").Child, onClose?: () => void,
+ *   cls?: string}} spec
+ * @returns {{el: HTMLDialogElement, body: HTMLElement, foot: HTMLElement,
+ *   open: () => void, close: () => void}}
+ */
+export function drawer(spec) {
+  const id = `nx-drawer-${++drawers}`;
+  const body = h("div", { class: "nx-drawer__body" }, spec.body ?? null);
+  const foot = h("div", { class: "nx-drawer__foot" }, spec.foot ?? null);
+  foot.hidden = spec.foot == null;
+  const close = () => {
+    if (d.open) d.close();
+  };
+  const x = dialogControl(
+    h(
+      "button",
+      {
+        type: "button",
+        class: "nx-icon-btn",
+        "aria-label": "Close",
+        title: "Close (Esc)",
+        onclick: close,
+      },
+      "✕",
+    ),
+    "close",
+  );
+  const d = /** @type {HTMLDialogElement} */ (
+    h(
+      "dialog",
+      {
+        class: `kp-dialog nx-drawer${spec.cls ? ` ${spec.cls}` : ""}`,
+        "aria-labelledby": `${id}-h`,
+      },
+      h(
+        "div",
+        { class: "nx-drawer__head" },
+        h("h2", { id: `${id}-h`, class: "kp-dialog__title" }, spec.title),
+        x,
+        h("p", { class: "section-head__desc" }, spec.desc),
+      ),
+      body,
+      foot,
+    )
+  );
+  d.addEventListener("click", (e) => {
+    if (e.target === d) close();
+  });
+  d.addEventListener("close", () => {
+    d.remove();
+    spec.onClose?.();
+  });
+  return {
+    el: d,
+    body,
+    foot,
+    open: () => {
+      if (!d.isConnected) document.body.append(d);
+      if (!d.open) d.showModal();
+    },
+    close,
+  };
+}
+let drawers = 0;
+
+/**
+ * The phone breakpoint every shared block switches at: one value, the
+ * same as app.css's `@media (max-width: 48rem)` (CSS cannot read a custom
+ * property inside a media query, so the guard test
+ * `uikit.test.js` holds the stylesheet to this one number).
+ */
+export const PHONE = "(max-width: 48rem)";

@@ -17,7 +17,6 @@ const {
   fleetNight,
   humanBytes,
   kpis,
-  nextSort,
   nightKey,
   nightRange,
   nightsNow,
@@ -29,6 +28,7 @@ const {
   ticks,
   viewFromSearch,
 } = await import("../js/backupsview.js");
+const { nextSort } = await import("../js/sortstate.js");
 
 /** A stack that keeps no data by design. @returns {import("../js/backupsview.js").StackRead} */
 const nothingKept = () => ({
@@ -235,7 +235,9 @@ test("the drill state, the seven-night ticks and the size read the repository's 
 });
 
 test("a sort header cycles ascending, descending, none; Shift adds a second key", () => {
-  let s = nextSort([], "age", false);
+  let s = /** @type {{key: string, dir: 1 | -1}[]} */ (
+    nextSort([], "age", false)
+  );
   assert.deepEqual(s, [{ key: "age", dir: 1 }]);
   s = nextSort(s, "age", false);
   assert.deepEqual(s, [{ key: "age", dir: -1 }]);

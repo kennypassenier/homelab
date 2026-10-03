@@ -18,7 +18,7 @@ import {
 import { scheduleArgFields, schedulableActions } from "../actionforms.js";
 import { fieldEl, refusalCallout } from "../actui.js";
 import { agoEl, setAgo } from "../ago.js";
-import { el, fetchJson } from "../dom.js";
+import { fetchJson, h } from "../dom.js";
 import { declare, dialogControl, drivable } from "../drivable.js";
 import {
   EVERY_WORDS,
@@ -45,7 +45,7 @@ import { current } from "../store.js";
 import {
   TOAST_MS,
   kbd,
-  keysLine,
+  keyRow,
   pageHeader,
   rowMenu,
   section,
@@ -160,9 +160,11 @@ const titleOf = (s) =>
 
 /**
  * @param {HTMLElement} root
+ * @param {{level?: "h1" | "h2"}} [opts] `level`: "h2" when another page
+ *   (Activity's "Planned" view) carries the page's h1
  * @returns {() => void}
  */
-export function mount(root) {
+export function mount(root, opts = {}) {
   // `nx-ops`: the shared blocks in the ops-kit look the Schedules demo uses.
   root.classList.add("sch-root", "nx-ops");
   /** @type {number | null | undefined} undefined: not read (yet) */
@@ -190,10 +192,10 @@ export function mount(root) {
       (v) => !pendingDeletes.has(v.schedule.id),
     );
 
-  const count = el("span", { id: "sched-count", class: "sch-num" });
-  const zoneChip = el("span", { class: "sch-chip", id: "sched-zone" });
+  const count = h("span", { id: "sched-count", class: "sch-num" });
+  const zoneChip = h("span", { class: "sch-chip", id: "sched-zone" });
   const read = agoEl("read");
-  const add = el(
+  const add = h(
     "button",
     {
       type: "button",
@@ -207,12 +209,13 @@ export function mount(root) {
   );
   drivable(add, NEW_SCHEDULE);
   const header = pageHeader({
+    level: opts.level,
     title: "Schedules",
     desc: "What the dashboard runs on its own, and when. A slot missed while the dashboard was down is skipped and you get a notice; it never runs late.",
     meta: [zoneChip, count, read],
     actions: [add],
   }).el;
-  const body = el("div", { class: "sch-body" });
+  const body = h("div", { class: "sch-body" });
   // The page's top-level pieces sit straight in `root`, so the shell's one
   // section gap (fix-206) spaces them.
   /** @type {HTMLElement[]} */
@@ -227,7 +230,7 @@ export function mount(root) {
       mine = "";
     }
     zoneChip.replaceChildren(
-      el("span", { class: "sch-dot sch-dot--info" }),
+      h("span", { class: "sch-dot sch-dot--info" }),
       mine === z
         ? `Host clock: ${z}, the same as yours`
         : `Host clock: ${z}; yours is ${mine || "unknown"}, times here are the host's`,
@@ -245,34 +248,34 @@ export function mount(root) {
     show([
       card({
         label: "Reading the schedules",
-        body: el(
+        body: h(
           "div",
           {
             "data-kp-state": "loading",
             class: "sch-hero",
             "aria-busy": "true",
           },
-          el(
+          h(
             "div",
             null,
-            el("div", { class: "sch-label" }, "Next run"),
-            el("span", {
+            h("div", { class: "sch-label" }, "Next run"),
+            h("span", {
               class: "sch-sk",
               style: "width:180px;height:32px;margin-top:4px",
             }),
           ),
-          el(
+          h(
             "div",
             { class: "sch-hero__what" },
             "Reading the schedules from the dashboard…",
           ),
-          el("span"),
+          h("span"),
         ),
       }),
       card({
         title: "The next 7 days",
         desc: "Every run on the calendar, read from the schedules below.",
-        body: el("span", {
+        body: h("span", {
           class: "sch-sk",
           style: `height:${COL_PX + 24}px`,
         }),
@@ -280,11 +283,11 @@ export function mount(root) {
       card({
         title: "All schedules",
         desc: "Turn one off with its switch; its slots are kept but nothing runs.",
-        body: el(
+        body: h(
           "div",
           { style: "display:grid;gap:10px" },
           [0, 1, 2].map(() =>
-            el("span", { class: "sch-sk", style: "height:36px" }),
+            h("span", { class: "sch-sk", style: "height:36px" }),
           ),
         ),
       }),
@@ -292,7 +295,7 @@ export function mount(root) {
   };
 
   const failed = (/** @type {import("../doctor.js").RouteError} */ e) => {
-    const retry = el(
+    const retry = h(
       "button",
       { type: "button", class: "kp-button", onclick: () => void first() },
       "Read again",
@@ -301,7 +304,7 @@ export function mount(root) {
       card({
         title: "The schedules could not be read",
         desc: "Nothing changed; the dashboard's answer is below.",
-        body: el(
+        body: h(
           "div",
           { style: "display:grid;gap:12px;justify-items:start" },
           refusalCallout(e, "destructive", "Could not read"),
@@ -337,12 +340,12 @@ export function mount(root) {
       card({
         title: "No schedules yet",
         desc: `${round} Start from one of these, or make your own with New schedule.`,
-        body: el(
+        body: h(
           "div",
           { class: "sch-templates" },
           TEMPLATES.map((t) =>
             drivable(
-              el(
+              h(
                 "button",
                 {
                   type: "button",
@@ -350,8 +353,8 @@ export function mount(root) {
                   "data-template": t.id,
                   onclick: () => void openDrawer(null, t),
                 },
-                el("b", null, t.title),
-                el("span", null, t.says),
+                h("b", null, t.title),
+                h("span", null, t.says),
               ),
               SCHEDULE_TEMPLATE,
               t.id,
@@ -387,11 +390,11 @@ export function mount(root) {
       card({
         title: "All schedules",
         desc: "Turn one off with its switch; its slots are kept but nothing runs.",
-        body: el("div", { class: "sch-scroll" }, table(all, z, t)),
+        body: h("div", { class: "sch-scroll" }, table(all, z, t)),
         foot: "Times are the host's clock; a run that starts becomes a job on Activity.",
         id: "sched-all",
       }),
-      keysLine([
+      keyRow([
         ["N", "new schedule"],
         ["Space", "turn the focused schedule on or off"],
         ["E", "edit it"],
@@ -410,26 +413,26 @@ export function mount(root) {
       return card({
         label: "Next run",
         id: "sched-hero",
-        body: el(
+        body: h(
           "div",
           { class: "sch-hero" },
-          el(
+          h(
             "div",
             null,
-            el("div", { class: "sch-label" }, "Next run"),
-            el("div", { class: "sch-hero__when" }, "None"),
+            h("div", { class: "sch-label" }, "Next run"),
+            h("div", { class: "sch-hero__when" }, "None"),
           ),
-          el(
+          h(
             "div",
             { class: "sch-hero__what" },
             "Every schedule is off or has no further run.",
           ),
-          el("span"),
+          h("span"),
         ),
       });
     const s = next.schedule;
     const at = next.next_run;
-    const runNow = el(
+    const runNow = h(
       "button",
       {
         type: "button",
@@ -442,7 +445,7 @@ export function mount(root) {
       "Run now",
     );
     drivable(runNow, RUN_NEXT);
-    const skip = el(
+    const skip = h(
       "button",
       {
         type: "button",
@@ -457,22 +460,22 @@ export function mount(root) {
     return card({
       label: "Next run",
       id: "sched-hero",
-      body: el(
+      body: h(
         "div",
         { class: "sch-hero" },
-        el(
+        h(
           "div",
           null,
-          el("div", { class: "sch-label" }, "Next run"),
-          el("div", { class: "sch-hero__when" }, untilText(at, t)),
+          h("div", { class: "sch-label" }, "Next run"),
+          h("div", { class: "sch-hero__when" }, untilText(at, t)),
         ),
-        el(
+        h(
           "div",
           { class: "sch-hero__what" },
-          el("b", null, titleOf(s)),
+          h("b", null, titleOf(s)),
           `${dateTimeText(at, z)} · ${lowerFirst(cadenceText(s.when))}`,
         ),
-        el("div", { class: "sch-btn-row" }, runNow, skip),
+        h("div", { class: "sch-btn-row" }, runNow, skip),
       ),
     });
   };
@@ -492,34 +495,34 @@ export function mount(root) {
       hostTarget(),
     );
     const y = (/** @type {number} */ h) => (h / 24) * COL_PX;
-    const wrap = el("div", {
+    const wrap = h("div", {
       class: "sch-week",
       role: "group",
       "aria-label": "Runs in the next 7 days",
     });
     wrap.append(
-      el(
+      h(
         "div",
         { class: "sch-week__head" },
-        el("div"),
+        h("div"),
         plan.days.map((d) =>
-          el(
+          h(
             "div",
             { class: `sch-week__day${d.today ? " today" : ""}` },
             d.head,
           ),
         ),
       ),
-      el(
+      h(
         "div",
         { class: "sch-week__axis", "aria-hidden": "true" },
-        [0, 6, 12, 18, 24].map((h) =>
-          el("span", { style: `top:${y(h)}px` }, `${pad(h)}:00`),
+        [0, 6, 12, 18, 24].map((hr) =>
+          h("span", { style: `top:${y(hr)}px` }, `${pad(hr)}:00`),
         ),
       ),
     );
     for (const d of plan.days) {
-      const col = el("div", {
+      const col = h("div", {
         class: `sch-week__col${d.today ? " today" : ""}`,
       });
       const tops = stackTops(
@@ -530,14 +533,14 @@ export function mount(root) {
         const top = `top:${Math.min(tops[i], COL_PX - 10)}px`;
         if (p.host) {
           col.append(
-            el(
+            h(
               "div",
               {
                 class: "sch-pill sch-pill--host",
                 style: top,
                 title: `The host's own nightly round at ${p.at} (backups, updates), for reference`,
               },
-              el("b", null, p.at),
+              h("b", null, p.at),
               p.text,
             ),
           );
@@ -562,7 +565,7 @@ export function mount(root) {
               : "";
         col.append(
           drivable(
-            el(
+            h(
               "button",
               {
                 type: "button",
@@ -572,7 +575,7 @@ export function mount(root) {
                 title: `${p.text} · ${dateTimeText(p.t, z)}${state}: click to find it in the list`,
                 onclick: () => flash(id),
               },
-              el("b", null, p.at),
+              h("b", null, p.at),
               p.text,
             ),
             FIND_SCHEDULE,
@@ -582,7 +585,7 @@ export function mount(root) {
       });
       if (d.today)
         col.append(
-          el("div", {
+          h("div", {
             class: "sch-nowline",
             style: `top:${y(plan.nowHour)}px`,
             title: `now, ${timeText(t, z)}`,
@@ -599,14 +602,14 @@ export function mount(root) {
     /** @type {number} */ t,
   ) => {
     const rows = agenda(all, t, z, actionLabel, 8, hostTarget());
-    return el(
+    return h(
       "div",
       { class: "sch-agenda", "aria-label": "The next runs" },
       rows.length
         ? rows.map((r) =>
-            el("div", { "data-id": r.id }, el("span", null, r.when), r.text),
+            h("div", { "data-id": r.id }, h("span", null, r.when), r.text),
           )
-        : el("div", null, el("span", null, "—"), "No run in the next 7 days."),
+        : h("div", null, h("span", null, "—"), "No run in the next 7 days."),
     );
   };
 
@@ -641,12 +644,12 @@ export function mount(root) {
           return (x < y ? -1 : x > y ? 1 : 0) * sort.dir;
         })
       : all;
-    const head = el(
+    const head = h(
       "tr",
       null,
       COLUMNS.map(([key, label]) => {
         const b = drivable(
-          el(
+          h(
             "button",
             {
               type: "button",
@@ -666,7 +669,7 @@ export function mount(root) {
           SORT_SCHEDULES,
           key,
         );
-        return el(
+        return h(
           "th",
           {
             class: key === "last" || key === "note" ? "sch-hide-phone" : null,
@@ -680,13 +683,13 @@ export function mount(root) {
           b,
         );
       }),
-      el("th", null, el("span", { class: "nx-vh" }, "Actions")),
+      h("th", null, h("span", { class: "nx-vh" }, "Actions")),
     );
-    return el(
+    return h(
       "table",
       { class: "sch-table" },
-      el("thead", null, head),
-      el(
+      h("thead", null, head),
+      h(
         "tbody",
         null,
         rows.map((v) => row(v, z, t)),
@@ -700,7 +703,7 @@ export function mount(root) {
     /** @type {number} */ t,
   ) => {
     const s = v.schedule;
-    const sw = el("input", {
+    const sw = h("input", {
       class: "kp-switch__input",
       type: "checkbox",
       role: "switch",
@@ -711,11 +714,11 @@ export function mount(root) {
     });
     sw.checked = s.enabled;
     drivable(sw, TOGGLE_SCHEDULE, s.id);
-    const menuBtn = el(
+    const menuBtn = h(
       "button",
       {
         type: "button",
-        class: "sch-icon-btn",
+        class: "nx-icon-btn",
         "aria-label": `Edit, run now or delete ${titleOf(s)}`,
         "aria-haspopup": "menu",
         title: "Edit · Run now · Delete",
@@ -727,34 +730,34 @@ export function mount(root) {
     drivable(menuBtn, SCHEDULE_MENU, s.id);
     const last = lastRunView(v, z);
     const arg = argSummary(s.args);
-    return el(
+    return h(
       "tr",
       { class: s.enabled ? null : "off", "data-id": s.id, tabindex: 0 },
-      el("td", null, el("label", { class: "kp-switch" }, sw)),
-      el(
+      h("td", null, h("label", { class: "kp-switch" }, sw)),
+      h(
         "td",
         { class: "sch-what" },
-        el("b", null, actionLabel(s.action)),
-        el(
+        h("b", null, actionLabel(s.action)),
+        h(
           "small",
           null,
           targetText(s.stack, hostTarget()),
-          arg ? el("span", { class: "mono" }, ` · ${arg}`) : null,
+          arg ? h("span", { class: "mono" }, ` · ${arg}`) : null,
         ),
       ),
-      el(
+      h(
         "td",
         null,
-        el(
+        h(
           "div",
           { class: "sch-cadence" },
           cadenceText(s.when),
           s.when.every === "week"
-            ? el(
+            ? h(
                 "span",
                 { class: "sch-days", "aria-hidden": "true" },
                 WEEKDAYS.map((d, i) =>
-                  el(
+                  h(
                     "i",
                     {
                       class:
@@ -769,45 +772,45 @@ export function mount(root) {
             : null,
         ),
       ),
-      el(
+      h(
         "td",
         null,
         s.enabled && v.next_run != null
-          ? el(
+          ? h(
               "div",
               { class: "sch-cadence" },
-              el("span", { class: "sch-num" }, untilText(v.next_run, t)),
-              el("small", null, dateTimeText(v.next_run, z)),
+              h("span", { class: "sch-num" }, untilText(v.next_run, t)),
+              h("small", null, dateTimeText(v.next_run, z)),
             )
-          : el(
+          : h(
               "span",
               { class: "sch-muted" },
               s.enabled ? "no further run" : "off",
             ),
       ),
-      el(
+      h(
         "td",
         { class: "sch-hide-phone" },
         last.tone === "none" && last.job == null
-          ? el("span", { class: "sch-muted" }, last.text)
-          : el(
+          ? h("span", { class: "sch-muted" }, last.text)
+          : h(
               "span",
               { class: "sch-status" },
-              el("span", {
+              h("span", {
                 class: `sch-dot${last.tone === "none" ? "" : ` sch-dot--${last.tone}`}`,
               }),
               last.job == null ? last.text : `${last.text} · `,
               last.job == null
                 ? null
-                : el(
+                : h(
                     "a",
                     { class: "sch-link", href: `/jobs?job=${last.job}` },
                     `job ${last.job}`,
                   ),
             ),
       ),
-      el("td", { class: "sch-hide-phone sch-muted" }, s.note || "—"),
-      el("td", null, menuBtn),
+      h("td", { class: "sch-hide-phone sch-muted" }, s.note || "—"),
+      h("td", null, menuBtn),
     );
   };
 
@@ -997,37 +1000,35 @@ export function mount(root) {
       d.stack = actions[0].target === "host" ? c.hostTarget : d.stack;
     }
 
-    const actionSel = el(
+    const actionSel = h(
       "select",
       { id: "sched-action", "aria-label": "Action" },
       [...stackActions, ...hostActions].map((a) =>
-        el("option", { value: a.action }, a.label),
+        h("option", { value: a.action }, a.label),
       ),
     );
     actionSel.value = d.action;
-    const stackSel = el("select", { id: "sched-stack", "aria-label": "On" });
-    const everySel = el(
+    const stackSel = h("select", { id: "sched-stack", "aria-label": "On" });
+    const everySel = h(
       "select",
       { id: "sched-every", "aria-label": "How often" },
-      Object.entries(EVERY_WORDS).map(([v, w]) =>
-        el("option", { value: v }, w),
-      ),
+      Object.entries(EVERY_WORDS).map(([v, w]) => h("option", { value: v }, w)),
     );
     everySel.value = d.every;
-    const date = el("input", {
+    const date = h("input", {
       type: "date",
       id: "sched-date",
       "aria-label": "On the date",
     });
     date.value = d.date;
-    const at = el("input", {
+    const at = h("input", {
       type: "time",
       id: "sched-at",
       "aria-label": "At",
     });
     at.value = d.at;
-    const dateBit = el("span", null, " on ", date);
-    const sentence = el(
+    const dateBit = h("span", null, " on ", date);
+    const sentence = h(
       "p",
       { class: "sch-sentence" },
       "Run ",
@@ -1041,28 +1042,28 @@ export function mount(root) {
       at,
     );
     const days = new Set(d.days.length ? d.days : [1, 4]);
-    const dayBox = el("span", { class: "sch-daypick" });
-    const daysWhy = el("span", { class: "sch-field__why", role: "alert" });
-    const daysField = el(
+    const dayBox = h("span", { class: "sch-daypick" });
+    const daysWhy = h("span", { class: "sch-field__why", role: "alert" });
+    const daysField = h(
       "div",
       { class: "sch-field" },
-      el("span", { class: "sch-field__label" }, "Weekdays"),
+      h("span", { class: "sch-field__label" }, "Weekdays"),
       dayBox,
       daysWhy,
     );
-    const argBox = el("div", { class: "sch-field" });
+    const argBox = h("div", { class: "sch-field" });
     /** @type {Map<string, HTMLInputElement | HTMLSelectElement>} */
     let argInputs = new Map();
     const hour = typeof nightly === "number" ? nightly : null;
-    const near = el(
+    const near = h(
       "div",
       { class: "sch-alert", id: "sched-near", role: "status" },
-      el("span", { class: "sch-alert__icon", "aria-hidden": "true" }, "!"),
-      el(
+      h("span", { class: "sch-alert__icon", "aria-hidden": "true" }, "!"),
+      h(
         "div",
         null,
-        el("div", { class: "sch-alert__t" }, "Close to the nightly round"),
-        el(
+        h("div", { class: "sch-alert__t" }, "Close to the nightly round"),
+        h(
           "div",
           { class: "sch-alert__d" },
           hour == null
@@ -1071,18 +1072,18 @@ export function mount(root) {
         ),
       ),
     );
-    const preview = el("div", {
+    const preview = h("div", {
       class: "sch-preview",
       "aria-live": "polite",
     });
-    const note = el("input", {
+    const note = h("input", {
       id: "sched-note",
       type: "text",
       maxlength: 200,
       placeholder: "Why this runs; shown in the list",
     });
     note.value = d.note;
-    const formErr = el("div");
+    const formErr = h("div");
 
     const fillStacks = () => {
       const entry = actions.find((a) => a.action === actionSel.value);
@@ -1100,7 +1101,7 @@ export function mount(root) {
       const keep = stackSel.value || d.stack;
       stackSel.replaceChildren(
         ...names.map((n) =>
-          el("option", { value: n }, n === c.hostTarget ? "the whole host" : n),
+          h("option", { value: n }, n === c.hostTarget ? "the whole host" : n),
         ),
       );
       if (names.includes(keep)) stackSel.value = keep;
@@ -1116,7 +1117,7 @@ export function mount(root) {
           ?.apps?.map((a) => a.name) ?? [];
       argBox.hidden = fields.length === 0;
       argBox.replaceChildren(
-        el("span", { class: "sch-field__label" }, "Options"),
+        h("span", { class: "sch-field__label" }, "Options"),
         ...fields.map((f) => {
           const prev =
             existing?.action === entry?.action ? d.args[f.name] : undefined;
@@ -1146,7 +1147,7 @@ export function mount(root) {
       dayBox.replaceChildren(
         ...WEEKDAYS.map((name, i) =>
           dialogControl(
-            el(
+            h(
               "button",
               {
                 type: "button",
@@ -1170,18 +1171,18 @@ export function mount(root) {
       const z = zone();
       const runs = when ? nextRuns(when, now(), 3, z) : [];
       preview.replaceChildren(
-        el("h3", null, "It will run"),
+        h("h3", null, "It will run"),
         ...(runs.length
           ? runs.map((t) =>
-              el(
+              h(
                 "div",
                 { "data-slot": t },
                 dateTimeText(t, z),
-                el("span", null, untilText(t, now())),
+                h("span", null, untilText(t, now())),
               ),
             )
           : [
-              el(
+              h(
                 "p",
                 null,
                 every === "week" && days.size === 0
@@ -1234,7 +1235,7 @@ export function mount(root) {
     repaint();
 
     const cancel = dialogControl(
-      el(
+      h(
         "button",
         {
           type: "button",
@@ -1246,7 +1247,7 @@ export function mount(root) {
       "cancel",
     );
     const save = dialogControl(
-      el(
+      h(
         "button",
         {
           type: "button",
@@ -1260,24 +1261,20 @@ export function mount(root) {
       "save",
     );
     const title = existing ? "Edit schedule" : "New schedule";
-    const dlg = el(
+    const dlg = h(
       "dialog",
       { class: "sch-drawer", "aria-labelledby": "sched-drawer-title" },
-      el(
+      h(
         "div",
         { class: "sch-drawer__h" },
-        el(
-          "h2",
-          { id: "sched-drawer-title", class: "kp-dialog__title" },
-          title,
-        ),
-        el(
+        h("h2", { id: "sched-drawer-title", class: "kp-dialog__title" }, title),
+        h(
           "p",
           null,
           "Read it as a sentence; the preview shows exactly when it will run.",
         ),
       ),
-      el(
+      h(
         "div",
         { class: "sch-drawer__b" },
         sentence,
@@ -1285,14 +1282,14 @@ export function mount(root) {
         argBox,
         near,
         preview,
-        el(
+        h(
           "div",
           { class: "sch-field" },
-          el(
+          h(
             "label",
             { for: "sched-note" },
             "Note ",
-            el(
+            h(
               "span",
               { class: "sch-muted", style: "font-weight:400" },
               "(optional)",
@@ -1302,7 +1299,7 @@ export function mount(root) {
         ),
         formErr,
       ),
-      el("div", { class: "sch-drawer__f" }, cancel, save),
+      h("div", { class: "sch-drawer__f" }, cancel, save),
     );
     dlg.addEventListener("close", () => dlg.remove());
     // A click on the backdrop (the dialog itself, outside its box) closes it.

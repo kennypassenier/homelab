@@ -4,6 +4,8 @@
 // the repository table's groups, filters and sort, and the page's address.
 // Pure, so the node tests pin the same shapes the browser draws.
 
+import { applySort } from "./sortstate.js";
+
 /** One day in seconds. */
 export const DAY = 86400;
 
@@ -309,28 +311,6 @@ export function sortValue(r, k, now) {
 }
 
 /**
- * A click on a sort header: the first click sorts ascending, the next
- * descending, the third clears it; with `add` (Shift) the key joins the
- * existing ones as a further sort instead of replacing them.
- * @param {SortKey[]} sort
- * @param {SortKey["key"]} key
- * @param {boolean} add
- * @returns {SortKey[]}
- */
-export function nextSort(sort, key, add) {
-  const i = sort.findIndex((s) => s.key === key);
-  if (add) {
-    if (i < 0) return [...sort, { key, dir: 1 }];
-    return sort.map((s, j) =>
-      j === i ? { key, dir: /** @type {1 | -1} */ (-s.dir) } : s,
-    );
-  }
-  if (i === 0 && sort.length === 1)
-    return sort[0].dir > 0 ? [{ key, dir: -1 }] : [];
-  return [{ key, dir: 1 }];
-}
-
-/**
  * The repository table, grouped per stack: every stack the fleet has, in
  * name order, each with the repositories that pass the filters, sorted.
  * A stack whose repositories all fall to a filter drops out while a text
@@ -346,23 +326,14 @@ export function repoGroups(stacks, v, now) {
     if (v.stacks.size && !v.stacks.has(name)) continue;
     const s = stacks[name];
     const all = s.status === "ok" ? s.repos : [];
-    const rows = all
-      .filter(
-        (r) =>
-          (!q || `${name} ${r.owner}`.toLowerCase().includes(q)) &&
-          (!v.undrilled || drillState(r) === "never"),
-      )
-      .sort((a, b) => {
-        for (const { key, dir } of v.sort) {
-          const x = sortValue(a, key, now);
-          const y = sortValue(b, key, now);
-          if (x < y) return -dir;
-          if (x > y) return dir;
-        }
-        return 0;
-      });
+    const rows = all.filter(
+      (r) =>
+        (!q || `${name} ${r.owner}`.toLowerCase().includes(q)) &&
+        (!v.undrilled || drillState(r) === "never"),
+    );
+    const sorted = applySort(rows, v.sort, (r, key) => sortValue(r, key, now));
     if ((q || v.undrilled) && rows.length === 0) continue;
-    out.push({ stack: name, read: s, total: all.length, rows });
+    out.push({ stack: name, read: s, total: all.length, rows: sorted });
   }
   return out;
 }

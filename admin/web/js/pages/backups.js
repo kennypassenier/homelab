@@ -24,7 +24,7 @@
 // sort headers, filter chips) are ui.js's; the page's root carries
 // `bk-page`, under which app.css measures them the way the demo does.
 
-import { fetchJson, h, on, slowRead, tableBlock } from "../dom.js";
+import { fetchJson, h, slowRead, tableBlock } from "../dom.js";
 import { formatDateTime, humanDuration } from "../format.js";
 import { openAction, openBatch } from "../actiondialog.js";
 import { openDialog } from "../actui.js";
@@ -45,7 +45,6 @@ import {
   fleetNight,
   humanBytes,
   kpis,
-  nextSort,
   nightRange,
   nightsNow,
   offsetFor,
@@ -64,6 +63,7 @@ import {
   hueColour,
   kbd,
   kpiStrip,
+  PHONE,
   pageHeader,
   section,
   skeleton,
@@ -266,7 +266,7 @@ export function mount(root) {
   root.classList.add("bk-page");
   /** @type {(() => void)[]} */
   const cleanups = [() => tip.stop(), () => root.classList.remove("bk-page")];
-  const N = () => (innerWidth < 640 ? 14 : 30);
+  const N = () => (matchMedia(PHONE).matches ? 14 : 30);
   /** @type {Map<string, number>} */
   let hues = new Map();
   const hueOf = (/** @type {string} */ s) => hues.get(s) ?? 210;
@@ -439,7 +439,7 @@ export function mount(root) {
   // ── repositories ──────────────────────────────────────────────────────
   const search = /** @type {HTMLInputElement} */ (
     h("input", {
-      class: "bk-search",
+      class: "bk-search nx-search",
       id: "bk-filter",
       name: "bk-filter",
       type: "search",
@@ -449,12 +449,12 @@ export function mount(root) {
     })
   );
   search.value = S.q;
-  on(search, "input", () => {
+  search.addEventListener("input", () => {
     S.q = search.value;
     writeUrl();
     paintRepos();
   });
-  on(search, "keydown", (/** @type {KeyboardEvent} */ e) => {
+  search.addEventListener("keydown", (/** @type {KeyboardEvent} */ e) => {
     if (e.key === "Escape" && search.value) {
       e.stopPropagation();
       search.value = "";
@@ -469,7 +469,10 @@ export function mount(root) {
     id: "bk-repos",
     title: "Repositories",
     desc: "One restic repository per app that keeps data (a native service has its own), grouped by stack. The ticks show the last 7 nights.",
-    tools: [search, kbd("/")],
+    // The `/` hint sits inside the box, so the two never part.
+    tools: [
+      h("div", { class: "nx-tb__search bk-searchbox" }, search, kbd("/")),
+    ],
   });
   repos.body.append(repoActive, repoBox);
   const readState = h("span", { class: "bk-readstate" });
@@ -545,8 +548,8 @@ export function mount(root) {
     tile("newest").set(
       k.newest
         ? {
-            value: humanDuration(nowS() - k.newest.time),
-            ctx: `ago · ${k.newest.where}`,
+            value: `${humanDuration(nowS() - k.newest.time)} ago`,
+            ctx: k.newest.where,
             title: formatDateTime(k.newest.time),
           }
         : { value: "—", ctx: "no snapshot yet" },
@@ -716,7 +719,7 @@ export function mount(root) {
         FLEET_NIGHT,
         night,
       );
-      on(b, "click", () => pin(night));
+      b.addEventListener("click", () => pin(night));
       tip.attach(b, () => [
         h("b", null, shortDate(night)),
         f.before
@@ -766,7 +769,7 @@ export function mount(root) {
         STACK_FILTER,
         s,
       );
-      on(label, "click", () => toggleStack(s));
+      label.addEventListener("click", () => toggleStack(s));
       const row = h("div", { class: "bk-heat__row", role: "row" });
       nights.forEach((night, ci) => {
         const st = cellState(r, night, nn);
@@ -783,7 +786,7 @@ export function mount(root) {
           NIGHT,
           `${s}/${night}`,
         );
-        on(cell, "click", () => {
+        cell.addEventListener("click", () => {
           focusCell = { r: ri, c: ci };
           pin(night);
         });
@@ -819,7 +822,7 @@ export function mount(root) {
         CLEAR,
         "all-stacks",
       );
-      on(all, "click", () => {
+      all.addEventListener("click", () => {
         S.stacks.clear();
         writeUrl();
         paintAll();
@@ -853,7 +856,7 @@ export function mount(root) {
   };
 
   // keyboard: roving focus in the grid (DESIGN_LANGUAGE §10, calendars)
-  on(heat, "keydown", (/** @type {KeyboardEvent} */ e) => {
+  heat.addEventListener("keydown", (/** @type {KeyboardEvent} */ e) => {
     const c = /** @type {HTMLElement | null} */ (
       /** @type {HTMLElement} */ (e.target).closest(".bk-heat__cell[data-r]")
     );
@@ -1123,7 +1126,7 @@ export function mount(root) {
         FOLD,
         s,
       );
-      on(gtr, "click", (/** @type {MouseEvent} */ e) => {
+      gtr.addEventListener("click", (/** @type {MouseEvent} */ e) => {
         if (/** @type {HTMLElement} */ (e.target).closest("button, a, input"))
           return;
         if (!g.total) return;
@@ -1166,14 +1169,14 @@ export function mount(root) {
             h("td", { class: "mono bk-app" }, repo.owner),
             h(
               "td",
-              null,
+              { "data-label": "Newest" },
               newest
                 ? h("span", { class: "bk-idchip mono" }, newest.short_id)
                 : h("span", { class: "bk-muted" }, repo.error ?? "—"),
             ),
             h(
               "td",
-              null,
+              { "data-label": "Age" },
               newest
                 ? h(
                     "span",
@@ -1184,7 +1187,7 @@ export function mount(root) {
             ),
             h(
               "td",
-              { class: "bk-num" },
+              { class: "bk-num", "data-label": "Snapshots" },
               `${repo.snapshot_count}`,
               h(
                 "span",
@@ -1196,7 +1199,7 @@ export function mount(root) {
             ),
             h(
               "td",
-              { class: "bk-num" },
+              { class: "bk-num", "data-label": "Size" },
               size ??
                 h(
                   "span",
@@ -1209,7 +1212,7 @@ export function mount(root) {
             ),
             h(
               "td",
-              null,
+              { "data-label": "Restore drill" },
               h(
                 "span",
                 {
@@ -1241,7 +1244,7 @@ export function mount(root) {
           /** @type {HTMLElement} */ (tr.querySelector(".bk-drill")),
           () => drillTip(full),
         );
-        on(tr, "click", (/** @type {MouseEvent} */ e) => {
+        tr.addEventListener("click", (/** @type {MouseEvent} */ e) => {
           if (/** @type {HTMLElement} */ (e.target).closest("button, a, input"))
             return;
           S.open = open ? null : key;
@@ -1308,7 +1311,7 @@ export function mount(root) {
         CLEAR,
         "all",
       );
-      on(clear, "click", resetAll);
+      clear.addEventListener("click", resetAll);
       tbody.append(
         h(
           "tr",
@@ -1332,17 +1335,18 @@ export function mount(root) {
     }
     /** @param {string} label @param {SortKey["key"]} key @param {string} [cls] */
     const head = (label, key, cls) =>
-      sortHead(
+      sortHead({
         label,
-        S.sort,
         key,
-        (add) => {
-          S.sort = nextSort(S.sort, key, add);
+        sort: S.sort,
+        onSort: (next) => {
+          S.sort = /** @type {SortKey[]} */ (next);
           writeUrl();
           paintRepos();
         },
-        { cls, drive: { id: SORT, row: key } },
-      );
+        cls,
+        drive: { id: SORT, row: key },
+      });
     repoBox.replaceChildren(
       h(
         "table",
@@ -1409,7 +1413,7 @@ export function mount(root) {
         CLEAR,
         "all",
       );
-      on(all, "click", resetAll);
+      all.addEventListener("click", resetAll);
       repoActive.replaceChildren(h("span", null, "Active:"), ...act, all);
     } else
       repoActive.replaceChildren(
@@ -1646,8 +1650,8 @@ export function mount(root) {
         ),
       );
     };
-    on(stackSel, "change", fillApps);
-    on(appSel, "change", fillSnaps);
+    stackSel.addEventListener("change", fillApps);
+    appSel.addEventListener("change", fillSnaps);
     fillApps();
     const field = (
       /** @type {string} */ id,
@@ -1680,7 +1684,7 @@ export function mount(root) {
       ],
       id: "bk-restore-pick",
     });
-    on(go, "click", () => {
+    go.addEventListener("click", () => {
       const stack = stackSel.value;
       const r = /** @type {any} */ (reads[stack]);
       const native = r.native === true;

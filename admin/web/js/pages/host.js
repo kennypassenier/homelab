@@ -22,7 +22,7 @@ import { act, catalogReady, onAct } from "../act.js";
 import { openAction } from "../actiondialog.js";
 import { agoEl, setAgo } from "../ago.js";
 import { doctorRows } from "../doctor.js";
-import { el, fetchJson, slowReport } from "../dom.js";
+import { fetchJson, h, slowReport } from "../dom.js";
 import { declare, drivable, viaForm } from "../drivable.js";
 import { humanDuration } from "../format.js";
 import {
@@ -51,13 +51,14 @@ import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
 import {
   attentionBand,
-  keysLine,
+  keyRow,
   kpiStrip,
   moreMenu,
   pageHeader,
   section,
   segSwitch,
   sortableTable,
+  swatch,
   toggleGroup,
 } from "../ui.js";
 
@@ -113,10 +114,24 @@ const SETTINGS_VIEW = declare({
   row: "changed|all",
   what: "show only the host settings host.toml changes, or all of them",
 });
+const SORT_GUESTS = declare({
+  id: "sort-host-containers",
+  page: "host",
+  opens: "view",
+  row: "id|container|status|memory|cpu|stack",
+  what: "sort the Containers table by one column (Shift adds a further one)",
+});
+const SORT_SETTINGS = declare({
+  id: "sort-host-settings",
+  page: "host",
+  opens: "view",
+  row: "setting|group|value|default",
+  what: "sort the host settings table by one column (Shift adds a further one)",
+});
 
 /** @param {"ok" | "warn" | "bad" | "live" | ""} tone */
 const dot = (tone) =>
-  el("span", { class: `hk-dot${tone ? ` hk-dot--${tone}` : ""}` });
+  h("span", { class: `hk-dot${tone ? ` hk-dot--${tone}` : ""}` });
 
 /**
  * @param {HTMLElement} root
@@ -131,15 +146,15 @@ export function mount(root, ctx) {
   const stops = [];
 
   // ── header ────────────────────────────────────────────────────────────
-  const reach = el(
+  const reach = h(
     "span",
     { class: "hk-chip", id: "host-reach" },
     dot(""),
     "Checking the line…",
   );
-  const daemon = el("span", { id: "host-daemon" });
+  const daemon = h("span", { id: "host-daemon" });
   const runChecks = drivable(
-    el(
+    h(
       "button",
       {
         type: "button",
@@ -179,7 +194,7 @@ export function mount(root, ctx) {
     meta: [reach, daemon],
     live: "measured",
     actions: [
-      el(
+      h(
         "a",
         {
           class: "kp-button",
@@ -188,7 +203,7 @@ export function mount(root, ctx) {
         },
         "Open the console",
       ),
-      el(
+      h(
         "a",
         {
           class: "kp-button",
@@ -231,7 +246,7 @@ export function mount(root, ctx) {
   let gShow = new Set();
   let gQ = "";
   const gSearch = /** @type {HTMLInputElement} */ (
-    el("input", {
+    h("input", {
       class: "hk-search",
       type: "search",
       id: "host-guest-search",
@@ -264,33 +279,36 @@ export function mount(root, ctx) {
     },
     drive: { id: GUEST_FILTER },
   });
-  const gBody = el("tbody", { id: "host-guests" });
+  const gBody = h("tbody", { id: "host-guests" });
   const gTable = /** @type {HTMLTableElement} */ (
-    el(
+    h(
       "table",
       { class: "hk-tbl" },
-      el(
+      h(
         "thead",
         null,
-        el(
+        h(
           "tr",
           null,
-          el("th", { class: "n" }, "ID"),
-          el("th", null, "Container"),
-          el("th", null, "Status"),
-          el("th", { class: "hk-hide-phone" }, "Memory"),
-          el(
+          h("th", { class: "n" }, "ID"),
+          h("th", null, "Container"),
+          h("th", null, "Status"),
+          h("th", { class: "hk-hide-phone" }, "Memory"),
+          h(
             "th",
             { class: "n hk-hide-phone", title: "Share of one core" },
             "CPU",
           ),
-          el("th", null, "Stack"),
+          h("th", null, "Stack"),
         ),
       ),
       gBody,
     )
   );
-  sortableTable(gTable);
+  const gSort = sortableTable(gTable, {
+    drive: { id: SORT_GUESTS },
+    remember: "host-containers",
+  });
   const guestsAgo = agoEl("read");
   const guestsCard = section({
     id: "host-containers",
@@ -299,20 +317,20 @@ export function mount(root, ctx) {
     foot: [`Read with pct list every ${EVERY_S} s`, guestsAgo],
   });
   guestsCard.body.append(
-    el("div", { class: "hk-filters" }, gSearch, gFilter.el),
-    el("div", { class: "hk-scroll" }, gTable),
+    h("div", { class: "hk-filters" }, gSearch, gFilter.el),
+    h("div", { class: "hk-scroll" }, gTable),
   );
   /** @param {number} n */
   const skeletonRows = (n) =>
     Array.from({ length: n }, () =>
-      el(
+      h(
         "tr",
         { "aria-hidden": "true" },
         Array.from({ length: 6 }, (_, i) =>
-          el(
+          h(
             "td",
             { class: i === 3 || i === 4 ? "hk-hide-phone" : null },
-            el("span", { class: "hk-sk kp-skeleton" }),
+            h("span", { class: "hk-sk kp-skeleton" }),
           ),
         ),
       ),
@@ -346,62 +364,58 @@ export function mount(root, ctx) {
     });
     if (!view.length) {
       gBody.replaceChildren(
-        el(
+        h(
           "tr",
           { class: "hk-empty-row" },
-          el("td", { colspan: 6 }, "The host lists no containers."),
+          h("td", { colspan: 6 }, "The host lists no containers."),
         ),
       );
       return;
     }
     gBody.replaceChildren(
       ...view.map((g) =>
-        el(
+        h(
           "tr",
           {
             "data-vmid": g.vmid,
             "data-status": g.running ? "running" : "stopped",
           },
-          el("td", { class: "n mono" }, g.vmid),
-          el(
+          h("td", { class: "n mono" }, g.vmid),
+          h(
             "td",
             null,
-            el(
+            h(
               "div",
               { class: "hk-name" },
-              el("span", { class: "mono" }, g.name),
-              g.lock ? el("small", null, `lock: ${g.lock}`) : null,
+              h("span", { class: "mono" }, g.name),
+              g.lock ? h("small", null, `lock: ${g.lock}`) : null,
             ),
           ),
-          el(
+          h(
             "td",
             null,
-            el(
+            h(
               "span",
               { class: "hk-status" },
               dot(g.running ? "ok" : g.tone === "bad" ? "bad" : ""),
               g.status,
             ),
           ),
-          el(
+          h(
             "td",
             { class: "hk-hide-phone", "data-sort": g.ramUsed ?? -1 },
             g.ramUsed != null && g.ramMax
               ? (() => {
-                  const fill = el("i");
+                  const fill = h("i");
                   fill.style.width = `${Math.min(100, (g.ramUsed / g.ramMax) * 100)}%`;
-                  return el(
+                  return h(
                     "div",
                     { class: "hk-bar" },
-                    el("span", null, fill),
-                    el(
-                      "span",
-                      null,
-                      `${gib(g.ramUsed)} / ${gib(g.ramMax)} GiB`,
-                    ),
+                    h("span", null, fill),
+                    h("span", null, `${gib(g.ramUsed)} / ${gib(g.ramMax)} GiB`),
                   );
                 })()
-              : el(
+              : h(
                   "span",
                   {
                     class: "hk-muted",
@@ -414,17 +428,17 @@ export function mount(root, ctx) {
                   "—",
                 ),
           ),
-          el(
+          h(
             "td",
             { class: "n hk-hide-phone", "data-sort": g.cpuPct ?? -1 },
             g.cpuPct == null ? "—" : `${g.cpuPct}%`,
           ),
-          el(
+          h(
             "td",
             { "data-sort": g.stack ?? `~${g.kind}` },
             g.stack
-              ? el("a", { class: "hk-link", href: stackHref(g.stack) }, g.stack)
-              : el(
+              ? h("a", { class: "hk-link", href: stackHref(g.stack) }, g.stack)
+              : h(
                   "span",
                   { class: "hk-tag" },
                   g.kind === "template" ? "template" : "not managed",
@@ -434,15 +448,7 @@ export function mount(root, ctx) {
       ),
     );
     // A re-paint keeps the sort the person chose.
-    const sorted = /** @type {HTMLElement | null} */ (
-      gTable.querySelector("th[aria-sort]")
-    );
-    if (sorted) {
-      const dir = sorted.getAttribute("aria-sort");
-      sorted.removeAttribute("aria-sort");
-      if (dir === "descending") sorted.setAttribute("aria-sort", "ascending");
-      sorted.click();
-    }
+    gSort.apply();
     filterGuests();
   };
   const loadGuests = async () => {
@@ -454,24 +460,22 @@ export function mount(root, ctx) {
     if (!r.ok) {
       if (!guests)
         gBody.replaceChildren(
-          el(
+          h(
             "tr",
             null,
-            el(
+            h(
               "td",
               { colspan: 6 },
-              el(
+              h(
                 "div",
                 {
                   class: "kp-alert kp-alert--destructive error",
                   role: "alert",
                 },
-                el("strong", null, `Could not read ${r.error.what}`),
-                el("p", null, `Why: ${r.error.why}`),
-                r.error.fix
-                  ? el("p", null, `What to do: ${r.error.fix}`)
-                  : null,
-                el(
+                h("strong", null, `Could not read ${r.error.what}`),
+                h("p", null, `Why: ${r.error.why}`),
+                r.error.fix ? h("p", null, `What to do: ${r.error.fix}`) : null,
+                h(
                   "button",
                   {
                     type: "button",
@@ -495,19 +499,19 @@ export function mount(root, ctx) {
   };
 
   // ── Host actions ──────────────────────────────────────────────────────
-  const groupsBox = el(
+  const groupsBox = h(
     "div",
     { class: "hk-act-groups", id: "host-actions" },
-    el("p", { class: "hk-muted", role: "status" }, "Reading the actions…"),
+    h("p", { class: "hk-muted", role: "status" }, "Reading the actions…"),
   );
-  const runningBox = el("div", { class: "hk-running" });
+  const runningBox = h("div", { class: "hk-running" });
   const actionsCard = section({
     id: "host-actions-card",
     title: "Host actions",
     desc: "What the dashboard can do to the host itself; each opens a dialog that says what will happen first.",
     foot: [
       "Every action becomes a job you can follow on Activity",
-      el("a", { class: "hk-link", href: "/activity" }, "Open Activity"),
+      h("a", { class: "hk-link", href: "/activity" }, "Open Activity"),
     ],
   });
   actionsCard.el.classList.add("actions-area");
@@ -516,7 +520,7 @@ export function mount(root, ctx) {
     if (abort.signal.aborted) return;
     if (!catalog) {
       groupsBox.replaceChildren(
-        el(
+        h(
           "p",
           { class: "kp-alert kp-alert--destructive", role: "alert" },
           "The dashboard did not send its action catalog; reload the page.",
@@ -527,15 +531,15 @@ export function mount(root, ctx) {
     const entries = catalog.actions.filter((a) => a.target === "host");
     groupsBox.replaceChildren(
       ...hostActionGroups(entries).map((g) =>
-        el(
+        h(
           "div",
           { class: "hk-act-group", "data-group": g.title },
-          el(
+          h(
             "h3",
             null,
             g.title,
             g.full
-              ? el(
+              ? h(
                   "span",
                   { class: "hk-lock", title: "Needs the full-access token" },
                   "full access",
@@ -543,7 +547,7 @@ export function mount(root, ctx) {
               : null,
           ),
           g.actions.map((a) =>
-            el(
+            h(
               "button",
               {
                 type: "button",
@@ -555,9 +559,9 @@ export function mount(root, ctx) {
                     openRollback,
                   }),
               },
-              el("b", null, a.label),
-              el("span", null, actionBlurb(a.what)),
-              el("em", { "aria-hidden": "true" }, "›"),
+              h("b", null, a.label),
+              h("span", null, actionBlurb(a.what)),
+              h("em", { "aria-hidden": "true" }, "›"),
             ),
           ),
         ),
@@ -581,8 +585,8 @@ export function mount(root, ctx) {
   paintRunning();
 
   // ── Disk ──────────────────────────────────────────────────────────────
-  const diskBody = el("div", { id: "host-disk" });
-  const growthLine = el("span", { id: "host-growth" }, "Growth: reading…");
+  const diskBody = h("div", { id: "host-disk" });
+  const growthLine = h("span", { id: "host-growth" }, "Growth: reading…");
   const diskAgo = agoEl("read");
   const diskCard = section({
     id: "host-disk-card",
@@ -596,7 +600,7 @@ export function mount(root, ctx) {
     const d = f ? diskBreakdown(f) : null;
     if (!d) {
       diskBody.replaceChildren(
-        el(
+        h(
           "p",
           { class: "hk-muted", role: "status" },
           "The host has not read its disks yet.",
@@ -605,83 +609,78 @@ export function mount(root, ctx) {
       return;
     }
     const colour = (/** @type {number} */ i) => `var(--chart-${(i % 5) + 1})`;
-    const bar = el("div", {
+    const bar = h("div", {
       class: "hk-stack-bar",
       role: "img",
       "aria-label": `What fills the root volume: ${d.dirs.map((x) => `${x.path} ${Math.round(x.gb)} GB`).join(", ")}, ${d.freeGb} GB free`,
     });
     d.dirs.forEach((x, i) => {
-      const seg = el("i", { title: `${x.path} ${x.gb.toFixed(0)} GB` });
+      const seg = h("i", { title: `${x.path} ${x.gb.toFixed(0)} GB` });
       seg.style.width = `${x.pct}%`;
       seg.style.background = colour(i);
       bar.append(seg);
     });
-    const swatch = (/** @type {string} */ bg) => {
-      const s = el("i");
-      s.style.background = bg;
-      return s;
-    };
     diskBody.replaceChildren(
-      el(
+      h(
         "div",
         { class: "hk-disk-line" },
-        el(
+        h(
           "span",
           null,
-          el("b", null, "Root volume"),
+          h("b", null, "Root volume"),
           ` · ${f ? rootVolumeLine(f) : ""}`,
         ),
-        el("span", { class: "num" }, `${d.usedPct}% used`),
+        h("span", { class: "num" }, `${d.usedPct}% used`),
       ),
       bar,
-      el(
+      h(
         "div",
         { class: "hk-dirs" },
         d.dirs.map((x, i) =>
-          el(
+          h(
             "div",
             null,
             swatch(colour(i)),
-            el("span", { class: "mono" }, x.path),
-            el("span", { class: "num hk-muted" }, `${x.gb.toFixed(0)} GB`),
+            h("span", { class: "mono" }, x.path),
+            h("span", { class: "num hk-muted" }, `${x.gb.toFixed(0)} GB`),
           ),
         ),
-        el(
+        h(
           "div",
           null,
           swatch("var(--muted)"),
-          el("span", null, "free"),
-          el("span", { class: "num hk-muted" }, `${d.freeGb} GB`),
+          h("span", null, "free"),
+          h("span", { class: "num hk-muted" }, `${d.freeGb} GB`),
         ),
       ),
-      el(
+      h(
         "div",
         { class: "hk-pool" },
-        el(
+        h(
           "div",
           null,
-          el("span", null, "Thin pool"),
-          el("b", null, `${Math.round(d.poolGb)} GB`),
+          h("span", null, "Thin pool"),
+          h("b", null, `${Math.round(d.poolGb)} GB`),
         ),
-        el(
+        h(
           "div",
           { id: "host-pool-promised" },
-          el("span", null, "Promised to guests"),
+          h("span", null, "Promised to guests"),
           d.pool
-            ? el("b", { title: d.pool.promisedNote }, d.pool.promised)
-            : el(
+            ? h("b", { title: d.pool.promisedNote }, d.pool.promised)
+            : h(
                 "b",
                 { class: "hk-muted" },
                 "not reported by this host version",
               ),
         ),
-        el(
+        h(
           "div",
           { id: "host-pool-written" },
-          el("span", null, "Really written"),
+          h("span", null, "Really written"),
           d.pool
-            ? el("b", null, d.pool.written)
-            : el(
+            ? h("b", null, d.pool.written)
+            : h(
                 "b",
                 { class: "hk-muted" },
                 "not reported by this host version",
@@ -709,17 +708,17 @@ export function mount(root, ctx) {
   /** @type {any} */
   let lineFacts = null;
   let lineOk = /** @type {boolean | null} */ (null);
-  const facts = el("dl", { class: "hk-facts", id: "host-line" });
-  const lat = el("div", {
+  const facts = h("dl", { class: "hk-facts", id: "host-line" });
+  const lat = h("div", {
     class: "hk-lat",
     id: "host-lat",
     role: "img",
     "aria-label": "No ping yet",
   });
   const pingDot = dot("");
-  const pingOut = el("span", { id: "host-ping-out" }, "Pinging…");
+  const pingOut = h("span", { id: "host-ping-out" }, "Pinging…");
   const pingBtn = drivable(
-    el(
+    h(
       "button",
       {
         type: "button",
@@ -731,7 +730,7 @@ export function mount(root, ctx) {
     ),
     PING,
   );
-  const pingCount = el("span", null, "last pings");
+  const pingCount = h("span", null, "last pings");
   const lineCard = section({
     id: "host-connection",
     title: "Connection",
@@ -741,10 +740,10 @@ export function mount(root, ctx) {
   lineCard.body.append(
     facts,
     lat,
-    el("p", { class: "hk-ping-out", role: "status" }, pingDot, pingOut),
+    h("p", { class: "hk-ping-out", role: "status" }, pingDot, pingOut),
   );
   const copyBtn = drivable(
-    el(
+    h(
       "button",
       {
         type: "button",
@@ -770,16 +769,16 @@ export function mount(root, ctx) {
     if (lineFacts) {
       rows.push([
         "Address",
-        el("span", { class: "mono" }, lineFacts.address ?? "not configured"),
+        h("span", { class: "mono" }, lineFacts.address ?? "not configured"),
       ]);
       rows.push(["Set in", lineFacts.address_source ?? "—"]);
       rows.push([
         "Pinned",
         lineFacts.pin
-          ? el(
+          ? h(
               "span",
               null,
-              el(
+              h(
                 "span",
                 { class: "mono", title: lineFacts.pin },
                 `${lineFacts.pin.slice(0, 26)}…`,
@@ -792,9 +791,9 @@ export function mount(root, ctx) {
     rows.push([
       "Host says",
       lineOk === true
-        ? el("span", { class: "hk-status" }, dot("ok"), "matches the pin")
+        ? h("span", { class: "hk-status" }, dot("ok"), "matches the pin")
         : lineOk === false
-          ? el(
+          ? h(
               "span",
               { class: "hk-status" },
               dot("bad"),
@@ -803,13 +802,13 @@ export function mount(root, ctx) {
           : f?.host.tls_fingerprint || "not asked yet",
     ]);
     facts.replaceChildren(
-      ...rows.flatMap(([k, v]) => [el("dt", null, k), el("dd", null, v)]),
+      ...rows.flatMap(([k, v]) => [h("dt", null, k), h("dd", null, v)]),
     );
     const l = latencyBars(pings);
     lat.setAttribute("aria-label", l.label);
     lat.replaceChildren(
       ...l.heights.map((hgt) => {
-        const i = el("i");
+        const i = h("i");
         i.style.height = `${hgt}%`;
         return i;
       }),
@@ -849,7 +848,7 @@ export function mount(root, ctx) {
               tone: "bad",
               title: "The host does not answer over the pinned line",
               text: pingOut.textContent ?? "",
-              action: el(
+              action: h(
                 "button",
                 {
                   type: "button",
@@ -865,7 +864,7 @@ export function mount(root, ctx) {
   };
 
   // ── About, Templates ──────────────────────────────────────────────────
-  const about = el("dl", { class: "hk-facts", id: "host-about" });
+  const about = h("dl", { class: "hk-facts", id: "host-about" });
   const aboutCard = section({
     id: "host-about-card",
     title: "About this host",
@@ -884,11 +883,11 @@ export function mount(root, ctx) {
       ["Name", f.host.name],
       [
         "Daemon",
-        el(
+        h(
           "span",
           { id: "host-daemon-signature", title: sig.title },
           `${versionText(s.hostVersion, s.hostBuild)} `,
-          el(
+          h(
             "span",
             { class: sig.tone === "ok" ? null : "hk-muted" },
             `(${sig.text})`,
@@ -908,29 +907,25 @@ export function mount(root, ctx) {
       [
         "Up for",
         up ??
-          el(
-            "span",
-            { class: "hk-muted" },
-            "not reported by this host version",
-          ),
+          h("span", { class: "hk-muted" }, "not reported by this host version"),
       ],
     ];
     about.replaceChildren(
-      ...rows.flatMap(([k, v]) => [el("dt", null, k), el("dd", null, v)]),
+      ...rows.flatMap(([k, v]) => [h("dt", null, k), h("dd", null, v)]),
     );
   };
-  const tplList = el(
+  const tplList = h(
     "ul",
     { class: "hk-tpl", id: "host-templates" },
-    el(
+    h(
       "li",
       { role: "status" },
-      el("span", { class: "hk-sk kp-skeleton" }),
+      h("span", { class: "hk-sk kp-skeleton" }),
       "Asking the host (pveam and the template containers)…",
     ),
   );
   const tplBuild = viaForm(
-    el(
+    h(
       "button",
       {
         type: "button",
@@ -953,7 +948,7 @@ export function mount(root, ctx) {
     const r = await fetchJson("/data/templates", "the templates", abort.signal);
     if (!r.ok) {
       tplList.replaceChildren(
-        el(
+        h(
           "li",
           { class: "kp-alert kp-alert--destructive error", role: "alert" },
           `Could not read ${r.error.what}: ${r.error.why}`,
@@ -964,30 +959,30 @@ export function mount(root, ctx) {
     const t = r.body.templates;
     tplList.replaceChildren(
       ...t.clones.map((/** @type {[number, string]} */ c) =>
-        el(
+        h(
           "li",
           null,
           dot("ok"),
-          el(
+          h(
             "span",
             null,
-            el("span", { class: "mono" }, `CT ${c[0]}`),
+            h("span", { class: "mono" }, `CT ${c[0]}`),
             ` · ${c[1]}`,
           ),
         ),
       ),
       ...t.os.map((/** @type {string} */ o) =>
-        el(
+        h(
           "li",
           null,
           dot(""),
-          el("span", { class: "mono" }, o.replace("local:vztmpl/", "")),
+          h("span", { class: "mono" }, o.replace("local:vztmpl/", "")),
         ),
       ),
       ...(t.clones.length
         ? []
         : [
-            el(
+            h(
               "li",
               { class: "hk-muted" },
               "No golden template yet: build one.",
@@ -998,7 +993,7 @@ export function mount(root, ctx) {
 
   // ── Host checks ───────────────────────────────────────────────────────
   const checksBtn = drivable(
-    el(
+    h(
       "button",
       {
         type: "button",
@@ -1010,12 +1005,12 @@ export function mount(root, ctx) {
     ),
     READ_CHECKS,
   );
-  const checksNote = el(
+  const checksNote = h(
     "p",
     { role: "status", id: "host-checks-note" },
     "Not read yet. Reading takes about 30 s on pve; the result stays here until you leave.",
   );
-  const checksList = el("ul", {
+  const checksList = h("ul", {
     class: "hk-checks",
     id: "host-checks",
     hidden: true,
@@ -1026,7 +1021,7 @@ export function mount(root, ctx) {
     desc: "The doctor's checks about the host itself: disk, state file, clock, certificates.",
   });
   checksCard.body.append(
-    el("div", { class: "hk-checks-empty" }, checksNote, checksBtn),
+    h("div", { class: "hk-checks-empty" }, checksNote, checksBtn),
     checksList,
   );
   /** @param {any} report */
@@ -1035,12 +1030,12 @@ export function mount(root, ctx) {
     checksList.hidden = false;
     checksList.replaceChildren(
       ...rows.map((x) =>
-        el(
+        h(
           "li",
           { "data-health": x.health.label },
           dot(x.health.tone),
-          el("span", null, el("b", null, x.name), ` · ${x.health.label}`),
-          el("small", null, x.detail),
+          h("span", null, h("b", null, x.name), ` · ${x.health.label}`),
+          h("small", null, x.detail),
         ),
       ),
     );
@@ -1083,7 +1078,7 @@ export function mount(root, ctx) {
   let sRows = [];
   let sAll = false;
   let sQ = "";
-  const sDesc = el(
+  const sDesc = h(
     "span",
     null,
     "host.toml as the host reads it. Read-only here; Settings changes them.",
@@ -1105,7 +1100,7 @@ export function mount(root, ctx) {
     },
     drive: { id: SETTINGS_VIEW },
   });
-  const sSearch = el("input", {
+  const sSearch = h("input", {
     class: "hk-search",
     type: "search",
     placeholder: "Search settings",
@@ -1115,27 +1110,30 @@ export function mount(root, ctx) {
       filterSettings();
     },
   });
-  const sBody = el("tbody", { id: "host-settings" });
+  const sBody = h("tbody", { id: "host-settings" });
   const sTable = /** @type {HTMLTableElement} */ (
-    el(
+    h(
       "table",
       { class: "hk-tbl" },
-      el(
+      h(
         "thead",
         null,
-        el(
+        h(
           "tr",
           null,
-          el("th", null, "Setting"),
-          el("th", { class: "hk-hide-phone" }, "Group"),
-          el("th", null, "Value"),
-          el("th", { class: "hk-hide-phone" }, "Default"),
+          h("th", null, "Setting"),
+          h("th", { class: "hk-hide-phone" }, "Group"),
+          h("th", null, "Value"),
+          h("th", { class: "hk-hide-phone" }, "Default"),
         ),
       ),
       sBody,
     )
   );
-  sortableTable(sTable);
+  const sSort = sortableTable(sTable, {
+    drive: { id: SORT_SETTINGS },
+    remember: "host-settings",
+  });
   const settingsCard = section({
     id: "host-settings-card",
     title: "Host settings",
@@ -1143,7 +1141,7 @@ export function mount(root, ctx) {
     collapsible: true,
     open: true,
     tools: [
-      el(
+      h(
         "a",
         {
           class: "kp-button kp-button--sm",
@@ -1158,8 +1156,8 @@ export function mount(root, ctx) {
     settingsCard.el.querySelector(".section-head__desc")
   ).replaceChildren(sDesc);
   settingsCard.body.append(
-    el("div", { class: "hk-filters" }, sView.el, sSearch),
-    el("div", { class: "hk-scroll" }, sTable),
+    h("div", { class: "hk-filters" }, sView.el, sSearch),
+    h("div", { class: "hk-scroll" }, sTable),
   );
   sBody.dataset.kpState = "loading";
   sBody.replaceChildren(
@@ -1184,17 +1182,17 @@ export function mount(root, ctx) {
     );
     if (!r.ok) {
       sBody.replaceChildren(
-        el(
+        h(
           "tr",
           null,
-          el(
+          h(
             "td",
             { colspan: 4 },
-            el(
+            h(
               "div",
               { class: "kp-alert kp-alert--destructive error", role: "alert" },
-              el("strong", null, `Could not read ${r.error.what}`),
-              el("p", null, `Why: ${r.error.why}`),
+              h("strong", null, `Could not read ${r.error.what}`),
+              h("p", null, `Why: ${r.error.why}`),
             ),
           ),
         ),
@@ -1208,32 +1206,32 @@ export function mount(root, ctx) {
     sView.counts({ changed: v.changed, all: v.rows.length });
     sBody.replaceChildren(
       ...sRows.map((x) =>
-        el(
+        h(
           "tr",
           {
             class: x.set ? "hk-set-row" : null,
             "data-key": x.key,
             "data-set": x.set ? "1" : "0",
           },
-          el(
+          h(
             "td",
             null,
-            el(
+            h(
               "div",
               { class: "hk-name" },
-              el("span", null, x.label),
-              el("small", { class: "mono" }, x.key),
+              h("span", null, x.label),
+              h("small", { class: "mono" }, x.key),
             ),
           ),
-          el("td", { class: "hk-hide-phone hk-muted" }, x.group),
-          el("td", { class: x.set ? "mono" : "mono hk-muted" }, x.value),
-          el("td", { class: "hk-hide-phone mono hk-muted" }, x.def),
+          h("td", { class: "hk-hide-phone hk-muted" }, x.group),
+          h("td", { class: x.set ? "mono" : "mono hk-muted" }, x.value),
+          h("td", { class: "hk-hide-phone mono hk-muted" }, x.def),
         ),
       ),
-      el(
+      h(
         "tr",
         { class: "hk-empty-row", "data-none": "" },
-        el(
+        h(
           "td",
           { colspan: 4 },
           "host.toml changes nothing: every setting is at its default.",
@@ -1244,6 +1242,7 @@ export function mount(root, ctx) {
       sBody.querySelector("[data-none]")
     );
     none.hidden = v.changed > 0;
+    sSort.apply();
     filterSettings();
   };
 
@@ -1252,17 +1251,17 @@ export function mount(root, ctx) {
     head.el,
     attention.el,
     kpis.el,
-    el(
+    h(
       "div",
       { class: "hk-cols" },
-      el(
+      h(
         "div",
         { class: "hk-col-main" },
         guestsCard.el,
         actionsCard.el,
         diskCard.el,
       ),
-      el(
+      h(
         "div",
         { class: "hk-col-side" },
         lineCard.el,
@@ -1272,11 +1271,12 @@ export function mount(root, ctx) {
       ),
     ),
     settingsCard.el,
-    keysLine([
+    keyRow([
       ["/", "search containers"],
       ["click a header", "sort"],
       ["G H", "go to Host"],
       ["R", "run host checks"],
+      ["Esc", "show every container"],
       ["Ctrl K", "any host action"],
     ]),
   );
@@ -1308,8 +1308,8 @@ export function mount(root, ctx) {
     paintLine();
   };
 
-  // `/` searches the containers, `r` runs the host checks (never while
-  // typing, never with a modifier).
+  // `/` searches the containers, `r` runs the host checks, Esc shows every
+  // container again (never while typing, never with a modifier).
   /** @param {KeyboardEvent} e */
   const keys = (e) => {
     const t = /** @type {HTMLElement | null} */ (e.target);
@@ -1327,6 +1327,9 @@ export function mount(root, ctx) {
       if (document.querySelector("dialog[open]")) return;
       e.preventDefault();
       void loadChecks().catch(() => {});
+    } else if (e.key === "Escape") {
+      if (document.querySelector("dialog[open]")) return;
+      gFilter.reset();
     }
   };
   document.addEventListener("keydown", keys);

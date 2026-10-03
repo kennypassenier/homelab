@@ -4439,38 +4439,67 @@ async function phonePage(browser, theme) {
 }
 
 test("invariants: redesign-kit: a narrow page header reads the title with its live status, the description, then the actions", async () => {
+  // redesign-kit-16: both header shapes a page shows at 390 px — the
+  // plain one (Backups) and the meta one (Host; Schedules, drawn as
+  // Activity's Planned view: the live status in the meta row under the
+  // description) — read title, description, actions.
   const browser = await chromium.launch();
   try {
-    for (const theme of ["light", "dark"]) {
-      const { context, page } = await phonePage(browser, theme);
-      await page.goto(`${BASE}/backups`);
-      await page.locator("main .nx-head h1").waitFor({ timeout: 10000 });
-      const order = await page.evaluate(() => {
-        const head = /** @type {HTMLElement} */ (
-          document.querySelector("main .nx-head")
+    for (const theme of ["light", "dark"])
+      for (const path of ["/backups", "/host", "/schedules"]) {
+        const { context, page } = await phonePage(browser, theme);
+        await page.goto(`${BASE}${path}`);
+        await page.locator("main .nx-head h1").waitFor({ timeout: 10000 });
+        const order = await page.evaluate(() => {
+          const head = /** @type {HTMLElement} */ (
+            document.querySelector("main .nx-head")
+          );
+          const top = (/** @type {string} */ sel) =>
+            head.querySelector(sel)?.getBoundingClientRect().top ?? -1;
+          return {
+            meta: head.classList.contains("nx-head--meta"),
+            title: top("h1"),
+            titleBottom:
+              head.querySelector("h1")?.getBoundingClientRect().bottom ?? -1,
+            live: top(".nx-live"),
+            desc: top(".nx-head-desc"),
+            metaRow: top(".nx-head-meta"),
+            actions: top(".nx-head-actions"),
+          };
+        });
+        const where = `${theme} ${path}`;
+        // A meta header may carry its freshness as a chip of its own
+        // (Schedules' "read 4 s ago") instead of a live status.
+        for (const k of [
+          "title",
+          "titleBottom",
+          "desc",
+          "actions",
+          ...(order.meta ? [] : ["live"]),
+        ])
+          assert.ok(
+            /** @type {Record<string, number>} */ (order)[k] >= 0,
+            `${where}: the header has no ${k}`,
+          );
+        assert.ok(
+          order.titleBottom <= order.desc && order.desc < order.actions,
+          `${where}: the narrow header is not title, description, actions: ${JSON.stringify(order)}`,
         );
-        const top = (/** @type {string} */ sel) =>
-          head.querySelector(sel)?.getBoundingClientRect().top ?? -1;
-        return {
-          title: top("h1"),
-          titleBottom:
-            head.querySelector("h1")?.getBoundingClientRect().bottom ?? -1,
-          live: top(".nx-live"),
-          desc: top(".nx-head-desc"),
-          actions: top(".nx-head-actions"),
-        };
-      });
-      for (const [k, v] of Object.entries(order))
-        assert.ok(v >= 0, `${theme}: the header has no ${k}`);
-      assert.ok(
-        order.title < order.live &&
-          order.live < order.titleBottom &&
-          order.titleBottom <= order.desc &&
-          order.desc < order.actions,
-        `${theme}: the narrow header is not title, live, description, actions: ${JSON.stringify(order)}`,
-      );
-      await context.close();
-    }
+        if (order.meta)
+          assert.ok(
+            order.desc < order.metaRow &&
+              order.metaRow < order.actions &&
+              (order.live < 0 ||
+                (order.metaRow <= order.live && order.live < order.actions)),
+            `${where}: the meta row with the live status is not between the description and the actions: ${JSON.stringify(order)}`,
+          );
+        else
+          assert.ok(
+            order.title < order.live && order.live < order.titleBottom,
+            `${where}: the live status is not beside the title: ${JSON.stringify(order)}`,
+          );
+        await context.close();
+      }
   } finally {
     await browser.close();
   }
@@ -4577,6 +4606,237 @@ test("invariants: redesign-kit: a row menu opened near the foot of the screen si
     );
     await page.keyboard.press("Escape");
     await clearSchedules(page);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: redesign-kit-17: no page scrolls sideways at 390 px, and no table's box overflows its card", async () => {
+  const browser = await chromium.launch();
+  try {
+    const { context, page } = await phonePage(browser, "light");
+    /** @type {string[]} */
+    const bad = [];
+    for (const path of [
+      "/",
+      "/inbox",
+      "/stacks",
+      "/stacks/films",
+      "/stacks/films/settings",
+      "/activity",
+      "/backups",
+      "/host",
+      "/schedules",
+      "/secrets",
+      "/charts",
+      "/fleetview",
+      "/firewall",
+      "/settings",
+      "/presets",
+      "/system/notifications",
+      "/jobs",
+      "/apply",
+      "/doctor",
+    ]) {
+      await page.goto(`${BASE}${path}`);
+      const shown = await page
+        .locator("#page")
+        .waitFor({ state: "attached", timeout: 10000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!shown) {
+        bad.push(`${path}: no page drawn (${page.url()})`);
+        continue;
+      }
+      // Wait for the page's reads to land (each has its own deadline).
+      await page
+        .waitForFunction(
+          () => !document.querySelector('#page [data-kp-state="loading"]'),
+          null,
+          { timeout: 8000 },
+        )
+        .catch(() => {});
+      const r = await page.evaluate(() => ({
+        over:
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+        wraps: [
+          ...document.querySelectorAll(
+            "main .kp-table-wrap, main .bk-table-wrap",
+          ),
+        ]
+          .map((w) => w.scrollWidth - w.clientWidth)
+          .filter((x) => x > 1),
+      }));
+      if (r.over > 0)
+        bad.push(`${path}: the page scrolls sideways by ${r.over} px`);
+      if (r.wraps.length)
+        bad.push(
+          `${path}: a table overflows its box by ${r.wraps.join(", ")} px`,
+        );
+    }
+    assert.deepEqual(bad, [], "at 390 px");
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: redesign-kit-13: a row menu's right edge lines up with its button's", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await clearSchedules(page);
+    const id = await addSchedule(page, "films", "backup", {
+      every: "day",
+      at: "10:00",
+    });
+    await page.goto(`${BASE}/schedules`);
+    const sel = `tr[data-id="${id}"] [data-drive="schedule-menu"]`;
+    await page.locator(sel).waitFor({ timeout: 10000 });
+    await page.locator(sel).click();
+    await page.locator("dialog.nx-rowmenu[open]").waitFor({ timeout: 3000 });
+    const r = await page.evaluate((q) => {
+      const b = /** @type {HTMLElement} */ (document.querySelector(q));
+      const m = /** @type {HTMLElement} */ (
+        document.querySelector("dialog.nx-rowmenu[open]")
+      );
+      return {
+        button: b.getBoundingClientRect().right,
+        menu: m.getBoundingClientRect().right,
+        width: m.getBoundingClientRect().width,
+        expanded: b.getAttribute("aria-expanded"),
+      };
+    }, sel);
+    assert.ok(
+      Math.abs(r.button - r.menu) <= 1,
+      `the menu ends ${r.menu - r.button} px past its button: ${JSON.stringify(r)}`,
+    );
+    assert.equal(r.width, 260, "the menu is the width it plans for");
+    assert.equal(r.expanded, "true");
+    await page.locator(sel).click();
+    assert.equal(
+      await page.locator("dialog.nx-rowmenu[open]").count(),
+      0,
+      "a second click on the button closes the menu",
+    );
+    await clearSchedules(page);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: redesign-kit-10: Esc on Host shows every container again, and its sorted headers are Live view controls that keep their sort", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/host`);
+    const running = page.locator(
+      '[data-drive="container-filter"][data-drive-row="running"]',
+    );
+    await running.waitFor({ timeout: 10000 });
+    await running.click();
+    assert.equal(await running.getAttribute("aria-pressed"), "true");
+    await page.locator("main h1").click();
+    await page.keyboard.press("Escape");
+    assert.equal(
+      await page
+        .locator('[data-drive="container-filter"][data-drive-row="all"]')
+        .getAttribute("aria-pressed"),
+      "true",
+      "Esc did not reset the status filter",
+    );
+    const th = (/** @type {string} */ row) =>
+      page.locator(
+        `th[data-drive="sort-host-containers"][data-drive-row="${row}"]`,
+      );
+    await th("memory").click();
+    await th("id").click({ modifiers: ["Shift"] });
+    assert.equal(await th("memory").getAttribute("aria-sort"), "ascending");
+    assert.equal(await th("id").getAttribute("aria-sort"), "ascending");
+    await page.reload();
+    await th("memory").waitFor({ timeout: 10000 });
+    assert.equal(
+      await th("memory").getAttribute("aria-sort"),
+      "ascending",
+      "the Containers table forgot its sort",
+    );
+    assert.equal(await th("id").getAttribute("data-mark"), "↑2");
+    await page.evaluate(() =>
+      localStorage.removeItem("nx-sort:host-containers"),
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: redesign-kit-18: Backups keeps its KPI context whole at 390 px, its search hint inside the box at 1894 px, and the newest snapshot's age in one phrase", async () => {
+  const browser = await chromium.launch();
+  try {
+    {
+      const { context, page } = await phonePage(browser, "light");
+      await page.goto(`${BASE}/backups`);
+      await page
+        .locator('.nx-kpi[data-key="newest"]:not([data-loading])')
+        .waitFor({ timeout: 10000 });
+      const cut = await page.evaluate(() =>
+        [...document.querySelectorAll("main .nx-kpi__ctx")]
+          .filter((c) => {
+            const box = c.getBoundingClientRect();
+            return [...c.querySelectorAll("*")].some(
+              (k) => k.getBoundingClientRect().right > box.right + 1,
+            );
+          })
+          .map((c) => c.textContent),
+      );
+      assert.deepEqual(cut, [], "a KPI context line is cut off at 390 px");
+      await context.close();
+    }
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/backups`);
+    await page.locator("#bk-filter").waitFor({ timeout: 10000 });
+    const r = await page.evaluate(() => {
+      const box = /** @type {HTMLElement} */ (
+        document.querySelector("#bk-filter")
+      ).getBoundingClientRect();
+      const kbd = /** @type {HTMLElement} */ (
+        document.querySelector("#bk-repos .nx-card__tools .nx-kbd")
+      ).getBoundingClientRect();
+      return {
+        box: [box.top, box.bottom, box.right],
+        kbd: [kbd.top, kbd.bottom, kbd.right],
+      };
+    });
+    assert.ok(
+      r.kbd[0] >= r.box[0] && r.kbd[1] <= r.box[1] && r.kbd[2] <= r.box[2],
+      `the / hint is not inside the search box: ${JSON.stringify(r)}`,
+    );
+    await page
+      .locator('.nx-kpi[data-key="newest"]:not([data-loading])')
+      .waitFor({ timeout: 10000 });
+    const tile = await page.evaluate(() => ({
+      value:
+        document.querySelector('.nx-kpi[data-key="newest"] .nx-kpi__value')
+          ?.textContent ?? "",
+      ctx:
+        document.querySelector('.nx-kpi[data-key="newest"] .nx-kpi__ctx')
+          ?.textContent ?? "",
+    }));
+    assert.match(
+      tile.value,
+      /\bago$/,
+      `the age is cut in two: ${JSON.stringify(tile)}`,
+    );
+    assert.doesNotMatch(tile.ctx, /^ago\b/);
   } finally {
     await browser.close();
   }

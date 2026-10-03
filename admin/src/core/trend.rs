@@ -156,6 +156,9 @@ mod tests {
                 load1_x100: load,
                 tls_fingerprint: String::new(),
                 disk_detail: None,
+                uptime_s: None,
+                release: None,
+                guests_usage: None,
             },
             stacks: stacks
                 .iter()

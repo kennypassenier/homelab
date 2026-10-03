@@ -2,6 +2,7 @@
 // facts, its load as bars, and the containers `pct list` reports.
 
 import { humanMb, stackState } from "./fleet.js";
+import { humanDuration } from "./format.js";
 
 /**
  * @typedef {{vmid: number, status: string, lock: string, name: string}} Guest
@@ -62,8 +63,11 @@ export function hostFacts(fleet, meta) {
     },
     { label: "Stacks online", value: `${c.online} of ${c.stacks}` },
     { label: "Parked", value: String(c.parked) },
-    // The host does not report its own uptime (HostView has no such field).
-    { label: "Up for", value: "not reported by the host" },
+    // redesign-host-4: the host reports its uptime since 3.71.0.
+    {
+      label: "Up for",
+      value: hostUptime(h) ?? "not reported by this host version",
+    },
   ];
 }
 
@@ -245,20 +249,31 @@ export function hostKpis(fleet, guests) {
         : "size not read yet",
       meter: { pct: h.disk_pct },
     },
-    {
-      // The host does not send how full the thin pool is (only its size):
-      // an honest "not reported", never a made-up percentage.
-      key: "pool",
-      label: "Container pool",
-      value: "—",
-      unit: "",
-      ctx: d
-        ? `${Math.round(d.thin_pool_size_gb)} GB pool · use not reported`
-        : "not read yet",
-      title:
-        "The local-lvm thin pool every container's own disk is carved from; the host reports its size, not yet how full it is",
-      meter: { pct: null },
-    },
+    // redesign-host-4: how full the thin pool is, from the host's `lvs`
+    // (3.71.0); an older host sends only its size, said as such and never
+    // a made-up percentage.
+    d?.thin_pool
+      ? {
+          key: "pool",
+          label: "Container pool",
+          value: String(Math.round(d.thin_pool.data_pct)),
+          unit: "%",
+          ctx: `${Math.round(d.thin_pool_size_gb * (1 - d.thin_pool.data_pct / 100))} GB free of ${Math.round(d.thin_pool_size_gb)} GB`,
+          title: `The local-lvm thin pool every container's own disk is carved from: data ${d.thin_pool.data_pct}%, metadata ${d.thin_pool.metadata_pct}%`,
+          meter: { pct: d.thin_pool.data_pct },
+        }
+      : {
+          key: "pool",
+          label: "Container pool",
+          value: "—",
+          unit: "",
+          ctx: d
+            ? `${Math.round(d.thin_pool_size_gb)} GB pool · use not reported by this host version`
+            : "not read yet",
+          title:
+            "The local-lvm thin pool every container's own disk is carved from; this host version reports its size, not how full it is",
+          meter: { pct: null },
+        },
     {
       key: "containers",
       label: "Containers",
@@ -302,7 +317,13 @@ export function meterTone(m) {
 export function guestTable(guests, fleet) {
   const base = guestRows(guests, fleet);
   return guests.map((g, i) => {
-    const s = fleet?.stacks.find((x) => x.vmid === g.vmid) ?? null;
+    // redesign-host-4: the stack's own use first; any other guest (one
+    // this orchestrator does not manage) from the host's per-guest
+    // reading, which an older host does not send.
+    const s =
+      fleet?.stacks.find((x) => x.vmid === g.vmid) ??
+      fleet?.host.guests_usage?.find((x) => x.vmid === g.vmid) ??
+      null;
     const running = g.status === "running";
     const stack = base[i].stack;
     return {
@@ -398,9 +419,12 @@ export function actionBlurb(what) {
  * What fills the root volume: the biggest top-level directories (one
  * inside another listed one is not stacked twice), each as a share of the
  * volume, and what is free.
+ * `pool` is what the thin pool promises and holds (redesign-host-4), null
+ * from a host too old to send it.
  * @param {import("./fleet.js").Fleet} fleet
  * @returns {{rootGb: number, device: string, diskGb: number,
  *   usedPct: number, freeGb: number, poolGb: number,
+ *   pool: {promised: string, promisedNote: string, written: string} | null,
  *   dirs: {path: string, gb: number, pct: number}[]} | null}
  */
 export function diskBreakdown(fleet) {
@@ -425,8 +449,59 @@ export function diskBreakdown(fleet) {
     usedPct: fleet.host.disk_pct,
     freeGb: Math.round(d.root_lv_size_gb * (1 - fleet.host.disk_pct / 100)),
     poolGb: d.thin_pool_size_gb,
+    pool: d.thin_pool
+      ? {
+          promised: `${Math.round(d.thin_pool.promised_gb)} GB`,
+          promisedNote: d.thin_pool_size_gb
+            ? `${Math.round((d.thin_pool.promised_gb / d.thin_pool_size_gb) * 100)}% of the pool${d.thin_pool.promised_gb > d.thin_pool_size_gb ? ", thin over-provisioned" : ""}`
+            : "",
+          written: `${Math.round((d.thin_pool_size_gb * d.thin_pool.data_pct) / 100)} GB · ${Math.round(d.thin_pool.data_pct)}%`,
+        }
+      : null,
     dirs,
   };
+}
+
+/**
+ * redesign-host-4: the Disk card's first line — the root volume, the disk
+ * it lives on, and that disk's kind (SSD, HDD, NVMe SSD) when the host
+ * says; "disk" from a host too old to.
+ * @param {import("./fleet.js").Fleet} fleet
+ */
+export function rootVolumeLine(fleet) {
+  const d = fleet.host.disk_detail;
+  if (!d) return "";
+  const kind = d.root_disk_kind || "disk";
+  return `${Math.round(d.root_lv_size_gb)} GB on ${d.root_disk_device || "an unknown disk"}${d.root_disk_total_gb ? ` (${d.root_disk_total_gb.toFixed(0)} GB ${kind})` : ""}`;
+}
+
+/**
+ * redesign-host-4: how long the host has been up, or null from a host too
+ * old to say.
+ * @param {import("./fleet.js").Fleet["host"]} host
+ */
+export function hostUptime(host) {
+  return host.uptime_s == null ? null : humanDuration(host.uptime_s);
+}
+
+/**
+ * redesign-host-4: whether the running daemon is a signed release, as the
+ * host itself verified its own binary against the signature recorded when
+ * it was installed.
+ * @param {import("./fleet.js").Fleet["host"]} host
+ * @returns {{text: string, tone: "ok" | "warn" | "", title: string}}
+ */
+export function daemonSignature(host) {
+  const r = host.release;
+  if (!r)
+    return {
+      text: "signature not reported by this host version",
+      tone: "",
+      title: "A host older than 3.71.0 does not check its own binary",
+    };
+  return r.signed
+    ? { text: "signed release", tone: "ok", title: r.detail }
+    : { text: "not a signed release", tone: "warn", title: r.detail };
 }
 
 /** @param {number} days */

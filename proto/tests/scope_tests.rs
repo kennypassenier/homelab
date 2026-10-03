@@ -40,6 +40,7 @@ fn arch_tokens_scopes_are_ordered_and_the_dangerous_commands_need_all() {
         },
         Command::SelfUpdateHost {
             binary_b64: String::new(),
+            proof: None,
         },
         Command::ForgetStack { stack: "x".into() },
         Command::WipeRetired {

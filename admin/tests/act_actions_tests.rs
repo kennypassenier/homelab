@@ -33,6 +33,7 @@ fn material_for(kind: ActionKind, stack: &str) -> Material {
         Needs::HostRelease => Material::HostRelease {
             tag: "v3.63.0".into(),
             binary_b64: "QUJD".into(),
+            proof: None,
         },
         Needs::NativeRelease => {
             let mut n = native("admin");
@@ -496,7 +497,7 @@ fn parity_the_new_actions_send_the_cli_commands() {
     );
     assert!(matches!(
         commands(&req, m).unwrap().as_slice(),
-        [Command::SelfUpdateHost { binary_b64 }] if binary_b64 == "QUJD"
+        [Command::SelfUpdateHost { binary_b64, .. }] if binary_b64 == "QUJD"
     ));
     // install-native: the host downloads; the CLI line is the verb's own.
     let req = validate(

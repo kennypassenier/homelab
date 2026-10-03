@@ -246,6 +246,29 @@ pub struct Schedule {
     pub handled_until: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_run: Option<LastRun>,
+    /// redesign-schedules-3: the newest slot that passed without a run,
+    /// and why — the page's "Last run" says "missed" when this is newer
+    /// than `last_run`. A slot skipped on purpose is never recorded here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_missed: Option<Missed>,
+}
+
+/// Why a slot passed without a run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MissedWhy {
+    /// The dashboard was not running at that time.
+    Down,
+    /// The schedule's previous run was still going.
+    Busy,
+    /// The action was refused when its slot came (its stack gone, say).
+    Refused,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Missed {
+    pub slot: i64,
+    pub why: MissedWhy,
 }
 
 fn yes() -> bool {
@@ -382,6 +405,24 @@ pub fn next_run(s: &Schedule, now: i64) -> Option<i64> {
         return None;
     }
     s.when.next_after(now.max(s.handled_until))
+}
+
+/// redesign-schedules-2: skip one run. Only the slot the page shows as next
+/// (`next_run`) can be skipped, so a page that is out of date cannot skip
+/// one the person never saw. Marking it handled is the whole skip: `tick`
+/// starts after `handled_until`, so the slot neither runs nor counts as
+/// missed, and the schedule stays on. Returns the new `handled_until`.
+pub fn skip(s: &Schedule, slot: i64, now: i64) -> Result<i64, String> {
+    match next_run(s, now) {
+        None if !s.enabled => Err("the schedule is off; it has no run to skip".into()),
+        None => Err("the schedule has no further run to skip".into()),
+        Some(next) if next != slot => Err(format!(
+            "its next run is {}, not {}",
+            local_label(next),
+            local_label(slot)
+        )),
+        Some(next) => Ok(next),
+    }
 }
 
 /// A local time for messages: `2026-10-25 02:30`.

@@ -4,8 +4,8 @@
 use homelab_admin::core::actions::ActionArgs;
 use homelab_admin::core::schedule::{
     Resolved, Schedule, ScheduleFile, ScheduleInput, When, check_input, civil_from_days,
-    days_from_civil, local_label, next_run, offset_at, resolve_local, summer_time, tick, to_local,
-    weekday,
+    days_from_civil, local_label, next_run, offset_at, resolve_local, skip, summer_time, tick,
+    to_local, weekday,
 };
 
 const JAN1_2026: i64 = 20_454;
@@ -171,6 +171,7 @@ fn daily(at: &str, handled_until: i64) -> Schedule {
         created_at: handled_until,
         handled_until,
         last_run: None,
+        last_missed: None,
     }
 }
 
@@ -262,4 +263,33 @@ fn arch_state_a_schedule_file_of_another_version_or_zone_is_refused() {
 fn feat_stacks_8_labels_are_local_time() {
     let summer = resolve_local(2026, 7, 1, 3, 30).instant();
     assert_eq!(local_label(summer), "2026-07-01 03:30");
+}
+
+/// redesign-schedules-2: "Skip this run" passes over exactly the next slot
+/// of a schedule that stays on: the slot neither runs nor counts as missed,
+/// and the one after it runs as planned.
+/// covers: redesign-schedules-2
+#[test]
+fn redesign_schedules_skip_passes_over_exactly_the_next_slot() {
+    let d = days_from_civil(2026, 9, 28);
+    let slot = resolve_local(2026, 9, 28, 3, 30).instant();
+    let s = daily("03:30", utc(d - 1, 12, 0));
+    let now = slot - 3_600;
+    // Only the slot the page shows as next can be skipped.
+    assert!(skip(&s, slot + DAY, now).is_err());
+    assert!(skip(&s, slot - DAY, now).is_err());
+    let mut skipped = s.clone();
+    skipped.handled_until = skip(&s, slot, now).unwrap();
+    assert_eq!(next_run(&skipped, now), Some(slot + DAY));
+    // At the slot: nothing runs, nothing is missed.
+    let p = tick(&skipped, slot + 20, 300, false);
+    assert_eq!((p.run, p.missed.len()), (None, 0));
+    skipped.handled_until = p.handled_until;
+    // The next one runs as planned.
+    let p = tick(&skipped, slot + DAY + 20, 300, false);
+    assert_eq!(p.run, Some(slot + DAY));
+    // A schedule that is off has no next run to skip.
+    let mut off = s.clone();
+    off.enabled = false;
+    assert!(skip(&off, slot, now).is_err());
 }

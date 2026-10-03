@@ -2,7 +2,7 @@
 // step is taken by the tab itself (driveview.js `animate`).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { controls, declare, pick } from "../js/drivable.js";
+import { control, controls, declare, pick } from "../js/drivable.js";
 import { animate, plan, targetOf } from "../js/driveview.js";
 
 const here = [
@@ -86,5 +86,27 @@ test("fix-239: a tab that has not caught up still takes a click after catching u
     plan(local, ev, false).ops,
     [],
     "a tab that does not follow",
+  );
+});
+
+test("redesign-activity: an id a redesign renamed (`was`) still reaches the control", () => {
+  declare({
+    id: "test-merged-menu",
+    was: ["test-old-edit", "test-old-delete"],
+    page: "test",
+    opens: "dialog",
+    row: "<id>",
+    what: "a menu that replaced two buttons",
+  });
+  assert.equal(control("test-old-edit")?.id, "test-merged-menu");
+  const on = [{ id: "test-merged-menu", row: "a", label: "More" }];
+  assert.deepEqual(pick({ id: "test-old-delete", row: "a" }, on), { index: 0 });
+  assert.throws(() =>
+    declare({
+      id: "test-old-edit",
+      page: "test",
+      opens: "view",
+      what: "taken by an alias",
+    }),
   );
 });

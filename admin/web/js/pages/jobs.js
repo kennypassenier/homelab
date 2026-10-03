@@ -18,9 +18,11 @@ import {
 
 /**
  * @param {HTMLElement} root
+ * @param {string} rowControl the Live view control a row is (declared by
+ *   the page that hosts the table, drivable.js)
  * @returns {() => void}
  */
-export function mountJobsTable(root) {
+export function mountJobsTable(root, rowControl) {
   const keys = sortKeys();
   const ago = agoEl("updated");
   const t = tableBlock({
@@ -89,6 +91,8 @@ export function mountJobsTable(root) {
             "data-job": String(r.job),
             "data-kp-row-key": String(r.job),
             title: "Open this job: its steps and its log",
+            "data-drive": rowControl,
+            "data-drive-row": String(r.job),
           },
           td(String(r.job), "num"),
           td(keys.note("time", formatDateTime(r.queued), r.queued)),

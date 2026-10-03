@@ -4421,3 +4421,344 @@ test("invariants: Schedules page: Live view reaches the drawer and its fields, t
     await browser.close();
   }
 });
+
+// redesign-activity (3.71.0, the approved Activity demo): Jobs, the
+// timeline, History, Schedules and the host log are one page with three
+// views, each its own address, and every old address opens its view.
+test("invariants: Activity is one page with Now and history, Planned and Host log, and the old addresses open their view", async () => {
+  const browser = await chromium.launch();
+  try {
+    const bad = [];
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 1000 },
+      });
+      const page = await freshPage(context);
+      for (const [from, view, mark] of [
+        ["/activity", "Now and history", "#history .ac-row"],
+        ["/jobs", "Now and history", "#running"],
+        ["/timeline", "Now and history", "#timeline .timeline svg"],
+        ["/log", "Host log", ".hl-side .hl-opt"],
+        ["/schedules", "Planned", ".sch-ph h2"],
+      ]) {
+        await page.goto(`${BASE}${from}`);
+        const found = await page
+          .locator(mark)
+          .first()
+          .waitFor({ timeout: 10000 })
+          .then(() => true)
+          .catch(() => false);
+        const r = await page.evaluate(() => ({
+          h1: [...document.querySelectorAll("#page h1")].map((e) =>
+            (e.textContent ?? "").trim(),
+          ),
+          tab: (
+            document.querySelector('.ac-tabs [aria-selected="true"]')
+              ?.textContent ?? ""
+          ).trim(),
+          overflow: document.documentElement.scrollWidth - window.innerWidth,
+        }));
+        if (!found) bad.push(`${width}px ${from}: ${mark} never drew`);
+        if (r.h1.join("|") !== "Activity")
+          bad.push(`${width}px ${from}: page titles ${JSON.stringify(r.h1)}`);
+        if (r.tab !== view)
+          bad.push(`${width}px ${from}: the current tab is "${r.tab}"`);
+        if (r.overflow > 0)
+          bad.push(`${width}px ${from}: scrolls ${r.overflow}px sideways`);
+      }
+      // The KPI strip in exact numbers, and who started every row.
+      await page.goto(`${BASE}/activity`);
+      await page
+        .locator("#history .ac-row")
+        .first()
+        .waitFor({ timeout: 10000 });
+      const k = await page.evaluate(() => ({
+        tiles: [...document.querySelectorAll(".nx-kpi .nx-kpi__label")].map(
+          (e) => (e.textContent ?? "").trim(),
+        ),
+        values: [...document.querySelectorAll(".nx-kpi .nx-kpi__value")].map(
+          (e) => (e.textContent ?? "").trim(),
+        ),
+        unnamed: [...document.querySelectorAll("#history .ac-row")].filter(
+          (r) => !(r.querySelector(".ac-by-chip")?.textContent ?? "").trim(),
+        ).length,
+      }));
+      if (
+        k.tiles.join("|") !==
+        "Operations|Succeeded|Open incidents|Nightly round|Running now"
+      )
+        bad.push(`${width}px: KPI tiles ${k.tiles}`);
+      if (k.values.some((v) => /\+|k$/i.test(v)))
+        bad.push(`${width}px: a KPI value is not exact: ${k.values}`);
+      if (k.unnamed) bad.push(`${width}px: ${k.unnamed} rows name no actor`);
+      await context.close();
+    }
+    assert.deepEqual(bad, [], bad.join("; "));
+  } finally {
+    await browser.close();
+  }
+});
+
+// redesign-activity: History's Show filter is plain-click toggle chips
+// (several at once, none = everything), kept in the address; a failed row
+// opens in place with its error and its fixes.
+test("invariants: Activity's History filters with a plain click, keeps it in the address, and a failed row opens with its fixes", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/activity`);
+    await page.locator("#history .ac-row").first().waitFor({ timeout: 10000 });
+    const count = () =>
+      page.locator("#history .ac-count").textContent({ timeout: 2000 });
+    const all = await count();
+    await page.locator('#history .nx-chip-toggle[data-value="claude"]').click();
+    const claude = await page.evaluate(() =>
+      [...document.querySelectorAll("#history .ac-row .ac-by-chip")].map((c) =>
+        (c.textContent ?? "").trim(),
+      ),
+    );
+    assert.ok(claude.length > 0, "By Claude shows no row");
+    assert.ok(
+      claude.every((c) => /Claude/.test(c)),
+      `By Claude shows ${[...new Set(claude)]}`,
+    );
+    assert.match(page.url(), /show=claude/);
+    await page.locator('#history .nx-chip-toggle[data-value="failed"]').click();
+    assert.match(page.url(), /show=failed%2Cclaude|show=failed,claude/);
+    const both = await page.evaluate(() =>
+      [...document.querySelectorAll("#history .ac-row")].every(
+        (r) =>
+          /Claude/.test(r.querySelector(".ac-by-chip")?.textContent ?? "") ||
+          /** @type {HTMLElement} */ (r).dataset.tone === "bad",
+      ),
+    );
+    assert.ok(both, "Failed + By Claude shows a row that is neither");
+    // Clicking both off shows everything again.
+    await page.locator('#history .nx-chip-toggle[data-value="failed"]').click();
+    await page.locator('#history .nx-chip-toggle[data-value="claude"]').click();
+    assert.equal(await count(), all);
+    const failed = page.locator('#history .ac-row[data-tone="bad"]').first();
+    await failed.click();
+    const detail = page.locator("#history .ac-detail").first();
+    await detail.waitFor({ timeout: 3000 });
+    assert.equal(await failed.getAttribute("aria-expanded"), "true");
+    const d = await detail.evaluate((el) => ({
+      err: (el.querySelector(".ac-err")?.textContent ?? "").trim(),
+      steps: el.querySelectorAll(".ac-gantt > div").length,
+      buttons: [...el.querySelectorAll("button, a.kp-button")].map((b) =>
+        (b.textContent ?? "").trim(),
+      ),
+    }));
+    assert.ok(d.err.length > 0, "the failed row shows no error");
+    assert.ok(d.steps > 0, "the failed row shows no steps");
+    assert.ok(
+      d.buttons.includes("Open the incident") &&
+        d.buttons.includes("Charts at this time"),
+      `the failed row offers ${d.buttons}`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// redesign-activity, invariant 47's rule on the page: a running job's log
+// in Running now scrolls inside its own box; the card never grows as lines
+// arrive.
+test("invariants: a running job's log in Activity scrolls inside its box and never makes Running now taller", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/films`);
+    await page.waitForTimeout(600);
+    await page
+      .getByRole("button", { name: "Park", exact: true })
+      .click({ timeout: 5000 });
+    await page.waitForTimeout(300);
+    await page.locator("#action-dialog #act-run").click();
+    await page.waitForTimeout(300);
+    await page.evaluate(() =>
+      document
+        .querySelectorAll("dialog[open]")
+        .forEach((d) => /** @type {HTMLDialogElement} */ (d).close()),
+    );
+    await page.goto(`${BASE}/activity?view=running`);
+    const log = page.locator("#running .ac-job__log").first();
+    await log.waitFor({ state: "attached", timeout: 5000 });
+    const card = page.locator("#running");
+    const before = await card.boundingBox();
+    assert.ok(before, "Running now is not on screen");
+    await log.evaluate((el) => {
+      el.hidden = false;
+      el.textContent += Array.from(
+        { length: 400 },
+        (_, i) =>
+          `12:00:${String(i % 60).padStart(2, "0")}  step ${i} of a long deploy`,
+      ).join("\n");
+    });
+    await page.waitForTimeout(200);
+    const after = await card.boundingBox();
+    assert.ok(after, "Running now left the screen");
+    assert.equal(
+      Math.round(after.height),
+      Math.round(before.height),
+      `Running now grew from ${before.height} to ${after.height} px as log lines arrived`,
+    );
+    assert.ok(
+      await log.evaluate((el) => el.scrollHeight > el.clientHeight + 1),
+      "the job's log does not scroll inside its own box",
+    );
+    // Open the log: the dialog's log scrolls too (invariant 47).
+    await page
+      .locator("#running .ac-job button", { hasText: "Open the log" })
+      .first()
+      .click();
+    await page.locator("dialog#job-dialog[open] .job-log").waitFor({
+      state: "attached",
+      timeout: 3000,
+    });
+  } finally {
+    await browser.close();
+  }
+});
+
+// redesign-console (Kenny, 2026-10-03, on the Live log: "alle items lijken
+// gewoon links aligned naast elkaar gezet, ipv mooi gestructureerd in hun
+// eigen sectie van het beeld"): the host log is a log explorer — sources
+// and levels in a side column with exact counts, the toolbar's search on
+// the left at its own width and the count and follow against the right
+// edge; one column on a phone, never a sideways scroll.
+test("invariants: the host log puts its filters in a side column and its toolbar in three zones, on Console and Activity", async () => {
+  const browser = await chromium.launch();
+  try {
+    const bad = [];
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 1000 },
+      });
+      const page = await freshPage(context);
+      for (const path of ["/console", "/activity?view=host-log"]) {
+        await page.goto(`${BASE}${path}`);
+        await page.locator(".hl-out .hl-ln[data-seq]").first().waitFor({
+          timeout: 10000,
+        });
+        const r = await page.evaluate(() => {
+          const box = (/** @type {Element | null} */ e) =>
+            e?.getBoundingClientRect() ?? null;
+          const bar = document.querySelector(".hl-bar");
+          return {
+            bar: box(bar),
+            search: box(bar?.querySelector(".nx-tb__search") ?? null),
+            state: box(bar?.querySelector(".nx-tb__state") ?? null),
+            count: (bar?.querySelector(".hl-count")?.textContent ?? "").trim(),
+            side: box(document.querySelector(".hl-side")),
+            out: box(document.querySelector(".hl-out")),
+            groups: [...document.querySelectorAll(".hl-side h3")].map((h) =>
+              (h.textContent ?? "").trim(),
+            ),
+            counts: [
+              ...document.querySelectorAll(".hl-side .hl-opt small"),
+            ].map((s) => (s.textContent ?? "").trim()),
+            overflow: document.documentElement.scrollWidth - window.innerWidth,
+          };
+        });
+        const at = `${width}px ${path}`;
+        if (!r.bar || !r.search || !r.state || !r.side || !r.out) {
+          bad.push(`${at}: a zone is missing`);
+          continue;
+        }
+        if (r.groups.join("|") !== "Source|Level")
+          bad.push(`${at}: side column groups ${r.groups}`);
+        if (r.counts.some((c) => !/^\d+$/.test(c)))
+          bad.push(`${at}: counts ${r.counts}`);
+        if (!/^\d+ of \d+ lines?$/.test(r.count))
+          bad.push(`${at}: the count reads "${r.count}"`);
+        if (r.overflow > 0) bad.push(`${at}: scrolls ${r.overflow}px sideways`);
+        if (width > 1200) {
+          if (!(r.side.right <= r.out.left))
+            bad.push(`${at}: the side column is not beside the lines`);
+          if (r.search.left - r.bar.left > 40)
+            bad.push(`${at}: the search is not at the left`);
+          if (r.search.width > 22 * 16 + 1)
+            bad.push(`${at}: the search stretches to ${r.search.width}px`);
+          if (r.bar.right - r.state.right > 40)
+            bad.push(`${at}: the count and follow are not at the right edge`);
+          if (Math.abs(r.search.top - r.state.top) > 12)
+            bad.push(`${at}: search and state are not on one row`);
+        } else if (!(r.side.bottom <= r.out.top))
+          bad.push(`${at}: on a phone the filters are not above the lines`);
+      }
+      // A source turns off with a plain click, and the lines follow.
+      await page.goto(`${BASE}/console`);
+      await page.locator(".hl-out .hl-ln[data-seq]").first().waitFor({
+        timeout: 10000,
+      });
+      const lines = () => page.locator(".hl-out .hl-ln[data-seq]").count();
+      const n0 = await lines();
+      await page
+        .locator(
+          '.hl-side input[data-drive="console-source"][data-drive-row="HOST"]',
+        )
+        .click();
+      const n1 = await lines();
+      if (!(n1 < n0))
+        bad.push(`${width}px: turning the host off left ${n1} of ${n0}`);
+      if (!/hide=HOST/.test(page.url()))
+        bad.push(`${width}px: the filter is not in the address`);
+      await context.close();
+    }
+    assert.deepEqual(bad, [], bad.join("; "));
+  } finally {
+    await browser.close();
+  }
+});
+
+// redesign-console (3.71.0): Console is the host's lines and the shell in
+// one place — the shell bar under the lines, a line opens its details.
+test("invariants: Console shows the host's lines with the shell bar under them, and a line opens its details", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/shell?vmid=104`);
+    assert.equal(new URL(page.url()).pathname, "/console");
+    const first = page.locator(".hl-out .hl-ln[data-seq]").first();
+    await first.waitFor({ timeout: 10000 });
+    const r = await page.evaluate(() => ({
+      h1: (document.querySelector("#page h1")?.textContent ?? "").trim(),
+      out:
+        document.querySelector(".hl-out")?.getBoundingClientRect().bottom ?? 0,
+      shell:
+        document.querySelector(".con-shell")?.getBoundingClientRect().top ?? 0,
+      inTerm: !!document.querySelector(".hl-term .con-shell #shell-line"),
+      actions: [
+        ...document.querySelectorAll(".nx-head-actions .kp-button"),
+      ].map((b) => (b.textContent ?? "").trim()),
+    }));
+    assert.equal(r.h1, "Console");
+    assert.ok(
+      r.inTerm && r.shell >= r.out - 1,
+      "the shell bar is not under the lines",
+    );
+    assert.deepEqual(r.actions, ["Pause", "Download", "Run a command"]);
+    await first.click();
+    await page.locator(".hl-more").waitFor({ timeout: 2000 });
+    assert.equal(await first.getAttribute("aria-expanded"), "true");
+    await page
+      .locator(".nx-head-actions .kp-button", { hasText: "Pause" })
+      .click();
+    assert.match(
+      (await page.locator(".con-live").textContent()) ?? "",
+      /paused/,
+    );
+  } finally {
+    await browser.close();
+  }
+});

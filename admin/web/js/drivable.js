@@ -32,13 +32,20 @@
  * filters, folds, sorts).
  * @typedef {{id: string, page: string, what: string,
  *   opens: "dialog" | "run" | "view", row?: string,
- *   at?: (row: string | null) => string | null}} Control
+ *   at?: (row: string | null) => string | null, was?: string[]}} Control
+ *   `was`: the ids this control had before a redesign renamed or merged it
+ *   (3.71.0 coordinator rule), kept as aliases so an old script still finds it.
  *   `at`: where the control is when it lives on a page per stack (the
  *   stack hub's), from its row; otherwise its page's own address.
  */
 
 /** @type {Map<string, Control>} */
 const CONTROLS = new Map();
+/** An old id (a control's `was`) → the id it has now. @type {Map<string, string>} */
+const ALIASES = new Map();
+
+/** The id a control has now, for an id it may have had before. @param {string} id */
+export const current = (id) => ALIASES.get(id) ?? id;
 
 /** A control id: lower-case words joined by hyphens. */
 const ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
@@ -52,10 +59,15 @@ const ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 export function declare(spec) {
   if (!ID.test(spec.id))
     throw new Error(`a Live view control id is lower-case-words: ${spec.id}`);
-  if (CONTROLS.has(spec.id))
+  if (CONTROLS.has(spec.id) || ALIASES.has(spec.id))
     throw new Error(`the Live view control ${spec.id} is declared twice`);
   if (!spec.page || !spec.what)
     throw new Error(`the Live view control ${spec.id} needs a page and what`);
+  for (const old of spec.was ?? []) {
+    if (CONTROLS.has(old) || ALIASES.has(old))
+      throw new Error(`the Live view id ${old} is taken (was of ${spec.id})`);
+    ALIASES.set(old, spec.id);
+  }
   CONTROLS.set(spec.id, Object.freeze({ ...spec }));
   return spec.id;
 }
@@ -65,7 +77,7 @@ export const controls = () =>
   [...CONTROLS.values()].sort((a, b) => a.id.localeCompare(b.id));
 
 /** @param {string} id @returns {Control | null} */
-export const control = (id) => CONTROLS.get(id) ?? null;
+export const control = (id) => CONTROLS.get(current(id)) ?? null;
 
 /**
  * Mark `el` as the declared control `id` — on row `row` when the control
@@ -125,6 +137,7 @@ export function viaForm(el, form) {
  * @returns {{index: number} | {why: string, fix: string}}
  */
 export function pick(want, here) {
+  want = { ...want, id: current(want.id) };
   const same = here
     .map((x, index) => ({ ...x, index }))
     .filter((x) => x.id === want.id);

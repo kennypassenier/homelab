@@ -95,7 +95,49 @@ const DRIVE = {
     opens: "run",
     what: "copy an opened line to the clipboard",
   }),
+  everything: declare({
+    id: "console-everything",
+    page: "shell",
+    opens: "view",
+    what: "show every source again",
+  }),
+  onlyLine: declare({
+    id: "console-only-line-source",
+    page: "shell",
+    opens: "view",
+    what: "show only the opened line's source",
+  }),
+  newLines: declare({
+    id: "console-back-to-tail",
+    page: "shell",
+    opens: "view",
+    what: "jump back to the newest lines and follow again",
+  }),
+  search: declare({
+    id: "console-search",
+    page: "shell",
+    opens: "view",
+    what: "the Lines containing box",
+  }),
+  retry: declare({
+    id: "console-retry",
+    page: "shell",
+    opens: "run",
+    what: "read the host's lines again after a failed read",
+  }),
 };
+const CONTAINER = declare({
+  id: "console-container",
+  page: "shell",
+  opens: "view",
+  what: "the container the next command runs in",
+});
+const COMMAND = declare({
+  id: "console-command",
+  page: "shell",
+  opens: "view",
+  what: "the command line",
+});
 
 /**
  * @param {HTMLElement} root
@@ -160,6 +202,8 @@ export function mount(root) {
     placeholder: "a command, e.g. df -h /appdata",
     "aria-label": "Command",
   });
+  drivable(target, CONTAINER);
+  drivable(line, COMMAND);
   const run = drivable(
     h(
       "button",

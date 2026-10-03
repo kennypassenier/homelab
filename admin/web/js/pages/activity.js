@@ -121,6 +121,98 @@ const ROW = declare({
   row: "<row key>",
   what: "open or close one History row: its steps, its error and what to do",
 });
+// 3.71.0 coordinator rule: every clickable element carries a declared id.
+const VIEW_TAB = declare({
+  id: "activity-view",
+  page: "activity",
+  opens: "view",
+  row: "now|planned|host-log",
+  what: "open one of Activity's views: Now and history, Planned, Host log",
+});
+const KPI_TILE = declare({
+  id: "activity-kpi",
+  page: "activity",
+  opens: "view",
+  row: "ok|incidents|nightly|running",
+  what: "open the History or Running now a KPI tile counts",
+});
+const RUN_AGAIN = declare({
+  id: "activity-run-again",
+  page: "activity",
+  opens: "dialog",
+  row: "<row key>",
+  what: "open the action dialog that starts a failed operation again",
+});
+const STACK_LINK = declare({
+  id: "activity-stack-link",
+  page: "activity",
+  opens: "view",
+  row: "<stack>",
+  what: "go to the stack an operation or a job was about",
+});
+const ALL_JOBS = declare({
+  id: "activity-all-jobs",
+  page: "activity",
+  opens: "view",
+  what: "unfold Every job: the last 200 jobs of this dashboard",
+});
+const EVERY_JOB = declare({
+  id: "activity-every-job",
+  page: "activity",
+  opens: "view",
+  what: "fold or unfold Every job",
+});
+const JOB_ROW = declare({
+  id: "activity-job-row",
+  page: "activity",
+  opens: "dialog",
+  row: "<job>",
+  what: "open one job of Every job, live, in a dialog",
+});
+const CHARTS = declare({
+  id: "activity-charts",
+  page: "activity",
+  opens: "view",
+  row: "<row key>",
+  what: "open the charts around an operation's moment",
+});
+const MARK = declare({
+  id: "activity-timeline-mark",
+  page: "activity",
+  opens: "view",
+  row: "<row key>",
+  what: "open a timeline mark's operation in History",
+});
+const SEARCH = declare({
+  id: "activity-search",
+  page: "activity",
+  opens: "view",
+  what: "History's search box",
+});
+const EVERY_DAY = declare({
+  id: "activity-show-every-day",
+  page: "activity",
+  opens: "view",
+  what: "drop the days picked on the timeline",
+});
+const CLEAR = declare({
+  id: "activity-clear-filters",
+  page: "activity",
+  opens: "view",
+  what: "clear every History filter",
+});
+const MORE = declare({
+  id: "activity-show-more",
+  page: "activity",
+  opens: "view",
+  what: "draw the next 50 older History rows",
+});
+const RETRY = declare({
+  id: "activity-retry",
+  page: "activity",
+  opens: "run",
+  what: "read the history again after a failed read",
+});
 const LOG_DRIVE = {
   follow: declare({
     id: "host-log-follow",
@@ -174,6 +266,36 @@ const LOG_DRIVE = {
     page: "log",
     opens: "run",
     what: "copy an opened line to the clipboard",
+  }),
+  everything: declare({
+    id: "host-log-everything",
+    page: "log",
+    opens: "view",
+    what: "show every source again",
+  }),
+  onlyLine: declare({
+    id: "host-log-only-line-source",
+    page: "log",
+    opens: "view",
+    what: "show only the opened line's source",
+  }),
+  newLines: declare({
+    id: "host-log-back-to-tail",
+    page: "log",
+    opens: "view",
+    what: "jump back to the newest lines and follow again",
+  }),
+  search: declare({
+    id: "host-log-search",
+    page: "log",
+    opens: "view",
+    what: "the Lines containing box",
+  }),
+  retry: declare({
+    id: "host-log-retry",
+    page: "log",
+    opens: "run",
+    what: "read the host's lines again after a failed read",
   }),
 };
 const LOG_DOWNLOAD = declare({
@@ -237,13 +359,22 @@ export function mount(root, ctx) {
     })),
   );
   tabs.classList.add("ac-tabs");
+  tabs
+    .querySelectorAll("a")
+    .forEach((a, i) =>
+      drivable(
+        /** @type {HTMLElement} */ (a),
+        VIEW_TAB,
+        VIEWS[i].view || "now",
+      ),
+    );
   const body = h("div", { class: "ac-body" });
   root.replaceChildren(header.el, tabs, body);
 
   if (view === "planned") {
     // The Schedules page, hosted as this view (its own module draws it,
     // its Live view controls stay declared on "schedules").
-    const stop = mountSchedules(body);
+    const stop = mountSchedules(body, { embedded: true });
     return () => {
       stop();
       root.classList.remove("ac-page");
@@ -344,6 +475,8 @@ function mountNow(body, x) {
     { loading: true },
   );
   strip.el.setAttribute("aria-label", `The last ${days} days`);
+  for (const [key, t] of strip.tiles)
+    if (t.el instanceof HTMLAnchorElement) drivable(t.el, KPI_TILE, key);
   const band = attentionBand();
   band.el.id = "attention";
 
@@ -364,6 +497,7 @@ function mountNow(body, x) {
     },
     "All jobs (the last 200)",
   );
+  drivable(allJobs, ALL_JOBS);
   running.body.append(
     runList,
     h("div", { class: "ac-foot" }, runFoot, allJobs),
@@ -441,6 +575,7 @@ function mountNow(body, x) {
     groups: [chips.el],
     state: [count, rangeChip],
   });
+  if (tb.search) drivable(tb.search, SEARCH);
   const feed = h("div", { class: "ac-feed", id: "history-feed" });
   const historyCard = section({
     title: "History",
@@ -456,8 +591,10 @@ function mountNow(body, x) {
     id: "jobs",
     collapsible: true,
     open: false,
-    mount: (b) => mountJobsTable(b),
+    mount: (b) => mountJobsTable(b, JOB_ROW),
   });
+  const fold = jobsCard.el.querySelector("summary");
+  if (fold) drivable(/** @type {HTMLElement} */ (fold), EVERY_JOB);
   allJobs.addEventListener("click", (e) => {
     e.preventDefault();
     jobsCard.open();
@@ -494,6 +631,18 @@ function mountNow(body, x) {
     act.jobs
       .filter((j) => !finished(j.state))
       .sort((a, b) => a.queued_at - b.queued_at);
+
+  /** A stack's name as a link to its hub. @param {string} name */
+  const stackLink = (name) =>
+    drivable(
+      h(
+        "a",
+        { class: "link", href: `/stacks/${encodeURIComponent(name)}` },
+        name,
+      ),
+      STACK_LINK,
+      name,
+    );
 
   /** @param {import("../jobs.js").Job} j */
   const jobWords = (j) =>
@@ -549,7 +698,7 @@ function mountNow(body, x) {
       e.stopPropagation();
       void openAction(a.stack, a.action);
     });
-    return viaForm(b, a.action);
+    return viaForm(drivable(b, RUN_AGAIN, r.key), a.action);
   };
   /** @param {string} name */
   const incidentButton = (name) => {
@@ -655,13 +804,7 @@ function mountNow(body, x) {
       const t = now();
       title.replaceChildren(
         `${actionLabel(j.action)} `,
-        j.stack === "_host"
-          ? "the host"
-          : h(
-              "a",
-              { class: "link", href: `/stacks/${encodeURIComponent(j.stack)}` },
-              j.stack,
-            ),
+        j.stack === "_host" ? "the host" : stackLink(j.stack),
         h("span", { class: "ac-muted" }, ` · job ${j.job}`),
       );
       const p = j.progress;
@@ -788,9 +931,19 @@ function mountNow(body, x) {
   let drag = null;
   /** @type {(px: number) => number} */
   let inv = () => 0;
+  /**
+   * A timeline mark Live view can click: an SVG element has no `click()`,
+   * so the mark gets one that does what a person's click does.
+   * @param {Element} g
+   * @param {string} key
+   */
+  const clickable = (g, key) => {
+    /** @type {any} */ (g).click = () => openRow(key);
+    return g;
+  };
   const paintTimeline = () => {
     if (!historyRead) return;
-    const W = Math.max(320, Math.round(tlBox.clientWidth || 1200));
+    const W = Math.max(240, Math.round(tlBox.clientWidth || 1200));
     const L = W < 600 ? 72 : 104;
     const lanes = /** @type {const} */ ([
       ["Operations", 30],
@@ -881,6 +1034,8 @@ function mountNow(body, x) {
         role: "button",
         "data-kind": tone,
         "data-key": r.key,
+        "data-drive": MARK,
+        "data-drive-row": r.key,
         "aria-label": `${r.what}, ${dayLabel(dayStart(r.start), now())} ${clock(r.start)}, ${r.state}. Enter opens it below.`,
       });
       g.append(
@@ -894,7 +1049,7 @@ function mountNow(body, x) {
           style: `fill: ${FILL[tone]}`,
         }),
       );
-      svg.append(g);
+      svg.append(clickable(g, r.key));
       if (r.state === "failed") {
         const [fy, fh] = ly.Failures;
         const fx = xOf(r.start);
@@ -904,6 +1059,8 @@ function mountNow(body, x) {
           role: "button",
           "data-kind": "bad",
           "data-key": r.key,
+          "data-drive": MARK,
+          "data-drive-row": r.key,
           "aria-label": `${r.what} failed. Enter opens it below.`,
         });
         fg.append(
@@ -912,7 +1069,7 @@ function mountNow(body, x) {
             style: `fill: ${FILL.bad}`,
           }),
         );
-        svg.append(fg);
+        svg.append(clickable(fg, r.key));
       }
     }
     const [ry, rh] = ly.Operations;
@@ -1065,15 +1222,19 @@ function mountNow(body, x) {
             })(),
           ]
         : []),
-      h(
-        "a",
-        {
-          class: "kp-button kp-button--sm",
-          href: `/charts${setParams("", { stack: r.stack, range })}`,
-          title:
-            "The charts of this moment's window, for this stack or the host",
-        },
-        "Charts at this time",
+      drivable(
+        h(
+          "a",
+          {
+            class: "kp-button kp-button--sm",
+            href: `/charts${setParams("", { stack: r.stack, range })}`,
+            title:
+              "The charts of this moment's window, for this stack or the host",
+          },
+          "Charts at this time",
+        ),
+        CHARTS,
+        r.key,
       ),
     ].filter((b) => b != null);
     return h(
@@ -1116,6 +1277,7 @@ function mountNow(body, x) {
         { type: "button", class: "kp-button kp-button--sm" },
         "Try again",
       );
+      drivable(again, RETRY);
       again.addEventListener("click", () => void loadHistory());
       feed.replaceChildren(
         h(
@@ -1140,6 +1302,7 @@ function mountNow(body, x) {
         { type: "button", class: "link-button" },
         "Show every day",
       );
+      drivable(clear, EVERY_DAY);
       clear.addEventListener("click", () => {
         filter = { ...filter, range: null };
         changed();
@@ -1155,6 +1318,7 @@ function mountNow(body, x) {
         { type: "button", class: "kp-button kp-button--sm" },
         "Clear the filters",
       );
+      drivable(clear, CLEAR);
       clear.addEventListener("click", () => {
         filter = { show: new Set(), q: "", range: null };
         chips.set([]);
@@ -1223,17 +1387,7 @@ function mountNow(body, x) {
               "span",
               { class: "ac-w" },
               ...(r.stack && r.entry.kind === "op"
-                ? [
-                    `${r.verb} `,
-                    h(
-                      "a",
-                      {
-                        class: "link",
-                        href: `/stacks/${encodeURIComponent(r.stack)}`,
-                      },
-                      r.stack,
-                    ),
-                  ]
+                ? [`${r.verb} `, stackLink(r.stack)]
                 : [r.what]),
             ),
             h(
@@ -1288,6 +1442,7 @@ function mountNow(body, x) {
         },
         `Show ${Math.min(PAGE, shown.length - limit)} more`,
       );
+      drivable(more, MORE);
       more.addEventListener("click", () => {
         limit += PAGE;
         paintFeed();
@@ -1310,27 +1465,9 @@ function mountNow(body, x) {
       "",
       location.pathname + setParams(location.search, filterToParams(filter)),
     );
-    const active = [];
-    if (filter.range)
-      active.push({
-        label: "Days picked on the timeline",
-        clear: () => {
-          filter = { ...filter, range: null };
-          changed();
-        },
-      });
-    tb.setActive(
-      active,
-      active.length
-        ? () => {
-            filter = { show: new Set(), q: "", range: null };
-            chips.set([]);
-            markChips();
-            if (tb.search) tb.search.value = "";
-            changed();
-          }
-        : undefined,
-    );
+    // The days picked on the timeline show in the toolbar's state zone
+    // (rangeChip, with Show every day), so the active-filter row stays
+    // absent: one place per filter, never two.
     paintFeed();
     paintTimeline();
   };

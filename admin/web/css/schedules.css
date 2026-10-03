@@ -49,6 +49,15 @@
   line-height: 1.1;
   letter-spacing: -0.01em;
 }
+/* Hosted as Activity's Planned view: a section heading under Activity's
+   own title (redesign-activity). */
+.sch-ph h2 {
+  grid-area: t;
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
 .sch-ph__desc {
   grid-area: d;
   margin: 0;

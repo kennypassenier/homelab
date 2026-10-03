@@ -82,6 +82,8 @@ const TOGGLE_SCHEDULE = declare({
 });
 const SCHEDULE_MENU = declare({
   id: "schedule-menu",
+  // Before 3.71.0: Edit and Delete were two buttons per row.
+  was: ["edit-schedule", "delete-schedule"],
   page: "schedules",
   opens: "dialog",
   row: "<schedule id>",
@@ -145,9 +147,11 @@ const titleOf = (s) =>
 
 /**
  * @param {HTMLElement} root
+ * @param {{embedded?: boolean}} [opts] `embedded`: hosted as Activity's
+ *   Planned view, under Activity's own title (its heading is then an h2)
  * @returns {() => void}
  */
-export function mount(root) {
+export function mount(root, opts = {}) {
   root.classList.add("sch-root");
   /** @type {number | null | undefined} undefined: not read (yet) */
   let nightly;
@@ -192,6 +196,7 @@ export function mount(root) {
     desc: "What the dashboard runs on its own, and when. A slot missed while the dashboard was down is skipped and you get a notice; it never runs late.",
     meta: [zoneChip, count, read],
     actions: add,
+    level: opts.embedded ? "h2" : "h1",
   });
   const body = el("div", { class: "sch-body" });
   // The page's top-level pieces sit straight in `root`, so the shell's one

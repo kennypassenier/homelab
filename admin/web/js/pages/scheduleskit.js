@@ -50,13 +50,15 @@ export function el(tag, attrs, ...children) {
  * A page's header: title, one-sentence description, a meta line and the
  * page's actions on the right (folded under the title on a phone).
  * @param {{title: string, desc: string, meta?: Children,
- *   actions?: Children}} spec
+ *   actions?: Children, level?: "h1" | "h2"}} spec
+ *   `level`: "h2" when the page is hosted as another page's view (Activity's
+ *   Planned), under that page's own h1.
  */
 export function pageHeader(spec) {
   return el(
     "header",
     { class: "sch-ph" },
-    el("h1", null, spec.title),
+    el(spec.level ?? "h1", null, spec.title),
     el("p", { class: "sch-ph__desc" }, spec.desc),
     el("div", { class: "sch-ph__meta" }, spec.meta ?? null),
     el("div", { class: "sch-ph__actions" }, spec.actions ?? null),

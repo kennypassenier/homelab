@@ -13,8 +13,27 @@
 }
 
 /* ── page rhythm ─────────────────────────────────────────────────────── */
-main.shell.ac-page > .ac-tabs {
-  margin-block-start: var(--kp-space-lg, 1rem) !important;
+/* The header's own buttons sit in one row against the right edge (the
+   shared `.actions-row` is a 13 rem column grid for a stack's action
+   lists, which stacked Pause / Download / Run a command into a column
+   here); on a phone they fold under the title from its left edge. */
+.ac-page .nx-head-actions,
+.con-page .nx-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+@media (max-width: 30rem) {
+  .ac-page .nx-head-actions,
+  .con-page .nx-head-actions {
+    justify-content: flex-start;
+  }
+  /* The Window control's first button starts at the title's left edge,
+     its pill's border and padding hanging outside it. */
+  .ac-page .nx-head-actions > .ac-seg:first-child {
+    margin-inline-start: -4px;
+  }
 }
 .ac-body {
   display: grid;

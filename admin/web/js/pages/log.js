@@ -42,7 +42,9 @@ const KEEP = 2000;
 /**
  * @typedef {{follow: string, source: string, only: string, level: string,
  *   reset: string, line: string, openJob: string, copy: string,
- *   download?: string}} DriveIds the Live view controls the host page
+ *   everything: string, onlyLine: string, newLines: string,
+ *   search: string, retry: string, download?: string}} DriveIds the Live
+ *   view controls the host page
  *   declared for this explorer (drivable.js)
  * @typedef {{drive: DriveIds, followInBar: boolean, foot?: HTMLElement,
  *   onFollow?: (on: boolean) => void, label: string}} ExplorerOpts
@@ -107,6 +109,7 @@ export function mountHostLog(root, opts) {
     state: [countEl, ...(opts.followInBar ? [followBtn] : []), hints],
   });
   tb.el.classList.add("hl-bar");
+  if (tb.search) drivable(tb.search, opts.drive.search);
   const transfers = h("div", { class: "hl-xfers" });
   const list = h("div", { class: "hl-lines" });
   const blocks = h("div", { class: "hl-blocks" });
@@ -115,6 +118,7 @@ export function mountHostLog(root, opts) {
     class: "kp-button kp-button--sm kp-button--primary hl-newpill",
     hidden: "",
   });
+  drivable(newPill, opts.drive.newLines);
   newPill.addEventListener("click", () => setFollow(true));
   const out = h(
     "div",
@@ -169,7 +173,9 @@ export function mountHostLog(root, opts) {
       h("span", null, "Everything"),
       h("small", null, String(lines.length)),
     );
-    everything.querySelector("input")?.addEventListener("change", () => {
+    const all = /** @type {HTMLElement} */ (everything.querySelector("input"));
+    drivable(all, opts.drive.everything);
+    all.addEventListener("change", () => {
       f = { ...f, off: new Set(), only: null };
       changed();
     });
@@ -334,6 +340,7 @@ export function mountHostLog(root, opts) {
       { type: "button", class: "kp-button kp-button--sm" },
       `Only ${sourceLabel(l.source)}`,
     );
+    drivable(onlyBtn, opts.drive.onlyLine);
     onlyBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       f = { ...f, only: l.source, off: new Set() };
@@ -470,6 +477,7 @@ export function mountHostLog(root, opts) {
         { type: "button", class: "kp-button kp-button--sm" },
         "Try again",
       );
+      drivable(again, opts.drive.retry);
       again.addEventListener("click", () => void read());
       list.replaceChildren(
         h(

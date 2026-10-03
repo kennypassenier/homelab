@@ -235,11 +235,14 @@ export function stackRows(fleet, ctx) {
       backup,
       newer,
       drift,
+      // redesign-final-gen-e: a red chip on the card is a problem, so
+      // "Problems N" always agrees with the chips it stands beside.
       problem:
         state.tone === "bad" ||
         state.label === "degraded" ||
         backup.state === "missed" ||
-        backup.state === "none",
+        backup.state === "none" ||
+        flags.some((f) => f.tone === "bad"),
       flags,
       action: rowAction(base),
       apps: (s.apps ?? []).map((a) => a.name),
@@ -257,7 +260,7 @@ export const ONLY = /** @type {const} */ ([
   {
     value: "problems",
     label: "Problems",
-    hint: "Only stacks that are down, degraded or missed a backup; click again to show all",
+    hint: "Only stacks that are down, degraded, missed a backup or carry a red flag; click again to show all",
   },
   {
     value: "drift",

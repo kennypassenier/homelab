@@ -207,7 +207,14 @@ export function actionForm(entry, ctx) {
   if (options.length)
     steps.push({ id: "options", label: SPEC.steps.options, fields: options });
   steps.push({ id: REVIEW, label: SPEC.steps.review, fields: review });
-  const where = entry.target === "host" ? "the whole host" : stack;
+  // redesign-final-h2: a host action that asks for a container's number
+  // works on that one container, not on the whole host.
+  const where =
+    entry.target !== "host"
+      ? stack
+      : entry.args.includes("vmid")
+        ? "one container"
+        : "the whole host";
   const refused =
     stack === ctx.selfStack && entry.refused_for_self
       ? "The dashboard never does this to its own stack (arch-self); use the CLI from a workstation."

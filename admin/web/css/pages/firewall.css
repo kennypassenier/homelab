@@ -293,9 +293,10 @@
     min-inline-size: 0;
   }
 }
-.fw-peer {
+.fw-peer__in {
   display: grid;
   gap: 2px;
+  justify-items: start;
 }
 .fw-peer .cf-row {
   gap: 4px;

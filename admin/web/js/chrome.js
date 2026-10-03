@@ -12,7 +12,7 @@
 // ("update jellyfin", "gateway logs"), grouped Inbox → Do → Go to → Theme;
 // the running pill follows a job from every page.
 
-import { act, onAct, startAct } from "./act.js";
+import { act, actionLabel, onAct, startAct } from "./act.js";
 import { openAction } from "./actiondialog.js";
 import { notify } from "./actui.js";
 import { AREAS, moreAreas, phoneTabs } from "./areas.js";
@@ -302,7 +302,14 @@ function mountRunningPill(navigate) {
  * @param {(href: string) => void} navigate
  */
 function openJobDrawer(jobId, count, navigate) {
-  const panel = mountJobPanel(jobId, { compact: true });
+  // redesign-final-c2 (FLOWS.md §1.2): the drawer is named after its job
+  // and lists the job's steps above the log tail; the panel lays out in
+  // one column at the drawer's own width (app.css `.job-panel` container).
+  const panel = mountJobPanel(jobId, { compact: true, steps: true });
+  const j = act.jobs.find((x) => x.job === jobId);
+  const named = j
+    ? `${actionLabel(j.action)} · ${j.stack === "_host" ? "the whole host" : j.stack}`
+    : "Running now";
   const close = h(
     "button",
     {
@@ -328,11 +335,11 @@ function openJobDrawer(jobId, count, navigate) {
   const d = /** @type {HTMLDialogElement} */ (
     h(
       "dialog",
-      { class: "kp-dialog nx-drawer", "aria-label": "Running job" },
+      { class: "kp-dialog nx-drawer job-drawer", "aria-label": "Running job" },
       h(
         "div",
         { class: "nx-drawer__head" },
-        h("h2", { class: "kp-dialog__title" }, "Running now"),
+        h("h2", { class: "kp-dialog__title" }, named),
         close,
         h(
           "p",

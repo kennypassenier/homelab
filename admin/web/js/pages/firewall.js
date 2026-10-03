@@ -1148,14 +1148,21 @@ export function mount(root) {
       h(
         "td",
         { class: "fw-peer", "data-label": r.dir === "in" ? "From" : "To" },
-        h("span", { class: "cf-mono" }, highlight(r.peer, S.q)),
-        r.peer_stacks.length
-          ? h(
-              "span",
-              { class: "cf-row" },
-              r.peer_stacks.map((p) => chip(highlight(p, S.q))),
-            )
-          : null,
+        // redesign-final-c4: the cell stays a table cell (a grid cell does
+        // not grow its row, so a rule's stack chips printed over the next
+        // rule); the grid lives on a block inside it.
+        h(
+          "div",
+          { class: "fw-peer__in" },
+          h("span", { class: "cf-mono" }, highlight(r.peer, S.q)),
+          r.peer_stacks.length
+            ? h(
+                "span",
+                { class: "cf-row" },
+                r.peer_stacks.map((p) => chip(highlight(p, S.q))),
+              )
+            : null,
+        ),
       ),
       h(
         "td",

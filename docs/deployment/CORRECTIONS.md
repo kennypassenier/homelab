@@ -288,3 +288,75 @@ summarised here for the corrections record.
 7. **Hoe en wanneer meten we dat het werkt.** At the next page change that adds or moves a control: the commit is refused until a sweep has pressed it; at the 3.71.0 gate: three shuffled full runs and the fixed-order stamp run pass.
 8. **Fallback.** If a stamp is regenerated without a real sweep (its hash recomputed by hand), the release gate's own full sweep still fails the control.
 9. **Wanneer herzien we de maatregel.** At the 3.71.0 retrospective.
+
+---
+
+## Correction · redesign-final-gen-a — words broken per letter and text cut in drawers and dialogs
+
+**Draft — awaiting Kenny.**
+
+1. **Wat ging er mis.** The final whole-dashboard review of redesign-371 (2026-10-04, C1 and C2) found Deploy all changes squeezed into a ~500 px drawer ("WILL DEPLO Y", tile numbers cut to "1…", "Compare again" over the step text) and the running pill's drawer cutting "step 3" and "no earlier run to go by".
+2. **Welke poort liet het door.** Every page was reviewed at 1894 and 390 px, but a drawer's or dialog's content was laid out by the window's width (viewport media queries) while it sat in a 34 rem panel; no test measured text inside an open drawer, and a class name shared by two pages (`.ap-tile`, the Apps tile and the plan tile) went unnoticed.
+3. **Waar dezelfde fout nog zit.** Any block that is drawn both on a page and in a panel (the job panel, the plan); the generic check lists seven more instances outside the review's C1–H5 (`AUDIT_KNOWN`, REGISTER redesign-final-10).
+4. **Hoe voorkomen we herhaling.** Blocks that live in panels lay out by their own width (container queries: the plan, the job panel); one generic check (`redesign-final-gen-a`, `layoutAudit`) walks every page and every action dialog and drawer at both widths for words broken per letter, text cut by a clipping box and text spilling out of its block.
+5. **Kost.** About 2 min per full sweep at the gate; a fix runs its own pages only (`INVARIANTS_AUDIT_ONLY`).
+6. **Handhaving.** Code: INVARIANTS.md row 160; `redesign-final-gen-a` and `redesign-final-c1`, `redesign-final-c2` in `admin/web/test-e2e/invariants.e2e.js`.
+7. **Hoe en wanneer meten we dat het werkt.** At the 3.71.0 gate's full whole-screen run: the check passes with only the listed known instances, each a correction item of its own.
+8. **Fallback.** A false finding (a deliberate ellipsis) gets a `title` with the full text, never an exception in the check.
+9. **Wanneer herzien we de maatregel.** At the 3.71.0 retrospective.
+
+## Correction · redesign-final-gen-b — a table row's chips printed over the next row
+
+**Draft — awaiting Kenny.**
+
+1. **Wat ging er mis.** Firewall rule 18's stack chips wrapped into row 19 and printed over rule 19's address (final review C4).
+2. **Welke poort liet het door.** The phone-width Firewall case (redesign-integrate-1) checked sideways scroll and labels, not row heights; at 1894 px nothing checked that a row holds its own content. The cause, `display: grid` on a `<td>`, does not grow its row.
+3. **Waar dezelfde fout nog zit.** Any table cell styled as a grid or flex box directly; the generic check found no other instance.
+4. **Hoe voorkomen we herhaling.** A cell keeps `display: table-cell`; its layout lives on a block inside it. The generic check `redesign-final-gen-b` compares every element's lowest content with its next sibling row's top on every page and dialog.
+5. **Kost.** Part of the same sweep.
+6. **Handhaving.** Code: INVARIANTS.md row 161; `redesign-final-gen-b`, `redesign-final-c4`.
+7. **Hoe en wanneer meten we dat het werkt.** At the 3.71.0 gate's full run.
+8. **Fallback.** A row that overlaps on purpose (none today) would sit in a positioned layer, which the check leaves out.
+9. **Wanneer herzien we de maatregel.** At the 3.71.0 retrospective.
+
+## Correction · redesign-final-gen-c — numeric dates beside written-out ones
+
+**Draft — awaiting Kenny.**
+
+1. **Wat ging er mis.** Dates read "Sat 3 Oct, 00:00" on most pages and "04/10/2026 00:00" on the Update flow, the Doctor, Notification rules, the Restore picker and the Map (final review X4).
+2. **Welke poort liet het door.** `formatDateTime` (dd/mm/yyyy, Kenny's 2026-09-30 choice for the notification table) kept being reused by pages whose approved demos write the day out; no check compared formats across pages.
+3. **Waar dezelfde fout nog zit.** Map and the Update flow (listed in `AUDIT_KNOWN` until Kenny decides X4); Notification rules and the Doctor view are gone with C3 and H5.
+4. **Hoe voorkomen we herhaling.** The generic check `redesign-final-gen-c` refuses a numeric dd/mm/yyyy on any page or dialog; one format for the whole dashboard is Kenny's decision (X4).
+5. **Kost.** Part of the same sweep.
+6. **Handhaving.** Code: INVARIANTS.md row 162; `redesign-final-gen-c`.
+7. **Hoe en wanneer meten we dat het werkt.** At the 3.71.0 gate's full run; once X4 is decided the two known entries go.
+8. **Fallback.** A table column that needs a fixed width uses the written-out format with tabular figures.
+9. **Wanneer herzien we de maatregel.** When Kenny decides X4.
+
+## Correction · redesign-final-gen-d — a second page-sized title inside a page
+
+**Draft — awaiting Kenny.**
+
+1. **Wat ging er mis.** Activity › Planned showed a second page-sized title "Schedules" under "Activity", and /host?section=doctor mounted the retired Doctor page (H1 "Doctor") inside Host (final review H5).
+2. **Welke poort liet het door.** The Schedules page was hosted with `level: "h2"`, which changed the tag but kept the page-title size; the "one h1" checks looked at tags only.
+3. **Waar dezelfde fout nog zit.** Any page module mounted as a view of another (`VIEW_MOUNTS`, main.js); the check found no other.
+4. **Hoe voorkomen we herhaling.** A hosted page draws as a section (section-sized heading); a retired page's address opens the new page's own card instead of mounting the old page. The generic check `redesign-final-gen-d` refuses a second h1 or any heading of the h1's size.
+5. **Kost.** Part of the same sweep.
+6. **Handhaving.** Code: INVARIANTS.md row 163; `redesign-final-gen-d`, `redesign-final-h5`.
+7. **Hoe en wanneer meten we dat het werkt.** At the 3.71.0 gate's full run.
+8. **Fallback.** None needed: a page that must show two titles is two pages.
+9. **Wanneer herzien we de maatregel.** At the 3.71.0 retrospective.
+
+## Correction · redesign-final-gen-e — a counter that contradicts its chips
+
+**Draft — awaiting Kenny.**
+
+1. **Wat ging er mis.** Stacks read "Problems 0" while every card carried a red "does not build" or "will be destroyed" chip (final review M1).
+2. **Welke poort liet het door.** The Problems filter counted down, degraded and missed-backup stacks only; the red drift flags were added later (redesign-stacks-7) without joining the count, and no test compared a counter with the chips on screen.
+3. **Waar dezelfde fout nog zit.** Any counter computed apart from the marks it summarises; the check found Stacks only.
+4. **Hoe voorkomen we herhaling.** A red chip on a stack is a problem (`stacksview.js`); the generic check `redesign-final-gen-e` refuses a problems counter reading 0 beside red chips on any page.
+5. **Kost.** Part of the same sweep.
+6. **Handhaving.** Code: INVARIANTS.md row 164; `redesign-final-gen-e` (whole-screen and unit).
+7. **Hoe en wanneer meten we dat het werkt.** At the 3.71.0 gate's full run.
+8. **Fallback.** A counter that deliberately counts less names what it counts in its label.
+9. **Wanneer herzien we de maatregel.** At the 3.71.0 retrospective.

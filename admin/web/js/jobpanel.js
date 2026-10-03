@@ -6,16 +6,26 @@
 import { act, actionLabel, onAct } from "./act.js";
 import { badge, labeledCopyLine, openDialog } from "./actui.js";
 import { h } from "./dom.js";
-import { jobFacts, jobPanel, logLine } from "./jobs.js";
+import { jobFacts, jobPanel, jobSteps, logLine } from "./jobs.js";
+import { checkList } from "./ui.js";
 import { attachLogs } from "/static/kp/js/log.js";
 
 /**
  * @param {number} jobId
- * @param {{compact?: boolean}} [opts] compact: no heading (inside a dialog
- *   that has its own)
+ * @param {{compact?: boolean, steps?: boolean}} [opts] compact: no heading
+ *   (inside a dialog that has its own); steps: the job's step list
+ *   (redesign-final-c2, the running pill's drawer, FLOWS.md §1.2)
  * @returns {{element: HTMLElement, stop: () => void}}
  */
 export function mountJobPanel(jobId, opts = {}) {
+  /** Each step's name as the host sent it when the step began. */
+  /** @type {Map<number, string>} */
+  const stepNames = new Map();
+  const steps = h("div", {
+    class: "job-steps",
+    hidden: opts.steps ? null : "",
+  });
+  let stepsSig = "";
   const title = h("h3", { class: "job-title" });
   const restarts = h(
     "div",
@@ -83,6 +93,7 @@ export function mountJobPanel(jobId, opts = {}) {
     ...(opts.compact ? [] : [h("div", { class: "title-row" }, title)]),
     restarts,
     facts,
+    steps,
     h(
       "div",
       { class: "kp-progress-group job-progress" },
@@ -123,6 +134,15 @@ export function mountJobPanel(jobId, opts = {}) {
     });
     title.textContent = v.title;
     restarts.hidden = !v.restarts;
+    if (opts.steps) {
+      if (j.progress) stepNames.set(j.progress.n, j.progress.step);
+      const rows = jobSteps(j, stepNames);
+      const sig = JSON.stringify(rows);
+      if (sig !== stepsSig) {
+        stepsSig = sig;
+        steps.replaceChildren(checkList(rows));
+      }
+    }
     for (const c of jobFacts(v)) {
       if (c.key === "origin") continue; // set below, with the job number
       const dd = factDD.get(c.key);

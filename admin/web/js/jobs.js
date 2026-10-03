@@ -389,6 +389,75 @@ export function jobFacts(v) {
 }
 
 /**
+ * redesign-final-c2 (FLOWS.md §1.2): the running-job drawer's step list
+ * (ui.js `checkList` rows) — the steps before the current one ticked, the
+ * current one running (failed when the job failed, the rest then
+ * skipped), the ones after it waiting. A step is named by what the host
+ * sent as it began (`names`, step number → name), "Step N" when this page
+ * never saw it. A long job keeps the two steps around the current one and
+ * folds the rest into a "Steps a–b" row on either side.
+ * @param {Job} j
+ * @param {Map<number, string>} names
+ * @returns {import("./ui.js").CheckRow[]}
+ */
+export function jobSteps(j, names) {
+  const p = j.progress;
+  if (!p) {
+    if (finished(j.state))
+      return [
+        {
+          title: jobBadge(j.state).label,
+          desc: j.message ?? "the job ended",
+          state: j.state === "done" ? "ok" : "bad",
+        },
+      ];
+    return [
+      j.state === "queued"
+        ? {
+            title: "Waiting in the queue",
+            desc: "starts when the one before it ends",
+            state: "wait",
+          }
+        : {
+            title: "Starting",
+            desc: "the host is getting ready",
+            state: "run",
+          },
+    ];
+  }
+  const total = Math.max(p.m ?? p.n, p.n);
+  const ok = j.state === "done";
+  const ended = finished(j.state);
+  /** @param {number} i @returns {import("./ui.js").CheckRow} */
+  const row = (i) => {
+    const title = names.get(i) ?? (i === p.n ? p.step : `Step ${i}`);
+    if (i < p.n || (ok && ended)) return { title, desc: "done", state: "ok" };
+    if (i === p.n)
+      return ended
+        ? { title, desc: j.message ?? "failed here", state: "bad" }
+        : { title, desc: `step ${p.n} of ${total}, running now`, state: "run" };
+    return ended
+      ? { title, desc: "not run", state: "skip" }
+      : { title, desc: "to come", state: "wait" };
+  };
+  if (total <= 7) return Array.from({ length: total }, (_, k) => row(k + 1));
+  const from = Math.max(1, p.n - 1);
+  const to = Math.min(total, p.n + 2);
+  /** @type {import("./ui.js").CheckRow[]} */
+  const rows = [];
+  if (from > 1)
+    rows.push({ title: `Steps 1–${from - 1}`, desc: "done", state: "ok" });
+  for (let i = from; i <= to; i++) rows.push(row(i));
+  if (to < total)
+    rows.push({
+      title: `Steps ${to + 1}–${total}`,
+      desc: ended ? "not run" : "to come",
+      state: ended && !ok ? "skip" : ok ? "ok" : "wait",
+    });
+  return rows;
+}
+
+/**
  * The jobs table's rows.
  * @param {Job[]} jobs
  * @param {(action: string) => string} label

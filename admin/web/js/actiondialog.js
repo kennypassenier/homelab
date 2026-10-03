@@ -44,6 +44,7 @@ import { stackDetail } from "./fleet.js";
 import { batchView, jobBadge } from "./jobs.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { openUpdateFlow } from "./pinupdate.js";
+import { codeSpans, previewGate } from "./previewgate.js";
 import { current } from "./store.js";
 import { clearError, showError } from "/static/kp/js/forms.js";
 import {
@@ -218,7 +219,16 @@ function introNodes(intro) {
     if (line.startsWith("- ")) items.push(line.slice(2));
     else {
       flushItems();
-      nodes.push(h("p", { class: "measured act-intro" }, line));
+      // redesign-final-h2: `inline code` is code, never raw backticks.
+      nodes.push(
+        h(
+          "p",
+          { class: "measured act-intro" },
+          ...codeSpans(line).map((x) =>
+            typeof x === "string" ? x : h("code", null, x.code),
+          ),
+        ),
+      );
     }
   }
   flushItems();
@@ -628,6 +638,31 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
 
   /** @type {import("./doctor.js").RouteError | null} */
   let guard = null;
+  /**
+   * redesign-final-h2: why this cannot run, in one plain sentence.
+   * @param {string} reason
+   */
+  const blockedNote = (reason) =>
+    h(
+      "p",
+      {
+        class: "kp-alert kp-alert--warning act-blocked",
+        role: "status",
+        "data-kp-semantic": "",
+      },
+      reason || "Reading what this would do…",
+    );
+  /**
+   * The primary button follows the preview: held back, with the reason as
+   * its description, while the preview says the action cannot run.
+   * @param {{ready: boolean, reason: string}} g
+   */
+  const setReady = (g) => {
+    const b = /** @type {HTMLButtonElement} */ (next);
+    b.disabled = !g.ready;
+    if (g.ready) b.removeAttribute("title");
+    else b.title = g.reason;
+  };
   let previewSeq = 0;
   const preview = async () => {
     const seq = ++previewSeq;
@@ -643,24 +678,27 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
     if (seq !== previewSeq) return;
     if (!r.ok) {
       guard = null;
-      previewBox.replaceChildren(
-        refusalCallout(r.error, "warning", "No preview"),
-      );
+      // redesign-final-h2: one plain sentence, the primary held back.
+      const g = previewGate(form, null, r.error);
+      previewBox.replaceChildren(blockedNote(g.reason));
+      setReady(g);
       return;
     }
     const p = r.body;
+    const gate = previewGate(form, p, null);
+    setReady(gate);
     previewBox.replaceChildren(
-      p.cli
-        ? h(
-            "div",
-            { class: "act-cli" },
-            labeledCopyLine("The same from a workstation:", p.cli),
-          )
-        : h(
-            "p",
-            { class: "measured act-cli-none" },
-            `No CLI line: ${p.cli_unavailable ?? "the dashboard could not build it"}.`,
-          ),
+      ...(gate.ready ? [] : [blockedNote(gate.reason)]),
+      ...(p.cli
+        ? [
+            h(
+              "div",
+              { class: "act-cli" },
+              labeledCopyLine("The same from a workstation:", p.cli),
+            ),
+          ]
+        : []),
+      ...gate.notes.map((n) => h("p", { class: "measured act-cli-none" }, n)),
     );
     // TUI parity: what the press changes, before it is pressed (the Deploy
     // plan with its diff, the Apply plan).
@@ -714,10 +752,7 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
             : []),
         ),
       );
-    } else if (p.plan_unavailable)
-      previewBox.append(
-        h("p", { class: "measured" }, `No plan: ${p.plan_unavailable}.`),
-      );
+    }
     restartsBox.hidden = !p.restarts_dashboard;
     guard = p.guard ?? null;
     guardBox.replaceChildren(
@@ -767,6 +802,7 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
   wiz.addEventListener(STEP_EVENT, (e) => {
     const detail = /** @type {CustomEvent} */ (e).detail;
     if (form.steps[detail.step]?.id === REVIEW) void preview();
+    else setReady({ ready: true, reason: "" });
   });
   if (form.steps.length === 1) void preview();
 

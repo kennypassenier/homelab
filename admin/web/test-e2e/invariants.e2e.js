@@ -10634,3 +10634,532 @@ test("invariants: redesign-integrate-1: on a 390 px phone the Firewall's rules t
     await browser.close();
   }
 });
+
+// ── redesign-final-gen (3.71.0's final review, 2026-10-04): one generic
+// whole-screen check per finding class, over every page and every action
+// dialog or drawer at 1894 and 390 px (test-e2e/layoutaudit.js says what
+// each class checks). The sweep runs once; its five cases read it. ──────
+
+/** The pages the final review walked: every area, view and hub tab. */
+const AUDIT_PAGES = [
+  "/apps",
+  "/inbox",
+  "/stacks",
+  "/stacks?deploy-all=1",
+  "/activity",
+  "/activity?view=running",
+  "/activity?view=host-log",
+  "/activity?view=planned",
+  "/activity?view=timeline",
+  "/backups",
+  "/backups?section=coverage",
+  "/backups?section=removed",
+  "/backups/restore?stack=kp-soft",
+  "/system",
+  "/host",
+  "/host?section=doctor",
+  "/charts",
+  "/map",
+  "/firewall",
+  "/settings",
+  "/settings?section=sign-in",
+  "/presets",
+  "/system/notifications",
+  "/console",
+  "/update?all=1",
+  "/update?stack=kp-soft",
+  "/stacks/kp-soft/overview",
+  "/stacks/kp-soft/logs",
+  "/stacks/kp-soft/apps",
+  "/stacks/kp-soft/backups",
+  "/stacks/kp-soft/history",
+  "/stacks/kp-soft/settings",
+];
+
+/**
+ * The action dialogs and drawers the final review opened: the page, then
+ * the control (its Live view id, or its words).
+ * @type {{path: string, drive?: string, text?: RegExp,
+ *   then?: (page: import("playwright").Page) => Promise<void>}[]}
+ */
+const AUDIT_DIALOGS = [
+  { path: "/inbox", drive: "inbox-fix" },
+  { path: "/inbox", drive: "inbox-push-envs" },
+  { path: "/stacks", drive: "stacks-new" },
+  { path: "/activity", drive: "activity-run-again" },
+  { path: "/activity?view=planned", drive: "schedule-template" },
+  { path: "/backups", text: /^Back up now/ },
+  { path: "/backups", drive: "backups-drill-now" },
+  { path: "/host", text: /^Back up host state/ },
+  { path: "/host", text: /^Back up devices/ },
+  { path: "/host", text: /^Run a command/ },
+  { path: "/host", text: /^Build a template/ },
+  { path: "/settings", drive: "issue-token" },
+  { path: "/presets", drive: "presets-import" },
+  { path: "/presets", drive: "presets-new-preset" },
+  { path: "/stacks/kp-soft/overview", drive: "stack-head" },
+  { path: "/stacks/kp-soft/overview", drive: "stack-fix" },
+  { path: "/stacks/films/overview", drive: "stack-head", text: /^Deploy/ },
+  { path: "/stacks/kp-soft/apps", drive: "stack-app-publish" },
+  { path: "/stacks/kp-soft/backups", drive: "stack-backups-card" },
+  // The running-job drawer: a back up confirmed, then the running pill.
+  {
+    path: "/stacks/kp-soft/overview",
+    drive: "stack-head",
+    text: /^Back up/,
+    then: openRunningDrawer,
+  },
+];
+
+/**
+ * From an open action dialog: confirm it, shut every dialog and open the
+ * running pill's job drawer while the job runs.
+ * @param {import("playwright").Page} page
+ */
+async function openRunningDrawer(page) {
+  await page.locator("dialog[open] #act-run").click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() =>
+    document
+      .querySelectorAll("dialog[open]")
+      .forEach((d) => /** @type {HTMLDialogElement} */ (d).close()),
+  );
+  await page.locator("#running-pill").click({ timeout: 5000 });
+  await page.locator("dialog[open]").last().waitFor({ timeout: 5000 });
+}
+
+/** @type {Promise<Record<string, string[]>> | null} */
+let auditRun = null;
+
+/**
+ * Every audit finding of the sweep, by class ("a".."e"), each prefixed with
+ * where it was found; run once for all five cases.
+ */
+function auditSweep() {
+  auditRun ??= (async () => {
+    const { layoutAudit } = await import("./layoutaudit.js");
+    /** @type {Record<string, string[]>} */
+    const all = { a: [], b: [], c: [], d: [], e: [] };
+    const browser = await launch();
+    try {
+      for (const width of [1894, 390]) {
+        const context = await browser.newContext({
+          viewport: { width, height: width > 500 ? 1000 : 844 },
+        });
+        const page = await freshPage(context);
+        const keep = (/** @type {string} */ where, r) => {
+          for (const k of Object.keys(all))
+            for (const f of r[k]) all[k].push(`${where} @${width}: ${f}`);
+        };
+        // The last open dialog, marked for the audit (a page that opens
+        // one by its address, as Deploy all changes does, is audited with
+        // it).
+        const markDialog = () =>
+          page.evaluate(() => {
+            const ds = [...document.querySelectorAll("dialog[open]")];
+            ds.forEach((d) => d.removeAttribute("data-audit"));
+            ds[ds.length - 1]?.setAttribute("data-audit", "");
+            return ds.length > 0;
+          });
+        for (const path of AUDIT_PAGES) {
+          if (AUDIT_ONLY && !AUDIT_ONLY.test(path)) continue;
+          await page.goto(`${BASE}${path}`);
+          await page.waitForTimeout(1500);
+          keep(path, await page.evaluate(layoutAudit, null));
+          if (await markDialog())
+            keep(
+              `${path} › its dialog`,
+              await page.evaluate(layoutAudit, "dialog[data-audit]"),
+            );
+        }
+        for (const d of AUDIT_DIALOGS) {
+          if (AUDIT_ONLY && !AUDIT_ONLY.test(d.path)) continue;
+          await page.goto(`${BASE}${d.path}`);
+          await page.waitForTimeout(1200);
+          let btn = page.locator(
+            d.drive
+              ? `main [data-drive="${d.drive}"]:visible`
+              : "main button:visible",
+          );
+          if (d.text) btn = btn.filter({ hasText: d.text });
+          if ((await btn.count()) === 0) {
+            all.a.push(`${d.path} @${width}: no control ${d.drive ?? d.text}`);
+            continue;
+          }
+          await btn.first().click();
+          const dlg = page.locator("dialog[open]").last();
+          await dlg.waitFor({ timeout: 5000 }).catch(() => {});
+          if (d.then) await d.then(page);
+          await page.waitForTimeout(700);
+          const where = `${d.path} › ${d.drive ?? d.text}${d.then ? " › then" : ""}`;
+          await markDialog();
+          keep(where, await page.evaluate(layoutAudit, "dialog[data-audit]"));
+          await page.keyboard.press("Escape");
+        }
+        await context.close();
+      }
+    } finally {
+      await browser.close();
+    }
+    if (process.env.INVARIANTS_AUDIT_OUT)
+      (await import("node:fs")).writeFileSync(
+        process.env.INVARIANTS_AUDIT_OUT,
+        JSON.stringify(all, null, 1),
+      );
+    return all;
+  })();
+  return auditRun;
+}
+
+/**
+ * Instances the generic checks find on pages outside the final review's
+ * critical and high findings (C1–C4, H1–H5): reported to Kenny as their
+ * own correction items, fixed in their own round, and listed here so the
+ * check still fails on anything new. Each names its review finding.
+ * @type {Record<string, RegExp[]>}
+ */
+const AUDIT_KNOWN = {
+  a: [
+    // M6: phone stack cards cut their facts ("0 restar…").
+    /^\/stacks(\?deploy-all=1)? @390: text cut by span "(\d+\/\d+ apps up|\d+ restarts)"/,
+    // Not in the review: Activity's KPI context lines cut at 390 px.
+    /^\/activity(\?view=\w+)? @390: text cut by span\.nx-kpi__ctx/,
+    // Not in the review: Backups › Coverage cuts a stack chip's name.
+    /^\/backups\?section=coverage @1894: text cut by span\.perstack-chip__name/,
+    // Not in the review: Charts' drive table head "Reallocated" at 390 px.
+    /^\/charts @390: word "Reallocated" wraps per letter/,
+    // Not in the review: Map's KPI label and "Capacity" heading at 390 px.
+    /^\/map @390: /,
+    // Not in the review: the hub's Backups heading at 390 px.
+    /^\/stacks\/kp-soft\/backups @390: text spills out of h2/,
+    // Not in the review: a hidden secret's dots cut at 390 px.
+    /^\/stacks\/kp-soft\/settings @390: text cut by span "•+"/,
+    // Not in the review: Drill them now lists repositories that overflow.
+    /^\/backups › backups-drill-now @390: text spills out of span\.mono/,
+  ],
+  b: [],
+  // X4 (one date format) is Kenny's decision against his 2026-09-30 one
+  // (dd/mm/yyyy for tables); Map and the Update flow keep it until then.
+  c: [/^\/map @\d+: /, /^\/update\?(all=1|stack=kp-soft) @\d+: /],
+  d: [],
+  e: [],
+};
+
+/** INVARIANTS_AUDIT_ONLY: audit only the pages and dialogs whose path
+ * matches (a fix's own run); the gate runs them all. */
+const AUDIT_ONLY = process.env.INVARIANTS_AUDIT_ONLY
+  ? new RegExp(process.env.INVARIANTS_AUDIT_ONLY)
+  : null;
+
+for (const [cls, what] of /** @type {const} */ ([
+  ["a", "no word wraps per letter and no text is cut or spills out of its box"],
+  ["b", "no row's content runs into the next row"],
+  ["c", "dates never show as numeric dd/mm/yyyy"],
+  ["d", "a page has one page-level header"],
+  ["e", "a problems counter never reads 0 beside red chips"],
+])) {
+  test(`invariants: redesign-final-gen-${cls}: on every page and action dialog at 1894 and 390 px, ${what}`, async () => {
+    const found = (await auditSweep())[cls].filter(
+      (f) => !AUDIT_KNOWN[cls].some((k) => k.test(f)),
+    );
+    assert.deepEqual(found, [], `${found.length} findings`);
+  });
+}
+
+// ── redesign-final C1–C4, H1–H5 (3.71.0's final review, 2026-10-04): one
+// case per finding, each failing on the reviewed tree (c6334fc9). ───────
+
+// C4: rule 18's stack chips wrapped into row 19 and printed over its
+// address; a rule's row grows with its chips.
+test("invariants: redesign-final-c4: every Firewall rule row grows with its stack chips, never printing into the next rule", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/firewall`);
+    await page.locator("tr.fw-rule").first().waitFor({ timeout: 10000 });
+    const seg = page
+      .locator(".fw-rules-body")
+      .locator("..")
+      .locator(".nx-seg button");
+    const names = await seg.allInnerTexts();
+    assert.ok(names.length >= 1, "no stack switch above the rules");
+    /** @type {string[]} */
+    const bad = [];
+    for (let i = 0; i < names.length; i++) {
+      await seg.nth(i).click();
+      await page.waitForTimeout(300);
+      bad.push(
+        ...(await page.evaluate(() =>
+          [...document.querySelectorAll("tr.fw-rule")].flatMap((tr) => {
+            const next = tr.nextElementSibling;
+            if (!next) return [];
+            const top = next.getBoundingClientRect().top;
+            const low = Math.max(
+              ...[...tr.querySelectorAll("*")].map(
+                (e) => e.getBoundingClientRect().bottom,
+              ),
+            );
+            return low > top + 1
+              ? [
+                  `${tr.getAttribute("data-rule")}: ${Math.round(low - top)} px into the next row`,
+                ]
+              : [];
+          }),
+        )),
+      );
+    }
+    assert.deepEqual(bad, [], "rules whose content runs into the next rule");
+  } finally {
+    await browser.close();
+  }
+});
+
+// C1: Deploy all changes squeezed the whole plan into a ~500 px drawer:
+// "WILL DEPLO Y", KPI numbers cut to "1…", the step text overlapped.
+test("invariants: redesign-final-c1: Deploy all changes opens as a wide sheet whose steps, tiles and columns never break a word per letter or cut a number, at 1894 and 390 px", async () => {
+  const { layoutAudit } = await import("./layoutaudit.js");
+  const browser = await launch();
+  try {
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: width > 500 ? 1000 : 844 },
+      });
+      const page = await freshPage(context);
+      await page.goto(`${BASE}/stacks?deploy-all=1`);
+      const d = page.locator("dialog[open]").last();
+      await d.locator(".ap-tile").first().waitFor({ timeout: 10000 });
+      await page.waitForTimeout(500);
+      const r = await page.evaluate(() => {
+        const d = /** @type {HTMLElement} */ (
+          [...document.querySelectorAll("dialog[open]")].pop()
+        );
+        d.setAttribute("data-audit", "");
+        return {
+          w: d.getBoundingClientRect().width,
+          cut: [...d.querySelectorAll(".ap-tile .nx-kpi__value")]
+            .filter((v) => v.scrollWidth > v.clientWidth + 1)
+            .map((v) => v.textContent),
+          over: [...d.querySelectorAll(".ap-steps li")].flatMap((li) => {
+            const b = li.getBoundingClientRect();
+            return [...li.querySelectorAll("*")]
+              .filter((e) => e.getBoundingClientRect().right > b.right + 1)
+              .map((e) => (e.textContent ?? "").slice(0, 30));
+          }),
+        };
+      });
+      if (width > 500)
+        assert.ok(
+          r.w >= 960,
+          `the sheet is ${Math.round(r.w)} px wide at ${width}`,
+        );
+      assert.deepEqual(r.cut, [], `@${width}: tile numbers cut`);
+      assert.deepEqual(r.over, [], `@${width}: step text out of its step`);
+      const a = (await page.evaluate(layoutAudit, "dialog[data-audit]")).a;
+      assert.deepEqual(a, [], `@${width}: words broken or text cut`);
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+// C2: the running pill's drawer reused the inline panel's window-wide
+// grid ("step 3", "no earlier run to go by" cut) and lacked the steps.
+test("invariants: redesign-final-c2: the running pill's drawer is named after its job, lists the job's steps and keeps every fact inside its one column", async () => {
+  const { layoutAudit } = await import("./layoutaudit.js");
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/kp-soft/overview`);
+    await page
+      .locator('main [data-drive="stack-head"]:visible')
+      .filter({ hasText: /^Back up/ })
+      .first()
+      .click();
+    await page.locator("dialog[open]").last().waitFor();
+    await openRunningDrawer(page);
+    const d = page.locator("dialog.job-drawer[open]");
+    await d.waitFor({ timeout: 5000 });
+    await page.waitForTimeout(400);
+    const r = await page.evaluate(() => {
+      const d = /** @type {HTMLElement} */ (
+        document.querySelector("dialog[open].job-drawer")
+      );
+      d.setAttribute("data-audit", "");
+      const panel = /** @type {HTMLElement} */ (d.querySelector(".job-panel"));
+      const pr = panel.getBoundingClientRect();
+      return {
+        title: d.querySelector("h2")?.textContent ?? "",
+        steps: d.querySelectorAll(".nx-check li").length,
+        out: [...d.querySelectorAll(".job-facts dd")]
+          .filter((dd) => dd.getBoundingClientRect().right > pr.right + 1)
+          .map((dd) => dd.textContent),
+        lefts: new Set(
+          [...d.querySelectorAll(".job-facts dt")].map((dt) =>
+            Math.round(dt.getBoundingClientRect().left),
+          ),
+        ).size,
+      };
+    });
+    assert.match(r.title, /^Back up · kp-soft$/);
+    assert.ok(r.steps >= 1, "the drawer lists no steps");
+    assert.deepEqual(r.out, [], "facts cut at the drawer's edge");
+    assert.equal(r.lefts, 1, "the facts are not one column");
+    const a = (await page.evaluate(layoutAudit, "dialog[data-audit]")).a;
+    assert.deepEqual(a, [], "text cut in the job drawer");
+  } finally {
+    await browser.close();
+  }
+});
+
+// H2: action dialogs showed the host's raw errors ("No CLI line: cannot
+// read /home/…/lxc-compose.yml (os error 2)", "No preview: exec _host",
+// raw backticks) and kept Deploy armed.
+test("invariants: redesign-final-h2: an action dialog that cannot run says why in one plain sentence and holds its primary back; Run a command is titled for one container", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const raw = /\/home\/|os error|No CLI line|No plan|No preview|`|_host/;
+    await page.goto(`${BASE}/inbox`);
+    await page.locator('main [data-drive="inbox-fix"]:visible').first().click();
+    const d = page.locator("#action-dialog[open]");
+    await d.waitFor();
+    await page.waitForTimeout(1200);
+    const films = {
+      title: await d.locator("h2").first().innerText(),
+      text: await d.innerText(),
+      disabled: await d.locator("#act-run").isDisabled(),
+      why: await d.locator("#act-run").getAttribute("title"),
+    };
+    assert.match(films.title, /^Deploy · films$/);
+    assert.doesNotMatch(films.text, raw, "raw words in the Deploy dialog");
+    assert.ok(films.disabled, "Deploy stays armed although it cannot run");
+    assert.match(films.why ?? "", /films has no stack file/);
+    await page.keyboard.press("Escape");
+
+    await page.goto(`${BASE}/host`);
+    await page
+      .locator("main button:visible")
+      .filter({ hasText: /^Run a command/ })
+      .first()
+      .click();
+    await d.waitFor();
+    await page.waitForTimeout(1200);
+    const exec = {
+      title: await d.locator("h2").first().innerText(),
+      text: await d.innerText(),
+      code: await d.locator(".act-intro code").count(),
+      disabled: await d.locator("#act-run").isDisabled(),
+    };
+    assert.equal(exec.title, "Run a command · one container");
+    assert.doesNotMatch(exec.text, raw, "raw words in Run a command");
+    assert.ok(exec.code >= 2, "the description's commands are not code");
+    assert.ok(exec.disabled, "Run a command is armed without a container");
+  } finally {
+    await browser.close();
+  }
+});
+
+// H5: Activity › Planned mounted the Schedules page with a second
+// page-sized title and a key badge no other button has; /host?section=
+// doctor mounted the retired Doctor page (H1 "Doctor", "Today block",
+// an old table) inside Host instead of Host's own checks card.
+test("invariants: redesign-final-h5: Planned is a section of Activity and the Doctor's address opens Host on its checks card", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/activity?view=planned`);
+    await page.locator("#sched-new").waitFor();
+    const planned = await page.evaluate(() => {
+      const h1 = /** @type {HTMLElement} */ (document.querySelector("main h1"));
+      const big = parseFloat(getComputedStyle(h1).fontSize) * 0.85;
+      return {
+        h1s: document.querySelectorAll("main h1").length,
+        rivals: [...document.querySelectorAll("main h2")]
+          .filter((x) => parseFloat(getComputedStyle(x).fontSize) >= big)
+          .map((x) => x.textContent),
+        badge: document.querySelectorAll("#sched-new kbd, #sched-new .nx-kbd")
+          .length,
+      };
+    });
+    assert.equal(planned.h1s, 1);
+    assert.deepEqual(planned.rivals, [], "a second page-sized title");
+    assert.equal(planned.badge, 0, "New schedule carries a key badge");
+
+    await page.goto(`${BASE}/host?section=doctor`);
+    const card = page.locator("#host-checks-card");
+    await card.waitFor({ timeout: 10000 });
+    await page.waitForTimeout(800);
+    const host = await page.evaluate(() => ({
+      h1: document.querySelector("main h1")?.textContent ?? "",
+      text: document.querySelector("main")?.textContent ?? "",
+      top: document.querySelector("#host-checks-card")?.getBoundingClientRect()
+        .top,
+    }));
+    assert.match(host.h1, /^Host/);
+    assert.doesNotMatch(host.text, /Today block/);
+    assert.ok(
+      host.top != null && host.top >= 0 && host.top < 1000,
+      `the Host checks card is not in view (top ${host.top})`,
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// H4: System was one flat grid of nine cards; the approved
+// flows/system.html has four headed groups, the host's live line and the
+// disaster runbook.
+test("invariants: redesign-final-h4: System groups its pages under The host, The fleet as a whole, Set up and Tools, with the host's live line and the runbook", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/system`);
+    await page
+      .locator('[data-card="host"] .sy-kpi')
+      .waitFor({ timeout: 10000 });
+    await page.waitForTimeout(1500);
+    const r = await page.evaluate(() => ({
+      heads: [...document.querySelectorAll("main .sy-group h2")].map(
+        (x) => x.textContent,
+      ),
+      descs: [
+        ...document.querySelectorAll("main .sy-group .section-head__desc"),
+      ]
+        .map((x) => x.textContent?.trim())
+        .filter(Boolean).length,
+      line: document.querySelector('[data-card="host"] .sy-kpi')?.textContent,
+      state: document.querySelector("main .sy-state")?.textContent,
+      runbook: document
+        .querySelector('[data-card="runbook"]')
+        ?.getAttribute("download"),
+    }));
+    assert.deepEqual(r.heads, [
+      "The host",
+      "The fleet as a whole",
+      "Set up",
+      "Tools",
+    ]);
+    assert.equal(r.descs, 4, "a group without its sentence");
+    assert.match(r.line ?? "", /^CPU \d+% · disk \d+% · \d+\.\d+\.\d+/);
+    assert.equal(r.state, "host healthy");
+    assert.equal(r.runbook, "DR_RUNBOOK.md");
+  } finally {
+    await browser.close();
+  }
+});

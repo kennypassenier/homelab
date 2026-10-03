@@ -1027,16 +1027,33 @@ tr.unread td:first-child {
    label over value) still wins below 30rem. Every value is set from a
    fixed-width numeric font so a job going from "9 s" to "2 min 14 s"
    never shifts its neighbour. */
-@media (min-width: 46rem) {
+/* redesign-final-c2: by the panel's own width, not the window's — in the
+   running pill's drawer (34rem) and the hub's inline panel the window-wide
+   three-up grid cut "step 3", "no earlier run to go by" and "Job 4585". */
+.job-panel {
+  container: job-panel / inline-size;
+}
+@container job-panel (min-width: 46rem) {
   .job-facts {
     grid-template-columns: repeat(2, max-content minmax(9rem, 1fr));
     column-gap: 28px;
   }
 }
-@media (min-width: 64rem) {
+@container job-panel (min-width: 64rem) {
   .job-facts {
     grid-template-columns: repeat(3, max-content minmax(9rem, 1fr));
   }
+}
+/* The drawer scrolls as a whole: steps, facts and the log tail in one
+   column, the log keeping its own capped height. */
+.job-drawer .job-panel--compact {
+  block-size: auto;
+}
+.job-drawer .job-panel--compact .job-log {
+  max-block-size: 18rem;
+}
+.job-drawer .job-steps .nx-check li {
+  min-inline-size: 0;
 }
 .job-fact {
   font-variant-numeric: tabular-nums;

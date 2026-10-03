@@ -813,3 +813,39 @@ pub async fn run_demo(
         }
     }
 }
+
+/// drive-reach review H1: one unread notice that suggests a fix, so the
+/// Notifications page draws Mark read, Mark all read and the fix's button
+/// and the whole-screen sweep presses each (it holds every change back, so
+/// the notice stays unread). The host's own demo notice is history to the
+/// centre (its first read only moves the cursor), so it is added here, once.
+pub async fn seed_unread_notice(center: &crate::shell::actions_notify::NotifyCenter) {
+    use crate::core::notify::{Draft, FixSource, Kind, Level, fix_for};
+    if center.snapshot().await["unread"].as_u64().unwrap_or(0) > 0 {
+        return;
+    }
+    let mut d = Draft::new(
+        Kind::HostEvent,
+        "deploy-films",
+        "demo host: deploy films failed",
+        "a made-up failure with a suggested fix, so the centre has an unread row",
+    );
+    d.stack = Some("films".into());
+    d.detail.level = Level::Warning;
+    d.detail.remedy = Some("deploy films again".into());
+    d.detail.source = Some("host".into());
+    d.detail.fixes = fix_for(&FixSource::Op {
+        op: "deploy-films",
+        label: "deploy",
+        ok: false,
+        deferred: false,
+        stack: Some("films"),
+    })
+    .into_iter()
+    .collect();
+    debug_assert!(
+        !d.detail.fixes.is_empty(),
+        "the demo notice suggests no fix"
+    );
+    center.notify(d).await;
+}

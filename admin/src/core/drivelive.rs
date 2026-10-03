@@ -77,7 +77,15 @@ pub struct Plan {
 /// Does this step wait while a viewer has paused? Everything that changes
 /// the screen does; reading it, sending the plan and letting go do not.
 pub fn holds(step: &UiStep) -> bool {
-    !matches!(step, UiStep::State | UiStep::Plan { .. } | UiStep::Done)
+    !matches!(
+        step,
+        UiStep::State
+            | UiStep::Plan { .. }
+            | UiStep::Done
+            | UiStep::Controls
+            | UiStep::Refusals
+            | UiStep::RefusedLocally { .. }
+    )
 }
 
 /// Is this step announced with a countdown? Typing is not (Kenny: the
@@ -213,6 +221,9 @@ pub fn describe(step: &UiStep, st: &DriveState) -> String {
         UiStep::State => "read the screen".into(),
         UiStep::Done => "hand the dashboard back".into(),
         UiStep::Plan { steps } => format!("send a plan of {} steps", steps.len()),
+        UiStep::Controls => "read the control catalog".into(),
+        UiStep::Refusals => "read the refused steps".into(),
+        UiStep::RefusedLocally { verb, name } => format!("count a refused ui {verb} {name}"),
     }
 }
 

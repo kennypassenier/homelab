@@ -23,7 +23,7 @@ import { openAction } from "../actiondialog.js";
 import { agoEl, setAgo } from "../ago.js";
 import { doctorRows } from "../doctor.js";
 import { fetchJson, h, slowReport } from "../dom.js";
-import { declare, drivable, viaForm } from "../drivable.js";
+import { declare, declareField, drivable, viaForm } from "../drivable.js";
 import { humanDuration } from "../format.js";
 import {
   actionBlurb,
@@ -70,6 +70,14 @@ const PINGS = 12;
 // Live view (invariant 39): every control on this page that runs
 // something or opens a menu is declared here; the action tiles and
 // "Build a template…" reach their dialogs as catalog forms.
+// review M5: every page field Live view may set is declared (drivable.js
+// `declareField`); the client and the dashboard refuse any other.
+const GUEST_SEARCH = declareField({
+  id: "host-guest-search",
+  page: "host",
+  what: "search the containers by name",
+});
+
 const RUN_CHECKS = declare({
   id: "run-host-checks",
   page: "host",
@@ -249,7 +257,7 @@ export function mount(root, ctx) {
     h("input", {
       class: "hk-search",
       type: "search",
-      id: "host-guest-search",
+      id: GUEST_SEARCH,
       placeholder: "Search containers   /",
       "aria-label": "Search containers",
       oninput: (/** @type {Event} */ e) => {

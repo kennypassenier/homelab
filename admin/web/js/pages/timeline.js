@@ -3,10 +3,19 @@
 // library, colours from the kp-themes tokens). The window is in the
 // address (?days=7).
 
+import { declareField } from "../drivable.js";
 import { agoEl, setAgo } from "../ago.js";
 import { errorBox, fetchReport, h } from "../dom.js";
 import { timelineModel } from "../timeline.js";
 import { choice, setParams } from "../urlstate.js";
+
+// review M5: every page field Live view may set is declared (drivable.js
+// `declareField`); the client and the dashboard refuse any other.
+const TIMELINE_DAYS = declareField({
+  id: "timeline-days",
+  page: "timeline",
+  what: "how many days the timeline shows",
+});
 
 const SVG = "http://www.w3.org/2000/svg";
 const DAYS = /** @type {const} */ (["1", "3", "7", "14", "30"]);
@@ -47,7 +56,7 @@ export function mount(root, ctx) {
   let days = choice(new URLSearchParams(location.search), "days", DAYS, "7");
   const daySel = h(
     "select",
-    { class: "kp-field__input", id: "timeline-days" },
+    { class: "kp-field__input", id: TIMELINE_DAYS },
     ...DAYS.map((d) =>
       h("option", { value: d }, d === "1" ? "1 day" : `${d} days`),
     ),

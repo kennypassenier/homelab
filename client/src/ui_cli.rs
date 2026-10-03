@@ -16,7 +16,8 @@ pub const STEPS: &str = "goto <path> | open <form> [stack] | open batch <action>
 select <stack>,<stack>|none | click <control> [row] | type <field> <text> | \
 pick <field> <value> | check <field> on|off | edit <field> <file|-> | \
 row add|edit|up|down|delete [n|key] | press next|back|save|cancel|default | \
-press confirm [--wait] | finish | answer [operation] allow|stop | close | reload | state | done | plan \"<step>\" \"<step>\" … | plan --file <file|->";
+press confirm [--wait] | finish | answer [operation] allow|stop | close | reload | state | done | plan \"<step>\" \"<step>\" … | plan --file <file|-> | \
+list [page|words] | refusals";
 
 /// What the line may print for a command besides its own answer. The host
 /// broadcasts every log line, transfer, fleet snapshot and question to every
@@ -44,6 +45,11 @@ pub enum UiCall {
     Finish,
     /// `ui press confirm --wait`: the press, then as `finish`.
     PressWait(UiStep),
+    /// drive-reach: `ui list [page|words]` (alias `controls`): the running
+    /// dashboard's control catalog, filtered (`ui_catalog`).
+    List(Vec<String>),
+    /// drive-reach: `ui refusals`: the dashboard's recent refused steps.
+    Refusals,
 }
 
 /// `args` are the words after `ui`, `--json` already taken out; `--wait`
@@ -56,6 +62,14 @@ pub fn parse_call(args: &[String]) -> Result<UiCall, String> {
             return Err(format!("too many words for ui finish; {}", usage()));
         }
         return Ok(UiCall::Finish);
+    }
+    match words.first().map(String::as_str) {
+        Some("list" | "controls") if !wait => return Ok(UiCall::List(words[1..].to_vec())),
+        Some("refusals") if !wait && words.len() == 1 => return Ok(UiCall::Refusals),
+        Some("refusals") => {
+            return Err(format!("too many words for ui refusals; {}", usage()));
+        }
+        _ => {}
     }
     let step = parse(&words)?;
     if !wait {
@@ -299,6 +313,8 @@ pub fn parse_with(
         UiStep::Select { .. } => args.len() > 2,
         UiStep::Close | UiStep::Reload | UiStep::State | UiStep::Done => args.len() > 1,
         UiStep::Type { .. } | UiStep::Plan { .. } => false,
+        // Never parsed from words: the client sends these itself.
+        UiStep::Controls | UiStep::Refusals | UiStep::RefusedLocally { .. } => false,
     };
     if extra {
         return Err(format!("too many words for ui {verb}; {}", usage()));
@@ -710,6 +726,18 @@ mod tests {
 
     /// Kenny, 2026-09-29: control back as soon as the confirmed dialog's
     /// job ends: `finish`, and `press confirm --wait` in one call.
+    #[test]
+    fn drive_reach_list_and_refusals_parse() {
+        assert_eq!(parse_call(&words("list")).unwrap(), UiCall::List(vec![]));
+        assert_eq!(
+            parse_call(&words("controls secret")).unwrap(),
+            UiCall::List(vec!["secret".into()])
+        );
+        assert_eq!(parse_call(&words("refusals")).unwrap(), UiCall::Refusals);
+        assert!(parse_call(&words("refusals all")).is_err());
+        assert!(STEPS.contains("list [page|words] | refusals"));
+    }
+
     #[test]
     fn finish_and_press_confirm_wait_parse_and_wait_goes_with_confirm_only() {
         assert_eq!(parse_call(&words("finish")).unwrap(), UiCall::Finish);

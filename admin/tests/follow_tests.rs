@@ -307,7 +307,12 @@ async fn follow_steps_are_checked_against_the_form_description() {
     assert_eq!(w.host.ran().len(), 0, "nothing reached the host");
     refused(&step(&w, goto("/jobs")).await);
     assert_eq!(step(&w, UiStep::Close).await["state"]["form"], Value::Null);
-    assert_eq!(step(&w, goto("/jobs")).await["state"]["page"], "/jobs");
+    // drive-reach: `/jobs` is an old address; the state keeps where the
+    // router's redirect lands it (the Activity page's running view).
+    assert_eq!(
+        step(&w, goto("/jobs")).await["state"]["page"],
+        "/activity?view=running"
+    );
 }
 
 /// feat-platform-10 (milestone follow).

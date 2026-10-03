@@ -12,6 +12,7 @@
 import { send } from "./act.js";
 import { notify } from "./actui.js";
 import { h } from "./dom.js";
+import { current, currentField } from "./drivable.js";
 import {
   announceView,
   fieldName,
@@ -255,7 +256,9 @@ export function findTarget(step, ctl, s) {
       return q(`#page [data-action="${CSS.escape(t.action)}"]`);
     case "field": {
       const input =
-        ctl?.input?.(fieldName(s, t.id), t.id) ?? document.getElementById(t.id);
+        ctl?.input?.(fieldName(s, t.id), t.id) ??
+        // drive-reach: a renamed page field, by its old id too.
+        document.getElementById(currentField(t.id));
       return /** @type {HTMLElement | null} */ (
         input?.closest(".kp-field") ?? input ?? null
       );
@@ -270,12 +273,15 @@ export function findTarget(step, ctl, s) {
       // fix-239: the declared control (drivable.js), in the dialog on top
       // when one is open, else on the page.
       const open = [...document.querySelectorAll("dialog[open]")].at(-1);
-      const root = open ?? document.getElementById("page");
+      // drive-reach: an old id (`was`) marks the control it became; a toast's
+      // control sits outside #page.
+      const root = open ?? document.body;
       const row =
         t.row == null ? "" : `[data-drive-row="${CSS.escape(t.row)}"]`;
       return /** @type {HTMLElement | null} */ (
-        root?.querySelector(`[data-drive="${CSS.escape(t.control)}"]${row}`) ??
-          null
+        root?.querySelector(
+          `[data-drive="${CSS.escape(current(t.control))}"]${row}`,
+        ) ?? null
       );
     }
     case "close":

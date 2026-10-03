@@ -13,6 +13,7 @@ pub mod drift;
 pub mod drive;
 pub mod driveedit;
 pub mod drivelive;
+pub mod driverefusals;
 pub mod editplan;
 pub mod fleet;
 pub mod fwmatrix;

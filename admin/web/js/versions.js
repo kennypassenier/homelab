@@ -8,7 +8,9 @@ import { openAction } from "./actiondialog.js";
 import { fetchJson, h } from "./dom.js";
 import SPEC from "./formspec.json" with { type: "json" };
 import { outdatedPage, versionNotes } from "./parity.js";
+import { DRIVABLE_PATHS } from "./router.js";
 import { listen } from "./store.js";
+import { TAB, WAS_TAB } from "./tabname.js";
 
 /**
  * @param {HTMLElement} root the banner's place under the navigation
@@ -133,8 +135,11 @@ export function mountVersions(root) {
         "/data/drive/attach",
         {
           page_version: r.body.dashboard,
-          known_pages: SPEC.pages,
+          // review M8: the router's own addresses, never a hand-kept copy.
+          known_pages: DRIVABLE_PATHS,
           known_forms: SPEC.forms,
+          tab: TAB,
+          was_tab: WAS_TAB,
         },
         "reporting this page's version",
       );

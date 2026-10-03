@@ -19,7 +19,7 @@ import { scheduleArgFields, schedulableActions } from "../actionforms.js";
 import { fieldEl, refusalCallout } from "../actui.js";
 import { agoEl, setAgo } from "../ago.js";
 import { fetchJson, h } from "../dom.js";
-import { declare, dialogControl, drivable } from "../drivable.js";
+import { declare, declareField, dialogControl, drivable } from "../drivable.js";
 import {
   EVERY_WORDS,
   TEMPLATES,
@@ -75,6 +75,39 @@ const card = (spec) =>
  */
 
 // fix-239, invariant 39: Live view reaches every control on this page.
+// review M5: every page field Live view may set is declared (drivable.js
+// `declareField`); the client and the dashboard refuse any other.
+const SCHED_ACTION = declareField({
+  id: "sched-action",
+  page: "schedules",
+  what: "what the schedule runs (New schedule drawer)",
+});
+const SCHED_STACK = declareField({
+  id: "sched-stack",
+  page: "schedules",
+  what: "the stack the schedule runs on (New schedule drawer)",
+});
+const SCHED_EVERY = declareField({
+  id: "sched-every",
+  page: "schedules",
+  what: "how often the schedule runs (New schedule drawer)",
+});
+const SCHED_DATE = declareField({
+  id: "sched-date",
+  page: "schedules",
+  what: "the date of a one-time run (New schedule drawer)",
+});
+const SCHED_AT = declareField({
+  id: "sched-at",
+  page: "schedules",
+  what: "the time of day the schedule runs (New schedule drawer)",
+});
+const SCHED_NOTE = declareField({
+  id: "sched-note",
+  page: "schedules",
+  what: "the schedule's note (New schedule drawer)",
+});
+
 const NEW_SCHEDULE = declare({
   id: "new-schedule",
   page: "schedules",
@@ -87,6 +120,7 @@ const SCHEDULE_TEMPLATE = declare({
   opens: "dialog",
   row: "<template id>",
   what: "open the New schedule drawer filled in from a template (empty page only)",
+  shows: "on an empty Schedules page",
 });
 const TOGGLE_SCHEDULE = declare({
   id: "toggle-schedule",
@@ -101,6 +135,11 @@ const SCHEDULE_MENU = declare({
   opens: "dialog",
   row: "<schedule id>",
   what: "open one schedule's menu: press edit, run-now or delete",
+  // drive-reach: 3.71.0 moved a row's Edit and Delete into this menu.
+  was: [
+    { id: "edit-schedule", press: "edit" },
+    { id: "delete-schedule", press: "delete" },
+  ],
 });
 const RUN_NEXT = declare({
   id: "run-next-now",
@@ -119,6 +158,11 @@ const UNDO_CHANGE = declare({
   page: "schedules",
   opens: "run",
   what: "undo the last switch or delete while its toast shows (6 s)",
+  shows: "for 6 s after a switch or a delete",
+  reach: [
+    { do: "click", control: "schedule-menu", row: "*" },
+    { do: "press", button: "delete" },
+  ],
 });
 const FIND_SCHEDULE = declare({
   id: "find-schedule",
@@ -1002,28 +1046,28 @@ export function mount(root, opts = {}) {
 
     const actionSel = h(
       "select",
-      { id: "sched-action", "aria-label": "Action" },
+      { id: SCHED_ACTION, "aria-label": "Action" },
       [...stackActions, ...hostActions].map((a) =>
         h("option", { value: a.action }, a.label),
       ),
     );
     actionSel.value = d.action;
-    const stackSel = h("select", { id: "sched-stack", "aria-label": "On" });
+    const stackSel = h("select", { id: SCHED_STACK, "aria-label": "On" });
     const everySel = h(
       "select",
-      { id: "sched-every", "aria-label": "How often" },
+      { id: SCHED_EVERY, "aria-label": "How often" },
       Object.entries(EVERY_WORDS).map(([v, w]) => h("option", { value: v }, w)),
     );
     everySel.value = d.every;
     const date = h("input", {
       type: "date",
-      id: "sched-date",
+      id: SCHED_DATE,
       "aria-label": "On the date",
     });
     date.value = d.date;
     const at = h("input", {
       type: "time",
-      id: "sched-at",
+      id: SCHED_AT,
       "aria-label": "At",
     });
     at.value = d.at;
@@ -1077,7 +1121,7 @@ export function mount(root, opts = {}) {
       "aria-live": "polite",
     });
     const note = h("input", {
-      id: "sched-note",
+      id: SCHED_NOTE,
       type: "text",
       maxlength: 200,
       placeholder: "Why this runs; shown in the list",

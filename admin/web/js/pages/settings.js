@@ -33,7 +33,47 @@ import { formatDateTime } from "../format.js";
 import { mountJobPanel } from "../jobpanel.js";
 import { listen } from "../store.js";
 import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
-import { declare, drivable, viaForm } from "../drivable.js";
+import {
+  declare,
+  declareField,
+  drivable,
+  fieldId,
+  viaForm,
+} from "../drivable.js";
+
+// review M5: every page field Live view may set is declared (drivable.js
+// `declareField`); the client and the dashboard refuse any other.
+const TOKEN_NAME = declareField({
+  id: "token-name",
+  page: "settings",
+  what: "the name of a token to issue (Issue token dialog)",
+});
+const TOKEN_SCOPE = declareField({
+  id: "token-scope",
+  page: "settings",
+  what: "the scope of a token to issue (Issue token dialog)",
+});
+const ISSUED_TOKEN = declareField({
+  id: "issued-token",
+  page: "settings",
+  what: "the token just issued, to copy (read only)",
+});
+const TOKEN_REVOKE_CONFIRM = declareField({
+  id: "token-revoke-confirm",
+  page: "settings",
+  what: "type the token name to confirm revoking it",
+});
+const HOST_KEY = declareField({
+  id: "key",
+  page: "settings",
+  what: "one host.toml key in its edit dialog (-<key>), and its typed confirmation (-<key>-confirm)",
+  row: "<key with - for _>[-confirm]",
+});
+const DROP_CONFIRM = declareField({
+  id: "drop-confirm",
+  page: "settings",
+  what: "type to confirm dropping unpushed commits",
+});
 
 // fix-239: Live view reaches every control here: host.toml's rows through
 // the host-settings form (`homelab ui open host-settings`, `row edit
@@ -63,6 +103,7 @@ const REPO_CHOICE = declare({
   opens: "run",
   row: "push|rebase|drop",
   what: "resolve unpushed commits: push them, rebase and push, or drop them",
+  shows: "when the working copy holds commits that were not pushed",
 });
 
 /**
@@ -369,13 +410,13 @@ export function mount(root) {
     const name = h("input", {
       class: "kp-field__input",
       type: "text",
-      id: "token-name",
+      id: TOKEN_NAME,
       autocomplete: "off",
       placeholder: "e.g. wsl, ct120-dev",
     });
     const scope = h(
       "select",
-      { class: "kp-field__input", id: "token-scope" },
+      { class: "kp-field__input", id: TOKEN_SCOPE },
       h("option", { value: "read" }, "read — look only"),
       h("option", { value: "operate" }, "operate — act without destroying"),
       h(
@@ -461,7 +502,7 @@ export function mount(root) {
       class: "kp-field__input mono",
       type: "text",
       readonly: "",
-      id: "issued-token",
+      id: ISSUED_TOKEN,
     });
     box.value = issued.token;
     const copy = h("button", { type: "button", class: "kp-button" }, "Copy");
@@ -493,7 +534,7 @@ export function mount(root) {
     const typed = h("input", {
       class: "kp-field__input",
       type: "text",
-      id: "token-revoke-confirm",
+      id: TOKEN_REVOKE_CONFIRM,
       autocomplete: "off",
       placeholder: name,
     });
@@ -563,7 +604,9 @@ export function mount(root) {
       : f.kind.type === "bool"
         ? f.value === true
         : fieldText(f);
-    const id = `key-${f.key.replace(/_/g, "-")}`;
+    const key = f.key.replace(/_/g, "-");
+    const id = fieldId(HOST_KEY, key);
+    const confirmId = fieldId(HOST_KEY, `${key}-confirm`);
     /** @type {HTMLInputElement | HTMLTextAreaElement} */
     let input;
     if (f.kind.type === "bool") {
@@ -596,7 +639,7 @@ export function mount(root) {
     const typed = h("input", {
       class: "kp-field__input",
       type: "text",
-      id: `${id}-confirm`,
+      id: confirmId,
       autocomplete: "off",
       placeholder: f.key,
     });
@@ -652,7 +695,7 @@ export function mount(root) {
                 { class: "kp-field field-danger" },
                 h(
                   "label",
-                  { class: "kp-field__label", for: `${id}-confirm` },
+                  { class: "kp-field__label", for: confirmId },
                   `Type ${f.key} to confirm`,
                 ),
                 typed,
@@ -1042,7 +1085,7 @@ function resolveButton(choice, reload) {
       const typed = h("input", {
         class: "kp-field__input",
         type: "text",
-        id: "drop-confirm",
+        id: DROP_CONFIRM,
         placeholder: "drop",
       });
       const go = h(

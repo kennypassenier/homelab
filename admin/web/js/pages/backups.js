@@ -30,7 +30,13 @@ import { openAction, openBatch } from "../actiondialog.js";
 import { openDialog } from "../actui.js";
 import { snapshotPickerRows } from "../snapshotpicker.js";
 import { snapshotFileUrl, snapshotFileView } from "../snapshotfile.js";
-import { declare, drivable, viaForm } from "../drivable.js";
+import {
+  declare,
+  declareField,
+  drivable,
+  fieldId,
+  viaForm,
+} from "../drivable.js";
 import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
@@ -73,6 +79,35 @@ import {
 
 /** A stack's colour square, in the topology's hue. @param {number} hue */
 const stackMark = (hue) => swatch(hueColour(hue));
+
+// review M5: every page field Live view may set is declared (drivable.js
+// `declareField`); the client and the dashboard refuse any other.
+const BK_FILTER = declareField({
+  id: "bk-filter",
+  page: "backups",
+  what: "filter the repositories by stack or app",
+});
+const BK_RESTORE_STACK = declareField({
+  id: "bk-restore-stack",
+  page: "backups",
+  what: "the stack a restore reads from (Restore dialog)",
+});
+const BK_RESTORE_APP = declareField({
+  id: "bk-restore-app",
+  page: "backups",
+  what: "the app a restore reads from (Restore dialog)",
+});
+const BK_RESTORE_SNAPSHOT = declareField({
+  id: "bk-restore-snapshot",
+  page: "backups",
+  what: "the snapshot a restore reads (Restore dialog)",
+});
+const SNAPFILE = declareField({
+  id: "snapfile",
+  page: "backups",
+  what: "the Show a file dialog: its snapshot (-snap) and path (-path)",
+  row: "<stack>-<owner>-snap|path",
+});
 
 /**
  * @typedef {import("../backupsview.js").StackRead} StackRead
@@ -127,6 +162,8 @@ const UNPIN = declare({
   page: "backups",
   opens: "view",
   what: "unpin the night and show last night again",
+  shows: "while a night is pinned",
+  reach: [{ do: "click", control: "backup-fleet-night", row: "*" }],
 });
 const EARLIER = declare({
   id: "backup-nights-earlier",
@@ -139,6 +176,8 @@ const LATER = declare({
   page: "backups",
   opens: "view",
   what: "show the nights after the ones on screen",
+  shows: "once the strip shows earlier nights",
+  reach: [{ do: "click", control: "backup-nights-earlier" }],
 });
 const TODAY = declare({
   id: "backup-nights-today",
@@ -159,6 +198,8 @@ const CLEAR = declare({
   opens: "view",
   row: "<filter>",
   what: "turn one active filter off (stack:<name>, text, drills, sort, all)",
+  shows: "while a filter is on",
+  reach: [{ do: "click", control: "backups-undrilled-filter" }],
 });
 const FOLD = declare({
   id: "backup-repo-group",
@@ -187,6 +228,7 @@ const RETRY = declare({
   opens: "view",
   row: "<stack>",
   what: "read one stack's repositories again after its read failed",
+  shows: "on a stack whose repositories could not be read",
 });
 // fix-239/241: "Show a file…" opens a page dialog (no catalog action).
 const SNAPSHOT_FILE = declare({
@@ -440,7 +482,7 @@ export function mount(root) {
   const search = /** @type {HTMLInputElement} */ (
     h("input", {
       class: "bk-search nx-search",
-      id: "bk-filter",
+      id: BK_FILTER,
       name: "bk-filter",
       type: "search",
       placeholder: "Filter stacks or apps",
@@ -1605,21 +1647,21 @@ export function mount(root) {
     const stackSel = /** @type {HTMLSelectElement} */ (
       h("select", {
         class: "kp-field__input",
-        id: "bk-restore-stack",
+        id: BK_RESTORE_STACK,
         name: "stack",
       })
     );
     const appSel = /** @type {HTMLSelectElement} */ (
       h("select", {
         class: "kp-field__input",
-        id: "bk-restore-app",
+        id: BK_RESTORE_APP,
         name: "app",
       })
     );
     const snapSel = /** @type {HTMLSelectElement} */ (
       h("select", {
         class: "kp-field__input",
-        id: "bk-restore-snapshot",
+        id: BK_RESTORE_SNAPSHOT,
         name: "snapshot",
       })
     );
@@ -1993,9 +2035,12 @@ function rowKeys(card) {
  */
 function openFileDialog(stack, r) {
   const now = Math.floor(Date.now() / 1000);
-  const id = `snapfile-${stack}-${r.owner}`;
+  const id = `${stack}-${r.owner}`;
   const snap = /** @type {HTMLSelectElement} */ (
-    h("select", { class: "kp-field__input", id: `${id}-snap` })
+    h("select", {
+      class: "kp-field__input",
+      id: fieldId(SNAPFILE, `${id}-snap`),
+    })
   );
   snap.append(
     ...snapshotPickerRows(r.snapshots ?? [], now).map((row) =>
@@ -2010,7 +2055,7 @@ function openFileDialog(stack, r) {
     h("input", {
       class: "kp-field__input",
       type: "text",
-      id: `${id}-path`,
+      id: fieldId(SNAPFILE, `${id}-path`),
       autocomplete: "off",
       spellcheck: "false",
       placeholder: "config/settings.xml",

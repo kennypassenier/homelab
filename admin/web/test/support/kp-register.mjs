@@ -46,6 +46,14 @@ function kpRoot() {
 let root;
 
 function resolve(specifier, context, next) {
+  // drive-reach: the kit's passkey helper (pages/passkeys.js imports it)
+  // wires itself to `document` as it loads; under node a stand-in with the
+  // one export the page uses, so the control catalog can load every page.
+  if (specifier === "/static/passkeys.js")
+    return {
+      url: "data:text/javascript,export%20const%20registerPasskey%20%3D%20async%20()%20%3D%3E%20%7B%7D%3B",
+      shortCircuit: true,
+    };
   if (specifier.startsWith(PREFIX)) {
     root ??= kpRoot();
     return {

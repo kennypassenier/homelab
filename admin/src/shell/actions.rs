@@ -2629,6 +2629,12 @@ pub fn mount(
             actions_for_watch,
             clock.clone(),
         );
+        // drive-reach review H1: the demo host's unread notice with a fix.
+        #[cfg(feature = "demo-host")]
+        if demo_host {
+            let center = notify.clone();
+            tokio::spawn(async move { super::demo::seed_unread_notice(&center).await });
+        }
         super::actions_notify::spawn_incident_poll(host, notify, poll);
     });
     Ok(())

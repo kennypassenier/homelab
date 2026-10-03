@@ -1,0 +1,88 @@
+{
+  "about": "Shared by admin/web/test/drivecatalog.test.js and core/src/drivecatalog.rs: both implementations of `closest` must name the same controls in the same order (review M7; distances over code points, not UTF-16 units).",
+  "controls": [
+    {
+      "id": "abcd",
+      "page": "p",
+      "what": "first",
+      "was": []
+    },
+    {
+      "id": "abc-abcd",
+      "page": "p",
+      "what": "second",
+      "was": []
+    },
+    {
+      "id": "new-schedule",
+      "page": "schedules",
+      "what": "open the New schedule drawer",
+      "was": []
+    },
+    {
+      "id": "schedule-menu",
+      "page": "schedules",
+      "what": "open one schedule's menu",
+      "was": [
+        {
+          "id": "edit-schedule",
+          "press": "edit"
+        }
+      ]
+    },
+    {
+      "id": "reveal-secret",
+      "page": "secrets",
+      "what": "show one secret's value",
+      "was": []
+    },
+    {
+      "id": "café-open",
+      "page": "p",
+      "what": "an accented id",
+      "was": []
+    }
+  ],
+  "cases": [
+    {
+      "name": "abcd😀😀",
+      "n": 4,
+      "want": ["abcd", "abc-abcd"]
+    },
+    {
+      "name": "new-schedul",
+      "n": 4,
+      "want": ["new-schedule", "schedule-menu"]
+    },
+    {
+      "name": "edit-schedul",
+      "n": 4,
+      "want": ["schedule-menu", "new-schedule"]
+    },
+    {
+      "name": "show-secret",
+      "n": 4,
+      "want": ["reveal-secret"]
+    },
+    {
+      "name": "cafe-open",
+      "n": 4,
+      "want": ["café-open", "new-schedule", "schedule-menu"]
+    },
+    {
+      "name": "café-opn",
+      "n": 4,
+      "want": ["café-open"]
+    },
+    {
+      "name": "😀😀😀😀",
+      "n": 4,
+      "want": []
+    },
+    {
+      "name": "zzzz-qqqq",
+      "n": 4,
+      "want": []
+    }
+  ]
+}

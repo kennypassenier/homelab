@@ -7,8 +7,42 @@
 // answers what happened: the page it is on, the dialog now open, or why it
 // could not. The server hands that answer to `homelab ui`.
 
-import { control, pick } from "./drivable.js";
+import {
+  clickLine,
+  closest,
+  currentField,
+  declaredField,
+  fields as declaredFields,
+  howToReach,
+  pick,
+  resolve,
+} from "./drivable.js";
 import { pageHref, shownPage } from "./router.js";
+
+/**
+ * review (the unexplained 15 s no-answer): the longest a tab spends on one
+ * page-control step — going to the control's page, looking for it, waiting
+ * for the dialog it opens — in ms. One budget for the whole step, below the
+ * dashboard's own wait for the answer (`TAB_WAIT`, 15 s) with room for the
+ * claim's and the answer's round trips; the generated catalog carries it
+ * and an admin test holds the two apart.
+ */
+export const TAB_BUDGET_MS = 11000;
+
+/**
+ * The clock of one step: its deadline, and whether the dashboard closed it
+ * (it gave up waiting: the tab stops at once rather than click late).
+ * @typedef {{end: number, cancelled: () => boolean}} Budget
+ */
+
+/** @returns {Budget} */
+const freshBudget = () => ({
+  end: Date.now() + TAB_BUDGET_MS,
+  cancelled: () => false,
+});
+
+/** @param {Budget} b */
+const left = (b) => Math.max(0, b.end - Date.now());
 
 /**
  * A page-control step as the server sends it.
@@ -66,19 +100,44 @@ const described = (el) => ({
 });
 
 /**
+ * drive-reach: the page has drawn: a title, and no skeleton left.
+ */
+function drawn() {
+  const p = document.getElementById("page");
+  return (
+    !!p?.querySelector("h1, h2") &&
+    ![...p.querySelectorAll(".kp-skeleton")].some(
+      (e) => e.getClientRects().length > 0,
+    )
+  );
+}
+
+/**
  * Look for the control for up to `ms` (a page draws its rows after its
- * read answers).
+ * read answers). With `settle`, a control not on screen at all is given up
+ * on once the page has stood drawn that long: a control that shows only in
+ * a state is not waited for the whole `ms`.
  * @param {() => ParentNode | null} rootOf
  * @param {boolean} inDialog
  * @param {{id: string, row: string | null}} want
  * @param {number} ms
+ * @param {Budget} budget
+ * @param {number} [settle]
+ * @returns {Promise<{el: HTMLElement | null, why: string, fix: string}>}
  */
-async function find(rootOf, inDialog, want, ms) {
-  const end = Date.now() + ms;
+async function find(rootOf, inDialog, want, ms, budget, settle = 0) {
+  const end = Date.now() + Math.min(ms, left(budget));
+  let calm = 0;
   for (;;) {
+    if (budget.cancelled())
+      return {
+        el: null,
+        why: "the dashboard stopped waiting for this step",
+        fix: "send it again",
+      };
     const root = rootOf();
     const els = root ? candidates(root, inDialog) : [];
-    const r = pick(want, els.map(described));
+    const r = pick(want, els.map(described), inDialog);
     if ("index" in r) {
       const el = els[r.index];
       if (!(el instanceof HTMLButtonElement && el.disabled))
@@ -89,7 +148,12 @@ async function find(rootOf, inDialog, want, ms) {
           why: `${want.id} is on screen but disabled`,
           fix: "the page holds it until what it needs is there; homelab ui state, then try again",
         };
-    } else if (Date.now() > end) return { el: null, why: r.why, fix: r.fix };
+    } else {
+      const gone = settle > 0 && r.why.startsWith("there is no control");
+      calm = gone && drawn() ? calm || Date.now() : 0;
+      if (Date.now() > end || (calm && Date.now() - calm >= settle))
+        return { el: null, why: r.why, fix: r.fix };
+    }
     await sleep(100);
   }
 }
@@ -98,66 +162,155 @@ async function find(rootOf, inDialog, want, ms) {
  * @param {Partial<TabAnswer>} a
  * @returns {TabAnswer}
  */
-const answer = (a) => ({
-  ok: false,
-  page: location.pathname,
-  dialog: titleOf(topDialog()),
-  ...a,
-});
+const answer = (a) => {
+  const d = topDialog();
+  return {
+    ok: false,
+    page: location.pathname,
+    dialog: titleOf(d),
+    // review H3/M5: what the dialog on top offers, so the client and the
+    // dashboard check the next step against it before any tab is asked.
+    ...(d
+      ? {
+          controls: candidates(d, true)
+            .filter((e) => !(e instanceof HTMLInputElement))
+            .map(described)
+            .map(({ id, label }) => ({ id, label })),
+          fields: [...d.querySelectorAll("input, select, textarea")]
+            .map((x) => x.id || x.getAttribute("name") || "")
+            .filter(Boolean),
+        }
+      : {}),
+    ...a,
+  };
+};
+
+/**
+ * drive-reach: where a declared control lives now: its own address when it
+ * lives per stack (`at`), else its page's, else its page's old address,
+ * which the router sends on to the page's new home (one redirect table for
+ * the browser and Live view).
+ * @param {import("./drivable.js").Control} c
+ * @param {string | null} row
+ */
+export const homeOf = (c, row) =>
+  c.at?.(row) ?? pageHref(c.page) ?? `/${c.page}`;
+
+/**
+ * drive-reach: the refusal for a name no page declares, ever: the closest
+ * declared controls, where each lives, and the line that clicks it.
+ * @param {string} id
+ * @returns {TabAnswer}
+ */
+function unknownControl(id) {
+  const near = closest(id, 4);
+  return answer({
+    why: `no page declares a control ${id}`,
+    fix: near.length
+      ? `the closest: ${near
+          .map((c) => `${c.id} (on ${c.page}: ${c.what})`)
+          .join(
+            "; ",
+          )}; e.g. ${clickLine(near[0])}; homelab ui list <words> lists every control`
+      : "homelab ui list lists every control, its page and the line that clicks it",
+  });
+}
 
 /**
  * Click a control: in the dialog on top when one is open, else on the
- * page — the control's own page first when it is not on this one.
+ * page: on screen now when it is (its module may be drawn inside another
+ * page), else on the control's own page, gone to first, as a person would.
+ * An old name (`was`) clicks the control it became; when it became an item
+ * of that control's menu, the dashboard sends the press as a step of its
+ * own (review: one step, one budget).
  * @param {string} id
  * @param {string | null} row
  * @param {(href: string) => void} navigate
  * @param {(el: HTMLElement) => Promise<void>} show
+ * @param {Budget} budget
  * @returns {Promise<TabAnswer>}
  */
-async function click(id, row, navigate, show) {
-  const want = { id, row };
+async function click(id, row, navigate, show, budget) {
   const d = topDialog();
   if (d) {
-    const f = await find(() => d, true, want, 1500);
+    const f = await find(() => d, true, { id, row }, 1500, budget);
     if (!f.el) return answer({ why: `${f.why} in ${titleOf(d)}`, fix: f.fix });
-    return press(f.el, show, false);
+    return press(f.el, show, false, budget);
   }
-  const page = () => document.getElementById("page");
-  const c = control(id);
-  const home = c ? (c.at?.(row) ?? pageHref(c.page)) : null;
-  // feat-shell-1: a pre-3.71.0 module shown as a view of its new home
-  // (`/activity?view=planned` is Schedules) counts as that module's page.
-  const here = shownPage(location.pathname, location.search);
-  // Declared on another page: go there first, as a person would.
-  const there = c?.at
-    ? location.pathname + location.search === home
-    : here === c?.page;
-  if (c && home && !there) {
-    navigate(home);
-    await sleep(250);
+  // drive-reach: a page's toasts (an Undo) sit at the screen's edge, outside
+  // #page; declared controls are found wherever the page drew them.
+  const page = () => (document.getElementById("page") ? document.body : null);
+  const hit = resolve(id);
+  // review H3: a page's own control answers to its declared id only (the
+  // client and the dashboard refuse an undeclared one before a tab sees it).
+  if (!hit) return unknownControl(id);
+  const c = hit.control;
+  const want = { id: c.id, row };
+  let f = await find(page, false, want, 0, budget);
+  // Only a control that is not on screen at all is gone looking for: one
+  // that is (disabled, or on rows a step must name) is answered here.
+  if (!f.el && f.why.startsWith("there is no control")) {
+    const home = homeOf(c, row);
+    // feat-shell-1: a pre-3.71.0 module shown as a view of its new home
+    // (`/activity?view=planned` is Schedules) counts as that module's page.
+    const here = shownPage(location.pathname, location.search);
+    // A module drawn inside another page (a stack hub's Settings shows the
+    // secrets module) counts as its page when its own controls are there.
+    const moduleHere = [...document.querySelectorAll("[data-drive]")].some(
+      (e) =>
+        visible(e) &&
+        resolve(/** @type {HTMLElement} */ (e).dataset.drive ?? "")?.control
+          .page === c.page,
+    );
+    const there = c.at
+      ? location.pathname + location.search === home
+      : here === c.page || moduleHere;
+    if (!there) {
+      if (budget.cancelled())
+        return answer({ why: "the dashboard stopped waiting for this step" });
+      navigate(home);
+      await sleep(250);
+    }
+    f = await find(page, false, want, 8000, budget, 2500);
   }
-  const f = await find(page, false, want, c ? 8000 : 1500);
-  if (!f.el)
+  if (!f.el) {
+    const at = `${location.pathname}${location.search}`;
+    const missing = f.why.startsWith("there is no control");
+    const disabled = f.why.endsWith("disabled");
     return answer({
-      why: f.why,
-      fix: c ? f.fix : `${f.fix}; no page declares a control ${id}`,
+      why: missing
+        ? `${c.id} is not on screen at ${at}${c.shows ? `: it shows only ${c.shows}` : ""}`
+        : disabled && c.shows
+          ? `${f.why}: it works only ${c.shows}`
+          : f.why,
+      fix: missing
+        ? `${c.reach?.length ? "reach it" : "it lives on " + c.page}: ${howToReach(c, row)}`
+        : f.fix,
     });
-  return press(f.el, show, c?.opens === "dialog");
+  }
+  return press(f.el, show, c.opens === "dialog" || hit.press != null, budget);
 }
 
 /**
  * @param {HTMLElement} el
  * @param {(el: HTMLElement) => Promise<void>} show
  * @param {boolean} opensDialog
+ * @param {Budget} budget
  * @returns {Promise<TabAnswer>}
  */
-async function press(el, show, opensDialog) {
+async function press(el, show, opensDialog, budget) {
   const before = topDialog();
   await show(el);
+  if (budget.cancelled())
+    return answer({
+      why: "the dashboard stopped waiting for this step",
+      fix: "send it again",
+    });
   el.click();
-  // A dialog that reads first draws its title at once; wait for it.
+  // A dialog that reads first draws its title at once; wait for it, within
+  // the step's budget.
   if (opensDialog) {
-    const end = Date.now() + 3000;
+    const end = Date.now() + Math.min(3000, left(budget));
     while (topDialog() === before && Date.now() < end) await sleep(50);
   } else await sleep(150);
   return answer({ ok: true });
@@ -168,8 +321,13 @@ async function press(el, show, opensDialog) {
  * @param {string} field
  */
 function fieldOf(field) {
-  const d = topDialog() ?? document.getElementById("page");
+  // drive-reach: a field a redesign renamed answers to its old id too.
+  field = currentField(field);
+  const dialog = topDialog();
+  const d = dialog ?? document.getElementById("page");
   if (!d) return { d, el: null };
+  // review M5: on the page itself only a declared field is set.
+  if (!dialog && !declaredField(field)) return { d, el: null };
   const el =
     d.querySelector(`#${CSS.escape(field)}`) ??
     d.querySelector(`[name="${CSS.escape(field)}"]`);
@@ -197,6 +355,13 @@ async function setField(field, value, show) {
       fix: "homelab ui goto the page first",
     });
   const where = d instanceof HTMLDialogElement ? titleOf(d) : "this page";
+  if (!(d instanceof HTMLDialogElement) && !declaredField(field))
+    return answer({
+      why: `no page declares a field ${field}`,
+      fix: `the page fields are: ${declaredFields()
+        .map((f) => (f.row ? `${f.id}-${f.row}` : f.id))
+        .join(", ")}`,
+    });
   if (!(
     el instanceof HTMLInputElement ||
     el instanceof HTMLSelectElement ||
@@ -237,19 +402,29 @@ async function setField(field, value, show) {
  * @param {(href: string) => void} navigate
  * @param {(el: HTMLElement) => Promise<void>} show marks the element
  *   before it is used (the press flash, the cursor)
+ * @param {() => boolean} [cancelled] true once the dashboard closed this
+ *   step (it stopped waiting): the tab stops at once
  * @returns {Promise<TabAnswer>}
  */
-export async function takeStep(step, navigate, show) {
+export async function takeStep(step, navigate, show, cancelled) {
+  const budget = freshBudget();
+  if (cancelled) budget.cancelled = cancelled;
   switch (step.do) {
     case "click":
-      return click(step.control ?? "", step.row ?? null, navigate, show);
+      return click(
+        step.control ?? "",
+        step.row ?? null,
+        navigate,
+        show,
+        budget,
+      );
     case "press":
       if (!topDialog())
         return answer({
           why: "no dialog is open",
           fix: "homelab ui click the control that opens it first",
         });
-      return click(step.button ?? "", null, navigate, show);
+      return click(step.button ?? "", null, navigate, show, budget);
     case "type":
     case "edit":
       return setField(step.field ?? "", step.text ?? "", show);

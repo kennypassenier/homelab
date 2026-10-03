@@ -19,7 +19,7 @@
 
 import { act, onAct, send } from "../act.js";
 import { fetchJson, h } from "../dom.js";
-import { declare, drivable } from "../drivable.js";
+import { declare, declareField, drivable } from "../drivable.js";
 import { stackHref } from "../router.js";
 import {
   createReveals,
@@ -42,6 +42,19 @@ import {
   toast,
 } from "../ui.js";
 
+// review M5: every page field Live view may set is declared (drivable.js
+// `declareField`); the client and the dashboard refuse any other.
+const SECRET_VALUE = declareField({
+  id: "secret-value",
+  page: "secrets",
+  what: "the new value of a secret (Change drawer)",
+});
+const SECRET_RESTART = declareField({
+  id: "secret-restart",
+  page: "secrets",
+  what: "restart the stack after writing (Change drawer)",
+});
+
 // fix-239 / invariant 39: Live view reaches every control on this page —
 // `homelab ui click <id> [row]`, the row being `<stack>/<app>/.env` (or
 // `<stack>/<from>` for a latch file); the value and the restart box are the
@@ -57,15 +70,6 @@ const secretsAt = (row) =>
   row
     ? `/stacks/${encodeURIComponent(row.split("/")[0])}/settings?section=secrets`
     : null;
-const PICK_STACK = declare({
-  id: "secrets-stack",
-  page: "secrets",
-  opens: "run",
-  row: "<stack>",
-  // feat-shell-1: the secrets live in each stack hub's Settings.
-  at: secretsAt,
-  what: "show one stack's secrets (re-reads what it declares)",
-});
 const REVEAL_SECRET = declare({
   id: "reveal-secret",
   page: "secrets",
@@ -110,36 +114,65 @@ const STAGE_SECRET = declare({
   page: "secrets",
   opens: "run",
   what: "stage the typed value (nothing is written yet)",
+  shows: "in the change drawer, once a value is typed",
+  reach: [
+    { do: "click", control: "change-a-secret" },
+    { do: "type", field: "secret-value", text: "DEMO=1" },
+  ],
 });
 const WRITE_SECRET = declare({
   id: "write-secret",
   page: "secrets",
   opens: "run",
   what: "write the staged value through latch after a 5 s Undo window, then restart when ticked",
+  shows: "in the change drawer, once the value is staged",
+  reach: [
+    { do: "click", control: "change-a-secret" },
+    { do: "type", field: "secret-value", text: "DEMO=1" },
+    { do: "click", control: "stage-secret" },
+  ],
 });
 const EDIT_STAGED = declare({
   id: "edit-staged-secret",
   page: "secrets",
   opens: "run",
   what: "go back from the staged value to editing it",
+  shows: "in the change drawer, once the value is staged",
+  reach: [
+    { do: "click", control: "change-a-secret" },
+    { do: "type", field: "secret-value", text: "DEMO=1" },
+    { do: "click", control: "stage-secret" },
+  ],
 });
 const CLOSE_DRAWER = declare({
   id: "close-secret-change",
   page: "secrets",
   opens: "run",
   what: "close the change drawer without writing",
+  shows: "while the change drawer is open",
+  reach: [{ do: "click", control: "change-a-secret" }],
+  // review M6: its x and its Cancel, each closing the drawer.
+  twins: true,
 });
 const UNDO_WRITE = declare({
   id: "undo-secret-write",
   page: "secrets",
   opens: "run",
   what: "cancel a write in its 5 s Undo window, before it runs",
+  shows: "for 5 s after Write",
+  reach: [
+    { do: "click", control: "change-a-secret" },
+    { do: "type", field: "secret-value", text: "DEMO=1" },
+    { do: "click", control: "stage-secret" },
+    { do: "click", control: "write-secret" },
+  ],
 });
 const RETRY_STACK = declare({
   id: "secrets-try-again",
   page: "secrets",
   opens: "run",
   what: "read an unreadable stack's file again",
+  shows: "on a stack whose secrets file could not be read",
 });
 
 /** How long Write waits for an Undo before it sends anything. */
@@ -418,20 +451,18 @@ export function mount(root, opts = {}) {
           k === "unreadable"
             ? chip("!", { tone: "warn", label: "unreadable" })
             : chip(String(stackCount(d)));
-        const b = drivable(
-          h(
-            "button",
-            {
-              type: "button",
-              "aria-current": String(s === S.stack),
-              "aria-label": `${s}: ${stackLine(d)}`,
-            },
-            swatch(chartColour(s, names)),
-            h("span", null, s, h("small", null, stackLine(d))),
-            badge,
-          ),
-          PICK_STACK,
-          s,
+        // The fleet-wide list (no address draws it since 3.71.0: each
+        // stack's Settings shows its own) is no Live view control.
+        const b = h(
+          "button",
+          {
+            type: "button",
+            "aria-current": String(s === S.stack),
+            "aria-label": `${s}: ${stackLine(d)}`,
+          },
+          swatch(chartColour(s, names)),
+          h("span", null, s, h("small", null, stackLine(d))),
+          badge,
         );
         b.addEventListener("click", () => pick(s));
         tip.attach(b, () => {
@@ -781,7 +812,7 @@ export function mount(root, opts = {}) {
     const ta = /** @type {HTMLTextAreaElement} */ (
       h("textarea", {
         class: "kp-field__input",
-        id: "secret-value",
+        id: SECRET_VALUE,
         name: "secret-value",
         placeholder: "KEY=value, one per line",
         "aria-label": "New value",
@@ -815,7 +846,7 @@ export function mount(root, opts = {}) {
     const restart = /** @type {HTMLInputElement} */ (
       h("input", {
         type: "checkbox",
-        id: "secret-restart",
+        id: SECRET_RESTART,
         name: "secret-restart",
       })
     );

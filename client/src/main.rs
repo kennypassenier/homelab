@@ -341,7 +341,56 @@ async fn run(explicit_host: Option<String>) {
             ) {
                 ui_repo_preflight(&host, &token).await;
             }
+            let mut line = HostLine {
+                host: &host,
+                token: &token,
+            };
+            let cache = homelab_client::ui_drive::FileCache {
+                dir: homelab_client::ui_drive::FileCache::default_dir()
+                    .unwrap_or_else(std::env::temp_dir),
+            };
             let step = match call {
+                // drive-reach: the running dashboard's catalog (by its hash,
+                // kept in ~/.cache) and its refused steps.
+                UiCall::List(filter) => {
+                    let reply = ui_state_reply(&host, &token).await;
+                    let v: serde_json::Value =
+                        serde_json::from_str(&reply.message).unwrap_or_default();
+                    match homelab_client::ui_drive::catalog_for(&mut line, &v, &cache).await {
+                        Ok(Some(c)) => {
+                            print!("{}", homelab_client::ui_catalog::render_list(&c, &filter));
+                            std::process::exit(0);
+                        }
+                        Ok(None) => die(
+                            "this dashboard serves no control catalog (it predates drive-reach): \
+                             `homelab ui reload` once it is updated, or `homelab ui state`",
+                        ),
+                        Err(e) => die(&e),
+                    }
+                }
+                UiCall::Refusals => {
+                    let reply = rpc_reply(
+                        &host,
+                        &token,
+                        Command::Ui {
+                            step: UiStep::Refusals,
+                            client_version: CLIENT_VERSION.to_string(),
+                        },
+                    )
+                    .await
+                    .unwrap_or_else(|| die("the host closed the line before it answered"));
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    match homelab_client::ui_catalog::render_refusals(&reply.message, now) {
+                        Ok(text) => {
+                            print!("{text}");
+                            std::process::exit(0);
+                        }
+                        Err(e) => die(&e),
+                    }
+                }
                 UiCall::Step(step) => step,
                 UiCall::Finish => ui_finish(&host, &token, json).await,
                 UiCall::PressWait(step) => {
@@ -364,17 +413,32 @@ async fn run(explicit_host: Option<String>) {
                     ui_finish(&host, &token, json).await
                 }
             };
-            let reply = rpc_reply(
-                &host,
-                &token,
-                Command::Ui {
-                    step,
-                    client_version: CLIENT_VERSION.to_string(),
-                },
-            )
-            .await
-            .unwrap_or_else(|| die("the host closed the line before it answered"));
-            ui_print(&reply, json);
+            // drive-reach (Kenny, 2026-10-03: guessing a name must stop):
+            // a step that names a control, a field or an address is checked
+            // here against the catalog of the dashboard that is running (and
+            // the dialog open on its screen) before anything reaches the
+            // tab; review L3: the orchestration lives in `ui_drive`, tested.
+            use homelab_client::ui_drive::End;
+            let driven = homelab_client::ui_drive::drive(&mut line, step, &cache).await;
+            for n in &driven.notes {
+                eprintln!("note: {n}");
+            }
+            match driven.end {
+                End::Print(r) => ui_print(
+                    &homelab_proto::RpcResponse {
+                        id: 0,
+                        ok: r.ok,
+                        message: r.message,
+                        deferred: None,
+                    },
+                    json,
+                ),
+                End::Refused(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+                End::HostGone => die("the host closed the line before it answered"),
+            }
         }
         "patch" => rpc(&host, &token, Command::PatchFleet).await,
         "config" => rpc(&host, &token, Command::GetConfig).await,
@@ -2356,6 +2420,46 @@ async fn rpc_collect(
 ) -> (bool, Option<homelab_proto::FleetState>) {
     let (ok, fleet, _) = rpc_exchange(host, token, command, true).await;
     (ok, fleet)
+}
+
+/// review L3: the host line `ui_drive` sends its steps over.
+struct HostLine<'a> {
+    host: &'a str,
+    token: &'a str,
+}
+
+impl homelab_client::ui_drive::Line for HostLine<'_> {
+    async fn send(&mut self, step: UiStep) -> Option<homelab_client::ui_drive::Reply> {
+        rpc_reply(
+            self.host,
+            self.token,
+            Command::Ui {
+                step,
+                client_version: CLIENT_VERSION.to_string(),
+            },
+        )
+        .await
+        .map(|r| homelab_client::ui_drive::Reply {
+            ok: r.ok,
+            message: r.message,
+        })
+    }
+}
+
+/// drive-reach: the dashboard's answer to `ui state` (the screen and the
+/// hash of its control catalog); the process ends when the host does not
+/// answer.
+async fn ui_state_reply(host: &str, token: &str) -> homelab_proto::RpcResponse {
+    rpc_reply(
+        host,
+        token,
+        Command::Ui {
+            step: UiStep::State,
+            client_version: CLIENT_VERSION.to_string(),
+        },
+    )
+    .await
+    .unwrap_or_else(|| die("the host closed the line before it answered"))
 }
 
 /// A `homelab ui` answer printed, and the process ended with its code.

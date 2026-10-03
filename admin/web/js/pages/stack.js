@@ -50,9 +50,32 @@ import {
 } from "/static/kp/js/datatable.js";
 import { attachLogs } from "/static/kp/js/log.js";
 import { watchTabOverflow } from "/static/kp/js/overlays.js";
-import { viaForm } from "../drivable.js";
+import { declareField, viaForm } from "../drivable.js";
 import { mount as mountSecrets } from "./secrets.js";
 import { emptyState, section } from "../ui.js";
+
+// review M5: every page field Live view may set is declared (drivable.js
+// `declareField`); the client and the dashboard refuse any other.
+const LOGS_APP = declareField({
+  id: "logs-app",
+  page: "stack",
+  what: "the app whose logs a stack's Logs tab shows",
+});
+const LOGS_SINCE = declareField({
+  id: "logs-since",
+  page: "stack",
+  what: "how far back the logs go",
+});
+const LOGS_Q = declareField({
+  id: "logs-q",
+  page: "stack",
+  what: "filter the log lines by text",
+});
+const LOGS_FOLLOW = declareField({
+  id: "logs-follow",
+  page: "stack",
+  what: "follow new log lines",
+});
 
 /** How far back the history tab reads. */
 const HISTORY_DAYS = 30;
@@ -577,7 +600,7 @@ function historyTab(panel, params) {
 function logsTab(panel, params) {
   const keys = sortKeys();
   let settings = logSettings(new URLSearchParams(location.search));
-  const appSel = h("select", { class: "kp-field__input", id: "logs-app" });
+  const appSel = h("select", { class: "kp-field__input", id: LOGS_APP });
   let appsShown = "";
   // The choices follow the fleet: a deep link can arrive before it does.
   const fillApps = () => {
@@ -598,13 +621,13 @@ function logsTab(panel, params) {
   const unsubApps = subscribe(fillApps);
   const sinceSel = h(
     "select",
-    { class: "kp-field__input", id: "logs-since" },
+    { class: "kp-field__input", id: LOGS_SINCE },
     ...SINCE.map((c) => h("option", { value: c.value }, c.label)),
   );
   sinceSel.value = settings.since;
   const text = h("input", {
     class: "kp-field__input",
-    id: "logs-q",
+    id: LOGS_Q,
     type: "search",
     placeholder: "Only lines containing…",
   });
@@ -612,7 +635,7 @@ function logsTab(panel, params) {
   const follow = h("input", {
     class: "kp-field__check",
     type: "checkbox",
-    id: "logs-follow",
+    id: LOGS_FOLLOW,
   });
   follow.checked = settings.follow;
   const refresh = h(

@@ -165,6 +165,7 @@ async fn fix_239_what_the_tab_could_not_do_reaches_the_driver() {
             fix: Some("its rows are: media/web/web".into()),
             page: Some("/fleetview".into()),
             dialog: None,
+            ..TabAnswer::default()
         },
     )
     .unwrap();
@@ -220,4 +221,118 @@ async fn fix_239_a_click_while_a_server_form_is_open_says_to_press_or_close() {
             .contains("homelab ui press"),
         "{answer}"
     );
+}
+
+/// covers: drive-reach (Kenny, 2026-10-03: "Claude must always be able to
+/// reach every control"). A name no page declares is answered by the
+/// dashboard itself, before any tab looks, with the closest real controls
+/// and the line that clicks one; the refusal is kept, with its control, in
+/// the bounded log `homelab ui refusals` reads (it was recorded nowhere).
+#[tokio::test(start_paused = true)]
+async fn drive_reach_an_unknown_control_is_refused_with_the_closest_and_recorded() {
+    let (d, live) = driver("unknown");
+    let answer = d
+        .step("wsl", Scope::Operate, click("edit-schedul", Some("s1")))
+        .await;
+    assert_eq!(answer["ok"], false, "{answer}");
+    let why = answer["refusal"]["why"].as_str().unwrap_or_default();
+    assert!(
+        why.contains("no page declares a control edit-schedul"),
+        "{answer}"
+    );
+    let fix = answer["refusal"]["fix"].as_str().unwrap_or_default();
+    assert!(fix.contains("schedule-menu (on schedules"), "{fix}");
+    assert!(fix.contains("homelab ui click"), "{fix}");
+    // No tab was asked: nothing went out as a click.
+    assert!(
+        !live
+            .events("drive")
+            .iter()
+            .any(|e| e["kind"] == "step" && e["applied"] == true),
+        "a refused name reached the tabs"
+    );
+    // review M3: the refusals are read on their own, not in every state.
+    let state = d.step("wsl", Scope::Read, UiStep::Refusals).await;
+    assert_eq!(state["refusals"]["total"], 1, "{state}");
+    let r = &state["refusals"]["refusals"][0];
+    assert_eq!(r["control"], "edit-schedul");
+    assert_eq!(r["row"], "s1");
+    assert_eq!(r["verb"], "click");
+    // The catalog this release serves, for the client's own check.
+    let c = d.step("wsl", Scope::Read, UiStep::Controls).await;
+    let cat: Value = serde_json::from_str(c["text"].as_str().unwrap_or("{}")).unwrap();
+    let ids: Vec<&str> = cat["controls"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|c| c["id"].as_str()).collect())
+        .unwrap_or_default();
+    assert!(ids.contains(&"schedule-menu") && ids.len() > 40, "{ids:?}");
+}
+
+/// covers: drive-reach. An old control name still goes to the tab, which
+/// clicks what it became (drivable.js `resolve`).
+#[tokio::test(start_paused = true)]
+async fn drive_reach_an_old_control_name_is_not_refused_by_the_dashboard() {
+    let (d, live) = driver("old-name");
+    let pending = send(&d, click("edit-schedule", Some("s1")));
+    let seq = waiting(&d, &live, 1).await;
+    d.claim(seq, "tab-a").unwrap();
+    d.taken(
+        seq,
+        "tab-a",
+        TabAnswer {
+            ok: true,
+            dialog: Some("Schedule s1".into()),
+            ..TabAnswer::default()
+        },
+    )
+    .unwrap();
+    // review: the menu press goes to the tab as a step of its own.
+    let seq = waiting(&d, &live, 2).await;
+    d.claim(seq, "tab-a").unwrap();
+    d.taken(
+        seq,
+        "tab-a",
+        TabAnswer {
+            ok: true,
+            dialog: Some("Edit schedule".into()),
+            ..TabAnswer::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(pending.await.unwrap()["ok"], true);
+}
+
+/// covers: drive-reach. `goto` takes every address the router knows, the
+/// retired ones included, and keeps where the router's redirect lands it.
+#[tokio::test(start_paused = true)]
+async fn drive_reach_goto_an_old_address_lands_on_its_new_home() {
+    let (d, _live) = driver("goto-old");
+    for (from, to) in [
+        ("/status", "/inbox"),
+        ("/home", "/apps"),
+        ("/schedules", "/activity?view=planned"),
+        ("/secrets", "/stacks/media/settings?section=secrets"),
+        (
+            "/stacks/media/firewall",
+            "/stacks/media/settings?section=firewall",
+        ),
+    ] {
+        let a = d
+            .step("wsl", Scope::Operate, UiStep::Goto { path: from.into() })
+            .await;
+        assert_eq!(a["ok"], true, "{from}: {a}");
+        assert_eq!(a["state"]["page"], to, "{from}");
+    }
+    let a = d
+        .step(
+            "wsl",
+            Scope::Operate,
+            UiStep::Goto {
+                path: "/inbx".into(),
+            },
+        )
+        .await;
+    assert_eq!(a["ok"], false);
+    let why = a["refusal"]["why"].as_str().unwrap_or_default();
+    assert!(why.contains("the closest: /inbox"), "{a}");
 }

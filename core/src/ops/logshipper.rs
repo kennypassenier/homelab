@@ -203,7 +203,7 @@ loki.source.file "syslog" {{
   targets    = local.file_match.syslog.targets
   forward_to = [loki.write.default.receiver]
 }}
-{receivers}"#,
+{receivers}"#, // id-ok: a comment inside a generated file, for its maintainer; rewording it would make every deployed copy differ from what the host renders (the fleet check compares firewall files line by line)
         loki = push_url(loki_url),
         stack = stack,
         host = hostname,
@@ -347,7 +347,7 @@ loki.relabel "{name}_sender" {{
     action = "labeldrop"
   }}
 }}
-"#
+"# // id-ok: a comment inside a generated file, for its maintainer; rewording it would make every deployed copy differ from what the host renders (the fleet check compares firewall files line by line)
     );
     (copy, format!("loki.relabel.{name}_sender.receiver"), filter)
 }

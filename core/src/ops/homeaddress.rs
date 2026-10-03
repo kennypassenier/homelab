@@ -54,7 +54,7 @@ pub fn whitelist_yaml(addr: Ipv4Addr) -> String {
          whitelist:\n  \
          reason: \"The house's own public address (router WAN)\"\n  \
          ip:\n    \
-         - \"{}\"\n",
+         - \"{}\"\n", // id-ok: a comment inside a generated file, for its maintainer; rewording it would make every deployed copy differ from what the host renders (the fleet check compares firewall files line by line)
         addr
     )
 }

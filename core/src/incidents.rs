@@ -38,7 +38,7 @@ impl Sink for RecordingSink<'_> {
 /// replayable shell script (AR16).
 pub fn commands_script(events: &[PipelineEvent]) -> String {
     let mut out = String::from(
-        "#!/bin/sh\n# Replay of the exact commands this operation ran (AR16).\n# Review before executing — this script mutates the host.\nset -x\n",
+        "#!/bin/sh\n# Replay of the exact commands this operation ran.\n# Review before executing — this script mutates the host.\nset -x\n",
     );
     for ev in events {
         if let PipelineEvent::Line { msg, .. } = ev

@@ -844,7 +844,7 @@ fn draw_help(f: &mut Frame, tab: Tab) {
         ))))
         .chain(std::iter::once(Line::from(Span::styled(
             "  host settings (nightly hour, retention, webhook): the admin \
-             dashboard, or `homelab host apply` (fix-110)",
+             dashboard, or `homelab host apply`",
             THEME.muted_style(),
         ))))
         .collect();

@@ -1148,12 +1148,15 @@ fn host_config_view(path: &str, raw: &str) -> Result<homelab_proto::HostConfigFi
         let json = serde_json::to_value(v).map_err(|e| e.to_string())?;
         values.insert(key.clone(), homelab_core::hostconfig::redact(key, &json));
     }
+    let (known_keys, defaults) = homelab_core::hostconfig::host_facts();
     Ok(homelab_proto::HostConfigFile {
         path: path.to_string(),
         sha256: homelab_core::manifest::sha256_hex(raw.as_bytes()),
         values,
         secrets_set,
         unknown: unknown_keys(&table),
+        known_keys,
+        defaults,
     })
 }
 
@@ -3768,7 +3771,9 @@ span_days = 7\n";
         assert_eq!(v["entries"][0]["name"], "backup");
     }
 
-    /// covers: feat-secrets-6 (Kenny, 2026-10-03, "Alle drie"): a
+    /// covers: feat-secrets-6
+    ///
+    /// Kenny, 2026-10-03, "Alle drie": a
     /// reveal and a copy each leave one history line — what Activity reads —
     /// naming who and which secret, and neither history.jsonl nor audit.log
     /// ever holds the value itself. A reveal from an old dashboard (no
@@ -8601,7 +8606,11 @@ where
         // silently ignored `data_mounts` on 2026-08-31 and came up without
         // a container's disks.
         if let Some(why) = unknown_field_refusal(&value, &req) {
-            tracing::warn!(cmd = req.command.name(), "fix-211: {}", why);
+            tracing::warn!(
+                cmd = req.command.name(),
+                "refused an unknown field: {}",
+                why
+            );
             let resp = RpcResponse {
                 id: req.id,
                 ok: false,
@@ -8861,7 +8870,7 @@ async fn park_after_night(
     .unwrap_or(false);
     if parked {
         tracing::warn!(
-            "scheduler: nightly update for {} FAILED — automatic updates parked, backups continue (H8, fix-59); investigate, then resume with `homelab enable {}`",
+            "scheduler: nightly update for {} FAILED — automatic updates parked, backups continue; investigate, then resume with `homelab enable {}`",
             name,
             name
         );
@@ -11994,7 +12003,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
             if let Err(e) = append_audit(&audit_path, &audit) {
                 tracing::warn!("audit.log: could not record the exec :: {}", e);
             }
-            info!("A6 {}", audit.trim_end());
+            info!("audit: {}", audit.trim_end());
             match homelab_core::executor::pct_sh(&exec, vmid, &command, 120).await {
                 Ok(out) => RpcResponse {
                     id: req.id,
@@ -12596,7 +12605,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                         .settings
                         .write()
                         .unwrap_or_else(PoisonError::into_inner) = *view;
-                    info!("settings updated via G8");
+                    info!("settings updated by a client");
                     RpcResponse {
                         id: req.id,
                         ok: true,
@@ -12850,7 +12859,7 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
                         );
                     }
-                    info!("host.toml applied from config/host.toml (fix-110)");
+                    info!("host.toml applied from config/host.toml");
                     RpcResponse {
                         id: req.id,
                         ok: true,

@@ -99,7 +99,7 @@ pub async fn set_enabled(ctx: &OpCtx<'_>, stack_name: &str, enabled: bool) -> Op
 /// reboot. Only `homelab disable` clears onboot.
 ///
 /// fix-59: only the automatic updates are parked; the nightly backup goes on.
-pub const AUTO_PARK_NOTICE: &str = "nightly update failed — automatic updates parked (H8): the \
+pub const AUTO_PARK_NOTICE: &str = "nightly update failed — automatic updates parked: the \
      nightly backup still runs, updates wait until `homelab enable`; onboot and the running \
      containers are left as they were";
 

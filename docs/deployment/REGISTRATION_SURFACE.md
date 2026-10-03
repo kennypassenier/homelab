@@ -159,7 +159,7 @@ printed in the format `homelab check` uses (`host/src/main.rs:3198`):
 
 ```text
   [noted] syncthing — retired 2026-09-27 (stack, vmid 108) — kept: restic syncthing-config; /appdata /appdata/syncthing/syncthing-config; vault /var/lib/homelab/secrets/syncthing
-      remedy: kept on purpose until you decide (ask-9); `homelab wipe syncthing` deletes exactly these after you type the name
+      remedy: kept on purpose until you decide; `homelab wipe syncthing` deletes exactly these after you type the name
 ```
 
 **Worked example: wipe what a destroyed stack kept.** Workstation, any

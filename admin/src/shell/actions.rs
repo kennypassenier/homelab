@@ -1448,7 +1448,7 @@ impl Actions {
         Ok(serde_json::json!({
             "stack": stack,
             "files": diffs,
-            "note": "secrets are never part of this: neither side carries them (D6, F291)",
+            "note": "secrets are never part of this: neither side carries them",
         }))
     }
 

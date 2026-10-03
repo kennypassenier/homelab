@@ -429,9 +429,12 @@ fn a_stack_whose_logs_never_arrive_is_reported() {
         "the finding must say which reading failed: {}",
         out[0].what
     );
+    // It says what went wrong in words; the register id F79 it exists for
+    // stays in the code's comment (fix-guards-8: no register id in text a
+    // person reads).
     assert!(
-        out[0].what.contains("F79"),
-        "and point at the fault it exists for: {}",
+        out[0].what.contains("without the container name") && !out[0].what.contains("F79"),
+        "and say what the fault is, in words: {}",
         out[0].what
     );
 }

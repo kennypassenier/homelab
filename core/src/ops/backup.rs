@@ -554,7 +554,7 @@ pub(crate) async fn backup_impl<'a>(
             }
             return Err(CoreError::SafetyAbort(format!(
                 "stack '{}' would back up into the repository '{}-config', which stack '{}' \
-                 already owns :: repositories are named after the owning app (D25), so both \
+                 already owns :: repositories are named after the owning app, so both \
                  stacks write into ONE history and the retention pass afterwards applies this \
                  stack's tiers to the other stack's snapshots. The stack recorded first keeps \
                  the repository; rename the app in this stack file",
@@ -568,7 +568,7 @@ pub(crate) async fn backup_impl<'a>(
             Level::Warn,
             format!(
                 "[owner] stack '{}' also claims '{}' but was recorded later — it is the \
-                 newcomer and ITS backup is refused, not this one (T82)",
+                 newcomer and ITS backup is refused, not this one",
                 other, owner
             ),
         );
@@ -1216,7 +1216,7 @@ pub fn resolve_night(
     };
     let Some(run) = snap.run else {
         return Err(format!(
-            "snapshot '{}' of '{}' carries no night tag (it is older than fix-112), so the \
+            "snapshot '{}' of '{}' carries no night tag (it was taken before snapshots carried one), so the \
              other repositories cannot be matched to it — restore that app alone with `--app \
              {}`, or restore 'latest'. Nothing has been stopped",
             wanted, owner, owner
@@ -1334,8 +1334,8 @@ pub fn restore_confirmed(stack: &str, confirm: Option<&str>) -> Result<(), CoreE
             stack, typed
         ))),
         None => Err(CoreError::SafetyAbort(format!(
-            "restore of '{}' refused: the request carries no typed stack name — a client from \
-             before fix-64 cannot restore; update it (`homelab restore` asks for the name, \
+            "restore of '{}' refused: the request carries no typed stack name — a client too old to send \
+             one cannot restore; update it (`homelab restore` asks for the name, \
              `--yes` answers it for scripts)",
             stack
         ))),
@@ -1666,7 +1666,7 @@ pub async fn restore_app(
             format!(
                 "[restore] --no-safety-copy: the current data of {} is overwritten without a \
                  copy, and restic writes over it in place — files the snapshot does not have \
-                 stay behind (fix-112)",
+                 stay behind",
                 m.stack_name
             ),
         );

@@ -326,7 +326,10 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         // dashboard's read does not mirror as a copyable line.
         | ReadSnapshotFile { .. }
         | RevealSecret { .. }
-        | SetSecret { .. } => return None,
+        | SetSecret { .. }
+        // redesign-stackhub-2: the stack hub's "Push the env…"; the CLI
+        // seals an env the way it always did, with a deploy.
+        | SealEnv { .. } => return None,
     }
     Some(parts.join(" "))
 }

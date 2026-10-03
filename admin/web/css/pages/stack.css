@@ -12,6 +12,12 @@
   --sh-warn: var(--warning-foreground, var(--warning));
   --sh-bad: var(--destructive);
   --sh-info: var(--info-foreground, var(--info));
+  /* The Host kit's key row and segmented switch read these (host.css
+     defines them under .hk-page only). */
+  --hk-r: var(--radius, 0.5rem);
+  --hk-r-sm: calc(var(--radius, 0.5rem) * 0.6);
+  --hk-line: color-mix(in oklab, var(--border) 85%, transparent);
+  --hk-soft: color-mix(in oklab, var(--muted) 55%, var(--card));
 }
 .sh-page .mono {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
@@ -202,24 +208,14 @@
   line-height: 1.6;
   font-variant-numeric: tabular-nums;
 }
-.sh-keys {
+.sh-tabbar .hk-keys {
   margin: 0 0 10px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-.sh-keys span {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
 }
 @media (max-width: 75rem) {
   .sh-tabbar {
     grid-template-columns: minmax(0, 1fr);
   }
-  .sh-keys {
+  .sh-tabbar .hk-keys {
     display: none;
   }
 }
@@ -584,32 +580,6 @@
 .sh-logcard {
   min-inline-size: 0;
 }
-.sh-seg {
-  display: inline-grid;
-  grid-auto-flow: column;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.sh-seg button {
-  font: inherit;
-  font-size: var(--kp-text-sm);
-  padding: 5px 12px;
-  background: transparent;
-  color: var(--muted-foreground);
-  border: 0;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.sh-seg button[aria-pressed="true"] {
-  background: var(--muted);
-  color: var(--foreground);
-  font-weight: 600;
-}
-.sh-seg button:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
 .sh-follow {
   display: inline-flex;
   align-items: center;
@@ -821,5 +791,33 @@
   .sh-page *,
   .sh-page *::before {
     transition: none !important;
+  }
+}
+
+/* ---------- phone (review 3, DESIGN_LANGUAGE line 30: one column) ---------- */
+@media (max-width: 30rem) {
+  /* The foundation draws two tiles a row under 30rem; the design language
+     says one, and a label or its context wraps instead of being cut. */
+  .sh-page .nx-kpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sh-page .nx-kpi__label,
+  .sh-page .nx-kpi__ctx {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+}
+/* A table as cards (the kp datatable's own container query, 40rem): a
+   row's actions wrap inside the card rather than running past its edge. */
+@container kp-table (max-width: 40rem) {
+  .sh-table td.row-actions {
+    white-space: normal;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  .sh-table td.row-actions > * + * {
+    margin-inline-start: 0;
   }
 }

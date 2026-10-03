@@ -504,13 +504,13 @@ export function attentionItems(x) {
       key: "no-env",
       tone: "warn",
       title: `The host holds no sealed env for ${name}`,
-      text: "Running apps are fine; the next deploy refuses to start until the .env is pushed through latch.",
+      text: "Running apps are fine; a rebuilt container would come up without its secrets until the host keeps a copy of each env file.",
       act: {
-        kind: "go",
-        tab: "settings",
-        section: "secrets",
-        label: "Open its secrets",
-        title: "Settings ▸ Secrets: what this stack reads from latch",
+        kind: "action",
+        action: "seal-env",
+        label: "Push the env…",
+        title:
+          "Copy every secret file on the container that the host's vault lacks into the vault; nothing in the container changes",
       },
     });
   if (s && !s.enabled)
@@ -583,24 +583,67 @@ function agoWords(seconds) {
 /**
  * @typedef {{key: string, label: string, value: string, unit?: string,
  *   ctx: string, tone?: "ok" | "warn" | "bad" | null, tab: string,
- *   title?: string}} HubKpi
+ *   href?: string, spark?: number[], title?: string}} HubKpi
+ * @typedef {{total: number, hourly: number[]}} RestartsDay
  */
 
+/** The `/data/charts` panel that counts restarts per app per hour. */
+const RESTARTS_PANEL = /^restarts \(last hour\)/i;
+
 /**
- * The five tiles (demo): Apps up, Restarts, Last backup, Errors in logs ·
- * 1 h, Matches its files — each a link into its tab.
- * @param {{s: Stack | null | undefined, last: number | null, night: string,
+ * Restarts in the last 24 h from `/data/charts?stack=…&range=24h`: the
+ * restarts panel counts each app's restarts in the hour before each point
+ * (`changes(container_start_time_seconds[1h])`), 6 min apart; every 10th
+ * point counted back from `to` is one whole hour, so those 24 summed over
+ * the apps are the hourly counts (oldest first) and their sum the total.
+ * Null when the panel is missing or Prometheus failed it.
+ * @param {any} body
+ * @returns {RestartsDay | null}
+ */
+export function restartsDay(body) {
+  const p = (body?.panels ?? []).find((/** @type {any} */ x) =>
+    RESTARTS_PANEL.test(x?.panel?.title ?? ""),
+  );
+  if (!p || p.error || typeof body?.to !== "number") return null;
+  const to = body.to;
+  const hourly = Array(24).fill(0);
+  for (const sr of p.series ?? [])
+    for (const [t, v] of sr.points ?? []) {
+      if (typeof t !== "number" || typeof v !== "number") continue;
+      const back = to - t;
+      // A point within half a step of the hour is that hour's count.
+      const h = Math.round(back / 3600);
+      if (h < 0 || h > 23 || Math.abs(back - h * 3600) > 30) continue;
+      hourly[23 - h] += Math.max(0, Math.round(v));
+    }
+  return { total: hourly.reduce((a, b) => a + b, 0), hourly };
+}
+
+/** The restarts counted since each container started (the host's
+ * RestartCount): the fallback without Prometheus, and for native units.
+ * @param {Stack} s */
+const restartsSinceCreated = (s) =>
+  s.restarts ?? (s.apps ?? []).reduce((n, a) => n + a.restarts, 0);
+
+/**
+ * The five tiles (demo): Apps up, Restarts · 24 h with its sparkline, Last
+ * backup, Errors in logs · 1 h, Matches its files — each a link into what
+ * shows it. `restarts24`: the 24 h reading ([`restartsDay`]); undefined
+ * while it is read, null without Prometheus (or for a native stack, which
+ * cAdvisor does not see) — then the counter since each container started,
+ * linked to the Apps tab that lists it per app.
+ * @param {{s: Stack | null | undefined, stack?: string,
+ *   last: number | null, night: string,
  *   errors: number | null | undefined, drift: Drift | null | undefined,
- *   now: number}} x
+ *   restarts24?: RestartsDay | null, now: number}} x
  * @returns {HubKpi[]}
  */
 export function hubKpis(x) {
   const s = x.s;
   const total = s?.apps_total ?? 0;
   const up = s?.apps_running ?? 0;
-  const restarts = s
-    ? (s.restarts ?? (s.apps ?? []).reduce((n, a) => n + a.restarts, 0))
-    : null;
+  const day = x.restarts24 ?? null;
+  const restarts = day ? day.total : s ? restartsSinceCreated(s) : null;
   const back = x.last != null ? agoParts(x.now - x.last) : null;
   const d = x.drift;
   return [
@@ -619,16 +662,32 @@ export function hubKpis(x) {
       tone: s && up < total ? "bad" : null,
       tab: "apps",
     },
-    {
-      key: "restarts",
-      label: "Restarts",
-      value: restarts == null ? "—" : String(restarts),
-      ctx: "since each container started",
-      tone: restarts != null && restarts > 0 ? "warn" : null,
-      tab: "history",
-      title:
-        "How often the apps' containers restarted since they were last created; the host counts no time window",
-    },
+    day
+      ? {
+          key: "restarts",
+          label: "Restarts",
+          value: String(day.total),
+          ctx: "in the last 24 h",
+          tone: day.total >= 5 ? "bad" : day.total > 0 ? "warn" : null,
+          tab: "apps",
+          href: `/charts?stack=${encodeURIComponent(x.stack ?? s?.name ?? "")}&range=24h`,
+          spark: day.hourly,
+          title:
+            "How often the apps restarted in the last 24 hours, hour by hour; opens the stack's charts",
+        }
+      : {
+          key: "restarts",
+          label: "Restarts",
+          value: restarts == null ? "—" : String(restarts),
+          ctx:
+            x.restarts24 === undefined && s && !s.native
+              ? "reading the last 24 h…"
+              : "since each container started",
+          tone: restarts != null && restarts > 0 ? "warn" : null,
+          tab: "apps",
+          title:
+            "How often the apps' containers restarted since they were last created (no metrics for a 24 h window); the Apps tab lists them per app",
+        },
     {
       key: "backup",
       label: "Last backup",
@@ -692,7 +751,19 @@ export function hubKpis(x) {
  * One line of "Is it healthy?".
  * @typedef {{key: string, text: string, tone: Tone, verdict: string,
  *   check?: string}} Health
+ * @typedef {{key: string, name: string, stack?: string | null,
+ *   state: string, checked_at?: number | null}} WatchTarget
  */
+
+/** An app's own health check as a tone: healthy (or a unit that is
+ * active) ok, starting needs you, anything else failed.
+ * @param {string} h @returns {Tone} */
+const healthTone = (h) =>
+  h === "healthy" || h === "active"
+    ? "ok"
+    : h === "starting" || h === "activating" || h === "reloading"
+      ? "warn"
+      : "bad";
 
 /** @param {Tone} t */
 const verdictOf = (t) =>
@@ -708,10 +779,15 @@ const verdictOf = (t) =>
 
 /**
  * Every check on the stack in one list — the answer to "why is it red?"
- * (FLOWS.md §1.3): what the host measures, what the hub reads, and each
- * manual check a deploy left open.
+ * (FLOWS.md §1.3): what the host measures, each app's own health check
+ * (docker's healthcheck; `systemctl is-active` for a native unit), whether
+ * its web addresses answer (the dashboard's minute watch, `watch`), what
+ * the hub reads, and each manual check a deploy left open. No restart loop
+ * counts the last 24 h (`restarts24`) — without that reading, the counter
+ * since each container started.
  * @param {{s: Stack | null | undefined, night: string,
  *   diskPct: number | null | undefined, drift: Drift | null | undefined,
+ *   restarts24?: RestartsDay | null, watch?: WatchTarget[] | null,
  *   manual?: {id: string, text: string, app: string,
  *     answer: {label: string, tone: "ok" | "warn" | "bad"}}[]}} x
  * @returns {Health[]}
@@ -720,9 +796,12 @@ export function healthChecks(x) {
   const s = x.s;
   /** @type {Health[]} */
   const out = [];
-  /** @param {string} key @param {string} text @param {Tone} tone */
-  const add = (key, text, tone) =>
-    out.push({ key, text, tone, verdict: verdictOf(tone) });
+  /**
+   * @param {string} key @param {string} text @param {Tone} tone
+   * @param {string} [verdict]
+   */
+  const add = (key, text, tone, verdict) =>
+    out.push({ key, text, tone, verdict: verdict ?? verdictOf(tone) });
   if (!s) add("deployed", "The container exists on the host", "warn");
   else {
     add(
@@ -738,12 +817,49 @@ export function healthChecks(x) {
           : `Every app's container is running (${s.apps_total - s.apps_running} stopped)`,
         s.apps_running === s.apps_total ? "ok" : "bad",
       );
-    const r = (s.apps ?? []).reduce((n, a) => n + a.restarts, 0);
+    for (const a of s.apps ?? []) {
+      if (s.native)
+        add(
+          `health:${a.name}`,
+          `${a.name}: systemctl is-active`,
+          a.health ? healthTone(a.health) : "unknown",
+          a.health ?? "not measured",
+        );
+      else
+        add(
+          `health:${a.name}`,
+          `${a.name}: its own health check`,
+          a.health ? healthTone(a.health) : "info",
+          a.health ?? "not declared",
+        );
+    }
+    const day = x.restarts24 ?? null;
+    const r = day ? day.total : restartsSinceCreated(s);
     add(
       "restarts",
-      `No restart loop (${r} ${r === 1 ? "restart" : "restarts"})`,
+      `No restart loop (${r} ${r === 1 ? "restart" : "restarts"}${day ? " in 24 h" : " since each container started"})`,
       r === 0 ? "ok" : r < 5 ? "warn" : "bad",
     );
+    if (x.watch) {
+      const mine = x.watch.filter((w) => w.stack === s.name);
+      const down = mine.filter((w) => w.state === "down");
+      const flaky = mine.filter((w) => w.state === "flaky");
+      const unread = mine.filter((w) => !w.checked_at);
+      const text = `Its web addresses answer (${mine.length} watched)`;
+      if (!mine.length)
+        add("web", "Its web addresses answer", "info", "none watched");
+      else if (down.length)
+        add("web", text, "bad", `${down.map((w) => w.name).join(", ")} down`);
+      else if (flaky.length)
+        add(
+          "web",
+          text,
+          "warn",
+          `${flaky.map((w) => w.name).join(", ")} flaky`,
+        );
+      else if (unread.length === mine.length) add("web", text, "unknown");
+      else add("web", text, "ok");
+    }
   }
   add(
     "disk",
@@ -775,7 +891,11 @@ export function healthChecks(x) {
     add(
       "env",
       "Env sealed on the host",
-      s.env_sealed === false ? "warn" : "ok",
+      s.env_sealed === false
+        ? "warn"
+        : s.env_sealed === true
+          ? "ok"
+          : "unknown",
     );
   const d = x.drift;
   add(
@@ -794,8 +914,18 @@ export function healthChecks(x) {
   return out;
 }
 
-/** Who started an operation (FLOWS.md §1.3, History: You / Claude /
+/** Who started an operation (FLOWS.md §1.3, History: Kenny / Claude /
  * Nightly round). @typedef {"you" | "claude" | "night"} Who */
+
+/** The person the dashboard serves, named as the demo names him. */
+const PERSON = "Kenny";
+
+/** History's "Started by" chips, in the demo's words. */
+export const WHO_CHIPS = /** @type {const} */ ([
+  { value: "you", label: PERSON },
+  { value: "claude", label: "Claude" },
+  { value: "night", label: "Nightly round" },
+]);
 
 /**
  * @param {import("./activity.js").Entry} e
@@ -810,7 +940,7 @@ export function whoOf(e) {
       label: /live view/i.test(by) ? "Claude · Live view" : by,
     };
   if (by) return { key: "you", label: by };
-  if (e.req != null) return { key: "you", label: "asked" };
+  if (e.req != null) return { key: "you", label: PERSON };
   return { key: "night", label: "nightly round" };
 }
 
@@ -1181,3 +1311,78 @@ export function fileList(paths) {
     .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
     .map((path) => ({ path, what: what(path) }));
 }
+
+/** Month names as the demo writes them (en-GB says "Sept"). */
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/**
+ * A moment as History's demo writes it, "30 Sep 12:14" in the browser's
+ * clock (with the year when it is not this one): never the ambiguous
+ * "02/10/2026".
+ * @param {number} unix
+ * @param {number} [now] unix seconds, for the year
+ * @param {string} [timeZone]
+ */
+export function shortWhen(unix, now = Date.now() / 1000, timeZone) {
+  const fmt = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone,
+  });
+  /** @param {number} u */
+  const parts = (u) => {
+    const p = fmt.formatToParts(new Date(u * 1000));
+    /** @param {string} t */
+    const g = (t) => p.find((x) => x.type === t)?.value ?? "";
+    return {
+      day: String(Number(g("day"))),
+      month: MONTHS[Number(g("month")) - 1] ?? "",
+      year: g("year"),
+      time: `${g("hour")}:${g("minute")}`,
+    };
+  };
+  const a = parts(unix);
+  const year = a.year !== parts(now).year ? ` ${a.year}` : "";
+  return `${a.day} ${a.month}${year} ${a.time}`;
+}
+
+/** What History's Incidents says with none kept. @param {string} name */
+export const noIncidentsText = (name) =>
+  `No incident bundles kept for ${name}.`;
+
+/**
+ * What the More menu would draw, as one string: a fleet push that changes
+ * nothing in it must not redraw it (that took the keyboard focus away).
+ * @param {{group: string, items: {key?: string, label: string,
+ *   hint?: string, disabled?: string | null, danger?: boolean}[]}[]} groups
+ */
+export const menuSignature = (groups) =>
+  JSON.stringify(
+    groups.map((g) => [
+      g.group,
+      g.items.map((i) => [
+        i.key ?? "",
+        i.label,
+        i.hint ?? "",
+        i.disabled ?? "",
+        !!i.danger,
+      ]),
+    ]),
+  );

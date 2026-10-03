@@ -59,6 +59,13 @@ pub async fn spawn_demo_metrics() -> String {
 #[derive(serde::Deserialize)]
 struct PromQ {
     query: String,
+    /// `query_range`'s window; absent on an instant query.
+    #[serde(default)]
+    start: Option<f64>,
+    #[serde(default)]
+    end: Option<f64>,
+    #[serde(default)]
+    step: Option<f64>,
 }
 
 /// One made-up `matrix`/`vector` answer, chosen by matching a fragment of
@@ -66,7 +73,53 @@ struct PromQ {
 /// `by (...)` clause, with one point per series (good enough for both
 /// `query` and `query_range`: `panelEl` only ever reads the last point).
 async fn prom_query(Query(q): Query<PromQ>) -> Response {
+    if let (Some(start), Some(end), Some(step)) = (q.start, q.end, q.step)
+        && let Some(body) = demo_restarts(&q.query, start as u64, end as u64, step as u64)
+    {
+        return axum::Json(body).into_response();
+    }
     axum::Json(demo_metric_body(&q.query)).into_response()
+}
+
+/// redesign-stackhub-2: the stack charts' "Restarts (last hour)" series
+/// over a range, point by point as Prometheus answers
+/// `changes(container_start_time_seconds[1h])`: the stack's first app
+/// restarted once 2.5 h before the window's end and twice 9.2 h before
+/// it, every other app never — so the hub's Restarts tile reads 3 in the
+/// last 24 h with two bumps on its sparkline.
+fn demo_restarts(query: &str, start: u64, end: u64, step: u64) -> Option<serde_json::Value> {
+    if !query.contains("container_start_time_seconds") || step == 0 {
+        return None;
+    }
+    let stack = selector_label(query, "stack")?;
+    let apps = demo_stack_apps(&stack);
+    let events = [
+        end.saturating_sub(9000),
+        end.saturating_sub(33_120),
+        end.saturating_sub(33_100),
+    ];
+    let result: Vec<serde_json::Value> = apps
+        .iter()
+        .enumerate()
+        .map(|(i, app)| {
+            let values: Vec<serde_json::Value> = (0..)
+                .map(|k| start + k * step)
+                .take_while(|t| *t <= end)
+                .map(|t| {
+                    let n = if i == 0 {
+                        events.iter().filter(|e| **e + 3600 > t && **e <= t).count()
+                    } else {
+                        0
+                    };
+                    serde_json::json!([t, n.to_string()])
+                })
+                .collect();
+            serde_json::json!({ "metric": { "name": app }, "values": values })
+        })
+        .collect();
+    Some(
+        serde_json::json!({ "status": "success", "data": { "resultType": "matrix", "result": result } }),
+    )
 }
 
 async fn loki_query_range(Query(q): Query<PromQ>) -> Response {
@@ -634,11 +687,13 @@ pub async fn run_demo(
                             name: a,
                             running: true,
                             restarts: 0,
+                            health: None,
                         })
                         .collect(),
                     drift: false,
                     applied_hash: String::new(),
                     env_sealed: false,
+                    env_sealed_read: Some(false),
                     online: true,
                     enabled: true,
                     // redesign-host-3: made-up but plausible use per guest

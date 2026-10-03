@@ -92,7 +92,7 @@ export function findingRows(findings) {
  * The flags the TUI shows beside a stack, in its words: [OFF] parked,
  * [CHANGED] its files differ from what the host applied, [NOENV] the host
  * holds no sealed env (a deploy fails closed).
- * @param {{enabled: boolean, env_sealed?: boolean}} s
+ * @param {{enabled: boolean, env_sealed?: boolean | null}} s
  * @param {DriftState | null | undefined} drift
  * @returns {{label: string, tone: "warn" | "bad", title: string}[]}
  */

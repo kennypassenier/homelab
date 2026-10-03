@@ -283,6 +283,7 @@ pub fn stack_of(c: &Command) -> String {
         | ReleaseUpdateNative { stack }
         | RollbackNative { stack, .. }
         | ForgetStack { stack }
+        | SealEnv { stack }
         | DestroyRecorded { stack, .. }
         | StageNativeBinary { stack, .. } => stack.clone(),
         WipeRetired { name, .. } => name.clone(),

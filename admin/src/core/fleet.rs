@@ -81,8 +81,10 @@ pub struct StackSummary {
     /// recorded it ("a1b2c3d4e5f6 + 1 uncommitted file(s)").
     pub applied_source: Option<String>,
     /// TUI parity ([NOENV]): whether the host holds the stack's sealed env;
-    /// without it a deploy fails closed.
-    pub env_sealed: bool,
+    /// without it a deploy fails closed. redesign-stackhub-1: None = the
+    /// host has not checked yet, or an older host that always said true —
+    /// shown as unknown, never as sealed.
+    pub env_sealed: Option<bool>,
     /// fix-229: the stack runs native services; the stack page offers the
     /// native actions only then.
     pub native: bool,
@@ -102,6 +104,10 @@ pub struct AppSummary {
     pub name: String,
     pub running: bool,
     pub restarts: u32,
+    /// redesign-stackhub-2: the app's own health check (docker's
+    /// healthcheck, or `systemctl is-active` for a native unit); None when
+    /// it declares none or the host is older.
+    pub health: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -136,11 +142,12 @@ pub fn fleet_view(state: &FleetState, measured_at: u64) -> FleetView {
                     name: a.name.clone(),
                     running: a.running,
                     restarts: a.restarts,
+                    health: a.health.clone(),
                 })
                 .collect(),
             uptime_s: s.usage.as_ref().map(|u| u.uptime_s),
             applied_source: s.applied_source.clone(),
-            env_sealed: s.env_sealed,
+            env_sealed: s.env_sealed_read,
             native: s.native,
             applied_hash: s.applied_hash.clone(),
             component_digests: s.component_digests.clone(),

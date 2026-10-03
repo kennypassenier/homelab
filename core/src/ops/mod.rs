@@ -66,6 +66,7 @@ pub mod resize;
 pub mod restarthost;
 pub mod restoredrill;
 pub mod retired;
+pub mod sealenv;
 pub mod secondcopy;
 pub mod secrets;
 pub mod selfupdate;

@@ -3,13 +3,15 @@
 // (reported to the foundation): the hub header (identity mark, title,
 // state, meta chips, actions with a grouped menu), a grouped menu of
 // buttons, the side filter column of a log explorer (DESIGN_LANGUAGE §12),
-// a one-of segmented switch, a card foot, a status dot, a chip, a feed list
-// and the 14-night strip. Styled by `css/pages/stack.css` under `sh-`, on
+// a card foot, a status dot, a chip and the 14-night strip. The key row
+// and the one-of segmented switch are the Host page kit's (hostkit.js),
+// not copies of them (review 6). Styled by `css/pages/stack.css` under `sh-`, on
 // top of the foundation's `nx-` classes where those exist (nx-head,
 // title-row, nx-head-right, actions-row).
 
 import { el, ensureStyle } from "./hostkit.js";
 import { liveStatus, stackMark } from "../ui.js";
+import { menuSignature } from "../stackhub.js";
 
 export { el, ensureStyle };
 
@@ -142,10 +144,36 @@ export function groupedMenu(spec) {
     list.hidden = true;
     btn.setAttribute("aria-expanded", "false");
     if (focus) btn.focus();
+    if (pending) {
+      const p = pending;
+      pending = null;
+      fill(p);
+    }
   };
   btn.addEventListener("click", () => (list.hidden ? open() : close()));
+  // review 4: the stack page calls `fill` on every fleet push. Redrawing an
+  // open menu threw away the entry that had the keyboard focus, so it is
+  // redrawn only when what it shows changed, and never while it is open
+  // (the change waits until it closes).
+  let drawn = "";
+  /** @type {{group: string, items: MenuEntry[]}[] | null} */
+  let pending = null;
   /** @param {{group: string, items: MenuEntry[]}[]} groups */
   const fill = (groups) => {
+    const sig = menuSignature(groups);
+    if (sig === drawn) {
+      pending = null;
+      return;
+    }
+    if (!list.hidden) {
+      pending = groups;
+      return;
+    }
+    drawn = sig;
+    draw(groups);
+  };
+  /** @param {{group: string, items: MenuEntry[]}[]} groups */
+  const draw = (groups) => {
     list.replaceChildren(
       ...groups.flatMap((g) => [
         el("p", { class: "sh-menu__group", role: "presentation" }, g.group),
@@ -364,45 +392,6 @@ export function sideFilters(spec) {
 }
 
 /**
- * A one-of segmented switch (the Logs window: 15 min · 1 h · 24 h · 7 d).
- * @param {{label: string, items: readonly {value: string, label: string}[],
- *   value: string, onChange: (v: string) => void,
- *   mark?: (b: HTMLElement, v: string) => void}} spec
- */
-export function segSwitch(spec) {
-  let cur = spec.value;
-  const btns = spec.items.map((it) => {
-    const b = el(
-      "button",
-      {
-        type: "button",
-        "data-value": it.value,
-        onclick: () => {
-          cur = it.value;
-          paint();
-          spec.onChange(cur);
-        },
-      },
-      it.label,
-    );
-    spec.mark?.(b, it.value);
-    return b;
-  });
-  const paint = () =>
-    btns.forEach((b, i) =>
-      b.setAttribute("aria-pressed", String(spec.items[i].value === cur)),
-    );
-  paint();
-  return {
-    el: el(
-      "div",
-      { class: "sh-seg", role: "group", "aria-label": spec.label },
-      btns,
-    ),
-  };
-}
-
-/**
  * A card's foot line (DESIGN_LANGUAGE §5): the source on the left, a link
  * or "read 4 s ago" on the right.
  * @param {Child[]} parts
@@ -439,13 +428,3 @@ export function nightStrip(cells) {
     ),
   );
 }
-
-/** The compact key row under the tabs. @param {[string, string][]} pairs */
-export const keyRow = (pairs) =>
-  el(
-    "p",
-    { class: "sh-keys", "aria-label": "Keyboard shortcuts" },
-    pairs.map(([k, w]) =>
-      el("span", null, el("kbd", { class: "nx-kbd" }, k), w),
-    ),
-  );

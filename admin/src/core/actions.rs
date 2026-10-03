@@ -106,6 +106,10 @@ pub enum ActionKind {
     /// into the `Material` this command is built from. See
     /// `admin::shell::secrets`.
     ChangeSecret,
+    /// redesign-stackhub-2: "Push the env…" from the stack hub's no-env
+    /// row — every secret file on the container that the host's vault
+    /// lacks is copied into it (`Command::SealEnv`).
+    SealEnv,
 }
 
 /// What the shell has to read before the command can be built.
@@ -231,6 +235,7 @@ impl ActionKind {
         ActionKind::Apply,
         ActionKind::RestartHost,
         ActionKind::ChangeSecret,
+        ActionKind::SealEnv,
     ];
 
     /// The name in a URL: `deploy`, `backup-native`, ...
@@ -270,6 +275,7 @@ impl ActionKind {
             Apply => "apply",
             RestartHost => "restart-host",
             ChangeSecret => "change-secret",
+            SealEnv => "seal-env",
         }
     }
 
@@ -417,6 +423,7 @@ impl ActionKind {
             Apply => "Deploy all changes",
             RestartHost => "Restart the host",
             ChangeSecret => "Change a secret",
+            SealEnv => "Push the env",
         }
     }
 
@@ -496,6 +503,9 @@ impl ActionKind {
             RestartHost => "restarts the host daemon; running jobs are refused while a job runs",
             ChangeSecret => {
                 "write one secret through latch (one .env or one latch_files entry); the other files latch holds for this stack are untouched; redeploy to apply it to the running container"
+            }
+            SealEnv => {
+                "copy every secret file on the container that the host's vault has no copy of into the vault, so the next deploy and a rebuild can read it; nothing in the container changes"
             }
         }
     }
@@ -1098,6 +1108,9 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
             app: a.app.clone(),
         }],
         (Resize, Material::Manifest(m)) => vec![Command::ApplyResources(manifest(&m)?)],
+        (SealEnv, _) => vec![Command::SealEnv {
+            stack: stack.clone(),
+        }],
         (Enable, _) => vec![Command::SetStackEnabled {
             stack,
             enabled: true,

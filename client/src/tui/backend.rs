@@ -292,6 +292,7 @@ fn demo_fleet() -> ServerMsg {
         name: n.into(),
         running: run,
         restarts: 0,
+        health: None,
     };
     ServerMsg::State(Box::new(FleetState {
         status_measured_at: None,
@@ -332,6 +333,7 @@ fn demo_fleet() -> ServerMsg {
                 drift: false,
                 applied_hash: String::new(),
                 env_sealed: true,
+                env_sealed_read: Some(true),
                 enabled: true,
                 online: true,
             },
@@ -351,6 +353,7 @@ fn demo_fleet() -> ServerMsg {
                 drift: true,
                 applied_hash: String::new(),
                 env_sealed: true,
+                env_sealed_read: Some(true),
                 enabled: true,
                 online: true,
             },
@@ -366,6 +369,7 @@ fn demo_fleet() -> ServerMsg {
                 drift: false,
                 applied_hash: String::new(),
                 env_sealed: true,
+                env_sealed_read: Some(true),
                 enabled: true,
                 online: true,
             },

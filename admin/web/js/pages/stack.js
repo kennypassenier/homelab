@@ -39,7 +39,7 @@ import {
   openPublishDialog,
   settingsTab,
 } from "../editpanels.js";
-import { formatDateTime, humanDuration } from "../format.js";
+import { humanDuration } from "../format.js";
 import { openIncident } from "../incident.js";
 import { inboxNow, onInbox } from "../inbox.js";
 import { finished } from "../jobs.js";
@@ -72,9 +72,14 @@ import {
   logSources,
   logView,
   logWindow,
+  menuSignature,
   moreGroups,
+  noIncidentsText,
+  restartsDay,
+  shortWhen,
   sizeFacts,
   staleFor,
+  WHO_CHIPS,
 } from "../stackhub.js";
 import { stackEntries, stackIncidents, stackChecks } from "../stacktabs.js";
 import { current, subscribe } from "../store.js";
@@ -99,11 +104,10 @@ import {
   foot,
   groupedMenu,
   hubHeader,
-  keyRow,
   nightStrip,
-  segSwitch,
   sideFilters,
 } from "./stackkit.js";
+import { keyRow, segSwitch } from "./hostkit.js";
 
 /** How far back the History tab reads. */
 const HISTORY_DAYS = 30;
@@ -344,6 +348,8 @@ const DANGER_BTN = declare({
  * @returns {() => void}
  */
 export function mount(root, params) {
+  // host.css: the key row and the segmented switch are the Host kit's.
+  ensureStyle("/css/pages/host.css");
   ensureStyle("/css/pages/stack.css");
   root.classList.add("sh-page");
   const name = params.name;
@@ -929,6 +935,11 @@ function overviewTab(panel, c) {
   /** @type {any[] | null} */
   let history = null;
   let checkedAtS = 0;
+  /** undefined while read; null without Prometheus (or a native stack).
+   * @type {import("../stackhub.js").RestartsDay | null | undefined} */
+  let restarts24;
+  /** @type {import("../stackhub.js").WatchTarget[] | null} */
+  let watch = null;
 
   const paint = () => {
     const now = nowS();
@@ -937,12 +948,17 @@ function overviewTab(panel, c) {
       noBackup: bk.noBackup,
       now,
     });
+    // A native stack's units are not containers: cAdvisor has no restart
+    // series for them, so the host's own counter is what there is.
+    const day = S.s?.native ? null : restarts24;
     const k = hubKpis({
       s: S.s,
+      stack: name,
       last: stand.last,
       night: stand.night,
       errors,
       drift: S.drift,
+      restarts24: day,
       now,
     });
     for (const t of k) {
@@ -955,6 +971,8 @@ function overviewTab(panel, c) {
         ctx: t.ctx,
         tone: t.tone ?? null,
         title: t.title,
+        spark: t.spark ?? [],
+        href: t.href ?? stackHref(name, /** @type {any} */ (t.tab)),
       });
       if (S.fleetRead) delete tile.el.dataset.loading;
     }
@@ -993,6 +1011,8 @@ function overviewTab(panel, c) {
         night: stand.night,
         diskPct,
         drift: S.drift,
+        restarts24: day,
+        watch,
         manual: manual ?? [],
       });
       checksList.replaceChildren(
@@ -1083,12 +1103,20 @@ function overviewTab(panel, c) {
         paint();
       })(),
       (async () => {
+        // One read for the disk (its newest point) and the restarts of the
+        // last 24 h (hour by hour, for the tile's sparkline).
         const r = await fetchJson(
-          `/data/charts?stack=${enc}&range=1h`,
+          `/data/charts?stack=${enc}&range=24h`,
           "the charts",
           c.signal,
         );
         diskPct = r.ok ? diskOf(r.body) : null;
+        restarts24 = r.ok ? restartsDay(r.body) : null;
+        paint();
+      })(),
+      (async () => {
+        const r = await fetchJson("/data/watch", "the watch", c.signal);
+        watch = r.ok ? (r.body.targets ?? []) : null;
         paint();
       })(),
       (async () => {
@@ -1256,21 +1284,22 @@ function feedRow(r) {
       "time",
       {
         datetime: new Date(r.start * 1000).toISOString(),
-        title: formatDateTime(r.start),
+        // The full moment with its year (a `now` of 0 is never this year).
+        title: shortWhen(r.start, 0),
       },
       whenText(r.start),
     ),
   );
 }
 
-/** "1 h ago" for today, else the date and time. @param {number} unix */
+/** "1 h ago" for today, else "30 Sep 12:14" (the demo's). @param {number} unix */
 function whenText(unix) {
   const d = nowS() - unix;
   if (d < 86400) {
     const p = agoParts(d);
     return `${p.value} ${p.unit}`;
   }
-  return formatDateTime(unix);
+  return shortWhen(unix);
 }
 
 // ─────────────────────────────────────────────────────────────── Logs
@@ -1352,7 +1381,7 @@ function logsTab(panel, c) {
   drivable(followIn, LOG_FOLLOW, name);
   const win = segSwitch({
     label: "Time window",
-    items: LOG_WINDOWS,
+    items: [...LOG_WINDOWS],
     value: st.since,
     onChange: (v) => {
       st.since = v;
@@ -1811,12 +1840,16 @@ function datatable(spec) {
           el(
             "tr",
             null,
-            spec.columns.map((col) =>
+            spec.columns.map((col, i) =>
               el(
                 "th",
                 {
                   "data-kp-sort": col.sort ?? null,
                   class: col.cls ?? null,
+                  // review 3: the table opens sorted by its first column, so
+                  // the phone's card sort reads "Sort by App · Ascending"
+                  // rather than "Sort by None" beside a dead Ascending.
+                  "aria-sort": i === 0 && col.sort ? "ascending" : null,
                 },
                 col.label,
               ),
@@ -2059,11 +2092,7 @@ function historyTab(panel, c) {
     { class: "sh-count-text", role: "status" },
     "reading…",
   );
-  const chips = [
-    { value: "you", label: "You" },
-    { value: "claude", label: "Claude" },
-    { value: "night", label: "Nightly round" },
-  ].map((ch) => {
+  const chips = WHO_CHIPS.map((ch) => {
     const b = drivable(
       el(
         "button",
@@ -2072,7 +2101,7 @@ function historyTab(panel, c) {
           class: "nx-chip-toggle",
           "aria-pressed": String(who.has(ch.value)),
           "data-value": ch.value,
-          title: `Show only what ${ch.value === "you" ? "a person" : ch.label} started; each click turns it on or off`,
+          title: `Show only what ${ch.label} started; each click turns it on or off`,
         },
         ch.label,
       ),
@@ -2242,13 +2271,7 @@ function historyTab(panel, c) {
                 ),
               );
             })
-          : [
-              el(
-                "li",
-                { class: "sh-feed__empty" },
-                `No incidents: no operation on ${name} has failed.`,
-              ),
-            ]),
+          : [el("li", { class: "sh-feed__empty" }, noIncidentsText(name))]),
       );
     } else
       incList.replaceChildren(

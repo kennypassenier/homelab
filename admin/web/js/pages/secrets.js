@@ -388,9 +388,19 @@ export function mount(root, opts = {}) {
   });
 
   const list = h("nav", { class: "nx-card sx-stacks", "aria-label": "Stacks" });
-  const detail = h("section", { class: "nx-card", "aria-labelledby": "sd-h" });
+  // redesign-stackhub review 5: inside the stack hub the hub's Secrets
+  // section is the card — the pane is not a second card inside it, names no
+  // stack (the page is that stack's) and links to no other.
+  const detail =
+    one != null
+      ? h("div", {
+          class: "sx-one-detail",
+          role: "group",
+          "aria-label": `${one}'s secrets`,
+        })
+      : h("section", { class: "nx-card", "aria-labelledby": "sd-h" });
   const drawer = h("aside", {
-    class: "nx-card sx-drawer",
+    class: one != null ? "sx-drawer sx-drawer--one" : "nx-card sx-drawer",
     "aria-labelledby": "ch-h",
   });
 
@@ -711,16 +721,20 @@ export function mount(root, opts = {}) {
     const names = fleet();
     if (!s) {
       detail.replaceChildren(
-        h(
-          "div",
-          { class: "nx-card__head" },
-          h("h2", { id: "sd-h" }, sk("8rem")),
-          h(
-            "p",
-            null,
-            "What this stack's lxc-compose.yml lists under latch_secrets and latch_files.",
-          ),
-        ),
+        ...(one != null
+          ? []
+          : [
+              h(
+                "div",
+                { class: "nx-card__head" },
+                h("h2", { id: "sd-h" }, sk("8rem")),
+                h(
+                  "p",
+                  null,
+                  "What this stack's lxc-compose.yml lists under latch_secrets and latch_files.",
+                ),
+              ),
+            ]),
         h("div", null, ...skRows()),
         foot(),
       );
@@ -776,7 +790,10 @@ export function mount(root, opts = {}) {
           ),
           h(
             "a",
-            { class: "sx-linkbtn", href: stackHref(s, "settings") },
+            {
+              class: "sx-linkbtn",
+              href: `${stackHref(s, "settings")}?section=files`,
+            },
             "Open its stack file",
           ),
         ),
@@ -786,35 +803,40 @@ export function mount(root, opts = {}) {
     );
     if (hintP instanceof HTMLElement) hintP.style.margin = "12px 0 0";
     detail.replaceChildren(
-      h(
-        "div",
-        { class: "nx-card__head" },
-        h(
-          "h2",
-          { id: "sd-h" },
-          h("span", { class: "nx-row" }, swatch(s, names), s),
-        ),
-        h(
-          "p",
-          null,
-          "What this stack's lxc-compose.yml lists under latch_secrets and latch_files.",
-        ),
-        h(
-          "div",
-          { class: "nx-card__tools" },
-          h(
-            "a",
-            {
-              class: "kp-button kp-button--sm kp-button--ghost",
-              href: stackHref(s),
-              title: `Open ${s}'s page`,
-            },
-            "Open stack",
-          ),
-        ),
-      ),
+      ...(one != null ? [] : [detailHead(s, names)]),
       h("div", null, ...body),
       foot(),
+    );
+  }
+  /** The pane's head on the Secrets page: the stack, what it lists, and
+   * the way to its page. @param {string} s @param {string[]} names */
+  function detailHead(s, names) {
+    return h(
+      "div",
+      { class: "nx-card__head" },
+      h(
+        "h2",
+        { id: "sd-h" },
+        h("span", { class: "nx-row" }, swatch(s, names), s),
+      ),
+      h(
+        "p",
+        null,
+        "What this stack's lxc-compose.yml lists under latch_secrets and latch_files.",
+      ),
+      h(
+        "div",
+        { class: "nx-card__tools" },
+        h(
+          "a",
+          {
+            class: "kp-button kp-button--sm kp-button--ghost",
+            href: stackHref(s),
+            title: `Open ${s}'s page`,
+          },
+          "Open stack",
+        ),
+      ),
     );
   }
   const skRows = () =>
@@ -839,8 +861,10 @@ export function mount(root, opts = {}) {
       h(
         "span",
         null,
-        h("kbd", { class: "nx-kbd" }, "↑ ↓"),
-        " stack · ",
+        // One stack in the hub: no other stack to move to.
+        ...(one != null
+          ? []
+          : [h("kbd", { class: "nx-kbd" }, "↑ ↓"), " stack · "]),
         h("kbd", { class: "nx-kbd" }, "Esc"),
         " hide all",
       ),

@@ -6,7 +6,7 @@ import { humanDuration } from "./format.js";
 /**
  * @typedef {{step: string, start: number, end: number, changed: boolean}} Step
  * @typedef {{kind: "op", start: number, end: number, label: string,
- *   subject?: string | null, req?: number | null, ok: boolean,
+ *   subject?: string | null, req?: number | null, by?: string | null, ok: boolean,
  *   deferred?: string | null, error?: string | null, steps: Step[]}} OpEntry
  * @typedef {{kind: "phase", start: number, end: number, name: string,
  *   count: number}} PhaseEntry
@@ -59,6 +59,15 @@ export function entryOutcome(e) {
 }
 
 /**
+ * redesign-3.71 secrets: a reveal or a copy of a secret, as the host
+ * records it (label `reveal-secret` / `copy-secret`, subject "revealed
+ * gateway/traefik/.env", `by` the person or "Claude (Live view)").
+ * @param {Entry} e
+ */
+export const isSecretAudit = (e) =>
+  e.kind === "op" && (e.label === "reveal-secret" || e.label === "copy-secret");
+
+/**
  * The history table's rows, newest first.
  * @param {Entry[]} entries
  */
@@ -66,6 +75,19 @@ export function historyRows(entries) {
   return entries
     .filter((e) => e && (e.kind === "op" || e.kind === "phase"))
     .map((e) => {
+      if (e.kind === "op" && isSecretAudit(e)) {
+        // "Kenny revealed gateway/traefik/.env": who, what, never the value.
+        const who = e.by ?? (e.req != null ? "asked" : "host");
+        return {
+          start: e.start,
+          what: `${who} ${e.subject ?? e.label}`,
+          took: null,
+          duration: "—",
+          outcome: entryOutcome(e),
+          by: who,
+          detail: e.error ?? "the value itself is never recorded",
+        };
+      }
       const took = e.end >= e.start && e.end > 0 ? e.end - e.start : null;
       const detail =
         e.kind === "op"

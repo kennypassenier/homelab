@@ -46,6 +46,7 @@
 //! | `HOMELAB_ADMIN_LIVE_MAX_PAUSE_MAX_S` | 3600 | Live view: the longest pause `HOMELAB_ADMIN_LIVE_MAX_PAUSE_S` may be set to |
 //! | `HOMELAB_ADMIN_DRIVE_IDLE_S` | 20 | a driver who sends nothing for this long no longer holds the tabs |
 //! | `HOMELAB_ADMIN_RELEASE_AFTER_JOB_S` | 30 | a confirmed dialog whose job has ended, with no step since, is closed and the tabs given back this long after |
+//! | `HOMELAB_ADMIN_VIEWER_NAME` | none: the Cloudflare Access login | redesign-3.71 secrets: the name a reveal or copy is recorded under in Activity |
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -112,6 +113,10 @@ pub struct ActConfig {
     /// Live view: how long a confirmed, finished dialog waits before it is
     /// released (`core::drive::RELEASE_AFTER_JOB_S` by default).
     pub drive_release_after_job_s: i64,
+    /// redesign-3.71 secrets: the name a reveal or copy is recorded under
+    /// in Activity ("Kenny revealed gateway/traefik/.env"); unset, the
+    /// Cloudflare Access login is used.
+    pub viewer_name: Option<String>,
 }
 
 /// arch-edit-txn, arch-push-credential: how the working copy reaches its
@@ -330,6 +335,7 @@ pub fn from_env(lookup: &dyn Fn(&str) -> Option<String>) -> Result<ActConfig, St
             0,
             &mut why,
         ) as i64,
+        viewer_name: non_empty("HOMELAB_ADMIN_VIEWER_NAME").map(|n| n.trim().to_string()),
         git: {
             let remote =
                 non_empty("HOMELAB_ADMIN_GIT_REMOTE").unwrap_or_else(|| DEFAULT_REMOTE.into());

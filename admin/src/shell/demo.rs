@@ -403,6 +403,10 @@ pub async fn run_demo(
     );
     let _ = live.publish("link", &serde_json::json!({ "up": true, "host_version": DEMO_VERSION, "host_build": "demo host in homelab-admin" }));
     let mut next: u64 = now_s() << 20;
+    // redesign-3.71 secrets: what this demo host was asked to reveal or
+    // copy, as the real host records it in history.jsonl (never a value),
+    // so the screen tests can see Activity name it.
+    let mut history: Vec<homelab_core::history::HistoryEntry> = Vec::new();
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     loop {
         tokio::select! {
@@ -413,9 +417,29 @@ pub async fn run_demo(
                     let _ = s.send(id);
                 }
                 let answer = move |message: String| RpcResponse { id, ok: true, message, deferred: None };
+                // redesign-3.71 secrets: a made-up value at once (the real
+                // host reads its vault, no job), recorded as the real host
+                // records it.
+                if let Command::RevealSecret { stack, secret, audit } = &command {
+                    let purpose = audit.as_ref().map(|a| a.purpose).unwrap_or_default();
+                    history.push(homelab_core::ops::secrets::reveal_history(
+                        now_s(),
+                        stack,
+                        secret,
+                        purpose,
+                        audit.as_ref().map(|a| a.by.clone()),
+                        Some(id),
+                        None,
+                    ));
+                    let rel = homelab_core::ops::secrets::latch_rel_path(stack, secret);
+                    let _ = reply.send(Ok(answer(format!("DEMO_VALUE=made-up-for-{}", rel.replace('/', "-")))));
+                    continue;
+                }
                 if command.is_read_only() {
                     let body = match command {
-                        Command::History { .. } => serde_json::json!({ "entries": [] }).to_string(),
+                        Command::History { since, limit } => serde_json::json!({
+                            "entries": homelab_core::history::select(history.clone(), since, limit),
+                        }).to_string(),
                         Command::Incidents { .. } => serde_json::json!({ "incidents": [] }).to_string(),
                         // One made-up notice, so the notification centre has
                         // an expandable row for the screen tests to click.

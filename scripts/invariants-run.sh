@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # invariants-run.sh — build the admin dashboard's demo-host build, run it
 # against a throwaway config, drive it with the Playwright smoke in
-# admin/web/test-e2e/invariants.e2e.js, and tear everything down again.
+# admin/web/test-e2e/*.e2e.js (invariants.e2e.js and the pages' own, e.g.
+# secrets.e2e.js), and tear everything down again.
 #
 # Nothing here touches a real host, a real stack or any of Kenny's
 # machines: HOMELAB_ADMIN_DEMO_HOST=1 (feat-platform-10, "Only in test
@@ -152,6 +153,7 @@ HOMELAB_ADMIN_TOKEN="$token" \
 HOMELAB_ADMIN_SECRET_KEY="$secret_key" \
 HOMELAB_ADMIN_PUBLIC_URL="https://localhost:$port" \
 HOMELAB_ADMIN_DEMO_HOST=1 \
+HOMELAB_ADMIN_VIEWER_NAME="Kenny" \
 HOMELAB_ADMIN_DEMO_STACKS="admin,kp-soft,gateway,films,notes,oldstack" \
 HOMELAB_ADMIN_DATA_DIR="$workdir/admin-data" \
 HOMELAB_ADMIN_GIT_REMOTE="$fixture_repo" \
@@ -193,8 +195,8 @@ if [ -n "${INVARIANTS_SCRIPT:-}" ]; then
   INVARIANTS_BASE_URL="$base_url" INVARIANTS_TOKEN="$token" node "$INVARIANTS_SCRIPT"
 elif [ -n "${INVARIANTS_ONLY:-}" ]; then
   INVARIANTS_BASE_URL="$base_url" INVARIANTS_TOKEN="$token" \
-    node --test --test-name-pattern="$INVARIANTS_ONLY" test-e2e/invariants.e2e.js
+    node --test --test-concurrency=1 --test-name-pattern="$INVARIANTS_ONLY" test-e2e/*.e2e.js
 else
   INVARIANTS_BASE_URL="$base_url" INVARIANTS_TOKEN="$token" \
-    node --test test-e2e/invariants.e2e.js
+    node --test --test-concurrency=1 test-e2e/*.e2e.js
 fi

@@ -25,6 +25,7 @@ pub mod notify;
 pub mod presetedit;
 pub mod releaseoptions;
 pub mod schedule;
+pub mod secrets;
 pub mod stackedit;
 pub mod stackedit_apps;
 pub mod stackedit_checks;

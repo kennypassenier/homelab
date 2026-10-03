@@ -61,6 +61,10 @@ async function logIn(context) {
  * @param {import("playwright").BrowserContext} context
  */
 async function freshPage(context) {
+  // A case that can hang for minutes is a defect: every Playwright wait in
+  // a case's context ends after 20 s unless the case asks for longer.
+  context.setDefaultTimeout(20000);
+  context.setDefaultNavigationTimeout(20000);
   await logIn(context);
   const page = await context.newPage();
   await page.goto(`${BASE}/stacks`);

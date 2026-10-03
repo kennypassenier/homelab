@@ -89,7 +89,10 @@ export function kpi(k) {
     k.target ? "a" : "div",
     {
       class: "nx-kpi mk-kpi",
-      ...(k.target ? { href: `#${k.target}` } : {}),
+      // A same-site path (invariant 35), the card's id as its hash.
+      ...(k.target
+        ? { href: `${location.pathname}${location.search}#${k.target}` }
+        : {}),
     },
     label,
     value,

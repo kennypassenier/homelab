@@ -98,7 +98,13 @@ test("the host page's facts and bars read in the units a person reads", () => {
   assert.equal(f["Load (1 min)"], "2.50");
   assert.equal(f["RAM promised to stacks"], "40.0 GB (125% of RAM)");
   assert.equal(f["Stacks online"], "1 of 2");
-  assert.equal(f["Up for"], "not reported by the host");
+  // redesign-host-4: this fleet comes from a host too old to say.
+  assert.equal(f["Up for"], "not reported by this host version");
+  const up = hostFacts(
+    { ...fleet, host: { ...fleet.host, uptime_s: 90000 } },
+    { version: "3.71.0" },
+  ).find((x) => x.label === "Up for");
+  assert.equal(up?.value, "1 day 1 h");
   assert.deepEqual(hostBars(fleet), [
     { label: "CPU", pct: 7, value: "7%" },
     { label: "RAM", pct: 50, value: "16.0 GB of 32.0 GB" },

@@ -89,3 +89,49 @@ fn redesign_host_3_a_guests_cpu_share_reaches_the_browser() {
     let json = serde_json::to_value(&v).unwrap();
     assert_eq!(json["stacks"][0]["cpu_permille"], 110);
 }
+
+#[test]
+fn redesign_host_4_the_hosts_new_facts_reach_the_browser_and_an_older_hosts_absence_too() {
+    let mut h = host();
+    h.uptime_s = Some(1_048_683);
+    h.release = Some(homelab_proto::ReleaseVerdict {
+        signed: true,
+        detail: "verified".into(),
+    });
+    h.guests_usage = Some(vec![homelab_proto::GuestUse {
+        vmid: 113,
+        usage: homelab_proto::GuestUsage {
+            cpu_permille: 125,
+            ram_used_mb: 3072,
+            ram_max_mb: 8192,
+            uptime_s: 10,
+        },
+    }]);
+    let v = fleet_view(
+        &FleetState {
+            status_measured_at: Some(9),
+            host: h,
+            stacks: vec![],
+        },
+        5,
+    );
+    let json = serde_json::to_value(&v).unwrap();
+    assert_eq!(json["host"]["uptime_s"], 1_048_683);
+    assert_eq!(json["host"]["release"]["signed"], true);
+    assert_eq!(json["host"]["guests_usage"][0]["vmid"], 113);
+    assert_eq!(json["host"]["guests_usage"][0]["cpu_permille"], 125);
+    // An older host: the keys are absent, which the page reads as "not
+    // reported by this host version".
+    let old = serde_json::to_value(fleet_view(
+        &FleetState {
+            status_measured_at: None,
+            host: host(),
+            stacks: vec![],
+        },
+        5,
+    ))
+    .unwrap();
+    for key in ["uptime_s", "release", "guests_usage"] {
+        assert!(old["host"].get(key).is_none(), "{key} present: {old}");
+    }
+}

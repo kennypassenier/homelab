@@ -308,6 +308,9 @@ fn demo_fleet() -> ServerMsg {
             cores_total: 12,
             load1_x100: 285, // load average 2.85
             disk_detail: None,
+            uptime_s: None,
+            release: None,
+            guests_usage: None,
         },
         // app-knowledge (2026-09-30): the demo fleet is made up, so no real
         // stack or app is named in code.

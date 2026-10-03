@@ -95,6 +95,9 @@ pub struct Shape {
     pub bumps: Vec<(u64, f64, f64)>,
     /// Whole numbers only (a count of sectors, of requests).
     pub whole: bool,
+    /// A steady climb, in the series' unit per day, ending on `last` at
+    /// the window's end (a filesystem filling up).
+    pub per_day: f64,
 }
 
 impl Shape {
@@ -108,7 +111,12 @@ impl Shape {
             night: 0.0,
             bumps: Vec::new(),
             whole: false,
+            per_day: 0.0,
         }
+    }
+    fn per_day(mut self, d: f64) -> Self {
+        self.per_day = d;
+        self
     }
     fn base(mut self, b: f64) -> Self {
         self.base = b;
@@ -168,7 +176,9 @@ impl Shape {
                 } else {
                     ((t as f64 - (w.end as f64 - tail)) / tail).clamp(0.0, 1.0)
                 };
-                let mut v = self.raw(seed, t, now) + off * k;
+                let mut v = self.raw(seed, t, now)
+                    + off * k
+                    + self.per_day * (t as f64 - w.end as f64) / 86_400.0;
                 v = v.max(0.0);
                 if self.whole {
                     v = v.round();
@@ -552,7 +562,9 @@ pub fn body(query: &str, w: &Window, now: u64) -> serde_json::Value {
         return answer(
             "mountpoint",
             &[
-                Shape::new("/", 31.0).base(30.6).jitter(0.002),
+                // redesign-host-4: 31 % full, 0.03 % of the disk a day,
+                // a line the Host page's growth fit reads exactly.
+                Shape::new("/", 31.0).per_day(0.03),
                 Shape::new("/mnt/pve-backup", 58.0)
                     .base(55.0)
                     .jitter(0.002)

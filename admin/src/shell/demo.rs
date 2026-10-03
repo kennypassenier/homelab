@@ -233,6 +233,25 @@ fn demo_nights<'a>(stacks: &'a [String], stack: &'a str) -> impl Iterator<Item =
     (0..12u64).filter(move |i| !(gap && *i == 3))
 }
 
+/// The demo stack `name`'s vmid: its working copy's, or 900 + its place.
+fn demo_vmid(repo: &std::path::Path, name: &str, i: usize) -> u16 {
+    homelab_client::spec::build_manifest(&repo.join("stacks").join(name))
+        .map(|m| m.vmid)
+        .unwrap_or(900 + i as u16)
+}
+
+/// redesign-host-3: made-up but plausible use per guest (the Host page's
+/// memory bars and CPU column), the same in the stack and the host's
+/// per-guest list.
+fn demo_usage(i: usize) -> homelab_proto::GuestUsage {
+    homelab_proto::GuestUsage {
+        cpu_permille: [30, 60, 20, 110, 10, 40][i % 6],
+        ram_used_mb: [512, 1536, 768, 2048, 1024, 640][i % 6],
+        ram_max_mb: [1024, 2048, 1024, 4096, 2048, 1024][i % 6],
+        uptime_s: 86_400 * (i as u64 + 1),
+    }
+}
+
 pub async fn run_demo(
     shared: Shared,
     live: Live,
@@ -271,7 +290,46 @@ pub async fn run_demo(
                     ("/opt".into(), 3.0),
                 ],
                 measured_at: now_s(),
+                // redesign-host-4: made-up but realistic — the root disk is
+                // an SSD, and the pool 41 % full with 412 GB promised to the
+                // guests (the approved demo's numbers).
+                root_disk_kind: Some("SSD".into()),
+                thin_pool: Some(homelab_proto::ThinPoolUse {
+                    data_pct: 41.0,
+                    metadata_pct: 2.4,
+                    promised_gb: 412.0,
+                    volumes: stacks.len() as u32 + 2,
+                }),
             }),
+            // redesign-host-4: up for twelve days and a few hours, a signed
+            // release, and every guest's use — the stacks' own (as below)
+            // and the unmanaged metrics container the demo's `pct list`
+            // names (113), so the Containers table has a number on every
+            // running row.
+            uptime_s: Some(12 * 86_400 + 3 * 3_600 + 17 * 60),
+            release: Some(homelab_proto::ReleaseVerdict {
+                signed: true,
+                detail: "demo host: made up, no binary was checked".into(),
+            }),
+            guests_usage: Some(
+                stacks
+                    .iter()
+                    .enumerate()
+                    .map(|(i, name)| homelab_proto::GuestUse {
+                        vmid: demo_vmid(&repo, name, i),
+                        usage: demo_usage(i),
+                    })
+                    .chain(std::iter::once(homelab_proto::GuestUse {
+                        vmid: 113,
+                        usage: homelab_proto::GuestUsage {
+                            cpu_permille: 125,
+                            ram_used_mb: 3072,
+                            ram_max_mb: 8192,
+                            uptime_s: 12 * 86_400,
+                        },
+                    }))
+                    .collect(),
+            ),
         },
         stacks: stacks
             .iter()
@@ -302,12 +360,7 @@ pub async fn run_demo(
                     enabled: true,
                     // redesign-host-3: made-up but plausible use per guest
                     // (the Host page's memory bars and CPU column).
-                    usage: Some(homelab_proto::GuestUsage {
-                        cpu_permille: [30, 60, 20, 110, 10, 40][i % 6],
-                        ram_used_mb: [512, 1536, 768, 2048, 1024, 640][i % 6],
-                        ram_max_mb: [1024, 2048, 1024, 4096, 2048, 1024][i % 6],
-                        uptime_s: 86_400 * (i as u64 + 1),
-                    }),
+                    usage: Some(demo_usage(i)),
                     applied_source: None,
                     component_digests: Default::default(),
                     native: false,

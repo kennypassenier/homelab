@@ -13,7 +13,7 @@ use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path as UrlPath, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, put};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use tokio::sync::Mutex;
 
@@ -22,7 +22,9 @@ use super::actions_notify::NotifyCenter;
 use super::actions_state::{StateError, read_json, write_json};
 use crate::core::actions::Refusal;
 use crate::core::notify::{Draft, Kind};
-use crate::core::schedule::{self, LastRun, Schedule, ScheduleFile, ScheduleInput};
+use crate::core::schedule::{
+    self, LastRun, Missed, MissedWhy, Schedule, ScheduleFile, ScheduleInput,
+};
 
 pub struct Scheduler {
     path: PathBuf,
@@ -98,6 +100,15 @@ impl Scheduler {
                 for slot in plan.missed {
                     // The newest slot was skipped because a run was going.
                     let was_busy = busy && now - slot <= self.grace_s;
+                    // redesign-schedules-3: the page names the newest one.
+                    s.last_missed = Some(Missed {
+                        slot,
+                        why: if was_busy {
+                            MissedWhy::Busy
+                        } else {
+                            MissedWhy::Down
+                        },
+                    });
                     missed.push((s.clone(), slot, was_busy));
                 }
             }
@@ -132,6 +143,18 @@ impl Scheduler {
                     }
                 }
                 Err(r) => {
+                    {
+                        let mut f = self.state.lock().await;
+                        if let Some(x) = f.schedules.iter_mut().find(|x| x.id == s.id) {
+                            x.last_missed = Some(Missed {
+                                slot,
+                                why: MissedWhy::Refused,
+                            });
+                        }
+                        if let Err(e) = self.save(&f) {
+                            tracing::warn!(error = %e, "schedules not saved");
+                        }
+                    }
                     self.missed_notice(&s, slot, &format!("{}: {}", r.what, r.why))
                         .await
                 }
@@ -249,6 +272,7 @@ impl Scheduler {
             // A new schedule starts now: nothing before it counts as missed.
             handled_until: now,
             last_run: None,
+            last_missed: None,
         };
         let view = {
             let mut f = self.state.lock().await;
@@ -283,6 +307,30 @@ impl Scheduler {
             s.when = input.when;
             s.enabled = input.enabled;
             s.note = input.note;
+            let s = s.clone();
+            self.save(&f).map_err(saved)?;
+            self.view(&s, now)
+        };
+        self.publish_list().await;
+        Ok(view)
+    }
+
+    /// redesign-schedules-2: skip the schedule's next run, `slot`, which
+    /// must be the next run the page showed; the schedule stays on.
+    pub async fn skip(&self, id: &str, slot: i64) -> Result<serde_json::Value, Refusal> {
+        let now = (self.clock)();
+        let view = {
+            let mut f = self.state.lock().await;
+            let Some(s) = f.schedules.iter_mut().find(|s| s.id == id) else {
+                return Err(unknown(id));
+            };
+            s.handled_until = schedule::skip(s, slot, now).map_err(|why| {
+                Refusal::new(
+                    format!("skipping a run of schedule {id}"),
+                    why,
+                    "reload the schedules page and skip the run it shows next",
+                )
+            })?;
             let s = s.clone();
             self.save(&f).map_err(saved)?;
             self.view(&s, now)
@@ -371,6 +419,37 @@ async fn update(
     }
 }
 
+/// The body of `POST /data/schedules/{id}/skip`.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SkipBody {
+    slot: i64,
+}
+
+async fn skip_run(
+    State(s): State<Arc<Scheduler>>,
+    UrlPath(id): UrlPath<String>,
+    b: Result<Json<SkipBody>, JsonRejection>,
+) -> Response {
+    let slot = match b {
+        Ok(Json(b)) => b.slot,
+        Err(e) => {
+            return bad(
+                StatusCode::BAD_REQUEST,
+                Refusal::new(
+                    "skip",
+                    format!("the request body does not read: {}", e.body_text()),
+                    "send {slot: <the next run, unix seconds>}",
+                ),
+            );
+        }
+    };
+    match s.skip(&id, slot).await {
+        Ok(v) => Json(v).into_response(),
+        Err(r) => bad(StatusCode::BAD_REQUEST, r),
+    }
+}
+
 async fn remove(State(s): State<Arc<Scheduler>>, UrlPath(id): UrlPath<String>) -> Response {
     match s.delete(&id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -383,5 +462,6 @@ pub fn router(s: Arc<Scheduler>) -> Router {
     Router::new()
         .route("/data/schedules", get(list).post(create))
         .route("/data/schedules/{id}", put(update).delete(remove))
+        .route("/data/schedules/{id}/skip", post(skip_run))
         .with_state(s)
 }

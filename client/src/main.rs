@@ -1925,7 +1925,7 @@ async fn run(explicit_host: Option<String>) {
                 C_CYAN, tag, C_RESET
             );
             match homelab_client::release::stage_release(&tag) {
-                Ok(binary_b64) => {
+                Ok((binary_b64, proof)) => {
                     if let Some(why) = homelab_client::version::too_large(binary_b64.len()) {
                         die(&why);
                     }
@@ -1936,7 +1936,8 @@ async fn run(explicit_host: Option<String>) {
                     // fix-121: done means the shipped version answered, not
                     // that a restart was scheduled.
                     let expected = homelab_client::release::expected_host_version(&tag);
-                    let ok = rpc_with(&host, &token, Command::SelfUpdateHost { binary_b64 }).await
+                    let ok = rpc_with(&host, &token, Command::SelfUpdateHost { binary_b64, proof })
+                        .await
                         && wait_for_updated_host(&host, &token, expected).await;
                     std::process::exit(if ok { 0 } else { 1 });
                 }
@@ -1992,7 +1993,17 @@ async fn run(explicit_host: Option<String>) {
             );
             // fix-121: the version inside a local file is not known here, so
             // whatever answers after the restart is the one checked.
-            let ok = rpc_with(&host, &token, Command::SelfUpdateHost { binary_b64 }).await
+            // redesign-host-4: a file carries no release signature, so the
+            // host will report itself as not a signed release.
+            let ok = rpc_with(
+                &host,
+                &token,
+                Command::SelfUpdateHost {
+                    binary_b64,
+                    proof: None,
+                },
+            )
+            .await
                 && wait_for_updated_host(&host, &token, None).await;
             std::process::exit(if ok { 0 } else { 1 });
         }

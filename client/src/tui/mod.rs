@@ -133,12 +133,12 @@ pub async fn run(
                         .await
                         .unwrap_or_else(|e| Err(e.to_string()));
                 match staged {
-                    Ok(binary_b64) => {
+                    Ok((binary_b64, proof)) => {
                         let _ = tx
                             .send(log("[release] signature and checksum verified — shipping over the line"))
                             .await;
                         let _ = ctx
-                            .send(homelab_proto::Command::SelfUpdateHost { binary_b64 })
+                            .send(homelab_proto::Command::SelfUpdateHost { binary_b64, proof })
                             .await;
                     }
                     Err(e) => {

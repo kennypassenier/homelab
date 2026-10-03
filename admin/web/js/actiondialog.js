@@ -154,8 +154,11 @@ export async function openAction(stack, action, opts = {}) {
   // Update — the stack hub's button, a Stacks row, the palette — opens the
   // Update flow (see, impact, back up, update, verify, done). Live view
   // drives the action's own form (`driven`), which the server models.
+  // redesign-openpoints-2: an app's Update (the hub's Apps row) opens the
+  // flow with that app picked, not the whole stack.
   if (action === "update" && opts.driven !== true) {
-    openUpdateFlow(stack);
+    const app = opts.preset?.app;
+    openUpdateFlow(stack, typeof app === "string" && app ? app : null);
     return null;
   }
   const catalog = await catalogReady();

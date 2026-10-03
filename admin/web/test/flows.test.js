@@ -24,6 +24,7 @@ import {
   safetyNet,
   scopeOf,
   updateHref,
+  updatesBody,
   whoNotices,
 } from "../js/updateflow.js";
 import { GLOSSARY, shouldTour, tourSteps } from "../js/helptour.js";
@@ -448,4 +449,31 @@ test("redesign-flows-3: the tour is six steps (search, then the areas), shown on
     "Secret",
     "Job",
   ]);
+});
+
+// redesign-openpoints-2: a hub app's Update… (an app on a moving tag) opens
+// the flow with that one app picked: the pull row pulls only that app.
+test("redesign-openpoints-2: one unpinned app picked: the pull row is that app's alone, picked alone, and its request names it", () => {
+  const s = /** @type {any} */ ({ all: false, stack: "kp-soft", app: "cache" });
+  const items = itemsFor(STALE, s);
+  const pull = items.find((i) => i.kind === "pull");
+  assert.equal(pull?.id, "pull:kp-soft", "the row's Live view id stays");
+  assert.equal(pull?.container, "cache");
+  assert.deepEqual([...firstChosen(items, s)], ["pull:kp-soft"]);
+  assert.equal(flowTitle(items, s), "Update kp-soft/cache");
+  assert.deepEqual(
+    JSON.parse(updatesBody(pull ? [pull] : [], new Map()).updates),
+    [{ stack: "kp-soft", kind: "pull", app: "cache" }],
+  );
+  // Without an app the pull row is still every app on a moving tag.
+  const whole = itemsFor(STALE, { all: false, stack: "kp-soft" });
+  assert.deepEqual(
+    JSON.parse(
+      updatesBody(
+        whole.filter((i) => i.kind === "pull"),
+        new Map(),
+      ).updates,
+    ),
+    [{ stack: "kp-soft", kind: "pull" }],
+  );
 });

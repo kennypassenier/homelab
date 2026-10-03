@@ -19,7 +19,10 @@ import { releaseUrl } from "./staleimages.js";
  * stack's Update action, which rolls an app back when it is not healthy.
  * @typedef {{id: string, kind: "pin" | "pull", stack: string,
  *   container: string, key: string | null, from: string, to: string,
- *   major: boolean, notes: string | null}} Item
+ *   major: boolean, notes: string | null, app?: string | null}} Item
+ *   `app` (pull only, redesign-openpoints-2): the one app the pull is for,
+ *   when the opener picked an app on a moving tag (a hub app's Update…);
+ *   absent: every app of the stack on a moving tag.
  * @typedef {{all: true, only?: string[]} |
  *   {all: false, stack: string, app?: string | null}} Scope
  *   `only`: the stacks a Stacks batch ticked (every app of those stacks
@@ -112,12 +115,23 @@ export function itemsFor(staleBody, scope) {
       major: a.major,
       notes: releaseUrl(a.upstream, a.to),
     }));
+  // redesign-openpoints-2: an opener that picked an app no pinned row is
+  // (an app on a moving tag) gets the pull row for that app alone. A pin
+  // key (`<app>/<service>`) whose newer version is gone is no app name.
+  const pullApp =
+    !scope.all &&
+    scope.app &&
+    !scope.app.includes("/") &&
+    !out.some((i) => i.key === scope.app)
+      ? scope.app
+      : null;
   if (!scope.all)
     out.push({
       id: `pull:${scope.stack}`,
       kind: "pull",
       stack: scope.stack,
-      container: "apps on a moving tag",
+      container: pullApp ?? "apps on a moving tag",
+      ...(pullApp ? { app: pullApp } : {}),
       key: null,
       from: "",
       to: "",
@@ -136,7 +150,9 @@ export function itemsFor(staleBody, scope) {
  */
 export function firstChosen(items, scope) {
   if (!scope.all && scope.app) {
-    const one = items.find((i) => i.key === scope.app);
+    const one = items.find(
+      (i) => i.key === scope.app || (i.kind === "pull" && i.app === scope.app),
+    );
     if (one) return new Set([one.id]);
   }
   const pins = items.filter((i) => i.kind === "pin");
@@ -152,7 +168,11 @@ export function firstChosen(items, scope) {
 export function flowTitle(items, scope) {
   const pins = items.filter((i) => i.kind === "pin");
   if (scope.all) return `Update ${plural(pins.length, "app")}`;
-  const one = scope.app && pins.find((i) => i.key === scope.app);
+  const one =
+    scope.app &&
+    items.find(
+      (i) => i.key === scope.app || (i.kind === "pull" && i.app === scope.app),
+    );
   if (one) return `Update ${one.stack}/${one.container}`;
   return `Update ${scope.stack}`;
 }
@@ -178,7 +198,9 @@ export const stacksOf = (chosen) => [...new Set(chosen.map((i) => i.stack))];
 export function restartWords(chosen) {
   return chosen
     .map((i) =>
-      i.kind === "pin" ? i.container : `${i.stack}'s apps on a moving tag`,
+      i.kind === "pin" || i.app
+        ? i.container
+        : `${i.stack}'s apps on a moving tag`,
     )
     .join(", ");
 }
@@ -277,7 +299,10 @@ export const undoWords = () => ({
  */
 export function updatesBody(chosen, moves) {
   const out = chosen.map((i) => {
-    if (i.kind === "pull") return { stack: i.stack, kind: "pull" };
+    if (i.kind === "pull")
+      return i.app
+        ? { stack: i.stack, kind: "pull", app: i.app }
+        : { stack: i.stack, kind: "pull" };
     const m = moves.get(i.id);
     return {
       stack: i.stack,

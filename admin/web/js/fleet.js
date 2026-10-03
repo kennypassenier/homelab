@@ -8,6 +8,7 @@ import { agoText, humanDuration } from "./format.js";
  * @typedef {{name: string, vmid: number, online: boolean, enabled: boolean,
  *   apps_running: number, apps_total: number, restarts?: number,
  *   ram_used_mb?: number | null, ram_max_mb?: number | null,
+ *   cpu_permille?: number | null,
  *   hostname?: string, apps?: App[], uptime_s?: number | null,
  *   applied_source?: string | null, env_sealed?: boolean,
  *   native?: boolean}} Stack

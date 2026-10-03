@@ -1,40 +1,120 @@
-// The host page (feat-overview-2): pve's load and facts, live from the fleet
-// reading; the containers `pct list` reports; and, on request, the doctor's
-// host-level checks (the disk among them), which take about a minute.
+// The Host page (redesign-host, release 3.71.0; Kenny approved the demo
+// 2026-10-03: ~/.local/share/homelab/redesign-3.71/host.html, implemented
+// exactly). It lives under System in the new navigation. Top to bottom:
+// the header (live "Reachable · N ms", Run host checks as the primary
+// action, Open the console and Host log beside it, the rest in `···`), the
+// KPI strip, then two columns — Containers, Host actions grouped by intent
+// and Disk on the left (8/12), Connection, About, Templates and Host checks
+// on the right (4/12) — and last host.toml as a folded card that shows
+// only what the file changes.
+//
+// Data: the fleet store (load, disk detail, stacks' measured use),
+// /data/host/guests (pct list, every 30 s), /data/ping (every 30 s: the
+// chip and the latency strip), /data/templates, /data/host-settings,
+// /data/disk-growth (the growth line, when Prometheus answers),
+// /data/doctor on request, and the action catalog. Not sent by the host
+// yet, so said plainly instead of invented: how full the thin pool is,
+// what the guests are promised and really wrote on it, per-guest memory
+// and CPU of containers it does not manage, and its own uptime.
 
-import { mountActionsArea } from "../actionsarea.js";
+import { act, catalogReady, onAct } from "../act.js";
 import { openAction } from "../actiondialog.js";
-import { hostSettingRows } from "../parity.js";
 import { agoEl, setAgo } from "../ago.js";
 import { doctorRows } from "../doctor.js";
-import {
-  badgeCell,
-  bindTableUrl,
-  errorBox,
-  fetchJson,
-  fillFacts,
-  h,
-  progressGroup,
-  slowReport,
-  tableBlock,
-  td,
-} from "../dom.js";
+import { fetchJson, slowReport } from "../dom.js";
+import { declare, drivable, viaForm } from "../drivable.js";
 import { humanDuration } from "../format.js";
 import {
-  diskDetailFacts,
-  guestRows,
-  hostBars,
+  actionBlurb,
+  diskBreakdown,
+  gib,
+  guestTable,
+  guestVisible,
+  hostActionGroups,
   hostChecks,
-  hostFacts,
-  topDirRows,
+  hostKpis,
+  hostSettingsView,
+  latencyBars,
+  meterTone,
+  rootGrowth,
+  settingVisible,
+  versionText,
 } from "../host.js";
+import { finished } from "../jobs.js";
+import { mountJobPanel } from "../jobpanel.js";
+import { openRollback } from "../rollbackdialog.js";
 import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
-import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
-import { viaForm } from "../drivable.js";
+import {
+  attentionBand,
+  el,
+  ensureStyle,
+  keyRow,
+  kpiStrip,
+  moreMenu,
+  pageHeader,
+  section,
+  segSwitch,
+  sortable,
+  toggleGroup,
+} from "./hostkit.js";
 
-/** Seconds between two readings of the container list. */
-const GUESTS_EVERY_S = 30;
+/** Seconds between two readings of the container list and the ping. */
+const EVERY_S = 30;
+/** How many pings the latency strip keeps. */
+const PINGS = 12;
+
+// Live view (invariant 39): every control on this page that runs
+// something or opens a menu is declared here; the action tiles and
+// "Build a template…" reach their dialogs as catalog forms.
+const RUN_CHECKS = declare({
+  id: "run-host-checks",
+  page: "host",
+  opens: "run",
+  what: "read the doctor's host-level checks now (about 30 s)",
+});
+const READ_CHECKS = declare({
+  id: "read-host-checks",
+  page: "host",
+  opens: "run",
+  what: "the Host checks card's own Run checks",
+});
+const PING = declare({
+  id: "ping-host",
+  page: "host",
+  opens: "run",
+  what: "send one ping over the pinned line and time the answer",
+});
+const COPY_PIN = declare({
+  id: "copy-host-pin",
+  page: "host",
+  opens: "run",
+  what: "copy the pinned certificate fingerprint",
+});
+const MORE = declare({
+  id: "host-more",
+  page: "host",
+  opens: "run",
+  what: "open the header's menu: presets and the runbook",
+});
+const GUEST_FILTER = declare({
+  id: "container-filter",
+  page: "host",
+  opens: "run",
+  row: "all|running|stopped",
+  what: "turn one status of the Containers table on or off (all: every row)",
+});
+const SETTINGS_VIEW = declare({
+  id: "host-settings-view",
+  page: "host",
+  opens: "run",
+  row: "changed|all",
+  what: "show only the host settings host.toml changes, or all of them",
+});
+
+/** @param {"ok" | "warn" | "bad" | "live" | ""} tone */
+const dot = (tone) =>
+  el("span", { class: `hk-dot${tone ? ` hk-dot--${tone}` : ""}` });
 
 /**
  * @param {HTMLElement} root
@@ -42,505 +122,1198 @@ const GUESTS_EVERY_S = 30;
  * @returns {() => void}
  */
 export function mount(root, ctx) {
-  const bars = h("div", { id: "host-bars" });
-  const facts = h("dl", { class: "facts", id: "host-facts" });
-  const diskFacts = h("dl", { class: "facts", id: "host-disk-facts" });
-  const topDirs = tableBlock({
-    remember: "host-top-dirs",
-    caption: "Biggest directories on root",
-    search: "Search directories",
-    nothing: "Not read yet.",
-    columns: [
-      { label: "Directory", sort: "text" },
-      { label: "Size", sort: "number" },
-    ],
-  });
-  const liveAgo = agoEl("measured", null, { live: true });
-  const guestsAgo = agoEl("read");
-  const guests = tableBlock({
-    remember: "guests",
-    caption: "Containers on the host (pct list)",
-    search: "Search containers",
-    state: "loading",
-    nothing: "The host lists no containers.",
-    columns: [
-      { label: "vmid", sort: "number" },
-      { label: "Name", sort: "text" },
+  ensureStyle("/css/pages/host.css");
+  root.classList.add("hk-page");
+  const abort = new AbortController();
+  /** @type {(() => void)[]} */
+  const stops = [];
+
+  // ── header ────────────────────────────────────────────────────────────
+  const reach = el(
+    "span",
+    { class: "hk-chip", id: "host-reach" },
+    dot(""),
+    "Checking the line…",
+  );
+  const daemon = el("span", { id: "host-daemon" });
+  const runChecks = drivable(
+    el(
+      "button",
       {
-        label: "Status",
-        sort: "text",
-        order: "stopped,running",
-        filter: "choice",
+        type: "button",
+        class: "kp-button kp-button--primary",
+        title: "Read the doctor's host-level checks (about 30 s)",
+        onclick: () => {
+          checksCard.el.scrollIntoView({ block: "nearest" });
+          void loadChecks().catch(() => {});
+        },
       },
-      { label: "Lock", sort: "text" },
-      { label: "Stack", sort: "text" },
-    ],
-  });
-  // feat-stacks-4: the four host-wide actions.
-  const actions = mountActionsArea({ host: true });
-  const checksAgo = agoEl("read");
-  const checksBtn = h(
-    "button",
-    { type: "button", class: "kp-button", id: "host-checks-read" },
-    "Read the host checks",
+      "Run host checks",
+    ),
+    RUN_CHECKS,
   );
-  const checksNote = h(
-    "p",
-    { class: "measured", role: "status" },
-    "The doctor reads for about half a minute on pve; the disk and the state file are among its host-level checks.",
-  );
-  const checks = tableBlock({
-    remember: "host-checks",
-    caption: "Host checks (from the doctor)",
-    search: "Search checks",
-    nothing: "The doctor reported no host-level checks.",
-    columns: [
-      { label: "Check", sort: "text" },
+  const menu = moreMenu({
+    label: "More: presets, download the runbook",
+    items: [
       {
-        label: "Health",
-        sort: "text",
-        order: "fail,warn,ok",
-        filter: "choice",
+        label: "Presets",
+        hint: "The stack recipes a new stack starts from",
+        href: "/presets",
       },
-      { label: "Detail", sort: "text", cls: "wide" },
-      { label: "What to do", sort: "text" },
+      {
+        label: "Download the runbook",
+        hint: "The disaster-recovery runbook, as Markdown",
+        href: "/data/download/runbook",
+        download: "DR_RUNBOOK.md",
+      },
     ],
+    mark: (b) => void drivable(b, MORE),
   });
-  // TUI parity: the line to the host (ping, where its address came from,
-  // the pin and the certificate), host.toml as the host reads it, the
-  // templates, and the pages the TUI reached from here.
-  const line = h("dl", { class: "facts", id: "host-line" });
-  const pingBtn = h(
-    "button",
-    { type: "button", class: "kp-button", id: "host-ping" },
-    "Ping",
-  );
-  const pingOut = h("p", {
-    class: "measured",
-    role: "status",
-    id: "host-ping-out",
-  });
-  const settingsAgo = agoEl("read");
-  const settingsT = tableBlock({
-    remember: "host-toml",
-    caption: "host.toml, as the host reads it",
-    search: "Search settings",
-    state: "loading",
-    nothing: "host.toml sets nothing.",
-    columns: [
-      { label: "Group", sort: "text", filter: "choice" },
-      { label: "Key", sort: "text" },
-      { label: "Setting", sort: "text" },
-      { label: "Value", sort: "text", cls: "wide" },
-      { label: "From", sort: "text", filter: "choice" },
-    ],
-  });
-  const tplBtn = h(
-    "button",
-    { type: "button", class: "kp-button", id: "host-templates-read" },
-    "Read the templates",
-  );
-  const tplBuild = h(
-    "button",
-    { type: "button", class: "kp-button", id: "host-template-build" },
-    "Build a template…",
-  );
-  // fix-239: Live view reaches it as `homelab ui open template-build`.
-  viaForm(tplBuild, "template-build");
-  tplBuild.addEventListener(
-    "click",
-    () => void openAction("_host", "template-build"),
-  );
-  const tplOut = h("div", { id: "host-templates" });
-  root.replaceChildren(
-    h("h1", null, "Host"),
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      "The Proxmox host itself: its resources, settings, templates and the containers it carries.",
-    ),
-    h(
-      "section",
-      { class: "kp-card", "aria-label": "Load" },
-      h("h2", null, "Load"),
-      h(
-        "p",
-        { class: "section-head__desc measured" },
-        "CPU, RAM and disk the host itself is using right now.",
-      ),
-      bars,
-      h("p", null, liveAgo),
-    ),
-    h(
-      "section",
-      { class: "kp-card", "aria-label": "Disk" },
-      h("h2", null, "Disk"),
-      h(
-        "p",
-        { class: "section-head__desc measured" },
-        // fix-222 (Kenny, 2026-10-02): "root disk 48%" said nothing about
-        // which disk that is or what is on it — this names the volume, the
-        // physical disk behind it, the local-lvm pool beside it, and the
-        // biggest directories using the space.
-        "Which disk the root filesystem lives on, the local-lvm pool every container's own disk is carved from, and what is using the space.",
-      ),
-      diskFacts,
-      h("h3", null, "Biggest directories on root"),
-      topDirs.wrap,
-    ),
-    h(
-      "section",
-      { class: "kp-card", "aria-label": "Facts" },
-      h("h2", null, "Facts"),
-      h(
-        "p",
-        { class: "section-head__desc measured" },
-        "What the host is: its version, uptime and hardware.",
-      ),
-      facts,
-    ),
-    h(
-      "section",
-      { class: "kp-card", "aria-label": "The line to the host" },
-      h(
-        "div",
-        { class: "title-row" },
-        h("h2", null, "The line to the host"),
-        pingBtn,
-      ),
-      h(
-        "p",
-        { class: "section-head__desc measured" },
-        "The TLS connection this dashboard holds to the host daemon, and a way to test it.",
-      ),
-      line,
-      pingOut,
-    ),
-    h(
-      "p",
-      { class: "actions-row host-links" },
-      h("a", { class: "kp-button", href: "/console" }, "Open the console"),
-      h(
-        "a",
-        { class: "kp-button", href: "/activity?view=host-log" },
-        "Host log",
-      ),
-      h("a", { class: "kp-button", href: "/presets" }, "Presets"),
-      h(
+  stops.push(menu.stop);
+  const head = pageHeader({
+    title: "Host",
+    sub: current().fleet?.host.name ?? "",
+    desc: "The Proxmox machine every stack runs on: how loaded it is, what runs on it, and the actions that act on the host itself.",
+    meta: [reach, daemon],
+    live: "measured",
+    actions: [
+      el(
         "a",
         {
           class: "kp-button",
-          href: "/data/download/runbook",
-          download: "DR_RUNBOOK.md",
+          href: "/console",
+          title: "Open a root shell on the host in this browser",
         },
-        "Download the runbook",
+        "Open the console",
       ),
-    ),
-    actions.element,
-    h("h2", null, "Host settings"),
-    h(
-      "p",
-      { class: "measured" },
-      "Read-only here; ",
-      h("a", { href: "/settings" }, "the Settings page"),
-      " changes them.",
-    ),
-    settingsT.wrap,
-    h("p", null, settingsAgo),
-    h("h2", null, "Templates"),
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      "The golden container templates new stacks are built from; build a fresh one here.",
-    ),
-    h("div", { class: "actions-row" }, tplBtn, tplBuild),
-    tplOut,
-    h("h2", null, "Containers"),
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      "Every container (LXC/VM) on the host, whether or not this orchestrator manages it.",
-    ),
-    guests.wrap,
-    h("p", null, guestsAgo),
-    h("div", { class: "title-row" }, h("h2", null, "Host checks"), checksBtn),
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      "Checks about the host itself, read on request (not per stack).",
-    ),
-    checksNote,
-    checks.wrap,
-    h("p", null, checksAgo),
-  );
-  const detach = attachDataTables(root);
-  const settingsTable = dataTable(settingsT.wrap);
-  const unbindS = bindTableUrl(settingsTable, "hosttoml");
-  const guestTable = dataTable(guests.wrap);
-  const checksTable = dataTable(checks.wrap);
-  const topDirsTable = dataTable(topDirs.wrap);
-  // Read on request: no empty table that looks like a load before that.
-  checks.wrap.hidden = true;
-  const unbindG = bindTableUrl(guestTable, "guests");
-  const unbindC = bindTableUrl(checksTable, "hostchecks");
-  const unbindTD = bindTableUrl(topDirsTable, "hosttopdirs");
-  const abort = new AbortController();
-
-  const render = () => {
-    const s = current();
-    const f = s.fleet;
-    if (!f) return;
-    bars.replaceChildren(progressGroup(hostBars(f)));
-    fillFacts(
-      facts,
-      hostFacts(f, { version: s.hostVersion, build: s.hostBuild }),
-    );
-    fillFacts(diskFacts, diskDetailFacts(f));
-    topDirs.tbody.replaceChildren(
-      ...topDirRows(f).map((r) => h("tr", null, td(r.path), td(r.gb, "num"))),
-    );
-    topDirsTable?.refresh();
-    setAgo(liveAgo, f.measured_at);
-    paintLine();
-  };
-
-  /** @type {any} */
-  let lineFacts = null;
-  const paintLine = () => {
-    const f = current().fleet;
-    /** @type {{label: string, value: string}[]} */
-    const rows = [];
-    if (lineFacts) {
-      rows.push(
-        { label: "Address", value: lineFacts.address ?? "not configured" },
-        { label: "Set in", value: lineFacts.address_source ?? "—" },
+      el(
+        "a",
         {
-          label: "Pinned certificate",
-          value: lineFacts.pin ?? "no pin compiled in",
+          class: "kp-button",
+          href: "/activity?view=host-log",
+          title: "Follow the host daemon's own log, live",
         },
+        "Host log",
+      ),
+    ],
+    primary: runChecks,
+    more: menu.el,
+  });
+  const sub = /** @type {HTMLElement | null} */ (
+    head.title.querySelector(".hk-head__sub")
+  );
+
+  const attention = attentionBand();
+  const kpis = kpiStrip(
+    hostKpis(
+      current().fleet ?? {
+        measured_at: 0,
+        stacks: [],
+        counts: { stacks: 0, online: 0, parked: 0 },
+        host: {
+          name: "",
+          cpu_pct: null,
+          ram_used_mb: 0,
+          ram_total_mb: 1,
+          disk_pct: 0,
+        },
+      },
+      null,
+    ),
+    { label: "The host right now" },
+  );
+
+  // ── Containers ────────────────────────────────────────────────────────
+  /** @type {import("../host.js").Guest[] | null} */
+  let guests = null;
+  let gShow = new Set();
+  let gQ = "";
+  const gSearch = /** @type {HTMLInputElement} */ (
+    el("input", {
+      class: "hk-search",
+      type: "search",
+      id: "host-guest-search",
+      placeholder: "Search containers   /",
+      "aria-label": "Search containers",
+      oninput: (/** @type {Event} */ e) => {
+        gQ = /** @type {HTMLInputElement} */ (e.target).value;
+        filterGuests();
+      },
+    })
+  );
+  const gFilter = toggleGroup({
+    label: "Status",
+    all: { label: "All", hint: "Every container, running or not" },
+    chips: [
+      {
+        value: "running",
+        label: "Running",
+        hint: "Click to show or hide running containers",
+      },
+      {
+        value: "stopped",
+        label: "Stopped",
+        hint: "Click to show or hide stopped containers",
+      },
+    ],
+    onChange: (on) => {
+      gShow = on;
+      filterGuests();
+    },
+    mark: (b, v) => void drivable(b, GUEST_FILTER, v),
+  });
+  const gBody = el("tbody", { id: "host-guests" });
+  const gTable = /** @type {HTMLTableElement} */ (
+    el(
+      "table",
+      { class: "hk-tbl" },
+      el(
+        "thead",
+        null,
+        el(
+          "tr",
+          null,
+          el("th", { class: "n" }, "ID"),
+          el("th", null, "Container"),
+          el("th", null, "Status"),
+          el("th", { class: "hk-hide-phone" }, "Memory"),
+          el(
+            "th",
+            { class: "n hk-hide-phone", title: "Share of one core" },
+            "CPU",
+          ),
+          el("th", null, "Stack"),
+        ),
+      ),
+      gBody,
+    )
+  );
+  sortable(gTable);
+  const guestsAgo = agoEl("read");
+  const guestsCard = section({
+    id: "host-containers",
+    title: "Containers",
+    desc: "Every container and VM on the host, managed by this orchestrator or not.",
+    foot: [`Read with pct list every ${EVERY_S} s`, guestsAgo],
+  });
+  guestsCard.body.append(
+    el("div", { class: "hk-filters" }, gSearch, gFilter.el),
+    el("div", { class: "hk-scroll" }, gTable),
+  );
+  /** @param {number} n */
+  const skeletonRows = (n) =>
+    Array.from({ length: n }, () =>
+      el(
+        "tr",
+        { "aria-hidden": "true" },
+        Array.from({ length: 6 }, (_, i) =>
+          el(
+            "td",
+            { class: i === 3 || i === 4 ? "hk-hide-phone" : null },
+            el("span", { class: "hk-sk kp-skeleton" }),
+          ),
+        ),
+      ),
+    );
+  gBody.dataset.kpState = "loading";
+  gBody.setAttribute(
+    "aria-label",
+    "Asking the host for its containers (pct list)…",
+  );
+  gBody.replaceChildren(...skeletonRows(5));
+  const filterGuests = () => {
+    const rows = [...gBody.querySelectorAll("tr[data-vmid]")];
+    if (!guests) return;
+    const view = guestTable(guests, current().fleet);
+    const vis = guestVisible(view, { show: gShow, q: gQ });
+    for (const tr of rows) {
+      const i = view.findIndex(
+        (r) => String(r.vmid) === /** @type {HTMLElement} */ (tr).dataset.vmid,
       );
+      /** @type {HTMLElement} */ (tr).hidden = i < 0 || !vis[i];
     }
-    rows.push({
-      label: "Host's TLS fingerprint",
-      value: f?.host.tls_fingerprint || "not reported by the host",
-    });
-    fillFacts(line, rows);
   };
-  const ping = async () => {
-    pingBtn.disabled = true;
-    pingOut.textContent = "Pinging…";
-    const r = await fetchJson("/data/ping", "the ping", abort.signal);
-    pingBtn.disabled = false;
-    if (!r.ok) {
-      pingOut.textContent = `No answer: ${r.error.why}`;
-      return;
-    }
-    lineFacts = r.body.facts;
-    paintLine();
-    pingOut.textContent = r.body.ok
-      ? `The host answered in ${r.body.ms} ms: ${r.body.message}`
-      : `No answer after ${r.body.ms} ms: ${r.body.message}`;
-  };
-  pingBtn.addEventListener("click", () => void ping().catch(() => {}));
-
-  const loadSettings = async () => {
-    settingsT.loading({ words: "Reading host.toml from the host…" });
-    const r = await fetchJson(
-      "/data/host-settings",
-      "the host settings",
-      abort.signal,
-    );
-    if (!r.ok) {
-      settingsT.failed(r.error);
-      return;
-    }
-    settingsT.tbody.replaceChildren(
-      ...hostSettingRows(r.body.page).map((x) =>
-        h(
-          "tr",
-          null,
-          td(x.group),
-          td(x.key, "mono"),
-          td(x.label),
-          td(x.value, "mono"),
-          td(x.source),
-        ),
-      ),
-    );
-    settingsT.ready();
-    setAgo(settingsAgo, r.body.measured_at ?? Date.now() / 1000);
-  };
-
-  const loadTemplates = async () => {
-    tplBtn.disabled = true;
-    tplOut.replaceChildren(
-      h(
-        "p",
-        { class: "measured" },
-        "Asking the host (pveam and the template containers)…",
-      ),
-    );
-    const r = await fetchJson("/data/templates", "the templates", abort.signal);
-    tplBtn.disabled = false;
-    if (!r.ok) {
-      tplOut.replaceChildren(errorBox(r.error));
-      return;
-    }
-    const t = r.body.templates;
-    tplOut.replaceChildren(
-      h("h3", null, "Golden templates (a deploy clones these)"),
-      t.clones.length
-        ? h(
-            "ul",
-            null,
-            ...t.clones.map((/** @type {[number, string]} */ c) =>
-              h("li", { class: "mono" }, `CT ${c[0]} · ${c[1]}`),
-            ),
-          )
-        : h("p", { class: "measured" }, "None: build one."),
-      h("h3", null, "OS templates (a build bakes from these)"),
-      t.os.length
-        ? h(
-            "ul",
-            null,
-            ...t.os.map((/** @type {string} */ o) =>
-              h("li", { class: "mono" }, o),
-            ),
-          )
-        : h("p", { class: "measured" }, "None listed."),
-    );
-  };
-  tplBtn.addEventListener("click", () => void loadTemplates().catch(() => {}));
-
-  /** @type {import("../host.js").Guest[]} */
-  let lastGuests = [];
   const paintGuests = () => {
-    guests.tbody.replaceChildren(
-      ...guestRows(lastGuests, current().fleet).map((g) =>
-        h(
+    if (!guests) return;
+    const view = guestTable(guests, current().fleet);
+    const running = view.filter((r) => r.running).length;
+    gFilter.counts({
+      all: view.length,
+      running,
+      stopped: view.length - running,
+    });
+    if (!view.length) {
+      gBody.replaceChildren(
+        el(
           "tr",
-          null,
-          td(String(g.vmid), "num"),
-          td(g.name),
-          badgeCell(g.status),
-          td(g.lock),
-          g.stack
-            ? h("td", null, h("a", { href: stackHref(g.stack) }, g.stack))
-            : td("not managed"),
+          { class: "hk-empty-row" },
+          el("td", { colspan: 6 }, "The host lists no containers."),
+        ),
+      );
+      return;
+    }
+    gBody.replaceChildren(
+      ...view.map((g) =>
+        el(
+          "tr",
+          {
+            "data-vmid": g.vmid,
+            "data-status": g.running ? "running" : "stopped",
+          },
+          el("td", { class: "n mono" }, g.vmid),
+          el(
+            "td",
+            null,
+            el(
+              "div",
+              { class: "hk-name" },
+              el("span", { class: "mono" }, g.name),
+              g.lock ? el("small", null, `lock: ${g.lock}`) : null,
+            ),
+          ),
+          el(
+            "td",
+            null,
+            el(
+              "span",
+              { class: "hk-status" },
+              dot(g.running ? "ok" : g.tone === "bad" ? "bad" : ""),
+              g.status,
+            ),
+          ),
+          el(
+            "td",
+            { class: "hk-hide-phone", "data-sort": g.ramUsed ?? -1 },
+            g.ramUsed != null && g.ramMax
+              ? (() => {
+                  const fill = el("i");
+                  fill.style.width = `${Math.min(100, (g.ramUsed / g.ramMax) * 100)}%`;
+                  return el(
+                    "div",
+                    { class: "hk-bar" },
+                    el("span", null, fill),
+                    el(
+                      "span",
+                      null,
+                      `${gib(g.ramUsed)} / ${gib(g.ramMax)} GiB`,
+                    ),
+                  );
+                })()
+              : el(
+                  "span",
+                  {
+                    class: "hk-muted",
+                    title: g.running
+                      ? "The host measures only the containers it manages"
+                      : null,
+                  },
+                  "—",
+                ),
+          ),
+          el(
+            "td",
+            { class: "n hk-hide-phone", "data-sort": g.cpuPct ?? -1 },
+            g.cpuPct == null ? "—" : `${g.cpuPct}%`,
+          ),
+          el(
+            "td",
+            { "data-sort": g.stack ?? `~${g.kind}` },
+            g.stack
+              ? el("a", { class: "hk-link", href: stackHref(g.stack) }, g.stack)
+              : el(
+                  "span",
+                  { class: "hk-tag" },
+                  g.kind === "template" ? "template" : "not managed",
+                ),
+          ),
         ),
       ),
     );
-    guestTable?.refresh();
+    // A re-paint keeps the sort the person chose.
+    const sorted = /** @type {HTMLElement | null} */ (
+      gTable.querySelector("th[aria-sort]")
+    );
+    if (sorted) {
+      const dir = sorted.getAttribute("aria-sort");
+      sorted.removeAttribute("aria-sort");
+      if (dir === "descending") sorted.setAttribute("aria-sort", "ascending");
+      sorted.click();
+    }
+    filterGuests();
   };
-  /** @param {boolean} [show] a first read or a retry: say it loads (the
-   * timer's reads refresh quietly) */
-  const loadGuests = async (show = false) => {
-    if (show || lastGuests.length === 0)
-      guests.loading({
-        words: "Asking the host for its containers (pct list)…",
-      });
+  const loadGuests = async () => {
     const r = await fetchJson(
       "/data/host/guests",
       "the host's containers",
       abort.signal,
     );
     if (!r.ok) {
-      guests.failed(r.error);
+      if (!guests)
+        gBody.replaceChildren(
+          el(
+            "tr",
+            null,
+            el(
+              "td",
+              { colspan: 6 },
+              el(
+                "div",
+                {
+                  class: "kp-alert kp-alert--destructive error",
+                  role: "alert",
+                },
+                el("strong", null, `Could not read ${r.error.what}`),
+                el("p", null, `Why: ${r.error.why}`),
+                r.error.fix
+                  ? el("p", null, `What to do: ${r.error.fix}`)
+                  : null,
+                el(
+                  "button",
+                  {
+                    type: "button",
+                    class: "kp-button kp-button--sm",
+                    onclick: () => void loadGuests().catch(() => {}),
+                  },
+                  "Try again",
+                ),
+              ),
+            ),
+          ),
+        );
       return;
     }
-    lastGuests = r.body.guests ?? [];
+    guests = r.body.guests ?? [];
+    delete gBody.dataset.kpState;
+    gBody.removeAttribute("aria-label");
     paintGuests();
-    guests.ready();
     setAgo(guestsAgo, r.body.measured_at);
+    paintKpis();
   };
 
-  /**
-   * Show one doctor answer's host-level checks.
-   * @param {any} report
-   */
+  // ── Host actions ──────────────────────────────────────────────────────
+  const groupsBox = el(
+    "div",
+    { class: "hk-act-groups", id: "host-actions" },
+    el("p", { class: "hk-muted", role: "status" }, "Reading the actions…"),
+  );
+  const runningBox = el("div", { class: "hk-running" });
+  const actionsCard = section({
+    id: "host-actions-card",
+    title: "Host actions",
+    desc: "What the dashboard can do to the host itself; each opens a dialog that says what will happen first.",
+    foot: [
+      "Every action becomes a job you can follow on Activity",
+      el("a", { class: "hk-link", href: "/activity" }, "Open Activity"),
+    ],
+  });
+  actionsCard.el.classList.add("actions-area");
+  actionsCard.body.append(groupsBox, runningBox);
+  void catalogReady().then((catalog) => {
+    if (abort.signal.aborted) return;
+    if (!catalog) {
+      groupsBox.replaceChildren(
+        el(
+          "p",
+          { class: "kp-alert kp-alert--destructive", role: "alert" },
+          "The dashboard did not send its action catalog; reload the page.",
+        ),
+      );
+      return;
+    }
+    const entries = catalog.actions.filter((a) => a.target === "host");
+    groupsBox.replaceChildren(
+      ...hostActionGroups(entries).map((g) =>
+        el(
+          "div",
+          { class: "hk-act-group", "data-group": g.title },
+          el(
+            "h3",
+            null,
+            g.title,
+            g.full
+              ? el(
+                  "span",
+                  { class: "hk-lock", title: "Needs the full-access token" },
+                  "full access",
+                )
+              : null,
+          ),
+          g.actions.map((a) =>
+            el(
+              "button",
+              {
+                type: "button",
+                class: `hk-act${a.destructive ? " hk-act--destructive" : ""}`,
+                "data-action": a.action,
+                title: `${a.label}: opens a dialog that says what will happen, then starts it`,
+                onclick: () =>
+                  void openAction(catalog.host_target, a.action, {
+                    openRollback,
+                  }),
+              },
+              el("b", null, a.label),
+              el("span", null, actionBlurb(a.what)),
+              el("em", { "aria-hidden": "true" }, "›"),
+            ),
+          ),
+        ),
+      ),
+    );
+  });
+  /** @type {Map<number, () => void>} */
+  const panels = new Map();
+  const paintRunning = () => {
+    const live = act.jobs.filter(
+      (j) => j.stack === "_host" && !finished(j.state),
+    );
+    for (const j of live)
+      if (!panels.has(j.job)) {
+        const p = mountJobPanel(j.job);
+        panels.set(j.job, p.stop);
+        runningBox.prepend(p.element);
+      }
+  };
+  stops.push(onAct("jobs", paintRunning));
+  paintRunning();
+
+  // ── Disk ──────────────────────────────────────────────────────────────
+  const diskBody = el("div", { id: "host-disk" });
+  const growthLine = el("span", { id: "host-growth" }, "Growth: reading…");
+  const diskAgo = agoEl("read");
+  const diskCard = section({
+    id: "host-disk-card",
+    title: "Disk",
+    desc: "What fills the root disk, and the pool every container's own disk is carved from.",
+    foot: [growthLine, diskAgo],
+  });
+  diskCard.body.append(diskBody);
+  const paintDisk = () => {
+    const f = current().fleet;
+    const d = f ? diskBreakdown(f) : null;
+    if (!d) {
+      diskBody.replaceChildren(
+        el(
+          "p",
+          { class: "hk-muted", role: "status" },
+          "The host has not read its disks yet.",
+        ),
+      );
+      return;
+    }
+    const colour = (/** @type {number} */ i) => `var(--chart-${(i % 5) + 1})`;
+    const bar = el("div", {
+      class: "hk-stack-bar",
+      role: "img",
+      "aria-label": `What fills the root volume: ${d.dirs.map((x) => `${x.path} ${Math.round(x.gb)} GB`).join(", ")}, ${d.freeGb} GB free`,
+    });
+    d.dirs.forEach((x, i) => {
+      const seg = el("i", { title: `${x.path} ${x.gb.toFixed(0)} GB` });
+      seg.style.width = `${x.pct}%`;
+      seg.style.background = colour(i);
+      bar.append(seg);
+    });
+    const swatch = (/** @type {string} */ bg) => {
+      const s = el("i");
+      s.style.background = bg;
+      return s;
+    };
+    diskBody.replaceChildren(
+      el(
+        "div",
+        { class: "hk-disk-line" },
+        el(
+          "span",
+          null,
+          el("b", null, "Root volume"),
+          ` · ${Math.round(d.rootGb)} GB on ${d.device || "an unknown disk"}${d.diskGb ? ` (${d.diskGb.toFixed(0)} GB disk)` : ""}`,
+        ),
+        el("span", { class: "num" }, `${d.usedPct}% used`),
+      ),
+      bar,
+      el(
+        "div",
+        { class: "hk-dirs" },
+        d.dirs.map((x, i) =>
+          el(
+            "div",
+            null,
+            swatch(colour(i)),
+            el("span", { class: "mono" }, x.path),
+            el("span", { class: "num hk-muted" }, `${x.gb.toFixed(0)} GB`),
+          ),
+        ),
+        el(
+          "div",
+          null,
+          swatch("var(--muted)"),
+          el("span", null, "free"),
+          el("span", { class: "num hk-muted" }, `${d.freeGb} GB`),
+        ),
+      ),
+      el(
+        "div",
+        { class: "hk-pool" },
+        el(
+          "div",
+          null,
+          el("span", null, "Thin pool"),
+          el("b", null, `${Math.round(d.poolGb)} GB`),
+        ),
+        el(
+          "div",
+          null,
+          el("span", null, "Promised to guests"),
+          el("b", { class: "hk-muted" }, "not reported by the host"),
+        ),
+        el(
+          "div",
+          null,
+          el("span", null, "Really written"),
+          el("b", { class: "hk-muted" }, "not reported by the host"),
+        ),
+      ),
+    );
+    setAgo(diskAgo, f?.host.disk_detail?.measured_at ?? null);
+  };
+  const loadGrowth = async () => {
+    const r = await fetchJson("/data/disk-growth", "disk growth", abort.signal);
+    if (abort.signal.aborted) return;
+    const rootGb = current().fleet?.host.disk_detail?.root_lv_size_gb ?? 0;
+    const line = r.ok ? rootGrowth(r.body.rows ?? [], rootGb) : null;
+    growthLine.textContent =
+      line ??
+      (r.ok
+        ? "Growth: not enough history yet to say how fast root fills"
+        : `Growth not measured: ${r.error.why}`);
+  };
+
+  // ── Connection ────────────────────────────────────────────────────────
+  /** @type {number[]} */
+  const pings = [];
+  /** @type {any} */
+  let lineFacts = null;
+  let lineOk = /** @type {boolean | null} */ (null);
+  const facts = el("dl", { class: "hk-facts", id: "host-line" });
+  const lat = el("div", {
+    class: "hk-lat",
+    id: "host-lat",
+    role: "img",
+    "aria-label": "No ping yet",
+  });
+  const pingDot = dot("");
+  const pingOut = el("span", { id: "host-ping-out" }, "Pinging…");
+  const pingBtn = drivable(
+    el(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--sm",
+        title: "Send one ping over the pinned line and time the answer",
+        onclick: () => void ping().catch(() => {}),
+      },
+      "Ping again",
+    ),
+    PING,
+  );
+  const pingCount = el("span", null, "last pings");
+  const lineCard = section({
+    id: "host-connection",
+    title: "Connection",
+    desc: "The pinned TLS line this dashboard holds to the host daemon.",
+    foot: [pingBtn, pingCount],
+  });
+  lineCard.body.append(
+    facts,
+    lat,
+    el("p", { class: "hk-ping-out", role: "status" }, pingDot, pingOut),
+  );
+  const copyBtn = drivable(
+    el(
+      "button",
+      {
+        type: "button",
+        class: "hk-copy",
+        title: "Copy the whole fingerprint",
+        onclick: () => {
+          const pin = lineFacts?.pin;
+          if (pin)
+            void navigator.clipboard?.writeText(pin).then(
+              () => (copyBtn.textContent = "Copied"),
+              () => {},
+            );
+        },
+      },
+      "Copy",
+    ),
+    COPY_PIN,
+  );
+  const paintLine = () => {
+    const f = current().fleet;
+    /** @type {[string, Node | string][]} */
+    const rows = [];
+    if (lineFacts) {
+      rows.push([
+        "Address",
+        el("span", { class: "mono" }, lineFacts.address ?? "not configured"),
+      ]);
+      rows.push(["Set in", lineFacts.address_source ?? "—"]);
+      rows.push([
+        "Pinned",
+        lineFacts.pin
+          ? el(
+              "span",
+              null,
+              el(
+                "span",
+                { class: "mono", title: lineFacts.pin },
+                `${lineFacts.pin.slice(0, 26)}…`,
+              ),
+              copyBtn,
+            )
+          : "no pin compiled in",
+      ]);
+    }
+    rows.push([
+      "Host says",
+      lineOk === true
+        ? el("span", { class: "hk-status" }, dot("ok"), "matches the pin")
+        : lineOk === false
+          ? el(
+              "span",
+              { class: "hk-status" },
+              dot("bad"),
+              "no answer over the pinned line",
+            )
+          : f?.host.tls_fingerprint || "not asked yet",
+    ]);
+    facts.replaceChildren(
+      ...rows.flatMap(([k, v]) => [el("dt", null, k), el("dd", null, v)]),
+    );
+    const l = latencyBars(pings);
+    lat.setAttribute("aria-label", l.label);
+    lat.replaceChildren(
+      ...l.heights.map((hgt) => {
+        const i = el("i");
+        i.style.height = `${hgt}%`;
+        return i;
+      }),
+    );
+    pingCount.textContent = pings.length
+      ? `last ${pings.length} ping${pings.length === 1 ? "" : "s"}`
+      : "no ping yet";
+  };
+  const ping = async () => {
+    pingBtn.setAttribute("disabled", "");
+    pingOut.textContent = "Pinging…";
+    const r = await fetchJson("/data/ping", "the ping", abort.signal);
+    pingBtn.removeAttribute("disabled");
+    if (!r.ok) {
+      lineOk = false;
+      pingOut.textContent = `No answer: ${r.error.why}`;
+    } else {
+      lineFacts = r.body.facts;
+      lineOk = !!r.body.ok;
+      pings.push(r.body.ms);
+      if (pings.length > PINGS) pings.shift();
+      pingOut.textContent = r.body.ok
+        ? `Answered in ${r.body.ms} ms: ${r.body.message}`
+        : `No answer after ${r.body.ms} ms: ${r.body.message}`;
+    }
+    pingDot.className = `hk-dot hk-dot--${lineOk ? "ok" : "bad"}`;
+    reach.replaceChildren(
+      dot(lineOk ? "live" : "bad"),
+      lineOk && r.ok ? `Reachable · ${r.body.ms} ms` : "Not reachable",
+    );
+    attention.set(
+      lineOk
+        ? []
+        : [
+            {
+              key: "unreachable",
+              tone: "bad",
+              title: "The host does not answer over the pinned line",
+              text: pingOut.textContent ?? "",
+              action: el(
+                "button",
+                {
+                  type: "button",
+                  class: "kp-button kp-button--sm",
+                  onclick: () => void ping().catch(() => {}),
+                },
+                "Ping again",
+              ),
+            },
+          ],
+    );
+    paintLine();
+  };
+
+  // ── About, Templates ──────────────────────────────────────────────────
+  const about = el("dl", { class: "hk-facts", id: "host-about" });
+  const aboutCard = section({
+    id: "host-about-card",
+    title: "About this host",
+    desc: "What the machine is.",
+  });
+  aboutCard.body.append(about);
+  const paintAbout = () => {
+    const s = current();
+    const f = s.fleet;
+    if (!f) return;
+    const d = f.host.disk_detail;
+    /** @type {[string, Node | string][]} */
+    const rows = [
+      ["Name", f.host.name],
+      ["Daemon", versionText(s.hostVersion, s.hostBuild)],
+      [
+        "Hardware",
+        `${f.host.cores_total ? `${f.host.cores_total} cores · ` : ""}${gib(f.host.ram_total_mb).replace(/\.0$/, "")} GiB RAM`,
+      ],
+      [
+        "Root disk",
+        d
+          ? `${d.root_disk_device || "unknown"} · ${d.root_disk_total_gb.toFixed(0)} GB`
+          : "not read yet",
+      ],
+      ["Up for", el("span", { class: "hk-muted" }, "not reported by the host")],
+    ];
+    about.replaceChildren(
+      ...rows.flatMap(([k, v]) => [el("dt", null, k), el("dd", null, v)]),
+    );
+  };
+  const tplList = el(
+    "ul",
+    { class: "hk-tpl", id: "host-templates" },
+    el(
+      "li",
+      { role: "status" },
+      el("span", { class: "hk-sk kp-skeleton" }),
+      "Asking the host (pveam and the template containers)…",
+    ),
+  );
+  const tplBuild = viaForm(
+    el(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--sm",
+        title: "Bake a fresh golden template: opens the dialog first",
+        onclick: () => void openAction("_host", "template-build"),
+      },
+      "Build a template…",
+    ),
+    "template-build",
+  );
+  const tplCard = section({
+    id: "host-templates-card",
+    title: "Templates",
+    desc: "The golden templates a new stack is cloned from.",
+    foot: [tplBuild, "read with the page"],
+  });
+  tplCard.body.append(tplList);
+  const loadTemplates = async () => {
+    const r = await fetchJson("/data/templates", "the templates", abort.signal);
+    if (!r.ok) {
+      tplList.replaceChildren(
+        el(
+          "li",
+          { class: "kp-alert kp-alert--destructive error", role: "alert" },
+          `Could not read ${r.error.what}: ${r.error.why}`,
+        ),
+      );
+      return;
+    }
+    const t = r.body.templates;
+    tplList.replaceChildren(
+      ...t.clones.map((/** @type {[number, string]} */ c) =>
+        el(
+          "li",
+          null,
+          dot("ok"),
+          el(
+            "span",
+            null,
+            el("span", { class: "mono" }, `CT ${c[0]}`),
+            ` · ${c[1]}`,
+          ),
+        ),
+      ),
+      ...t.os.map((/** @type {string} */ o) =>
+        el(
+          "li",
+          null,
+          dot(""),
+          el("span", { class: "mono" }, o.replace("local:vztmpl/", "")),
+        ),
+      ),
+      ...(t.clones.length
+        ? []
+        : [
+            el(
+              "li",
+              { class: "hk-muted" },
+              "No golden template yet: build one.",
+            ),
+          ]),
+    );
+  };
+
+  // ── Host checks ───────────────────────────────────────────────────────
+  const checksBtn = drivable(
+    el(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--sm kp-button--primary",
+        title: "Read the doctor's host-level checks (about 30 s)",
+        onclick: () => void loadChecks().catch(() => {}),
+      },
+      "Run checks",
+    ),
+    READ_CHECKS,
+  );
+  const checksNote = el(
+    "p",
+    { role: "status", id: "host-checks-note" },
+    "Not read yet. Reading takes about 30 s on pve; the result stays here until you leave.",
+  );
+  const checksList = el("ul", {
+    class: "hk-checks",
+    id: "host-checks",
+    hidden: true,
+  });
+  const checksCard = section({
+    id: "host-checks-card",
+    title: "Host checks",
+    desc: "The doctor's checks about the host itself: disk, state file, clock, certificates.",
+  });
+  checksCard.body.append(
+    el("div", { class: "hk-checks-empty" }, checksNote, checksBtn),
+    checksList,
+  );
+  /** @param {any} report */
   const paintChecks = (report) => {
     const rows = doctorRows({ ...report, checks: hostChecks(report) });
-    checks.tbody.replaceChildren(
+    checksList.hidden = false;
+    checksList.replaceChildren(
       ...rows.map((x) =>
-        h(
-          "tr",
-          null,
-          td(x.name),
-          badgeCell(x.health),
-          td(x.detail),
-          td(x.remedy),
+        el(
+          "li",
+          { "data-health": x.health.label },
+          dot(x.health.tone),
+          el("span", null, el("b", null, x.name), ` · ${x.health.label}`),
+          el("small", null, x.detail),
         ),
       ),
     );
     return rows.length;
   };
-  const checksWords = {
-    words: "Asking the host to run the doctor…",
-    expect: 30,
+  let checking = false;
+  const loadChecks = async () => {
+    if (checking) return;
+    checking = true;
+    runChecks.setAttribute("disabled", "");
+    checksBtn.setAttribute("disabled", "");
+    checksNote.textContent = "The doctor is running on the host (about 30 s)…";
+    const began = Date.now();
+    try {
+      const r = await slowReport(
+        "/data/doctor",
+        "the doctor",
+        abort.signal,
+        (b) => {
+          const n = paintChecks(b.report);
+          checksNote.textContent = `${n} host-level checks, the last reading, while the host runs the doctor again.`;
+        },
+      );
+      const secs = Math.round((Date.now() - began) / 1000);
+      if (!r.ok) {
+        checksNote.textContent = `The doctor did not answer (after ${humanDuration(secs)}): ${r.error.why}`;
+        return;
+      }
+      const n = paintChecks(r.report);
+      checksNote.textContent = `${n} host-level checks, read in ${humanDuration(secs)}.`;
+    } finally {
+      checking = false;
+      runChecks.removeAttribute("disabled");
+      checksBtn.removeAttribute("disabled");
+    }
   };
 
-  const loadChecks = async () => {
-    checksBtn.disabled = true;
-    checks.wrap.hidden = false;
-    checks.loading(checksWords);
-    checksNote.textContent = "The doctor is running on the host.";
-    let r;
-    try {
-      // slow-reads: the dashboard's last doctor answer at once, while the
-      // host runs it again.
-      r = await slowReport("/data/doctor", "the doctor", abort.signal, (b) => {
-        const n = paintChecks(b.report);
-        checks.ready();
-        checks.loading({ ...checksWords, overlay: false });
-        checksNote.textContent = `${n} host-level checks, the last reading, while the host runs the doctor again.`;
-        setAgo(checksAgo, b.read_at ?? Date.now() / 1000);
+  // ── Host settings (host.toml) ─────────────────────────────────────────
+  /** @type {import("../host.js").SettingRow[]} */
+  let sRows = [];
+  let sAll = false;
+  let sQ = "";
+  const sDesc = el(
+    "span",
+    null,
+    "host.toml as the host reads it. Read-only here; Settings changes them.",
+  );
+  const sView = segSwitch({
+    label: "Which settings",
+    value: "changed",
+    items: [
+      {
+        value: "changed",
+        label: "Changed",
+        hint: "Only the settings that differ from their default",
+      },
+      { value: "all", label: "All", hint: "Every setting host.toml knows" },
+    ],
+    onChange: (v) => {
+      sAll = v === "all";
+      filterSettings();
+    },
+    mark: (b, v) => void drivable(b, SETTINGS_VIEW, v),
+  });
+  const sSearch = el("input", {
+    class: "hk-search",
+    type: "search",
+    placeholder: "Search settings",
+    "aria-label": "Search settings",
+    oninput: (/** @type {Event} */ e) => {
+      sQ = /** @type {HTMLInputElement} */ (e.target).value;
+      filterSettings();
+    },
+  });
+  const sBody = el("tbody", { id: "host-settings" });
+  const sTable = /** @type {HTMLTableElement} */ (
+    el(
+      "table",
+      { class: "hk-tbl" },
+      el(
+        "thead",
+        null,
+        el(
+          "tr",
+          null,
+          el("th", null, "Setting"),
+          el("th", { class: "hk-hide-phone" }, "Group"),
+          el("th", null, "Value"),
+          el("th", { class: "hk-hide-phone" }, "Default"),
+        ),
+      ),
+      sBody,
+    )
+  );
+  sortable(sTable);
+  const settingsCard = section({
+    id: "host-settings-card",
+    title: "Host settings",
+    desc: "",
+    collapsible: true,
+    open: true,
+    tools: [
+      el(
+        "a",
+        {
+          class: "kp-button kp-button--sm",
+          href: "/settings",
+          title: "Change host.toml on the Settings page",
+        },
+        "Edit in Settings",
+      ),
+    ],
+  });
+  /** @type {HTMLElement} */ (
+    settingsCard.el.querySelector(".section-head__desc")
+  ).replaceChildren(sDesc);
+  settingsCard.body.append(
+    el("div", { class: "hk-filters" }, sView.el, sSearch),
+    el("div", { class: "hk-scroll" }, sTable),
+  );
+  sBody.dataset.kpState = "loading";
+  sBody.replaceChildren(
+    ...skeletonRows(3).map((r) => {
+      r.querySelectorAll("td").forEach((td, i) => {
+        if (i > 3) td.remove();
       });
-    } finally {
-      checksBtn.disabled = false;
-    }
+      return r;
+    }),
+  );
+  const filterSettings = () => {
+    const vis = settingVisible(sRows, { all: sAll, q: sQ });
+    [...sBody.querySelectorAll("tr[data-key]")].forEach((tr, i) => {
+      /** @type {HTMLElement} */ (tr).hidden = !vis[i];
+    });
+  };
+  const loadSettings = async () => {
+    const r = await fetchJson(
+      "/data/host-settings",
+      "the host settings",
+      abort.signal,
+    );
     if (!r.ok) {
-      const secs = checks.failed(r.error);
-      checksNote.textContent = `The doctor did not answer (after ${humanDuration(secs)}).`;
+      sBody.replaceChildren(
+        el(
+          "tr",
+          null,
+          el(
+            "td",
+            { colspan: 4 },
+            el(
+              "div",
+              { class: "kp-alert kp-alert--destructive error", role: "alert" },
+              el("strong", null, `Could not read ${r.error.what}`),
+              el("p", null, `Why: ${r.error.why}`),
+            ),
+          ),
+        ),
+      );
       return;
     }
-    const n = paintChecks(r.report);
-    const secs = checks.ready();
-    checksNote.textContent = `${n} host-level checks, read in ${humanDuration(secs)}.`;
-    setAgo(checksAgo, r.body.read_at ?? Date.now() / 1000);
+    delete sBody.dataset.kpState;
+    const v = hostSettingsView(r.body.page);
+    sRows = v.rows;
+    sDesc.textContent = `host.toml as the host reads it: ${v.changed} of ${v.rows.length} settings changed from their default. Read-only here; Settings changes them.`;
+    sView.counts({ changed: v.changed, all: v.rows.length });
+    sBody.replaceChildren(
+      ...sRows.map((x) =>
+        el(
+          "tr",
+          {
+            class: x.set ? "hk-set-row" : null,
+            "data-key": x.key,
+            "data-set": x.set ? "1" : "0",
+          },
+          el(
+            "td",
+            null,
+            el(
+              "div",
+              { class: "hk-name" },
+              el("span", null, x.label),
+              el("small", { class: "mono" }, x.key),
+            ),
+          ),
+          el("td", { class: "hk-hide-phone hk-muted" }, x.group),
+          el("td", { class: x.set ? "mono" : "mono hk-muted" }, x.value),
+          el("td", { class: "hk-hide-phone mono hk-muted" }, x.def),
+        ),
+      ),
+      el(
+        "tr",
+        { class: "hk-empty-row", "data-none": "" },
+        el(
+          "td",
+          { colspan: 4 },
+          "host.toml changes nothing: every setting is at its default.",
+        ),
+      ),
+    );
+    const none = /** @type {HTMLElement} */ (
+      sBody.querySelector("[data-none]")
+    );
+    none.hidden = v.changed > 0;
+    filterSettings();
   };
-  checksBtn.addEventListener("click", () => void loadChecks().catch(() => {}));
 
-  const retry = (/** @type {Event} */ e) => {
-    if (guests.wrap.contains(/** @type {Node} */ (e.target)))
-      void loadGuests(true).catch(() => {});
-    else if (settingsT.wrap.contains(/** @type {Node} */ (e.target)))
-      void loadSettings().catch(() => {});
-    else void loadChecks().catch(() => {});
+  // ── assemble ──────────────────────────────────────────────────────────
+  root.replaceChildren(
+    head.el,
+    attention.el,
+    kpis.el,
+    el(
+      "div",
+      { class: "hk-cols" },
+      el(
+        "div",
+        { class: "hk-col-main" },
+        guestsCard.el,
+        actionsCard.el,
+        diskCard.el,
+      ),
+      el(
+        "div",
+        { class: "hk-col-side" },
+        lineCard.el,
+        aboutCard.el,
+        tplCard.el,
+        checksCard.el,
+      ),
+    ),
+    settingsCard.el,
+    keyRow([
+      ["/", "search containers"],
+      ["click a header", "sort"],
+      ["G H", "go to Host"],
+      ["R", "run host checks"],
+      ["Ctrl K", "any host action"],
+    ]),
+  );
+
+  const paintKpis = () => {
+    const f = current().fleet;
+    if (!f) return;
+    for (const k of hostKpis(f, guests))
+      kpis.tiles.get(k.key)?.set({
+        ...k,
+        meter: {
+          pct: k.meter.pct,
+          mark: k.meter.mark,
+          tone: meterTone(k.meter),
+        },
+      });
   };
-  root.addEventListener("kp-datatable-retry", retry);
+  const render = () => {
+    const s = current();
+    const f = s.fleet;
+    if (!f) return;
+    if (sub) sub.textContent = ` ${f.host.name}`;
+    daemon.textContent = s.hostVersion ? `host daemon ${s.hostVersion}` : "";
+    head.live?.set(f.measured_at);
+    paintKpis();
+    paintDisk();
+    paintAbout();
+    paintLine();
+  };
+
+  // `/` searches the containers, `r` runs the host checks (never while
+  // typing, never with a modifier).
+  /** @param {KeyboardEvent} e */
+  const keys = (e) => {
+    const t = /** @type {HTMLElement | null} */ (e.target);
+    if (
+      e.ctrlKey ||
+      e.metaKey ||
+      e.altKey ||
+      t?.closest("input, textarea, select, [contenteditable], dialog")
+    )
+      return;
+    if (e.key === "/") {
+      e.preventDefault();
+      gSearch.focus();
+    } else if (e.key === "r" || e.key === "R") {
+      if (document.querySelector("dialog[open]")) return;
+      e.preventDefault();
+      void loadChecks().catch(() => {});
+    }
+  };
+  document.addEventListener("keydown", keys);
+
   const unsub = subscribe(() => {
     render();
-    if (lastGuests.length) paintGuests();
+    paintGuests();
   });
   render();
   void loadGuests().catch(() => {});
   void loadSettings().catch(() => {});
+  void loadTemplates().catch(() => {});
+  void loadGrowth().catch(() => {});
   void ping().catch(() => {});
-  const timer = setInterval(
-    () => void loadGuests().catch(() => {}),
-    GUESTS_EVERY_S * 1000,
-  );
+  const timer = setInterval(() => {
+    void loadGuests().catch(() => {});
+    void ping().catch(() => {});
+  }, EVERY_S * 1000);
   void ctx;
   return () => {
     abort.abort();
-    actions.stop();
     clearInterval(timer);
     unsub();
-    unbindG();
-    unbindC();
-    unbindS();
-    unbindTD();
-    root.removeEventListener("kp-datatable-retry", retry);
-    detach();
+    document.removeEventListener("keydown", keys);
+    stops.forEach((s) => s());
+    for (const s of panels.values()) s();
+    root.classList.remove("hk-page");
   };
 }

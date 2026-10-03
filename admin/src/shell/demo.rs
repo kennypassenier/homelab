@@ -382,7 +382,14 @@ pub async fn run_demo(
                     env_sealed: false,
                     online: true,
                     enabled: true,
-                    usage: None,
+                    // redesign-host-3: made-up but plausible use per guest
+                    // (the Host page's memory bars and CPU column).
+                    usage: Some(homelab_proto::GuestUsage {
+                        cpu_permille: [30, 60, 20, 110, 10, 40][i % 6],
+                        ram_used_mb: [512, 1536, 768, 2048, 1024, 640][i % 6],
+                        ram_max_mb: [1024, 2048, 1024, 4096, 2048, 1024][i % 6],
+                        uptime_s: 86_400 * (i as u64 + 1),
+                    }),
                     applied_source: None,
                     component_digests: Default::default(),
                     native: false,
@@ -515,10 +522,42 @@ pub async fn run_demo(
                             serde_json::json!({ "statuses": statuses }).to_string()
                         }
                         Command::Ping => "pong (demo host)".into(),
+                        // redesign-host-1: the Host page shows only the
+                        // settings host.toml changes from their default, so
+                        // the demo's file changes a few (made-up values).
                         Command::GetHostConfig => serde_json::to_string(&homelab_proto::HostConfigFile {
                             path: "/etc/homelab/host.toml (demo host)".into(),
+                            values: [
+                                ("exec_enabled", serde_json::json!(true)),
+                                ("backup_hour", serde_json::json!(3)),
+                                ("restic_base", serde_json::json!("rclone:demo-remote:homelab-backups")),
+                                ("notify_webhook", serde_json::json!("https://notify.example.org/hook/homelab")),
+                                ("prometheus_url", serde_json::json!("http://10.10.10.113:9090")),
+                                ("loki_url", serde_json::json!("http://10.10.10.113:3100")),
+                            ]
+                            .into_iter()
+                            .map(|(k, v)| (k.to_string(), v))
+                            .collect(),
                             ..Default::default()
                         }).unwrap_or_default(),
+                        // redesign-host-1: `pct list` as the host's status
+                        // answers it (admin/src/core/guests.rs reads it):
+                        // every stack's container, one unmanaged container
+                        // and the golden template, so the Host page's
+                        // Containers table has every kind of row.
+                        Command::Status => {
+                            let mut lines = vec!["pct list:".to_string(), "VMID       Status     Lock         Name".to_string()];
+                            for (i, name) in stacks.iter().enumerate() {
+                                let m = homelab_client::spec::build_manifest(&repo.join("stacks").join(name)).ok();
+                                let vmid = m.as_ref().map(|m| m.vmid).unwrap_or(900 + i as u16);
+                                let host = m.map(|m| m.hostname).unwrap_or_else(|| name.clone());
+                                lines.push(format!("{vmid}        running                 {host}"));
+                            }
+                            lines.push("113        running                 113-metrics".into());
+                            lines.push("996        stopped    template     debian-13-homelab-v4".into());
+                            lines.push("managed state:".into());
+                            lines.join("\n")
+                        }
                         // fix-202 (invariants: the backup calendar must show
                         // partial data at once and never hang on a stack
                         // with nothing to read): every requested stack

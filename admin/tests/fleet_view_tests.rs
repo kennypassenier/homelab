@@ -63,3 +63,29 @@ fn feat_overview_1_an_empty_fleet_is_a_view_not_an_error() {
     assert_eq!(v.counts.stacks, 0);
     assert!(v.stacks.is_empty());
 }
+
+/// covers: redesign-host-3
+#[test]
+fn redesign_host_3_a_guests_cpu_share_reaches_the_browser() {
+    let mut measured = stack("films", 106, true, true, &[true]);
+    measured.usage = Some(homelab_proto::GuestUsage {
+        cpu_permille: 110,
+        ram_used_mb: 2048,
+        ram_max_mb: 4096,
+        uptime_s: 60,
+    });
+    let v = fleet_view(
+        &FleetState {
+            status_measured_at: Some(9),
+            host: host(),
+            stacks: vec![measured, stack("notes", 107, true, true, &[])],
+        },
+        5,
+    );
+    assert_eq!(v.stacks[0].cpu_permille, Some(110));
+    assert_eq!(v.stacks[0].ram_used_mb, Some(2048));
+    // Not read yet: no number, never a made-up 0.
+    assert_eq!(v.stacks[1].cpu_permille, None);
+    let json = serde_json::to_value(&v).unwrap();
+    assert_eq!(json["stacks"][0]["cpu_permille"], 110);
+}

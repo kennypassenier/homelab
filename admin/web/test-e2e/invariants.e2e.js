@@ -1346,10 +1346,12 @@ test("invariants: the Host page's Disk section names the root volume's device an
     const context = await browser.newContext();
     const page = await freshPage(context);
     await page.goto(`${BASE}/host`, { waitUntil: "load" });
-    await page.waitForSelector("#host-disk-facts", { timeout: 5000 });
+    // redesign-host: the Disk card (#host-disk) names the volume, its disk
+    // and what fills it in one stacked bar with its legend.
+    await page.waitForSelector("#host-disk .hk-stack-bar", { timeout: 5000 });
     await page.waitForTimeout(300);
     const diskFactsText = await page.evaluate(
-      () => document.querySelector("#host-disk-facts")?.textContent ?? "",
+      () => document.querySelector("#host-disk")?.textContent ?? "",
     );
     // fix-222 (Kenny, 2026-10-02: "is dat de 1TB SSD die erin zit?"): the
     // demo host's own made-up disk_detail (admin/src/shell/demo.rs) names
@@ -1364,9 +1366,7 @@ test("invariants: the Host page's Disk section names the root volume's device an
       `expected a GB size on the Disk section, got: ${diskFactsText}`,
     );
     const topDirsText = await page.evaluate(
-      () =>
-        document.querySelector('[data-kp-remember="host-top-dirs"]')
-          ?.textContent ?? "",
+      () => document.querySelector("#host-disk .hk-dirs")?.textContent ?? "",
     );
     assert.ok(
       topDirsText.includes("/var"),
@@ -2769,11 +2769,16 @@ test("invariants: every red action button belongs to an action the catalog marks
         .first()
         .waitFor({ timeout: 15000 });
       const red = await page.evaluate(() =>
-        [...document.querySelectorAll(".actions-area .kp-button--destructive")]
+        [
+          ...document.querySelectorAll(
+            // redesign-host: the Host page's action tiles mark red the same way.
+            ".actions-area .kp-button--destructive, .actions-area .hk-act--destructive",
+          ),
+        ]
           .filter((b) => /** @type {HTMLElement} */ (b).offsetParent)
           .map((b) => ({
             action: b.getAttribute("data-action"),
-            label: (b.textContent ?? "").trim(),
+            label: (b.querySelector("b") ?? b).textContent?.trim() ?? "",
           })),
       );
       for (const r of red)
@@ -3596,6 +3601,323 @@ test("invariants: clicking a Backups heatmap night pins it into the address and 
     await page.waitForTimeout(150);
     assert.equal(param(), null, "Today left the night in the address");
     assert.match(await label.innerText(), /Last night/);
+  } finally {
+    await browser.close();
+  }
+});
+
+// ── redesign-host (3.71.0, Kenny approved the Host demo 2026-10-03:
+// "approved demos are implemented exactly") — the whole-screen shape of
+// the redesigned Host page, in the demo host's own data. ─────────────────
+
+test("invariants: the Host page lays out two columns, Containers first, the line and the facts on the right", async () => {
+  const browser = await chromium.launch();
+  try {
+    const bad = [];
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 1000 },
+      });
+      const page = await freshPage(context);
+      await page.goto(`${BASE}/host`);
+      await page
+        .locator("#host-guests tr[data-vmid]")
+        .first()
+        .waitFor({ timeout: 10000 });
+      const r = await page.evaluate(() => {
+        const box = (/** @type {string} */ sel) =>
+          document.querySelector(sel)?.getBoundingClientRect() ?? null;
+        const main = [
+          ...document.querySelectorAll(".hk-col-main > section"),
+        ].map((s) => s.id);
+        const side = [
+          ...document.querySelectorAll(".hk-col-side > section"),
+        ].map((s) => s.id);
+        return {
+          main,
+          side,
+          containers: box("#host-containers"),
+          connection: box("#host-connection"),
+          kpis: [...document.querySelectorAll(".hk-kpi")].map(
+            (k) => /** @type {HTMLElement} */ (k).dataset.key,
+          ),
+          kpiText: [...document.querySelectorAll(".hk-kpi")].map(
+            (k) => k.textContent ?? "",
+          ),
+          primary: [
+            ...document.querySelectorAll(".hk-head__actions .kp-button"),
+          ].map((b) => ({
+            label: (b.textContent ?? "").trim(),
+            primary: b.classList.contains("kp-button--primary"),
+          })),
+          reach: document.querySelector("#host-reach")?.textContent ?? "",
+          // No sideways page scroll, at any width.
+          overflow: document.documentElement.scrollWidth - window.innerWidth,
+        };
+      });
+      if (r.main[0] !== "host-containers")
+        bad.push(`${width}px: the left column opens with ${r.main[0]}`);
+      if (r.main.join() !== "host-containers,host-actions-card,host-disk-card")
+        bad.push(`${width}px: left column ${r.main}`);
+      if (
+        r.side.join() !==
+        "host-connection,host-about-card,host-templates-card,host-checks-card"
+      )
+        bad.push(`${width}px: right column ${r.side}`);
+      if (
+        r.kpis.join() !== "cpu,memory,root,pool,containers" ||
+        !/7\s*of 8 running/.test(r.kpiText[4])
+      )
+        bad.push(`${width}px: KPI strip ${r.kpis} / ${r.kpiText[4]}`);
+      const labels = r.primary.map((p) => p.label);
+      if (
+        labels.join("|") !== "Open the console|Host log|Run host checks" ||
+        !r.primary[2].primary ||
+        r.primary.filter((p) => p.primary).length !== 1
+      )
+        bad.push(`${width}px: header actions ${JSON.stringify(r.primary)}`);
+      if (r.overflow > 0)
+        bad.push(`${width}px: the page scrolls ${r.overflow}px sideways`);
+      if (!/^Reachable · \d+ ms$/.test(r.reach.trim()))
+        bad.push(`${width}px: the live chip reads "${r.reach}"`);
+      const c = r.containers;
+      const l = r.connection;
+      if (!c || !l) bad.push(`${width}px: a card is missing`);
+      else if (width > 1200) {
+        // Two columns: the line card sits right of Containers, level
+        // with it, and Containers takes about two thirds.
+        if (!(l.left > c.right) || Math.abs(l.top - c.top) > 2)
+          bad.push(`${width}px: Connection is not beside Containers`);
+        const share = c.width / (l.right - c.left);
+        if (share < 0.6 || share > 0.72)
+          bad.push(
+            `${width}px: Containers takes ${share.toFixed(2)} of the row`,
+          );
+      } else if (!(l.top > c.bottom))
+        bad.push(`${width}px: on a phone Connection is not under Containers`);
+      await context.close();
+    }
+    assert.deepEqual(bad, [], bad.join("; "));
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the Host page's Containers filter toggles with a plain click and / focuses its search", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/host`);
+    await page
+      .locator("#host-guests tr[data-vmid]")
+      .first()
+      .waitFor({ timeout: 10000 });
+    const shown = () =>
+      page.$$eval("#host-guests tr[data-vmid]", (rows) =>
+        rows
+          .filter((r) => !(/** @type {HTMLElement} */ (r).hidden))
+          .map((r) => /** @type {HTMLElement} */ (r).dataset.status),
+      );
+    const all = await shown();
+    assert.ok(all.length >= 3, `only ${all.length} containers listed`);
+    assert.ok(all.includes("stopped") && all.includes("running"));
+    const chip = (/** @type {string} */ v) =>
+      page.locator(`[data-drive="container-filter"][data-drive-row="${v}"]`);
+    await chip("stopped").click();
+    assert.deepEqual(
+      [...new Set(await shown())],
+      ["stopped"],
+      "Stopped did not narrow to stopped",
+    );
+    // A second plain click turns it off again: back to every row.
+    await chip("stopped").click();
+    assert.equal((await shown()).length, all.length);
+    assert.equal(await chip("all").getAttribute("aria-pressed"), "true");
+    await chip("running").click();
+    assert.deepEqual([...new Set(await shown())], ["running"]);
+    await chip("all").click();
+    assert.equal((await shown()).length, all.length);
+    // Sorting by a header keeps every row and reorders them.
+    await page.locator("#host-containers th", { hasText: "ID" }).click();
+    await page.locator("#host-containers th", { hasText: "ID" }).click();
+    const ids = await page.$$eval("#host-guests tr[data-vmid]", (rows) =>
+      rows.map((r) => Number(/** @type {HTMLElement} */ (r).dataset.vmid)),
+    );
+    assert.deepEqual(
+      ids,
+      [...ids].sort((a, b) => b - a),
+      "ID did not sort descending on the second click",
+    );
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("/");
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.id),
+      "host-guest-search",
+      "/ did not focus the containers search",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: Host settings show only the values host.toml changes until All is picked", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/host`);
+    await page
+      .locator("#host-settings tr[data-key]")
+      .first()
+      .waitFor({ state: "attached", timeout: 10000 });
+    const read = () =>
+      page.evaluate(() => {
+        const rows = [
+          ...document.querySelectorAll("#host-settings tr[data-key]"),
+        ];
+        const vis = rows.filter(
+          (r) => /** @type {HTMLElement} */ (r).offsetParent,
+        );
+        return {
+          total: rows.length,
+          changed: rows.filter(
+            (r) => /** @type {HTMLElement} */ (r).dataset.set === "1",
+          ).length,
+          shown: vis.length,
+          shownAllChanged: vis.every(
+            (r) => /** @type {HTMLElement} */ (r).dataset.set === "1",
+          ),
+          open: /** @type {HTMLDetailsElement | null} */ (
+            document.querySelector("#host-settings-card")
+          )?.open,
+          desc:
+            document.querySelector("#host-settings-card .section-head__desc")
+              ?.textContent ?? "",
+        };
+      });
+    const before = await read();
+    assert.equal(before.open, true, "the settings card starts folded");
+    assert.ok(before.changed > 0, "the demo host.toml changes nothing");
+    assert.ok(
+      before.total > before.changed + 10,
+      `only ${before.total} settings`,
+    );
+    assert.equal(
+      before.shown,
+      before.changed,
+      "rows at their default are shown by default",
+    );
+    assert.ok(before.shownAllChanged);
+    assert.ok(
+      before.desc.includes(
+        `${before.changed} of ${before.total} settings changed`,
+      ),
+      `the description does not count them: ${before.desc}`,
+    );
+    assert.equal(
+      await page
+        .locator("#host-settings-card a.kp-button", {
+          hasText: "Edit in Settings",
+        })
+        .getAttribute("href"),
+      "/settings",
+    );
+    await page
+      .locator('[data-drive="host-settings-view"][data-drive-row="all"]')
+      .click();
+    assert.equal(
+      (await read()).shown,
+      before.total,
+      "All does not show every setting",
+    );
+    await page
+      .locator('[data-drive="host-settings-view"][data-drive-row="changed"]')
+      .click();
+    assert.equal((await read()).shown, before.changed);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("invariants: the Host page's actions are grouped by intent as described tiles, red only when destructive", async () => {
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const catalog = await page.evaluate(async () =>
+      (await fetch("/data/actions/catalog")).json(),
+    );
+    const host = catalog.actions.filter(
+      (/** @type {any} */ a) => a.target === "host",
+    );
+    await page.goto(`${BASE}/host`);
+    await page
+      .locator("#host-actions .hk-act")
+      .first()
+      .waitFor({ timeout: 10000 });
+    const groups = await page.evaluate(() =>
+      [...document.querySelectorAll("#host-actions .hk-act-group")].map(
+        (g) => ({
+          title: /** @type {HTMLElement} */ (g).dataset.group,
+          full: !!g.querySelector(".hk-lock"),
+          tiles: [...g.querySelectorAll(".hk-act")].map((t) => ({
+            action: t.getAttribute("data-action"),
+            label: (t.querySelector("b")?.textContent ?? "").trim(),
+            desc: (t.querySelector("span")?.textContent ?? "").trim(),
+            red: t.classList.contains("hk-act--destructive"),
+          })),
+        }),
+      ),
+    );
+    assert.deepEqual(
+      groups.map((g) => g.title),
+      ["Keep it healthy", "Build and guard", "Change the host"],
+    );
+    assert.deepEqual(
+      groups.map((g) => g.full),
+      [false, false, true],
+    );
+    const tiles = groups.flatMap((g) => g.tiles);
+    assert.deepEqual(
+      tiles.map((t) => t.action).sort(),
+      host.map((/** @type {any} */ a) => a.action).sort(),
+      "a host action is missing from the tiles",
+    );
+    for (const t of tiles) {
+      assert.ok(
+        t.desc.length > 10 && t.desc.endsWith("."),
+        `${t.label} has no one-line description`,
+      );
+      const entry = host.find((/** @type {any} */ a) => a.action === t.action);
+      assert.equal(
+        t.red,
+        entry.destructive === true,
+        `${t.label} red=${t.red}`,
+      );
+    }
+    // The left column reads Containers, then the actions, then Disk.
+    const order = await page.$$eval(".hk-col-main > section", (s) =>
+      s.map((x) => x.id),
+    );
+    assert.deepEqual(order.slice(0, 2), [
+      "host-containers",
+      "host-actions-card",
+    ]);
+    // A tile opens its existing action dialog.
+    await page.locator('#host-actions .hk-act[data-action="patch"]').click();
+    const dialog = page.locator("dialog#action-dialog[open]");
+    await dialog.waitFor({ timeout: 3000 });
+    assert.ok(
+      await dialog.isVisible(),
+      "the tile did not open the action dialog",
+    );
   } finally {
     await browser.close();
   }

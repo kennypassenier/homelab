@@ -272,3 +272,19 @@ summarised here for the corrections record.
 7. **Hoe en wanneer meten we dat het werkt.** At the next whole-screen run: no case runs past its deadline without failing by name; the 3.71.0 Go form's run reports every case's duration.
 8. **Fallback.** If a case still hangs inside its deadline window often, the deadline drops to the longest measured case plus a margin and that case is split.
 9. **Wanneer herzien we de maatregel.** At the 3.71.0 retrospective.
+
+---
+
+## Correction · redesign-integrate-8 — five merges went green while 54 Live view controls could not be reached
+
+**Draft — awaiting Kenny.**
+
+1. **Wat ging er mis.** The 3.71.0 integration merged eight branches in five green merge commits (and three more after); the first whole-screen run then found 54 declared Live view controls the sweep could not reach on screen: 8 on Activity, 6 on the Console, 2 on Apps, 4 chart and Metrics controls, 9 in Deploy all changes, 8 on the Stacks page, 5 on Firewall, 7 on Settings, 5 on Sign-in (passkeys) — all from the page branches, which declared their new controls without saying where they show (a view, a row, a state).
+2. **Welke poort liet het door.** The commit-time catalog check (`.githooks/drivecatalog.sh` + `admin/web/test/drivecatalog.test.js`) ran on every one of these merges (they were committed with `git commit`, so pre-commit ran) and passed: it checks declarations and marks (a fresh catalog, no hand-written mark, every field declared), not where a page draws a control. Reachability was only checked by the whole-screen sweep, which a commit does not run. Separately: a clean `git merge` runs `pre-merge-commit`, which did not exist, so a merge git commits by itself skipped every commit check.
+3. **Waar dezelfde fout nog zit.** Every control a page branch added or moved since the catalog branch's own sweep: the commit-time check listed 218 of the 276 catalog entries as pressed by no passing sweep (by page: activity, home, metrics, shell, passkeys, overview, firewall, log, inbox, fleetview, presets, settings, host, stack, update).
+4. **Hoe voorkomen we herhaling.** A passing sweep stamps every control it pressed (`admin/web/test-e2e/sweep-stamp.json`, one key per control: id, page, opens, row, address, old names, state, reach steps, twins); the commit check refuses any catalog control whose key is not stamped, so a new or moved control needs a passing sweep before it can be committed. `.githooks/pre-merge-commit` runs pre-commit.
+5. **Kost.** A sweep run (about 5 minutes, in the e2e queue) before committing a declaration change; nothing for other commits.
+6. **Handhaving.** Code: `redesign-integrate-8: every catalog control was pressed by a passing Live view sweep since its entry last changed` (drivecatalog.test.js, at every commit and merge touching admin/web/), and `a_clean_merge_runs_the_same_commit_checks_as_a_commit` (register_hook_tests.rs).
+7. **Hoe en wanneer meten we dat het werkt.** At the next page change that adds a control: the commit is refused until the sweep has pressed it.
+8. **Fallback.** If the stamp is regenerated without a real sweep, the stamp file gets the sweep run's duration and the catalog hash, and the release gate re-runs the sweep.
+9. **Wanneer herzien we de maatregel.** At the 3.71.0 retrospective.

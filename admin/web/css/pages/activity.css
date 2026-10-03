@@ -31,7 +31,7 @@
   }
   /* The Window control's first button starts at the title's left edge,
      its pill's border and padding hanging outside it. */
-  .ac-page .nx-head-actions > .hk-seg:first-child {
+  .ac-page .nx-head-actions > .nx-seg:first-child {
     margin-inline-start: -4px;
   }
 }
@@ -49,10 +49,9 @@
 }
 
 /* ── segmented switches: the header's Window, History's Show ─────────
-   hostkit.js's segSwitch (moving to ui.js) draws `.hk-seg`; host.css
-   styles it with the Host page's own variables, so this page gives it
-   its own look, scoped, whichever stylesheet loaded first. */
-:is(.ac-page, .con-page) .hk-seg {
+   ui.js's segSwitch draws `.nx-seg` (hostkit's `.hk-seg` until the 3.71.0
+   merge); this page gives it its own look, scoped, over app.css's. */
+:is(.ac-page, .con-page) .nx-seg {
   display: inline-grid;
   grid-auto-flow: column;
   gap: 2px;
@@ -61,7 +60,7 @@
   border-radius: 999px;
   background: var(--ac-soft);
 }
-:is(.ac-page, .con-page) .hk-seg button {
+:is(.ac-page, .con-page) .nx-seg button {
   all: unset;
   font-size: var(--kp-text-sm);
   padding: 4px 14px;
@@ -72,20 +71,20 @@
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
-:is(.ac-page, .con-page) .hk-seg button:hover {
+:is(.ac-page, .con-page) .nx-seg button:hover {
   color: var(--foreground);
 }
-:is(.ac-page, .con-page) .hk-seg button[aria-pressed="true"] {
+:is(.ac-page, .con-page) .nx-seg button[aria-pressed="true"] {
   background: var(--card);
   color: var(--foreground);
   font-weight: 600;
   box-shadow: 0 0 0 1px var(--border);
 }
-:is(.ac-page, .con-page) .hk-seg button:focus-visible {
+:is(.ac-page, .con-page) .nx-seg button:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 1px;
 }
-:is(.ac-page, .con-page) .hk-seg__count {
+:is(.ac-page, .con-page) .nx-seg__count {
   margin-inline-start: 6px;
   padding: 0 6px;
   border-radius: 999px;
@@ -93,7 +92,7 @@
   font-size: 0.72rem;
   font-weight: 500;
 }
-:is(.ac-page, .con-page) .hk-seg__count:empty {
+:is(.ac-page, .con-page) .nx-seg__count:empty {
   display: none;
 }
 
@@ -122,7 +121,7 @@
   gap: 8px;
   align-items: center;
 }
-:is(.ac-page, .con-page) .hk-keys {
+:is(.ac-page, .con-page) .nx-keys {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 20px;
@@ -130,12 +129,12 @@
   font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
 }
-:is(.ac-page, .con-page) .hk-keys span {
+:is(.ac-page, .con-page) .nx-keys span {
   display: inline-flex;
   gap: 6px;
   align-items: center;
 }
-:is(.ac-page, .con-page) .hk-kbd {
+:is(.ac-page, .con-page) .nx-kbd {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.72rem;
   border: 1px solid var(--border);
@@ -551,11 +550,11 @@
   .ac-hint {
     text-align: start;
   }
-  .ac-page .hk-seg {
+  .ac-page .nx-seg {
     grid-auto-columns: minmax(0, 1fr);
     max-inline-size: 100%;
   }
-  .ac-page .hk-seg button {
+  .ac-page .nx-seg button {
     padding-inline: 8px;
   }
 }

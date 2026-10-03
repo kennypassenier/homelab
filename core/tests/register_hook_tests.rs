@@ -1090,3 +1090,63 @@ fn the_commit_gate_regenerates_the_control_catalog_and_runs_its_test() {
         "pre-commit does not call it"
     );
 }
+
+/// redesign-integrate-8: a merge git commits by itself (`git merge` with no
+/// conflict) runs `pre-merge-commit`, not `pre-commit`; with no such hook
+/// every commit-time check was skipped on a clean merge. The repository's
+/// `pre-merge-commit` runs the same checks as `pre-commit`.
+///
+/// covers: redesign-integrate-8
+#[test]
+fn a_clean_merge_runs_the_same_commit_checks_as_a_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    let hooks = dir.path().join("hooks");
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::create_dir_all(&hooks).unwrap();
+    // The real pre-merge-commit beside a stand-in pre-commit that leaves a mark.
+    let real = std::fs::read_to_string(repo_root().join(".githooks/pre-merge-commit"))
+        .expect(".githooks/pre-merge-commit exists");
+    let mark = dir.path().join("pre-commit-ran");
+    std::fs::write(hooks.join("pre-merge-commit"), real).unwrap();
+    std::fs::write(
+        hooks.join("pre-commit"),
+        format!("#!/bin/sh\ntouch '{}'\n", mark.display()),
+    )
+    .unwrap();
+    for h in ["pre-merge-commit", "pre-commit"] {
+        let p = hooks.join(h);
+        let mut perm = std::fs::metadata(&p).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perm, 0o755);
+        std::fs::set_permissions(&p, perm).unwrap();
+    }
+    git(&repo, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo.join("a"), "a").unwrap();
+    git(&repo, &["add", "a"]);
+    git(&repo, &["commit", "-q", "-m", "a"]);
+    git(&repo, &["checkout", "-q", "-b", "side"]);
+    std::fs::write(repo.join("b"), "b").unwrap();
+    git(&repo, &["add", "b"]);
+    git(&repo, &["commit", "-q", "-m", "b"]);
+    git(&repo, &["checkout", "-q", "main"]);
+    std::fs::write(repo.join("c"), "c").unwrap();
+    git(&repo, &["add", "c"]);
+    git(&repo, &["commit", "-q", "-m", "c"]);
+    let hooks_path = format!("core.hooksPath={}", hooks.display());
+    git(
+        &repo,
+        &[
+            "-c",
+            &hooks_path,
+            "merge",
+            "-q",
+            "--no-ff",
+            "--no-edit",
+            "side",
+        ],
+    );
+    assert!(
+        mark.exists(),
+        "a clean merge committed without the pre-commit checks"
+    );
+}

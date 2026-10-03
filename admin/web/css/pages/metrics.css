@@ -80,7 +80,7 @@ main.mk-page > .mk-failed:empty {
   .mk-window {
     white-space: normal;
   }
-  .mk-toolbar .hk-seg {
+  .mk-toolbar .nx-seg {
     inline-size: 100%;
   }
 }
@@ -369,7 +369,7 @@ main.mk-page > .mk-failed:empty {
 @media (hover: none) {
   .mk-pointer-only,
   .tc-hint--pointer,
-  .mk-page .hk-keys {
+  .mk-page .nx-keys {
     display: none !important;
   }
   .mk-touch-only,

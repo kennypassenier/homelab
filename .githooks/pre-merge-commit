@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# redesign-integrate-8: a merge git commits by itself (`git merge` with no
+# conflict) runs this hook, never pre-commit; without it a clean merge
+# skipped every commit-time check (the register, the Live view catalog, the
+# gates). It runs exactly what a commit runs.
+exec "$(dirname "$0")/pre-commit" "$@"

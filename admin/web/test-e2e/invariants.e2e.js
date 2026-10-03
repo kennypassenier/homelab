@@ -2056,14 +2056,9 @@ test("invariants: a title row's controls sit in one row beside the title, and fo
           const row = h1?.closest(".title-row");
           if (!h1 || !row) return null;
           const t = h1.getBoundingClientRect();
-          // A segmented switch (ui.js `segSwitch`) is one control with a
-          // frame of its own: its edge counts, not its buttons inside.
           const ctls = [
-            ...row.querySelectorAll(
-              "button, a.kp-button, .state, .badge, .nx-seg",
-            ),
+            ...row.querySelectorAll("button, a.kp-button, .state, .badge"),
           ]
-            .filter((e) => !e.parentElement?.closest(".nx-seg"))
             .filter((e) => /** @type {HTMLElement} */ (e).offsetParent)
             .map((e) => e.getBoundingClientRect())
             .filter((b) => b.width > 0);
@@ -2264,18 +2259,34 @@ test("invariants: a collapsible block's heading stays beside its chevron, on des
             .filter((s) => /** @type {HTMLElement} */ (s).offsetParent)
             .map((s) => {
               const head = s.querySelector("h2, h3");
-              const chev = s.querySelector(".nx-chev");
-              if (!head || !chev) return null;
+              if (!head) return null;
               const a = head.getBoundingClientRect();
-              const b = chev.getBoundingClientRect();
-              const desc = s.querySelector(".section-head__desc");
-              const end = desc ? desc.getBoundingClientRect().bottom : a.bottom;
+              const b = s.querySelector(".nx-chev")?.getBoundingClientRect();
+              if (b && b.width > 0) {
+                // The ops look: the chevron at the head's right edge, beside
+                // the heading and its sentence (centred on them), never
+                // alone on a line above or below them.
+                const desc = s.querySelector(".section-head__desc");
+                const end = desc
+                  ? desc.getBoundingClientRect().bottom
+                  : a.bottom;
+                return {
+                  name: (head.textContent ?? "").trim(),
+                  beside:
+                    b.left > a.left + 20 && b.top < end && b.bottom > a.top,
+                };
+              }
+              // The next.css look: the chevron is the summary's ::before at
+              // its left; a heading beside it starts ~12 px in, one wrapped
+              // under it at 0 (fix-250's rule).
+              const st = getComputedStyle(s);
+              const left =
+                s.getBoundingClientRect().left +
+                parseFloat(st.paddingInlineStart) +
+                parseFloat(st.borderInlineStartWidth);
               return {
                 name: (head.textContent ?? "").trim(),
-                // The chevron beside the heading and its sentence (the
-                // kit centres it on them), never alone on a line of its own
-                // above or below them.
-                beside: b.left > a.left + 20 && b.top < end && b.bottom > a.top,
+                beside: a.left - left >= 10,
               };
             })
             .filter((x) => x !== null),
@@ -6325,6 +6336,24 @@ test("invariants: drive-reach: Live view finds and presses every declared contro
       [...twins],
       [],
       "controls drawn twice that are not declared twins",
+    );
+    // redesign-integrate-8: a passing sweep stamps every control it pressed;
+    // the commit-time catalog check refuses a control no sweep has pressed
+    // since its entry changed.
+    const { sweepKey } = await import("./sweepkey.js");
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(
+      new URL("./sweep-stamp.json", import.meta.url),
+      `${JSON.stringify(
+        {
+          about:
+            "Written by the passing Live view sweep (invariants.e2e.js, drive-reach); read by admin/web/test/drivecatalog.test.js. Never edit by hand.",
+          schema: 1,
+          controls: all.map(sweepKey).sort(),
+        },
+        null,
+        1,
+      )}\n`,
     );
   } finally {
     await browser.close();

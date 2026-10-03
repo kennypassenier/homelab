@@ -99,6 +99,7 @@ function rows(stack, native, repos) {
           "div",
           { class: "backups__actions" },
           ...restoreCell(stack, native, r),
+          ...verifyCell(stack, r),
           ...fileCell(stack, native, r),
         ),
       ),
@@ -135,6 +136,38 @@ function restoreCell(stack, native, r) {
         preset: native
           ? { snapshot: r.newest_snapshot.short_id }
           : { app: r.owner, snapshot: r.newest_snapshot.short_id },
+      }),
+  );
+  return [btn];
+}
+
+/**
+ * fix-237: "Verify restore…" — restore this repository's snapshot into the
+ * restore drill's scratch directory on the host, judge it, report files and
+ * size, empty the scratch again; the live data is never touched. Opens the
+ * action dialog with this row's app (or native unit) and newest snapshot.
+ * @param {string} stack
+ * @param {any} r
+ * @returns {Node[]}
+ */
+function verifyCell(stack, r) {
+  if (!r.newest_snapshot) return [];
+  const btn = h(
+    "button",
+    {
+      class: "kp-button kp-button--sm kp-button--ghost",
+      type: "button",
+      "data-action": "verify-restore",
+      title:
+        "Restore this snapshot into the drill's scratch directory to prove it restores; live data is not touched",
+    },
+    "Verify restore…",
+  );
+  btn.addEventListener(
+    "click",
+    () =>
+      void openAction(stack, "verify-restore", {
+        preset: { app: r.owner, snapshot: r.newest_snapshot.short_id },
       }),
   );
   return [btn];

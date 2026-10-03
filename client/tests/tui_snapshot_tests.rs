@@ -1383,6 +1383,12 @@ const CLI_ONLY: &[(&str, &str)] = &[
          viewer",
     ),
     (
+        "VerifyRestore",
+        "fix-237: `homelab verify-restore` and the dashboard's Backups page \
+         (ActionKind::VerifyRestore) restore a snapshot into the drill's \
+         scratch directory; the TUI has no restore flow of its own",
+    ),
+    (
         "RestoreNative",
         "the dashboard's restore action for a native service (ActionKind::\
          RestoreNative); the TUI has no restore flow of its own, native or \

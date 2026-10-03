@@ -601,6 +601,20 @@ pub enum Command {
         snapshot: String,
         path: String,
     },
+    /// fix-237: prove one snapshot restorable without touching live data —
+    /// restore it into the restore drill's scratch directory
+    /// (`restore_drill_scratch_dir`), judge it the way the nightly drill
+    /// does, report the files and the size, and empty the scratch directory
+    /// again. `snapshot` an id or `latest`; `app` one repository of the
+    /// stack, or every repository (`latest` only) when absent. An operation
+    /// (op lock, journal, streamed lines) because it writes gigabytes to the
+    /// scratch pool and can take as long as a restore.
+    VerifyRestore {
+        stack: String,
+        #[serde(default)]
+        app: Option<String>,
+        snapshot: String,
+    },
     /// feat-backup-2: restore a native (adopted) service from a snapshot
     /// (default "latest"). Unpacks the archive `restic dump` emits straight
     /// into the container with `tar`, the same pipeline the auto-restore of
@@ -853,6 +867,7 @@ impl Command {
             | StageNativeBinary { .. }
             | BackupStack(_)
             | RestoreStack { .. }
+            | VerifyRestore { .. }
             | UpdateStack { .. }
             | PatchFleet
             | BuildTemplate { .. }
@@ -964,6 +979,7 @@ impl Command {
             GetRetired => "get_retired",
             BrowseSnapshot { .. } => "browse_snapshot",
             ReadSnapshotFile { .. } => "read_snapshot_file",
+            VerifyRestore { .. } => "verify_restore",
             RestoreNative { .. } => "restore_native",
             RevealSecret { .. } => "reveal_secret",
             SetSecret { .. } => "set_secret",

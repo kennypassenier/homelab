@@ -2313,13 +2313,15 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
     doc.push_str(&format!(
         "The daemon replicates the datasets named in `[[zfs_jobs]]` (`source`, `target`) in \
          `{toml}` every night, and on `homelab zfs-replicate` (core/src/ops/zfs.rs). Each run \
-         takes `zfs snapshot -r <source>@{prefix}YYYYMMDD-HHMM` and then sends every \
-         dataset of the source on its own, never as one `-R` stream: `zfs send -I \
+         takes `zfs snapshot -r <source>@{prefix}YYYYMMDD-HHMM` (a run on demand adds \
+         `{mark}` to the name) and then sends every dataset of the source on its own, never as one `-R` stream: `zfs send -I \
          <replica's newest snapshot> <new> | zfs receive -F -x mountpoint <target dataset>`, \
          or a full send when the target dataset does not exist yet or holds no snapshots at \
          all. It prunes only snapshots whose name starts with `{prefix}`: the source with \
          the configured tiers, the replica with its own longer ones, keeping whatever either \
-         policy keeps (fix-85).\n\n\
+         policy keeps (fix-85). Scheduled snapshots and snapshots taken on demand are \
+         thinned each on their own, so a run by hand never removes that day's nightly \
+         snapshot (fix-243).\n\n\
          The replica keeps its own history. A snapshot destroyed on the source stays on the \
          replica until the replica's retention thins it; a dataset destroyed on the source \
          stays on the replica untouched, is never pruned, and is named in a warning every \
@@ -2342,6 +2344,7 @@ pub fn generate_runbook(stacks_dir: &Path, out_path: &str) -> Result<usize, Stri
          with `zfs destroy -r <target>` and run the job again for a fresh full send.\n\n",
         toml = host_toml,
         prefix = homelab_core::ops::zfs::SNAP_PREFIX,
+        mark = homelab_core::ops::zfs::ON_DEMAND_MARK,
     ));
 
     // ── Stacks ──

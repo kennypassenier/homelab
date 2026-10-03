@@ -1290,6 +1290,37 @@ async fn run(explicit_host: Option<String>) {
                 }
             }
         }
+        // fix-237: one snapshot restored into the drill's scratch directory
+        // on the host, judged, counted and emptied again — never the live
+        // data. The host streams one result line per repository.
+        "verify-restore" => {
+            let homelab_client::cli_args::Invocation::VerifyRestore(a) = invocation(&args) else {
+                die("internal: verify-restore parsed as another verb")
+            };
+            let stack = homelab_client::repo_config::stack_name(&a.stack);
+            println!(
+                "{}▶ verify-restore {}{} snapshot '{}' into the restore drill's scratch directory \
+                 (live data untouched){}",
+                C_YELLOW,
+                stack,
+                a.app
+                    .as_deref()
+                    .map(|x| format!(" :: {}", x))
+                    .unwrap_or_default(),
+                a.snapshot,
+                C_RESET
+            );
+            rpc(
+                &host,
+                &token,
+                Command::VerifyRestore {
+                    stack,
+                    app: a.app,
+                    snapshot: a.snapshot,
+                },
+            )
+            .await;
+        }
         // fix-241: one file of one snapshot, read-only (`restic dump` on the
         // host, capped) — the exact old settings without a live restore.
         "snapshot-file" => {

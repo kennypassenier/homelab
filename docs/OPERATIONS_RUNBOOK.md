@@ -1138,7 +1138,8 @@ Put `[[zfs_jobs]]` tables after every top-level key: a key written below a
 
 **Runs** nightly (op-1 step 7) and on demand with `homelab zfs-replicate`
 (`host/src/main.rs:3789-3808`). Per job: `zfs snapshot -r
-<source>@homelab-YYYYMMDD-HHMM`, then every dataset of the source is sent on
+<source>@homelab-YYYYMMDD-HHMM` (`-manual` appended on demand; retention
+thins the two kinds each on its own, fix-243), then every dataset of the source is sent on
 its own (never one `-R` stream): an incremental from the replica dataset's
 newest snapshot, or a full seed when that dataset does not exist yet or
 holds no snapshots at all; received with `-x mountpoint` so a replica never

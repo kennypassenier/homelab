@@ -83,6 +83,9 @@ pub enum Invocation {
     ZfsReplicate,
     BackupHostMeta,
     BackupDevices,
+    /// fix-237: restore one snapshot into the drill's scratch directory,
+    /// never the live data (`snapshots::verify_restore_args`).
+    VerifyRestore(crate::snapshots::VerifyRestoreArgs),
 }
 
 fn usage(verb: &str) -> String {
@@ -188,6 +191,9 @@ pub fn parse(args: &[String]) -> Result<Option<Invocation>, String> {
         "zfs-replicate" => Invocation::ZfsReplicate,
         "backup-host-meta" => Invocation::BackupHostMeta,
         "backup-devices" => Invocation::BackupDevices,
+        "verify-restore" => Invocation::VerifyRestore(crate::snapshots::verify_restore_args(
+            args.get(1..).unwrap_or(&[]),
+        )?),
         _ => return Ok(None),
     }))
 }

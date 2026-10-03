@@ -194,6 +194,19 @@ fn cli_line_bare(command: &Command, force: bool) -> Option<String> {
         }
         PatchFleet => push("patch")?,
         ZfsReplicate => push("zfs-replicate")?,
+        VerifyRestore {
+            stack,
+            app,
+            snapshot,
+        } => {
+            push("verify-restore")?;
+            push(stack)?;
+            push(snapshot)?;
+            if let Some(a) = app {
+                push("--app")?;
+                push(a)?;
+            }
+        }
         BackupHostMeta => push("backup-host-meta")?,
         BackupDevices => push("backup-devices")?,
         Ping => push("ping")?,

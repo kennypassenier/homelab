@@ -6394,6 +6394,7 @@ fn rpc_stack(command: &Rpc) -> Option<String> {
         | Rpc::GetApplied { stack }
         | Rpc::GetBackups { stack, .. }
         | Rpc::RestoreNative { stack, .. }
+        | Rpc::VerifyRestore { stack, .. }
         | Rpc::RevealSecret { stack, .. }
         | Rpc::SetSecret { stack, .. } => Some(stack.clone()),
         Rpc::InstallNative { manifest, .. }
@@ -7997,7 +7998,15 @@ async fn scheduler_loop(state: AppState) {
         if plan.contains(&NightlyTask::Zfs) {
             let jobs = state.config.zfs_jobs.clone();
             let report = run_mutating_op(&state, &exec, 0, "zfs-replicate", |ctx| {
-                Box::pin(async move { homelab_core::ops::zfs::replicate(ctx, &jobs, &tiers).await })
+                Box::pin(async move {
+                    homelab_core::ops::zfs::replicate(
+                        ctx,
+                        &jobs,
+                        &tiers,
+                        homelab_core::ops::backup::BackupTrigger::Nightly,
+                    )
+                    .await
+                })
             })
             .await;
             if report.ok {
@@ -11420,7 +11429,15 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                 .clone();
             let jobs = state.config.zfs_jobs.clone();
             let resp = run_mutating_op(state, &exec, req.id, "zfs-replicate", |ctx| {
-                Box::pin(async move { homelab_core::ops::zfs::replicate(ctx, &jobs, &tiers).await })
+                Box::pin(async move {
+                    homelab_core::ops::zfs::replicate(
+                        ctx,
+                        &jobs,
+                        &tiers,
+                        homelab_core::ops::backup::BackupTrigger::Manual,
+                    )
+                    .await
+                })
             })
             .await;
             if resp.ok {
@@ -12096,6 +12113,54 @@ async fn handle_rpc(state: &AppState, req: RpcRequest) -> RpcResponse {
                     deferred: None,
                 },
             }
+        }
+        // fix-237: one snapshot restored into the drill's scratch directory
+        // with the drill's own restore-and-judge, counted, and emptied again;
+        // the live data is never a target.
+        Rpc::VerifyRestore {
+            stack,
+            app,
+            snapshot,
+        } => {
+            let store = homelab_core::state::StateStore::new(&exec, &state.config.state_dir);
+            let owners = match store.load().await {
+                Ok(hs) => homelab_core::ops::restoredrill::verify_restore_owners(
+                    &hs,
+                    &stack,
+                    app.as_deref(),
+                    &snapshot,
+                ),
+                Err(e) => Err(format!("state unreadable: {}", e)),
+            };
+            let owners = match owners {
+                Ok(o) => o,
+                Err(e) => {
+                    return RpcResponse {
+                        id: req.id,
+                        ok: false,
+                        message: e,
+                        deferred: None,
+                    };
+                }
+            };
+            let cfg = state.config.backup.clone();
+            let scratch = state.config.restore_drill_scratch_dir.clone();
+            run_mutating_op_for_stack(
+                state,
+                &exec,
+                req.id,
+                "verify-restore",
+                Some(&stack),
+                |ctx| {
+                    Box::pin(async move {
+                        homelab_core::ops::restoredrill::verify_restore(
+                            ctx, &cfg, &scratch, &owners, &snapshot,
+                        )
+                        .await
+                    })
+                },
+            )
+            .await
         }
         Rpc::RestoreNative {
             stack,

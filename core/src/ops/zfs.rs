@@ -32,6 +32,19 @@ pub struct ZfsJob {
 
 pub const SNAP_PREFIX: &str = "homelab-";
 
+/// fix-243: the suffix a snapshot taken on demand (`homelab zfs-replicate`,
+/// the dashboard's action) carries: `homelab-YYYYMMDD-HHMM-manual`. The
+/// nightly round's snapshots keep the plain name, and so does every snapshot
+/// taken before fix-243, so a name without the marker reads as scheduled.
+pub const ON_DEMAND_MARK: &str = "-manual";
+
+/// fix-243: does this snapshot belong to the scheduled lane? Everything but
+/// a name ending in [`ON_DEMAND_MARK`] does, foreign names included (they
+/// are never pruned anyway).
+pub fn snap_is_scheduled(name: &str) -> bool {
+    !name.ends_with(ON_DEMAND_MARK)
+}
+
 /// Dataset names we refuse to touch, whatever the config says: a job may
 /// never take its own target as source (or vice versa), and neither side may
 /// be a parent of the other — recursive sends would eat themselves.
@@ -300,13 +313,17 @@ pub fn replica_tiers() -> Vec<crate::retention::RetentionTier> {
 /// tiers would forget. The source's tiers are live settings; taking the
 /// intersection means a longer source policy can never make the replica the
 /// shorter memory of the two. `forget_list` is used as it is (fix-42).
+///
+/// fix-243: `(name, time, scheduled)`; both policies thin the scheduled and
+/// the on-demand lane each on its own (`forget_list_by_lane`, fix-238), so a
+/// run by hand never pushes that day's nightly snapshot off the replica.
 pub fn replica_forget(
-    snapshots: &[(String, u64)],
+    snapshots: &[(String, u64, bool)],
     source_tiers: &[crate::retention::RetentionTier],
     now: u64,
 ) -> Vec<String> {
-    let by_source = crate::retention::forget_list(snapshots, source_tiers, now);
-    crate::retention::forget_list(snapshots, &replica_tiers(), now)
+    let by_source = crate::retention::forget_list_by_lane(snapshots, source_tiers, now);
+    crate::retention::forget_list_by_lane(snapshots, &replica_tiers(), now)
         .into_iter()
         .filter(|id| by_source.contains(id))
         .collect()
@@ -319,18 +336,25 @@ fn prune_victims(
     list_stdout: &str,
     only: Option<&std::collections::BTreeSet<String>>,
     now: u64,
-    forget: impl Fn(&[(String, u64)]) -> Vec<String>,
+    forget: impl Fn(&[(String, u64, bool)]) -> Vec<String>,
 ) -> Vec<String> {
     let mut victims = Vec::new();
     for (ds, snaps) in group_by_dataset(list_stdout) {
         if only.is_some_and(|o| !o.contains(&ds)) {
             continue;
         }
-        // One retention decision per dataset, applied to its own snaps.
-        let ours: Vec<(String, u64)> = snaps
+        // One retention decision per dataset, applied to its own snaps,
+        // each in its lane (fix-243).
+        let ours: Vec<(String, u64, bool)> = snaps
             .iter()
             .filter(|s| s.starts_with(SNAP_PREFIX))
-            .map(|s| (format!("{}@{}", ds, s), snap_time(s, now)))
+            .map(|s| {
+                (
+                    format!("{}@{}", ds, s),
+                    snap_time(s, now),
+                    snap_is_scheduled(s),
+                )
+            })
             .collect();
         victims.extend(forget(&ours));
     }
@@ -340,11 +364,13 @@ fn prune_victims(
 /// `homelab-20260827-1845` → unix time, so the shared retention engine can
 /// rank snapshots without a date library on the host.
 pub fn snap_time(name: &str, now: u64) -> u64 {
-    // Format: homelab-YYYYMMDD-HHMM. Anything unparseable is treated as
-    // brand new — retention then keeps it rather than deleting blindly.
+    // Format: homelab-YYYYMMDD-HHMM, with `-manual` behind it for a run on
+    // demand (fix-243). Anything unparseable is treated as brand new —
+    // retention then keeps it rather than deleting blindly.
     let Some(rest) = name.strip_prefix(SNAP_PREFIX) else {
         return now;
     };
+    let rest = rest.strip_suffix(ON_DEMAND_MARK).unwrap_or(rest);
     let (date, time) = match rest.split_once('-') {
         Some(p) => p,
         None => return now,
@@ -373,7 +399,9 @@ pub fn snap_time(name: &str, now: u64) -> u64 {
     (days * 86_400 + h * 3600 + mi * 60).max(0) as u64
 }
 
-fn snapshot_label(now_unix: u64) -> String {
+/// fix-243: a run on demand marks its snapshot ([`ON_DEMAND_MARK`]); the
+/// nightly round's keeps the plain name every earlier snapshot has.
+fn snapshot_label(now_unix: u64, trigger: crate::ops::backup::BackupTrigger) -> String {
     // Sortable, human-readable, and parseable by snap_time. Derived from the
     // injected clock — core never reads the wall clock itself (AR1).
     let days = now_unix / 86_400;
@@ -390,22 +418,31 @@ fn snapshot_label(now_unix: u64) -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     format!(
-        "{}{:04}{:02}{:02}-{:02}{:02}",
+        "{}{:04}{:02}{:02}-{:02}{:02}{}",
         SNAP_PREFIX,
         y,
         m,
         d,
         secs / 3600,
-        (secs % 3600) / 60
+        (secs % 3600) / 60,
+        if trigger == crate::ops::backup::BackupTrigger::Nightly {
+            ""
+        } else {
+            ON_DEMAND_MARK
+        }
     )
 }
 
 /// Run every configured job. Fails the whole operation if any job fails —
-/// a half-replicated fleet must not read as success.
+/// a half-replicated fleet must not read as success. `trigger` is
+/// `BackupTrigger::Nightly` for the nightly round and anything else for a
+/// run on demand (fix-243: it decides the snapshot's name, and so its
+/// retention lane).
 pub async fn replicate(
     ctx: &OpCtx<'_>,
     jobs: &[ZfsJob],
     tiers: &[crate::retention::RetentionTier],
+    trigger: crate::ops::backup::BackupTrigger,
 ) -> OperationReport {
     let mut runner = Runner::new("zfs-replicate", ctx.sink, ctx.journal);
     // fix-171 round 3: "validate jobs" plus five named steps per job — all
@@ -421,7 +458,7 @@ pub async fn replicate(
     runner.plan(&plan.iter().map(String::as_str).collect::<Vec<_>>());
     let texec = TracingExecutor::new(ctx.exec, ctx.sink);
     let exec: &dyn Executor = &texec;
-    let label = snapshot_label(ctx.now_unix);
+    let label = snapshot_label(ctx.now_unix, trigger);
 
     step!(runner, "validate jobs", {
         if jobs.is_empty() {
@@ -614,12 +651,13 @@ pub async fn replicate(
         }
 
         // Retention: the source with its own tiers, the replica with its
-        // longer ones (fix-85), each deciding per dataset with forget_list.
+        // longer ones (fix-85), each deciding per dataset, scheduled and
+        // on-demand snapshots each in their own lane (fix-243).
         let step_name = format!("prune {}", src);
         step!(runner, &step_name, {
             let out = list_snaps(&src).await?;
             let victims = prune_victims(&out.stdout, None, ctx.now_unix, |s| {
-                crate::retention::forget_list(s, tiers, ctx.now_unix)
+                crate::retention::forget_list_by_lane(s, tiers, ctx.now_unix)
             });
             destroy_each(exec, &victims).await
         });

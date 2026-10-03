@@ -2465,7 +2465,9 @@ homelab zfs-replicate
 ```
 
 or wait for the nightly run. Snapshots are recursive and named
-`homelab-YYYYMMDD-HHMM` (`core/src/ops/zfs.rs`). Every dataset is sent on its
+`homelab-YYYYMMDD-HHMM` (`core/src/ops/zfs.rs`); a run on demand adds
+`-manual`, and retention thins nightly and on-demand snapshots each on their
+own, so a run by hand never removes that day's nightly one (fix-243). Every dataset is sent on its
 own, never as one `-R` stream: incrementally from the replica's newest
 snapshot (`zfs send -I`), or as a full seed when the replica dataset does not
 exist yet or holds no snapshots. With no common snapshot and a target that

@@ -368,8 +368,23 @@ pub async fn restore_and_judge(
     repo: &str,
     target: &str,
 ) -> Outcome {
+    restore_snapshot_and_judge(exec, cfg, repo, "latest", target).await
+}
+
+/// fix-237: [`restore_and_judge`] for one named snapshot (an id, or
+/// `latest`) — the one restore-to-scratch both the drill and a
+/// verify-restore run.
+pub async fn restore_snapshot_and_judge(
+    exec: &dyn Executor,
+    cfg: &crate::ops::backup::BackupCfg,
+    repo: &str,
+    snapshot: &str,
+    target: &str,
+) -> Outcome {
     let _ = exec.run(&Cmd::new("rm", &["-rf", target], 120)).await;
-    if let Err(e) = crate::ops::backup::restore_into(exec, cfg, repo, target).await {
+    if let Err(e) =
+        crate::ops::backup::restore_snapshot_into(exec, cfg, repo, snapshot, target).await
+    {
         return Outcome::Failed(format!("the restore itself failed: {}", e));
     }
     let sh = |script: String, timeout: u64| async move {
@@ -434,4 +449,258 @@ pub async fn restore_and_judge(
         with_archives(verdict(count, largest), &unreadable),
         &bad_sqlite,
     )
+}
+
+// ── fix-237: verify-restore of one named snapshot ────────────────────────
+
+/// fix-237: what one verify-restore proved. `files`, `bytes` and
+/// `largest_bytes` count what came back in the scratch directory before it
+/// was emptied; `problem` says why it proves nothing when `passed` is false.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VerifyRestore {
+    pub owner: String,
+    pub snapshot: String,
+    pub files: u64,
+    pub bytes: u64,
+    pub largest_bytes: u64,
+    pub passed: bool,
+    #[serde(default)]
+    pub problem: Option<String>,
+}
+
+/// fix-237: where a verify-restore of `owner` restores to: its own
+/// sub-directory of the drill's scratch directory, beside the nightly
+/// drill's (`restore-drill`) and destroy's restore-check (`destroy-…`), so
+/// none of them empties another's.
+pub fn verify_restore_target(scratch_dir: &str, owner: &str) -> String {
+    format!(
+        "{}/verify-restore-{}",
+        scratch_dir.trim_end_matches('/'),
+        owner
+    )
+}
+
+/// fix-237: a scratch directory a verify-restore may restore into and
+/// `rm -rf` under: absolute, not `/`, no `..`, no control characters.
+fn valid_scratch_dir(dir: &str) -> bool {
+    let d = dir.trim_end_matches('/');
+    d.starts_with('/')
+        && d.len() > 1
+        && !d.chars().any(|c| c.is_control())
+        && !d.split('/').any(|seg| seg == "..")
+}
+
+/// fix-237: a repository name as `homelab snapshots` lists it — never a
+/// path, never a flag.
+fn valid_owner(owner: &str) -> bool {
+    !owner.is_empty()
+        && !owner.starts_with(['-', '.'])
+        && owner
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// fix-237: which repositories of `stack` a verify-restore takes, from the
+/// stack as host state records it: `app` alone when given (it must be one
+/// of the stack's), otherwise every repository — which only `latest` can
+/// name, since a snapshot id belongs to one repository.
+pub fn verify_restore_owners(
+    state: &HostState,
+    stack: &str,
+    app: Option<&str>,
+    snapshot: &str,
+) -> Result<Vec<String>, String> {
+    let Some(st) = state.stacks.get(stack) else {
+        return Err(format!("stack '{}' is not in host state", stack));
+    };
+    let owners: Vec<String> = if st.is_native() {
+        backed_up_units(&st.natives)
+    } else {
+        let Some(m) = st.manifest.as_ref() else {
+            return Err(format!(
+                "stack '{}' has no manifest in host state :: deploy it once",
+                stack
+            ));
+        };
+        crate::ops::backup::owner_groups(m)
+            .into_iter()
+            .map(|(o, _)| o)
+            .collect()
+    };
+    if owners.is_empty() {
+        return Err(format!("stack '{}' has no backed-up repository", stack));
+    }
+    match app {
+        Some(a) if owners.iter().any(|o| o == a) => Ok(vec![a.to_string()]),
+        Some(a) => Err(format!(
+            "'{}' is no repository of stack '{}' :: one of: {}",
+            a,
+            stack,
+            owners.join(", ")
+        )),
+        None if snapshot != "latest" && owners.len() > 1 => Err(format!(
+            "snapshot {} belongs to one repository and '{}' has {} :: give --app, one of: {}",
+            snapshot,
+            stack,
+            owners.len(),
+            owners.join(", ")
+        )),
+        None => Ok(owners),
+    }
+}
+
+/// fix-237: restore one snapshot (an id, or `latest`) of repository `owner`
+/// into its own sub-directory of `scratch_dir` with the drill's
+/// restore-and-judge, count what came back, and empty the sub-directory
+/// again — whatever the verdict. Never writes the live data: the only
+/// target restic is given is under `scratch_dir`.
+pub async fn verify_restore_one(
+    exec: &dyn Executor,
+    cfg: &crate::ops::backup::BackupCfg,
+    owner: &str,
+    snapshot: &str,
+    scratch_dir: &str,
+) -> Result<VerifyRestore, crate::error::CoreError> {
+    use crate::error::CoreError;
+    if !valid_scratch_dir(scratch_dir) {
+        return Err(CoreError::SafetyAbort(format!(
+            "'{}' is not a scratch directory a restore may write into (absolute, not /, no ..) \
+             :: set restore_drill_scratch_dir in host.toml",
+            scratch_dir
+        )));
+    }
+    if !valid_owner(owner) {
+        return Err(CoreError::Other(format!(
+            "'{}' is not a repository name (the app `homelab snapshots` lists)",
+            owner
+        )));
+    }
+    if !crate::ops::backup::valid_snapshot_ref(snapshot) {
+        return Err(CoreError::Other(format!(
+            "'{}' is not a snapshot :: give `latest` or an id `homelab snapshots` lists",
+            snapshot
+        )));
+    }
+    let target = verify_restore_target(scratch_dir, owner);
+    let outcome = restore_snapshot_and_judge(exec, cfg, owner, snapshot, &target).await;
+    let script = format!(
+        "find {} -type f -printf '%s\\n' 2>/dev/null | awk '{{n++; s+=$1; if ($1>m) m=$1}} \
+         END {{printf \"%.0f %.0f %.0f\\n\", n, s, m}}'",
+        crate::executor::shq(&target)
+    );
+    let counted = exec
+        .run(&Cmd::new("sh", &["-c", &script], 600))
+        .await
+        .map(|o| o.stdout)
+        .unwrap_or_default();
+    let mut nums = counted
+        .split_whitespace()
+        .map(|n| n.parse::<u64>().unwrap_or(0));
+    let (files, bytes, largest_bytes) = (
+        nums.next().unwrap_or(0),
+        nums.next().unwrap_or(0),
+        nums.next().unwrap_or(0),
+    );
+    // Always: a restore left behind fills the pool the backups need.
+    let removed = exec.run(&Cmd::new("rm", &["-rf", &target], 300)).await;
+    let mut problem = match &outcome {
+        Outcome::Passed { .. } => None,
+        Outcome::Failed(why) => Some(why.clone()),
+    };
+    if !removed.as_ref().is_ok_and(|o| o.success()) {
+        let why = format!("{} could not be emptied after the restore", target);
+        problem = Some(match problem {
+            Some(p) => format!("{}; {}", p, why),
+            None => why,
+        });
+    }
+    Ok(VerifyRestore {
+        owner: owner.to_string(),
+        snapshot: snapshot.to_string(),
+        files,
+        bytes,
+        largest_bytes,
+        passed: problem.is_none(),
+        problem,
+    })
+}
+
+/// fix-237: the `verify-restore` operation — one step per repository, each
+/// a [`verify_restore_one`] into `scratch_dir`, its result as a line. A
+/// repository that proves nothing fails the operation; the ones after it
+/// are not tried.
+pub async fn verify_restore(
+    ctx: &crate::ops::OpCtx<'_>,
+    cfg: &crate::ops::backup::BackupCfg,
+    scratch_dir: &str,
+    owners: &[String],
+    snapshot: &str,
+) -> crate::runner::OperationReport {
+    use crate::runner::{Runner, StepOutcome};
+    let mut runner = Runner::new("verify-restore", ctx.sink, ctx.journal);
+    let names: Vec<String> = owners
+        .iter()
+        .map(|o| format!("verify restore {}", o))
+        .collect();
+    runner.plan(&names);
+    let texec = crate::executor::TracingExecutor::new(ctx.exec, ctx.sink);
+    let exec: &dyn Executor = &texec;
+    for (owner, name) in owners.iter().zip(&names) {
+        step!(runner, name, {
+            let r = verify_restore_one(exec, cfg, owner, snapshot, scratch_dir).await?;
+            let line = verify_restore_line(&r);
+            ctx.sink.emit(crate::sink::PipelineEvent::Line {
+                level: if r.passed {
+                    crate::sink::Level::Info
+                } else {
+                    crate::sink::Level::Error
+                },
+                source: "HOST".into(),
+                msg: line.clone(),
+            });
+            if r.passed {
+                Ok(StepOutcome::Unchanged)
+            } else {
+                Err(crate::error::CoreError::Other(line))
+            }
+        });
+    }
+    runner.finish_ok()
+}
+
+/// fix-237: one result as the line a person reads.
+pub fn verify_restore_line(r: &VerifyRestore) -> String {
+    let counted = format!(
+        "{} file(s), {} in total, largest {}",
+        r.files,
+        human_bytes(r.bytes),
+        human_bytes(r.largest_bytes)
+    );
+    match &r.problem {
+        None => format!(
+            "[verify-restore] {} snapshot {}: restorable — {} came back in scratch (emptied \
+             again; live data untouched)",
+            r.owner, r.snapshot, counted
+        ),
+        Some(why) => format!(
+            "[verify-restore] {} snapshot {}: NOT proved — {} ({}; scratch emptied, live data \
+             untouched)",
+            r.owner, r.snapshot, why, counted
+        ),
+    }
+}
+
+fn human_bytes(b: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut v = b as f64;
+    let mut i = 0;
+    while v >= 1024.0 && i < UNITS.len() - 1 {
+        v /= 1024.0;
+        i += 1;
+    }
+    if i == 0 {
+        format!("{} B", b)
+    } else {
+        format!("{:.1} {}", v, UNITS[i])
+    }
 }

@@ -43,6 +43,7 @@ import { driven, register } from "./drivehooks.js";
 import { stackDetail } from "./fleet.js";
 import { batchView, jobBadge } from "./jobs.js";
 import { mountJobPanel } from "./jobpanel.js";
+import { openUpdateFlow } from "./pinupdate.js";
 import { current } from "./store.js";
 import { clearError, showError } from "/static/kp/js/forms.js";
 import {
@@ -149,6 +150,14 @@ async function readSources(form, given) {
  * @returns {Promise<ActionController | null>}
  */
 export async function openAction(stack, action, opts = {}) {
+  // redesign-flows-1 (3.71.0, decision "one Update flow"): a person's
+  // Update — the stack hub's button, a Stacks row, the palette — opens the
+  // Update flow (see, impact, back up, update, verify, done). Live view
+  // drives the action's own form (`driven`), which the server models.
+  if (action === "update" && opts.driven !== true) {
+    openUpdateFlow(stack);
+    return null;
+  }
   const catalog = await catalogReady();
   const entry = catalog?.actions.find((a) => a.action === action);
   if (!catalog || !entry) {

@@ -83,7 +83,11 @@ fn args_for(kind: ActionKind, stack: &str) -> ActionArgs {
             a.check = Some("c4bca102".into());
             a.verdict = Some("ok".into());
         }
-        ActionKind::Apply => a.destroy = Some("gone".into()),
+        ActionKind::Apply => {
+            a.destroy = Some("gone".into());
+            a.destroy_ids = Some("950".into());
+            a.destroy_ack = true;
+        }
         ActionKind::ChangeSecret => {
             a.secret_ref = Some(
                 serde_json::to_string(&homelab_proto::SecretRef::Env {
@@ -607,9 +611,12 @@ fn parity_apply_destroys_only_typed_gone_stacks() {
     let req = validate(
         HOST_TARGET,
         "apply",
+        // redesign-flows-5: a destroy carries its own tick and CT number,
+        // and the dashboard never skips the backup before it.
         ActionArgs {
             destroy: Some("drill".into()),
-            skip_backup: true,
+            destroy_ids: Some("903".into()),
+            destroy_ack: true,
             ..Default::default()
         },
     )
@@ -625,11 +632,11 @@ fn parity_apply_destroys_only_typed_gone_stacks() {
     assert!(matches!(cmds.first(), Some(Command::DeployStack(_))));
     assert!(matches!(
         cmds.last(),
-        Some(Command::DestroyRecorded { stack, confirm, skip_backup: true }) if stack == "drill" && confirm == "drill"
+        Some(Command::DestroyRecorded { stack, confirm, skip_backup: false }) if stack == "drill" && confirm == "drill"
     ));
     assert_eq!(
         actions::cli_override(&req, &Material::None).as_deref(),
-        Some("homelab apply --yes --no-backup")
+        Some("homelab apply --yes")
     );
 }
 

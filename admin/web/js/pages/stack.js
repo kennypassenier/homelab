@@ -30,7 +30,14 @@ import { act, catalogReady, onAct } from "../act.js";
 import { openAction } from "../actiondialog.js";
 import { onAnswered } from "../answer.js";
 import { checkRows } from "../checks.js";
-import { fetchJson, fetchReport, h, slowRead, tabRow } from "../dom.js";
+import {
+  errorBox,
+  fetchJson,
+  fetchReport,
+  h,
+  slowRead,
+  tabRow,
+} from "../dom.js";
 import { declare, drivable, viaForm } from "../drivable.js";
 import { driven } from "../drivehooks.js";
 import {
@@ -39,13 +46,14 @@ import {
   openPublishDialog,
   settingsTab,
 } from "../editpanels.js";
-import { humanDuration } from "../format.js";
+import { formatDateTime, humanDuration } from "../format.js";
 import { openIncident } from "../incident.js";
 import { inboxNow, onInbox } from "../inbox.js";
 import { finished } from "../jobs.js";
 import { mountJobPanel } from "../jobpanel.js";
 import { lineTime, logsUrl } from "../logs.js";
-import { openPinUpdate } from "../pinupdate.js";
+import { openPinRollback, openPinUpdate } from "../pinupdate.js";
+import { movesOf } from "../updateflow.js";
 import { openRollback } from "../rollbackdialog.js";
 import { STACK_TABS, stackHref } from "../router.js";
 import { incidentRows } from "../activity.js";
@@ -114,6 +122,17 @@ const LOG_LIMIT = 1000;
 /** @param {string} tab */
 const at = (tab) => (/** @type {string | null} */ row) =>
   row ? stackHref(row.split("/")[0], /** @type {any} */ (tab)) : null;
+/** redesign-flows-6: an update's Roll back from the stack's History. */
+const UNDO_UPDATE = declare({
+  id: "stack-undo-update",
+  page: "stack",
+  opens: "dialog",
+  row: "<stack>/<app>/<service>",
+  at: (row) =>
+    row ? `/stacks/${encodeURIComponent(row.split("/")[0])}/history` : null,
+  what: "Roll back one app an Update moved in the last 7 days: its earlier image line, backed up, committed and deployed",
+});
+
 const MORE = declare({
   id: "stack-more",
   page: "stack",
@@ -2156,7 +2175,13 @@ function historyTab(panel, c) {
     desc: "Each failed operation on this stack kept a bundle of what it saw; Show opens it.",
   });
   incidents.body.append(incList);
-  panel.replaceChildren(h("div", { class: "sh-stack" }, card, incidents.el));
+  // redesign-flows-6: the updates of the last 7 days, each with its Roll
+  // back (the demo's "1 click, for 7 days, from the stack's History").
+  const updatesAbort = new AbortController();
+  const updates = updatesCard(c.name, updatesAbort.signal);
+  panel.replaceChildren(
+    h("div", { class: "sh-stack" }, card, updates, incidents.el),
+  );
 
   const writeUrl = () => {
     const search = setParams(location.search, {
@@ -2275,6 +2300,7 @@ function historyTab(panel, c) {
   reload();
   return () => {
     stopAnswers();
+    updatesAbort.abort();
     document.removeEventListener("keydown", esc);
   };
 }
@@ -2978,4 +3004,84 @@ function nightStrip(cells) {
       }),
     ),
   );
+}
+
+/**
+ * redesign-flows-6 (review item 4, the demo's "Roll back, 1 click, for 7
+ * days, from the stack's History"): the updates of this stack the Update
+ * flow made in the last 7 days, each pinned app with its Roll back….
+ * @param {string} stack
+ * @param {AbortSignal} signal
+ */
+function updatesCard(stack, signal) {
+  ensureStyle("/css/pages/update.css");
+  const list = h(
+    "div",
+    { class: "undo-updates__list" },
+    h("p", { class: "measured" }, "Reading the updates of the last 7 days…"),
+  );
+  const card = section({
+    id: "undo-updates",
+    title: "Updates you can undo",
+    desc: "Each app the Update flow moved in the last 7 days; Roll back puts its earlier version back the same way — backup, files, deploy.",
+    level: "h3",
+    cls: "undo-updates",
+  });
+  card.body.append(list);
+  void (async () => {
+    const r = await fetchJson(
+      `/data/update-flows?stack=${encodeURIComponent(stack)}`,
+      "the updates of the last 7 days",
+      signal,
+    );
+    if (signal.aborted) return;
+    if (!r.ok) {
+      list.replaceChildren(errorBox(r.error));
+      return;
+    }
+    const rows = (r.body.updates ?? []).flatMap((/** @type {any} */ u) =>
+      [...movesOf(u.items ?? []).values()]
+        .filter((m) => m.stack === stack)
+        .map((m) => {
+          const b = drivable(
+            h(
+              "button",
+              {
+                type: "button",
+                class: "kp-button kp-button--sm",
+                title: `Put ${m.from_version} back: backup, files, deploy`,
+              },
+              `Roll back to ${m.from_version}…`,
+            ),
+            UNDO_UPDATE,
+            `${stack}/${m.key}`,
+          );
+          b.addEventListener("click", () => openPinRollback(m));
+          return h(
+            "div",
+            { class: "undo-updates__row" },
+            h("strong", null, m.key),
+            h("span", null, `${m.from_version} → ${m.to_version}`),
+            h(
+              "span",
+              { class: "measured" },
+              `${formatDateTime(u.at)} · ${u.by}`,
+            ),
+            b,
+          );
+        }),
+    );
+    list.replaceChildren(
+      ...(rows.length
+        ? rows
+        : [
+            h(
+              "p",
+              { class: "measured" },
+              "No app of this stack was updated in the last 7 days.",
+            ),
+          ]),
+    );
+  })().catch(() => {});
+  return card.el;
 }

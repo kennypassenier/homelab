@@ -131,6 +131,99 @@ pub fn parse_inspect(stdout: &str, now: u64) -> BTreeMap<String, RunningImage> {
     out
 }
 
+/// redesign-flows-6 (the Update flow's verify): what one stack's containers
+/// run right now, read fresh after a deploy — every container with whether
+/// it runs, and each `manual` one's image. The dashboard reads it through
+/// `Command::StackRuntime`; an older host does not know that command, and
+/// the flow then says the version was not reported rather than inventing it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StackRuntime {
+    /// Every container of the guest (`docker ps -a`), with whether it runs.
+    pub containers: Vec<(String, bool)>,
+    /// Each `manual` container's image, as the nightly round reads it.
+    pub images: BTreeMap<String, RunningImage>,
+}
+
+const RUNTIME_MARK: &str = "--manual--";
+
+/// The one script [`read_runtime`] runs in the guest.
+pub fn runtime_script() -> String {
+    format!(
+        "docker ps -a --format '{{{{.Names}}}}|{{{{.State}}}}'; echo '{RUNTIME_MARK}'; {INSPECT}"
+    )
+}
+
+/// Parse [`runtime_script`]'s output.
+pub fn parse_runtime(stdout: &str, now: u64) -> StackRuntime {
+    let (ps, manual) = stdout.split_once(RUNTIME_MARK).unwrap_or((stdout, ""));
+    let containers = ps
+        .lines()
+        .filter_map(|l| {
+            let (name, state) = l.trim().split_once('|')?;
+            (!name.is_empty()).then(|| (name.to_string(), state.trim() == "running"))
+        })
+        .collect();
+    StackRuntime {
+        containers,
+        images: parse_inspect(manual, now),
+    }
+}
+
+/// Read one guest's [`StackRuntime`] now.
+pub async fn read_runtime(
+    exec: &dyn Executor,
+    vmid: u16,
+    now: u64,
+) -> Result<StackRuntime, String> {
+    match pct_sh(exec, vmid, &runtime_script(), 60).await {
+        Ok(o) if o.success() => Ok(parse_runtime(&o.stdout, now)),
+        Ok(o) => Err(format!(
+            "could not read CT {vmid}'s containers: {}",
+            o.stderr.trim()
+        )),
+        Err(e) => Err(format!("could not read CT {vmid}'s containers: {e}")),
+    }
+}
+
+/// The repository part of an image reference: no registry host, no tag, no
+/// digest (`ghcr.io/example/demo-api:v2@sha256:…` → `example/demo-api`), so
+/// a deploy's registry-cache rewrite still names the same image.
+fn repository(image: &str) -> String {
+    let name = image.split('@').next().unwrap_or(image);
+    let (head, last) = name.rsplit_once('/').unwrap_or(("", name));
+    let last = last.split(':').next().unwrap_or(last);
+    let mut parts: Vec<&str> = head.split('/').filter(|p| !p.is_empty()).collect();
+    if parts
+        .first()
+        .is_some_and(|p| p.contains('.') || p.contains(':') || *p == "localhost")
+    {
+        parts.remove(0);
+    }
+    parts.push(last);
+    parts.join("/")
+}
+
+/// redesign-flows-6: whether a container of `running` runs `want` (an image
+/// line the Update flow committed): the same digest, or the same repository
+/// at the same version. `None` when no `manual` container runs that
+/// repository at all.
+pub fn runs_image(running: &BTreeMap<String, RunningImage>, want: &str) -> Option<bool> {
+    let repo = repository(want);
+    let digest = want.split_once('@').map(|(_, d)| d);
+    let version = pinned_version(want);
+    let same: Vec<&RunningImage> = running
+        .values()
+        .filter(|r| repository(&r.image) == repo)
+        .collect();
+    if same.is_empty() {
+        return None;
+    }
+    Some(same.iter().all(|r| {
+        digest.is_some_and(|d| r.digest == d)
+            || (version.is_some() && pinned_version(&r.image) == version)
+    }))
+}
+
 /// The version a reference is pinned to: the tag in its last path segment,
 /// without the digest. None for a digest-only reference.
 pub fn pinned_version(image: &str) -> Option<String> {

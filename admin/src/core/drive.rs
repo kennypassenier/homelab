@@ -236,6 +236,10 @@ pub fn arg_name(a: Arg) -> &'static str {
         Arg::Days => "days",
         Arg::Note => "note",
         Arg::Destroy => "destroy",
+        Arg::LeaveOut => "leave_out",
+        Arg::DestroyIds => "destroy_ids",
+        Arg::DestroyAck => "destroy_ack",
+        Arg::Updates => "updates",
         Arg::SecretRef => "secret_ref",
         Arg::StageToken => "stage_token",
     }

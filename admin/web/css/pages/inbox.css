@@ -1,0 +1,134 @@
+/* redesign-flows-2 (3.71.0, demo flows/inbox.html): the Inbox's own
+   styles on top of the foundation's .nx-inbox rows. kp-themes tokens only.
+   the shared flow blocks are ui.js's (app.css). */
+
+.inbox-card,
+.inbox-clear,
+.inbox-worth {
+  display: grid;
+  gap: 12px;
+}
+.inbox-card .nx-card__head h2 {
+  margin: 0;
+}
+.inbox-shown {
+  font-variant-numeric: tabular-nums;
+}
+.inbox-list > li {
+  padding-block: 14px;
+}
+.inbox-list > li:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.inbox-list .nx-inbox__acts {
+  flex-wrap: wrap;
+}
+.inbox-src {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block-start: 6px;
+}
+.inbox-src .kp-badge {
+  font-weight: 400;
+}
+.inbox-src a.kp-badge {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  color: inherit;
+}
+.inbox-loading {
+  list-style: none;
+  padding: 8px 0;
+}
+.inbox-foot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 16px;
+  align-items: center;
+  padding-block-start: 12px;
+  border-block-start: 1px solid var(--border);
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.inbox-hint {
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.inbox-clear {
+  justify-items: center;
+  text-align: center;
+  padding-block: 28px;
+}
+.inbox-clear[hidden] {
+  display: none;
+}
+.inbox-clear h2 {
+  margin: 0;
+}
+.inbox-clear p {
+  max-inline-size: 52ch;
+  margin: 0;
+}
+.inbox-worth > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  cursor: pointer;
+  list-style-position: inside;
+}
+@media (max-width: 40rem) {
+  .inbox-foot,
+  .inbox-worth > summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* Review item 8: Worth a look's heading over its one-sentence
+   description. */
+.inbox-worth > summary {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+}
+.inbox-worth__desc {
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+/* Review item 13: on a phone the header reads title, its sentence, then
+   the checked time beside Check again at its own width. */
+@media (max-width: 40rem) {
+  .inbox-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .inbox-head .title-row {
+    display: contents;
+  }
+  .inbox-head h1 {
+    order: 1;
+  }
+  .inbox-head .nx-head-desc {
+    order: 2;
+    margin: 0;
+  }
+  .inbox-head .nx-head-right {
+    order: 3;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px 12px;
+    inline-size: 100%;
+  }
+  .inbox-head .nx-head-actions {
+    inline-size: auto;
+    flex: 0 0 auto;
+  }
+  .inbox-head .nx-head-actions .kp-button {
+    inline-size: auto;
+    flex: 0 0 auto;
+  }
+}

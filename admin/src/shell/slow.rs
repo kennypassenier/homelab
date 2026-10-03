@@ -72,9 +72,16 @@ pub const WAIT: Duration = Duration::from_secs(20);
 const KEEP: usize = 4;
 
 /// `?run=<id>`: the run this page started or joined.
+///
+/// redesign-flows-2 (3.71.0, the Inbox's counter on every page): `?last=1`
+/// answers the kept last good answer and starts nothing — the bar's Inbox
+/// counter reads a slow source on every page load without paying for a
+/// new run each time; 204 when no run has answered yet.
 #[derive(Debug, Deserialize, Default)]
 pub struct RunQuery {
     pub run: Option<u64>,
+    #[serde(default, deserialize_with = "super::queryflag::flag")]
+    pub last: bool,
 }
 
 #[derive(Clone)]
@@ -159,6 +166,15 @@ impl SlowRead {
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// redesign-flows-2: the kept last good answer (as `read` would hand it
+    /// first), without starting a run; 204 No Content when there is none.
+    pub fn kept(&self) -> Response {
+        match &self.lock().last {
+            Some(last) => (last.status, Json(last.body())).into_response(),
+            None => StatusCode::NO_CONTENT.into_response(),
+        }
     }
 
     /// Answer one request. Without `run` the read starts, or the page joins
@@ -407,5 +423,29 @@ mod tests {
             })
             .await;
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    /// redesign-flows-2: `kept` answers the last good run without starting
+    /// one — nothing (204) before any run, that run's answer after.
+    #[tokio::test]
+    async fn redesign_flows_2_kept_answers_the_last_run_and_starts_none() {
+        let (_tx, rx) = watch::channel(false);
+        let read = SlowRead::with_shutdown("test", rx);
+        assert_eq!(read.kept().status(), StatusCode::NO_CONTENT);
+        assert!(read.lock().running.is_none());
+        let resp = read
+            .read(None, Duration::from_secs(1), || async {
+                (StatusCode::OK, serde_json::json!({"n": 7}))
+            })
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let kept = read.kept();
+        assert_eq!(kept.status(), StatusCode::OK);
+        assert!(read.lock().running.is_none(), "kept started a run");
+        let body = axum::body::to_bytes(kept.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["n"], 7);
     }
 }

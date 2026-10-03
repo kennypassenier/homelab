@@ -4360,6 +4360,166 @@ details.nx-card--fold[open] > summary::before {
 .nx-art__accent-line {
   stroke: var(--chart-1);
 }
+/* a flow's blocks (ui.js stepper, checkList, explainNote, doneMark; the
+   Update flow and the Inbox) */
+.nx-explain {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--kp-space-sm);
+  align-items: start;
+  padding: var(--kp-space-sm) var(--kp-space-md);
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.nx-explain b {
+  color: var(--foreground);
+}
+.nx-explain__x {
+  all: unset;
+  cursor: pointer;
+  color: var(--muted-foreground);
+  padding-inline: var(--kp-space-xs);
+}
+.nx-explain__x:focus-visible {
+  outline: 2px solid var(--ring);
+  border-radius: 4px;
+}
+.nx-done__mark {
+  inline-size: 64px;
+  block-size: 64px;
+}
+.nx-done__mark--ok {
+  color: var(--nx-ok, var(--success));
+}
+.nx-done__mark--bad {
+  color: var(--nx-bad, var(--destructive));
+}
+
+/* the flow stepper (the demo flows.css .fx-steps) */
+.nx-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--n, 6), minmax(0, 1fr));
+  gap: var(--kp-space-xs);
+  counter-reset: nx-s;
+}
+.nx-steps li {
+  display: grid;
+  gap: var(--kp-space-xs);
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+  counter-increment: nx-s;
+}
+.nx-steps li::before {
+  content: "";
+  block-size: 4px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+.nx-steps li span::before {
+  content: counter(nx-s) " · ";
+}
+.nx-steps li[data-s="done"]::before {
+  background: var(--nx-ok, var(--success));
+}
+.nx-steps li[data-s="now"]::before {
+  background: var(--primary);
+}
+.nx-steps li[data-s="now"] {
+  color: var(--foreground);
+  font-weight: 600;
+}
+@media (max-width: 48rem) {
+  .nx-steps li span {
+    visibility: hidden;
+    white-space: nowrap;
+  }
+  .nx-steps li[data-s="now"] span {
+    visibility: visible;
+  }
+}
+
+/* the live step list (the demo flows.css .fx-check) */
+.nx-check {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--kp-space-sm);
+}
+.nx-check li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: var(--kp-space-sm);
+  align-items: center;
+  padding: var(--kp-space-sm) var(--kp-space-md);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+}
+.nx-check__st {
+  inline-size: 18px;
+  block-size: 18px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.nx-check li[data-s="run"] .nx-check__st {
+  border-color: var(--primary);
+  border-inline-end-color: transparent;
+  animation: nx-rot 900ms linear infinite;
+}
+.nx-check li[data-s="ok"] .nx-check__st {
+  border-color: var(--nx-ok, var(--success));
+  background: var(--nx-ok, var(--success));
+  color: var(--card);
+}
+.nx-check li[data-s="ok"] .nx-check__st::after {
+  content: "✓";
+}
+.nx-check li[data-s="bad"] .nx-check__st {
+  border-color: var(--nx-bad, var(--destructive));
+  background: var(--nx-bad, var(--destructive));
+  color: var(--card);
+}
+.nx-check li[data-s="bad"] .nx-check__st::after {
+  content: "!";
+}
+.nx-check li[data-s="skip"] {
+  opacity: 0.6;
+}
+.nx-check li[data-s="skip"] .nx-check__st {
+  border-style: dashed;
+}
+.nx-check li small {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm);
+}
+.nx-check li time {
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+@keyframes nx-rot {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nx-check li[data-s="run"] .nx-check__st {
+    animation: none;
+  }
+}
 /* A key printed inside a button sits apart from its label. */
 .kp-button > .nx-kbd {
   margin-inline-start: var(--kp-space-xs);

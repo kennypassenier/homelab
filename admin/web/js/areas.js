@@ -222,6 +222,12 @@ const AREA_OF_PAGE = /** @type {Record<string, string>} */ ({
  * @returns {string | null}
  */
 export function areaOf(r) {
+  // redesign-flows-11: the Update flow belongs to Stacks when it is one
+  // stack's, to the Inbox when it is every app's.
+  if (r.page === "update") {
+    const q = new URLSearchParams(globalThis.location?.search ?? "");
+    return q.get("stack") ? "overview" : "inbox";
+  }
   return AREA_OF_PAGE[r.page] ?? null;
 }
 

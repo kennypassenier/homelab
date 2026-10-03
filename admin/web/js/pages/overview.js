@@ -1202,37 +1202,23 @@ export function mount(root, ctx) {
       ),
       "compare-now",
     );
-    /** @param {string} label @param {string} text */
-    const stepEl = (label, text) =>
-      h("li", null, h("strong", null, label), h("span", null, text));
-    const stepCompare = stepEl("Compare", "Each stack against its files.");
-    const stepReview = stepEl(
-      "Review the plan",
-      "Every change per stack. Nothing runs yet.",
-    );
-    const stepDeploy = stepEl(
-      "Deploy",
-      "One confirmed batch, each stack backed up first.",
-    );
-    const steps = h(
-      "ol",
-      { class: "sk-steps", "aria-label": "Steps" },
-      stepCompare,
-      stepReview,
-      stepDeploy,
-    );
     /** @type {{pending: number, broken: number} | null} */
     let planRead = null;
-    // The steps say where the panel stands: done, now, or still to come.
-    const paintSteps = () => {
-      const compared = planRead != null || deployCount(drift) != null;
-      stepCompare.dataset.s = compared ? "done" : "now";
-      if (compared) stepReview.dataset.s = "now";
-      else delete stepReview.dataset.s;
-      delete stepDeploy.dataset.s;
-      for (const li of [stepCompare, stepReview, stepDeploy])
-        if (li.dataset.s === "now") li.setAttribute("aria-current", "step");
-        else li.removeAttribute("aria-current");
+    // redesign-flows-4/5: the plan's own steps (apply.js) carry the
+    // compare as step 1, done once a compare has run.
+    /** @type {Set<() => void>} */
+    const compareSubs = new Set();
+    const compare = {
+      button: h("div", { class: "ap-compare" }, compareBtn, compareNote),
+      at: () =>
+        planRead != null || deployCount(drift) != null
+          ? (drift?.measured_at ?? Date.now() / 1000)
+          : null,
+      /** @param {() => void} f */
+      onChange: (f) => {
+        compareSubs.add(f);
+        return () => compareSubs.delete(f);
+      },
     };
     const paintCompare = () => {
       const n = planRead ? planRead.pending : deployCount(drift);
@@ -1244,7 +1230,7 @@ export function mount(root, ctx) {
           : n === 0
             ? "Every stack matches its files."
             : `${stacks(n)} ${n === 1 ? "differs" : "differ"} from ${n === 1 ? "its" : "their"} files, new and removed ones included · marked in the list.`;
-      paintSteps();
+      compareSubs.forEach((f) => f());
     };
     paintCompare();
     compareBtn.addEventListener("click", () => {
@@ -1258,36 +1244,12 @@ export function mount(root, ctx) {
         });
     });
     const planBody = h("div", { class: "sk-plan", id: "apply-section" });
-    const footSlot = h("div", { class: "sk-drawer-foot" });
-    const compare = h(
-      "section",
-      { class: "sk-drawer-part" },
-      h(
-        "div",
-        { class: "sk-drawer-part__head" },
-        h("h3", null, "Which stacks differ"),
-        compareBtn,
-      ),
-      compareNote,
-    );
-    const plan = h(
-      "section",
-      { class: "sk-drawer-part" },
-      h("h3", null, "What deploying would change"),
-      h(
-        "p",
-        { class: "sk-hint" },
-        "Per stack what changes; open one to read its diff.",
-      ),
-      planBody,
-    );
     let stopPlan = () => {};
     panel = drawer({
       cls: "sk-drawer",
       title: "Deploy all changes",
       desc: "Make every stack match its files in the repository, in one confirmed batch. Each stack is backed up before it changes.",
-      body: [steps, compare, plan],
-      foot: [footSlot],
+      body: [planBody],
       onClose: () => {
         stopPlan();
         panel = null;
@@ -1298,7 +1260,7 @@ export function mount(root, ctx) {
     });
     panel.open();
     stopPlan = mountPlan(planBody, {
-      foot: footSlot,
+      compare,
       // The plan's own count is the exact one: it goes on the header
       // button and into the compare line, and the list's flags follow.
       onRead: (read) => {

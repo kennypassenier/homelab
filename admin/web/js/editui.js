@@ -207,11 +207,13 @@ export function planBlock(plan) {
 }
 
 /**
- * The files' diffs, one open `details` each.
+ * The files' diffs, one `details` each, open unless `opts.open` is false
+ * (the Update flow folds them, review item 7).
  * @param {ReturnType<typeof import("./plan.js").fileViews>} files
+ * @param {{open: boolean}} [opts]
  * @returns {HTMLElement[]}
  */
-export function diffBlocks(files) {
+export function diffBlocks(files, opts = { open: true }) {
   /** @type {HTMLElement[]} */
   const out = [];
   for (const f of files) {
@@ -243,7 +245,7 @@ export function diffBlocks(files) {
     out.push(
       h(
         "details",
-        { class: "plan-file", open: "" },
+        { class: "plan-file", ...(opts.open ? { open: "" } : {}) },
         h(
           "summary",
           null,

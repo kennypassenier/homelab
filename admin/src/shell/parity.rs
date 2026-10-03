@@ -237,6 +237,9 @@ fn gateway_value(what: &str, why: String) -> (StatusCode, serde_json::Value) {
 /// so it is a slow read: started once, asked after with `?run=`.
 async fn today(State(c): State<ParityCtx>, Query(q): Query<RunQuery>) -> Response {
     let read = c.today_read.clone();
+    if q.last {
+        return read.kept();
+    }
     read.read(q.run, WAIT, move || read_today(c)).await
 }
 
@@ -544,7 +547,13 @@ async fn read_backup_calendar(
 async fn stale_images(State(c): State<ParityCtx>, Query(q): Query<RunQuery>) -> Response {
     let read = c.check_read.clone();
     let repo = c.repo.clone();
-    let resp = read.read(q.run, WAIT, move || read_fleet_check(c)).await;
+    // redesign-flows-2: `?last=1` (the Inbox counter's read on every page)
+    // filters the kept answer without starting a fleet check.
+    let resp = if q.last {
+        read.kept()
+    } else {
+        read.read(q.run, WAIT, move || read_fleet_check(c)).await
+    };
     // read_fleet_check's own 202/error shapes (still running, or the host
     // could not be reached) pass straight through unfiltered; only a
     // finished 200 answer has `findings` to filter.

@@ -101,6 +101,90 @@ pub fn deploy_reasons(
         .collect()
 }
 
+/// What one Apply press runs (redesign-flows-5): the deploys and the
+/// destroys, chosen from the plan.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Chosen {
+    pub deploy: Vec<String>,
+    pub destroy: Vec<String>,
+}
+
+/// redesign-flows-5: the subset one Apply press runs.
+///
+/// - `leave_out`: stacks of the plan's deploy list left out of this press,
+///   and the stacks that cannot be planned, each named, so they are left
+///   alone instead of refusing the whole run. A stack that cannot be planned
+///   and is not named still refuses everything (`homelab apply`'s rule).
+/// - `typed`, `ids`, `ack`: a destroy is its own step after the deploys
+///   (coordinator, 2026-10-03): only in a press that deploys nothing, only
+///   with its own confirmation ticked, and only for the CT number the host
+///   records under that name, so a plan read before a stack was re-created
+///   never destroys the new one. The backup and restore check the host takes
+///   first is never skipped from here (`validate` refuses `skip_backup`).
+pub fn choose(
+    view: &ApplyView,
+    leave_out: &[String],
+    typed: &[String],
+    ids: &[u16],
+    ack: bool,
+    vmid_of: impl Fn(&str) -> Option<u16>,
+) -> Result<Chosen, String> {
+    for n in leave_out {
+        if !view.deploy.contains(n) && !view.broken.iter().any(|(b, _)| b == n) {
+            return Err(format!(
+                "{n} is neither a stack to deploy nor one that cannot be planned, so there is nothing to leave out; plan again"
+            ));
+        }
+    }
+    if let Some((name, why)) = view.broken.iter().find(|(b, _)| !leave_out.contains(b)) {
+        return Err(format!("{name} does not build: {why} — nothing applied"));
+    }
+    let destroy = chosen_destroys(view, typed)?;
+    let deploy: Vec<String> = view
+        .deploy
+        .iter()
+        .filter(|s| !leave_out.contains(s))
+        .cloned()
+        .collect();
+    if !destroy.is_empty() {
+        if !deploy.is_empty() {
+            return Err(
+                "a destroy is its own step after the deploys: leave every deploy out of the press that destroys"
+                    .into(),
+            );
+        }
+        if !ack {
+            return Err("a destroy runs only after its own confirmation is ticked".into());
+        }
+        if ids.len() != destroy.len() {
+            return Err(format!(
+                "each stack to destroy needs its CT number, in the same order ({} names, {} numbers)",
+                destroy.len(),
+                ids.len()
+            ));
+        }
+        for (n, id) in destroy.iter().zip(ids) {
+            match vmid_of(n) {
+                Some(real) if real == *id => {}
+                Some(real) => {
+                    return Err(format!(
+                        "{n} is CT {real} on the host, not CT {id}; plan again before destroying it"
+                    ));
+                }
+                None => {
+                    return Err(format!(
+                        "the host records no CT number for {n}; plan again before destroying it"
+                    ));
+                }
+            }
+        }
+    }
+    if deploy.is_empty() && destroy.is_empty() {
+        return Err("nothing to apply: every stack is left out and no destroy is armed".into());
+    }
+    Ok(Chosen { deploy, destroy })
+}
+
 /// The gone stacks the typed names choose. A typed name the plan does not
 /// list as gone is refused (it would destroy a stack the files still
 /// declare); a gone stack whose name was not typed is kept.

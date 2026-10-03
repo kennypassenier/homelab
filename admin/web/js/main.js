@@ -50,6 +50,8 @@ import { mount as shell } from "./pages/shell.js";
 import { mount as presets } from "./pages/presets.js";
 import { mount as homePage } from "./pages/home.js";
 import { mount as inboxPage } from "./pages/inbox.js";
+import { mount as updatePage } from "./pages/update.js";
+import { scopeOf } from "./updateflow.js";
 import { mount as systemPage } from "./pages/system.js";
 import { mount as metricsPage } from "./pages/metrics.js";
 import { mount as fleetviewPage } from "./pages/fleetview.js";
@@ -252,6 +254,9 @@ function render() {
       break;
     case "inbox":
       cleanup = inboxPage(page);
+      break;
+    case "update":
+      cleanup = updatePage(page, scopeOf(location.search) ?? { all: true });
       break;
     case "overview":
       cleanup = overview(page, { navigate });

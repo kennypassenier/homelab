@@ -1,0 +1,113 @@
+/* redesign-flows-3 (3.71.0, FLOWS.md §1.2 "Help" and "Tour"; demo
+   flows/shell.js + flows.css .fx-drawer / .fx-tour): the Help panel and
+   the first-use tour. kp-themes tokens only. */
+
+dialog.help-panel .nx-drawer__head .kp-dialog__close {
+  grid-row: 1;
+  grid-column: 2;
+  /* Review item 14: in the head's grid, never kp's absolute corner spot
+     that put it half past the panel's right edge. */
+  position: static;
+  inset: auto;
+  margin: 0;
+  justify-self: end;
+  align-self: start;
+}
+.help-panel__body {
+  display: grid;
+  gap: 16px;
+}
+.help-panel .help-card {
+  margin: 0;
+}
+.help-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+}
+.help-card .nx-card__head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.help-card .nx-card__head p {
+  margin: 2px 0 0;
+}
+.help-kv {
+  display: grid;
+  grid-template-columns: minmax(7rem, max-content) minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0;
+  font-size: var(--kp-text-sm);
+}
+.help-kv dt {
+  font-weight: 600;
+  color: var(--foreground);
+}
+.help-kv dd {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+.help-kv dd a {
+  color: var(--primary);
+}
+@media (max-width: 40rem) {
+  .help-kv {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px 0;
+  }
+  .help-kv dd {
+    margin-block-end: 8px;
+  }
+}
+.help-panel .nx-drawer__foot {
+  justify-content: stretch;
+}
+.help-panel .help-tour {
+  inline-size: 100%;
+}
+
+/* the tour: a card under (or above) what it points at */
+.tour {
+  box-sizing: border-box;
+  position: fixed;
+  margin: 0;
+  inset: auto;
+  z-index: 60;
+  inline-size: min(22rem, calc(100vw - 32px));
+  background: var(--card);
+  color: var(--card-foreground, var(--foreground));
+  border: 1px solid var(--ring);
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: 0 18px 48px -18px
+    color-mix(in oklab, var(--foreground) 55%, transparent);
+  display: grid;
+  gap: 8px;
+}
+.tour h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.tour p {
+  margin: 0;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.tour footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.tour__btns {
+  display: flex;
+  gap: 8px;
+}
+.tour-target {
+  outline: 3px solid var(--ring);
+  outline-offset: 3px;
+  border-radius: 8px;
+  position: relative;
+  z-index: 55;
+}

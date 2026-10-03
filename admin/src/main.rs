@@ -119,6 +119,13 @@ async fn main() -> std::process::ExitCode {
         .page(Page::new("backups", "Backups", "/backups"))
         .page(Page::new("system", "System", "/system"))
         .page(Page::new("host", "Host", "/host").group("System").hidden())
+        // redesign-flows-11: the Update flow's own address; the nav marks
+        // Stacks for one stack's update and the Inbox for every app's.
+        .page(
+            Page::new("update", "Update apps", "/update")
+                .group("Inbox")
+                .hidden(),
+        )
         // fix-206: chassis reserves `/metrics` for its own Prometheus
         // scrape text, unconditionally; "/charts" is this page's path.
         .page(

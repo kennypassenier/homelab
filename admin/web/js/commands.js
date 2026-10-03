@@ -289,6 +289,16 @@ export const editCommands =
         featured: true,
         href: "/stacks?deploy-all=1",
       },
+      {
+        // redesign-flows-1: the one Update flow over every app with a
+        // newer version (a stack's own "Update · <stack>" opens it too).
+        id: "edit:update-all",
+        group: "Do",
+        label: "Update apps with a newer version…",
+        hint: "see what is newer and what it changes, then back up, update and verify",
+        words: "update upgrade newer version stale images all apps",
+        href: "/inbox?update=all",
+      },
       ...(openImportBundle
         ? [
             {

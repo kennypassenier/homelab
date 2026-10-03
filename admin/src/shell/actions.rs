@@ -37,6 +37,10 @@ use homelab_proto::{Command, RpcResponse, ServerMsg};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+#[path = "actions_flow.rs"]
+mod flow;
+pub use flow::ImageCommitter;
+
 use super::actions_notify::NotifyCenter;
 use super::host_link::{HostClient, Shared};
 use crate::core::actions::{
@@ -592,6 +596,10 @@ pub struct JobView {
     /// arch-self: this job restarts the dashboard; its end is read back
     /// after the restart.
     pub restarts_dashboard: bool,
+    /// redesign-flows-6: the Update flow's own rows (`core::updateflow::
+    /// FlowView`), for the page that follows this job.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flow: Option<serde_json::Value>,
 }
 
 struct Job {
@@ -650,6 +658,11 @@ struct Inner {
     /// (mount wires it after both are built). None for a queue the driver
     /// never reached (most tests): the queue then never waits.
     pause_gate: std::sync::OnceLock<Arc<dyn PauseGate>>,
+    /// redesign-flows-6: the stack editor's commit, the undo records' file
+    /// and the verify's timing (mount and tests set them).
+    committer: std::sync::OnceLock<Arc<dyn ImageCommitter>>,
+    flow_store: std::sync::OnceLock<PathBuf>,
+    flow_timing: std::sync::OnceLock<(Duration, Duration)>,
 }
 
 /// feat-secrets-2: how long a staged secret value waits for the job that
@@ -724,6 +737,9 @@ impl Actions {
             limits: std::sync::OnceLock::new(),
             secret_stage: std::sync::Mutex::new(std::collections::HashMap::new()),
             pause_gate: std::sync::OnceLock::new(),
+            committer: std::sync::OnceLock::new(),
+            flow_store: std::sync::OnceLock::new(),
+            flow_timing: std::sync::OnceLock::new(),
         });
         let worker = Actions {
             inner: inner.clone(),
@@ -1036,6 +1052,7 @@ impl Actions {
             message: None,
             cli: None,
             progress: None,
+            flow: None,
         };
         self.store(&view);
         let _ = self.inner.queue.send(Job { view: view.clone() });
@@ -1485,25 +1502,29 @@ impl Actions {
     async fn apply_material(&self, req: &ActionRequest) -> Result<Material, Refusal> {
         let what = "apply".to_string();
         let (view, mut local) = self.apply_plan(true).await?;
-        if let Some((name, why)) = view.broken.first() {
-            return Err(Refusal::new(
-                what,
-                format!("{name} does not build: {why} — nothing applied"),
-                format!("fix stacks/{name}; the Apply page lists every stack that does not build"),
-            ));
-        }
-        let typed = crate::core::applyview::chosen_destroys(&view, &req.args.destroy_names())
-            .map_err(|why| {
-                Refusal::new(
-                    what.clone(),
-                    why,
-                    "type only names the plan lists under 'gone from the files'",
-                )
-            })?;
-        // arch-deploy-guard: every planned stack is checked before the
+        // redesign-flows-5: the press's own subset — the ticked deploys,
+        // the stacks left alone named, a destroy only as its own confirmed
+        // step for the CT number the host records under that name.
+        let ids = req.args.destroy_id_list().unwrap_or_default();
+        let chosen = crate::core::applyview::choose(
+            &view,
+            &req.args.leave_out_names(),
+            &req.args.destroy_names(),
+            &ids,
+            req.args.destroy_ack,
+            |n| self.fleet_stack(n).map(|(vmid, _)| vmid),
+        )
+        .map_err(|why| {
+            Refusal::new(
+                what.clone(),
+                why,
+                "plan again: Deploy all changes lists what each press may deploy, leave alone or destroy",
+            )
+        })?;
+        // arch-deploy-guard: every chosen stack is checked before the
         // first one is sent, so a refusal leaves nothing half-applied.
         if !req.args.force {
-            for name in &view.deploy {
+            for name in &chosen.deploy {
                 let r = ActionRequest {
                     stack: name.clone(),
                     action: ActionKind::Deploy,
@@ -1512,7 +1533,8 @@ impl Actions {
                 self.guard(&r)?;
             }
         }
-        let deploy = view
+        let typed = chosen.destroy;
+        let deploy = chosen
             .deploy
             .iter()
             .filter_map(|n| local.specs.remove(n))
@@ -1670,6 +1692,10 @@ impl Actions {
     }
 
     async fn execute(&self, req: &ActionRequest, view: &mut JobView) -> Result<RpcResponse, Stop> {
+        // redesign-flows-6: the Update flow is one job of several steps.
+        if req.action == ActionKind::UpdateApps {
+            return self.run_update_flow(req, view).await;
+        }
         let material = self.material(req).await.map_err(Stop::Refused)?;
         let over = actions::cli_override(req, &material);
         let expected = match &material {
@@ -2377,6 +2403,24 @@ async fn outcome(State(a): State<Actions>, Query(q): Query<OutcomeQuery>) -> Jso
     Json(a.outcome_since(&q.op, q.since).await)
 }
 
+#[derive(Deserialize)]
+struct FlowsQuery {
+    #[serde(default)]
+    stack: Option<String>,
+}
+
+/// redesign-flows-6: the updates a stack's History offers to undo (7 days).
+async fn update_flows(
+    State(a): State<Actions>,
+    Query(q): Query<FlowsQuery>,
+) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "updates": a.update_records(q.stack.as_deref()),
+        "days": crate::core::updateflow::UNDO_DAYS,
+        "now": a.now(),
+    }))
+}
+
 /// Mounted with `dashboard_routes`: the login and both locks stand before
 /// every one of them.
 pub fn router(actions: Actions) -> Router {
@@ -2393,6 +2437,7 @@ pub fn router(actions: Actions) -> Router {
         .route("/data/actions/{stack}/{action}", post(start))
         .route("/data/actions/{stack}/{action}/preview", post(preview))
         .route("/data/actions/outcome", get(outcome))
+        .route("/data/update-flows", get(update_flows))
         .with_state(actions)
 }
 
@@ -2493,6 +2538,10 @@ pub fn mount(
         publish: publish_for_edit,
     };
     app.dashboard_routes(super::edit::router(edit_ctx.clone()));
+    // redesign-flows-6: the Update flow commits through the stack editor
+    // and keeps its undo records beside the notifications.
+    actions.set_committer(Arc::new(super::edit::EditCommitter(edit_ctx.clone())));
+    actions.set_flow_store(cfg.notify_file().with_file_name("update-flows.json"));
     // feat-backup-1/3: the Backups page's read-only routes.
     app.dashboard_routes(super::backups::router(host.clone()));
     // feat-retired-1: the Retired page's one read-only route.

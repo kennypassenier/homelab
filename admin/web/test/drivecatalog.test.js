@@ -207,8 +207,10 @@ export function declaredMaps(src) {
  * @param {string} file
  * @param {string} src
  * @param {Set<string>} declared every declared control id
+ * @param {Set<string>} [exported] the declare() constants other modules
+ *   export (`export const HELP_OPEN = declare(…)`), usable where imported
  */
-export function markFaults(file, src, declared) {
+export function markFaults(file, src, declared, exported = new Set()) {
   /** @type {string[]} */
   const bad = [];
   // A hand-written mark skips the declaration the registry needs: the
@@ -218,6 +220,10 @@ export function markFaults(file, src, declared) {
   ))
     bad.push(`${file}: writes ${m[0]} by hand (use drivable())`);
   const consts = boundTo(src, "declare");
+  // An exported declare() constant this module imports by name.
+  for (const m of src.matchAll(/import \{([^}]*)\} from "[^"]+"/g))
+    for (const n of m[1].split(",").map((x) => x.trim()))
+      if (exported.has(n)) consts.add(n);
   // A module-local wrapper of declare() (`const ctl = (id, what) =>
   // declare({…})`): what it returns is a declared id too.
   for (const m of src.matchAll(
@@ -351,9 +357,14 @@ test("drive-reach: no page marks an element for Live view except through declare
   const declared = new Set(controls().map((c) => c.id));
   /** @type {string[]} */
   const bad = [];
+  /** @type {Set<string>} */
+  const exported = new Set();
+  for (const [, src] of sources())
+    for (const m of src.matchAll(/export const (\w+) = declare\(/g))
+      exported.add(m[1]);
   for (const [file, src] of sources()) {
     if (file === "drivable.js") continue;
-    bad.push(...markFaults(file, src, declared));
+    bad.push(...markFaults(file, src, declared, exported));
   }
   assert.deepEqual(bad, [], bad.join("\n"));
 });

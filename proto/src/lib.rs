@@ -327,6 +327,16 @@ pub enum Command {
         spec: Box<DeploySpec>,
         confirm: String,
     },
+    /// redesign-flows-6 (3.71.0): what one stack's containers run right
+    /// now — each container with whether it runs, and each `manual` one's
+    /// image (`homelab_core::ops::pins::StackRuntime`, as JSON). The
+    /// dashboard's Update flow reads it after a deploy to verify the app is
+    /// healthy and runs the new version. Read-only. A host before 3.71.0
+    /// does not know it and answers with an error; the flow then says the
+    /// version was not reported.
+    StackRuntime {
+        stack: String,
+    },
     /// Y4: hold the repository against reality and report every difference.
     /// The client sends what only it can see — the vmid each stack directory
     /// claims — and the host adds what only it can see: which containers
@@ -900,6 +910,7 @@ impl Command {
             | GetFirewallLive { .. }
             | GetConfig
             | FleetCheck { .. }
+            | StackRuntime { .. }
             | Today { .. }
             | ListManualChecks { .. }
             | Tiles { .. }
@@ -1007,6 +1018,7 @@ impl Command {
             WipeRetired { .. } => "wipe_retired",
             PruneOrphans { .. } => "prune_orphans",
             FleetCheck { .. } => "fleet_check",
+            StackRuntime { .. } => "stack_runtime",
             Today { .. } => "today",
             SetStackEnabled { .. } => "set_stack_enabled",
             SealEnv { .. } => "seal_env",

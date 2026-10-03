@@ -852,6 +852,114 @@
       "twins": false
     },
     {
+      "id": "deploy-all-destroy",
+      "page": "overview",
+      "what": "open the destroy of the armed gone stacks, a separate confirmed step after the deploys",
+      "opens": "dialog",
+      "row": null,
+      "href": "/stacks",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "deploy-all-destroy-confirm",
+      "page": "overview",
+      "what": "tick the destroy step's own red confirmation",
+      "opens": "view",
+      "row": null,
+      "href": "/stacks",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "deploy-all-destroy-name",
+      "page": "overview",
+      "what": "type a gone stack's name to include its destroy",
+      "opens": "view",
+      "row": "<stack>",
+      "href": "/stacks",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "deploy-all-diff",
+      "page": "overview",
+      "what": "show or hide what deploying one stack changes",
+      "opens": "view",
+      "row": "<stack>",
+      "href": "/stacks",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "deploy-all-pick",
+      "page": "overview",
+      "what": "include or leave out one stack of the deploy batch",
+      "opens": "view",
+      "row": "<stack>",
+      "href": "/stacks",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "deploy-all-plan-again",
+      "page": "overview",
+      "what": "read the plan of every stack again from the host and the working copy",
+      "opens": "run",
+      "row": null,
+      "href": "/stacks",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "deploy-all-show-all",
+      "page": "overview",
+      "what": "show every column of the plan again (Esc does the same)",
+      "opens": "view",
+      "row": null,
+      "href": "/stacks",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "deploy-all-stack-file",
+      "page": "overview",
+      "what": "open the stack file of a stack that cannot be planned (its Settings)",
+      "opens": "view",
+      "row": "<stack>",
+      "href": "/stacks",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "deploy-all-tile",
+      "page": "overview",
+      "what": "show only one column of the plan (a plain click; again shows all)",
+      "opens": "view",
+      "row": "deploy|destroy|broken|same",
+      "href": "/stacks",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "edit-secret",
       "page": "secrets",
       "what": "open the change drawer for one secret",
@@ -1207,6 +1315,18 @@
       "twins": false
     },
     {
+      "id": "help-open",
+      "page": "home",
+      "what": "open Help: the six areas, the words, the keys and the tour",
+      "opens": "dialog",
+      "row": null,
+      "href": "/apps",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "hide-all-secrets",
       "page": "secrets",
       "what": "hide every revealed value now",
@@ -1405,6 +1525,174 @@
       "opens": "run",
       "row": "changed|all",
       "href": "/host",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-answer",
+      "page": "inbox",
+      "what": "answer the host's question: allow, or leave it stopped",
+      "opens": "run",
+      "row": "<ask key>:allow|stop",
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-answer-check",
+      "page": "inbox",
+      "what": "answer a manual check: it passes, it fails, or not now (asks again in 7 days)",
+      "opens": "dialog",
+      "row": "<check id>:pass|fail|later",
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-check-again",
+      "page": "inbox",
+      "what": "read every source of the Inbox again now: the fleet check, Today, the manual checks, the notices",
+      "opens": "run",
+      "row": null,
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-explain-hide",
+      "page": "inbox",
+      "what": "hide the note about what the Inbox replaces",
+      "opens": "view",
+      "row": null,
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-fix",
+      "page": "inbox",
+      "what": "a row's fix: the action's own dialog, prefilled",
+      "opens": "dialog",
+      "row": "<row key>",
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-kind",
+      "page": "inbox",
+      "what": "show only one kind of row, or all again (a plain click turns it on or off)",
+      "opens": "view",
+      "row": "ask|fail|update|setup|check",
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-mark-seen",
+      "page": "inbox",
+      "what": "mark a notice as seen (it leaves the Inbox; Activity keeps it)",
+      "opens": "run",
+      "row": "<row key>",
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-order",
+      "page": "inbox",
+      "what": "order the Inbox worst first or newest first",
+      "opens": "view",
+      "row": "worst|newest",
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-push-envs",
+      "page": "inbox",
+      "what": "deploy every stack without a sealed env, so the host's vault takes a copy (one confirm)",
+      "opens": "dialog",
+      "row": null,
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-review-updates",
+      "page": "inbox",
+      "what": "open the Update flow from the Updates row: every app with a newer version, or one stack's",
+      "opens": "view",
+      "row": "all|<stack>",
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-see-what-happened",
+      "page": "inbox",
+      "what": "a notice's See what happened: open where it happened",
+      "opens": "view",
+      "row": "<row key>",
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-source",
+      "page": "inbox",
+      "what": "a row's source chip: open its stack or Activity",
+      "opens": "view",
+      "row": "<row key>:<chip label>",
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-worth",
+      "page": "inbox",
+      "what": "fold or unfold Worth a look (not counted in the counter)",
+      "opens": "view",
+      "row": null,
+      "href": "/inbox",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "inbox-worth-open",
+      "page": "inbox",
+      "what": "a Worth a look row's button: drill the backups, update the host, the doctor report",
+      "opens": "view",
+      "row": "worth:drills|worth:host-release|worth:doctor",
+      "href": "/inbox",
       "was": [],
       "shows": null,
       "reach": [],
@@ -2662,6 +2950,18 @@
       "twins": false
     },
     {
+      "id": "stack-undo-update",
+      "page": "stack",
+      "what": "Roll back one app an Update moved in the last 7 days: its earlier image line, backed up, committed and deployed",
+      "opens": "dialog",
+      "row": "<stack>/<app>/<service>",
+      "href": "/stacks/<stack>/history",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "stacks-batch",
       "page": "overview",
       "what": "act on the ticked stacks: back up or deploy them in one batch dialog, or update them (each stack's Update dialog in turn)",
@@ -2964,6 +3264,138 @@
       "twins": false
     },
     {
+      "id": "update-after",
+      "page": "update",
+      "what": "the result's links: Activity, the stack, back to the Inbox, or the list again; or Back from an empty list",
+      "opens": "view",
+      "row": "activity|stack|inbox|back|again",
+      "href": "/update",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "update-back",
+      "page": "update",
+      "what": "the Update flow's step 2 → 1: back to the list",
+      "opens": "view",
+      "row": null,
+      "href": "/update",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "update-diff",
+      "page": "update",
+      "what": "fold or unfold the change to the stack files",
+      "opens": "view",
+      "row": null,
+      "href": "/update",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "update-go",
+      "page": "update",
+      "what": "back up the chosen apps' stacks, update them and verify them",
+      "opens": "run",
+      "row": null,
+      "href": "/update",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "update-leave",
+      "page": "update",
+      "what": "leave the running update (the job keeps going on the server)",
+      "opens": "view",
+      "row": null,
+      "href": "/update",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "update-major-notes",
+      "page": "update",
+      "what": "a major version's release notes, in a new tab",
+      "opens": "view",
+      "row": "<pin:stack:app/service>",
+      "href": "/update",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "update-major-read",
+      "page": "update",
+      "what": "tick “I read the release notes” for a major version",
+      "opens": "view",
+      "row": "<pin:stack:app/service>",
+      "href": "/update",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "update-pick",
+      "page": "update",
+      "what": "include or leave out one row of the Update flow's list (a plain click)",
+      "opens": "view",
+      "row": "<pin:stack:app/service | pull:stack>",
+      "href": "/update",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "update-release-notes",
+      "page": "update",
+      "what": "a row's release notes, in a new tab",
+      "opens": "view",
+      "row": "<pin:stack:app/service>",
+      "href": "/update",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "update-roll-back",
+      "page": "update",
+      "what": "the result's Roll back…: put the earlier version back the same way",
+      "opens": "dialog",
+      "row": "<pin:stack:app/service>",
+      "href": "/update",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "update-see-impact",
+      "page": "update",
+      "what": "the Update flow's step 1 → 2: see what the update changes",
+      "opens": "view",
+      "row": null,
+      "href": "/update",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "write-secret",
       "page": "secrets",
       "what": "write the staged value through latch after a 5 s Undo window, then restart when ticked",
@@ -2991,6 +3423,13 @@
     }
   ],
   "fields": [
+    {
+      "id": "apply-destroy-ack",
+      "page": "overview",
+      "what": "the destroy step's own red confirmation (a tick)",
+      "was": [],
+      "row": null
+    },
     {
       "id": "bk-filter",
       "page": "backups",
@@ -3186,6 +3625,13 @@
       "what": "the scope of a token to issue (Issue token dialog)",
       "was": [],
       "row": null
+    },
+    {
+      "id": "uf-ack",
+      "page": "update",
+      "what": "tick that a major version's release notes were read",
+      "was": [],
+      "row": "<item id, - for anything but a-z 0-9>"
     }
   ],
   "addresses": [
@@ -3225,7 +3671,8 @@
     "system/notifications",
     "timeline",
     "today",
-    "traffic"
+    "traffic",
+    "update"
   ],
   "redirects": {
     "overview": "/stacks",

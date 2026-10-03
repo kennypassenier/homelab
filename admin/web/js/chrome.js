@@ -28,6 +28,7 @@ import {
   themeCommands,
 } from "./commands.js";
 import { h } from "./dom.js";
+import { drivable } from "./drivable.js";
 import {
   changed as notifyInbox,
   countText,
@@ -35,6 +36,8 @@ import {
   onInbox,
   wireInbox,
 } from "./inbox.js";
+import { HELP_OPEN, helpPanel } from "./helptour.js";
+import { startInboxSources } from "./inboxsources.js";
 import { noMatchText, rankCommands } from "./intent.js";
 import { finished, stepText } from "./jobs.js";
 import { mountJobPanel } from "./jobpanel.js";
@@ -42,13 +45,12 @@ import { toastOf } from "./notices.js";
 import { openImport } from "./importstack.js";
 import { openNewStack } from "./newstack.js";
 import { openRollback } from "./rollbackdialog.js";
-import { SHORTCUTS, idle, keyAction } from "./shortcuts.js";
+import { idle, keyAction } from "./shortcuts.js";
 import { current, listen, subscribe } from "./store.js";
 import {
   OPEN_EVENT,
   RUN_EVENT,
   attachPalettes,
-  isMac,
   palette,
 } from "/static/kp/js/palette.js";
 import {
@@ -81,46 +83,6 @@ registerCommands(
 registerCommands("pages", pageCommands);
 registerCommands("stacks", stackCommands);
 registerCommands("themes", themeCommands(chooseTheme));
-
-/** @param {string} keys */
-const shown = (keys) => (keys === "Ctrl K" && isMac() ? "⌘ K" : keys);
-
-/** The words the help sheet explains (FLOWS.md §1.2 "Help"). */
-const GLOSSARY = /** @type {const} */ ([
-  [
-    "Stack",
-    "One container on the host with the apps it runs, described by files in the repository.",
-  ],
-  ["App", "One program inside a stack, usually a Docker container."],
-  [
-    "Deploy",
-    "Make the stack match its files: create, change or restart what differs.",
-  ],
-  [
-    "Update",
-    "Move an app to a newer image; backed up first, rolled back if it does not come up healthy.",
-  ],
-  [
-    "Back up / snapshot",
-    "A dated copy of an app's data, every night and whenever you press Back up.",
-  ],
-  [
-    "Restore",
-    "Put an app's data back as it was in a snapshot; a safety copy of today's data is made first.",
-  ],
-  [
-    "Secret",
-    "A password or token a stack needs, sealed with latch, never shown until you press Reveal.",
-  ],
-  [
-    "Job",
-    "One action running on the host; follow it from the running pill or in Activity.",
-  ],
-  [
-    "Park",
-    "Take a stack out of the nightly round and start-on-boot; nothing is stopped.",
-  ],
-]);
 
 /** The palette's dialog; its options are written for every query. */
 function paletteDialog() {
@@ -250,77 +212,6 @@ function fillPalette(list, query, here) {
     ),
   );
   return commands;
-}
-
-/** The "?" sheet: where things live, the words, and the keys. */
-function helpSheet() {
-  return h(
-    "dialog",
-    {
-      class: "kp-shortcuts",
-      id: "shortcuts",
-      "data-kp-shortcuts": "",
-      "aria-label": "Help, words and shortcuts",
-    },
-    h("h2", { class: "kp-dialog__title" }, "Help"),
-    h(
-      "section",
-      { class: "kp-shortcuts__group" },
-      h("h3", { class: "kp-shortcuts__group-label" }, "Where things live"),
-      h(
-        "dl",
-        { class: "kp-shortcuts__list" },
-        ...AREAS.map((a) =>
-          h(
-            "div",
-            { class: "kp-shortcuts__row" },
-            h("dt", null, h("a", { href: a.href }, a.label)),
-            h("dd", null, a.what),
-          ),
-        ),
-      ),
-    ),
-    h(
-      "section",
-      { class: "kp-shortcuts__group" },
-      h("h3", { class: "kp-shortcuts__group-label" }, "Words"),
-      h(
-        "dl",
-        { class: "kp-shortcuts__list" },
-        ...GLOSSARY.map(([w, m]) =>
-          h(
-            "div",
-            { class: "kp-shortcuts__row" },
-            h("dt", null, w),
-            h("dd", null, m),
-          ),
-        ),
-      ),
-    ),
-    ...SHORTCUTS.map((g) =>
-      h(
-        "section",
-        { class: "kp-shortcuts__group" },
-        h("h3", { class: "kp-shortcuts__group-label" }, g.group),
-        h(
-          "dl",
-          { class: "kp-shortcuts__list" },
-          ...g.shortcuts.map((s) =>
-            h(
-              "div",
-              { class: "kp-shortcuts__row" },
-              h(
-                "dt",
-                null,
-                h("kbd", { class: "kp-palette__keys" }, shown(s.keys)),
-              ),
-              h("dd", null, s.what),
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
 }
 
 /**
@@ -620,7 +511,8 @@ function mountTabBar(ctx, openPalette, openHelp) {
  */
 export function mountChrome(where, ctx) {
   const { dialog, list, input } = paletteDialog();
-  const sheet = helpSheet();
+  // redesign-flows-3: the Help panel and the first-visit tour (helptour.js).
+  const sheet = helpPanel();
   const trigger = h(
     "div",
     { class: "kp-nav__search" },
@@ -636,16 +528,20 @@ export function mountChrome(where, ctx) {
       h("kbd", { class: "kp-palette__keys", "data-kp-palette-keys": "" }),
     ),
   );
-  const help = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--ghost help-button",
-      "data-kp-palette-open": "shortcuts",
-      "aria-label": "Help, words and shortcuts",
-      title: "Help, words and shortcuts (?)",
-    },
-    "?",
+  // Review item 15: the bar's ? is the Live view control help-open.
+  const help = drivable(
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--ghost help-button",
+        "data-kp-palette-open": "shortcuts",
+        "aria-label": "Help, words and shortcuts",
+        title: "Help, words and shortcuts (?)",
+      },
+      "?",
+    ),
+    HELP_OPEN,
   );
   const themes = h("div", { class: "theme-slot" });
   themes.innerHTML = themeMenuMarkup({
@@ -659,6 +555,9 @@ export function mountChrome(where, ctx) {
     asks: current().asks,
     notices: act.notices?.notices ?? (act.failed.notices ? [] : null),
   }));
+  // redesign-flows-2: the Inbox's slower sources (updates, setup, checks,
+  // Today), so the bar's counter is the Inbox's row count on every page.
+  startInboxSources();
   subscribe(() => notifyInbox());
   onAct("notices", () => notifyInbox());
   // A question's countdown moves on its own; re-count once a second only

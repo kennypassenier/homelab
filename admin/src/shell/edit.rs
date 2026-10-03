@@ -593,6 +593,37 @@ fn follow_up(
     serde_json::json!({ "job": job.job, "action": job.action, "restarts_dashboard": job.restarts_dashboard })
 }
 
+/// redesign-flows-6: the Update flow's commit of new image lines, through
+/// the same transaction a person's edit takes (`commit_stack`), without a
+/// follow-up: the flow deploys the commit itself.
+pub struct EditCommitter(pub EditCtx);
+
+impl super::actions::ImageCommitter for EditCommitter {
+    fn commit_images(
+        &self,
+        stack: String,
+        images: std::collections::BTreeMap<String, String>,
+        subject: String,
+        origin: Origin,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, Refusal>> + Send + '_>>
+    {
+        Box::pin(async move {
+            let body: CommitBody = serde_json::from_value(serde_json::json!({
+                "edit": { "kind": "settings", "images": images },
+                "subject": subject,
+            }))
+            .map_err(|e| Refusal::new("the commit", e.to_string(), "report this"))?;
+            let v = commit_stack(&self.0, &stack, body, origin)
+                .await
+                .map_err(|(_, r)| r)?;
+            Ok(v["committed"]["commit"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string())
+        })
+    }
+}
+
 async fn stack_commit(
     State(c): State<EditCtx>,
     UrlPath(stack): UrlPath<String>,

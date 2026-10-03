@@ -41,13 +41,23 @@ pub trait Releases: Send + Sync + 'static {
     /// The newest release's tag of `repo` (`owner/name`).
     fn latest_tag<'a>(&'a self, repo: &'a str) -> BoxFut<'a, Result<String, String>>;
     /// The host binary of `tag`, verified (signature, then checksum), as
-    /// base64 ready for `SelfUpdateHost`.
-    fn host_binary<'a>(&'a self, tag: &'a str) -> BoxFut<'a, Result<String, String>>;
+    /// base64 ready for `SelfUpdateHost`, with the signed checksum list it
+    /// came with (redesign-host-4: the host records it).
+    fn host_binary<'a>(&'a self, tag: &'a str) -> BoxFut<'a, Result<HostBinary, String>>;
     /// dashboard-latest: `repo`'s release list, newest first, drafts and
     /// pre-releases left out, each with whether it carries
     /// `SHA256SUMS.minisig` (fix-29) — what the "release tag" dropdown is
     /// built from.
     fn list<'a>(&'a self, repo: &'a str) -> BoxFut<'a, Result<Vec<ReleaseListItem>, String>>;
+}
+
+/// redesign-host-4: a verified host binary and the proof it carried — the
+/// release's `SHA256SUMS` and its signature — which `SelfUpdateHost` hands
+/// to the host so it can report later whether it runs a signed release.
+#[derive(Debug, Clone)]
+pub struct HostBinary {
+    pub binary_b64: String,
+    pub proof: Option<homelab_proto::ReleaseProof>,
 }
 
 /// GitHub over HTTPS.
@@ -113,7 +123,7 @@ impl Releases for GitHub {
         })
     }
 
-    fn host_binary<'a>(&'a self, tag: &'a str) -> BoxFut<'a, Result<String, String>> {
+    fn host_binary<'a>(&'a self, tag: &'a str) -> BoxFut<'a, Result<HostBinary, String>> {
         Box::pin(async move {
             if !crate::core::actions::valid_tag(tag) {
                 return Err(format!("{tag:?} is not a release tag"));
@@ -132,7 +142,11 @@ impl Releases for GitHub {
                 .get(&format!("{base}/{}", homelab_core::release_sig::SIG_ASSET))
                 .await?
                 .map(|b| String::from_utf8_lossy(&b).into_owned());
-            verified_b64(tag, &binary, &sums, sig.as_deref())
+            let binary_b64 = verified_b64(tag, &binary, &sums, sig.as_deref())?;
+            Ok(HostBinary {
+                binary_b64,
+                proof: sig.map(|sig| homelab_proto::ReleaseProof { sums, sig }),
+            })
         })
     }
 

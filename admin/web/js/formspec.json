@@ -13,6 +13,7 @@
     "backup": "Takes a restic snapshot of the stack's data right now, on top of its nightly backup.",
     "restore": "A restore brings the chosen app's data back to the picked snapshot. A safety copy of the current data is kept first, unless \"Skip the safety copy\" below is ticked.",
     "restore-native": "A restore brings this service's data back to the picked snapshot. A safety copy of the current data is always kept first, before anything is overwritten.",
+    "verify-restore": "Proves a snapshot can be restored without touching the live data: the host restores it into the restore drill's scratch directory, checks what came back the way the nightly drill does (files with content, archives that list, databases that pass their own check), reports the number of files and the size, and empties the scratch directory again. Pick an app to check one snapshot of it; leave it empty to check the latest snapshot of every app.",
     "update": "Pulls the newest image for one app (or every app, left empty) and recreates its container. If the new container does not come up healthy, the previous image is put back automatically.",
     "resize": "Applies the memory, CPU core and disk sizes from the manifest to the container that is already running, without recreating it.",
     "enable": "Takes the stack back into the nightly backup and update round, and marks it to start automatically when the host boots.",
@@ -90,7 +91,8 @@
       "label": "App",
       "help": "Update one app, or every app of the stack.",
       "help_for": {
-        "restore": "Restore one app's data, or every app of the stack."
+        "restore": "Restore one app's data, or every app of the stack.",
+        "verify-restore": "Check one app's snapshot, or the latest snapshot of every app of the stack."
       },
       "required": false,
       "source": "apps",
@@ -351,6 +353,7 @@
     "update",
     "update-host",
     "update-native",
+    "verify-restore",
     "wipe",
     "zfs-replicate"
   ],

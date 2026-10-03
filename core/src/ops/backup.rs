@@ -1280,17 +1280,36 @@ pub async fn restore_into(
     app: &str,
     target: &str,
 ) -> Result<(), CoreError> {
+    restore_snapshot_into(exec, cfg, app, "latest", target).await
+}
+
+/// fix-237: [`restore_into`] for one named snapshot (an id, or `latest`).
+/// The snapshot reference is validated before a command is built, so it
+/// cannot ride in as a restic flag.
+pub async fn restore_snapshot_into(
+    exec: &dyn Executor,
+    cfg: &BackupCfg,
+    app: &str,
+    snapshot: &str,
+    target: &str,
+) -> Result<(), CoreError> {
+    if !valid_snapshot_ref(snapshot) {
+        return Err(CoreError::Other(format!(
+            "'{}' is not a snapshot :: give `latest` or an id `homelab snapshots` lists",
+            snapshot
+        )));
+    }
     let out = exec
         .run(&restic_cmd(
             cfg,
             app,
-            &["restore", "latest", "--target", target],
+            &["restore", snapshot, "--target", target],
             cfg.restore_timeout_s,
         ))
         .await?;
     if out.code != 0 {
         return Err(CoreError::Command {
-            rendered: format!("restic restore latest --target {}", target),
+            rendered: format!("restic restore {} --target {}", snapshot, target),
             detail: format!(
                 "restic restore of {} exited {}: {}",
                 app,

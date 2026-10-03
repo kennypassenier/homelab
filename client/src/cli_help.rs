@@ -122,6 +122,13 @@ pub const VERBS: &[Verb] = &[
     ),
     v(
         Daily,
+        "verify-restore",
+        "stacks/<name> [<snapshot>|latest] [--app <app>]",
+        "prove a snapshot restorable without touching live data: restore it into the restore drill's scratch directory, judge it as the nightly drill does, print the files and the size, empty the scratch again (every app's latest when --app is left out)",
+        "homelab verify-restore stacks/mystack latest --app myapp",
+    ),
+    v(
+        Daily,
         "snapshot-file",
         "stacks/<name> <snapshot|latest> --app <app> <path> [--json]",
         "print one file as a snapshot holds it, read-only (no restore; cut at 1 MiB, and said so); the path is relative to the app's backed-up directory",

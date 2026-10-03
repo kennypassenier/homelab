@@ -52,6 +52,10 @@ pub enum ActionKind {
     /// no `lxc-compose.yml` manifest to read, so it is its own action with
     /// its own `Needs`, like `BackupNative` beside `Backup`).
     RestoreNative,
+    /// fix-237: restore one snapshot into the restore drill's scratch
+    /// directory, judge it, report files and size, empty the scratch again;
+    /// the live data is never a target.
+    VerifyRestore,
     Update,
     Resize,
     Enable,
@@ -196,6 +200,7 @@ impl ActionKind {
         ActionKind::Backup,
         ActionKind::Restore,
         ActionKind::RestoreNative,
+        ActionKind::VerifyRestore,
         ActionKind::Update,
         ActionKind::Resize,
         ActionKind::Enable,
@@ -234,6 +239,7 @@ impl ActionKind {
             Backup => "backup",
             Restore => "restore",
             RestoreNative => "restore-native",
+            VerifyRestore => "verify-restore",
             Update => "update",
             Resize => "resize",
             Enable => "enable",
@@ -310,6 +316,7 @@ impl ActionKind {
             DeployCommit => &[Arg::Commit, Arg::Force],
             Restore => &[Arg::Confirm, Arg::App, Arg::Snapshot, Arg::SkipSafetyCopy],
             RestoreNative => &[Arg::Confirm, Arg::Snapshot, Arg::Unit],
+            VerifyRestore => &[Arg::App, Arg::Snapshot],
             ChangeSecret => &[Arg::SecretRef, Arg::StageToken],
             Update => &[Arg::App],
             RollbackNative => &[Arg::Unit],
@@ -362,6 +369,7 @@ impl ActionKind {
             Backup => "Back up",
             Restore => "Restore",
             RestoreNative => "Restore (native)",
+            VerifyRestore => "Verify restore",
             Update => "Update",
             Resize => "Resize",
             Enable => "Enable",
@@ -408,6 +416,9 @@ impl ActionKind {
             }
             RestoreNative => {
                 "restore an adopted service's data from a snapshot ('latest' unless named): stops the unit, keeps a copy of the current data first, unpacks the archive, restarts it; on a multi-unit stack, choose which unit (all units otherwise)"
+            }
+            VerifyRestore => {
+                "prove a snapshot restorable without touching live data: restore it into the restore drill's scratch directory, judge it as the nightly drill does, report the files and the size, empty the scratch again (every app's latest when no app is picked)"
             }
             Update => "pull and recreate one app or all, with rollback",
             Resize => "apply the manifest's memory, cores and disk to the running container",
@@ -1053,6 +1064,11 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
             confirm: a.confirm.clone(),
             skip_safety_copy: a.skip_safety_copy,
             app: a.app.clone(),
+        }],
+        (VerifyRestore, _) => vec![Command::VerifyRestore {
+            stack,
+            app: a.app.clone(),
+            snapshot: a.snapshot.clone().unwrap_or_else(|| "latest".into()),
         }],
         (Update, Material::Manifest(m)) => vec![Command::UpdateStack {
             manifest: manifest(&m)?,

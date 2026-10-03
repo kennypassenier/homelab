@@ -231,6 +231,33 @@ fn feat_stacks_7_every_stack_action_round_trips_through_the_cli_parser() {
         (Command::ZfsReplicate, false, Invocation::ZfsReplicate),
         (Command::BackupHostMeta, false, Invocation::BackupHostMeta),
         (Command::BackupDevices, false, Invocation::BackupDevices),
+        // fix-237
+        (
+            Command::VerifyRestore {
+                stack: "media".into(),
+                app: Some("jellyfin".into()),
+                snapshot: "af364ed7".into(),
+            },
+            false,
+            Invocation::VerifyRestore(homelab_client::snapshots::VerifyRestoreArgs {
+                stack: "media".into(),
+                snapshot: "af364ed7".into(),
+                app: Some("jellyfin".into()),
+            }),
+        ),
+        (
+            Command::VerifyRestore {
+                stack: "media".into(),
+                app: None,
+                snapshot: "latest".into(),
+            },
+            false,
+            Invocation::VerifyRestore(homelab_client::snapshots::VerifyRestoreArgs {
+                stack: "media".into(),
+                snapshot: "latest".into(),
+                app: None,
+            }),
+        ),
     ];
     for (command, force, want) in cases {
         let line = cli_line(&command, force).unwrap_or_else(|| panic!("{}", command.name()));

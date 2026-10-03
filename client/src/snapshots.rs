@@ -107,6 +107,62 @@ pub fn snapshot_file_args(rest: &[String]) -> Result<SnapshotFileArgs, String> {
     })
 }
 
+/// fix-237: what `homelab verify-restore` was asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifyRestoreArgs {
+    pub stack: String,
+    pub snapshot: String,
+    pub app: Option<String>,
+}
+
+pub const VERIFY_RESTORE_USAGE: &str =
+    "usage: homelab verify-restore stacks/<name> [<snapshot>|latest] [--app <app>]";
+
+/// fix-237: the arguments after `homelab verify-restore`, in the shape of
+/// `snapshot-file`: the stack, then the snapshot (`latest` when left out);
+/// `--app` may stand anywhere. Without `--app` every repository of the
+/// stack is verified, which the host only accepts for `latest`.
+pub fn verify_restore_args(rest: &[String]) -> Result<VerifyRestoreArgs, String> {
+    let mut positional: Vec<String> = Vec::new();
+    let mut app = None;
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--app" => match it.next() {
+                Some(name) if !name.starts_with("--") && !name.is_empty() => {
+                    app = Some(name.clone())
+                }
+                _ => {
+                    return Err(format!(
+                        "--app needs an app name :: {}",
+                        VERIFY_RESTORE_USAGE
+                    ));
+                }
+            },
+            other if other.starts_with("--") => {
+                return Err(format!(
+                    "unknown flag {} :: {}",
+                    other, VERIFY_RESTORE_USAGE
+                ));
+            }
+            other => positional.push(other.to_string()),
+        }
+    }
+    let mut words = positional.into_iter();
+    let stack = words
+        .next()
+        .ok_or_else(|| VERIFY_RESTORE_USAGE.to_string())?;
+    let snapshot = words.next().unwrap_or_else(|| "latest".into());
+    if words.next().is_some() {
+        return Err(VERIFY_RESTORE_USAGE.to_string());
+    }
+    Ok(VerifyRestoreArgs {
+        stack,
+        snapshot,
+        app,
+    })
+}
+
 /// fix-241: the file for stdout (exactly its text, so it can be redirected
 /// into a file to compare), and the note for stderr: what was read, and
 /// whether it was cut at the cap or is not text.

@@ -112,6 +112,7 @@ async fn e8_target_with_only_foreign_snapshots_is_not_empty() {
         &ctx(&exec, &sink, &j),
         &[job("HDD2TB", "HDD18TB/REPLICA_2TB")],
         &homelab_core::retention::default_tiers(),
+        homelab_core::ops::backup::BackupTrigger::Nightly,
     )
     .await;
     assert!(
@@ -146,6 +147,7 @@ async fn e8_rides_the_old_scripts_chain_during_migration() {
         &ctx(&exec, &sink, &j),
         &[job("HDD4TB", "HDD18TB/REPLICA_4TB")],
         &homelab_core::retention::default_tiers(),
+        homelab_core::ops::backup::BackupTrigger::Nightly,
     )
     .await;
     assert!(report.ok, "{:?}", report.error);
@@ -183,6 +185,7 @@ async fn e8_refuses_to_reseed_over_an_existing_history() {
         &ctx(&exec, &sink, &j),
         &[job("HDD2TB", "HDD18TB/REPLICA_2TB")],
         &homelab_core::retention::default_tiers(),
+        homelab_core::ops::backup::BackupTrigger::Nightly,
     )
     .await;
 
@@ -217,6 +220,7 @@ async fn e8_empty_target_is_seeded_incremental_otherwise() {
         &ctx(&exec, &sink, &j),
         &[job("HDD4TB", "HDD18TB/REPLICA_4TB")],
         &homelab_core::retention::default_tiers(),
+        homelab_core::ops::backup::BackupTrigger::Nightly,
     )
     .await;
     assert!(report.ok, "{:?}", report.error);
@@ -240,6 +244,7 @@ async fn e8_no_jobs_is_an_error_not_a_silent_success() {
         &ctx(&exec, &sink, &j),
         &[],
         &homelab_core::retention::default_tiers(),
+        homelab_core::ops::backup::BackupTrigger::Nightly,
     )
     .await;
     assert!(!report.ok, "an empty job list must never read as success");
@@ -274,6 +279,7 @@ async fn a_replica_never_inherits_the_path_its_source_lives_at() {
         &ctx(&exec, &sink, &j),
         &[job("HDD2TB", "HDD18TB/REPLICA_2TB")],
         &homelab_core::retention::default_tiers(),
+        homelab_core::ops::backup::BackupTrigger::Nightly,
     )
     .await;
 
@@ -379,6 +385,7 @@ async fn a_dataset_destroyed_on_the_source_survives_on_the_replica() {
         &ctx(&exec, &sink, &j),
         &[job("HDD4TB", r)],
         &homelab_core::retention::default_tiers(),
+        homelab_core::ops::backup::BackupTrigger::Nightly,
     )
     .await;
     assert!(report.ok, "{:?}", report.error);
@@ -441,6 +448,7 @@ async fn a_snapshot_destroyed_on_the_source_by_mistake_stays_on_the_replica() {
         &ctx(&exec, &sink, &j),
         &[job("HDD2TB", r)],
         &homelab_core::retention::default_tiers(),
+        homelab_core::ops::backup::BackupTrigger::Nightly,
     )
     .await;
     assert!(report.ok, "{:?}", report.error);
@@ -489,6 +497,7 @@ async fn the_replica_keeps_history_the_source_already_pruned() {
         &ctx(&exec, &sink, &j),
         &[job("HDD4TB", r)],
         &homelab_core::retention::default_tiers(),
+        homelab_core::ops::backup::BackupTrigger::Nightly,
     )
     .await;
     assert!(report.ok, "{:?}", report.error);
@@ -541,6 +550,7 @@ async fn a_replica_whose_newest_snapshot_left_the_source_is_refused_not_rolled_b
         &ctx(&exec, &sink, &j),
         &[job("HDD4TB", r)],
         &homelab_core::retention::default_tiers(),
+        homelab_core::ops::backup::BackupTrigger::Nightly,
     )
     .await;
     assert!(
@@ -619,19 +629,20 @@ fn the_plan_sends_each_dataset_on_its_own_and_leaves_orphans_alone() {
 fn the_replica_keeps_at_least_what_either_retention_policy_keeps() {
     use homelab_core::retention::{default_tiers, forget_list};
     const DAY: u64 = 86_400;
-    let snaps: Vec<(String, u64)> = (0..400u64)
-        .map(|d| (format!("s{d}"), NOW - d * DAY))
+    let snaps: Vec<(String, u64, bool)> = (0..400u64)
+        .map(|d| (format!("s{d}"), NOW - d * DAY, true))
         .collect();
     let kept = |forget: &[String]| -> std::collections::BTreeSet<String> {
         snaps
             .iter()
-            .map(|(id, _)| id.clone())
+            .map(|(id, _, _)| id.clone())
             .filter(|id| !forget.contains(id))
             .collect()
     };
+    let pairs: Vec<(String, u64)> = snaps.iter().map(|(i, t, _)| (i.clone(), *t)).collect();
     let replica = kept(&replica_forget(&snaps, &default_tiers(), NOW));
-    let source = kept(&forget_list(&snaps, &default_tiers(), NOW));
-    let own = kept(&forget_list(&snaps, &replica_tiers(), NOW));
+    let source = kept(&forget_list(&pairs, &default_tiers(), NOW));
+    let own = kept(&forget_list(&pairs, &replica_tiers(), NOW));
     assert!(
         replica.is_superset(&source),
         "never shorter than the source"
@@ -660,6 +671,7 @@ async fn fix_171_replicate_reaches_its_announced_plan() {
         &ctx(&exec, &sink, &j),
         &[job("HDD4TB", "HDD18TB/REPLICA_4TB")],
         &homelab_core::retention::default_tiers(),
+        homelab_core::ops::backup::BackupTrigger::Nightly,
     )
     .await;
     assert!(report.ok, "{:?}", report.error);

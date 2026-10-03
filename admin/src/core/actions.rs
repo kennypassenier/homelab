@@ -389,14 +389,17 @@ impl ActionKind {
             VerifyRestore => "Verify restore",
             Update => "Update",
             Resize => "Resize",
-            Enable => "Enable",
-            Disable => "Disable",
+            // feat-shell-1 (3.71.0, the approved renames, FLOWS.md §1.4):
+            // Park / Unpark for Disable / Enable, Add log guards for Apply
+            // guards, Deploy all changes for Apply repository.
+            Enable => "Unpark",
+            Disable => "Park",
             Adopt => "Adopt",
             BackupNative => "Back up (native)",
             UpdateNative => "Update (native)",
             ReleaseUpdateNative => "Install newest",
             RollbackNative => "Roll back binary",
-            Guards => "Apply guards",
+            Guards => "Add log guards",
             PruneOrphans => "Prune orphans",
             Destroy => "Destroy",
             Forget => "Forget",
@@ -411,7 +414,7 @@ impl ActionKind {
             UpdateHost => "Update the host",
             AnswerCheck => "Answer a check",
             InstallNative => "Install a release",
-            Apply => "Apply repository",
+            Apply => "Deploy all changes",
             RestartHost => "Restart the host",
             ChangeSecret => "Change a secret",
         }

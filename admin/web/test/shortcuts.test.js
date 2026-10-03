@@ -12,8 +12,12 @@ test("g then a letter goes to a page, within the chord's time", () => {
   assert.deepEqual(keyAction(r.state, "h", 1500, home).action, {
     navigate: "/host",
   });
-  assert.deepEqual(keyAction(r.state, "k", 1000, home).action, {
-    navigate: "/health",
+  // feat-shell-1: the areas' own letters (g i = the Inbox).
+  assert.deepEqual(keyAction(r.state, "i", 1000, home).action, {
+    navigate: "/inbox",
+  });
+  assert.deepEqual(keyAction(r.state, "p", 1000, home).action, {
+    navigate: "/activity?view=planned",
   });
   // Too late: the second key is a key on its own.
   assert.equal(keyAction(r.state, "h", 1000 + CHORD_MS + 1, home).action, null);
@@ -27,23 +31,25 @@ test("/ searches; digits and brackets move between a stack's tabs", () => {
   assert.deepEqual(keyAction(idle(), "/", 0, home).action, {
     focusSearch: true,
   });
+  // feat-shell-3: the hub's tabs, Overview · Logs · Apps · Backups ·
+  // History · Settings.
   const logs = route("/stacks/media/logs");
   assert.deepEqual(keyAction(idle(), "1", 0, logs).action, {
     navigate: "/stacks/media",
   });
   assert.deepEqual(keyAction(idle(), "[", 0, logs).action, {
-    navigate: "/stacks/media/history",
+    navigate: "/stacks/media",
   });
   assert.deepEqual(keyAction(idle(), "]", 0, logs).action, {
-    navigate: "/stacks/media/checks",
+    navigate: "/stacks/media/apps",
   });
-  assert.equal(keyAction(idle(), "4", 0, logs).action, null); // already there
-  assert.deepEqual(keyAction(idle(), "7", 0, logs).action, {
-    navigate: "/stacks/media/firewall",
+  assert.equal(keyAction(idle(), "2", 0, logs).action, null); // already there
+  assert.deepEqual(keyAction(idle(), "6", 0, logs).action, {
+    navigate: "/stacks/media/settings",
   });
   assert.equal(keyAction(idle(), "9", 0, logs).action, null);
   assert.equal(
-    keyAction(idle(), "]", 0, route("/stacks/media/firewall")).action,
+    keyAction(idle(), "]", 0, route("/stacks/media/settings")).action,
     null,
   );
   // Digits mean nothing off a stack's page.
@@ -52,7 +58,7 @@ test("/ searches; digits and brackets move between a stack's tabs", () => {
 
 test("the sheet lists every go-to key the handler knows", () => {
   const listed = SHORTCUTS.flatMap((g) => g.shortcuts.map((s) => s.keys));
-  for (const k of ["o", "u", "k", "m", "h", "a", "f", "e"]) {
+  for (const k of ["u", "i", "s", "a", "b", "y", "m", "h", "f", "e"]) {
     assert.ok(listed.includes(`g ${k}`), k);
     const r = keyAction(keyAction(idle(), "g", 0, home).state, k, 1, home);
     assert.ok(r.action && "navigate" in r.action, k);

@@ -56,7 +56,7 @@ export function mount(root) {
     "aria-label": "What ran and what it printed",
   });
   root.replaceChildren(
-    h("h1", null, "Shell"),
+    h("h1", null, "Console"),
     h(
       "p",
       { class: "measured" },

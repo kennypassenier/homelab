@@ -103,57 +103,69 @@ async fn main() -> std::process::ExitCode {
     // extensionless path that is not the kit's. `/app` and `/app/…` from
     // before 3.1.0 get a 308 to the same path at the root (the kit's own).
     app.webapp(WebApp::embedded(FILES));
-    // nav-decisions (Kenny, 2026-10-01): Apps (today's tile page, renamed
-    // from Home) is the root; Overview is reachable but hidden from the
-    // nav, and the brand link ("Homelab") opens it instead. Every other
-    // page registers its group (a bar dropdown) and keeps its registration
-    // order, which `Page` sorts stably among ties. The kit's own pages
-    // (Status, Clients, Passkeys) register themselves; `kit_pages_in_webapp`
-    // below has this web app draw them too, in the same bar.
-    app.page(Page::new("home", "Apps", "/"))
-        .page(Page::new("overview", "Overview", "/overview").hidden())
-        .page(Page::new("health", "Health", "/health"))
-        // fix-206: chassis reserves `/metrics` for its own Prometheus
-        // scrape text, unconditionally (`kit_pages_in_webapp` frees only
-        // Status/Clients/Passkeys); a page registered at that same path is
-        // dead — the kit's axum route always answers first, and this
-        // page's styled charts never render. "/charts" is the live path
-        // for this page; the title stays "Metrics".
-        .page(Page::new("metrics", "Metrics", "/charts"))
+    // feat-shell-1 (redesign 3.71.0, Kenny approved 2026-10-03): six areas,
+    // in the order a person needs them — `Apps · Inbox · Stacks · Activity
+    // │ Backups · System` — are the bar's only links (admin/web/js/areas.js
+    // holds the same list; a web test holds the two equal). Every other
+    // page belongs to an area (its `group`) and is routable but not listed:
+    // System's landing page, the breadcrumbs and the command palette reach
+    // them. The brand link opens `/`, which shows the Inbox when it holds
+    // something and Apps otherwise. Every address a page had before 3.71.0
+    // still works: the web app's router redirects it (router.js REDIRECTS).
+    app.page(Page::new("home", "Apps", "/apps"))
+        .page(Page::new("inbox", "Inbox", "/inbox"))
+        .page(Page::new("overview", "Stacks", "/stacks"))
         .page(Page::new("activity", "Activity", "/activity"))
-        .page(Page::new("host", "Host", "/host"))
-        .page(Page::new("log", "Live log", "/log").group("Operations"))
-        .page(Page::new("jobs", "Jobs", "/jobs").group("Operations"))
-        // fix-210 (Kenny, 2026-10-02): Apply moved into Overview as a
-        // collapsible section ("Apply the whole fleet"); the page stays
-        // registered and hidden, the same way "overview" itself is above —
-        // formspec.json keeps listing it (so a Live view script with
-        // `homelab ui goto apply` still works, DRIVABLE_PATHS in
-        // router.js stays in step with it) and the old `/apply` address
-        // still resolves (`router.js` redirectFor sends it on to
-        // `/overview?section=apply`); it just no longer has its own link
-        // in the bar.
+        .page(Page::new("backups", "Backups", "/backups"))
+        .page(Page::new("system", "System", "/system"))
+        .page(Page::new("host", "Host", "/host").group("System").hidden())
+        // fix-206: chassis reserves `/metrics` for its own Prometheus
+        // scrape text, unconditionally; "/charts" is this page's path.
         .page(
-            Page::new("apply", "Apply", "/apply")
-                .group("Operations")
+            Page::new("metrics", "Metrics", "/charts")
+                .group("System")
                 .hidden(),
         )
-        .page(Page::new("schedules", "Schedules", "/schedules").group("Operations"))
-        .page(Page::new("firewall", "Firewall", "/firewall").group("Configure"))
-        .page(Page::new("backups", "Backups", "/backups").group("Configure"))
-        .page(Page::new("retired", "Retired", "/retired").group("Configure"))
-        .page(Page::new("secrets", "Secrets", "/secrets").group("Configure"))
-        .page(Page::new("settings", "Settings", "/settings").group("Configure"))
-        .page(Page::new("fleetview", "Fleet view", "/fleetview").group("Visuals"))
-        .page(Page::new("backupcalendar", "Backup calendar", "/backupcalendar").group("Visuals"))
-        // Reachable at a fixed address, not shown in the bar (the bell,
-        // the shell button and the new-stack wizard link them).
-        .page(Page::new("notifications", "Notifications", "/notifications").hidden())
-        .page(Page::new("shell", "Shell", "/shell").hidden())
-        .page(Page::new("presets", "Presets", "/presets").hidden())
-        .brand("/overview")
+        .page(
+            Page::new("fleetview", "Map", "/map")
+                .group("System")
+                .hidden(),
+        )
+        .page(
+            Page::new("firewall", "Firewall", "/firewall")
+                .group("System")
+                .hidden(),
+        )
+        .page(
+            Page::new("settings", "Host settings", "/settings")
+                .group("System")
+                .hidden(),
+        )
+        .page(
+            Page::new("presets", "Presets", "/presets")
+                .group("System")
+                .hidden(),
+        )
+        .page(
+            Page::new(
+                "notifications",
+                "Notification rules",
+                "/system/notifications",
+            )
+            .group("System")
+            .hidden(),
+        )
+        .page(
+            Page::new("shell", "Console", "/console")
+                .group("System")
+                .hidden(),
+        )
+        .brand("/")
         .brand_title("Homelab")
         .kit_pages_in_webapp()
+        // Passkeys is drawn as Host settings › Sign-in since 3.71.0 (its
+        // `/passkeys` address redirects there), so it leaves the bar.
+        .kit_page("passkeys", |p| p.hidden().group("System"))
         // Kenny, 2026-10-02: the kit's Status page duplicates Health, and
         // nothing calls this dashboard's client API, so both are switched
         // off; Passkeys stays (it is how Kenny logs in).

@@ -98,7 +98,7 @@ export function mount(root) {
       // with a "Show measured traffic" toggle — this links there with the
       // toggle already on, instead of drawing a second one here.
       "See these connections on the ",
-      h("a", { href: "/fleetview?traffic=1" }, "Fleet view topology"),
+      h("a", { href: "/map?traffic=1" }, "Map topology"),
       ".",
     ),
     h("h2", null, "All rules"),

@@ -137,7 +137,7 @@ export function mount(root) {
     ],
   });
   root.replaceChildren(
-    h("h1", null, "Settings"),
+    h("h1", null, "Host settings"),
     h(
       "p",
       { class: "section-head__desc measured" },

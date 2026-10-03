@@ -158,7 +158,7 @@ function healthStrip(problems) {
         p.text,
       ),
     ),
-    h("li", null, h("a", { href: "/health" }, "Open Health")),
+    h("li", null, h("a", { href: "/inbox" }, "Open the Inbox")),
   );
   summary.addEventListener("click", () => {
     const open = summary.getAttribute("aria-expanded") === "true";

@@ -2,123 +2,147 @@ import { setParams } from "./urlstate.js";
 
 // The client-side router's pure half (arch-frontend): a path in, a page
 // out. chassis answers index.html for every extensionless path the kit
-// does not claim (`/api`, `/static`, `/login`, `/logout`, `/clients`,
-// `/passkeys`, `/healthz`, `/readyz`, `/metrics` stay the kit's; with
-// `kit_pages_in_webapp` the kit claims no GET page at `/status`,
-// `/clients` or `/passkeys` either, so this app's fallback serves them
-// too). feat-overview-8: every page and every stack tab has its own path;
-// what a page filters on lives in the query string (urlstate.js), so any
-// state a person can see is a link they can keep.
+// does not claim (`/api`, `/static`, `/login`, `/logout`, `/healthz`,
+// `/readyz`, `/metrics` stay the kit's; `/passkeys` and `/status` are
+// served by this app, fix-256). feat-overview-8: every page and every
+// stack tab has its own path; what a page filters on lives in the query
+// string (urlstate.js), so any state a person can see is a link they keep.
 //
-// nav-decisions (chassis-rs 3.1.0, Kenny 2026-10-01): since every path now
-// lives at the root (`/app/…` from before is a 308 the kit answers, not a
-// route this module parses), and the nav bar and the command palette
-// (commands.js) render from the page registry (`GET /api/kit/pages`, see
-// pages.js) instead of a hand-written list here. This module keeps only
-// what the registry cannot know: which path belongs to which SPA page
-// (`ROUTES`), the stack sub-router, and the client-side fallback titles
-// for a page the registry has not answered yet.
+// feat-shell-1 (redesign 3.71.0, Kenny approved 2026-10-03): six areas,
+// `Apps · Inbox · Stacks · Activity │ Backups · System` (areas.js holds
+// the IA itself). Every address a page ever had keeps working: a retired
+// path is `{page: "retired", from}` here and `redirectFor` names its new
+// home, one hop, its query string kept. The nav bar and the command
+// palette render from the page registry (`GET /api/kit/pages`, pages.js);
+// this module keeps what the registry cannot know: which path is which SPA
+// page, the stack hub's sub-router, the redirect table, and fallback
+// titles for a page the registry has not answered yet.
 
-/** The stack page's tabs (feat-stacks-1), in order. */
+/**
+ * The stack hub's tabs (feat-stacks-1; feat-shell-3 reorders them by use,
+ * FLOWS.md §1.3): Overview · Logs · Apps · Backups · History · Settings.
+ */
 export const STACK_TABS = /** @type {const} */ ([
   { tab: "overview", label: "Overview" },
-  { tab: "apps", label: "Apps" },
-  { tab: "history", label: "History" },
   { tab: "logs", label: "Logs" },
-  { tab: "checks", label: "Checks" },
-  // Milestone edit (feat-stacks-2, feat-firewall-1).
+  { tab: "apps", label: "Apps" },
+  { tab: "backups", label: "Backups" },
+  { tab: "history", label: "History" },
   { tab: "settings", label: "Settings" },
-  { tab: "firewall", label: "Firewall" },
 ]);
+
+/**
+ * Tabs the hub had before 3.71.0, merged into another tab (FLOWS.md §2.1):
+ * Checks into Overview ("Is it healthy?"), Firewall into Settings. Kept
+ * parseable so an old link or a Live view `goto` still lands.
+ */
+export const RETIRED_STACK_TABS = /** @type {const} */ (["checks", "firewall"]);
 
 /** @typedef {(typeof STACK_TABS)[number]["tab"]} StackTab */
 
 /**
- * @typedef {{page: "overview"} | {page: "home"} | {page: "health"} | {page: "metrics"} | {page: "host"} |
+ * @typedef {{page: "landing"} | {page: "home"} | {page: "inbox"} |
+ *   {page: "overview"} | {page: "activity"} | {page: "backups"} |
+ *   {page: "system"} | {page: "host"} | {page: "metrics"} |
+ *   {page: "fleetview"} | {page: "firewall"} | {page: "settings"} |
+ *   {page: "presets"} | {page: "notifications"} | {page: "shell"} |
  *   {page: "stack", name: string, tab: StackTab} |
- *   {page: "activity"} | {page: "jobs"} | {page: "schedules"} |
- *   {page: "notifications"} | {page: "firewall"} | {page: "settings"} |
- *   {page: "backups"} | {page: "retired"} | {page: "secrets"} |
- *   {page: "log"} | {page: "shell"} | {page: "apply"} |
- *   {page: "presets"} |
- *   {page: "fleetview"} | {page: "backupcalendar"} |
- *   {page: "passkeys"} | {page: "status-retired"} |
- *   {page: "start"} | {page: "today"} | {page: "doctor"} | {page: "checks"} |
- *   {page: "charts"} | {page: "traffic"} | {page: "timeline"} |
- *   {page: "home-legacy"} |
+ *   {page: "retired", from: string, name?: string} |
  *   {page: "notfound", path: string}} Route
- * The last group (start, today, doctor, checks, charts, traffic, timeline)
- * are 2026-09-30's retired addresses: `route()` still names them, so an old
- * link or a Live view script naming one is recognised, but `main.js`
- * redirects every one of them before it ever mounts a page for them (see
- * `redirectFor`). `passkeys` is the kit's own page, drawn by this app since
- * `kit_pages_in_webapp()`; the kit's Status and Clients pages are switched
- * off (2026-10-02), and `/status` redirects to Health. `apply` (fix-210,
- * 2026-10-02) is the same shape: it stays a known page (`formspec.json`
- * still lists it, so Live view's `homelab ui goto apply` keeps working and
- * `DRIVABLE_PATHS` below stays in step with it), but `redirectFor` always
- * sends it on to Overview's own "Apply the whole fleet" section before
- * `main.js` ever mounts anything for it.
+ * `landing` is `/`: the Inbox when it holds something, Apps otherwise
+ * (Kenny, 2026-10-03). `retired` is any address a page used to live at;
+ * `main.js` sends it on (`redirectFor`) before it mounts anything.
  */
 
 /**
- * Every address this app answers itself, by its route's `page`. The page
- * registry (pages.js) carries each one's title, group and order; this
- * table only says which URL is which page, for `route()` and `pageTitle`'s
- * fallback before the registry has answered.
- * @type {Record<string, Route["page"]>}
+ * Every current address this app answers itself, by its route's `page`.
+ * The page registry (pages.js) carries each one's title and area.
+ * @type {Record<string, Exclude<Route["page"], "stack" | "retired" | "notfound">>}
  */
-export const PATH_TO_PAGE = {
-  "": "home",
-  overview: "overview",
-  health: "health",
-  // fix-206: the Metrics page (system + traffic charts) lives at
-  // `/charts`, not `/metrics` — chassis reserves `/metrics` itself,
-  // unconditionally, for its own Prometheus scrape text (see the kit-claim
-  // comment above); a page registered at that path never renders, the kit
-  // answers first. The title stays "Metrics".
-  charts: "metrics",
-  host: "host",
+export const CURRENT_PATHS = {
+  "": "landing",
+  apps: "home",
+  inbox: "inbox",
+  stacks: "overview",
   activity: "activity",
-  jobs: "jobs",
-  schedules: "schedules",
-  notifications: "notifications",
-  firewall: "firewall",
   backups: "backups",
-  retired: "retired",
-  secrets: "secrets",
+  system: "system",
+  host: "host",
+  // fix-206: chassis reserves `/metrics` itself for its Prometheus scrape
+  // text; the Metrics page lives at `/charts`.
+  charts: "metrics",
+  map: "fleetview",
+  firewall: "firewall",
   settings: "settings",
-  log: "log",
-  shell: "shell",
-  apply: "apply",
   presets: "presets",
-  fleetview: "fleetview",
-  backupcalendar: "backupcalendar",
-  passkeys: "passkeys",
-  // 2026-10-02: the kit's Status page is switched off (it duplicated
-  // Health); an old link to it goes to Health instead.
-  status: "status-retired",
-  // 2026-09-30: retired addresses, kept parseable for old links and for
-  // Live view's known_page (core::drive checks formspec.json's page list,
-  // not this table); `redirectFor` sends every one of them on to its new
-  // home before main.js ever mounts a page for them.
-  start: "start",
-  today: "today",
-  doctor: "doctor",
-  checks: "checks",
-  traffic: "traffic",
-  timeline: "timeline",
-  // Pre-3.1.0 address for the tile page, now the root: kept so an old
-  // bookmark still lands somewhere (`redirectFor` sends it on to `/`).
-  home: "home-legacy",
+  "system/notifications": "notifications",
+  console: "shell",
 };
 
 /**
- * The addresses a driven `goto` may land on (core::drive's `known_page`),
- * i.e. every current page of `PATH_TO_PAGE` without the retired or
- * pre-3.1.0 ones `redirectFor` sends on elsewhere. A web test holds this
- * equal to `formspec.json`'s `pages` (follow.test.js), which `core::drive`
- * reads on the server.
+ * Every retired address and its new home (FLOWS.md §2.1 plus every older
+ * alias): a function of the query string the old link carried. `ctx.stacks`
+ * is the fleet's stack names, for `/secrets` (its first stack's Settings).
+ * @type {Record<string, (search: string, ctx: {stacks: string[]}) => string>}
+ */
+const REDIRECTS = {
+  // 3.71.0 IA (feat-shell-1)
+  overview: (s) => {
+    const p = new URLSearchParams(s);
+    if (p.get("section") !== "apply") return `/stacks${s}`;
+    return `/stacks${setParams(s, { section: null, "deploy-all": "1" })}`;
+  },
+  apply: (s) => `/stacks${setParams(s, { "deploy-all": "1" })}`,
+  health: (s) => {
+    const block = new URLSearchParams(s).get("block");
+    return `/inbox${setParams(s, { block: null, kind: block })}`;
+  },
+  "needs-you": (s) => `/inbox${s}`,
+  jobs: (s) => `/activity${setParams(s, { view: "running" })}`,
+  log: (s) => `/activity${setParams(s, { view: "host-log" })}`,
+  schedules: (s) => `/activity${setParams(s, { view: "planned" })}`,
+  backupcalendar: (s) => `/backups${setParams(s, { section: "coverage" })}`,
+  retired: (s) => `/backups${setParams(s, { section: "removed" })}`,
+  fleetview: (s) => `/map${s}`,
+  notifications: (s) => `/inbox${s}`,
+  shell: (s) => `/console${s}`,
+  passkeys: (s) => `/settings${setParams(s, { section: "sign-in" })}`,
+  secrets: (s, ctx) => {
+    const stack = new URLSearchParams(s).get("stack") ?? ctx.stacks[0];
+    if (!stack) return `/stacks${setParams(s, { stack: null })}`;
+    return `${stackHref(stack, "settings")}${setParams(s, { stack: null, section: "secrets" })}`;
+  },
+  // 2026-10-02: the kit's Status page is off; its address goes where
+  // Health's did.
+  status: (s) => `/inbox${s}`,
+  // 2026-09-30's retired addresses, collapsed to one hop.
+  start: (s) => `/${s}`,
+  today: (s) => `/inbox${setParams(s, { kind: "today" })}`,
+  doctor: (s) => `/inbox${setParams(s, { kind: "doctor" })}`,
+  checks: (s) => `/inbox${setParams(s, { kind: "checks" })}`,
+  traffic: (s) => `/charts${setParams(s, { tab: "traffic" })}`,
+  timeline: (s) => `/activity${setParams(s, { view: "timeline" })}`,
+  // Pre-3.1.0 address of the tile page.
+  home: (s) => `/apps${s}`,
+};
+
+/**
+ * Every address the router knows — current and retired — by what it is.
+ * The whole-screen invariant "every address the router knows renders a
+ * page or redirects to one" walks these keys.
+ * @type {Record<string, string>}
+ */
+export const PATH_TO_PAGE = {
+  ...CURRENT_PATHS,
+  ...Object.fromEntries(Object.keys(REDIRECTS).map((k) => [k, "retired"])),
+};
+
+/**
+ * The addresses a driven `goto` may land on (core::drive's `known_page`):
+ * every address of `PATH_TO_PAGE`, retired ones included, so a Live view
+ * script naming an old page still works (invariant 19). A web test holds
+ * this equal to `formspec.json`'s `pages` (follow.test.js). The 2026-09-30
+ * aliases and the kit's Status were never drivable and stay out.
  */
 export const DRIVABLE_PATHS = Object.keys(PATH_TO_PAGE).filter(
   (k) =>
@@ -131,68 +155,79 @@ export const DRIVABLE_PATHS = Object.keys(PATH_TO_PAGE).filter(
       "timeline",
       "home",
       "status",
+      "needs-you",
     ].includes(k),
 );
 
 /** Fallback titles for a page before the registry has answered. */
 const FALLBACK_TITLE = /** @type {Record<string, string>} */ ({
+  landing: "Homelab",
   home: "Apps",
-  overview: "Overview",
-  health: "Health",
-  metrics: "Metrics",
+  inbox: "Inbox",
+  overview: "Stacks",
   activity: "Activity",
-  host: "Host",
-  log: "Live log",
-  jobs: "Jobs",
-  apply: "Apply",
-  schedules: "Schedules",
-  firewall: "Firewall",
   backups: "Backups",
-  retired: "Retired",
-  secrets: "Secrets",
-  settings: "Settings",
-  fleetview: "Fleet view",
-  backupcalendar: "Backup calendar",
-  notifications: "Notifications",
-  shell: "Shell",
+  system: "System",
+  host: "Host",
+  metrics: "Metrics",
+  fleetview: "Map",
+  firewall: "Firewall",
+  settings: "Host settings",
   presets: "Presets",
-  passkeys: "Passkeys",
+  notifications: "Notification rules",
+  shell: "Console",
 });
 
 /**
- * The retired (or pre-3.1.0) path's replacement, its query string kept
- * and extended so the merged page opens on the right block or tab; `null`
- * for a path that is not retired.
+ * A pre-3.71.0 page's module, shown inside a current page until that page
+ * draws it itself (a view of `?view=`/`?section=`/`?kind=`): the address a
+ * Live view control declared on that module is found at (drivable.js
+ * `page`), and the module main.js mounts for it.
+ * @type {Record<string, {at: string, param: string, value: string}>}
+ */
+export const VIEWS = {
+  jobs: { at: "activity", param: "view", value: "running" },
+  log: { at: "activity", param: "view", value: "host-log" },
+  schedules: { at: "activity", param: "view", value: "planned" },
+  backupcalendar: { at: "backups", param: "section", value: "coverage" },
+  retired: { at: "backups", param: "section", value: "removed" },
+  passkeys: { at: "settings", param: "section", value: "sign-in" },
+  doctor: { at: "host", param: "section", value: "doctor" },
+};
+
+/**
+ * The retired path's replacement, its query string kept and extended so
+ * the merged page opens on the right view; `null` for a current route.
  * @param {Route} r
  * @param {string} search e.g. location.search
+ * @param {{stacks?: string[]}} [ctx] the fleet's stack names, when known
  * @returns {string | null}
  */
-export function redirectFor(r, search) {
-  switch (r.page) {
-    case "start":
-      return `/${search}`;
-    case "home-legacy":
-      return `/${search}`;
-    case "today":
-      return `/health${setParams(search, { block: "today" })}`;
-    case "doctor":
-      return `/health${setParams(search, { block: "doctor" })}`;
-    case "checks":
-      return `/health${setParams(search, { block: "checks" })}`;
-    case "traffic":
-      return `/charts${setParams(search, { tab: "traffic" })}`;
-    case "timeline":
-      return `/activity${setParams(search, { view: "timeline" })}`;
-    case "status-retired":
-      return `/health${search}`;
-    // fix-210: /apply moved into Overview as a collapsible section; the
-    // old address still resolves, opened and scrolled to.
-    case "apply":
-      return `/overview${setParams(search, { section: "apply" })}`;
-    default:
-      return null;
+export function redirectFor(r, search, ctx = {}) {
+  const c = { stacks: ctx.stacks ?? [] };
+  if (r.page === "retired") {
+    if (r.name != null) {
+      // A merged stack tab (FLOWS.md §1.3).
+      if (r.from === "checks") return `${stackHref(r.name)}${search}`;
+      return `${stackHref(r.name, "settings")}${setParams(search, { section: r.from })}`;
+    }
+    const f = REDIRECTS[r.from];
+    return f ? f(search, c) : null;
   }
+  return null;
 }
+
+/**
+ * Whether a retired route needs the fleet's stack list to know its new
+ * home (`/secrets` without `?stack=`); main.js waits for the first fleet
+ * read before redirecting it.
+ * @param {Route} r
+ * @param {string} search
+ */
+export const needsFleet = (r, search) =>
+  r.page === "retired" &&
+  r.from === "secrets" &&
+  !new URLSearchParams(search).has("stack");
 
 /**
  * @param {string} pathname a path, with or without a query string
@@ -202,53 +237,67 @@ export function route(pathname) {
   const path = pathname.split(/[?#]/)[0];
   if (!path.startsWith("/")) return { page: "notfound", path };
   const rest = path.replace(/^\/+/, "").replace(/\/+$/, "");
-  if (Object.hasOwn(PATH_TO_PAGE, rest)) {
-    const page = PATH_TO_PAGE[rest];
-    return /** @type {Route} */ ({ page });
-  }
+  if (Object.hasOwn(CURRENT_PATHS, rest))
+    return /** @type {Route} */ ({ page: CURRENT_PATHS[rest] });
+  if (Object.hasOwn(REDIRECTS, rest)) return { page: "retired", from: rest };
   const m = /^stacks\/([^/]+)(?:\/([^/]+))?$/.exec(rest);
   if (m) {
-    const tab = STACK_TABS.find((t) => t.tab === (m[2] ?? "overview"));
-    if (!tab) return { page: "notfound", path };
+    /** @type {string} */
+    const want = m[2] ?? "overview";
+    let name;
     try {
-      return { page: "stack", name: decodeURIComponent(m[1]), tab: tab.tab };
+      name = decodeURIComponent(m[1]);
     } catch {
       return { page: "notfound", path };
     }
+    if (/** @type {readonly string[]} */ (RETIRED_STACK_TABS).includes(want))
+      return { page: "retired", from: want, name };
+    const tab = STACK_TABS.find((t) => t.tab === want);
+    if (!tab) return { page: "notfound", path };
+    return { page: "stack", name, tab: tab.tab };
   }
   return { page: "notfound", path };
 }
 
 /**
- * The link of one stack's page, or of one of its tabs.
+ * The page module a location shows: the route's page, or a pre-3.71.0
+ * module drawn as one of its views (`VIEWS`). pagedrive.js compares it with
+ * a declared control's page.
+ * @param {string} pathname
+ * @param {string} search
+ * @returns {string}
+ */
+export function shownPage(pathname, search) {
+  const r = route(pathname);
+  const p = new URLSearchParams(search);
+  for (const [page, v] of Object.entries(VIEWS))
+    if (v.at === r.page && p.get(v.param) === v.value) return page;
+  return r.page;
+}
+
+/**
+ * The link of one stack's hub, or of one of its tabs.
  * @param {string} name
- * @param {StackTab} [tab]
+ * @param {StackTab | string} [tab]
  */
 export const stackHref = (name, tab = "overview") =>
   `/stacks/${encodeURIComponent(name)}${tab === "overview" ? "" : `/${tab}`}`;
 
 /**
- * The address a route answers at, the reverse of `route()`, for marking
- * the current entry in a nav built from the registry.
- * @param {Route} r
- * @returns {string | null}
- */
-function hrefOf(r) {
-  if (r.page === "stack") return stackHref(r.name, r.tab);
-  if (r.page === "notfound") return null;
-  const rest = Object.entries(PATH_TO_PAGE).find(([, p]) => p === r.page)?.[0];
-  return rest == null ? null : `/${rest}`;
-}
-
-/**
- * fix-239: the address of a page by its registry name (`"fleetview"` →
- * `/fleetview`), so a Live view control declared on a page is found there
- * whatever the page's address is now; null for a name no route answers.
+ * The address of a page by its id (`"fleetview"` → `/map`), a pre-3.71.0
+ * module shown as a view included (`"schedules"` → `/activity?view=planned`),
+ * so a Live view control declared on a page is found wherever the page
+ * lives now (fix-239); null for an id no route answers.
  * @param {string} page
  * @returns {string | null}
  */
 export function pageHref(page) {
-  const rest = Object.entries(PATH_TO_PAGE).find(([, p]) => p === page)?.[0];
+  const view = VIEWS[page];
+  if (view) {
+    const at = pageHref(view.at);
+    return at == null ? null : `${at}?${view.param}=${view.value}`;
+  }
+  const rest = Object.entries(CURRENT_PATHS).find(([, p]) => p === page)?.[0];
   return rest == null ? null : `/${rest}`;
 }
 
@@ -260,22 +309,21 @@ export function pageHref(page) {
 
 /**
  * The navigation bar for a route, built from the page registry (`nav:
- * true` pages, in the order and the groups the server sorted them into).
- * A page's `group` puts it in a dropdown of the bar; one without a group
- * is a top-level link. A stack page has no entry of its own in the
- * registry, so while one is open it gets its own entry beside the page it
- * was opened from.
+ * true` pages, in the order the server registered them). A page's area
+ * (areas.js) is current while any of its sub-pages or stack hubs is open.
  * @param {import("./pages.js").PageSet | null} pageSet
  * @param {Route} r
+ * @param {(r: Route) => string | null} [areaOf] the area id of a route
  * @returns {NavEntry[]}
  */
-export function navEntries(pageSet, r) {
+export function navEntries(pageSet, r, areaOf) {
   /** @type {NavEntry[]} */
   const out = [];
-  const current = hrefOf(r);
+  const area = areaOf ? areaOf(r) : null;
   for (const p of pageSet?.pages ?? []) {
     if (!p.nav) continue;
-    const link = { href: p.path, label: p.title, current: p.path === current };
+    const current = area != null ? p.id === area : p.id === r.page;
+    const link = { href: p.path, label: p.title, current };
     if (!p.group) {
       out.push(link);
       continue;
@@ -293,12 +341,6 @@ export function navEntries(pageSet, r) {
       });
     }
   }
-  if (r.page === "stack")
-    out.splice(1, 0, {
-      href: stackHref(r.name),
-      label: `Stack ${r.name}`,
-      current: true,
-    });
   return out;
 }
 
@@ -317,6 +359,7 @@ export function pageTitle(r, pageSet) {
       : `Homelab · ${r.name} · ${tab?.label}`;
   }
   if (r.page === "notfound") return "Homelab · Not found";
+  if (r.page === "landing" || r.page === "retired") return "Homelab";
   const fromRegistry = pageSet?.pages.find((p) => p.id === r.page)?.title;
   return `Homelab · ${fromRegistry ?? FALLBACK_TITLE[r.page] ?? r.page}`;
 }

@@ -28,7 +28,10 @@
 /**
  * One declared page control.
  * @typedef {{id: string, page: string, what: string,
- *   opens: "dialog" | "run", row?: string}} Control
+ *   opens: "dialog" | "run", row?: string,
+ *   at?: (row: string | null) => string | null}} Control
+ *   `at`: where the control is when it lives on a page per stack (the
+ *   stack hub's), from its row; otherwise its page's own address.
  */
 
 /** @type {Map<string, Control>} */

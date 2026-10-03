@@ -8,7 +8,7 @@
 // could not. The server hands that answer to `homelab ui`.
 
 import { control, pick } from "./drivable.js";
-import { pageHref, route } from "./router.js";
+import { pageHref, shownPage } from "./router.js";
 
 /**
  * A page-control step as the server sends it.
@@ -124,10 +124,15 @@ async function click(id, row, navigate, show) {
   }
   const page = () => document.getElementById("page");
   const c = control(id);
-  const home = c ? pageHref(c.page) : null;
-  const here = route(location.pathname).page;
+  const home = c ? (c.at?.(row) ?? pageHref(c.page)) : null;
+  // feat-shell-1: a pre-3.71.0 module shown as a view of its new home
+  // (`/activity?view=planned` is Schedules) counts as that module's page.
+  const here = shownPage(location.pathname, location.search);
   // Declared on another page: go there first, as a person would.
-  if (c && home && here !== c.page) {
+  const there = c?.at
+    ? location.pathname + location.search === home
+    : here === c?.page;
+  if (c && home && !there) {
     navigate(home);
     await sleep(250);
   }

@@ -8,30 +8,29 @@ import { STACK_TABS, stackHref } from "./router.js";
 export const CHORD_MS = 1500;
 
 /**
- * Where "g" + a letter goes, and what the shortcut sheet calls it. A
- * fixed, local table (never the page registry, pages.js): the sheet must
- * work before `GET /api/kit/pages` has answered, and these are this
- * app's own addresses either way.
+ * Where "g" + a letter goes, and what the help sheet calls it. A fixed,
+ * local table (never the page registry, pages.js): the sheet must work
+ * before `GET /api/kit/pages` has answered. feat-shell-1 (3.71.0): the six
+ * areas first, then the pages inside them, at their current addresses.
  * @type {Record<string, {href: string, label: string}>}
  */
 const PAGES = {
-  overview: { href: "/overview", label: "Overview" },
-  home: { href: "/", label: "Apps" },
-  health: { href: "/health", label: "Health" },
-  metrics: { href: "/charts", label: "Metrics" },
-  host: { href: "/host", label: "Host" },
+  home: { href: "/apps", label: "Apps" },
+  inbox: { href: "/inbox", label: "the Inbox" },
+  stacks: { href: "/stacks", label: "Stacks" },
   activity: { href: "/activity", label: "Activity" },
-  jobs: { href: "/jobs", label: "Jobs" },
-  schedules: { href: "/schedules", label: "Schedules" },
-  notifications: { href: "/notifications", label: "Notifications" },
+  backups: { href: "/backups", label: "Backups" },
+  system: { href: "/system", label: "System" },
+  running: { href: "/activity?view=running", label: "Running now" },
+  planned: { href: "/activity?view=planned", label: "Planned" },
+  hostlog: { href: "/activity?view=host-log", label: "the Host log" },
+  host: { href: "/host", label: "Host" },
+  metrics: { href: "/charts", label: "Metrics" },
+  map: { href: "/map", label: "the Map" },
   firewall: { href: "/firewall", label: "Firewall" },
-  settings: { href: "/settings", label: "Settings" },
-  log: { href: "/log", label: "Live log" },
-  // fix-210: Apply is now Overview's own collapsible section; the
-  // shortcut goes straight to it instead of bouncing through the
-  // `/apply` → `/overview?section=apply` alias.
-  apply: { href: "/overview?section=apply", label: "Apply the whole fleet" },
-  shell: { href: "/shell", label: "Shell" },
+  settings: { href: "/settings", label: "Host settings" },
+  console: { href: "/console", label: "the Console" },
+  deployall: { href: "/stacks?deploy-all=1", label: "Deploy all changes" },
 };
 
 /**
@@ -43,20 +42,22 @@ const PAGES = {
 
 /** @type {Record<string, string>} second key after "g" → page */
 const GO = {
-  o: "overview",
   u: "home",
-  k: "health",
-  m: "metrics",
-  h: "host",
+  i: "inbox",
+  s: "stacks",
   a: "activity",
-  j: "jobs",
-  s: "schedules",
-  n: "notifications",
+  b: "backups",
+  y: "system",
+  j: "running",
+  p: "planned",
+  l: "hostlog",
+  h: "host",
+  m: "metrics",
+  v: "map",
   f: "firewall",
   e: "settings",
-  l: "log",
-  p: "apply",
-  x: "shell",
+  x: "console",
+  d: "deployall",
 };
 
 /** @type {ShortcutGroup[]} */

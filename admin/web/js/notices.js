@@ -105,13 +105,15 @@ export function pushText(p) {
 }
 
 /**
- * The bell: its count ("9+" past nine) and what a screen reader hears.
+ * The bell: its count and what a screen reader hears. The count is the
+ * exact number, never capped (feat-shell-4, Kenny 2026-10-03: "9+" hid
+ * how many there were).
  * @param {number} unread
  */
 export function bell(unread) {
   const n = Math.max(0, Math.floor(unread || 0));
   return {
-    count: n === 0 ? "" : n > 9 ? "9+" : String(n),
+    count: n === 0 ? "" : String(n),
     label:
       n === 0 ? "Notifications, none unread" : `Notifications, ${n} unread`,
   };

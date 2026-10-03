@@ -86,7 +86,7 @@ export function mount(root) {
       control,
     );
   root.replaceChildren(
-    h("h1", null, "Live log"),
+    h("h1", null, "Host log"),
     h(
       "p",
       { class: "measured" },

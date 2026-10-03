@@ -22,7 +22,11 @@ import {
   plan,
   readFollow,
 } from "../js/driveview.js";
-import { DRIVABLE_PATHS, STACK_TABS } from "../js/router.js";
+import {
+  DRIVABLE_PATHS,
+  RETIRED_STACK_TABS,
+  STACK_TABS,
+} from "../js/router.js";
 import SPEC from "../js/formspec.json" with { type: "json" };
 import CASES from "./formspec-cases.json" with { type: "json" };
 
@@ -202,10 +206,12 @@ test("the form description is one file: the browser's checks match the cases the
   }
   // The pages a driven `goto` may name are the router's.
   assert.deepEqual([...SPEC.pages].sort(), [...DRIVABLE_PATHS].sort());
-  assert.deepEqual(
-    SPEC.stack_tabs,
-    STACK_TABS.map((t) => t.tab),
-  );
+  // feat-shell-3: the hub's tabs, and the two merged ones a Live view
+  // `goto` may still name (they redirect).
+  assert.deepEqual(SPEC.stack_tabs, [
+    ...STACK_TABS.map((t) => t.tab),
+    ...RETIRED_STACK_TABS,
+  ]);
 });
 
 /** An edit form's state, as the dashboard's server sends it. */

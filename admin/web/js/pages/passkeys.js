@@ -110,7 +110,7 @@ export function mount(root) {
   const status = h("p", { class: "measured", role: "status" }, "Reading…");
   const body = h("div", { class: "passkeys-page" });
   root.replaceChildren(
-    h("h1", null, "Passkeys"),
+    h("h1", null, "Sign-in"),
     h(
       "p",
       { class: "section-head__desc measured" },

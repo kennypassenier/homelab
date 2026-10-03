@@ -372,7 +372,11 @@ export function mount(root) {
                 ...(r.job
                   ? [
                       " ",
-                      h("a", { href: `/jobs?job=${r.job}` }, `job ${r.job}`),
+                      h(
+                        "a",
+                        { href: `/activity?view=running&job=${r.job}` },
+                        `job ${r.job}`,
+                      ),
                     ]
                   : []),
               ),

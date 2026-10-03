@@ -20,6 +20,11 @@ const REVEAL_SECRET = declare({
   opens: "run",
   row: "<stack>/<secret>",
   what: "show one secret's value (once more hides it again)",
+  // feat-shell-1: the secrets live in each stack hub's Settings.
+  at: (row) =>
+    row
+      ? `/stacks/${encodeURIComponent(row.split("/")[0])}/settings?section=secrets`
+      : null,
 });
 
 /**
@@ -167,10 +172,47 @@ function secretRow(stack, kind, secret) {
 }
 
 /**
+ * Read one stack's secrets into `body`, saying in `status` what happens.
+ * @param {string} stack
+ * @param {HTMLElement} status
+ * @param {HTMLElement} body
+ * @param {AbortSignal} signal
+ */
+async function loadOne(stack, status, body, signal) {
+  body.replaceChildren();
+  if (!stack) return;
+  status.textContent = "Reading what this stack declares…";
+  const r = await fetchJson(
+    `/data/secrets/${encodeURIComponent(stack)}`,
+    `${stack}'s secrets`,
+    signal,
+  );
+  if (!r.ok) {
+    status.replaceChildren(errorBox(r.error));
+    return;
+  }
+  const secrets = r.body.secrets ?? [];
+  const files = r.body.files ?? [];
+  if (secrets.length === 0 && files.length === 0) {
+    status.textContent = "This stack declares no latch secret or file.";
+    return;
+  }
+  status.textContent = "";
+  body.replaceChildren(
+    ...secrets.map((/** @type {any} */ app) => secretRow(stack, "env", app)),
+    ...files.map((/** @type {any} */ f) => secretRow(stack, "file", f)),
+  );
+}
+
+/**
+ * The fleet's secrets page (one stack at a time, picked), or with
+ * `opts.stack` one stack's secrets without the picker (the stack hub's
+ * Settings, `?section=secrets`).
  * @param {HTMLElement} root
+ * @param {{stack?: string}} [opts]
  * @returns {() => void}
  */
-export function mount(root) {
+export function mount(root, opts = {}) {
   const stackSelect = h("select", { class: "kp-input" });
   const body = h("tbody");
   const table = h(
@@ -190,6 +232,15 @@ export function mount(root) {
     body,
   );
   const status = h("div", { class: "measured" });
+  if (opts.stack != null) {
+    // feat-shell-1 (FLOWS.md §2): Secrets lives in each stack hub's
+    // Settings since 3.71.0 — one stack, no picker.
+    const one = opts.stack;
+    root.replaceChildren(status, table);
+    const ab = new AbortController();
+    void loadOne(one, status, body, ab.signal).catch(() => {});
+    return () => ab.abort();
+  }
   root.replaceChildren(
     h("div", { class: "title-row" }, h("h1", null, "Secrets")),
     h(
@@ -212,29 +263,7 @@ export function mount(root) {
 
   /** @param {string} stack */
   const loadStack = async (stack) => {
-    body.replaceChildren();
-    if (!stack) return;
-    status.textContent = "Reading what this stack declares…";
-    const r = await fetchJson(
-      `/data/secrets/${encodeURIComponent(stack)}`,
-      `${stack}'s secrets`,
-      abort.signal,
-    );
-    if (!r.ok) {
-      status.replaceChildren(errorBox(r.error));
-      return;
-    }
-    const secrets = r.body.secrets ?? [];
-    const files = r.body.files ?? [];
-    if (secrets.length === 0 && files.length === 0) {
-      status.textContent = "This stack declares no latch secret or file.";
-      return;
-    }
-    status.textContent = "";
-    body.replaceChildren(
-      ...secrets.map((/** @type {any} */ app) => secretRow(stack, "env", app)),
-      ...files.map((/** @type {any} */ f) => secretRow(stack, "file", f)),
-    );
+    await loadOne(stack, status, body, abort.signal);
   };
 
   const fillStacks = () => {

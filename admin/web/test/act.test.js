@@ -317,14 +317,20 @@ test("every action is a palette command, the open stack's first", () => {
     c.id.startsWith("action:"),
   );
   off();
-  assert.equal(all[0].group, "Actions on media");
-  assert.ok(
-    all.some(
-      (c) => c.id === "action:_host:patch" && c.group === "Host actions",
-    ),
-  );
+  // feat-shell-2: every action is in "Do"; the open stack's come first.
+  assert.ok(all.every((c) => c.group === "Do"));
+  assert.equal(all[0].stack, "media");
+  assert.ok(all.some((c) => c.id === "action:_host:patch"));
   assert.ok(!all.some((c) => c.id === "action:admin:destroy"));
   assert.ok(all.some((c) => c.id === "action:admin:deploy"));
+  // A `*-native` action is left out for a stack without native services.
+  assert.ok(!all.some((c) => c.id === "action:media:rollback-native"));
+  assert.match(
+    /** @type {string} */ (
+      all.find((c) => c.id === "action:media:update")?.words
+    ),
+    /upgrade/,
+  );
   all.find((c) => c.id === "action:media:restore")?.run?.();
   assert.deepEqual(opened, ["media/restore"]);
   assert.deepEqual(
@@ -761,7 +767,9 @@ test("a schedule's when in words and back from the form", () => {
 test("the bell, the snooze and the per-stack switches", () => {
   assert.deepEqual(bell(0), { count: "", label: "Notifications, none unread" });
   assert.equal(bell(3).count, "3");
-  assert.equal(bell(12).count, "9+");
+  // feat-shell-4 (Kenny, 2026-10-03): counters are exact, never "9+".
+  assert.equal(bell(12).count, "12");
+  assert.equal(bell(130).count, "130");
   const settings = {
     push: true,
     muted_stacks: ["books"],

@@ -3010,3 +3010,1016 @@ td.measured.stale__action {
 .pin-update .kp-field--check {
   margin: 0;
 }
+
+/* ==== BEGIN redesign 3.71.0 foundation (feat-shell-1..6, Kenny approved
+   2026-10-03; ~/.local/share/homelab/redesign-3.71/DESIGN_LANGUAGE.md and
+   FLOWS.md). kp-themes tokens only, kp components underneath; the `nx-`
+   layout classes are the demos' own names, so a page helper can lay the
+   approved markup out as it stands, and `tc-` is the time chart. ==== */
+:root {
+  --nx-gap: var(--kp-space-xl, 1.5rem);
+  --nx-pad: var(--kp-space-lg, 1rem);
+  --nx-radius: var(--radius, 10px);
+  --nx-ease: cubic-bezier(0.2, 0, 0.38, 0.9);
+  --nx-ok: var(--success-foreground);
+  --nx-warn: var(--warning-foreground);
+  --nx-bad: var(--destructive);
+  --nx-info: var(--info-foreground);
+}
+@media (min-width: 1600px) {
+  :root {
+    --nx-gap: var(--kp-space-2xl, 2rem);
+  }
+}
+
+/* -- the bar: six areas, the divider before the rare two, the Inbox's
+      exact count, the search box, the running pill (FLOWS.md §1.2) -- */
+.kp-nav .nx-nav-sep {
+  inline-size: 1px;
+  align-self: stretch;
+  margin: 6px 6px;
+  background: var(--border);
+  list-style: none;
+}
+.kp-nav .nx-count,
+.nx-tabbar .nx-count {
+  margin-inline-start: 6px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  padding-block: 0;
+}
+.nx-search-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-inline-size: 17rem;
+  justify-content: space-between;
+}
+.nx-search-trigger__text {
+  color: var(--muted-foreground);
+}
+.nx-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: inherit;
+  font-size: var(--kp-text-sm);
+  cursor: pointer;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: inherit;
+  white-space: nowrap;
+  max-inline-size: 30rem;
+}
+.nx-pill[hidden] {
+  display: none;
+}
+.nx-pill__long {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nx-spin {
+  flex: none;
+  inline-size: 10px;
+  block-size: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--primary);
+  border-inline-end-color: transparent;
+  animation: nx-rot 900ms linear infinite;
+}
+@keyframes nx-rot {
+  to {
+    transform: rotate(1turn);
+  }
+}
+/* The trail above a page below an area's own (Stacks / gateway / Logs). */
+.crumbs-slot {
+  max-width: max(80vw, 64rem);
+  margin: 0 auto;
+  padding: 12px 16px 0;
+}
+.crumbs-slot[hidden] {
+  display: none;
+}
+.crumbs-slot:not([hidden]) + main.shell {
+  padding-block-start: 8px;
+}
+.nx-crumbs a {
+  color: var(--muted-foreground);
+}
+
+/* -- phone (≤ 60 rem): the areas move to a bottom tab bar with More;
+      the top bar keeps brand, search, the running pill and the theme -- */
+.nx-tabbar {
+  display: none;
+}
+@media (max-width: 60rem) {
+  .kp-nav > .kp-nav__links,
+  .kp-nav > .kp-nav__toggle,
+  .kp-nav[data-fold] > .kp-nav__toggle {
+    display: none !important;
+  }
+  .nx-search-trigger {
+    min-inline-size: 0;
+  }
+  .nx-search-trigger__text,
+  .nx-pill__long {
+    display: none;
+  }
+  .nx-tabbar {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 40;
+    background: var(--card);
+    border-block-start: 1px solid var(--border);
+    padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+  }
+  .nx-tabbar__tab {
+    all: unset;
+    cursor: pointer;
+    display: grid;
+    justify-items: center;
+    gap: 2px;
+    padding: 6px 2px;
+    border-radius: 8px;
+    font-size: var(--kp-text-xs);
+    color: var(--muted-foreground);
+    position: relative;
+  }
+  .nx-tabbar__tab:focus-visible {
+    outline: 2px solid var(--ring);
+  }
+  .nx-tabbar svg {
+    inline-size: 22px;
+    block-size: 22px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .nx-tabbar [aria-current="page"] {
+    color: var(--foreground);
+    font-weight: 600;
+  }
+  .nx-tabbar [aria-current="page"] svg {
+    stroke: var(--primary);
+  }
+  .nx-tabbar .nx-count {
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-start: 55%;
+    margin: 0;
+  }
+  body {
+    padding-block-end: 72px;
+  }
+}
+
+/* -- side drawer and the More sheet, on a native <dialog> -- */
+dialog.nx-drawer {
+  margin: 0 0 0 auto;
+  block-size: 100dvh;
+  max-block-size: 100dvh;
+  inline-size: min(34rem, 100vw);
+  padding: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+dialog.nx-drawer[open] {
+  display: grid;
+}
+.nx-drawer__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  padding: 18px 20px 12px;
+  border-block-end: 1px solid var(--border);
+}
+.nx-drawer__head h2 {
+  margin: 0;
+}
+.nx-drawer__head p {
+  grid-column: 1;
+  margin: 0;
+}
+.nx-drawer__body {
+  padding: 16px 20px;
+  overflow: auto;
+  align-content: start;
+}
+.nx-drawer__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 14px 20px;
+  border-block-start: 1px solid var(--border);
+}
+@media (max-width: 40rem) {
+  dialog.nx-drawer {
+    inline-size: 100vw;
+  }
+}
+
+/* -- the command palette's own additions -- */
+.nx-palette__foot {
+  margin: 0;
+  padding: 8px 14px;
+  border-block-start: 1px solid var(--border);
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.nx-palette__empty {
+  padding: 18px;
+  color: var(--muted-foreground);
+  list-style: none;
+}
+
+/* -- page header (DESIGN_LANGUAGE §1.1): title row + description -- */
+.nx-head > * {
+  margin: 0;
+}
+.nx-head .nx-crumbs {
+  margin-block-end: var(--kp-space-sm, 8px);
+}
+.nx-head .title-row > h1 {
+  margin: 0;
+  font-size: min(var(--kp-text-display, 2.25rem), 2.25rem);
+  line-height: 1.1;
+}
+.nx-head .nx-head-desc {
+  margin-block-start: 6px !important;
+  color: var(--muted-foreground);
+  max-inline-size: 70ch;
+}
+.nx-head-right {
+  display: flex;
+  align-items: center;
+  gap: var(--kp-space-md, 12px);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.nx-head-right > .actions-row:empty {
+  display: none;
+}
+@media (max-width: 30rem) {
+  .title-row > h1 ~ .nx-head-right,
+  .nx-head-right > .actions-row {
+    justify-content: flex-start;
+  }
+}
+.nx-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.nx-live::before {
+  content: "";
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--nx-ok);
+}
+.nx-live:has([data-stale="true"])::before {
+  background: var(--nx-warn);
+}
+
+/* -- KPI strip (DESIGN_LANGUAGE §1.2) -- */
+.nx-kpis {
+  display: grid;
+  grid-template-columns: repeat(var(--kpi-n, 4), minmax(0, 1fr));
+  gap: var(--kp-space-md, 12px);
+}
+@media (max-width: 75rem) {
+  .nx-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 30rem) {
+  .nx-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--kp-space-sm, 8px);
+  }
+}
+.nx-kpi {
+  display: grid;
+  grid-template-rows: auto auto auto 28px;
+  row-gap: 2px;
+  min-inline-size: 0;
+  padding: var(--kp-space-md, 12px) var(--nx-pad);
+  background: var(--card);
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--nx-radius);
+  text-decoration: none;
+}
+a.nx-kpi:hover {
+  border-color: var(--ring);
+}
+.nx-kpi__label {
+  font-size: var(--kp-text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nx-kpi__value {
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.nx-kpi__value small {
+  font-size: 0.55em;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  margin-inline-start: 3px;
+}
+.nx-kpi__ctx {
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+  min-block-size: 1.4em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nx-kpi[data-tone="warn"] {
+  box-shadow: inset 3px 0 0 var(--nx-warn);
+}
+.nx-kpi[data-tone="warn"] .nx-kpi__value {
+  color: var(--nx-warn);
+}
+.nx-kpi[data-tone="bad"] {
+  border-color: color-mix(in oklab, var(--nx-bad) 55%, var(--border));
+  box-shadow: inset 3px 0 0 var(--nx-bad);
+}
+.nx-kpi[data-tone="bad"] .nx-kpi__value {
+  color: var(--nx-bad);
+}
+.nx-kpi[data-loading] .nx-kpi__value {
+  border-radius: 4px;
+  background: var(--muted);
+  color: transparent;
+  animation: nx-pulse 1.4s ease-in-out infinite;
+}
+@keyframes nx-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+.nx-spark {
+  display: block;
+  inline-size: 100%;
+  block-size: 28px;
+  color: var(--chart-1);
+  overflow: visible;
+}
+.nx-spark path.line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  vector-effect: non-scaling-stroke;
+}
+.nx-spark path.area {
+  fill: currentColor;
+  opacity: 0.12;
+}
+
+/* -- attention band (DESIGN_LANGUAGE §1.3): absent when all is well -- */
+.nx-attention {
+  display: grid;
+  gap: var(--kp-space-sm, 8px);
+}
+.nx-attention[hidden] {
+  display: none;
+}
+.nx-attention__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px var(--kp-space-md, 12px);
+  margin: 0;
+}
+.nx-attention__icon {
+  inline-size: 28px;
+  block-size: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  background: color-mix(in oklab, currentColor 14%, transparent);
+}
+.nx-attention__text strong {
+  display: block;
+}
+.nx-attention__text span {
+  font-size: var(--kp-text-sm);
+}
+.nx-attention__act {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@media (max-width: 30rem) {
+  .nx-attention__item {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .nx-attention__act {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+/* -- toolbar / filter bar (DESIGN_LANGUAGE §12): search · filters ·
+      view & state, inside the card it filters -- */
+.nx-tb {
+  display: grid;
+  grid-template-columns: minmax(14rem, 22rem) minmax(0, 1fr) auto;
+  gap: 10px 20px;
+  align-items: center;
+}
+.nx-tb--nosearch {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.nx-tb__search {
+  position: relative;
+}
+.nx-tb__search .nx-search {
+  inline-size: 100%;
+  box-sizing: border-box;
+  padding-inline-end: 34px;
+}
+.nx-tb__search .nx-kbd {
+  position: absolute;
+  inset-inline-end: 8px;
+  inset-block-start: 50%;
+  transform: translateY(-50%);
+}
+.nx-kbd {
+  font: 500 var(--kp-text-xs) / 1 var(--font-mono, ui-monospace, monospace);
+  border: 1px solid var(--border);
+  border-block-end-width: 2px;
+  border-radius: 4px;
+  padding: 2px 5px;
+  color: var(--muted-foreground);
+}
+.nx-tb__filters {
+  display: flex;
+  gap: 8px 18px;
+  flex-wrap: wrap;
+  align-items: center;
+  min-inline-size: 0;
+}
+.nx-tb__group {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.nx-tb__group > b {
+  font-size: var(--kp-text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+  margin-inline-end: 2px;
+}
+.nx-tb__group + .nx-tb__group {
+  padding-inline-start: 18px;
+  border-inline-start: 1px solid var(--border);
+}
+.nx-chips {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.nx-chip-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font: inherit;
+  font-size: var(--kp-text-sm);
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: inherit;
+  cursor: pointer;
+}
+.nx-chip-toggle:hover {
+  border-color: var(--ring);
+}
+.nx-chip-toggle[aria-pressed="true"] {
+  background: var(--foreground);
+  color: var(--background);
+  border-color: var(--foreground);
+}
+.nx-chip-toggle__count {
+  font-size: var(--kp-text-xs);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+.nx-tb__state {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-self: end;
+  white-space: nowrap;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.nx-tb__active {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: var(--kp-text-sm);
+}
+.nx-tb__active[hidden] {
+  display: none;
+}
+.nx-tb__chip {
+  cursor: pointer;
+}
+@media (max-width: 48rem) {
+  .nx-tb,
+  .nx-tb--nosearch {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .nx-tb__filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .nx-tb__group {
+    flex-wrap: nowrap;
+  }
+  .nx-tb__state {
+    justify-self: stretch;
+    justify-content: space-between;
+  }
+}
+
+/* -- a section as a card (DESIGN_LANGUAGE §5), folded or open -- */
+.nx-card {
+  display: grid;
+  gap: var(--kp-space-md, 12px);
+  min-inline-size: 0;
+}
+.nx-card__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--kp-space-md, 12px);
+  align-items: start;
+}
+.nx-card__head > h2,
+.nx-card__head > h3 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.nx-card__head > p {
+  grid-column: 1;
+  margin: 0;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.nx-card__tools {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  display: flex;
+  gap: var(--kp-space-sm, 8px);
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.nx-card__body {
+  min-inline-size: 0;
+}
+details.nx-card--fold > summary {
+  list-style: none;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+details.nx-card--fold > summary::-webkit-details-marker {
+  display: none;
+}
+details.nx-card--fold > summary::before {
+  content: "";
+  inline-size: 8px;
+  block-size: 8px;
+  margin-block-start: 0.55em;
+  border-inline-end: 2px solid currentColor;
+  border-block-end: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 150ms var(--nx-ease);
+}
+details.nx-card--fold[open] > summary::before {
+  transform: rotate(45deg);
+}
+.hub-part + .nx-card,
+.nx-card + .nx-card {
+  margin-block-start: var(--section-gap);
+}
+
+/* -- loading, empty (DESIGN_LANGUAGE §7) -- */
+.nx-skeleton {
+  display: grid;
+  gap: 8px;
+}
+.nx-skeleton .kp-skeleton {
+  display: block;
+  block-size: 1em;
+}
+.nx-skeleton--table {
+  grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr));
+}
+.nx-skeleton-block {
+  inline-size: 100%;
+}
+.nx-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+
+/* -- the per-stack identity mark (DESIGN_LANGUAGE §11, graphics.html):
+      generated per name, so its hue is the one colour not from a token -- */
+.nx-mark {
+  flex: none;
+  vertical-align: middle;
+}
+.nx-mark__ground {
+  fill: oklch(0.62 0.15 var(--mark-hue));
+}
+.nx-mark__cell {
+  fill: oklch(0.97 0.03 var(--mark-hue));
+  opacity: 0.92;
+}
+.nx-stackname {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* -- the Inbox's rows and the System landing's cards -- */
+.nx-inbox {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+.nx-inbox__row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  gap: 4px 14px;
+  align-items: center;
+  padding: 12px 4px;
+  border-block-end: 1px solid var(--border);
+}
+.nx-inbox__row:last-child {
+  border-block-end: 0;
+}
+.nx-sev {
+  inline-size: 10px;
+  block-size: 10px;
+  border-radius: 50%;
+  align-self: start;
+  margin-block-start: 6px;
+  background: var(--nx-warn);
+}
+.nx-sev--bad {
+  background: var(--nx-bad);
+}
+.nx-sev--info {
+  background: var(--nx-info);
+}
+.nx-inbox__what strong {
+  display: block;
+}
+.nx-inbox__what span {
+  display: block;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.nx-inbox__acts {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+@media (max-width: 40rem) {
+  .nx-inbox__row {
+    grid-template-columns: 10px minmax(0, 1fr);
+  }
+  .nx-inbox__acts {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+}
+.nx-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+  gap: var(--kp-space-sm, 8px);
+}
+.nx-action {
+  display: grid;
+  gap: 2px;
+  text-align: start;
+  font: inherit;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.nx-action:hover {
+  border-color: var(--ring);
+}
+.nx-action strong {
+  font-weight: 600;
+}
+.nx-action span {
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+
+/* -- the shared time chart (DESIGN_LANGUAGE §10, timechart.js) -- */
+.tc {
+  position: relative;
+}
+.tc svg {
+  display: block;
+  inline-size: 100%;
+  overflow: visible;
+}
+.tc-plot {
+  position: relative;
+  cursor: crosshair;
+  touch-action: pan-y;
+  border-radius: 4px;
+}
+.tc-plot:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+}
+.tc-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.tc-tick {
+  fill: var(--muted-foreground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.tc-line {
+  fill: none;
+  stroke-linejoin: round;
+}
+.tc-ann {
+  stroke: var(--muted-foreground);
+  stroke-dasharray: 2 3;
+  opacity: 0.7;
+}
+.tc-mark {
+  cursor: pointer;
+  stroke: var(--card);
+  stroke-width: 1.5;
+  fill: var(--info-foreground);
+}
+.tc-mark--bad {
+  fill: var(--destructive);
+}
+.tc-mark--warn {
+  fill: var(--warning-foreground);
+}
+.tc-xhair {
+  stroke: var(--foreground);
+  opacity: 0.35;
+}
+.tc-xhair--pinned {
+  opacity: 0.8;
+  stroke-width: 1.5;
+}
+.tc-snap {
+  stroke: var(--card);
+  stroke-width: 2;
+}
+.tc-threshold {
+  stroke: var(--destructive);
+  stroke-dasharray: 4 4;
+  opacity: 0.8;
+}
+.tc-brush {
+  fill: color-mix(in oklab, var(--chart-1) 16%, transparent);
+  stroke: var(--chart-1);
+  stroke-dasharray: 3 3;
+}
+.tc-tip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  display: grid;
+  gap: 3px;
+  min-inline-size: 220px;
+  max-inline-size: 280px;
+  padding: 8px 10px;
+  font-size: var(--kp-text-xs);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px color-mix(in oklab, var(--foreground) 14%, transparent);
+}
+.tc-tip[hidden] {
+  display: none;
+}
+.tc-tip > b {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-block-end: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.tc-tip--pinned {
+  pointer-events: auto;
+  box-shadow:
+    0 0 0 1px var(--ring),
+    0 8px 24px color-mix(in oklab, var(--foreground) 14%, transparent);
+}
+.tc-tip__pin {
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.tc-tip__x {
+  all: unset;
+  cursor: pointer;
+  margin-inline-start: 8px;
+  padding: 0 4px;
+  border-radius: 4px;
+  color: var(--foreground);
+}
+.tc-tip__row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto 64px;
+  gap: 6px;
+  align-items: center;
+}
+.tc-tip__row > span:nth-child(2) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tc-tip__row--hot {
+  font-weight: 700;
+}
+.tc-tip__d {
+  text-align: end;
+  color: var(--muted-foreground);
+}
+.tc-tip__d.up {
+  color: var(--warning-foreground);
+}
+.tc-tip__d.down {
+  color: var(--info-foreground);
+}
+.tc-tip__foot {
+  margin: 2px 0 0;
+  color: var(--muted-foreground);
+  text-align: end;
+}
+.tc-tip__ev {
+  margin: 4px 0 0;
+  padding-block-start: 4px;
+  border-block-start: 1px solid var(--border);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.tc-dot {
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--info-foreground);
+}
+.tc-dot--bad {
+  background: var(--destructive);
+}
+.tc-dot--warn {
+  background: var(--warning-foreground);
+}
+.tc-num {
+  font-variant-numeric: tabular-nums;
+}
+.tc-swatch {
+  display: inline-block;
+  inline-size: 10px;
+  block-size: 3px;
+  border-radius: 2px;
+}
+.tc-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-block-start: 10px;
+}
+.tc-legend__item {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.tc-legend__item b {
+  color: var(--foreground);
+  font-weight: 600;
+}
+.tc-legend__item:hover,
+.tc-legend__item:focus-visible {
+  border-color: var(--border);
+  color: var(--foreground);
+}
+.tc-legend__item:focus-visible {
+  outline: 2px solid var(--ring);
+}
+.tc-legend__item[aria-pressed="true"] {
+  border-color: var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: 0 0 0 1px var(--ring);
+}
+.tc-legend__item[data-off] {
+  opacity: 0.45;
+}
+.tc-legend__item[data-off] .tc-swatch {
+  background: var(--muted-foreground) !important;
+}
+.tc-legend__reset {
+  all: unset;
+  cursor: pointer;
+  font-size: var(--kp-text-xs);
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px dashed var(--border);
+  color: var(--foreground);
+}
+.tc-legend__reset[hidden] {
+  display: none;
+}
+.tc-legend__hint {
+  margin: 4px 0 0;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.tc-zoom {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font-size: var(--kp-text-sm);
+}
+.tc-zoom[hidden] {
+  display: none;
+}
+.tc-zoom__reset {
+  all: unset;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nx-spin,
+  .nx-kpi[data-loading] .nx-kpi__value {
+    animation: none;
+  }
+  details.nx-card--fold > summary::before {
+    transition: none;
+  }
+}
+/* ==== END redesign 3.71.0 foundation ==== */

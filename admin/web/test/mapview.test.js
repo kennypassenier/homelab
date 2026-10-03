@@ -176,11 +176,12 @@ test("redesign-371-map: a pin in the homelab binary is one row naming every stac
     },
   ]);
   assert.equal(g.length, 2);
-  assert.equal(g[0].image, "demo-agent");
-  assert.deepEqual(g[0].stacks, ["admin", "kpsite"]);
-  assert.equal(g[1].key, "web/web");
-  assert.equal(g[1].container, "demo-web");
-  assert.equal(g[1].major, false);
+  // What this page can update comes first (review finding 13).
+  assert.equal(g[1].image, "demo-agent");
+  assert.deepEqual(g[1].stacks, ["admin", "kpsite"]);
+  assert.equal(g[0].key, "web/web");
+  assert.equal(g[0].container, "demo-web");
+  assert.equal(g[0].major, false);
   assert.equal(shortDate("2026-09-28"), "28 Sep");
 });
 

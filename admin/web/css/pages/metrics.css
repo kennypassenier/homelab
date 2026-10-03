@@ -44,16 +44,6 @@ main.mk-page > .mk-failed:empty {
   font-size: var(--kp-text-sm);
 }
 
-/* ---------- header: meta row under the description ---------- */
-.mk-head__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  align-items: center;
-  margin-block-start: 10px !important;
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-}
 .mk-chip {
   display: inline-flex;
   align-items: center;
@@ -65,9 +55,6 @@ main.mk-page > .mk-failed:empty {
   font-size: var(--kp-text-xs);
   color: var(--foreground);
   white-space: nowrap;
-}
-.mk-head__meta .nx-live::before {
-  display: none;
 }
 .mk-dot {
   inline-size: 8px;
@@ -110,43 +97,6 @@ main.mk-page > .mk-failed:empty {
   }
 }
 
-/* ---------- segmented switch (System | Traffic, 1h … 30d) ---------- */
-.mk-seg {
-  display: inline-grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(max-content, 1fr);
-  border: 1px solid var(--border);
-  border-radius: var(--radius, 0.5rem);
-  background: var(--mk-soft);
-  padding: 3px;
-  gap: 2px;
-}
-.mk-seg button {
-  all: unset;
-  cursor: pointer;
-  text-align: center;
-  padding: 5px 12px;
-  border-radius: calc(var(--radius, 0.5rem) * 0.6);
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.mk-seg button:hover {
-  color: var(--foreground);
-}
-.mk-seg button[aria-pressed="true"] {
-  background: var(--card);
-  color: var(--foreground);
-  font-weight: 600;
-  box-shadow:
-    0 1px 2px color-mix(in oklab, var(--foreground) 14%, transparent),
-    0 0 0 1px var(--mk-line);
-}
-.mk-seg button:focus-visible {
-  outline: 2px solid var(--ring);
-}
-
 /* ---------- the page's toolbar (the window, what is shown) ---------- */
 .mk-toolbar {
   padding-block: 10px;
@@ -183,7 +133,7 @@ main.mk-page > .mk-failed:empty {
   .mk-window {
     white-space: normal;
   }
-  .mk-toolbar .mk-seg {
+  .mk-toolbar .hk-seg {
     inline-size: 100%;
   }
 }
@@ -235,6 +185,27 @@ main.mk-page > .mk-failed:empty {
   .mk-page .nx-kpis {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
+/* The phone strip as the demo lays it out (ops-kit.css .kpis): two tiles a
+   row from 640 px down, 8 px apart, and the context line wraps onto a
+   second line instead of being cut off (review finding 14). */
+@media (max-width: 640px) {
+  .mk-page .nx-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--kp-space-sm, 8px);
+  }
+  .mk-page .nx-kpi__ctx {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    min-block-size: 2.8em;
+  }
+  .mk-page .nx-kpi__value {
+    font-size: 1.5rem;
+  }
+}
+.mk-kpi .nx-kpi__ctx .mk-dot {
+  margin-inline-end: 5px;
+  vertical-align: 0.05em;
 }
 
 /* ---------- attention band actions, the marker key ---------- */
@@ -438,34 +409,100 @@ main.mk-page > .mk-failed:empty {
   .mk-hide-phone {
     display: none;
   }
-}
-
-/* ---------- the keyboard line at the foot ---------- */
-.mk-keys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 18px;
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-.mk-keys span {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-
-/* ---------- phone: a card's tools fold under its heading ---------- */
-@media (max-width: 640px) {
-  .mk-page .nx-card__head {
+  /* Drives and Hostnames fit a phone (finding 3): tighter cells, the share
+     bar folded to its number, a smaller hostname. */
+  .mk-table .kp-table {
+    font-size: var(--kp-text-sm);
+  }
+  .mk-table .kp-table th,
+  .mk-table .kp-table td {
+    padding-inline: 6px;
+  }
+  .mk-table .kp-table th {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .mk-table .mk-bar {
     grid-template-columns: minmax(0, 1fr);
   }
-  .mk-page .nx-card__head > .nx-card__tools {
-    grid-row: auto;
-    grid-column: 1;
-    justify-content: flex-start;
+  .mk-table .mk-bar > span:first-child {
+    display: none;
   }
-  .mk-page .nx-card__head > .nx-card__tools > .mk-now {
-    justify-items: start;
-    text-align: start;
+  .mk-table .mk-share {
+    inline-size: auto;
+  }
+  .mk-host {
+    font-size: 0.8em;
+    overflow-wrap: anywhere;
+  }
+}
+.mk-rowpick[aria-pressed="true"] td:first-child {
+  font-weight: 600;
+}
+
+/* ---------- tables as cards on a phone (the demo's nx-table--cards) ---- */
+@media (max-width: 640px) {
+  .mk-cards thead {
+    display: none;
+  }
+  .mk-cards,
+  .mk-cards tbody {
+    display: grid;
+    gap: var(--kp-space-sm, 8px);
+  }
+  .mk-cards tr {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 4px 12px;
+    padding: var(--kp-space-md, 12px);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .mk-cards td {
+    border: 0 !important;
+    padding: 0 !important;
+    text-align: start !important;
+    min-inline-size: 0;
+  }
+  .mk-cards td.id {
+    grid-column: 1 / -1;
+    font-size: 1.05rem;
+  }
+  .mk-cards td[data-label] {
+    display: contents;
+  }
+  .mk-cards td[data-label]::before {
+    content: attr(data-label);
+    grid-column: 1;
+    align-self: center;
+    color: var(--muted-foreground);
+    font-size: var(--kp-text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .mk-cards td.row-actions {
+    grid-column: 1 / -1;
+    margin-block-start: 6px;
+  }
+  .mk-table:has(.mk-cards) .kp-table-wrap {
+    overflow: visible;
+  }
+}
+
+/* ---------- pointer hints never show on a touch screen (finding 17) ----
+   `!important`: the hints sit in rows that set their own display. */
+.mk-touch-only,
+.tc-hint--touch {
+  display: none !important;
+}
+@media (hover: none) {
+  .mk-pointer-only,
+  .tc-hint--pointer,
+  .mk-page .hk-keys {
+    display: none !important;
+  }
+  .mk-touch-only,
+  .tc-hint--touch {
+    display: inline !important;
   }
 }

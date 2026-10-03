@@ -305,19 +305,39 @@ fn traffic(query: &str, w: &Window, now: u64) -> serde_json::Value {
     // An instant read of a whole window (a table, a total): one number per
     // row, from the window's length.
     let total = RATE * span;
-    if query.contains("DownstreamStatus >= 400") {
-        let rows = [
-            ("404", "demo.example.org", "/favicon.ico", 0.032),
-            ("404", "demo.example.org", "/robots.txt", 0.006),
-            ("403", "shop.example.org", "/wp-login.php", 0.008),
-            ("500", "films.example.org", "/api/stream", 0.002),
-        ];
+    let errs = [
+        ("404", "demo.example.org", "/favicon.ico", 0.038),
+        ("403", "shop.example.org", "/wp-login.php", 0.008),
+        ("500", "films.example.org", "/api/stream", 0.002),
+    ];
+    // The top errors' second step: one pair's busiest path.
+    if query.contains("by (path)") {
+        let hit = errs
+            .iter()
+            .find(|(code, host, _, _)| {
+                query.contains(&format!("DownstreamStatus=\"{code}\""))
+                    && query.contains(&format!("RequestHost=\"{host}\""))
+            })
+            .map(|(_, _, path, share)| (*path, (total * share * 0.8).round()));
         return matrix(
-            rows.iter()
-                .map(|(code, host, path, share)| {
+            hit.into_iter()
+                .map(|(path, n)| {
+                    serde_json::json!({
+                        "metric": { "path": path },
+                        "value": [w.end, n.to_string()],
+                        "values": [[w.end, n.to_string()]],
+                    })
+                })
+                .collect(),
+        );
+    }
+    if query.contains("DownstreamStatus >= 400") {
+        return matrix(
+            errs.iter()
+                .map(|(code, host, _, share)| {
                     let n = (total * share).round();
                     serde_json::json!({
-                        "metric": { "DownstreamStatus": code, "RequestHost": host, "RequestPath": path },
+                        "metric": { "DownstreamStatus": code, "RequestHost": host },
                         "value": [w.end, n.to_string()],
                         "values": [[w.end, n.to_string()]],
                     })
@@ -373,11 +393,15 @@ fn traffic(query: &str, w: &Window, now: u64) -> serde_json::Value {
 /// Every made-up answer, chosen from the query's own text — the same
 /// shapes a real Prometheus or Loki answers for that `by (...)` clause.
 /// Deliberately raw ids where the live host has them (fix-220): a guest's
-/// firewall bridge and veth (`fwbr117i0`, `veth118i0`), an hwmon chip's
-/// sysfs PCI path, a Proxmox cgroup id (`lxc/117`) — the humanizing code
+/// firewall bridge and veth (`fwbr903i0`, `veth904i0`), an hwmon chip's
+/// sysfs PCI path, a Proxmox cgroup id (`lxc/903`) — the humanizing code
 /// path turns them into words, and a whole-screen invariant proves it.
 /// One SMART drive turns "not ok" 20 hours ago (`sdb`) so Drives has both
 /// states and a "since".
+/// The guests' vmids are the demo fleet's own (`demo::demo_vmid`: 900 + a
+/// stack's place when it has no working copy), so the humanized labels read
+/// "CT 903 · films" and "CT 904 · notes" with the names from the fleet
+/// store, as the demo's "CT 117 · films" does.
 pub fn body(query: &str, w: &Window, now: u64) -> serde_json::Value {
     let day_ago = 86_400 + 4 * 3_600;
     if query.contains("job=\"") {
@@ -523,8 +547,8 @@ pub fn body(query: &str, w: &Window, now: u64) -> serde_json::Value {
         return answer(
             "id",
             &[
-                Shape::new("lxc/117", 2.0 * GIB).wave(0.04).jitter(0.02),
-                Shape::new("lxc/118", GIB).wave(0.04).jitter(0.02),
+                Shape::new("lxc/903", 2.0 * GIB).wave(0.04).jitter(0.02),
+                Shape::new("lxc/904", GIB).wave(0.04).jitter(0.02),
             ],
             w,
             now,
@@ -539,8 +563,8 @@ pub fn body(query: &str, w: &Window, now: u64) -> serde_json::Value {
                     .wave(0.6)
                     .jitter(0.5)
                     .bump(7_560, 2_400_000.0, 600.0),
-                Shape::new("fwbr117i0", 4_200.0).wave(0.6).jitter(0.5),
-                Shape::new("veth118i0", 1_800.0).wave(0.6).jitter(0.5),
+                Shape::new("fwbr903i0", 4_200.0).wave(0.6).jitter(0.5),
+                Shape::new("veth904i0", 1_800.0).wave(0.6).jitter(0.5),
             ],
             w,
             now,

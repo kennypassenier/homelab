@@ -30,6 +30,7 @@ import {
   neighbours,
   shortDate,
   sortCapacity,
+  sortGrowth,
   staleGroups,
   trafficByStack,
 } from "../mapview.js";
@@ -39,7 +40,6 @@ import { releaseUrl } from "../staleimages.js";
 import { current, subscribe } from "../store.js";
 import { bytes } from "../timechart.js";
 import { emptyState, section, skeletonBlock, skeletonLines } from "../ui.js";
-import { attachDataTables } from "/static/kp/js/datatable.js";
 import { attachSwitches } from "/static/kp/js/forms.js";
 import { mapGraph } from "./mapgraph.js";
 import {
@@ -51,6 +51,7 @@ import {
   meter,
   pageHeader,
   segmented,
+  tableSlot,
 } from "./metricskit.js";
 
 // fix-239: Live view reaches every stale image's Update (`homelab ui click
@@ -182,6 +183,8 @@ function mark(n, hue) {
  * @returns {() => void}
  */
 export function mount(root) {
+  // The hostkit blocks (header, switches) keep host.css's styles.
+  ensureStyle("/css/pages/host.css");
   ensureStyle("/css/pages/metrics.css");
   ensureStyle("/css/pages/map.css");
   root.classList.add("mk-page", "mp-page");
@@ -215,7 +218,7 @@ export function mount(root) {
   const head = pageHeader({
     title: "Map",
     desc: "How the stacks connect, what they use and what is out of date, all derived from the stack files and the fleet's metrics, nothing typed by hand.",
-    liveVerb: "read",
+    live: "read",
     actions: [trafficSwitch],
   });
 
@@ -323,6 +326,9 @@ export function mount(root) {
   const side = h("aside", { class: "mp-side", "aria-live": "polite" });
   const listBox = h("div", { class: "mp-list", hidden: "" });
   const topoGrid = h("div", { class: "mp-topo" });
+  const listTable = tableSlot();
+  const staleTable = tableSlot();
+  stops.push(listTable.stop, staleTable.stop);
 
   const paintTiles = () => {
     if (!topology) return;
@@ -334,14 +340,15 @@ export function mount(root) {
         ? `+ ${f.outside} ${f.outside === 1 ? "address" : "addresses"} outside the fleet`
         : "no address outside the fleet",
     });
+    // The demo's colours: what the firewall enforces in green, what is
+    // open in amber.
     T.get("connections")?.set({
       value: String(f.connections),
-      ctx: [
-        `${f.enforced} enforced`,
-        ...(f.planned ? [`${f.planned} not on yet`] : []),
-        `${f.open} open`,
-      ].join(" · "),
-      ctxTone: f.open ? "warn" : "",
+      ctxParts: [
+        { text: `${f.enforced} enforced`, tone: "ok" },
+        ...(f.planned ? [{ text: `${f.planned} not on yet` }] : []),
+        { text: `${f.open} open`, tone: f.open ? "warn" : "" },
+      ],
     });
     const off = [
       ...f.firewallNone.map((s) => `${s} none`),
@@ -672,16 +679,12 @@ export function mount(root) {
     );
     listBox.replaceChildren(tbl.wrap);
     topo.body.replaceChildren(
-      h("div", { class: "mp-legends" }, legend, graph.keys),
+      h("div", { class: "mp-legends" }, legend),
       topoGrid,
       listBox,
     );
-    stops.push(attachDataTables(listBox));
-    showView(
-      viewSeg.el
-        .querySelector('[aria-pressed="true"]')
-        ?.getAttribute("data-value") ?? "graph",
-    );
+    listTable.attach(listBox);
+    showView(viewSeg.value());
     graph.draw();
     onGraph(want, null);
   };
@@ -714,7 +717,7 @@ export function mount(root) {
       return;
     }
     topology = r.body.topology;
-    head.live.set(r.body.head?.at ?? Math.floor(Date.now() / 1000));
+    head.live?.set(r.body.head?.at ?? Math.floor(Date.now() / 1000));
     paintTopology();
     paintTiles();
     if (input.checked) void ensureTraffic();
@@ -832,33 +835,44 @@ export function mount(root) {
             h("span", { role: "columnheader" }, x),
           ),
         ),
-        ...rows.map((/** @type {any} */ row) => {
+        // One fixed order whatever order the read brings (finding 4).
+        ...sortGrowth(rows).map((/** @type {any} */ row) => {
           const days = row.fit.days_to_full;
           const now = row.fit.pct_now;
+          // On a phone the head row is hidden: two lines per row (name and
+          // "Full in", then the bar and the trend), each value with its
+          // own inline label.
+          const inl = (/** @type {string} */ t) =>
+            h("span", { class: "mp-inl" }, `${t} `);
           return h(
             "div",
             { class: "mp-growth", role: "row" },
             h(
               "span",
-              { role: "cell" },
+              { role: "cell", class: "mp-g-name" },
               row.scope === "host" ? "Host" : "Stack",
               " ",
               h("b", { class: "mono" }, row.subject || "/"),
             ),
             h(
               "span",
-              { class: "mp-cap__cell", role: "cell" },
+              { class: "mp-cap__cell mp-g-bar", role: "cell" },
               meter({ pct: now, tone: meterTone(now) }),
               h("span", { class: "mp-cap__n" }, `${Math.round(now)}%`),
             ),
             h(
               "span",
-              { role: "cell", class: "mp-cap__n" },
+              { role: "cell", class: "mp-cap__n mp-g-trend" },
+              inl("Trend"),
               `${row.fit.pct_per_day_robust >= 0 ? "+" : "−"}${Math.abs(row.fit.pct_per_day_robust).toFixed(2)}%/day`,
             ),
             h(
               "span",
-              { role: "cell", class: row.warning ? "mk-bad" : "" },
+              {
+                role: "cell",
+                class: `mp-g-full${row.warning ? " mk-bad" : ""}`,
+              },
+              inl("Full in"),
               days == null
                 ? "not growing"
                 : days > 365
@@ -900,17 +914,21 @@ export function mount(root) {
         { label: "Action", cls: "mk-n" },
       ],
     });
+    // On a phone each row is a small card (the demo's nx-table--cards):
+    // the image first, then each cell with its column's name, the Update
+    // button on its own line, never behind a sideways scroll.
+    t.wrap.querySelector("table")?.classList.add("mk-cards");
     t.tbody.replaceChildren(
       ...groups.map((g) => {
         const notes = releaseUrl(g.upstream, g.latest);
         return h(
           "tr",
           { "data-kp-row-key": g.where.join(",") },
-          h("td", null, h("b", null, g.image)),
-          h("td", null, g.stacks.join(", ")),
+          h("td", { class: "id" }, h("b", null, g.image)),
+          h("td", { "data-label": "Stack" }, g.stacks.join(", ")),
           h(
             "td",
-            null,
+            { "data-label": "Pinned → latest" },
             h(
               "span",
               { class: "mp-pin" },
@@ -929,10 +947,17 @@ export function mount(root) {
               ),
             ),
           ),
-          h("td", null, shortDate(g.released)),
+          // The sort reads the cell's text: a hidden ISO date first makes
+          // "28 Sep" sort before "1 Oct" (finding 13).
           h(
             "td",
-            null,
+            { "data-label": "Released" },
+            h("span", { class: "mk-sortkey", hidden: "" }, g.released ?? "~"),
+            shortDate(g.released),
+          ),
+          h(
+            "td",
+            { "data-label": "Upstream" },
             notes
               ? drivable(
                   h(
@@ -951,11 +976,11 @@ export function mount(root) {
               : h("span", { class: "mono" }, g.upstream),
           ),
           g.key
-            ? h("td", { class: "mk-n" }, updateButton(g))
+            ? h("td", { class: "mk-n row-actions" }, updateButton(g))
             : h(
                 "td",
                 {
-                  class: "mk-n mk-muted mk-sm",
+                  class: "mk-n mk-muted mk-sm row-actions",
                   title:
                     "This pin lives in the homelab binary, not a stack file: it moves with a homelab release, not from here",
                 },
@@ -965,7 +990,7 @@ export function mount(root) {
       }),
     );
     stale.body.replaceChildren(t.wrap);
-    stops.push(attachDataTables(stale.body));
+    staleTable.attach(stale.body);
   };
   void (async () => {
     const r = await slowRead(

@@ -17,9 +17,50 @@
 //            hover = what happened, click = pin it, with its link
 //
 // Colours are kp-themes tokens only (`--chart-1..5` in order, or a series'
-// own colour); every class is `tc-` in app.css.
+// own colour); from the sixth source on the colours repeat with a dashed
+// line, so no two sources look the same. Every class is `tc-` in app.css.
+//
+// Live view (redesign-371-metrics review): a source, Show all and the zoom
+// chip's Reset are declared controls, found on whichever page draws the
+// chart (`at` is the address shown now).
 
+import { declare, drivable } from "./drivable.js";
 import { h } from "./dom.js";
+
+/** A chart control lives wherever a chart is drawn: the page shown now. */
+const here = () => location.pathname + location.search;
+const SOURCE = declare({
+  id: "chart-source",
+  page: "metrics",
+  opens: "view",
+  row: "<card>/<label>",
+  at: here,
+  what: "a chart's legend source: turn it on or off in that chart",
+});
+const SHOW_ALL = declare({
+  id: "chart-show-all",
+  page: "metrics",
+  opens: "view",
+  row: "<card>",
+  at: here,
+  what: "a chart's Show all: every source on again",
+});
+const ZOOM_RESET = declare({
+  id: "chart-zoom-reset",
+  page: "metrics",
+  opens: "view",
+  at: here,
+  what: "the zoom chip's Reset: every chart of the page back to its whole window",
+});
+
+/**
+ * The dash of the `i`-th source's line: solid for the first five (each its
+ * own `--chart-n`), dashed when the colours come round again.
+ * @param {number} i
+ * @returns {string | null}
+ */
+export const dashOf = (i) =>
+  i < 5 ? null : ["5 3", "1.5 2.5", "8 3 1.5 3"][Math.floor(i / 5 - 1) % 3];
 
 const SVGNS = "http://www.w3.org/2000/svg";
 
@@ -33,7 +74,11 @@ const SVGNS = "http://www.w3.org/2000/svg";
  * @typedef {{label: string, series: Series[], unit?: Unit, from: number,
  *   to: number, height?: number, annotations?: Annotation[],
  *   threshold?: number, yMax?: number, stacked?: boolean,
- *   group?: ChartGroup}} ChartSpec
+ *   group?: ChartGroup, key?: string,
+ *   onSelect?: (on: number[]) => void}} ChartSpec
+ *   `key`: the chart's name for Live view (its card), `label` otherwise;
+ *   `onSelect`: called with the sources turned on (none = all shown)
+ *   whenever the selection changes — a click, Show all, Esc, `select`
  * @typedef {{draw: () => void, cursorAt: (t: number | null, own: boolean) => void,
  *   destroy: () => void, host: HTMLElement}} ChartState
  */
@@ -184,6 +229,7 @@ export function zoomChip(group = pageCharts) {
     "Reset",
   );
   reset.addEventListener("click", () => group.setZoom(null));
+  drivable(reset, ZOOM_RESET);
   const el = h(
     "span",
     { class: "tc-zoom", hidden: "", role: "status" },
@@ -210,7 +256,7 @@ function s(tag, attrs) {
  * Draw an interactive time chart into `host`.
  * @param {HTMLElement} host
  * @param {ChartSpec} opt
- * @returns {ChartState & {select: (only: number | null) => void}}
+ * @returns {ChartState & {select: (i: number | null, on?: boolean) => void}}
  */
 export function timeChart(host, opt) {
   const group = opt.group ?? pageCharts;
@@ -250,6 +296,8 @@ export function timeChart(host, opt) {
     },
     "Show all",
   );
+  const driveKey = opt.key ?? opt.label;
+  drivable(reset, SHOW_ALL, driveKey);
   host.classList.add("tc");
   host.replaceChildren(plot, tip);
   if (series.length > 1)
@@ -258,11 +306,25 @@ export function timeChart(host, opt) {
       h(
         "p",
         { class: "tc-legend__hint" },
-        "Hover a source to single it out · click to keep it on or off · Show all resets",
+        h(
+          "span",
+          { class: "tc-hint--pointer" },
+          "Hover a source to single it out · click to keep it on or off · Show all resets",
+        ),
+        h(
+          "span",
+          { class: "tc-hint--touch" },
+          "Tap a source to keep it on or off · Show all resets",
+        ),
       ),
     );
   const colour = (/** @type {number} */ i) =>
     series[i].colour ?? `var(--chart-${(i % 5) + 1})`;
+  /** A legend or tooltip swatch: striped where the line is dashed. */
+  const swatch = (/** @type {number} */ i) =>
+    dashOf(i)
+      ? `repeating-linear-gradient(90deg, ${colour(i)} 0 3px, transparent 3px 5px)`
+      : colour(i);
   const visible = () =>
     series.map((_, i) => i).filter((i) => sel.size === 0 || sel.has(i));
   const range = () => group.zoom ?? { from: opt.from, to: opt.to };
@@ -271,7 +333,12 @@ export function timeChart(host, opt) {
    *   from: number, to: number, svg: SVGSVGElement}} */
   let geo = null;
 
-  /** @type {ChartState & {select: (only: number | null) => void}} */
+  /** A new selection, told to `onSelect`. @param {Set<number>} next */
+  const setSel = (next) => {
+    sel = next;
+    opt.onSelect?.([...sel].sort((a, b) => a - b));
+  };
+  /** @type {ChartState & {select: (i: number | null, on?: boolean) => void}} */
   const state = {
     host,
     draw,
@@ -285,8 +352,11 @@ export function timeChart(host, opt) {
       group.charts.delete(state);
       ro?.disconnect();
     },
-    select: (only) => {
-      sel = only == null ? new Set() : new Set([only]);
+    // Source `i` on or off (a toggle without `on`); null: show all.
+    select: (i, on) => {
+      if (i == null) setSel(new Set());
+      else if (on === undefined || on !== sel.has(i))
+        setSel(toggleSource(sel, i, series.length));
       draw();
     },
   };
@@ -448,6 +518,8 @@ export function timeChart(host, opt) {
         "stroke-width": hoverSeries === si ? 2.5 : 1.75,
       });
       line.style.stroke = colour(si);
+      const dash = dashOf(si);
+      if (dash) line.setAttribute("stroke-dasharray", dash);
       line.style.opacity = dim ? "0.18" : "1";
       g.append(line);
     });
@@ -519,7 +591,7 @@ export function timeChart(host, opt) {
   const items = series.map((sr, si) => {
     const val = h("b", { class: "tc-num" });
     const sw = h("i", { class: "tc-swatch" });
-    sw.style.background = colour(si);
+    sw.style.background = swatch(si);
     const b = h(
       "button",
       {
@@ -531,6 +603,7 @@ export function timeChart(host, opt) {
       h("span", null, sr.label),
       val,
     );
+    drivable(b, SOURCE, `${driveKey}/${sr.label}`);
     const hover = (/** @type {number | null} */ v) => () => {
       hoverSeries = v;
       draw();
@@ -541,14 +614,14 @@ export function timeChart(host, opt) {
     b.addEventListener("blur", hover(null));
     b.addEventListener("click", () => {
       // Kenny, 2026-10-03: a click toggles one source; no modifier keys.
-      sel = toggleSource(sel, si, series.length);
+      setSel(toggleSource(sel, si, series.length));
       draw();
     });
     return { b, val };
   });
   if (series.length > 1) legend.append(...items.map((i) => i.b), reset);
   reset.addEventListener("click", () => {
-    sel = new Set();
+    setSel(new Set());
     draw();
   });
 
@@ -608,7 +681,7 @@ export function timeChart(host, opt) {
       head,
       ...rows.map((r) => {
         const sw = h("i", { class: "tc-swatch" });
-        sw.style.background = colour(r.si);
+        sw.style.background = swatch(r.si);
         return h(
           "div",
           {
@@ -727,7 +800,7 @@ export function timeChart(host, opt) {
     } else if (e.key === "Escape") {
       e.stopPropagation();
       if (pinned != null) pinned = null;
-      else if (sel.size) sel = new Set();
+      else if (sel.size) setSel(new Set());
       else if (group.zoom) group.setZoom(null);
       draw();
       return;

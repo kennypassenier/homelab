@@ -24,5 +24,6 @@ pub mod routes;
 pub mod scheduler;
 pub mod secrets;
 pub mod slow;
+pub mod traffic;
 pub mod watch;
 pub mod workcopy;

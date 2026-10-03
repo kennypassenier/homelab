@@ -250,7 +250,37 @@ export function staleGroups(images) {
       container,
     });
   }
-  return [...out.values()];
+  // Review finding 13: the jumps that need reading first, then what this
+  // page can update, then the pins a homelab release moves; by name within.
+  const rank = (/** @type {StaleGroup} */ g) =>
+    (g.major ? 0 : 2) + (g.key ? 0 : 1);
+  return [...out.values()].sort(
+    (a, b) =>
+      rank(a) - rank(b) ||
+      a.image.localeCompare(b.image) ||
+      a.stacks.join(",").localeCompare(b.stacks.join(",")),
+  );
+}
+
+/**
+ * Disk growth rows in one fixed order, whatever order a read brings them
+ * in: the soonest full first (a filesystem that is not growing last), then
+ * the fullest, then by name.
+ * @template {{subject?: string, scope?: string,
+ *   fit: {days_to_full: number | null, pct_now: number}}} R
+ * @param {R[]} rows
+ * @returns {R[]}
+ */
+export function sortGrowth(rows) {
+  const days = (/** @type {R} */ r) =>
+    r.fit.days_to_full == null ? Infinity : r.fit.days_to_full;
+  const name = (/** @type {R} */ r) => `${r.scope ?? ""} ${r.subject ?? ""}`;
+  return [...rows].sort(
+    (a, b) =>
+      days(a) - days(b) ||
+      b.fit.pct_now - a.fit.pct_now ||
+      name(a).localeCompare(name(b)),
+  );
 }
 
 /**

@@ -1,58 +1,31 @@
-// redesign-371-metrics / redesign-371-map (3.71.0): small LOCAL additions
-// to the shared building blocks in js/ui.js, for the Metrics and Map
-// pages, named and shaped like them so they move into ui.js by changing
-// one import (reported to the foundation):
+// redesign-371-metrics / redesign-371-map (3.71.0): what the Metrics and
+// Map pages need beyond the shared building blocks. The blocks themselves
+// come from js/ui.js (kpi / kpiStrip, sparkline) and pages/hostkit.js
+// (pageHeader with its meta row, segSwitch, keyRow, ensureStyle); this file
+// only adds to them, and lists what ui.js should gain (reported to the
+// foundation):
 //
-//   pageHeader  ui.js's header plus a `meta` row under the description
-//               (the live chip, "updated 4 s ago", the data's source)
-//   kpi         ui.js's tile plus a `meter` (with a tick mark) in the
-//               sparkline's row, a tone on the context line, and a click
-//               that scrolls to the card the tile summarises
-//   segmented   a one-of-N switch (System | Traffic, 1h … 30d) that keeps
-//               the segmented look; every button declared for Live view
+//   kpiStrip    ui.js's strip and tiles plus: a `meter` (with a tick mark)
+//               in the sparkline's row, a tone on the context line (or
+//               coloured parts), a sparkline colour, a `target` card the
+//               tile scrolls to, each tile a declared Live view control, the
+//               strip's own label, and a `set` that ends the skeleton
+//   segmented   hostkit's segSwitch with every button a Live view control
+//   tableSlot   one attachDataTables stop per card, replaced on each fill
 //   cardFoot    a card's xs muted foot line (source left, legend right)
-//   dataTable   a kp datatable without its own search bar (sortable,
-//               Shift-click multi-sort, remembered per table)
-//   keyRow      the "Tab focus a chart · ← → move …" line at a page's foot
+//   dataTable   a kp datatable without its own search bar
 //   shareBar    the 60 px "used of" bar with its number beside it
 //
-// Styles: css/pages/metrics.css (`mk-` prefix), kp-themes tokens only.
+// Styles: css/pages/metrics.css (`mk-` prefix), kp-themes tokens only;
+// the hostkit blocks keep host.css's `hk-` styles.
 
 import { h } from "../dom.js";
 import { drivable } from "../drivable.js";
-import { liveStatus, pageHeader as uiHeader, sparkline } from "../ui.js";
+import { kpiStrip as uiKpiStrip } from "../ui.js";
+import { segSwitch } from "./hostkit.js";
+import { attachDataTables } from "/static/kp/js/datatable.js";
 
-/** Load a page's own stylesheet once (the shell links only app.css).
- * @param {string} href */
-export function ensureStyle(href) {
-  if (document.querySelector(`link[data-page-style="${href}"]`)) return;
-  const l = document.createElement("link");
-  l.rel = "stylesheet";
-  l.href = href;
-  l.dataset.pageStyle = href;
-  document.head.append(l);
-}
-
-/**
- * The page header (ui.js `pageHeader`) with a meta row under the
- * description: chips, the live status, the source. The description stays
- * the title's next sibling paragraph (invariants 36, 40).
- * @param {import("../ui.js").HeaderSpec & {meta?: (Node | string)[],
- *   liveVerb?: string}} spec
- */
-export function pageHeader(spec) {
-  const head = uiHeader({ ...spec, live: false });
-  const live = liveStatus(spec.liveVerb ?? "updated");
-  const meta = h(
-    "div",
-    { class: "mk-head__meta" },
-    ...(spec.meta ?? []),
-    live.el,
-  );
-  head.el.append(meta);
-  head.el.classList.add("mk-head");
-  return { ...head, meta, live };
-}
+export { ensureStyle, keyRow, pageHeader } from "./hostkit.js";
 
 /**
  * A chip: a dot and words (status is never colour alone).
@@ -68,97 +41,149 @@ export const dot = (tone) =>
 
 /**
  * @typedef {{key?: string, label: string, value?: string, unit?: string,
- *   ctx?: string, ctxTone?: "ok" | "warn" | "bad" | "", title?: string,
- *   tone?: "warn" | "bad" | "" | null, spark?: number[], colour?: string,
+ *   ctx?: string, ctxTone?: "ok" | "warn" | "bad" | "",
+ *   ctxParts?: {text: string, tone?: "ok" | "warn" | "bad" | ""}[] | null,
+ *   title?: string, tone?: "warn" | "bad" | "" | null, spark?: number[],
+ *   colour?: string,
  *   meter?: {pct: number, mark?: number | null, tone?: string} | null,
- *   target?: string}} Kpi `target`: the id of the card the tile sums up
+ *   target?: string}} Kpi `target`: the id of the card the tile sums up;
+ *   `ctxParts`: the context line as coloured pieces (e.g. "7 enforced" in
+ *   green, "2 open" in amber) instead of `ctx`
  */
 
 /**
- * One KPI tile in the foundation's `nx-kpi` markup: label, value + unit,
- * context, and in the last row a sparkline or a meter. A tile with a
- * `target` is a link that scrolls to that card. `set` repaints in place.
- * @param {Kpi} k
- */
-export function kpi(k) {
-  const label = h("span", { class: "nx-kpi__label" });
-  const value = h("span", { class: "nx-kpi__value" });
-  const ctx = h("span", { class: "nx-kpi__ctx" });
-  const foot = h("span", { class: "nx-kpi__spark", "aria-hidden": "true" });
-  const el = h(
-    k.target ? "a" : "div",
-    {
-      class: "nx-kpi mk-kpi",
-      // A same-site path (invariant 35), the card's id as its hash.
-      ...(k.target
-        ? { href: `${location.pathname}${location.search}#${k.target}` }
-        : {}),
-    },
-    label,
-    value,
-    ctx,
-    foot,
-  );
-  /** @type {Kpi} */
-  let cur = { ...k };
-  el.addEventListener("click", (e) => {
-    if (!cur.target) return;
-    // The page's own scroll, never a navigation (main.js routes links).
-    e.preventDefault();
-    document
-      .getElementById(cur.target)
-      ?.scrollIntoView({ block: "start", behavior: "smooth" });
-  });
-  /** @param {Partial<Kpi>} next */
-  const set = (next) => {
-    cur = { ...cur, ...next };
-    delete el.dataset.loading;
-    label.textContent = cur.label;
-    value.replaceChildren(
-      cur.value ?? "—",
-      ...(cur.unit ? [h("small", null, cur.unit)] : []),
-    );
-    ctx.textContent = cur.ctx ?? "";
-    ctx.className = `nx-kpi__ctx${cur.ctxTone ? ` mk-ctx--${cur.ctxTone}` : ""}`;
-    el.dataset.tone = cur.tone ?? "";
-    el.dataset.key = cur.key ?? cur.label;
-    if (cur.title) el.title = cur.title;
-    if (cur.meter) foot.replaceChildren(meter(cur.meter));
-    else if (cur.spark && cur.spark.length > 1)
-      foot.replaceChildren(
-        sparkline(cur.spark, cur.colour ? { colour: cur.colour } : {}),
-      );
-    else foot.replaceChildren();
-  };
-  set({});
-  return { el, set };
-}
-
-/**
- * A row of KPI tiles; while `loading` each is its own skeleton in the final
- * geometry.
+ * ui.js's KPI strip, each tile extended in place (see the head of this
+ * file). While `loading`, every tile is the foundation's skeleton until its
+ * first `set`.
  * @param {Kpi[]} tiles
  * @param {{loading?: boolean, label?: string, drive?: string}} [opts]
  *   drive: the declared Live view control every tile is, on its own row
  *   (the tile's key)
+ * @returns {{el: HTMLElement, tiles: Map<string, {el: HTMLElement,
+ *   set: (k: Partial<Kpi>) => void}>}}
  */
 export function kpiStrip(tiles, opts = {}) {
-  /** @type {Map<string, ReturnType<typeof kpi>>} */
-  const map = new Map();
-  const el = h("div", {
-    class: "nx-kpis",
-    role: "group",
-    "aria-label": opts.label ?? "Key figures",
-  });
-  el.style.setProperty("--kpi-n", String(Math.max(1, tiles.length)));
+  const strip = uiKpiStrip(
+    tiles.map((t) => ({
+      key: t.key,
+      label: t.label,
+      // A same-site path (invariant 35), the card's id as its hash.
+      ...(t.target
+        ? { href: `${location.pathname}${location.search}#${t.target}` }
+        : {}),
+      ...(opts.loading ? { ctx: "" } : {}),
+    })),
+    { loading: opts.loading },
+  );
+  if (opts.label) strip.el.setAttribute("aria-label", opts.label);
+  /** @type {Map<string, {el: HTMLElement, set: (k: Partial<Kpi>) => void}>} */
+  const out = new Map();
   for (const t of tiles) {
-    const k = kpi(opts.loading ? { ...t, value: "", ctx: "" } : t);
-    if (opts.loading) k.el.dataset.loading = "";
-    if (opts.drive) drivable(k.el, opts.drive, t.key ?? t.label);
-    map.set(t.key ?? t.label, k);
-    el.append(k.el);
+    const key = t.key ?? t.label;
+    const base = strip.tiles.get(key);
+    if (!base) continue;
+    const el = base.el;
+    el.classList.add("mk-kpi");
+    el.dataset.key = key;
+    if (opts.drive) drivable(el, opts.drive, key);
+    /** @type {Kpi} */
+    let cur = { ...t };
+    el.addEventListener("click", (e) => {
+      if (!cur.target) return;
+      // The page's own scroll, never a navigation (main.js routes links).
+      e.preventDefault();
+      document
+        .getElementById(cur.target)
+        ?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+    const ctx = /** @type {HTMLElement} */ (el.querySelector(".nx-kpi__ctx"));
+    const foot = /** @type {HTMLElement} */ (
+      el.querySelector(".nx-kpi__spark")
+    );
+    /** @param {Partial<Kpi>} next */
+    const set = (next) => {
+      cur = { ...cur, ...next };
+      delete el.dataset.loading;
+      base.set({
+        label: cur.label,
+        value: cur.value,
+        unit: cur.unit,
+        ctx: cur.ctx ?? "",
+        tone: cur.tone || null,
+        spark: cur.meter ? [] : (cur.spark ?? []),
+        ...(cur.title ? { title: cur.title } : {}),
+      });
+      ctx.className = `nx-kpi__ctx${cur.ctxTone ? ` mk-ctx--${cur.ctxTone}` : ""}`;
+      if (cur.ctxParts?.length)
+        ctx.replaceChildren(
+          ...cur.ctxParts.flatMap((p, i) => [
+            ...(i ? [" · "] : []),
+            h(
+              "span",
+              { class: p.tone ? `mk-ctx--${p.tone}` : "" },
+              ...(p.tone ? [dot(p.tone)] : []),
+              p.text,
+            ),
+          ]),
+        );
+      if (cur.meter) foot.replaceChildren(meter(cur.meter));
+      else if (cur.colour)
+        foot.querySelector("svg")?.style.setProperty("color", cur.colour);
+    };
+    out.set(key, { el, set });
   }
-  return { el, tiles: map };
+  return { el: strip.el, tiles: out };
+}
+
+/**
+ * hostkit's one-of-N segmented switch; each button is the declared Live
+ * view control `drive` on its own row (the option's value).
+ * @param {{label: string, options: [string, string, string?][],
+ *   value: string, onPick: (v: string) => void, drive: string}} spec
+ *   options: value, label, and an optional one-line hint
+ */
+export function segmented(spec) {
+  const seg = segSwitch({
+    label: spec.label,
+    items: spec.options.map(([value, label, hint]) => ({
+      value,
+      label,
+      hint: hint ?? `${spec.label}: ${label}`,
+    })),
+    value: spec.value,
+    onChange: spec.onPick,
+    mark: (b, v) => {
+      drivable(b, spec.drive, v);
+    },
+  });
+  /** The value pressed now. */
+  const value = () =>
+    seg.el.querySelector('[aria-pressed="true"]')?.getAttribute("data-v") ??
+    spec.value;
+  return { el: seg.el, value };
+}
+
+/**
+ * One card's datatable behaviour: `attach(body)` wires the table just put
+ * in `body` and stops the one it replaced, so a page that repaints every
+ * 30 s keeps one listener set per card, not one per repaint.
+ * @param {(root: HTMLElement) => () => void} [attachFn] attachDataTables
+ *   (a test passes its own)
+ */
+export function tableSlot(attachFn = attachDataTables) {
+  /** @type {(() => void) | null} */
+  let stop = null;
+  return {
+    /** @param {HTMLElement} body */
+    attach: (body) => {
+      stop?.();
+      stop = attachFn(body);
+    },
+    stop: () => {
+      stop?.();
+      stop = null;
+    },
+  };
 }
 
 /**
@@ -199,45 +224,6 @@ export function shareBar(pct, text, colour) {
     h("span", null, fill),
     h("span", { class: "mk-num" }, text),
   );
-}
-
-/**
- * A one-of-N segmented switch; each button is the declared Live view
- * control `drive` on its own row (the option's value).
- * @param {{label: string, options: [string, string, string?][],
- *   value: string, onPick: (v: string) => void, drive: string}} spec
- *   options: value, label, and an optional one-line hint
- */
-export function segmented(spec) {
-  const el = h("div", {
-    class: "mk-seg",
-    role: "group",
-    "aria-label": spec.label,
-  });
-  /** @param {string} v */
-  const paint = (v) => {
-    for (const b of el.querySelectorAll("button"))
-      b.setAttribute("aria-pressed", String(b.dataset.value === v));
-  };
-  for (const [v, text, hint] of spec.options) {
-    const b = h(
-      "button",
-      {
-        type: "button",
-        "data-value": v,
-        "aria-pressed": String(v === spec.value),
-        title: hint ?? `${spec.label}: ${text}`,
-      },
-      text,
-    );
-    drivable(b, spec.drive, v);
-    b.addEventListener("click", () => {
-      paint(v);
-      spec.onPick(v);
-    });
-    el.append(b);
-  }
-  return { el, set: paint };
 }
 
 /**
@@ -307,16 +293,3 @@ export function dataTable(spec) {
   );
   return { wrap, tbody };
 }
-
-/**
- * The page's keyboard line (DESIGN_LANGUAGE §10 "Hints").
- * @param {[string, string][]} pairs key, what it does
- */
-export const keyRow = (pairs) =>
-  h(
-    "p",
-    { class: "mk-keys", "aria-label": "Keyboard and pointer shortcuts" },
-    ...pairs.map(([k, what]) =>
-      h("span", null, h("kbd", { class: "nx-kbd" }, k), what),
-    ),
-  );

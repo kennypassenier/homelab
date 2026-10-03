@@ -448,3 +448,25 @@ export function changeText(change, range) {
  * @param {number} n
  */
 export const count = (n) => Math.round(n).toLocaleString("en-GB");
+
+/**
+ * The Requests per hostname chart's sources, each carrying the total the
+ * Hostnames table shows for it (`rows`, the whole-window counts), so the
+ * legend and the table never disagree; a hostname the table does not list
+ * (beyond its top 20) sums its own points.
+ * @param {{label: string, points: [number, number][]}[]} series
+ * @param {[string, number][]} rows
+ * @returns {{label: string, points: [number, number][], n: number}[]}
+ */
+export function hostLegend(series, rows) {
+  const table = new Map(rows.map(([name, n]) => [name || "no hostname", n]));
+  return series.map((s) => {
+    const label = s.label || "no hostname";
+    const n = table.get(label);
+    return {
+      label,
+      points: s.points,
+      n: Math.round(n ?? s.points.reduce((a, p) => a + p[1], 0)),
+    };
+  });
+}

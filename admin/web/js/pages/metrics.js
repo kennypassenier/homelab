@@ -32,6 +32,7 @@ import {
   count,
   drives,
   fill,
+  hostLegend,
   nowValue,
   peak,
   poweredOn,
@@ -55,7 +56,6 @@ import {
   toolbar,
 } from "../ui.js";
 import { choice, setParams } from "../urlstate.js";
-import { attachDataTables } from "/static/kp/js/datatable.js";
 import {
   cardFoot,
   chip,
@@ -67,6 +67,7 @@ import {
   pageHeader,
   segmented,
   shareBar,
+  tableSlot,
 } from "./metricskit.js";
 
 const RANGES = /** @type {const} */ (["1h", "6h", "24h", "7d", "30d"]);
@@ -136,6 +137,8 @@ const BACKUPS = declare({
  * @returns {() => void}
  */
 export function mount(root, ctx) {
+  // The hostkit blocks (header, switches, key row) keep host.css's styles.
+  ensureStyle("/css/pages/host.css");
   ensureStyle("/css/pages/metrics.css");
   root.classList.add("mk-page");
   const params = new URLSearchParams(location.search);
@@ -186,6 +189,7 @@ export function mount(root, ctx) {
           : "Source: the gateway's access log in Loki",
       ),
     ],
+    live: "updated",
     actions: [view.el],
   });
 
@@ -278,7 +282,10 @@ export function mount(root, ctx) {
     pageCharts.zoom != null ||
     root.querySelector(".tc-tip--pinned:not([hidden])") != null ||
     root.querySelector('.tc-legend__item[aria-pressed="true"]') != null ||
-    root.querySelector(".tc-plot:focus") != null;
+    root.querySelector(".tc-plot:focus") != null ||
+    // A pointer over a chart or its legend: the reading under it stays put
+    // (a repaint would destroy the chart under the hover).
+    root.querySelector(".tc:hover") != null;
 
   const destroyCharts = () => {
     for (const c of charts) c.destroy();
@@ -323,6 +330,7 @@ export function mount(root, ctx) {
    * Draw a time chart into a card's body.
    * @param {HTMLElement} body
    * @param {Omit<import("../timechart.js").ChartSpec, "from" | "to" | "annotations" | "group">} spec
+   *   `key`: the card's key, the chart's name for Live view
    * @param {{from: number, to: number}} w
    */
   const draw = (body, spec, w) => {
@@ -354,6 +362,27 @@ export function mount(root, ctx) {
   /** @param {HTMLElement} body @param {string} why */
   const notRead = (body, why) =>
     body.replaceChildren(h("p", { class: "mk-card-error" }, dot("bad"), why));
+
+  /**
+   * A read that failed: every tile says so instead of pulsing for ever, and
+   * nothing is left in the attention band from an earlier read.
+   * @param {ReturnType<typeof kpiStrip>} strip
+   * @param {ReturnType<typeof attentionBand> | null} band
+   */
+  const tilesNotRead = (strip, band) => {
+    for (const t of strip.tiles.values())
+      t.set({
+        value: "—",
+        unit: "",
+        ctx: "not read",
+        ctxTone: "",
+        ctxParts: null,
+        tone: "",
+        spark: [],
+        meter: null,
+      });
+    band?.set([]);
+  };
 
   /** @param {string} title @param {string} desc @param {Node[]} cards */
   const sect = (title, desc, cards) =>
@@ -429,13 +458,24 @@ export function mount(root, ctx) {
       drive: TILE,
     });
     const attention = attentionBand([]);
+    const drivesTable = tableSlot();
+    stops.push(drivesTable.stop);
     const annKey = h(
       "p",
       { class: "mk-annkey", "aria-label": "Chart markers" },
       h("span", null, dot("info"), "an operation the host ran"),
       h("span", null, dot("warn"), "an update"),
       h("span", null, dot("bad"), "a failure"),
-      h("span", null, "Point at a chart: every chart follows the same moment."),
+      h(
+        "span",
+        { class: "mk-pointer-only" },
+        "Point at a chart: every chart follows the same moment.",
+      ),
+      h(
+        "span",
+        { class: "mk-touch-only" },
+        "Touch a chart: every chart follows the same moment.",
+      ),
     );
     /** @type {Map<string, ReturnType<typeof card>>} */
     const cards = new Map();
@@ -464,6 +504,7 @@ export function mount(root, ctx) {
         failed.replaceChildren(errorBox(r.error));
         span.textContent = "";
         for (const c of cards.values()) notRead(c.body, "Not read: see above.");
+        tilesNotRead(strip, attention);
         return;
       }
       failed.replaceChildren();
@@ -510,6 +551,7 @@ export function mount(root, ctx) {
           draw(
             k.body,
             {
+              key: c.key,
               label: c.title,
               unit,
               series: p.series.map((x) => ({
@@ -534,7 +576,7 @@ export function mount(root, ctx) {
         }
       if (stack) paintStackTiles(P);
       else paintHostTiles(P);
-      head.live.set(Math.floor(Date.now() / 1000));
+      head.live?.set(Math.floor(Date.now() / 1000));
     };
 
     /**
@@ -641,10 +683,10 @@ export function mount(root, ctx) {
             [
               "A rising pending or reallocated count is the early warning; temperature above 50 °C shortens a drive's life.",
             ],
-            ["SMART via node-exporter"],
+            ["smartctl via node-exporter"],
           ),
         );
-      stops.push(attachDataTables(k.body));
+      drivesTable.attach(k.body);
       const seeDrive = (/** @type {string} */ name) =>
         drivable(
           h(
@@ -673,7 +715,7 @@ export function mount(root, ctx) {
               title:
                 "Open Backups to back up the stacks now, before the drive gets worse",
             },
-            "Back up stacks…",
+            "Back up devices now",
           );
           drivable(back, BACKUPS, d.name);
           return {
@@ -727,12 +769,13 @@ export function mount(root, ctx) {
         T.get("disk")?.set({
           value: String(host.disk_pct),
           unit: "%",
-          ctx: `${d ? `${d.root_lv_size_gb} GB on ${d.root_disk_device}` : "the host's root"}${
+          // Short enough for one line of a wide tile (finding 14).
+          ctx: `${d ? `${d.root_lv_size_gb} GB on ${d.root_disk_device.replace(/^\/dev\//, "")}` : "the host's root"}${
             moved == null
               ? ""
               : Math.abs(moved) < 0.5
-                ? " · flat in this window"
-                : ` · ${moved > 0 ? "+" : "−"}${Math.abs(moved).toFixed(1)} points in this window`
+                ? " · flat"
+                : ` · ${moved > 0 ? "+" : "−"}${Math.abs(moved).toFixed(1)} pts`
           }`,
           meter: {
             pct: host.disk_pct,
@@ -927,6 +970,9 @@ export function mount(root, ctx) {
     });
     for (const c of [mix, hostsCard, clientsCard])
       c.body.replaceChildren(skeletonBlock("168px", "Reading the access log"));
+    const hostsTable = tableSlot();
+    const clientsTable = tableSlot();
+    stops.push(hostsTable.stop, clientsTable.stop);
     root.append(
       strip.el,
       h(
@@ -955,6 +1001,7 @@ export function mount(root, ctx) {
         span.textContent = "";
         for (const c of [over, mix, perHost, hostsCard, clientsCard])
           notRead(c.body, "Not read: see above.");
+        tilesNotRead(strip, null);
         return;
       }
       failed.replaceChildren();
@@ -982,6 +1029,7 @@ export function mount(root, ctx) {
         draw(
           over.body,
           {
+            key: "requests",
             label: "Requests over time",
             unit: "count",
             stacked: true,
@@ -1019,14 +1067,26 @@ export function mount(root, ctx) {
         ),
       );
 
-      // Requests per hostname.
+      // Requests per hostname: the legend's totals are the Hostnames
+      // table's own numbers (one count, two places, never two sums).
+      const rows = /** @type {[string, number][]} */ (b.hosts?.rows ?? []);
+      const hostSeries = hostLegend(hostsP?.series ?? [], rows);
+      /** The table's rows, pressed as the chart's sources are on. */
+      const paintRows = (/** @type {number[]} */ on) => {
+        for (const row of hostsCard.body.querySelectorAll(
+          "tr[data-kp-row-key]",
+        )) {
+          const key = /** @type {HTMLElement} */ (row).dataset.kpRowKey ?? "";
+          const j = hostSeries.findIndex(
+            (s) => s.label === (key || "no hostname"),
+          );
+          const pressed = j >= 0 && on.includes(j);
+          row.classList.toggle("is-on", pressed);
+          row.setAttribute("aria-pressed", String(pressed));
+        }
+      };
       /** @type {Chart | null} */
       let hostChart = null;
-      const hostSeries = (hostsP?.series ?? []).map((s) => ({
-        label: s.label || "no hostname",
-        points: s.points,
-        n: Math.round(s.points.reduce((a, p) => a + p[1], 0)),
-      }));
       if (hostsP?.error)
         notRead(perHost.body, `Loki did not answer: ${hostsP.error}`);
       else if (!hostSeries.length)
@@ -1034,12 +1094,17 @@ export function mount(root, ctx) {
       else
         hostChart = draw(
           perHost.body,
-          { label: "Requests per hostname", unit: "count", series: hostSeries },
+          {
+            key: "perhost",
+            label: "Requests per hostname",
+            unit: "count",
+            series: hostSeries,
+            onSelect: paintRows,
+          },
           w,
         );
 
       // Hostnames table.
-      const rows = /** @type {[string, number][]} */ (b.hosts?.rows ?? []);
       const top = rows[0]?.[1] ?? 0;
       hostsCard.setNow(String(rows.length), "active");
       if (b.hosts?.error)
@@ -1066,12 +1131,13 @@ export function mount(root, ctx) {
                 "data-kp-row-key": name,
                 class: "mk-rowpick",
                 tabindex: "0",
+                "aria-pressed": "false",
                 title: "Switch this hostname on or off in the chart above",
               },
               h(
                 "td",
                 null,
-                h("span", { class: "mono" }, name || "no hostname"),
+                h("span", { class: "mono mk-host" }, name || "no hostname"),
               ),
               h(
                 "td",
@@ -1094,24 +1160,9 @@ export function mount(root, ctx) {
               ),
             );
             drivable(tr, HOSTNAME, name || "no hostname");
+            // The chart owns the selection; its onSelect repaints the rows.
             const pickIt = () => {
-              if (si < 0 || !hostChart) return;
-              const item = /** @type {HTMLElement | undefined} */ (
-                perHost.body.querySelectorAll(".tc-legend__item")[si]
-              );
-              item?.click();
-              for (const [i, row] of [...t.tbody.rows].entries()) {
-                const key = row.dataset.kpRowKey ?? "";
-                const j = hostSeries.findIndex(
-                  (s) => s.label === (key || "no hostname"),
-                );
-                const on =
-                  perHost.body
-                    .querySelectorAll(".tc-legend__item")
-                    [j]?.getAttribute("aria-pressed") === "true";
-                row.classList.toggle("is-on", on);
-                void i;
-              }
+              if (si >= 0) hostChart?.select(si);
             };
             tr.addEventListener("click", pickIt);
             tr.addEventListener("keydown", (e) => {
@@ -1124,7 +1175,7 @@ export function mount(root, ctx) {
           }),
         );
         hostsCard.body.replaceChildren(t.wrap);
-        stops.push(attachDataTables(hostsCard.body));
+        hostsTable.attach(hostsCard.body);
       }
 
       // Busiest clients.
@@ -1170,7 +1221,7 @@ export function mount(root, ctx) {
           ),
         );
         clientsCard.body.replaceChildren(t.wrap);
-        stops.push(attachDataTables(clientsCard.body));
+        clientsTable.attach(clientsCard.body);
       }
 
       // The tiles.
@@ -1225,7 +1276,7 @@ export function mount(root, ctx) {
         meter: f.total && busiest ? { pct: (busiest / f.total) * 100 } : null,
         title: "The bar is the busiest address's share of all requests",
       });
-      head.live.set(Math.floor(Date.now() / 1000));
+      head.live?.set(Math.floor(Date.now() / 1000));
     };
   }
 }

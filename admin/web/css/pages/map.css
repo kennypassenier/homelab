@@ -14,14 +14,12 @@
   gap: 8px;
   margin-block-end: var(--kp-space-md, 12px);
 }
-.mp-kinds,
-.mp-stackkeys {
+.mp-kinds {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
-.mp-kind,
-.mp-stackkey {
+.mp-kind {
   font: inherit;
   font-size: var(--kp-text-sm);
   display: inline-flex;
@@ -35,21 +33,15 @@
   cursor: pointer;
   white-space: nowrap;
 }
-.mp-kind:hover,
-.mp-stackkey:hover {
+.mp-kind:hover {
   border-color: var(--ring);
 }
-.mp-kind:focus-visible,
-.mp-stackkey:focus-visible {
+.mp-kind:focus-visible {
   outline: 2px solid var(--ring);
 }
 .mp-kind[aria-pressed="false"] {
   opacity: 0.45;
   text-decoration: line-through;
-}
-.mp-stackkey[aria-pressed="true"] {
-  box-shadow: 0 0 0 1px var(--ring);
-  font-weight: 600;
 }
 .mp-kind__line {
   inline-size: 18px;
@@ -67,12 +59,6 @@
 }
 .mp-kind__line--route {
   border-block-start-color: var(--chart-1);
-}
-.mp-swatch {
-  inline-size: 10px;
-  block-size: 10px;
-  border-radius: 50%;
-  background: oklch(0.62 0.15 var(--stack-hue, 210));
 }
 
 .mp-topo {
@@ -399,8 +385,44 @@
   .mp-cap__cell .mp-cap__n {
     text-align: start;
   }
+}
+/* Disk growth on a phone (finding 2): no head row, two lines a row — the
+   name and "Full in", then the bar with its % and the trend — each value
+   with its own inline label. */
+.mp-inl {
+  display: none;
+}
+@media (max-width: 30rem) {
+  .mp-caps[aria-label="Disk growth per filesystem"] .mp-cap--head {
+    display: none;
+  }
   .mp-growth {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "name full"
+      "bar trend";
+    gap: 4px 12px;
+    padding-block-end: 8px;
+    border-block-end: 1px solid var(--mk-line);
+  }
+  .mp-g-name {
+    grid-area: name;
+  }
+  .mp-g-full {
+    grid-area: full;
+    text-align: end;
+  }
+  .mp-g-bar {
+    grid-area: bar;
+    grid-template-columns: minmax(0, 1fr) 3rem;
+  }
+  .mp-g-trend {
+    grid-area: trend;
+  }
+  .mp-inl {
+    display: inline;
+    color: var(--muted-foreground);
+    font-size: var(--kp-text-xs);
   }
 }
 .mp-illus {
@@ -426,9 +448,4 @@
   border-color: color-mix(in oklab, var(--mk-warn) 45%, var(--border));
   background: color-mix(in oklab, var(--mk-warn) 14%, var(--card));
   color: var(--foreground);
-}
-@media (max-width: 30rem) {
-  .mp-growth > span:first-child {
-    grid-column: 1 / -1;
-  }
 }

@@ -4,7 +4,7 @@
 // the fleet dashed, one colour per stack (invariant 16), the connection
 // kinds told apart by line style.
 //
-//   hover / focus a node or its legend entry   isolate its connections
+//   hover / focus a node                       isolate its connections
 //   click / Enter                              turn the node on or off in
 //                                              the selection (several may
 //                                              be on, no modifier keys)
@@ -33,13 +33,6 @@ const SHOW_ALL = declare({
   page: "fleetview",
   opens: "view",
   what: "clear the Map's selection and show every connection kind again",
-});
-const STACK_KEY = declare({
-  id: "map-stack-key",
-  page: "fleetview",
-  opens: "view",
-  row: "<stack>",
-  what: "the stack's legend entry: turn it on or off in the Map's selection",
 });
 
 /**
@@ -244,43 +237,7 @@ export function mapGraph(topo, opts) {
       g.classList.toggle("is-pinned", pinned.has(id));
       g.setAttribute("aria-pressed", String(pinned.has(id)));
     }
-    for (const k of keys.querySelectorAll(".mp-stackkey"))
-      k.setAttribute(
-        "aria-pressed",
-        String(pinned.has(k.getAttribute("data-stack") ?? "")),
-      );
     reset.hidden = pinned.size === 0 && hiddenKinds.size === 0;
-  }
-
-  // One legend entry per stack, in the graph's own colour (invariant 16).
-  const keys = h("div", {
-    class: "mp-stackkeys",
-    role: "group",
-    "aria-label": "Stacks: hover to single one out, click to keep it selected",
-  });
-  for (const n of [...topo.nodes]
-    .filter(isStack)
-    .sort((a, b) => a.stack.localeCompare(b.stack))) {
-    const b = h(
-      "button",
-      {
-        type: "button",
-        class: "mp-stackkey",
-        "data-stack": n.stack,
-        "aria-pressed": "false",
-        title: `${n.stack}: hover to see only its connections, click to keep it selected`,
-      },
-      h("i", { class: "mp-swatch", "aria-hidden": "true" }),
-      n.stack,
-    );
-    b.style.setProperty("--stack-hue", String(hue.get(n.stack) ?? 0));
-    drivable(b, STACK_KEY, n.stack);
-    b.addEventListener("mouseenter", () => setHover(n.stack));
-    b.addEventListener("mouseleave", () => setHover(null));
-    b.addEventListener("focus", () => setHover(n.stack));
-    b.addEventListener("blur", () => setHover(null));
-    b.addEventListener("click", () => toggle(n.stack));
-    keys.append(b);
   }
 
   const clear = () => {
@@ -319,7 +276,6 @@ export function mapGraph(topo, opts) {
   ro?.observe(box);
   return {
     el: box,
-    keys,
     draw,
     /** @param {Map<string, number> | null} t */
     setTraffic: (t) => {

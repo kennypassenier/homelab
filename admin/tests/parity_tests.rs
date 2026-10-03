@@ -704,3 +704,49 @@ async fn slow_reads_the_last_result_is_served_at_once_while_one_run_reads_again(
     assert_eq!((s, b["n"].as_u64()), (StatusCode::OK, Some(2)), "{b}");
     assert!(b["refreshing"]["run"].as_u64().is_some());
 }
+
+/// redesign-stacks-7: the Stacks page's "differs from files" answer is the
+/// plan's own: changed, gone (destroyed by the plan), new (in the files,
+/// not on the host) and not building are each named, and the counts are
+/// what Deploy all changes would do.
+#[test]
+fn redesign_stacks_7_the_drift_answer_names_changed_gone_new_and_broken_like_the_plan() {
+    use homelab_admin::core::drift::drift_answer;
+    let ok = |h: &str| -> Result<String, String> { Ok(h.into()) };
+    let host = vec![
+        ("same".to_string(), "h1".to_string()),
+        ("changed".to_string(), "h2".to_string()),
+        ("gone".to_string(), "h3".to_string()),
+        ("broken".to_string(), "h4".to_string()),
+        ("eph".to_string(), "h5".to_string()),
+    ];
+    let hashes = vec![
+        ("same".to_string(), ok("h1")),
+        ("changed".to_string(), ok("h2-new")),
+        (
+            "broken".to_string(),
+            Err("lxc-compose.yml: bad yaml".to_string()),
+        ),
+        ("fresh".to_string(), ok("h6")),
+    ];
+    let dirs: Vec<String> = ["same", "changed", "broken", "fresh", "eph"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let a = drift_answer(&host, &hashes, &dirs, &["eph".to_string()]);
+    let st = |n: &str| a.stacks.get(n).map(|(s, _)| *s);
+    assert_eq!(st("same"), Some(DriftState::Same));
+    assert_eq!(st("changed"), Some(DriftState::Changed));
+    assert_eq!(st("gone"), Some(DriftState::NoLocalFiles));
+    assert_eq!(st("fresh"), Some(DriftState::New));
+    assert_eq!(st("broken"), Some(DriftState::NotCompared));
+    assert_eq!(
+        a.stacks
+            .get("broken")
+            .and_then(|(_, w)| w.clone())
+            .as_deref(),
+        Some("lxc-compose.yml: bad yaml")
+    );
+    assert_eq!(st("eph"), Some(DriftState::NotCompared), "never 'gone'");
+    assert_eq!((a.deploy, a.new, a.destroy, a.broken), (2, 1, 1, 1));
+}

@@ -1,52 +1,55 @@
-// Apply the whole fleet (TUI parity, ask-8's `homelab apply`, dash-apply:
+// Deploy all changes (TUI parity, ask-8's `homelab apply`, dash-apply:
 // "Yes, plan first"): every stack of the working copy against what the
 // host last applied, each changed stack's diff on request, then one
 // confirmation, the apply form, where a stack whose directory is gone is
 // destroyed only after its name is typed.
 //
-// fix-210 (Kenny, 2026-10-02, "die functionaliteit kan toch ingebouwd
-// worden in Overview?"): this used to be its own page at `/apply`; it is
-// now a collapsible section of Overview (`overview.js`'s "Apply the whole
-// fleet" section), mounted only once that section is opened, so visiting
-// Overview never pays for a plan read nobody asked for. `/apply` itself
-// still resolves (`router.js` `redirectFor`'s "apply" case sends it to
-// `/overview?section=apply`, Live view's `homelab ui goto apply` still
-// works because "apply" stays a known page in `formspec.json`).
-//
-// `mount` no longer paints its own `<h1>`/title row — the section's
-// heading and one-line description are the caller's `<summary>`
-// (`dom.js` `sectionHeader()`); this module owns only the section's body,
-// starting with a skeleton grid shown the instant it is opened, before
-// the plan has been read.
+// fix-210 made this a folded section of Overview; redesign-stacks (3.71.0,
+// FLOWS.md §1 row 3 and task 13, Kenny approved 2026-10-03) makes it the
+// body of the Stacks page's "Deploy all changes" side panel: the Stacks
+// header button says the count before you click, the panel reads the plan
+// only once it is opened (a skeleton first), and its foot holds the one
+// button that opens the existing apply dialog. `/apply` and
+// `/overview?section=apply` still land here (router.js `redirectFor`,
+// `/stacks?deploy-all=1`); Live view's `homelab ui open apply` still works
+// because "apply" stays a known form in `formspec.json`.
 
 import { openAction } from "../actiondialog.js";
 import { agoEl, setAgo } from "../ago.js";
 import { errorBox, fetchJson, h } from "../dom.js";
 import { diffBlocks } from "../editui.js";
-import { applySummary } from "../parity.js";
+import { applySummary, brokenView } from "../parity.js";
 import { fileViews } from "../plan.js";
 import { stackHref } from "../router.js";
-import { viaForm } from "../drivable.js";
+import { dialogControl, viaForm } from "../drivable.js";
 
-/** A handful of skeleton rows shown the moment the section opens, so there
- * is never a blank body while the first plan read is in flight — the same
- * shape (`kp-pulse`, reused from `backupcalendar.js`'s skeleton) as every
- * other page's first-paint loading state. */
+/** A handful of skeleton rows shown the moment the panel opens, so there
+ * is never a blank body while the first plan read is in flight. */
 function skeletonGrid() {
   return h(
     "div",
-    { class: "apply-grid apply-grid--skeleton", "aria-hidden": "true" },
+    {
+      class: "apply-grid apply-grid--skeleton",
+      role: "status",
+      "aria-label": "Reading the plan",
+      "data-kp-state": "loading",
+    },
     ...Array.from({ length: 3 }, () =>
-      h("div", { class: "apply-row apply-row--skeleton" }),
+      h("div", { class: "apply-row apply-row--skeleton kp-skeleton" }),
     ),
   );
 }
 
 /**
+ * The plan's body. `foot` (the panel's foot) receives the two buttons —
+ * "Read the plan again" and the one that opens the apply dialog; without
+ * it they sit at the top of the body.
  * @param {HTMLElement} root
+ * @param {{foot?: HTMLElement, onRead?: (read: {pending: number,
+ *   broken: number}) => void}} [opts]
  * @returns {() => void}
  */
-export function mount(root) {
+export function mount(root, opts = {}) {
   const read = h(
     "button",
     {
@@ -61,33 +64,38 @@ export function mount(root) {
     "button",
     {
       type: "button",
-      class: "kp-button kp-button--destructive",
+      class: "kp-button kp-button--primary",
       id: "apply-open",
       disabled: "",
       title:
-        "Apply every pending change at once, after one confirmation; a stack whose directory vanished is destroyed only once its name is typed there.",
+        "Deploy every pending change at once, after one confirmation; each stack is backed up first, and a stack whose directory vanished is destroyed only once its name is typed there.",
     },
-    "Apply…",
+    "Deploy all changes…",
   );
   const head = h("div", { "aria-live": "polite", id: "apply-head" });
   const err = h("div");
   const body = h("div", { class: "apply-grid", id: "apply-body" });
   const ago = agoEl("read");
+  const nothingYet = h(
+    "span",
+    { class: "sk-hint" },
+    "Nothing runs until the dialog is confirmed.",
+  );
+  if (opts.foot) opts.foot.replaceChildren(nothingYet, read, go);
   root.replaceChildren(
-    h(
-      "p",
-      { class: "measured" },
-      "This plans every stack of the working copy against what the host last applied — not one stack's own Compare, which only checks the stack you already opened. Nothing runs until Apply… is confirmed; a stack whose directory is gone is destroyed only when its name is typed there.",
-    ),
-    h(
-      "div",
-      { class: "title-row" },
-      h("span", { class: "actions-row" }, read, go),
-    ),
+    ...(opts.foot
+      ? []
+      : [
+          h(
+            "div",
+            { class: "title-row" },
+            h("span", { class: "actions-row" }, read, go),
+          ),
+        ]),
     err,
     head,
     body,
-    h("p", null, ago),
+    h("p", { class: "sk-hint" }, ago),
   );
   body.replaceChildren(skeletonGrid());
   const abort = new AbortController();
@@ -152,7 +160,7 @@ export function mount(root) {
       h(
         "p",
         { class: "measured" },
-        "Reading every stack (latch is asked for the secrets the host's hash covers)…",
+        "Reading every stack against its files (latch is asked for the secrets the host's hash covers)…",
       ),
     );
     const r = await fetchJson("/data/apply/plan", "the plan", abort.signal);
@@ -182,49 +190,115 @@ export function mount(root) {
         ...(s.blocked ? [h("span", { class: "refusal-line" }, s.blocked)] : []),
       ),
     );
+    /**
+     * One group of the plan: a heading, one line saying what it holds, its
+     * rows.
+     * @param {string} title
+     * @param {string} desc
+     * @param {Node[]} rows
+     */
+    const group = (title, desc, rows) =>
+      h(
+        "div",
+        { class: "apply-group" },
+        h("h3", null, title),
+        h("p", { class: "sk-hint apply-group__desc" }, desc),
+        ...rows,
+      );
     /** @type {HTMLElement[]} */
     const groups = [];
+    if (p.broken.length)
+      groups.push(
+        group(
+          "Does not build",
+          "These stacks' files cannot be read into a deploy; nothing is deployed until they are fixed.",
+          p.broken.map((/** @type {[string, string]} */ [n, why]) => {
+            const v = brokenView(n, why);
+            return h(
+              "div",
+              {
+                class: "kp-alert kp-alert--destructive apply-row apply-broken",
+                role: "alert",
+                "data-stack": n,
+              },
+              h("strong", null, v.what),
+              h("p", null, `Why: ${v.why}`),
+              h("p", null, `What to do: ${v.fix}`),
+            );
+          }),
+        ),
+      );
     if (p.deploy.length)
       groups.push(
-        h(
-          "div",
-          { class: "apply-group" },
-          h("h3", null, "To deploy"),
-          ...p.deploy.map((/** @type {string} */ n) =>
+        group(
+          "To deploy",
+          "Each of these is backed up and then made to match its files; a new one gets its container.",
+          p.deploy.map((/** @type {string} */ n) =>
             stackBlock(n, p.new.includes(n), p.reasons?.[n]),
           ),
         ),
       );
     if (p.destroy.length)
       groups.push(
-        h(
-          "div",
-          { class: "apply-group" },
-          h("h3", null, "Gone from the files"),
-          ...p.destroy.map((/** @type {string} */ n) =>
+        group(
+          "Gone from the files",
+          "These run on the host but their directory is gone: each is destroyed only when its name is typed in the deploy dialog.",
+          p.destroy.map((/** @type {string} */ n) =>
             h(
               "p",
-              { class: "apply-row" },
+              { class: "apply-row", "data-stack": n },
               h("strong", null, n),
-              " runs on the host; its directory is gone. Destroyed only when its name is typed in the apply form (backed up first, its data kept).",
+              " will be destroyed once its name is typed (backed up first, its data kept).",
             ),
           ),
         ),
       );
-    groups.push(
-      h(
-        "div",
-        { class: "apply-group" },
-        h("h3", null, "The rest"),
-        ...s.lines
-          .filter((l) => !l.startsWith("↑") && !l.startsWith("✗"))
-          .map((l) => h("p", { class: "apply-row measured" }, l)),
-      ),
-    );
+    const rest = [
+      ...(p.unchanged.length
+        ? [
+            h(
+              "p",
+              { class: "apply-row measured" },
+              `${p.unchanged.length} ${p.unchanged.length === 1 ? "stack matches its" : "stacks match their"} files: ${p.unchanged.join(", ")}.`,
+            ),
+          ]
+        : []),
+      ...(p.ephemeral.length
+        ? [
+            h(
+              "p",
+              { class: "apply-row measured" },
+              `${p.ephemeral.join(", ")}: deployed by name only (ephemeral), never by Deploy all changes.`,
+            ),
+          ]
+        : []),
+    ];
+    if (rest.length)
+      groups.push(
+        group("The rest", "Stacks this deploy leaves alone, and why.", rest),
+      );
     body.replaceChildren(...groups);
+    // The primary button stays off while any stack does not build: apply
+    // refuses then anyway, and the panel says why above.
     go.disabled = !s.pending || !!s.blocked;
+    const nd = p.deploy.length;
+    go.textContent =
+      nd > 0
+        ? `Back up and deploy ${nd} ${nd === 1 ? "stack" : "stacks"}…`
+        : "Deploy all changes…";
+    nothingYet.textContent = s.blocked
+      ? "Nothing can be deployed while a stack does not build."
+      : s.pending
+        ? "Nothing has run yet: the dialog asks once more before it deploys."
+        : "Nothing to deploy: every stack matches its files.";
+    opts.onRead?.({
+      pending: p.deploy.length + p.destroy.length,
+      broken: p.broken.length,
+    });
     setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
   };
+  dialogControl(read, "read-plan");
+  dialogControl(go, "deploy-all-changes");
   read.addEventListener("click", () => void load().catch(() => {}));
   // fix-239: Live view reaches it as `homelab ui open apply`.
   viaForm(go, "apply");

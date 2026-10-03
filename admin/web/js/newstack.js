@@ -33,11 +33,14 @@ import {
 
 /**
  * @param {(href: string) => void} [navigate]
- * @param {{preset?: string}} [opts] redesign-presets: the preset a
- *   gallery card's "Use this preset" picked, chosen (with its size) when
- *   the wizard opens
+ * @param {{preset?: string, empty?: boolean}} [opts] redesign-presets: the
+ *   preset a gallery card's "Use this preset" picked, chosen (with its
+ *   size) when the wizard opens; redesign-stacks-8: `empty`, New stack's
+ *   "Empty" route — no preset step; a stack with no apps that says so, its
+ *   first app added from its hub.
  */
 export async function openNewStack(navigate, opts = {}) {
+  const empty = opts.empty === true;
   const r = await fetchJson("/data/presets", "the presets");
   if (!r.ok) {
     await refusalAlarm(r.error, 0);
@@ -45,7 +48,7 @@ export async function openNewStack(navigate, opts = {}) {
   }
   /** @type {import("./editforms.js").Preset[]} */
   const presets = r.body.presets ?? [];
-  if (!presets.length) {
+  if (!presets.length && !empty) {
     await refusalAlarm(
       {
         what: "a new stack",
@@ -62,10 +65,11 @@ export async function openNewStack(navigate, opts = {}) {
     names: /** @type {string[]} */ (r.body.taken?.names ?? []),
     vmids: /** @type {number[]} */ (r.body.taken?.vmids ?? []),
   };
-  const w = newStackWizard(presets, r.body.suggest_vmid ?? null);
+  const w = newStackWizard(presets, r.body.suggest_vmid ?? null, { empty });
   const values = startValues(w);
   const picked = presets.find((p) => p.name === opts.preset);
-  if (picked)
+  if (empty) values.preset = "";
+  else if (picked)
     Object.assign(values, { preset: picked.name }, presetSize(picked));
   /** @type {Map<string, HTMLElement>} */
   const inputs = new Map();
@@ -150,9 +154,10 @@ export async function openNewStack(navigate, opts = {}) {
   );
   const body = h("div", { class: "act-body" }, wiz);
   const d = openDialog({
-    title: "New stack",
-    description:
-      "From one of the repository's presets; committed under stacks/<name>/ and pushed, then deployed if you choose.",
+    title: empty ? "New empty stack" : "New stack",
+    description: empty
+      ? "A stack with no apps yet: its container and address, committed under stacks/<name>/ and pushed, then deployed if you choose. Add its first app from its hub."
+      : "From one of the repository's presets; committed under stacks/<name>/ and pushed, then deployed if you choose.",
     body: [body],
     id: "new-stack-dialog",
     wide: true,

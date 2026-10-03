@@ -278,9 +278,47 @@ export function applySummary(p) {
     headline: `${p.deploy.length} to deploy · ${p.unchanged.length} unchanged · ${p.destroy.length} gone from the files`,
     lines,
     blocked: p.broken.length
-      ? `${p.broken.length} stack(s) do not build; apply refuses until they do (nothing applied).`
+      ? `${p.broken.length} ${p.broken.length === 1 ? "stack does" : "stacks do"} not build; Deploy all changes waits until ${p.broken.length === 1 ? "it does" : "they do"} (nothing deployed).`
       : "",
     pending: p.deploy.length + p.destroy.length > 0,
+  };
+}
+
+/**
+ * redesign-stacks: a stack that does not build, as a person reads it —
+ * what, why and what to do — from the build's raw error: the working
+ * copy's own absolute path (often a temporary one) shortened to
+ * `stacks/<name>/…`, and the error chain's " :: " links read as a list.
+ * @param {string} name
+ * @param {string} raw
+ * @returns {{what: string, why: string, fix: string}}
+ */
+export function brokenView(name, raw) {
+  const clean = (/** @type {string} */ t) =>
+    t
+      .replace(/(?:\/[^\s/:'"`]+)+\/(stacks\/[^\s:'"`]+)/g, "$1")
+      .replace(
+        /(^|[\s(])((?:\/[^\s/:'"`]+){2,})/g,
+        (_, pre, path) => `${pre}${path.split("/").pop() ?? path}`,
+      )
+      .trim();
+  const parts = String(raw ?? "")
+    .split(/\s*::\s*/)
+    .map(clean)
+    .filter(Boolean);
+  // The repository's errors read "what went wrong :: what to do"; the
+  // first link is the why, the rest the fix when there is one.
+  const said = parts.slice(1).join("; ");
+  const cap = (/** @type {string} */ t) =>
+    t ? `${t[0].toUpperCase()}${t.slice(1)}${/[.!]$/.test(t) ? "" : "."}` : t;
+  return {
+    what: `${name} does not build`,
+    why: parts[0] || "its files could not be read",
+    fix: said
+      ? cap(said)
+      : /latch/i.test(raw)
+        ? `Check that latch holds the secrets stacks/${name} names, then read the plan again.`
+        : `Fix stacks/${name} in the working copy (or in its editor), then read the plan again.`,
   };
 }
 

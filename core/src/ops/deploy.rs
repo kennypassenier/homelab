@@ -345,11 +345,30 @@ pub const STEPS: &[&str] = &[
     "service checks",
 ];
 
+/// redesign-stacks-6: the deploy's whole plan for `spec` — [`STEPS`], with
+/// the nested `backup` op's names right after "safety gates" when the spec
+/// asks for a backup first (`DeploySpec::backup_first`). Still fixed per
+/// spec: a stack with nothing to back up skip-marks those names rather than
+/// leaving them out. The single source `deploy` plans from and the
+/// dashboard's batch total sums.
+pub fn plan_names(spec: &DeploySpec) -> Vec<String> {
+    let mut v: Vec<String> = Vec::with_capacity(STEPS.len() + 8);
+    for s in STEPS {
+        v.push(s.to_string());
+        if *s == "safety gates" && spec.backup_first {
+            v.extend(crate::ops::backup::backup_plan_names(
+                &spec.manifest.stack_name,
+            ));
+        }
+    }
+    v
+}
+
 pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
     let m = &spec.manifest;
     let op = format!("deploy-{}", m.stack_name);
     let mut runner = Runner::new(&op, ctx.sink, ctx.journal);
-    runner.plan(STEPS);
+    runner.plan(&plan_names(spec));
     runner.log(
         Level::Info,
         format!("[sync][run ] deploy {} (vmid {})", m.stack_name, m.vmid),
@@ -418,6 +437,52 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
         exists = safety::check_deploy_target(exec, &ctx.safety, m).await?;
         Ok(StepOutcome::Unchanged)
     });
+
+    // ── redesign-stacks-6: the backup the dashboard promises ("each stack
+    // is backed up first"), before the first step that changes anything.
+    // Nested through this runner (fix-step-plan-nested), so its names are
+    // part of the one plan announced above. A failed backup ends the
+    // deploy here, with the stack exactly as it was: nothing before this
+    // point mutates, so there is nothing to mark incomplete.
+    if spec.backup_first {
+        let names = crate::ops::backup::backup_plan_names(&m.stack_name);
+        if !exists || m.storage.is_empty() {
+            log_info(format!(
+                "[deploy] {}: nothing to back up first ({})",
+                m.stack_name,
+                if exists {
+                    "the stack declares no storage"
+                } else {
+                    "the container does not exist yet"
+                }
+            ));
+            for n in &names {
+                runner.skip(n);
+            }
+        } else {
+            let cfg = crate::ops::backup::BackupCfg {
+                trigger: crate::ops::backup::BackupTrigger::PreDeploy,
+                ..ctx.backup.clone()
+            };
+            let mut scope = crate::runner::Scope::Nested {
+                parent: &mut runner,
+                prefix: format!("backup-{}", m.stack_name),
+            };
+            let backed = crate::ops::backup::backup_impl(ctx, m, &cfg, &mut scope).await;
+            drop(scope);
+            if let Err(f) = backed {
+                let why = crate::error::OperatorError::from_core(&f.step, &f.err).why;
+                return runner.finish_err(
+                    &f.step,
+                    &CoreError::SafetyAbort(format!(
+                        "refusing to deploy '{}': the backup taken first did not succeed :: {} \
+                         :: the stack is unchanged; fix the backup and deploy again",
+                        m.stack_name, why
+                    )),
+                );
+            }
+        }
+    }
 
     // ── step-22 / ask-8: the record as it stood before this deploy. What
     // the stack file used to declare is the only way to know what has left

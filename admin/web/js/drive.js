@@ -303,10 +303,12 @@ export function mountFollow(region, ctx) {
         // Owner decision 2026-09-30: ticks the Overview table's own
         // multiselect, exactly as a click would, so a batch action opened
         // right after acts on the same rows a viewer would see ticked.
+        // redesign-stacks: the Stacks list (cards or table) is marked
+        // `data-drive-list="stacks"`, whichever view is on.
         handle("overview")?.select?.(op.stacks);
         await flash(
           /** @type {HTMLElement | null} */ (
-            document.querySelector("table.fleet")
+            document.querySelector('[data-drive-list="stacks"]')
           ),
           "drive-focus",
           250,

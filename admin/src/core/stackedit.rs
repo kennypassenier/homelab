@@ -769,10 +769,26 @@ pub fn changes(
                     .iter()
                     .map(|a| Item::New(Value::from(a.as_str()))),
             );
-            let mut ops = vec![Op::Seq {
-                path: path("apps"),
-                items: apps,
-            }];
+            // redesign-stacks-8: an empty stack (`apps: []`, `no_apps_yet`)
+            // gets its list written whole, and stops waiting for apps.
+            let mut ops = if m.apps.is_empty() {
+                vec![Op::Set {
+                    path: path("apps"),
+                    value: Value::Sequence(
+                        files.apps.iter().map(|a| Value::from(a.as_str())).collect(),
+                    ),
+                }]
+            } else {
+                vec![Op::Seq {
+                    path: path("apps"),
+                    items: apps,
+                }]
+            };
+            if m.no_apps_yet {
+                ops.push(Op::Remove {
+                    path: path("no_apps_yet"),
+                });
+            }
             let declared: Vec<&str> = m.storage.iter().map(|s| s.host_path.as_str()).collect();
             let new_mounts: Vec<Value> = files
                 .appdata

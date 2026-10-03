@@ -4327,6 +4327,39 @@ details.nx-card--fold[open] > summary::before {
 .title-row > .nx-head-titlemeta + * {
   margin-inline-start: auto;
 }
+/* a KPI tile's inline meter (`ctxMeter`) before its context words */
+.nx-kpi__ctx:has(> .nx-meter) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--kp-space-sm);
+}
+.nx-kpi__ctx > .nx-meter {
+  flex: 0 0 3rem;
+}
+/* the empty and all-clear drawings (ui.js `art`) */
+.nx-art {
+  color: var(--muted-foreground);
+  margin-block-end: var(--kp-space-xs);
+}
+.nx-art__ok {
+  stroke: var(--success-foreground, var(--success));
+}
+.nx-art__ok-fill {
+  stroke: var(--success-foreground, var(--success));
+  fill: color-mix(
+    in oklab,
+    var(--success-foreground, var(--success)) 12%,
+    transparent
+  );
+}
+.nx-art__accent {
+  stroke: var(--chart-1);
+  fill: var(--card);
+}
+.nx-art__accent-line {
+  stroke: var(--chart-1);
+}
 /* A key printed inside a button sits apart from its label. */
 .kp-button > .nx-kbd {
   margin-inline-start: var(--kp-space-xs);

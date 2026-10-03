@@ -1,0 +1,960 @@
+/* Phone (DESIGN_LANGUAGE §1.1): the header's actions fold under the
+   description, the primary one full-width; the key row is for keyboards. */
+@media (max-width: 48rem) {
+  .sk-page .nx-head,
+  .ap-page .nx-head {
+    display: grid;
+  }
+  .sk-page .nx-head .title-row,
+  .ap-page .nx-head .title-row {
+    display: contents;
+  }
+  .sk-page .nx-head .title-row > h1,
+  .ap-page .nx-head .title-row > h1 {
+    order: 1;
+  }
+  .sk-page .nx-head .nx-head-desc,
+  .ap-page .nx-head .nx-head-desc {
+    order: 2;
+  }
+  .sk-page .nx-head .nx-head-right,
+  .ap-page .nx-head .nx-head-right {
+    order: 3;
+    margin-block-start: var(--kp-space-md, 12px);
+    justify-content: flex-start;
+  }
+  .sk-page .nx-keys {
+    display: none;
+  }
+}
+
+/* redesign-stacks (3.71.0): the Stacks and Apps pages as the approved demos
+   draw them (~/.local/share/homelab/redesign-3.71/overview.html, apps.html,
+   graphics.html, next.css), kp-themes tokens only. Everything sits under
+   `.sk-page` / `.ap-page` with the `sk-` / `ap-` prefixes, so it never
+   collides with the foundation's shared `nx-` classes. The shared blocks
+   (KPI tiles, the segmented switch, the drawer, the key row, the empty
+   drawings) are ui.js's and app.css's since the 3.71.0 integration. */
+
+.sk-page,
+.ap-page,
+.sk-drawer {
+  --sk-gap: var(--nx-gap, 1.5rem);
+  --sk-line: color-mix(in oklab, var(--border) 85%, transparent);
+  --sk-ok: var(--success-foreground, var(--success));
+  --sk-warn: var(--warning-foreground, var(--warning));
+  --sk-bad: var(--destructive);
+  --sk-info: var(--info-foreground, var(--info));
+  --sk-ease: cubic-bezier(0.2, 0, 0.38, 0.9);
+}
+@media (max-width: 640px) {
+  .sk-page,
+  .ap-page {
+    --sk-gap: var(--kp-space-lg, 1rem);
+  }
+}
+/* The page's rhythm between its top-level pieces: 24 px, 32 on a wide
+   screen (DESIGN_LANGUAGE §3), never under the shared --section-gap. */
+main.shell.sk-page > * + *,
+main.shell.ap-page > * + * {
+  margin-block-start: max(var(--sk-gap), var(--section-gap)) !important;
+}
+main.shell.sk-page > [hidden],
+main.shell.ap-page > [hidden] {
+  display: none;
+}
+.sk-page .sk-band[hidden] + * {
+  margin-block-start: max(var(--sk-gap), var(--section-gap)) !important;
+}
+
+/* The header's actions sit in one row against the right edge (the shared
+   `.actions-row` grid stacks them when it is not a title row's own child). */
+.sk-page .nx-head-right > .actions-row,
+.ap-page .nx-head-right > .actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+@media (max-width: 48rem) {
+  .sk-page .nx-head-right,
+  .sk-page .nx-head-right > .actions-row {
+    justify-content: flex-start;
+  }
+  .sk-page .nx-head-right > .actions-row > .kp-button--primary {
+    flex: 1 1 100%;
+  }
+}
+.sk-page .nx-keys code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.sk-mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.9em;
+}
+.sk-muted,
+.sk-hint {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm);
+}
+.sk-hint {
+  margin: 0;
+}
+.sk-num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* -- status dot + word: colour is never the only signal -- */
+.sk-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.sk-dot::before {
+  content: "";
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+  flex: none;
+}
+.sk-dot--ok::before {
+  background: var(--sk-ok);
+}
+.sk-dot--warn::before {
+  background: var(--sk-warn);
+}
+.sk-dot--bad::before {
+  background: var(--sk-bad);
+}
+.sk-dot--info::before {
+  background: var(--sk-info);
+}
+
+/* -- chips: filled only for the levels that need a person -- */
+.sk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: var(--kp-radius-pill, 999px);
+  font-size: var(--kp-text-xs);
+  font-weight: 500;
+  line-height: 1.6;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  background: var(--card);
+}
+.sk-chip--info {
+  background: var(--info);
+  color: var(--info-foreground);
+  border-color: transparent;
+}
+.sk-chip--warn {
+  background: var(--warning);
+  color: var(--warning-foreground);
+  border-color: transparent;
+}
+.sk-chip--bad {
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+  border-color: transparent;
+}
+
+/* -- meter: used of limit, 6 px (DESIGN_LANGUAGE §6) -- */
+.sk-meter {
+  display: block;
+  flex: 1;
+  min-inline-size: 48px;
+  block-size: 6px;
+  border-radius: var(--kp-radius-pill, 999px);
+  background: var(--muted);
+  overflow: hidden;
+}
+.sk-meter > span {
+  display: block;
+  block-size: 100%;
+  background: var(--primary);
+  border-radius: inherit;
+  transition: inline-size 400ms var(--sk-ease);
+}
+.sk-meter--warn > span {
+  background: var(--sk-warn);
+}
+.sk-meter--bad > span {
+  background: var(--sk-bad);
+}
+
+/* -- KPI tiles: the context line holds a dot or a meter before its words -- */
+/* The context line wraps rather than cutting its words ("0 park…"). */
+
+/* -- the segmented view switch -- */
+.sk-count {
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sk-sort[hidden] {
+  display: none;
+}
+
+/* -- the key row under the card head -- */
+
+/* -- the batch bar, between the toolbar and the list -- */
+.sk-batch {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--kp-space-md, 12px);
+  align-items: center;
+  margin-block: var(--kp-space-md, 12px) 0;
+  padding: 8px 12px;
+  border-radius: var(--kp-radius-sm, 8px);
+  background: color-mix(in oklab, var(--primary) 8%, var(--card));
+  border: 1px solid color-mix(in oklab, var(--primary) 40%, var(--border));
+}
+.sk-batch[hidden] {
+  display: none;
+}
+.sk-batch > .sk-muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sk-batch__acts {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.sk-iconbtn {
+  min-inline-size: 30px;
+  justify-content: center;
+}
+
+/* -- the list: cards or a table, the same box in every state -- */
+.sk-list {
+  margin-block-start: var(--kp-space-md, 12px);
+}
+.sk-list[hidden],
+.sk-empty-slot[hidden],
+.sk-cards[hidden],
+.sk-table[hidden] {
+  display: none;
+}
+.sk-empty-slot {
+  margin-block-start: var(--kp-space-md, 12px);
+  min-block-size: 16rem;
+  align-content: center;
+  display: grid;
+  justify-items: center;
+  text-align: center;
+}
+.sk-empty-slot .kp-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+
+.sk-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+  gap: var(--kp-space-md, 12px);
+}
+.sk-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  /* Fixed rows (identity, meta, flags, CPU line), kept in every state —
+     loading, no flag, several — so every card is the same height. */
+  grid-template-rows: 1.75rem 1.25rem 1.5rem 28px;
+  gap: 6px 10px;
+  align-items: center;
+  padding: var(--kp-space-md, 12px);
+  border: 1px solid var(--border);
+  border-radius: var(--nx-radius, 10px);
+  background: var(--background);
+  cursor: pointer;
+  transition: border-color 150ms var(--sk-ease);
+}
+.sk-card:hover {
+  border-color: var(--ring);
+}
+.sk-card.is-ticked {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+.sk-card.is-cursor,
+.sk-row.is-cursor {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.sk-card > input {
+  margin: 0;
+  position: relative;
+  z-index: 1;
+}
+.sk-card__id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+}
+.sk-card__name {
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sk-card__name:hover {
+  text-decoration: underline;
+}
+.sk-card__vmid {
+  color: var(--muted-foreground);
+}
+.sk-card__meta {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
+  gap: 6px 14px;
+  align-items: center;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.sk-card__meta b {
+  color: var(--foreground);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.sk-card__bar {
+  grid-column: 2 / -1;
+  display: grid;
+  grid-template-columns: 3.2rem minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.sk-card__flags {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  align-items: center;
+  overflow: hidden;
+}
+.sk-card--skeleton {
+  cursor: default;
+}
+.sk-card__tickbone {
+  inline-size: 16px;
+}
+.sk-card--skeleton .kp-skeleton {
+  display: block;
+  block-size: 0.9rem;
+}
+.sk-bone--id {
+  inline-size: 9rem;
+}
+.sk-bone--state {
+  inline-size: 4.5rem;
+}
+.sk-bone--meta {
+  inline-size: 16rem;
+  max-inline-size: 100%;
+}
+.sk-bone--flag {
+  inline-size: 6rem;
+}
+.sk-card--skeleton .sk-bone--bar {
+  inline-size: 100%;
+  block-size: 20px;
+}
+
+.sk-cpu {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3rem;
+  gap: 8px;
+  align-items: center;
+  min-inline-size: 8rem;
+}
+.sk-cpu .sk-num {
+  text-align: end;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.sk-backup--bad {
+  color: var(--sk-bad);
+  font-weight: 500;
+}
+.sk-backup--warn {
+  color: var(--sk-warn);
+}
+
+/* -- the table view (kp datatable; DESIGN_LANGUAGE §6) -- */
+.sk-table .kp-table {
+  inline-size: 100%;
+  font-variant-numeric: tabular-nums;
+}
+.sk-table th {
+  font-size: var(--kp-text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.sk-table td {
+  vertical-align: middle;
+}
+.sk-table .num {
+  text-align: end;
+}
+.sk-table .sk-right {
+  text-align: end;
+}
+.sk-table .sk-tick {
+  inline-size: 36px;
+}
+.sk-row {
+  cursor: pointer;
+}
+.sk-row.is-ticked {
+  background: color-mix(in oklab, var(--primary) 6%, transparent);
+}
+.sk-id__wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sk-id__wrap a {
+  font-weight: 600;
+  color: inherit;
+  text-decoration: none;
+}
+.sk-id__wrap a:hover {
+  text-decoration: underline;
+}
+.sk-id__wrap small {
+  display: block;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.sk-ram {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 12rem;
+}
+.sk-ram .sk-meter {
+  max-inline-size: 90px;
+}
+.sk-ram .sk-num {
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.sk-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.sk-acts {
+  white-space: nowrap;
+}
+.sk-acts > * + * {
+  margin-inline-start: 6px;
+}
+@media (max-width: 75rem) {
+  .sk-table .sk-wide {
+    display: none;
+  }
+}
+/* A phone shows only tick · stack (its state as a dot) · action, so the
+   table never scrolls sideways and every row's action is on screen. */
+.sk-phone-dot {
+  display: none;
+}
+@media (max-width: 48rem) {
+  .sk-table .sk-mid,
+  .sk-table .sk-state,
+  .sk-table .sk-apps {
+    display: none;
+  }
+  .sk-table .sk-phone-dot {
+    display: inline-flex;
+    vertical-align: middle;
+    margin-inline-end: 6px;
+  }
+  .sk-table .kp-table {
+    min-inline-size: 0;
+    inline-size: 100%;
+  }
+  .sk-table .sk-id {
+    max-inline-size: 0;
+    inline-size: 100%;
+  }
+  .sk-table .sk-id__wrap,
+  .sk-table .sk-id__wrap > span {
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sk-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sk-batch {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .sk-batch > .sk-muted {
+    display: none;
+  }
+  .sk-batch__acts {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+.sk-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px 16px;
+  flex-wrap: wrap;
+  margin-block-start: var(--kp-space-md, 12px);
+  padding-block-start: var(--kp-space-sm, 8px);
+  border-block-start: 1px solid var(--sk-line);
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+
+/* -- the header's Deploy all changes count -- */
+.sk-badge {
+  display: inline-grid;
+  place-items: center;
+  min-inline-size: 1.4em;
+  margin-inline-start: 6px;
+  padding: 0 6px;
+  border-radius: var(--kp-radius-pill, 999px);
+  background: var(--warning);
+  color: var(--warning-foreground);
+  font-size: var(--kp-text-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.sk-badge[hidden] {
+  display: none;
+}
+
+/* -- side panels: Deploy all changes, New stack -- */
+.sk-drawer .nx-drawer__body {
+  display: grid;
+  gap: var(--kp-space-lg, 16px);
+}
+.sk-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--kp-space-sm, 8px);
+  counter-reset: sk-step;
+}
+.sk-steps li {
+  counter-increment: sk-step;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 2px 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--kp-radius-sm, 8px);
+  background: var(--background);
+  font-size: var(--kp-text-sm);
+}
+.sk-steps li::before {
+  content: counter(sk-step);
+  grid-row: span 2;
+  inline-size: 24px;
+  block-size: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  font-size: var(--kp-text-xs);
+  background: var(--muted);
+}
+.sk-steps span {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-xs);
+}
+/* Where the panel stands, as the demo marks it: done, now, still to come. */
+.sk-steps li[data-s="done"]::before {
+  content: "✓";
+  background: var(--sk-ok);
+  color: var(--background);
+}
+.sk-steps li[data-s="now"] {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+.sk-steps li[data-s="now"]::before {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.sk-steps li:not([data-s]) {
+  opacity: 0.75;
+}
+@media (max-width: 40rem) {
+  .sk-steps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.sk-drawer-part {
+  display: grid;
+  gap: 8px;
+}
+.sk-drawer-part h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.sk-drawer-part__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.sk-drawer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  inline-size: 100%;
+}
+.sk-drawer-foot > .sk-hint {
+  margin-inline-end: auto;
+}
+.sk-plan .apply-grid {
+  display: grid;
+  gap: 8px;
+}
+.sk-plan .apply-row--skeleton {
+  display: block;
+  block-size: 2.25rem;
+  border-radius: var(--kp-radius-sm, 8px);
+}
+.sk-routes {
+  display: grid;
+  gap: 8px;
+}
+.sk-route {
+  text-align: start;
+  font: inherit;
+  cursor: pointer;
+  inline-size: 100%;
+}
+
+/* ===== Apps (home when the Inbox is empty; apps.html) ================== */
+.ap-launch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--kp-space-md, 12px);
+  align-items: center;
+}
+.ap-launch .ap-search {
+  inline-size: 100%;
+  font-size: 1.15rem;
+  padding: 14px 16px;
+  border-radius: 12px;
+}
+.ap-verdict {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.ap-verdict strong {
+  color: var(--foreground);
+}
+.ap-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+  gap: var(--sk-gap);
+  align-items: start;
+}
+.ap-board > .ap-grp--wide {
+  grid-column: 1 / -1;
+}
+.ap-grp > h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  /* The demo's group label is the body face (a theme's heading face can
+     be a serif), at weight 500. */
+  font-family: var(--theme-font-body, inherit);
+  font-size: var(--kp-text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+}
+.ap-tiles {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-md, 12px);
+}
+.ap-grp--wide .ap-tiles {
+  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+  column-gap: var(--sk-gap);
+}
+.ap-tile {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  gap: 2px 12px;
+  align-items: center;
+  padding: 14px;
+  border-radius: var(--nx-radius, 10px);
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: inherit;
+  text-decoration: none;
+  transition:
+    border-color 110ms var(--sk-ease),
+    transform 110ms var(--sk-ease);
+}
+.ap-tile:hover,
+.ap-tile:focus-visible {
+  border-color: var(--ring);
+  transform: translateY(-2px);
+}
+.ap-tile:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.ap-tile.is-first {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+.ap-tile__icon {
+  grid-row: span 2;
+  inline-size: 44px;
+  block-size: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 1.05rem;
+  background: color-mix(in oklab, var(--c) 16%, var(--card));
+  color: var(--c);
+  border: 1px solid color-mix(in oklab, var(--c) 35%, transparent);
+}
+.ap-tile__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+  font-weight: 600;
+}
+.ap-tile__name > span:last-child,
+.ap-tile__desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ap-tile__desc {
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.ap-tile__lines {
+  grid-column: 2 / -1;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.ap-tile__pin {
+  all: unset;
+  cursor: pointer;
+  grid-row: 1;
+  grid-column: 3;
+  inline-size: 26px;
+  block-size: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  opacity: 0.45;
+}
+.ap-tile:hover .ap-tile__pin,
+.ap-tile__pin:focus-visible,
+.ap-tile__pin[aria-pressed="true"] {
+  opacity: 1;
+}
+.ap-tile__pin:focus-visible {
+  outline: 2px solid var(--ring);
+}
+.ap-tile__pin[aria-pressed="true"] {
+  color: var(--sk-warn);
+}
+.ap-tile__pin:hover {
+  background: var(--muted);
+}
+.ap-tile__go {
+  grid-row: 2;
+  grid-column: 3;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+  justify-self: center;
+}
+.ap-tile--skeleton {
+  min-block-size: 4.6rem;
+  grid-template-columns: 44px minmax(0, 1fr);
+}
+.ap-tile--skeleton .kp-skeleton {
+  display: block;
+  block-size: 0.9rem;
+}
+.ap-tile--skeleton .kp-skeleton:first-child {
+  grid-row: span 2;
+  block-size: 44px;
+  border-radius: 12px;
+}
+.ap-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.ap-page mark {
+  background: color-mix(in oklab, var(--warning) 80%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+.ap-empty {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 6px;
+}
+.ap-example {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--kp-radius-sm, 8px);
+  background: var(--muted);
+  font-size: var(--kp-text-sm);
+  text-align: start;
+  overflow-x: auto;
+}
+@media (max-width: 48rem) {
+  .ap-launch {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ap-launch .nx-keys {
+    display: none;
+  }
+  .ap-board,
+  .ap-grp--wide .ap-tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ap-tile,
+  .sk-card,
+  .sk-meter > span {
+    transition: none;
+  }
+  .ap-tile:hover,
+  .ap-tile:focus-visible {
+    transform: none;
+  }
+}
+
+/* The header: "updated … ago" sits beside the title, as both demos draw it. */
+.sk-page .sk-head .title-row > .nx-live,
+.ap-page .sk-head .title-row > .nx-live {
+  align-self: center;
+  margin-inline-start: 0;
+  font-size: var(--kp-text-sm);
+}
+.sk-page .sk-head .title-row > .nx-head-right,
+.ap-page .sk-head .title-row > .nx-head-right {
+  margin-inline-start: auto;
+}
+@media (max-width: 48rem) {
+  .sk-page .sk-head .title-row > .nx-live,
+  .ap-page .sk-head .title-row > .nx-live {
+    order: 1;
+  }
+}
+
+/* The cards' order: every option shown, the active one pressed. */
+.sk-sorts[hidden] {
+  display: none;
+}
+
+/* One line per source that could not be read. */
+.sk-errors {
+  display: grid;
+  gap: 8px;
+  margin-block: var(--kp-space-sm, 8px);
+}
+.sk-errors[hidden] {
+  display: none;
+}
+
+/* Deploy all changes: each group of the plan says what it holds. */
+.apply-group__desc {
+  margin: 0 0 6px;
+}
+/* What, why and what to do read top to bottom, not as three columns. */
+.apply-broken,
+#apply-head > .kp-alert {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+}
+.apply-broken p {
+  margin: 0;
+}
+
+/* The Apps skeleton is the grouped board itself: a label bone per group. */
+.ap-grp--skeleton > h2 .kp-skeleton {
+  display: inline-block;
+  inline-size: 7rem;
+  block-size: 0.8rem;
+}
+
+/* Phone: the toolbar's count, sort and view switch wrap onto their own
+   lines instead of running out of the card. */
+@media (max-width: 48rem) {
+  .sk-page .nx-tb__state {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 8px;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+  }
+  .sk-page .sk-card__meta > span {
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}

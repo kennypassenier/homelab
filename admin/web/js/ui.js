@@ -37,6 +37,8 @@
 //                in the block's own footprint
 //   rowKeys / kbd / keyRow   keyboard: list rows, a key, the shortcut line
 //   sparkline    a 28 px trend line for a tile or a table row
+//   art          the small empty and all-clear line drawings of
+//                graphics.html, for emptyState's `art`
 //
 // Every block that draws something clickable takes the Live view control
 // it is (a declared id, or a dialog control name) from its caller, so no
@@ -253,7 +255,7 @@ export function pageHeader(spec) {
  * @typedef {{key?: string, label: string, value?: string, unit?: string,
  *   ctx?: string, ctxTone?: "ok" | "warn" | "bad" | "" | null,
  *   ctxParts?: {text: string, tone?: "ok" | "warn" | "bad" | ""}[] | null,
- *   colour?: string, target?: string,
+ *   colour?: string, target?: string, ctxMeter?: Meter | null,
  *   tone?: "" | "warn" | "bad" | null, href?: string,
  *   spark?: number[], meter?: Meter | null, title?: string,
  *   toggle?: {pressed: boolean, onToggle: () => void, drive?: Drive}}} Kpi
@@ -266,7 +268,8 @@ export function pageHeader(spec) {
  *   pieces, each with its own dot ("7 enforced" green, "2 open" amber).
  *   `colour`: the sparkline's colour. `target`: the id of the card on this
  *   page the tile sums up; the tile is a same-site link to it and scrolls
- *   there (Metrics, the Map). A tile made without a spark or meter grows
+ *   there (Metrics, the Map). `ctxMeter`: a small used-of-limit bar at
+ *   the start of the context line (the Stacks demo's tiles). A tile made without a spark or meter grows
  *   its fourth row when a later `set` brings one.
  */
 
@@ -367,6 +370,7 @@ export function kpi(k) {
           ]),
     );
     ctx.replaceChildren(
+      ...(loading || !cur.ctxMeter ? [] : [ctxBar(cur.ctxMeter, cur.label)]),
       ...(loading
         ? [skeleton("80%")]
         : cur.ctxParts?.length
@@ -419,6 +423,22 @@ export function kpi(k) {
   };
   set({});
   return { el: e, set };
+}
+
+/**
+ * A tile's inline meter, read out as its percentage.
+ * @param {Meter} m @param {string} label
+ */
+function ctxBar(m, label) {
+  const e = meter(m).el;
+  const pct = Math.round(meterParts(m).fill);
+  e.removeAttribute("aria-hidden");
+  e.setAttribute("role", "meter");
+  e.setAttribute("aria-valuenow", String(pct));
+  e.setAttribute("aria-valuemin", "0");
+  e.setAttribute("aria-valuemax", "100");
+  e.setAttribute("aria-label", `${label}: ${pct}%`);
+  return e;
 }
 
 /**
@@ -2259,3 +2279,101 @@ export function failBand(spec) {
     },
   };
 }
+
+/**
+ * An SVG line drawing from a list of shapes, 120×72, in currentColor.
+ * @param {string} label for the test hooks; the drawing itself is hidden
+ * @param {[string, Record<string, string>][]} shapes
+ * @returns {SVGSVGElement}
+ */
+function drawing(label, shapes) {
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("class", "nx-art");
+  svg.setAttribute("viewBox", "0 0 120 72");
+  svg.setAttribute("width", "120");
+  svg.setAttribute("height", "72");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.6");
+  svg.setAttribute("aria-hidden", "true");
+  svg.dataset.art = label;
+  for (const [tag, attrs] of shapes) {
+    const e = document.createElementNS(SVG, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    svg.append(e);
+  }
+  return svg;
+}
+
+/** The empty and all-clear drawings of graphics.html (approved). */
+export const art = {
+  /** Nothing matches a filter: a magnifier over an empty line. */
+  noMatch: () =>
+    drawing("no-match", [
+      ["circle", { cx: "52", cy: "32", r: "18" }],
+      [
+        "path",
+        { d: "M65 45l17 17", "stroke-width": "3", "stroke-linecap": "round" },
+      ],
+      ["path", { d: "M44 32h16", opacity: ".5", "stroke-linecap": "round" }],
+    ]),
+  /** All clear: a shield with a tick, in the success colour. */
+  allClear: () =>
+    drawing("all-clear", [
+      [
+        "path",
+        {
+          d: "M60 8l30 11v17c0 16-13 25-30 30C43 61 30 52 30 36V19z",
+          class: "nx-art__ok-fill",
+        },
+      ],
+      [
+        "path",
+        {
+          d: "M47 37l9 9 18-19",
+          class: "nx-art__ok",
+          "stroke-width": "3",
+          "stroke-linecap": "round",
+          "stroke-linejoin": "round",
+        },
+      ],
+    ]),
+  /** No stacks yet: an empty container with a plus. */
+  noStacks: () =>
+    drawing("no-stacks", [
+      ["rect", { x: "22", y: "14", width: "76", height: "46", rx: "6" }],
+      ["path", { d: "M22 26h76", opacity: ".5" }],
+      [
+        "path",
+        { d: "M34 38h30M34 47h20", opacity: ".35", "stroke-linecap": "round" },
+      ],
+      ["circle", { cx: "88", cy: "50", r: "13", class: "nx-art__accent" }],
+      [
+        "path",
+        {
+          d: "M88 44v12M82 50h12",
+          class: "nx-art__accent-line",
+          "stroke-linecap": "round",
+        },
+      ],
+    ]),
+  /** No tiles yet: an empty grid of four tiles, one dashed. */
+  noTiles: () =>
+    drawing("no-tiles", [
+      ["rect", { x: "26", y: "10", width: "30", height: "22", rx: "5" }],
+      ["rect", { x: "64", y: "10", width: "30", height: "22", rx: "5" }],
+      ["rect", { x: "26", y: "40", width: "30", height: "22", rx: "5" }],
+      [
+        "rect",
+        {
+          x: "64",
+          y: "40",
+          width: "30",
+          height: "22",
+          rx: "5",
+          "stroke-dasharray": "4 4",
+          class: "nx-art__accent-line",
+        },
+      ],
+    ]),
+};

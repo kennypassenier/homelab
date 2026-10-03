@@ -60,6 +60,7 @@ fn paperwork() -> StackManifest {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        no_apps_yet: false,
         on_demand: false,
         syslog_receivers: vec![],
         natives: Vec::new(),
@@ -403,6 +404,7 @@ async fn fix_223_a_backup_is_tagged_with_what_triggered_it() {
         (BackupTrigger::Nightly, "trigger:nightly"),
         (BackupTrigger::Manual, "trigger:manual"),
         (BackupTrigger::PreDestroy, "trigger:pre-destroy"),
+        (BackupTrigger::PreDeploy, "trigger:pre-deploy"),
     ] {
         let exec = harness();
         exec.respond_always("restic backup", CmdOutput::ok(""));

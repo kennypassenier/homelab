@@ -556,7 +556,16 @@ pub fn scaffold_stack_with(
         format!("\ntiles:\n{entries}")
     };
 
-    let manifest = format!("{manifest_head}{storage_yaml}{tiles_yaml}\napps:\n{apps_yaml}\n");
+    // redesign-stacks-8: a stack with no apps (New stack's "Empty" route)
+    // says so as an empty list; a bare `apps:` would be null, which no
+    // plan can read.
+    let manifest = if apps_yaml.trim().is_empty() {
+        format!(
+            "{manifest_head}{storage_yaml}{tiles_yaml}\n# No apps yet: add the first one from the stack's hub (Add app).\nno_apps_yet: true\napps: []\n"
+        )
+    } else {
+        format!("{manifest_head}{storage_yaml}{tiles_yaml}\napps:\n{apps_yaml}\n")
+    };
     write_file(&dir.join("lxc-compose.yml"), &manifest, &mut files)?;
 
     Ok(Scaffolded { dir, files })

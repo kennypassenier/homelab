@@ -52,6 +52,7 @@ fn a_rootfs_file_anywhere_else_or_climbing_is_refused() {
 fn native_kyu_spec() -> DeploySpec {
     DeploySpec {
         secret_files: Vec::new(),
+        backup_first: false,
         client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),
@@ -64,6 +65,7 @@ fn native_kyu_spec() -> DeploySpec {
             retention: None,
             data_mounts: Vec::new(),
             native_only: true,
+            no_apps_yet: false,
             on_demand: false,
             syslog_receivers: vec![],
             firewall: None,

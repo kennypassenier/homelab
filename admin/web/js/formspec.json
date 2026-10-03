@@ -114,8 +114,11 @@
       "help": "Without it the container's data is backed up first.",
       "required": false,
       "danger": true,
+      "label_for": {
+        "apply": "Skip the backups (deploy and destroy without one)"
+      },
       "help_for": {
-        "apply": "Without it each stack destroyed here is backed up first."
+        "apply": "Without it each stack is backed up before it is deployed or destroyed; a stack whose backup fails is left unchanged."
       }
     },
     "skip_safety_copy": {

@@ -20,6 +20,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        no_apps_yet: false,
         on_demand: false,
         syslog_receivers: vec![],
         firewall: None,
@@ -80,6 +81,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
 fn spec(vmid: u16, stack: &str) -> DeploySpec {
     DeploySpec {
         secret_files: Vec::new(),
+        backup_first: false,
         client_schema: CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),
@@ -233,4 +235,19 @@ fn fix_211_every_real_native_service_file_round_trips_without_an_unknown_field()
         checked += 1;
     }
     assert!(checked >= 5, "only {checked} service files found");
+}
+
+/// redesign-stacks-6: `backup_first` is on the wire only when it is asked
+/// for, so a host that does not know it sees it exactly when skipping it
+/// would deploy without the promised backup, and then refuses by name.
+#[test]
+fn redesign_stacks_6_backup_first_is_on_the_wire_only_when_asked_for() {
+    let mut s = spec(110, "syncthing");
+    let off = serde_json::to_value(&s).unwrap();
+    assert!(off.get("backup_first").is_none(), "{off}");
+    s.backup_first = true;
+    let on = serde_json::to_value(&s).unwrap();
+    assert_eq!(on.get("backup_first"), Some(&serde_json::Value::Bool(true)));
+    let back: DeploySpec = serde_json::from_value(on).unwrap();
+    assert!(back.backup_first);
 }

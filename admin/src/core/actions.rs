@@ -586,6 +586,13 @@ pub struct ActionArgs {
     /// `ActionKind::ChangeSecret`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage_token: Option<String>,
+    /// redesign-stacks-6: back the stack up before the deploy changes it
+    /// (`DeploySpec::backup_first`). Never read from a request body: the
+    /// server sets it for every deploy of a batch (`validate_batch`), the
+    /// one place the page promises "each backed up first"; Apply derives
+    /// it from `skip_backup` instead.
+    #[serde(skip)]
+    pub backup_first: bool,
 }
 
 impl ActionArgs {
@@ -1062,7 +1069,9 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
             if spec.manifest.stack_name != req.stack {
                 return Err(name_mismatch(req, &spec.manifest.stack_name));
             }
-            deploy_commands(*spec)
+            let mut spec = *spec;
+            spec.backup_first = a.backup_first;
+            deploy_commands(spec)
         }
         (Backup, Material::Manifest(m)) => vec![Command::BackupStack(manifest(&m)?)],
         (RestoreNative, Material::Native(m)) => {
@@ -1207,7 +1216,10 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
         }
         (Apply, Material::Apply { deploy, destroy }) => {
             let mut out = Vec::new();
-            for spec in deploy {
+            for mut spec in deploy {
+                // redesign-stacks-6: "each stack is backed up first", the
+                // same opt-out as the destroys below.
+                spec.backup_first = !a.skip_backup;
                 out.extend(deploy_commands(spec));
             }
             for name in destroy {
@@ -1339,7 +1351,13 @@ pub fn validate_batch(b: BatchRequest) -> Result<Vec<ActionRequest>, Refusal> {
         if let Some(c) = b.confirms.get(stack) {
             args.confirm = Some(c.clone());
         }
-        out.push(validate(stack, &b.action, args)?);
+        let mut req = validate(stack, &b.action, args)?;
+        // redesign-stacks-6: the batch Deploy promises each stack is backed
+        // up before it changes; the server keeps that promise, not the page.
+        if req.action == ActionKind::Deploy {
+            req.args.backup_first = true;
+        }
+        out.push(req);
     }
     if out.iter().any(|r| r.action.host_wide()) {
         return Err(Refusal::new(

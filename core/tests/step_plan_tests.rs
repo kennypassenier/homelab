@@ -27,6 +27,7 @@ fn manifest(vmid: u16, stack: &str, apps: &[&str]) -> StackManifest {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        no_apps_yet: false,
         on_demand: false,
         syslog_receivers: vec![],
         firewall: None,
@@ -76,6 +77,7 @@ fn manifest(vmid: u16, stack: &str, apps: &[&str]) -> StackManifest {
 fn spec(vmid: u16, stack: &str, apps: &[&str]) -> DeploySpec {
     DeploySpec {
         secret_files: Vec::new(),
+        backup_first: false,
         client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),
@@ -518,4 +520,177 @@ async fn restart_host_announces_its_one_step_plan() {
         })
         .expect("a plan was announced");
     assert_eq!(m, 1);
+}
+
+// ── redesign-stacks-6: a backup before the deploy changes anything ─────────
+
+/// An existing container with its data on the host: what a backup reads.
+fn script_existing(exec: &MockExecutor) {
+    exec.respond_always("qm status", CmdOutput::failed(2, "does not exist"));
+    exec.respond_always("pct config", CmdOutput::ok("hostname: 110-app-syncthing\n"));
+    exec.respond_always("pct status", CmdOutput::ok("status: running"));
+    exec.respond_always("test -d", CmdOutput::ok("yes\n"));
+    exec.respond_always("du -sbc", CmdOutput::ok("1000\n50000000000\n"));
+    exec.respond_always("is-system-running", CmdOutput::ok("running"));
+    exec.respond_always(
+        "ps --status running --services",
+        CmdOutput::ok("syncthing\n"),
+    );
+    exec.respond_always("git -C /var/lib/homelab/repo commit", CmdOutput::ok(""));
+}
+
+/// The step marks in the order they happened.
+fn marks_in_order(events: &[PipelineEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            PipelineEvent::StepStarted { step, .. } | PipelineEvent::StepSkipped { step, .. } => {
+                Some(step.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The Stacks page says "each stack is backed up first" for Deploy all
+/// changes and the batch Deploy: the backup is part of the deploy's one
+/// plan, right after the read-only gates, it runs (tagged as taken before a
+/// deploy) and it comes before the first step that changes anything.
+#[tokio::test]
+async fn redesign_stacks_6_a_deploy_asked_to_back_up_first_backs_up_before_it_changes_anything() {
+    let exec = MockExecutor::new();
+    script_existing(&exec);
+    exec.respond_always("restic backup", CmdOutput::ok(""));
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut s = spec(110, "syncthing", &["syncthing"]);
+    s.backup_first = true;
+    let _ = run_deploy(&ctx(&exec, &sink, &journal), &s).await;
+    let events = sink.events();
+
+    let plan = plan_of(&events);
+    let backup_names = homelab_core::ops::backup::backup_plan_names("syncthing");
+    let gates = plan.iter().position(|n| n == "safety gates").unwrap();
+    assert_eq!(
+        plan[gates + 1..gates + 1 + backup_names.len()].to_vec(),
+        backup_names,
+        "the backup's steps follow the safety gates in the announced plan"
+    );
+    assert_eq!(plan, deploy::plan_names(&s));
+    assert_eq!(plan.len(), deploy::STEPS.len() + backup_names.len());
+
+    let snaps = exec.calls_containing("restic backup");
+    assert!(
+        !snaps.is_empty() && snaps.iter().all(|c| c.contains("--tag trigger:pre-deploy")),
+        "the backup ran, tagged as taken before a deploy: {snaps:?}"
+    );
+    let marks = marks_in_order(&events);
+    let snapshot = marks
+        .iter()
+        .position(|n| n == "backup-syncthing :: snapshot")
+        .expect("the snapshot step was marked");
+    let first_change = marks
+        .iter()
+        .position(|n| n == "registry cache")
+        .expect("the deploy went on after the backup");
+    assert!(
+        snapshot < first_change,
+        "the backup comes before the first changing step: {marks:?}"
+    );
+}
+
+/// A backup that fails changes nothing: the deploy stops right there with
+/// a refusal that says why, and no step after the backup runs.
+#[tokio::test]
+async fn redesign_stacks_6_a_failed_backup_stops_the_deploy_before_anything_changes() {
+    let exec = MockExecutor::new();
+    script_existing(&exec);
+    exec.respond_always(
+        "restic backup",
+        CmdOutput::failed(1, "repository is locked"),
+    );
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut s = spec(110, "syncthing", &["syncthing"]);
+    s.backup_first = true;
+    let report = run_deploy(&ctx(&exec, &sink, &journal), &s).await;
+    assert!(!report.ok, "a failed backup must stop the deploy");
+    let why = report.error.unwrap().why;
+    assert!(
+        why.contains("refusing to deploy 'syncthing': the backup taken first did not succeed"),
+        "{why}"
+    );
+    let marks = marks_in_order(&sink.events());
+    for after in [
+        "registry cache",
+        "host storage",
+        "provision container",
+        "push files",
+    ] {
+        assert!(
+            !marks.iter().any(|n| n == after),
+            "{after} ran after a failed backup: {marks:?}"
+        );
+    }
+    for changing in ["pct create", "pct set", "pct push", "pct start"] {
+        assert!(
+            exec.calls_containing(changing).is_empty(),
+            "{changing} ran after a failed backup"
+        );
+    }
+}
+
+/// A stack that does not exist yet has nothing to back up: the backup's
+/// names are skip-marked (still one mark each), and a deploy not asked to
+/// back up plans exactly as before.
+#[tokio::test]
+async fn redesign_stacks_6_a_new_stack_skips_the_backup_and_a_plain_deploy_plans_as_before() {
+    let exec = MockExecutor::new();
+    script_fresh(&exec);
+    let sink = VecSink::new();
+    let journal = NullJournal;
+    let mut s = spec(110, "syncthing", &["syncthing"]);
+    s.backup_first = true;
+    let _ = run_deploy(&ctx(&exec, &sink, &journal), &s).await;
+    let events = sink.events();
+    let skipped: std::collections::BTreeSet<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            PipelineEvent::StepSkipped { step, .. } => Some(step.clone()),
+            _ => None,
+        })
+        .collect();
+    for n in homelab_core::ops::backup::backup_plan_names("syncthing") {
+        assert!(skipped.contains(&n), "{n} was not skip-marked");
+    }
+    assert!(exec.calls_containing("restic backup").is_empty());
+
+    let plain = spec(110, "syncthing", &["syncthing"]);
+    assert_eq!(
+        deploy::plan_names(&plain),
+        deploy::STEPS
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// redesign-stacks-8: an empty stack says its apps come later
+/// (`no_apps_yet`), the way `native_only` says it runs no docker; the
+/// marker with apps declared, or beside `native_only`, is refused.
+#[test]
+fn redesign_stacks_8_an_empty_stack_is_valid_only_when_it_says_its_apps_come_later() {
+    use homelab_core::manifest::validate_manifest;
+    let mut m = manifest(150, "blank", &["x"]);
+    m.apps.clear();
+    m.storage.clear();
+    assert!(validate_manifest(&m).is_err(), "an unexplained empty list");
+    m.no_apps_yet = true;
+    validate_manifest(&m).expect("an empty stack that says so");
+    m.apps = vec!["web".into()];
+    let e = validate_manifest(&m).unwrap_err().to_string();
+    assert!(
+        e.contains("no_apps_yet is set but the stack declares apps"),
+        "{e}"
+    );
 }

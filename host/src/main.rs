@@ -5399,6 +5399,7 @@ span_days = 7\n";
                 retention: None,
                 data_mounts: Vec::new(),
                 native_only: false,
+                no_apps_yet: false,
                 on_demand: false,
                 syslog_receivers: vec![],
                 firewall: None,

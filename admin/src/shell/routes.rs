@@ -43,6 +43,12 @@ async fn fleet(State(c): State<Ctx>) -> Json<serde_json::Value> {
     }))
 }
 
+/// redesign-stacks: the last day of the fleet, one point per five minutes
+/// (`core::trend`), for the Stacks page's sparklines.
+async fn fleet_trend(State(c): State<Ctx>) -> Json<serde_json::Value> {
+    Json(c.shared.read().await.trend.view())
+}
+
 fn failed(what: &str, why: String) -> Response {
     (
         StatusCode::BAD_GATEWAY,
@@ -163,6 +169,7 @@ pub fn router(
 ) -> Router {
     Router::new()
         .route("/data/fleet", get(fleet))
+        .route("/data/fleet-trend", get(fleet_trend))
         .route("/data/doctor", get(doctor))
         .route("/data/incidents", get(incidents))
         .route("/data/manual-checks", get(manual_checks))

@@ -16,7 +16,8 @@ use super::actions::valid_stack_name;
 pub struct NewStack {
     pub name: String,
     pub vmid: u16,
-    /// A preset directory under `presets/` (`custom` for an empty stack).
+    /// A preset directory under `presets/`, or [`EMPTY_PRESET`] for a
+    /// stack with no apps (New stack's "Empty" route).
     pub preset: String,
     pub ram_mb: u32,
     pub cores: u16,
@@ -69,6 +70,12 @@ impl NewStackTile {
     }
 }
 
+/// redesign-stacks-8: the preset name New stack's "Empty" route sends: no
+/// preset at all, so the client's scaffold writes a stack with no apps
+/// (`scaffold_stack` with `preset: None`), whether or not the repository
+/// carries a `custom` preset.
+pub const EMPTY_PRESET: &str = "";
+
 /// What is taken already: names and vmids from the host's fleet and the
 /// working copy's stack directories, and every address a stack file uses.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -101,7 +108,7 @@ pub fn suggest_vmid(taken: &Taken) -> Option<u16> {
 pub fn problems(req: &NewStack, taken: &Taken, presets: &[String]) -> Vec<(String, String)> {
     let mut out = identity_problems(&req.name, req.vmid, taken);
     let mut say = |field: &str, why: String| out.push((field.to_string(), why));
-    if !presets.contains(&req.preset) {
+    if req.preset != EMPTY_PRESET && !presets.contains(&req.preset) {
         say(
             "preset",
             format!("there is no preset called {}", req.preset),

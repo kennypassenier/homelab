@@ -18,6 +18,7 @@ fn manifest(vmid: u16, stack: &str) -> StackManifest {
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        no_apps_yet: false,
         on_demand: false,
         syslog_receivers: vec![],
         firewall: None,
@@ -1236,6 +1237,7 @@ fn b4_intent_hash_changes_with_any_file_edit() {
     use homelab_core::manifest::{DeploySpec, FileBlob, intent_hash};
     let base = DeploySpec {
         secret_files: Vec::new(),
+        backup_first: false,
         client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),
@@ -1271,6 +1273,7 @@ fn fix_192_component_digests_isolate_what_changed() {
     use homelab_core::manifest::{DeploySpec, FileBlob, component_digests};
     let base = DeploySpec {
         secret_files: Vec::new(),
+        backup_first: false,
         client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),
@@ -1353,6 +1356,7 @@ async fn h4_gpu_and_vpn_flags_produce_device_config() {
     m.lxc.vpn = true;
     let spec = DeploySpec {
         secret_files: Vec::new(),
+        backup_first: false,
         client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),
@@ -1403,6 +1407,7 @@ async fn h4_no_flags_no_device_config() {
     );
     let spec = DeploySpec {
         secret_files: Vec::new(),
+        backup_first: false,
         client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),
@@ -1556,6 +1561,7 @@ async fn b8_clone_template_provisions_via_pct_clone() {
     m.resources.disk_gb = 8;
     let spec = DeploySpec {
         secret_files: Vec::new(),
+        backup_first: false,
         client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),
@@ -1693,6 +1699,7 @@ fn v8_validate_rejects_undeclared_appdata_bind() {
     m.storage.clear(); // nothing declared
     let spec = DeploySpec {
         secret_files: Vec::new(),
+        backup_first: false,
         client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),
@@ -1833,6 +1840,7 @@ fn deploy_mocks(exec: &MockExecutor) {
 fn deploy_spec(m: StackManifest) -> homelab_core::manifest::DeploySpec {
     homelab_core::manifest::DeploySpec {
         secret_files: Vec::new(),
+        backup_first: false,
         client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         source: None,
         native_binaries: Default::default(),
@@ -3248,6 +3256,7 @@ async fn protection_is_set_after_all_drive_changes() {
         m.resources.disk_gb = 8;
         let spec = DeploySpec {
             secret_files: Vec::new(),
+            backup_first: false,
             client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
             source: None,
             native_binaries: Default::default(),

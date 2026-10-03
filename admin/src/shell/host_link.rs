@@ -55,6 +55,9 @@ pub struct Snapshot {
     /// configured (the TUI's ping shows the same).
     pub host_addr: Option<String>,
     pub host_addr_source: Option<String>,
+    /// redesign-stacks: the last day of fleet snapshots, for the Stacks
+    /// page's sparklines (`/data/fleet-trend`).
+    pub trend: crate::core::trend::Trend,
 }
 
 pub type Shared = Arc<RwLock<Snapshot>>;
@@ -336,6 +339,7 @@ async fn session_loop(
                         };
                         {
                             let mut s = shared.write().await;
+                            s.trend.record(&view, now_s());
                             s.fleet = Some(view.clone());
                             s.home_address = state.host.home_address.clone();
                         }

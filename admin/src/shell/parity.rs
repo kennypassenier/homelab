@@ -25,7 +25,7 @@ use super::actions::{Actions, HostPort, LocalStacks, StackFiles};
 use super::host_link::{Shared, now_s};
 use super::slow::{RunQuery, SlowRead, WAIT};
 use crate::core::actions::{Refusal, valid_stack_name};
-use crate::core::drift::drift_state;
+use crate::core::drift::drift_answer;
 
 /// How long a drift reading is reused (it runs latch once per stack).
 pub const DRIFT_REUSE_S: u64 = 300;
@@ -750,24 +750,30 @@ async fn drift(State(c): State<ParityCtx>, Query(q): Query<Fresh>) -> Response {
             ),
         );
     };
-    let stacks: serde_json::Map<String, serde_json::Value> = fleet
+    let host: Vec<(String, String)> = fleet
         .stacks
         .iter()
-        .map(|st| {
-            let local_hash = local
-                .hashes
-                .iter()
-                .find(|(n, _)| *n == st.name)
-                .map(|(_, h)| h);
-            let state = drift_state(&st.applied_hash, local_hash);
-            let why = local_hash.and_then(|h| h.as_ref().err()).cloned();
+        .map(|st| (st.name.clone(), st.applied_hash.clone()))
+        .collect();
+    drop(s);
+    // redesign-stacks-7: the same plan Deploy all changes reads, so the
+    // count on its button and the list's flags agree with it.
+    let a = drift_answer(&host, &local.hashes, &local.dirs, &local.ephemeral);
+    let stacks: serde_json::Map<String, serde_json::Value> = a
+        .stacks
+        .iter()
+        .map(|(name, (state, why))| {
             (
-                st.name.clone(),
+                name.clone(),
                 serde_json::json!({ "state": state, "label": state.label(), "why": why }),
             )
         })
         .collect();
-    Json(serde_json::json!({ "stacks": stacks, "measured_at": at })).into_response()
+    let counts = serde_json::json!({
+        "deploy": a.deploy, "new": a.new, "destroy": a.destroy, "broken": a.broken,
+    });
+    Json(serde_json::json!({ "stacks": stacks, "counts": counts, "measured_at": at }))
+        .into_response()
 }
 
 /// dash-apply: the plan against the host (no programs are downloaded; the

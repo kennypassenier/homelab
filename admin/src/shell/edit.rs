@@ -1189,7 +1189,11 @@ fn prepare_new(wc: &WorkingCopy, req: &NewStack, taken: &Taken) -> Result<Planne
         old: None,
         head: wc.status().head.map(|h| h.commit),
         sync_error,
-        summary: format!("new stack from the {} preset (CT {})", req.preset, req.vmid),
+        summary: if req.preset == newstack::EMPTY_PRESET {
+            format!("new empty stack (CT {})", req.vmid)
+        } else {
+            format!("new stack from the {} preset (CT {})", req.preset, req.vmid)
+        },
     })
 }
 

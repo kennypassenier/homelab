@@ -485,6 +485,7 @@ fn boot_manifest(vmid: u16, onboot: bool, order: u16, mem: u32, cores: u16) -> S
         retention: None,
         data_mounts: Vec::new(),
         native_only: false,
+        no_apps_yet: false,
         on_demand: false,
         syslog_receivers: vec![],
         firewall: None,

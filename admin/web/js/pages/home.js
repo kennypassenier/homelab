@@ -1,22 +1,32 @@
-// The Apps page (replace-homepage, Kenny 2026-09-30, renamed from Start;
-// nav-decisions, Kenny 2026-10-01: renamed again from Home to Apps and
-// moved to the root `/`, Overview's old address):
-// one tile per service, grouped, each opening its app in a new tab, with
-// the line its stack file's reading prints. Everything on a tile is
-// declared in the stack that owns the route (`tiles:` in lxc-compose.yml);
-// nothing here knows an app.
+// The Apps page (redesign-stacks, release 3.71.0; Kenny approved the demo
+// 2026-10-03: ~/.local/share/homelab/redesign-3.71/apps.html). Home when
+// the Inbox is empty (`/` sends there; main.js `landing`). Every app the
+// fleet runs, one click away: a header with the watch's own freshness, a
+// one-line verdict, the launch search (type, Enter opens the first match
+// in a new tab), then the tiles grouped as the stacks declare them, the
+// starred ones on top, and a legend of the dots.
 //
-// Below the tiles: a health strip (decision replace-homepage-2), shown only
-// when something needs Kenny — Today's own items (doctor, the fleet check
-// and the manual checks, whichever this tab has already read: `keptRead`,
-// never a fresh 90 s read just to paint a strip) and a tile or container
-// `/data/watch` reports down. Collapsed it is one line; it expands in place
-// to the list and links on to the Health page.
+// Everything on a tile is declared in the stack that owns the route
+// (`tiles:` in lxc-compose.yml); nothing here knows an app. The dot is the
+// minute watch (`/data/watch`): the tile's own probe, or its stack's
+// container when the tile has none. Stars are this browser's own (a
+// per-viewer convenience, never shared state).
 
-import { h, fetchJson } from "../dom.js";
+import { fetchJson, h } from "../dom.js";
 import { formatDateTime } from "../format.js";
-import { todayView } from "../parity.js";
-import { keptRead } from "../slowread.js";
+import { declare, drivable } from "../drivable.js";
+import { agoEl, setAgo } from "../ago.js";
+import {
+  appsVerdict,
+  board,
+  filterTiles,
+  hueOf,
+  initials,
+  markParts,
+  readStars,
+  tileState,
+} from "../appsview.js";
+import { art, emptyState, ensureStyle, keyRow, pageHeader } from "../ui.js";
 
 /**
  * @typedef {{stack: string, host: string, url: string, name: string,
@@ -40,241 +50,484 @@ export function grouped(tiles) {
   return out;
 }
 
-/**
- * @typedef {{key: string, failing_since: number | null, down: boolean,
- *   state: "up" | "flaky" | "down" | "deploying", why: string | null}} Watch
- */
+// Live view (invariant 39; coordinator rule 2026-10-03: every clickable
+// element carries a declared, stable id): the tiles, their stars, the
+// search, the Stacks link and the empty search's reset.
+const OPEN = declare({
+  id: "apps-open",
+  page: "home",
+  opens: "run",
+  row: "<tile host>",
+  what: "open one app in a new tab",
+});
+const SEARCH = declare({
+  id: "apps-search",
+  page: "home",
+  opens: "view",
+  what: "the launch search: type an app's name, Enter opens the first match",
+});
+const STACKS = declare({
+  id: "apps-stacks",
+  page: "home",
+  opens: "view",
+  what: "the header's Stacks: every stack with its state and actions",
+});
+const RETRY = declare({
+  id: "apps-retry",
+  page: "home",
+  opens: "view",
+  what: "read the apps again after a failed read",
+});
+const STAR = declare({
+  id: "apps-star",
+  page: "home",
+  opens: "view",
+  row: "<tile host>",
+  what: "star or unstar one app, keeping it at the top under Starred",
+});
+const SHOW_ALL = declare({
+  id: "apps-show-all",
+  page: "home",
+  opens: "view",
+  what: "clear the app search and show every app again",
+});
 
-/**
- * The dot beside a tile's name: what the minute watch (replace-kuma) says.
- * Decision "deploys are known outages" (Kenny, 2026-09-30): a stack known
- * to be deploying gets its own dot, never the down (red) one — it is an
- * expected outage, not a fault.
- * @param {Watch | undefined} w
- */
-function dot(w) {
-  if (!w) return h("span", { class: "start-dot", title: "not watched yet" });
-  if (w.state === "deploying")
-    return h("span", {
-      class: "start-dot start-dot--deploying",
-      title: "deploying",
-    });
-  if (w.down)
-    return h("span", {
-      class: "start-dot start-dot--down",
-      title: `no answer since ${formatDateTime(w.failing_since ?? 0)}: ${w.why ?? ""}`,
-    });
-  if (w.failing_since != null)
-    return h("span", {
-      class: "start-dot start-dot--flaky",
-      title: `failing since ${formatDateTime(w.failing_since)}: ${w.why ?? ""}`,
-    });
-  return h("span", { class: "start-dot start-dot--up", title: "answers" });
-}
+/** Where this browser keeps its starred tiles. */
+const STARS_KEY = "homelab.apps.starred";
 
-/**
- * @param {Tile} t
- * @param {Map<string, Watch>} watch
- */
-function tileEl(t, watch) {
-  /** @type {(string | Node)[]} */
-  const parts = [
-    h(
-      "span",
-      { class: "start-tile__name" },
-      dot(watch.get(`tile:${t.host}`)),
-      t.name,
-    ),
-  ];
-  if (t.description)
-    parts.push(h("span", { class: "start-tile__desc" }, t.description));
-  for (const l of t.lines)
-    parts.push(h("span", { class: "start-tile__line" }, l));
-  if (t.error)
-    parts.push(
-      h(
-        "span",
-        { class: "start-tile__error", title: t.error },
-        "reading failed",
-      ),
-    );
-  // Kenny, 2026-09-30: a tile opens the app in its own tab — the dashboard
-  // stays open behind it.
-  return h(
-    "a",
-    { class: "start-tile", href: t.url, target: "_blank", rel: "noopener" },
-    ...parts,
-  );
-}
-
-/**
- * One health-strip problem: what it is, and when it started when known.
- * @typedef {{text: string, since: number | null}} Problem
- */
-
-/**
- * The down watch targets, as problems (the tiles already on screen show
- * their own dot; this is what makes them worth a strip).
- * @param {Watch[]} targets
- * @returns {Problem[]}
- */
-function watchProblems(targets) {
-  return targets
-    .filter((w) => w.down)
-    .map((w) => ({
-      text: `${w.key.replace(/^tile:/, "")} does not answer${w.why ? `: ${w.why}` : ""}`,
-      since: w.failing_since,
-    }));
-}
-
-/**
- * The health strip: collapsed, one line with the count and the oldest
- * problem; expanded, every problem, each linking on to Health.
- * @param {Problem[]} problems
- */
-function healthStrip(problems) {
-  if (!problems.length) return null;
-  const sorted = [...problems].sort(
-    (a, b) => (a.since ?? Infinity) - (b.since ?? Infinity),
-  );
-  const first = sorted[0];
-  const glyph = h("span", { class: "health-strip__glyph" }, "▸");
-  const summary = h(
-    "button",
-    { type: "button", class: "health-strip__toggle", "aria-expanded": "false" },
-    glyph,
-    ` ${problems.length} problem${problems.length === 1 ? "" : "s"}: `,
-    first.since != null ? `${formatDateTime(first.since)} ` : "",
-    first.text,
-  );
-  const list = h(
-    "ul",
-    { class: "health-strip__list", hidden: "" },
-    ...sorted.map((p) =>
-      h(
-        "li",
-        null,
-        p.since != null ? `${formatDateTime(p.since)} ` : "",
-        p.text,
-      ),
-    ),
-    h("li", null, h("a", { href: "/inbox" }, "Open the Inbox")),
-  );
-  summary.addEventListener("click", () => {
-    const open = summary.getAttribute("aria-expanded") === "true";
-    summary.setAttribute("aria-expanded", String(!open));
-    glyph.textContent = open ? "▸" : "▾";
-    list.hidden = open;
-  });
-  // The same `kp-alert` every other warning on the dashboard uses (Today's
-  // verdict, the restart notice), not a one-off tinted box of its own
-  // (Kenny, 2026-10-02).
-  return h(
-    "div",
-    { class: "health-strip kp-alert kp-alert--warning", role: "status" },
-    h("div", { class: "kp-alert__body" }, summary, list),
-  );
-}
+/** How often the dots are read again (the watch runs every minute). */
+const EVERY_MS = 60_000;
 
 /**
  * @param {HTMLElement} root
  * @returns {() => void}
  */
 export function mount(root) {
-  const status = h(
-    "p",
-    { class: "measured", role: "status" },
-    "Reading the tiles…",
-  );
-  const body = h("div", { class: "start" });
-  const strip = h("div", { class: "health-strip-slot" });
-  // Kenny, 2026-10-01: the dots need a legend, as a section of its own
-  // (never under each tile): a kp card after the tiles, kp swatches in the
-  // dots' own colours.
-  const legend = h(
-    "section",
-    { class: "kp-card start-legend", "aria-labelledby": "start-legend-h" },
-    h("h2", { id: "start-legend-h", class: "start-legend__title" }, "Legend"),
-    h(
-      "ul",
-      { class: "start-legend__list" },
-      ...[
-        ["up", "Answers"],
-        ["flaky", "Failing, not yet down"],
-        ["down", "Down"],
-        ["deploying", "Deploying (no alarm)"],
-        ["", "Not watched"],
-      ].map(([k, words]) =>
-        h(
-          "li",
-          { class: "start-legend__item" },
-          h("span", {
-            class: `kp-swatch start-dot${k ? ` start-dot--${k}` : ""}`,
-            "aria-hidden": "true",
-          }),
-          words,
-        ),
-      ),
-    ),
-  );
-  root.replaceChildren(
-    h("h1", null, "Apps"),
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      "Every app the fleet runs, as tiles — the fastest way to open one.",
-    ),
-    status,
-    body,
-    strip,
-    legend,
-  );
+  ensureStyle("/css/pages/stacks.css");
+  root.classList.add("ap-page");
   const abort = new AbortController();
-  (async () => {
-    const [r, w] = await Promise.all([
-      fetchJson("/data/tiles", "the start page", abort.signal),
-      fetchJson("/data/watch", "the watch", abort.signal),
-    ]);
-    /** @type {Watch[]} */
-    const targets = w.ok ? (w.body.targets ?? []) : [];
-    /** @type {Map<string, Watch>} */
-    const watch = new Map(targets.map((x) => [x.key, x]));
-    if (!r.ok) {
-      status.textContent = `${r.error.what}: ${r.error.why}`;
-      return;
+  /** @type {Tile[] | null} */
+  let tiles = null;
+  /** @type {Map<string, import("../appsview.js").Watch>} */
+  let watch = new Map();
+  /** @type {string | null} why the tiles could not be read */
+  let failed = null;
+  let q = new URLSearchParams(location.search).get("q") ?? "";
+  /** @type {Set<string>} */
+  let stars = new Set();
+  try {
+    stars = readStars(localStorage.getItem(STARS_KEY));
+  } catch {
+    // a private window: no stars kept, every tile in its own group
+  }
+  const saveStars = () => {
+    try {
+      localStorage.setItem(STARS_KEY, JSON.stringify([...stars]));
+    } catch {
+      // the stars last as long as this page
     }
-    /** @type {Tile[]} */
-    const tiles = r.body.report?.tiles ?? [];
-    status.textContent = tiles.length
-      ? ""
-      : "No stack declares a tile yet: add `tiles:` to a stack file and deploy it.";
+  };
+
+  const stacksLink = drivable(
+    h(
+      "a",
+      {
+        class: "kp-button",
+        href: "/stacks",
+        title: "Every stack with its state and actions",
+      },
+      "Stacks",
+    ),
+    STACKS,
+  );
+  const watched = h(
+    "span",
+    {
+      class: "nx-live",
+      title: "The dashboard asks every app once a minute whether it answers",
+    },
+    "watched every minute",
+  );
+  const head = pageHeader({
+    title: "Apps",
+    desc: "Every app the fleet runs, one click away. Type to find one, Enter opens it in a new tab; star the ones you use most.",
+    actions: [stacksLink],
+  });
+  // As the demo: the live status beside the title, the link on the right.
+  head.title.after(watched);
+  head.el.classList.add("sk-head");
+  const verdictDot = h("span", { class: "sk-dot" });
+  const verdictText = h("strong", null, "Reading the apps…");
+  const verdictAgo = agoEl("checked");
+  const verdict = h(
+    "p",
+    { class: "ap-verdict", role: "status" },
+    verdictDot,
+    verdictText,
+    h("span", null, " · "),
+    verdictAgo,
+  );
+  const search = /** @type {HTMLInputElement} */ (
+    h("input", {
+      type: "search",
+      class: "kp-field__input nx-search ap-search",
+      placeholder: matchMedia("(max-width: 30rem)").matches
+        ? "Open an app…"
+        : "Open an app… type its name, Enter opens it",
+      "aria-label": "Find an app",
+      "aria-keyshortcuts": "/",
+    })
+  );
+  search.value = q;
+  drivable(search, SEARCH);
+  const launch = h(
+    "div",
+    { class: "ap-launch" },
+    search,
+    keyRow([
+      [["/"], "find"],
+      [["Enter"], "open"],
+      [["←", "→", "↑", "↓"], "move"],
+      [["s"], "star"],
+    ]),
+  );
+  const body = h("div", { class: "ap-board", "aria-label": "Apps" });
+  const legend = h(
+    "p",
+    { class: "ap-legend", "aria-label": "What the dots mean" },
+    ...[
+      ["ok", "answers"],
+      ["warn", "failing, not yet down"],
+      ["bad", "down"],
+      ["info", "deploying"],
+      ["", "not watched"],
+    ].map(([tone, words]) =>
+      h("span", { class: `sk-dot${tone ? ` sk-dot--${tone}` : ""}` }, words),
+    ),
+  );
+  root.replaceChildren(head.el, verdict, launch, body, legend);
+
+  /** @param {string} text */
+  const marked = (text) =>
+    markParts(text, q).map((p) => (p.hit ? h("mark", null, p.text) : p.text));
+
+  /** @param {Tile} t */
+  const star = (t) => {
+    if (stars.has(t.host)) stars.delete(t.host);
+    else stars.add(t.host);
+    saveStars();
+    paint();
+    /** @type {HTMLElement | null} */ (
+      body.querySelector(`.ap-tile[data-host="${CSS.escape(t.host)}"]`)
+    )?.focus();
+  };
+
+  /**
+   * @param {Tile} t
+   * @param {boolean} first
+   */
+  const tileEl = (t, first) => {
+    const st = tileState(watch, t);
+    const pinned = stars.has(t.host);
+    const pin = drivable(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "ap-tile__pin",
+          "aria-pressed": String(pinned),
+          "aria-label": pinned ? `Unstar ${t.name}` : `Star ${t.name}`,
+          title: pinned
+            ? "Remove from Starred (s)"
+            : "Keep at the top under Starred (s)",
+        },
+        pinned ? "★" : "☆",
+      ),
+      STAR,
+      t.host,
+    );
+    pin.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      star(t);
+    });
+    const why =
+      st.via === "stack"
+        ? `its stack ${t.stack} ${st.state === "up" ? "runs" : `is ${st.word}`} (the tile has no probe of its own)`
+        : st.word;
+    const a = h(
+      "a",
+      {
+        class: `ap-tile${first ? " is-first" : ""}`,
+        href: t.url,
+        target: "_blank",
+        rel: "noopener",
+        "data-host": t.host,
+        title: `Open ${t.name} in a new tab\n${t.host} · ${why}${st.checkedAt ? ` · checked ${formatDateTime(st.checkedAt)}` : ""}\nstack ${t.stack}`,
+      },
+      h(
+        "span",
+        { class: "ap-tile__icon", "aria-hidden": "true" },
+        initials(t.name),
+      ),
+      h(
+        "span",
+        { class: "ap-tile__name" },
+        h("span", {
+          class: `sk-dot${st.tone ? ` sk-dot--${st.tone}` : ""}`,
+          role: "img",
+          "aria-label": st.word,
+        }),
+        h("span", null, ...marked(t.name)),
+      ),
+      pin,
+      h("span", { class: "ap-tile__desc" }, ...marked(t.description || t.host)),
+      h("span", { class: "ap-tile__go", "aria-hidden": "true" }, "↗"),
+      ...(t.lines.length || t.error
+        ? [
+            h(
+              "span",
+              { class: "ap-tile__lines" },
+              t.error ? "reading failed" : t.lines.join(" · "),
+            ),
+          ]
+        : []),
+    );
+    a.style.setProperty("--c", `var(--chart-${hueOf(t.name)})`);
+    drivable(a, OPEN, t.host);
+    a.addEventListener("keydown", (e) => {
+      if (e.key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        star(t);
+      }
+    });
+    return a;
+  };
+
+  // Loading: the grouped board the page fills in (22rem columns, a label
+  // per group), so nothing moves when the tiles arrive (rule 6).
+  const paintLoading = () => {
     body.replaceChildren(
-      ...grouped(tiles).map((g) =>
+      ...[3, 2, 2].map((n, i) =>
         h(
           "section",
-          { class: "start-group" },
-          h("h2", null, g.group),
+          {
+            class: "ap-grp ap-grp--skeleton",
+            "aria-label": "Reading the apps",
+            role: "status",
+            "data-kp-state": "loading",
+            ...(i === 0 ? {} : { "aria-hidden": "true" }),
+          },
+          h("h2", null, h("span", { class: "kp-skeleton" })),
           h(
             "div",
-            { class: "start-grid" },
-            ...g.tiles.map((t) => tileEl(t, watch)),
+            { class: "ap-tiles" },
+            ...Array.from({ length: n }, () =>
+              h(
+                "div",
+                { class: "ap-tile ap-tile--skeleton" },
+                h("span", { class: "kp-skeleton" }),
+                h("span", { class: "kp-skeleton" }),
+                h("span", { class: "kp-skeleton" }),
+              ),
+            ),
           ),
         ),
       ),
     );
-    // The strip is built from what this tab already knows: Today's own
-    // items (a kept reading, never a fresh 90 s one just for the strip)
-    // and the watch this same load already read.
-    const kept = keptRead("/data/today");
-    const todayProblems = kept
-      ? todayView(kept).items.map((i) => ({
-          text: `${i.source}: ${i.what}`,
-          since: null,
-        }))
-      : [];
-    const problems = [...todayProblems, ...watchProblems(targets)];
-    const el = healthStrip(problems);
-    strip.replaceChildren(...(el ? [el] : []));
+  };
+
+  const paint = () => {
+    if (failed != null) {
+      body.replaceChildren(
+        h(
+          "div",
+          {
+            class: "kp-alert kp-alert--destructive ap-grp--wide",
+            role: "alert",
+          },
+          h("strong", null, "The apps could not be read"),
+          h(
+            "span",
+            null,
+            ` ${failed}. They come back by themselves once the host answers; or `,
+          ),
+          drivable(h("a", { href: "/apps" }, "try again now"), RETRY),
+          ".",
+        ),
+      );
+      return;
+    }
+    if (tiles == null) {
+      paintLoading();
+      return;
+    }
+    const v = appsVerdict(tiles, watch);
+    verdictDot.className = `sk-dot${v.tone ? ` sk-dot--${v.tone}` : ""}`;
+    verdictText.textContent = tiles.length ? v.text : "No apps yet";
+    setAgo(verdictAgo, v.checkedAt);
+    if (!tiles.length) {
+      body.replaceChildren(
+        h(
+          "section",
+          { class: "kp-card nx-card ap-grp--wide ap-empty" },
+          emptyState({
+            art: art.noTiles(),
+            title: "No app has a tile yet",
+            text: "A tile comes from the stack that owns the app's address: add tiles: to its lxc-compose.yml and deploy it.",
+            action: h(
+              "pre",
+              { class: "ap-example sk-mono" },
+              "tiles:\n  jellyfin.example.dev:\n    name: Jellyfin\n    group: Media\n    description: Films and series",
+            ),
+          }),
+        ),
+      );
+      return;
+    }
+    const groups = board(tiles, stars, q);
+    let first = q.trim() !== "";
+    const shown = filterTiles(tiles, q);
+    const sections = groups.map((g) =>
+      h(
+        "section",
+        {
+          class: `ap-grp${g.wide ? " ap-grp--wide" : ""}`,
+          "aria-label": g.group,
+        },
+        h(
+          "h2",
+          null,
+          g.group,
+          h("span", { class: "sk-chip" }, String(g.tiles.length)),
+        ),
+        h(
+          "div",
+          { class: "ap-tiles" },
+          ...g.tiles.map((t) => {
+            const el = tileEl(t, first);
+            first = false;
+            return el;
+          }),
+        ),
+      ),
+    );
+    if (!shown.length) {
+      const all = drivable(
+        h(
+          "button",
+          {
+            type: "button",
+            class: "kp-button",
+            title: "Clear the search (Esc)",
+          },
+          "Show every app",
+        ),
+        SHOW_ALL,
+      );
+      all.addEventListener("click", () => setQuery(""));
+      sections.push(
+        h(
+          "div",
+          { class: "ap-grp--wide sk-empty-slot" },
+          emptyState({
+            art: art.noMatch(),
+            title: `No app matches “${q.trim()}”`,
+            text: "Search looks at an app's name, address, description and stack.",
+            action: all,
+          }),
+        ),
+      );
+    }
+    body.replaceChildren(...sections);
+  };
+
+  /** @param {string} next */
+  const setQuery = (next) => {
+    q = next;
+    if (search.value !== next) search.value = next;
+    const p = new URLSearchParams(location.search);
+    if (q) p.set("q", q);
+    else p.delete("q");
+    const s = p.toString();
+    history.replaceState(
+      history.state,
+      "",
+      `${location.pathname}${s ? `?${s}` : ""}`,
+    );
+    paint();
+  };
+  search.addEventListener("input", () => setQuery(search.value));
+  search.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      const f = tiles ? filterTiles(tiles, q)[0] : undefined;
+      if (f) window.open(f.url, "_blank", "noopener");
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      /** @type {HTMLElement | null} */ (
+        body.querySelector(".ap-tile")
+      )?.focus();
+    } else if (e.key === "Escape" && search.value) {
+      e.stopPropagation();
+      setQuery("");
+    }
+  });
+  // Arrows move between tiles on the grid they sit in.
+  body.addEventListener("keydown", (e) => {
+    const all = /** @type {HTMLElement[]} */ ([
+      ...body.querySelectorAll(".ap-tile:not(.ap-tile--skeleton)"),
+    ]);
+    const i = all.indexOf(/** @type {HTMLElement} */ (document.activeElement));
+    if (i < 0) return;
+    const grid = all[i].parentElement;
+    const cols = grid
+      ? Math.max(1, Math.round(grid.clientWidth / all[i].offsetWidth))
+      : 1;
+    /** @type {Record<string, number>} */
+    const step = {
+      ArrowRight: 1,
+      ArrowLeft: -1,
+      ArrowDown: cols,
+      ArrowUp: -cols,
+    };
+    const d = step[e.key];
+    if (d == null) return;
+    e.preventDefault();
+    if (e.key === "ArrowUp" && i - cols < 0) {
+      search.focus();
+      return;
+    }
+    all[Math.max(0, Math.min(all.length - 1, i + d))].focus();
+  });
+
+  const readWatch = async () => {
+    const w = await fetchJson("/data/watch", "the watch", abort.signal);
+    if (!w.ok) return;
+    /** @type {import("../appsview.js").Watch[]} */
+    const targets = w.body.targets ?? [];
+    watch = new Map(targets.map((x) => [x.key, x]));
+    paint();
+  };
+  paint();
+  (async () => {
+    const [r] = await Promise.all([
+      fetchJson("/data/tiles", "the apps", abort.signal),
+      readWatch(),
+    ]);
+    if (abort.signal.aborted) return;
+    if (!r.ok) {
+      failed = `${r.error.what}: ${r.error.why}`;
+      paint();
+      return;
+    }
+    tiles = r.body.report?.tiles ?? [];
+    paint();
   })().catch(() => {});
-  return () => abort.abort();
+  const timer = setInterval(() => void readWatch().catch(() => {}), EVERY_MS);
+  if (!matchMedia("(max-width: 48rem)").matches) search.focus();
+  return () => {
+    abort.abort();
+    clearInterval(timer);
+    root.classList.remove("ap-page");
+  };
 }

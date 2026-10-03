@@ -40,5 +40,6 @@ pub mod stale_images;
 pub mod templates;
 pub mod textdiff;
 pub mod topology;
+pub mod trend;
 pub mod watch;
 pub mod yamledit;

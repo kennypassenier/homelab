@@ -47,6 +47,7 @@ pub fn native(stack: &str) -> NativeServiceManifest {
 pub fn spec(stack: &str) -> DeploySpec {
     DeploySpec {
         secret_files: Vec::new(),
+        backup_first: false,
         client_schema: homelab_core::manifest::CURRENT_CLIENT_SCHEMA,
         manifest: manifest(stack),
         files: Vec::new(),

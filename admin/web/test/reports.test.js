@@ -116,6 +116,30 @@ test("a manual check's answer: open, ok, not ok, or accepted for now", () => {
   );
 });
 
+// fix-195 round 2: the host marks an ok answer the report reopened
+// (`reopened: true` beside the record); the page must not call it ok.
+test("fix-195: an ok answer the host reopened reads as reopened and sorts as open", () => {
+  const rows = checkRows(
+    [
+      { id: "a", record: { ...rec, ok: true, answered_at: 2000 } },
+      {
+        id: "b",
+        record: { ...rec, ok: true, answered_at: 2000 },
+        reopened: true,
+      },
+    ],
+    5000,
+    { locale: "en-GB", timeZone: "UTC" },
+  );
+  assert.deepEqual(
+    rows.map((r) => [r.id, r.answer.label, r.answer.tone]),
+    [
+      ["b", "reopened", "warn"],
+      ["a", "ok", "ok"],
+    ],
+  );
+});
+
 test("check rows put open ones first and show unknown fields readably", () => {
   const rows = checkRows(
     [

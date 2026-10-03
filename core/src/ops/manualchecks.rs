@@ -269,6 +269,81 @@ pub fn accept(state: &mut HostState, id: &str, until: u64, reason: &str, now: u6
 /// is the exact failure this gap exists to fix. One line per stack with a
 /// count and two examples is something Kenny can act on; the full list is one
 /// command away.
+/// fix-65 / fix-195: whether the files an answer is about changed since it
+/// was given. An answer is about the files it was given against; any deploy
+/// used to reopen it, and `applied_at` moves on every deploy.
+///
+/// When the answer carries `answered_digests` AND the stack still has
+/// `component_digests` to compare against, that replaces the whole-stack
+/// `answered_hash` rule — it only reopens when the check's own app files,
+/// the rootfs, or the app's env actually changed. An older answer, or one
+/// made before the stack ever carried `component_digests`, keeps the old
+/// rule (see [`pin_pre_digest_answers`] for how such an answer moves to the
+/// new rule at the next deploy).
+fn files_changed_since_answer(state: &HostState, r: &ManualCheckRecord, at: u64) -> bool {
+    let stack = state.stacks.get(&r.stack);
+    if let (Some(rd), Some(s)) = (&r.answered_digests, stack)
+        && s.component_digests.has_digests()
+    {
+        return crate::manifest::relevant_digests(&s.component_digests, &r.app) != *rd;
+    }
+    match &r.answered_hash {
+        Some(h) => stack.map(|s| &s.applied_hash != h).unwrap_or(false),
+        None => at < stack.map(|s| s.applied_at).unwrap_or(0),
+    }
+}
+
+/// password-chain-bus-factor: a standing check is due again `recur_days`
+/// after it was last answered, whatever the answer was.
+fn recur_due(r: &ManualCheckRecord, at: u64, now: u64) -> bool {
+    r.recur_days
+        .is_some_and(|d| now.saturating_sub(at) >= d * 86400)
+}
+
+/// fix-195 round 2 (live, host 3.70.7, 2026-10-03): `homelab today` said
+/// four stacks' answers were "reopened because the stack's files changed
+/// since" while `homelab checks` listed the same answers as "ok, 1d ago" —
+/// the listing printed the stored answer and never asked the rule the
+/// report uses. This is that rule, for one record: an `ok` answer that is
+/// open again at `now` (its files changed since, or a standing check fell
+/// due), so the listing, the dashboard and the report can never disagree.
+pub fn open_again(state: &HostState, r: &ManualCheckRecord, now: u64) -> bool {
+    match (r.ok, r.answered_at) {
+        (Some(true), Some(_)) if r.once => false,
+        (Some(true), Some(at)) => recur_due(r, at, now) || files_changed_since_answer(state, r, at),
+        _ => false,
+    }
+}
+
+/// fix-195 round 2: a deploy is the one moment an answer given under the old
+/// whole-stack rule (no `answered_digests`) can be moved to the per-app rule
+/// soundly. Called with the stack's PREVIOUS record still in `state`, before
+/// the deploy overwrites it: an answer whose `answered_hash` still equals
+/// that record's `applied_hash` was current against exactly that record's
+/// `component_digests`, so those are its digests. Without this, every such
+/// answer was reopened by the next deploy of its stack whatever it changed
+/// (productivity, 2026-10-03: by every sign a firewall-only deploy).
+/// An answer already stale, or a previous record without digests, is left
+/// alone — nothing sound can be recorded for it.
+pub fn pin_pre_digest_answers(state: &mut HostState, stack: &str) {
+    let Some(prev) = state.stacks.get(stack) else {
+        return;
+    };
+    if !prev.component_digests.has_digests() {
+        return;
+    }
+    let (applied_hash, cd) = (prev.applied_hash.clone(), prev.component_digests.clone());
+    for r in state.manual_checks.values_mut() {
+        if r.stack == stack
+            && r.answered_digests.is_none()
+            && r.answered_at.is_some()
+            && r.answered_hash.as_deref() == Some(applied_hash.as_str())
+        {
+            r.answered_digests = Some(crate::manifest::relevant_digests(&cd, &r.app));
+        }
+    }
+}
+
 pub fn evaluate_manual(state: &HostState, now: u64) -> Vec<Finding> {
     let mut out: Vec<Finding> = Vec::new();
     // stack -> (unanswered//stale-by-deploy, stale-by-age)
@@ -278,31 +353,7 @@ pub fn evaluate_manual(state: &HostState, now: u64) -> Vec<Finding> {
     let mut reopened: BTreeMap<String, usize> = BTreeMap::new();
 
     for r in state.manual_checks.values() {
-        let stack = state.stacks.get(&r.stack);
-        let deployed_at = stack.map(|s| s.applied_at).unwrap_or(0);
-        // fix-65: an answer is about the files it was given against. Any
-        // deploy used to reopen it, and `applied_at` moves on every deploy,
-        // so answers given in the morning were open again by the evening.
-        //
-        // fix-195: when the answer carries `answered_digests` AND the stack
-        // still has `component_digests` to compare against, that replaces
-        // the whole-stack `answered_hash` rule — it only reopens when the
-        // check's own app files, the rootfs, or the app's env actually
-        // changed, not when something the question was never about did
-        // (another app, the check's own wording, the manifest's own
-        // serialization). An older answer, or one made before the stack
-        // ever carried `component_digests`, keeps the old rule.
-        let files_changed = |at: u64| {
-            if let (Some(rd), Some(s)) = (&r.answered_digests, stack)
-                && s.component_digests.has_digests()
-            {
-                return crate::manifest::relevant_digests(&s.component_digests, &r.app) != *rd;
-            }
-            match &r.answered_hash {
-                Some(h) => stack.map(|s| &s.applied_hash != h).unwrap_or(false),
-                None => at < deployed_at,
-            }
-        };
+        let files_changed = |at: u64| files_changed_since_answer(state, r, at);
         match (r.ok, r.answered_at) {
             (Some(false), _) if r.accepted_until.is_some_and(|u| now < u) => out.push(Finding {
                 severity: Severity::Noted,
@@ -341,15 +392,10 @@ pub fn evaluate_manual(state: &HostState, now: u64) -> Vec<Finding> {
             // password-chain-bus-factor: a standing check is due again
             // `recur_days` after it was last answered, whatever the answer
             // was — on a clock, since no deploy ever reopens it.
-            (_, Some(at))
-                if r.recur_days
-                    .is_some_and(|d| now.saturating_sub(at) >= d * 86400) =>
-            {
-                pending
-                    .entry(r.stack.clone())
-                    .or_default()
-                    .push(labelled(r))
-            }
+            (_, Some(at)) if recur_due(r, at, now) => pending
+                .entry(r.stack.clone())
+                .or_default()
+                .push(labelled(r)),
             (_, Some(at)) if files_changed(at) => {
                 if r.answered_hash.is_some() {
                     *reopened.entry(r.stack.clone()).or_default() += 1;
@@ -428,19 +474,28 @@ pub fn listing(state: &HostState) -> Vec<(String, ManualCheckRecord)> {
 
 /// Render the listing for a terminal. Kept here rather than in the client so
 /// the shape is testable without a terminal.
-pub fn render_listing(rows: &[(String, ManualCheckRecord)], now: u64) -> String {
+///
+/// fix-195 round 2: takes the whole state so each answer is judged by the
+/// same rule `evaluate_manual` uses ([`open_again`]); an `ok` the report
+/// reopened is printed as reopened, never as "ok".
+pub fn render_listing(state: &HostState, now: u64) -> String {
+    let rows = listing(state);
     if rows.is_empty() {
         return "no manual checks are registered — deploy a stack that has them".into();
     }
     let mut s = String::new();
     let mut stack = String::new();
     let (mut open, mut done) = (0usize, 0usize);
-    for (id, r) in rows {
+    for (id, r) in &rows {
         if r.stack != stack {
             stack = r.stack.clone();
             s.push_str(&format!("\n{}\n", stack));
         }
+        let reopened = open_again(state, r, now);
         let status = match (r.ok, r.answered_at) {
+            (Some(true), Some(at)) if reopened => {
+                format!("reopened, ok {}d ago", now.saturating_sub(at) / 86400)
+            }
             (Some(true), Some(at)) => format!("ok, {}d ago", now.saturating_sub(at) / 86400),
             // fix-65
             (Some(false), _) if r.accepted_until.is_some_and(|u| now < u) => format!(
@@ -450,7 +505,7 @@ pub fn render_listing(rows: &[(String, ManualCheckRecord)], now: u64) -> String 
             (Some(false), _) => "NOT OK".into(),
             _ => "unanswered".into(),
         };
-        if matches!(r.ok, Some(true)) {
+        if matches!(r.ok, Some(true)) && !reopened {
             done += 1;
         } else {
             open += 1;

@@ -45,7 +45,7 @@ recreated from this file.
 
 ## Access: who may reach it
 
-Three applications, and they do not overlap the way the names suggest.
+Three applications (as read on 2026-10-03), and they do not overlap the way the names suggest.
 
 ### `Homelab` — `*.kp-soft.dev`, session 730h
 
@@ -78,20 +78,24 @@ true, and it has one exception with a name.
 ↳ *SuperSync = the sync service on CT 111 (`stacks/productivity`), the one
 Super Productivity talks to.*
 
-### `Kobo services` — `ha.kp-soft.dev` and `trmnl.kp-soft.dev`, session 24h
+### `Homelab admin` — `prox`, `opn`, `traefik` and `admin.kp-soft.dev`, session 8h
 
-Covers two names: `ha.kp-soft.dev` and `trmnl.kp-soft.dev` (the second was
-in the capture of 2026-09-20 and missing here until 2026-09-27, fix-143).
-Two policies:
+Read from the API on 2026-10-03 (edge-capture-2026-10-03); it came with the
+Access split (step-25). Covers four names: `prox.kp-soft.dev`,
+`opn.kp-soft.dev`, `traefik.kp-soft.dev` and `admin.kp-soft.dev`. One policy,
+`Kenny only, Google`, **allow**, two email addresses — narrower than the
+wildcard's three, and an 8-hour session instead of a month.
 
-1. `Toegang kpsoft` — **allow**, the same three email addresses.
-2. `kobo-token` — **non_identity**, service token
-   `a836cb28-4c6e-440c-ac2b-b4317ee0b44c`.
+### Removed: `Kobo services` (`ha.kp-soft.dev`, `trmnl.kp-soft.dev`)
 
-The second is what lets the e-reader through: it presents a service token
-instead of logging in. The token's *id* is recorded here; its secret is not,
-and cannot be read back from the API — if that secret is lost, a new service
-token has to be issued and the reader reconfigured.
+In the capture of 2026-09-20; gone from Cloudflare by 2026-10-03 (a JSON copy
+of the app dated 2026-10-02 sits beside Kenny's tokens, outside this
+repository). It had an allow policy for the three addresses and a
+`non_identity` policy for service token
+`a836cb28-4c6e-440c-ac2b-b4317ee0b44c`, which let the e-reader through
+without a login. Both names now fall to the `Homelab` wildcard, which has no
+service-token policy: whether the e-reader still reaches them is not
+measured here.
 
 ## What a rebuild needs that is NOT here
 
@@ -99,9 +103,7 @@ Written down because a capture that pretends to be complete is worse than one
 that names its gaps.
 
 - **The tunnel token** — in the gateway stack's `.env`, in the host vault.
-- **The `kobo-token` service-token secret** — not readable from the API by
-  design. Recovery = issue a new one and reconfigure the e-reader.
-- **The Google identity-provider client secret** — same: write-only.
+- **The Google identity-provider client secret** — write-only.
 
 ## How this was read
 

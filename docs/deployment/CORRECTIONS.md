@@ -240,3 +240,19 @@ summarised here for the corrections record.
 7. **Hoe en wanneer meten we dat het werkt.** After the first manual backup once 3.70.7 is live, that day's nightly is still listed by `homelab snapshots`. Until then Claude takes no manual backups (the release waits on the UI round, Kenny 2026-10-03).
 8. **Fallback.** Claude stops taking manual backups until the cause is found and reports at once.
 9. **Wanneer herzien we de maatregel.** At the next change to the retention settings.
+
+---
+
+## Correction · fix-livefix-1..4 — four 3.70.x fixes that did not hold live
+
+**Draft — awaiting Kenny.**
+
+1. **Wat ging er mis.** The read-only sweep of host 3.70.7 (2026-10-03) found four rows that were "fixed" but not right on the real host: doctor and `homelab snapshots` disagreed about inbox's backup (fix-218); `status --json` had no root disk (fix-222); `homelab today` and `homelab checks` disagreed about four stacks' answers (fix-195/fix-65); `homelab check` reported Access drift from a stale capture.
+2. **Welke poort liet het door.** Each fix was tested only against what its author imagined, never against the real shape: fix-218 fixed one of two readers of a stack's repositories and left the other with its own choice; fix-222's mock matched the substring `pv_name pve`, so a `pvs` call lvm2 refuses passed; fix-195 changed the report's rule and not the listing beside it; the edge capture was not renewed when the Access split changed the edge.
+3. **Waar dezelfde fout nog zit.** Any second place that decides the same thing on its own: searched `natives.iter().map(|n| n.unit` (four places; two now share `stack_repo_owners`, the other two are the nightly and adopt, which decide it the same way) and every `MockExecutor` rule in the disk reading (now matched on the full command).
+4. **Hoe voorkomen we herhaling.** One function per decision, called by every reader (`stack_repo_owners`, `manualchecks::open_again`); mocks for host commands match the whole command line and script the real refusal of a wrong one; an edge change made by hand is followed by a capture in the same sitting.
+5. **Kost.** Small: four code changes, tests, one capture.
+6. **Handhaving.** Tests `fix_218_repo_owners_tests.rs`, `fix_222_real_host_tests`, the fix-195 tests in `manualchecks_tests.rs` and `reports.test.js`, the renewed `edge_tests.rs` fixture.
+7. **Hoe en wanneer meten we dat het werkt.** After the 3.71.0 rollout: `homelab snapshots stacks/inbox` lists the `inbox` repository with the snapshot doctor dates; `status --json` `disk_detail.root_disk_device` names a disk and `root_disk_total_gb` > 0; `homelab checks` shows the same open answers `homelab today` counts; `homelab check` keeps saying "edge: Cloudflare agrees".
+8. **Fallback.** If one still disagrees live, the row stays "doing" and the reading is reported with the command output, not reasoned away.
+9. **Wanneer herzien we de maatregel.** At the measurement in field 7.

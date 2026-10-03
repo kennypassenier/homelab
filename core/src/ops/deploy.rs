@@ -3446,6 +3446,10 @@ pub async fn deploy(ctx: &OpCtx<'_>, spec: &DeploySpec) -> OperationReport {
                 m.stack_name
             ));
         }
+        // fix-195 round 2: while the previous record is still here, move
+        // its old-rule check answers onto the digests they were given
+        // against, so this deploy reopens only what it really changed.
+        crate::ops::manualchecks::pin_pre_digest_answers(&mut state, &m.stack_name);
         state.stacks.insert(
             m.stack_name.clone(),
             StackState {

@@ -9,7 +9,7 @@ import { formatDateTime } from "./format.js";
  *   answered_at?: number | null, ok?: boolean | null, note?: string,
  *   answered_hash?: string | null, accepted_until?: number | null,
  *   [key: string]: unknown}} CheckRecord
- * @typedef {{id: string, record: CheckRecord}} Check
+ * @typedef {{id: string, record: CheckRecord, reopened?: boolean}} Check
  * @typedef {{label: string, tone: "ok" | "warn" | "bad"}} Answer
  */
 
@@ -27,12 +27,17 @@ const KNOWN = new Set([
 /**
  * The answer as it stands at `now`: open until answered; a "not ok" that
  * is accepted until a later moment is noted, not broken.
+ * fix-195 round 2: `reopened` is the host's verdict (the rule the nightly
+ * report uses) that an ok answer is open again because the files it was
+ * about changed since; such an answer is never shown as ok.
  * @param {CheckRecord} r
  * @param {number} now unix seconds
+ * @param {boolean} [reopened]
  * @returns {Answer}
  */
-export function checkAnswer(r, now) {
+export function checkAnswer(r, now, reopened = false) {
   if (r.ok == null) return { label: "open", tone: "warn" };
+  if (r.ok && reopened) return { label: "reopened", tone: "warn" };
   if (r.ok) return { label: "ok", tone: "ok" };
   if (r.accepted_until != null && r.accepted_until > now)
     return { label: "accepted", tone: "warn" };
@@ -62,10 +67,10 @@ export function extraField(key, value, opts) {
  * @param {import("./format.js").TimeOptions} [opts]
  */
 export function checkRows(checks, now, opts) {
-  const rank = { "not ok": 0, open: 1, accepted: 2, ok: 3 };
+  const rank = { "not ok": 0, open: 1, reopened: 1, accepted: 2, ok: 3 };
   return checks
-    .map(({ id, record: r }) => {
-      const answer = checkAnswer(r, now);
+    .map(({ id, record: r, reopened }) => {
+      const answer = checkAnswer(r, now, reopened === true);
       const note = [
         r.note ?? "",
         answer.label === "accepted" && r.accepted_until != null

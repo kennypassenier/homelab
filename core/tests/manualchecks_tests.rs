@@ -6,7 +6,7 @@ use homelab_core::manifest::ComponentDigests;
 use homelab_core::ops::fleetcheck::Severity;
 use homelab_core::ops::manualchecks::{
     PASSWORD_CHAIN_APP, PASSWORD_CHAIN_RECUR_DAYS, PASSWORD_CHAIN_TEXT, Question, STANDING_STACK,
-    answer, ensure_standing, ensure_standing_checks, evaluate_manual, id_for, listing, register,
+    answer, ensure_standing, ensure_standing_checks, evaluate_manual, id_for, register,
     render_listing,
 };
 use homelab_core::state::{HostState, StackState};
@@ -346,7 +346,7 @@ fn an_open_question_carries_the_address_of_its_application() {
         st.manual_checks[&id].url.as_deref(),
         Some("https://son.kp-soft.dev")
     );
-    assert!(render_listing(&listing(&st), 200).contains("https://son.kp-soft.dev"));
+    assert!(render_listing(&st, 200).contains("https://son.kp-soft.dev"));
 }
 
 #[test]
@@ -364,7 +364,7 @@ fn the_listing_names_the_id_the_status_and_the_question() {
     let id = id_for("media", "jellyfin", "sound in sync");
     answer(&mut st, &id, true, "", 10 * DAY);
 
-    let out = render_listing(&listing(&st), 12 * DAY);
+    let out = render_listing(&st, 12 * DAY);
     assert!(out.contains(&id), "the id is what you type back: {}", out);
     assert!(out.contains("sound in sync"), "{}", out);
     assert!(out.contains("did tonight's episode arrive"), "{}", out);
@@ -385,7 +385,7 @@ fn the_listing_names_the_id_the_status_and_the_question() {
 #[test]
 fn an_empty_register_says_so_instead_of_printing_nothing() {
     let st = HostState::default();
-    let out = render_listing(&listing(&st), 0);
+    let out = render_listing(&st, 0);
     assert!(out.contains("no manual checks"), "{}", out);
 }
 
@@ -790,4 +790,128 @@ fn password_chain_bus_factor_a_standing_check_recurs_on_its_own_clock() {
         Some(true),
         "re-ensuring must not reset the answer"
     );
+}
+
+// ── fix-195 round 2: the listing and the report disagreed ──────────────────
+
+/// fix-195 round 2 (live, host 3.70.7, 2026-10-03): `homelab today` said
+/// media's answer was "reopened because the stack's files changed since"
+/// (jellyfin's compose file did change: the 12.1 upgrade) while `homelab
+/// checks` printed the same answer as "ok, 1d ago". The listing must ask the
+/// rule the report uses.
+///
+/// covers: fix-195
+/// fail-first: written against the old `render_listing(&listing(&st), now)`
+/// first, where it failed on the "ok, 1d ago" assertion (2026-10-03); the
+/// fix changed that signature, so the file no longer builds on the old code.
+#[test]
+fn fix_195_the_listing_shows_an_answer_the_report_reopened() {
+    let mut st = state_with_stack(100);
+    st.stacks.get_mut("media").unwrap().component_digests = ComponentDigests {
+        manifest: "m1".into(),
+        files: BTreeMap::from([("jellyfin/docker-compose.yml".into(), "a".into())]),
+        ..Default::default()
+    };
+    register(&mut st, "media", &[q("jellyfin", "sound in sync")], 100);
+    let id = id_for("media", "jellyfin", "sound in sync");
+    assert!(answer(&mut st, &id, true, "", DAY));
+    st.stacks
+        .get_mut("media")
+        .unwrap()
+        .component_digests
+        .files
+        .insert("jellyfin/docker-compose.yml".into(), "b".into());
+    assert_eq!(
+        evaluate_manual(&st, 2 * DAY).len(),
+        1,
+        "the report reopens it"
+    );
+    let out = render_listing(&st, 2 * DAY);
+    assert!(
+        !out.contains("ok, 1d ago"),
+        "the listing must not call a reopened answer ok: {}",
+        out
+    );
+    assert!(out.contains("reopened"), "{}", out);
+    assert!(out.contains("0 answered ok, 1 open"), "{}", out);
+}
+
+/// fix-195 round 2: an answer given under the old whole-stack rule (no
+/// `answered_digests`) was reopened by the next deploy whatever it changed.
+/// At that deploy, while the previous record is still in state, an answer
+/// that was still current against it takes that record's digests, so a
+/// firewall-only deploy leaves it answered and a change to its app does not.
+///
+/// covers: fix-195
+/// fail-first: `pin_pre_digest_answers` is new; with its body stubbed to
+/// return at once (the old behaviour: nothing pinned) this failed on the
+/// "a firewall-only deploy reopened it" assertion (2026-10-03).
+#[test]
+fn fix_195_a_deploy_moves_a_current_old_rule_answer_to_its_digests() {
+    use homelab_core::ops::manualchecks::pin_pre_digest_answers;
+    let digests = |compose: &str| ComponentDigests {
+        manifest: "m1".into(),
+        files: BTreeMap::from([("supersync/docker-compose.yml".into(), compose.into())]),
+        ..Default::default()
+    };
+    let mut st = state_with_stack(100);
+    {
+        let s = st.stacks.get_mut("media").unwrap();
+        s.applied_hash = "h1".into();
+        s.component_digests = digests("a");
+    }
+    register(&mut st, "media", &[q("supersync", "sync works")], 100);
+    let id = id_for("media", "supersync", "sync works");
+    assert!(answer(&mut st, &id, true, "", 200));
+    // As an answer recorded by a host from before fix-195 looks.
+    st.manual_checks.get_mut(&id).unwrap().answered_digests = None;
+
+    pin_pre_digest_answers(&mut st, "media");
+    // The deploy: only the manifest (the firewall) changed.
+    {
+        let s = st.stacks.get_mut("media").unwrap();
+        s.applied_hash = "h2".into();
+        s.component_digests = ComponentDigests {
+            manifest: "m2".into(),
+            ..digests("a")
+        };
+    }
+    assert!(
+        evaluate_manual(&st, 300).is_empty(),
+        "a firewall-only deploy reopened it"
+    );
+
+    // A later deploy that does change the app's compose file reopens it.
+    st.stacks.get_mut("media").unwrap().component_digests = digests("b");
+    assert_eq!(
+        evaluate_manual(&st, 400).len(),
+        1,
+        "a real change must still reopen it"
+    );
+}
+
+/// fix-195 round 2: an old-rule answer that was ALREADY stale before the
+/// deploy is never re-stamped as current.
+///
+/// covers: fix-195
+/// fail-first: a guard on the new pinning, not on old behaviour; passes with
+/// the stub too, which is its point (it must never pin a stale answer).
+#[test]
+fn fix_195_a_stale_old_rule_answer_is_not_pinned() {
+    use homelab_core::ops::manualchecks::pin_pre_digest_answers;
+    let mut st = state_with_stack(100);
+    st.stacks.get_mut("media").unwrap().applied_hash = "h0".into();
+    register(&mut st, "media", &[q("jellyfin", "sound in sync")], 100);
+    let id = id_for("media", "jellyfin", "sound in sync");
+    assert!(answer(&mut st, &id, true, "", 200));
+    {
+        let s = st.stacks.get_mut("media").unwrap();
+        s.applied_hash = "h1".into();
+        s.component_digests = ComponentDigests {
+            manifest: "m1".into(),
+            ..Default::default()
+        };
+    }
+    pin_pre_digest_answers(&mut st, "media");
+    assert!(st.manual_checks[&id].answered_digests.is_none());
 }

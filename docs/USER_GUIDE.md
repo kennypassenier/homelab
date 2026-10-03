@@ -953,42 +953,62 @@ Tests: `core/ops/backup.rs`'s own unit tests (`parse_snapshot_ls`),
 `core/tests/native_restore_tests.rs` (`restore_native`'s gate, order of
 steps, and the failed-unpack case).
 
-#### feat-secrets-1/2 · Secrets page
+#### feat-secrets-1..6 · Secrets page
 
-**Status:** Built, not yet measured live (needs the next release).
+**Status:** Built, not yet measured live (redesigned for 3.71.0).
 
-`/secrets` lists what a chosen stack declares in `latch_secrets` and
-`latch_files` — read from the dashboard's own working copy of
-`lxc-compose.yml` (`admin::core::stackedit_latch::current`), the same source
-the stack editor's latch form already reads. No value is fetched ahead of a
-click.
+`/secrets` has three panes. **Left:** every stack with its exact count of
+declared `latch_secrets` and `latch_files` (`GET /data/secrets`, read from
+the dashboard's own working copy of each `lxc-compose.yml`); a stack whose
+file does not parse carries a warning chip, its hover card says why, and its
+pane shows the reason, the fix and Try again. ↑/↓ move between stacks; the
+chosen one is kept in the address (`?stack=`). **Middle:** that stack's
+secrets, each with a masked value, Reveal, Copy and Change…. **Right:** the
+change drawer. No value is fetched ahead of a click.
 
-**Reveal.** Pressing Reveal on one row asks the host for that one value
+**Reveal (feat-secrets-1, -4).** Reveal asks the host for that one value
 (`RevealSecret`, read straight from the host's vault —
 `{state_dir}/secrets/<stack>/…`, never through a traced process) and shows
-it inline; Hide (or leaving the page) drops it from the page without asking
-the host again. Every reveal is one audit-log line on the host naming WHICH
-secret was read, never the value.
+it in place for 30 seconds: a thin bar drains and "hides in N s" counts
+down, then it hides itself. Hide, Hide all, Esc, picking another stack or
+leaving the page drop it at once without asking the host again.
 
-**Change a secret (feat-secrets-2).** Change… opens a small form on the same
-row: the new value is staged first (`POST /data/secrets/stage`, held in
-memory on the host for five minutes, taken exactly once) and the write
-itself rides `ActionKind::ChangeSecret` — the same job/audit/progress
-machinery every other dashboard write gets, driven with the secret
-reference and the one-time stage token, never the value itself (it never
-becomes a job argument, a "copy as CLI command" line, or a `homelab ui`
-step's field). The host writes it with `latch put <stack>/<app>/.env --env
-<env>` (or the matching `latch_files` path) from its own intent-repo
-checkout — the exact file the next deploy reads, nothing else in latch is
-touched. Redeploy the stack for the running container to pick it up.
-`HOMELAB_LATCH_ENV` must be set on the host (the same variable the nightly
-deploy uses) or the write is refused with that remedy.
+**Copy (feat-secrets-5).** Copy puts the value on the clipboard without
+showing it and clears the clipboard 30 seconds later. Where the browser
+refuses the clipboard, the value is revealed and selected instead, so Ctrl C
+copies it.
 
-Not drivable with `homelab ui` as a scripted preset the way other actions
-are (Reveal and the staged value are deliberately a page-only, click-through
-flow); the dialog itself still opens and plays through `open
-change-secret`/`type act-secret_ref …`/`type act-stage_token …` once a value
-has been staged by hand.
+**Audit (feat-secrets-6).** Every reveal and every copy is one line in the
+host's history, which Activity reads: "Kenny revealed
+gateway/traefik/.env", "Claude (Live view) copied …" — who and which,
+never the value — and one audit-log line on the host. The name comes from
+`HOMELAB_ADMIN_VIEWER_NAME` in the dashboard's environment (else the
+Cloudflare Access login); a click Live view made is recorded as Claude's.
+
+**Change a secret (feat-secrets-2, -3).** Change… opens the drawer: paste
+the new value, Stage it (`POST /data/secrets/stage`, held in memory on the
+dashboard for five minutes, taken exactly once; nothing is written yet),
+then Write and restart. Write waits five seconds with Undo before anything
+is sent; then the write rides `ActionKind::ChangeSecret` — the same
+job/audit/progress machinery every other dashboard write gets, driven with
+the secret reference and the one-time stage token, never the value itself
+(it never becomes a job argument, a "copy as CLI command" line, or a
+`homelab ui` step's field). The host writes it with `latch put
+<stack>/<app>/.env --env <env>` (or the matching `latch_files` path) from
+its own intent-repo checkout — the exact file the next deploy reads,
+nothing else in latch is touched. With "Restart … after writing" ticked
+(the default), the stack is deployed once the write's job is done, so the
+app reads the new value. `HOMELAB_LATCH_ENV` must be set on the host (the
+same variable the nightly deploy uses) or the write is refused with that
+remedy.
+
+Every control is reachable through Live view (`homelab ui click
+reveal-secret <stack>/<app>/.env`, `copy-secret …`, `edit-secret …`,
+`stage-secret`, `write-secret`, `undo-secret-write`, `hide-all-secrets`,
+`secrets-stack <stack>` and the rest declared in `pages/secrets.js`); the
+value is the page field `secret-value` (`homelab ui type secret-value …`)
+and the restart box `secret-restart`. The write is also the catalog form
+`open change-secret <stack>`.
 
 Tests: `core/src/ops/secrets.rs` (`vault_rel`, `latch_rel_path`),
 `host/src/secrets.rs` (`latch_put` refuses without `HOMELAB_LATCH_ENV`).

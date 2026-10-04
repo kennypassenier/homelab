@@ -6936,10 +6936,14 @@ test(
                   // the Restore flow page) opens no dialog; its effect is
                   // the new address, as pagedrive.js answers it.
                   if (c.opens === "dialog" && !opened) {
+                    // Another page, not the same one with another query
+                    // (a sort, a filter): that is no dialog's effect.
                     const went = await page
-                      .waitForFunction((u) => location.href !== u, before.url, {
-                        timeout: 1500,
-                      })
+                      .waitForFunction(
+                        (u) => location.pathname !== new URL(u).pathname,
+                        before.url,
+                        { timeout: 1500 },
+                      )
                       .then(() => true)
                       .catch(() => false);
                     return went ? null : "pressed, but no dialog opened";

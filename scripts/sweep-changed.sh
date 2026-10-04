@@ -9,6 +9,10 @@
 set -euo pipefail
 root="$(git rev-parse --show-toplevel)"
 cd "$root/admin/web"
+# The dashboard serves the catalog it was built with: regenerate it from the
+# page modules first (as the commit hook does), so the sweep presses the
+# entries this tree declares.
+node --import ./test/support/kp-register.mjs scripts/drivecatalog.mjs >/dev/null
 only=$(node --import ./test/support/kp-register.mjs scripts/sweep-changed.mjs)
 if [ -z "$only" ]; then
   echo "sweep-changed: no Live view control changed against HEAD; no sweep needed"

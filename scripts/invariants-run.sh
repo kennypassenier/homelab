@@ -201,7 +201,9 @@ cd admin/web
 # (scripts/e2e-watchdog.py) kills the whole run when no case started or
 # ended for 90 s while its browsers did no work — a hang the in-test
 # deadline cannot see (a stuck browser or driver connection) — and names
-# the last case it started.
+# the last case it started. redesign-final: --test-force-exit ends a file's
+# process once its cases are done (a 2 s sweep of one control sat ~44 s
+# waiting for a handle a case left open).
 if [ -n "${INVARIANTS_SCRIPT:-}" ]; then
   INVARIANTS_BASE_URL="$base_url" INVARIANTS_TOKEN="$token" node "$INVARIANTS_SCRIPT"
 else
@@ -212,6 +214,7 @@ else
   INVARIANTS_BASE_URL="$base_url" INVARIANTS_TOKEN="$token" \
   INVARIANTS_PROGRESS_FILE="$progress" \
     node --test --test-concurrency=1 \
+      --test-force-exit \
       --test-timeout="${INVARIANTS_TEST_TIMEOUT_MS:-300000}" \
       --test-reporter=spec --test-reporter-destination=stdout \
       --test-reporter=tap --test-reporter-destination="$progress" \

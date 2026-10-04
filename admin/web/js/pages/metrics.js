@@ -49,6 +49,7 @@ import {
   zoomChip,
 } from "../timechart.js";
 import {
+  countOf,
   attentionBand,
   chip,
   dataTable,
@@ -322,6 +323,11 @@ export function mount(root, ctx) {
         nowB.textContent = v ?? "";
         if (label) nowS.textContent = label;
       },
+      /**
+       * redesign-final (exact counts): the "now" figure counts these rows.
+       * @param {HTMLElement} list @param {string} rows
+       */
+      countOf: (list, rows) => countOf(nowB, list, rows),
       /**
        * The card's foot line: the source left, a note right (section's
        * foot). @param {(Node | string)[]} left @param {(Node | string)[]} [right]
@@ -686,6 +692,10 @@ export function mount(root, ctx) {
             h("td", { class: "mk-n mk-hide-phone" }, poweredOn(d.hours)),
           ),
         ),
+      );
+      k.countOf(
+        t.tbody,
+        bad.length ? ":scope > tr:has(td.mk-bad)" : ":scope > tr",
       );
       k.body.replaceChildren(t.wrap);
       k.foot(

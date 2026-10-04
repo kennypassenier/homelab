@@ -1458,6 +1458,7 @@ function logsTab(panel, c) {
     "aria-label": `Log lines of ${name}`,
   });
   pre.append(skeletonLines(12, "Asking Loki for the lines"));
+  countOf(count, pre, ".sh-log__line");
   const footLeft = h("span", null, "Loki");
   const footRight = h("span", null, "");
   const card = h(

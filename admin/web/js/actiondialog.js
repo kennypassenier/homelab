@@ -47,6 +47,7 @@ import { openUpdateFlow } from "./pinupdate.js";
 import { codeSpans, previewGate } from "./previewgate.js";
 import { restoreHref } from "./restoreflow.js";
 import { current } from "./store.js";
+import { countOf } from "./ui.js";
 import { clearError, showError } from "/static/kp/js/forms.js";
 import {
   BEFORE_STEP_EVENT,
@@ -1053,6 +1054,11 @@ export async function openBatch(action, stacks) {
     wide: true,
   });
   d.dialog.dataset.form = form.id;
+  // redesign-final (exact counts): "Back up · 5 stacks" is the stacks
+  // the dialog lists.
+  const titleEl = d.dialog.querySelector(".kp-dialog__title");
+  if (titleEl instanceof HTMLElement)
+    countOf(titleEl, list, ":scope > li[data-stack]");
   /** @type {() => void} */
   let stop = () => {};
   /** The batch runs: its progress in the dialog's place.

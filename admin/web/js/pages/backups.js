@@ -68,6 +68,7 @@ import {
   viewFromSearch,
 } from "../backupsview.js";
 import {
+  countOf,
   attentionBand,
   button,
   filterChip,
@@ -549,6 +550,9 @@ export function mount(root) {
     readState.textContent = !current().fleet
       ? "Waiting for the host's report of the fleet…"
       : `Read from the host's snapshot cache · ${done - failed.length} of ${names.length} stacks answered${failed.length ? ` · ${failed.join(", ")} could not be read` : ""}`;
+    // redesign-final (exact counts): "N of M stacks answered" is the
+    // coverage rows of the stacks that answered.
+    countOf(readState, heat, '.bk-heat__label[data-read="ok"]');
     readState.dataset.bkRead =
       names.length > 0 && done === names.length ? "all" : "some";
   };
@@ -787,6 +791,7 @@ export function mount(root) {
             type: "button",
             class: "bk-heat__label",
             "data-stack": s,
+            "data-read": r.status,
             "aria-pressed": String(S.stacks.has(s)),
             title: `Click to show only ${s} (each click turns a stack on or off; Show every stack resets)`,
           },
@@ -1531,6 +1536,8 @@ export function mount(root) {
   /** @type {(() => void) | null} */
   let detachRetired = null;
   const paintRetired = () => {
+    // redesign-final (exact counts): "N entries" is the retired table's rows.
+    countOf(retiredCount, ret.body, "tbody > tr:not([data-kp-skeleton-row])");
     retiredCount.textContent = retired
       ? `${retired.length} ${retired.length === 1 ? "entry" : "entries"}`
       : retiredError
@@ -1597,6 +1604,7 @@ export function mount(root) {
     ret.body.replaceChildren(table.wrap);
     detachRetired = attachDataTables(ret.body);
     table.tbody.replaceChildren(...retired.map(retiredRow));
+
     table.ready();
   };
   cleanups.push(() => detachRetired?.());

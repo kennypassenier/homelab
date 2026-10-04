@@ -36,7 +36,7 @@ import { logLine } from "../jobs.js";
 import { openJobDialog } from "../jobpanel.js";
 import { transferView } from "../parity.js";
 import { current, listen, subscribe } from "../store.js";
-import { emptyState, kbd, stackMark, toolbar } from "../ui.js";
+import { countOf, emptyState, kbd, stackMark, toolbar } from "../ui.js";
 import { setParams } from "../urlstate.js";
 
 /** Lines kept in the page, as the server's ring. */
@@ -118,6 +118,8 @@ export function mountHostLog(root, opts) {
   if (tb.search) drivable(tb.search, opts.drive.search);
   const transfers = h("div", { class: "hl-xfers" });
   const list = h("div", { class: "hl-lines" });
+  // redesign-final (exact counts): "N of M lines" is the lines drawn.
+  countOf(countEl, list, ".hl-ln:not(.hl-ln--sk)");
   const blocks = h("div", { class: "hl-blocks" });
   const newPill = h("button", {
     type: "button",

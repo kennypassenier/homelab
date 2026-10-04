@@ -1097,6 +1097,7 @@ export function mount(root) {
     rulesBody.replaceChildren(side("in"), side("out"));
     ruleCount.textContent =
       shown === total ? `${total} rules` : `${shown} of ${total} rules`;
+    countOf(ruleCount, rulesBody, "tr.fw-rule");
   };
 
   const clearRuleFilter = () => {

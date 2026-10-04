@@ -50,6 +50,7 @@ import { openRollback } from "../rollbackdialog.js";
 import { stackHref } from "../router.js";
 import { current, subscribe } from "../store.js";
 import {
+  countOf,
   attentionBand,
   keyRow,
   kpiStrip,
@@ -1227,6 +1228,9 @@ export function mount(root, ctx) {
     const v = hostSettingsView(r.body.page);
     sRows = v.rows;
     sDesc.textContent = `host.toml as the host reads it: ${v.changed} of ${v.rows.length} settings changed from their default. Read-only here; Settings changes them.`;
+    // redesign-final (exact counts): the changed settings are the table's
+    // rows marked changed.
+    countOf(sDesc, sBody, ':scope > tr[data-set="1"]');
     sView.counts({ changed: v.changed, all: v.rows.length });
     sBody.replaceChildren(
       ...sRows.map((x) =>

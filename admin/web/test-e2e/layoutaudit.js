@@ -21,11 +21,21 @@
 /**
  * The page-side audit. Self-contained: Playwright serialises it.
  * @param {string | null} rootSel the dialog to audit, or null for the page
- * @returns {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[], g: string[], h: string[]}}
+ * @returns {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[], g: string[], h: string[], hn: string[]}}
  */
 export function layoutAudit(rootSel) {
-  /** @type {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[], g: string[], h: string[]}} */
-  const out = { a: [], b: [], c: [], d: [], e: [], f: [], g: [], h: [] };
+  /** @type {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[], g: string[], h: string[], hn: string[]}} */
+  const out = {
+    a: [],
+    b: [],
+    c: [],
+    d: [],
+    e: [],
+    f: [],
+    g: [],
+    h: [],
+    hn: [],
+  };
   const root = /** @type {HTMLElement | null} */ (
     rootSel
       ? document.querySelector(rootSel)
@@ -232,6 +242,25 @@ export function layoutAudit(rootSel) {
   }
 
   // ---- h: a count is the rows it describes (Kenny: exact counts) ----
+  // A count of a list's rows — "N of M shown", "· N" on a fold or a
+  // heading, "N items|rows|operations|…" in a card's head, foot or toolbar
+  // state — must name its list (ui.js countOf); an unlinked one fails.
+  const COUNT =
+    /(?:^|\s)·\s*\d+(?![\d/:.\w-])|\b\d+ of \d+\b|\b\d+ (?:items?|rows?|operations?|lines?|stacks?|rules?|repositor(?:y|ies)|snapshots?|apps?|entries)\b/;
+  for (const t of texts) {
+    const el = /** @type {HTMLElement} */ (t.parentElement);
+    if (!COUNT.test(t.data)) continue;
+    if (
+      !el.closest(
+        ".nx-card__head, .nx-card__foot, summary, .nx-tb__state, .section-head, h2, h3",
+      )
+    )
+      continue;
+    if (el.closest("[data-count-of], .nx-kpi, [class*='chip'], button, a"))
+      continue;
+    out.h.push(`count ${say(el)} names no list (ui.js countOf)`);
+  }
+  let checked = 0;
   for (const c of root.querySelectorAll("[data-count-of]")) {
     const el = /** @type {HTMLElement} */ (c);
     if (!shown(el)) continue;
@@ -245,9 +274,11 @@ export function layoutAudit(rootSel) {
         !(/** @type {HTMLElement} */ (r).hidden) &&
         getComputedStyle(r).display !== "none",
     ).length;
+    checked += 1;
     if (Number(n[1]) !== rows)
       out.h.push(`count ${say(el)} says ${n[1]}, its list holds ${rows} rows`);
   }
+  out.hn.push(String(checked));
 
   // ---- f: internal ids in user text (redesign-final M8) ----
   for (const t of texts) {

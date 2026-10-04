@@ -7,7 +7,7 @@ import { act, actionLabel, onAct } from "./act.js";
 import { badge, labeledCopyLine, openDialog } from "./actui.js";
 import { h } from "./dom.js";
 import { jobFacts, jobPanel, jobSteps, logLine } from "./jobs.js";
-import { checkList } from "./ui.js";
+import { countOf, checkList } from "./ui.js";
 import { attachLogs } from "/static/kp/js/log.js";
 
 /**
@@ -222,6 +222,8 @@ export function mountJobPanel(jobId, opts = {}) {
   };
   for (const l of act.logs.get(jobId) ?? []) log.append(lineEl(l));
   attachLogs(log);
+  // redesign-final (exact counts): "(N lines)" is the log's lines.
+  countOf(logCount, log, ":scope > .kp-log__line");
   countLines();
 
   const offJobs = onAct("jobs", (id) => {

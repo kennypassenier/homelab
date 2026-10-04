@@ -10751,7 +10751,17 @@ function auditSweep() {
   auditRun ??= (async () => {
     const { layoutAudit } = await import("./layoutaudit.js");
     /** @type {Record<string, string[]>} */
-    const all = { a: [], b: [], c: [], d: [], e: [], f: [], g: [], h: [] };
+    const all = {
+      a: [],
+      b: [],
+      c: [],
+      d: [],
+      e: [],
+      f: [],
+      g: [],
+      h: [],
+      hn: [],
+    };
     const browser = await launch();
     try {
       for (const width of [1894, 390]) {
@@ -10848,10 +10858,16 @@ for (const [cls, what] of /** @type {const} */ ([
   ],
   ["h", "every count linked to its rows says how many rows it describes"],
 ])) {
-  test(`invariants: redesign-final-gen-${cls}: on every page and action dialog at 1894 and 390 px, ${what}`, async () => {
+  test(`invariants: redesign-final-gen-${cls}: on every page and action dialog at 1894 and 390 px, ${what}`, async (t) => {
     // redesign-final: no instance is excused (the AUDIT_KNOWN allowance is
     // gone); every finding fails.
-    const found = (await auditSweep())[cls];
+    const sweep = await auditSweep();
+    const found = sweep[cls];
+    // Class h: how many linked counts each page had checked.
+    if (cls === "h")
+      t.diagnostic(
+        `counts checked per page: ${sweep.hn.filter((x) => !/: 0$/.test(x)).join("; ")}`,
+      );
     assert.deepEqual(found, [], `${found.length} findings`);
   });
 }

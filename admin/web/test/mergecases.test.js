@@ -53,7 +53,7 @@ test("redesign-final-12: a page module's change reaches its own page's cases and
   const ui = await plan(["admin/web/js/ui.js"]);
   assert.ok(ui.cases.length > fw.cases.length);
   assert.ok(
-    ui.cases.some((c) => c.includes("title row puts the title left")),
+    ui.cases.some((c) => c.includes("redesign-final-gen: one walk")),
     "a case that walks every page is not chosen for a shared file",
   );
   assert.equal((await plan(["docs/USER_GUIDE.md"])).cases.length, 0);
@@ -68,7 +68,7 @@ test("redesign-final: a plain commit's cases: a page file as at a merge; a widel
   const ui = await plan(["admin/web/js/ui.js"], "commit");
   assert.deepEqual(ui.pages, ["inbox", "overview"]);
   assert.ok(
-    !ui.cases.some((c) => c.includes("title row puts the title left")),
+    !ui.cases.some((c) => c.includes("redesign-final-gen: one walk")),
     "a walker is chosen at commit",
   );
   const merge = await plan(["admin/web/js/ui.js"]);

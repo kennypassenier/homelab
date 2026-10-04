@@ -45,7 +45,7 @@ test("redesign-final: a removed select's old field id still answers ui pick / ui
 test("redesign-final: the generic layout audit excuses nothing (AUDIT_KNOWN is gone)", () => {
   const e2e = readFileSync(web("test-e2e/invariants.e2e.js"), "utf8");
   assert.doesNotMatch(e2e, /const AUDIT_KNOWN\b/);
-  assert.match(e2e, /const found = sweep\[cls\];/);
+  assert.match(e2e, /const found = all\[cls\];/);
 });
 
 test("redesign-final: every module in js/ is reached from main.js; one no page imports is deleted (pages/doctor.js was)", () => {

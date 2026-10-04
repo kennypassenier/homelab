@@ -1,0 +1,23 @@
+{
+  "why": "Whole-screen findings Kenny parked for 3.71.1 (2026-10-04: deliver 3.71.0 first; only what breaks function, data or a core flow stays before the Go). An entry names a case (`name`) or a class of the one layout walk (`class`, test-e2e/layoutaudit.js). A parked case passes only while it is still red, a parked class only while it still has findings; the run fails when either starts passing (take it off this list) and when anything not on this list fails. Listed in docs/INVARIANTS.md too.",
+  "parked": [
+    {
+      "name": "invariants: every data-loading page shows a loading indicator before its data (or error) arrives",
+      "finding": "M7 (final review 3.71.0): Settings draws its data without a loading indicator first",
+      "date": "2026-10-04",
+      "note": "parked by Kenny 2026-10-04 for 3.71.1"
+    },
+    {
+      "class": "descgap",
+      "finding": "red on base fe2940ba: at 390 px a page's description sits a section gap below its title",
+      "date": "2026-10-04",
+      "note": "parked by Kenny 2026-10-04 for 3.71.1"
+    },
+    {
+      "class": "mono",
+      "finding": "red on base fe2940ba: /map draws /mnt/pve-backup in monospace at 11.7 px, smaller than its row",
+      "date": "2026-10-04",
+      "note": "parked by Kenny 2026-10-04 for 3.71.1"
+    }
+  ]
+}

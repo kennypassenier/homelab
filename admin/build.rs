@@ -39,10 +39,16 @@ fn main() {
             .expect("under web/")
             .to_string_lossy()
             .replace('\\', "/");
+        // redesign-final-46: the path is the crate's own directory at
+        // compile time, never this script's absolute path. Every worktree
+        // shares one cargo target directory and cargo hashes a path package
+        // the same in each, so this script's output was another worktree's:
+        // a demo build embedded that worktree's web files (a layout run
+        // judged code from another branch). `env!` is read when this crate
+        // compiles, and a changed directory recompiles it.
         writeln!(
             src,
-            "    ({rel:?}, include_bytes!({:?})),",
-            f.display().to_string()
+            "    ({rel:?}, include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/web/{rel}\"))),"
         )
         .expect("write to a String");
     }

@@ -249,6 +249,9 @@ cd admin/web
 # the last case it started. redesign-final: --test-force-exit ends a file's
 # process once its cases are done (a 2 s sweep of one control sat ~44 s
 # waiting for a handle a case left open).
+# redesign-final (Kenny, 2026-10-04): the cases parked for 3.71.1 are
+# printed on every run (test-e2e/parked.json; parked.js runs them).
+node --input-type=module -e 'import("./test-e2e/parked.js").then((m) => console.log(m.parkedLines().join("\n")))' || true
 if [ -n "${INVARIANTS_SCRIPT:-}" ]; then
   INVARIANTS_BASE_URL="$base_url" INVARIANTS_TOKEN="$token" node "$INVARIANTS_SCRIPT"
 else

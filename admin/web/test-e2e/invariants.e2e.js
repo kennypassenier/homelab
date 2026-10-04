@@ -12,7 +12,8 @@
 // case per invariant, DOM assertions rather than screenshots, against the
 // one demo server `scripts/invariants-run.sh` already has waiting at
 // INVARIANTS_BASE_URL.
-import { test } from "node:test";
+import { test as nodeTest } from "node:test";
+import { parkedAware } from "./parked.js";
 import assert from "node:assert/strict";
 import { launch } from "./harness.js";
 import { clockNow, clockNowS } from "./clock.js";
@@ -22,6 +23,9 @@ import { clockNow, clockNowS } from "./clock.js";
 // loudly enough to get fixed; found while adding this file's own fix-210
 // cases, which need the same list.
 import { DRIVABLE_PATHS, PATH_TO_PAGE, route } from "../js/router.js";
+// redesign-final: the cases Kenny parked for 3.71.1 (parked.json) pass only
+// while red; every other case runs as it is.
+const test = parkedAware(nodeTest);
 
 const BASE = process.env.INVARIANTS_BASE_URL ?? "http://127.0.0.1:8099";
 const TOKEN = process.env.INVARIANTS_TOKEN ?? "test-invariants-token-1234";
@@ -1387,108 +1391,6 @@ test("invariants: the Host page's Disk section names the root volume's device an
   }
 });
 
-// fix-225 (Kenny, 2026-10-02: "ik dacht dat de install a release pagina ook
-// al met grid hermaakt was?"): the page sweeps (fix-206, fix-210) never
-// opened a dialog, so an action dialog could still stack its fields loosely.
-// This opens every action a stack page offers and measures each visible
-// field: every label starts on one edge and every control on another, to
-// the right of the labels.
-test("invariants: every action dialog lays its fields on one grid — labels on one edge, controls on another", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1600, height: 1000 },
-    });
-    const page = await freshPage(context);
-    await page.goto(`${BASE}/stacks/kp-soft`);
-    const buttons = page.locator("button[data-action]");
-    await buttons.first().waitFor({ timeout: 15000 });
-    const actions = await buttons.evaluateAll((bs) =>
-      bs.map((b) => b.getAttribute("data-action")).filter(Boolean),
-    );
-    assert.ok(actions.length >= 3, `expected several actions, got ${actions}`);
-    let measured = 0;
-    for (const action of actions) {
-      const btn = page.locator(`button[data-action="${action}"]`).first();
-      // redesign-stackhub: the hub keeps most actions in its More ▾.
-      if (!(await btn.isVisible())) await openStackMore(page);
-      if (!(await btn.isVisible()) || !(await btn.isEnabled())) continue;
-      await btn.click({ timeout: 5000 });
-      const dialog = page.locator("dialog#action-dialog[open]");
-      if (!(await dialog.isVisible().catch(() => false))) {
-        await page.waitForTimeout(300);
-        if (!(await dialog.isVisible().catch(() => false))) {
-          for (const close of await page
-            .locator("dialog[open] .kp-dialog__close")
-            .all())
-            await close.click({ timeout: 2000 }).catch(() => {});
-          continue;
-        }
-      }
-      const edges = await dialog.evaluate((d) => {
-        const step = [...d.querySelectorAll("[data-kp-step]")].find(
-          (s) => !(/** @type {HTMLElement} */ (s).hidden),
-        );
-        if (!step) return [];
-        return [...step.querySelectorAll(":scope > .kp-field")]
-          .filter((f) => /** @type {HTMLElement} */ (f).offsetParent)
-          .map((f) => {
-            const label = f.querySelector(".kp-field__label");
-            const ctl = f.querySelector(".kp-field__input, .kp-field__check");
-            if (!label || !ctl) return null;
-            const l = label.getBoundingClientRect();
-            const c = ctl.getBoundingClientRect();
-            // A control replaced on screen by a richer one (the snapshot
-            // field behind its picker) has no box of its own to align.
-            if (c.width === 0 || c.height === 0) return null;
-            return {
-              label: Math.round(l.left),
-              ctl: Math.round(c.left),
-              labelRight: Math.round(l.right),
-            };
-          })
-          .filter(Boolean);
-      });
-      if (edges.length >= 1) {
-        const labelEdges = new Set(edges.map((e) => e.label));
-        const ctlEdges = new Set(edges.map((e) => e.ctl));
-        assert.equal(
-          labelEdges.size,
-          1,
-          `${action}: labels start at ${[...labelEdges]}`,
-        );
-        assert.equal(
-          ctlEdges.size,
-          1,
-          `${action}: controls start at ${[...ctlEdges]}`,
-        );
-        for (const e of edges)
-          assert.ok(
-            e.ctl > e.label,
-            `${action}: a control sits under its label instead of beside it`,
-          );
-        measured++;
-      }
-      // Close through the dialog's own close button: Escape lands on a
-      // focused select first and leaves the dialog open over the page.
-      // Some actions (Roll back…) open their own dialog, not the action
-      // dialog: close whatever is open before the next button.
-      for (const close of await page
-        .locator("dialog[open] .kp-dialog__close")
-        .all())
-        await close.click({ timeout: 2000 }).catch(() => {});
-      await page
-        .locator("dialog[open]")
-        .first()
-        .waitFor({ state: "detached", timeout: 5000 })
-        .catch(() => {});
-    }
-    assert.ok(measured >= 2, `only ${measured} dialogs had fields to measure`);
-  } finally {
-    await browser.close();
-  }
-});
-
 // fix-234 (Kenny, 2026-10-02: "nu staan deze per twee zo half links
 // aligned, terwijl ze nog altijd per twee kunnen staan, maar dan wel
 // gecentreerd in het beeld"): a grid of content blocks fills its own width —
@@ -1516,60 +1418,6 @@ test("invariants: chart blocks fill their grid's width, with no empty track left
       });
       assert.ok(gap <= 2, `${tab}: ${gap}px of the grid's width left empty`);
     }
-  } finally {
-    await browser.close();
-  }
-});
-
-// fix-235 (Kenny, 2026-10-02: "consistentie is ook belangrijk. En niet
-// gewoon alles links aligned naast elkaar proppen"): every page's title row
-// has the same shape — the title on the left edge, whatever acts on the
-// page grouped against the right edge.
-test("invariants: every page's title row puts the title left and its controls against the right edge", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1894, height: 1000 },
-    });
-    const page = await freshPage(context);
-    let checked = 0;
-    for (const path of DRIVABLE_PATHS) {
-      await page.goto(`${BASE}/${path}`);
-      await page.waitForTimeout(800);
-      const rows = await page.evaluate(() =>
-        [...document.querySelectorAll("main .title-row")]
-          .filter((r) => /** @type {HTMLElement} */ (r).offsetParent)
-          .filter(
-            (r) => r.querySelector(":scope > h1") && r.children.length > 1,
-          )
-          .map((r) => {
-            const box = r.getBoundingClientRect();
-            // The page's freshness sits after the title (redesign-final
-            // X1); it is no control, so a row of title and freshness only
-            // has nothing to push right.
-            const kids = [...r.children].filter(
-              (c) =>
-                /** @type {HTMLElement} */ (c).offsetParent &&
-                !c.matches(":is(h1, h2), .nx-live"),
-            );
-            if (!kids.length) return null;
-            const last = kids[kids.length - 1].getBoundingClientRect();
-            return {
-              rowRight: Math.round(box.right),
-              lastRight: Math.round(last.right),
-            };
-          }),
-      );
-      for (const r of rows) {
-        if (!r) continue;
-        assert.ok(
-          r.rowRight - r.lastRight <= 2,
-          `/${path}: the title row's controls stop ${r.rowRight - r.lastRight}px short of its right edge`,
-        );
-        checked++;
-      }
-    }
-    assert.ok(checked >= 2, `only ${checked} title rows with controls found`);
   } finally {
     await browser.close();
   }
@@ -1751,140 +1599,6 @@ test("invariants: a stale-image row offers Update with the from/to versions, and
   }
 });
 
-test("invariants: every link on every drivable page has an absolute http(s) href or a same-site path that resolves", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1600, height: 1000 },
-    });
-    const page = await freshPage(context);
-    // `console` is `shell` at its 3.71.0 address (feat-shell-1).
-    const skip = new Set(["apply", "shell", "console", "log", "passkeys"]);
-    const paths = [
-      ...DRIVABLE_PATHS.filter((p) => !skip.has(p)).map((p) => `/${p}`),
-      "/stacks/kp-soft",
-    ];
-    /** @type {string[]} */
-    const bad = [];
-    /** @type {Map<string, string>} where each same-site path was first seen */
-    const sameSite = new Map();
-    for (const p of paths) {
-      await page.goto(`${BASE}${p}`, { waitUntil: "load" });
-      await page.waitForTimeout(1200);
-      // Expandable rows hold their own links: open every one first.
-      await page.evaluate(() => {
-        for (const b of document.querySelectorAll(
-          "#page [data-kp-row-toggle]:not([aria-expanded='true'])",
-        ))
-          /** @type {HTMLElement} */ (b).click();
-      });
-      await page.waitForTimeout(200);
-      const hrefs = await page.evaluate(() =>
-        [...document.querySelectorAll("a[href]")].map(
-          (a) => a.getAttribute("href") ?? "",
-        ),
-      );
-      // A link to a section of this page names a section that is there.
-      const lost = await page.evaluate(() =>
-        [...document.querySelectorAll("a[href*='#']")]
-          .map((a) => new URL(/** @type {HTMLAnchorElement} */ (a).href))
-          .filter(
-            (u) =>
-              u.origin === location.origin &&
-              u.pathname === location.pathname &&
-              u.hash.length > 1 &&
-              !document.getElementById(decodeURIComponent(u.hash.slice(1))),
-          )
-          .map((u) => u.hash),
-      );
-      for (const f of lost)
-        bad.push(`${p}: ${f} points at a section this page does not have`);
-      // A repository address shown as text reads as a link and is not one
-      // ("en de links werken niet"): it must be a real, absolute link.
-      const deadText = await page.evaluate(() => {
-        const out = [];
-        const walk = document.createTreeWalker(
-          document.getElementById("page") ?? document.body,
-          NodeFilter.SHOW_TEXT,
-        );
-        for (let n = walk.nextNode(); n; n = walk.nextNode()) {
-          const m =
-            /\b(?:github\.com|gitlab\.com|codeberg\.org)\/[\w.-]+\/[\w.-]+/.exec(
-              n.textContent ?? "",
-            );
-          if (!m) continue;
-          const a = n.parentElement?.closest("a[href]");
-          if (!a || !/^https?:\/\//.test(a.getAttribute("href") ?? ""))
-            out.push(m[0]);
-        }
-        return out;
-      });
-      for (const t of deadText)
-        bad.push(`${p}: "${t}" is shown as text, not as a working link`);
-      for (const href of hrefs) {
-        if (/^https?:\/\/[^/\s]+/.test(href)) continue;
-        if (href.startsWith("/") && !href.startsWith("//")) {
-          if (!sameSite.has(href)) sameSite.set(href, p);
-          continue;
-        }
-        bad.push(
-          `${p}: ${JSON.stringify(href)} has no scheme and no leading /`,
-        );
-      }
-    }
-    for (const [href, where] of sameSite) {
-      const path = href.split(/[?#]/)[0];
-      if (route(path).page !== "notfound") continue;
-      const r = await page.request.get(`${BASE}${path}`, { maxRedirects: 0 });
-      if (r.status() >= 400)
-        bad.push(`${where}: ${href} does not resolve (${r.status()})`);
-      else if (!/^\/(data|static|login|logout|hooks|healthz)\b/.test(path))
-        bad.push(`${where}: ${href} is no page of this dashboard`);
-    }
-    assert.deepEqual(bad, [], `broken links:\n${bad.join("\n")}`);
-  } finally {
-    await browser.close();
-  }
-});
-
-// fix-236 (Kenny, 2026-10-02: "ik moet niet raden naar wat een functie
-// doet"): every page says under its title what it is for, not only
-// Overview and the stack page.
-test("invariants: every page has a one-sentence description right under its title", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1894, height: 1000 },
-    });
-    const page = await freshPage(context);
-    const missing = [];
-    for (const path of DRIVABLE_PATHS) {
-      await page.goto(`${BASE}/${path}`);
-      await page.waitForTimeout(700);
-      const ok = await page.evaluate(() => {
-        const h1 = document.querySelector("main h1");
-        if (!h1) return true;
-        const top = h1.getBoundingClientRect().bottom;
-        // A description is a short muted paragraph within 120 px under the
-        // title, wherever the page's header puts it.
-        return [...document.querySelectorAll("main p")].some((p) => {
-          const r = p.getBoundingClientRect();
-          return (
-            r.height > 0 &&
-            r.top >= top - 4 &&
-            r.top - top < 120 &&
-            (p.textContent ?? "").trim().length > 20
-          );
-        });
-      });
-      if (!ok) missing.push(`/${path}`);
-    }
-    assert.deepEqual(missing, [], `pages without a description: ${missing}`);
-  } finally {
-    await browser.close();
-  }
-});
-
 // fix-236: an action button's label never wraps onto a second line and is
 // never cut off, at desktop and at phone width.
 test("invariants: every action button's label fits on one line, uncut, on desktop and phone", async () => {
@@ -1975,150 +1689,6 @@ async function eachActionDialog(page, measure) {
     }
   }
 }
-
-// fix-244: a page's one-sentence description is its title's subtitle — it
-// sits right under the title (and under the title row's own controls when
-// a phone folds them below it), never a full section gap away where it
-// reads as a section of its own.
-test("invariants: every page's description sits directly under its title, never a section gap away", async () => {
-  const browser = await launch();
-  try {
-    const bad = [];
-    for (const width of [1894, 390]) {
-      const context = await browser.newContext({
-        viewport: { width, height: 1000 },
-      });
-      const page = await freshPage(context);
-      for (const path of UI_PASS_3_PATHS) {
-        await page.goto(`${BASE}/${path}`);
-        await page.waitForTimeout(600);
-        const gap = await page.evaluate(() => {
-          const h1 = document.querySelector("main h1");
-          if (!h1) return null;
-          const head = h1.closest(".title-row") ?? h1;
-          const desc = head.nextElementSibling;
-          if (!desc || desc.tagName !== "P") return null;
-          // The title block's own visible content, without its margins.
-          const parts =
-            head === h1
-              ? [h1]
-              : [...head.children].filter(
-                  (c) => /** @type {HTMLElement} */ (c).offsetParent,
-                );
-          const bottom = Math.max(
-            ...parts.map((p) => p.getBoundingClientRect().bottom),
-          );
-          return Math.round(desc.getBoundingClientRect().top - bottom);
-        });
-        if (gap !== null && (gap > 12 || gap < 0))
-          bad.push(`${width}px /${path}: ${gap}px`);
-      }
-      await context.close();
-    }
-    assert.deepEqual(
-      bad,
-      [],
-      `descriptions detached from their title: ${bad.join("; ")}`,
-    );
-  } finally {
-    await browser.close();
-  }
-});
-
-// fix-245: a page title row's controls are one row beside the title on a
-// desktop — never a column stacked under each other — and on a phone, once
-// they fold under the title, they start on the title's own left edge
-// instead of hanging off the right.
-test("invariants: a title row's controls sit in one row beside the title, and fold under it left-aligned on a phone", async () => {
-  const browser = await launch();
-  try {
-    const bad = [];
-    for (const width of [1894, 390]) {
-      const context = await browser.newContext({
-        viewport: { width, height: 1000 },
-      });
-      const page = await freshPage(context);
-      for (const path of UI_PASS_3_PATHS) {
-        await page.goto(`${BASE}/${path}`);
-        await page.waitForTimeout(600);
-        const r = await page.evaluate(() => {
-          const h1 = document.querySelector("main h1");
-          const row = h1?.closest(".title-row");
-          if (!h1 || !row) return null;
-          const t = h1.getBoundingClientRect();
-          const ctls = [
-            ...row.querySelectorAll("button, a.kp-button, .state, .badge"),
-          ]
-            .filter((e) => /** @type {HTMLElement} */ (e).offsetParent)
-            .map((e) => e.getBoundingClientRect())
-            .filter((b) => b.width > 0);
-          if (!ctls.length) return null;
-          // Stacked: one control sits wholly under another (badges of
-          // different heights centred on one line are still one row).
-          const stacked = ctls.some((a) =>
-            ctls.some((b) => b.top >= a.bottom - 1),
-          );
-          const below = ctls.filter((b) => b.top >= t.bottom - 2);
-          return {
-            stacked,
-            belowLeft: below.length
-              ? Math.round(Math.min(...below.map((b) => b.left)) - t.left)
-              : null,
-          };
-        });
-        if (!r) continue;
-        if (width > 800 && r.stacked)
-          bad.push(`${width}px /${path}: controls stacked in a column`);
-        if (r.belowLeft !== null && Math.abs(r.belowLeft) > 2)
-          bad.push(
-            `${width}px /${path}: folded controls start ${r.belowLeft}px from the title's edge`,
-          );
-      }
-      await context.close();
-    }
-    assert.deepEqual(bad, [], bad.join("; "));
-  } finally {
-    await browser.close();
-  }
-});
-
-// fix-246: code-like text (an address, a key, a port list) is set in the
-// theme's monospace at a readable size — never the browser's bare
-// `monospace` fallback, whose 13 px base shrank it to 11 px beside 16 px
-// text.
-test("invariants: monospace text reads at nearly its row's own size, in the theme's mono font", async () => {
-  const browser = await launch();
-  try {
-    const bad = [];
-    const context = await browser.newContext({
-      viewport: { width: 1894, height: 1000 },
-    });
-    const page = await freshPage(context);
-    for (const path of UI_PASS_3_PATHS) {
-      await page.goto(`${BASE}/${path}`);
-      await page.waitForTimeout(900);
-      const found = await page.evaluate(() =>
-        [...document.querySelectorAll("main .mono")]
-          .filter((e) => /** @type {HTMLElement} */ (e).offsetParent)
-          .map((e) => {
-            const own = parseFloat(getComputedStyle(e).fontSize);
-            const parent = parseFloat(
-              getComputedStyle(/** @type {Element} */ (e.parentElement))
-                .fontSize,
-            );
-            return { own, ratio: own / parent, text: e.textContent ?? "" };
-          })
-          .filter((m) => m.ratio < 0.8 || m.own < 12)
-          .slice(0, 2)
-          .map((m) => `"${m.text.trim().slice(0, 30)}" ${m.own}px`),
-      );
-      for (const f of found) bad.push(`/${path}: ${f}`);
-    }
-    assert.deepEqual(bad, [], `undersized monospace: ${bad.join("; ")}`);
-  } finally {
-    await browser.close();
-  }
-});
 
 // fix-247: a link drawn as a button looks like every other button — no
 // underline on one ("Export bundle") beside a plain one ("Compare with the
@@ -5425,77 +4995,6 @@ test("invariants: redesign-kit: a row menu opened near the foot of the screen si
     );
     await page.keyboard.press("Escape");
     await clearSchedules(page);
-  } finally {
-    await browser.close();
-  }
-});
-
-test("invariants: redesign-kit-17: no page scrolls sideways at 390 px, and no table's box overflows its card", async () => {
-  const browser = await launch();
-  try {
-    const { context, page } = await phonePage(browser, "light");
-    /** @type {string[]} */
-    const bad = [];
-    for (const path of [
-      "/",
-      "/inbox",
-      "/stacks",
-      "/stacks/films",
-      "/stacks/films/settings",
-      "/activity",
-      "/backups",
-      "/host",
-      "/schedules",
-      "/secrets",
-      "/charts",
-      "/fleetview",
-      "/firewall",
-      "/settings",
-      "/presets",
-      "/system/notifications",
-      "/jobs",
-      "/apply",
-      "/doctor",
-    ]) {
-      await page.goto(`${BASE}${path}`);
-      const shown = await page
-        .locator("#page")
-        .waitFor({ state: "attached", timeout: 10000 })
-        .then(() => true)
-        .catch(() => false);
-      if (!shown) {
-        bad.push(`${path}: no page drawn (${page.url()})`);
-        continue;
-      }
-      // Wait for the page's reads to land (each has its own deadline).
-      await page
-        .waitForFunction(
-          () => !document.querySelector('#page [data-kp-state="loading"]'),
-          null,
-          { timeout: 8000 },
-        )
-        .catch(() => {});
-      const r = await page.evaluate(() => ({
-        over:
-          document.documentElement.scrollWidth -
-          document.documentElement.clientWidth,
-        wraps: [
-          ...document.querySelectorAll(
-            "main .kp-table-wrap, main .bk-table-wrap",
-          ),
-        ]
-          .map((w) => w.scrollWidth - w.clientWidth)
-          .filter((x) => x > 1),
-      }));
-      if (r.over > 0)
-        bad.push(`${path}: the page scrolls sideways by ${r.over} px`);
-      if (r.wraps.length)
-        bad.push(
-          `${path}: a table overflows its box by ${r.wraps.join(", ")} px`,
-        );
-    }
-    assert.deepEqual(bad, [], "at 390 px");
-    await context.close();
   } finally {
     await browser.close();
   }
@@ -9184,10 +8683,14 @@ test("invariants: redesign-integrate-1: on a 390 px phone the Firewall's rules t
 // ── redesign-final-gen (3.71.0's final review, 2026-10-04): one generic
 // whole-screen check per finding class, over every page and every action
 // dialog or drawer at 1894 and 390 px (test-e2e/layoutaudit.js says what
-// each class checks). The sweep runs once; its five cases read it. ──────
+// each class checks). redesign-final-45 (Kenny, 2026-10-04): ONE case, one
+// walk, every class reported in one pass; the walkers that each walked the
+// pages on their own (links, description, title row, monospace, sideways
+// scroll, the dialog field grid) are classes of it. ──────────────────────
 
 /** The pages the final review walked: every area, view and hub tab. */
 const AUDIT_PAGES = [
+  "/",
   "/apps",
   "/inbox",
   "/stacks",
@@ -9220,6 +8723,8 @@ const AUDIT_PAGES = [
   "/stacks/kp-soft/backups",
   "/stacks/kp-soft/history",
   "/stacks/kp-soft/settings",
+  "/stacks/films/overview",
+  "/stacks/films/settings",
   // redesign-final M8: the stack whose last night failed (its incident).
   "/stacks/oldstack/history",
 ];
@@ -9277,106 +8782,14 @@ async function openRunningDrawer(page) {
   await page.locator("dialog[open]").last().waitFor({ timeout: 5000 });
 }
 
-/** @type {Promise<Record<string, string[]>> | null} */
-let auditRun = null;
-
-/**
- * Every audit finding of the sweep, by class ("a".."e"), each prefixed with
- * where it was found; run once for all five cases.
- */
-function auditSweep() {
-  auditRun ??= (async () => {
-    const { layoutAudit } = await import("./layoutaudit.js");
-    /** @type {Record<string, string[]>} */
-    const all = {
-      a: [],
-      b: [],
-      c: [],
-      d: [],
-      e: [],
-      f: [],
-      g: [],
-      h: [],
-      hn: [],
-    };
-    const browser = await launch();
-    try {
-      for (const width of [1894, 390]) {
-        const context = await browser.newContext({
-          viewport: { width, height: width > 500 ? 1000 : 844 },
-        });
-        const page = await freshPage(context);
-        const keep = (/** @type {string} */ where, r) => {
-          for (const k of Object.keys(all))
-            for (const f of r[k]) all[k].push(`${where} @${width}: ${f}`);
-        };
-        // The last open dialog, marked for the audit (a page that opens
-        // one by its address, as Deploy all changes does, is audited with
-        // it).
-        const markDialog = () =>
-          page.evaluate(() => {
-            const ds = [...document.querySelectorAll("dialog[open]")];
-            ds.forEach((d) => d.removeAttribute("data-audit"));
-            ds[ds.length - 1]?.setAttribute("data-audit", "");
-            return ds.length > 0;
-          });
-        for (const path of AUDIT_PAGES) {
-          if (AUDIT_ONLY && !AUDIT_ONLY.test(path)) continue;
-          await page.goto(`${BASE}${path}`);
-          await page.waitForTimeout(1500);
-          keep(path, await page.evaluate(layoutAudit, null));
-          if (await markDialog())
-            keep(
-              `${path} › its dialog`,
-              await page.evaluate(layoutAudit, "dialog[data-audit]"),
-            );
-        }
-        for (const d of AUDIT_DIALOGS) {
-          if (AUDIT_ONLY && !AUDIT_ONLY.test(d.path)) continue;
-          await page.goto(`${BASE}${d.path}`);
-          await page.waitForTimeout(1200);
-          let btn = page.locator(
-            d.drive
-              ? `main [data-drive="${d.drive}"]:visible`
-              : "main button:visible",
-          );
-          if (d.text) btn = btn.filter({ hasText: d.text });
-          if ((await btn.count()) === 0) {
-            all.a.push(`${d.path} @${width}: no control ${d.drive ?? d.text}`);
-            continue;
-          }
-          await btn.first().click();
-          const dlg = page.locator("dialog[open]").last();
-          await dlg.waitFor({ timeout: 5000 }).catch(() => {});
-          if (d.then) await d.then(page);
-          await page.waitForTimeout(700);
-          const where = `${d.path} › ${d.drive ?? d.text}${d.then ? " › then" : ""}`;
-          await markDialog();
-          keep(where, await page.evaluate(layoutAudit, "dialog[data-audit]"));
-          await page.keyboard.press("Escape");
-        }
-        await context.close();
-      }
-    } finally {
-      await browser.close();
-    }
-    if (process.env.INVARIANTS_AUDIT_OUT)
-      (await import("node:fs")).writeFileSync(
-        process.env.INVARIANTS_AUDIT_OUT,
-        JSON.stringify(all, null, 1),
-      );
-    return all;
-  })();
-  return auditRun;
-}
-
 /** INVARIANTS_AUDIT_ONLY: audit only the pages and dialogs whose path
  * matches (a fix's own run); the gate runs them all. */
 const AUDIT_ONLY = process.env.INVARIANTS_AUDIT_ONLY
   ? new RegExp(process.env.INVARIANTS_AUDIT_ONLY)
   : null;
 
-for (const [cls, what] of /** @type {const} */ ([
+/** Every class the walk reports, with what it holds. */
+const AUDIT_CLASSES = /** @type {const} */ ([
   ["a", "no word wraps per letter and no text is cut or spills out of its box"],
   ["b", "no row's content runs into the next row"],
   [
@@ -9394,20 +8807,180 @@ for (const [cls, what] of /** @type {const} */ ([
     "the page's freshness sits in one slot, the title's row, after the title",
   ],
   ["h", "every count linked to its rows says how many rows it describes"],
-])) {
-  test(`invariants: redesign-final-gen-${cls}: on every page and action dialog at 1894 and 390 px, ${what}`, async (t) => {
-    // redesign-final: no instance is excused (the AUDIT_KNOWN allowance is
-    // gone); every finding fails.
-    const sweep = await auditSweep();
-    const found = sweep[cls];
-    // Class h: how many linked counts each page had checked.
-    if (cls === "h")
-      t.diagnostic(
-        `counts checked per page: ${sweep.hn.filter((x) => !/: 0$/.test(x)).join("; ")}`,
+  ["desc", "every page has a one-sentence description right under its title"],
+  [
+    "descgap",
+    "a page's description sits directly under its title, never a section gap away",
+  ],
+  [
+    "titlerow",
+    "a title row puts its controls in one row against its right edge, folding under the title left-aligned on a phone",
+  ],
+  ["mono", "monospace text reads at nearly its row's own size"],
+  [
+    "sideways",
+    "no page scrolls sideways at 390 px and no table is wider than its box",
+  ],
+  [
+    "links",
+    "every link is an absolute http(s) address or a same-site path that resolves",
+  ],
+  [
+    "grid",
+    "an action dialog lays its fields on one grid, labels on one edge, controls on another",
+  ],
+]);
+
+test("invariants: redesign-final-gen: one walk over every page and action dialog at 1894 and 390 px reports every layout class", async (t) => {
+  const { layoutAudit, pageChecks, dialogGrid } =
+    await import("./layoutaudit.js");
+  const { parkedClass } = await import("./parked.js");
+  /** @type {Record<string, string[]>} */
+  const all = Object.fromEntries(
+    [...AUDIT_CLASSES.map(([k]) => k), "hn"].map((k) => [k, []]),
+  );
+  /** @type {Map<string, string>} where each same-site path was first seen */
+  const sameSite = new Map();
+  // Action dialogs whose fields the grid class measured: none measured is
+  // no pass (the old case found 0 once the hub moved its actions).
+  let gridDialogs = 0;
+  const browser = await launch();
+  try {
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: width > 500 ? 1000 : 844 },
+      });
+      const page = await freshPage(context);
+      const keep = (/** @type {string} */ where, /** @type {any} */ r) => {
+        for (const k of Object.keys(all))
+          for (const f of r[k] ?? []) all[k].push(`${where} @${width}: ${f}`);
+      };
+      // The last open dialog, marked for the audit (a page that opens
+      // one by its address, as Deploy all changes does, is audited with
+      // it).
+      const markDialog = () =>
+        page.evaluate(() => {
+          const ds = [...document.querySelectorAll("dialog[open]")];
+          ds.forEach((d) => d.removeAttribute("data-audit"));
+          ds[ds.length - 1]?.setAttribute("data-audit", "");
+          return ds.length > 0;
+        });
+      const auditDialog = async (/** @type {string} */ where) => {
+        keep(where, await page.evaluate(layoutAudit, "dialog[data-audit]"));
+        const g = await page.evaluate(dialogGrid, "dialog[data-audit]");
+        keep(where, { grid: g.faults });
+        if (g.fields) gridDialogs += 1;
+      };
+      for (const path of AUDIT_PAGES) {
+        if (AUDIT_ONLY && !AUDIT_ONLY.test(path)) continue;
+        await page.goto(`${BASE}${path}`);
+        await page.waitForTimeout(1500);
+        keep(path, await page.evaluate(layoutAudit, null));
+        const pc = await page.evaluate(pageChecks);
+        keep(path, pc);
+        if (await markDialog()) await auditDialog(`${path} › its dialog`);
+        if (width > 800) {
+          // Expandable rows hold their own links: open every one, then
+          // read the links (after the layout classes, which it would move).
+          await page.evaluate(() => {
+            for (const b of document.querySelectorAll(
+              "#page [data-kp-row-toggle]:not([aria-expanded='true'])",
+            ))
+              /** @type {HTMLElement} */ (b).click();
+          });
+          await page.waitForTimeout(200);
+          const more = await page.evaluate(pageChecks);
+          for (const href of [...pc.hrefs, ...more.hrefs])
+            if (!sameSite.has(href)) sameSite.set(href, path);
+          keep(path, {
+            links: more.links.filter((l) => !pc.links.includes(l)),
+          });
+        }
+      }
+      for (const d of AUDIT_DIALOGS) {
+        if (AUDIT_ONLY && !AUDIT_ONLY.test(d.path)) continue;
+        await page.goto(`${BASE}${d.path}`);
+        await page.waitForTimeout(1200);
+        let btn = page.locator(
+          d.drive
+            ? `main [data-drive="${d.drive}"]:visible`
+            : "main button:visible",
+        );
+        if (d.text) btn = btn.filter({ hasText: d.text });
+        if ((await btn.count()) === 0) {
+          all.a.push(`${d.path} @${width}: no control ${d.drive ?? d.text}`);
+          continue;
+        }
+        await btn.first().click();
+        const dlg = page.locator("dialog[open]").last();
+        await dlg.waitFor({ timeout: 5000 }).catch(() => {});
+        if (d.then) await d.then(page);
+        await page.waitForTimeout(700);
+        await markDialog();
+        await auditDialog(
+          `${d.path} › ${d.drive ?? d.text}${d.then ? " › then" : ""}`,
+        );
+        await page.keyboard.press("Escape");
+      }
+      if (width > 800)
+        for (const [href, where] of sameSite) {
+          const path = href.split(/[?#]/)[0];
+          if (route(path).page !== "notfound") continue;
+          const r = await page.request.get(`${BASE}${path}`, {
+            maxRedirects: 0,
+          });
+          // A refusal with its reason (a demo stack the fixture repository
+          // lacks answers its export with 409) is a route that resolves;
+          // no route (404) or a crash (5xx) is not.
+          if (r.status() === 404 || r.status() >= 500)
+            all.links.push(
+              `${where}: ${href} does not resolve (${r.status()})`,
+            );
+          else if (!/^\/(data|static|login|logout|hooks|healthz)\b/.test(path))
+            all.links.push(`${where}: ${href} is no page of this dashboard`);
+        }
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+  if (process.env.INVARIANTS_AUDIT_OUT)
+    (await import("node:fs")).writeFileSync(
+      process.env.INVARIANTS_AUDIT_OUT,
+      JSON.stringify(all, null, 1),
+    );
+  if (gridDialogs < 2)
+    all.grid.push(`only ${gridDialogs} action dialogs had fields to measure`);
+  t.diagnostic(`grid: ${gridDialogs} action dialogs with fields measured`);
+  t.diagnostic(
+    `counts checked per page: ${all.hn.filter((x) => !/: 0$/.test(x)).join("; ")}`,
+  );
+  // Every class in one verdict: a class with findings fails unless Kenny
+  // parked it (test-e2e/parked.json); a parked class without findings
+  // fails too (take it off the list).
+  /** @type {string[]} */
+  const bad = [];
+  for (const [cls, what] of AUDIT_CLASSES) {
+    const found = all[cls];
+    const parked = parkedClass(cls);
+    if (parked) {
+      if (found.length)
+        t.diagnostic(
+          `parked class ${cls} (${parked.note}): still red, ${found.length} findings, first: ${found[0]}`,
+        );
+      else
+        bad.push(
+          `class ${cls} is parked but passes now: take it off admin/web/test-e2e/parked.json and docs/INVARIANTS.md (${parked.finding})`,
+        );
+      continue;
+    }
+    if (found.length)
+      bad.push(
+        `class ${cls} (${what}): ${found.length} findings\n  ${found.join("\n  ")}`,
       );
-    assert.deepEqual(found, [], `${found.length} findings`);
-  });
-}
+  }
+  assert.deepEqual(bad, [], bad.join("\n"));
+});
 
 // ── redesign-final C1–C4, H1–H5 (3.71.0's final review, 2026-10-04): one
 // case per finding, each failing on the reviewed tree (c6334fc9). ───────
@@ -10472,36 +10045,6 @@ test("invariants: redesign-final-contrast: every banner, badge and chip's text m
       for (const f of found) bad.add(f);
     }
     assert.deepEqual([...bad], [], `${themes.length} themes`);
-  } finally {
-    await browser.close();
-  }
-});
-
-// M9: Backups › Coverage at 390 px scrolled 22 px sideways (the calendar's
-// Today button). No page scrolls sideways on a phone, in light or dark.
-test("invariants: redesign-final-m9: no audited page scrolls sideways at 390 px, in light and dark", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 390, height: 844 },
-    });
-    const page = await freshPage(context);
-    /** @type {string[]} */
-    const bad = [];
-    for (const theme of ["dark", "light"]) {
-      await page.evaluate((t) => localStorage.setItem("theme", t), theme);
-      for (const path of AUDIT_PAGES) {
-        await page.goto(`${BASE}${path}`);
-        await page.waitForTimeout(1200);
-        const over = await page.evaluate(
-          () =>
-            document.documentElement.scrollWidth -
-            document.documentElement.clientWidth,
-        );
-        if (over > 0) bad.push(`${theme} ${path}: ${over} px sideways`);
-      }
-    }
-    assert.deepEqual(bad, []);
   } finally {
     await browser.close();
   }

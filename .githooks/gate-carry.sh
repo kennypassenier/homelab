@@ -362,6 +362,10 @@ cmd_node() {
 cmd_invariants() {
   local state="$gitdir/gate-carry/invariants"
   mkdir -p "$state"
+  # redesign-final (Kenny, 2026-10-04): the whole-screen cases parked for
+  # 3.71.1, printed on every gate run, carried or not. A parked case that
+  # passes fails the run (admin/web/test-e2e/parked.js).
+  (cd "$root/admin/web" && node --input-type=module -e 'import("./test-e2e/parked.js").then((m) => console.log(m.parkedLines().join("\n")))') || true
   local cur_tc; cur_tc="node $(node -v 2>/dev/null || echo none)"
   local workdir; workdir=$(mktemp -d)
   trap 'rm -rf "${workdir:-}"; trap - RETURN' RETURN

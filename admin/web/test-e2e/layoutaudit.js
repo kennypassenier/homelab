@@ -346,3 +346,223 @@ export function layoutAudit(rootSel) {
   }
   return out;
 }
+
+/**
+ * redesign-final-45 (Kenny, 2026-10-04: one walk, not a walker per rule):
+ * the page-level checks that each had a walk of their own, run in the
+ * same walk as `layoutAudit`, on the page (never a dialog). Self-contained:
+ * Playwright serialises it. The width is the page's own.
+ *   desc      a one-sentence description right under the title (1894 px)
+ *   descgap   that description sits directly under the title, not a
+ *             section gap away
+ *   titlerow  the title row's controls end at its right edge (1894 px),
+ *             sit in one row on a desktop, and fold under the title
+ *             left-aligned on a phone
+ *   mono      monospace reads at nearly its row's own size (1894 px)
+ *   sideways  no sideways scroll and no table wider than its box (390 px)
+ *   links     a link names an absolute http(s) address or a same-site
+ *             path, a section link a section this page has, and a
+ *             repository address shown as text is a link (1894 px; the
+ *             same-site paths come back in `hrefs`, resolved by the caller)
+ * @returns {{desc: string[], descgap: string[], titlerow: string[],
+ *   mono: string[], sideways: string[], links: string[], hrefs: string[]}}
+ */
+export function pageChecks() {
+  /** @type {{desc: string[], descgap: string[], titlerow: string[], mono: string[], sideways: string[], links: string[], hrefs: string[]}} */
+  const out = {
+    desc: [],
+    descgap: [],
+    titlerow: [],
+    mono: [],
+    sideways: [],
+    links: [],
+    hrefs: [],
+  };
+  const wide = window.innerWidth > 800;
+  const h1 = document.querySelector("main h1");
+
+  // ---- desc: a description under the title ----
+  if (wide && h1) {
+    const top = h1.getBoundingClientRect().bottom;
+    const has = [...document.querySelectorAll("main p")].some((p) => {
+      const r = p.getBoundingClientRect();
+      return (
+        r.height > 0 &&
+        r.top >= top - 4 &&
+        r.top - top < 120 &&
+        (p.textContent ?? "").trim().length > 20
+      );
+    });
+    if (!has) out.desc.push("no one-sentence description under the title");
+  }
+
+  // ---- descgap: directly under it ----
+  if (h1) {
+    const head = h1.closest(".title-row") ?? h1;
+    const desc = head.nextElementSibling;
+    if (desc && desc.tagName === "P") {
+      const parts =
+        head === h1
+          ? [h1]
+          : [...head.children].filter(
+              (c) => /** @type {HTMLElement} */ (c).offsetParent,
+            );
+      const bottom = Math.max(
+        ...parts.map((p) => p.getBoundingClientRect().bottom),
+      );
+      const gap = Math.round(desc.getBoundingClientRect().top - bottom);
+      if (gap > 12 || gap < 0)
+        out.descgap.push(`the description sits ${gap}px under the title`);
+    }
+  }
+
+  // ---- titlerow ----
+  if (wide)
+    for (const r of document.querySelectorAll("main .title-row")) {
+      if (!(/** @type {HTMLElement} */ (r).offsetParent)) continue;
+      if (!r.querySelector(":scope > h1") || r.children.length < 2) continue;
+      // The freshness after the title (redesign-final X1) is no control.
+      const kids = [...r.children].filter(
+        (c) =>
+          /** @type {HTMLElement} */ (c).offsetParent &&
+          !c.matches(":is(h1, h2), .nx-live"),
+      );
+      if (!kids.length) continue;
+      const short = Math.round(
+        r.getBoundingClientRect().right -
+          kids[kids.length - 1].getBoundingClientRect().right,
+      );
+      if (short > 2)
+        out.titlerow.push(
+          `the controls stop ${short}px short of the right edge`,
+        );
+    }
+  const row = h1?.closest(".title-row");
+  if (h1 && row) {
+    const t = h1.getBoundingClientRect();
+    const ctls = [
+      ...row.querySelectorAll("button, a.kp-button, .state, .badge"),
+    ]
+      .filter((e) => /** @type {HTMLElement} */ (e).offsetParent)
+      .map((e) => e.getBoundingClientRect())
+      .filter((b) => b.width > 0);
+    if (ctls.length) {
+      const stacked = ctls.some((a) => ctls.some((b) => b.top >= a.bottom - 1));
+      const below = ctls.filter((b) => b.top >= t.bottom - 2);
+      const left = below.length
+        ? Math.round(Math.min(...below.map((b) => b.left)) - t.left)
+        : null;
+      if (wide && stacked) out.titlerow.push("controls stacked in a column");
+      if (left !== null && Math.abs(left) > 2)
+        out.titlerow.push(
+          `folded controls start ${left}px from the title's edge`,
+        );
+    }
+  }
+
+  // ---- mono ----
+  if (wide)
+    for (const e of document.querySelectorAll("main .mono")) {
+      if (!(/** @type {HTMLElement} */ (e).offsetParent)) continue;
+      const own = parseFloat(getComputedStyle(e).fontSize);
+      const parent = parseFloat(
+        getComputedStyle(/** @type {Element} */ (e.parentElement)).fontSize,
+      );
+      if (own / parent < 0.8 || own < 12)
+        out.mono.push(
+          `"${(e.textContent ?? "").trim().slice(0, 30)}" at ${own}px`,
+        );
+    }
+
+  // ---- sideways ----
+  if (!wide) {
+    const over =
+      document.documentElement.scrollWidth -
+      document.documentElement.clientWidth;
+    if (over > 0) out.sideways.push(`the page scrolls sideways by ${over} px`);
+    for (const w of document.querySelectorAll(
+      "main .kp-table-wrap, main .bk-table-wrap",
+    )) {
+      // A table in a shut fold or a hidden view is not on screen.
+      if (!w.checkVisibility()) continue;
+      const x = w.scrollWidth - w.clientWidth;
+      if (x > 1) out.sideways.push(`a table overflows its box by ${x} px`);
+    }
+  }
+
+  // ---- links ----
+  if (wide) {
+    for (const a of document.querySelectorAll("a[href]")) {
+      const href = a.getAttribute("href") ?? "";
+      if (/^https?:\/\/[^/\s]+/.test(href)) continue;
+      if (href.startsWith("/") && !href.startsWith("//")) {
+        out.hrefs.push(href);
+        continue;
+      }
+      out.links.push(`${JSON.stringify(href)} has no scheme and no leading /`);
+    }
+    for (const a of document.querySelectorAll("a[href*='#']")) {
+      const u = new URL(/** @type {HTMLAnchorElement} */ (a).href);
+      if (
+        u.origin === location.origin &&
+        u.pathname === location.pathname &&
+        u.hash.length > 1 &&
+        !document.getElementById(decodeURIComponent(u.hash.slice(1)))
+      )
+        out.links.push(`${u.hash} points at a section this page does not have`);
+    }
+    const walk = document.createTreeWalker(
+      document.getElementById("page") ?? document.body,
+      NodeFilter.SHOW_TEXT,
+    );
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      const m =
+        /\b(?:github\.com|gitlab\.com|codeberg\.org)\/[\w.-]+\/[\w.-]+/.exec(
+          n.textContent ?? "",
+        );
+      if (!m) continue;
+      const a = n.parentElement?.closest("a[href]");
+      if (!a || !/^https?:\/\//.test(a.getAttribute("href") ?? ""))
+        out.links.push(`"${m[0]}" is shown as text, not as a working link`);
+    }
+  }
+  return out;
+}
+
+/**
+ * redesign-final-45: the action dialog's field grid (folded from its own
+ * case): labels on one edge, controls on another, each control beside its
+ * label, at desktop width. Run on the audited dialog.
+ * @param {string} rootSel the dialog
+ * @returns {{faults: string[], fields: number}}
+ */
+export function dialogGrid(rootSel) {
+  /** @type {string[]} */
+  const out = [];
+  const d = document.querySelector(rootSel);
+  if (!d || window.innerWidth <= 800) return { faults: out, fields: 0 };
+  const step = [...d.querySelectorAll("[data-kp-step]")].find(
+    (s) => !(/** @type {HTMLElement} */ (s).hidden),
+  );
+  if (!step) return { faults: out, fields: 0 };
+  const edges = [...step.querySelectorAll(":scope > .kp-field")]
+    .filter((f) => /** @type {HTMLElement} */ (f).offsetParent)
+    .map((f) => {
+      const label = f.querySelector(".kp-field__label");
+      const ctl = f.querySelector(".kp-field__input, .kp-field__check");
+      if (!label || !ctl) return null;
+      const l = label.getBoundingClientRect();
+      const c = ctl.getBoundingClientRect();
+      if (c.width === 0 || c.height === 0) return null;
+      return { label: Math.round(l.left), ctl: Math.round(c.left) };
+    })
+    .filter((e) => e != null);
+  if (!edges.length) return { faults: out, fields: 0 };
+  const labels = new Set(edges.map((e) => e.label));
+  const ctls = new Set(edges.map((e) => e.ctl));
+  if (labels.size > 1) out.push(`labels start at ${[...labels].join(", ")}`);
+  if (ctls.size > 1) out.push(`controls start at ${[...ctls].join(", ")}`);
+  if (edges.some((e) => e.ctl <= e.label))
+    out.push("a control sits under its label instead of beside it");
+  return { faults: out, fields: edges.length };
+}

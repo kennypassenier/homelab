@@ -11356,3 +11356,65 @@ test("invariants: redesign-final-h3: Restore… opens the Restore flow page, Bac
     await browser.close();
   }
 });
+
+// ── redesign-final round 2 (M1–M9, Low, X1–X7; coordinator 2026-10-04) ──
+
+// M3: the palette offered Park and Unpark for a running stack, and a label
+// wrapped ("Unpark · kp-↵soft"); it offers only the verb that applies, and
+// a label keeps its own column on one line.
+test("invariants: redesign-final-m3: the palette offers Park only for a stack that is not parked, never Unpark beside it, and no label wraps", async () => {
+  const browser = await launch();
+  try {
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: width > 500 ? 1000 : 844 },
+      });
+      const page = await freshPage(context);
+      await page.goto(`${BASE}/stacks`);
+      await page.waitForTimeout(1200);
+      const parked = await page.evaluate(async () => {
+        const f = await (await fetch("/data/fleet")).json().catch(() => null);
+        const s = (f?.stacks ?? f?.fleet?.stacks ?? []).find(
+          (/** @type {any} */ x) => x.name === "kp-soft",
+        );
+        return s ? s.enabled === false : null;
+      });
+      await page.keyboard.press("Control+k");
+      const input = page.locator("#commands input");
+      await input.waitFor({ timeout: 3000 });
+      await input.fill("park kp-soft");
+      await page.waitForTimeout(200);
+      const got = await page.evaluate(() =>
+        [...document.querySelectorAll("#commands [data-kp-option]")]
+          .filter((o) => !(/** @type {HTMLElement} */ (o).hidden))
+          .map((o) => {
+            const l = /** @type {HTMLElement} */ (
+              o.querySelector(".nx-palette__label")
+            );
+            const r = document.createRange();
+            r.selectNodeContents(l);
+            const lines = new Set(
+              [...r.getClientRects()].map((x) => Math.round(x.top)),
+            ).size;
+            return { label: l.textContent?.trim() ?? "", lines };
+          }),
+      );
+      const labels = got.map((g) => g.label);
+      if (parked !== true) {
+        assert.ok(labels.includes("Park · kp-soft"), `${width}: ${labels}`);
+        assert.ok(!labels.includes("Unpark · kp-soft"), `${width}: ${labels}`);
+      } else {
+        assert.ok(labels.includes("Unpark · kp-soft"), `${width}: ${labels}`);
+        assert.ok(!labels.includes("Park · kp-soft"), `${width}: ${labels}`);
+      }
+      assert.deepEqual(
+        got.filter((g) => g.lines > 1).map((g) => g.label),
+        [],
+        `${width}: a palette label wraps`,
+      );
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});

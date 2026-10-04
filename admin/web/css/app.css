@@ -3269,6 +3269,28 @@ dialog.nx-drawer[open] {
   color: var(--muted-foreground);
   list-style: none;
 }
+/* redesign-final M3: a command's label keeps its own column and never
+   wraps ("Unpark · kp-↵soft"); its description takes the rest. */
+#commands .kp-palette__option {
+  display: grid;
+  grid-template-columns: minmax(14rem, max-content) minmax(0, 1fr) auto;
+  align-items: baseline;
+}
+.nx-palette__label {
+  white-space: nowrap;
+}
+#commands .kp-palette__description {
+  margin-inline-start: 0;
+  min-inline-size: 0;
+}
+@media (max-width: 48rem) {
+  #commands .kp-palette__option {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  #commands .kp-palette__description {
+    grid-column: 1;
+  }
+}
 
 /* -- page header (DESIGN_LANGUAGE §1.1): title row + description -- */
 .nx-head > * {

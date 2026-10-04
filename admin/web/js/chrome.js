@@ -201,10 +201,15 @@ function fillPalette(list, query, here) {
                 ? h(
                     "a",
                     { ...a, href: c.href, tabindex: "-1" },
-                    c.label,
+                    h("span", { class: "nx-palette__label" }, c.label),
                     ...extra,
                   )
-                : h("span", a, c.label, ...extra),
+                : h(
+                    "span",
+                    a,
+                    h("span", { class: "nx-palette__label" }, c.label),
+                    ...extra,
+                  ),
             );
           }),
         ),

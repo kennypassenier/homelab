@@ -189,12 +189,16 @@ export function actionWords(action) {
 /**
  * Whether an action applies to a stack: a `*-native` action only to a
  * stack of adopted services (FLOWS.md §4: the palette listed Restore
- * (native) for stacks that have no native unit).
+ * (native) for stacks that have no native unit); Park (`disable`) only to
+ * a stack that is not parked and Unpark (`enable`) only to a parked one
+ * (redesign-final M3: the palette offered both for a running stack).
  * @param {string} action
- * @param {{native?: boolean}} stack
+ * @param {{native?: boolean, enabled?: boolean}} stack
  */
 export const appliesTo = (action, stack) =>
-  !/-native$/.test(action) || stack.native === true;
+  (!/-native$/.test(action) || stack.native === true) &&
+  (action !== "disable" || stack.enabled !== false) &&
+  (action !== "enable" || stack.enabled === false);
 
 /**
  * feat-stacks-4: every action, as a command in Do. The stack whose hub is
@@ -213,7 +217,7 @@ export const actionCommands = (catalog, currentStack, open) => (ctx) => {
   if (!c) return [];
   const stacks = ctx.fleet?.stacks ?? [];
   const here = currentStack();
-  /** @param {{name: string, native?: boolean}} s @returns {Command[]} */
+  /** @param {{name: string, native?: boolean, enabled?: boolean}} s @returns {Command[]} */
   const forStack = (s) =>
     c.actions
       .filter(

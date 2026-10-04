@@ -5,8 +5,20 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import { existsSync, readFileSync } from "node:fs";
+import { appliesTo } from "../js/commands.js";
 
 const web = (/** @type {string} */ p) => new URL(`../${p}`, import.meta.url);
+
+test("redesign-final M3: the palette offers Park only for a stack that is not parked and Unpark only for a parked one", () => {
+  const running = { name: "a", enabled: true };
+  const parked = { name: "b", enabled: false };
+  assert.equal(appliesTo("disable", running), true);
+  assert.equal(appliesTo("enable", running), false);
+  assert.equal(appliesTo("disable", parked), false);
+  assert.equal(appliesTo("enable", parked), true);
+  assert.equal(appliesTo("backup", parked), true);
+  assert.equal(appliesTo("restore-native", running), false);
+});
 
 test("redesign-final: the generic layout audit excuses nothing (AUDIT_KNOWN is gone)", () => {
   const e2e = readFileSync(web("test-e2e/invariants.e2e.js"), "utf8");

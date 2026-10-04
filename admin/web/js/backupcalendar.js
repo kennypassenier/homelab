@@ -27,6 +27,7 @@
  */
 function dayKey(unix, tz) {
   const d = new Date(unix * 1000);
+  // date-key: a YYYY-MM-DD key the calendar looks nights up by, never shown.
   const parts = new Intl.DateTimeFormat("en-CA", {
     year: "numeric",
     month: "2-digit",

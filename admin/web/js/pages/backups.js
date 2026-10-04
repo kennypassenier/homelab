@@ -25,7 +25,12 @@
 // `bk-page`, under which app.css measures them the way the demo does.
 
 import { fetchJson, h, slowRead, tableBlock } from "../dom.js";
-import { formatDateTime, humanDuration } from "../format.js";
+import {
+  formatClock,
+  formatDateTime,
+  formatDay,
+  humanDuration,
+} from "../format.js";
 import { openAction, openBatch } from "../actiondialog.js";
 import { openDialog } from "../actui.js";
 import { snapshotPickerRows } from "../snapshotpicker.js";
@@ -231,18 +236,16 @@ const UNREAD_GIVE_UP_MS = 180_000;
 const nowS = () => Math.floor(Date.now() / 1000);
 
 /** @param {number} t unix seconds @returns {string} local HH:MM */
-const hhmm = (t) => {
-  const d = new Date(t * 1000);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-};
+const hhmm = (t) => formatClock(t);
 
-/** @param {string} n YYYY-MM-DD @param {Intl.DateTimeFormatOptions} o */
-const dateWords = (n, o) =>
-  new Date(`${n}T12:00:00`).toLocaleDateString("en-GB", o);
-const shortDate = (/** @type {string} */ n) =>
-  dateWords(n, { weekday: "short", day: "numeric", month: "short" });
-const longDate = (/** @type {string} */ n) =>
-  dateWords(n, { weekday: "long", day: "numeric", month: "long" });
+/**
+ * A night (YYYY-MM-DD, a civil date) as every page writes a day: "Sat 3
+ * Oct" (redesign-final X4: one date format).
+ * @param {string} n
+ */
+const shortDate = (n) =>
+  formatDay(Date.parse(`${n}T12:00:00Z`) / 1000, { timeZone: "UTC" });
+const longDate = shortDate;
 
 /**
  * The restore action a stack's repositories need.

@@ -182,7 +182,7 @@ test("redesign-371-map: a pin in the homelab binary is one row naming every stac
   assert.equal(g[0].key, "web/web");
   assert.equal(g[0].container, "demo-web");
   assert.equal(g[0].major, false);
-  assert.equal(shortDate("2026-09-28"), "28 Sep");
+  assert.match(shortDate("2026-09-28"), /^Mon 28 Sep( 2026)?$/);
 });
 
 test("redesign-371-map: capacity is one row per stack, busiest first, amber from 75% and red from 90%", () => {

@@ -5,7 +5,7 @@
 // marked on every chart — so it is tested without a browser. The page
 // itself (js/pages/metrics.js) only draws what these return.
 
-import { hhmm } from "./timechart.js";
+import { formatDateTime } from "./format.js";
 import { entryWhat } from "./activity.js";
 
 /**
@@ -309,11 +309,7 @@ export const poweredOn = (h) =>
  * @param {number} from @param {number} to
  */
 export function windowText(from, to) {
-  const d = (/** @type {number} */ t) => {
-    const x = new Date(t * 1000);
-    return `${"Sun Mon Tue Wed Thu Fri Sat".split(" ")[x.getDay()]} ${x.getDate()} ${"Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ")[x.getMonth()]}, ${hhmm(t)}`;
-  };
-  return `${d(from)} → ${d(to)}`;
+  return `${formatDateTime(from)} → ${formatDateTime(to)}`;
 }
 
 /**

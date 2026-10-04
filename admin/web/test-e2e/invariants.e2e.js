@@ -1148,7 +1148,7 @@ test("invariants: every top-level section on Overview and the stack page has a h
   }
 });
 
-test("invariants: opening Restore from an app's row never asks for the app again and shows dated snapshots with the latest preselected", async () => {
+test("invariants: opening Restore from an app's row never asks for the app again and shows dated snapshots with the latest preselected (the Restore flow, redesign-final-h3)", async () => {
   // fix-216 (Kenny, 2026-10-02: "als ik daar bv op kyu restore pak, dan
   // vraagt die nog altijd welke app, terwijl ik restore al bij een app
   // selecteerde? ... ik heb toch geen idee wat die snapshot is?").
@@ -1164,46 +1164,39 @@ test("invariants: opening Restore from an app's row never asks for the app again
     const row = page.locator('tr[data-kp-row-key="kp-soft-jobtracker"]');
     await row.waitFor({ timeout: 15000 });
     await row.getByRole("button", { name: /Restore/ }).click();
-    const dialog = page.locator("dialog#action-dialog");
-    await dialog.waitFor({ timeout: 5000 });
-
-    // The app is shown read-only, with the row's own choice ("jobtracker")
-    // — never a select box asking which app, all over again.
-    const appLocked = dialog.locator('[data-field="app-locked"]');
-    await appLocked.waitFor({ timeout: 5000 });
-    assert.match(await appLocked.innerText(), /jobtracker/);
+    // redesign-final-h3: Restore… opens the Restore flow page (FLOWS.md
+    // §5) with the row's app already chosen — never a select asking which
+    // app all over again — and its nights dated, newest first, the newest
+    // snapshot preselected.
+    await page.waitForURL(/\/backups\/restore\?/, { timeout: 5000 });
+    const app = page.locator('[data-app="jobtracker"]');
+    await app.waitFor({ timeout: 8000 });
+    assert.equal(await app.getAttribute("aria-pressed"), "true");
     assert.equal(
-      await dialog.locator('select[name="app"]').isVisible(),
-      false,
-      "the app select must stay hidden behind the locked summary until Change is pressed",
+      await page.locator('#page select[name="app"]').count(),
+      0,
+      "the flow asks for the app again",
     );
-
-    // The snapshot field is a picker: dated rows, newest first, the first
-    // one marked "latest" and preselected.
-    const rows = dialog.locator(".act-snapshot-row");
-    await rows.first().waitFor({ timeout: 5000 });
-    const count = await rows.count();
-    assert.ok(count >= 2, `expected several snapshot rows, got ${count}`);
-    const firstText = await rows.first().innerText();
-    assert.match(firstText, /\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}/, "a dated row");
-    assert.match(firstText, /ago/);
-    assert.match(firstText, /latest/);
+    const nights = page.locator("[data-night]");
+    await nights.first().waitFor({ timeout: 5000 });
+    const count = await nights.count();
+    assert.ok(count >= 2, `expected several snapshot nights, got ${count}`);
+    const firstText = await nights.first().innerText();
+    // redesign-final X4: the one date format ("Sat 3 Oct, 00:00"); today's
+    // night says "Today".
+    assert.match(
+      firstText,
+      /^(Today|(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2}( \d{4})?), \d{2}:\d{2}/,
+      "a dated night",
+    );
     assert.equal(
-      await rows.first().locator('input[type="radio"]').isChecked(),
-      true,
+      await nights.first().getAttribute("aria-pressed"),
+      "true",
       "the newest snapshot is preselected",
     );
-    assert.equal(
-      await rows.nth(1).locator('input[type="radio"]').isChecked(),
-      false,
-    );
-    // Never a bare restic id as the only thing shown — the short id is
-    // there, but only beside the date, never alone.
-    const idText = await rows
-      .first()
-      .locator(".act-snapshot-row__id")
-      .innerText();
-    assert.match(idText, /^demo/);
+    assert.equal(await nights.nth(1).getAttribute("aria-pressed"), "false");
+    // Never a bare restic id alone: the short id sits beside the date.
+    assert.match(firstText, /snapshot demo/);
   } finally {
     await browser.close();
   }

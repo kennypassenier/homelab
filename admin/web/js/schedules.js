@@ -191,6 +191,7 @@ const FORMATS = new Map();
 function zoneFormat(zone) {
   let f = FORMATS.get(zone);
   if (!f) {
+    // date-key: the zone's wall-clock parts for arithmetic, never shown.
     f = new Intl.DateTimeFormat("en-GB", {
       timeZone: zone,
       hourCycle: "h23",

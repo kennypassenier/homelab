@@ -5,6 +5,7 @@
 // capacity rows and the stale images grouped per image — so it is tested
 // without a browser. js/pages/fleetview.js draws what these return.
 
+import { formatDay } from "./format.js";
 import { stackHues } from "./topology.js";
 import { majorJump } from "./staleimages.js";
 
@@ -284,17 +285,17 @@ export function sortGrowth(rows) {
 }
 
 /**
- * "30 Sep" from a release date ("2026-09-30").
+ * "Wed 30 Sep" from a release date ("2026-09-30").
  * @param {string | null} iso
  */
 export function shortDate(iso) {
   if (!iso) return "—";
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
   if (!m) return iso;
-  const mon = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ")[
-    Number(m[2]) - 1
-  ];
-  return `${Number(m[3])} ${mon}`;
+  // redesign-final X4: a release day as every page writes a day.
+  return formatDay(Date.UTC(+m[1], +m[2] - 1, +m[3], 12) / 1000, {
+    timeZone: "UTC",
+  });
 }
 
 /**

@@ -26,6 +26,7 @@
 
 import { declare, drivable } from "./drivable.js";
 import { h } from "./dom.js";
+import { formatClock, formatDateTime, formatDay } from "./format.js";
 
 /**
  * A chart control lives wherever a chart is drawn: the page shown now
@@ -120,21 +121,12 @@ export function fmtValue(v, unit) {
   return v.toFixed(v % 1 ? 2 : 0);
 }
 
-const pad = (/** @type {number} */ n) => String(n).padStart(2, "0");
-const MON = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ");
-const DOW = "Sun Mon Tue Wed Thu Fri Sat".split(" ");
 /** @param {number} t */
-export const hhmm = (t) => {
-  const d = new Date(t * 1000);
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
+export const hhmm = (t) => formatClock(t);
 /** @param {number} t */
-const day = (t) => {
-  const d = new Date(t * 1000);
-  return `${DOW[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}`;
-};
+const day = (t) => formatDay(t);
 /** @param {number} t */
-const dayTime = (t) => `${day(t)}, ${hhmm(t)}`;
+const dayTime = (t) => formatDateTime(t);
 
 /**
  * The top of the y axis: a round number just above the highest value.

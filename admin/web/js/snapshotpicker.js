@@ -6,6 +6,8 @@
 // renders is the same shape a node test can pin without a DOM or a fetch;
 // `actiondialog.js` only draws what this returns.
 
+import { formatDateTime } from "./format.js";
+
 /**
  * @typedef {{id: string, short_id: string, time: number,
  *   run?: number | null, size_bytes?: number | null,
@@ -96,25 +98,13 @@ export function snapshotPickerRows(snapshots, now, selected = "") {
 }
 
 /**
- * dd/mm/yyyy HH:MM, 24-hour, Europe/Brussels — fixed, not the viewer's own
- * locale or zone (Kenny, 2026-10-02: a restore's "when" must read the same
- * on every screen it is driven from).
+ * A snapshot's moment in Europe/Brussels — fixed, not the viewer's own zone
+ * (Kenny, 2026-10-02: a restore's "when" must read the same on every
+ * screen it is driven from), in the one date format (redesign-final X4).
  * @param {number} unixSeconds
  */
 export function formatDateTimeBrussels(unixSeconds) {
-  const d = new Date(unixSeconds * 1000);
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Europe/Brussels",
-  }).formatToParts(d);
-  const get = (/** @type {string} */ t) =>
-    parts.find((p) => p.type === t)?.value ?? "";
-  return `${get("day")}/${get("month")}/${get("year")} ${get("hour")}:${get("minute")}`;
+  return formatDateTime(unixSeconds, { timeZone: "Europe/Brussels" });
 }
 
 /**

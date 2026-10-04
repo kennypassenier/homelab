@@ -40,7 +40,7 @@ import {
   stepSegments,
   windowDays,
 } from "../activityview.js";
-import { humanDuration } from "../format.js";
+import { formatDay, humanDuration } from "../format.js";
 import { openIncident } from "../incident.js";
 import {
   elapsedS,
@@ -1064,10 +1064,7 @@ function mountNow(body, x) {
             { class: "tick-label", x: xx + 4, y: H - 6 },
             d === days - 1
               ? "today"
-              : new Intl.DateTimeFormat("en-GB", {
-                  weekday: "short",
-                  day: "numeric",
-                }).format(new Date(t * 1000)),
+              : formatDay(t).split(" ").slice(0, 2).join(" "),
           ),
         );
     }

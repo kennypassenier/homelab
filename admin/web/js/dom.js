@@ -2,6 +2,7 @@
 // block every table uses (ui-tables), the error box and report fetching.
 
 import { routeError } from "./doctor.js";
+import { formatClock } from "./format.js";
 import {
   replaceTableParams,
   tableFromParams,
@@ -350,13 +351,8 @@ export function tableBlock(spec) {
         shownFrom:
           readAt != null &&
           tbody.querySelector("tr:not([data-kp-skeleton-row])")
-            ? // 24h, not the viewer's locale (Kenny, 2026-10-02): no
-              // am/pm, consistent with dd/mm/yyyy HH:MM everywhere else.
-              new Date(readAt).toLocaleTimeString(undefined, {
-                hour: "2-digit",
-                minute: "2-digit",
-                hour12: false,
-              })
+            ? // 24h (redesign-final X4: the one clock format).
+              formatClock(readAt / 1000)
             : null,
       }),
       since: Date.now(),

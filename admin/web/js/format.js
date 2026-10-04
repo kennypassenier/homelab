@@ -44,44 +44,105 @@ export function humanDuration(seconds) {
  * `locale` and `timeZone` default to the viewer's; tests pin both.
  */
 
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
 /**
- * A unix moment as date and time in the viewer's locale.
- * @param {number | null | undefined} unix seconds
- * @param {TimeOptions} [opts]
- * @returns {string}
+ * The wall-clock parts of a unix moment in `timeZone` (the viewer's by
+ * default), read with numeric fields only so no locale reorders or names
+ * them.
+ * @param {number} unix seconds
+ * @param {string} [timeZone]
  */
-export function formatTime(unix, opts = {}) {
-  if (unix == null || !Number.isFinite(unix) || unix <= 0) return "—";
-  return new Intl.DateTimeFormat(opts.locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: opts.timeZone,
-  }).format(new Date(unix * 1000));
+function wall(unix, timeZone) {
+  /** @type {Record<string, string>} */
+  const p = {};
+  for (const x of new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+    timeZone,
+  }).formatToParts(new Date(unix * 1000)))
+    p[x.type] = x.value;
+  const y = Number(p.year);
+  const m = Number(p.month);
+  const d = Number(p.day);
+  return {
+    y,
+    m,
+    d,
+    // The weekday of that civil date (no zone left to apply).
+    wd: new Date(Date.UTC(y, m - 1, d)).getUTCDay(),
+    hh: p.hour.padStart(2, "0").replace("24", "00"),
+    mm: p.minute.padStart(2, "0"),
+    ss: p.second.padStart(2, "0"),
+  };
 }
 
 /**
- * A unix moment as dd/mm/yyyy HH:MM (Kenny, 2026-09-30: the notification
- * centre's own format, not the viewer's locale — a fixed field width a
- * table column can align on).
+ * @typedef {TimeOptions & {now?: number, seconds?: boolean}} DateOptions
+ * `now` (unix seconds, the present by default) decides whether the year is
+ * written; `seconds` adds them to the clock (a log line needs them).
+ */
+
+/**
+ * The day of a moment as every page writes it: "Sat 3 Oct", with the year
+ * when it is not this one ("Tue 30 Dec 2025").
+ * redesign-final X4 (3.71.0's approved demos, 2026-10-03): one date format
+ * on every page, never the numeric dd/mm/yyyy; `formatDateTime` adds the
+ * clock, `formatClock` is the clock alone. A guard test
+ * (finalreview_dates.test.js) refuses a date formatter anywhere else.
  * @param {number | null | undefined} unix seconds
- * @param {TimeOptions} [opts]
+ * @param {DateOptions} [opts]
+ * @returns {string}
+ */
+export function formatDay(unix, opts = {}) {
+  if (unix == null || !Number.isFinite(unix)) return "—";
+  const w = wall(unix, opts.timeZone);
+  const nowY = wall(opts.now ?? Date.now() / 1000, opts.timeZone).y;
+  return `${DAYS[w.wd]} ${w.d} ${MONTHS[w.m - 1]}${w.y === nowY ? "" : ` ${w.y}`}`;
+}
+
+/**
+ * A moment's clock, 24-hour: "00:00" (or "00:00:05" with `seconds`).
+ * @param {number | null | undefined} unix seconds
+ * @param {DateOptions} [opts]
+ * @returns {string}
+ */
+export function formatClock(unix, opts = {}) {
+  if (unix == null || !Number.isFinite(unix)) return "—";
+  const w = wall(unix, opts.timeZone);
+  return `${w.hh}:${w.mm}${opts.seconds ? `:${w.ss}` : ""}`;
+}
+
+/**
+ * A moment as every page writes it: "Sat 3 Oct, 00:00" (the approved
+ * demos), the year added when it is not this one ("Tue 30 Dec 2025,
+ * 08:05"). Never the viewer's locale's field order, never dd/mm/yyyy.
+ * @param {number | null | undefined} unix seconds
+ * @param {DateOptions} [opts]
  * @returns {string}
  */
 export function formatDateTime(unix, opts = {}) {
   if (unix == null || !Number.isFinite(unix) || unix <= 0) return "—";
-  const d = new Date(unix * 1000);
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: opts.timeZone,
-  }).formatToParts(d);
-  const get = (/** @type {string} */ t) =>
-    parts.find((p) => p.type === t)?.value ?? "";
-  return `${get("day")}/${get("month")}/${get("year")} ${get("hour")}:${get("minute")}`;
+  return `${formatDay(unix, opts)}, ${formatClock(unix, opts)}`;
 }
 
 /**

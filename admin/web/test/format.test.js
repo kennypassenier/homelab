@@ -1,7 +1,12 @@
 // ui-units: durations and moments in human units, in the viewer's locale.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatDateTime, formatTime, humanDuration } from "../js/format.js";
+import {
+  formatClock,
+  formatDateTime,
+  formatDay,
+  humanDuration,
+} from "../js/format.js";
 import { sortKeys } from "../js/sortkeys.js";
 
 test("durations step from seconds to minutes, hours and days", () => {
@@ -17,26 +22,22 @@ test("durations step from seconds to minutes, hours and days", () => {
   assert.equal(humanDuration(-1), "—");
 });
 
-test("a moment reads in the viewer's locale, never as ISO", () => {
-  const at = 1790000000; // 2026-09-21 14:13:20 UTC
-  const en = formatTime(at, { locale: "en-GB", timeZone: "UTC" });
-  assert.match(en, /21 Sept? 2026/);
-  assert.match(en, /14:13/);
-  const nl = formatTime(at, { locale: "nl-NL", timeZone: "Europe/Brussels" });
-  assert.match(nl, /21 sep/);
-  assert.match(nl, /16:13/);
-  assert.doesNotMatch(en, /T\d\d:/);
-  assert.equal(formatTime(null), "—");
-  assert.equal(formatTime(0), "—");
-});
-
-test("the notification centre's date is a fixed dd/mm/yyyy HH:MM, not the locale", () => {
-  const at = 1790000000; // 2026-09-21 14:13:20 UTC
-  assert.equal(formatDateTime(at, { timeZone: "UTC" }), "21/09/2026 14:13");
+test("redesign-final X4: every moment reads as the demos write it, never dd/mm/yyyy", () => {
+  const at = 1790000000; // Mon 2026-09-21 14:13:20 UTC
+  const now = { now: at, timeZone: "UTC" };
+  assert.equal(formatDateTime(at, now), "Mon 21 Sep, 14:13");
   assert.equal(
-    formatDateTime(at, { timeZone: "Europe/Brussels" }),
-    "21/09/2026 16:13",
+    formatDateTime(at, { now: at, timeZone: "Europe/Brussels" }),
+    "Mon 21 Sep, 16:13",
   );
+  assert.equal(formatDay(at, now), "Mon 21 Sep");
+  assert.equal(formatClock(at, now), "14:13");
+  assert.equal(formatClock(at, { ...now, seconds: true }), "14:13:20");
+  // Another year is written out.
+  const before = Date.UTC(2025, 11, 30, 8, 5) / 1000;
+  assert.equal(formatDateTime(before, now), "Tue 30 Dec 2025, 08:05");
+  // Midnight is 00:00, never 24:00.
+  assert.equal(formatClock(Date.UTC(2026, 9, 3) / 1000, now), "00:00");
   assert.equal(formatDateTime(null), "—");
   assert.equal(formatDateTime(0), "—");
 });

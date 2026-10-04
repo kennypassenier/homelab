@@ -3,7 +3,7 @@
 // and `action_log` events and the `action_batch` event; the clock comes in
 // as an argument, so `node --test` can drive every line.
 
-import { formatDateTime, humanDuration } from "./format.js";
+import { formatClock, formatDateTime, humanDuration } from "./format.js";
 
 /**
  * @typedef {{op: string, step: string, n: number, m: number | null,
@@ -522,13 +522,7 @@ export function logLine(l, opts = {}) {
           : "info";
   return {
     // 24h, not the viewer's locale (Kenny, 2026-10-02).
-    time: new Intl.DateTimeFormat(opts.locale, {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-      timeZone: opts.timeZone,
-    }).format(new Date(l.ts * 1000)),
+    time: formatClock(l.ts, { ...opts, seconds: true }),
     source: l.source || "host",
     level,
     severity,

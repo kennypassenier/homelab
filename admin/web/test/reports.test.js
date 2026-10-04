@@ -164,7 +164,7 @@ test("check rows put open ones first and show unknown fields readably", () => {
       locale: "en-GB",
       timeZone: "UTC",
     }),
-    /^snoozed until: 21\/09\/2026 14:13$/,
+    /^snoozed until: Mon 21 Sep( 2026)?, 14:13$/,
   );
 });
 

@@ -11,6 +11,7 @@ import { historyRows } from "./activity.js";
 import { ownerOf } from "./activityview.js";
 import { cellState, nightKey, nightRange, nightsNow } from "./backupsview.js";
 import { humanMb, stackState } from "./fleet.js";
+import { formatDateTime } from "./format.js";
 import { canonicalLevel } from "./logs.js";
 import { majorJump } from "./staleimages.js";
 
@@ -1315,22 +1316,6 @@ export function fileList(paths) {
     .map((path) => ({ path, what: what(path) }));
 }
 
-/** Month names as the demo writes them (en-GB says "Sept"). */
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
-
 /**
  * A moment as History's demo writes it, "30 Sep 12:14" in the browser's
  * clock (with the year when it is not this one): never the ambiguous
@@ -1340,30 +1325,7 @@ const MONTHS = [
  * @param {string} [timeZone]
  */
 export function shortWhen(unix, now = Date.now() / 1000, timeZone) {
-  const fmt = new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone,
-  });
-  /** @param {number} u */
-  const parts = (u) => {
-    const p = fmt.formatToParts(new Date(u * 1000));
-    /** @param {string} t */
-    const g = (t) => p.find((x) => x.type === t)?.value ?? "";
-    return {
-      day: String(Number(g("day"))),
-      month: MONTHS[Number(g("month")) - 1] ?? "",
-      year: g("year"),
-      time: `${g("hour")}:${g("minute")}`,
-    };
-  };
-  const a = parts(unix);
-  const year = a.year !== parts(now).year ? ` ${a.year}` : "";
-  return `${a.day} ${a.month}${year} ${a.time}`;
+  return formatDateTime(unix, { now, timeZone });
 }
 
 /** What History's Incidents says with none kept. @param {string} name */

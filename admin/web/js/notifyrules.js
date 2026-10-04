@@ -10,8 +10,7 @@
  *   snooze_until?: number | null, muted_stacks?: string[]}} Rules
  */
 
-const DAYS = "Sun Mon Tue Wed Thu Fri Sat".split(" ");
-const MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ");
+import { formatDateTime } from "./format.js";
 
 /**
  * A moment as the demos write it: "Sat 4 Oct, 14:00" (never dd/mm/yyyy).
@@ -19,22 +18,7 @@ const MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ");
  * @param {string} [timeZone] the viewer's by default; tests pin it
  */
 export function dayTime(unix, timeZone) {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-GB", {
-      weekday: "short",
-      day: "numeric",
-      month: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-      timeZone,
-    })
-      .formatToParts(new Date(unix * 1000))
-      .map((p) => [p.type, p.value]),
-  );
-  const wd =
-    DAYS.find((d) => String(parts.weekday).startsWith(d)) ?? parts.weekday;
-  return `${wd} ${Number(parts.day)} ${MONTHS[Number(parts.month) - 1]}, ${parts.hour}:${parts.minute}`;
+  return formatDateTime(unix, { timeZone });
 }
 
 /**

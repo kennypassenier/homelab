@@ -7,7 +7,7 @@
 // comes in as an argument, so `node --test` drives every line.
 
 import { isSecretAudit } from "./activity.js";
-import { humanDuration } from "./format.js";
+import { formatClock, formatDay, humanDuration } from "./format.js";
 
 /**
  * @typedef {import("./activity.js").Entry} Entry
@@ -263,14 +263,7 @@ export function dayStart(t) {
  * @param {{locale?: string, timeZone?: string}} [opts]
  */
 export function dayLabel(day, now, opts = {}) {
-  const words = new Intl.DateTimeFormat(opts.locale ?? "en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    timeZone: opts.timeZone,
-  })
-    .format(new Date(day * 1000))
-    .replace(",", "");
+  const words = formatDay(day, { ...opts, now });
   const today = dayStart(now);
   if (day === today) return `Today · ${words}`;
   if (day === dayStart(today - 43200)) return `Yesterday · ${words}`;
@@ -377,13 +370,7 @@ export function perDay(rows, days, now, pred) {
  * @param {number} t
  * @param {{locale?: string, timeZone?: string}} [opts]
  */
-export const clock = (t, opts = {}) =>
-  new Intl.DateTimeFormat(opts.locale ?? "en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: opts.timeZone,
-  }).format(new Date(t * 1000));
+export const clock = (t, opts = {}) => formatClock(t, opts);
 
 /**
  * The KPI strip: operations, the share that succeeded, open incidents, the
@@ -484,11 +471,7 @@ export function dayWord(t, now, opts = {}) {
   const d = dayStart(t);
   if (d === dayStart(now)) return "today";
   if (d === dayStart(dayStart(now) - 43200)) return "yesterday";
-  return new Intl.DateTimeFormat(opts.locale ?? "en-GB", {
-    day: "numeric",
-    month: "short",
-    timeZone: opts.timeZone,
-  }).format(new Date(t * 1000));
+  return formatDay(t, { ...opts, now });
 }
 
 /**

@@ -127,14 +127,14 @@ const SORT_GUESTS = declare({
   page: "host",
   opens: "view",
   row: "id|container|status|memory|cpu|stack",
-  what: "sort the Containers table by one column (Shift adds a further one)",
+  what: "sort the Containers table: each header clicked is a further sort key (again reverses it, a third time takes it out)",
 });
 const SORT_SETTINGS = declare({
   id: "sort-host-settings",
   page: "host",
   opens: "view",
   row: "setting|group|value|default",
-  what: "sort the host settings table by one column (Shift adds a further one)",
+  what: "sort the host settings table: each header clicked is a further sort key (again reverses it, a third time takes it out)",
 });
 
 /** @param {"ok" | "warn" | "bad" | "live" | ""} tone */
@@ -326,6 +326,7 @@ export function mount(root, ctx) {
   });
   guestsCard.body.append(
     h("div", { class: "hk-filters" }, gSearch, gFilter.el),
+    gSort.line,
     h("div", { class: "hk-scroll" }, gTable),
   );
   /** @param {number} n */
@@ -1175,6 +1176,7 @@ export function mount(root, ctx) {
   ).replaceChildren(sDesc);
   settingsCard.body.append(
     h("div", { class: "hk-filters" }, sView.el, sSearch),
+    sSort.line,
     h("div", { class: "hk-scroll" }, sTable),
   );
   sBody.dataset.kpState = "loading";

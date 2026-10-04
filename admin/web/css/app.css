@@ -619,13 +619,25 @@ p:has(> .measured:only-child):first-child {
 /* fix-236: the datatable's own "Not sorted." line sat between every
    table's search bar and its rows as visible noise; the column headers
    already show the sort. It stays readable to a screen reader. */
-.kp-datatable__sort-line {
+.kp-datatable__sort-line:not(
+  :has([data-kp-datatable-sort-reset]:not([data-kp-datatable-at-opening]))
+) {
   position: absolute;
   inline-size: 1px;
   block-size: 1px;
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+/* redesign-final Low (Kenny's rule: multi-sort without Shift, with a Reset
+   sort): while a table is sorted away from its opening order its sort
+   line shows what it is sorted by and Reset the sort; unsorted it stays
+   out of sight as fix-236 decided. */
+.kp-datatable__sort-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--kp-space-sm);
 }
 /* fix-225 (Kenny, 2026-10-02: "ik dacht dat de install a release pagina ook
    al met grid hermaakt was?"): every action dialog's step is one grid —
@@ -6005,4 +6017,23 @@ dialog.nx-rowmenu[open] {
     animation: none;
     transition: none;
   }
+}
+
+/* redesign-final Low: a sortable table's sort line (ui.js sortableTable):
+   what it is sorted by and Reset sort while it is sorted, as kp-themes
+   draws its own datatables' sort line. */
+.nx-sortline[hidden] {
+  display: none;
+}
+.nx-sortline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--kp-space-sm);
+  min-block-size: 2rem;
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.nx-sortline__said {
+  min-inline-size: 0;
 }

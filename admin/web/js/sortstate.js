@@ -10,26 +10,20 @@
  */
 
 /**
- * A click on a sort header: a plain click sorts by that column alone —
- * ascending, then descending, then not at all; with `add` (Shift+click)
- * the column joins the existing keys as a further sort, a second Shift
- * click reverses it and a third takes it out again.
+ * A click on a sort header (Kenny's rule, redesign-final Low: multi-sort
+ * without Shift): a plain click adds the column as a further key,
+ * ascending; clicking it again reverses it, a third click takes it out.
+ * The first column clicked sorts first. "Reset sort" (`[]`) clears them.
  * @template {string} K
  * @param {{key: K, dir: 1 | -1}[]} sort
  * @param {K} key
- * @param {boolean} [add]
  * @returns {{key: K, dir: 1 | -1}[]}
  */
-export function nextSort(sort, key, add = false) {
+export function nextSort(sort, key) {
   const i = sort.findIndex((s) => s.key === key);
-  if (add) {
-    if (i < 0) return [...sort, { key, dir: 1 }];
-    if (sort[i].dir < 0) return sort.filter((_, j) => j !== i);
-    return sort.map((s, j) => (j === i ? { key, dir: -1 } : s));
-  }
-  if (i === 0 && sort.length === 1)
-    return sort[0].dir > 0 ? [{ key, dir: -1 }] : [];
-  return [{ key, dir: 1 }];
+  if (i < 0) return [...sort, { key, dir: 1 }];
+  if (sort[i].dir < 0) return sort.filter((_, j) => j !== i);
+  return sort.map((s, j) => (j === i ? { key, dir: -1 } : s));
 }
 
 /**

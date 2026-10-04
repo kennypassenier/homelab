@@ -1648,7 +1648,7 @@ function logsTab(panel, c) {
 /**
  * Apps (the hub demo): each app's state, the version its image is pinned
  * to and whether a newer one exists, with Logs, Update… and Publish… per
- * row. A kp datatable: sortable, Shift-click adds a key, remembered, cards
+ * row. A kp datatable: sortable, a click adds a key, remembered, cards
  * on a phone.
  * @param {HTMLElement} panel
  * @param {Ctx} c
@@ -1844,7 +1844,7 @@ function appsTab(panel, c) {
 
 /**
  * A kp datatable without a search bar (a short list needs none):
- * sortable, Shift-click adds a sort key, remembered per table, cards on a
+ * sortable, a click adds a sort key, remembered per table, cards on a
  * phone.
  * @param {{remember: string, columns: {label: string, sort?: string,
  *   cls?: string}[], tbody: HTMLElement}} spec

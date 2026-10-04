@@ -122,7 +122,7 @@ export function badgeCell(st) {
 
 /**
  * The kp datatable block every table on the dashboard is (ui-tables):
- * sortable columns, Shift+click for a second key, its sort remembered
+ * sortable columns, each header clicked a further key (sortclick.js), its sort remembered
  * under its own name, no row selection (the one exception, the fleet's
  * batch actions, passes `select`).
  *

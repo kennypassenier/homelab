@@ -59,6 +59,9 @@ import { mount as fleetviewPage } from "./pages/fleetview.js";
 import { mount as backupCalendarPage } from "./pages/backupcalendar.js";
 import { mount as passkeysPage } from "./pages/passkeys.js";
 import { mountVersions } from "./versions.js";
+import { installSortClick } from "./sortclick.js";
+
+installSortClick();
 
 const page = /** @type {HTMLElement} */ (document.getElementById("page"));
 const nav = /** @type {HTMLElement} */ (document.getElementById("nav"));

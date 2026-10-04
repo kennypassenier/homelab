@@ -563,7 +563,7 @@ export function mount(root) {
     );
   };
 
-  // The Stacks card is a kp datatable (Kenny's rule: sortable, Shift for
+  // The Stacks card is a kp datatable (Kenny's rule: sortable, a click for
   // a second key, remembered per table; redesign-config-6). Its rows are
   // drawn once per read; lighting a stack up only marks them.
   /** @type {ReturnType<typeof tableBlock> | null} */

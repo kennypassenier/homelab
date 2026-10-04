@@ -1451,7 +1451,7 @@ export function mount(root) {
         h(
           "span",
           null,
-          "Click a header to sort (Shift+click for a second key) · click a stack to fold it · click a row for every snapshot",
+          "Click a header to sort; each header clicked is a further key (again reverses it, a third time takes it out) · click a stack to fold it · click a row for every snapshot",
         ),
       );
   };

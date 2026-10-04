@@ -234,20 +234,22 @@ test("the drill state, the seven-night ticks and the size read the repository's 
   assert.equal(humanBytes(1536), "1.5 KB");
 });
 
-test("a sort header cycles ascending, descending, none; Shift adds a second key", () => {
-  let s = /** @type {{key: string, dir: 1 | -1}[]} */ (
-    nextSort([], "age", false)
-  );
+test("redesign-final Low: a plain click adds a sort key, cycles it ascending, descending, out; no Shift", () => {
+  let s = /** @type {{key: string, dir: 1 | -1}[]} */ (nextSort([], "age"));
   assert.deepEqual(s, [{ key: "age", dir: 1 }]);
-  s = nextSort(s, "age", false);
-  assert.deepEqual(s, [{ key: "age", dir: -1 }]);
-  assert.deepEqual(nextSort(s, "age", false), []);
-  s = nextSort([{ key: "age", dir: 1 }], "size", true);
+  s = nextSort(s, "size");
   assert.deepEqual(s, [
     { key: "age", dir: 1 },
     { key: "size", dir: 1 },
   ]);
-  assert.deepEqual(nextSort(s, "app", false), [{ key: "app", dir: 1 }]);
+  s = nextSort(s, "age");
+  assert.deepEqual(s, [
+    { key: "age", dir: -1 },
+    { key: "size", dir: 1 },
+  ]);
+  s = nextSort(s, "age");
+  assert.deepEqual(s, [{ key: "size", dir: 1 }]);
+  assert.equal(nextSort.length, 2, "no Shift flag is taken");
 });
 
 test("the repository table keeps every stack, filters by text, stack and never-drilled, and sorts within a stack", () => {

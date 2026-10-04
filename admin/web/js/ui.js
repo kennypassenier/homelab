@@ -62,6 +62,7 @@ import { h } from "./dom.js";
 import { dialogControl, drivable } from "./drivable.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
 import { toast as kpToast } from "/static/kp/js/overlays.js";
+import { RESET_SORT } from "./sortclick.js";
 import { applySort, keepSort, nextSort, rememberedSort } from "./sortstate.js";
 
 export {
@@ -1249,13 +1250,16 @@ export const sortMark = (
   return `${sort[i].dir > 0 ? "↑" : "↓"}${sort.length > 1 ? i + 1 : ""}`;
 };
 
+/** What every sortable header says it does (Kenny: no Shift). */
+export const SORT_HINT =
+  "Click to sort by this column; click another to sort by it next · click again to reverse, a third time to take it out · Reset sort clears every key";
+
 /**
  * @typedef {{label: string, key: string, sort: SortKey[],
  *   onSort: (next: SortKey[]) => void, drive: Drive, remember?: string,
  *   cls?: string}} SortHeadSpec
  *   `sort`: the table's sort now; `onSort` gets the next one (plain click:
- *   this column alone, ascending → descending → none; Shift+click adds it
- *   as a further key); `remember`: the table's name, to keep the sort for
+ *   each column clicked is a further key: ascending → descending → out); `remember`: the table's name, to keep the sort for
  *   the next visit (`rememberedSort` reads it back); `drive`: the Live view
  *   control the header's button is.
  */
@@ -1274,10 +1278,9 @@ export function sortHead(spec) {
     {
       type: "button",
       class: "nx-sort",
-      title:
-        "Sort: click for ascending, again for descending, a third time for none · Shift+click adds a further sort",
-      onclick: (/** @type {MouseEvent} */ e) => {
-        const next = nextSort(spec.sort, spec.key, e.shiftKey);
+      title: SORT_HINT,
+      onclick: () => {
+        const next = nextSort(spec.sort, spec.key);
         if (spec.remember) keepSort(spec.remember, next);
         spec.onSort(next);
       },
@@ -1316,16 +1319,18 @@ const columnKey = (th) =>
 
 /**
  * Makes a plain table's headers sort it (DESIGN_LANGUAGE §12) with the
- * same rule as `sortHead`: a click sorts by that column (ascending,
- * descending, the original order), Shift+click adds it as a further key,
- * Enter / Space do the same; `aria-sort` and the header's mark say which.
+ * same rule as `sortHead`: a click adds that column as a further key
+ * (ascending, descending, out again), Enter / Space do the same; `aria-sort` and the header's mark say which.
  * A cell's `data-sort` overrides its text. Each header is the Live view
  * control `drive.id` on its column's row; with `remember` the table keeps
  * its sort for the next visit. Returns `apply()`, which sorts the body
  * again after the page refilled it.
+ * `line` is the table's sort line (what it is sorted by and Reset sort,
+ * the Live view control `table-reset-sort`), shown while the table is
+ * sorted; the page puts it above the table.
  * @param {HTMLTableElement} table
  * @param {{drive: {id: string}, remember?: string}} opts
- * @returns {{apply: () => void, sort: () => SortKey[]}}
+ * @returns {{apply: () => void, sort: () => SortKey[], line: HTMLElement}}
  */
 export function sortableTable(table, opts) {
   if (!opts?.drive?.id)
@@ -1337,7 +1342,37 @@ export function sortableTable(table, opts) {
   const keyed = ths
     .map((th, ci) => ({ th, ci, key: columnKey(th) }))
     .filter((x) => x.key);
+  const said = h("span", { class: "nx-sortline__said", "aria-live": "polite" });
+  const reset = /** @type {HTMLButtonElement} */ (
+    drivable(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--ghost kp-button--sm",
+          title: "Clear every sort key this table was given",
+        },
+        "Reset sort",
+      ),
+      RESET_SORT,
+      opts.remember ?? "table",
+    )
+  );
+  reset.addEventListener("click", () => {
+    sort = [];
+    if (opts.remember) keepSort(opts.remember, sort);
+    apply();
+  });
+  const line = h("div", { class: "nx-sortline" }, said, reset);
   const apply = () => {
+    const label = (/** @type {string} */ k) =>
+      keyed.find((x) => x.key === k)?.th.textContent?.trim() ?? k;
+    said.textContent = sort.length
+      ? `Sorted by ${sort.map((x) => `${label(x.key)} ${x.dir > 0 ? "↑" : "↓"}`).join(", then ")}`
+      : "";
+    // Unsorted, the line stays out of sight (fix-236: no "Not sorted."
+    // noise between the filters and the rows).
+    line.hidden = sort.length === 0;
     for (const { th, key } of keyed) {
       const i = sort.findIndex((s) => s.key === key);
       if (i < 0) th.setAttribute("aria-sort", "none");
@@ -1370,25 +1405,23 @@ export function sortableTable(table, opts) {
   for (const { th, key } of keyed) {
     th.classList.add("nx-sortable");
     th.tabIndex = 0;
-    th.title =
-      "Sort by this column: click again to reverse, a third time for the original order · Shift+click adds a further sort";
+    th.title = SORT_HINT;
     drive(th, { id: opts.drive.id, row: key });
-    /** @param {boolean} add */
-    const go = (add) => {
-      sort = nextSort(sort, key, add);
+    const go = () => {
+      sort = nextSort(sort, key);
       if (opts.remember) keepSort(opts.remember, sort);
       apply();
     };
-    th.addEventListener("click", (e) => go(e.shiftKey));
+    th.addEventListener("click", () => go());
     th.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        go(e.shiftKey);
+        go();
       }
     });
   }
   apply();
-  return { apply, sort: () => [...sort] };
+  return { apply, sort: () => [...sort], line };
 }
 
 /**
@@ -2231,7 +2264,7 @@ export const PHONE = "(max-width: 48rem)";
 
 /**
  * A kp datatable with no search bar of its own: sortable headers,
- * Shift-click for a second key, the sort remembered under `remember`; the
+ * a click adds a further key (sortclick.js), the sort remembered under `remember`; the
  * caller fills `tbody`, then wires it with a `tableSlot` (or
  * `attachDataTables`). `cls` adds the page's own class (Metrics, the Map).
  * @param {{remember: string, caption: string, cls?: string,

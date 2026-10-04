@@ -147,14 +147,18 @@ test("redesign-kit-7: segSwitch moves without a change event; sort state is mult
   const { nextSort, applySort, rememberedSort, keepSort } = sortstate;
   /** @type {{key: string, dir: 1 | -1}[]} */
   let s = nextSort([], "size");
-  s = nextSort(s, "name", true);
+  s = nextSort(s, "name");
   assert.deepEqual(s, [
     { key: "size", dir: 1 },
     { key: "name", dir: 1 },
   ]);
-  s = nextSort(s, "name", true);
-  assert.deepEqual(s[1], { key: "name", dir: -1 }, "Shift again reverses it");
-  assert.deepEqual(nextSort(s, "name", true), [{ key: "size", dir: 1 }]);
+  s = nextSort(s, "name");
+  assert.deepEqual(
+    s[1],
+    { key: "name", dir: -1 },
+    "a second click reverses it",
+  );
+  assert.deepEqual(nextSort(s, "name"), [{ key: "size", dir: 1 }]);
   const rows = [
     { name: "b", size: 2 },
     { name: "a", size: 2 },

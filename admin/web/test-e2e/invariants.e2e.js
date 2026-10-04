@@ -11418,3 +11418,70 @@ test("invariants: redesign-final-m3: the palette offers Park only for a stack th
     await browser.close();
   }
 });
+
+// Low (Kenny's rule): multi-sort without Shift. A plain click on a second
+// header adds it as a further key, on the dashboard's own sortable tables
+// and on kp datatables alike; Reset sort clears every key.
+test("invariants: redesign-final-low-sort: a plain click on a second header adds a sort key (no Shift), and Reset sort clears them", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    // The Host page's Containers table (ui.js sortableTable).
+    await page.goto(`${BASE}/host`);
+    const th = (/** @type {string} */ k) =>
+      page.locator(
+        `[data-drive="sort-host-containers"][data-drive-row="${k}"]`,
+      );
+    await th("status").waitFor({ timeout: 10000 });
+    await th("status").click();
+    await th("memory").click();
+    const sorted = await page.evaluate(() =>
+      [
+        ...document.querySelectorAll(
+          '[data-drive="sort-host-containers"][aria-sort]:not([aria-sort="none"])',
+        ),
+      ].map((e) => /** @type {HTMLElement} */ (e).dataset.driveRow),
+    );
+    assert.deepEqual(sorted.sort(), ["memory", "status"], "two keys");
+    const reset = page.locator(
+      '[data-drive="table-reset-sort"][data-drive-row="host-containers"]',
+    );
+    assert.ok(await reset.isVisible(), "no Reset sort while sorted");
+    await reset.click();
+    assert.equal(
+      await page
+        .locator(
+          '[data-drive="sort-host-containers"][aria-sort]:not([aria-sort="none"])',
+        )
+        .count(),
+      0,
+      "Reset sort left a key",
+    );
+    // A kp datatable (the Stacks table): two plain clicks, two keys.
+    await page.goto(`${BASE}/stacks?view=table`);
+    const head = page.locator(".sk-table thead th[data-kp-sort]");
+    await head.first().waitFor({ timeout: 10000 });
+    await head.nth(0).click();
+    await head.nth(1).click();
+    assert.equal(
+      await page
+        .locator('.sk-table thead th[aria-sort]:not([aria-sort="none"])')
+        .count(),
+      2,
+      "a plain click on a second kp datatable header did not add a key",
+    );
+    const kpReset = page.locator('.sk-table [data-drive="table-reset-sort"]');
+    await kpReset.click();
+    assert.ok(
+      (await page
+        .locator('.sk-table thead th[aria-sort]:not([aria-sort="none"])')
+        .count()) <= 1,
+      "Reset sort did not clear the kp datatable's keys",
+    );
+  } finally {
+    await browser.close();
+  }
+});

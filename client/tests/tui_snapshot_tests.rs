@@ -1421,6 +1421,12 @@ const CLI_ONLY: &[(&str, &str)] = &[
         "the dashboard's secrets page writes a changed value; the TUI has no \
          secrets screen to write one from",
     ),
+    (
+        "StackRuntime",
+        "redesign-flows-6: the dashboard's Update flow reads what a stack's \
+         containers run after its deploy, to verify health and the new \
+         version; read-only, and the TUI has no Update flow to verify",
+    ),
 ];
 
 /// covers: F156

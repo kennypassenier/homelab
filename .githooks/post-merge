@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# redesign-final (B, coordinator 2026-10-04): a fast-forward makes no merge
+# commit, so no pre-merge-commit hook ran the cases it affects (two Activity
+# cases went red on redesign-371 that way). After a fast-forward this runs
+# the merge's full set over what came in (ORIG_HEAD..HEAD); if any fails the
+# fast-forward is undone (git reset --keep ORIG_HEAD) and the cases named.
+# `make hooks` also sets merge.ff=false, so a merge makes a merge commit and
+# runs pre-merge-commit instead; this catches the rest (an explicit
+# --ff-only, a pull).
+set -uo pipefail
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+# A real merge commit (two parents) already ran pre-merge-commit.
+[ "$(git rev-list --parents -n 1 HEAD | wc -w)" -gt 2 ] && exit 0
+from=$(git rev-parse -q --verify ORIG_HEAD) || exit 0
+[ "$from" = "$(git rev-parse HEAD)" ] && exit 0
+if ! HOMELAB_CASES_RANGE="$from..HEAD" "$root/.githooks/merge-cases.sh"; then
+  echo "FAST-FORWARD UNDONE — the cases it affects failed (above); HEAD is back at ${from:0:8}." >&2
+  git reset -q --keep "$from"
+  exit 1
+fi

@@ -33,7 +33,8 @@ help:
 # fresh clone has no enforcement until this runs.
 hooks:
 	git config core.hooksPath .githooks
-	@echo "git-native hooks active: $$(git config core.hooksPath)"
+	git config merge.ff false
+	@echo "git-native hooks active: $$(git config core.hooksPath); merges make a merge commit (merge.ff=false)"
 
 build:
 	cargo build --workspace

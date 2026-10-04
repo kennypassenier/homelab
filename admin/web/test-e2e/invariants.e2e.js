@@ -5965,15 +5965,21 @@ test("invariants: review-activity: a host line opens with Space, Copy line comes
       .click();
     const row = page.locator(".hl-out .hl-ln[data-seq]").first();
     await row.focus();
-    await page.keyboard.press(" ");
-    assert.equal(await row.getAttribute("aria-expanded"), "true");
-    assert.equal(
-      await page.evaluate(
+    // redesign-final-52: focusing the first line scrolls a long log away
+    // from its bottom, which stops following by itself; Space must not
+    // change that state, whatever it was.
+    const following = () =>
+      page.evaluate(
         () =>
           /** @type {HTMLElement} */ (document.querySelector(".con-body"))
             ?.dataset.following,
-      ),
-      "true",
+      );
+    const before = await following();
+    await page.keyboard.press(" ");
+    assert.equal(await row.getAttribute("aria-expanded"), "true");
+    assert.equal(
+      await following(),
+      before,
       "Space on a line paused the log instead of opening it",
     );
     const copy = page.locator(".hl-more button", { hasText: /Copy line/ });

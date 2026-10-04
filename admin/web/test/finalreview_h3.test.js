@@ -44,9 +44,10 @@ test("redesign-final-h3: the nights are newest first, a missed night shown and n
       [false, "s3"],
     ],
   );
-  assert.match(n[0].label, /^Today, 03:04$/);
-  assert.match(n[2].label, /^[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}$/);
-  for (const x of n) assert.doesNotMatch(x.label, /\d+\/\d+\/\d+/);
+  assert.match(n[0].label, /^Today 03:04$/);
+  assert.match(n[2].label, /^\d{2}\/\d{2}\/\d{4}$/);
+  for (const x of n)
+    assert.doesNotMatch(x.label, /Mon|Tue|Wed|Thu|Fri|Sat|Sun|Oct|Sep/);
   const late = restoreNights(
     [{ id: "x", short_id: "y", time: at(1, 3) }],
     NOW,
@@ -60,12 +61,12 @@ test("redesign-final-h3: step 3 says what will happen, the safety copy as the un
   const w = whatWillHappen({
     stack: "notes",
     app: "db",
-    night: "Fri 2 Oct, 03:04",
+    night: "02/10/2026 03:04",
     native: false,
   });
   assert.equal(w.length, 4);
   assert.match(w[1], /safety copy .*undo/);
-  assert.match(w[2], /Fri 2 Oct, 03:04/);
+  assert.match(w[2], /02\/10\/2026 03:04/);
   assert.equal(restoreStep({ app: null, night: null, running: false }), 1);
   assert.equal(restoreStep({ app: "db", night: null, running: false }), 2);
   assert.equal(restoreStep({ app: "db", night: "s1", running: false }), 3);

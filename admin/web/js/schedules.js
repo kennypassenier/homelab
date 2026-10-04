@@ -3,7 +3,7 @@
 // The times a schedule names are the host's wall clock (Europe/Brussels);
 // the next run is shown in the viewer's own time.
 
-import { formatDateTime } from "./format.js";
+import { formatClock, formatDateTime, formatDay } from "./format.js";
 
 /**
  * @typedef {{every: "day", at: string} |
@@ -168,21 +168,8 @@ export const toggledBody = (s, enabled) =>
 // Europe/Brussels: in the autumn hour a time counts at its first
 // occurrence, in the spring gap at the first minute after it.
 
+// calendar-words: the weekday toggles' names, not a moment's format.
 const SHORT_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
 
 /** @type {Map<string, Intl.DateTimeFormat>} */
 const FORMATS = new Map();
@@ -341,30 +328,25 @@ export function nextRuns(when, after, n, zone) {
   return out.slice(0, n);
 }
 
-/** "Sat 3 Oct" in the host's clock. */
-export const dayText = (/** @type {number} */ t, /** @type {string} */ z) => {
-  const p = zoneParts(t, z);
-  return `${SHORT_DAYS[p.wd]} ${p.d} ${MONTHS[p.m - 1]}`;
-};
+/** "03/10/2026" in the host's clock (redesign-final X4: the one format). */
+export const dayText = (/** @type {number} */ t, /** @type {string} */ z) =>
+  formatDay(t, { timeZone: z });
 
 /** "10:00" in the host's clock. */
-export const timeText = (/** @type {number} */ t, /** @type {string} */ z) => {
-  const p = zoneParts(t, z);
-  return `${String(p.hh).padStart(2, "0")}:${String(p.mm).padStart(2, "0")}`;
-};
+export const timeText = (/** @type {number} */ t, /** @type {string} */ z) =>
+  formatClock(t, { timeZone: z });
 
-/** "Sat 3 Oct, 10:00". */
+/** "03/10/2026 10:00" in the host's clock. */
 export const dateTimeText = (
   /** @type {number} */ t,
   /** @type {string} */ z,
-) => `${dayText(t, z)}, ${timeText(t, z)}`;
+) => formatDateTime(t, { timeZone: z });
 
-/** An ISO date's own day, "Mon 5 Oct", with no zone involved. */
+/** An ISO date's own day, "05/10/2026", with no zone involved. */
 function isoDayText(/** @type {string} */ date) {
   const x = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
   if (!x) return date;
-  const c = addDays(+x[1], +x[2], +x[3], 0);
-  return `${SHORT_DAYS[c.wd]} ${c.d} ${MONTHS[c.m - 1]}`;
+  return `${x[3]}/${x[2]}/${x[1]}`;
 }
 
 /** The short weekday names, Monday first, for the drawer's toggles. */
@@ -758,7 +740,7 @@ export function agenda(list, now, zone, label, n = 8, hostTarget = "_host") {
       rows.push({
         id: s.id,
         t,
-        when: `${dayText(t, zone).slice(0, 3)} ${timeText(t, zone)}`,
+        when: dateTimeText(t, zone),
         text: scheduleTitle(label(s.action), s.stack, hostTarget),
       });
     }

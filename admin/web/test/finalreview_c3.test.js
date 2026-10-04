@@ -15,8 +15,11 @@ import {
 const NOW = Date.UTC(2026, 9, 4, 12, 0) / 1000;
 
 test("redesign-final-c3: a moment reads as the demos write it, never dd/mm/yyyy", () => {
-  assert.equal(dayTime(NOW, "UTC"), "Sun 4 Oct, 12:00");
-  assert.doesNotMatch(dayTime(NOW, "Europe/Brussels"), /\d+\/\d+\/\d+/);
+  assert.equal(dayTime(NOW, "UTC"), "04/10/2026 12:00");
+  assert.match(
+    dayTime(NOW, "Europe/Brussels"),
+    /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/,
+  );
 });
 
 test("redesign-final-c3: the push chip says on, snoozed until when, or off", () => {
@@ -31,7 +34,7 @@ test("redesign-final-c3: the push chip says on, snoozed until when, or off", () 
   );
   assert.deepEqual(s, {
     tone: "warn",
-    text: "Snoozed until Sun 4 Oct, 14:00",
+    text: "Snoozed until 04/10/2026 14:00",
     snoozed: true,
   });
   assert.equal(
@@ -64,6 +67,6 @@ test("redesign-final-c3: the digest line says when and what came last, in words"
       { at: NOW, count: 2 },
       "UTC",
     ),
-    "One push at 07:30 with what still waits, worst first. Last one Sun 4 Oct, 12:00: 2 things waited.",
+    "One push at 07:30 with what still waits, worst first. Last one 04/10/2026 12:00: 2 things waited.",
   );
 });

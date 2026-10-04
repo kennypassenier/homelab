@@ -67,6 +67,7 @@ import { agoText, formatDateTime } from "../format.js";
 import { current, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
 
+// calendar-words: the month grid's column heads, not a moment's format.
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTH_NAMES = [
   "January",

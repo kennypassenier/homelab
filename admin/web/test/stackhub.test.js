@@ -652,15 +652,15 @@ test("review 8: History says Kenny in the chip and in the rows", () => {
 test("review 9, redesign-final X4: History dates read in the one date format", () => {
   const t = Date.UTC(2026, 8, 30, 12, 14) / 1000;
   const now = Date.UTC(2026, 9, 3, 9, 0) / 1000;
-  assert.equal(shortWhen(t, now, "UTC"), "Wed 30 Sep, 12:14");
+  assert.equal(shortWhen(t, now, "UTC"), "30/09/2026 12:14");
   assert.equal(
     shortWhen(Date.UTC(2026, 9, 2, 14, 22) / 1000, now, "UTC"),
-    "Fri 2 Oct, 14:22",
+    "02/10/2026 14:22",
     "a day is not zero-padded",
   );
   assert.equal(
     shortWhen(Date.UTC(2025, 11, 30, 8, 5) / 1000, now, "UTC"),
-    "Tue 30 Dec 2025, 08:05",
+    "30/12/2025 08:05",
     "another year says which",
   );
 });

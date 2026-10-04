@@ -1062,9 +1062,7 @@ function mountNow(body, x) {
           svgEl(
             "text",
             { class: "tick-label", x: xx + 4, y: H - 6 },
-            d === days - 1
-              ? "today"
-              : formatDay(t).split(" ").slice(0, 2).join(" "),
+            d === days - 1 ? "today" : formatDay(t),
           ),
         );
     }

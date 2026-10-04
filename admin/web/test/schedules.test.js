@@ -86,14 +86,14 @@ test("redesign-schedules: the next runs of a schedule, as the drawer previews th
     nextRuns(/** @type {any} */ (tueFri), NOW, 3, Z).map((t) =>
       dateTimeText(t, Z),
     ),
-    ["Tue 6 Oct, 02:30", "Fri 9 Oct, 02:30", "Tue 13 Oct, 02:30"],
+    ["06/10/2026 02:30", "09/10/2026 02:30", "13/10/2026 02:30"],
   );
   // Later today still counts.
   assert.deepEqual(
     nextRuns({ every: "day", at: "10:00" }, NOW, 2, Z).map((t) =>
       dateTimeText(t, Z),
     ),
-    ["Sat 3 Oct, 10:00", "Sun 4 Oct, 10:00"],
+    ["03/10/2026 10:00", "04/10/2026 10:00"],
   );
   assert.deepEqual(
     nextRuns({ every: "once", date: "2026-10-05", at: "08:00" }, NOW, 3, Z),
@@ -113,7 +113,7 @@ test("redesign-schedules: the next runs of a schedule, as the drawer previews th
   );
   assert.deepEqual(
     across.map((t) => dateTimeText(t, Z)),
-    ["Sun 25 Oct, 02:30", "Mon 26 Oct, 02:30", "Tue 27 Oct, 02:30"],
+    ["25/10/2026 02:30", "26/10/2026 02:30", "27/10/2026 02:30"],
   );
 });
 
@@ -136,7 +136,7 @@ test("redesign-schedules: when, until, titles and counters in the demo's words",
   );
   assert.equal(
     cadenceText({ every: "once", date: "2026-10-05", at: "08:00" }),
-    "Once, Mon 5 Oct at 08:00",
+    "Once, 05/10/2026 at 08:00",
   );
   assert.equal(untilText(NOW + 2 * 3600 + 14 * 60, NOW), "in 2 h 14 min");
   assert.equal(untilText(NOW + 30 * 60, NOW), "in 30 min");
@@ -203,7 +203,7 @@ test("redesign-schedules: the drawer's sentence, its defaults, the templates and
   assert.equal(draftBody({ ...d, every: "once", date: "" }).ok, false);
   assert.equal(
     sentenceText({ ...d, every: "once", date: "2026-10-05" }, label, "_host"),
-    "Run Back up on films once on Mon 5 Oct at 02:30",
+    "Run Back up on films once on 05/10/2026 at 02:30",
   );
   const patch = draftFor(null, TEMPLATES[1], ctx);
   assert.deepEqual(
@@ -280,7 +280,7 @@ test("redesign-schedules: the last run names the job, or the slot missed and why
       ),
       Z,
     ),
-    { tone: "warn", text: "missed Sat 26 Sep (dashboard down)", job: null },
+    { tone: "warn", text: "missed 26/09/2026 (dashboard down)", job: null },
   );
   // A run after the miss is the last run again.
   assert.equal(
@@ -348,9 +348,9 @@ test("redesign-schedules: the week from today, the nightly round, the now-line, 
   assert.deepEqual(
     a.slice(0, 3).map((r) => [r.when, r.text]),
     [
-      ["Sat 10:00", "Back up films"],
-      ["Sun 10:00", "Back up films"],
-      ["Mon 10:00", "Back up films"],
+      ["03/10/2026 10:00", "Back up films"],
+      ["04/10/2026 10:00", "Back up films"],
+      ["05/10/2026 10:00", "Back up films"],
     ],
   );
   assert.ok(

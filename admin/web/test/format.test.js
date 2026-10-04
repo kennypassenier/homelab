@@ -22,22 +22,23 @@ test("durations step from seconds to minutes, hours and days", () => {
   assert.equal(humanDuration(-1), "—");
 });
 
-test("redesign-final X4: every moment reads as the demos write it, never dd/mm/yyyy", () => {
+test("redesign-final X4: every moment reads dd/mm/yyyy HH:MM, 24-hour, in Europe/Brussels (Kenny's rule, fix-216)", () => {
   const at = 1790000000; // Mon 2026-09-21 14:13:20 UTC
-  const now = { now: at, timeZone: "UTC" };
-  assert.equal(formatDateTime(at, now), "Mon 21 Sep, 14:13");
+  assert.equal(formatDateTime(at), "21/09/2026 16:13", "Brussels by default");
+  assert.equal(formatDateTime(at, { timeZone: "UTC" }), "21/09/2026 14:13");
+  assert.equal(formatDay(at), "21/09/2026");
+  assert.equal(formatClock(at), "16:13");
+  assert.equal(formatClock(at, { seconds: true }), "16:13:20");
+  // Midnight is 00:00, never 24:00; another year is the same shape.
   assert.equal(
-    formatDateTime(at, { now: at, timeZone: "Europe/Brussels" }),
-    "Mon 21 Sep, 16:13",
+    formatDateTime(Date.UTC(2025, 11, 29, 23, 5) / 1000),
+    "30/12/2025 00:05",
   );
-  assert.equal(formatDay(at, now), "Mon 21 Sep");
-  assert.equal(formatClock(at, now), "14:13");
-  assert.equal(formatClock(at, { ...now, seconds: true }), "14:13:20");
-  // Another year is written out.
-  const before = Date.UTC(2025, 11, 30, 8, 5) / 1000;
-  assert.equal(formatDateTime(before, now), "Tue 30 Dec 2025, 08:05");
-  // Midnight is 00:00, never 24:00.
-  assert.equal(formatClock(Date.UTC(2026, 9, 3) / 1000, now), "00:00");
+  // Never a weekday or a month's name ("Sat 3 Oct", "30 Sep 12:14").
+  assert.doesNotMatch(
+    formatDateTime(at),
+    /Mon|Tue|Wed|Thu|Fri|Sat|Sun|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec/,
+  );
   assert.equal(formatDateTime(null), "—");
   assert.equal(formatDateTime(0), "—");
 });

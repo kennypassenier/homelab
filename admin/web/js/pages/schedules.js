@@ -28,6 +28,7 @@ import {
   cadenceText,
   countText,
   dateTimeText,
+  dayText,
   draftBody,
   draftFor,
   lastRunView,
@@ -1486,11 +1487,11 @@ const lowerFirst = (/** @type {string} */ s) =>
 /** @param {number} n */
 const pad = (n) => String(n).padStart(2, "0");
 
-/** "tomorrow at 10:00", "today at 22:00" or "Mon 5 Oct, 10:00". */
+/** "tomorrow at 10:00", "today at 22:00" or "05/10/2026 10:00". */
 function dayWord(/** @type {number} */ t, /** @type {string} */ z) {
-  const today = dateTimeText(now(), z).split(",")[0];
-  const tomorrow = dateTimeText(now() + 86_400, z).split(",")[0];
-  const day = dateTimeText(t, z).split(",")[0];
+  const today = dayText(now(), z);
+  const tomorrow = dayText(now() + 86_400, z);
+  const day = dayText(t, z);
   if (day === today) return `today at ${timeText(t, z)}`;
   if (day === tomorrow) return `tomorrow at ${timeText(t, z)}`;
   return dateTimeText(t, z);

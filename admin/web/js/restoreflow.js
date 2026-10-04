@@ -5,7 +5,7 @@
 // dialog. Pure, so `node --test` holds the nights, the words and the
 // address; pages/restore.js draws them.
 
-import { dayTime } from "./notifyrules.js";
+import { formatClock, formatDateTime, formatDay } from "./format.js";
 
 /**
  * @typedef {{id: string, short_id: string, time: number,
@@ -65,14 +65,14 @@ export function restoreNights(snaps, now, days = 14) {
     for (const s of here)
       out.push({
         key: s.short_id,
-        label: `${k === today ? "Today" : dayTime(s.time).split(",")[0]}, ${dayTime(s.time).split(", ")[1]}`,
+        label: `${k === today ? "Today" : formatDay(s.time)} ${formatClock(s.time)}`,
         snap: s,
         missed: false,
       });
     if (!here.length && k !== today)
       out.push({
         key: `missed:${k}`,
-        label: dayTime(unix).split(",")[0],
+        label: formatDay(unix),
         snap: null,
         missed: true,
       });
@@ -84,7 +84,7 @@ export function restoreNights(snaps, now, days = 14) {
     if (byDay.has(dayKey(new Date(s.time * 1000))))
       out.push({
         key: s.short_id,
-        label: dayTime(s.time),
+        label: formatDateTime(s.time),
         snap: s,
         missed: false,
       });

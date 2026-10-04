@@ -1317,15 +1317,14 @@ export function fileList(paths) {
 }
 
 /**
- * A moment as History's demo writes it, "30 Sep 12:14" in the browser's
- * clock (with the year when it is not this one): never the ambiguous
- * "02/10/2026".
+ * A moment in History: the one date format (dd/mm/yyyy HH:MM,
+ * Europe/Brussels; Kenny's rule, REGISTER fix-216).
  * @param {number} unix
- * @param {number} [now] unix seconds, for the year
+ * @param {number} [_now] kept for callers; the year is always written
  * @param {string} [timeZone]
  */
-export function shortWhen(unix, now = Date.now() / 1000, timeZone) {
-  return formatDateTime(unix, { now, timeZone });
+export function shortWhen(unix, _now, timeZone) {
+  return formatDateTime(unix, { timeZone });
 }
 
 /** What History's Incidents says with none kept. @param {string} name */

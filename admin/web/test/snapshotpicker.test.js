@@ -92,10 +92,7 @@ test("fix-216: a size and file count the host does send are shown, humanised", (
 
 test("fix-216: the date reads in the one date format, 24-hour, fixed to Europe/Brussels", () => {
   // 2026-09-21 14:13:20 UTC == 16:13 in Europe/Brussels (CEST, +2)
-  assert.match(
-    formatDateTimeBrussels(1_790_000_000),
-    /^Mon 21 Sep( 2026)?, 16:13$/,
-  );
+  assert.match(formatDateTimeBrussels(1_790_000_000), /^21\/09\/2026 16:13$/);
 });
 
 test("fix-216: the picker reads a row's own app, never a different one with the same stack", () => {

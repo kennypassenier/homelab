@@ -7,7 +7,7 @@
 //      title);
 //   b  no row's content runs into the next row (a table row's chips into
 //      the row below, a list row into the next one);
-//   c  one date format: never a numeric dd/mm/yyyy;
+//   c  one date format, dd/mm/yyyy HH:MM: never a weekday or month name;
 //   d  one page-level header: at most one heading of the h1's size;
 //   e  a "problems" counter that reads 0 draws no red chip beside it.
 // Not a test file itself (no `.e2e.js`): invariants.e2e.js imports it.
@@ -213,12 +213,15 @@ export function layoutAudit(rootSel) {
     }
   }
 
-  // ---- c: numeric dates ----
+  // ---- c: one date format (Kenny's rule, REGISTER fix-216: dd/mm/yyyy
+  // HH:MM): never a weekday or a month's name ("Sat 3 Oct", "30 Sep 12:14")
   for (const t of texts) {
-    const m = t.data.match(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/);
+    const m = t.data.match(
+      /\b(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b|\d{1,2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?: \d{4})?,? \d{2}:\d{2})/,
+    );
     if (m)
       out.c.push(
-        `numeric date "${m[0]}" in ${say(/** @type {Element} */ (t.parentElement))}`,
+        `date "${m[0]}" not in dd/mm/yyyy in ${say(/** @type {Element} */ (t.parentElement))}`,
       );
   }
 

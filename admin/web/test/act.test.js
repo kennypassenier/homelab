@@ -754,7 +754,7 @@ test("a schedule's when in words and back from the form", () => {
     () => "Back up",
     { locale: "en-GB", timeZone: "UTC" },
   );
-  assert.match(rows[0].nextText, /^Mon 21 Sep(?: 2026)?, 14:13$/);
+  assert.equal(rows[0].nextText, "21/09/2026 14:13");
   assert.equal(rows[0].last, "never");
   assert.deepEqual(toggledBody(s, false), {
     stack: "media",

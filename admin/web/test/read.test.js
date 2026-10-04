@@ -315,7 +315,7 @@ test("the logs tab reads its settings from the address and asks the server", () 
   assert.equal(levelTone("warning"), "warn");
   assert.equal(levelTone("informational"), "ok");
   assert.equal(levelTone(""), "");
-  assert.equal(lineTime(1790606585948, UTC), "Mon 28 Sep, 14:43:05");
+  assert.equal(lineTime(1790606585948, UTC), "28/09/2026 14:43:05");
   const rows = logRows(
     [
       { ts_ms: 1000, source: "a", stream: "stdout", level: "", line: "old" },

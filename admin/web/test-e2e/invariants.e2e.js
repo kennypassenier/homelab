@@ -1182,11 +1182,11 @@ test("invariants: opening Restore from an app's row never asks for the app again
     const count = await nights.count();
     assert.ok(count >= 2, `expected several snapshot nights, got ${count}`);
     const firstText = await nights.first().innerText();
-    // redesign-final X4: the one date format ("Sat 3 Oct, 00:00"); today's
-    // night says "Today".
+    // redesign-final X4: the one date format (dd/mm/yyyy HH:MM, Kenny's
+    // rule, fix-216); today's night says "Today".
     assert.match(
       firstText,
-      /^(Today|(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2}( \d{4})?), \d{2}:\d{2}/,
+      /^(Today|\d{2}\/\d{2}\/\d{4}) \d{2}:\d{2}/,
       "a dated night",
     );
     assert.equal(
@@ -10821,7 +10821,10 @@ const AUDIT_ONLY = process.env.INVARIANTS_AUDIT_ONLY
 for (const [cls, what] of /** @type {const} */ ([
   ["a", "no word wraps per letter and no text is cut or spills out of its box"],
   ["b", "no row's content runs into the next row"],
-  ["c", "dates never show as numeric dd/mm/yyyy"],
+  [
+    "c",
+    "dates show as dd/mm/yyyy HH:MM, never with a weekday or a month's name",
+  ],
   ["d", "a page has one page-level header"],
   ["e", "a problems counter never reads 0 beside red chips"],
 ])) {

@@ -263,7 +263,7 @@ export function dayStart(t) {
  * @param {{locale?: string, timeZone?: string}} [opts]
  */
 export function dayLabel(day, now, opts = {}) {
-  const words = formatDay(day, { ...opts, now });
+  const words = formatDay(day, opts);
   const today = dayStart(now);
   if (day === today) return `Today · ${words}`;
   if (day === dayStart(today - 43200)) return `Yesterday · ${words}`;
@@ -471,7 +471,7 @@ export function dayWord(t, now, opts = {}) {
   const d = dayStart(t);
   if (d === dayStart(now)) return "today";
   if (d === dayStart(dayStart(now) - 43200)) return "yesterday";
-  return formatDay(t, { ...opts, now });
+  return formatDay(t, opts);
 }
 
 /**

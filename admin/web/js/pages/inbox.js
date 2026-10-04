@@ -685,7 +685,9 @@ export function mount(root) {
       backups.flatMap((b) => (b.ok ? [b.body] : [])),
       versions.ok ? versions.body : null,
     );
-    worthN.textContent = ` · ${rows.length}`;
+    // M5: the count is the rows the fold holds (the doctor report's row
+    // included), exactly.
+    worthN.textContent = ` · ${rows.length + 1}`;
     worthList.replaceChildren(
       ...rows.map((r) =>
         h(

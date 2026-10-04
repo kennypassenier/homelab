@@ -11937,3 +11937,42 @@ test("invariants: redesign-final-m9: no audited page scrolls sideways at 390 px,
     await browser.close();
   }
 });
+
+// M5: the Inbox's "Worth a look · 1" showed no chevron and counted fewer
+// rows than its fold held; the demo's fold has a chevron and its count is
+// what it holds.
+test("invariants: redesign-final-m5: Worth a look is a fold with a chevron, and its count is the rows it holds", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/inbox`);
+    const sum = page.locator(".inbox-worth > summary");
+    await page.waitForFunction(
+      () =>
+        /· \d+/.test(
+          document.querySelector(".inbox-worth > summary")?.textContent ?? "",
+        ),
+      null,
+      { timeout: 10000 },
+    );
+    const chevron = await sum.evaluate((s) => {
+      const b = getComputedStyle(s, "::before");
+      return b.content !== "none" && parseFloat(b.width) > 0;
+    });
+    assert.ok(chevron, "the fold has no chevron");
+    await sum.click();
+    const n = Number(
+      /· (\d+)/.exec((await sum.innerText()) ?? "")?.[1] ?? "-1",
+    );
+    const rows = await page
+      .locator(".inbox-worth .inbox-list > li:visible")
+      .count();
+    assert.ok(rows > 0, "the open fold shows no rows");
+    assert.equal(n, rows, "the count is not the rows the fold holds");
+  } finally {
+    await browser.close();
+  }
+});

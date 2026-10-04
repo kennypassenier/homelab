@@ -87,10 +87,34 @@
   }
 }
 /* Review item 8: Worth a look's heading over its one-sentence
-   description. */
+   description. M5: a fold with its chevron (the demo's details), turning
+   when open. */
 .inbox-worth > summary {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 2px;
+  list-style: none;
+}
+.inbox-worth > summary::-webkit-details-marker {
+  display: none;
+}
+.inbox-worth > summary::before {
+  content: "";
+  grid-row: 1 / span 2;
+  align-self: center;
+  justify-self: center;
+  inline-size: 8px;
+  block-size: 8px;
+  border-inline-end: 2px solid currentColor;
+  border-block-end: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 150ms;
+}
+.inbox-worth[open] > summary::before {
+  transform: rotate(45deg);
+}
+.inbox-worth > summary > * {
+  grid-column: 2;
 }
 .inbox-worth__desc {
   font-size: var(--kp-text-sm);

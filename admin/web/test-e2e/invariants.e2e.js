@@ -9729,127 +9729,102 @@ test("invariants: redesign-final-extra-live-selection: on every page with select
       viewport: { width: 1894, height: 1000 },
     });
     const page = await freshPage(context);
-    const { cat, all } = await catalogOf(page);
-    const paths = new Set([
-      ...cat.addresses.map((/** @type {string} */ a) => `/${a}`),
-      ...all.map((c) => c.home).filter((h) => !/[<{]/.test(h)),
-      ...(cat.stack_tabs ?? []).map(
-        (/** @type {string} */ t) => `/stacks/kp-soft/${t}`,
-      ),
-    ]);
-    // A selectable row: any enabled, visible, labelled checkbox that is not
-    // a switch, outside a table head, the header and a toolbar; its row is
-    // the nearest row-like box (a table row, a list item, a card, a label).
+    // redesign-final-47 (Kenny, 2026-10-04: no crawl): the controls whose
+    // rows are a person's selection say so in the catalog (`selects`);
+    // the check goes straight to their pages.
+    const { all } = await catalogOf(page);
+    const sel = all.filter((c) => c.selects);
+    assert.ok(sel.length >= 1, "no control declares selectable rows");
     const ROW =
       "tr, li, [role=listitem], [role=row], .sk-card, [data-stack], [data-kp-row-key], label";
-    /** @type {Set<string>} */
-    const landed = new Set();
     /** @type {string[]} */
     const bad = [];
     /** @type {string[]} */
     const checked = [];
-    // Each page's own links with a query (a variant of a known page: the
-    // Update flow's ?all=1, a view or a section) are visited too, once.
-    const todo = [...paths].sort();
-    for (let i = 0; i < todo.length && i < 150; i++) {
-      const path = todo[i];
-      await page.goto(`${BASE}${path}`);
+    for (const c of sel) {
+      await page.goto(`${BASE}${c.home}`);
       await page.waitForTimeout(1500);
-      const here = await page.evaluate(
-        () => location.pathname + location.search,
-      );
-      if (landed.has(here)) continue;
-      landed.add(here);
-      for (const href of await page.evaluate(() =>
-        [...document.querySelectorAll('#page a[href^="/"]')]
-          .map((a) => a.getAttribute("href") ?? "")
-          .filter((x) => x.includes("?") && !x.includes("#")),
-      ))
-        if (!paths.has(href)) {
-          paths.add(href);
-          todo.push(href);
-        }
-      // The rows a person can tick: in the open dialog when one is on top
-      // (Deploy all changes), else on the page.
-      const labels = await page.evaluate((ROW) => {
-        document
-          .querySelectorAll("[data-probe-root]")
-          .forEach((e) => e.removeAttribute("data-probe-root"));
-        const ds = [...document.querySelectorAll("dialog[open]")];
-        const root = ds[ds.length - 1] ?? document.getElementById("page");
-        root?.setAttribute("data-probe-root", "");
-        const boxes = [
-          ...(root?.querySelectorAll(
-            "input[type=checkbox]:not([role=switch]):not(:disabled)",
-          ) ?? []),
-        ].filter((b) => {
-          const r = b.closest(ROW);
-          return (
-            r &&
-            !b.closest("thead, header, .nx-tb") &&
-            /** @type {HTMLElement} */ (b).offsetParent !== null &&
-            b.getAttribute("aria-label")
+      // A control that shows only once another is pressed (Deploy all
+      // changes' picks): its declared reach steps first.
+      for (const r of c.reach ?? [])
+        if (r.do === "click")
+          await page
+            .locator(`[data-drive="${r.control}"]:visible`)
+            .first()
+            .click();
+      if (c.reach?.length) await page.waitForTimeout(1500);
+      // Its first two rows' boxes, enabled and on screen.
+      const rows = await page.evaluate((id) => {
+        const box = (/** @type {Element} */ e) =>
+          /** @type {HTMLInputElement | null} */ (
+            e.matches("input[type=checkbox]")
+              ? e
+              : e.querySelector("input[type=checkbox]")
           );
-        });
-        return boxes.slice(0, 2).map((b) => b.getAttribute("aria-label"));
-      }, ROW);
-      if (process.env.INVARIANTS_PROGRESS)
-        t.diagnostic(`${path} → ${here}: ${labels.length} selectable`);
-      if (labels.length === 0) continue;
-      checked.push(here);
-      for (const l of labels) {
-        const box = page
-          .locator(`[data-probe-root] input[aria-label="${l}"]`)
-          .first();
-        if (!(await box.isChecked())) await box.click();
+        return [...document.querySelectorAll(`[data-drive="${id}"]`)]
+          .filter((e) => {
+            const b = box(e);
+            return b && !b.disabled && b.offsetParent !== null;
+          })
+          .slice(0, 2)
+          .map((e) => /** @type {HTMLElement} */ (e).dataset.driveRow ?? "");
+      }, c.id);
+      if (!rows.length) {
+        bad.push(`${c.id}: no selectable row on ${c.home}`);
+        continue;
       }
-      await page
-        .locator(`[data-probe-root] input[aria-label="${labels[0]}"]`)
-        .first()
-        .focus();
+      checked.push(`${c.id} on ${c.home}`);
+      const sel1 = (/** @type {string} */ r) =>
+        `[data-drive="${c.id}"][data-drive-row="${r}"]`;
+      for (const r of rows) {
+        const e = page.locator(sel1(r)).first();
+        const b = (await e.evaluate((x) => x.matches("input")))
+          ? e
+          : e.locator("input[type=checkbox]").first();
+        if (!(await b.isChecked())) await b.click();
+      }
       await page.evaluate(
-        ({ ROW, labels }) => {
-          for (const l of labels) {
-            const b = document.querySelector(
-              `[data-probe-root] input[aria-label="${l}"]`,
-            );
+        ({ ROW, sels }) => {
+          sels.forEach((s, i) => {
+            const e = document.querySelector(s);
+            const b = e?.matches("input")
+              ? e
+              : e?.querySelector("input[type=checkbox]");
+            if (i === 0) /** @type {HTMLElement} */ (b)?.focus();
             const r = /** @type {any} */ (b?.closest(ROW));
             if (r) r.__kept = true;
-          }
+          });
         },
-        { ROW, labels },
+        { ROW, sels: rows.map(sel1) },
       );
       // A live refresh: the demo host pushes the fleet every 5 s and the
-      // pages re-read on it; two pushes, so every page's refresh has come
-      // (only pages with selectable rows wait).
+      // pages re-read on it; two pushes, so every page's refresh has come.
       await page.waitForTimeout(11000);
       const after = await page.evaluate(
-        ({ ROW, labels }) =>
-          labels.map((l) => {
+        ({ ROW, sels }) =>
+          sels.map((s) => {
+            const e = document.querySelector(s);
             const b = /** @type {HTMLInputElement | null} */ (
-              document.querySelector(
-                `[data-probe-root] input[aria-label="${l}"]`,
-              )
+              e?.matches("input") ? e : e?.querySelector("input[type=checkbox]")
             );
             return {
-              l,
+              s,
               ticked: !!b?.checked,
               kept: !!(/** @type {any} */ (b?.closest(ROW))?.__kept),
-              focus: document.activeElement?.getAttribute("aria-label") === l,
+              focus: !!b && document.activeElement === b,
             };
           }),
-        { ROW, labels },
+        { ROW, sels: rows.map(sel1) },
       );
       for (const a of after) {
-        if (!a.ticked) bad.push(`${here}: "${a.l}" lost its tick`);
-        if (!a.kept) bad.push(`${here}: "${a.l}"'s row was rebuilt`);
+        if (!a.ticked) bad.push(`${c.home}: ${a.s} lost its tick`);
+        if (!a.kept) bad.push(`${c.home}: ${a.s}'s row was rebuilt`);
       }
-      if (!after[0].focus) bad.push(`${here}: the focus left "${after[0].l}"`);
+      if (!after[0].focus) bad.push(`${c.home}: the focus left ${after[0].s}`);
       await page.keyboard.press("Escape");
     }
-    t.diagnostic(`pages with selectable rows: ${checked.join(", ")}`);
-    assert.ok(checked.length >= 1, "no page with selectable rows was found");
-    assert.deepEqual(bad, [], `pages checked: ${checked.join(", ")}`);
+    t.diagnostic(`selectable rows checked: ${checked.join(", ")}`);
+    assert.deepEqual(bad, [], `checked: ${checked.join(", ")}`);
   } finally {
     await browser.close();
   }

@@ -66,6 +66,7 @@ const PICK = declare({
   opens: "view",
   row: "<stack>",
   what: "include or leave out one stack of the deploy batch",
+  selects: true,
   shows: "in the Deploy all changes panel",
   reach: [{ do: "click", control: "stacks-deploy-all" }],
 });

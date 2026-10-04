@@ -70,6 +70,7 @@ const DRIVE = {
     opens: "view",
     row: "<source>",
     what: "turn one source's lines on or off",
+    selects: true,
   }),
   only: declare({
     id: "console-only",

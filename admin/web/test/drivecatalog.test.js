@@ -597,3 +597,24 @@ test("redesign-drive-5: the catalog carries the router's stack tabs, its schema 
     !c.controls.some((/** @type {any} */ x) => x.id === "secrets-stack"),
   );
 });
+
+// redesign-final-47 (Kenny, 2026-10-04: no crawl to find them): the pages
+// whose rows are a person's selection are read off the catalog, so the
+// whole-screen live-selection check goes straight to them.
+test("redesign-final-47: the controls whose rows are a selection are declared so, each a per-row control of its page", () => {
+  const sel = /** @type {any} */ (built).controls.filter(
+    (/** @type {any} */ c) => c.selects,
+  );
+  // Stacks' tick had the fault the check was written for.
+  assert.ok(sel.some((/** @type {any} */ c) => c.id === "stacks-tick"));
+  for (const c of sel) {
+    assert.ok(c.row, `${c.id} selects but has no rows`);
+    assert.equal(c.opens, "view", `${c.id}: a tick changes no page`);
+  }
+  // Only a selecting control carries the key (the catalog stays lean).
+  assert.ok(
+    /** @type {any} */ (built).controls.every(
+      (/** @type {any} */ c) => c.selects === true || !("selects" in c),
+    ),
+  );
+});

@@ -72,6 +72,7 @@ const PICK = declare({
   opens: "view",
   row: "<pin:stack:app/service | pull:stack>",
   what: "include or leave out one row of the Update flow's list (a plain click)",
+  selects: true,
 });
 const SEE = declare({
   id: "update-see-impact",

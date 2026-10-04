@@ -140,6 +140,7 @@ const TICK = declare({
   opens: "view",
   row: "<stack>",
   what: "tick or untick one stack for a batch action",
+  selects: true,
 });
 const TICK_ALL = declare({
   id: "stacks-tick-all",

@@ -33,6 +33,7 @@
  * @typedef {{id: string, page: string, what: string,
  *   opens: "dialog" | "run" | "view", row?: string, bar?: boolean,
  *   rowOpens?: Record<string, "dialog" | "run" | "view">,
+ *   selects?: boolean,
  *   at?: (row: string | null) => string | null,
  *   was?: (string | Was)[], shows?: string, reach?: Reach[],
  *   twins?: boolean}} Control
@@ -40,6 +41,9 @@
  *   than `opens` declares its own, keyed by the row's last part (`update`
  *   of `<stack>/update`) or the whole row — the stack hub's Update goes to
  *   the Update flow ("view") where Back up and Deploy open a dialog.
+ *   `selects` (redesign-final-47): its rows are a person's selection
+ *   (ticks); a live refresh keeps the ticks, the focus and the row nodes.
+ *   The whole-screen check goes straight to these controls' pages.
  *   `bar`: the control lives in the bar on every page (Help's "?"); like
  *   every declared control it is found wherever it is drawn.
  *   `at`: where the control is when it lives on a page per stack (the
@@ -61,7 +65,7 @@
  * @typedef {{do: string, control?: string, row?: string, field?: string,
  *   text?: string, button?: string}} Reach
  * @typedef {{id: string, page: string, what: string, opens: string,
- *   rowOpens?: Record<string, string>, row: string | null, href: string | null, was: Was[],
+ *   rowOpens?: Record<string, string>, selects?: boolean, row: string | null, href: string | null, was: Was[],
  *   shows: string | null, reach: Reach[], twins: boolean}} CatalogEntry
  */
 
@@ -263,6 +267,8 @@ export const entry = (c, href) => ({
   opens: c.opens,
   // Only a control whose rows differ carries it (the catalog stays lean).
   ...(c.rowOpens ? { rowOpens: c.rowOpens } : {}),
+  // redesign-final-47: only a control whose rows are a selection.
+  ...(c.selects ? { selects: true } : {}),
   row: c.row ?? null,
   href: href(c),
   was: (c.was ?? []).map((w) => (typeof w === "string" ? { id: w } : w)),

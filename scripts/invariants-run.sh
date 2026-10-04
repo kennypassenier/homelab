@@ -29,7 +29,36 @@ cleanup() {
   fi
   rm -rf "$workdir"
 }
+# redesign-final (coordinator, 2026-10-04: three orphaned demo dashboards
+# answered on 8099, 18099 and 18199): the server this run starts dies on
+# every way out — a normal end, a failure, Ctrl-C, a TERM from a watchdog.
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# The port: INVARIANTS_PORT when given — refused if something already
+# answers there, never shared — else one the OS hands out (port 0).
+port_taken() {
+  python3 - "$1" <<'PY'
+import socket, sys
+s = socket.socket()
+try:
+    s.bind(("127.0.0.1", int(sys.argv[1])))
+except OSError:
+    sys.exit(0)
+sys.exit(1)
+PY
+}
+if [ -n "${INVARIANTS_PORT:-}" ]; then
+  if port_taken "$INVARIANTS_PORT"; then
+    echo "invariants: port $INVARIANTS_PORT is already taken (another run, or an orphaned demo dashboard); refusing to share it. Pick a free one, or leave INVARIANTS_PORT unset for one the OS hands out." >&2
+    exit 2
+  fi
+  port="$INVARIANTS_PORT"
+else
+  port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+fi
+[ "${INVARIANTS_PORT_CHECK_ONLY:-}" = 1 ] && { echo "invariants: port $port is free"; exit 0; }
 
 # fix-207: the topology/firewall/dependencies pages read the working copy
 # (homelab_admin::shell::workcopy::WorkingCopy), not the demo host's made-up
@@ -133,11 +162,7 @@ git -C "$fixture_repo" -c user.email=invariants@example.com -c user.name=invaria
 # its checked-out branch unless told to move its work tree along.
 git -C "$fixture_repo" config receive.denyCurrentBranch updateInstead
 
-# A free-ish high port, so two runs on one machine (a dev shell and a CI
-# box, say) do not collide on 8090 (the service's own default).
-# INVARIANTS_PORT lets two runs on one machine (a gate and a helper) not
-# fight over one port.
-port="${INVARIANTS_PORT:-18099}"
+# The port was chosen (and checked) at the start.
 listen="127.0.0.1:$port"
 base_url="http://$listen"
 token="invariants-$(date +%s)-$$"
@@ -200,6 +225,13 @@ if [ "$up" != 1 ]; then
   echo "invariants: the demo host never answered /healthz — its log:" >&2
   cat "$workdir/server.log" >&2
   exit 1
+fi
+# The server that answers is the one this run started, never another
+# process on the same port (an orphan from an earlier run).
+owner=$(ss -ltnpH "sport = :$port" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
+if [ -n "$owner" ] && [ "$owner" != "$server_pid" ]; then
+  echo "invariants: port $port is answered by pid $owner, not by the demo host this run started (pid $server_pid); refusing to test someone else's server." >&2
+  exit 2
 fi
 
 echo "invariants: running the Playwright smoke"

@@ -289,9 +289,11 @@ main.mk-page > .mk-failed:empty {
   .mk-table .kp-table td {
     padding-inline: 6px;
   }
+  /* A header wraps between words, never inside one ("Reallocated" broke
+     per letter; layout audit). */
   .mk-table .kp-table th {
     white-space: normal;
-    overflow-wrap: anywhere;
+    overflow-wrap: normal;
   }
   .mk-table .nx-share {
     grid-template-columns: minmax(0, 1fr);

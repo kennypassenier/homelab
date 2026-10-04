@@ -10812,40 +10812,6 @@ function auditSweep() {
   return auditRun;
 }
 
-/**
- * Instances the generic checks find on pages outside the final review's
- * critical and high findings (C1–C4, H1–H5): reported to Kenny as their
- * own correction items, fixed in their own round, and listed here so the
- * check still fails on anything new. Each names its review finding.
- * @type {Record<string, RegExp[]>}
- */
-const AUDIT_KNOWN = {
-  a: [
-    // M6: phone stack cards cut their facts ("0 restar…").
-    /^\/stacks(\?deploy-all=1)? @390: text cut by span "(\d+\/\d+ apps up|\d+ restarts)"/,
-    // Not in the review: Activity's KPI context lines cut at 390 px.
-    /^\/activity(\?view=\w+)? @390: text cut by span\.nx-kpi__ctx/,
-    // Not in the review: Backups › Coverage cuts a stack chip's name.
-    /^\/backups\?section=coverage @1894: text cut by span\.perstack-chip__name/,
-    // Not in the review: Charts' drive table head "Reallocated" at 390 px.
-    /^\/charts @390: word "Reallocated" wraps per letter/,
-    // Not in the review: Map's KPI label and "Capacity" heading at 390 px.
-    /^\/map @390: /,
-    // Not in the review: the hub's Backups heading at 390 px.
-    /^\/stacks\/kp-soft\/backups @390: text spills out of h2/,
-    // Not in the review: a hidden secret's dots cut at 390 px.
-    /^\/stacks\/kp-soft\/settings @390: text cut by span "•+"/,
-    // Not in the review: Drill them now lists repositories that overflow.
-    /^\/backups › backups-drill-now @390: text spills out of span\.mono/,
-  ],
-  b: [],
-  // X4 (one date format) is Kenny's decision against his 2026-09-30 one
-  // (dd/mm/yyyy for tables); Map and the Update flow keep it until then.
-  c: [/^\/map @\d+: /, /^\/update\?(all=1|stack=kp-soft) @\d+: /],
-  d: [],
-  e: [],
-};
-
 /** INVARIANTS_AUDIT_ONLY: audit only the pages and dialogs whose path
  * matches (a fix's own run); the gate runs them all. */
 const AUDIT_ONLY = process.env.INVARIANTS_AUDIT_ONLY
@@ -10860,9 +10826,9 @@ for (const [cls, what] of /** @type {const} */ ([
   ["e", "a problems counter never reads 0 beside red chips"],
 ])) {
   test(`invariants: redesign-final-gen-${cls}: on every page and action dialog at 1894 and 390 px, ${what}`, async () => {
-    const found = (await auditSweep())[cls].filter(
-      (f) => !AUDIT_KNOWN[cls].some((k) => k.test(f)),
-    );
+    // redesign-final: no instance is excused (the AUDIT_KNOWN allowance is
+    // gone); every finding fails.
+    const found = (await auditSweep())[cls];
     assert.deepEqual(found, [], `${found.length} findings`);
   });
 }

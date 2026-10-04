@@ -965,9 +965,21 @@ dialog.nx-drawer.sk-drawer--plan {
     min-inline-size: 0;
     max-inline-size: 100%;
   }
-  .sk-page .sk-card__meta > span {
-    min-inline-size: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  /* M6: a phone card shows every fact whole: apps and restarts on one
+     line, the last backup on the next (every card the same height). */
+  .sk-page .sk-card {
+    grid-template-rows: auto auto auto 28px;
+  }
+  .sk-page .sk-card__meta {
+    display: grid;
+    grid-template-columns: max-content max-content;
+    overflow: visible;
+  }
+  .sk-page .sk-card__meta > span:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+  .sk-page .sk-card__flags {
+    flex-wrap: wrap;
+    overflow: visible;
   }
 }

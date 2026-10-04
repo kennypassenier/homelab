@@ -525,14 +525,19 @@ export function mount(root, opts = {}) {
       },
       h(
         "span",
-        { "data-secret-value": row.key },
+        {
+          "data-secret-value": row.key,
+          // redesign-final (layout audit): the mask is eight dots, short
+          // enough for a phone's column; a narrower one says what it hides.
+          ...(shown || err || busy ? {} : { title: "The value is hidden" }),
+        },
         shown
           ? value
           : err
             ? `could not read: ${err}`
             : busy
               ? "reading…"
-              : "••••••••••••••••••••",
+              : "••••••••",
       ),
       h(
         "span",

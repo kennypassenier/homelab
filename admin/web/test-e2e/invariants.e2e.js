@@ -10675,6 +10675,8 @@ const AUDIT_PAGES = [
   "/stacks/kp-soft/backups",
   "/stacks/kp-soft/history",
   "/stacks/kp-soft/settings",
+  // redesign-final M8: the stack whose last night failed (its incident).
+  "/stacks/oldstack/history",
 ];
 
 /**
@@ -10688,6 +10690,7 @@ const AUDIT_DIALOGS = [
   { path: "/inbox", drive: "inbox-push-envs" },
   { path: "/stacks", drive: "stacks-new" },
   { path: "/activity", drive: "activity-run-again" },
+  { path: "/activity", drive: "activity-open-incident" },
   { path: "/activity?view=planned", drive: "schedule-template" },
   { path: "/backups", text: /^Back up now/ },
   { path: "/backups", drive: "backups-drill-now" },
@@ -10740,7 +10743,7 @@ function auditSweep() {
   auditRun ??= (async () => {
     const { layoutAudit } = await import("./layoutaudit.js");
     /** @type {Record<string, string[]>} */
-    const all = { a: [], b: [], c: [], d: [], e: [] };
+    const all = { a: [], b: [], c: [], d: [], e: [], f: [] };
     const browser = await launch();
     try {
       for (const width of [1894, 390]) {
@@ -10827,6 +10830,10 @@ for (const [cls, what] of /** @type {const} */ ([
   ],
   ["d", "a page has one page-level header"],
   ["e", "a problems counter never reads 0 beside red chips"],
+  [
+    "f",
+    "no internal id (fix-NNN, an incident file name, fixture words) shows in a person's words",
+  ],
 ])) {
   test(`invariants: redesign-final-gen-${cls}: on every page and action dialog at 1894 and 390 px, ${what}`, async () => {
     // redesign-final: no instance is excused (the AUDIT_KNOWN allowance is

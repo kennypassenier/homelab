@@ -82,3 +82,15 @@ test("redesign-final: every module in js/ is reached from main.js; one no page i
   assert.deepEqual(dead, [], "modules nothing imports: delete them");
   assert.equal(existsSync(web("js/pages/doctor.js")), false);
 });
+
+test("redesign-final M8: an operation's error drops the incident bundle's file name the host appends", async () => {
+  const { plainError } = await import("../js/activityview.js");
+  assert.equal(
+    plainError(
+      "restic: repository is already locked :: incident bundle 1790997969-backup-oldstack",
+    ),
+    "restic: repository is already locked",
+  );
+  assert.equal(plainError("health check timed out"), "health check timed out");
+  assert.equal(plainError(null), null);
+});

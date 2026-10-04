@@ -914,7 +914,7 @@ function overviewTab(panel, c) {
   const judged = section({
     id: "stack-checks",
     title: "Checks it is judged on",
-    desc: "The before/after checks, nightly probes and manual questions in checks.yml, one app at a time.",
+    desc: "The before/after checks, nightly probes and manual questions of each app's health checks file, one app at a time.",
     collapsible: true,
     open:
       new URLSearchParams(location.search).get("section") === "checks" ||
@@ -2293,12 +2293,7 @@ function historyTab(panel, c) {
                 "li",
                 null,
                 dot("bad"),
-                h(
-                  "span",
-                  { class: "sh-feed__what" },
-                  h("b", null, x.op),
-                  h("span", { class: "sh-feed__detail mono" }, x.name),
-                ),
+                h("span", { class: "sh-feed__what" }, h("b", null, x.op)),
                 h(
                   "span",
                   { class: "sh-feed__end" },
@@ -2544,7 +2539,7 @@ function settingsHub(panel, c) {
         h(
           "p",
           { class: "sh-muted" },
-          `The stack's files do not read: ${S.editError ?? "no lxc-compose.yml"}.`,
+          `The stack's files do not read: ${S.editError ?? "its stack file is missing"}.`,
         ),
       );
     } else

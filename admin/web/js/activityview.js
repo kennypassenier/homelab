@@ -195,7 +195,7 @@ export function feedRow(e, ctx) {
     tone,
     state,
     actor,
-    error: e.deferred ?? e.error ?? null,
+    error: plainError(e.deferred ?? e.error ?? null),
     search:
       `${what} ${e.label} ${e.subject ?? ""} ${e.error ?? ""} ${actor.text}`.toLowerCase(),
   };
@@ -257,7 +257,17 @@ export function dayStart(t) {
 }
 
 /**
- * "Today · Sat 3 Oct", "Yesterday · Fri 2 Oct", "Thu 1 Oct".
+ * An operation's error as a person reads it (redesign-final M8): the host
+ * appends " :: incident bundle <name>" to a failure; the row has its own
+ * Open the incident, so the file name goes.
+ * @param {string | null} e
+ * @returns {string | null}
+ */
+export const plainError = (e) =>
+  e == null ? null : e.replace(/\s*::\s*incident bundle \S+/g, "").trim() || e;
+
+/**
+ * "Today · 03/10/2026", "Yesterday · 02/10/2026", "01/10/2026".
  * @param {number} day a dayStart
  * @param {number} now
  * @param {{locale?: string, timeZone?: string}} [opts]

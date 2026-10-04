@@ -794,7 +794,8 @@ function mountNow(body, x) {
           key: r.key,
           tone: /** @type {const} */ ("bad"),
           title: `${r.what} failed ${dayWord(r.start, now())} at ${clock(r.start)}`,
-          text: `${sentence(r.error ?? "The host reported a failure")}${bundle ? ` Incident bundle ${bundle} holds the log.` : ""}`,
+          // redesign-final M8: the bundle by its button, never its file name.
+          text: `${sentence(r.error ?? "The host reported a failure")}${bundle ? " Its incident bundle holds the log: Open the incident." : ""}`,
           action: acts.length ? h("div", { class: "ac-acts" }, ...acts) : null,
         };
       }),

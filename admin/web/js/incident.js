@@ -2,8 +2,10 @@
 // bundle in a dialog: the error, the versions and the end of its
 // transcript, secrets masked by the dashboard before it arrives.
 
+import { parseIncident } from "./activity.js";
 import { openDialog } from "./actui.js";
 import { errorBox, fetchJson, h } from "./dom.js";
+import { formatDateTime } from "./format.js";
 
 /**
  * @param {string} name a bundle's name, as the incidents list shows it
@@ -15,7 +17,9 @@ export async function openIncident(name) {
     h("p", { class: "measured" }, "Reading the bundle…"),
   );
   const d = openDialog({
-    title: `Incident ${name}`,
+    // redesign-final M8: the operation and its moment in words, never the
+    // bundle's own file name.
+    title: incidentTitle(name),
     body: [body],
     id: "incident-dialog",
     wide: true,
@@ -30,6 +34,16 @@ export async function openIncident(name) {
   }
   body.replaceChildren(h("pre", { class: "incident-text mono" }, r.body.text));
   return d;
+}
+
+/**
+ * An incident bundle's name ("1790997799-backup-oldstack") in words: "Failed
+ * backup-oldstack · 03/10/2026 03:12".
+ * @param {string} name
+ */
+export function incidentTitle(name) {
+  const p = parseIncident(name);
+  return `Failed ${p.op}${p.at ? ` · ${formatDateTime(p.at)}` : ""}`;
 }
 
 /**

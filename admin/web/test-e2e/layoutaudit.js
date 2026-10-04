@@ -9,17 +9,19 @@
 //      the row below, a list row into the next one);
 //   c  one date format, dd/mm/yyyy HH:MM: never a weekday or month name;
 //   d  one page-level header: at most one heading of the h1's size;
-//   e  a "problems" counter that reads 0 draws no red chip beside it.
+//   e  a "problems" counter that reads 0 draws no red chip beside it;
+//   f  no internal id in a person's words: a working reference ("fix-193"),
+//      an incident bundle's file name, a test fixture's words.
 // Not a test file itself (no `.e2e.js`): invariants.e2e.js imports it.
 
 /**
  * The page-side audit. Self-contained: Playwright serialises it.
  * @param {string | null} rootSel the dialog to audit, or null for the page
- * @returns {{a: string[], b: string[], c: string[], d: string[], e: string[]}}
+ * @returns {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[]}}
  */
 export function layoutAudit(rootSel) {
-  /** @type {{a: string[], b: string[], c: string[], d: string[], e: string[]}} */
-  const out = { a: [], b: [], c: [], d: [], e: [] };
+  /** @type {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[]}} */
+  const out = { a: [], b: [], c: [], d: [], e: [], f: [] };
   const root = /** @type {HTMLElement | null} */ (
     rootSel
       ? document.querySelector(rootSel)
@@ -222,6 +224,17 @@ export function layoutAudit(rootSel) {
     if (m)
       out.c.push(
         `date "${m[0]}" not in dd/mm/yyyy in ${say(/** @type {Element} */ (t.parentElement))}`,
+      );
+  }
+
+  // ---- f: internal ids in user text (redesign-final M8) ----
+  for (const t of texts) {
+    const m = t.data.match(
+      /\b(?:fix|gap|redesign(?:-[a-z0-9]+)?)-\d+\b|\b\d{10}-[a-z][\w-]*|\bfixture\b/i,
+    );
+    if (m)
+      out.f.push(
+        `internal id "${m[0]}" in ${say(/** @type {Element} */ (t.parentElement))}`,
       );
   }
 

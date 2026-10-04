@@ -37,11 +37,14 @@ trap cleanup EXIT
 # firewall block at all — and points HOMELAB_ADMIN_GIT_REMOTE at it. Only
 # `lxc-compose.yml` is copied (never a stack's `.env`), so no secret ever
 # enters this throwaway repo.
-fixture_repo="$workdir/fixture-repo"
+fixture_repo="$workdir/stacks-repo"
 mkdir -p "$fixture_repo/stacks/admin" "$fixture_repo/stacks/kp-soft" "$fixture_repo/stacks/gateway"
 cp "$root/stacks/admin/lxc-compose.yml" "$fixture_repo/stacks/admin/lxc-compose.yml"
 cp "$root/stacks/kp-soft/lxc-compose.yml" "$fixture_repo/stacks/kp-soft/lxc-compose.yml"
 cp "$root/stacks/gateway/lxc-compose.yml" "$fixture_repo/stacks/gateway/lxc-compose.yml"
+# redesign-final M8: the demo shows a rule's note as its "Why"; a working
+# reference in Kenny's own notes ("(fix-193; …)") is no words for a demo.
+sed -i -E 's/ \((fix|gap|redesign)-[0-9]+[^)]*\)//' "$fixture_repo/stacks/"*/lxc-compose.yml
 # fix-203: a throwaway working copy fixture for the fleet view's topology —
 # it shares fix-207's local fixture repository above, so it costs no
 # network and no credentials. Two made-up stacks (never real app
@@ -121,7 +124,7 @@ git init -q -b main "$fixture_repo"
 git -C "$fixture_repo" -c user.email=invariants@example.com -c user.name=invariants \
   add -A
 git -C "$fixture_repo" -c user.email=invariants@example.com -c user.name=invariants \
-  commit -q -m "fixture: three stacks for the invariants smoke"
+  commit -q -m "Three stacks to try the dashboard on"
 # fix-231: the dashboard's own commits (the Fleet view's Update of a stale
 # pin) push back into this fixture; a non-bare repository refuses a push to
 # its checked-out branch unless told to move its work tree along.

@@ -25,10 +25,11 @@ import {
   zonedInstant,
   zoneParts,
 } from "../js/schedules.js";
+import { at } from "./support/clock.js";
 
 const Z = "Europe/Brussels";
 /** Sat 3 Oct 2026, 07:46 in Brussels (summer time, UTC+2): the demo's now. */
-const NOW = Date.UTC(2026, 9, 3, 5, 46) / 1000;
+const NOW = at("2026-10-03T05:46:00Z");
 const utc = (/** @type {number[]} */ ...a) =>
   Date.UTC(a[0], a[1] - 1, a[2], a[3], a[4]) / 1000;
 

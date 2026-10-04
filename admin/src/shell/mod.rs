@@ -4,6 +4,7 @@ pub mod actions;
 pub mod actions_notify;
 pub mod actions_state;
 pub mod backups;
+pub mod clock;
 #[cfg(feature = "demo-host")]
 pub mod demo;
 #[cfg(feature = "demo-host")]

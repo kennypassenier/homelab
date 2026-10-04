@@ -8,6 +8,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { since } from "./support/clock.js";
 
 const WATCHDOG = new URL("../../../scripts/e2e-watchdog.py", import.meta.url)
   .pathname;
@@ -28,13 +29,13 @@ test("redesign-integrate-7: the watchdog kills a stuck run's whole tree and name
   );
   // The stuck run: a shell whose child sleeps, as node and its browser do.
   const run = spawn("sh", ["-c", "sleep 60 & wait"], { stdio: "ignore" });
-  const t0 = Date.now();
+  const t0 = performance.now();
   const r = spawnSync("python3", [WATCHDOG, String(run.pid), log], {
     env,
     encoding: "utf8",
     timeout: 15000,
   });
-  const took = Date.now() - t0;
+  const took = since(t0);
   assert.equal(r.status, 3, `${r.stdout}\n${r.stderr}`);
   assert.match(
     r.stdout,

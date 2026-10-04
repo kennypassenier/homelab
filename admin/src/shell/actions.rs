@@ -56,12 +56,8 @@ type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 pub fn system_clock() -> Clock {
-    Arc::new(|| {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0)
-    })
+    // redesign-final: the dashboard's one clock (injected in a demo run).
+    Arc::new(|| super::clock::now_s() as i64)
 }
 
 /// The live channel, as the actions see it.

@@ -8,6 +8,7 @@
 import { appendFileSync } from "node:fs";
 import { afterEach, beforeEach } from "node:test";
 import { chromium } from "playwright";
+import { clockNow } from "./clock.js";
 
 /** A Playwright step's default deadline. */
 export const STEP_MS = 20000;
@@ -45,6 +46,11 @@ export async function launch(opts) {
     const c = await raw(o);
     c.setDefaultTimeout(STEP_MS);
     c.setDefaultNavigationTimeout(STEP_MS);
+    // redesign-final (B): the page's clock is the run's injected clock
+    // (clock.js), the one the demo host counts from; time runs on.
+    // Only the date: the page's own timers run as they do for a person.
+    if (process.env.INVARIANTS_NO_CLOCK !== "1")
+      await c.clock.setSystemTime(clockNow());
     return c;
   };
   /** @param {import("playwright").BrowserContextOptions} [o] */

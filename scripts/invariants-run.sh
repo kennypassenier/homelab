@@ -156,11 +156,18 @@ cargo build -p homelab-admin --features demo-host --quiet
 # ~/.cargo/config.toml (or CARGO_TARGET_DIR) may move out of the repository.
 target_dir=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
 
+# redesign-final (B): one injected clock for the demo host, every browser
+# context and the cases (admin/web/test-e2e/clock.js): no case depends on
+# the time of day it runs at. INVARIANTS_CLOCK (unix seconds) picks it; the
+# default is a fixed moment, 2026-10-03 12:00 UTC.
+clock="${INVARIANTS_CLOCK:-1791028800}"
+export INVARIANTS_CLOCK="$clock"
 echo "invariants: starting the demo host on $listen"
 HOMELAB_ADMIN_TOKEN="$token" \
 HOMELAB_ADMIN_SECRET_KEY="$secret_key" \
 HOMELAB_ADMIN_PUBLIC_URL="https://localhost:$port" \
 HOMELAB_ADMIN_DEMO_HOST=1 \
+HOMELAB_ADMIN_DEMO_CLOCK="$clock" \
 HOMELAB_ADMIN_VIEWER_NAME="Kenny" \
 HOMELAB_ADMIN_DEMO_STACKS="admin,kp-soft,gateway,films,notes,oldstack" \
 HOMELAB_ADMIN_DATA_DIR="$workdir/admin-data" \

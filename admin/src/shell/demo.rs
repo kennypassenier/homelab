@@ -10,7 +10,8 @@ use axum::routing::get;
 use chassis::shell::live::Live;
 use homelab_proto::{Command, RpcResponse, ServerMsg};
 
-use super::host_link::{Asked, HostAsks, Shared, now_s};
+use super::clock::now_s;
+use super::host_link::{Asked, HostAsks, Shared};
 use crate::core::fleet::fleet_view;
 
 /// The version the demo host says Hello with: the release every gate in

@@ -111,6 +111,17 @@ if git diff --cached --name-only | grep -q '^admin/web/'; then
   "$root/.githooks/drivecatalog.sh" || exit 1
 fi
 
+# redesign-final (B): no test, harness or demo host reads the real clock,
+# and no test names a date that expires (admin/web/scripts/check-test-clock.mjs).
+if command -v node >/dev/null 2>&1; then
+  if ! out=$(node "$root/admin/web/scripts/check-test-clock.mjs" 2>&1); then
+    echo "$out" >&2
+    echo "COMMIT BLOCKED — a test reads the real clock or names a date that expires (above)." >&2
+    echo "Remedy: take the time from the injected clock helper it names." >&2
+    exit 1
+  fi
+fi
+
 # redesign-final-12: a merge runs the whole-screen cases of the pages it
 # changes (only on a merge: MERGE_HEAD; a plain commit's cases are its
 # author's own fail-first and pass runs).

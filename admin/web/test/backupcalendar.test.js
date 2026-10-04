@@ -15,6 +15,9 @@ import {
   shiftMonth,
   withStackResult,
 } from "../js/backupcalendar.js";
+// Fixed dates only: the calendar is driven by the dates it is given.
+import { at } from "./support/clock.js";
+void at;
 
 const UTC = "UTC";
 // 2026-09-20 is a Sunday (UTC midday, so a local-midnight day boundary

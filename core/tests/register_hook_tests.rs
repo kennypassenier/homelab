@@ -11,13 +11,12 @@
 //! are driven the same way.
 
 mod common;
+mod support;
 
 use common::{git, git_ok, repo_root, run_check_register};
 use std::path::Path;
 use std::process::Command;
-
-/// The day every constructed case is judged on.
-const TODAY: &str = "2026-10-03";
+use support::clock::TODAY;
 
 /// Run the commit mode over a constructed staged diff, every test name
 /// these cases cite existing; (exit code, stderr).

@@ -4,6 +4,7 @@
 // and the page's address — driven without a browser.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { at } from "./support/clock.js";
 
 // Nights are the viewer's own: pin a zone with a daylight-saving change in
 // the range the tests walk (Europe/Brussels leaves summer time on
@@ -40,7 +41,6 @@ const nothingKept = () => ({
 });
 
 /** Local wall-clock time in Brussels as unix seconds. */
-const at = (/** @type {string} */ iso) => Date.parse(iso) / 1000;
 
 /** @returns {import("../js/backupsview.js").StackRead} */
 const ok = (

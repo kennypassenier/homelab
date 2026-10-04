@@ -15,6 +15,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { launch } from "./harness.js";
+import { clockNow, clockNowS } from "./clock.js";
 // fix-210: this import was missing — the fix-206 spacing sweep below has
 // referenced DRIVABLE_PATHS since it was written without ever importing
 // it, a ReferenceError this suite's own runs apparently never surfaced
@@ -2864,7 +2865,7 @@ test("invariants: the Doctor shows no verdict and one loading indicator until ev
               checks: [{ name: "disk", health: "ok", detail: "fine" }],
             },
             read_run: 7,
-            read_at: Math.floor(Date.now() / 1000),
+            read_at: clockNowS(),
           },
         });
       });
@@ -3162,7 +3163,7 @@ test("invariants: the Inbox counter shows the exact number, never 9+, and equals
       const page = await context.newPage();
       // Twelve unread notices that need a person: more than the old bell's
       // "9+" cap ever showed.
-      const now = Math.floor(Date.now() / 1000);
+      const now = clockNowS();
       await page.route("**/data/notifications", (r) =>
         r.request().method() === "GET"
           ? r.fulfill({
@@ -4159,7 +4160,7 @@ test("invariants: Deploy all changes shows four count tiles that each show only 
             ephemeral: [],
           },
           pending: 3,
-          measured_at: Math.floor(Date.now() / 1000),
+          measured_at: clockNowS(),
         }),
       }),
     );
@@ -5031,7 +5032,7 @@ test("invariants: Schedules page: the drawer reads as a sentence, warns near the
       .locator('[data-drive^="day-"][aria-pressed="true"]')
       .evaluateAll((bs) => bs.map((b) => b.getAttribute("data-drive") ?? ""));
     const want = new Set(days.map((d) => d.slice(4)));
-    const now = Math.floor(Date.now() / 1000);
+    const now = clockNowS();
     /** @type {string[]} */
     const expected = [];
     for (let t = now - (now % 60) + 60; expected.length < 3; t += 60) {
@@ -5907,7 +5908,7 @@ const closeAll = (page) =>
   );
 
 test("invariants: drive-reach: every button that opens a dialog or runs an action is reachable through Live view (the walk of every route)", async (t) => {
-  const started = Date.now();
+  const started = performance.now();
   const { default: SPEC } = await import("../js/formspec.json", {
     with: { type: "json" },
   });
@@ -6041,7 +6042,7 @@ test("invariants: drive-reach: every button that opens a dialog or runs an actio
     const helpers = [await context.newPage(), await context.newPage()];
     await Promise.all([page, ...helpers].map(walk));
     await Promise.all(helpers.map((p) => p.close()));
-    const step1 = Math.round((Date.now() - started) / 1000);
+    const step1 = Math.round((performance.now() - started) / 1000);
     assert.deepEqual(
       unreachable,
       [],
@@ -6100,7 +6101,7 @@ const SWEEP_REQ = 990001;
  * @param {number[]} reqs
  */
 const sweepJob = (p, state, reqs) => {
-  const now = Math.floor(Date.now() / 1000);
+  const now = clockNowS();
   return liveEvent(p, "action", {
     job: SWEEP_JOB,
     origin: { from: "manual" },
@@ -6156,7 +6157,7 @@ const editRead =
   };
 
 const NOTHING = "sweep-matches-nothing";
-const nowS = () => Math.floor(Date.now() / 1000);
+const nowS = () => clockNowS();
 
 /** One open manual check on kp-soft (`/data/manual-checks`). */
 const openCheck = editRead("**/data/manual-checks", (b) => {
@@ -6401,11 +6402,12 @@ const FIXTURES = {
   },
   "charts-zoomed": {
     ready: (p) =>
-      p.evaluate(() =>
-        import("/js/timechart.js").then((m) => {
-          const t = Date.now() / 1000;
-          m.pageCharts.setZoom({ from: t - 1800, to: t - 600 });
-        }),
+      p.evaluate(
+        (t) =>
+          import("/js/timechart.js").then((m) => {
+            m.pageCharts.setZoom({ from: t - 1800, to: t - 600 });
+          }),
+        clockNow() / 1000,
       ),
   },
   "https-with-a-passkey": { set: passkeys },
@@ -6766,7 +6768,7 @@ test(
   "invariants: drive-reach: Live view finds and presses every declared control, and each press has its effect",
   { timeout: 600_000 },
   async (t) => {
-    const started = Date.now();
+    const started = performance.now();
     const browser = await launch();
     try {
       const context = await browser.newContext({
@@ -6831,9 +6833,9 @@ test(
       // Where a press's time goes (INVARIANTS_PROGRESS prints it).
       /** @type {Record<string, number>} */
       let laps = {};
-      let lapAt = Date.now();
+      let lapAt = performance.now();
       const lap = (/** @type {string} */ k) => {
-        const n = Date.now();
+        const n = performance.now();
         if (k !== "start") laps[k] = (laps[k] ?? 0) + n - lapAt;
         lapAt = n;
       };
@@ -7056,7 +7058,7 @@ test(
                   ),
                 ),
               ]);
-            const t0 = Date.now();
+            const t0 = performance.now();
             leftOpen = "";
             laps = {};
             // A control drawn in a state leaves its page in that state (a failed
@@ -7071,7 +7073,7 @@ test(
             afterState = !!state;
             if (process.env.INVARIANTS_PROGRESS)
               console.error(
-                `sweep ${c.id}${why ? ` ✖ ${why}` : ""} (${Date.now() - t0} ms; ${Object.entries(
+                `sweep ${c.id}${why ? ` ✖ ${why}` : ""} (${performance.now() - t0} ms; ${Object.entries(
                   laps,
                 )
                   .map(([k, v]) => `${k} ${v}`)
@@ -7105,7 +7107,7 @@ test(
         all.map((c) => c.id),
         outcome,
       );
-      const secs = Math.round((Date.now() - started) / 1000);
+      const secs = Math.round((performance.now() - started) / 1000);
       t.diagnostic(`sweep: ${acct.line}, in ${secs} s`);
       for (const k of /** @type {const} */ ([
         "failed",
@@ -7156,7 +7158,7 @@ test(
       // (INVARIANTS_SWEEP_ONLY, scripts/sweep-changed.sh: the controls a
       // commit changed) writes a partial one of those it pressed, which the
       // commit-time guard accepts for exactly those.
-      const at = new Date(started).toISOString();
+      const at = new Date(clockNow()).toISOString();
       const st = only
         ? partialStamp(
             all
@@ -7210,13 +7212,13 @@ async function liveClick(path, id, want = null) {
     const g = await liveGo(page, path, landed);
     assert.ok(g.ok, `ui goto ${path}: ${g.refusal?.why}`);
     const row = want ?? (entry?.row ? await firstRow(page, id) : null);
-    const t0 = Date.now();
+    const t0 = performance.now();
     const r = await reachStep(page, {
       do: "click",
       control: id,
       ...(row == null ? {} : { row }),
     });
-    const ms = Date.now() - t0;
+    const ms = performance.now() - t0;
     await page.waitForTimeout(800);
     const out = {
       r,
@@ -7802,7 +7804,7 @@ const pushLines = (page, lines) =>
 /** @param {number} seq @param {string} source @param {string} msg */
 const hostLine = (seq, source, msg) => ({
   seq,
-  ts: Math.floor(Date.now() / 1000),
+  ts: clockNowS(),
   level: "info",
   source,
   msg,
@@ -9957,9 +9959,9 @@ test("invariants: stack hub review — the More menu keeps the keyboard focus ac
       () =>
         new Promise((done) => {
           let n = 0;
-          const t0 = Date.now();
+          const t0 = performance.now();
           const tick = setInterval(() => {
-            if (Date.now() - t0 > 12000) {
+            if (performance.now() - t0 > 12000) {
               clearInterval(tick);
               done(n);
             }
@@ -10228,7 +10230,7 @@ test("invariants: Deploy all changes deploys the ticked subset and destroys only
             ephemeral: [],
           },
           pending: 3,
-          measured_at: Math.floor(Date.now() / 1000),
+          measured_at: clockNowS(),
         }),
       }),
     );
@@ -10524,10 +10526,10 @@ test("invariants: the Update flow folds the file change, names each file once, a
     ).job;
     // The tab leaves: the job goes on, on the server, and is in Activity.
     await page.goto(`${BASE}/apps`);
-    const end = Date.now() + 120000;
+    const end = performance.now() + 120000;
     /** @type {any} */
     let seen = null;
-    while (Date.now() < end) {
+    while (performance.now() < end) {
       seen = await page.evaluate(async (id) => {
         const r = await fetch("/data/actions/jobs");
         const b = await r.json();
@@ -11291,9 +11293,12 @@ test("invariants: redesign-final-c3: Notification rules is the approved demo's D
           seg: [...document.querySelectorAll("#delivery .nx-seg button")].map(
             (b) => b.firstChild?.textContent?.trim(),
           ),
-          numeric: /\b\d{1,2}\/\d{1,2}\/\d{4}\b/.test(
-            document.querySelector("main")?.textContent ?? "",
-          ),
+          // redesign-final X4: the one date format is dd/mm/yyyy HH:MM
+          // (Kenny's rule, fix-216); a weekday or month name is the drift.
+          numeric:
+            /\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2}\b/.test(
+              document.querySelector("main")?.textContent ?? "",
+            ),
           colsN: cols
             ? getComputedStyle(cols).gridTemplateColumns.split(" ").length
             : 0,
@@ -11310,7 +11315,7 @@ test("invariants: redesign-final-c3: Notification rules is the approved demo's D
       assert.equal(r.tables, 0, "a generic table on the rules page");
       assert.equal(r.selects, 0, "a native select on the rules page");
       assert.deepEqual(r.seg, ["1 h", "4 h", "Until 07:00", "1 day"]);
-      assert.equal(r.numeric, false, "a numeric date");
+      assert.equal(r.numeric, false, "a date not in dd/mm/yyyy");
       assert.equal(r.colsN, width > 500 ? 2 : 1, `@${width}: columns`);
       assert.ok(
         r.sideways <= 1,

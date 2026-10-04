@@ -12,6 +12,7 @@ import {
   closest,
   currentField,
   declaredField,
+  fieldAsClick,
   fields as declaredFields,
   howToReach,
   pick,
@@ -456,9 +457,13 @@ export async function takeStep(step, navigate, show, cancelled) {
       return click(step.button ?? "", null, navigate, show, budget);
     case "type":
     case "edit":
-      return setField(step.field ?? "", step.text ?? "", show);
-    case "pick":
-      return setField(step.field ?? "", step.value ?? "", show);
+    case "pick": {
+      const value = String((step.do === "pick" ? step.value : step.text) ?? "");
+      // An old field that is a control per row now presses that row.
+      const as = topDialog() ? null : fieldAsClick(step.field ?? "", value);
+      if (as) return click(as.control, as.row, navigate, show, budget);
+      return setField(step.field ?? "", value, show);
+    }
     case "check":
       return setField(step.field ?? "", step.on === true, show);
     default:

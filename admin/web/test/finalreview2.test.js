@@ -6,6 +6,9 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import { existsSync, readFileSync } from "node:fs";
 import { appliesTo } from "../js/commands.js";
+import { fieldAsClick, resolve } from "../js/drivable.js";
+import "../js/pages/notifications.js";
+import "../js/pages/restore.js";
 
 const web = (/** @type {string} */ p) => new URL(`../${p}`, import.meta.url);
 
@@ -18,6 +21,25 @@ test("redesign-final M3: the palette offers Park only for a stack that is not pa
   assert.equal(appliesTo("enable", parked), true);
   assert.equal(appliesTo("backup", parked), true);
   assert.equal(appliesTo("restore-native", running), false);
+});
+
+test("redesign-final: a removed select's old field id still answers ui pick / ui type, by pressing the control it became", () => {
+  for (const [old, now, value] of [
+    ["notify-snooze-minutes", "snooze-for", "240"],
+    ["bk-restore-stack", "restore-stack", "kp-soft"],
+    ["bk-restore-app", "restore-app", "jobtracker"],
+    ["bk-restore-snapshot", "restore-night", "abc123"],
+  ]) {
+    assert.deepEqual(
+      fieldAsClick(old, value),
+      { control: now, row: value },
+      `ui pick ${old} ${value}`,
+    );
+    assert.equal(resolve(old)?.control.id, now);
+  }
+  // A control's own id, or a name nothing had, is not a field alias.
+  assert.equal(fieldAsClick("snooze-for", "60"), null);
+  assert.equal(fieldAsClick("no-such-field", "x"), null);
 });
 
 test("redesign-final: the generic layout audit excuses nothing (AUDIT_KNOWN is gone)", () => {

@@ -231,23 +231,64 @@ fn check_one(
         }
         // review M5: a page field is declared like a control; an old id is
         // rewritten and the driver told.
-        UiStep::Type { field, text } => Ok(vec![UiStep::Type {
-            field: field_now(catalog, "type", field, notes)?,
-            text,
-        }]),
+        // redesign-final (coordinator, 2026-10-04): an old field that became
+        // a control per row (a select turned into one press per choice)
+        // presses that row.
+        UiStep::Type { field, text } => match field_as_click(catalog, &field, &text, notes) {
+            Some(click) => Ok(vec![click]),
+            None => Ok(vec![UiStep::Type {
+                field: field_now(catalog, "type", field, notes)?,
+                text,
+            }]),
+        },
         UiStep::Edit { field, text } => Ok(vec![UiStep::Edit {
             field: field_now(catalog, "edit", field, notes)?,
             text,
         }]),
-        UiStep::Pick { field, value } => Ok(vec![UiStep::Pick {
-            field: field_now(catalog, "pick", field, notes)?,
-            value,
-        }]),
+        UiStep::Pick { field, value } => match field_as_click(catalog, &field, &value, notes) {
+            Some(click) => Ok(vec![click]),
+            None => Ok(vec![UiStep::Pick {
+                field: field_now(catalog, "pick", field, notes)?,
+                value,
+            }]),
+        },
         UiStep::Check { field, on } => Ok(vec![UiStep::Check {
             field: field_now(catalog, "check", field, notes)?,
             on,
         }]),
         other => Ok(vec![other]),
+    }
+}
+
+/// An old page field id that a control repeating per row keeps in its
+/// `was` (and no field has): the click on that control's row `value`, the
+/// driver told. `None` for every other name.
+fn field_as_click(
+    catalog: &Catalog,
+    field: &str,
+    value: &str,
+    notes: &mut Vec<String>,
+) -> Option<UiStep> {
+    if !matches!(catalog.field(field), FieldName::Unknown { .. }) {
+        return None;
+    }
+    match catalog.click(field) {
+        Click::Renamed {
+            control,
+            press: None,
+            ..
+        } if control.row.is_some() => {
+            notes.push(format!(
+                "field {field} is the control {} now: {}",
+                control.id,
+                click_line(control, Some(value))
+            ));
+            Some(UiStep::Click {
+                control: control.id.clone(),
+                row: Some(value.to_string()),
+            })
+        }
+        _ => None,
     }
 }
 
@@ -446,7 +487,10 @@ mod tests {
                     {"id": "undo-schedule-change", "page": "schedules", "what": "undo the last switch",
                      "opens": "run", "href": "/activity?view=planned", "was": [],
                      "shows": "while its Undo toast shows",
-                     "reach": [{"do": "click", "control": "toggle-schedule", "row": "*"}]}
+                     "reach": [{"do": "click", "control": "toggle-schedule", "row": "*"}]},
+                    {"id": "snooze-for", "page": "notifications", "what": "snooze every push",
+                     "opens": "run", "row": "60|240", "href": "/system/notifications",
+                     "was": [{"id": "notify-snooze-minutes"}]}
                 ],
                 "fields": [
                     {"id": "shell-target", "page": "shell", "what": "the container a command runs in",
@@ -487,6 +531,42 @@ mod tests {
         let ok = check(click("new-schedule", None), &cat, &Screen::default()).unwrap();
         assert_eq!(ok.steps, [click("new-schedule", None)]);
         assert!(ok.notes.is_empty());
+    }
+
+    // redesign-final (coordinator, 2026-10-04): a removed select that became
+    // one press per choice still answers `ui pick` / `ui type` by its old id.
+    #[test]
+    fn redesign_final_an_old_field_that_became_a_control_per_row_is_pressed() {
+        let cat = cat();
+        for step in [
+            UiStep::Pick {
+                field: "notify-snooze-minutes".into(),
+                value: "240".into(),
+            },
+            UiStep::Type {
+                field: "notify-snooze-minutes".into(),
+                text: "240".into(),
+            },
+        ] {
+            let c = check(step, &cat, &Screen::default()).unwrap();
+            assert_eq!(c.steps, [click("snooze-for", Some("240"))]);
+            assert!(
+                c.notes[0].contains("notify-snooze-minutes is the control snooze-for now"),
+                "{:?}",
+                c.notes
+            );
+        }
+        // A real field keeps its own verb.
+        let c = check(
+            UiStep::Pick {
+                field: "shell-target".into(),
+                value: "104".into(),
+            },
+            &cat,
+            &Screen::default(),
+        )
+        .unwrap();
+        assert!(matches!(&c.steps[0], UiStep::Pick { .. }));
     }
 
     #[test]

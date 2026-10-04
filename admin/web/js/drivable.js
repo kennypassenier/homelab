@@ -331,6 +331,24 @@ export function declaredField(name) {
   return null;
 }
 
+/**
+ * redesign-final (coordinator, 2026-10-04): an old page field that became
+ * a control repeating per row (a select turned into one press per choice:
+ * Backups' Restore picker selects `bk-restore-*`, the rules page's
+ * `notify-snooze-minutes`). `ui pick <old> <value>` and `ui type <old>
+ * <value>` still land: they press that control's row `value`. `null` when
+ * `field` is a declared field or no control's `was`.
+ * @param {string} field
+ * @param {string} value
+ * @returns {{control: string, row: string} | null}
+ */
+export function fieldAsClick(field, value) {
+  if (FIELDS.has(currentField(field)) || CONTROLS.has(field)) return null;
+  const r = resolve(field);
+  if (!r || !r.was || !r.control.row || r.press) return null;
+  return { control: r.control.id, row: value };
+}
+
 /** @param {string} id @returns {Control | null} */
 export const control = (id) => CONTROLS.get(current(id)) ?? null;
 

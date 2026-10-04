@@ -377,6 +377,15 @@ cmd_invariants() {
   if [ -z "${reason:-}" ]; then
     changed=$(git diff --name-only "$base" -- admin/web admin/src scripts/invariants-run.sh 2>/dev/null || true)
   fi
+  # redesign-final (coordinator, 2026-10-04): a commit may carry a partial
+  # Live view sweep stamp (the controls it changed); the gate demands a
+  # FULL one, so a tree without it is never carried: the full run below
+  # writes it.
+  local stamp_why=""
+  stamp_why=$(cd "$root/admin/web" && node --import ./test/support/kp-register.mjs scripts/sweep-gate.mjs 2>&1) || true
+  if [ -z "${reason:-}" ] && [ -n "$stamp_why" ]; then
+    reason="the Live view sweep stamp is not a full one (${stamp_why#sweep-gate: })"
+  fi
 
   # A failed smoke is never carried as a pass: its failing file stays
   # non-empty until a run passes.
@@ -397,6 +406,12 @@ cmd_invariants() {
   echo "gate-carry: invariants smoke run — $why"
   local rc=0
   "$root"/scripts/invariants-run.sh || rc=$?
+  # The full run's sweep rewrote the stamp when it passed; anything short of
+  # a full stamp of this catalog fails the gate, by name.
+  if [ "$rc" = 0 ] && ! (cd "$root/admin/web" && node --import ./test/support/kp-register.mjs scripts/sweep-gate.mjs); then
+    echo "gate-carry: invariants smoke passed but the Live view sweep stamp is not full (above)" >&2
+    rc=1
+  fi
   : > "$workdir/failing.tsv"
   [ "$rc" = 0 ] || echo "invariants-smoke" > "$workdir/failing.tsv"
   record_state invariants "$(current_tree)" "$cur_tc" "$workdir/failing.tsv" full

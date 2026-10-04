@@ -583,11 +583,17 @@ test("redesign-drive-5: the catalog carries the router's stack tabs, its schema 
 // checks above see declarations and marks, not where a page draws a
 // control (a view, a row, a state). The whole-screen sweep does, and a
 // passing sweep stamps every control it pressed
-// (test-e2e/sweep-stamp.json, `sweepKey` of each). A control whose entry no
-// passing sweep has pressed since it changed is refused at commit, merge
+// (test-e2e/sweep-stamp.json, `sweepKey` of each).
+// redesign-final (coordinator, 2026-10-04): at commit only the controls
+// whose entries changed against HEAD (added, moved, given a `was`) must be
+// in the stamp — a sweep of just those (scripts/sweep-changed.sh) will do;
+// an unchanged control was pressed when the commit that last changed it
+// went in. The release gate still demands a full stamp of the whole
+// catalog (.githooks/gate-carry.sh invariants, `gateRefusal`). Merge
 // commits included (.githooks/drivecatalog.sh runs this file).
-test("redesign-integrate-8: every catalog control was pressed by a passing Live view sweep since its entry last changed", async () => {
-  const { sweepKey, catalogHash } = await import("../test-e2e/sweepkey.js");
+test("redesign-integrate-8: every control a commit changed was pressed by a passing Live view sweep since its entry last changed", async () => {
+  const { catalogHash, uncovered } = await import("../test-e2e/sweepkey.js");
+  const { execFileSync } = await import("node:child_process");
   const file = new URL("../test-e2e/sweep-stamp.json", import.meta.url);
   /** @type {any} */
   let stamp = { controls: [] };
@@ -603,15 +609,30 @@ test("redesign-integrate-8: every catalog control was pressed by a passing Live 
       stamp.catalog,
       "sweep-stamp.json's controls do not hash to the catalog it names: it was edited by hand; only a passing sweep writes it",
     );
-  const pressed = new Set(keys);
+  /** @type {any[] | null} HEAD's controls; null before a first commit */
+  let head = null;
+  try {
+    head = JSON.parse(
+      execFileSync("git", ["show", "HEAD:admin/web/js/drivecatalog.json"], {
+        cwd: new URL("..", import.meta.url),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        maxBuffer: 64 * 1024 * 1024,
+      }),
+    ).controls;
+  } catch {
+    head = null;
+  }
+  const now = /** @type {any} */ (built).controls;
+  const left = uncovered(stamp, head, now);
   /** @type {Map<string, string[]>} */
   const byPage = new Map();
-  for (const c of /** @type {any} */ (built).controls)
-    if (!pressed.has(sweepKey(c)))
+  for (const c of now)
+    if (left.includes(c.id))
       byPage.set(c.page, [...(byPage.get(c.page) ?? []), c.id]);
   assert.deepEqual(
     [...byPage].map(([p, ids]) => `${p}: ${ids.join(", ")}`),
     [],
-    "controls no passing sweep has pressed since they changed: run INVARIANTS_ONLY='drive-reach: Live view finds and presses' scripts/invariants-run.sh, which rewrites admin/web/test-e2e/sweep-stamp.json when it passes",
+    "controls this commit changed that no passing sweep has pressed since: run scripts/sweep-changed.sh (a sweep of just those, which writes admin/web/test-e2e/sweep-stamp.json when it passes), then commit again",
   );
 });

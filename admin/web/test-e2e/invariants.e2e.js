@@ -7100,7 +7100,7 @@ test(
       }
       // redesign-integrate-8: one count per run, every control in exactly
       // one category, each named; a run whose counts do not add up fails.
-      const { sweepKey, catalogHash, sweepAccount, catalogDiff } =
+      const { sweepKey, sweepAccount, catalogDiff, fullStamp, partialStamp } =
         await import("./sweepkey.js");
       const acct = sweepAccount(
         all.map((c) => c.id),
@@ -7152,23 +7152,27 @@ test(
       // The stamp names the catalog it was produced for (`catalog`, the hash
       // of every pressed key) and the run that produced it; the commit check
       // refuses a stamp whose keys do not hash to its `catalog`.
-      if (acct.skipped.length) return;
-      const keys = all.map(sweepKey).sort();
+      // redesign-final (coordinator, 2026-10-04): a sweep of every control
+      // writes a full stamp (the release gate's demand); a sweep of some
+      // (INVARIANTS_SWEEP_ONLY, scripts/sweep-changed.sh: the controls a
+      // commit changed) writes a partial one of those it pressed, which the
+      // commit-time guard accepts for exactly those.
+      const at = new Date(started).toISOString();
+      const st = only
+        ? partialStamp(
+            all
+              .filter((c) => acct.passed.includes(c.id))
+              .map((c) => sweepKey(c)),
+            at,
+          )
+        : acct.skipped.length
+          ? null
+          : fullStamp(all.map(sweepKey), at);
+      if (!st) return;
       writeFileSync(
         new URL("./sweep-stamp.json", import.meta.url),
         `${JSON.stringify(
-          {
-            about:
-              "Written by the passing Live view sweep (invariants.e2e.js, drive-reach); read by admin/web/test/drivecatalog.test.js. Never edit by hand: `catalog` is the hash of `controls`.",
-            schema: 2,
-            catalog: catalogHash(keys),
-            run: {
-              at: new Date(started).toISOString(),
-              seconds: secs,
-              pressed: acct.passed.length,
-            },
-            controls: keys,
-          },
+          { ...st, run: { seconds: secs, pressed: acct.passed.length } },
           null,
           2,
         )}\n`,

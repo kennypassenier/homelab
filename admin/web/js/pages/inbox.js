@@ -33,6 +33,7 @@ import {
 import { feedToday, feedUpdates, readChecks } from "../inboxsources.js";
 import { current, setAsks, subscribe } from "../store.js";
 import {
+  countOf,
   doneMark,
   explainNote,
   pageHeader,
@@ -321,6 +322,7 @@ export function mount(root) {
     worthSummary,
     worthList,
   );
+  countOf(worthN, worthList, ":scope > li.nx-inbox__row");
 
   root.replaceChildren(head.el, ...(note ? [note.el] : []), card, clear, worth);
 
@@ -633,6 +635,7 @@ export function mount(root) {
     );
     const show = shownRows(rows, kinds, order);
     shown.textContent = `${show.length} of ${rows.length} shown`;
+    countOf(shown, list, ":scope > li[data-key]");
     // Redraw only when the rows changed (a question's countdown ticks
     // every second; its words update in place).
     const now = Date.now() / 1000;

@@ -52,6 +52,7 @@ import {
 import { logLine } from "../jobs.js";
 import { current, subscribe } from "../store.js";
 import {
+  countOf,
   attentionBand,
   emptyState,
   ensureStyle,
@@ -1372,7 +1373,10 @@ function mountNow(body, x) {
       )?.focus({ preventScroll: true });
     };
     const shown = rows.filter((r) => rowMatches(r, filter));
-    count.textContent = `${shown.length} of ${rows.length} shown`;
+    // redesign-final (exact counts): the rows drawn, of all there are —
+    // "Show more" draws the next page.
+    count.textContent = `${Math.min(shown.length, limit)} of ${rows.length} shown`;
+    countOf(count, feed, ".ac-row");
     chips.counts(showCounts(rows, filter));
     rangeChip.hidden = !filter.range;
     if (filter.range) {

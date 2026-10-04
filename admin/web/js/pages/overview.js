@@ -43,6 +43,7 @@ import {
   stackRows,
 } from "../stacksview.js";
 import {
+  countOf,
   art,
   drawer,
   emptyState,
@@ -1059,6 +1060,8 @@ export function mount(root, ctx) {
       })),
     );
     count.textContent = `${shown.length} of ${rows.length}`;
+    if (ui.view === "table") countOf(count, tbody, ":scope > tr[data-stack]");
+    else countOf(count, cards, ":scope > .sk-card[data-stack]");
     // Keep the focused control across a live repaint: only rows whose
     // content changed are rebuilt (by key), and a control that was
     // rebuilt anyway gets its focus back by its Live view id and row.

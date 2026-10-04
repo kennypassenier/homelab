@@ -39,6 +39,7 @@ import {
 import { stackHref } from "../router.js";
 import { listen } from "../store.js";
 import {
+  countOf,
   attentionBand,
   chip,
   dot,
@@ -1011,19 +1012,61 @@ export function mount(root) {
       const rs = all.filter((r) => ruleMatches(r, S.act, S.q));
       shown += rs.length;
       total += all.length;
+      // redesign-final (exact counts): the side's count is linked to the
+      // rule rows it counts.
+      const body = h(
+        "tbody",
+        null,
+        rs.length
+          ? rs.flatMap((r) => ruleRow(r, m.rules))
+          : [
+              h(
+                "tr",
+                null,
+                h(
+                  "td",
+                  { colspan: "5" },
+                  h(
+                    "div",
+                    { class: "cf-empty" },
+                    h(
+                      "strong",
+                      null,
+                      all.length ? "No rule matches" : "No rules this way",
+                    ),
+                    all.length
+                      ? drivable(
+                          h(
+                            "button",
+                            {
+                              type: "button",
+                              class: "cf-linkbtn",
+                              onclick: clearRuleFilter,
+                            },
+                            "Clear the filters",
+                          ),
+                          CLEAR_RULES,
+                        )
+                      : h(
+                          "span",
+                          null,
+                          "The default policy decides everything in this direction.",
+                        ),
+                  ),
+                ),
+              ),
+            ],
+      );
+      const counted = chip(
+        rs.length === all.length
+          ? String(all.length)
+          : `${rs.length} of ${all.length}`,
+      );
+      countOf(counted, body, ":scope > tr.fw-rule");
       return h(
         "div",
         { class: "fw-side", "data-dir": dir },
-        h(
-          "h3",
-          null,
-          dir === "in" ? "Inbound" : "Outbound",
-          chip(
-            rs.length === all.length
-              ? String(all.length)
-              : `${rs.length} of ${all.length}`,
-          ),
-        ),
+        h("h3", null, dir === "in" ? "Inbound" : "Outbound", counted),
         // redesign-integrate-1: on a phone each rule is a card with its
         // cells labelled (kp-themes' card layout, decided by this wrap's
         // own width), never a table scrolling sideways inside its card.
@@ -1046,51 +1089,7 @@ export function mount(root) {
                 h("th", { scope: "col", class: "fw-hide-sm" }, "Why"),
               ),
             ),
-            h(
-              "tbody",
-              null,
-              rs.length
-                ? rs.flatMap((r) => ruleRow(r, m.rules))
-                : [
-                    h(
-                      "tr",
-                      null,
-                      h(
-                        "td",
-                        { colspan: "5" },
-                        h(
-                          "div",
-                          { class: "cf-empty" },
-                          h(
-                            "strong",
-                            null,
-                            all.length
-                              ? "No rule matches"
-                              : "No rules this way",
-                          ),
-                          all.length
-                            ? drivable(
-                                h(
-                                  "button",
-                                  {
-                                    type: "button",
-                                    class: "cf-linkbtn",
-                                    onclick: clearRuleFilter,
-                                  },
-                                  "Clear the filters",
-                                ),
-                                CLEAR_RULES,
-                              )
-                            : h(
-                                "span",
-                                null,
-                                "The default policy decides everything in this direction.",
-                              ),
-                        ),
-                      ),
-                    ),
-                  ],
-            ),
+            body,
           ),
         ),
       );

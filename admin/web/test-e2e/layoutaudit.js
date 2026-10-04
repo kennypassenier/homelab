@@ -13,17 +13,19 @@
 //   f  no internal id in a person's words: a working reference ("fix-193"),
 //      an incident bundle's file name, a test fixture's words;
 //   g  the page's freshness ("updated 4 s ago") in one slot: the title row,
-//      after the title, never with the actions or in a meta row.
+//      after the title, never with the actions or in a meta row;
+//   h  exact counts: a count linked to its rows (`data-count-of`, ui.js
+//      countOf) says how many rows it describes ("N" or "N of M").
 // Not a test file itself (no `.e2e.js`): invariants.e2e.js imports it.
 
 /**
  * The page-side audit. Self-contained: Playwright serialises it.
  * @param {string | null} rootSel the dialog to audit, or null for the page
- * @returns {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[], g: string[]}}
+ * @returns {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[], g: string[], h: string[]}}
  */
 export function layoutAudit(rootSel) {
-  /** @type {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[], g: string[]}} */
-  const out = { a: [], b: [], c: [], d: [], e: [], f: [], g: [] };
+  /** @type {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[], g: string[], h: string[]}} */
+  const out = { a: [], b: [], c: [], d: [], e: [], f: [], g: [], h: [] };
   const root = /** @type {HTMLElement | null} */ (
     rootSel
       ? document.querySelector(rootSel)
@@ -227,6 +229,24 @@ export function layoutAudit(rootSel) {
       out.c.push(
         `date "${m[0]}" not in dd/mm/yyyy in ${say(/** @type {Element} */ (t.parentElement))}`,
       );
+  }
+
+  // ---- h: a count is the rows it describes (Kenny: exact counts) ----
+  for (const c of root.querySelectorAll("[data-count-of]")) {
+    const el = /** @type {HTMLElement} */ (c);
+    if (!shown(el)) continue;
+    const list = document.getElementById(el.dataset.countOf ?? "");
+    const n = /(\d+)/.exec(el.textContent ?? "");
+    if (!list || !n) continue;
+    const rows = [
+      ...list.querySelectorAll(el.dataset.countRows || ":scope > *"),
+    ].filter(
+      (r) =>
+        !(/** @type {HTMLElement} */ (r).hidden) &&
+        getComputedStyle(r).display !== "none",
+    ).length;
+    if (Number(n[1]) !== rows)
+      out.h.push(`count ${say(el)} says ${n[1]}, its list holds ${rows} rows`);
   }
 
   // ---- f: internal ids in user text (redesign-final M8) ----

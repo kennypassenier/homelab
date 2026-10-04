@@ -388,3 +388,17 @@ summarised here for the corrections record.
 7. **Hoe en wanneer meten we dat het werkt.** Measured 2026-10-04: with Stacks' row fix reverted the check failed naming two rebuilt rows (242 s); with the fix it passed (242 s). Next: the 3.71.0 gate's full run.
 8. **Fallback.** A page whose rows truly change identity (a different item) may rebuild that row; the check ticks rows whose identity stays.
 9. **Wanneer herzien we de maatregel.** At the 3.71.0 retrospective, with the gate's measured duration of the check.
+
+## Correction · redesign-final-31 — a count that is not the rows it describes
+
+**Draft — awaiting Kenny.**
+
+1. **Wat ging er mis.** The Inbox's "Worth a look · 1" stood over two rows (final review M5), and Activity's History said "168 of 168 shown" while it drew 50 (it pages by 50).
+2. **Welke poort liet het door.** Each page wrote its count from its own variable next to the rows it drew; nothing tied the number to the rows on screen, so a row added beside the counted ones (the doctor report) or a page limit slipped through.
+3. **Waar dezelfde fout nog zit.** Any count drawn apart from its list; the check covers every count that names its list.
+4. **Hoe voorkomen we herhaling.** A count names its list declaratively (`ui.js countOf`: `data-count-of`, `data-count-rows`), and the layout audit's class h holds every such count to the rows it describes, on every page and dialog at both widths.
+5. **Kost.** Part of the layout audit's one sweep (about 3.5 min at the gate).
+6. **Handhaving.** Code: `countOf` (ui.js), `layoutaudit.js` class h, `redesign-final-gen-h`.
+7. **Hoe en wanneer meten we dat het werkt.** Measured 2026-10-04: with M5's fix reverted the check failed naming the Inbox's "· 1" over two rows; with it, 0. Next: the 3.71.0 gate's full run.
+8. **Fallback.** A count that deliberately counts something else (a filter chip's matches) carries no `data-count-of` and says what it counts in its label.
+9. **Wanneer herzien we de maatregel.** At the 3.71.0 retrospective.

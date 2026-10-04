@@ -10749,7 +10749,7 @@ function auditSweep() {
   auditRun ??= (async () => {
     const { layoutAudit } = await import("./layoutaudit.js");
     /** @type {Record<string, string[]>} */
-    const all = { a: [], b: [], c: [], d: [], e: [], f: [], g: [] };
+    const all = { a: [], b: [], c: [], d: [], e: [], f: [], g: [], h: [] };
     const browser = await launch();
     try {
       for (const width of [1894, 390]) {
@@ -10844,6 +10844,7 @@ for (const [cls, what] of /** @type {const} */ ([
     "g",
     "the page's freshness sits in one slot, the title's row, after the title",
   ],
+  ["h", "every count linked to its rows says how many rows it describes"],
 ])) {
   test(`invariants: redesign-final-gen-${cls}: on every page and action dialog at 1894 and 390 px, ${what}`, async () => {
     // redesign-final: no instance is excused (the AUDIT_KNOWN allowance is

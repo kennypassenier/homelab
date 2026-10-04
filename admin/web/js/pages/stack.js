@@ -95,6 +95,7 @@ import { attachDataTables } from "/static/kp/js/datatable.js";
 import { watchTabOverflow } from "/static/kp/js/overlays.js";
 import { mount as mountSecrets } from "./secrets.js";
 import {
+  countOf,
   attentionBand,
   chip,
   dot,
@@ -2233,6 +2234,7 @@ function historyTab(panel, c) {
     if (!rows) return;
     const shown = filterFeed(rows, who, q);
     count.textContent = `${shown.length === rows.length ? rows.length : `${shown.length} of ${rows.length}`} ${rows.length === 1 ? "operation" : "operations"}, ${HISTORY_DAYS} days`;
+    countOf(count, list, ":scope > li[data-who]");
     list.replaceChildren(
       ...(shown.length
         ? shown.map((r) => feedRow(r))

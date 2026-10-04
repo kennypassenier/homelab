@@ -173,6 +173,22 @@ export function liveStatus(verb = "updated") {
  *   meta rows (one column on a phone, actions last).
  */
 
+let countIds = 0;
+/**
+ * redesign-final (exact counts, Kenny's rule): link a count to the rows it
+ * describes, declaratively, so a whole-screen check can hold the number to
+ * the rows (`data-count-of` names the list, `data-count-rows` the rows
+ * inside it). The count's first number is the rows drawn: "N" or "N of M".
+ * @param {HTMLElement} count
+ * @param {HTMLElement} list
+ * @param {string} [rows] the rows' selector inside `list`
+ */
+export function countOf(count, list, rows = ":scope > *") {
+  if (!list.id) list.id = `nx-counted-${++countIds}`;
+  count.dataset.countOf = list.id;
+  count.dataset.countRows = rows;
+}
+
 /**
  * The page header (DESIGN_LANGUAGE §1.1): breadcrumbs, then one title row
  * (title left; live status and the actions grouped against the right

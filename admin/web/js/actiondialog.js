@@ -227,6 +227,9 @@ function introNodes(intro) {
   let items = [];
   const flushItems = () => {
     if (!items.length) return;
+    // redesign-final M2: an intro's list is what will happen, in order (a
+    // list, not an <ol>: the kp wizard reads an <ol> in its dialog as its
+    // own steps).
     nodes.push(
       h(
         "ul",
@@ -711,11 +714,13 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
     setReady(gate);
     previewBox.replaceChildren(
       ...(gate.ready ? [] : [blockedNote(gate.reason)]),
+      // redesign-final M2: the command line is a quiet footnote for who
+      // wants it, never the dialog's main content.
       ...(p.cli
         ? [
             h(
               "div",
-              { class: "act-cli" },
+              { class: "act-cli act-cli--quiet" },
               labeledCopyLine("The same from a workstation:", p.cli),
             ),
           ]

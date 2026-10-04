@@ -4807,6 +4807,21 @@ function brussels(/** @type {number} */ unix) {
   );
 }
 
+/** A unix moment's Brussels day as dd/mm/yyyy. @param {number} unix */
+function brusselsDay(unix) {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Brussels",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    })
+      .formatToParts(new Date(unix * 1000))
+      .map((x) => [x.type, x.value]),
+  );
+  return `${p.day}/${p.month}/${p.year}`;
+}
+
 test("invariants: Schedules page: the next 7 days show every run by time, the host's nightly round dashed, a now-line, and a pill finds its row", async () => {
   const browser = await launch();
   try {
@@ -5042,7 +5057,8 @@ test("invariants: Schedules page: the drawer reads as a sentence, warns near the
         p.minute === "30" &&
         want.has(p.weekday.toLowerCase())
       )
-        expected.push(`${p.weekday} ${p.day} ${p.month}, 02:30`);
+        // redesign-final X4: the one date format, dd/mm/yyyy HH:MM.
+        expected.push(`${brusselsDay(t)} 02:30`);
     }
     for (const [i, e] of expected.entries())
       assert.ok(
@@ -12006,6 +12022,45 @@ test("invariants: redesign-final-m5: Worth a look is a fold with a chevron, and 
       .count();
     assert.ok(rows > 0, "the open fold shows no rows");
     assert.equal(n, rows, "the count is not the rows the fold holds");
+  } finally {
+    await browser.close();
+  }
+});
+
+// M2: the Back up confirm dialog was unfinished: an empty bordered box, the
+// command line as its main content, "restic snapshot" jargon, no word on
+// what will happen.
+test("invariants: redesign-final-m2: Back up says in plain words what will happen, the command line is a footnote, no empty box", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks/kp-soft/overview`);
+    await page
+      .locator('[data-drive="stack-head"][data-drive-row="kp-soft/backup"]')
+      .click();
+    const d = page.locator("dialog#action-dialog[open]");
+    await d.waitFor({ timeout: 5000 });
+    await page.waitForTimeout(1200);
+    const f = await d.evaluate((el) => {
+      const text = el.textContent ?? "";
+      const steps = el.querySelectorAll(".act-intro-steps > li").length;
+      const cli = el.querySelector(".act-cli");
+      const wiz = el.querySelector(".act-wizard");
+      return {
+        jargon: /restic|snapshot/i.test(text),
+        steps,
+        what: /what will happen/i.test(text),
+        cliQuiet: !!cli?.classList.contains("act-cli--quiet"),
+        box: wiz ? parseFloat(getComputedStyle(wiz).borderTopWidth) : 0,
+      };
+    });
+    assert.equal(f.jargon, false, "the dialog speaks of restic snapshots");
+    assert.ok(f.what && f.steps >= 3, "no 'what will happen' steps");
+    assert.ok(f.cliQuiet, "the command line is the main content");
+    assert.equal(f.box, 0, "an empty bordered box around a one-step form");
   } finally {
     await browser.close();
   }

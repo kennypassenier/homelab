@@ -742,6 +742,17 @@ p:has(> .measured:only-child):first-child {
 .act-run-error {
   margin-block: 8px;
 }
+/* redesign-final M2: an action dialog reads its words and its steps first;
+   the command line is a small footnote, and a one-step form draws no
+   bordered box around it. */
+.act-cli--quiet {
+  font-size: var(--kp-text-sm);
+  color: var(--muted-foreground);
+}
+.act-dialog .act-wizard:not(:has([data-kp-step] ~ [data-kp-step])) {
+  border: none;
+  padding: 0;
+}
 .field-danger .kp-field__label {
   color: var(--destructive);
 }

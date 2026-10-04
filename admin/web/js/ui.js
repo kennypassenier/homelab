@@ -206,18 +206,15 @@ export function pageHeader(spec) {
   );
   const desc = h("p", { class: "section-head__desc nx-head-desc" }, spec.desc);
   const crumbs = spec.crumbs?.length ? [breadcrumbs(spec.crumbs)] : [];
+  // redesign-final X1: the page's freshness ("updated 4 s ago") has one
+  // slot on every page, as the demos draw it: right after the title.
   if (spec.meta) {
-    const meta = h(
-      "div",
-      { class: "nx-head-meta" },
-      ...spec.meta,
-      ...(live ? [live.el] : []),
-    );
+    const meta = h("div", { class: "nx-head-meta" }, ...spec.meta);
     const e = h(
       "header",
       { class: "nx-head nx-head--meta" },
       ...crumbs,
-      title,
+      h("div", { class: "title-row" }, title, live?.el ?? null),
       desc,
       meta,
       actions,
@@ -238,13 +235,15 @@ export function pageHeader(spec) {
   const titleMeta = spec.titleMeta
     ? h("div", { class: "nx-head-titlemeta" }, ...spec.titleMeta)
     : null;
-  const row = h("div", { class: "title-row" }, title, titleMeta);
-  if (live || actions.childElementCount > 0) {
-    const right = h("div", { class: "nx-head-right" });
-    if (live) right.append(live.el);
-    right.append(actions);
-    row.append(right);
-  }
+  const row = h(
+    "div",
+    { class: "title-row" },
+    title,
+    live?.el ?? null,
+    titleMeta,
+  );
+  if (actions.childElementCount > 0)
+    row.append(h("div", { class: "nx-head-right" }, actions));
   const e = h("header", { class: "nx-head" }, ...crumbs, row, desc);
   return { el: e, title, desc, actions, meta: titleMeta, live };
 }

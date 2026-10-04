@@ -11,17 +11,19 @@
 //   d  one page-level header: at most one heading of the h1's size;
 //   e  a "problems" counter that reads 0 draws no red chip beside it;
 //   f  no internal id in a person's words: a working reference ("fix-193"),
-//      an incident bundle's file name, a test fixture's words.
+//      an incident bundle's file name, a test fixture's words;
+//   g  the page's freshness ("updated 4 s ago") in one slot: the title row,
+//      after the title, never with the actions or in a meta row.
 // Not a test file itself (no `.e2e.js`): invariants.e2e.js imports it.
 
 /**
  * The page-side audit. Self-contained: Playwright serialises it.
  * @param {string | null} rootSel the dialog to audit, or null for the page
- * @returns {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[]}}
+ * @returns {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[], g: string[]}}
  */
 export function layoutAudit(rootSel) {
-  /** @type {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[]}} */
-  const out = { a: [], b: [], c: [], d: [], e: [], f: [] };
+  /** @type {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[], g: string[]}} */
+  const out = { a: [], b: [], c: [], d: [], e: [], f: [], g: [] };
   const root = /** @type {HTMLElement | null} */ (
     rootSel
       ? document.querySelector(rootSel)
@@ -239,6 +241,17 @@ export function layoutAudit(rootSel) {
   }
 
   if (rootSel) return out;
+
+  // ---- g: the page's freshness next to its title (redesign-final X1) ----
+  for (const live of root.querySelectorAll(".nx-head .nx-live")) {
+    if (!shown(live)) continue;
+    const row = live.closest(".title-row");
+    if (
+      live.closest(".nx-head-meta, .nx-head-right, .nx-head-actions") ||
+      !row?.querySelector(":scope > :is(h1, h2)")
+    )
+      out.g.push(`freshness ${say(live)} is not in the title's row`);
+  }
 
   // ---- d: one page-level header ----
   const h1s = [...document.querySelectorAll("h1")].filter(

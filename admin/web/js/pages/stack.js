@@ -2655,12 +2655,9 @@ function hubHeader(spec) {
     spec.primary,
     spec.more,
   );
-  const right = h(
-    "div",
-    { class: "nx-head-right sh-head__right" },
-    live.el,
-    actions,
-  );
+  // redesign-final X1: the freshness right after the title and its state,
+  // the one slot every page uses; the actions alone on the right.
+  const right = h("div", { class: "nx-head-right sh-head__right" }, actions);
   const mark = stackMark(spec.name, 40);
   mark.classList.add("sh-head__mark");
   const row = h(
@@ -2669,6 +2666,7 @@ function hubHeader(spec) {
     mark,
     title,
     state,
+    live.el,
     right,
   );
   const desc = /** @type {HTMLParagraphElement} */ (

@@ -33,7 +33,7 @@
 /* ---------- header: mark · name · state ……… live · actions ---------- */
 .sh-head .title-row.sh-head__row {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-columns: auto auto auto minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 12px;
   row-gap: 12px;
@@ -75,16 +75,17 @@
   .sh-head .title-row.sh-head__row {
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
-  .sh-head__right {
+  .sh-head .sh-head__row > .nx-live {
     grid-column: 1 / -1;
     grid-row: 2;
+  }
+  .sh-head__right {
+    grid-column: 1 / -1;
+    grid-row: 3;
     justify-self: stretch;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
-  }
-  .sh-head__right > .nx-live {
-    order: 2;
   }
   .sh-head .sh-head__actions.actions-row {
     order: 1;

@@ -1543,9 +1543,15 @@ test("invariants: every page's title row puts the title left and its controls ag
           )
           .map((r) => {
             const box = r.getBoundingClientRect();
+            // The page's freshness sits after the title (redesign-final
+            // X1); it is no control, so a row of title and freshness only
+            // has nothing to push right.
             const kids = [...r.children].filter(
-              (c) => /** @type {HTMLElement} */ (c).offsetParent,
+              (c) =>
+                /** @type {HTMLElement} */ (c).offsetParent &&
+                !c.matches(":is(h1, h2), .nx-live"),
             );
+            if (!kids.length) return null;
             const last = kids[kids.length - 1].getBoundingClientRect();
             return {
               rowRight: Math.round(box.right),
@@ -1554,6 +1560,7 @@ test("invariants: every page's title row puts the title left and its controls ag
           }),
       );
       for (const r of rows) {
+        if (!r) continue;
         assert.ok(
           r.rowRight - r.lastRight <= 2,
           `/${path}: the title row's controls stop ${r.rowRight - r.lastRight}px short of its right edge`,
@@ -5278,15 +5285,14 @@ test("invariants: redesign-kit: a narrow page header reads the title with its li
         );
         if (order.meta)
           assert.ok(
-            order.desc < order.metaRow &&
-              order.metaRow < order.actions &&
-              (order.live < 0 ||
-                (order.metaRow <= order.live && order.live < order.actions)),
-            `${where}: the meta row with the live status is not between the description and the actions: ${JSON.stringify(order)}`,
+            order.desc < order.metaRow && order.metaRow < order.actions,
+            `${where}: the meta row is not between the description and the actions: ${JSON.stringify(order)}`,
           );
-        else
+        // redesign-final X1: the live status has one slot on every page,
+        // beside the title (a meta header's too).
+        if (order.live >= 0)
           assert.ok(
-            order.title < order.live && order.live < order.titleBottom,
+            order.title <= order.live && order.live < order.titleBottom,
             `${where}: the live status is not beside the title: ${JSON.stringify(order)}`,
           );
         await context.close();
@@ -10743,7 +10749,7 @@ function auditSweep() {
   auditRun ??= (async () => {
     const { layoutAudit } = await import("./layoutaudit.js");
     /** @type {Record<string, string[]>} */
-    const all = { a: [], b: [], c: [], d: [], e: [], f: [] };
+    const all = { a: [], b: [], c: [], d: [], e: [], f: [], g: [] };
     const browser = await launch();
     try {
       for (const width of [1894, 390]) {
@@ -10833,6 +10839,10 @@ for (const [cls, what] of /** @type {const} */ ([
   [
     "f",
     "no internal id (fix-NNN, an incident file name, fixture words) shows in a person's words",
+  ],
+  [
+    "g",
+    "the page's freshness sits in one slot, the title's row, after the title",
   ],
 ])) {
   test(`invariants: redesign-final-gen-${cls}: on every page and action dialog at 1894 and 390 px, ${what}`, async () => {

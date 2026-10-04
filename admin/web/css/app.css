@@ -68,6 +68,14 @@ main.shell > * + * {
 .title-row > :first-child + * {
   margin-inline-start: auto;
 }
+/* redesign-final X1: the page's freshness sits right after its title (one
+   slot on every page); what follows it goes to the right edge. */
+.title-row > :is(h1, h2) + .nx-live {
+  margin-inline-start: 0;
+}
+.title-row > .nx-live + * {
+  margin-inline-start: auto;
+}
 /* fix-245: a title row's own group of buttons (`.actions-row`, a column
    grid wherever it lists a stack's actions) is one row here, against the
    right edge; it stacked Overview's Import and New stack, and Presets'
@@ -3386,7 +3394,7 @@ dialog.nx-drawer[open] {
     grid-column: 1;
     order: 1;
   }
-  .nx-head:not(.nx-head--meta, .nx-head--split) .nx-head-right > .nx-live {
+  .nx-head:not(.nx-head--meta, .nx-head--split) > .title-row > .nx-live {
     grid-column: 2;
     justify-self: start;
     order: 2;
@@ -4649,6 +4657,13 @@ details.nx-card--fold[open] > summary::before {
 }
 .nx-head--meta > .nx-crumbs {
   grid-area: c;
+}
+.nx-head--meta > .title-row {
+  grid-area: t;
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--kp-space-md);
 }
 .nx-head--meta > :is(h1, h2) {
   grid-area: t;

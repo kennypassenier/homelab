@@ -350,11 +350,9 @@ export function mount(root, ctx) {
     actions: [deployAll],
     primary: newStack,
   });
-  // Both demos put "updated … ago" beside the title, not with the buttons.
-  if (head.live) {
-    head.title.after(head.live.el);
-    head.el.classList.add("sk-head");
-  }
+  // Both demos put "updated … ago" beside the title (pageHeader's one
+  // slot since redesign-final X1).
+  head.el.classList.add("sk-head");
 
   // ── the strip (redesign-final M1: the demo's five tiles; no attention
   // band beside it, the Need you tile says what the Inbox holds) ────────

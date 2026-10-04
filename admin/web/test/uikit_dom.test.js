@@ -618,7 +618,7 @@ test("redesign-kit-16: a section's foot is hidden while it has nothing to say", 
 
 // fail-first: the meta header's order was already right before the review;
 // finding 13 asked for this test to pin it, not for a fix.
-test("redesign-kit-16: a meta header reads title, description, the meta row with the live status, then the actions", () => {
+test("redesign-kit-16, redesign-final X1: a meta header reads the title with its live status, the description, the meta row, then the actions", () => {
   const chip = doc.createElement("span");
   const act = doc.createElement("button");
   const hd = ui.pageHeader({
@@ -632,17 +632,15 @@ test("redesign-kit-16: a meta header reads title, description, the meta row with
     (/** @type {any} */ c) => c.className || c.localName,
   );
   assert.deepEqual(kids, [
-    "h1",
+    "title-row",
     "section-head__desc nx-head-desc",
     "nx-head-meta",
     "actions-row nx-head-actions",
   ]);
   assert.equal(hd.el.className, "nx-head nx-head--meta");
-  assert.ok(
-    hd.meta?.contains(/** @type {any} */ (hd.live).el),
-    "the live status sits in the meta row",
-  );
-  assert.equal(hd.title.nextElementSibling, hd.desc);
+  // X1: the freshness has one slot on every page, right after the title.
+  assert.equal(hd.title.nextElementSibling, /** @type {any} */ (hd.live).el);
+  assert.ok(!hd.meta?.contains(/** @type {any} */ (hd.live).el));
 });
 
 test("redesign-kit-16: a stack the fleet does not list is neutral, never the first chart colour", () => {

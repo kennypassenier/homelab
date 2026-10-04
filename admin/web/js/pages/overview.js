@@ -41,11 +41,9 @@ import {
   rowMatches,
   sortRows,
   stackRows,
-  verdict,
 } from "../stacksview.js";
 import {
   art,
-  attentionBand,
   drawer,
   emptyState,
   ensureStyle,
@@ -200,14 +198,16 @@ const KPI = declare({
   id: "stacks-kpi",
   page: "overview",
   opens: "view",
-  row: "online|cpu|ram|disk|load|inbox",
-  what: "open the detail behind one tile of the host strip",
+  row: "online|newer|cpu|disk",
+  what: "open the detail behind one tile of the strip (stacks running, newer versions, host CPU, root disk)",
 });
+// redesign-final M1: the attention band that duplicated the Inbox tile is
+// gone; its Inbox button's id is the strip's Need you tile now.
 const INBOX = declare({
   id: "stacks-open-inbox",
   page: "overview",
   opens: "view",
-  what: "the attention band's Inbox button: open the Inbox",
+  what: "the strip's Need you tile: open the Inbox",
 });
 const SHOW_ALL = declare({
   id: "stacks-show-all",
@@ -281,7 +281,8 @@ export function mount(root, ctx) {
       ? /** @type {string} */ (q0.get("sort"))
       : "vmid",
   };
-  if (ui.view !== "table") ui.view = "cards";
+  // redesign-final M1: the demo opens on the Table.
+  if (ui.view !== "cards") ui.view = "table";
   /** @type {Set<string>} */
   const ticked = new Set();
   /** @type {string | null} the j/k cursor, a stack's name */
@@ -303,7 +304,7 @@ export function mount(root, ctx) {
     const search = setParams(location.search, {
       q: ui.q || null,
       only: ui.only.size ? [...ui.only].join(",") : null,
-      view: ui.view === "cards" ? null : ui.view,
+      view: ui.view === "table" ? null : ui.view,
       sort: ui.sort === "vmid" ? null : ui.sort,
     });
     if (search !== location.search)
@@ -355,22 +356,22 @@ export function mount(root, ctx) {
     head.el.classList.add("sk-head");
   }
 
-  // ── attention band and host strip ───────────────────────────────────
-  const band = attentionBand([]);
-  band.el.classList.add("sk-band");
+  // ── the strip (redesign-final M1: the demo's five tiles; no attention
+  // band beside it, the Need you tile says what the Inbox holds) ────────
   const strip = kpiStrip(
     [
-      { key: "online", label: "Stacks online", href: "/stacks" },
-      { key: "cpu", label: "CPU", href: "/host" },
-      { key: "ram", label: "RAM", href: "/host" },
+      { key: "online", label: "Stacks running", href: "/stacks" },
+      { key: "inbox", label: "Need you", href: "/inbox" },
+      { key: "newer", label: "Newer versions", href: "/update?all=1" },
+      { key: "cpu", label: "Host CPU", href: "/host" },
       { key: "disk", label: "Root disk", href: "/host" },
-      { key: "load", label: "Load (1 min)", href: "/charts" },
-      { key: "inbox", label: "Inbox", href: "/inbox" },
     ],
     { loading: !current().fleet, label: "The host at a glance" },
   );
   strip.el.classList.add("sk-kpis");
-  for (const [key, k] of strip.tiles) drivable(k.el, KPI, key);
+  for (const [key, k] of strip.tiles)
+    if (key === "inbox") drivable(k.el, INBOX);
+    else drivable(k.el, KPI, key);
 
   // ── the stacks card ─────────────────────────────────────────────────
   const count = h("span", { class: "sk-count", "aria-live": "polite" });
@@ -397,14 +398,14 @@ export function mount(root, ctx) {
     value: ui.view,
     items: [
       {
+        value: "table",
+        label: "Table",
+        hint: "Every stack as a table row; click a header to sort, another to sort by it next",
+      },
+      {
         value: "cards",
         label: "Cards",
         hint: "Every stack as a card with its CPU line",
-      },
-      {
-        value: "table",
-        label: "Table",
-        hint: "Every stack as a table row; click a header to sort, Shift-click to add a second sort",
       },
     ],
     onChange: (v) => {
@@ -619,16 +620,12 @@ export function mount(root, ctx) {
   );
   const empty = h("div", { class: "sk-empty-slot", hidden: "" });
   const card = section({
-    title: "Stacks",
-    desc: "Every stack the host manages, with its live state. Click one to open it, or tick several for a batch action.",
+    title: "All stacks",
+    desc: "Click a row to open it; click the box at the start of a row to tick it (click again to untick).",
     id: "stack-list",
   });
-  const foot = h(
-    "div",
-    { class: "sk-foot" },
-    h("span", null, "Read from the host daemon, live"),
-    h("span", null, "CPU lines: the last 24 hours, one point per 5 min"),
-  );
+  // redesign-final M1: the key hints sit in the card's footer, as the demo
+  // draws them; the search's filter words are its own hint.
   const keys = keyRow([
     [["/"], "find"],
     [["j", "k"], "move"],
@@ -636,17 +633,11 @@ export function mount(root, ctx) {
     [["Enter"], "open"],
     [["Esc"], "untick all"],
   ]);
-  keys.append(
-    h(
-      "span",
-      null,
-      "filter words: ",
-      h("code", { class: "sk-mono" }, "state:running"),
-      " ",
-      h("code", { class: "sk-mono" }, "flag:noenv"),
-      " ",
-      h("code", { class: "sk-mono" }, "flag:newer"),
-    ),
+  const foot = h(
+    "div",
+    { class: "sk-foot" },
+    h("span", null, "Read from the host, live · CPU lines: the last 24 hours"),
+    keys,
   );
   // One line per source that could not be read (the comparison, the
   // backups, the newer versions, the CPU lines): what, why, what to do.
@@ -664,9 +655,9 @@ export function mount(root, ctx) {
     errs.hidden = errBySource.size === 0;
   };
   errs.hidden = true;
-  card.body.append(keys, tb.el, errs, batch, listBox, empty, foot);
+  card.body.append(tb.el, errs, batch, listBox, empty, foot);
 
-  root.replaceChildren(head.el, band.el, strip.el, card.el);
+  root.replaceChildren(head.el, strip.el, card.el);
 
   const detach = attachDataTables(root);
   const table = dataTable(tableWrap);
@@ -959,11 +950,39 @@ export function mount(root, ctx) {
     for (const w of want) {
       const c = cur.find((x) => x.dataset.stack === w.dataset.stack);
       if (c && c !== w) {
-        c.replaceWith(w);
+        // A row whose content moved (a live CPU figure) keeps its node, so
+        // its hover stays; its contents and the focus inside are renewed.
+        morph(c, w);
+        built.set(`${kind}:${c.dataset.stack}`, {
+          sig: /** @type {any} */ (built.get(`${kind}:${c.dataset.stack}`)).sig,
+          el: c,
+        });
         changed = true;
       }
     }
     return changed;
+  };
+  /**
+   * `c` takes `w`'s attributes and children; the element that had the
+   * focus inside `c` gets it back in the new children (by its Live view
+   * id and row).
+   * @param {HTMLElement} c the node on screen
+   * @param {HTMLElement} w the freshly built one
+   */
+  const morph = (c, w) => {
+    const f = document.activeElement;
+    const was =
+      f instanceof HTMLElement && c.contains(f) && f.dataset.drive
+        ? `[data-drive="${CSS.escape(f.dataset.drive)}"]${f.dataset.driveRow == null ? "" : `[data-drive-row="${CSS.escape(f.dataset.driveRow)}"]`}`
+        : null;
+    for (const a of [...c.attributes])
+      if (!w.hasAttribute(a.name)) c.removeAttribute(a.name);
+    for (const a of [...w.attributes]) c.setAttribute(a.name, a.value);
+    c.replaceChildren(...w.childNodes);
+    if (was)
+      /** @type {HTMLElement | null} */ (c.querySelector(was))?.focus({
+        preventScroll: true,
+      });
   };
 
   /** Loading: skeletons in the final geometry of whichever view is on. */
@@ -1136,40 +1155,20 @@ export function mount(root, ctx) {
     const f = current().fleet;
     if (!f) return;
     const { items } = inboxNow();
-    const tiles = hostStrip(f, trend, {
-      count: items.length,
-      urgent: items.filter((i) => i.severity === "bad").length,
-    });
+    const tiles = hostStrip(
+      f,
+      trend,
+      {
+        count: items.length,
+        urgent: items.filter((i) => i.severity === "bad").length,
+      },
+      newer,
+    );
     for (const t of tiles) {
       const k = strip.tiles.get(t.key);
       if (!k) continue;
       k.set({ ...tileKpi(t), loading: false });
     }
-    const v = verdict(items);
-    band.set(
-      v
-        ? [
-            {
-              key: "inbox",
-              tone: v.tone,
-              title: v.title,
-              text: v.text,
-              action: drivable(
-                h(
-                  "a",
-                  {
-                    class: "kp-button",
-                    href: "/inbox",
-                    title: "Open the Inbox: every waiting item with its fix",
-                  },
-                  "Inbox",
-                ),
-                INBOX,
-              ),
-            },
-          ]
-        : [],
-    );
     head.live?.set(f.measured_at);
   };
 
@@ -1532,8 +1531,8 @@ export function mount(root, ctx) {
 /** The view this browser last chose (per viewer; the address wins). */
 function readView() {
   try {
-    return localStorage.getItem(VIEW_KEY) ?? "cards";
+    return localStorage.getItem(VIEW_KEY) ?? "table";
   } catch {
-    return "cards";
+    return "table";
   }
 }

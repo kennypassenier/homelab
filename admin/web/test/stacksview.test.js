@@ -17,7 +17,6 @@ import {
   series,
   sortRows,
   stackRows,
-  verdict,
 } from "../js/stacksview.js";
 
 const NOW = 2_000_000;
@@ -232,7 +231,7 @@ test("redesign-stacks: the cards sort by vmid, name or busiest first, and the bu
   assert.equal(nextSort("cpu"), "vmid");
 });
 
-test("redesign-stacks: the host strip has the demo's six tiles, each a link", () => {
+test("redesign-final M1: the strip has the approved demo's five tiles, each a link", () => {
   const t = hostStrip(
     fleet(),
     {
@@ -243,50 +242,30 @@ test("redesign-stacks: the host strip has the demo's six tiles, each a link", ()
       stacks: {},
     },
     { count: 3, urgent: 1 },
+    new Map([
+      ["kp-soft", 2],
+      ["admin", 1],
+      ["gateway", 0],
+    ]),
   );
   assert.deepEqual(
     t.map((x) => x.label),
-    [
-      "Stacks online",
-      "CPU · 16 cores",
-      "RAM",
-      "Root disk",
-      "Load (1 min)",
-      "Inbox",
-    ],
+    ["Stacks running", "Need you", "Newer versions", "Host CPU", "Root disk"],
   );
   assert.ok(t.every((x) => x.href.startsWith("/")));
-  const [online, cpu, ram, disk, load, inbox] = t;
+  const [online, inbox, newer, cpu, disk] = t;
   assert.equal(online.value, "2");
   assert.equal(online.unit, "of 3");
-  assert.equal(online.ctx, "1 offline · 1 parked");
+  assert.equal(online.ctx, "1 offline");
   assert.equal(online.tone, "bad");
-  assert.deepEqual(cpu.spark, [5, 9]);
-  assert.equal(ram.value, "25.4");
-  assert.equal(ram.unit, "of 64 GB");
-  assert.equal(ram.meter, 40);
-  assert.equal(disk.ctx, "96 GB · /dev/sda");
-  assert.deepEqual(load.spark, [0.8, 1.2]);
-  assert.equal(load.value, "0.80");
   assert.equal(inbox.value, "3", "the exact count, never 9+");
+  assert.equal(inbox.ctx, "1 urgent · open the list");
   assert.equal(inbox.tone, "bad");
-});
-
-test("redesign-stacks: the verdict is absent when nothing waits, one sentence otherwise", () => {
-  assert.equal(verdict([]), null);
-  const one = verdict([{ title: "Backup missed", severity: "warn" }]);
-  assert.deepEqual(one, {
-    tone: "warn",
-    title: "1 item in the Inbox",
-    text: "Backup missed",
-  });
-  const many = verdict([
-    { title: "gateway is down", severity: "bad" },
-    { title: "x", severity: "warn" },
-  ]);
-  assert.equal(many?.tone, "bad");
-  assert.equal(many?.title, "2 items in the Inbox");
-  assert.equal(many?.text, "gateway is down · and 1 more");
+  assert.equal(newer.value, "3");
+  assert.equal(newer.ctx, "in 2 stacks · review");
+  assert.equal(newer.href, "/update?all=1");
+  assert.deepEqual(cpu.spark, [5, 9]);
+  assert.equal(disk.ctx, "96 GB");
 });
 
 test("redesign-stacks: Deploy all changes counts changed, gone and new stacks, as its plan does", () => {

@@ -4247,9 +4247,10 @@ test("invariants: Stacks lists every stack once as a card and as a table row, wi
         );
       }
     }
-    // The view is in the address, so a reload keeps it.
-    assert.ok(page.url().includes("view=table"), "the view is not in the URL");
     await page.click(".nx-seg button[data-v=cards]");
+    // The view is in the address (Table, the default since redesign-final
+    // M1, is not), so a reload keeps it.
+    assert.ok(page.url().includes("view=cards"), "the view is not in the URL");
     // A tick only ticks (invariant 12): the page stays, the card is marked.
     const first = names[0];
     await page.locator(`.sk-cards [data-tick="${first}"]`).check();
@@ -4390,16 +4391,10 @@ test("invariants: Stacks has the host strip, Deploy all changes and New stack; N
         h: Math.round(e.getBoundingClientRect().height),
       })),
     );
+    // redesign-final M1: the approved flows/stacks.html's five tiles.
     assert.deepEqual(
       tiles.map((t) => t.label),
-      [
-        "Stacks online",
-        "CPU · 16 cores",
-        "RAM",
-        "Root disk",
-        "Load (1 min)",
-        "Inbox",
-      ],
+      ["Stacks running", "Need you", "Newer versions", "Host CPU", "Root disk"],
     );
     assert.ok(
       tiles.every((t) => t.href?.startsWith("/")),
@@ -4408,7 +4403,7 @@ test("invariants: Stacks has the host strip, Deploy all changes and New stack; N
     assert.notEqual(
       tiles[0].href,
       "/stacks",
-      "Stacks online links to the page it is on",
+      "Stacks running links to the page it is on",
     );
     // The count on Deploy all changes is there before any click (FLOWS.md
     // §3 #13), and it is the plan's own: deploys, new ones and removed
@@ -4436,9 +4431,10 @@ test("invariants: Stacks has the host strip, Deploy all changes and New stack; N
       `the host tiles differ in height: ${tiles.map((t) => t.h).join(", ")}`,
     );
     // The sparklines come from the last day's trend, not one point.
+    // redesign-final M1: the Host CPU tile's line (Load left the strip).
     assert.ok(
-      (await page.locator(".sk-kpis .nx-spark").count()) >= 2,
-      "CPU and load draw no line",
+      (await page.locator(".sk-kpis .nx-spark").count()) >= 1,
+      "Host CPU draws no line",
     );
     const heads = await page.$$eval(".nx-head .actions-row > button", (bs) =>
       bs.map((b) => b.textContent?.trim()),
@@ -11144,7 +11140,7 @@ test("invariants: redesign-final-h1: Stacks, the Inbox and the Update flow name 
       viewport: { width: 1894, height: 1000 },
     });
     const page = await freshPage(context);
-    await page.goto(`${BASE}/stacks`);
+    await page.goto(`${BASE}/stacks?view=cards`);
     await page.locator(".sk-chip").first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(1500);
     const flags = await page.evaluate(() => {
@@ -11481,6 +11477,58 @@ test("invariants: redesign-final-low-sort: a plain click on a second header adds
         .count()) <= 1,
       "Reset sort did not clear the kp datatable's keys",
     );
+  } finally {
+    await browser.close();
+  }
+});
+
+// M1: Stacks drifted from flows/stacks.html: an Inbox banner duplicating
+// its tile, RAM and Load tiles instead of Need you and Newer versions,
+// Cards by default, a section titled "Stacks", and key hints with filter
+// syntax crowding above the toolbar.
+test("invariants: redesign-final-m1: Stacks is the approved demo: no Inbox banner, its five tiles, the Table by default, All stacks, key hints in the footer", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.evaluate(() => localStorage.removeItem("homelab.stacks.view"));
+    await page.goto(`${BASE}/stacks`);
+    await page.waitForSelector(".sk-kpis .nx-kpi:not([data-loading])", {
+      timeout: 8000,
+    });
+    await page.waitForTimeout(800);
+    const f = await page.evaluate(() => {
+      const card = document.querySelector("#stack-list");
+      const tb = card?.querySelector(".nx-tb");
+      const before = [];
+      for (let n = tb?.previousElementSibling; n; n = n.previousElementSibling)
+        before.push(n.textContent ?? "");
+      return {
+        band: document.querySelectorAll("#page .nx-attention .kp-alert").length,
+        tiles: [...document.querySelectorAll(".sk-kpis .nx-kpi__label")].map(
+          (e) => e.textContent?.trim(),
+        ),
+        table: !!document.querySelector(".sk-table tbody tr[data-stack]"),
+        cards: !!document.querySelector(".sk-cards .sk-card[data-stack]"),
+        title: card?.querySelector("h2")?.textContent?.trim(),
+        keysInFoot: !!card?.querySelector(".sk-foot .nx-keys"),
+        aboveToolbar: before.join(" "),
+      };
+    });
+    assert.equal(f.band, 0, "an Inbox banner beside the Need you tile");
+    assert.deepEqual(f.tiles, [
+      "Stacks running",
+      "Need you",
+      "Newer versions",
+      "Host CPU",
+      "Root disk",
+    ]);
+    assert.ok(f.table && !f.cards, "the Table is not the default view");
+    assert.equal(f.title, "All stacks");
+    assert.ok(f.keysInFoot, "the key hints are not in the footer");
+    assert.doesNotMatch(f.aboveToolbar, /state:|flag:|move|tick/);
   } finally {
     await browser.close();
   }

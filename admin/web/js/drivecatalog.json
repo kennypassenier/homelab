@@ -3280,9 +3280,9 @@
     {
       "id": "stacks-kpi",
       "page": "overview",
-      "what": "open the detail behind one tile of the host strip",
+      "what": "open the detail behind one tile of the strip (stacks running, newer versions, host CPU, root disk)",
       "opens": "view",
-      "row": "online|cpu|ram|disk|load|inbox",
+      "row": "online|newer|cpu|disk",
       "href": "/stacks",
       "was": [],
       "shows": null,
@@ -3328,7 +3328,7 @@
     {
       "id": "stacks-open-inbox",
       "page": "overview",
-      "what": "the attention band's Inbox button: open the Inbox",
+      "what": "the strip's Need you tile: open the Inbox",
       "opens": "view",
       "row": null,
       "href": "/stacks",

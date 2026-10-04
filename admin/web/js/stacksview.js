@@ -369,12 +369,6 @@ export function nextSort(key) {
 }
 
 /**
- * GB with one decimal ("25.4").
- * @param {number} mb
- */
-const gbText = (mb) => (mb / 1024).toFixed(1);
-
-/**
  * @typedef {{key: string, label: string, value: string, unit?: string,
  *   ctx: string, tone: "ok" | "warn" | "bad" | null, href: string,
  *   spark?: number[], meter?: number | null, dot?: "ok" | "warn" | "bad",
@@ -382,29 +376,33 @@ const gbText = (mb) => (mb / 1024).toFixed(1);
  */
 
 /**
- * The host strip on top of the list (the demo's six tiles): stacks online,
- * CPU, RAM, root disk, load and what needs you; every tile a link to its
- * detail.
+ * The strip on top of the list, the approved flows/stacks.html's five tiles
+ * (redesign-final M1): stacks running, what needs you, newer versions, the
+ * host's CPU and its root disk; every tile a link to its detail.
  * @param {Fleet} fleet
  * @param {Trend | null} trend
  * @param {{count: number, urgent: number}} inbox
+ * @param {Map<string, number>} [newer] newer versions per stack
  * @returns {HostKpi[]}
  */
-export function hostStrip(fleet, trend, inbox) {
+export function hostStrip(fleet, trend, inbox, newer = new Map()) {
   const h = fleet.host;
   const c = fleet.counts;
   const offline = fleet.stacks.filter((s) => s.enabled && !s.online).length;
   const disk = h.disk_detail ?? null;
-  const ramPct = h.ram_total_mb
-    ? Math.round((h.ram_used_mb / h.ram_total_mb) * 100)
-    : null;
+  const apps = [...newer.values()].reduce((a, n) => a + n, 0);
+  const inStacks = [...newer.values()].filter((n) => n > 0).length;
   return [
     {
       key: "online",
-      label: "Stacks online",
+      label: "Stacks running",
       value: String(c.online),
       unit: `of ${c.stacks}`,
-      ctx: `${offline ? `${offline} offline` : c.online === c.stacks ? "all running" : `${c.stacks - c.online} not running`} · ${c.parked} parked`,
+      ctx: offline
+        ? `${offline} offline`
+        : c.online === c.stacks
+          ? "all running"
+          : `${c.stacks - c.online} not running`,
       dot: offline ? "bad" : "ok",
       tone: offline ? "bad" : null,
       // Not all running: the list, only its problems; all running: the
@@ -416,8 +414,31 @@ export function hostStrip(fleet, trend, inbox) {
           : "Every stack runs; open the Host page for its containers",
     },
     {
+      key: "inbox",
+      label: "Need you",
+      value: String(inbox.count),
+      ctx:
+        inbox.count === 0
+          ? "nothing waiting"
+          : `${inbox.urgent} urgent · open the list`,
+      tone: inbox.urgent ? "bad" : inbox.count ? "warn" : null,
+      href: "/inbox",
+      title: "Everything waiting for a person; open the Inbox",
+    },
+    {
+      key: "newer",
+      label: "Newer versions",
+      value: String(apps),
+      ctx: apps
+        ? `in ${inStacks} ${inStacks === 1 ? "stack" : "stacks"} · review`
+        : "every app is current",
+      tone: null,
+      href: "/update?all=1",
+      title: "Apps with a newer version; review them in the Update flow",
+    },
+    {
       key: "cpu",
-      label: h.cores_total ? `CPU · ${h.cores_total} cores` : "CPU",
+      label: "Host CPU",
       value: h.cpu_pct == null ? "—" : String(h.cpu_pct),
       unit: h.cpu_pct == null ? "" : "%",
       ctx: h.cpu_pct == null ? "not measured yet" : "",
@@ -427,75 +448,17 @@ export function hostStrip(fleet, trend, inbox) {
       title: "The host's CPU over the last day; open the Host page",
     },
     {
-      key: "ram",
-      label: "RAM",
-      value: gbText(h.ram_used_mb),
-      unit: `of ${Math.round(h.ram_total_mb / 1024)} GB`,
-      ctx: ramPct == null ? "" : `${ramPct}%`,
-      meter: ramPct,
-      tone: ramPct != null && ramPct >= 90 ? "warn" : null,
-      href: "/host",
-      title: "The host's memory in use; open the Host page",
-    },
-    {
       key: "disk",
       label: "Root disk",
       value: String(h.disk_pct),
       unit: "%",
-      ctx: disk
-        ? `${Math.round(disk.root_lv_size_gb)} GB · ${disk.root_disk_device}`
-        : "",
+      ctx: disk ? `${Math.round(disk.root_lv_size_gb)} GB` : "",
       meter: h.disk_pct,
       tone: h.disk_pct >= 90 ? "bad" : h.disk_pct >= 80 ? "warn" : null,
       href: "/host",
       title: "How full the host's root filesystem is; open the Host page",
     },
-    {
-      key: "load",
-      label: "Load (1 min)",
-      value: h.load1_x100 == null ? "—" : (h.load1_x100 / 100).toFixed(2),
-      ctx: "",
-      spark: series(trend?.host.load_x100, 100),
-      tone:
-        h.cores_total && h.load1_x100 != null
-          ? h.load1_x100 / 100 > h.cores_total
-            ? "warn"
-            : null
-          : null,
-      href: "/charts",
-      title: "The host's load over the last day; open Metrics",
-    },
-    {
-      key: "inbox",
-      label: "Inbox",
-      value: String(inbox.count),
-      ctx:
-        inbox.count === 0
-          ? "nothing waiting"
-          : `${inbox.count - inbox.urgent} attention · ${inbox.urgent} urgent`,
-      dot: inbox.urgent ? "bad" : inbox.count ? "warn" : "ok",
-      tone: inbox.urgent ? "bad" : inbox.count ? "warn" : null,
-      href: "/inbox",
-      title: "Everything waiting for a person; open the Inbox",
-    },
   ];
-}
-
-/**
- * The page's one-sentence verdict (DESIGN_LANGUAGE §9.1, exception first):
- * null when nothing needs a person — the band then takes no space at all.
- * @param {{title: string, severity: string}[]} items the Inbox's rows
- * @returns {{tone: "bad" | "warn", title: string, text: string} | null}
- */
-export function verdict(items) {
-  if (!items.length) return null;
-  const n = items.length;
-  const first = items[0];
-  return {
-    tone: first.severity === "bad" ? "bad" : "warn",
-    title: `${n} ${n === 1 ? "item" : "items"} in the Inbox`,
-    text: n === 1 ? first.title : `${first.title} · and ${n - 1} more`,
-  };
 }
 
 /**

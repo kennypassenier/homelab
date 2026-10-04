@@ -63,9 +63,6 @@ main.shell.sk-page > [hidden],
 main.shell.ap-page > [hidden] {
   display: none;
 }
-.sk-page .sk-band[hidden] + * {
-  margin-block-start: max(var(--sk-gap), var(--section-gap)) !important;
-}
 
 /* The header's actions sit in one row against the right edge (the shared
    `.actions-row` grid stacks them when it is not a title row's own child). */
@@ -527,11 +524,13 @@ main.shell.ap-page > [hidden] {
   }
 }
 
+/* redesign-final M1: the footer holds the source line and the key hints,
+   as the demo's card foot does. */
 .sk-foot {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: 6px 16px;
-  flex-wrap: wrap;
   margin-block-start: var(--kp-space-md, 12px);
   padding-block-start: var(--kp-space-sm, 8px);
   border-block-start: 1px solid var(--sk-line);

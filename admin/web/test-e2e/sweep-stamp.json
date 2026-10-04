@@ -2,10 +2,10 @@
   "about": "Written by a passing Live view sweep (invariants.e2e.js, drive-reach); read by admin/web/test/drivecatalog.test.js at commit (the controls a commit changed must be in it) and by the release gate (a full stamp of the whole catalog). Never edit by hand: `catalog` is the hash of `controls`.",
   "schema": 3,
   "scope": "partial",
-  "catalog": "4c7f0d1bb668bf8b1e0464468419a0ea5e7eaf6d6e67e815b72e6b57bf9a80b6",
-  "at": "2026-10-04T01:02:13.772Z",
+  "catalog": "45d03accffa188ba26fed5833b4d44fa72d6edadc29cb59bce7e02ad50289644",
+  "at": "2026-10-04T01:09:22.605Z",
   "controls": [
-    "[\"table-reset-sort\",\"host\",\"view\",\"<table>\",\"/host\",[],\"while a table is sorted\",[{\"control\":\"sort-host-containers\",\"do\":\"click\",\"row\":\"status\"}],false]"
+    "[\"stacks-kpi\",\"overview\",\"view\",\"online|newer|cpu|disk\",\"/stacks\",[],null,[],false]"
   ],
   "run": {
     "seconds": 2,

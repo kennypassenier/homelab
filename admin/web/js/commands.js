@@ -301,7 +301,7 @@ export const editCommands =
         label: "Update apps with a newer version…",
         hint: "see what is newer and what it changes, then back up, update and verify",
         words: "update upgrade newer version stale images all apps",
-        href: "/inbox?update=all",
+        href: "/needs-you?update=all",
       },
       ...(openImportBundle
         ? [
@@ -348,16 +348,16 @@ export const editCommands =
 
 /**
  * The Inbox's open items, worst first, as the palette's first section.
- * @param {() => import("./inbox.js").InboxItem[]} items
+ * @param {() => import("./inboxlist.js").InboxItem[]} items
  * @returns {Provider}
  */
 export const inboxCommands = (items) => () =>
   items().map((i) => ({
-    id: `inbox:${i.key}`,
+    id: `needs-you:${i.key}`,
     group: "Inbox",
     label: i.title,
     hint: i.why,
-    words: `inbox ${i.stack ?? ""}`,
+    words: `Inbox ${i.stack ?? ""}`,
     href: i.href,
     stack: i.stack ?? undefined,
   }));

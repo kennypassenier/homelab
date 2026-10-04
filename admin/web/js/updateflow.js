@@ -69,7 +69,7 @@ export function scopeOf(search) {
 }
 
 /**
- * The old address (`/inbox?update=all`, `/inbox?update=<stack>&app=…`)
+ * The old address (`/needs-you?update=all`, `/needs-you?update=<stack>&app=…`)
  * sent on to the flow's own; null when the query is not the flow's.
  * @param {string} search
  */
@@ -86,7 +86,7 @@ export function legacyUpdateHref(search) {
  */
 export const flowArea = (search) => {
   const s = scopeOf(search);
-  return s && (!s.all || s.only) ? "overview" : "inbox";
+  return s && (!s.all || s.only) ? "overview" : "needs-you";
 };
 
 /**

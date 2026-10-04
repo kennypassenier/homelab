@@ -296,7 +296,7 @@ test("invariants: the kit's Status and Clients pages are switched off, Passkeys 
     // approved "Health → Inbox" merge) — never the old page.
     const old = await page.goto(`${BASE}/status`);
     if (old && old.status() !== 404) {
-      await page.waitForURL("**/inbox", { timeout: 5000 });
+      await page.waitForURL("**/needs-you", { timeout: 5000 });
     }
   } finally {
     await browser.close();
@@ -2601,7 +2601,7 @@ test("invariants: every pre-3.71.0 address lands on its new home", async () => {
       // Apps by itself (Kenny, 2026-10-03).
       const landed = (/** @type {URL} */ u) =>
         want === "/"
-          ? ["/inbox", "/apps"].includes(u.pathname)
+          ? ["/needs-you", "/apps"].includes(u.pathname)
           : u.pathname + u.search === want;
       await page.waitForURL(landed, { timeout: 5000 }).catch(() => {});
       await page.waitForTimeout(200);
@@ -2768,12 +2768,12 @@ test("invariants: the Inbox counter shows the exact number, never 9+, and equals
       await logIn(context);
       // `/` opens the Inbox when it holds something (Kenny, 2026-10-03).
       await page.goto(`${BASE}/`);
-      await page.waitForURL("**/inbox", { timeout: 5000 });
+      await page.waitForURL("**/needs-you", { timeout: 5000 });
       await page.waitForTimeout(500);
       const badge =
         width > 960
-          ? page.locator("#nav a[data-area='inbox'] .nx-count")
-          : page.locator(".nx-tabbar [data-area='inbox'] .nx-count");
+          ? page.locator("#nav a[data-area='needs-you'] .nx-count")
+          : page.locator(".nx-tabbar [data-area='needs-you'] .nx-count");
       // redesign-flows-2: the updates, setup, checks and Today sources
       // add their rows to the twelve notices; the counter is the rows.
       const rows = await page
@@ -3447,7 +3447,7 @@ test("invariants: every Inbox row says what and why and carries its fix, and a p
         viewport: { width, height: 1000 },
       });
       const page = await freshPage(context);
-      await page.goto(`${BASE}/inbox`);
+      await page.goto(`${BASE}/needs-you`);
       // The demo host: an Updates row (its stale images), a Setup row
       // (stacks without a sealed env) and Today's made-up item.
       const update = page.locator(
@@ -3481,8 +3481,8 @@ test("invariants: every Inbox row says what and why and carries its fix, and a p
         .count();
       const badge =
         width > 960
-          ? page.locator("#nav a[data-area='inbox'] .nx-count")
-          : page.locator(".nx-tabbar [data-area='inbox'] .nx-count");
+          ? page.locator("#nav a[data-area='needs-you'] .nx-count")
+          : page.locator(".nx-tabbar [data-area='needs-you'] .nx-count");
       assert.equal((await badge.innerText()).trim(), String(rows));
       // A plain click on Setup shows only the Setup row; again shows all.
       // The kit (redesign-kit-1) marks a chip with data-v.
@@ -3529,7 +3529,7 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
       viewport: { width: 1600, height: 1000 },
     });
     const page = await freshPage(context);
-    await page.goto(`${BASE}/inbox`);
+    await page.goto(`${BASE}/needs-you`);
     const update = page.locator(
       "#page .inbox-card .nx-inbox__row[data-kind=update]",
     );
@@ -8440,7 +8440,7 @@ test("invariants: on a phone the Deploy all changes tiles wrap their labels and 
         await l.evaluate((e) => e.scrollWidth <= e.clientWidth + 1),
         `a tile label is cut off: ${await l.innerText()}`,
       );
-    await page.goto(`${BASE}/inbox`);
+    await page.goto(`${BASE}/needs-you`);
     const head = page.locator("#page .nx-head").first();
     await head.waitFor({ timeout: 10000 });
     const box = async (/** @type {string} */ sel) =>
@@ -8465,7 +8465,7 @@ test("invariants: the Inbox's Worth a look carries a one-sentence description", 
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
-    await page.goto(`${BASE}/inbox`);
+    await page.goto(`${BASE}/needs-you`);
     const desc = page.locator(
       "#page .inbox-worth > summary .inbox-worth__desc",
     );
@@ -8484,7 +8484,7 @@ test("invariants: the Update flow has its own address, the old one redirects, an
       viewport: { width: 1894, height: 1100 },
     });
     const page = await freshPage(context);
-    await page.goto(`${BASE}/inbox?update=kp-soft`);
+    await page.goto(`${BASE}/needs-you?update=kp-soft`);
     await page.waitForURL(/\/update\?stack=kp-soft$/, { timeout: 5000 });
     const current = () =>
       page.locator(".kp-nav__link[aria-current=page]").innerText();
@@ -8692,7 +8692,7 @@ test("invariants: redesign-integrate-1: on a 390 px phone the Firewall's rules t
 const AUDIT_PAGES = [
   "/",
   "/apps",
-  "/inbox",
+  "/needs-you",
   "/stacks",
   "/stacks?deploy-all=1",
   "/activity",
@@ -8736,8 +8736,8 @@ const AUDIT_PAGES = [
  *   then?: (page: import("playwright").Page) => Promise<void>}[]}
  */
 const AUDIT_DIALOGS = [
-  { path: "/inbox", drive: "inbox-fix" },
-  { path: "/inbox", drive: "inbox-push-envs" },
+  { path: "/needs-you", drive: "inbox-fix" },
+  { path: "/needs-you", drive: "inbox-push-envs" },
   { path: "/stacks", drive: "stacks-new" },
   { path: "/activity", drive: "activity-run-again" },
   { path: "/activity", drive: "activity-open-incident" },
@@ -9147,7 +9147,7 @@ test("invariants: redesign-final-h2: an action dialog that cannot run says why i
     });
     const page = await freshPage(context);
     const raw = /\/home\/|os error|No CLI line|No plan|No preview|`|_host/;
-    await page.goto(`${BASE}/inbox`);
+    await page.goto(`${BASE}/needs-you`);
     await page.locator('main [data-drive="inbox-fix"]:visible').first().click();
     const d = page.locator("#action-dialog[open]");
     await d.waitFor();
@@ -9313,7 +9313,7 @@ test("invariants: redesign-final-h1: Stacks, the Inbox and the Update flow name 
       `no stack flags a newer version (${JSON.stringify(flags)})`,
     );
 
-    await page.goto(`${BASE}/inbox`);
+    await page.goto(`${BASE}/needs-you`);
     const updates = page.locator(
       "text=/\\d+ apps? (has|have) a newer version/",
     );
@@ -10040,7 +10040,7 @@ test("invariants: redesign-final-m5: Worth a look is a fold with a chevron, and 
       viewport: { width: 1894, height: 1000 },
     });
     const page = await freshPage(context);
-    await page.goto(`${BASE}/inbox`);
+    await page.goto(`${BASE}/needs-you`);
     const sum = page.locator(".inbox-worth > summary");
     await page.waitForFunction(
       () =>

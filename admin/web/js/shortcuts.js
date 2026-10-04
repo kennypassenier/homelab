@@ -16,7 +16,7 @@ export const CHORD_MS = 1500;
  */
 const PAGES = {
   home: { href: "/apps", label: "Apps" },
-  inbox: { href: "/inbox", label: "the Inbox" },
+  "needs-you": { href: "/needs-you", label: "the Inbox" },
   stacks: { href: "/stacks", label: "Stacks" },
   activity: { href: "/activity", label: "Activity" },
   backups: { href: "/backups", label: "Backups" },
@@ -43,7 +43,7 @@ const PAGES = {
 /** @type {Record<string, string>} second key after "g" → page */
 const GO = {
   u: "home",
-  i: "inbox",
+  i: "needs-you",
   s: "stacks",
   a: "activity",
   b: "backups",

@@ -1,5 +1,5 @@
 // redesign-flows-2 (redesign 3.71.0, FLOWS.md §1 "Needs you", invariant
-// 60): the Inbox's slower sources, fed into inbox.js on EVERY page — so the
+// 60): the Inbox's slower sources, fed into inboxlist.js on EVERY page — so the
 // counter in the bar is the number of rows the Inbox shows wherever you
 // are, not only after the Inbox was opened once.
 //
@@ -16,7 +16,7 @@
 
 import { onAnswered } from "./answer.js";
 import { fetchJson, fetchReport } from "./dom.js";
-import { setInboxSource } from "./inbox.js";
+import { setInboxSource } from "./inboxlist.js";
 import { checkRowsOf, setupRows, todayRows, updateRows } from "./inboxrows.js";
 import { current, subscribe } from "./store.js";
 

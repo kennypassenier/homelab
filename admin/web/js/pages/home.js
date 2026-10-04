@@ -380,7 +380,7 @@ export function mount(root) {
             action: h(
               "pre",
               { class: "ap-example sk-mono" },
-              "tiles:\n  jellyfin.example.dev:\n    name: Jellyfin\n    group: Media\n    description: Films and series",
+              "tiles:\n  films.example.dev:\n    name: Films\n    group: Media\n    description: Films and series",
             ),
           }),
         ),

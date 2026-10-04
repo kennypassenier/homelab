@@ -11,7 +11,7 @@
 // here), the palette ("update kp-soft", "Update apps with a newer
 // version…") and the Map's stale-image rows. It lives at its own address
 // since the review (redesign-flows-11): `/update?all=1` or
-// `/update?stack=<stack>[&app=<key>]`; the old `/inbox?update=…` is sent on.
+// `/update?stack=<stack>[&app=<key>]`; the old `/needs-you?update=…` is sent on.
 //
 // redesign-flows-6 (review items 3 and 4): steps 3-5 are ONE job on the
 // dashboard's server (`update-apps`, admin/src/shell/actions_flow.rs) —
@@ -27,7 +27,7 @@ import { ensureStyle, errorBox, fetchJson, h, slowRead } from "../dom.js";
 import { declare, declareField, drivable, fieldId } from "../drivable.js";
 import { diffBlocks } from "../editui.js";
 import { formatDateTime, humanDuration } from "../format.js";
-import { inboxNow } from "../inbox.js";
+import { inboxNow } from "../inboxlist.js";
 import { feedUpdates } from "../inboxsources.js";
 import { openPinRollback } from "../pinupdate.js";
 import { planView } from "../plan.js";
@@ -149,7 +149,7 @@ const AFTER = declare({
   id: "update-after",
   page: "update",
   opens: "view",
-  row: "activity|stack|inbox|back|again",
+  row: "activity|stack|needs-you|back|again",
   what: "the result's links: Activity, the stack, back to the Inbox, or the list again; or Back from an empty list",
   shows: "in the result of an update, or on an empty list (Back)",
 });
@@ -218,7 +218,7 @@ export function mount(root, scope) {
   const crumbs = fromStacks
     ? [{ label: "Stacks", href: "/stacks" }, { label: "Update apps" }]
     : scope.all
-      ? [{ label: "Inbox", href: "/inbox" }, { label: "Update apps" }]
+      ? [{ label: "Inbox", href: "/needs-you" }, { label: "Update apps" }]
       : [
           { label: "Stacks", href: "/stacks" },
           {
@@ -236,7 +236,7 @@ export function mount(root, scope) {
   const back = fromStacks
     ? "/stacks"
     : scope.all
-      ? "/inbox"
+      ? "/needs-you"
       : `/stacks/${encodeURIComponent(scope.stack)}`;
 
   // ---- 1 · See -------------------------------------------------------
@@ -1089,13 +1089,13 @@ export function mount(root, scope) {
               "a",
               {
                 class: "kp-button kp-button--primary",
-                href: "/inbox",
+                href: "/needs-you",
                 title: "What else waits for you",
               },
               left ? `Back to the Inbox · ${left} left` : "Back to the Inbox",
             ),
             AFTER,
-            "inbox",
+            "needs-you",
           ),
         ),
       ),

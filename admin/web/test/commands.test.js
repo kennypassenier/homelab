@@ -85,7 +85,10 @@ test("pages, every stack with each tab, and the themes", () => {
   assert.ok(ids.includes("page:activity"));
   assert.ok(ids.includes("page:host"), "System's Host page");
   assert.ok(ids.includes("page:planned"), "Activity's Planned view");
-  assert.ok(!ids.includes("page:inbox"), "an area the registry did not list");
+  assert.ok(
+    !ids.includes("page:needs-you"),
+    "an area the registry did not list",
+  );
   assert.ok(!ids.includes("page:timeline"), "Timeline merged into Activity");
   assert.ok(ids.includes("stack:media:overview"));
   assert.ok(ids.includes("stack:media:logs"));

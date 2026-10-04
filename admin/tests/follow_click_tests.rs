@@ -311,7 +311,7 @@ async fn drive_reach_an_old_control_name_is_not_refused_by_the_dashboard() {
 async fn drive_reach_goto_an_old_address_lands_on_its_new_home() {
     let (d, _live) = driver("goto-old");
     for (from, to) in [
-        ("/status", "/inbox"),
+        ("/status", "/needs-you"),
         ("/home", "/apps"),
         ("/schedules", "/activity?view=planned"),
         ("/secrets", "/stacks/media/settings?section=secrets"),
@@ -331,11 +331,11 @@ async fn drive_reach_goto_an_old_address_lands_on_its_new_home() {
             "wsl",
             Scope::Operate,
             UiStep::Goto {
-                path: "/inbx".into(),
+                path: "/neds-you".into(),
             },
         )
         .await;
     assert_eq!(a["ok"], false);
     let why = a["refusal"]["why"].as_str().unwrap_or_default();
-    assert!(why.contains("the closest: /inbox"), "{a}");
+    assert!(why.contains("the closest: /needs-you"), "{a}");
 }

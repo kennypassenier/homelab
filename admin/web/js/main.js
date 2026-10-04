@@ -23,7 +23,7 @@ import { mountChrome } from "./chrome.js";
 import { mountFollow } from "./drive.js";
 import { attachRowToggle } from "./rowtoggle.js";
 import { h } from "./dom.js";
-import { countText, inboxNow, onInbox, worst } from "./inbox.js";
+import { countText, inboxNow, onInbox, worst } from "./inboxlist.js";
 import { attachNavMenus, attachNavToggles } from "/static/kp/js/components.js";
 import { loadPages, pages, subscribePages } from "./pages.js";
 import {
@@ -50,7 +50,7 @@ import { mount as stack } from "./pages/stack.js";
 import { mount as shell } from "./pages/shell.js";
 import { mount as presets } from "./pages/presets.js";
 import { mount as homePage } from "./pages/home.js";
-import { mount as inboxPage } from "./pages/inbox.js";
+import { mount as inboxPage } from "./pages/needsyou.js";
 import { mount as updatePage } from "./pages/update.js";
 import { scopeOf } from "./updateflow.js";
 import { mount as systemPage } from "./pages/system.js";
@@ -128,7 +128,7 @@ function renderNav() {
       if (p && p.id === "backups" && i > 0)
         out.push(h("li", { class: "nx-nav-sep", "aria-hidden": "true" }));
       const kids = [/** @type {Node | string} */ (e.label)];
-      if (p?.id === "inbox" && n > 0) {
+      if (p?.id === "needs-you" && n > 0) {
         kids.push(
           h(
             "span",
@@ -195,7 +195,7 @@ function landing() {
     history.replaceState(
       null,
       "",
-      `${items.length > 0 ? "/inbox" : "/apps"}${location.search}`,
+      `${items.length > 0 ? "/needs-you" : "/apps"}${location.search}`,
     );
     render();
     return true;
@@ -256,7 +256,7 @@ function render() {
     case "home":
       cleanup = homePage(page);
       break;
-    case "inbox":
+    case "needs-you":
       cleanup = inboxPage(page);
       break;
     case "restore":

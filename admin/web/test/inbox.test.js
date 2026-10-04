@@ -11,7 +11,7 @@ import {
   setInboxSource,
   wireInbox,
   worst,
-} from "../js/inbox.js";
+} from "../js/inboxlist.js";
 
 /** @param {Partial<import("../js/notices.js").Notice>} o */
 const notice = (o) =>
@@ -94,7 +94,7 @@ test("feat-shell-4: a page's slower source joins the same list, so the count is 
       severity: "warn",
       title: "kp-soft has a newer version",
       why: "",
-      href: "/inbox",
+      href: "/needs-you",
       stack: "kp-soft",
       at: 1,
       source: "x",

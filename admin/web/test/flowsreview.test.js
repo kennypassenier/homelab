@@ -107,7 +107,7 @@ test("redesign-flows-11: the Update flow's own address, the old one sent on, and
   );
   assert.equal(legacyUpdateHref("?kind=update"), null);
   assert.equal(flowArea("?stack=kp-soft"), "overview");
-  assert.equal(flowArea("?all=1"), "inbox");
+  assert.equal(flowArea("?all=1"), "needs-you");
 });
 
 test("redesign-flows-6: the moves the one job gets, and the rows it shows", () => {

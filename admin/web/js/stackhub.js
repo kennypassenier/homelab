@@ -411,7 +411,7 @@ export function staleFor(stack, images) {
  * @param {{stack: string, s: Stack | null | undefined,
  *   drift?: Drift | null, night?: string, last?: number | null,
  *   stale?: Stale[], openChecks?: number, now: number,
- *   inbox?: {key: string, severity: "bad" | "warn" | "info", title: string,
+ *   inboxItems?: {key: string, severity: "bad" | "warn" | "info", title: string,
  *     why: string, href: string}[]}} x
  * @returns {Problem[]}
  */
@@ -558,10 +558,10 @@ export function attentionItems(x) {
     });
   }
   const seen = new Set(out.map((p) => p.title));
-  for (const i of x.inbox ?? [])
+  for (const i of x.inboxItems ?? [])
     if (!seen.has(i.title))
       out.push({
-        key: `inbox:${i.key}`,
+        key: `needs-you:${i.key}`,
         tone: i.severity,
         title: i.title,
         text: i.why,

@@ -84,7 +84,7 @@ test("redesign-flows-2: the stale images are ONE Updates row naming every app th
   assert.match(r.why, /beta-demo\/api v2\.3\.0 → v3\.0\.0 \(major\)/);
   assert.match(r.why, /kp-soft\/demo-agent 0\.1\.4 → 0\.2\.0(?! \(major\))/);
   assert.deepEqual(r.stacks, ["admin", "beta-demo", "kp-soft"]);
-  assert.equal(r.href, "/inbox?update=all");
+  assert.equal(r.href, "/needs-you?update=all");
   assert.deepEqual(updateRows({ images: [] }), []);
   assert.deepEqual(updateRows(null), []);
   assert.equal(

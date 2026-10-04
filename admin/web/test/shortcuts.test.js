@@ -14,7 +14,7 @@ test("g then a letter goes to a page, within the chord's time", () => {
   });
   // feat-shell-1: the areas' own letters (g i = the Inbox).
   assert.deepEqual(keyAction(r.state, "i", 1000, home).action, {
-    navigate: "/inbox",
+    navigate: "/needs-you",
   });
   assert.deepEqual(keyAction(r.state, "p", 1000, home).action, {
     navigate: "/activity?view=planned",

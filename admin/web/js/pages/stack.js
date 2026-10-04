@@ -48,7 +48,7 @@ import {
 } from "../editpanels.js";
 import { formatDateTime, humanDuration } from "../format.js";
 import { openIncident } from "../incident.js";
-import { inboxNow, onInbox } from "../inbox.js";
+import { inboxNow, onInbox } from "../inboxlist.js";
 import { finished } from "../jobs.js";
 import { mountJobPanel } from "../jobpanel.js";
 import { lineTime, logsUrl } from "../logs.js";
@@ -1031,7 +1031,7 @@ function overviewTab(panel, c) {
         stale,
         openChecks: open,
         now,
-        inbox: inboxNow().items.filter((i) => i.stack === name),
+        inboxItems: inboxNow().items.filter((i) => i.stack === name),
       })
         .filter((p) => S.fleetRead || p.key !== "not-deployed")
         .map((p) => ({
@@ -1286,7 +1286,7 @@ function problemAction(c, p) {
           "a",
           {
             class: "kp-button",
-            href: /** @type {any} */ (a).href ?? "/inbox",
+            href: /** @type {any} */ (a).href ?? "/needs-you",
             title: a.title,
           },
           a.label,

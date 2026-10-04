@@ -71,7 +71,7 @@ function commandsFor(/** @type {string | null} */ here) {
           severity: "bad",
           title: "Backup of gateway failed",
           why: "the nightly round could not reach its repository",
-          href: "/inbox#notice-1",
+          href: "/needs-you#notice-1",
           stack: "gateway",
           at: 1,
           source: "notices",

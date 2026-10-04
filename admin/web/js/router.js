@@ -41,7 +41,7 @@ export const RETIRED_STACK_TABS = /** @type {const} */ (["checks", "firewall"]);
 /** @typedef {(typeof STACK_TABS)[number]["tab"]} StackTab */
 
 /**
- * @typedef {{page: "landing"} | {page: "home"} | {page: "inbox"} |
+ * @typedef {{page: "landing"} | {page: "home"} | {page: "needs-you"} |
  *   {page: "overview"} | {page: "activity"} | {page: "backups"} |
  *   {page: "system"} | {page: "host"} | {page: "metrics"} |
  *   {page: "fleetview"} | {page: "firewall"} | {page: "settings"} |
@@ -63,7 +63,7 @@ export const RETIRED_STACK_TABS = /** @type {const} */ (["checks", "firewall"]);
 export const CURRENT_PATHS = {
   "": "landing",
   apps: "home",
-  inbox: "inbox",
+  "needs-you": "needs-you",
   stacks: "overview",
   activity: "activity",
   backups: "backups",
@@ -100,16 +100,15 @@ const REDIRECTS = {
   apply: (s) => `/stacks${setParams(s, { "deploy-all": "1" })}`,
   health: (s) => {
     const block = new URLSearchParams(s).get("block");
-    return `/inbox${setParams(s, { block: null, kind: block })}`;
+    return `/needs-you${setParams(s, { block: null, kind: block })}`;
   },
-  "needs-you": (s) => `/inbox${s}`,
   jobs: (s) => `/activity${setParams(s, { view: "running" })}`,
   log: (s) => `/activity${setParams(s, { view: "host-log" })}`,
   schedules: (s) => `/activity${setParams(s, { view: "planned" })}`,
   backupcalendar: (s) => `/backups${setParams(s, { section: "coverage" })}`,
   retired: (s) => `/backups${setParams(s, { section: "removed" })}`,
   fleetview: (s) => `/map${s}`,
-  notifications: (s) => `/inbox${s}`,
+  notifications: (s) => `/needs-you${s}`,
   shell: (s) => `/console${s}`,
   passkeys: (s) => `/settings${setParams(s, { section: "sign-in" })}`,
   secrets: (s, ctx) => {
@@ -119,12 +118,12 @@ const REDIRECTS = {
   },
   // 2026-10-02: the kit's Status page is off; its address goes where
   // Health's did.
-  status: (s) => `/inbox${s}`,
+  status: (s) => `/needs-you${s}`,
   // 2026-09-30's retired addresses, collapsed to one hop.
   start: (s) => `/${s}`,
-  today: (s) => `/inbox${setParams(s, { kind: "today" })}`,
-  doctor: (s) => `/inbox${setParams(s, { kind: "doctor" })}`,
-  checks: (s) => `/inbox${setParams(s, { kind: "checks" })}`,
+  today: (s) => `/needs-you${setParams(s, { kind: "today" })}`,
+  doctor: (s) => `/needs-you${setParams(s, { kind: "doctor" })}`,
+  checks: (s) => `/needs-you${setParams(s, { kind: "checks" })}`,
   traffic: (s) => `/charts${setParams(s, { tab: "traffic" })}`,
   timeline: (s) => `/activity${setParams(s, { view: "timeline" })}`,
   // Pre-3.1.0 address of the tile page.
@@ -187,7 +186,7 @@ export function redirectTable() {
 const FALLBACK_TITLE = /** @type {Record<string, string>} */ ({
   landing: "Homelab",
   home: "Apps",
-  inbox: "Inbox",
+  "needs-you": "Inbox",
   overview: "Stacks",
   activity: "Activity",
   backups: "Backups",

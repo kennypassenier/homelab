@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "../js/drivable.js";
 import { redirectFor, route } from "../js/router.js";
-import "../js/pages/inbox.js";
+import "../js/pages/needsyou.js";
 import "../js/pages/notifications.js";
 import "../js/pages/restore.js";
 
@@ -39,7 +39,7 @@ test("redesign-final-c3/h3: every control or field the rules page and the Restor
 });
 
 test("redesign-final-c3/h3: the old notices address redirects, the rules and the Restore flow have their own", () => {
-  assert.equal(redirectFor(route("/notifications"), ""), "/inbox");
+  assert.equal(redirectFor(route("/notifications"), ""), "/needs-you");
   assert.deepEqual(route("/system/notifications"), { page: "notifications" });
   assert.deepEqual(route("/backups/restore"), { page: "restore" });
 });

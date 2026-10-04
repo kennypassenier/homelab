@@ -24,7 +24,7 @@ import { majorJump } from "./staleimages.js";
  * @typedef {Omit<StaleApp, "key"> & {key: string | null, release: boolean}}
  *   NewerApp one app with a newer version (redesign-final-h1): `release`
  *   when it comes with a homelab release (no key)
- * @typedef {import("./inbox.js").InboxItem & {kind?: Kind,
+ * @typedef {import("./inboxlist.js").InboxItem & {kind?: Kind,
  *   chips?: SrcChip[], stacks?: string[], apps?: NewerApp[],
  *   fix?: import("./notices.js").Fix | null, check?: string,
  *   checkState?: "open" | "not ok"}} Row
@@ -144,7 +144,7 @@ export function updateRows(body) {
         .join(
           " · ",
         )}. Each is backed up first; Roll back puts the old version back.`,
-      href: "/inbox?update=all",
+      href: "/needs-you?update=all",
       stack: stacks.length === 1 ? stacks[0] : null,
       at,
       source: "updates",
@@ -174,7 +174,7 @@ export function setupRows(fleet) {
       kind: "setup",
       title: `${plural(names.length, "stack has", "stacks have")} no sealed env on the host`,
       why: "Running containers are fine, but the host's vault holds no copy of their secrets, so a lost container could not get them back. A deploy of each stack gives the vault its copy.",
-      href: "/inbox#setup-noenv",
+      href: "/needs-you#setup-noenv",
       stack: names.length === 1 ? names[0] : null,
       at: 0,
       source: "setup",
@@ -207,7 +207,7 @@ export function checkRowsOf(report) {
         a === "not ok"
           ? "Answered “it fails”. Fix the cause, then answer it again; “Not now” asks again in 7 days."
           : "Only a person can confirm this one. Answer it here; “Not now” asks again in 7 days.",
-      href: `/inbox#check-${c.id}`,
+      href: `/needs-you#check-${c.id}`,
       stack: r.stack ?? null,
       at: Number(r.answered_at ?? r.registered_at) || 0,
       source: "checks",
@@ -249,7 +249,7 @@ export function todayRows(body, setupStacks = []) {
       kind: i.source === "incident" ? "fail" : "check",
       title: i.what,
       why: `What to do: ${i.remedy}`,
-      href: "/inbox#today",
+      href: "/needs-you#today",
       stack: i.fix?.stack ?? null,
       at,
       source: "today",
@@ -355,7 +355,7 @@ export function worthRows(backups, versions) {
 
 /**
  * The rows a set of chips shows: none on means all; "worst first" keeps
- * inbox.js's order, "newest" sorts by time.
+ * inboxlist.js's order, "newest" sorts by time.
  * @param {Row[]} rows
  * @param {Set<string>} kinds
  * @param {"worst" | "newest"} order

@@ -381,11 +381,11 @@ export function nextSort(key) {
  * host's CPU and its root disk; every tile a link to its detail.
  * @param {Fleet} fleet
  * @param {Trend | null} trend
- * @param {{count: number, urgent: number}} inbox
+ * @param {{count: number, urgent: number}} needs
  * @param {Map<string, number>} [newer] newer versions per stack
  * @returns {HostKpi[]}
  */
-export function hostStrip(fleet, trend, inbox, newer = new Map()) {
+export function hostStrip(fleet, trend, needs, newer = new Map()) {
   const h = fleet.host;
   const c = fleet.counts;
   const offline = fleet.stacks.filter((s) => s.enabled && !s.online).length;
@@ -414,15 +414,15 @@ export function hostStrip(fleet, trend, inbox, newer = new Map()) {
           : "Every stack runs; open the Host page for its containers",
     },
     {
-      key: "inbox",
+      key: "needs-you",
       label: "Need you",
-      value: String(inbox.count),
+      value: String(needs.count),
       ctx:
-        inbox.count === 0
+        needs.count === 0
           ? "nothing waiting"
-          : `${inbox.urgent} urgent · open the list`,
-      tone: inbox.urgent ? "bad" : inbox.count ? "warn" : null,
-      href: "/inbox",
+          : `${needs.urgent} urgent · open the list`,
+      tone: needs.urgent ? "bad" : needs.count ? "warn" : null,
+      href: "/needs-you",
       title: "Everything waiting for a person; open the Inbox",
     },
     {

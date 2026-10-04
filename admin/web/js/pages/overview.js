@@ -25,7 +25,7 @@ import { declare, dialogControl, drivable, viaForm } from "../drivable.js";
 import { register } from "../drivehooks.js";
 import { gb } from "../fleet.js";
 import { openImport } from "../importstack.js";
-import { inboxNow, onInbox } from "../inbox.js";
+import { inboxNow, onInbox } from "../inboxlist.js";
 import { openNewStack } from "../newstack.js";
 import { updateHrefFor } from "../updateflow.js";
 import { stackHref } from "../router.js";
@@ -361,7 +361,7 @@ export function mount(root, ctx) {
   const strip = kpiStrip(
     [
       { key: "online", label: "Stacks running", href: "/stacks" },
-      { key: "inbox", label: "Need you", href: "/inbox" },
+      { key: "needs-you", label: "Need you", href: "/needs-you" },
       { key: "newer", label: "Newer versions", href: "/update?all=1" },
       { key: "cpu", label: "Host CPU", href: "/host" },
       { key: "disk", label: "Root disk", href: "/host" },
@@ -370,7 +370,7 @@ export function mount(root, ctx) {
   );
   strip.el.classList.add("sk-kpis");
   for (const [key, k] of strip.tiles)
-    if (key === "inbox") drivable(k.el, INBOX);
+    if (key === "needs-you") drivable(k.el, INBOX);
     else drivable(k.el, KPI, key);
 
   // ── the stacks card ─────────────────────────────────────────────────

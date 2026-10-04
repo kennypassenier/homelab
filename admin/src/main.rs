@@ -113,7 +113,7 @@ async fn main() -> std::process::ExitCode {
     // something and Apps otherwise. Every address a page had before 3.71.0
     // still works: the web app's router redirects it (router.js REDIRECTS).
     app.page(Page::new("home", "Apps", "/apps"))
-        .page(Page::new("inbox", "Inbox", "/inbox"))
+        .page(Page::new("needs-you", "Inbox", "/needs-you"))
         .page(Page::new("overview", "Stacks", "/stacks"))
         .page(Page::new("activity", "Activity", "/activity"))
         .page(Page::new("backups", "Backups", "/backups"))

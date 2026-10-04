@@ -6,7 +6,7 @@
 // reviewing the updates, pushing the envs, answering a check — so nobody
 // has to know which page it came from. A plain click on a kind shows only
 // those (several may be on; Esc shows all again). The counter in the bar
-// is exactly the number of rows here (invariant 60): both read inbox.js's
+// is exactly the number of rows here (invariant 60): both read inboxlist.js's
 // one list, which inboxsources.js feeds on every page.
 //
 // Below the list, folded: "Worth a look" — not urgent, not counted (never
@@ -20,7 +20,7 @@ import { refusalCallout } from "../actui.js";
 import { answerBody } from "../asks.js";
 import { ensureStyle, fetchJson, h, slowRead } from "../dom.js";
 import { declare, drivable } from "../drivable.js";
-import { inboxNow, onInbox } from "../inbox.js";
+import { inboxNow, onInbox } from "../inboxlist.js";
 import {
   KINDS,
   askWords,
@@ -46,33 +46,33 @@ import { legacyUpdateHref, updateHref } from "../updateflow.js";
 
 const CHECK_AGAIN = declare({
   id: "inbox-check-again",
-  page: "inbox",
+  page: "needs-you",
   opens: "run",
   what: "read every source of the Inbox again now: the fleet check, Today, the manual checks, the notices",
 });
 const KIND = declare({
   id: "inbox-kind",
-  page: "inbox",
+  page: "needs-you",
   opens: "view",
   row: "ask|fail|update|setup|check",
   what: "show only one kind of row, or all again (a plain click turns it on or off)",
 });
 const ORDER = declare({
   id: "inbox-order",
-  page: "inbox",
+  page: "needs-you",
   opens: "view",
   row: "worst|newest",
   what: "order the Inbox worst first or newest first",
 });
 const EXPLAIN = declare({
   id: "inbox-explain-hide",
-  page: "inbox",
+  page: "needs-you",
   opens: "view",
   what: "hide the note about what the Inbox replaces",
 });
 const ANSWER = declare({
   id: "inbox-answer",
-  page: "inbox",
+  page: "needs-you",
   opens: "run",
   row: "<ask key>:allow|stop",
   what: "answer the host's question: allow, or leave it stopped",
@@ -83,7 +83,7 @@ const FIX = declare({
   // redesign-final-c3: the notice list left Notification rules for the
   // Inbox; its old control keeps working by its old name.
   was: ["notice-fix"],
-  page: "inbox",
+  page: "needs-you",
   opens: "dialog",
   row: "<row key>",
   what: "a row's fix: the action's own dialog, prefilled",
@@ -93,7 +93,7 @@ const SEEN = declare({
   // redesign-final-c3: the notice list left Notification rules for the
   // Inbox; its old control keeps working by its old name.
   was: ["mark-read"],
-  page: "inbox",
+  page: "needs-you",
   opens: "run",
   row: "<row key>",
   what: "mark a notice as seen (it leaves the Inbox; Activity keeps it)",
@@ -101,13 +101,13 @@ const SEEN = declare({
 });
 const PUSH_ENVS = declare({
   id: "inbox-push-envs",
-  page: "inbox",
+  page: "needs-you",
   opens: "dialog",
   what: "deploy every stack without a sealed env, so the host's vault takes a copy (one confirm)",
 });
 const REVIEW = declare({
   id: "inbox-review-updates",
-  page: "inbox",
+  page: "needs-you",
   opens: "view",
   row: "all|<stack>",
   what: "open the Update flow from the Updates row: every app with a newer version, or one stack's",
@@ -117,34 +117,34 @@ const SEE_WHAT = declare({
   // redesign-final-c3: the notice list left Notification rules for the
   // Inbox; its old control keeps working by its old name.
   was: ["open-notice"],
-  page: "inbox",
+  page: "needs-you",
   opens: "view",
   row: "<row key>",
   what: "a notice's See what happened: open where it happened",
 });
 const SOURCE = declare({
   id: "inbox-source",
-  page: "inbox",
+  page: "needs-you",
   opens: "view",
   row: "<row key>:<chip label>",
   what: "a row's source chip: open its stack or Activity",
 });
 const WORTH = declare({
   id: "inbox-worth",
-  page: "inbox",
+  page: "needs-you",
   opens: "view",
   what: "fold or unfold Worth a look (not counted in the counter)",
 });
 const WORTH_OPEN = declare({
   id: "inbox-worth-open",
-  page: "inbox",
+  page: "needs-you",
   opens: "view",
   row: "worth:drills|worth:host-release|worth:doctor",
   what: "a Worth a look row's button: drill the backups, update the host, the doctor report",
 });
 const ANSWER_CHECK = declare({
   id: "inbox-answer-check",
-  page: "inbox",
+  page: "needs-you",
   opens: "dialog",
   row: "<check id>:pass|fail|later",
   what: "answer a manual check: it passes, it fails, or not now (asks again in 7 days)",
@@ -160,14 +160,14 @@ const rowId = (key) => key.replace(/[^a-z0-9-]/gi, "-");
  */
 export function mount(root) {
   // redesign-flows-11: the Update flow has its own address; the old
-  // `/inbox?update=…` is sent on to it.
+  // `/needs-you?update=…` is sent on to it.
   const legacy = legacyUpdateHref(location.search);
   if (legacy) {
     history.replaceState(null, "", legacy);
     queueMicrotask(() => dispatchEvent(new PopStateEvent("popstate")));
     return () => {};
   }
-  ensureStyle("/css/pages/inbox.css");
+  ensureStyle("/css/pages/needsyou.css");
 
   const again = drivable(
     h(
@@ -190,7 +190,7 @@ export function mount(root) {
     actions: [again],
   });
   // Review item 13: on a phone the header reads title, sentence, then the
-  // checked time with Check again (inbox.css).
+  // checked time with Check again (needsyou.css).
   head.el.classList.add("inbox-head");
 
   const note = explainNote("homelab-inbox-explained", [

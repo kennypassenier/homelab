@@ -39,7 +39,7 @@ export const GLOSSARY = /** @type {const} */ ([
   ],
   [
     "App",
-    "One program inside a stack, usually a Docker container (traefik, jellyfin…).",
+    "One program inside a stack, usually a Docker container (traefik, a film server…).",
   ],
   [
     "Deploy",
@@ -95,9 +95,9 @@ export function tourSteps() {
       text: "Type what you want — “update gateway”, “restore notes”, “backups”. Actions open their own dialog; nothing runs until you confirm.",
     },
     {
-      desktop: nav("inbox"),
-      phone: tab("inbox"),
-      title: area("inbox")?.label ?? "Inbox",
+      desktop: nav("needs-you"),
+      phone: tab("needs-you"),
+      title: area("needs-you")?.label ?? "Inbox",
       text: "Start here when something is off. Every problem, question and available update in one list, worst first, each with the button that fixes it.",
     },
     {

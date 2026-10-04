@@ -732,7 +732,7 @@ test("every stack's edit tabs and a new stack are palette commands, the open sta
     ],
   );
   assert.equal(list[1].href, "/stacks?deploy-all=1");
-  assert.equal(list[2].href, "/inbox?update=all");
+  assert.equal(list[2].href, "/needs-you?update=all");
   assert.equal(list[5].href, "/stacks/media/settings?section=firewall");
   assert.equal(list[4].href, "/stacks/media/settings?section=secrets");
   list[0].run?.();

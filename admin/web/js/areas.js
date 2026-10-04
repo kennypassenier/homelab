@@ -29,9 +29,9 @@ export const AREAS = Object.freeze([
     keys: "g u",
   },
   {
-    id: "inbox",
+    id: "needs-you",
     label: "Inbox",
-    href: "/inbox",
+    href: "/needs-you",
     what: "Everything waiting for a person, worst first",
     rare: false,
     phone: "tab",
@@ -200,7 +200,7 @@ export const SUB_PAGES = Object.freeze([
 const AREA_OF_PAGE = /** @type {Record<string, string>} */ ({
   landing: "home",
   home: "home",
-  inbox: "inbox",
+  "needs-you": "needs-you",
   overview: "overview",
   stack: "overview",
   activity: "activity",
@@ -227,7 +227,7 @@ export function areaOf(r) {
   // stack's, to the Inbox when it is every app's.
   if (r.page === "update") {
     const q = new URLSearchParams(globalThis.location?.search ?? "");
-    return q.get("stack") ? "overview" : "inbox";
+    return q.get("stack") ? "overview" : "needs-you";
   }
   return AREA_OF_PAGE[r.page] ?? null;
 }

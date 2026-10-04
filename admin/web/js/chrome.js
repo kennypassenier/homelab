@@ -35,7 +35,7 @@ import {
   inboxNow,
   onInbox,
   wireInbox,
-} from "./inbox.js";
+} from "./inboxlist.js";
 import { HELP_OPEN, helpPanel } from "./helptour.js";
 import { startInboxSources } from "./inboxsources.js";
 import { noMatchText, rankCommands } from "./intent.js";
@@ -77,7 +77,7 @@ function chooseTheme(name) {
 }
 
 registerCommands(
-  "inbox",
+  "needs-you",
   inboxCommands(() => inboxNow().items),
 );
 registerCommands("pages", pageCommands);
@@ -379,7 +379,7 @@ const icon = (id) => {
   /** @type {Record<string, string[]>} */
   const paths = {
     home: ["M3 3h7v7H3z", "M14 3h7v7h-7z", "M3 14h7v7H3z", "M14 14h7v7h-7z"],
-    inbox: ["M4 13h4l2 3h4l2-3h4", "M5 5h14l1 8v6H4v-6z"],
+    "needs-you": ["M4 13h4l2 3h4l2-3h4", "M5 5h14l1 8v6H4v-6z"],
     overview: ["m12 3 9 5-9 5-9-5z", "m3 13 9 5 9-5"],
     activity: ["M3 12h4l3-7 4 14 3-7h4"],
     more: ["M5 12h.01", "M12 12h.01", "M19 12h.01"],
@@ -413,7 +413,7 @@ function mountTabBar(ctx, openPalette, openHelp) {
       { href: a.href, "data-area": a.id, class: "nx-tabbar__tab" },
       icon(a.id),
       h("span", null, a.label),
-      ...(a.id === "inbox" ? [badge] : []),
+      ...(a.id === "needs-you" ? [badge] : []),
     ),
   );
   const more = h(
@@ -652,7 +652,10 @@ export function mountChrome(where, ctx) {
             label: "Open the job",
             onClick: () => ctx.navigate(`/activity?view=running&job=${job}`),
           }
-        : { label: "Open the Inbox", onClick: () => ctx.navigate("/inbox") },
+        : {
+            label: "Open the Inbox",
+            onClick: () => ctx.navigate("/needs-you"),
+          },
     );
   });
   // A new host question toasts once, wherever you are (the strip under
@@ -669,7 +672,7 @@ export function mountChrome(where, ctx) {
         "warning",
         {
           label: "Answer in the Inbox",
-          onClick: () => ctx.navigate("/inbox"),
+          onClick: () => ctx.navigate("/needs-you"),
         },
       );
     }

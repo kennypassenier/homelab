@@ -11783,3 +11783,127 @@ test("invariants: redesign-final-x7: the Live view switch is in the bar beside H
     await browser.close();
   }
 });
+
+// Low: in dark, Stacks' amber-on-brown Inbox banner read with too little
+// contrast — a fault class. On every page the layout audit visits, in
+// every theme the dashboard's own theme picker offers (read from the
+// picker), the text of every banner, badge and chip meets WCAG AA: 4.5:1,
+// 3:1 for large text and for an icon glyph.
+test("invariants: redesign-final-contrast: every banner, badge and chip's text meets WCAG AA in every theme the picker offers", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/stacks`);
+    const themes = await page.$$eval(
+      "[data-kp-theme-picker] [data-kp-theme]",
+      (bs) =>
+        [
+          ...new Set(bs.map((b) => b.getAttribute("data-kp-theme") ?? "")),
+        ].filter(Boolean),
+    );
+    assert.ok(themes.length > 1, `the picker offers ${themes.length} themes`);
+    /** @type {Set<string>} */
+    const bad = new Set();
+    for (const path of AUDIT_PAGES) {
+      await page.goto(`${BASE}${path}`);
+      await page.waitForTimeout(1200);
+      const found = await page.evaluate((themes) => {
+        const style = document.createElement("style");
+        style.textContent =
+          "*,*::before,*::after{transition:none!important;animation:none!important}";
+        document.head.append(style);
+        const cv = document.createElement("canvas").getContext("2d", {
+          willReadFrequently: true,
+        });
+        /** Any CSS colour through a canvas pixel. @param {string} c */
+        const rgba = (c) => {
+          if (!cv) return [0, 0, 0, 1];
+          cv.clearRect(0, 0, 1, 1);
+          cv.fillStyle = "rgba(0, 0, 0, 0)";
+          cv.fillStyle = c;
+          cv.fillRect(0, 0, 1, 1);
+          const d = cv.getImageData(0, 0, 1, 1).data;
+          return [d[0], d[1], d[2], d[3] / 255];
+        };
+        /** @param {number[]} c */
+        const lum = (c) => {
+          const [r, g, b] = c.slice(0, 3).map((v) => {
+            const x = v / 255;
+            return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        };
+        /** The opaque colour behind an element. @param {Element} el */
+        const behind = (el) => {
+          /** @type {number[][]} */
+          const layers = [];
+          for (
+            let e = /** @type {Element | null} */ (el);
+            e;
+            e = e.parentElement
+          ) {
+            const c = rgba(getComputedStyle(e).backgroundColor);
+            if (c[3] > 0) layers.push(c);
+            if (c[3] >= 1) break;
+          }
+          if (!layers.length || layers[layers.length - 1][3] < 1)
+            layers.push(rgba(getComputedStyle(document.body).backgroundColor));
+          let out = [255, 255, 255];
+          for (const c of layers.reverse())
+            out = out.map((v, i) => v * (1 - c[3]) + c[i] * c[3]);
+          return out;
+        };
+        const SEL =
+          ".kp-alert, .nx-attention__item, .kp-badge, [class*='badge'], .nx-count, [class*='chip']";
+        /** @type {string[]} */
+        const out = [];
+        const html = document.documentElement;
+        const was = html.getAttribute("data-theme");
+        for (const theme of themes) {
+          html.setAttribute("data-theme", theme);
+          for (const box of document.querySelectorAll(SEL)) {
+            if (box.closest(".kp-button, dialog:not([open])")) continue;
+            const w = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+            for (let n = w.nextNode(); n; n = w.nextNode()) {
+              const el = /** @type {HTMLElement} */ (n.parentElement);
+              const t = n.textContent?.trim();
+              if (!t || !el.checkVisibility({ visibilityProperty: true }))
+                continue;
+              if (el.closest(".kp-button")) continue;
+              const cs = getComputedStyle(el);
+              const fg = rgba(cs.color);
+              const bg = behind(el);
+              const f = fg
+                .slice(0, 3)
+                .map((v, i) => v * fg[3] + bg[i] * (1 - fg[3]));
+              const l1 = lum(f);
+              const l2 = lum(bg);
+              const r = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+              const px = parseFloat(cs.fontSize);
+              const large =
+                px >= 24 || (px >= 18.66 && Number(cs.fontWeight) >= 700);
+              const glyph =
+                t.length <= 2 && !!el.closest("[aria-hidden='true']");
+              const need = large || glyph ? 3 : 4.5;
+              if (r < need)
+                out.push(
+                  `${theme}: ${(box.getAttribute("class") ?? "").split(" ")[0]} "${t.slice(0, 30)}" ${r.toFixed(2)}:1 (needs ${need})`,
+                );
+            }
+          }
+        }
+        if (was) html.setAttribute("data-theme", was);
+        else html.removeAttribute("data-theme");
+        style.remove();
+        return out;
+      }, themes);
+      for (const f of found) bad.add(f);
+    }
+    assert.deepEqual([...bad], [], `${themes.length} themes`);
+  } finally {
+    await browser.close();
+  }
+});

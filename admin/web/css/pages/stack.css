@@ -192,9 +192,11 @@
 }
 
 /* ---------- small parts: foot, kv, hint (dot and chip are ui.js's) ---------- */
+/* Claude's chip: its colour on the border, its words in the text colour
+   (a chart token is for marks, not text: it fell under 4.5:1). */
 .sh-page .nx-chip--claude {
   border-color: color-mix(in oklab, var(--chart-2) 60%, var(--border));
-  color: var(--chart-2);
+  color: var(--foreground);
 }
 .sh-foot {
   display: flex;

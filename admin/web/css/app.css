@@ -3629,8 +3629,10 @@ a.nx-kpi:hover {
   background: var(--nx-bad);
   color: var(--destructive-foreground);
 }
+/* The description reads in the page's text colour: muted on the red tint
+   fell under 4.5:1 in some themes (titanium). */
 .nx-attention__item.kp-alert--destructive .nx-attention__text span {
-  color: var(--muted-foreground);
+  color: var(--foreground);
 }
 .nx-attention__text strong {
   display: block;
@@ -4338,12 +4340,19 @@ details.nx-card--fold[open] > summary::before {
   color: var(--destructive-foreground, var(--background));
   border-color: transparent;
 }
+/* redesign-final (contrast in every theme): a status chip is text on its
+   status plate, the kp-themes pairing that holds in every theme (the
+   *-foreground tokens are made for their plate, not for a card). */
 .nx-chip--ok {
-  color: var(--nx-ok);
+  background: var(--success);
+  color: var(--success-foreground);
+  border-color: transparent;
 }
 .nx-chip--info,
 .nx-chip--live {
-  color: var(--nx-info);
+  background: var(--info);
+  color: var(--info-foreground);
+  border-color: transparent;
 }
 .nx-chip--dot::before {
   content: "";

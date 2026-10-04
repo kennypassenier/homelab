@@ -11537,3 +11537,31 @@ test("invariants: redesign-final-m1: Stacks is the approved demo: no Inbox banne
     await browser.close();
   }
 });
+
+// Low: Settings had the H1 "Settings" under the nav's and the breadcrumb's
+// "Host settings"; one name.
+test("invariants: redesign-final-low-settings: the Host settings page, its breadcrumb and the System tile that opens it use one name", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/settings`);
+    const h1 = page.locator("#page h1");
+    await h1.waitFor({ timeout: 10000 });
+    const crumbs = await page.locator("#crumbs").innerText();
+    assert.equal((await h1.innerText()).trim(), "Host settings");
+    assert.match(crumbs, /Host settings\s*$/);
+    await page.goto(`${BASE}/system`);
+    await page.waitForTimeout(800);
+    assert.ok(
+      (await page.locator('#page a[href="/settings"]').allInnerTexts()).some(
+        (t) => /Host settings/.test(t),
+      ),
+      "System names it otherwise",
+    );
+  } finally {
+    await browser.close();
+  }
+});

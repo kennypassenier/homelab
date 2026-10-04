@@ -418,8 +418,10 @@ export function mount(root, opts = {}) {
   );
   drivable(discard, DISCARD);
   drivable(write, CHECK_WRITE);
+  // redesign-final Low: one name, the nav's and the breadcrumb's
+  // (FLOWS.md: System ▸ Host settings).
   const head = pageHeader({
-    title: "Settings",
+    title: "Host settings",
     desc: "How this homelab is set up: the working copy it applies from, who can sign in, and every key of the host's host.toml. Edits are staged, checked and written in one go.",
     titleMeta: [h("span", { class: "cf-live" }, ago)],
     actions: [stagedChip, discard],
@@ -571,7 +573,7 @@ export function mount(root, opts = {}) {
   const hsHead = h(
     "div",
     { class: "st-hs-head", id: "host-settings" },
-    h("div", null, h("h2", null, "Host settings"), hsDesc),
+    h("div", null, h("h2", null, "Host configuration"), hsDesc),
     h("div", { class: "cf-row" }, showSeg.el, foldAll),
   );
   const groupBox = h(

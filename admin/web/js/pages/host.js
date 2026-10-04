@@ -837,8 +837,12 @@ export function mount(root, ctx) {
     } else {
       lineFacts = r.body.facts;
       lineOk = !!r.body.ok;
-      pings.push(r.body.ms);
-      if (pings.length > PINGS) pings.shift();
+      // redesign-final Low: the dashboard keeps the last twelve round
+      // trips it measured, so the strip opens full (the demo's twelve).
+      const recent = Array.isArray(r.body.recent) ? r.body.recent : null;
+      if (recent && recent.length) pings.splice(0, pings.length, ...recent);
+      else pings.push(r.body.ms);
+      while (pings.length > PINGS) pings.shift();
       pingOut.textContent = r.body.ok
         ? `Answered in ${r.body.ms} ms: ${r.body.message}`
         : `No answer after ${r.body.ms} ms: ${r.body.message}`;

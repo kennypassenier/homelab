@@ -935,6 +935,11 @@ pub async fn run_demo(
         s.host_build = Some("demo host in homelab-admin".into());
         s.link_error = None;
     }
+    // redesign-final Low: the Host page's latency strip opens with the last
+    // twelve round trips, as a dashboard that has run a while has them.
+    for ms in [2, 1, 1, 2, 3, 1, 1, 2, 1, 1, 2] {
+        crate::shell::parity::keep_ping(ms);
+    }
     tracing::warn!(
         "HOMELAB_ADMIN_DEMO_HOST is set: a demo host answers; no real host is contacted"
     );

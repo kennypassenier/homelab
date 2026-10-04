@@ -665,10 +665,30 @@ async fn templates(State(c): State<ParityCtx>) -> Response {
 }
 
 /// `homelab ping`: the round trip, the address and where it came from.
+/// redesign-final Low (the Host page's latency strip drew one dot where the
+/// demo draws twelve): the last [`PINGS_KEPT`] round trips this dashboard
+/// measured, newest last, so the strip opens full. Bounded, never grows.
+pub const PINGS_KEPT: usize = 12;
+static RECENT_PINGS: std::sync::Mutex<std::collections::VecDeque<u64>> =
+    std::sync::Mutex::new(std::collections::VecDeque::new());
+
+/// Keep one round trip (ms) and answer the kept ones, oldest first.
+pub fn keep_ping(ms: u64) -> Vec<u64> {
+    let mut q = RECENT_PINGS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    q.push_back(ms);
+    while q.len() > PINGS_KEPT {
+        q.pop_front();
+    }
+    q.iter().copied().collect()
+}
+
 async fn ping(State(c): State<ParityCtx>) -> Response {
     let t = std::time::Instant::now();
     let r = ask(&c, Command::Ping, 15).await;
     let ms = t.elapsed().as_millis() as u64;
+    let recent = keep_ping(ms);
     let s = c.shared.read().await;
     let facts = serde_json::json!({
         "address": s.host_addr,
@@ -682,10 +702,12 @@ async fn ping(State(c): State<ParityCtx>) -> Response {
     match r {
         Ok(r) => Json(serde_json::json!({
             "ok": r.ok, "message": r.message, "ms": ms, "facts": facts, "measured_at": now_s(),
+            "recent": recent,
         }))
         .into_response(),
         Err(e) => Json(serde_json::json!({
             "ok": false, "message": e, "ms": ms, "facts": facts, "measured_at": now_s(),
+            "recent": recent,
         }))
         .into_response(),
     }
@@ -1013,5 +1035,23 @@ mod fix_219_with_repo_drift_tests {
         let list = got.as_array().unwrap();
         assert_eq!(list[0]["drift_diffable"], serde_json::json!(false));
         assert!(list[0].get("drift_stack").is_none());
+    }
+}
+
+#[cfg(test)]
+mod ping_tests {
+    use super::*;
+
+    // redesign-final Low: the latency strip's history is the last twelve
+    // round trips, oldest first, never more.
+    #[test]
+    fn redesign_final_the_ping_history_keeps_the_last_twelve() {
+        let mut last = Vec::new();
+        for ms in 0..20 {
+            last = keep_ping(ms);
+        }
+        assert_eq!(last.len(), PINGS_KEPT);
+        assert_eq!(last.last(), Some(&19));
+        assert_eq!(last.first(), Some(&8));
     }
 }

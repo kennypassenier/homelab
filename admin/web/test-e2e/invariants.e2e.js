@@ -11705,3 +11705,31 @@ test("invariants: redesign-final-extra-live-selection: on every page with select
     await browser.close();
   }
 });
+
+// Low: Host › Connection's latency strip drew one dot ("last 1 ping")
+// where the demo draws twelve: the dashboard keeps its last twelve.
+test("invariants: redesign-final-low-ping: the Host page's latency strip opens with the last twelve pings", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/host`);
+    await page.waitForFunction(
+      () => document.querySelectorAll("#host-lat i").length > 0,
+      null,
+      { timeout: 10000 },
+    );
+    assert.equal(await page.locator("#host-lat i").count(), 12);
+    assert.match(
+      await page
+        .locator("#page .nx-card__foot")
+        .allInnerTexts()
+        .then((t) => t.join(" ")),
+      /last 12 pings/,
+    );
+  } finally {
+    await browser.close();
+  }
+});

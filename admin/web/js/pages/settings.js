@@ -604,7 +604,8 @@ export function mount(root, opts = {}) {
         NAV,
         id,
         {
-          href: `#${id}`,
+          // A same-site path with the section's anchor (never a bare #).
+          href: `${location.pathname}#${id}`,
           "aria-current": String(id === current),
           onclick: (/** @type {Event} */ e) => {
             e.preventDefault();

@@ -1784,6 +1784,21 @@ test("invariants: every link on every drivable page has an absolute http(s) href
           (a) => a.getAttribute("href") ?? "",
         ),
       );
+      // A link to a section of this page names a section that is there.
+      const lost = await page.evaluate(() =>
+        [...document.querySelectorAll("a[href*='#']")]
+          .map((a) => new URL(/** @type {HTMLAnchorElement} */ (a).href))
+          .filter(
+            (u) =>
+              u.origin === location.origin &&
+              u.pathname === location.pathname &&
+              u.hash.length > 1 &&
+              !document.getElementById(decodeURIComponent(u.hash.slice(1))),
+          )
+          .map((u) => u.hash),
+      );
+      for (const f of lost)
+        bad.push(`${p}: ${f} points at a section this page does not have`);
       // A repository address shown as text reads as a link and is not one
       // ("en de links werken niet"): it must be a real, absolute link.
       const deadText = await page.evaluate(() => {

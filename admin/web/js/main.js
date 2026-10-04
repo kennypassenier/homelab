@@ -345,6 +345,19 @@ document.addEventListener("click", (e) => {
     return;
   if (/\.[a-z0-9]+$/i.test(url.pathname)) return;
   e.preventDefault();
+  // A link to a section of the page already shown scrolls to it; it does
+  // not draw the page again.
+  if (
+    url.hash &&
+    url.pathname === location.pathname &&
+    url.search === location.search
+  ) {
+    history.replaceState(null, "", url.hash);
+    document
+      .getElementById(decodeURIComponent(url.hash.slice(1)))
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
   navigate(url.pathname + url.search + url.hash);
 });
 window.addEventListener("popstate", render);

@@ -544,7 +544,8 @@ function mountNow(body, x) {
   const allJobs = h(
     "a",
     {
-      href: "#jobs",
+      // This page's own path with the section's anchor (never a bare #).
+      href: `${location.pathname}${location.search}#jobs`,
       class: "link",
       title: "Every job this dashboard ran, newest first",
     },

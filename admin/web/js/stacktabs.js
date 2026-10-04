@@ -1,6 +1,7 @@
 // Pure helpers for the stack page's tabs (feat-stacks-1): which history
 // entries, incidents and manual checks belong to one stack.
 
+import { nameKey } from "./namekey.js";
 /** The host's operations on one stack, as the first word(s) of their name. */
 const VERBS = [
   "deploy",
@@ -33,12 +34,12 @@ const VERBS = [
  * @param {string} stack
  * @param {string} [label]
  */
+
 export function aboutStack(subject, stack, label) {
   if (!subject) return false;
   const verbs = label ? [label] : VERBS;
-  return verbs.some(
-    (v) => subject === `${v}-${stack}` || subject === `${v} ${stack}`,
-  );
+  const s = nameKey(subject);
+  return verbs.some((v) => s === nameKey(`${v}-${stack}`));
 }
 
 /**

@@ -639,7 +639,7 @@ pub fn activity_demo_incidents(history: &[homelab_core::history::HistoryEntry]) 
                 ok: false,
                 subject: Some(s),
                 ..
-            } => Some((*end, format!("{end}-{s}"))),
+            } => Some((*end, homelab_core::names::incident_name(*end, s))),
             _ => None,
         })
         .collect();

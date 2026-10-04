@@ -65,7 +65,12 @@ pub async fn write_bundle(
     events: &[PipelineEvent],
     versions: &str,
 ) -> Result<String, CoreError> {
-    let dir = format!("{}/incidents/{}-{}", state_dir, ts_unix, report.op);
+    // redesign-final: the op's key, so the dashboard can always open it.
+    let dir = format!(
+        "{}/incidents/{}",
+        state_dir,
+        crate::names::incident_name(ts_unix, &report.op)
+    );
 
     let report_json =
         serde_json::to_string_pretty(report).map_err(|e| CoreError::State(e.to_string()))?;

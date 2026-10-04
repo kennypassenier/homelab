@@ -8,6 +8,7 @@
 
 import { isSecretAudit } from "./activity.js";
 import { formatClock, formatDay, humanDuration } from "./format.js";
+import { nameKey } from "./namekey.js";
 
 /**
  * @typedef {import("./activity.js").Entry} Entry
@@ -340,7 +341,7 @@ export function openFailures(rows) {
 export function incidentFor(r, names) {
   if (r.entry.kind !== "op") return null;
   const e = r.entry;
-  const subj = (e.subject ?? e.label).replace(/\s+/g, "-");
+  const subj = nameKey(e.subject ?? e.label);
   let best = null;
   let gap = Infinity;
   for (const n of names) {
@@ -348,11 +349,11 @@ export function incidentFor(r, names) {
     if (!m) continue;
     const at = Number(m[1]);
     const d = Math.abs(at - (e.end || e.start));
-    // A bundle's operation may carry a space where the entry's subject has
-    // a hyphen ("update kp-soft" / "update-kp-soft"): compared hyphenated.
-    const op = m[2].replace(/\s+/g, "-");
+    // Names compare by their key (namekey.js): "update kp-soft" is
+    // "update-kp-soft".
+    const op = nameKey(m[2]);
     const about =
-      op === subj || (r.stack != null && op.endsWith(`-${r.stack}`));
+      op === subj || (r.stack != null && op.endsWith(`-${nameKey(r.stack)}`));
     if (about && d <= 3600 && d < gap) {
       best = n;
       gap = d;

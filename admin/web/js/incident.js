@@ -26,7 +26,7 @@ export async function openIncident(name) {
   });
   const r = await fetchJson(
     `/data/incidents/${encodeURIComponent(name)}`,
-    `incident ${name}`,
+    `the incident bundle of ${incidentTitle(name).replace(/^Failed /, "")}`,
   );
   if (!r.ok) {
     body.replaceChildren(errorBox(r.error));

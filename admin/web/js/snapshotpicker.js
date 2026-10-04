@@ -7,6 +7,7 @@
 // `actiondialog.js` only draws what this returns.
 
 import { formatDateTime } from "./format.js";
+import { sameName } from "./namekey.js";
 
 /**
  * @typedef {{id: string, short_id: string, time: number,
@@ -118,7 +119,7 @@ export function formatDateTimeBrussels(unixSeconds) {
  */
 export function resolveSnapshotOwner(repos, appValue) {
   if (appValue) {
-    const match = repos.find((r) => r.owner === appValue);
+    const match = repos.find((r) => sameName(r.owner, appValue));
     if (match) return match;
   }
   return repos.length === 1 ? repos[0] : null;

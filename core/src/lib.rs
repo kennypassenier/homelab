@@ -25,6 +25,7 @@ pub mod logring;
 pub mod manifest;
 #[cfg(any(test, feature = "test-support"))]
 pub mod mock;
+pub mod names;
 pub mod native;
 pub mod notify;
 pub mod oplock;

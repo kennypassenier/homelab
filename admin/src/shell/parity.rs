@@ -626,7 +626,7 @@ async fn incident(State(c): State<ParityCtx>, UrlPath(name): UrlPath<String>) ->
         return refused(
             StatusCode::BAD_REQUEST,
             Refusal::new(
-                format!("incident {name:?}"),
+                "this incident bundle".to_string(),
                 "not a bundle name",
                 "pick one from the incidents list",
             ),
@@ -641,7 +641,7 @@ async fn incident(State(c): State<ParityCtx>, UrlPath(name): UrlPath<String>) ->
         Ok(r) => refused(
             StatusCode::NOT_FOUND,
             Refusal::new(
-                format!("incident {name}"),
+                "this incident bundle".to_string(),
                 r.message,
                 "pick one from the incidents list",
             ),

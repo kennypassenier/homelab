@@ -295,7 +295,7 @@ impl Actions {
         }
         for s in &pin_stacks {
             let subject = format!(
-                "Update {} (Update flow) [redesign-flows-6]",
+                "Update {} (Update flow)",
                 items
                     .iter()
                     .filter(|i| &i.stack == s && i.kind == ItemKind::Pin)
@@ -434,7 +434,7 @@ impl Actions {
         let mut back_words = Vec::new();
         for s in &pin_stacks {
             let subject = format!(
-                "Roll back {} (Update flow safety net: not healthy within 2 min) [redesign-flows-6]",
+                "Roll back {} (Update flow safety net: not healthy within 2 min)",
                 items
                     .iter()
                     .filter(|i| &i.stack == s && i.kind == ItemKind::Pin)

@@ -374,3 +374,17 @@ summarised here for the corrections record.
 7. **Hoe en wanneer meten we dat het werkt.** Measured 2026-10-04 in a throwaway clone: a merge undoing the C4 fix was refused naming its case; a clean merge passed. Next: the next page branch merged into redesign-371.
 8. **Fallback.** A merge that cannot wait for its cases is made with `--no-verify` as a conscious act; the release gate's full run still runs every case.
 9. **Wanneer herzien we de maatregel.** At the 3.71.0 retrospective, with the merges' measured hook durations.
+
+## Correction · redesign-final-23 — a live update rebuilt a ticked row
+
+**Draft — awaiting Kenny.**
+
+1. **Wat ging er mis.** On Stacks a live fleet push rebuilt a table row whose data had moved: the row lost its hover, and only the page's own tick set kept the tick; the case "Stacks keeps its ticks across Table/Cards and live updates" was red on the integration branch for it.
+2. **Welke poort liet het door.** The page compared a row's whole content and replaced the node when anything in it changed; the one case that held it was page-specific, and the demo host pushed identical data every 5 s, so a rebuild only showed after a cursor move.
+3. **Waar dezelfde fout nog zit.** Any page that draws selectable rows from live data. The generic check found ten such pages from the code (Stacks, Deploy all changes, the Update flow three ways, Host log, Console four ways); only Stacks had the fault.
+4. **Hoe voorkomen we herhaling.** A row whose data moved keeps its node: its contents are renewed in place and the focus inside is given back (Stacks' `morph`). The generic check `redesign-final-extra-live-selection` visits every page the router knows plus their query links, ticks two rows, focuses one, waits two live pushes and refuses a lost tick, a lost focus or a rebuilt row; the demo host's memory now moves a little with every push, as a real container's does, so the check sees what a real host sends.
+5. **Kost.** About 4 min of whole-screen time at the gate (most of it the crawl over ~60 addresses).
+6. **Handhaving.** Code: `redesign-final-extra-live-selection` (invariants.e2e.js), `demo_usage` (admin/src/shell/demo.rs).
+7. **Hoe en wanneer meten we dat het werkt.** Measured 2026-10-04: with Stacks' row fix reverted the check failed naming two rebuilt rows (242 s); with the fix it passed (242 s). Next: the 3.71.0 gate's full run.
+8. **Fallback.** A page whose rows truly change identity (a different item) may rebuild that row; the check ticks rows whose identity stays.
+9. **Wanneer herzien we de maatregel.** At the 3.71.0 retrospective, with the gate's measured duration of the check.

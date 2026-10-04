@@ -794,10 +794,14 @@ fn demo_vmid(repo: &std::path::Path, name: &str, i: usize) -> u16 {
 /// redesign-host-3: made-up but plausible use per guest (the Host page's
 /// memory bars and CPU column), the same in the stack and the host's
 /// per-guest list.
-fn demo_usage(i: usize) -> homelab_proto::GuestUsage {
+/// `push`: the fleet push it is for (one every 5 s). redesign-final (extra):
+/// memory in use moves a little with every push, as a real container's does,
+/// so a page that rebuilds a row whose data changed shows it in a test (the
+/// row keeps its node, its ticks and its focus: redesign-final-extra).
+fn demo_usage(i: usize, push: u64) -> homelab_proto::GuestUsage {
     homelab_proto::GuestUsage {
         cpu_permille: [30, 60, 20, 110, 10, 40][i % 6],
-        ram_used_mb: [512, 1536, 768, 2048, 1024, 640][i % 6],
+        ram_used_mb: [512, 1536, 768, 2048, 1024, 640][i % 6] + (push % 4) as u32,
         ram_max_mb: [1024, 2048, 1024, 4096, 2048, 1024][i % 6],
         uptime_s: 86_400 * (i as u64 + 1),
     }
@@ -868,7 +872,7 @@ pub async fn run_demo(
                     .enumerate()
                     .map(|(i, name)| homelab_proto::GuestUse {
                         vmid: demo_vmid(&repo, name, i),
-                        usage: demo_usage(i),
+                        usage: demo_usage(i, now_s() / 5),
                     })
                     .chain(std::iter::once(homelab_proto::GuestUse {
                         vmid: 113,
@@ -913,7 +917,7 @@ pub async fn run_demo(
                     enabled: true,
                     // redesign-host-3: made-up but plausible use per guest
                     // (the Host page's memory bars and CPU column).
-                    usage: Some(demo_usage(i)),
+                    usage: Some(demo_usage(i, now_s() / 5)),
                     applied_source: None,
                     component_digests: Default::default(),
                     native: false,

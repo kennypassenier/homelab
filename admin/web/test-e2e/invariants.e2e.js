@@ -11565,3 +11565,143 @@ test("invariants: redesign-final-low-settings: the Host settings page, its bread
     await browser.close();
   }
 });
+
+// redesign-final extra (coordinator, 2026-10-04): Stacks' live update
+// rebuilt a row, so its hover went and its tick nearly did — a fault class.
+// On every page the router knows (the catalog's addresses and every
+// control's home, the stack hub's tabs on kp-soft — found from the code,
+// not listed here) that draws selectable rows: tick two, focus the first,
+// let the live data refresh, and the ticks, the focus and the row nodes
+// must all survive (rows are updated in place by their stable id).
+test("invariants: redesign-final-extra-live-selection: on every page with selectable rows a live refresh keeps the ticks, the focus and the row nodes", async (t) => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    const { cat, all } = await catalogOf(page);
+    const paths = new Set([
+      ...cat.addresses.map((/** @type {string} */ a) => `/${a}`),
+      ...all.map((c) => c.home).filter((h) => !/[<{]/.test(h)),
+      ...(cat.stack_tabs ?? []).map(
+        (/** @type {string} */ t) => `/stacks/kp-soft/${t}`,
+      ),
+    ]);
+    // A selectable row: any enabled, visible, labelled checkbox that is not
+    // a switch, outside a table head, the header and a toolbar; its row is
+    // the nearest row-like box (a table row, a list item, a card, a label).
+    const ROW =
+      "tr, li, [role=listitem], [role=row], .sk-card, [data-stack], [data-kp-row-key], label";
+    /** @type {Set<string>} */
+    const landed = new Set();
+    /** @type {string[]} */
+    const bad = [];
+    /** @type {string[]} */
+    const checked = [];
+    // Each page's own links with a query (a variant of a known page: the
+    // Update flow's ?all=1, a view or a section) are visited too, once.
+    const todo = [...paths].sort();
+    for (let i = 0; i < todo.length && i < 150; i++) {
+      const path = todo[i];
+      await page.goto(`${BASE}${path}`);
+      await page.waitForTimeout(1500);
+      const here = await page.evaluate(
+        () => location.pathname + location.search,
+      );
+      if (landed.has(here)) continue;
+      landed.add(here);
+      for (const href of await page.evaluate(() =>
+        [...document.querySelectorAll('#page a[href^="/"]')]
+          .map((a) => a.getAttribute("href") ?? "")
+          .filter((x) => x.includes("?") && !x.includes("#")),
+      ))
+        if (!paths.has(href)) {
+          paths.add(href);
+          todo.push(href);
+        }
+      // The rows a person can tick: in the open dialog when one is on top
+      // (Deploy all changes), else on the page.
+      const labels = await page.evaluate((ROW) => {
+        document
+          .querySelectorAll("[data-probe-root]")
+          .forEach((e) => e.removeAttribute("data-probe-root"));
+        const ds = [...document.querySelectorAll("dialog[open]")];
+        const root = ds[ds.length - 1] ?? document.getElementById("page");
+        root?.setAttribute("data-probe-root", "");
+        const boxes = [
+          ...(root?.querySelectorAll(
+            "input[type=checkbox]:not([role=switch]):not(:disabled)",
+          ) ?? []),
+        ].filter((b) => {
+          const r = b.closest(ROW);
+          return (
+            r &&
+            !b.closest("thead, header, .nx-tb") &&
+            /** @type {HTMLElement} */ (b).offsetParent !== null &&
+            b.getAttribute("aria-label")
+          );
+        });
+        return boxes.slice(0, 2).map((b) => b.getAttribute("aria-label"));
+      }, ROW);
+      if (process.env.INVARIANTS_PROGRESS)
+        t.diagnostic(`${path} → ${here}: ${labels.length} selectable`);
+      if (labels.length === 0) continue;
+      checked.push(here);
+      for (const l of labels) {
+        const box = page
+          .locator(`[data-probe-root] input[aria-label="${l}"]`)
+          .first();
+        if (!(await box.isChecked())) await box.click();
+      }
+      await page
+        .locator(`[data-probe-root] input[aria-label="${labels[0]}"]`)
+        .first()
+        .focus();
+      await page.evaluate(
+        ({ ROW, labels }) => {
+          for (const l of labels) {
+            const b = document.querySelector(
+              `[data-probe-root] input[aria-label="${l}"]`,
+            );
+            const r = /** @type {any} */ (b?.closest(ROW));
+            if (r) r.__kept = true;
+          }
+        },
+        { ROW, labels },
+      );
+      // A live refresh: the demo host pushes the fleet every 5 s and the
+      // pages re-read on it; two pushes, so every page's refresh has come
+      // (only pages with selectable rows wait).
+      await page.waitForTimeout(11000);
+      const after = await page.evaluate(
+        ({ ROW, labels }) =>
+          labels.map((l) => {
+            const b = /** @type {HTMLInputElement | null} */ (
+              document.querySelector(
+                `[data-probe-root] input[aria-label="${l}"]`,
+              )
+            );
+            return {
+              l,
+              ticked: !!b?.checked,
+              kept: !!(/** @type {any} */ (b?.closest(ROW))?.__kept),
+              focus: document.activeElement?.getAttribute("aria-label") === l,
+            };
+          }),
+        { ROW, labels },
+      );
+      for (const a of after) {
+        if (!a.ticked) bad.push(`${here}: "${a.l}" lost its tick`);
+        if (!a.kept) bad.push(`${here}: "${a.l}"'s row was rebuilt`);
+      }
+      if (!after[0].focus) bad.push(`${here}: the focus left "${after[0].l}"`);
+      await page.keyboard.press("Escape");
+    }
+    t.diagnostic(`pages with selectable rows: ${checked.join(", ")}`);
+    assert.ok(checked.length >= 1, "no page with selectable rows was found");
+    assert.deepEqual(bad, [], `pages checked: ${checked.join(", ")}`);
+  } finally {
+    await browser.close();
+  }
+});

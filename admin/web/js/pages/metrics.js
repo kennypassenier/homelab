@@ -623,7 +623,9 @@ export function mount(root, ctx) {
           { label: "Trend", cls: "mk-hide-phone" },
           { label: "Pending", sort: "number", cls: "mk-n" },
           { label: "Trend", cls: "mk-hide-phone" },
-          { label: "Reallocated", sort: "number", cls: "mk-n" },
+          // A soft hyphen: on a phone the header breaks as "Real-located"
+          // instead of pushing the table 48 px past its card.
+          { label: "Real\u00ADlocated", sort: "number", cls: "mk-n" },
           { label: "Powered on", sort: "number", cls: "mk-n mk-hide-phone" },
         ],
       });

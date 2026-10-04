@@ -287,13 +287,15 @@ main.mk-page > .mk-failed:empty {
   }
   .mk-table .kp-table th,
   .mk-table .kp-table td {
-    padding-inline: 6px;
+    padding-inline: 3px;
   }
   /* A header wraps between words, never inside one ("Reallocated" broke
      per letter; layout audit). */
   .mk-table .kp-table th {
     white-space: normal;
     overflow-wrap: normal;
+    word-break: normal;
+    hyphens: manual;
   }
   .mk-table .nx-share {
     grid-template-columns: minmax(0, 1fr);

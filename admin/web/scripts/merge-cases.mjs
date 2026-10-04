@@ -154,10 +154,30 @@ export function affected(changed, x) {
     });
   });
   const names = cases.map((c) => c.name);
+  const pat = (/** @type {string[]} */ ns) =>
+    ns.length ? `^(?:${ns.map(escape).join("|")})$` : "";
+  // redesign-final-50: two groups for the e2e queue's two slots, the walks
+  // first, each to the lighter group. Weights measured 2026-10-04: the
+  // layout walk 229 s, a page case about 5 s (20 page cases ran in 114 s
+  // with the build and the demo host's start); a first split by 16 put 5
+  // page cases beside the walk and its group took 317 s.
+  /** @type {{w: number, n: string[]}[]} */
+  const g = [
+    { w: 0, n: [] },
+    { w: 0, n: [] },
+  ];
+  for (const c of [...cases].sort(
+    (a, b) => Number(!!(b.walk || b.style)) - Number(!!(a.walk || a.style)),
+  )) {
+    const to = g[0].w <= g[1].w ? g[0] : g[1];
+    to.w += c.walk || c.style ? 45 : 1;
+    to.n.push(c.name);
+  }
   return {
     pages: [...pages].sort(),
     cases: names,
-    pattern: names.length ? `^(?:${names.map(escape).join("|")})$` : "",
+    pattern: pat(names),
+    groups: g.map((x) => pat(x.n)).filter(Boolean),
   };
 }
 

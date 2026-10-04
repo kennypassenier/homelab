@@ -84,22 +84,38 @@ if [ -z "$pattern" ]; then
 fi
 echo "pre-${mode}: $count whole-screen cases open the pages this ${mode} changes ($pages)"
 
-log=$(mktemp)
-# A port of its own (another run, a gate, may hold the default one).
-if [ -z "${INVARIANTS_PORT:-}" ]; then
-  INVARIANTS_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
-  export INVARIANTS_PORT
-fi
 runner=(scripts/invariants-run.sh)
 slot="$HOME/.cache/claude-build-scratch/e2e-slot.sh"
 [ -x "$slot" ] && runner=("$slot" scripts/invariants-run.sh)
+free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
+# One run of the cases matching $1 into log $2, on a port of its own
+# (another run, a gate, may hold the default one). A hook runs with GIT_DIR /
+# GIT_INDEX_FILE set for this repository: the run's own fixture repository
+# (git init, git commit) must not see them, or its commit lands on the
+# branch being committed (it did, in a proof).
+run_cases() {
+  env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
+    -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+    INVARIANTS_PORT="${INVARIANTS_PORT:-$(free_port)}" \
+    INVARIANTS_ONLY="$1" "${runner[@]}" </dev/null >"$2" 2>&1
+}
+# redesign-final-50 (Kenny, 2026-10-04: a merge check under 5 min): a merge
+# splits its cases over the e2e queue's two slots, the layout walk in one
+# group, its pages' cases in the other, both at once. A commit runs one.
+mapfile -t groups < <(printf '%s' "$plan" | python3 -c 'import json,sys; [print(p) for p in json.load(sys.stdin)["groups"]]')
+log=$(mktemp)
 rc=0
-# A hook runs with GIT_DIR / GIT_INDEX_FILE set for this repository: the
-# run's own fixture repository (git init, git commit) must not see them,
-# or its commit lands on the branch being committed (it did, in a proof).
-env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
-  -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
-  INVARIANTS_ONLY="$pattern" "${runner[@]}" </dev/null >"$log" 2>&1 || rc=$?
+if [ "$mode" != commit ] && [ "${#groups[@]}" -eq 2 ] && [ -z "${INVARIANTS_PORT:-}" ]; then
+  log2=$(mktemp)
+  run_cases "${groups[0]}" "$log" & p1=$!
+  run_cases "${groups[1]}" "$log2" & p2=$!
+  wait "$p1" || rc=$?
+  wait "$p2" || rc=$?
+  cat "$log2" >>"$log"
+  rm -f "$log2"
+else
+  run_cases "$pattern" "$log" || rc=$?
+fi
 took=$(( $(date +%s) - t0 ))
 if [ "$rc" -ne 0 ]; then
   echo "$kind BLOCKED — whole-screen cases this ${mode} affects failed (${took} s):" >&2

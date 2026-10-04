@@ -116,3 +116,20 @@ test("invariants: themes", async () => {
     { name: "invariants: themes", paths: [], style: true },
   ]);
 });
+
+test("redesign-final-50: a merge's cases split into two groups for the two e2e slots, the walk alone beside the page cases", async () => {
+  const m = await plan([
+    "admin/web/js/pages/firewall.js",
+    "admin/web/js/ui.js",
+  ]);
+  assert.equal(m.groups.length, 2);
+  const [a, b] = m.groups.map((g) => new RegExp(g));
+  const walk = m.cases.filter(isWalk);
+  assert.equal(walk.length, 1);
+  assert.ok(a.test(walk[0]) !== b.test(walk[0]), "the walk in one group");
+  // Every case in exactly one group.
+  for (const c of m.cases) assert.ok(a.test(c) !== b.test(c), c);
+  // One case is one group.
+  const one = await plan(["admin/web/js/ui.js"], "commit");
+  assert.equal(one.groups.length, 1);
+});

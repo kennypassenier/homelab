@@ -22,12 +22,14 @@ unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_OBJECT_DIRECTORY
 
 workdir="$(mktemp -d)"
 server_pid=""
+bin=""
 cleanup() {
   if [ -n "$server_pid" ] && kill -0 "$server_pid" 2>/dev/null; then
     kill "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
   fi
   rm -rf "$workdir"
+  if [ -n "${bin:-}" ]; then rm -f "$bin"; fi
 }
 # redesign-final (coordinator, 2026-10-04: three orphaned demo dashboards
 # answered on 8099, 18099 and 18199): the server this run starts dies on
@@ -183,6 +185,12 @@ cargo build -p homelab-admin --features demo-host --quiet
 # The binary lands in cargo's target directory, which a global
 # ~/.cargo/config.toml (or CARGO_TARGET_DIR) may move out of the repository.
 target_dir=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+# redesign-final-46: every worktree shares that target directory, so the
+# binary there is whichever worktree built last; take this build's copy at
+# once (a hard link beside it, no copy of 160 MB; removed on every way out)
+# before another build replaces it.
+bin="$target_dir/debug/.invariants-$$-homelab-admin"
+ln -f "$target_dir/debug/homelab-admin" "$bin"
 
 # redesign-final (B): one injected clock for the demo host, every browser
 # context and the cases (admin/web/test-e2e/clock.js): no case depends on
@@ -201,7 +209,7 @@ HOMELAB_ADMIN_DEMO_STACKS="admin,kp-soft,gateway,films,notes,oldstack" \
 HOMELAB_ADMIN_DATA_DIR="$workdir/admin-data" \
 HOMELAB_ADMIN_GIT_REMOTE="$fixture_repo" \
 HOMELAB_ADMIN_GIT_BRANCH="main" \
-  "$target_dir"/debug/homelab-admin \
+  "$bin" \
     --config "$workdir/admin.toml" \
     --state-dir "$workdir/state" \
     --listen "$listen" \

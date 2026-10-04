@@ -38,7 +38,14 @@ if [ -n "${HOMELAB_CASES_RANGE:-}" ]; then
 else
   mapfile -t changed < <(git diff --cached --name-only -- admin/web)
 fi
-[ "${#changed[@]}" -gt 0 ] || exit 0
+if [ "${#changed[@]}" -eq 0 ]; then
+  # redesign-final-48: a kp-themes bump alone still runs the contrast case.
+  if [ -n "${HOMELAB_CASES_RANGE:-}" ]; then
+    git diff -U0 "$HOMELAB_CASES_RANGE" -- Cargo.lock | grep -q '^[-+].*chassis-rs' || exit 0
+  else
+    git diff --cached -U0 -- Cargo.lock | grep -q '^[-+].*chassis-rs' || exit 0
+  fi
+fi
 
 blocked() {
   echo "$kind BLOCKED — $1" >&2
@@ -52,6 +59,14 @@ command -v node >/dev/null 2>&1 \
 t0=$(date +%s)
 flag=()
 [ "$mode" = commit ] && flag=(--commit)
+# redesign-final-48: the 22-theme contrast case runs when a stylesheet or the
+# kp-themes pin (Cargo.lock's chassis-rs line) changed.
+if [ -n "${HOMELAB_CASES_RANGE:-}" ]; then
+  lockdiff=$(git diff -U0 "$HOMELAB_CASES_RANGE" -- Cargo.lock)
+else
+  lockdiff=$(git diff --cached -U0 -- Cargo.lock)
+fi
+grep -q '^[-+].*chassis-rs' <<<"$lockdiff" && flag+=(--kp)
 plan=$(cd admin/web && node --import ./test/support/kp-register.mjs scripts/merge-cases.mjs "${flag[@]}" "${changed[@]}") \
   || blocked "the merge's affected cases could not be worked out (above)." \
              "fix admin/web/scripts/merge-cases.mjs or the file it names."

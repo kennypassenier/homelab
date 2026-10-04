@@ -9907,6 +9907,9 @@ test("invariants: redesign-final-x7: the Live view switch is in the bar beside H
 // picker), the text of every banner, badge and chip meets WCAG AA: 4.5:1,
 // 3:1 for large text and for an icon glyph.
 test("invariants: redesign-final-contrast: every banner, badge and chip's text meets WCAG AA in every theme the picker offers", async () => {
+  // merge-cases: on style change (redesign-final-48, Kenny 2026-10-04: 22
+  // themes cost minutes; a commit or merge runs this only when a stylesheet
+  // or the kp-themes pin changed, the release gate always).
   const browser = await launch();
   try {
     const context = await browser.newContext({

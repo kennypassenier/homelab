@@ -379,7 +379,9 @@ cmd_invariants() {
 
   local changed=""
   if [ -z "${reason:-}" ]; then
-    changed=$(git diff --name-only "$base" -- admin/web admin/src scripts/invariants-run.sh 2>/dev/null || true)
+    # redesign-final-48: Cargo.lock too: a kp-themes bump (its chassis-rs
+    # pin) changes every theme, and the gate's run holds the contrast case.
+    changed=$(git diff --name-only "$base" -- admin/web admin/src scripts/invariants-run.sh Cargo.lock 2>/dev/null || true)
   fi
   # A failed smoke is never carried as a pass: its failing file stays
   # non-empty until a run passes.

@@ -78,7 +78,7 @@ export function closure(file, read) {
  * whose name is a template (`${…}`) is left out: it is one of a family the
  * gate runs whole.
  * @param {string} src a *.e2e.js file
- * @returns {{name: string, paths: string[]}[]}
+ * @returns {{name: string, paths: string[], style?: boolean}[]}
  */
 export function casesOf(src) {
   const starts = [...src.matchAll(/^test\(\s*\n?\s*(["`])((?:(?!\1).)+)\1/gm)];
@@ -93,10 +93,17 @@ export function casesOf(src) {
       for (const p of body.matchAll(/["'](\/[a-z][\w/?=&.,%-]*)["']/g))
         if (!p[1].startsWith("/data/") && !p[1].startsWith("/static/"))
           paths.add(p[1]);
+      // redesign-final-48: a case marked `// merge-cases: on style change`
+      // (the 22-theme contrast) runs only when a stylesheet or the
+      // kp-themes pin changed; the release gate runs it always.
+      const style = /\/\/ merge-cases: on style change\b/.test(body)
+        ? { style: true }
+        : {};
       // An address built at run time (`${BASE}/${path}` over a list of
       // pages) walks every page: a case for any shared change.
-      if (/\$\{BASE\}\/?\$\{/.test(body)) return { name: m[2], paths: [] };
-      return { name: m[2], paths: [...paths] };
+      if (/\$\{BASE\}\/?\$\{/.test(body))
+        return { name: m[2], paths: [], ...style };
+      return { name: m[2], paths: [...paths], ...style };
     })
     .filter((c) => !c.name.includes("${"));
 }
@@ -108,7 +115,8 @@ const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * The cases a change set affects.
  * @param {string[]} changed admin/web-relative paths
  * @param {{modules: Map<string, string>, closures: Map<string, Set<string>>,
- *   shared: Set<string>, cases: {name: string, paths: string[]}[],
+ *   shared: Set<string>, cases: {name: string, paths: string[], style?: boolean}[],
+ *   styleChanged?: boolean,
  *   pageOf: (path: string) => string | null, mode?: "merge" | "commit",
  *   direct?: Map<string, Set<string>>, smoke?: string[]}} x
  */
@@ -138,6 +146,7 @@ export function affected(changed, x) {
   }
   if (commit && sharedHit) for (const p of x.smoke ?? []) pages.add(p);
   const cases = x.cases.filter((c) => {
+    if (c.style) return !!x.styleChanged;
     if (!c.paths.length) return sharedHit && !commit;
     return c.paths.some((p) => {
       const page = x.pageOf(p);
@@ -155,8 +164,11 @@ export function affected(changed, x) {
 /**
  * The affected pages and cases of a change set, read from this tree.
  * @param {string[]} changedPaths from the repository root or admin/web
+ * @param {"merge" | "commit"} [mode]
+ * @param {{kp?: boolean}} [opts] kp: the kp-themes pin (Cargo.lock's
+ *   chassis-rs line) changed
  */
-export async function plan(changedPaths, mode = "merge") {
+export async function plan(changedPaths, mode = "merge", opts = {}) {
   const read = (/** @type {string} */ f) => {
     const p = join(WEB, f);
     return existsSync(p) ? readFileSync(p, "utf8") : null;
@@ -224,18 +236,19 @@ export async function plan(changedPaths, mode = "merge") {
     cases,
     pageOf,
     mode: mode === "commit" ? "commit" : "merge",
+    styleChanged: !!opts.kp || changed.some((f) => f.endsWith(".css")),
     direct,
     smoke: ["overview", "inbox"],
   });
 }
 
 const main = async () => {
-  const args = process.argv.slice(2);
-  const commit = args[0] === "--commit";
-  const out = await plan(
-    commit ? args.slice(1) : args,
-    commit ? "commit" : "merge",
-  );
+  let args = process.argv.slice(2);
+  const flag = (/** @type {string} */ f) =>
+    args.includes(f) ? ((args = args.filter((a) => a !== f)), true) : false;
+  const commit = flag("--commit");
+  const kp = flag("--kp");
+  const out = await plan(args, commit ? "commit" : "merge", { kp });
   process.stdout.write(`${JSON.stringify(out)}\n`);
 };
 

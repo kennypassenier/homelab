@@ -68,7 +68,7 @@ defect. Never fix only the one spot.
 | Class | Where |
 |---|---|
 | Cut text, letter-per-line wraps, row overlap, two page headers, one date format (dd/mm/yyyy HH:MM, 24 h), "0 problems" without a red chip, internal ids in user text, one freshness slot, exact counts (linked via `data-count-of`), a description under the title, the title row, monospace size, links that resolve, no sideways scroll at 390 px, the action dialog field grid | `admin/web/test-e2e/layoutaudit.js`: ONE walk over every page and every action dialog at 1894 and 390 px reports every class in one pass (`invariants.e2e.js`, redesign-final-gen; parked classes in `test-e2e/parked.json`) |
-| Text contrast WCAG AA on every banner, badge and chip, in every theme the picker offers | `invariants.e2e.js` (redesign-final-contrast) |
+| Text contrast WCAG AA on every banner, badge and chip, in every theme the picker offers | `invariants.e2e.js` (redesign-final-contrast): at a commit or merge only when a stylesheet or the kp-themes pin changed, always in the release gate (redesign-final-48) |
 | Row selection and focus survive a live refresh (rows updated in place by stable id) | `invariants.e2e.js` (redesign-final-extra-live-selection) |
 | Names matched through one normalising key (spaces, capitals, unicode) | `namekey.test.js` + Rust `names_tests` |
 | No test, harness or demo host reads the real clock | `admin/web/scripts/check-test-clock.mjs`, one injected clock (`test-e2e/clock.js`) |

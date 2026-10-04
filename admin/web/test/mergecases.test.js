@@ -74,3 +74,27 @@ test("redesign-final: a plain commit's cases: a page file as at a merge; a widel
   const merge = await plan(["admin/web/js/ui.js"]);
   assert.ok(merge.cases.length > ui.cases.length);
 });
+
+test("redesign-final-48: the contrast case runs on a stylesheet or kp-themes change, never because a shared script changed", async () => {
+  const isContrast = (/** @type {string} */ c) =>
+    c.includes("redesign-final-contrast");
+  const ui = await plan(["admin/web/js/ui.js"]);
+  assert.ok(!ui.cases.some(isContrast), "contrast chosen for ui.js");
+  const page = await plan(["admin/web/js/pages/firewall.js"]);
+  assert.ok(!page.cases.some(isContrast));
+  const css = await plan(["admin/web/css/app.css"]);
+  assert.ok(css.cases.some(isContrast), "contrast not chosen for app.css");
+  const pageCss = await plan(["admin/web/css/pages/firewall.css"], "commit");
+  assert.ok(pageCss.cases.some(isContrast), "a page stylesheet at commit");
+  const kp = await plan([], "merge", { kp: true });
+  assert.deepEqual(kp.cases.filter(isContrast).length, 1, "a kp-themes bump");
+  const cs = casesOf(`
+test("invariants: themes", async () => {
+  // merge-cases: on style change
+  await page.goto(\`\${BASE}\${path}\`);
+});
+`);
+  assert.deepEqual(cs, [
+    { name: "invariants: themes", paths: [], style: true },
+  ]);
+});

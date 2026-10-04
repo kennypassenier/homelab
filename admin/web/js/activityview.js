@@ -348,8 +348,11 @@ export function incidentFor(r, names) {
     if (!m) continue;
     const at = Number(m[1]);
     const d = Math.abs(at - (e.end || e.start));
+    // A bundle's operation may carry a space where the entry's subject has
+    // a hyphen ("update kp-soft" / "update-kp-soft"): compared hyphenated.
+    const op = m[2].replace(/\s+/g, "-");
     const about =
-      m[2] === subj || (r.stack != null && m[2].endsWith(`-${r.stack}`));
+      op === subj || (r.stack != null && op.endsWith(`-${r.stack}`));
     if (about && d <= 3600 && d < gap) {
       best = n;
       gap = d;

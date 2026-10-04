@@ -94,3 +94,22 @@ test("redesign-final M8: an operation's error drops the incident bundle's file n
   assert.equal(plainError("health check timed out"), "health check timed out");
   assert.equal(plainError(null), null);
 });
+
+test("redesign-final: a failed operation finds its incident bundle whether the bundle's name has a space or a hyphen", async () => {
+  const { incidentFor } = await import("../js/activityview.js");
+  const r = /** @type {any} */ ({
+    stack: "kp-soft",
+    entry: {
+      kind: "op",
+      subject: "update kp-soft",
+      label: "update",
+      start: 1000,
+      end: 1064,
+    },
+  });
+  assert.equal(
+    incidentFor(r, ["1064-update kp-soft", "50-backup-gateway"]),
+    "1064-update kp-soft",
+  );
+  assert.equal(incidentFor(r, ["1064-update-kp-soft"]), "1064-update-kp-soft");
+});

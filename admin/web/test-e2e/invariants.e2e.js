@@ -7580,8 +7580,10 @@ test("invariants: a running job's log in Activity scrolls inside its box and nev
     const page = await freshPage(context);
     await page.goto(`${BASE}/stacks/films`);
     await page.waitForTimeout(600);
+    // Park lives in the hub header's More menu since 3.71.0.
+    await openStackMore(page);
     await page
-      .getByRole("button", { name: "Park", exact: true })
+      .locator('[data-drive="stack-more-item"][data-drive-row="films/disable"]')
       .click({ timeout: 5000 });
     await page.waitForTimeout(300);
     await page.locator("#action-dialog #act-run").click();

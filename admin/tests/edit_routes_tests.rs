@@ -469,7 +469,8 @@ async fn feat_settings_1_read_and_write_with_the_session_commands_only() {
     assert_eq!(f("token")["set"], true);
     assert!(f("token")["value"].is_null());
 
-    // arch-self: a locked key never reaches the host.
+    // arch-self: a locked key never reaches the host. The refusal names
+    // the ssh route, without the internal id (redesign-config-2).
     let (st, v) = call(
         &w.app,
         "PUT",
@@ -478,7 +479,13 @@ async fn feat_settings_1_read_and_write_with_the_session_commands_only() {
     )
     .await;
     assert_eq!(st, StatusCode::BAD_REQUEST);
-    assert!(v["why"].as_str().unwrap().contains("arch-self"), "{v}");
+    let why = v["why"].as_str().unwrap();
+    assert!(
+        why.contains("listen can cut the dashboard off from the host")
+            && why.contains("changed over ssh only"),
+        "{v}"
+    );
+    assert!(!why.contains("arch-self"), "{v}");
     let (st, v) = call(
         &w.app,
         "PUT",

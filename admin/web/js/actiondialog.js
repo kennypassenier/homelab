@@ -34,7 +34,14 @@ import {
   refusalAlarm,
   refusalCallout,
 } from "./actui.js";
-import { fetchJson, fetchReport, h, statTile } from "./dom.js";
+import {
+  fetchJson,
+  fetchReport,
+  h,
+  progressBar,
+  setProgress,
+  statTile,
+} from "./dom.js";
 import { resolveSnapshotOwner, snapshotPickerRows } from "./snapshotpicker.js";
 import { diffBlocks } from "./editui.js";
 import { applySummary, checkChoices } from "./parity.js";
@@ -1188,12 +1195,7 @@ export async function openBatch(action, stacks) {
  * @param {{job: number, stack: string}[]} jobs
  */
 export function mountBatchPanel(batch, jobs) {
-  const bar = h("progress", {
-    class: "kp-progress",
-    max: "100",
-    value: "0",
-    "aria-label": "Batch progress",
-  });
+  const bar = progressBar("Batch progress", 0);
   const text = h("span", { class: "kp-progress__value" });
   // Kenny, 2026-10-01: the totals used to be one sentence; stat tiles keep
   // Done/OK/Failed/Deferred in their own place instead.
@@ -1274,7 +1276,7 @@ export function mountBatchPanel(batch, jobs) {
     };
     const v = batchView(b);
     stopBtn.hidden = !!b.done;
-    bar.value = v.percent;
+    setProgress(bar, v.percent);
     text.textContent = `${v.percent}%`;
     totalTile.value.textContent = String(v.total);
     doneTile.value.textContent = String(b.done);

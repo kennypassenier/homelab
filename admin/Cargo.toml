@@ -24,7 +24,7 @@ homelab-core = { path = "../core" }
 # arch-crates: the client library (link, tls) without the terminal UI.
 homelab-client = { path = "../client", default-features = false }
 # tech-chassis-dep: a released chassis-rs only, never a rev or a path.
-chassis = { git = "https://github.com/kennypassenier/chassis-rs", tag = "v3.4.0", default-features = false, features = ["core", "webapp", "live", "passkeys", "request-guard"] }
+chassis = { git = "https://github.com/kennypassenier/chassis-rs", tag = "v3.5.1", default-features = false, features = ["core", "webapp", "live", "passkeys", "request-guard"] }
 axum = "0.8"
 tokio.workspace = true
 serde.workspace = true

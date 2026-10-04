@@ -11,7 +11,7 @@
 
 import { send } from "./act.js";
 import { notify } from "./actui.js";
-import { h } from "./dom.js";
+import { h, progressBar, setProgress } from "./dom.js";
 import { current, currentField } from "./drivable.js";
 import {
   announceView,
@@ -60,13 +60,10 @@ export function makeBar(inline, extra = []) {
     class: "drive-announce__count",
     "aria-hidden": "true",
   });
-  const progress = /** @type {HTMLProgressElement} */ (
-    h("progress", {
-      class: "kp-progress drive-announce__progress",
-      max: "1",
-      value: "0",
-      "aria-label": "Countdown to Claude's next step",
-    })
+  const progress = progressBar(
+    "Countdown to Claude's next step",
+    0,
+    "drive-announce__progress",
   );
   const pause = h(
     "button",
@@ -148,7 +145,7 @@ export function makeBar(inline, extra = []) {
     shown(counter, !!v?.counter);
     count.textContent = v?.count || "0";
     shown(count, !!v?.countdown);
-    progress.value = v?.fraction ?? 0;
+    setProgress(progress, (v?.fraction ?? 0) * 100);
     shown(progress, !!v?.countdown);
     // fix-188: Pause/Continue and Stop are no longer reserved-but-invisible
     // while nothing is driving (that was the strip's "tall block" — a

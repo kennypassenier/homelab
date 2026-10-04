@@ -5,7 +5,7 @@
 
 import { act, actionLabel, onAct } from "./act.js";
 import { badge, labeledCopyLine, openDialog } from "./actui.js";
-import { h } from "./dom.js";
+import { h, progressBar, setProgress } from "./dom.js";
 import { jobFacts, jobPanel, jobSteps, logLine } from "./jobs.js";
 import { countOf, checkList } from "./ui.js";
 import { attachLogs } from "/static/kp/js/log.js";
@@ -32,11 +32,7 @@ export function mountJobPanel(jobId, opts = {}) {
     { class: "kp-alert kp-alert--warning", role: "status", hidden: "" },
     "This job restarts the dashboard: the page loses its link for a moment and reads the job's end after the restart.",
   );
-  const bar = h("progress", {
-    class: "kp-progress",
-    max: "100",
-    "aria-label": "Progress",
-  });
+  const bar = progressBar("Progress", null);
   const pctText = h("span", { class: "kp-progress__value" });
   const stepName = h("p", { class: "job-step-name mono" });
   // feat-jobpanel-1 (Kenny, 2026-10-02: "maak hier ook een grid van, met
@@ -152,13 +148,9 @@ export function mountJobPanel(jobId, opts = {}) {
     }
     /** @type {HTMLElement} */ (factDD.get("origin")).textContent =
       `Job ${j.job} · ${v.origin}`;
-    if (v.percent == null) {
-      bar.removeAttribute("value");
-      pctText.textContent = v.finished ? "" : "…";
-    } else {
-      bar.value = v.percent;
-      pctText.textContent = `${v.percent}%`;
-    }
+    setProgress(bar, v.percent);
+    if (v.percent == null) pctText.textContent = v.finished ? "" : "…";
+    else pctText.textContent = `${v.percent}%`;
     stepName.textContent = v.stepName;
     stepName.hidden = !v.stepName;
     basis.textContent = v.basis;

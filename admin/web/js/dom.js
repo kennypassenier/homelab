@@ -747,6 +747,57 @@ export function statTile(label, value = "") {
 }
 
 /**
+ * Set a `progressBar`'s share done, 0 to 100, or null for busy with no
+ * count to go by. kp-themes 9 (MIGRATION.md 8→9): `--kp-value` (0 to 1) is
+ * what the bar paints, `aria-valuenow` what a screen reader reads; busy is
+ * `data-kp-indeterminate` with no `aria-valuenow`.
+ * @param {HTMLElement} el
+ * @param {number | null} pct
+ */
+export function setProgress(el, pct) {
+  if (pct == null || !Number.isFinite(pct)) {
+    el.setAttribute("data-kp-indeterminate", "");
+    el.removeAttribute("aria-valuenow");
+    el.style.removeProperty("--kp-value");
+    return;
+  }
+  const v = Math.max(0, Math.min(100, pct));
+  el.removeAttribute("data-kp-indeterminate");
+  el.setAttribute("aria-valuenow", String(Math.round(v)));
+  el.style.setProperty("--kp-value", String(v / 100));
+}
+
+/**
+ * A kp-themes 9 progress bar (`.kp-progressbar`, the replacement of the
+ * native `<progress class="kp-progress">`): the element, its track, fill
+ * and head written in, so it paints without kp's progressbar.js.
+ * @param {string} label what the bar measures, for a screen reader
+ * @param {number | null} [pct] 0 to 100; null: busy
+ * @param {string} [cls] further classes
+ * @returns {HTMLElement}
+ */
+export function progressBar(label, pct = 0, cls = "") {
+  const el = h(
+    "div",
+    {
+      class: cls ? `kp-progressbar ${cls}` : "kp-progressbar",
+      role: "progressbar",
+      "aria-label": label,
+      "aria-valuemin": "0",
+      "aria-valuemax": "100",
+    },
+    h(
+      "span",
+      { class: "kp-progressbar__track", "aria-hidden": "true" },
+      h("span", { class: "kp-progressbar__fill" }),
+      h("span", { class: "kp-progressbar__head" }),
+    ),
+  );
+  setProgress(el, pct);
+  return el;
+}
+
+/**
  * kp-themes progress bars in one group, so the tracks line up.
  * @param {{label: string, pct: number, value: string}[]} bars
  */
@@ -755,12 +806,7 @@ export function progressGroup(bars) {
     "div",
     { class: "kp-progress-group" },
     ...bars.map((b) => {
-      const p = h("progress", {
-        class: "kp-progress",
-        max: "100",
-        value: String(Math.max(0, Math.min(100, b.pct))),
-        "aria-label": b.label,
-      });
+      const p = progressBar(b.label, b.pct);
       return h(
         "div",
         { class: "kp-progress__wrap" },

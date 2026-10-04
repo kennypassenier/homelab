@@ -573,28 +573,13 @@ p:has(> .measured:only-child):first-child {
   --kp-dialog-max-width: 95vw;
   inline-size: min(1100px, 95vw);
 }
-/* A running job without a count to go by is busy, not empty: kp-themes
-   draws the indeterminate stripes as a background image, which every
-   theme's own `.kp-progress { background: … }` rule later in the sheet
-   resets, so the bar read as 0% until the end (Kenny, 2026-09-29). This
-   sheet is outside kp's layers, so the stripes win here. */
-/* About twice kp's own thickness (Kenny, 2026-10-01): a 0.5rem bar read as
+/* About twice kp's old thickness (Kenny, 2026-10-01): a 0.5rem bar read as
    a hairline on the batch panel, the job panel and the Live view countdown.
-   kp-themes has no token for the track's height (`.kp-progress` hardcodes
-   `block-size: 0.5rem`), so this overrides the property itself. */
-.kp-progress {
-  block-size: 1rem;
-}
-.kp-progress:indeterminate {
-  background-image: linear-gradient(
-    -45deg,
-    var(--kp-control-accent, var(--primary)) 25%,
-    transparent 25% 50%,
-    var(--kp-control-accent, var(--primary)) 50% 75%,
-    transparent 75%
-  );
-  background-size: var(--kp-progress-stripe, 1rem)
-    var(--kp-progress-stripe, 1rem);
+   kp-themes 9 draws the bar as `.kp-progressbar` (MIGRATION.md 8→9) with a
+   height token of its own, 0.75rem by default; the theme draws the busy
+   bar (`data-kp-indeterminate`) itself. */
+.kp-progressbar {
+  --kp-progressbar-height: 1rem;
 }
 .act-dialog .kp-field,
 .sched-form .kp-field {
@@ -943,6 +928,7 @@ p:has(> .measured:only-child):first-child {
    of stranding the rest beside it (Kenny, 2026-10-02). */
 .job-progress {
   max-inline-size: none;
+  --kp-progressbar-max-width: none;
 }
 /* feat-stacks-5: the batch bar and progress. */
 .select-col {

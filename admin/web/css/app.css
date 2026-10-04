@@ -2548,15 +2548,19 @@ td.stack-flags {
  * two panes keep the same place across every state (loading, a day picked,
  * nothing picked) rather than the detail pane appearing and shoving things
  * around. */
+/* M9: the month's ‹ title › and Today on one grid row; on a phone the
+   title takes the space left, so Today never pushes the page sideways. */
 .backup-cal__nav {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, max-content) auto auto;
+  justify-content: start;
   align-items: center;
   gap: 10px;
   margin-block-end: 10px;
 }
 .backup-cal__nav h2 {
   margin: 0;
-  min-width: 12ch;
+  min-width: 0;
   text-align: center;
   font-size: 1.1em;
 }
@@ -3835,10 +3839,13 @@ a.nx-kpi:hover {
   .nx-card__head {
     grid-template-columns: minmax(0, 1fr);
   }
-  .nx-card__head > .nx-card__tools {
+  .nx-card__head > .nx-card__tools,
+  .nx-ops .nx-card__head > .nx-card__tools {
     grid-row: auto;
     grid-column: 1;
     justify-content: flex-start;
+    /* M9: a tool row wraps on a phone, never pushing the page sideways
+       (Backups › Coverage's Earlier · range · Later · Today). */
     flex-wrap: wrap;
   }
 }
@@ -4532,13 +4539,16 @@ details.nx-card--fold[open] > summary::before {
   color: var(--foreground);
   font-weight: 600;
 }
+/* On a phone only the step you stand on names itself, wrapping in its own
+   column; the others' names take no room (M9: a hidden but laid-out
+   "4 · Restore and check" pushed the page 18 px sideways). */
 @media (max-width: 48rem) {
   .nx-steps li span {
-    visibility: hidden;
-    white-space: nowrap;
+    display: none;
   }
   .nx-steps li[data-s="now"] span {
-    visibility: visible;
+    display: inline;
+    white-space: normal;
   }
 }
 

@@ -11907,3 +11907,33 @@ test("invariants: redesign-final-contrast: every banner, badge and chip's text m
     await browser.close();
   }
 });
+
+// M9: Backups › Coverage at 390 px scrolled 22 px sideways (the calendar's
+// Today button). No page scrolls sideways on a phone, in light or dark.
+test("invariants: redesign-final-m9: no audited page scrolls sideways at 390 px, in light and dark", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await freshPage(context);
+    /** @type {string[]} */
+    const bad = [];
+    for (const theme of ["dark", "light"]) {
+      await page.evaluate((t) => localStorage.setItem("theme", t), theme);
+      for (const path of AUDIT_PAGES) {
+        await page.goto(`${BASE}${path}`);
+        await page.waitForTimeout(1200);
+        const over = await page.evaluate(
+          () =>
+            document.documentElement.scrollWidth -
+            document.documentElement.clientWidth,
+        );
+        if (over > 0) bad.push(`${theme} ${path}: ${over} px sideways`);
+      }
+    }
+    assert.deepEqual(bad, []);
+  } finally {
+    await browser.close();
+  }
+});

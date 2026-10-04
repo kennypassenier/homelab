@@ -3012,6 +3012,9 @@
       "page": "stack",
       "what": "the header's Back up, Update or Deploy (b, u, d): Back up and Deploy open that action's dialog, Update opens the stack's Update flow",
       "opens": "dialog",
+      "rowOpens": {
+        "update": "view"
+      },
       "row": "<stack>/<backup|update|deploy>",
       "href": "/stacks/<stack>",
       "was": [],

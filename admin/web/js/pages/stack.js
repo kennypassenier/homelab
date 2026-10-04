@@ -226,9 +226,9 @@ const HEAD = declare({
   id: "stack-head",
   page: "stack",
   // redesign-openpoints-1: Back up and Deploy open their dialog, Update the
-  // one Update flow (an address); Live view answers as soon as the address
-  // moved (pagedrive.js press), it does not wait for a dialog.
+  // one Update flow (an address). redesign-final-42: each row says so.
   opens: "dialog",
+  rowOpens: { update: "view" },
   row: "<stack>/<backup|update|deploy>",
   at: at("overview"),
   what: "the header's Back up, Update or Deploy (b, u, d): Back up and Deploy open that action's dialog, Update opens the stack's Update flow",

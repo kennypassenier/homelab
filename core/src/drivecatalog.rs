@@ -70,6 +70,11 @@ pub struct Control {
     pub what: String,
     /// `dialog`, `run` or `view`.
     pub opens: String,
+    /// A row whose press does something else than `opens`, by the row's
+    /// last part or the whole row (redesign-final-42: the stack hub's
+    /// Update goes to the Update flow, a `view`).
+    #[serde(default, rename = "rowOpens")]
+    pub row_opens: std::collections::BTreeMap<String, String>,
     /// The row's shape when it repeats per row (`<stack>/<app>`).
     #[serde(default)]
     pub row: Option<String>,
@@ -89,6 +94,19 @@ pub struct Control {
     /// Cancel), each press doing the same (review M6).
     #[serde(default)]
     pub twins: bool,
+}
+
+impl Control {
+    /// What pressing this control on `row` does: the row's own
+    /// `rowOpens` (by the whole row, then its last part), else `opens`.
+    pub fn opens_for(&self, row: Option<&str>) -> &str {
+        row.and_then(|r| {
+            self.row_opens
+                .get(r)
+                .or_else(|| self.row_opens.get(r.rsplit('/').next().unwrap_or(r)))
+        })
+        .map_or(self.opens.as_str(), String::as_str)
+    }
 }
 
 /// A declared page field (`ui type/pick/check/edit <field>`).
@@ -684,6 +702,26 @@ fn distance(a: &str, b: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redesign_final_42_a_row_declares_its_own_kind_of_press() {
+        let c: Control = serde_json::from_str(
+            r#"{"id": "stack-head", "page": "stack", "what": "x", "opens": "dialog",
+                "rowOpens": {"update": "view"}, "row": "<stack>/<backup|update|deploy>"}"#,
+        )
+        .unwrap();
+        assert_eq!(c.opens_for(Some("kp-soft/update")), "view");
+        assert_eq!(c.opens_for(Some("update")), "view");
+        assert_eq!(c.opens_for(Some("kp-soft/backup")), "dialog");
+        assert_eq!(c.opens_for(None), "dialog");
+        // The shipped catalog says the same of the stack hub's header.
+        let shipped = Catalog::parse(include_str!("../../admin/web/js/drivecatalog.json")).unwrap();
+        let head = shipped
+            .control("stack-head")
+            .expect("stack-head is declared");
+        assert_eq!(head.opens_for(Some("kp-soft/update")), "view");
+        assert_eq!(head.opens_for(Some("kp-soft/deploy")), "dialog");
+    }
 
     fn cat() -> Catalog {
         Catalog::parse(

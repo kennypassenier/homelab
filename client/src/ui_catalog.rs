@@ -192,10 +192,12 @@ fn check_one(
             let mut inside = screen.clone();
             for (i, s) in steps.into_iter().enumerate() {
                 let opens = match &s {
-                    UiStep::Click { control, .. } => match catalog.click(control) {
-                        Click::Known(c) => c.opens == "dialog",
+                    UiStep::Click { control, row } => match catalog.click(control) {
+                        // redesign-final-42: a row may say it opens no dialog
+                        // (the stack hub's Update goes to the Update flow).
+                        Click::Known(c) => c.opens_for(row.as_deref()) == "dialog",
                         Click::Renamed { control, press, .. } => {
-                            control.opens == "dialog" || press.is_some()
+                            control.opens_for(row.as_deref()) == "dialog" || press.is_some()
                         }
                         Click::Unknown { .. } => false,
                     },
@@ -488,6 +490,9 @@ mod tests {
                      "opens": "run", "href": "/activity?view=planned", "was": [],
                      "shows": "while its Undo toast shows",
                      "reach": [{"do": "click", "control": "toggle-schedule", "row": "*"}]},
+                    {"id": "stack-head", "page": "stack", "what": "Back up, Update or Deploy",
+                     "opens": "dialog", "rowOpens": {"update": "view"},
+                     "row": "<stack>/<backup|update|deploy>", "href": "/stacks/<stack>", "was": []},
                     {"id": "snooze-for", "page": "notifications", "what": "snooze every push",
                      "opens": "run", "row": "60|240", "href": "/system/notifications",
                      "was": [{"id": "notify-snooze-minutes"}]}
@@ -641,6 +646,19 @@ mod tests {
             .unwrap_err()
             .starts_with("plan step 1:")
         );
+    }
+
+    #[test]
+    fn redesign_final_42_a_plan_after_the_hub_update_row_checks_the_page_not_a_dialog() {
+        let cat = cat();
+        let plan = |row: &str| UiStep::Plan {
+            steps: vec![click("stack-head", Some(row)), click("zzz", None)],
+        };
+        // Back up opens a dialog: the next step is the dialog's to check.
+        assert!(check(plan("kp-soft/backup"), &cat, &Screen::default()).is_ok());
+        // Update goes to the Update flow page: the next step is checked.
+        let e = check(plan("kp-soft/update"), &cat, &Screen::default()).unwrap_err();
+        assert!(e.starts_with("plan step 2:"), "{e}");
     }
 
     #[test]

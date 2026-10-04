@@ -73,12 +73,11 @@ defect. Never fix only the one spot.
 | Row selection and focus survive a live refresh (rows updated in place by stable id) | `invariants.e2e.js` (redesign-final-extra-live-selection) |
 | Names matched through one normalising key (spaces, capitals, unicode) | `namekey.test.js` + Rust `names_tests` |
 | No test, harness or demo host reads the real clock | `admin/web/scripts/check-test-clock.mjs`, one injected clock (`test-e2e/clock.js`) |
-| Every Live view control is declared and pressable with its effect | catalog sweep (`drive-reach`), stamp in `test-e2e/sweep-stamp.json` |
+| Every Live view control is declared and known to the catalog (old names resolve for click and field verbs) | static node tests (`drivecatalog.test.js`, `drivable.test.js`) and the client's own check (`client/src/ui_catalog.rs`); the press-every-control sweep and its stamp were removed on 2026-10-04 (Kenny: know every control, do not press them all) |
 
 ## 4 · Review and gate setup
 
-- **Pre-commit:** fmt/lint/secrets, the drive catalog test, a sweep of
-  only the Live view controls whose catalog entries changed, and the
+- **Pre-commit:** fmt/lint/secrets, the drive catalog test, and the
   whole-screen cases of the pages the commit changes (mapping derived
   from the import graph, not a list).
 - **Merge / integration:** the merge check runs the affected cases and
@@ -87,8 +86,7 @@ defect. Never fix only the one spot.
 - **Test harness:** a free port per run, a check that the server answering
   is the one the run started, and the server killed on every exit path.
   An orphaned demo server once answered a run on a fixed port.
-- **Release gate:** one full fixed-order sweep that writes the stamp, plus
-  shuffled runs, then the full suite. Every test run reports its measured
+- **Release gate:** the full suite, once. Every test run reports its measured
   duration.
 - **Proofs:** every guard is proven by a commit that breaks the thing it
   guards and is refused, in a throwaway clone.

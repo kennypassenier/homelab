@@ -113,3 +113,15 @@ test("redesign-final: a failed operation finds its incident bundle whether the b
   );
   assert.equal(incidentFor(r, ["1064-update-kp-soft"]), "1064-update-kp-soft");
 });
+
+test("redesign-final-42: the stack hub's Update row declares its own press (the Update flow, a view); Back up and Deploy open a dialog", async () => {
+  const { opensFor } = await import("../js/drivable.js");
+  const cat = JSON.parse(readFileSync(web("js/drivecatalog.json"), "utf8"));
+  const head = cat.controls.find(
+    (/** @type {any} */ c) => c.id === "stack-head",
+  );
+  assert.equal(opensFor(head, "kp-soft/update"), "view");
+  assert.equal(opensFor(head, "kp-soft/backup"), "dialog");
+  assert.equal(opensFor(head, "kp-soft/deploy"), "dialog");
+  assert.equal(opensFor(head, null), "dialog");
+});

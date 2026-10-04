@@ -15,6 +15,7 @@ import {
   fieldAsClick,
   fields as declaredFields,
   howToReach,
+  opensFor,
   pick,
   resolve,
 } from "./drivable.js";
@@ -298,7 +299,12 @@ async function click(id, row, navigate, show, budget) {
         : f.fix,
     });
   }
-  return press(f.el, show, c.opens === "dialog" || hit.press != null, budget);
+  return press(
+    f.el,
+    show,
+    opensFor(c, row) === "dialog" || hit.press != null,
+    budget,
+  );
 }
 
 /**

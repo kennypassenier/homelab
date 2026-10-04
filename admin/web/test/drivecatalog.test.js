@@ -13,7 +13,10 @@ import {
 import {
   closest,
   controls,
+  currentField,
   declare,
+  declaredField,
+  fieldAsClick,
   fields,
   pick,
   resolve,
@@ -48,6 +51,23 @@ test("drive-reach: every page's controls are in the catalog, each once, with whe
     assert.ok(resolve(w)?.was === w, `${w} does not resolve`);
   }
   assert.ok(old.includes("edit-schedule") && old.includes("delete-schedule"));
+  // redesign-final-44 (Kenny, 2026-10-04: Live view knows every control,
+  // the whole-screen press of each old name is gone): the field verbs too.
+  // An old field id answers as the field it became; an old name of a
+  // control repeating per row with no menu press answers `ui pick/type
+  // <old> <value>` by pressing that row.
+  for (const f of c.fields)
+    for (const w of f.was ?? []) {
+      assert.equal(currentField(w), f.id, `field ${w} does not resolve`);
+      assert.equal(declaredField(w)?.id, f.id);
+    }
+  for (const x of c.controls)
+    for (const w of x.was) {
+      const asField = fieldAsClick(w.id, "row-1");
+      if (x.row && !w.press && !fields().some((f) => f.id === w.id))
+        assert.deepEqual(asField, { control: x.id, row: "row-1" }, w.id);
+      else assert.equal(asField, null, w.id);
+    }
 });
 
 test("drive-reach: the catalog's redirect table is the router's own redirect, for every address", () => {
@@ -575,64 +595,5 @@ test("redesign-drive-5: the catalog carries the router's stack tabs, its schema 
   assert.equal(spec.stack_tabs, undefined);
   assert.ok(
     !c.controls.some((/** @type {any} */ x) => x.id === "secrets-stack"),
-  );
-});
-
-// redesign-integrate-8 (coordinator, 2026-10-03): five merge commits went
-// green while 53 declared controls could not be reached on screen — the
-// checks above see declarations and marks, not where a page draws a
-// control (a view, a row, a state). The whole-screen sweep does, and a
-// passing sweep stamps every control it pressed
-// (test-e2e/sweep-stamp.json, `sweepKey` of each).
-// redesign-final (coordinator, 2026-10-04): at commit only the controls
-// whose entries changed against HEAD (added, moved, given a `was`) must be
-// in the stamp — a sweep of just those (scripts/sweep-changed.sh) will do;
-// an unchanged control was pressed when the commit that last changed it
-// went in. The release gate still demands a full stamp of the whole
-// catalog (.githooks/gate-carry.sh invariants, `gateRefusal`). Merge
-// commits included (.githooks/drivecatalog.sh runs this file).
-test("redesign-integrate-8: every control a commit changed was pressed by a passing Live view sweep since its entry last changed", async () => {
-  const { catalogHash, uncovered } = await import("../test-e2e/sweepkey.js");
-  const { execFileSync } = await import("node:child_process");
-  const file = new URL("../test-e2e/sweep-stamp.json", import.meta.url);
-  /** @type {any} */
-  let stamp = { controls: [] };
-  try {
-    stamp = JSON.parse(readFileSync(file, "utf8"));
-  } catch (e) {
-    if (/** @type {any} */ (e).code !== "ENOENT") throw e;
-  }
-  const keys = stamp.controls ?? [];
-  if (keys.length)
-    assert.equal(
-      catalogHash([...keys].sort()),
-      stamp.catalog,
-      "sweep-stamp.json's controls do not hash to the catalog it names: it was edited by hand; only a passing sweep writes it",
-    );
-  /** @type {any[] | null} HEAD's controls; null before a first commit */
-  let head = null;
-  try {
-    head = JSON.parse(
-      execFileSync("git", ["show", "HEAD:admin/web/js/drivecatalog.json"], {
-        cwd: new URL("..", import.meta.url),
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-        maxBuffer: 64 * 1024 * 1024,
-      }),
-    ).controls;
-  } catch {
-    head = null;
-  }
-  const now = /** @type {any} */ (built).controls;
-  const left = uncovered(stamp, head, now);
-  /** @type {Map<string, string[]>} */
-  const byPage = new Map();
-  for (const c of now)
-    if (left.includes(c.id))
-      byPage.set(c.page, [...(byPage.get(c.page) ?? []), c.id]);
-  assert.deepEqual(
-    [...byPage].map(([p, ids]) => `${p}: ${ids.join(", ")}`),
-    [],
-    "controls this commit changed that no passing sweep has pressed since: run scripts/sweep-changed.sh (a sweep of just those, which writes admin/web/test-e2e/sweep-stamp.json when it passes), then commit again",
   );
 });

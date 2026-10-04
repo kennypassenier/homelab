@@ -32,9 +32,14 @@
  * filters, folds, sorts).
  * @typedef {{id: string, page: string, what: string,
  *   opens: "dialog" | "run" | "view", row?: string, bar?: boolean,
+ *   rowOpens?: Record<string, "dialog" | "run" | "view">,
  *   at?: (row: string | null) => string | null,
  *   was?: (string | Was)[], shows?: string, reach?: Reach[],
  *   twins?: boolean}} Control
+ *   `rowOpens` (redesign-final-42): a row whose press does something else
+ *   than `opens` declares its own, keyed by the row's last part (`update`
+ *   of `<stack>/update`) or the whole row — the stack hub's Update goes to
+ *   the Update flow ("view") where Back up and Deploy open a dialog.
  *   `bar`: the control lives in the bar on every page (Help's "?"); like
  *   every declared control it is found wherever it is drawn.
  *   `at`: where the control is when it lives on a page per stack (the
@@ -48,8 +53,7 @@
  *   Undo, a staged value's Write), that state in a few words, for the
  *   refusal and `homelab ui list`.
  *   `reach`: the Live view steps that bring it on screen from its page,
- *   `"*"` as a row meaning the first row on screen. The whole-screen sweep
- *   takes them before it clicks, and a refusal names them.
+ *   `"*"` as a row meaning the first row on screen. A refusal names them.
  *   `twins` (review M6): the control is drawn more than once without rows
  *   on purpose (a drawer's x and its Cancel), each press doing the same;
  *   any other control found twice on screen is refused, never guessed.
@@ -57,7 +61,7 @@
  * @typedef {{do: string, control?: string, row?: string, field?: string,
  *   text?: string, button?: string}} Reach
  * @typedef {{id: string, page: string, what: string, opens: string,
- *   row: string | null, href: string | null, was: Was[],
+ *   rowOpens?: Record<string, string>, row: string | null, href: string | null, was: Was[],
  *   shows: string | null, reach: Reach[], twins: boolean}} CatalogEntry
  */
 
@@ -224,6 +228,18 @@ export function reachLine(s) {
 }
 
 /**
+ * redesign-final-42: what pressing `c` on `row` does: the row's own
+ * `rowOpens` (by the whole row, then its last part), else the control's.
+ * @param {{opens: string, rowOpens?: Record<string, string>}} c
+ * @param {string | null | undefined} row
+ * @returns {string}
+ */
+export const opensFor = (c, row) =>
+  (row != null &&
+    (c.rowOpens?.[row] ?? c.rowOpens?.[row.split("/").pop() ?? ""])) ||
+  c.opens;
+
+/**
  * drive-reach: how a driver gets `c` on screen and clicks it, as the
  * `homelab ui` lines to send, in order.
  * @param {Control} c
@@ -245,6 +261,8 @@ export const entry = (c, href) => ({
   page: c.page,
   what: c.what,
   opens: c.opens,
+  // Only a control whose rows differ carries it (the catalog stays lean).
+  ...(c.rowOpens ? { rowOpens: c.rowOpens } : {}),
   row: c.row ?? null,
   href: href(c),
   was: (c.was ?? []).map((w) => (typeof w === "string" ? { id: w } : w)),

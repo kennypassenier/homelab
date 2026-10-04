@@ -1341,9 +1341,10 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
         (Apply, Material::Apply { deploy, destroy }) => {
             let mut out = Vec::new();
             for mut spec in deploy {
-                // redesign-stacks-6: "each stack is backed up first", the
-                // same opt-out as the destroys below.
-                spec.backup_first = !a.skip_backup;
+                // redesign-stacks-6: "each stack is backed up first". Like
+                // the destroys below, never skipped from the dashboard's
+                // apply (redesign-flows-5: `validate` refuses `skip_backup`).
+                spec.backup_first = true;
                 out.extend(deploy_commands(spec));
             }
             for name in destroy {

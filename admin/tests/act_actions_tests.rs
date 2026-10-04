@@ -674,9 +674,11 @@ fn parity_a_check_answer_follows_the_cli_rules() {
 /// redesign-stacks-6: the Stacks page promises "each stack is backed up
 /// first" for its batch Deploy and for Deploy all changes. The server keeps
 /// that promise: every deploy of a batch, and every deploy Apply sends,
-/// asks the host to back up first; Apply's "Skip the backup" opts out, and a
-/// single Deploy from the stack hub deploys as before. The page cannot ask
-/// for it either way (the field is never read from a body).
+/// asks the host to back up first, and a single Deploy from the stack hub
+/// deploys as before. Apply has no opt-out since redesign-flows-5 (the
+/// coordinator's destroy rule of 2026-10-03: `skip_backup` is no longer an
+/// Apply field, so `validate` refuses it). The page cannot ask for it either
+/// way (the field is never read from a body).
 #[test]
 fn redesign_stacks_6_batch_deploy_and_apply_ask_the_host_to_back_up_first() {
     let deploy_flag = |cmds: &[Command]| -> Vec<bool> {
@@ -707,30 +709,26 @@ fn redesign_stacks_6_batch_deploy_and_apply_ask_the_host_to_back_up_first() {
     let cmds = commands(&single, Material::Spec(Box::new(spec("media")))).unwrap();
     assert_eq!(deploy_flag(&cmds), vec![false], "a single deploy");
 
-    for (skip, want) in [(false, true), (true, false)] {
-        let req = validate(
-            HOST_TARGET,
-            "apply",
-            ActionArgs {
-                skip_backup: skip,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let cmds = commands(
-            &req,
-            Material::Apply {
-                deploy: vec![spec("media"), spec("kyu")],
-                destroy: vec![],
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            deploy_flag(&cmds),
-            vec![want, want],
-            "apply, skip_backup {skip}"
-        );
-    }
+    let req = validate(HOST_TARGET, "apply", ActionArgs::default()).unwrap();
+    let cmds = commands(
+        &req,
+        Material::Apply {
+            deploy: vec![spec("media"), spec("kyu")],
+            destroy: vec![],
+        },
+    )
+    .unwrap();
+    assert_eq!(deploy_flag(&cmds), vec![true, true], "apply");
+    let r = validate(
+        HOST_TARGET,
+        "apply",
+        ActionArgs {
+            skip_backup: true,
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+    assert!(r.why.contains("skip_backup"), "{r}");
     let from_body: ActionArgs = serde_json::from_str(r#"{"force":true}"#).unwrap();
     assert!(!from_body.backup_first);
     assert!(serde_json::from_str::<ActionArgs>(r#"{"backup_first":true}"#).is_err());

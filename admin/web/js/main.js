@@ -359,9 +359,16 @@ const chrome = mountChrome(
   { navigate, route: () => route(location.pathname) },
 );
 // feat-platform-10: the "Live view" switch and badge, on every page.
-mountFollow(/** @type {HTMLElement} */ (document.getElementById("follow")), {
-  navigate,
+// redesign-final X7: in the bar beside Help, not a row of its own above
+// every page's breadcrumb (no demo has that row; two lines on a phone).
+const follow = h("div", {
+  class: "follow follow--bar",
+  id: "follow",
+  role: "group",
+  "aria-label": "Claude driving this dashboard",
 });
+(bar.querySelector(".help-button") ?? bar.lastElementChild)?.before(follow);
+mountFollow(follow, { navigate });
 // TUI parity: a newer host release, a dashboard older than its host.
 mountVersions(/** @type {HTMLElement} */ (document.getElementById("versions")));
 startAgoTicker();

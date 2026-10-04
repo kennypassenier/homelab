@@ -11733,3 +11733,46 @@ test("invariants: redesign-final-low-ping: the Host page's latency strip opens w
     await browser.close();
   }
 });
+
+// X7: the Live view switch sat in a row of its own above every page's
+// breadcrumb (two lines on a phone), in no demo; it lives in the bar.
+test("invariants: redesign-final-x7: the Live view switch is in the bar beside Help, and nothing stands between the bar and the breadcrumb", async () => {
+  const browser = await launch();
+  try {
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: width > 500 ? 1000 : 844 },
+      });
+      const page = await freshPage(context);
+      await page.goto(`${BASE}/stacks`);
+      await page.waitForTimeout(800);
+      const f = await page.evaluate(() => {
+        const sw = document.getElementById("live-view");
+        const bar = document.getElementById("bar");
+        const crumbs = document.getElementById("crumbs");
+        const wrap = bar?.closest(".kp-nav-wrap");
+        /** @type {string[]} */
+        const between = [];
+        for (
+          let n = wrap?.nextElementSibling;
+          n && n !== crumbs && n.id !== "page";
+          n = n.nextElementSibling
+        )
+          if (!(/** @type {HTMLElement} */ (n).hidden))
+            between.push(n.id || n.className);
+        return {
+          inBar: !!sw && !!bar?.contains(sw),
+          between,
+        };
+      });
+      assert.ok(f.inBar, `${width}: the Live view switch is not in the bar`);
+      assert.deepEqual(f.between, [], `${width}: rows above the breadcrumb`);
+      await page.check("#live-view");
+      assert.equal(await page.isChecked("#live-view"), true);
+      await page.uncheck("#live-view");
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});

@@ -167,6 +167,7 @@ export function mountFollow(region, ctx) {
     const text = badgeText(state, now());
     badge.hidden = !text;
     badge.textContent = text ?? "";
+    badge.title = text ?? "";
     watchBtn.hidden = !text || following;
     region.dataset.driving = String(!!text);
     region.dataset.following = String(following);

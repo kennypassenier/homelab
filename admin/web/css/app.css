@@ -1179,15 +1179,28 @@ div.row-buttons {
 
 /* Milestone follow (feat-platform-10): the toggle and the badge under the
    bar, and the marks a driven step leaves. */
-.shell.follow {
+/* redesign-final X7: the switch sits in the bar beside Help; its hint is
+   for a screen reader (the switch says "Live view"), the badge and the
+   watch button show beside it while Claude drives. */
+.follow--bar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
-  padding-block: 8px 0;
+  gap: var(--kp-space-sm);
+  min-inline-size: 0;
 }
-.follow-hint {
-  font-size: 0.85em;
+.follow--bar .follow-hint {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.follow--bar .follow-badge {
+  max-inline-size: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .follow-badge {
   margin-inline-start: auto;

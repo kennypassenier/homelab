@@ -10090,7 +10090,7 @@ test("invariants: stack hub review — the no-env row's Push the env… opens th
   }
 });
 
-test("invariants: stack hub review — History says Kenny in chip and rows, dates read 30 Sep 12:14, and no incidents reads as no bundles kept", async () => {
+test("invariants: stack hub review — History says Kenny in chip and rows, dates read dd/mm/yyyy HH:MM, and no incidents reads as no bundles kept", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -10125,7 +10125,7 @@ test("invariants: stack hub review — History says Kenny in chip and rows, date
     for (const t of times)
       assert.match(
         t.trim(),
-        /^(\d+ (s|min|h) ago|\d{1,2} [A-Z][a-z]{2}( \d{4})? \d\d:\d\d)$/,
+        /^(\d+ (s|min|h) ago|\d{2}\/\d{2}\/\d{4} \d\d:\d\d)$/,
         `a date reads ${t}`,
       );
     await page.goto(`${BASE}/stacks/notes/history`);

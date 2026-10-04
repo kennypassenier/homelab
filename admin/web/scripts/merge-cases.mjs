@@ -109,16 +109,36 @@ const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * @param {string[]} changed admin/web-relative paths
  * @param {{modules: Map<string, string>, closures: Map<string, Set<string>>,
  *   shared: Set<string>, cases: {name: string, paths: string[]}[],
- *   pageOf: (path: string) => string | null}} x
+ *   pageOf: (path: string) => string | null, mode?: "merge" | "commit",
+ *   direct?: Map<string, Set<string>>, smoke?: string[]}} x
  */
 export function affected(changed, x) {
   const sharedHit = changed.some((f) => x.shared.has(f));
   /** @type {Set<string>} */
   const pages = new Set();
-  for (const [page, file] of x.modules)
-    if (changed.some((f) => x.closures.get(file)?.has(f))) pages.add(page);
+  // redesign-final (B): a plain commit's cheaper rule. A file the page
+  // modules share counts only for the pages whose module imports it
+  // directly (one hop), plus the smoke pages (Stacks and the Inbox, the
+  // two every session opens first); a page-local file counts as at a
+  // merge. The walkers (cases that visit every page, minutes each) wait
+  // for the merge and the gate.
+  const commit = x.mode === "commit";
+  /** Pages whose module imports `f` itself. @param {string} f */
+  const importers = (f) =>
+    [...x.modules].filter(([, file]) => x.direct?.get(file)?.has(f));
+  for (const [page, file] of x.modules) {
+    const hit = changed.some((f) =>
+      commit && x.shared.has(f)
+        ? // A kit file most pages import (ui.js, dom.js) is checked on the
+          // smoke pages only; one a few pages import, on those.
+          importers(f).length <= 3 && (x.direct?.get(file)?.has(f) ?? false)
+        : x.closures.get(file)?.has(f),
+    );
+    if (hit) pages.add(page);
+  }
+  if (commit && sharedHit) for (const p of x.smoke ?? []) pages.add(p);
   const cases = x.cases.filter((c) => {
-    if (!c.paths.length) return sharedHit;
+    if (!c.paths.length) return sharedHit && !commit;
     return c.paths.some((p) => {
       const page = x.pageOf(p);
       return page != null && pages.has(page);
@@ -136,7 +156,7 @@ export function affected(changed, x) {
  * The affected pages and cases of a change set, read from this tree.
  * @param {string[]} changedPaths from the repository root or admin/web
  */
-export async function plan(changedPaths) {
+export async function plan(changedPaths, mode = "merge") {
   const read = (/** @type {string} */ f) => {
     const p = join(WEB, f);
     return existsSync(p) ? readFileSync(p, "utf8") : null;
@@ -181,11 +201,41 @@ export async function plan(changedPaths) {
   const changed = changedPaths
     .map((f) => (f.startsWith("admin/web/") ? f.slice("admin/web/".length) : f))
     .map((f) => relative(WEB, join(WEB, f)));
-  return affected(changed, { modules, closures, shared, cases, pageOf });
+  // One hop: the files a page module imports itself.
+  /** @type {Map<string, Set<string>>} */
+  const direct = new Map();
+  for (const f of new Set(modules.values())) {
+    const src = read(f) ?? "";
+    direct.set(
+      f,
+      new Set(
+        [
+          ...src.matchAll(
+            /(?:import|export)[^;]*?from\s*"(\.{1,2}\/[^"]+\.js)"/g,
+          ),
+        ].map((m) => normalize(join(dirname(f), m[1]))),
+      ),
+    );
+  }
+  return affected(changed, {
+    modules,
+    closures,
+    shared,
+    cases,
+    pageOf,
+    mode: mode === "commit" ? "commit" : "merge",
+    direct,
+    smoke: ["overview", "inbox"],
+  });
 }
 
 const main = async () => {
-  const out = await plan(process.argv.slice(2));
+  const args = process.argv.slice(2);
+  const commit = args[0] === "--commit";
+  const out = await plan(
+    commit ? args.slice(1) : args,
+    commit ? "commit" : "merge",
+  );
   process.stdout.write(`${JSON.stringify(out)}\n`);
 };
 

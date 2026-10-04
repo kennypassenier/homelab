@@ -16,6 +16,9 @@
 set -euo pipefail
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
+# Run from a git hook, GIT_DIR / GIT_INDEX_FILE name the repository being
+# committed; the fixture repository below must never write into it.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_OBJECT_DIRECTORY
 
 workdir="$(mktemp -d)"
 server_pid=""

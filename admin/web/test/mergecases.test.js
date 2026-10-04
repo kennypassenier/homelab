@@ -58,3 +58,19 @@ test("redesign-final-12: a page module's change reaches its own page's cases and
   );
   assert.equal((await plan(["docs/USER_GUIDE.md"])).cases.length, 0);
 });
+
+// redesign-final (B): a plain commit runs its pages' cases too, with a
+// cheaper rule for a kit file most pages import: the smoke pages (Stacks,
+// the Inbox) instead of every page, and never the walkers (minutes each).
+test("redesign-final: a plain commit's cases: a page file as at a merge; a widely shared kit file only the smoke pages', no walker", async () => {
+  const fw = await plan(["admin/web/js/pages/firewall.js"], "commit");
+  assert.deepEqual(fw.pages, ["firewall"]);
+  const ui = await plan(["admin/web/js/ui.js"], "commit");
+  assert.deepEqual(ui.pages, ["inbox", "overview"]);
+  assert.ok(
+    !ui.cases.some((c) => c.includes("title row puts the title left")),
+    "a walker is chosen at commit",
+  );
+  const merge = await plan(["admin/web/js/ui.js"]);
+  assert.ok(merge.cases.length > ui.cases.length);
+});

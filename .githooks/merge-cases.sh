@@ -11,20 +11,37 @@
 # shared e2e queue when this machine has one). Any failure refuses the
 # merge and names the cases.
 #
-# Called by .githooks/pre-commit; usable alone on a merge in progress.
+# redesign-final (B, coordinator 2026-10-04: two Activity cases went red
+# on redesign-371 unnoticed): a PLAIN commit runs the cases of the pages it
+# changes too (HOMELAB_CASES_MODE=commit, .githooks/pre-commit), with a
+# cheaper rule for a kit file most pages import (merge-cases.mjs --commit:
+# the smoke pages, Stacks and the Inbox); a fast-forward runs the merge's
+# full set from .githooks/post-merge (HOMELAB_CASES_RANGE=<from>..<to>).
+#
+# Called by .githooks/pre-commit and post-merge; usable alone.
 set -euo pipefail
 root=$(git rev-parse --show-toplevel)
 cd "$root"
-# pre-merge-commit says so (a merge git commits by itself writes no
-# MERGE_HEAD); a conflicted merge's own commit has MERGE_HEAD.
-[ "${HOMELAB_MERGE_COMMIT:-}" = 1 ] \
-  || git rev-parse -q --verify MERGE_HEAD >/dev/null || exit 0
+mode=${HOMELAB_CASES_MODE:-merge}
+kind=MERGE
+if [ "$mode" = commit ]; then
+  kind=COMMIT
+elif [ -z "${HOMELAB_CASES_RANGE:-}" ]; then
+  # pre-merge-commit says so (a merge git commits by itself writes no
+  # MERGE_HEAD); a conflicted merge's own commit has MERGE_HEAD.
+  [ "${HOMELAB_MERGE_COMMIT:-}" = 1 ] \
+    || git rev-parse -q --verify MERGE_HEAD >/dev/null || exit 0
+fi
 
-mapfile -t changed < <(git diff --cached --name-only -- admin/web)
+if [ -n "${HOMELAB_CASES_RANGE:-}" ]; then
+  mapfile -t changed < <(git diff --name-only "$HOMELAB_CASES_RANGE" -- admin/web)
+else
+  mapfile -t changed < <(git diff --cached --name-only -- admin/web)
+fi
 [ "${#changed[@]}" -gt 0 ] || exit 0
 
 blocked() {
-  echo "MERGE BLOCKED — $1" >&2
+  echo "$kind BLOCKED — $1" >&2
   echo "Remedy: $2" >&2
   exit 1
 }
@@ -33,30 +50,42 @@ command -v node >/dev/null 2>&1 \
              "install node, or merge with --no-verify from a machine that cannot run them."
 
 t0=$(date +%s)
-plan=$(cd admin/web && node --import ./test/support/kp-register.mjs scripts/merge-cases.mjs "${changed[@]}") \
+flag=()
+[ "$mode" = commit ] && flag=(--commit)
+plan=$(cd admin/web && node --import ./test/support/kp-register.mjs scripts/merge-cases.mjs "${flag[@]}" "${changed[@]}") \
   || blocked "the merge's affected cases could not be worked out (above)." \
              "fix admin/web/scripts/merge-cases.mjs or the file it names."
 pattern=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["pattern"])')
 count=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["cases"]))')
 pages=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(", ".join(json.load(sys.stdin)["pages"]) or "none")')
 if [ -z "$pattern" ]; then
-  echo "pre-merge: no whole-screen case opens a page this merge changes (pages: $pages)"
+  echo "pre-${mode}: no whole-screen case opens a page this ${mode} changes (pages: $pages)"
   exit 0
 fi
-echo "pre-merge: $count whole-screen cases open the pages this merge changes ($pages)"
+echo "pre-${mode}: $count whole-screen cases open the pages this ${mode} changes ($pages)"
 
 log=$(mktemp)
+# A port of its own (another run, a gate, may hold the default one).
+if [ -z "${INVARIANTS_PORT:-}" ]; then
+  INVARIANTS_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+  export INVARIANTS_PORT
+fi
 runner=(scripts/invariants-run.sh)
 slot="$HOME/.cache/claude-build-scratch/e2e-slot.sh"
 [ -x "$slot" ] && runner=("$slot" scripts/invariants-run.sh)
 rc=0
-INVARIANTS_ONLY="$pattern" "${runner[@]}" </dev/null >"$log" 2>&1 || rc=$?
+# A hook runs with GIT_DIR / GIT_INDEX_FILE set for this repository: the
+# run's own fixture repository (git init, git commit) must not see them,
+# or its commit lands on the branch being committed (it did, in a proof).
+env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
+  -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+  INVARIANTS_ONLY="$pattern" "${runner[@]}" </dev/null >"$log" 2>&1 || rc=$?
 took=$(( $(date +%s) - t0 ))
 if [ "$rc" -ne 0 ]; then
-  echo "MERGE BLOCKED — whole-screen cases this merge affects failed (${took} s):" >&2
+  echo "$kind BLOCKED — whole-screen cases this ${mode} affects failed (${took} s):" >&2
   grep -E '^✖ ' "$log" | grep -v '^✖ failing tests' | sort -u | sed 's/^/  /' >&2 || tail -20 "$log" >&2
-  echo "Remedy: fix them on the merged tree (log: $log), or merge with --no-verify as a conscious act." >&2
+  echo "Remedy: fix them (log: $log), then ${mode} again." >&2
   exit 1
 fi
-echo "pre-merge: $count affected whole-screen cases pass (${took} s)"
+echo "pre-${mode}: $count affected whole-screen cases pass (${took} s)"
 rm -f "$log"

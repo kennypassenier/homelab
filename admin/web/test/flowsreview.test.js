@@ -37,6 +37,21 @@ test("redesign-flows-5: Apply deploys the ticked subset and names what it leaves
   assert.equal(goPlan(PLAN, new Set()).n, 0);
 });
 
+test("Kenny 2026-10-04: Skip the backups rides on the deploys only, off by default", () => {
+  const off = goPlan(PLAN, new Set(["beta"]));
+  assert.ok(!("skip_backup" in off.preset), "off by default");
+  assert.match(off.note, /each stack is backed up first/);
+  const on = goPlan(PLAN, new Set(["beta"]), true);
+  assert.deepEqual(on.preset, { leave_out: "alpha, gamma", skip_backup: true });
+  assert.match(on.note, /no stack is backed up first/);
+  const armed = new Set(["oldstack"]);
+  const d = destroyStep(PLAN, armed, vmid, {
+    ack: true,
+    deploysPending: false,
+  });
+  assert.ok(!("skip_backup" in d.preset), "a destroy never skips its backup");
+});
+
 test("redesign-flows-5: a destroy is its own step: armed, confirmed, after the deploys, with its CT number", () => {
   const off = destroyStep(PLAN, new Set(), vmid, {
     ack: true,

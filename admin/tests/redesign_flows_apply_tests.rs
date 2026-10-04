@@ -110,7 +110,8 @@ fn redesign_flows_5_a_destroy_never_runs_without_its_backup_proof() {
         },
     )
     .unwrap_err();
-    assert!(r.why.contains("skip_backup"), "{r}");
+    // Kenny, 2026-10-04: Skip the backups is back for the deploys only.
+    assert!(r.why.contains("a destroy always backs up first"), "{r}");
     // Typed names without the tick, or without their CT numbers: refused
     // before anything is read.
     let r = validate(

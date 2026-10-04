@@ -18,6 +18,7 @@ import SPEC from "./formspec.json" with { type: "json" };
  *   "destroy_ack"} ArgName
  * @typedef {{action: string, target: "stack" | "host", label: string,
  *   what: string, scope: string, needs: string, args: ArgName[],
+ *   batch_args?: ArgName[],
  *   confirm: boolean, refused_for_self: boolean,
  *   destructive: boolean}} CatalogEntry
  *   destructive (fix-255): the one thing that paints an action red
@@ -110,7 +111,8 @@ export const ROLLBACK_ACTIONS = /** @type {const} */ ([
  *   label_for?: Record<string, string>,
  *   required_for?: Record<string, boolean>,
  *   choices?: {value: string, label: string}[],
- *   show_when?: ShowWhen, change_when?: ChangeWhen}} FieldDef
+ *   show_when?: ShowWhen, show_when_for?: Record<string, ShowWhen>,
+ *   change_when?: ChangeWhen}} FieldDef
  */
 
 /**
@@ -129,8 +131,15 @@ export const fill = (template, values) =>
  */
 export function argField(arg, entry, stack) {
   const def = /** @type {FieldDef} */ (SPEC.fields[arg]);
-  const { list_only, help_for, label_for, required_for, pattern, ...base } =
-    def;
+  const {
+    list_only,
+    help_for,
+    label_for,
+    required_for,
+    show_when_for,
+    pattern,
+    ...base
+  } = def;
   /** @type {Record<string, unknown>} */
   const merged = {
     ...base,
@@ -141,6 +150,8 @@ export function argField(arg, entry, stack) {
     merged.label = label_for[entry.action];
   if (required_for && entry.action in required_for)
     merged.required = required_for[entry.action];
+  if (show_when_for && show_when_for[entry.action])
+    merged.show_when = show_when_for[entry.action];
   if (pattern)
     merged.pattern =
       SPEC.patterns[/** @type {keyof typeof SPEC.patterns} */ (pattern)];
@@ -499,13 +510,15 @@ const PER_RUN = new Set([
 
 /**
  * The batch form: the action's own fields, minus the ones that differ per
- * stack (an app), plus one typed name per stack when the action asks it.
+ * stack (an app), plus the ones only a batch takes (`batch_args`: the batch
+ * Deploy's Skip the backups), plus one typed name per stack when the action
+ * asks it. The same as core::driveedit::batch_fields.
  * @param {CatalogEntry} entry
  * @param {string[]} stacks
  * @param {string} selfStack
  */
 export function batchForm(entry, stacks, selfStack) {
-  const shared = entry.args
+  const shared = [...entry.args, ...(entry.batch_args ?? [])]
     .filter((a) => a !== "app" && a !== "confirm")
     .map((a) => argField(a, entry, "each stack"));
   const confirms = entry.confirm

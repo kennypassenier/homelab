@@ -85,7 +85,12 @@ const catalog = {
   host_target: "_host",
   self_stack: "admin",
   actions: [
-    entry("deploy", { label: "Deploy", args: ["force"], needs: "spec" }),
+    entry("deploy", {
+      label: "Deploy",
+      args: ["force"],
+      batch_args: ["skip_backup"],
+      needs: "spec",
+    }),
     entry("deploy-commit", { args: ["commit", "force"] }),
     entry("backup", { label: "Back up" }),
     entry("restore", {
@@ -302,6 +307,22 @@ test("a batch asks each typed name and leaves out what differs per stack", () =>
   assert.match(
     String(batchForm(find("destroy"), ["admin"], "admin").refused),
     /own stack/,
+  );
+  // Kenny, 2026-10-04: the batch Deploy's Skip the backups, off by
+  // default; a single Deploy's form has nothing to skip.
+  const d = batchForm(find("deploy"), ["media", "books"], "admin");
+  const skip = d.shared.find((x) => x.name === "skip_backup");
+  assert.ok(skip, "the batch Deploy asks Skip the backups");
+  assert.equal(skip.label, "Skip the backups (deploy without one)");
+  assert.deepEqual(batchBody(d, { skip_backup: false }).args, {});
+  assert.deepEqual(batchBody(d, { skip_backup: true }).args, {
+    skip_backup: true,
+  });
+  assert.ok(
+    !formFields(
+      actionForm(find("deploy"), { stack: "media", selfStack: "admin" }),
+    ).some((f) => f.name === "skip_backup"),
+    "a single Deploy has nothing to skip",
   );
   const u = batchForm(find("update"), ["media", "admin"], "admin");
   assert.deepEqual(u.shared, []);

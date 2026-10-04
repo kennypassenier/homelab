@@ -117,10 +117,19 @@
       "required": false,
       "danger": true,
       "label_for": {
-        "apply": "Skip the backups (deploy and destroy without one)"
+        "apply": "Skip the backups (deploy without one)",
+        "deploy": "Skip the backups (deploy without one)"
       },
       "help_for": {
-        "apply": "Without it each stack is backed up before it is deployed or destroyed; a stack whose backup fails is left unchanged."
+        "apply": "Off by default: each stack is backed up before it is deployed, and a stack whose backup fails is left unchanged. Tick it to deploy without that backup. A destroy always backs up and restore-checks first.",
+        "deploy": "Off by default: each stack is backed up before it is deployed, and a stack whose backup fails is left unchanged. Tick it to deploy without that backup."
+      },
+      "show_when_for": {
+        "apply": {
+          "field": "destroy",
+          "value": "",
+          "says": "only while no stack is typed to destroy: a destroy always backs up first"
+        }
       }
     },
     "skip_safety_copy": {

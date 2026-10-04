@@ -101,6 +101,10 @@ pub struct FieldDef {
     /// On screen, checked and sent only while another field has a value.
     #[serde(default)]
     pub show_when: Option<ShowWhen>,
+    /// Per action: `show_when` for that action's form only (apply's Skip
+    /// the backups, hidden while a destroy is typed).
+    #[serde(default)]
+    pub show_when_for: BTreeMap<String, ShowWhen>,
     /// Other words (and required) while another field has a value.
     #[serde(default)]
     pub change_when: Option<ChangeWhen>,
@@ -351,7 +355,11 @@ pub fn arg_field(arg: Arg, action: ActionKind, stack: &str) -> Field {
         max: None,
         choices: def.choices.clone(),
         current: None,
-        show_when: def.show_when.clone(),
+        show_when: def
+            .show_when_for
+            .get(action.slug())
+            .or(def.show_when.as_ref())
+            .cloned(),
         change_when: def.change_when.clone(),
     }
 }

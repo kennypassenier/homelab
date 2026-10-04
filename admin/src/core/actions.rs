@@ -211,6 +211,9 @@ pub struct CatalogEntry {
     pub scope: Scope,
     pub needs: Needs,
     pub args: &'static [Arg],
+    /// Arguments only a batch of this action takes (the batch Deploy's
+    /// "Skip the backups"); a single press refuses them.
+    pub batch_args: &'static [Arg],
     /// The stack name must be typed into `confirm`.
     pub confirm: bool,
     /// Refused for the dashboard's own stack (arch-self).
@@ -370,7 +373,11 @@ impl ActionKind {
             AnswerCheck => &[Arg::Check, Arg::Verdict, Arg::Days, Arg::Note],
             InstallNative => &[Arg::Unit, Arg::Tag],
             UpdateApps => &[Arg::Updates],
+            // Kenny, 2026-10-04: "overslaan moet terug een optie zijn, maar
+            // niet standaard" — Skip the backups is back for the deploys,
+            // off by default; `validate` refuses it with a destroy.
             Apply => &[
+                Arg::SkipBackup,
                 Arg::Destroy,
                 Arg::Force,
                 Arg::LeaveOut,
@@ -402,6 +409,17 @@ impl ActionKind {
     pub fn destructive(self) -> bool {
         use ActionKind::*;
         matches!(self, PruneOrphans | Destroy | Forget | Wipe | Exec)
+    }
+
+    /// The arguments only a batch of this action takes. The batch Deploy
+    /// backs each stack up first (redesign-stacks-6) unless "Skip the
+    /// backups" is ticked (Kenny, 2026-10-04); a single Deploy never backs
+    /// up, so it has nothing to skip.
+    pub fn batch_args(self) -> &'static [Arg] {
+        match self {
+            ActionKind::Deploy => &[Arg::SkipBackup],
+            _ => &[],
+        }
     }
 
     /// arch-self: what the dashboard never does to its own stack.
@@ -570,6 +588,7 @@ impl ActionKind {
             scope: self.scope(),
             needs: self.needs(),
             args: self.args(),
+            batch_args: self.batch_args(),
             confirm: self.confirm(),
             refused_for_self: self.refused_for_self(),
             destructive: self.destructive(),
@@ -653,9 +672,8 @@ pub struct ActionArgs {
     pub stage_token: Option<String>,
     /// redesign-stacks-6: back the stack up before the deploy changes it
     /// (`DeploySpec::backup_first`). Never read from a request body: the
-    /// server sets it for every deploy of a batch (`validate_batch`), the
-    /// one place the page promises "each backed up first"; Apply derives
-    /// it from `skip_backup` instead.
+    /// server sets it for every deploy of a batch (`validate_batch`) unless
+    /// the batch ticked `skip_backup`; Apply derives it from `skip_backup`.
     #[serde(skip)]
     pub backup_first: bool,
 }
@@ -1096,6 +1114,15 @@ fn validate_parity(kind: ActionKind, what: &str, args: &ActionArgs) -> Result<()
             }
         }
         if !names.is_empty() {
+            // Kenny, 2026-10-04: a destroy never skips its backup and
+            // restore check; "Skip the backups" is for the deploys only.
+            if args.skip_backup {
+                return refuse(
+                    "a destroy always backs up first; Skip the backups is for the deploys only"
+                        .into(),
+                    "untick Skip the backups; the destroy step backs up and restore-checks each stack",
+                );
+            }
             // redesign-flows-5: a destroy is its own confirmed step, for
             // the CT numbers the plan showed.
             if !args.destroy_ack {
@@ -1341,10 +1368,10 @@ pub fn commands(req: &ActionRequest, material: Material) -> Result<Vec<Command>,
         (Apply, Material::Apply { deploy, destroy }) => {
             let mut out = Vec::new();
             for mut spec in deploy {
-                // redesign-stacks-6: "each stack is backed up first". Like
-                // the destroys below, never skipped from the dashboard's
-                // apply (redesign-flows-5: `validate` refuses `skip_backup`).
-                spec.backup_first = true;
+                // redesign-stacks-6: "each stack is backed up first", unless
+                // Skip the backups is ticked (Kenny, 2026-10-04; off by
+                // default). The destroys below never skip theirs.
+                spec.backup_first = !a.skip_backup;
                 out.extend(deploy_commands(spec));
             }
             for name in destroy {
@@ -1476,11 +1503,19 @@ pub fn validate_batch(b: BatchRequest) -> Result<Vec<ActionRequest>, Refusal> {
         if let Some(c) = b.confirms.get(stack) {
             args.confirm = Some(c.clone());
         }
+        // A batch-only argument is taken here, before `validate` checks the
+        // single action's own list.
+        let batch_only = ActionKind::from_slug(&b.action).map_or(&[][..], |k| k.batch_args());
+        let skip_backup = args.skip_backup && batch_only.contains(&Arg::SkipBackup);
+        if skip_backup {
+            args.skip_backup = false;
+        }
         let mut req = validate(stack, &b.action, args)?;
         // redesign-stacks-6: the batch Deploy promises each stack is backed
-        // up before it changes; the server keeps that promise, not the page.
+        // up before it changes; the server keeps that promise, not the page,
+        // unless the batch ticked Skip the backups (Kenny, 2026-10-04).
         if req.action == ActionKind::Deploy {
-            req.args.backup_first = true;
+            req.args.backup_first = !skip_backup;
         }
         out.push(req);
     }

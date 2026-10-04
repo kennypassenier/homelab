@@ -20,10 +20,13 @@ const count = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /**
  * The go bar of the deploys: its words, and the apply form's preset.
+ * `skipBackups`: the bar's "Skip the backups" tick (Kenny, 2026-10-04:
+ * back as an option, never the default); it rides on the deploys only.
  * @param {Plan} p
  * @param {Set<string>} ticked
+ * @param {boolean} [skipBackups]
  */
-export function goPlan(p, ticked) {
+export function goPlan(p, ticked, skipBackups = false) {
   const deploy = p.deploy.filter((s) => ticked.has(s));
   const unticked = p.deploy.filter((s) => !ticked.has(s));
   const broken = p.broken.map(([s]) => s);
@@ -44,15 +47,16 @@ export function goPlan(p, ticked) {
       ? `Apply ${count(deploy.length, "deploy")}`
       : "Nothing ticked to deploy",
     note: deploy.length
-      ? `${left.length ? `${left.join("; ")}. ` : ""}One confirmed batch; each stack is backed up first and shows its own progress in the stack list. Nothing is destroyed here.`
+      ? `${left.length ? `${left.join("; ")}. ` : ""}One confirmed batch; ${skipBackups ? "no stack is backed up first (Skip the backups is ticked)" : "each stack is backed up first"} and shows its own progress in the stack list. Nothing is destroyed here.`
       : "Tick a stack under Will deploy to deploy it.",
     label: deploy.length
       ? `Apply ${count(deploy.length, "deploy")}…`
       : "Apply…",
     /** The apply form's preset: the whole plan sends nothing extra. */
-    preset: /** @type {Record<string, string>} */ (
-      leaveOut.length ? { leave_out: leaveOut.join(", ") } : {}
-    ),
+    preset: /** @type {Record<string, string | boolean>} */ ({
+      ...(leaveOut.length ? { leave_out: leaveOut.join(", ") } : {}),
+      ...(skipBackups ? { skip_backup: true } : {}),
+    }),
   };
 }
 

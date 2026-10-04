@@ -1017,6 +1017,23 @@
       "twins": false
     },
     {
+      "id": "deploy-all-skip-backups",
+      "page": "overview",
+      "what": "tick Skip the backups for the ticked deploys (off by default; a destroy always backs up)",
+      "opens": "view",
+      "row": null,
+      "href": "/stacks",
+      "was": [],
+      "shows": "in the Deploy all changes panel's Apply bar, once the plan is read",
+      "reach": [
+        {
+          "do": "click",
+          "control": "stacks-deploy-all"
+        }
+      ],
+      "twins": false
+    },
+    {
       "id": "deploy-all-stack-file",
       "page": "overview",
       "what": "open the stack file of a stack that cannot be planned (its Settings)",
@@ -3794,6 +3811,13 @@
       "id": "apply-destroy-ack",
       "page": "overview",
       "what": "the destroy step's own red confirmation (a tick)",
+      "was": [],
+      "row": null
+    },
+    {
+      "id": "apply-skip-backups",
+      "page": "overview",
+      "what": "the deploys' Skip the backups (a tick, off by default)",
       "was": [],
       "row": null
     },

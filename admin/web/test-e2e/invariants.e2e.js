@@ -8284,8 +8284,28 @@ test("invariants: Deploy all changes deploys the ticked subset and destroys only
       "",
       "a deploy press carries a destroy",
     );
+    // Kenny, 2026-10-04: Skip the backups is an option, never the default.
+    const skipBox = dialog.locator("#act-skip-backup");
+    assert.equal(
+      await skipBox.isChecked(),
+      false,
+      "skipping is off by default",
+    );
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "detached", timeout: 5000 }).catch(() => {});
+    const skipTick = page.locator("#apply-skip-backups");
+    assert.equal(await skipTick.isChecked(), false);
+    await skipTick.check();
+    await page.locator("#apply-open").click();
+    await dialog.waitFor({ timeout: 5000 });
+    assert.equal(
+      await skipBox.isChecked(),
+      true,
+      "the bar's tick rides on the deploy press",
+    );
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "detached", timeout: 5000 }).catch(() => {});
+    await skipTick.uncheck();
     // The destroy is its own red step: off until it is confirmed, and while
     // a ticked deploy has not run.
     const step = page.locator("#apply-section .ap-destroy");
@@ -8314,6 +8334,11 @@ test("invariants: Deploy all changes deploys the ticked subset and destroys only
     assert.equal(await val("act-destroy"), "oldstack");
     assert.equal(await val("act-destroy-ids"), "905");
     assert.equal(await val("act-leave-out"), "alpha, beta, gamma");
+    assert.equal(
+      await skipBox.isVisible(),
+      false,
+      "a destroy press never offers to skip its backup",
+    );
     await page.keyboard.press("Escape");
     // The server refuses a destroy without its own confirmation or beside
     // a deploy, before anything runs.
@@ -8336,6 +8361,7 @@ test("invariants: Deploy all changes deploys the ticked subset and destroys only
       skip_backup: true,
     });
     assert.equal(noBackup.status, 400, noBackup.body);
+    assert.match(noBackup.body, /a destroy always backs up first/);
   } finally {
     await browser.close();
   }

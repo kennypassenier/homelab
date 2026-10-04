@@ -288,6 +288,15 @@ button.ap-tile[aria-pressed="true"] {
 .ap-go__acts {
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+/* Kenny, 2026-10-04: the deploys' Skip the backups, off by default. */
+.ap-go__skip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--kp-text-sm);
+  white-space: nowrap;
 }
 .ap-go .kp-button:disabled {
   opacity: 0.55;

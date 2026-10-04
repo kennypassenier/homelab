@@ -2456,6 +2456,7 @@ pub fn batch_fields(kind: ActionKind, stacks: &[String]) -> Vec<Field> {
     let mut out: Vec<Field> = kind
         .args()
         .iter()
+        .chain(kind.batch_args())
         .filter(|a| !matches!(a, Arg::App | Arg::Confirm))
         .map(|a| drive::arg_field(*a, kind, "each stack"))
         .collect();

@@ -5,7 +5,7 @@ mod act_support;
 
 use act_support::{manifest, native, spec};
 use homelab_admin::core::actions::{
-    self, ActionArgs, ActionKind, BatchRequest, HOST_TARGET, Material, catalog, commands,
+    self, ActionArgs, ActionKind, Arg, BatchRequest, HOST_TARGET, Material, catalog, commands,
     restarts_dashboard, validate, validate_batch,
 };
 use homelab_proto::Command;
@@ -675,10 +675,11 @@ fn parity_a_check_answer_follows_the_cli_rules() {
 /// first" for its batch Deploy and for Deploy all changes. The server keeps
 /// that promise: every deploy of a batch, and every deploy Apply sends,
 /// asks the host to back up first, and a single Deploy from the stack hub
-/// deploys as before. Apply has no opt-out since redesign-flows-5 (the
-/// coordinator's destroy rule of 2026-10-03: `skip_backup` is no longer an
-/// Apply field, so `validate` refuses it). The page cannot ask for it either
-/// way (the field is never read from a body).
+/// deploys as before. Kenny, 2026-10-04 ("overslaan moet terug een optie
+/// zijn, maar niet standaard"): "Skip the backups" is back for those
+/// deploys, off by default; a single Deploy has nothing to skip and refuses
+/// it, and a destroy never skips its backup (Apply refuses it with one).
+/// The page cannot ask for `backup_first` itself (never read from a body).
 #[test]
 fn redesign_stacks_6_batch_deploy_and_apply_ask_the_host_to_back_up_first() {
     let deploy_flag = |cmds: &[Command]| -> Vec<bool> {
@@ -689,46 +690,82 @@ fn redesign_stacks_6_batch_deploy_and_apply_ask_the_host_to_back_up_first() {
             })
             .collect()
     };
-    let batch = validate_batch(BatchRequest {
-        action: "deploy".into(),
-        stacks: vec!["kyu".into(), "media".into()],
-        args: ActionArgs::default(),
-        confirms: Default::default(),
-    })
-    .unwrap();
-    for req in &batch {
-        let cmds = commands(req, Material::Spec(Box::new(spec(&req.stack)))).unwrap();
-        assert_eq!(
-            deploy_flag(&cmds),
-            vec![true],
-            "batch deploy of {}",
-            req.stack
-        );
+    for (skip, want) in [(false, true), (true, false)] {
+        let batch = validate_batch(BatchRequest {
+            action: "deploy".into(),
+            stacks: vec!["kyu".into(), "media".into()],
+            args: ActionArgs {
+                skip_backup: skip,
+                ..Default::default()
+            },
+            confirms: Default::default(),
+        })
+        .unwrap();
+        for req in &batch {
+            let cmds = commands(req, Material::Spec(Box::new(spec(&req.stack)))).unwrap();
+            assert_eq!(
+                deploy_flag(&cmds),
+                vec![want],
+                "batch deploy of {}, skip_backup {skip}",
+                req.stack
+            );
+        }
     }
     let single = validate("media", "deploy", ActionArgs::default()).unwrap();
     let cmds = commands(&single, Material::Spec(Box::new(spec("media")))).unwrap();
     assert_eq!(deploy_flag(&cmds), vec![false], "a single deploy");
-
-    let req = validate(HOST_TARGET, "apply", ActionArgs::default()).unwrap();
-    let cmds = commands(
-        &req,
-        Material::Apply {
-            deploy: vec![spec("media"), spec("kyu")],
-            destroy: vec![],
-        },
-    )
-    .unwrap();
-    assert_eq!(deploy_flag(&cmds), vec![true, true], "apply");
     let r = validate(
-        HOST_TARGET,
-        "apply",
+        "media",
+        "deploy",
         ActionArgs {
             skip_backup: true,
             ..Default::default()
         },
     )
     .unwrap_err();
-    assert!(r.why.contains("skip_backup"), "{r}");
+    assert!(r.why.contains("skip_backup"), "a single deploy: {r}");
+    // Only the batch takes it: the catalog says so for the batch form.
+    assert_eq!(ActionKind::Deploy.batch_args(), &[Arg::SkipBackup]);
+    assert!(!ActionKind::Deploy.args().contains(&Arg::SkipBackup));
+
+    for (skip, want) in [(false, true), (true, false)] {
+        let req = validate(
+            HOST_TARGET,
+            "apply",
+            ActionArgs {
+                skip_backup: skip,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let cmds = commands(
+            &req,
+            Material::Apply {
+                deploy: vec![spec("media"), spec("kyu")],
+                destroy: vec![],
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            deploy_flag(&cmds),
+            vec![want, want],
+            "apply, skip_backup {skip}"
+        );
+    }
+    // A destroy never skips its backup: Apply refuses the tick with one.
+    let r = validate(
+        HOST_TARGET,
+        "apply",
+        ActionArgs {
+            skip_backup: true,
+            destroy: Some("drill".into()),
+            destroy_ids: Some("903".into()),
+            destroy_ack: true,
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+    assert!(r.why.contains("a destroy always backs up first"), "{r}");
     let from_body: ActionArgs = serde_json::from_str(r#"{"force":true}"#).unwrap();
     assert!(!from_body.backup_first);
     assert!(serde_json::from_str::<ActionArgs>(r#"{"backup_first":true}"#).is_err());

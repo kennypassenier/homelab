@@ -122,6 +122,21 @@ const DESTROY_ACK_FIELD = declareField({
   page: "overview",
   what: "the destroy step's own red confirmation (a tick)",
 });
+// Kenny, 2026-10-04: "overslaan moet terug een optie zijn, maar niet
+// standaard" — the deploys' Skip the backups, unticked on every visit.
+const SKIP = declare({
+  id: "deploy-all-skip-backups",
+  page: "overview",
+  opens: "view",
+  what: "tick Skip the backups for the ticked deploys (off by default; a destroy always backs up)",
+  shows: "in the Deploy all changes panel's Apply bar, once the plan is read",
+  reach: [{ do: "click", control: "stacks-deploy-all" }],
+});
+const SKIP_FIELD = declareField({
+  id: "apply-skip-backups",
+  page: "overview",
+  what: "the deploys' Skip the backups (a tick, off by default)",
+});
 const DESTROY = declare({
   id: "deploy-all-destroy",
   page: "overview",
@@ -244,6 +259,8 @@ export function mount(root, opts = {}) {
   /** @type {Map<string, Node[]>} */
   const diffs = new Map();
   let ack = false;
+  // The deploys' Skip the backups: off by default, never remembered.
+  let skipBackups = false;
   /** @type {"none" | "pressed" | "running" | "done"} */
   let applied = "none";
   /** @type {number | null} unix seconds of this page's Apply press */
@@ -645,7 +662,20 @@ export function mount(root, opts = {}) {
           : []),
       ),
     );
-    const g = goPlan(p, ticked);
+    const g = goPlan(p, ticked, skipBackups);
+    const skip = drivable(
+      h("input", {
+        type: "checkbox",
+        id: SKIP_FIELD,
+        ...(g.n === 0 ? { disabled: "" } : {}),
+      }),
+      SKIP,
+    );
+    /** @type {HTMLInputElement} */ (skip).checked = skipBackups;
+    skip.addEventListener("change", () => {
+      skipBackups = /** @type {HTMLInputElement} */ (skip).checked;
+      paint();
+    });
     const apply = viaForm(
       h(
         "button",
@@ -654,8 +684,9 @@ export function mount(root, opts = {}) {
           class: "kp-button kp-button--primary",
           id: "apply-open",
           ...(g.n === 0 ? { disabled: "" } : {}),
-          title:
-            "Deploy the ticked stacks after one confirmation; each stack is backed up first. Nothing is destroyed here.",
+          title: skipBackups
+            ? "Deploy the ticked stacks after one confirmation, without backing them up first. Nothing is destroyed here."
+            : "Deploy the ticked stacks after one confirmation; each stack is backed up first. Nothing is destroyed here.",
         },
         g.label,
       ),
@@ -668,7 +699,22 @@ export function mount(root, opts = {}) {
     });
     go.replaceChildren(
       h("div", null, h("strong", null, g.title), h("p", null, g.note)),
-      h("div", { class: "ap-go__acts" }, apply),
+      h(
+        "div",
+        { class: "ap-go__acts" },
+        h(
+          "label",
+          {
+            class: "ap-go__skip",
+            for: SKIP_FIELD,
+            title:
+              "Deploy the ticked stacks without backing each up first. A destroy always backs up.",
+          },
+          skip,
+          h("span", null, "Skip the backups"),
+        ),
+        apply,
+      ),
     );
     paintDestroy(p, g.n > 0 && applied !== "done");
   };

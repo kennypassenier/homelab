@@ -13,10 +13,15 @@
 #
 # redesign-final (B, coordinator 2026-10-04: two Activity cases went red
 # on redesign-371 unnoticed): a PLAIN commit runs the cases of the pages it
-# changes too (HOMELAB_CASES_MODE=commit, .githooks/pre-commit), with a
-# cheaper rule for a kit file most pages import (merge-cases.mjs --commit:
-# the smoke pages, Stacks and the Inbox); a fast-forward runs the merge's
-# full set from .githooks/post-merge (HOMELAB_CASES_RANGE=<from>..<to>).
+# changes too (HOMELAB_CASES_MODE=commit, .githooks/pre-commit); a
+# fast-forward runs the merge's set from .githooks/post-merge
+# (HOMELAB_CASES_RANGE=<from>..<to>).
+#
+# redesign-final-49 (Kenny, 2026-10-04: "dit moet stevig gepruned
+# worden"): a page file runs its pages' cases; a shared file (ui.js, dom.js,
+# chrome.js, app.css, …) runs only the one layout walk, never every page's
+# cases; no other walker runs before the release gate (merge-cases.mjs
+# `affected` holds the rule).
 #
 # Called by .githooks/pre-commit and post-merge; usable alone.
 set -euo pipefail

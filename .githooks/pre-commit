@@ -129,8 +129,8 @@ if [ "${HOMELAB_MERGE_COMMIT:-}" = 1 ] \
    || git rev-parse -q --verify MERGE_HEAD >/dev/null; then
   "$root/.githooks/merge-cases.sh" || exit 1
 else
-  # redesign-final (B): a plain commit runs its pages' cases too (the
-  # cheaper commit rule for a kit file most pages share).
+  # redesign-final (B): a plain commit runs its pages' cases too;
+  # redesign-final-49: a shared file only the one layout walk.
   HOMELAB_CASES_MODE=commit "$root/.githooks/merge-cases.sh" || exit 1
 fi
 

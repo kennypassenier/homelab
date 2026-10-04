@@ -8832,6 +8832,8 @@ const AUDIT_CLASSES = /** @type {const} */ ([
 ]);
 
 test("invariants: redesign-final-gen: one walk over every page and action dialog at 1894 and 390 px reports every layout class", async (t) => {
+  // merge-cases: the layout walk (redesign-final-49: a commit that changes a
+  // shared file runs this instead of every page's cases; a merge always).
   const { layoutAudit, pageChecks, dialogGrid } =
     await import("./layoutaudit.js");
   const { parkedClass } = await import("./parked.js");

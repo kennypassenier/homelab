@@ -6,6 +6,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { casesOf, pageModules, plan } from "../scripts/merge-cases.mjs";
 
+/** The one layout walk. @param {string} c */
+const isWalk = (c) => c.includes("redesign-final-gen: one walk");
+
 test("redesign-final-12: main.js names each route page's module, views included", () => {
   const m = pageModules(`
 import { mount as firewall } from "./pages/firewall.js";
@@ -50,29 +53,44 @@ test("redesign-final-12: a page module's change reaches its own page's cases and
   assert.deepEqual(css.pages, ["firewall"]);
   const sched = await plan(["admin/web/js/pages/schedules.js"]);
   assert.ok(sched.pages.includes("activity"), "Planned is part of Activity");
+  // redesign-final-50: a merge runs the one layout walk beside them.
+  assert.ok(fw.cases.some(isWalk), "a merge without the layout walk");
   const ui = await plan(["admin/web/js/ui.js"]);
-  assert.ok(ui.cases.length > fw.cases.length);
-  assert.ok(
-    ui.cases.some((c) => c.includes("redesign-final-gen: one walk")),
-    "a case that walks every page is not chosen for a shared file",
+  // A shared file reaches the one layout walk, not every page's cases.
+  assert.deepEqual(ui.pages, []);
+  assert.deepEqual(
+    ui.cases.filter((c) => !isWalk(c)),
+    [],
   );
+  assert.ok(ui.cases.some(isWalk), "no layout walk for a shared file");
   assert.equal((await plan(["docs/USER_GUIDE.md"])).cases.length, 0);
 });
 
-// redesign-final (B): a plain commit runs its pages' cases too, with a
-// cheaper rule for a kit file most pages import: the smoke pages (Stacks,
-// the Inbox) instead of every page, and never the walkers (minutes each).
-test("redesign-final: a plain commit's cases: a page file as at a merge; a widely shared kit file only the smoke pages', no walker", async () => {
+// redesign-final-49 (Kenny, 2026-10-04): a plain commit runs the cases of
+// the pages its page files build; a shared file runs only the one layout
+// walk, never every page's cases, and no other walker.
+test("redesign-final-49: a commit's page file runs its page's cases; a shared file only the one layout walk", async () => {
   const fw = await plan(["admin/web/js/pages/firewall.js"], "commit");
   assert.deepEqual(fw.pages, ["firewall"]);
-  const ui = await plan(["admin/web/js/ui.js"], "commit");
-  assert.deepEqual(ui.pages, ["inbox", "overview"]);
-  assert.ok(
-    !ui.cases.some((c) => c.includes("redesign-final-gen: one walk")),
-    "a walker is chosen at commit",
-  );
-  const merge = await plan(["admin/web/js/ui.js"]);
-  assert.ok(merge.cases.length > ui.cases.length);
+  assert.ok(fw.cases.length > 0);
+  assert.ok(!fw.cases.some(isWalk), "the walk for a page file at commit");
+  for (const f of [
+    "admin/web/js/ui.js",
+    "admin/web/js/dom.js",
+    "admin/web/js/chrome.js",
+  ]) {
+    const x = await plan([f], "commit");
+    assert.deepEqual(x.pages, [], f);
+    assert.deepEqual(
+      x.cases.filter((c) => !isWalk(c)),
+      [],
+      f,
+    );
+    assert.equal(x.cases.filter(isWalk).length, 1, f);
+  }
+  const css = await plan(["admin/web/css/app.css"], "commit");
+  assert.deepEqual(css.pages, []);
+  assert.ok(css.cases.some(isWalk));
 });
 
 test("redesign-final-48: the contrast case runs on a stylesheet or kp-themes change, never because a shared script changed", async () => {

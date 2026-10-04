@@ -10,8 +10,9 @@
 //     index.html links, and a file every page imports, is shared;
 //   - each case's addresses (`${BASE}/…` and quoted "/…" paths in its
 //     body), resolved to a route page by the router itself.
-// A case that names no address (it walks every page) runs when a shared
-// file changed. `.githooks/merge-cases.sh` runs what this prints.
+// A shared file reaches only the one layout walk (redesign-final-49/50,
+// `affected` says the whole rule). `.githooks/merge-cases.sh` runs what
+// this prints.
 //
 // Usage: node scripts/merge-cases.mjs <changed file>... (paths from the
 // repository root or admin/web); prints {pages, cases, pattern} as JSON.
@@ -78,7 +79,7 @@ export function closure(file, read) {
  * whose name is a template (`${…}`) is left out: it is one of a family the
  * gate runs whole.
  * @param {string} src a *.e2e.js file
- * @returns {{name: string, paths: string[], style?: boolean}[]}
+ * @returns {{name: string, paths: string[], style?: boolean, walk?: boolean}[]}
  */
 export function casesOf(src) {
   const starts = [...src.matchAll(/^test\(\s*\n?\s*(["`])((?:(?!\1).)+)\1/gm)];
@@ -98,7 +99,9 @@ export function casesOf(src) {
       // kp-themes pin changed; the release gate runs it always.
       const style = /\/\/ merge-cases: on style change\b/.test(body)
         ? { style: true }
-        : {};
+        : /\/\/ merge-cases: the layout walk\b/.test(body)
+          ? { walk: true }
+          : {};
       // An address built at run time (`${BASE}/${path}` over a list of
       // pages) walks every page: a case for any shared change.
       if (/\$\{BASE\}\/?\$\{/.test(body))
@@ -112,42 +115,39 @@ export function casesOf(src) {
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
- * The cases a change set affects.
+ * The cases a change set affects (redesign-final-49/50, Kenny 2026-10-04:
+ * "dit moet stevig gepruned worden"):
+ *   - a page file (one in the closure of fewer than half the page
+ *     modules) reaches the cases of the pages built from it;
+ *   - a shared file (ui.js, dom.js, chrome.js, app.css, …) reaches only the
+ *     one layout walk (`// merge-cases: the layout walk`), never every page;
+ *   - a merge always runs the walk beside its pages' cases;
+ *   - a case marked `// merge-cases: on style change` runs only when a
+ *     stylesheet or the kp-themes pin changed;
+ *   - every other case that walks every page waits for the release gate.
  * @param {string[]} changed admin/web-relative paths
  * @param {{modules: Map<string, string>, closures: Map<string, Set<string>>,
- *   shared: Set<string>, cases: {name: string, paths: string[], style?: boolean}[],
+ *   shared: Set<string>,
+ *   cases: {name: string, paths: string[], style?: boolean, walk?: boolean}[],
  *   styleChanged?: boolean,
- *   pageOf: (path: string) => string | null, mode?: "merge" | "commit",
- *   direct?: Map<string, Set<string>>, smoke?: string[]}} x
+ *   pageOf: (path: string) => string | null, mode?: "merge" | "commit"}} x
  */
 export function affected(changed, x) {
   const sharedHit = changed.some((f) => x.shared.has(f));
+  const own = changed.filter((f) => !x.shared.has(f));
   /** @type {Set<string>} */
   const pages = new Set();
-  // redesign-final (B): a plain commit's cheaper rule. A file the page
-  // modules share counts only for the pages whose module imports it
-  // directly (one hop), plus the smoke pages (Stacks and the Inbox, the
-  // two every session opens first); a page-local file counts as at a
-  // merge. The walkers (cases that visit every page, minutes each) wait
-  // for the merge and the gate.
-  const commit = x.mode === "commit";
-  /** Pages whose module imports `f` itself. @param {string} f */
-  const importers = (f) =>
-    [...x.modules].filter(([, file]) => x.direct?.get(file)?.has(f));
-  for (const [page, file] of x.modules) {
-    const hit = changed.some((f) =>
-      commit && x.shared.has(f)
-        ? // A kit file most pages import (ui.js, dom.js) is checked on the
-          // smoke pages only; one a few pages import, on those.
-          importers(f).length <= 3 && (x.direct?.get(file)?.has(f) ?? false)
-        : x.closures.get(file)?.has(f),
-    );
-    if (hit) pages.add(page);
-  }
-  if (commit && sharedHit) for (const p of x.smoke ?? []) pages.add(p);
+  for (const [page, file] of x.modules)
+    if (own.some((f) => x.closures.get(file)?.has(f))) pages.add(page);
+  // The dashboard's own served files (not its tests or docs).
+  const served = changed.some(
+    (f) => /^(js|css)\//.test(f) || f === "index.html",
+  );
+  const walk = x.mode === "commit" ? sharedHit : served || !!x.styleChanged;
   const cases = x.cases.filter((c) => {
     if (c.style) return !!x.styleChanged;
-    if (!c.paths.length) return sharedHit && !commit;
+    if (c.walk) return walk;
+    if (!c.paths.length) return false;
     return c.paths.some((p) => {
       const page = x.pageOf(p);
       return page != null && pages.has(page);
@@ -212,23 +212,9 @@ export async function plan(changedPaths, mode = "merge", opts = {}) {
   };
   const changed = changedPaths
     .map((f) => (f.startsWith("admin/web/") ? f.slice("admin/web/".length) : f))
-    .map((f) => relative(WEB, join(WEB, f)));
-  // One hop: the files a page module imports itself.
-  /** @type {Map<string, Set<string>>} */
-  const direct = new Map();
-  for (const f of new Set(modules.values())) {
-    const src = read(f) ?? "";
-    direct.set(
-      f,
-      new Set(
-        [
-          ...src.matchAll(
-            /(?:import|export)[^;]*?from\s*"(\.{1,2}\/[^"]+\.js)"/g,
-          ),
-        ].map((m) => normalize(join(dirname(f), m[1]))),
-      ),
-    );
-  }
+    .map((f) => relative(WEB, join(WEB, f)))
+    // Only the dashboard's own files reach a case.
+    .filter((f) => !f.startsWith(".."));
   return affected(changed, {
     modules,
     closures,
@@ -237,8 +223,6 @@ export async function plan(changedPaths, mode = "merge", opts = {}) {
     pageOf,
     mode: mode === "commit" ? "commit" : "merge",
     styleChanged: !!opts.kp || changed.some((f) => f.endsWith(".css")),
-    direct,
-    smoke: ["overview", "inbox"],
   });
 }
 

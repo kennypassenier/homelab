@@ -530,8 +530,8 @@
     {
       "id": "backups-restore",
       "page": "backups",
-      "what": "pick a stack, an app and a snapshot, then restore it",
-      "opens": "dialog",
+      "what": "open the Restore flow: pick an app and a night, then restore it",
+      "opens": "view",
       "row": null,
       "href": "/backups",
       "was": [],
@@ -1737,7 +1737,11 @@
       "opens": "dialog",
       "row": "<row key>",
       "href": "/inbox",
-      "was": [],
+      "was": [
+        {
+          "id": "notice-fix"
+        }
+      ],
       "shows": null,
       "reach": [],
       "twins": false
@@ -1761,7 +1765,11 @@
       "opens": "run",
       "row": "<row key>",
       "href": "/inbox",
-      "was": [],
+      "was": [
+        {
+          "id": "mark-read"
+        }
+      ],
       "shows": "on an unread notice without a fix",
       "reach": [],
       "twins": false
@@ -1809,7 +1817,11 @@
       "opens": "view",
       "row": "<row key>",
       "href": "/inbox",
-      "was": [],
+      "was": [
+        {
+          "id": "open-notice"
+        }
+      ],
       "shows": null,
       "reach": [],
       "twins": false
@@ -2007,18 +2019,6 @@
       "twins": false
     },
     {
-      "id": "mark-read",
-      "page": "notifications",
-      "what": "mark one notification read",
-      "opens": "run",
-      "row": "<notification id>",
-      "href": "/system/notifications",
-      "was": [],
-      "shows": "on an unread notification",
-      "reach": [],
-      "twins": false
-    },
-    {
       "id": "metrics-drive-backups",
       "page": "metrics",
       "what": "the failing drive's alert: open Backups to back the stacks up now",
@@ -2115,36 +2115,6 @@
       "opens": "dialog",
       "row": null,
       "href": "/activity?view=planned",
-      "was": [],
-      "shows": null,
-      "reach": [],
-      "twins": false
-    },
-    {
-      "id": "notice-fix",
-      "page": "notifications",
-      "what": "run a notification's suggested fix (the n-th, from 0)",
-      "opens": "dialog",
-      "row": "<notification id>:<n>",
-      "href": "/system/notifications",
-      "was": [],
-      "shows": "in an opened notification that suggests a fix",
-      "reach": [
-        {
-          "do": "click",
-          "control": "open-notice",
-          "row": "*"
-        }
-      ],
-      "twins": false
-    },
-    {
-      "id": "open-notice",
-      "page": "notifications",
-      "what": "open (or fold) one notification's details: what to do and its fixes",
-      "opens": "view",
-      "row": "<notification id>",
-      "href": "/system/notifications",
       "was": [],
       "shows": null,
       "reach": [],
@@ -2437,6 +2407,84 @@
       "twins": false
     },
     {
+      "id": "restore-app",
+      "page": "restore",
+      "what": "pick the app whose data comes back (step 1)",
+      "opens": "view",
+      "row": "<app>",
+      "href": "/backups/restore",
+      "was": [
+        {
+          "id": "bk-restore-app"
+        }
+      ],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "restore-cancel",
+      "page": "restore",
+      "what": "leave the Restore flow for the stack's Backups tab",
+      "opens": "view",
+      "row": null,
+      "href": "/backups/restore",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "restore-go",
+      "page": "restore",
+      "what": "restore the picked night (the safety copy first); before the app, the night and the typed name it says which is missing",
+      "opens": "run",
+      "row": null,
+      "href": "/backups/restore",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "restore-night",
+      "page": "restore",
+      "what": "pick the night its data comes back from (step 2)",
+      "opens": "view",
+      "row": "<snapshot>",
+      "href": "/backups/restore",
+      "was": [
+        {
+          "id": "bk-restore-snapshot"
+        }
+      ],
+      "shows": "once an app is picked",
+      "reach": [
+        {
+          "do": "click",
+          "control": "restore-app",
+          "row": "*"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "restore-stack",
+      "page": "restore",
+      "what": "restore from another stack",
+      "opens": "view",
+      "row": "<stack>",
+      "href": "/backups/restore",
+      "was": [
+        {
+          "id": "bk-restore-stack"
+        }
+      ],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "reveal-secret",
       "page": "secrets",
       "what": "show one secret's value for 30 seconds (once more hides it again); audited",
@@ -2487,7 +2535,7 @@
     {
       "id": "save-digest",
       "page": "notifications",
-      "what": "save the bulletin time",
+      "what": "save the digest time",
       "opens": "run",
       "row": null,
       "href": "/system/notifications",
@@ -2778,11 +2826,27 @@
     {
       "id": "snooze",
       "page": "notifications",
-      "what": "snooze every push for the chosen time",
+      "what": "snooze every push for an hour (Snooze 1 h)",
       "opens": "run",
       "row": null,
       "href": "/system/notifications",
       "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "snooze-for",
+      "page": "notifications",
+      "what": "snooze every push for 1 h, 4 h, until 07:00 or a day",
+      "opens": "run",
+      "row": "60|240|morning|1440",
+      "href": "/system/notifications",
+      "was": [
+        {
+          "id": "notify-snooze-minutes"
+        }
+      ],
       "shows": null,
       "reach": [],
       "twins": false
@@ -3120,7 +3184,7 @@
     {
       "id": "stack-push",
       "page": "notifications",
-      "what": "turn one stack's pushes on or off (muted: the centre only)",
+      "what": "turn one stack's pushes on or off (muted: the Inbox only)",
       "opens": "run",
       "row": "<stack>",
       "href": "/system/notifications",
@@ -3715,27 +3779,6 @@
       "row": null
     },
     {
-      "id": "bk-restore-app",
-      "page": "backups",
-      "what": "the app a restore reads from (Restore dialog)",
-      "was": [],
-      "row": null
-    },
-    {
-      "id": "bk-restore-snapshot",
-      "page": "backups",
-      "what": "the snapshot a restore reads (Restore dialog)",
-      "was": [],
-      "row": null
-    },
-    {
-      "id": "bk-restore-stack",
-      "page": "backups",
-      "what": "the stack a restore reads from (Restore dialog)",
-      "was": [],
-      "row": null
-    },
-    {
       "id": "deploy-all-destroy-name",
       "page": "overview",
       "what": "type a gone stack's name to include its destroy",
@@ -3799,16 +3842,16 @@
       "row": null
     },
     {
-      "id": "notify-snooze-minutes",
-      "page": "notifications",
-      "what": "how long a snooze lasts",
+      "id": "passkey-label",
+      "page": "passkeys",
+      "what": "the name a new passkey is kept under",
       "was": [],
       "row": null
     },
     {
-      "id": "passkey-label",
-      "page": "passkeys",
-      "what": "the name a new passkey is kept under",
+      "id": "restore-confirm",
+      "page": "restore",
+      "what": "the stack's name, typed to confirm the restore",
       "was": [],
       "row": null
     },
@@ -3925,6 +3968,7 @@
     "apps",
     "backupcalendar",
     "backups",
+    "backups/restore",
     "charts",
     "checks",
     "console",

@@ -126,6 +126,12 @@ async fn main() -> std::process::ExitCode {
                 .group("Inbox")
                 .hidden(),
         )
+        // redesign-final-h3: the Restore flow's own address, under Backups.
+        .page(
+            Page::new("restore", "Restore", "/backups/restore")
+                .group("Backups")
+                .hidden(),
+        )
         // fix-206: chassis reserves `/metrics` for its own Prometheus
         // scrape text, unconditionally; "/charts" is this page's path.
         .page(

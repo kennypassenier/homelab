@@ -531,6 +531,11 @@ pub fn activity_demo_history(
     let mut r = DemoRng(9);
     let mut out = Vec::new();
     let today = now - now % 86_400;
+    // redesign-final (the stamp sweep failed after midnight UTC): "last
+    // night" is the newest round that has finished, so the open incident
+    // and its Run it again exist at every hour, not only after 03:40 UTC.
+    let today_done = today + 3 * 3_600 + 300 + 2_000 <= now;
+    let last_night = if today_done { 0 } else { 1 };
     let step = |name: &str, start: u64, end: u64| StepTiming {
         step: name.into(),
         start,
@@ -547,7 +552,7 @@ pub fn activity_demo_history(
         let mut phase_end = t;
         for (i, st) in stacks.iter().enumerate() {
             let took = 90 + r.next(80);
-            let fail_last = d == 0 && i + 1 == stacks.len();
+            let fail_last = d == last_night && i + 1 == stacks.len();
             let fail_old = d == 9 && i == 2.min(stacks.len().saturating_sub(1));
             let error = if fail_last {
                 Some("restic: repository is already locked by PID 41190 on pve".to_string())
@@ -1327,4 +1332,28 @@ pub async fn seed_unread_notice(center: &crate::shell::actions_notify::NotifyCen
         "the demo notice suggests no fix"
     );
     center.notify(d).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // redesign-final: Activity's open incident (last night's failed backup)
+    // exists at every hour of the day, also before tonight's 03:00 round.
+    #[test]
+    fn redesign_final_last_nights_failed_backup_exists_at_every_hour() {
+        let stacks: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+        let midnight = 1_790_985_600; // a whole UTC day
+        for hour in [0, 1, 3, 4, 12, 23] {
+            let now = midnight + hour * 3_600 + 1_800;
+            let failed = activity_demo_history(&stacks, now)
+                .into_iter()
+                .filter(|e| {
+                    matches!(e, homelab_core::history::HistoryEntry::Op { ok: false, label, end, .. }
+                        if label == "scheduled-backup" && now - end < 2 * 86_400)
+                })
+                .count();
+            assert_eq!(failed, 1, "at {hour}:30 UTC");
+        }
+    }
 }

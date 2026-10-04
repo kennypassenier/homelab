@@ -1,0 +1,98 @@
+/* redesign-final-c3 (3.71.0): System › Notification rules as the approved
+   notifications.html draws its rules — Delivery and Per stack side by
+   side, the notice list in the Inbox. kp-themes tokens only. */
+
+.nr-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--nx-gap, 1.5rem);
+  align-items: start;
+}
+@media (max-width: 64rem) {
+  .nr-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.nr-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.nr-settings {
+  display: grid;
+  gap: 18px;
+}
+.nr-setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 16px;
+  align-items: center;
+}
+.nr-setting > div:first-child b {
+  display: block;
+  font-weight: 600;
+  font-size: var(--kp-text-sm);
+}
+.nr-setting > div:first-child > span {
+  display: block;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+  line-height: 1.45;
+}
+.nr-setting > .nx-seg {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+.nr-setting [hidden] {
+  display: none;
+}
+.nr-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.nr-time {
+  inline-size: 8rem;
+}
+.nr-hr {
+  block-size: 1px;
+  background: var(--border);
+}
+.nr-stacks {
+  display: grid;
+}
+.nr-stack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-block-start: 1px solid var(--border);
+  font-size: var(--kp-text-sm);
+}
+.nr-stack:first-child {
+  border-block-start: 0;
+}
+.nr-stack > b {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.nr-stack.is-muted > b {
+  color: var(--muted-foreground);
+  text-decoration: line-through;
+}
+.nr-count {
+  min-inline-size: 22px;
+  text-align: center;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: var(--kp-text-xs);
+  font-variant-numeric: tabular-nums;
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+.nr-count.is-hot {
+  background: var(--chart-1);
+  color: var(--card);
+  font-weight: 700;
+}

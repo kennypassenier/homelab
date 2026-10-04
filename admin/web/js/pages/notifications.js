@@ -1,45 +1,28 @@
-// The notification centre (feat-overview-5, feat-ops-9): the notices,
-// newest first; mark read; the push switch, the daily digest's time, the
-// snooze with its "snoozed until", and a mute per stack. Decision
-// "Notifications and Grafana" (2026-09-30): every notice shows what, since
-// when, the consequence and what to do, its page, and a Fix button that
-// opens the action's dialog when the dashboard can run the remedy.
+// System › Notification rules (feat-overview-5, feat-ops-9; redesign-final-c3,
+// 3.71.0's final review): who gets bothered and when, as the approved
+// notifications.html draws its rules — a Delivery card (push to the phone,
+// the daily digest, a snooze segment) and a Per stack card (each stack's
+// unread count and its push switch). The notice list itself lives in the
+// Inbox since 3.71.0 (FLOWS.md §2), so this page holds the rules only.
 
 import { act, loadNotices, onAct, patchNoticeSettings, send } from "../act.js";
-import { openAction } from "../actiondialog.js";
 import { notify, refusalCallout } from "../actui.js";
-import {
-  badgeCell,
-  bindTableUrl,
-  h,
-  stateWord,
-  tableBlock,
-  td,
-} from "../dom.js";
-import { formatDateTime } from "../format.js";
-import {
-  KIND_ORDER,
-  LEVEL_ORDER,
-  SNOOZE_CHOICES,
-  digestText,
-  fixLabel,
-  noticeRows,
-  settingsBody,
-  snoozeState,
-  stackMuteRows,
-} from "../notices.js";
-import { sortKeys } from "../sortkeys.js";
+import { h } from "../dom.js";
+import { declare, declareField, drivable, fieldId } from "../drivable.js";
+import { settingsBody, stackMuteRows } from "../notices.js";
+import { digestWords, pushChip, snoozeChoices } from "../notifyrules.js";
 import { current, subscribe } from "../store.js";
 import {
-  attachDataTables,
-  compare,
-  dataTable,
-} from "/static/kp/js/datatable.js";
+  dot,
+  ensureStyle,
+  pageHeader,
+  section,
+  segSwitch,
+  skeletonLines,
+} from "../ui.js";
 import { attachSwitches } from "/static/kp/js/forms.js";
-import { declare, declareField, drivable, fieldId } from "../drivable.js";
 
-// review M5: every page field Live view may set is declared (drivable.js
-// `declareField`); the client and the dashboard refuse any other.
+// review M5: every page field Live view may set is declared.
 const NOTIFY_PUSH = declareField({
   id: "notify-push",
   page: "notifications",
@@ -50,11 +33,6 @@ const NOTIFY_DIGEST = declareField({
   page: "notifications",
   what: "the time of the daily digest",
 });
-const NOTIFY_SNOOZE = declareField({
-  id: "notify-snooze-minutes",
-  page: "notifications",
-  what: "how long a snooze lasts",
-});
 const MUTE = declareField({
   id: "mute",
   page: "notifications",
@@ -62,9 +40,7 @@ const MUTE = declareField({
   row: "<stack>",
 });
 
-// fix-239: Live view reaches every notification control (`homelab ui
-// click …`; the digest time and the snooze length are `homelab ui type
-// notify-digest 07:30` and `homelab ui pick notify-snooze-minutes 60`).
+// fix-239: Live view reaches every rule.
 const PUSH_TO_PHONE = declare({
   id: "push-to-phone",
   page: "notifications",
@@ -76,19 +52,30 @@ const STACK_PUSH = declare({
   page: "notifications",
   opens: "run",
   row: "<stack>",
-  what: "turn one stack's pushes on or off (muted: the centre only)",
+  what: "turn one stack's pushes on or off (muted: the Inbox only)",
 });
 const SAVE_DIGEST = declare({
   id: "save-digest",
   page: "notifications",
   opens: "run",
-  what: "save the bulletin time",
+  what: "save the digest time",
 });
 const SNOOZE = declare({
   id: "snooze",
   page: "notifications",
   opens: "run",
-  what: "snooze every push for the chosen time",
+  what: "snooze every push for an hour (Snooze 1 h)",
+});
+// redesign-final-c3: the demo's snooze segment, one press per length.
+const SNOOZE_FOR = declare({
+  id: "snooze-for",
+  // The snooze length was a select (field notify-snooze-minutes) with a
+  // Snooze button; it is one press per length now.
+  was: ["notify-snooze-minutes"],
+  page: "notifications",
+  opens: "run",
+  row: "60|240|morning|1440",
+  what: "snooze every push for 1 h, 4 h, until 07:00 or a day",
 });
 const END_SNOOZE = declare({
   id: "end-snooze",
@@ -105,328 +92,196 @@ const MARK_ALL_READ = declare({
   what: "mark every notification read",
   shows: "while a notification is unread",
 });
-const MARK_READ = declare({
-  id: "mark-read",
-  page: "notifications",
-  opens: "run",
-  row: "<notification id>",
-  what: "mark one notification read",
-  shows: "on an unread notification",
-});
-const OPEN_NOTICE = declare({
-  id: "open-notice",
-  page: "notifications",
-  opens: "view",
-  row: "<notification id>",
-  what: "open (or fold) one notification's details: what to do and its fixes",
-});
-const NOTICE_FIX = declare({
-  id: "notice-fix",
-  page: "notifications",
-  opens: "dialog",
-  row: "<notification id>:<n>",
-  what: "run a notification's suggested fix (the n-th, from 0)",
-  shows: "in an opened notification that suggests a fix",
-  reach: [{ do: "click", control: "open-notice", row: "*" }],
-});
 
 /**
- * A kp switch. In a table cell it goes without its On/Off words (both are
- * in the DOM, which the table would read as the cell's text); the label
- * then says the state.
+ * A kp switch with its label beside it.
  * @param {string} id
- * @param {string | Node} label
- * @param {boolean} [words]
+ * @param {string} label
  */
-function switchEl(id, label, words = true) {
-  const input = h("input", {
-    class: "kp-switch__input",
-    type: "checkbox",
-    role: "switch",
-    id,
-  });
-  const wrap = h(
-    "label",
-    { class: "kp-switch" },
-    input,
-    ...(words
-      ? [h("span", { class: "kp-switch__state", "aria-hidden": "true" })]
-      : []),
-    typeof label === "string" ? h("span", null, label) : label,
+function switchEl(id, label) {
+  const input = /** @type {HTMLInputElement} */ (
+    h("input", {
+      class: "kp-switch__input",
+      type: "checkbox",
+      role: "switch",
+      id,
+      "aria-label": label,
+    })
   );
-  return { wrap, input };
+  return { wrap: h("label", { class: "kp-switch" }, input), input };
 }
+
+/**
+ * One rule: its name and sentence on the left, its control on the right,
+ * an optional control under both (the demo's `.setting`).
+ * @param {string} title
+ * @param {Node | string} desc
+ * @param {Node | null} control
+ * @param {Node} [below]
+ */
+const setting = (title, desc, control, below) =>
+  h(
+    "div",
+    { class: "nr-setting" },
+    h("div", null, h("b", null, title), h("span", null, desc)),
+    control ?? h("span"),
+    below ?? null,
+  );
 
 /**
  * @param {HTMLElement} root
  * @returns {() => void}
  */
 export function mount(root) {
-  const keys = sortKeys();
+  ensureStyle("/css/pages/notifications.css");
+  root.classList.add("nr-page");
   const err = h("div");
+  const pushState = h("span", { class: "nr-chip", id: "notify-push-state" });
+  const digestState = h("span", { class: "nr-chip", id: "notify-digest-at" });
+  const unreadState = h("span", { class: "nr-chip", id: "notify-unread" });
+  const snoozeHour = drivable(
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-button",
+        id: "notify-snooze",
+        title: "Hold every push for an hour; the Inbox keeps filling",
+      },
+      "Snooze 1 h",
+    ),
+    SNOOZE,
+  );
+  const markAll = drivable(
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--primary",
+        id: "notify-read-all",
+        title: "Mark every notice read; the Inbox shows them still",
+      },
+      "Mark all read",
+    ),
+    MARK_ALL_READ,
+  );
+  const head = pageHeader({
+    title: "Notification rules",
+    desc: "Who gets bothered and when: only urgent notices reach the phone at once; the rest wait for the daily digest. The notices themselves are in the Inbox.",
+    meta: [pushState, digestState, unreadState],
+    actions: [snoozeHour, markAll],
+  });
+
+  // ── Delivery ───────────────────────────────────────────────────────
   const push = switchEl(NOTIFY_PUSH, "Push to the phone");
   drivable(push.input, PUSH_TO_PHONE);
-  const digestInput = h("input", {
-    class: "kp-field__input",
-    type: "time",
-    id: NOTIFY_DIGEST,
-    "aria-describedby": "notify-digest-help",
-  });
-  const digestSave = h(
-    "button",
-    { type: "button", class: "kp-button", id: "notify-digest-save" },
-    "Save",
+  const digestInput = /** @type {HTMLInputElement} */ (
+    h("input", {
+      class: "kp-field__input nr-time",
+      type: "time",
+      id: NOTIFY_DIGEST,
+      "aria-label": "Digest time",
+      title: "Empty it for no digest",
+    })
   );
-  drivable(digestSave, SAVE_DIGEST);
-  const digestText_ = h("p", {
-    class: "measured",
-    id: "notify-digest-last",
-    role: "status",
+  const digestSave = drivable(
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--sm",
+        id: "notify-digest-save",
+        title: "Save the digest time (it also saves as you change it)",
+      },
+      "Save",
+    ),
+    SAVE_DIGEST,
+  );
+  const digestLine = h("span", { id: "notify-digest-last" });
+  const snoozeSeg = segSwitch({
+    label: "Snooze for",
+    value: "",
+    items: snoozeChoices(Date.now() / 1000).map((c) => ({
+      value: c.value,
+      label: c.label,
+      hint: c.hint,
+    })),
+    drive: { id: SNOOZE_FOR },
+    onChange: (v) => {
+      const c = snoozeChoices(Date.now() / 1000).find((x) => x.value === v);
+      if (c) void snooze(c.minutes);
+    },
   });
-  const snoozeSel = h(
-    "select",
-    { class: "kp-field__input", id: NOTIFY_SNOOZE },
-    ...SNOOZE_CHOICES.map((c) =>
-      h("option", { value: String(c.minutes) }, c.label),
+  const unsnooze = drivable(
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--sm kp-button--ghost",
+        id: "notify-unsnooze",
+        title: "End the snooze now; pushes go out again",
+      },
+      "End the snooze",
+    ),
+    END_SNOOZE,
+  );
+  const snoozeText = h("span", { id: "snooze-state", role: "status" });
+  const delivery = section({
+    id: "delivery",
+    title: "Delivery",
+    desc: "Where a notice goes besides the Inbox, and when.",
+    foot: ["Saved as you change it", "Times are this browser's clock"],
+  });
+  const deliveryBody = h(
+    "div",
+    { class: "nr-settings" },
+    setting(
+      "Push to the phone",
+      "Urgent only: a service down, a failed backup, update or deploy, a disk almost full or failing.",
+      push.wrap,
+    ),
+    h("div", { class: "nr-hr" }),
+    setting(
+      "Daily digest",
+      digestLine,
+      h("div", { class: "nr-row" }, digestInput, digestSave),
+    ),
+    h("div", { class: "nr-hr" }),
+    setting(
+      "Snooze every push",
+      h(
+        "span",
+        null,
+        "The Inbox keeps filling; pushes and the digest wait until the snooze ends. ",
+        snoozeText,
+      ),
+      unsnooze,
+      snoozeSeg.el,
     ),
   );
-  snoozeSel.value = "60";
-  const snoozeBtn = h(
-    "button",
-    { type: "button", class: "kp-button", id: "notify-snooze" },
-    "Snooze",
-  );
-  drivable(snoozeBtn, SNOOZE);
-  const unsnooze = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--ghost",
-      id: "notify-unsnooze",
-    },
-    "End the snooze",
-  );
-  drivable(unsnooze, END_SNOOZE);
-  const snoozeText = h("p", {
-    class: "snooze-state",
-    id: "snooze-state",
-    role: "status",
-  });
-  const markAll = h(
-    "button",
-    { type: "button", class: "kp-button", id: "notify-read-all" },
-    "Mark all read",
-  );
-  drivable(markAll, MARK_ALL_READ);
-  const unreadText = h("span", { class: "measured", id: "notify-unread" });
+  delivery.body.replaceChildren(skeletonLines(4, "Reading the rules"));
 
-  const notices = tableBlock({
-    remember: "notices",
-    caption: "Notifications, newest first",
-    search: "Search notifications",
-    state: "loading",
-    nothing: "No notifications yet.",
-    columns: [
-      { label: "When", sort: "time" },
-      { label: "Level", sort: "text", order: LEVEL_ORDER, filter: "choice" },
-      { label: "Kind", sort: "text", order: KIND_ORDER, filter: "choice" },
-      { label: "Stack", sort: "text", filter: "choice" },
-      { label: "What", sort: "text", cls: "wide" },
-      { label: "Push", sort: "text" },
-      {
-        label: "Read",
-        sort: "text",
-        order: "unread,read",
-        filter: "choice",
-        cls: "col-button",
-      },
-    ],
+  // ── Per stack ──────────────────────────────────────────────────────
+  const perStack = section({
+    id: "per-stack",
+    title: "Per stack",
+    desc: "A muted stack still lands in the Inbox; it never pushes.",
   });
-  notices.tbody.id = "notices";
-  const stacks = tableBlock({
-    remember: "notify-stacks",
-    caption: "Per stack",
-    search: "Search stacks",
-    state: "loading",
-    nothing: "The host manages no stacks yet.",
-    columns: [
-      { label: "Stack", sort: "text" },
-      { label: "Unread", sort: "number" },
-      { label: "Push", sort: "text", order: "muted,on", filter: "choice" },
-    ],
+  const stackList = h("div", {
+    class: "nr-stacks",
+    id: "notify-stacks",
+    role: "list",
   });
-  /** @type {Map<string, {input: HTMLInputElement, word: HTMLElement, unread: HTMLElement}>} */
+  perStack.body.replaceChildren(skeletonLines(5, "Reading the stacks"));
+  /** @type {Map<string, {row: HTMLElement, input: HTMLInputElement, unread: HTMLElement}>} */
   const stackRows = new Map();
-  stacks.tbody.id = "notify-stacks";
 
   root.replaceChildren(
-    h("h1", null, "Notifications"),
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      "Every notice the fleet raised, with its history, and where each kind is sent: only urgent ones reach the phone, the desktop and the lights.",
-    ),
+    head.el,
     err,
-    h(
-      "section",
-      { class: "kp-card notify-settings", "aria-label": "Settings" },
-      h("h2", null, "Settings"),
-      push.wrap,
-      h(
-        "p",
-        { class: "measured" },
-        "Every notice lands in this list. Only urgent ones go to the phone at once: a service down, a failed backup, update or deploy, a disk almost full or failing. The switch turns those pushes and the digest off.",
-      ),
-      // The help goes under the row, not in the field: in the field it made
-      // the field taller than the button beside it, and the row's
-      // bottom-aligned button sat level with the help text instead of the
-      // input (Kenny, 2026-09-29).
-      h(
-        "div",
-        { class: "inline-fields" },
-        h(
-          "div",
-          { class: "kp-field" },
-          h(
-            "label",
-            { class: "kp-field__label", for: "notify-digest" },
-            "Daily digest at (Brussels time)",
-          ),
-          digestInput,
-        ),
-        digestSave,
-      ),
-      h(
-        "p",
-        {
-          class: "kp-field__help inline-fields__help",
-          id: "notify-digest-help",
-        },
-        "One push at that time, only when something waits (unread notices and open Today items, worst first), with a link to this page. Empty: no digest.",
-      ),
-      digestText_,
-      h(
-        "div",
-        { class: "inline-fields" },
-        h(
-          "div",
-          { class: "kp-field" },
-          h(
-            "label",
-            { class: "kp-field__label", for: "notify-snooze-minutes" },
-            "Snooze every notification for",
-          ),
-          snoozeSel,
-        ),
-        snoozeBtn,
-        unsnooze,
-      ),
-      snoozeText,
-    ),
-    h(
-      "div",
-      { class: "title-row" },
-      h("h2", null, "Notices"),
-      unreadText,
-      markAll,
-    ),
-    h(
-      "p",
-      { class: "section-head__desc measured" },
-      "Every notification the fleet has raised, newest first, with its own history.",
-    ),
-    notices.wrap,
-    h("h2", null, "Per stack"),
-    h(
-      "p",
-      { class: "measured" },
-      "A muted stack's notices still land in the list; they never go to the phone.",
-    ),
-    stacks.wrap,
+    h("div", { class: "nr-cols" }, delivery.el, perStack.el),
   );
   const detachSwitches = attachSwitches(root);
-  // feat-ops-9 (Kenny, 2026-09-30): the "What" cell shows only the title;
-  // the row expands to what/consequence/remedy/link/push reason, keyed by
-  // the notice id this render painted last (noticeById).
-  notices.wrap.setAttribute("data-kp-expandable", "");
-  /** @type {Map<number, ReturnType<typeof noticeRows>[number]>} */
-  const noticeById = new Map();
-  const detach = attachDataTables(root, {
-    compare: keys.compare(compare),
-    detail: (row) => {
-      const id = Number(row.dataset.notice);
-      const r = noticeById.get(id);
-      if (!r) return null;
-      // Kenny, 2026-10-01: Since/Consequence/What to do used to be three
-      // separate paragraphs, each its own line; a kv-grid keeps the label
-      // and its value on one row, lined up with the others.
-      const rows = [
-        ...(r.since != null
-          ? [{ label: "Since", value: formatDateTime(r.since) }]
-          : []),
-        ...(r.consequence
-          ? [{ label: "Consequence", value: r.consequence }]
-          : []),
-        ...(r.remedy ? [{ label: "What to do", value: r.remedy }] : []),
-      ];
-      return h(
-        "div",
-        { class: "notice-detail" },
-        ...(r.body ? [h("p", null, r.body)] : []),
-        ...(rows.length
-          ? [
-              h(
-                "dl",
-                { class: "facts" },
-                ...rows.flatMap((x) => [
-                  h("dt", null, x.label),
-                  h("dd", null, x.value),
-                ]),
-              ),
-            ]
-          : []),
-        ...(r.link || r.job || r.fixes.length
-          ? [
-              h(
-                "div",
-                { class: "notice-actions" },
-                ...r.fixes.map((f, i) =>
-                  drivable(
-                    h(
-                      "button",
-                      {
-                        type: "button",
-                        class: "kp-button kp-button--sm",
-                        "data-fix": `${r.id}:${i}`,
-                      },
-                      fixLabel(f),
-                    ),
-                    NOTICE_FIX,
-                    `${r.id}:${i}`,
-                  ),
-                ),
-                ...(r.link ? [h("a", { href: r.link }, "Open the page")] : []),
-                ...(r.job
-                  ? [
-                      " ",
-                      h(
-                        "a",
-                        { href: `/activity?view=running&job=${r.job}` },
-                        `job ${r.job}`,
-                      ),
-                    ]
-                  : []),
-              ),
-            ]
-          : []),
-        h("p", { class: "measured" }, `Push: ${r.push}`),
-      );
-    },
-  });
-  const nTable = dataTable(notices.wrap);
-  const sTable = dataTable(stacks.wrap);
-  const unbindN = bindTableUrl(nTable, "notices");
-  const unbindS = bindTableUrl(sTable, "nstacks");
 
   /** @param {Partial<import("../notices.js").NotifySettings>} change */
   const saveSettings = async (change) => {
@@ -436,7 +291,7 @@ export function mount(root) {
       "PUT",
       "/data/notifications/settings",
       settingsBody(s, change),
-      "the notification settings",
+      "the notification rules",
     );
     if (!r.ok) {
       err.replaceChildren(refusalCallout(r.error, "destructive", "Not saved"));
@@ -450,7 +305,7 @@ export function mount(root) {
     "change",
     () => void saveSettings({ push: push.input.checked }),
   );
-  digestSave.addEventListener("click", () => {
+  const saveDigest = () => {
     const v = digestInput.value.trim();
     if (v !== "" && !/^\d\d:\d\d$/.test(v)) {
       digestInput.focus();
@@ -458,7 +313,9 @@ export function mount(root) {
       return;
     }
     void saveSettings({ digest_at: v === "" ? null : v });
-  });
+  };
+  digestInput.addEventListener("change", saveDigest);
+  digestSave.addEventListener("click", saveDigest);
   /** @param {number} minutes */
   const snooze = async (minutes) => {
     const r = await send(
@@ -476,11 +333,11 @@ export function mount(root) {
     err.replaceChildren();
     patchNoticeSettings({ snooze_until: r.body?.snooze_until ?? null });
   };
-  snoozeBtn.addEventListener(
-    "click",
-    () => void snooze(Number(snoozeSel.value)),
-  );
-  unsnooze.addEventListener("click", () => void snooze(0));
+  snoozeHour.addEventListener("click", () => void snooze(60));
+  unsnooze.addEventListener("click", () => {
+    snoozeSeg.set("");
+    void snooze(0);
+  });
   markAll.addEventListener("click", async () => {
     const r = await send(
       "POST",
@@ -491,29 +348,7 @@ export function mount(root) {
     if (!r.ok) err.replaceChildren(refusalCallout(r.error));
     else void loadNotices();
   });
-  notices.tbody.addEventListener("click", async (e) => {
-    const fx = /** @type {Element} */ (e.target).closest("button[data-fix]");
-    if (fx) {
-      const el = /** @type {HTMLElement} */ (fx);
-      const [id, i] = (el.dataset.fix ?? "").split(":").map(Number);
-      const f = act.notices?.notices.find((n) => n.id === id)?.fixes?.[i];
-      // The action's own dialog, prefilled: its review and Confirm decide.
-      if (f) void openAction(f.stack, f.action, { preset: f.args ?? {} });
-      return;
-    }
-    const b = /** @type {Element} */ (e.target).closest("button[data-read]");
-    if (!b) return;
-    const id = Number(/** @type {HTMLElement} */ (b).dataset.read);
-    const r = await send(
-      "POST",
-      "/data/notifications/read",
-      { ids: [id], read: true },
-      "marking read",
-    );
-    if (!r.ok) err.replaceChildren(refusalCallout(r.error));
-    else void loadNotices();
-  });
-  stacks.tbody.addEventListener("change", async (e) => {
+  stackList.addEventListener("change", async (e) => {
     const input = /** @type {HTMLInputElement} */ (e.target);
     const stack = input.dataset.mute;
     if (!stack) return;
@@ -529,148 +364,90 @@ export function mount(root) {
     } else if (r.body) patchNoticeSettings(r.body);
   });
 
-  let noticesSig = "";
-  let stacksSig = "";
+  let filled = false;
   const paintSnooze = () => {
     const s = act.notices?.settings;
-    const st = snoozeState(s, Date.now() / 1000);
-    snoozeText.textContent = st.text;
-    snoozeText.dataset.on = String(st.on);
-    unsnooze.hidden = !st.on;
+    const c = pushChip(s, Date.now() / 1000);
+    pushState.replaceChildren(dot(c.tone), c.text);
+    snoozeText.textContent = c.snoozed ? `${c.text}.` : "Not snoozed.";
+    unsnooze.hidden = !c.snoozed;
+    if (!c.snoozed) snoozeSeg.set("");
   };
   const render = () => {
     const snap = act.notices;
     if (!snap) {
       if (act.failed.notices) {
-        notices.failed(act.failed.notices);
-        stacks.failed(act.failed.notices);
+        delivery.body.replaceChildren(
+          refusalCallout(act.failed.notices, "destructive", "Not read"),
+        );
+        perStack.body.replaceChildren();
       }
       return;
+    }
+    if (!filled) {
+      filled = true;
+      delivery.body.replaceChildren(deliveryBody);
+      perStack.body.replaceChildren(stackList);
     }
     push.input.checked = snap.settings.push;
     if (document.activeElement !== digestInput)
       digestInput.value = snap.settings.digest_at ?? "";
-    digestText_.textContent = digestText(snap.last_digest);
-    paintSnooze();
-    unreadText.textContent = `${snap.unread} unread`;
-    markAll.disabled = snap.unread === 0;
-    const rows = noticeRows(snap.notices);
-    const sig = JSON.stringify(
-      rows.map((r) => [r.id, r.read, r.remedy, r.fixes.length]),
+    digestLine.textContent = digestWords(
+      { push: snap.settings.push, digest_at: snap.settings.digest_at ?? null },
+      snap.last_digest ?? null,
     );
-    const noticesChanged = sig !== noticesSig;
-    if (noticesChanged) {
-      noticesSig = sig;
-      noticeById.clear();
-      for (const r of rows) noticeById.set(r.id, r);
-      notices.tbody.replaceChildren(
-        ...rows.map((r) =>
-          drivable(
-            h(
-              "tr",
-              {
-                "data-notice": String(r.id),
-                "data-kp-row-key": String(r.id),
-                class: r.read === "unread" ? "unread" : "",
-              },
-              td(keys.note("time", formatDateTime(r.at), r.at), "num"),
-              badgeCell(r.level),
-              badgeCell(r.kind),
-              td(r.stack),
-              td(r.title, "notify-title"),
-              td(r.push),
-              r.read === "unread"
-                ? h(
-                    "td",
-                    null,
-                    drivable(
-                      h(
-                        "button",
-                        {
-                          type: "button",
-                          class: "kp-button kp-button--sm",
-                          "data-read": String(r.id),
-                        },
-                        "Mark read",
-                      ),
-                      MARK_READ,
-                      String(r.id),
-                    ),
-                  )
-                : h("td", null, h("span", { class: "read-mark" }, "read")),
-            ),
-            OPEN_NOTICE,
-            String(r.id),
-          ),
-        ),
-      );
-    }
-    notices.ready({ refresh: noticesChanged });
+    digestState.textContent = snap.settings.digest_at
+      ? `Digest daily at ${snap.settings.digest_at}`
+      : "No daily digest";
+    unreadState.textContent =
+      snap.unread === 0 ? "All read" : `${snap.unread} unread in the Inbox`;
+    markAll.disabled = snap.unread === 0;
+    paintSnooze();
     const names = (current().fleet?.stacks ?? []).map((s) => s.name);
-    const mrows = stackMuteRows(names, snap);
-    const msig = JSON.stringify(mrows.map((r) => r.stack));
-    let changed = msig !== stacksSig;
-    if (changed) {
-      stacksSig = msig;
+    const rows = stackMuteRows(names, snap);
+    const sig = rows.map((r) => r.stack).join("|");
+    if (sig !== [...stackRows.keys()].join("|")) {
       stackRows.clear();
-      stacks.tbody.replaceChildren(
-        ...mrows.map((r) => {
-          const word = stateWord("on", ["on", "muted"]);
-          const sw = switchEl(fieldId(MUTE, r.stack), word, false);
+      stackList.replaceChildren(
+        ...rows.map((r) => {
+          const sw = switchEl(fieldId(MUTE, r.stack), `Push for ${r.stack}`);
           sw.input.dataset.mute = r.stack;
+          sw.input.title = `Off: ${r.stack} still lands in the Inbox, never on the phone`;
           drivable(sw.input, STACK_PUSH, r.stack);
-          sw.input.setAttribute("aria-label", `Push for ${r.stack}`);
-          const unread = td("", "num");
-          stackRows.set(r.stack, { input: sw.input, word, unread });
-          return h(
-            "tr",
-            { "data-kp-row-key": r.stack },
-            td(r.stack),
+          const unread = h("span", { class: "nr-count" });
+          const row = h(
+            "div",
+            { class: "nr-stack", role: "listitem", "data-stack": r.stack },
+            h("b", null, r.stack),
             unread,
-            h("td", null, sw.wrap),
+            sw.wrap,
           );
+          stackRows.set(r.stack, { row, input: sw.input, unread });
+          return row;
         }),
       );
     }
-    // A toggle changes its row in place: the same switch stays under the
+    // A toggle changes its row in place: the switch stays under the
     // pointer and keeps the keyboard focus (Kenny, 2026-09-29).
-    for (const r of mrows) {
-      const row = stackRows.get(r.stack);
-      if (!row) continue;
-      const text = r.muted ? "muted" : "on";
-      if (row.word.textContent !== text) {
-        row.word.textContent = text;
-        changed = true;
-      }
-      if (row.input.checked === r.muted) row.input.checked = !r.muted;
-      if (row.unread.textContent !== String(r.unread)) {
-        row.unread.textContent = String(r.unread);
-        changed = true;
-      }
+    for (const r of rows) {
+      const x = stackRows.get(r.stack);
+      if (!x) continue;
+      x.row.classList.toggle("is-muted", r.muted);
+      if (x.input.checked === r.muted) x.input.checked = !r.muted;
+      x.unread.textContent = String(r.unread);
+      x.unread.classList.toggle("is-hot", r.unread > 0);
+      x.unread.title = `${r.unread} unread`;
     }
-    stacks.ready({ refresh: changed });
   };
   const off = onAct("notices", render);
   const unsub = subscribe(render);
   const timer = setInterval(paintSnooze, 1000);
-  const first = () => {
-    if (act.notices) return;
-    const words = "Reading the notifications from the dashboard…";
-    notices.loading({ words });
-    stacks.loading({ words });
-    void loadNotices();
-  };
-  root.addEventListener("kp-datatable-retry", first);
-  first();
+  if (!act.notices) void loadNotices();
   render();
   return () => {
     off();
     unsub();
-    root.removeEventListener("kp-datatable-retry", first);
     clearInterval(timer);
-    unbindN();
-    unbindS();
-    detach();
     detachSwitches();
   };
 }

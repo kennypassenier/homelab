@@ -214,6 +214,7 @@ const AREA_OF_PAGE = /** @type {Record<string, string>} */ ({
   presets: "system",
   notifications: "system",
   shell: "system",
+  restore: "backups",
 });
 
 /**
@@ -248,6 +249,22 @@ export function crumbs(r, pathname, search, opts = {}) {
   const id = areaOf(r);
   const area = id ? areaById(id) : null;
   if (!area) return [];
+  // redesign-final-h3: `Backups / gateway / Restore` (FLOWS.md §1.2).
+  if (r.page === "restore") {
+    const stack = new URLSearchParams(search).get("stack");
+    return [
+      { label: area.label, href: area.href },
+      ...(stack
+        ? [
+            {
+              label: stack,
+              href: `/stacks/${encodeURIComponent(stack)}/backups`,
+            },
+          ]
+        : []),
+      { label: "Restore" },
+    ];
+  }
   if (r.page === "stack") {
     const hub = `/stacks/${encodeURIComponent(r.name)}`;
     if (r.tab === "overview")

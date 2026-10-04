@@ -237,45 +237,29 @@ test("invariants: an expandable row opens and closes from a click anywhere in it
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
-    // feat-shell-1: the notices table is Notification rules' page under
-    // System since 3.71.0 (`/notifications` itself goes to the Inbox).
-    await page.goto(`${BASE}/system/notifications`);
-    const row = page
-      .locator("[data-kp-expandable] tbody tr:not([data-kp-detail])")
-      .first();
+    // redesign-final-c3: the notices table left Notification rules for the
+    // Inbox (3.71.0); the Firewall's rules are the dashboard's expandable
+    // rows now: a click anywhere in a rule opens its details.
+    await page.goto(`${BASE}/firewall`);
+    const row = page.locator("tr.fw-rule").first();
     await row.waitFor({ timeout: 10000 });
-    const toggle = row.locator("[data-kp-row-toggle]");
-    const before = await toggle.getAttribute("aria-expanded");
-    // A plain cell: the last text cell that holds no control of its own.
-    const plain = row.locator("td:not([data-kp-expand-cell])").nth(1);
-    await plain.click();
-    const after = await toggle.getAttribute("aria-expanded");
+    const key = await row.getAttribute("data-rule");
+    const rule = page.locator(`tr.fw-rule[data-rule="${key}"]`);
+    const before = await rule.getAttribute("aria-expanded");
+    // A plain cell: Ports holds no control of its own.
+    await rule.locator("td[data-label=Ports]").click();
+    const after = await rule.getAttribute("aria-expanded");
     assert.notEqual(
       after,
       before,
       "a click in the row must toggle it (Kenny, 2026-10-02)",
     );
-    await plain.click();
+    await rule.locator("td[data-label=Ports]").click();
     assert.equal(
-      await toggle.getAttribute("aria-expanded"),
+      await rule.getAttribute("aria-expanded"),
       before,
       "a second click must close it again",
     );
-    // A control of the row's own keeps doing its own thing.
-    const control = row
-      .locator("td button:not([data-kp-row-toggle]), td a")
-      .first();
-    if ((await control.count()) > 0) {
-      const href = await control.getAttribute("href");
-      if (href === null) {
-        await control.click();
-        assert.equal(
-          await toggle.getAttribute("aria-expanded"),
-          before,
-          "a click on the row's own button must not toggle the row",
-        );
-      }
-    }
   } finally {
     await browser.close();
   }
@@ -6957,8 +6941,21 @@ test(
                     )
                     .then(() => true)
                     .catch(() => false);
-                  if (c.opens === "dialog")
-                    return opened ? null : "pressed, but no dialog opened";
+                  // redesign-openpoints-1: a dialog control whose row goes
+                  // to another address instead (the hub header's Update is
+                  // the Update flow; since redesign-final-h3 a Restore… is
+                  // the Restore flow page) opens no dialog; its effect is
+                  // the new address, as pagedrive.js answers it.
+                  if (c.opens === "dialog" && !opened) {
+                    const went = await page
+                      .waitForFunction((u) => location.href !== u, before.url, {
+                        timeout: 1500,
+                      })
+                      .then(() => true)
+                      .catch(() => false);
+                    return went ? null : "pressed, but no dialog opened";
+                  }
+                  if (c.opens === "dialog") return null;
                   const moved = await page
                     .waitForFunction(
                       (b) =>
@@ -11246,6 +11243,148 @@ test("invariants: redesign-final-h1: Stacks, the Inbox and the Update flow name 
       await rel.locator("input").count(),
       0,
       "a release row has a tick",
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// C3: Notification rules was never redesigned: breadcrumb "Notification
+// rules" over an H1 "Notifications", generic tables with Filters, numeric
+// dates, a select for the snooze, the notice list the Inbox holds now.
+test("invariants: redesign-final-c3: Notification rules is the approved demo's Delivery and Per stack cards, named as its breadcrumb, without the notice list", async () => {
+  const browser = await launch();
+  try {
+    for (const width of [1894, 390]) {
+      const context = await browser.newContext({
+        viewport: { width, height: 1000 },
+      });
+      const page = await freshPage(context);
+      await page.goto(`${BASE}/system/notifications`);
+      await page.locator("#notify-stacks .nr-stack").first().waitFor({
+        timeout: 10000,
+      });
+      const r = await page.evaluate(() => {
+        const crumbs = [
+          ...document.querySelectorAll(
+            ".nx-crumbs li, .nx-crumbs a, .nx-crumbs span",
+          ),
+        ]
+          .map((x) => (x.textContent ?? "").trim())
+          .filter(Boolean);
+        const cols = document.querySelector(".nr-cols");
+        return {
+          h1: document.querySelector("main h1")?.textContent?.trim(),
+          crumb: crumbs[crumbs.length - 1] ?? "",
+          cards: [...document.querySelectorAll("main .nr-cols > section")].map(
+            (s) => ({
+              h: s.querySelector("h2")?.textContent?.trim(),
+              d: (
+                s.querySelector(".section-head__desc")?.textContent ?? ""
+              ).trim(),
+            }),
+          ),
+          tables: document.querySelectorAll("main table").length,
+          selects: document.querySelectorAll("main select").length,
+          seg: [...document.querySelectorAll("#delivery .nx-seg button")].map(
+            (b) => b.firstChild?.textContent?.trim(),
+          ),
+          numeric: /\b\d{1,2}\/\d{1,2}\/\d{4}\b/.test(
+            document.querySelector("main")?.textContent ?? "",
+          ),
+          colsN: cols
+            ? getComputedStyle(cols).gridTemplateColumns.split(" ").length
+            : 0,
+          sideways: document.documentElement.scrollWidth - innerWidth,
+        };
+      });
+      assert.equal(r.h1, "Notification rules");
+      assert.equal(r.crumb, "Notification rules");
+      assert.deepEqual(
+        r.cards.map((c) => c.h),
+        ["Delivery", "Per stack"],
+      );
+      for (const c of r.cards) assert.ok(c.d, `${c.h} has no sentence`);
+      assert.equal(r.tables, 0, "a generic table on the rules page");
+      assert.equal(r.selects, 0, "a native select on the rules page");
+      assert.deepEqual(r.seg, ["1 h", "4 h", "Until 07:00", "1 day"]);
+      assert.equal(r.numeric, false, "a numeric date");
+      assert.equal(r.colsN, width > 500 ? 2 : 1, `@${width}: columns`);
+      assert.ok(
+        r.sideways <= 1,
+        `@${width}: scrolls sideways by ${r.sideways}`,
+      );
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+// H3: FLOWS.md §5 approves a stepped Restore flow page; Restore… opened a
+// picker dialog leading to a second dialog.
+test("invariants: redesign-final-h3: Restore… opens the Restore flow page, Backups / stack / Restore, which runs app, night, confirm and the job's steps", async () => {
+  const browser = await launch();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1894, height: 1000 },
+    });
+    const page = await freshPage(context);
+    await page.goto(`${BASE}/backups`);
+    await page.locator('main [data-drive="backups-restore"]').click();
+    await page.waitForURL(/\/backups\/restore\?stack=/, { timeout: 10000 });
+    assert.equal(
+      await page.locator("dialog[open]").count(),
+      0,
+      "a dialog opened instead of the flow",
+    );
+    await page.goto(`${BASE}/backups/restore?stack=kp-soft`);
+    const app = page.locator('[data-drive="restore-app"]').first();
+    await app.waitFor({ timeout: 10000 });
+    const head = await page.evaluate(() => ({
+      h1: document.querySelector("main h1")?.textContent,
+      crumbs: [...document.querySelectorAll(".nx-crumbs li")].map((x) =>
+        (x.textContent ?? "").trim(),
+      ),
+      steps: [...document.querySelectorAll("main .nx-steps li")].map((x) =>
+        (x.textContent ?? "").trim(),
+      ),
+    }));
+    assert.equal(head.h1, "Restore kp-soft");
+    assert.deepEqual(head.crumbs, ["Backups", "kp-soft", "Restore"]);
+    assert.deepEqual(head.steps, [
+      "Which app",
+      "Which night",
+      "Confirm",
+      "Restore and check",
+    ]);
+    await app.click();
+    const night = page.locator('[data-drive="restore-night"]').first();
+    await night.waitFor({ timeout: 5000 });
+    await night.click();
+    assert.match(
+      await page.locator("#restore-what").innerText(),
+      /safety copy/,
+    );
+    const go = page.locator("#restore-go");
+    assert.equal(
+      await go.getAttribute("aria-disabled"),
+      "true",
+      "Restore is armed before the name",
+    );
+    await page.fill("#restore-confirm", "kp-soft");
+    assert.equal(
+      await go.getAttribute("aria-disabled"),
+      "false",
+      "Restore stays held after the name",
+    );
+    await go.click();
+    await page.locator("#restore-run .nx-check li").first().waitFor({
+      timeout: 10000,
+    });
+    assert.ok(
+      await page.locator("#restore-run").isVisible(),
+      "the job's steps are not shown",
     );
   } finally {
     await browser.close();

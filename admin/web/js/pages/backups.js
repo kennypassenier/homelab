@@ -29,6 +29,7 @@ import { formatDateTime, humanDuration } from "../format.js";
 import { openAction, openBatch } from "../actiondialog.js";
 import { openDialog } from "../actui.js";
 import { snapshotPickerRows } from "../snapshotpicker.js";
+import { restoreHref } from "../restoreflow.js";
 import { snapshotFileUrl, snapshotFileView } from "../snapshotfile.js";
 import {
   declare,
@@ -87,21 +88,6 @@ const BK_FILTER = declareField({
   page: "backups",
   what: "filter the repositories by stack or app",
 });
-const BK_RESTORE_STACK = declareField({
-  id: "bk-restore-stack",
-  page: "backups",
-  what: "the stack a restore reads from (Restore dialog)",
-});
-const BK_RESTORE_APP = declareField({
-  id: "bk-restore-app",
-  page: "backups",
-  what: "the app a restore reads from (Restore dialog)",
-});
-const BK_RESTORE_SNAPSHOT = declareField({
-  id: "bk-restore-snapshot",
-  page: "backups",
-  what: "the snapshot a restore reads (Restore dialog)",
-});
 const SNAPFILE = declareField({
   id: "snapfile",
   page: "backups",
@@ -128,8 +114,8 @@ const REFRESH = declare({
 const RESTORE_PICK = declare({
   id: "backups-restore",
   page: "backups",
-  opens: "dialog",
-  what: "pick a stack, an app and a snapshot, then restore it",
+  opens: "view",
+  what: "open the Restore flow: pick an app and a night, then restore it",
 });
 const DRILL_NOW = declare({
   id: "backups-drill-now",
@@ -350,7 +336,7 @@ export function mount(root) {
   const restoreBtn = drivable(
     button("Restore…", {
       cls: "kp-button--primary",
-      title: "Pick a stack, an app and a snapshot, then restore it",
+      title: "Open the Restore flow: pick an app and a night, then restore it",
       onClick: () => openRestorePicker(),
     }),
     RESTORE_PICK,
@@ -1625,118 +1611,19 @@ export function mount(root) {
    * Restore… in the header: pick the stack, the app and the snapshot here,
    * then the Restore action's own dialog opens with all three filled in.
    */
+  // redesign-final-h3: Restore… opens the Restore flow (FLOWS.md §5), on
+  // the stack the view is narrowed to, or the first with a snapshot.
   const openRestorePicker = () => {
     const withRepos = names.filter(
       (n) =>
         reads[n]?.status === "ok" && /** @type {any} */ (reads[n]).repos.length,
     );
-    if (!withRepos.length) {
-      openDialog({
-        title: "Restore",
-        description: "No stack has a repository to restore from yet.",
-        body: [
-          h(
-            "p",
-            { class: "bk-hint" },
-            "Once a stack's first backup has run, its snapshots show up here.",
-          ),
-        ],
-      });
-      return;
-    }
-    const stackSel = /** @type {HTMLSelectElement} */ (
-      h("select", {
-        class: "kp-field__input",
-        id: BK_RESTORE_STACK,
-        name: "stack",
-      })
-    );
-    const appSel = /** @type {HTMLSelectElement} */ (
-      h("select", {
-        class: "kp-field__input",
-        id: BK_RESTORE_APP,
-        name: "app",
-      })
-    );
-    const snapSel = /** @type {HTMLSelectElement} */ (
-      h("select", {
-        class: "kp-field__input",
-        id: BK_RESTORE_SNAPSHOT,
-        name: "snapshot",
-      })
-    );
-    stackSel.append(...withRepos.map((n) => h("option", { value: n }, n)));
-    const first = S.stacks.size ? withRepos.find((n) => S.stacks.has(n)) : null;
-    if (first) stackSel.value = first;
-    const fillApps = () => {
-      const r = /** @type {any} */ (reads[stackSel.value]);
-      appSel.replaceChildren(
-        ...r.repos.map((/** @type {Repo} */ x) =>
-          h("option", { value: x.owner }, x.owner),
-        ),
-      );
-      fillSnaps();
-    };
-    const fillSnaps = () => {
-      const r = /** @type {any} */ (reads[stackSel.value]);
-      const repo = r.repos.find(
-        (/** @type {Repo} */ x) => x.owner === appSel.value,
-      );
-      snapSel.replaceChildren(
-        ...snapshotPickerRows(repo?.snapshots ?? [], nowS()).map((row) =>
-          h(
-            "option",
-            { value: row.shortId },
-            `${row.shortId} · ${row.when} · ${row.ago}${row.latest ? " (latest)" : ""}`,
-          ),
-        ),
-      );
-    };
-    stackSel.addEventListener("change", fillApps);
-    appSel.addEventListener("change", fillSnaps);
-    fillApps();
-    const field = (
-      /** @type {string} */ id,
-      /** @type {string} */ label,
-      /** @type {Node} */ input,
-    ) =>
-      h(
-        "div",
-        { class: "kp-field" },
-        h("label", { class: "kp-field__label", for: id }, label),
-        input,
-      );
-    const go = button("Continue…", {
-      cls: "kp-button--primary",
-      title: "Open the Restore dialog with this stack, app and snapshot",
-    });
-    const d = openDialog({
-      title: "Restore",
-      description:
-        "Pick what to bring back. The next step is the Restore dialog itself, filled in with your choice: it says what will happen and asks you to confirm.",
-      body: [
-        h(
-          "div",
-          { class: "bk-dlg" },
-          field("bk-restore-stack", "Stack", stackSel),
-          field("bk-restore-app", "App", appSel),
-          field("bk-restore-snapshot", "Snapshot", snapSel),
-          h("div", { class: "kp-dialog__actions" }, go),
-        ),
-      ],
-      id: "bk-restore-pick",
-    });
-    go.addEventListener("click", () => {
-      const stack = stackSel.value;
-      const r = /** @type {any} */ (reads[stack]);
-      const native = r.native === true;
-      const app = appSel.value;
-      const snapshot = snapSel.value;
-      d.close();
-      void openAction(stack, restoreKind(native), {
-        preset: restorePreset(native, app, snapshot),
-      });
-    });
+    const first =
+      (S.stacks.size ? withRepos.find((n) => S.stacks.has(n)) : null) ??
+      withRepos[0] ??
+      null;
+    history.pushState(null, "", restoreHref(first));
+    dispatchEvent(new PopStateEvent("popstate"));
   };
 
   /** "Drill them now…": every repository never drilled, each its own Verify restore. */

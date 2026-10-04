@@ -45,6 +45,7 @@ import { batchView, jobBadge } from "./jobs.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { openUpdateFlow } from "./pinupdate.js";
 import { codeSpans, previewGate } from "./previewgate.js";
+import { restoreHref } from "./restoreflow.js";
 import { current } from "./store.js";
 import { clearError, showError } from "/static/kp/js/forms.js";
 import {
@@ -160,6 +161,26 @@ export async function openAction(stack, action, opts = {}) {
   if (action === "update" && opts.driven !== true) {
     const app = opts.preset?.app;
     openUpdateFlow(stack, typeof app === "string" && app ? app : null);
+    return null;
+  }
+  // redesign-final-h3: Restore… (Backups, the hub, the palette) opens the
+  // Restore flow (FLOWS.md §5) with what the opener already chose; Live
+  // view drives the action's own form.
+  if (
+    (action === "restore" || action === "restore-native") &&
+    opts.driven !== true
+  ) {
+    const p = opts.preset ?? {};
+    history.pushState(
+      null,
+      "",
+      restoreHref(
+        stack,
+        typeof p.app === "string" ? p.app : null,
+        typeof p.snapshot === "string" ? p.snapshot : null,
+      ),
+    );
+    dispatchEvent(new PopStateEvent("popstate"));
     return null;
   }
   const catalog = await catalogReady();

@@ -79,6 +79,9 @@ const ANSWER = declare({
 });
 const FIX = declare({
   id: "inbox-fix",
+  // redesign-final-c3: the notice list left Notification rules for the
+  // Inbox; its old control keeps working by its old name.
+  was: ["notice-fix"],
   page: "inbox",
   opens: "dialog",
   row: "<row key>",
@@ -86,6 +89,9 @@ const FIX = declare({
 });
 const SEEN = declare({
   id: "inbox-mark-seen",
+  // redesign-final-c3: the notice list left Notification rules for the
+  // Inbox; its old control keeps working by its old name.
+  was: ["mark-read"],
   page: "inbox",
   opens: "run",
   row: "<row key>",
@@ -107,6 +113,9 @@ const REVIEW = declare({
 });
 const SEE_WHAT = declare({
   id: "inbox-see-what-happened",
+  // redesign-final-c3: the notice list left Notification rules for the
+  // Inbox; its old control keeps working by its old name.
+  was: ["open-notice"],
   page: "inbox",
   opens: "view",
   row: "<row key>",

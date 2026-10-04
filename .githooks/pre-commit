@@ -111,6 +111,16 @@ if git diff --cached --name-only | grep -q '^admin/web/'; then
   "$root/.githooks/drivecatalog.sh" || exit 1
 fi
 
+# redesign-final-51: the whole-screen budget is raised only with a new
+# reason line (admin/web/test-e2e/budget.json).
+if git diff --cached --name-only | grep -qx 'admin/web/test-e2e/budget.json'; then
+  if ! (cd "$root/admin/web" && node scripts/e2e-budget.mjs commit); then
+    echo "COMMIT BLOCKED — the whole-screen budget grew without a new reason line (above)." >&2
+    echo "Remedy: say in budget.json's reason why the suite may take longer or hold more cases." >&2
+    exit 1
+  fi
+fi
+
 # redesign-final (B): no test, harness or demo host reads the real clock,
 # and no test names a date that expires (admin/web/scripts/check-test-clock.mjs).
 if command -v node >/dev/null 2>&1; then

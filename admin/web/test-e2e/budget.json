@@ -1,0 +1,7 @@
+{
+  "why": "The whole-screen suite's budget (redesign-final-51, Kenny 2026-10-04: \"Dit soort ballooning van tests mag niet meer voorkomen\"). A full run (scripts/invariants-run.sh without INVARIANTS_ONLY, the release gate's) fails when it takes more than 20 % longer than `seconds` or holds more than 20 % more cases than `cases`. Raising either is a commit that edits this file with a new `reason`.",
+  "seconds": 930,
+  "cases": 170,
+  "reason": "Set from the pruned suite's first full run (Kenny's prune of 2026-10-04): 930 s for 170 cases, down from about 31 min for 180 cases the night before.",
+  "measured": "2026-10-04 full run of scripts/invariants-run.sh on redesign-371-final1: 169 passed, 1 failed (a flake listed for 3.71.1), 930 s"
+}

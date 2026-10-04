@@ -242,6 +242,21 @@ if [ -n "$owner" ] && [ "$owner" != "$server_pid" ]; then
   exit 2
 fi
 
+# Pre-flight (coordinator, 2026-10-04: a full run served no web files and
+# every case waited out its own deadline, 32 min): signed in, the page and
+# one script and one stylesheet it loads must answer 200, or the run stops
+# here within seconds.
+jar="$workdir/preflight.cookies"
+curl -s -c "$jar" -o /dev/null --max-time 5 --data-urlencode "token=$token" "$base_url/login" || true
+for asset in / /js/main.js /css/app.css; do
+  code=$(curl -s -b "$jar" -o /dev/null -w '%{http_code}' --max-time 5 "$base_url$asset" || true)
+  if [ "$code" != 200 ]; then
+    echo "invariants: PRE-FLIGHT FAILED — the demo host answers $asset with ${code:-nothing}, so no case can pass; stopping now. Did the build embed this tree's web files (admin/build.rs, the shared cargo target directory)? Its log:" >&2
+    tail -20 "$workdir/server.log" >&2
+    exit 2
+  fi
+done
+echo "invariants: pre-flight: /, /js/main.js and /css/app.css answer 200"
 echo "invariants: running the Playwright smoke"
 cd admin/web
 [ -d node_modules/playwright ] || PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --no-audit --no-fund
@@ -267,6 +282,7 @@ else
   : > "$progress"
   only=()
   [ -n "${INVARIANTS_ONLY:-}" ] && only=(--test-name-pattern="$INVARIANTS_ONLY")
+  run_t0=$(date +%s)
   INVARIANTS_BASE_URL="$base_url" INVARIANTS_TOKEN="$token" \
   INVARIANTS_PROGRESS_FILE="$progress" \
     node --test --test-concurrency=1 \
@@ -284,6 +300,14 @@ else
   if [ -f "$progress.fired" ]; then
     cat "$progress.fired" >&2
     exit 3
+  fi
+  # redesign-final-51 (Kenny, 2026-10-04: tests never balloon): a full run
+  # (the release gate's) is held to the suite's budget,
+  # test-e2e/budget.json: more than 20 % over its duration or its case
+  # count fails it.
+  if [ -z "${INVARIANTS_ONLY:-}" ]; then
+    node scripts/e2e-budget.mjs run "$progress" "$(( $(date +%s) - run_t0 ))" \
+      || { [ "$rc" = 0 ] && rc=4; }
   fi
   exit "$rc"
 fi

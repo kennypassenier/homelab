@@ -77,16 +77,27 @@ defect. Never fix only the one spot.
 ## 4 · Review and gate setup
 
 - **Pre-commit:** fmt/lint/secrets, the drive catalog test, and the
-  whole-screen cases of the pages the commit changes (mapping derived
-  from the import graph, not a list).
-- **Merge / integration:** the merge check runs the affected cases and
-  refuses the merge naming each failure; a fast-forward goes through it
-  too (`post-merge` undoes a failing one).
+  whole-screen cases of the pages the commit's page files build (mapping
+  derived from the import graph, not a list); a shared file (ui.js, dom.js,
+  chrome.js, app.css, …) runs only the one layout walk; the 22-theme
+  contrast only when a stylesheet or the kp-themes pin changed.
+- **Merge / integration:** the merge check runs the cases of the pages the
+  diff touches plus the one layout walk, split over the e2e queue's two
+  slots (measured 264 s for a 26-case merge), and refuses the merge naming
+  each failure; a fast-forward goes through it too (`post-merge` undoes a
+  failing one).
 - **Test harness:** a free port per run, a check that the server answering
-  is the one the run started, and the server killed on every exit path.
-  An orphaned demo server once answered a run on a fixed port.
+  is the one the run started, the server killed on every exit path, and
+  the run's own build of the demo binary (every worktree shares one cargo
+  target directory). An orphaned demo server once answered a run on a
+  fixed port.
 - **Release gate:** the full suite, once. Every test run reports its measured
-  duration.
+  duration. The whole-screen suite has a budget
+  (`admin/web/test-e2e/budget.json`): a full run more than 20 % over its
+  duration or its case count fails; raising it is a commit with a new
+  reason line.
+- **Iterating:** run the one failing test (`INVARIANTS_ONLY`), never a broad
+  set to check one fix; the broad run happens once.
 - **Proofs:** every guard is proven by a commit that breaks the thing it
   guards and is refused, in a throwaway clone.
 

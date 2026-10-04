@@ -24,7 +24,12 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn main() {
-    let web = Path::new(env!("CARGO_MANIFEST_DIR")).join("web");
+    // redesign-final-46: read when this script RUNS, never `env!` (fixed
+    // when it was compiled): the compiled script is shared by every
+    // worktree through the one cargo target directory, so `env!` named the
+    // worktree that compiled it (a deleted clone listed no files at all).
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR");
+    let web = Path::new(&manifest).join("web");
     let mut files = vec![web.join("index.html")];
     for root in ["js", "css"] {
         walk(&web.join(root), &mut files);

@@ -58,6 +58,17 @@ are not style preferences; ignoring them costs him the ability to steer.
    one-sentence description, every action button a short description; every
    page that loads data shows that it is loading from the first frame.
 
+9. **Tests stay small; they never balloon** (Kenny, 2026-10-04, after one
+   night spent 6 h 16 min in whole-screen runs: "Dit soort ballooning van
+   tests mag niet meer voorkomen"). The testing rules are in
+   `~/Projects/dev-procedure/UI_PRINCIPLES.md` §5:
+   - Live view knows its controls through static catalog checks; nothing
+     presses every control.
+   - Each page is walked once for all layout classes.
+   - Iterate with the one failing test.
+   - The release gate fails when the whole-screen suite outgrows its
+     budget (`admin/web/test-e2e/budget.json`) by more than 20 %.
+
 Both failures look identical from his side: he answered, and then had to
 argue with the answer.
 

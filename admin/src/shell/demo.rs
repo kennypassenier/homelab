@@ -884,6 +884,17 @@ pub async fn run_demo(
                             uptime_s: 12 * 86_400,
                         },
                     }))
+                    // fix-371-1: a stopped guest (the golden template), so
+                    // the Containers table has a stopped row.
+                    .chain(std::iter::once(homelab_proto::GuestUse {
+                        vmid: 996,
+                        usage: homelab_proto::GuestUsage {
+                            cpu_permille: 0,
+                            ram_used_mb: 0,
+                            ram_max_mb: 1024,
+                            uptime_s: 0,
+                        },
+                    }))
                     .collect(),
             ),
         },
@@ -1101,25 +1112,12 @@ pub async fn run_demo(
                             .collect(),
                             ..Default::default()
                         }).unwrap_or_default(),
-                        // redesign-host-1: `pct list` as the host's status
-                        // answers it (admin/src/core/guests.rs reads it):
-                        // every stack's container, one unmanaged container
-                        // and the golden template, so the Host page's
-                        // Containers table has every kind of row.
+                        // fix-371-1: the host's status answers its fleet
+                        // snapshot as JSON (fix-68), as the real host does
+                        // (measured 2026-10-04); admin/src/core/guests.rs
+                        // reads the guests from it.
                         Command::Tiles { .. } => demo_tiles(&repo, &stacks).to_string(),
-                        Command::Status => {
-                            let mut lines = vec!["pct list:".to_string(), "VMID       Status     Lock         Name".to_string()];
-                            for (i, name) in stacks.iter().enumerate() {
-                                let m = homelab_client::spec::build_manifest(&repo.join("stacks").join(name)).ok();
-                                let vmid = m.as_ref().map(|m| m.vmid).unwrap_or(900 + i as u16);
-                                let host = m.map(|m| m.hostname).unwrap_or_else(|| name.clone());
-                                lines.push(format!("{vmid}        running                 {host}"));
-                            }
-                            lines.push("113        running                 113-metrics".into());
-                            lines.push("996        stopped    template     debian-13-homelab-v4".into());
-                            lines.push("managed state:".into());
-                            lines.join("\n")
-                        }
+                        Command::Status => serde_json::to_string(&build()).unwrap_or_default(),
                         // fix-202 (invariants: the backup calendar must show
                         // partial data at once and never hang on a stack
                         // with nothing to read): every requested stack

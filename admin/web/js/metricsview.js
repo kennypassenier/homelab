@@ -9,10 +9,10 @@ import { formatDateTime } from "./format.js";
 import { entryWhat } from "./activity.js";
 
 /**
- * @typedef {import("./timechart.js").Point} Point
- * @typedef {import("./timechart.js").Series} Series
- * @typedef {import("./timechart.js").Unit} Unit
- * @typedef {import("./timechart.js").Annotation} Annotation
+ * @typedef {import("./charts.js").Point} Point
+ * @typedef {import("./charts.js").Series} Series
+ * @typedef {import("./charts.js").Unit} Unit
+ * @typedef {import("./charts.js").Annotation} Annotation
  * @typedef {{panel: {title: string, desc: string, unit: string,
  *   legend?: string}, series: {label: string, points: Point[]}[],
  *   error?: string}} Panel one `/data/charts` panel
@@ -32,7 +32,7 @@ import { entryWhat } from "./activity.js";
 export const HOST_SECTIONS = [
   {
     title: "Compute",
-    desc: "CPU, memory and queue length of the host itself and its containers.",
+    desc: "CPU, memory, swap, queue length and network of the host itself and its containers.",
     cards: [
       {
         key: "cpu",
@@ -70,12 +70,34 @@ export const HOST_SECTIONS = [
         span: 2,
         unit: "bytes",
       },
+      // fix-371-1: the Host page's Swap tile lands here.
+      {
+        key: "swap",
+        panel: "Swap used",
+        title: "Swap used",
+        desc: "Share of the host's swap space in use; a host without swap reads 0.",
+        span: 1,
+        unit: "percent",
+        now: "first",
+        yMax: 100,
+      },
       {
         key: "net",
         panel: "Network in",
         title: "Network in",
         desc: "Received per second on the uplink and each container.",
         span: 1,
+        unit: "rate",
+        now: "first",
+      },
+      // fix-371-1: the Host page's Network tile (in + out on the bridges)
+      // lands here, both directions drawn.
+      {
+        key: "netio",
+        panel: "Network in and out",
+        title: "Network in and out",
+        desc: "Received and sent per second on the host's Proxmox bridges.",
+        span: 2,
         unit: "rate",
         now: "first",
       },
@@ -95,12 +117,22 @@ export const HOST_SECTIONS = [
         yMax: 100,
         threshold: 85,
       },
+      // fix-371-1: the Host page's Disk traffic tile lands here.
+      {
+        key: "diskio",
+        panel: "Disk traffic",
+        title: "Disk traffic",
+        desc: "Bytes the host's disks read and write per second.",
+        span: 1,
+        unit: "rate",
+        now: "first",
+      },
       {
         key: "temp",
         panel: "Temperature (hottest sensor per chip)",
         title: "Chip temperature",
         desc: "The hottest sensor of each chip on the motherboard.",
-        span: 2,
+        span: 1,
         unit: "celsius",
         now: "max",
       },

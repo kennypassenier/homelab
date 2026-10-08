@@ -44,7 +44,7 @@ main.shell.cf-page > [hidden] {
   border-radius: 50%;
   background: var(--success-foreground, var(--success));
 }
-.cf-live:has([data-stale="true"])::before {
+.cf-live:has([data-kp-stale])::before {
   background: var(--warning-foreground, var(--warning));
 }
 .cf-live .measured {

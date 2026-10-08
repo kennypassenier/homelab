@@ -30,67 +30,48 @@
   display: none !important;
 }
 
-/* ---------- header: mark · name · state ……… live · actions ---------- */
+/* ---------- header: mark · name · state · live ……… actions ----------
+   kp-themes' page header (stack.js hubHeader): the title row, the
+   description and the chips on the left, the actions against the right
+   edge on one line. Under 60rem the demo's narrow header: the live status
+   under the title, the actions under everything, two a row with Deploy
+   across the width first and More across the width last. */
 .sh-head .title-row.sh-head__row {
-  display: grid;
-  grid-template-columns: auto auto auto minmax(0, 1fr) auto;
-  align-items: center;
   column-gap: 12px;
-  row-gap: 12px;
-}
-.sh-head .title-row.sh-head__row > :first-child + * {
-  margin-inline-start: 0;
 }
 .sh-head__mark {
   border-radius: 10px;
 }
 .sh-head .title-row > h1 {
-  margin: 0;
   overflow-wrap: anywhere;
 }
 .sh-head__state {
   font-size: var(--kp-text-md, 1rem);
   white-space: nowrap;
 }
-.sh-head__right {
-  justify-self: end;
+.sh-head .sh-head__actions {
   flex-wrap: nowrap;
-}
-.sh-head .sh-head__actions.actions-row {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 8px;
-  align-items: center;
 }
 .sh-head__meta {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-block-start: 10px !important;
+  margin-block-start: 10px;
 }
 .sh-head__meta:empty {
   display: none;
 }
 @media (max-width: 60rem) {
-  .sh-head .title-row.sh-head__row {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+  .sh-head .kp-page-header__inner {
+    grid-template-columns: minmax(0, 1fr);
   }
   .sh-head .sh-head__row > .nx-live {
-    grid-column: 1 / -1;
-    grid-row: 2;
+    flex-basis: 100%;
   }
-  .sh-head__right {
-    grid-column: 1 / -1;
-    grid-row: 3;
-    justify-self: stretch;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
-  }
-  .sh-head .sh-head__actions.actions-row {
-    order: 1;
+  .sh-head .sh-head__actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
   .sh-head .sh-head__actions > .kp-button--primary {
     grid-column: 1 / -1;
@@ -103,13 +84,6 @@
   }
   .sh-head .nx-more {
     grid-column: 1 / -1;
-  }
-  /* the More ▾ list (ui.js moreMenu) as wide as the header's actions */
-  .sh-head .nx-more > .nx-menu {
-    inset-inline: 0;
-    inline-size: auto;
-    min-inline-size: 0;
-    max-inline-size: none;
   }
 }
 

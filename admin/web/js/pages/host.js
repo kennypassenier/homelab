@@ -24,7 +24,7 @@ import { agoEl, setAgo } from "../ago.js";
 import { doctorRows } from "../doctor.js";
 import { fetchJson, h, slowReport } from "../dom.js";
 import { declare, declareField, drivable, viaForm } from "../drivable.js";
-import { humanDuration } from "../format.js";
+import { formatClock, formatDateTime, humanDuration } from "../format.js";
 import {
   actionBlurb,
   daemonSignature,
@@ -32,13 +32,13 @@ import {
   gib,
   guestTable,
   guestVisible,
+  HOST_FIGURES,
   hostActionGroups,
   hostChecks,
-  hostKpis,
   hostSettingsView,
+  hostTile,
   hostUptime,
   latencyBars,
-  meterTone,
   rootGrowth,
   rootVolumeLine,
   settingVisible,
@@ -53,26 +53,36 @@ import {
   countOf,
   attentionBand,
   keyRow,
-  kpiStrip,
   moreMenu,
   pageHeader,
   section,
   segSwitch,
+  skeleton,
   sortableTable,
   swatch,
   toggleGroup,
 } from "../ui.js";
+import { drawSparkline } from "/static/kp/js/kpi.js";
 
 /** Seconds between two readings of the container list and the ping. */
 const EVERY_S = 30;
 /** How many pings the latency strip keeps. */
 const PINGS = 12;
+/** Seconds between two readings of the host's trends (1-minute data). */
+const TREND_EVERY_S = 60;
 
 // Live view (invariant 39): every control on this page that runs
 // something or opens a menu is declared here; the action tiles and
 // "Build a template…" reach their dialogs as catalog forms.
 // review M5: every page field Live view may set is declared (drivable.js
 // `declareField`); the client and the dashboard refuse any other.
+const KPI_CHART = declare({
+  id: "host-kpi-chart",
+  page: "host",
+  opens: "view",
+  row: "<figure>",
+  what: "open one of the host's figures on Charts (CPU, memory, load, root disk, disk traffic, network, CPU temperature, swap)",
+});
 const GUEST_SEARCH = declareField({
   id: "host-guest-search",
   page: "host",
@@ -141,6 +151,114 @@ const SORT_SETTINGS = declare({
 /** @param {"ok" | "warn" | "bad" | "live" | ""} tone */
 const dot = (tone) =>
   h("span", { class: `hk-dot${tone ? ` hk-dot--${tone}` : ""}` });
+
+const SVG = "http://www.w3.org/2000/svg";
+
+/**
+ * fix-371-1: one Host tile, a link to its figure on Charts: label, the
+ * big number, "now · peak · context", and the 24 h trend, which answers a
+ * pointer with its moment and value. Loading until `set` gives it a tile.
+ * @param {import("../host.js").HostFigure} fig
+ */
+function trendTile(fig) {
+  const label = h("span", { class: "nx-kpi__label" }, fig.label);
+  const value = h("span", { class: "nx-kpi__value" }, skeleton("3ch"));
+  const ctx = h("span", { class: "nx-kpi__ctx hx-kpi__ctx" }, skeleton("80%"));
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("class", "nx-spark hx-spark");
+  svg.setAttribute("viewBox", "0 0 100 28");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("aria-hidden", "true");
+  svg.style.color = `var(--chart-${fig.colour})`;
+  const from = h("span", null, "\u00a0");
+  const to = h("span", null, "\u00a0");
+  const mark = h("span", { class: "hx-trend__mark", hidden: "" });
+  const read = h("span", { class: "hx-trend__read", hidden: "" });
+  const box = h(
+    "span",
+    { class: "hx-trend" },
+    svg,
+    h("span", { class: "hx-trend__axis" }, from, to),
+    mark,
+    read,
+  );
+  const el = drivable(
+    h(
+      "a",
+      {
+        class: "nx-kpi hx-kpi",
+        href: fig.chart ? `/charts#chart-${fig.chart}` : "/charts",
+        "data-key": fig.key,
+        "data-loading": "",
+      },
+      label,
+      h(
+        "span",
+        { class: "hx-kpi__go", "aria-hidden": "true" },
+        h("span", { class: "hx-kpi__word" }, "Charts "),
+        "↗",
+      ),
+      value,
+      ctx,
+      box,
+    ),
+    KPI_CHART,
+    fig.key,
+  );
+  /** @type {import("../host.js").HostTile | null} */
+  let cur = null;
+  const hide = () => {
+    mark.hidden = true;
+    read.hidden = true;
+  };
+  box.addEventListener("pointermove", (e) => {
+    const pts = cur?.points ?? [];
+    if (pts.length < 2 || !cur) return;
+    const r = svg.getBoundingClientRect();
+    const i = Math.max(
+      0,
+      Math.min(
+        pts.length - 1,
+        Math.round(((e.clientX - r.left) / r.width) * (pts.length - 1)),
+      ),
+    );
+    const x = (i / (pts.length - 1)) * r.width;
+    const [t, v] = pts[i];
+    mark.style.insetInlineStart = `${x}px`;
+    read.style.insetInlineStart = `${Math.max(56, Math.min(r.width - 56, x))}px`;
+    read.textContent = `${formatDateTime(t)} · ${cur.fmt(v)}`;
+    mark.hidden = false;
+    read.hidden = false;
+  });
+  box.addEventListener("pointerleave", hide);
+  return {
+    fig,
+    el,
+    /** @param {import("../host.js").HostTile} t */
+    set: (t) => {
+      cur = t;
+      delete el.dataset.loading;
+      el.title = t.title;
+      label.textContent = t.label;
+      value.replaceChildren(
+        t.value,
+        ...(t.unit ? [h("small", null, t.unit)] : []),
+      );
+      ctx.replaceChildren(
+        ...(t.now ? ["now ", h("b", null, t.now), " · "] : []),
+        t.rest,
+      );
+      const vs = t.points.map((p) => p[1]);
+      // kp-themes' drawSparkline (js/kpi.js), the line every sparkline of
+      // the dashboard draws (ui.js sparkline); under two points, nothing.
+      drawSparkline(svg, vs, { parts: "nx-spark" });
+      from.textContent =
+        t.from != null ? `${formatClock(t.from)} yesterday` : "\u00a0";
+      to.textContent = t.from != null ? "now" : "\u00a0";
+      if (vs.length < 2) hide();
+    },
+  };
+}
 
 /**
  * @param {HTMLElement} root
@@ -230,24 +348,26 @@ export function mount(root, ctx) {
   );
 
   const attention = attentionBand();
-  const kpis = kpiStrip(
-    hostKpis(
-      current().fleet ?? {
-        measured_at: 0,
-        stacks: [],
-        counts: { stacks: 0, online: 0, parked: 0 },
-        host: {
-          name: "",
-          cpu_pct: null,
-          ram_used_mb: 0,
-          ram_total_mb: 1,
-          disk_pct: 0,
-        },
-      },
-      null,
-    ),
-    { label: "The host right now" },
+  // fix-371-1 (Kenny approved the Host tiles demo 2026-10-04:
+  // redesign-3.71/demos-3711/host-kpis.html): eight tiles, each with its
+  // 24 h sparkline, the 15-minute average as the big number ("avg 15
+  // min"), now and the day's peak under it, and a link to the figure on
+  // Charts. Drawn in their final size from the first frame.
+  /** @type {Map<string, import("../host.js").TrendFigure> | null} */
+  let trend = null;
+  /** @type {string | null} why the trends could not be read */
+  let trendWhy = null;
+  const tiles = HOST_FIGURES.map((f) => trendTile(f));
+  const kpisEl = h(
+    "div",
+    {
+      class: "nx-kpis hx-kpis",
+      role: "group",
+      "aria-label": "The host's figures",
+    },
+    ...tiles.map((t) => t.el),
   );
+  kpisEl.style.setProperty("--kpi-n", "4");
 
   // ── Containers ────────────────────────────────────────────────────────
   /** @type {import("../host.js").Guest[] | null} */
@@ -397,7 +517,11 @@ export function mount(root, ctx) {
             h(
               "div",
               { class: "hk-name" },
-              h("span", { class: "mono" }, g.name),
+              // fix-371-1: the host's fleet snapshot names only its
+              // stacks' guests; any other shows its number.
+              g.name
+                ? h("span", { class: "mono" }, g.name)
+                : h("span", { class: "hk-muted" }, `CT ${g.vmid}`),
               g.lock ? h("small", null, `lock: ${g.lock}`) : null,
             ),
           ),
@@ -690,6 +814,18 @@ export function mount(root, ctx) {
           h("span", null, "Really written"),
           d.pool
             ? h("b", null, d.pool.written)
+            : h(
+                "b",
+                { class: "hk-muted" },
+                "not reported by this host version",
+              ),
+        ),
+        h(
+          "div",
+          { id: "host-pool-free" },
+          h("span", null, "Free in the pool"),
+          d.pool
+            ? h("b", null, d.pool.free)
             : h(
                 "b",
                 { class: "hk-muted" },
@@ -1278,7 +1414,7 @@ export function mount(root, ctx) {
   root.replaceChildren(
     head.el,
     attention.el,
-    kpis.el,
+    kpisEl,
     h(
       "div",
       { class: "hk-cols" },
@@ -1310,18 +1446,28 @@ export function mount(root, ctx) {
   );
 
   const paintKpis = () => {
-    const f = current().fleet;
-    if (!f) return;
-    for (const k of hostKpis(f, guests))
-      kpis.tiles.get(k.key)?.set({
-        ...k,
-        meter: {
-          pct: k.meter.pct,
-          mark: k.meter.mark,
-          markTitle: "promised to stacks",
-          tone: meterTone(k.meter),
-        },
-      });
+    if (trend == null && trendWhy == null) return;
+    const f = current().fleet ?? null;
+    for (const t of tiles)
+      t.set(hostTile(t.fig, trend?.get(t.fig.key) ?? null, f, trendWhy));
+  };
+  const loadTrend = async () => {
+    const r = await fetchJson(
+      "/data/host/trend",
+      "the host's trends",
+      abort.signal,
+    );
+    if (abort.signal.aborted) return;
+    if (r.ok) {
+      /** @type {import("../host.js").TrendFigure[]} */
+      const figs = r.body.figures ?? [];
+      trend = new Map(figs.map((x) => [x.key, x]));
+      trendWhy = null;
+    } else {
+      trend = new Map();
+      trendWhy = `${r.error.what}: ${r.error.why}`;
+    }
+    paintKpis();
   };
   const render = () => {
     const s = current();
@@ -1371,7 +1517,12 @@ export function mount(root, ctx) {
   void loadSettings().catch(() => {});
   void loadTemplates().catch(() => {});
   void loadGrowth().catch(() => {});
+  void loadTrend().catch(() => {});
   void ping().catch(() => {});
+  const trendTimer = setInterval(
+    () => void loadTrend().catch(() => {}),
+    TREND_EVERY_S * 1000,
+  );
   const timer = setInterval(() => {
     void loadGuests().catch(() => {});
     void ping().catch(() => {});
@@ -1388,6 +1539,7 @@ export function mount(root, ctx) {
   return () => {
     abort.abort();
     clearInterval(timer);
+    clearInterval(trendTimer);
     unsub();
     document.removeEventListener("keydown", keys);
     stops.forEach((s) => s());

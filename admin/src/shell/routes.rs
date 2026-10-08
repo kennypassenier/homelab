@@ -308,7 +308,8 @@ async fn host(State(c): State<ReadCtx>) -> Json<serde_json::Value> {
     }))
 }
 
-/// feat-overview-2: the containers on the host, from `status` (`pct list`).
+/// feat-overview-2: the containers on the host, from `status` (its fleet
+/// snapshot; fix-371-1).
 async fn guests(State(c): State<ReadCtx>) -> Response {
     match c.host.ask(Command::Status).await {
         Ok(r) if r.ok => Json(serde_json::json!({
@@ -600,10 +601,74 @@ async fn fleet_traffic(State(c): State<ReadCtx>) -> Response {
     Json(serde_json::json!({ "panels": out, "measured_at": now_s() })).into_response()
 }
 
+/// fix-371-1 (Kenny approved the Host tiles demo 2026-10-04): the Host
+/// page's eight KPI tiles. Per figure (`homelab_core::charts::
+/// host_kpi_queries`): the last 24 hours at 10 minutes for the sparkline,
+/// and the last 15 minutes at one minute, whose mean is the tile's big
+/// number ("avg 15 min") and whose last point is "now".
+async fn host_trend(State(c): State<ReadCtx>) -> Response {
+    let Some(prom) = &c.prometheus else {
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the host's trends",
+            "no Prometheus is configured for this dashboard",
+            "set admin.prometheus_url (or HOMELAB_ADMIN_PROMETHEUS_URL) to Prometheus's address",
+        );
+    };
+    let Some(h) = &prom.host_label else {
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the host's trends",
+            "no charts_host is configured",
+            "set admin.charts_host (or HOMELAB_ADMIN_CHARTS_HOST) to the hypervisor's host label in Prometheus",
+        );
+    };
+    const DAY: u64 = 86_400;
+    const DAY_STEP: u64 = 600;
+    const RECENT: u64 = 14 * 60;
+    const RECENT_STEP: u64 = 60;
+    let end = now_s();
+    let first = |r: Result<Vec<serde_json::Value>, String>| {
+        r.map(|s| {
+            s.into_iter()
+                .next()
+                .map(|x| x["points"].clone())
+                .unwrap_or_else(|| serde_json::json!([]))
+        })
+    };
+    let reads = homelab_core::charts::host_kpi_queries(h)
+        .into_iter()
+        .map(|(key, q)| async move {
+            let (day, recent) = futures_util::future::join(
+                prom.range(&q, end.saturating_sub(DAY), end, DAY_STEP, None),
+                prom.range(&q, end.saturating_sub(RECENT), end, RECENT_STEP, None),
+            )
+            .await;
+            match (first(day), first(recent)) {
+                (Ok(series), Ok(recent)) => {
+                    serde_json::json!({ "key": key, "series": series, "recent": recent })
+                }
+                (Err(e), _) | (_, Err(e)) => {
+                    serde_json::json!({ "key": key, "series": [], "recent": [], "error": e })
+                }
+            }
+        });
+    let figures = futures_util::future::join_all(reads).await;
+    Json(serde_json::json!({
+        "figures": figures,
+        "from": end.saturating_sub(DAY),
+        "to": end,
+        "step": DAY_STEP,
+        "measured_at": end,
+    }))
+    .into_response()
+}
+
 pub fn read_router(ctx: ReadCtx) -> Router {
     Router::new()
         .route("/data/host", get(host))
         .route("/data/host/guests", get(guests))
+        .route("/data/host/trend", get(host_trend))
         .route("/data/asks", get(asks))
         .route("/data/asks/answer", post(answer))
         .route("/data/logs", get(logs))

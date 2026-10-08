@@ -74,11 +74,6 @@ export function mountJobPanel(jobId, opts = {}) {
     "aria-label": "The host's lines for this job",
   });
   const logCount = h("span", { class: "measured" });
-  const empty = h(
-    "p",
-    { class: "measured job-log-empty" },
-    "No lines yet. Lines appear here as the host sends them.",
-  );
   const element = h(
     "section",
     {
@@ -107,9 +102,11 @@ export function mountJobPanel(jobId, opts = {}) {
     cli,
     h(
       "details",
-      { class: "job-log-wrap", open: "" },
+      {
+        class: "job-log-wrap kp-accordion__item kp-accordion__item--bare",
+        open: "",
+      },
       h("summary", null, "Log ", logCount),
-      empty,
       log,
     ),
   );
@@ -206,11 +203,19 @@ export function mountJobPanel(jobId, opts = {}) {
       h("span", { class: "kp-log__message" }, x.msg),
     );
   };
+  // fix-371-1 (Kenny, 2026-10-04): the box itself (app.css `.job-log`) is
+  // always at least ten lines tall, empty or loading too; an empty job
+  // reads one placeholder row inside it rather than the box collapsing
+  // away. `emptyRow` is never a `.kp-log__line`, so it is not counted.
+  const emptyText = "No lines yet. Lines appear here as the host sends them.";
+  const emptyRow = () => h("p", { class: "job-log-empty measured" }, emptyText);
   const countLines = () => {
-    const n = log.childElementCount;
+    const n = log.querySelectorAll(":scope > .kp-log__line").length;
     logCount.textContent = n ? `(${n} ${n === 1 ? "line" : "lines"})` : "";
-    empty.hidden = n > 0;
-    log.hidden = n === 0;
+    const ph = log.querySelector(".job-log-empty");
+    if (n === 0) {
+      if (!ph) log.append(emptyRow());
+    } else ph?.remove();
   };
   for (const l of act.logs.get(jobId) ?? []) log.append(lineEl(l));
   attachLogs(log);
@@ -226,6 +231,7 @@ export function mountJobPanel(jobId, opts = {}) {
     (/** @type {import("./jobs.js").LogLine} */ l) => {
       if (l.job !== jobId) return;
       const near = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+      log.querySelector(".job-log-empty")?.remove();
       const el = lineEl(l);
       log.append(el);
       while (log.childElementCount > 500) log.firstElementChild?.remove();

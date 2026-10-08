@@ -228,6 +228,39 @@ fn feat_overview_2_status_reads_as_the_guest_list_without_the_managed_state() {
     assert!(parse_status("pct list:\nnothing here").is_empty());
 }
 
+/// fix-371-1 (CORRECTION, Kenny 2026-10-04: "Containers 0/0 running" on
+/// /host while 13/13 stacks were online). Measured through the client the
+/// same day: the host's `status` reply is the fleet snapshot as JSON
+/// (fix-68), with no `pct list:` section, so the text reader found no
+/// guest. Trimmed from that reply: four guests, two of them stacks.
+#[test]
+fn fix_371_1_the_containers_come_from_the_hosts_fleet_snapshot() {
+    let msg = r#"{"host":{"name":"pve-01","cpu_pct":7,"ram_pct":48,"disk_pct":48,
+        "tls_fingerprint":"","ram_total_mb":31811,"ram_used_mb":15270,
+        "ram_committed_mb":29952,"cores_total":12,"load1_x100":147,
+        "guests_usage":[
+          {"vmid":104,"cpu_permille":4,"ram_used_mb":339,"ram_max_mb":5120,"uptime_s":543828},
+          {"vmid":102,"cpu_permille":0,"ram_used_mb":0,"ram_max_mb":3072,"uptime_s":0},
+          {"vmid":100,"cpu_permille":70,"ram_used_mb":1865,"ram_max_mb":4096,"uptime_s":5656887},
+          {"vmid":118,"cpu_permille":1,"ram_used_mb":83,"ram_max_mb":512,"uptime_s":2529521}]},
+      "stacks":[
+        {"name":"gateway","vmid":104,"hostname":"104-app-gateway","apps":[],"drift":false,"online":true},
+        {"name":"inbox","vmid":118,"hostname":"118-app-inbox","apps":[],"drift":false,"online":true}],
+      "status_measured_at":1791118248}"#;
+    let g = parse_status(msg);
+    assert_eq!(
+        g.iter()
+            .map(|g| (g.vmid, g.status.as_str(), g.name.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (100, "running", ""),
+            (102, "stopped", ""),
+            (104, "running", "104-app-gateway"),
+            (118, "running", "118-app-inbox"),
+        ]
+    );
+}
+
 fn q(stack: &str, app: Option<&str>, text: Option<&str>) -> LogQuery {
     LogQuery {
         stack: stack.into(),

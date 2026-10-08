@@ -25,6 +25,10 @@ import { attachRowToggle } from "./rowtoggle.js";
 import { h } from "./dom.js";
 import { countText, inboxNow, onInbox, worst } from "./inboxlist.js";
 import { attachNavMenus, attachNavToggles } from "/static/kp/js/components.js";
+import { attachMotion } from "/static/kp/js/motion.js";
+import { attachTableRegions } from "/static/kp/js/tables.js";
+import { attachActionColumns } from "/static/kp/js/actions.js";
+import { attachTileSets } from "/static/kp/js/tiles.js";
 import { loadPages, pages, subscribePages } from "./pages.js";
 import {
   STACK_TABS,
@@ -380,7 +384,17 @@ const follow = h("div", {
   role: "group",
   "aria-label": "Claude driving this dashboard",
 });
-(bar.querySelector(".help-button") ?? bar.lastElementChild)?.before(follow);
+// fix-371-1 (Kenny, 2026-10-04: at 390 px the theme button wrapped to a row
+// of its own): Live view, Help and the theme button are one group at the
+// bar's end, so when a narrow bar has to wrap (a running job's pill beside
+// a wide brand face) they move together, never the theme button alone.
+const barEnd = h("div", { class: "nx-bar-end" }, follow);
+for (const el of [
+  bar.querySelector(":scope > .help-button"),
+  bar.querySelector(":scope > .theme-slot"),
+])
+  if (el) barEnd.append(el);
+bar.append(barEnd);
 mountFollow(follow, { navigate });
 // TUI parity: a newer host release, a dashboard older than its host.
 mountVersions(/** @type {HTMLElement} */ (document.getElementById("versions")));
@@ -418,6 +432,34 @@ function fitBar() {
 fitBar();
 addEventListener("resize", fitBar);
 attachRowToggle();
+// kp-themes' motion on the whole dashboard (Kenny, 2026-10-08: "alles wat
+// kp-themes te bieden heeft ten volle benutten"): every card eases to its
+// new height, and what is added to one arrives the theme's way. A live
+// repaint is not news: under `arrive: "new"` a row put back under the key
+// it left with (`data-kp-row-key`, `id`), or a like-for-like redraw, stays
+// still; what replaces a skeleton is the data it waited for.
+attachMotion(document, {
+  size: ".kp-card, .nx-card, [data-motion-box]",
+  arrive: "new",
+});
+// kp-themes' tables.js: every table's scroll box a named region a keyboard
+// can reach (tabindex, role, the caption as its name), for the tables the
+// pages draw now and later.
+attachTableRegions(document);
+// kp-themes' actions.js: a row's buttons of one role share one column and
+// one width down the whole table (`.kp-row-actions`).
+attachActionColumns(document);
+// kp-themes' tiles.js: the tiles of every grid on one board (the Apps
+// groups, `data-kp-tiles-set`) share one height.
+attachTileSets(document);
+new MutationObserver((records) => {
+  const roots = new Set();
+  for (const r of records)
+    if ([...r.addedNodes].some((n) => n instanceof Element))
+      roots.add(r.target);
+  for (const root of roots)
+    if (root instanceof Element && root.isConnected) attachTableRegions(root);
+}).observe(page, { childList: true, subtree: true });
 // fix-176: the bar's content changes after the first paint, so it is
 // measured again whenever its content or its own size moves. Only
 // childList/characterData are watched: fitBar's own data-fold toggle is an

@@ -38,7 +38,7 @@ import { openPinUpdate } from "../pinupdate.js";
 import { stackHref } from "../router.js";
 import { releaseUrl } from "../staleimages.js";
 import { current, subscribe } from "../store.js";
-import { bytes } from "../timechart.js";
+import { bytes } from "../charts.js";
 import {
   dataTable,
   dot,

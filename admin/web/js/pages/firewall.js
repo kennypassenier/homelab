@@ -647,20 +647,24 @@ export function mount(root) {
       h(
         "td",
         { class: "cf-row-actions", "data-label": "" },
-        drivable(
-          h(
-            "a",
-            {
-              class: "kp-button kp-button--sm",
-              href: fwHref(s.stack),
-              title: s.declared
-                ? "Edit on the stack's Settings"
-                : "Declare a firewall for this stack on its Settings",
-            },
-            s.declared ? "Edit" : "Declare…",
+        h(
+          "div",
+          { class: "kp-row-actions" },
+          drivable(
+            h(
+              "a",
+              {
+                class: "kp-button kp-button--sm",
+                href: fwHref(s.stack),
+                title: s.declared
+                  ? "Edit on the stack's Settings"
+                  : "Declare a firewall for this stack on its Settings",
+              },
+              s.declared ? "Edit" : "Declare…",
+            ),
+            EDIT_STACK,
+            s.stack,
           ),
-          EDIT_STACK,
-          s.stack,
         ),
       ),
     );

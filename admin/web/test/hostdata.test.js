@@ -10,7 +10,6 @@ import {
   daemonSignature,
   diskBreakdown,
   guestTable,
-  hostKpis,
   hostUptime,
   rootVolumeLine,
 } from "../js/host.js";
@@ -97,25 +96,14 @@ const guests = [
   { vmid: 996, status: "stopped", lock: "template", name: "debian-13" },
 ];
 
-test("redesign-host-4: the container pool KPI reads how full the thin pool is", () => {
-  const pool = hostKpis(fleet(), guests)[3];
-  assert.equal(pool.value, "41");
-  assert.equal(pool.unit, "%");
-  assert.equal(pool.ctx, "460 GB free of 780 GB");
-  assert.equal(pool.meter.pct, 41);
-  assert.match(pool.title ?? "", /metadata 2\.5%/);
-  const old = hostKpis(oldFleet(), guests)[3];
-  assert.equal(old.value, "—");
-  assert.equal(old.meter.pct, null);
-  assert.equal(old.ctx, "780 GB pool · use not reported by this host version");
-});
-
-test("redesign-host-4: the Disk card says what the guests are promised and what is really written", () => {
+test("redesign-host-4: the Disk card says what the guests are promised, what is really written and what is free", () => {
   const d = diskBreakdown(fleet());
   assert.ok(d?.pool);
   assert.equal(d.pool.promised, "1012 GB");
   assert.equal(d.pool.promisedNote, "130% of the pool, thin over-provisioned");
   assert.equal(d.pool.written, "320 GB · 41%");
+  // fix-371-1: the pool's free space is never dropped
+  assert.equal(d.pool.free, "460 GB of 780 GB");
   const old = diskBreakdown(oldFleet());
   assert.ok(old);
   assert.equal(old.pool, null);

@@ -23,6 +23,9 @@ import {
   hueOf,
   initials,
   markParts,
+  packColumns,
+  packGroups,
+  packMinRem,
   readStars,
   tileState,
 } from "../appsview.js";
@@ -94,6 +97,17 @@ const SHOW_ALL = declare({
   shows: "when the search matches no app",
 });
 
+const FOLD = declare({
+  id: "apps-group-fold",
+  page: "home",
+  opens: "view",
+  row: "<group>",
+  what: "fold or unfold one group of apps by its title (remembered per group)",
+});
+
+/** Where this browser keeps the groups folded by their title. */
+const FOLDED_KEY = "homelab.apps.folded";
+
 /** Where this browser keeps its starred tiles. */
 const STARS_KEY = "homelab.apps.starred";
 
@@ -122,6 +136,20 @@ export function mount(root) {
   } catch {
     // a private window: no stars kept, every tile in its own group
   }
+  /** @type {Set<string>} the groups folded by their title */
+  let folded = new Set();
+  try {
+    folded = readStars(localStorage.getItem(FOLDED_KEY));
+  } catch {
+    // a private window: every group starts unfolded
+  }
+  const saveFolded = () => {
+    try {
+      localStorage.setItem(FOLDED_KEY, JSON.stringify([...folded]));
+    } catch {
+      // the folds last as long as this page
+    }
+  };
   const saveStars = () => {
     try {
       localStorage.setItem(STARS_KEY, JSON.stringify([...stars]));
@@ -193,7 +221,13 @@ export function mount(root) {
       [["s"], "star"],
     ]),
   );
-  const body = h("div", { class: "ap-board", "aria-label": "Apps" });
+  // Every group's tiles share one height across the board (kp-themes'
+  // tiles.js, `data-kp-tiles-set`), packed columns and folds included.
+  const body = h("div", {
+    class: "ap-board",
+    "aria-label": "Apps",
+    "data-kp-tiles-set": "apps",
+  });
   const legend = h(
     "p",
     { class: "ap-legend", "aria-label": "What the dots mean" },
@@ -285,15 +319,17 @@ export function mount(root) {
       pin,
       h("span", { class: "ap-tile__desc" }, ...marked(t.description || t.host)),
       h("span", { class: "ap-tile__go", "aria-hidden": "true" }, "↗"),
-      ...(t.lines.length || t.error
-        ? [
-            h(
-              "span",
-              { class: "ap-tile__lines" },
-              t.error ? "reading failed" : t.lines.join(" · "),
-            ),
-          ]
-        : []),
+      // fix-371-1: always the row's box; empty when the tile has no
+      // lines (stacks.css keeps the row on every tile of a board where
+      // any tile has lines).
+      h(
+        "span",
+        {
+          class: "ap-tile__lines",
+          ...(t.lines.length ? { title: t.lines.join(" · ") } : {}),
+        },
+        t.error ? "reading failed" : t.lines.join(" · "),
+      ),
     );
     a.style.setProperty("--c", `var(--chart-${hueOf(t.name)})`);
     drivable(a, OPEN, t.host);
@@ -309,8 +345,9 @@ export function mount(root) {
   // Loading: the grouped board the page fills in (22rem columns, a label
   // per group), so nothing moves when the tiles arrive (rule 6).
   const paintLoading = () => {
-    body.replaceChildren(
-      ...[3, 2, 2].map((n, i) =>
+    place(
+      [],
+      [3, 2, 2].map((n, i) =>
         h(
           "section",
           {
@@ -323,7 +360,7 @@ export function mount(root) {
           h("h2", null, h("span", { class: "kp-skeleton" })),
           h(
             "div",
-            { class: "ap-tiles" },
+            { class: "ap-tiles kp-tiles" },
             ...Array.from({ length: n }, () =>
               h(
                 "div",
@@ -336,27 +373,94 @@ export function mount(root) {
           ),
         ),
       ),
+      [3, 2, 2],
     );
   };
 
+  /** The groups placed in columns now, and how (to skip a no-op pass). */
+  /** @type {{wide: HTMLElement[], packed: HTMLElement[], tiles: number[]}} */
+  let placed = { wide: [], packed: [], tiles: [] };
+  let placedKey = "";
+  /**
+   * fix-371-1 (packed columns, Kenny approved the demo 2026-10-04): the
+   * wide blocks (Starred, a search's groups, an empty or failed state)
+   * span the board; every other group goes into the column that is
+   * shortest by tile count. Packs again when the board's width changes
+   * the column count.
+   * @param {HTMLElement[]} wide
+   * @param {HTMLElement[]} packed
+   * @param {number[]} tiles each packed group's tile count
+   */
+  const place = (wide, packed, tiles) => {
+    placed = { wide, packed, tiles };
+    placedKey = "";
+    arrange();
+  };
+  const arrange = () => {
+    const { wide, packed, tiles } = placed;
+    const cs = getComputedStyle(body);
+    const rem =
+      parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    const gap = parseFloat(cs.columnGap) || 24;
+    const w = body.clientWidth;
+    const cols = packed.length && w ? packColumns(w, gap, rem) : 1;
+    const plan = packGroups(
+      packed.map((el, i) => ({
+        tiles: tiles[i],
+        folded: el instanceof HTMLDetailsElement && !el.open,
+      })),
+      cols,
+    );
+    body.style.setProperty("--ap-min", `${packMinRem(w, rem)}rem`);
+    const key = `${cols}:${JSON.stringify(plan)}`;
+    if (key === placedKey && body.childElementCount) return;
+    placedKey = key;
+    const focused = /** @type {HTMLElement | null} */ (
+      body.contains(document.activeElement) ? document.activeElement : null
+    );
+    body.style.setProperty("--ap-cols", String(cols));
+    body.replaceChildren(
+      ...wide,
+      ...(packed.length
+        ? plan.map((ids) =>
+            h("div", { class: "ap-pack" }, ...ids.map((i) => packed[i])),
+          )
+        : []),
+    );
+    if (focused && focused !== document.activeElement)
+      focused.focus({ preventScroll: true });
+  };
+  let lastW = 0;
+  const resized = new ResizeObserver(() => {
+    const w = Math.round(body.clientWidth);
+    if (w === lastW) return;
+    lastW = w;
+    requestAnimationFrame(arrange);
+  });
+  resized.observe(body);
+
   const paint = () => {
     if (failed != null) {
-      body.replaceChildren(
-        h(
-          "div",
-          {
-            class: "kp-alert kp-alert--destructive ap-grp--wide",
-            role: "alert",
-          },
-          h("strong", null, "The apps could not be read"),
+      place(
+        [
           h(
-            "span",
-            null,
-            ` ${failed}. They come back by themselves once the host answers; or `,
+            "div",
+            {
+              class: "kp-alert kp-alert--destructive ap-grp--wide",
+              role: "alert",
+            },
+            h("strong", null, "The apps could not be read"),
+            h(
+              "span",
+              null,
+              ` ${failed}. They come back by themselves once the host answers; or `,
+            ),
+            drivable(h("a", { href: "/apps" }, "try again now"), RETRY),
+            ".",
           ),
-          drivable(h("a", { href: "/apps" }, "try again now"), RETRY),
-          ".",
-        ),
+        ],
+        [],
+        [],
       );
       return;
     }
@@ -369,51 +473,84 @@ export function mount(root) {
     verdictText.textContent = tiles.length ? v.text : "No apps yet";
     setAgo(verdictAgo, v.checkedAt);
     if (!tiles.length) {
-      body.replaceChildren(
-        h(
-          "section",
-          { class: "kp-card nx-card ap-grp--wide ap-empty" },
-          emptyState({
-            art: art.noTiles(),
-            title: "No app has a tile yet",
-            text: "A tile comes from the stack that owns the app's address: add tiles: to its lxc-compose.yml and deploy it.",
-            action: h(
-              "pre",
-              { class: "ap-example sk-mono" },
-              "tiles:\n  films.example.dev:\n    name: Films\n    group: Media\n    description: Films and series",
-            ),
-          }),
-        ),
+      place(
+        [
+          h(
+            "section",
+            { class: "kp-card nx-card ap-grp--wide ap-empty" },
+            emptyState({
+              art: art.noTiles(),
+              title: "No app has a tile yet",
+              text: "A tile comes from the stack that owns the app's address: add tiles: to its lxc-compose.yml and deploy it.",
+              action: h(
+                "pre",
+                { class: "ap-example sk-mono" },
+                "tiles:\n  films.example.dev:\n    name: Films\n    group: Media\n    description: Films and series",
+              ),
+            }),
+          ),
+        ],
+        [],
+        [],
       );
       return;
     }
     const groups = board(tiles, stars, q);
     let first = q.trim() !== "";
     const shown = filterTiles(tiles, q);
-    const sections = groups.map((g) =>
-      h(
-        "section",
-        {
-          class: `ap-grp${g.wide ? " ap-grp--wide" : ""}`,
-          "aria-label": g.group,
-        },
+    // fix-371-1 (Kenny, 2026-10-04): a group's title folds and unfolds the
+    // whole group: kp-themes' bare accordion item (a <details>, its summary
+    // the whole title row), gliding open and shut the theme's way and
+    // remembered per group. A search shows every group open, so its first
+    // match is always on screen.
+    /** @type {HTMLElement[]} */
+    const sections = groups.map((g) => {
+      const open = q.trim() !== "" || !folded.has(g.group);
+      const title = drivable(
         h(
-          "h2",
-          null,
-          g.group,
-          h("span", { class: "sk-chip" }, String(g.tiles.length)),
+          "summary",
+          { class: "ap-grp__title", title: `Fold or unfold ${g.group}` },
+          h(
+            "h2",
+            null,
+            h("span", { class: "ap-grp__chev", "aria-hidden": "true" }, "›"),
+            g.group,
+            h("span", { class: "sk-chip" }, String(g.tiles.length)),
+          ),
         ),
+        FOLD,
+        g.group,
+      );
+      const d = /** @type {HTMLDetailsElement} */ (
         h(
-          "div",
-          { class: "ap-tiles" },
-          ...g.tiles.map((t) => {
-            const el = tileEl(t, first);
-            first = false;
-            return el;
-          }),
-        ),
-      ),
-    );
+          "details",
+          {
+            class: `ap-grp kp-accordion__item kp-accordion__item--bare${g.wide ? " ap-grp--wide" : ""}`,
+            "aria-label": g.group,
+            ...(open ? { open: "" } : {}),
+          },
+          title,
+          h(
+            "div",
+            { class: "ap-tiles kp-tiles" },
+            ...g.tiles.map((t) => {
+              const el = tileEl(t, first);
+              first = false;
+              return el;
+            }),
+          ),
+        )
+      );
+      d.addEventListener("toggle", () => {
+        if (q.trim()) return;
+        if (d.open) folded.delete(g.group);
+        else folded.add(g.group);
+        saveFolded();
+        // A fold changes the tile counts: the board packs again.
+        if (!g.wide) requestAnimationFrame(arrange);
+      });
+      return d;
+    });
     if (!shown.length) {
       const all = drivable(
         h(
@@ -441,7 +578,19 @@ export function mount(root) {
         ),
       );
     }
-    body.replaceChildren(...sections);
+    // fix-371-1 (uniform tiles): one tile with live lines gives every tile
+    // that row.
+    body.classList.toggle(
+      "ap-board--lines",
+      tiles.some((t) => t.lines.length > 0 || Boolean(t.error)),
+    );
+    const isPacked = (/** @type {HTMLElement} */ el) =>
+      el.matches(".ap-grp:not(.ap-grp--wide)");
+    place(
+      sections.filter((el) => !isPacked(el)),
+      sections.filter(isPacked),
+      groups.filter((g) => !g.wide).map((g) => g.tiles.length),
+    );
   };
 
   /** @param {string} next */
@@ -466,9 +615,9 @@ export function mount(root) {
       if (f) window.open(f.url, "_blank", "noopener");
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      /** @type {HTMLElement | null} */ (
-        body.querySelector(".ap-tile")
-      )?.focus();
+      /** @type {HTMLElement[]} */ ([...body.querySelectorAll(".ap-tile")])
+        .find((t) => t.offsetParent !== null)
+        ?.focus();
     } else if (e.key === "Escape" && search.value) {
       e.stopPropagation();
       setQuery("");
@@ -478,7 +627,7 @@ export function mount(root) {
   body.addEventListener("keydown", (e) => {
     const all = /** @type {HTMLElement[]} */ ([
       ...body.querySelectorAll(".ap-tile:not(.ap-tile--skeleton)"),
-    ]);
+    ]).filter((t) => t.offsetParent !== null);
     const i = all.indexOf(/** @type {HTMLElement} */ (document.activeElement));
     if (i < 0) return;
     const grid = all[i].parentElement;
@@ -530,6 +679,7 @@ export function mount(root) {
   return () => {
     abort.abort();
     clearInterval(timer);
+    resized.disconnect();
     root.classList.remove("ap-page");
   };
 }

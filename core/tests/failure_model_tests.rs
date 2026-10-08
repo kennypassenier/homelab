@@ -146,6 +146,7 @@ async fn fix_125_an_incident_bundle_is_readable_by_root_only() {
         steps: vec![],
         error: None,
         deferred: None,
+        note: None,
     };
     let dir = incidents::write_bundle(&exec, "/var/lib/homelab", 1, &report, &[], "host=x\n")
         .await

@@ -62,6 +62,7 @@ import {
   withStackResult,
 } from "../backupcalendar.js";
 import { h, perstackChips, slowRead } from "../dom.js";
+import { pageHeader } from "../ui.js";
 import { stackChips } from "../perstack.js";
 import { agoText, formatDateTime } from "../format.js";
 import { current, subscribe } from "../store.js";
@@ -315,12 +316,11 @@ export function mount(root) {
     "Refresh",
   );
   root.replaceChildren(
-    h("div", { class: "title-row" }, h("h1", null, "Backup calendar"), refresh),
-    h(
-      "p",
-      { class: "page-intro" },
-      "One month at a time: every stack that keeps data is expected to have at least one restic snapshot each night. Reads restic directly over the network, one stack at a time, so a slow repository only ever holds up its own chip — never the whole page.",
-    ),
+    pageHeader({
+      title: "Backup calendar",
+      desc: "One month at a time: every stack that keeps data is expected to have at least one restic snapshot each night. Reads restic directly over the network, one stack at a time, so a slow repository only ever holds up its own chip — never the whole page.",
+      primary: refresh,
+    }).el,
     h(
       "div",
       { class: "backup-cal__legend" },

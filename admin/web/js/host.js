@@ -183,122 +183,185 @@ export function hostChecks(report) {
 
 /** GiB with one decimal, from MiB. @param {number} mb */
 export const gib = (mb) => (mb / 1024).toFixed(1);
-/** GiB without a trailing ".0" ("64", "15.5"). @param {number} mb */
-const gibShort = (mb) => gib(mb).replace(/\.0$/, "");
 
 /**
- * One KPI tile: label, value, unit, context line and a meter (`pct` null
- * draws an empty track; `mark` a tick, e.g. the RAM promised to stacks).
- * @typedef {{key: string, label: string, value: string, unit: string,
- *   ctx: string, title?: string,
- *   meter: {pct: number | null, mark?: number | null, neutral?: boolean}}}
- *   HostKpi
+ * fix-371-1 (Kenny approved the Host tiles demo 2026-10-04:
+ * redesign-3.71/demos-3711/host-kpis.html): one of the Host page's eight
+ * figures, read from Prometheus (`/data/host/trend`). `chart` is the
+ * Charts card that draws the same figure (`metricsview.js` HOST_SECTIONS'
+ * key), or null when Charts has none of its own; `colour` its chart hue.
+ * Every figure has its own card since 3.71.1 (Disk traffic and Swap got
+ * one; Network lands on "Network in and out", the two rates it adds up).
+ * @typedef {{key: string, label: string, unit: string, rate?: boolean,
+ *   digits?: number, chart: string | null, colour: number}} HostFigure
  */
 
+/** @type {HostFigure[]} */
+export const HOST_FIGURES = [
+  { key: "cpu", label: "CPU", unit: "%", chart: "cpu", colour: 1 },
+  { key: "memory", label: "Memory", unit: "%", chart: "mem", colour: 2 },
+  { key: "load", label: "Load", unit: "", digits: 2, chart: "load", colour: 3 },
+  { key: "disk", label: "Root disk", unit: "%", chart: "disk", colour: 5 },
+  {
+    key: "diskio",
+    label: "Disk traffic",
+    unit: "",
+    rate: true,
+    chart: "diskio",
+    colour: 5,
+  },
+  {
+    key: "network",
+    label: "Network",
+    unit: "",
+    rate: true,
+    chart: "netio",
+    colour: 1,
+  },
+  {
+    key: "temp",
+    label: "CPU temperature",
+    unit: "°C",
+    chart: "temp",
+    colour: 2,
+  },
+  { key: "swap", label: "Swap", unit: "%", chart: "swap", colour: 3 },
+];
+
+/** The words beside the big number, which is this average. */
+export const AVG_WORDS = "avg 15 min";
+
 /**
- * The Host page's KPI strip: CPU, memory (with what is promised to
- * stacks), the root disk, the container pool and the containers, in exact
- * counts. `guests` is null until `pct list` has answered.
- * @param {import("./fleet.js").Fleet} fleet
- * @param {Guest[] | null} guests
- * @returns {HostKpi[]}
+ * One reading of a figure as the tile writes it: the number and its unit
+ * (a rate picks kB/s or MB/s by its size).
+ * @param {HostFigure} f
+ * @param {number} v
+ * @returns {{value: string, unit: string}}
  */
-export function hostKpis(fleet, guests) {
-  const h = fleet.host;
-  const d = h.disk_detail ?? null;
-  const committed = h.ram_committed_mb ?? 0;
-  const running = guests?.filter((g) => g.status === "running").length ?? 0;
-  const load = h.load1_x100 == null ? null : (h.load1_x100 / 100).toFixed(2);
-  return [
-    {
-      key: "cpu",
-      label: "CPU",
-      value: h.cpu_pct == null ? "—" : String(h.cpu_pct),
-      unit: h.cpu_pct == null ? "" : "%",
-      ctx:
-        h.cpu_pct == null
-          ? "not measured yet"
-          : [
-              h.cores_total ? `${h.cores_total} cores` : null,
-              load == null ? null : `load ${load}`,
-            ]
-              .filter(Boolean)
-              .join(" · "),
-      meter: { pct: h.cpu_pct },
-    },
-    {
-      key: "memory",
-      label: "Memory",
-      value: gib(h.ram_used_mb),
-      unit: `of ${gibShort(h.ram_total_mb)} GiB`,
-      ctx:
-        committed > 0
-          ? `${gib(committed)} GiB promised to stacks (${pct(committed, h.ram_total_mb)}%)`
-          : "nothing promised to stacks yet",
-      title: "The tick marks what the stacks are promised together",
-      meter: {
-        pct: pct(h.ram_used_mb, h.ram_total_mb),
-        mark: committed > 0 ? pct(committed, h.ram_total_mb) : null,
-      },
-    },
-    {
-      key: "root",
-      label: "Root disk",
-      value: String(h.disk_pct),
-      unit: "%",
-      ctx: d
-        ? `${Math.round(d.root_lv_size_gb * (1 - h.disk_pct / 100))} GB free of ${Math.round(d.root_lv_size_gb)} GB`
-        : "size not read yet",
-      meter: { pct: h.disk_pct },
-    },
-    // redesign-host-4: how full the thin pool is, from the host's `lvs`
-    // (3.71.0); an older host sends only its size, said as such and never
-    // a made-up percentage.
-    d?.thin_pool
-      ? {
-          key: "pool",
-          label: "Container pool",
-          value: String(Math.round(d.thin_pool.data_pct)),
-          unit: "%",
-          ctx: `${Math.round(d.thin_pool_size_gb * (1 - d.thin_pool.data_pct / 100))} GB free of ${Math.round(d.thin_pool_size_gb)} GB`,
-          title: `The local-lvm thin pool every container's own disk is carved from: data ${d.thin_pool.data_pct}%, metadata ${d.thin_pool.metadata_pct}%`,
-          meter: { pct: d.thin_pool.data_pct },
-        }
-      : {
-          key: "pool",
-          label: "Container pool",
-          value: "—",
-          unit: "",
-          ctx: d
-            ? `${Math.round(d.thin_pool_size_gb)} GB pool · use not reported by this host version`
-            : "not read yet",
-          title:
-            "The local-lvm thin pool every container's own disk is carved from; this host version reports its size, not how full it is",
-          meter: { pct: null },
-        },
-    {
-      key: "containers",
-      label: "Containers",
-      value: guests ? String(running) : "—",
-      unit: guests ? `of ${guests.length} running` : "",
-      ctx: `${fleet.counts.online} of ${fleet.counts.stacks} stacks online`,
-      meter: {
-        pct: guests && guests.length ? (running / guests.length) * 100 : null,
-        neutral: true,
-      },
-    },
-  ];
+export function figureText(f, v) {
+  if (f.rate) {
+    if (v >= 1e6)
+      return { value: (v / 1e6).toFixed(v >= 1e8 ? 0 : 1), unit: "MB/s" };
+    return { value: String(Math.round(v / 1e3)), unit: "kB/s" };
+  }
+  return {
+    value: f.digits ? v.toFixed(f.digits) : String(Math.round(v)),
+    unit: f.unit,
+  };
 }
 
+/** @param {{value: string, unit: string}} t */
+const joined = (t) => (t.unit ? `${t.value} ${t.unit}` : t.value);
+
 /**
- * The meter's tone: warn above 70 %, bad above 85 % (never for a neutral
- * count like "6 of 8 running").
- * @param {{pct: number | null, neutral?: boolean}} m
- * @returns {"" | "warn" | "bad"}
+ * @typedef {{key: string, series: [number, number][],
+ *   recent: [number, number][], error?: string}} TrendFigure one figure of
+ *   `/data/host/trend`: 24 h at 10 minutes, the last 15 minutes at one
+ * @typedef {{key: string, label: string, value: string, unit: string,
+ *   now: string, rest: string, href: string, title: string, colour: number,
+ *   points: [number, number][], from: number | null, avg: boolean,
+ *   fmt: (v: number) => string}} HostTile
  */
-export function meterTone(m) {
-  if (m.neutral || m.pct == null) return "";
-  return m.pct > 85 ? "bad" : m.pct > 70 ? "warn" : "";
+
+/**
+ * One Host tile as the approved demo draws it: the label with "avg 15
+ * min", the 15-minute average as the big number, then "now X · peak Y ·
+ * context" (the peak over the 24 h the sparkline spans), the sparkline,
+ * and a link to the figure on Charts. Without a trend (Prometheus did not
+ * answer) the fleet's own reading stands in where the host sends one —
+ * CPU, memory, load, root disk — as "now", never a made-up average.
+ * @param {HostFigure} f
+ * @param {TrendFigure | null} t
+ * @param {import("./fleet.js").Fleet | null} fleet
+ * @param {string | null} [why] why there is no trend
+ * @returns {HostTile}
+ */
+export function hostTile(f, t, fleet, why = null) {
+  const h = fleet?.host;
+  const ctx = (/** @type {number | null} */ now) => {
+    const cores = h?.cores_total ? `${h.cores_total} cores` : null;
+    const memGiB = h?.ram_total_mb ? h.ram_total_mb / 1024 : null;
+    const diskGB = h?.disk_detail?.root_lv_size_gb ?? null;
+    switch (f.key) {
+      case "cpu":
+      case "load":
+        return cores;
+      case "memory":
+        return memGiB && now != null
+          ? `${((now / 100) * memGiB).toFixed(1)} of ${memGiB.toFixed(0)} GiB`
+          : null;
+      case "disk":
+        return diskGB && now != null
+          ? `${((now / 100) * diskGB).toFixed(0)} of ${diskGB.toFixed(0)} GB`
+          : null;
+      case "diskio":
+        return "read + written";
+      case "network":
+        return "in + out, the bridges";
+      case "temp":
+        return "hottest core";
+      default:
+        return "of the swap space";
+    }
+  };
+  const href = f.chart ? `/charts#chart-${f.chart}` : "/charts";
+  const title = f.chart
+    ? `Open ${f.label} on Charts`
+    : `Open the host's charts (${f.label} has no chart of its own there)`;
+  const fmt = (/** @type {number} */ v) => joined(figureText(f, v));
+  const recent = t?.recent ?? [];
+  const series = t?.series ?? [];
+  if (!t?.error && recent.length && series.length) {
+    const avg = recent.reduce((a, p) => a + p[1], 0) / recent.length;
+    const now = recent[recent.length - 1][1];
+    const peak = Math.max(...series.map((p) => p[1]));
+    const big = figureText(f, avg);
+    return {
+      key: f.key,
+      label: `${f.label} · ${AVG_WORDS}`,
+      value: big.value,
+      unit: big.unit,
+      now: fmt(now),
+      rest: [`peak ${fmt(peak)}`, ctx(now)].filter(Boolean).join(" · "),
+      href,
+      title,
+      colour: f.colour,
+      points: series,
+      from: series[0][0],
+      avg: true,
+      fmt,
+    };
+  }
+  /** @type {Record<string, number | null | undefined>} */
+  const fleetNow = {
+    cpu: h?.cpu_pct,
+    memory: h && h.ram_total_mb ? (h.ram_used_mb / h.ram_total_mb) * 100 : null,
+    load: h?.load1_x100 == null ? null : h.load1_x100 / 100,
+    disk: h?.disk_pct,
+  };
+  const v = fleetNow[f.key] ?? null;
+  const reason = t?.error ?? why;
+  const missing = reason
+    ? "no trend: Prometheus did not answer"
+    : "no trend yet";
+  const big = v == null ? null : figureText(f, v);
+  return {
+    key: f.key,
+    label: f.label,
+    value: big?.value ?? "—",
+    unit: big?.unit ?? "",
+    now: "",
+    rest: [v == null ? "not measured" : "now", missing, ctx(v)]
+      .filter(Boolean)
+      .join(" · "),
+    href,
+    title: reason ? `${title}\n${reason}` : title,
+    colour: f.colour,
+    points: [],
+    from: null,
+    avg: false,
+    fmt,
+  };
 }
 
 /**
@@ -426,7 +489,8 @@ export function actionBlurb(what) {
  * @param {import("./fleet.js").Fleet} fleet
  * @returns {{rootGb: number, device: string, diskGb: number,
  *   usedPct: number, freeGb: number, poolGb: number,
- *   pool: {promised: string, promisedNote: string, written: string} | null,
+ *   pool: {promised: string, promisedNote: string, written: string,
+ *     free: string} | null,
  *   dirs: {path: string, gb: number, pct: number}[]} | null}
  */
 export function diskBreakdown(fleet) {
@@ -458,6 +522,9 @@ export function diskBreakdown(fleet) {
             ? `${Math.round((d.thin_pool.promised_gb / d.thin_pool_size_gb) * 100)}% of the pool${d.thin_pool.promised_gb > d.thin_pool_size_gb ? ", thin over-provisioned" : ""}`
             : "",
           written: `${Math.round((d.thin_pool_size_gb * d.thin_pool.data_pct) / 100)} GB · ${Math.round(d.thin_pool.data_pct)}%`,
+          // fix-371-1: the pool's free space, shown in the 3.71.0 Container
+          // pool tile until the Host tiles replaced it.
+          free: `${Math.round(d.thin_pool_size_gb * (1 - d.thin_pool.data_pct / 100))} GB of ${Math.round(d.thin_pool_size_gb)} GB`,
         }
       : null,
     dirs,

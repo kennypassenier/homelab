@@ -11,6 +11,13 @@ import {
 import { freshRead } from "./slowread.js";
 import { busyWords, emptyWords, failReason } from "./tablestate.js";
 import { VIEW_EVENT, dataTable } from "/static/kp/js/datatable.js";
+import { leave } from "/static/kp/js/motion.js";
+import { update } from "/static/kp/js/update.js";
+import {
+  buildProgressbar,
+  setIndeterminate,
+  setProgress as kpSetProgress,
+} from "/static/kp/js/progressbar.js";
 
 /**
  * @typedef {Node | string | number | null | undefined | false | Child[]}
@@ -144,8 +151,8 @@ export function badgeCell(st) {
  *   every row. select: a checkbox column first and an action bar that
  *   shows while rows are ticked; each row brings its own
  *   `selectCell(key)`. nothing: the empty box's words when the table has
- *   no rows at all. busyOverlay: false leaves out the big loading layer
- *   over the rows (`busyOverlay`; on by default). captionHidden: the
+ *   no rows at all. busyOverlay: false leaves out kp's big loading layer
+ *   over the rows (`data-kp-busy-overlay`; on by default). captionHidden: the
  *   caption stays for a screen reader but is not drawn — for a table whose
  *   section heading (`sectionHeader`) already names it right above
  *   (fix-230: the tiny caption repeated the heading under it).
@@ -193,7 +200,7 @@ export function tableBlock(spec) {
   };
   if (spec.pageSize) wrapAttrs["data-kp-page-size"] = String(spec.pageSize);
   if (spec.state) wrapAttrs["data-kp-state"] = spec.state;
-  // kp-themes' future `data-kp-busy-overlay` (busyOverlay below, a shim).
+  // kp-themes' busy overlay (8.1.0; flat in a narrow table since 9.2.0).
   if (spec.busyOverlay !== false) wrapAttrs["data-kp-busy-overlay"] = "";
   const status = h("p", {
     class: "kp-datatable__status",
@@ -292,9 +299,6 @@ export function tableBlock(spec) {
     ),
   );
 
-  const overlay =
-    spec.busyOverlay !== false ? busyOverlay(wrap, status) : () => {};
-
   // ── Loading: kp's spinner, the page's words and kp's own counter ─────
   /** @type {{text: string, since: number, given: boolean, overlay?: boolean} | null} */
   let busy = null;
@@ -306,9 +310,8 @@ export function tableBlock(spec) {
     const hd = handle();
     if (!busy || busy.given || !hd) return;
     busy.given = true;
-    // fix-260: this load's overlay choice reaches kp's own busy() too
-    // (kp-themes now draws its own card; `overlay: false` keeps a page's
-    // last answer readable under it, as the shim below already did).
+    // fix-260: this load's overlay choice reaches kp's busy(); `overlay:
+    // false` keeps a page's last answer readable while it reads again.
     hd.busy({
       text: busy.text,
       since: busy.since,
@@ -343,7 +346,6 @@ export function tableBlock(spec) {
    */
   const loading = (o = {}) => {
     stopBusy();
-    overlay(o.overlay);
     busy = {
       text: busyWords({
         words: o.words ?? "Asking the host…",
@@ -401,125 +403,6 @@ export function tableBlock(spec) {
     ...spec.columns.map((c) => c.label),
   ]);
   return { wrap, tbody, loading, ready, failed: fail, setNothing };
-}
-
-/**
- * The busy overlay: while the table loads, a large spinner with the busy
- * words and kp's counter over the rows, under the header (Kenny,
- * 2026-09-29: the 1em spinner in the status line under a long table went
- * unseen).
- *
- * A LOCAL SHIM of kp-themes main 05d62af6 (scope-138: busy({ overlay }),
- * the `data-kp-busy-overlay` attribute, the `.kp-datatable__busy-overlay`
- * layer with its `.kp-datatable__busy-panel`, the --kp-busy-overlay-veil and
- * --kp-busy-overlay-spinner knobs), with exactly its names and placement,
- * to delete when the chassis pin carries it. A thin layer on kp's busy():
- * it reads kp's state (`aria-busy` on the wrapper) and mirrors kp's status
- * line, words and counter, and keeps no counter of its own. The layer is
- * aria-hidden; the status line stays the live region. Placed over the
- * skeleton or the dimmed rows, it inserts nothing, so nothing moves.
- * @param {HTMLElement} wrap the `.kp-datatable`
- * @param {HTMLElement} status kp's status line
- * @returns {(on: boolean | undefined) => void} this load's choice, as
- *   kp's busy({ overlay }); undefined is the wrapper's attribute
- */
-function busyOverlay(wrap, status) {
-  const words = h("span", { class: "kp-datatable__busy-words" });
-  const clock = h("span", { class: "kp-datatable__busy-clock" });
-  const panel = h(
-    "div",
-    { class: "kp-datatable__busy-panel" },
-    h("span", { class: "kp-spinner" }),
-    words,
-    clock,
-  );
-  const layer = h(
-    "div",
-    { class: "kp-datatable__busy-overlay", "aria-hidden": "true", hidden: "" },
-    panel,
-  );
-  wrap.append(layer);
-  /** @type {boolean | undefined} */
-  let chosen;
-  const wanted = () => chosen ?? wrap.hasAttribute("data-kp-busy-overlay");
-  const sync = () => {
-    const table = wrap.querySelector("table");
-    // fix-260 (design review, 2026-10-03): kp-themes draws its own busy
-    // card now; with both, two spinners showed. The shim steps aside for
-    // kp's own layer whenever one exists.
-    const kpOwn = [
-      ...wrap.querySelectorAll(":scope > .kp-datatable__busy-overlay"),
-    ].some((l) => l !== layer);
-    if (
-      kpOwn ||
-      wrap.getAttribute("aria-busy") !== "true" ||
-      !wanted() ||
-      !table
-    ) {
-      layer.hidden = true;
-      return;
-    }
-    // kp's status line while loading: its spinner, the words, then its
-    // counter in `[data-kp-busy-clock]`.
-    const tick = status.querySelector("[data-kp-busy-clock]");
-    let text = "";
-    status.childNodes.forEach((n) => {
-      if (n !== tick && !(n instanceof Element && n.matches(".kp-spinner")))
-        text += n.textContent ?? "";
-    });
-    words.textContent = text.trim();
-    clock.textContent = tick?.textContent ?? "";
-    clock.hidden = !tick;
-    // kp's placement: from the header's bottom to the table box's bottom,
-    // within its left and right. A table not laid out (hidden) shows none.
-    const host = wrap.getBoundingClientRect();
-    if (host.height === 0) {
-      layer.hidden = true;
-      return;
-    }
-    const box = (
-      wrap.querySelector(".kp-table-wrap") ?? table
-    ).getBoundingClientRect();
-    const top = (
-      table.tHead ??
-      table.tBodies[0] ??
-      table
-    ).getBoundingClientRect()[table.tHead ? "bottom" : "top"];
-    const px = (/** @type {number} */ n) => `${Math.max(0, Math.round(n))}px`;
-    layer.style.setProperty(
-      "--kp-busy-overlay-top",
-      px(top - host.top - wrap.clientTop),
-    );
-    layer.style.setProperty(
-      "--kp-busy-overlay-bottom",
-      px(host.bottom - Math.max(box.bottom, top) - wrap.clientTop),
-    );
-    layer.style.setProperty(
-      "--kp-busy-overlay-left",
-      px(box.left - host.left - wrap.clientLeft),
-    );
-    layer.style.setProperty(
-      "--kp-busy-overlay-right",
-      px(host.right - box.right - wrap.clientLeft),
-    );
-    layer.hidden = false;
-  };
-  new MutationObserver(sync).observe(status, {
-    childList: true,
-    subtree: true,
-    characterData: true,
-  });
-  new MutationObserver(sync).observe(wrap, {
-    attributes: true,
-    attributeFilter: ["aria-busy", "data-kp-busy-overlay", "hidden"],
-  });
-  if (typeof ResizeObserver === "function")
-    new ResizeObserver(sync).observe(wrap);
-  sync();
-  return (on) => {
-    chosen = on;
-    sync();
-  };
 }
 
 /**
@@ -720,6 +603,105 @@ export function statGrid(stats) {
 }
 
 /**
+ * Repaint a live list by its rows' keys, so a row that went away leaves
+ * the theme's way (kp-themes' `leave()`) instead of vanishing: a row whose
+ * key is still there is swapped for its new paint in place (a repaint,
+ * which stays still under `arrive: "new"`), a row with a new key is put
+ * where it belongs and arrives, and a row whose key is gone plays its exit
+ * where it stood and is then taken out. Children without a key (a
+ * skeleton, an empty line) go at once.
+ * @param {Element} list
+ * @param {Element[]} next the new rows, in order, each carrying a key
+ * @param {(el: Element) => string | null} [keyOf]
+ * @returns {Promise<void>} settled once every leaving row is gone
+ */
+export function patchKeyed(
+  list,
+  next,
+  keyOf = (el) => el.getAttribute("data-kp-row-key"),
+) {
+  /** @type {Map<string, Element>} */
+  const old = new Map();
+  for (const c of [...list.children]) {
+    if (c.hasAttribute("data-kp-leaving")) continue;
+    const k = keyOf(c);
+    if (k == null || old.has(k)) c.remove();
+    else old.set(k, c);
+  }
+  const keep = new Set(next.map(keyOf));
+  const gone = [...old].filter(([k]) => !keep.has(k)).map(([, c]) => c);
+  const leaving = new Set(gone);
+  let cursor = list.firstElementChild;
+  const skip = () => {
+    while (
+      cursor &&
+      (leaving.has(cursor) || cursor.hasAttribute("data-kp-leaving"))
+    )
+      cursor = cursor.nextElementSibling;
+  };
+  for (const n of next) {
+    skip();
+    const k = keyOf(n);
+    const was = k == null ? undefined : old.get(k);
+    if (was && was === cursor) cursor = was.nextElementSibling;
+    // The same node kept (a row built once and reused) only moves.
+    list.insertBefore(n, cursor);
+    if (was && was !== n) was.remove();
+  }
+  return Promise.all(
+    gone.map((el) => leave(/** @type {HTMLElement} */ (el))),
+  ).then(() => undefined);
+}
+
+/**
+ * The attribute that names a value a live repaint may change in place
+ * (a state word, a count, a CPU figure), so the change plays the theme's
+ * update (kp-themes' `update()`) instead of only swapping the text.
+ */
+export const LIVE = "data-live";
+
+/**
+ * The text of every live value under `root`, by its name.
+ * @param {ParentNode} root
+ * @returns {Map<string, string>}
+ */
+export function liveTexts(root) {
+  /** @type {Map<string, string>} */
+  const m = new Map();
+  for (const e of root.querySelectorAll(`[${LIVE}]`))
+    m.set(e.getAttribute(LIVE) ?? "", e.textContent ?? "");
+  return m;
+}
+
+/**
+ * After a repaint of `root`, play the theme's update on every live value
+ * whose text differs from what `before` (liveTexts, taken just before the
+ * repaint) held; a value that is new, or the same, plays nothing.
+ * @param {ParentNode} root
+ * @param {Map<string, string>} before
+ */
+export function playChanged(root, before) {
+  for (const e of root.querySelectorAll(`[${LIVE}]`)) {
+    const was = before.get(e.getAttribute(LIVE) ?? "");
+    const now = e.textContent ?? "";
+    if (was != null && was !== now) void update(e, now);
+  }
+}
+
+/**
+ * Write a live value in place: a change plays the theme's update; the
+ * first fill, or the same text again, is written plainly.
+ * @param {Element} el
+ * @param {string | number} text
+ */
+export function setLive(el, text) {
+  const s = String(text);
+  if (el.textContent === s) return;
+  if (!el.isConnected || el.textContent === "") el.textContent = s;
+  else void update(el, s);
+}
+
+/**
  * Refills a stat grid in place, the stat-tile counterpart of `fillFacts`.
  * @param {HTMLElement} grid
  * @param {{label: string, value: string}[]} stats
@@ -748,50 +730,32 @@ export function statTile(label, value = "") {
 
 /**
  * Set a `progressBar`'s share done, 0 to 100, or null for busy with no
- * count to go by. kp-themes 9 (MIGRATION.md 8→9): `--kp-value` (0 to 1) is
- * what the bar paints, `aria-valuenow` what a screen reader reads; busy is
- * `data-kp-indeterminate` with no `aria-valuenow`.
+ * count to go by (kp-themes' progressbar.js: `aria-valuenow` and the
+ * `--kp-value` it paints kept in step, busy as `data-kp-indeterminate`).
  * @param {HTMLElement} el
  * @param {number | null} pct
  */
 export function setProgress(el, pct) {
-  if (pct == null || !Number.isFinite(pct)) {
-    el.setAttribute("data-kp-indeterminate", "");
-    el.removeAttribute("aria-valuenow");
-    el.style.removeProperty("--kp-value");
-    return;
-  }
-  const v = Math.max(0, Math.min(100, pct));
-  el.removeAttribute("data-kp-indeterminate");
-  el.setAttribute("aria-valuenow", String(Math.round(v)));
-  el.style.setProperty("--kp-value", String(v / 100));
+  if (pct == null || !Number.isFinite(pct)) setIndeterminate(el, true);
+  else kpSetProgress(el, pct);
 }
 
 /**
- * A kp-themes 9 progress bar (`.kp-progressbar`, the replacement of the
- * native `<progress class="kp-progress">`): the element, its track, fill
- * and head written in, so it paints without kp's progressbar.js.
+ * A kp-themes progress bar (`.kp-progressbar`), its track, fill and head
+ * written by kp's own `buildProgressbar`.
  * @param {string} label what the bar measures, for a screen reader
  * @param {number | null} [pct] 0 to 100; null: busy
  * @param {string} [cls] further classes
  * @returns {HTMLElement}
  */
 export function progressBar(label, pct = 0, cls = "") {
-  const el = h(
-    "div",
-    {
+  const el = buildProgressbar(
+    h("div", {
       class: cls ? `kp-progressbar ${cls}` : "kp-progressbar",
-      role: "progressbar",
       "aria-label": label,
       "aria-valuemin": "0",
       "aria-valuemax": "100",
-    },
-    h(
-      "span",
-      { class: "kp-progressbar__track", "aria-hidden": "true" },
-      h("span", { class: "kp-progressbar__fill" }),
-      h("span", { class: "kp-progressbar__head" }),
-    ),
+    }),
   );
   setProgress(el, pct);
   return el;

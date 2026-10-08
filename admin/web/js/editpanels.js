@@ -586,7 +586,11 @@ function filesCard(stack, e, reload) {
 
   return h(
     "details",
-    { class: "kp-card edit-card", id: "raw-editor", open: "" },
+    {
+      class: "kp-card edit-card kp-accordion__item kp-accordion__item--bare",
+      id: "raw-editor",
+      open: "",
+    },
     h("summary", null, h("strong", null, "Files")),
     h(
       "p",

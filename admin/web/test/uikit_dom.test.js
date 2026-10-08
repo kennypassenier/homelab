@@ -505,35 +505,9 @@ test("redesign-kit-13: a row menu says it is open, closes on a second click, and
   );
 });
 
-test("redesign-kit-13: the more menu listens on the document only while open, and Esc gives the focus back", () => {
-  const before = doc.listeners("keydown");
-  const more = ui.moreMenu({
-    label: "More",
-    items: [{ label: "Runbook", hint: "read it", href: "/runbook" }],
-    drive: { id: "kit-test-more" },
-  });
-  doc.body.append(more.el);
-  assert.equal(
-    doc.listeners("keydown"),
-    before,
-    "a closed menu listens to nothing",
-  );
-  const btn = /** @type {any} */ (more.el.querySelector("button"));
-  btn.click();
-  assert.equal(btn.getAttribute("aria-expanded"), "true");
-  assert.equal(doc.listeners("keydown"), before + 1);
-  const link = /** @type {any} */ (more.el.querySelector('[role="menuitem"]'));
-  link.focus();
-  press(link, "Escape");
-  assert.equal(btn.getAttribute("aria-expanded"), "false");
-  assert.equal(
-    doc.activeElement,
-    btn,
-    "Esc gives the focus back to the button",
-  );
-  assert.equal(doc.listeners("keydown"), before);
-  more.el.remove();
-});
+// redesign-kit-13 moved to kp-themes with the menu itself: its menu button
+// (js/menu-button.js) owns the listeners, the keys and Esc's focus return,
+// and tests them there.
 
 test("redesign-kit-14: the kit switches to the phone layout at one breakpoint, 48rem", () => {
   assert.equal(ui.PHONE, "(max-width: 48rem)");
@@ -638,16 +612,21 @@ test("redesign-kit-16, redesign-final X1: a meta header reads the title with its
     live: "measured",
     actions: [act],
   });
-  const kids = /** @type {any} */ (hd.el).children.map(
-    (/** @type {any} */ c) => c.className || c.localName,
+  // kp-themes 9.2.0's page header: the title row, the description and
+  // the meta row on the left, the actions beside them.
+  const inner = /** @type {any} */ (hd.el).children[0];
+  assert.equal(inner.className, "kp-page-header__inner");
+  const [lead, acts] = inner.children;
+  assert.deepEqual(
+    lead.children.map((/** @type {any} */ c) => c.className),
+    [
+      "title-row",
+      "kp-page-header__description section-head__desc nx-head-desc",
+      "nx-head-meta",
+    ],
   );
-  assert.deepEqual(kids, [
-    "title-row",
-    "section-head__desc nx-head-desc",
-    "nx-head-meta",
-    "actions-row nx-head-actions",
-  ]);
-  assert.equal(hd.el.className, "nx-head nx-head--meta");
+  assert.equal(acts.className, "kp-page-header__actions nx-head-actions");
+  assert.equal(hd.el.className, "kp-page-header nx-head nx-head--meta");
   // X1: the freshness has one slot on every page, right after the title.
   assert.equal(hd.title.nextElementSibling, /** @type {any} */ (hd.live).el);
   assert.ok(!hd.meta?.contains(/** @type {any} */ (hd.live).el));
@@ -741,10 +720,13 @@ test("redesign-openpoints-3: the shared more menu draws grouped entries, closes 
   assert.equal(btn.getAttribute("data-test"), "more", "the page marks it");
   assert.equal(btn.getAttribute("aria-keyshortcuts"), ".");
   assert.equal(btn.textContent, "More ▾");
+  // kp-themes' menu button draws the entries and owns the keys, the
+  // placing and the open and close (its own tests); this checks what the
+  // dashboard hands it and that a pick runs the entry's own action.
   const list = /** @type {any} */ (more.el.querySelector('[role="menu"]'));
   assert.deepEqual(
     list
-      .querySelectorAll(".nx-menu__group")
+      .querySelectorAll(".kp-menu__heading")
       .map((/** @type {any} */ g) => g.textContent),
     ["Data", "Remove"],
   );
@@ -752,40 +734,18 @@ test("redesign-openpoints-3: the shared more menu draws grouped entries, closes 
   assert.equal(items.length, 4);
   assert.equal(items[0].getAttribute("data-action"), "restore");
   assert.equal(marked.length, 1);
-  assert.equal(items[1].getAttribute("disabled"), "");
+  assert.equal(items[1].getAttribute("aria-disabled"), "true");
   assert.match(items[1].textContent, /Never on the dashboard's own stack/);
-  assert.match(items[2].getAttribute("class"), /nx-menu__item--danger/);
+  assert.match(items[2].getAttribute("class"), /kp-menu__item--destructive/);
   assert.equal(items[3].localName, "a");
   assert.equal(items[3].getAttribute("download"), "x.tgz");
-
-  more.toggle();
-  assert.equal(btn.getAttribute("aria-expanded"), "true");
-  assert.equal(doc.activeElement, items[0], "the first enabled entry");
-  press(items[0], "ArrowDown");
-  assert.equal(doc.activeElement, items[2], "↓ skips the disabled entry");
   items[2].click();
   assert.deepEqual(ran, ["remove"]);
-  assert.equal(btn.getAttribute("aria-expanded"), "false", "closed after it");
-
-  btn.click();
-  doc.body.click();
-  assert.equal(btn.getAttribute("aria-expanded"), "false", "outside click");
-
-  btn.click();
-  // A push that changes nothing keeps the drawn entries (and the focus).
+  items[1].click();
+  assert.deepEqual(ran, ["remove"], "a disabled entry does nothing");
+  // A push that changes nothing keeps the drawn entries.
   more.fill(groups("from a snapshot"));
   assert.equal(list.querySelectorAll('[role="menuitem"]')[0], items[0]);
-  // A change while open waits until it closes.
-  more.fill(groups("from the newest snapshot"));
-  assert.equal(list.querySelectorAll('[role="menuitem"]')[0], items[0]);
-  items[0].focus();
-  press(items[0], "Escape");
-  assert.equal(btn.getAttribute("aria-expanded"), "false");
-  assert.equal(doc.activeElement, btn, "Esc gives the focus back");
-  assert.match(
-    list.querySelectorAll('[role="menuitem"]')[0].textContent,
-    /from the newest snapshot/,
-  );
   more.stop();
   more.el.remove();
 });
@@ -796,19 +756,4 @@ test("redesign-openpoints-3: the stack hub has no menu of its own", () => {
     /function groupedMenu|sh-menu/,
   );
   assert.doesNotMatch(read("css/pages/stack.css"), /sh-menu/);
-});
-
-// review 4 (moved with the menu, redesign-openpoints-3): a fleet push that
-// changes nothing in the stack hub's More menu does not redraw it.
-test("review 4: the More menu's signature changes only when its groups do", async () => {
-  const { moreGroups } = await import("../js/stackhub.js");
-  const a = moreGroups({ stack: "gateway", native: false, enabled: true });
-  const b = moreGroups({ stack: "gateway", native: false, enabled: true });
-  assert.equal(ui.menuSignature(a), ui.menuSignature(b));
-  const parked = moreGroups({
-    stack: "gateway",
-    native: false,
-    enabled: false,
-  });
-  assert.notEqual(ui.menuSignature(a), ui.menuSignature(parked));
 });

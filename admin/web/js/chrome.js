@@ -534,6 +534,7 @@ export function mountChrome(where, ctx) {
         type: "button",
         class: "kp-nav__search-trigger nx-search-trigger",
         "data-kp-palette-open": "commands",
+        "aria-label": "Search or do anything",
         title: "Search pages, stacks and actions, or start one (Ctrl K)",
       },
       h("span", { class: "nx-search-trigger__text" }, "Search or do anything…"),

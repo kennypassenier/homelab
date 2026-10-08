@@ -192,3 +192,60 @@ export function readStars(raw) {
     return new Set();
   }
 }
+
+// fix-371-1 (Kenny approved the packed-columns demo 2026-10-04:
+// redesign-3.71/demos-3711/apps-packed.html): the board has as many
+// columns as its width allows, and each group goes into the column that
+// is shortest by tile count, so short groups stack under each other and
+// no group leaves a hole a whole group could fill. Starred stays full
+// width above the columns.
+
+/** A column's minimum width on a wide board (1000 px and up), in rem. */
+export const PACK_WIDE_REM = 22;
+/** A column's minimum width on a narrow board (700 px and 390 px), in rem. */
+export const PACK_NARROW_REM = 18;
+/** The board width, in rem, from which a column needs PACK_WIDE_REM. */
+export const PACK_BREAK_REM = 53;
+
+/**
+ * A column's minimum width for a board this wide, in rem.
+ * @param {number} boardPx
+ * @param {number} remPx
+ */
+export function packMinRem(boardPx, remPx) {
+  return boardPx >= PACK_BREAK_REM * remPx ? PACK_WIDE_REM : PACK_NARROW_REM;
+}
+
+/**
+ * How many columns a board this wide holds.
+ * @param {number} boardPx
+ * @param {number} gapPx
+ * @param {number} remPx
+ */
+export function packColumns(boardPx, gapPx, remPx) {
+  const min = packMinRem(boardPx, remPx) * remPx;
+  return Math.max(1, Math.floor((boardPx + gapPx) / (min + gapPx)));
+}
+
+/**
+ * Each group into the column that is shortest by tile count at that
+ * moment, in page order; a folded group counts as its title alone. A
+ * column must be shorter by more than half a tile to win, so equal
+ * columns fill left to right.
+ * @param {{tiles: number, folded?: boolean}[]} groups
+ * @param {number} cols
+ * @returns {number[][]} per column, the indexes of its groups in order
+ */
+export function packGroups(groups, cols) {
+  const n = Math.max(1, cols);
+  const used = Array.from({ length: n }, () => 0);
+  /** @type {number[][]} */
+  const out = Array.from({ length: n }, () => []);
+  groups.forEach((g, i) => {
+    let c = 0;
+    for (let k = 1; k < n; k++) if (used[k] < used[c] - 0.5) c = k;
+    out[c].push(i);
+    used[c] += (g.folded ? 0 : g.tiles) + 0.6;
+  });
+  return out;
+}

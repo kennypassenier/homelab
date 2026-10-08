@@ -272,6 +272,18 @@
       "twins": false
     },
     {
+      "id": "apps-group-fold",
+      "page": "home",
+      "what": "fold or unfold one group of apps by its title (remembered per group)",
+      "opens": "view",
+      "row": "<group>",
+      "href": "/apps",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "apps-open",
       "page": "home",
       "what": "open one app in a new tab",
@@ -1475,6 +1487,18 @@
       "opens": "run",
       "row": null,
       "href": "/stacks/{stack}/settings?section=secrets",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "host-kpi-chart",
+      "page": "host",
+      "what": "open one of the host's figures on Charts (CPU, memory, load, root disk, disk traffic, network, CPU temperature, swap)",
+      "opens": "view",
+      "row": "<figure>",
+      "href": "/host",
       "was": [],
       "shows": null,
       "reach": [],

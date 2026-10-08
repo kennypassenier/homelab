@@ -1157,7 +1157,11 @@ export function mount(root) {
             { class: "bk-meta", colspan: "5" },
             r.status === "pending" ? skeleton("30%") : stackWhy(r),
           ),
-          h("td", { class: "bk-row-actions" }, groupRestore),
+          h(
+            "td",
+            { class: "bk-row-actions" },
+            h("div", { class: "kp-row-actions" }, groupRestore),
+          ),
         ),
         FOLD,
         s,
@@ -1261,7 +1265,11 @@ export function mount(root) {
             h(
               "td",
               { class: "bk-row-actions" },
-              ...rowActions(s, native, repo),
+              h(
+                "div",
+                { class: "kp-row-actions" },
+                ...rowActions(s, native, repo),
+              ),
             ),
           ),
           OPEN_REPO,

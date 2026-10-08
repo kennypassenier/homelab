@@ -1137,6 +1137,30 @@ async fn a_skip_says_which_copy_it_read_and_how_to_refresh_it() {
     );
 }
 
+/// fix-371-1 (CORRECTION, Kenny 2026-10-04): "Update (native)" on a
+/// service with update_policy manual finished "0 step(s), 0 changed" and
+/// said no more. Its outcome now says in one line why nothing happened and
+/// points to Install newest.
+#[tokio::test]
+async fn fix_371_1_update_native_on_a_manual_service_says_why_nothing_happened() {
+    use homelab_core::native::UpdatePolicy;
+    use homelab_core::ops::native::update_native;
+    let exec = MockExecutor::new();
+    adopt_mocks(&exec);
+    let sink = VecSink::new();
+    let j = NullJournal;
+    let mut m = kyu_manifest();
+    m.update_cmd = None;
+    m.update_policy = UpdatePolicy::Manual;
+    let report = update_native(&ctx(&exec, &sink, &j), &m, None).await;
+    assert!(report.ok, "a skip is not a failure");
+    assert!(report.steps.is_empty());
+    let note = report.note.expect("no reason for doing nothing");
+    assert!(!note.contains('\n'), "one line: {note}");
+    assert!(note.contains("update_policy: manual"), "{note}");
+    assert!(note.contains("Install newest"), "{note}");
+}
+
 /// The formatter behind that date. Hand-written because it is the only place
 /// the orchestrator renders a time and a date crate would be a poor trade.
 #[test]

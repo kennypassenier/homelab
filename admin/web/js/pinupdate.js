@@ -264,7 +264,7 @@ async function drawMove(d, body, move, o) {
   const diff = v.files.length
     ? h(
         "details",
-        { class: "act-plan" },
+        { class: "act-plan kp-accordion__item kp-accordion__item--bare" },
         h("summary", null, "The change to the stack file"),
         ...diffBlocks(v.files),
       )

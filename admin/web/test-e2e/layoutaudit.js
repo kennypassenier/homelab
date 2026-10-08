@@ -15,16 +15,19 @@
 //   g  the page's freshness ("updated 4 s ago") in one slot: the title row,
 //      after the title, never with the actions or in a meta row;
 //   h  exact counts: a count linked to its rows (`data-count-of`, ui.js
-//      countOf) says how many rows it describes ("N" or "N of M").
+//      countOf) says how many rows it describes ("N" or "N of M");
+//   uni  uniform siblings: the tiles of one KPI strip or one Apps board
+//      share one height, cards side by side in a row share one height,
+//      and a card's foot line sits at the card's bottom.
 // Not a test file itself (no `.e2e.js`): invariants.e2e.js imports it.
 
 /**
  * The page-side audit. Self-contained: Playwright serialises it.
  * @param {string | null} rootSel the dialog to audit, or null for the page
- * @returns {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[], g: string[], h: string[], hn: string[]}}
+ * @returns {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[], g: string[], h: string[], hn: string[], uni: string[]}}
  */
 export function layoutAudit(rootSel) {
-  /** @type {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[], g: string[], h: string[], hn: string[]}} */
+  /** @type {{a: string[], b: string[], c: string[], d: string[], e: string[], f: string[], g: string[], h: string[], hn: string[], uni: string[]}} */
   const out = {
     a: [],
     b: [],
@@ -35,6 +38,7 @@ export function layoutAudit(rootSel) {
     g: [],
     h: [],
     hn: [],
+    uni: [],
   };
   const root = /** @type {HTMLElement | null} */ (
     rootSel
@@ -298,10 +302,56 @@ export function layoutAudit(rootSel) {
     if (!shown(live)) continue;
     const row = live.closest(".title-row");
     if (
-      live.closest(".nx-head-meta, .nx-head-right, .nx-head-actions") ||
+      live.closest(".nx-head-meta, .nx-head-actions") ||
       !row?.querySelector(":scope > :is(h1, h2)")
     )
       out.g.push(`freshness ${say(live)} is not in the title's row`);
+  }
+
+  // ---- uni: uniform siblings (fix-371-1, Kenny 2026-10-04) ----
+  const tall = (/** @type {Element} */ e) => e.getBoundingClientRect().height;
+  for (const set of [
+    ...[...root.querySelectorAll(".nx-kpis")].map((s) => [
+      ...s.querySelectorAll(":scope > .nx-kpi"),
+    ]),
+    ...[...root.querySelectorAll(".ap-board")].map((b) => [
+      ...b.querySelectorAll(".ap-tile:not(.ap-tile--skeleton)"),
+    ]),
+  ]) {
+    const hs = set.filter(shown).map(tall);
+    if (hs.length > 1 && Math.max(...hs) - Math.min(...hs) > 1)
+      out.uni.push(
+        `${say(/** @type {Element} */ (set[0].parentElement)).slice(0, 50)}: tiles ${Math.round(Math.min(...hs))} to ${Math.round(Math.max(...hs))} px tall`,
+      );
+  }
+  /** @type {Map<string, number[]>} cards of one grid row, by grid and top */
+  const rowsOf = new Map();
+  const grids = new Map();
+  for (const c of root.querySelectorAll(".nx-card")) {
+    const p = c.parentElement;
+    if (!p || !shown(c) || getComputedStyle(p).display !== "grid") continue;
+    if (!grids.has(p)) grids.set(p, grids.size);
+    const key = `${grids.get(p)}@${Math.round(c.getBoundingClientRect().top)}`;
+    rowsOf.set(key, [...(rowsOf.get(key) ?? []), tall(c)]);
+  }
+  for (const [key, hs] of rowsOf)
+    if (hs.length > 1 && Math.max(...hs) - Math.min(...hs) > 1)
+      out.uni.push(
+        `cards side by side (grid ${key}) are ${Math.round(Math.min(...hs))} to ${Math.round(Math.max(...hs))} px tall`,
+      );
+  for (const f of root.querySelectorAll(".nx-card > .nx-card__foot")) {
+    if (!shown(f)) continue;
+    const card = /** @type {Element} */ (f.parentElement);
+    const cs = getComputedStyle(card);
+    const gap =
+      card.getBoundingClientRect().bottom -
+      parseFloat(cs.paddingBlockEnd) -
+      parseFloat(cs.borderBlockEndWidth) -
+      f.getBoundingClientRect().bottom;
+    if (gap > 1)
+      out.uni.push(
+        `${say(card).slice(0, 50)}: its foot sits ${Math.round(gap)} px above the card's bottom`,
+      );
   }
 
   // ---- d: one page-level header ----
@@ -421,11 +471,13 @@ export function pageChecks() {
     for (const r of document.querySelectorAll("main .title-row")) {
       if (!(/** @type {HTMLElement} */ (r).offsetParent)) continue;
       if (!r.querySelector(":scope > h1") || r.children.length < 2) continue;
-      // The freshness after the title (redesign-final X1) is no control.
+      // The freshness after the title (redesign-final X1) and the chips
+      // beside it (pageHeader titleMeta) are no controls; since kp-themes
+      // 9.2.0's page header the actions sit outside the title row.
       const kids = [...r.children].filter(
         (c) =>
           /** @type {HTMLElement} */ (c).offsetParent &&
-          !c.matches(":is(h1, h2), .nx-live"),
+          !c.matches(":is(h1, h2), .nx-live, .nx-head-titlemeta"),
       );
       if (!kids.length) continue;
       const short = Math.round(

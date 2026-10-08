@@ -9,7 +9,7 @@
 // the window in words with the events counted, the zoom chip, the window
 // switch), the KPI strip, the attention band (a failing drive), the key to
 // the event markers, then the charts in sections on a 3-column grid. Every
-// chart is the shared time chart (timechart.js): hover a point for its
+// chart is kp-themes' own (js/charts.js wraps it): hover a point for its
 // reading and the change over the hour before, a plain click on a legend
 // source turns it on or off (Show all or Esc resets — Kenny, 2026-10-03:
 // "shift-klik wil ik niet, ik wil dat een klik aan/uit is"), drag to zoom
@@ -41,13 +41,7 @@ import {
   windowText,
 } from "../metricsview.js";
 import { current, subscribe } from "../store.js";
-import {
-  fmtValue,
-  hhmm,
-  pageCharts,
-  timeChart,
-  zoomChip,
-} from "../timechart.js";
+import { fmtValue, hhmm, pageCharts, timeChart, zoomChip } from "../charts.js";
 import {
   countOf,
   attentionBand,
@@ -234,7 +228,7 @@ export function mount(root, ctx) {
           h("span", { class: "mk-muted" }, "Every hostname behind the gateway"),
         );
   const span = h("span", { class: "mk-window", role: "status" }, "Reading…");
-  const zoom = zoomChip(pageCharts);
+  const zoom = zoomChip();
   stops.push(zoom.stop);
   stops.push(
     pageCharts.onZoom((z) => {
@@ -261,7 +255,7 @@ export function mount(root, ctx) {
   const failed = h("div", { class: "mk-failed" });
   root.replaceChildren(head.el, bar.el, failed);
 
-  /** @type {import("../timechart.js").Annotation[]} */
+  /** @type {import("../charts.js").Annotation[]} */
   let marks = [];
   /** @param {number} from @param {number} to */
   const readMarks = async (from, to) => {
@@ -282,12 +276,13 @@ export function mount(root, ctx) {
   /** Someone is reading a chart: a zoom, a pinned reading, a picked source. */
   const busy = () =>
     pageCharts.zoom != null ||
-    root.querySelector(".tc-tip--pinned:not([hidden])") != null ||
-    root.querySelector('.tc-legend__item[aria-pressed="true"]') != null ||
-    root.querySelector(".tc-plot:focus") != null ||
+    root.querySelector(".kp-chart__tip[data-kp-pinned]:not([hidden])") !=
+      null ||
+    root.querySelector('.kp-chart__source[aria-pressed="true"]') != null ||
+    root.querySelector(".kp-chart__plot:focus") != null ||
     // A pointer over a chart or its legend: the reading under it stays put
     // (a repaint would destroy the chart under the hover).
-    root.querySelector(".tc:hover") != null;
+    root.querySelector(".kp-chart:hover") != null;
 
   const destroyCharts = () => {
     for (const c of charts) c.destroy();
@@ -345,7 +340,7 @@ export function mount(root, ctx) {
   /**
    * Draw a time chart into a card's body.
    * @param {HTMLElement} body
-   * @param {Omit<import("../timechart.js").ChartSpec, "from" | "to" | "annotations" | "group">} spec
+   * @param {Omit<import("../charts.js").ChartSpec, "from" | "to" | "annotations">} spec
    *   `key`: the card's key, the chart's name for Live view
    * @param {{from: number, to: number}} w
    */
@@ -369,7 +364,6 @@ export function mount(root, ctx) {
       from: w.from,
       to: w.to,
       annotations: marks,
-      group: pageCharts,
     });
     charts.push(c);
     return c;
@@ -512,6 +506,14 @@ export function mount(root, ctx) {
       ),
     );
     root.append(strip.el, attention.el, annKey, ...blocks);
+    // fix-371-1: a Host tile opens its own figure here (/charts#chart-cpu);
+    // the card stands in its final size from the first frame, so the page
+    // scrolls to it at once.
+    const asked = location.hash
+      ? document.getElementById(decodeURIComponent(location.hash.slice(1)))
+      : null;
+    if (asked?.matches(".mk-card"))
+      requestAnimationFrame(() => asked.scrollIntoView({ block: "start" }));
 
     return async () => {
       const q = setParams("", { stack: stack || null, range });

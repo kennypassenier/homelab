@@ -245,7 +245,10 @@ export function diffBlocks(files, opts = { open: true }) {
     out.push(
       h(
         "details",
-        { class: "plan-file", ...(opts.open ? { open: "" } : {}) },
+        {
+          class: "plan-file kp-accordion__item kp-accordion__item--bare",
+          ...(opts.open ? { open: "" } : {}),
+        },
         h(
           "summary",
           null,

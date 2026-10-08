@@ -39,6 +39,7 @@ import {
   fetchReport,
   h,
   progressBar,
+  setLive,
   setProgress,
   statTile,
 } from "./dom.js";
@@ -741,7 +742,10 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
       previewBox.append(
         h(
           "details",
-          { class: "act-plan", open: "" },
+          {
+            class: "act-plan kp-accordion__item kp-accordion__item--bare",
+            open: "",
+          },
           h(
             "summary",
             null,
@@ -772,7 +776,10 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
       previewBox.append(
         h(
           "div",
-          { class: "act-plan", "data-apply": "" },
+          {
+            class: "act-plan kp-accordion__item kp-accordion__item--bare",
+            "data-apply": "",
+          },
           h("p", null, s.headline),
           h("ul", null, ...s.lines.map((l) => h("li", null, l))),
           ...(s.blocked
@@ -1278,11 +1285,11 @@ export function mountBatchPanel(batch, jobs) {
     stopBtn.hidden = !!b.done;
     setProgress(bar, v.percent);
     text.textContent = `${v.percent}%`;
-    totalTile.value.textContent = String(v.total);
-    doneTile.value.textContent = String(b.done);
-    okTile.value.textContent = String(b.ok);
-    failedTile.value.textContent = String(b.failed);
-    deferredTile.value.textContent = String(b.deferred);
+    setLive(totalTile.value, String(v.total));
+    setLive(doneTile.value, String(b.done));
+    setLive(okTile.value, String(b.ok));
+    setLive(failedTile.value, String(b.failed));
+    setLive(deferredTile.value, String(b.deferred));
     rows.replaceChildren(
       ...v.rows.map((r) => {
         const live = act.jobs.find((x) => x.job === r.job);

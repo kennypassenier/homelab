@@ -42,6 +42,10 @@ class Node_ {
   get parentElement() {
     return this.parentNode;
   }
+  /** kp-themes' modules build through their element's own document. */
+  get ownerDocument() {
+    return doc ?? null;
+  }
   get firstChild() {
     return this.childNodes[0] ?? null;
   }
@@ -467,6 +471,9 @@ class Document_ extends Element_ {
     this.documentElement.append(this.head, this.body);
     this.append(this.documentElement);
     /** @type {Element_} */ this.activeElement = this.body;
+  }
+  get defaultView() {
+    return win;
   }
   /** @param {string} t */
   createElement(t) {

@@ -1821,7 +1821,11 @@ function appsTab(panel, c) {
                   stale == null ? "checking…" : "up to date",
                 ),
           ),
-          h("td", { class: "row-actions" }, acts),
+          h(
+            "td",
+            { class: "row-actions" },
+            h("div", { class: "kp-row-actions" }, acts),
+          ),
         );
       }),
     );
@@ -2021,31 +2025,35 @@ function backupsTab(panel, c) {
           h(
             "td",
             { class: "row-actions" },
-            actionButton(c, nat ? "restore-native" : "restore", {
-              label: "Restore…",
-              title: `Bring ${r.app}'s data back from a snapshot`,
-              cls: "kp-button--sm",
-              preset: nat
-                ? r.newest?.short_id
-                  ? { snapshot: r.newest.short_id }
-                  : undefined
-                : {
-                    app: r.app,
-                    ...(r.newest?.short_id
-                      ? { snapshot: r.newest.short_id }
-                      : {}),
-                  },
-              drive: [BACKUP_ROW, `${name}/${r.app}/restore`],
-            }),
-            nat
-              ? null
-              : actionButton(c, "verify-restore", {
-                  label: "Verify…",
-                  title: `Prove ${r.app}'s newest snapshot restores, without touching live data`,
-                  cls: "kp-button--sm kp-button--ghost",
-                  preset: { app: r.app },
-                  drive: [BACKUP_ROW, `${name}/${r.app}/verify`],
-                }),
+            h(
+              "div",
+              { class: "kp-row-actions" },
+              actionButton(c, nat ? "restore-native" : "restore", {
+                label: "Restore…",
+                title: `Bring ${r.app}'s data back from a snapshot`,
+                cls: "kp-button--sm",
+                preset: nat
+                  ? r.newest?.short_id
+                    ? { snapshot: r.newest.short_id }
+                    : undefined
+                  : {
+                      app: r.app,
+                      ...(r.newest?.short_id
+                        ? { snapshot: r.newest.short_id }
+                        : {}),
+                    },
+                drive: [BACKUP_ROW, `${name}/${r.app}/restore`],
+              }),
+              nat
+                ? null
+                : actionButton(c, "verify-restore", {
+                    label: "Verify…",
+                    title: `Prove ${r.app}'s newest snapshot restores, without touching live data`,
+                    cls: "kp-button--sm kp-button--ghost",
+                    preset: { app: r.app },
+                    drive: [BACKUP_ROW, `${name}/${r.app}/verify`],
+                  }),
+            ),
           ),
         ),
       ),
@@ -2385,7 +2393,10 @@ function settingsHub(panel, c) {
   const editor = /** @type {HTMLDetailsElement} */ (
     h(
       "details",
-      { class: "sh-fold", open: want === "files" || drive ? true : null },
+      {
+        class: "sh-fold kp-accordion__item kp-accordion__item--bare",
+        open: want === "files" || drive ? true : null,
+      },
       h(
         "summary",
         {
@@ -2438,7 +2449,10 @@ function settingsHub(panel, c) {
   const fwFold = /** @type {HTMLDetailsElement} */ (
     h(
       "details",
-      { class: "sh-fold", open: want === "firewall" || drive ? true : null },
+      {
+        class: "sh-fold kp-accordion__item kp-accordion__item--bare",
+        open: want === "firewall" || drive ? true : null,
+      },
       h(
         "summary",
         { title: "Every rule, with Add, Edit and Remove" },
@@ -2473,7 +2487,8 @@ function settingsHub(panel, c) {
     h(
       "details",
       {
-        class: "kp-card nx-card nx-card--fold sh-danger sh-span-12",
+        class:
+          "kp-card nx-card nx-card--fold sh-danger sh-span-12 kp-accordion__item kp-accordion__item--bare",
         id: "danger",
         open: want === "danger" ? true : null,
       },
@@ -2638,31 +2653,34 @@ function settingsHub(panel, c) {
 // has no hub header, grouped action menu, log side filters or night strip)
 
 /**
- * The hub's header (flows/stack-hub.html): the stack's identity mark, its
- * name and state on the title row with the live status and the actions
- * against the right edge (Back up · Update · Deploy, the primary one, then
- * More), the one-sentence description under it, and the meta chips.
- * Markup the whole-screen invariants read: `.title-row` holding the h1,
- * the description its next sibling `p`, the buttons in `.actions-row`.
+ * The hub's header (flows/stack-hub.html) on kp-themes' `.kp-page-header`:
+ * the stack's identity mark, its name, state and live status on the title
+ * row, the one-sentence description under it and the meta chips; the
+ * actions against the right edge (Back up · Update · Deploy, the primary
+ * one, then More). Markup the whole-screen invariants read: `.title-row`
+ * holding the h1, the description its next sibling `p`, the buttons in
+ * `.sh-head__actions`.
  * @param {{name: string, desc: string, actions: Node[], primary: Node,
  *   more: Node}} spec
  */
 function hubHeader(spec) {
-  const title = /** @type {HTMLHeadingElement} */ (h("h1", null, spec.name));
+  const title = /** @type {HTMLHeadingElement} */ (
+    h("h1", { class: "kp-page-header__title" }, spec.name)
+  );
   const state = h("span", { class: "sh-head__state", id: "stack-state" });
   const live = liveStatus("updated");
+  // kp-themes' page header: the actions against the right edge beside the
+  // title, description and chips.
   const actions = h(
     "div",
-    { class: "actions-row nx-head-actions sh-head__actions" },
+    { class: "kp-page-header__actions nx-head-actions sh-head__actions" },
     spec.actions,
     spec.primary,
     spec.more,
   );
-  // redesign-final X1: the freshness right after the title and its state,
-  // the one slot every page uses; the actions alone on the right.
-  const right = h("div", { class: "nx-head-right sh-head__right" }, actions);
   const mark = stackMark(spec.name, 40);
   mark.classList.add("sh-head__mark");
+  // redesign-final X1: the freshness right after the title and its state.
   const row = h(
     "div",
     { class: "title-row sh-head__row" },
@@ -2670,13 +2688,27 @@ function hubHeader(spec) {
     title,
     state,
     live.el,
-    right,
   );
   const desc = /** @type {HTMLParagraphElement} */ (
-    h("p", { class: "section-head__desc nx-head-desc" }, spec.desc)
+    h(
+      "p",
+      {
+        class: "kp-page-header__description section-head__desc nx-head-desc",
+      },
+      spec.desc,
+    )
   );
   const meta = h("div", { class: "sh-head__meta", id: "stack-flags" });
-  const e = h("header", { class: "nx-head sh-head" }, row, desc, meta);
+  const e = h(
+    "header",
+    { class: "kp-page-header nx-head sh-head" },
+    h(
+      "div",
+      { class: "kp-page-header__inner" },
+      h("div", { class: "nx-head-lead" }, row, desc, meta),
+      actions,
+    ),
+  );
   return {
     el: e,
     title,

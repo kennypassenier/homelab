@@ -18,7 +18,7 @@ import { act, loadNotices, send } from "../act.js";
 import { openAction, openBatch } from "../actiondialog.js";
 import { refusalCallout } from "../actui.js";
 import { answerBody } from "../asks.js";
-import { ensureStyle, fetchJson, h, slowRead } from "../dom.js";
+import { ensureStyle, fetchJson, h, patchKeyed, slowRead } from "../dom.js";
 import { declare, drivable } from "../drivable.js";
 import { inboxNow, onInbox } from "../inboxlist.js";
 import {
@@ -318,7 +318,10 @@ export function mount(root) {
   );
   const worth = h(
     "details",
-    { class: "kp-card nx-card inbox-worth" },
+    {
+      class:
+        "kp-card nx-card inbox-worth kp-accordion__item kp-accordion__item--bare",
+    },
     worthSummary,
     worthList,
   );
@@ -623,8 +626,11 @@ export function mount(root) {
     head.live?.set(Date.now() / 1000);
     const rows = /** @type {import("../inboxrows.js").Row[]} */ (items);
     const empty = rows.length === 0;
-    card.hidden = empty;
-    clear.hidden = !empty;
+    // The last row leaves the theme's way before the card makes room for
+    // the all-clear (below, once its exit is over).
+    if (!empty || !list.querySelector(":scope > li[data-key]"))
+      card.hidden = empty;
+    clear.hidden = !card.hidden;
     title.textContent = headline(rows);
     chips.setChips(
       KINDS.map((k) => ({
@@ -654,7 +660,15 @@ export function mount(root) {
       return;
     }
     lastKey = key;
-    list.replaceChildren(...show.map((r) => rowEl(r, now)));
+    void patchKeyed(
+      list,
+      show.map((r) => rowEl(r, now)),
+      (el) => el.getAttribute("data-key"),
+    ).then(() => {
+      if (lastKey !== key || !empty) return;
+      card.hidden = true;
+      clear.hidden = false;
+    });
   };
 
   // ---- worth a look ---------------------------------------------------

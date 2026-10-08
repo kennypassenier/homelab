@@ -76,40 +76,14 @@ main.shell > * + * {
 .title-row > .nx-live + * {
   margin-inline-start: auto;
 }
-/* fix-245: a title row's own group of buttons (`.actions-row`, a column
-   grid wherever it lists a stack's actions) is one row here, against the
-   right edge; it stacked Overview's Import and New stack, and Presets'
-   three buttons, into a column that made the title row 80-124 px tall. */
-.title-row > .actions-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-}
-/* fix-245: on a phone the page title takes its own line and its controls
-   fold under it from the title's own left edge, instead of hanging off
-   the right edge of an otherwise empty line. */
-@media (max-width: 30rem) {
-  .title-row > h1 {
-    flex-basis: 100%;
-  }
-  .title-row > h1:first-child + * {
-    margin-inline-start: 0;
-  }
-  .title-row > h1 ~ .actions-row {
-    justify-content: flex-start;
-  }
-}
 /* fix-244: a page's one-sentence description is its title's subtitle: it
    sits right under the title instead of a whole section gap (plus the
    heading's own bottom margin) away, where it read as a section of its
    own. The `!important` matches the shared section-gap rule above, which
    would otherwise win for every top-level child. */
-main.shell > .title-row > h1,
 main.shell > h1 {
   margin-block-end: 0;
 }
-main.shell > .title-row:has(> h1) + p,
 main.shell > h1 + p {
   margin-block-start: 6px !important;
 }
@@ -353,13 +327,15 @@ p:has(> .measured:only-child) {
 p:has(> .measured:only-child):first-child {
   margin-block-start: 0;
 }
-/* feat-overview-4: live data that stopped renewing. The plate is a
-   shadow, not padding, so going stale moves nothing. */
-.measured[data-stale="true"] {
-  color: var(--warning-foreground, var(--destructive));
-  background: var(--warning);
-  box-shadow: 0 0 0 4px var(--warning);
-  border-radius: 4px;
+/* feat-overview-4: live data that stopped renewing wears kp-themes'
+   own stale plate (`[data-kp-stale]`, js/freshness.js), drawn per theme. */
+/* fix-371-1: Live view, Help and the theme button, one group at the bar's
+   end that wraps as one (main.js). */
+.nx-bar-end {
+  display: flex;
+  align-items: center;
+  gap: var(--kp-space-sm, 8px);
+  flex: none;
 }
 /* The bar's end: palette door, shortcut help, theme menu, link state. */
 .kp-nav .help-button {
@@ -894,9 +870,12 @@ p:has(> .measured:only-child):first-child {
   flex: 1 1 auto;
   min-block-size: 0;
 }
+/* The flex item's own `min-block-size` still floors it at ten lines
+   (fix-371-1, below); only the automatic content-based minimum is
+   dropped, so the log shrinks to its floor rather than its full content
+   when the compact dialog is tight. */
 .job-panel--compact .job-log {
   flex: 1 1 auto;
-  min-block-size: 0;
 }
 /* fix-261: a <details> wraps its content in a ::details-content box that
    is not a flex item, so without this the log ignored the flex column and
@@ -910,7 +889,16 @@ p:has(> .measured:only-child):first-child {
     max-block-size: none;
   }
 }
+/* fix-371-1 (Kenny, 2026-10-04: "the job log as a textarea showing at
+   least 10 lines"): kp's `.kp-log` is the component, so the ask becomes a
+   floor on its own height, not a different element — ten of its own
+   lines (`1lh`, its font and line-height) plus its padding and border,
+   from the first frame, empty or loading too; jobpanel.js never hides
+   the box, it shows one placeholder row inside it instead. */
 .job-log {
+  min-block-size: calc(
+    10 * 1lh + 2 * var(--kp-log-padding, var(--kp-space-sm, 0.5rem)) + 2px
+  );
   max-block-size: 18rem;
   overflow: auto;
   overflow-wrap: anywhere;
@@ -919,7 +907,10 @@ p:has(> .measured:only-child):first-child {
   cursor: pointer;
   margin-block: 8px 4px;
 }
+/* The placeholder row is not a `.kp-log__line` (never counted as a line),
+   but it sits in the same four-column grid, so it spans it on its own. */
 .job-log-empty {
+  grid-column: 1 / -1;
   margin: 4px 0;
 }
 /* The bar used to cap at 40rem like any other lone progress bar
@@ -1417,6 +1408,40 @@ td.stack-flags {
   .kp-nav [data-kp-palette-keys] {
     display: none;
   }
+  /* fix-371-1 (Kenny, 2026-10-04): at 390 px the theme button wrapped to a
+     second row in 21 of 22 themes (measured). The bar is one row: the
+     brand, Live view and the theme button keep their size, the search box
+     takes what is left, and Live view's switch shows its state without the
+     "Off" word beside it (the switch reads On or Off to a screen reader). */
+  .kp-nav {
+    column-gap: var(--kp-space-sm, 8px);
+  }
+  .kp-nav > .kp-nav__search {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    display: flex;
+    justify-content: flex-end;
+  }
+  /* The search door is its magnifier: a word would be cut in the room a
+     wide brand face leaves (synthwave, deco); its title and the palette
+     it opens say what it is. */
+  .kp-nav > .kp-nav__search > .nx-search-trigger {
+    min-inline-size: 2.5rem;
+    inline-size: 2.5rem;
+    padding-inline: 0;
+    justify-content: center;
+  }
+  .kp-nav > .kp-nav__search > .nx-search-trigger::before {
+    content: "";
+    inline-size: 1.1rem;
+    block-size: 1.1rem;
+    background: currentColor;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-4-4'/%3E%3C/svg%3E")
+      center / contain no-repeat;
+  }
+  .follow--bar .follow-switch .kp-switch__state {
+    display: none;
+  }
 }
 
 /* Kenny, 2026-09-29, for every UI: the layout never shifts when a value
@@ -1549,92 +1574,15 @@ td.stack-flags {
 .kp-datatable > .kp-empty p {
   margin: 0 0 6px;
 }
-/* The busy overlay (Kenny, 2026-09-29: the 1em spinner in the status line
-   under a long table went unseen). A LOCAL SHIM of kp-themes main 05d62af6
-   (scope-138), same names and the same rules: `data-kp-busy-overlay` on the
-   wrapper, the `.kp-datatable__busy-overlay` layer (aria-hidden; the status
-   line stays the live region) from under the header to the bottom of the
-   table, a card panel with the spinner, the words and the count, and the
-   knobs --kp-busy-overlay-veil and --kp-busy-overlay-spinner. Absolutely
-   placed over the skeleton or the dimmed rows, so nothing moves. Delete it,
-   with busyOverlay() in dom.js, when the chassis pin carries kp's own. */
-.kp-datatable:has(> .kp-datatable__busy-overlay) {
-  position: relative;
-}
-.kp-datatable__busy-overlay {
-  position: absolute;
-  inset: var(--kp-busy-overlay-top, 0px) var(--kp-busy-overlay-right, 0px)
-    var(--kp-busy-overlay-bottom, 0px) var(--kp-busy-overlay-left, 0px);
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  background: color-mix(
-    in oklab,
-    var(--background) var(--kp-busy-overlay-veil, 70%),
-    transparent
-  );
-  pointer-events: none;
-}
-.kp-datatable__busy-overlay[hidden] {
-  display: none;
-}
-/* fix-260: one loading sign at a time. While a busy card is up (kp's own
-   or the shim's), the status line it mirrors is transparent: same place (nothing moves), still the
-   live region for a screen reader. */
+/* The busy overlay is kp-themes' own (`data-kp-busy-overlay`, dom.js
+   tableBlock; in a narrow table its panel lies flat since 9.2.0).
+   fix-260: one loading sign at a time. While the busy card is up, the
+   status line it mirrors is transparent: same place (nothing moves), still
+   the live region for a screen reader. */
 .kp-datatable:has(> .kp-datatable__busy-overlay:not([hidden]))
   > .kp-datatable__bar
   > .kp-datatable__status:not(.kp-datatable__sort-summary) {
   opacity: 0;
-}
-.kp-datatable__busy-panel {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--kp-space-sm, 0.5rem);
-  /* A phone's column is narrow: the panel keeps inside the table. */
-  max-inline-size: calc(100% - 2 * var(--kp-space-sm, 0.5rem));
-  padding: var(--kp-space-md, 1rem) var(--kp-space-lg, 1rem);
-  border-radius: var(--radius, 0.5rem);
-  background: var(--card);
-  color: var(--card-foreground);
-  box-shadow: 0 0 0 1px var(--border);
-  text-align: center;
-}
-.kp-datatable__busy-panel > .kp-spinner {
-  --kp-spinner-size: var(--kp-busy-overlay-spinner, 2.5rem);
-}
-.kp-datatable__busy-panel > .kp-datatable__busy-clock {
-  color: var(--muted-foreground);
-  font-size: var(--kp-text-sm, 0.8125rem);
-  font-variant-numeric: tabular-nums;
-}
-/* Ours, not kp's (yet): a phone's three skeleton rows are lower than the
-   stacked panel, so there the spinner stands beside the words, the words
-   keep to three lines (the whole sentence stays in the status line), and
-   the layer clips rather than covering the status line. */
-.kp-datatable__busy-overlay {
-  overflow: hidden;
-}
-@media (max-width: 480px) {
-  .kp-datatable__busy-panel {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    column-gap: var(--kp-space-md, 1rem);
-    row-gap: 0;
-    align-items: center;
-    padding: var(--kp-space-sm, 0.5rem) var(--kp-space-md, 1rem);
-    text-align: start;
-  }
-  .kp-datatable__busy-panel > .kp-spinner {
-    grid-row: span 2;
-  }
-  .kp-datatable__busy-panel > .kp-datatable__busy-words {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 3;
-    line-clamp: 3;
-    overflow: hidden;
-  }
 }
 /* ==== END data tables ==== */
 
@@ -3326,88 +3274,45 @@ dialog.nx-drawer[open] {
   }
 }
 
-/* -- page header (DESIGN_LANGUAGE §1.1): title row + description -- */
-.nx-head > * {
-  margin: 0;
+/* -- page header (DESIGN_LANGUAGE §1.1): kp-themes 10.0.0's
+      `.kp-page-header` (ui.js pageHeader): the title row (title, live
+      status, chips) and the description on the left, the actions against
+      the right edge; top to bottom on a narrow header, the primary first.
+      What stays the dashboard's: the title row's look and an empty
+      actions box taking no column. -- */
+.nx-head > .nx-crumbs {
+  margin: 0 0 var(--kp-space-sm, 8px);
 }
-.nx-head .nx-crumbs {
-  margin-block-end: var(--kp-space-sm, 8px);
+.nx-head-lead {
+  min-inline-size: 0;
+}
+.nx-head .title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kp-space-xs, 4px) var(--kp-space-md, 12px);
+}
+.nx-head .title-row > * {
+  margin-inline-start: 0;
 }
 .nx-head .title-row > :is(h1, h2) {
   margin: 0;
   font-size: min(var(--kp-text-display, 2.25rem), 2.25rem);
   line-height: 1.1;
+  letter-spacing: -0.01em;
 }
+/* kp's description spacing, over the loose section heads' 2 px. */
 .nx-head .nx-head-desc {
-  margin-block-start: 6px !important;
-  color: var(--muted-foreground);
-  max-inline-size: 70ch;
+  margin-block-start: var(--kp-space-xs, 4px) !important;
 }
-.nx-head-right {
-  display: flex;
-  align-items: center;
-  gap: var(--kp-space-md, 12px);
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-/* The header's actions are one row against the right edge (fix-245's
-   title-row rule), never `.actions-row`'s 13 rem column grid. */
-.nx-head-right > .actions-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.nx-head-right > .actions-row:empty {
+/* kp-themes 10.0.0's `.kp-page-header` already lifts itself over what
+   follows while its more menu is open (css/components.css), so nothing
+   extra is needed here for that. */
+.nx-head .kp-page-header__actions:empty {
   display: none;
 }
-@media (max-width: 48rem) {
-  .title-row > :is(h1, h2) ~ .nx-head-right,
-  .nx-head-right > .actions-row {
-    justify-content: flex-start;
-  }
-}
-/* On a narrow screen the header reads top to bottom as the demos draw it:
-   the title with its live status beside it, the one-sentence description,
-   then the actions. The markup keeps the title row (the whole-screen
-   checks read `.title-row` and the `p` after it); only the boxes are laid
-   out in this order. */
-@media (max-width: 48rem) {
-  .nx-head:not(.nx-head--meta, .nx-head--split) {
-    display: grid;
-    grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
-    column-gap: var(--kp-space-md, 12px);
-    align-items: center;
-  }
-  .nx-head:not(.nx-head--meta, .nx-head--split) > .title-row,
-  .nx-head:not(.nx-head--meta, .nx-head--split) > .title-row > .nx-head-right {
-    display: contents;
-  }
-  .nx-head:not(.nx-head--meta, .nx-head--split) > .nx-crumbs {
-    grid-column: 1 / -1;
-    order: 0;
-  }
-  .nx-head:not(.nx-head--meta, .nx-head--split) > .title-row > :is(h1, h2) {
-    grid-column: 1;
-    order: 1;
-  }
-  .nx-head:not(.nx-head--meta, .nx-head--split) > .title-row > .nx-live {
-    grid-column: 2;
-    justify-self: start;
-    order: 2;
-  }
-  .nx-head:not(.nx-head--meta, .nx-head--split) > .nx-head-desc {
-    grid-column: 1 / -1;
-    order: 3;
-  }
-  .nx-head:not(.nx-head--meta, .nx-head--split)
-    .nx-head-right
-    > .nx-head-actions {
-    grid-column: 1 / -1;
-    order: 4;
-    justify-content: flex-start;
-    margin-block-start: var(--kp-space-md, 12px);
-  }
+.nx-head .kp-page-header__inner:has(> .kp-page-header__actions:empty) {
+  grid-template-columns: minmax(0, 1fr);
 }
 .nx-live {
   display: inline-flex;
@@ -3424,7 +3329,7 @@ dialog.nx-drawer[open] {
   border-radius: 50%;
   background: var(--nx-ok);
 }
-.nx-live:has([data-stale="true"])::before {
+.nx-live:has([data-kp-stale])::before {
   background: var(--nx-warn);
 }
 .nx-live[data-state="none"]::before {
@@ -3434,67 +3339,15 @@ dialog.nx-drawer[open] {
   background: var(--nx-bad);
 }
 
-/* -- the split header (pageHeader({split: true}), next.css's): the live
-      status beside the title, the actions spanning title and description
-      against the right edge; one column on a phone, actions last -- */
-.nx-head--split {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "title actions" "desc actions";
-  column-gap: var(--kp-space-xl);
-  align-items: end;
-}
-.nx-head--split:has(> .nx-crumbs) {
-  grid-template-areas: "crumbs crumbs" "title actions" "desc actions";
-}
-.nx-head--split > .nx-crumbs {
-  grid-area: crumbs;
-}
-.nx-head--split > .title-row {
-  grid-area: title;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--kp-space-sm) var(--kp-space-md);
-}
-.nx-head--split > .title-row > :is(h1, h2) {
-  letter-spacing: -0.01em;
-}
-.nx-head--split > .title-row > .nx-live {
-  padding-inline-end: var(--kp-space-sm);
-}
-.nx-head--split > .nx-head-desc {
-  grid-area: desc;
-  font-size: var(--kp-text-md);
-}
-.nx-head--split > .nx-head-actions.actions-row {
-  grid-area: actions;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-  gap: var(--kp-space-sm);
-}
-@media (max-width: 48rem) {
-  .nx-head--split,
-  .nx-head--split:has(> .nx-crumbs) {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "crumbs" "title" "desc" "actions";
-  }
-  .nx-head--split > .nx-head-actions.actions-row {
-    justify-content: flex-start;
-    margin-block-start: var(--kp-space-md);
-  }
-  .nx-head--split > .nx-head-actions > .kp-button--primary {
-    flex: 1 1 100%;
-    justify-content: center;
-  }
-}
-
 /* -- KPI strip (DESIGN_LANGUAGE §1.2) -- */
+/* fix-371-1 (Kenny, 2026-10-04: "alle tegels moeten uniform zijn"): every
+   tile of a strip is as tall as its tallest, on every row it wraps to, and
+   inside a tile the label and the value sit on the same lines as their
+   neighbours' while the trend row keeps to the tile's bottom. */
 .nx-kpis {
   display: grid;
   grid-template-columns: repeat(var(--kpi-n, 4), minmax(0, 1fr));
+  grid-auto-rows: 1fr;
   gap: var(--kp-space-md, 12px);
 }
 @media (max-width: 75rem) {
@@ -3510,7 +3363,7 @@ dialog.nx-drawer[open] {
 }
 .nx-kpi {
   display: grid;
-  grid-template-rows: auto auto auto 28px;
+  grid-template-rows: auto auto 1fr 28px;
   row-gap: 2px;
   min-inline-size: 0;
   padding: var(--kp-space-md, 12px) var(--nx-pad);
@@ -3591,79 +3444,19 @@ a.nx-kpi:hover {
   color: var(--chart-1);
   overflow: visible;
 }
-.nx-spark path.line {
+.nx-spark .nx-spark-line {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.6;
   vector-effect: non-scaling-stroke;
 }
-.nx-spark path.area {
+.nx-spark .nx-spark-area {
   fill: currentColor;
   opacity: 0.12;
 }
 
-/* -- attention band (DESIGN_LANGUAGE §1.3): absent when all is well -- */
-.nx-attention {
-  display: grid;
-  gap: var(--kp-space-sm, 8px);
-}
-.nx-attention[hidden] {
-  display: none;
-}
-.nx-attention__item {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 4px var(--kp-space-md, 12px);
-  margin: 0;
-}
-.nx-attention__icon {
-  inline-size: 28px;
-  block-size: 28px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-weight: 700;
-  background: color-mix(in oklab, currentColor 14%, transparent);
-}
-/* A "bad" item is a soft red tint with a red border and the page's own
-   text colour (the ops-kit demos), never kp-alert's solid destructive
-   plate with white text. */
-.nx-attention__item.kp-alert--destructive {
-  background: color-mix(in oklab, var(--nx-bad) 8%, var(--card));
-  color: var(--foreground);
-  border-color: color-mix(in oklab, var(--nx-bad) 45%, var(--nx-line));
-}
-.nx-attention__item.kp-alert--destructive .nx-attention__icon {
-  background: var(--nx-bad);
-  color: var(--destructive-foreground);
-}
-/* The description reads in the page's text colour: muted on the red tint
-   fell under 4.5:1 in some themes (titanium). */
-.nx-attention__item.kp-alert--destructive .nx-attention__text span {
-  color: var(--foreground);
-}
-.nx-attention__text strong {
-  display: block;
-}
-.nx-attention__text span {
-  font-size: var(--kp-text-sm);
-}
-.nx-attention__act {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-@media (max-width: 48rem) {
-  .nx-attention__item {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-  .nx-attention__act {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-  }
-}
+/* -- attention band (DESIGN_LANGUAGE §1.3): kp-themes' `.kp-attention`
+   (js/attention.js) draws it per theme and takes no room when it is empty. */
 
 /* -- toolbar / filter bar (DESIGN_LANGUAGE §12): search · filters ·
       view & state, inside the card it filters -- */
@@ -3799,6 +3592,11 @@ a.nx-kpi:hover {
   display: grid;
   gap: var(--kp-space-md, 12px);
   min-inline-size: 0;
+}
+/* fix-371-1 (uniform siblings): a card made taller by its neighbour in a
+   row keeps its foot line at its bottom; the body takes the room between. */
+.nx-card:not(details):has(> .nx-card__foot:not([hidden])) {
+  grid-template-rows: auto 1fr auto;
 }
 .nx-card__head {
   display: grid;
@@ -4437,9 +4235,6 @@ details.nx-card--fold[open] > summary::before {
   align-items: center;
   min-inline-size: 0;
 }
-.title-row > .nx-head-titlemeta + * {
-  margin-inline-start: auto;
-}
 /* a KPI tile's inline meter (`ctxMeter`) before its context words */
 .nx-kpi__ctx:has(> .nx-meter) {
   display: flex;
@@ -4641,53 +4436,18 @@ details.nx-card--fold[open] > summary::before {
   margin-inline-start: var(--kp-space-xs);
 }
 
-/* the page header with a meta row: title, description and meta on the
-   left, the actions against the right edge spanning all three rows */
-.nx-head--meta {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "t a" "d a" "m a";
-  column-gap: var(--kp-space-xl);
-  row-gap: var(--kp-space-xs);
-  align-items: start;
-}
-.nx-head--meta:has(> .nx-crumbs) {
-  grid-template-areas: "c c" "t a" "d a" "m a";
-}
-.nx-head--meta > .nx-crumbs {
-  grid-area: c;
-}
-.nx-head--meta > .title-row {
-  grid-area: t;
-  display: grid;
-  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
-  align-items: center;
-  column-gap: var(--kp-space-md);
-}
-.nx-head--meta > :is(h1, h2) {
-  grid-area: t;
-  margin: 0;
-  font-size: min(var(--kp-text-display, 2.25rem), 2.25rem);
-  line-height: 1.1;
-  letter-spacing: -0.01em;
-}
+/* the page header's sub-title part and its meta row (pageHeader `sub`,
+   `meta`): facts under the description, in the header's left column */
 .nx-head-sub {
   color: var(--muted-foreground);
   font-weight: 400;
 }
-.nx-head--meta > .nx-head-desc {
-  grid-area: d;
-  margin: 0 !important;
-  color: var(--muted-foreground);
-  max-inline-size: 72ch;
-}
 .nx-head-meta {
-  grid-area: m;
   display: flex;
   flex-wrap: wrap;
   gap: var(--kp-space-sm) var(--kp-space-lg);
   align-items: center;
-  margin-block-start: var(--kp-space-xs);
+  margin-block-start: var(--kp-space-sm);
   font-size: var(--kp-text-sm);
   color: var(--muted-foreground);
 }
@@ -4705,36 +4465,10 @@ details.nx-card--fold[open] > summary::before {
 .nx-ops .nx-head-meta > .nx-live::before {
   display: none;
 }
-.nx-head--meta > .nx-head-actions.actions-row {
-  grid-area: a;
-  display: flex;
-  gap: var(--kp-space-sm);
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  align-self: center;
-}
-@media (max-width: 48rem) {
-  .nx-head--meta {
-    grid-template-columns: 1fr;
-    grid-template-areas: "t" "d" "m" "a";
-  }
-  .nx-head--meta:has(> .nx-crumbs) {
-    grid-template-areas: "c" "t" "d" "m" "a";
-  }
-  .nx-head--meta > .nx-head-actions.actions-row {
-    justify-content: flex-start;
-    margin-block-start: var(--kp-space-sm);
-  }
-  .nx-head--meta > .nx-head-actions > .kp-button--primary {
-    flex: 1 1 100%;
-    justify-content: center;
-  }
-}
 
 /* KPI: a tile with no trend row, a tile that toggles a filter, a meter */
 .nx-kpi--bare {
-  grid-template-rows: auto auto auto;
+  grid-template-rows: auto auto 1fr;
 }
 .nx-kpi {
   position: relative;
@@ -5034,12 +4768,10 @@ dialog.nx-rowmenu[open] {
 .nx-rowmenu button:focus-visible {
   background: var(--nx-soft);
 }
-.nx-rowmenu b,
-.nx-menu b {
+.nx-rowmenu b {
   font-size: var(--kp-text-sm);
 }
-.nx-rowmenu span,
-.nx-menu span {
+.nx-rowmenu span {
   font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
 }
@@ -5069,96 +4801,9 @@ dialog.nx-rowmenu[open] {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
-.nx-more {
-  position: relative;
-}
-.nx-menu {
-  position: absolute;
-  inset-inline-end: 0;
-  inset-block-start: calc(100% + var(--kp-space-xs));
-  z-index: 50;
-  inline-size: 260px;
-  background: var(--popover);
-  color: var(--popover-foreground);
-  border: 1px solid var(--nx-line);
-  border-radius: var(--nx-radius);
-  padding: var(--kp-space-xs);
-  box-shadow: 0 12px 32px
-    color-mix(in oklab, var(--foreground) 18%, transparent);
-  display: grid;
-}
-.nx-menu[hidden] {
-  display: none;
-}
-.nx-menu a {
-  display: grid;
-  gap: 1px;
-  padding: var(--kp-space-sm) var(--kp-space-sm);
-  border-radius: var(--nx-r-sm);
-  text-decoration: none;
-  color: inherit;
-}
-.nx-menu a:hover,
-.nx-menu a:focus-visible {
-  background: var(--nx-soft);
-}
-/* redesign-openpoints-3: entries as buttons, groups under small headings
-   (the stack hub's More ▾), an entry's reason it is disabled, a danger one */
-.nx-menu__item {
-  all: unset;
-  box-sizing: border-box;
-  cursor: pointer;
-  display: grid;
-  gap: 1px;
-  padding: var(--kp-space-sm) var(--kp-space-sm);
-  border-radius: var(--nx-r-sm);
-  color: inherit;
-}
-.nx-menu__item:hover,
-.nx-menu__item:focus-visible {
-  background: var(--nx-soft);
-}
-.nx-menu__item:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-.nx-menu__item[disabled],
-.nx-menu__item[aria-disabled="true"] {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-.nx-menu__item--danger b {
-  color: var(--destructive);
-}
-.nx-menu__group {
-  margin: var(--kp-space-sm) var(--kp-space-sm) 0;
-  font-size: var(--kp-text-xs);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted-foreground);
-}
-.nx-menu__group:first-child {
-  margin-block-start: var(--kp-space-xs);
-}
-.nx-menu--grouped {
-  inline-size: max-content;
-  min-inline-size: 19rem;
-  max-inline-size: min(26rem, calc(100vw - 2rem));
-  max-block-size: calc(100vh - 12rem);
-  overflow-y: auto;
-}
-@media (max-width: 48rem) {
-  .nx-menu {
-    inset-inline: 0 auto;
-  }
-  .nx-menu--grouped {
-    inset-inline: 0;
-    inline-size: auto;
-    min-inline-size: 0;
-    max-inline-size: none;
-  }
-}
+/* The more menus (ui.js moreMenu) are kp-themes' menu button and rich
+   menu (js/menu-button.js): every theme draws them, opens and closes them
+   its own way and keeps them whole on the screen. */
 
 /* the page's line of shortcuts */
 .nx-keys {
@@ -5206,14 +4851,14 @@ dialog.nx-rowmenu[open] {
 .nx-ops .nx-kpi__ctx {
   min-block-size: 0;
 }
-.nx-ops .nx-attention__item {
+.nx-ops .kp-attention__item {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--kp-space-xs) var(--kp-space-md);
 }
-.nx-ops .nx-attention__icon {
+.nx-ops .kp-attention__icon {
   display: none;
 }
-.nx-ops .nx-attention__text span {
+.nx-ops .kp-attention__text span {
   display: block;
   margin-block-start: 2px;
   font-size: inherit;
@@ -5328,9 +4973,6 @@ dialog.nx-rowmenu[open] {
    `redesign-3.71/backups.html`). Tokens only. Built from ui.js's shared
    blocks; the first part below is only where the demo measures them
    differently from the foundation's default. ────────── */
-.bk-page .nx-head-right {
-  gap: 8px 12px;
-}
 .bk-page .nx-live[data-state="ok"]::before {
   background: var(--nx-ok);
 }
@@ -5341,12 +4983,13 @@ dialog.nx-rowmenu[open] {
   background: none;
   box-shadow: none;
 }
+/* The demo's phone header: the primary across the width, the others two
+   a row under it (kp's narrow header lets them wrap at their own size). */
 @media (max-width: 48rem) {
-  .bk-page .nx-head-right {
-    justify-content: flex-start;
-    flex-basis: 100%;
+  .bk-page .nx-head .kp-page-header__inner {
+    grid-template-columns: minmax(0, 1fr);
   }
-  .bk-page .nx-head-right > .nx-head-actions {
+  .bk-page .nx-head-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
     inline-size: 100%;
@@ -5399,14 +5042,14 @@ dialog.nx-rowmenu[open] {
     font-size: 1.4rem;
   }
 }
-.bk-page .nx-attention__item {
+.bk-page .kp-attention__item {
   gap: var(--kp-space-md, 0.75rem);
 }
-.bk-page .nx-attention__text {
+.bk-page .kp-attention__text {
   display: grid;
   gap: 2px;
 }
-.bk-page .nx-attention__act {
+.bk-page .kp-attention__actions {
   display: block;
 }
 .bk-page .nx-card {

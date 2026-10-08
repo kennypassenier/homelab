@@ -388,7 +388,7 @@ main.shell.hk-page > [hidden] {
 }
 .hk-pool {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-top: 16px;
   padding-top: 16px;
@@ -513,4 +513,93 @@ main.shell.hk-page > [hidden] {
   grid-column: 2;
   color: var(--muted-foreground);
   font-size: var(--kp-text-xs);
+}
+
+/* fix-371-1 (Kenny approved the Host tiles demo 2026-10-04:
+   redesign-3.71/demos-3711/host-kpis.html): the KPI tiles with a 24 h
+   trend at their foot that answers a pointer with its moment and value,
+   and "Charts ↗" in the corner. Label and context wrap rather than cut;
+   the strip's grid gives every tile the tallest one's height. */
+.hk-page .hx-kpi {
+  grid-template-rows: auto auto 1fr auto;
+  cursor: pointer;
+}
+.hk-page .hx-kpi .nx-kpi__label {
+  padding-inline-end: 5.5em;
+  white-space: normal;
+  overflow: visible;
+}
+.hk-page .hx-kpi .nx-kpi__ctx {
+  white-space: normal;
+  overflow: visible;
+}
+.hk-page .hx-kpi__ctx b {
+  color: var(--foreground);
+  font-weight: 600;
+}
+.hk-page .hx-kpi__go {
+  position: absolute;
+  inset-block-start: var(--kp-space-sm, 8px);
+  inset-inline-end: var(--kp-space-md, 12px);
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.hk-page .hx-kpi:hover .hx-kpi__go,
+.hk-page .hx-kpi:focus-visible .hx-kpi__go {
+  color: var(--foreground);
+}
+.hk-page .hx-kpi:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.hk-page .hx-trend {
+  position: relative;
+  display: grid;
+  grid-template-rows: 44px auto;
+  margin-block-start: var(--kp-space-xs, 4px);
+}
+.hk-page .hx-trend .nx-spark {
+  block-size: 44px;
+}
+.hk-page .hx-trend__axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.hk-page .hx-trend__mark {
+  position: absolute;
+  inset-block: 0 auto;
+  block-size: 44px;
+  inline-size: 1px;
+  background: var(--foreground);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.hk-page .hx-trend__read {
+  position: absolute;
+  inset-block-end: 100%;
+  transform: translateX(-50%);
+  padding: 2px var(--kp-space-xs, 6px);
+  border-radius: var(--hk-r-sm);
+  background: var(--popover, var(--card));
+  color: var(--popover-foreground, var(--foreground));
+  border: 1px solid var(--border);
+  font-size: var(--kp-text-xs);
+  white-space: nowrap;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+.hk-page .hx-trend__mark[hidden],
+.hk-page .hx-trend__read[hidden] {
+  display: none;
+}
+@media (max-width: 48rem) {
+  .hk-page .hx-kpi .nx-kpi__label {
+    padding-inline-end: 1.5em;
+  }
+  .hk-page .hx-kpi__word {
+    display: none;
+  }
 }

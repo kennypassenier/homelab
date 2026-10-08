@@ -20,7 +20,16 @@
 // fleet check's own kept run) and the Inbox (the verdict and its tile).
 
 import { openAction, openBatch } from "../actiondialog.js";
-import { errorBox, fetchJson, h, slowRead } from "../dom.js";
+import {
+  LIVE,
+  errorBox,
+  fetchJson,
+  h,
+  liveTexts,
+  patchKeyed,
+  playChanged,
+  slowRead,
+} from "../dom.js";
 import { declare, dialogControl, drivable, viaForm } from "../drivable.js";
 import { register } from "../drivehooks.js";
 import { gb } from "../fleet.js";
@@ -736,7 +745,7 @@ export function mount(root, ctx) {
         : h("span", { class: "sk-muted" }, "no line yet"),
       h(
         "span",
-        { class: "sk-num" },
+        { class: "sk-num", [LIVE]: "cpu" },
         r.cpuPct == null ? "—" : `${Math.round(r.cpuPct)}%`,
       ),
     );
@@ -763,17 +772,26 @@ export function mount(root, ctx) {
         link,
         h("span", { class: "sk-card__vmid sk-mono" }, String(r.vmid)),
       ),
-      h("span", { class: dotClass(r.state.tone) }, r.state.label),
+      h(
+        "span",
+        { class: dotClass(r.state.tone), [LIVE]: "state" },
+        r.state.label,
+      ),
       h(
         "div",
         { class: "sk-card__meta" },
         h(
           "span",
           null,
-          h("b", null, `${r.appsUp}/${r.appsTotal}`),
+          h("b", { [LIVE]: "apps" }, `${r.appsUp}/${r.appsTotal}`),
           r.appsTotal ? " apps up" : " apps",
         ),
-        h("span", null, h("b", null, String(r.restarts)), " restarts"),
+        h(
+          "span",
+          null,
+          h("b", { [LIVE]: "restarts" }, String(r.restarts)),
+          " restarts",
+        ),
         h(
           "span",
           { title: "The last backup" },
@@ -846,10 +864,18 @@ export function mount(root, ctx) {
       h(
         "td",
         { class: "sk-state" },
-        h("span", { class: dotClass(r.state.tone) }, r.state.label),
+        h(
+          "span",
+          { class: dotClass(r.state.tone), [LIVE]: "state" },
+          r.state.label,
+        ),
       ),
-      h("td", { class: "num sk-apps" }, `${r.appsUp} of ${r.appsTotal}`),
-      h("td", { class: "num sk-wide" }, String(r.restarts)),
+      h(
+        "td",
+        { class: "num sk-apps", [LIVE]: "apps" },
+        `${r.appsUp} of ${r.appsTotal}`,
+      ),
+      h("td", { class: "num sk-wide", [LIVE]: "restarts" }, String(r.restarts)),
       h("td", { class: "sk-wide" }, ram),
       h("td", { class: "sk-wide" }, sparkCell(r)),
       h(
@@ -943,7 +969,11 @@ export function mount(root, ctx) {
             cur.some((c) => c.dataset.stack === w.dataset.stack),
           ));
     if (!sameRows) {
-      box.replaceChildren(...want);
+      // A stack that went (filtered out, destroyed) leaves the theme's way;
+      // one that came arrives.
+      void patchKeyed(box, want, (el) =>
+        el instanceof HTMLElement ? (el.dataset.stack ?? null) : null,
+      );
       return true;
     }
     let changed = false;
@@ -978,7 +1008,10 @@ export function mount(root, ctx) {
     for (const a of [...c.attributes])
       if (!w.hasAttribute(a.name)) c.removeAttribute(a.name);
     for (const a of [...w.attributes]) c.setAttribute(a.name, a.value);
+    // A figure that moved plays the theme's update (kp-themes' update()).
+    const before = liveTexts(c);
     c.replaceChildren(...w.childNodes);
+    playChanged(c, before);
     if (was)
       /** @type {HTMLElement | null} */ (c.querySelector(was))?.focus({
         preventScroll: true,

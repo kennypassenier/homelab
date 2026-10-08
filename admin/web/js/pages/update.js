@@ -299,7 +299,7 @@ export function mount(root, scope) {
   const diff = h("div", { class: "uf-diff" });
   const diffFold = h(
     "details",
-    { class: "uf-fold" },
+    { class: "uf-fold kp-accordion__item kp-accordion__item--bare" },
     drivable(
       h(
         "summary",

@@ -10,6 +10,8 @@ import {
   hueOf,
   initials,
   markParts,
+  packColumns,
+  packGroups,
   readStars,
   tileState,
 } from "../js/appsview.js";
@@ -140,4 +142,23 @@ test("redesign-stacks: stars kept in this browser read back, anything else reads
   assert.deepEqual([...readStars(null)], []);
   assert.deepEqual([...readStars("{")], []);
   assert.deepEqual([...readStars('{"a":1}')], []);
+});
+
+test("fix-371-1: the board packs each group into the column shortest by tile count", () => {
+  // The fleet's own groups, as the approved demo packed them.
+  const g = [7, 3, 3, 5, 5].map((tiles) => ({ tiles }));
+  assert.deepEqual(packGroups(g, 3), [[0], [1, 3], [2, 4]]);
+  assert.deepEqual(packGroups(g, 2), [
+    [0, 3],
+    [1, 2, 4],
+  ]);
+  assert.deepEqual(packGroups(g, 1), [[0, 1, 2, 3, 4]]);
+  // A folded group counts as its title alone: the next one fills under it.
+  const folded = g.map((x, i) => ({ ...x, folded: i === 0 }));
+  assert.deepEqual(packGroups(folded, 3), [[0, 3], [1, 4], [2]]);
+  // Column count: 22 rem columns from a 53 rem board, 18 rem below.
+  assert.equal(packColumns(1400, 24, 16), 3);
+  assert.equal(packColumns(1000, 24, 16), 2);
+  assert.equal(packColumns(700, 24, 16), 2);
+  assert.equal(packColumns(358, 16, 16), 1);
 });

@@ -1,5 +1,5 @@
 // redesign-host (3.71.0, the approved Host demo): the view models the
-// redesigned Host page draws from — the KPI strip, the Containers table and
+// redesigned Host page draws from — the KPI tiles, the Containers table and
 // its filter, the actions grouped by intent, the Disk card and host.toml
 // shown as only what it changes.
 import { test } from "node:test";
@@ -9,14 +9,15 @@ import {
   diskBreakdown,
   guestTable,
   guestVisible,
+  HOST_FIGURES,
   hostActionGroups,
-  hostKpis,
   hostSettingsView,
+  hostTile,
   latencyBars,
-  meterTone,
   rootGrowth,
   settingVisible,
 } from "../js/host.js";
+import { HOST_SECTIONS } from "../js/metricsview.js";
 
 /** @returns {any} the demo host's own fleet reading, trimmed */
 const fleet = () => ({
@@ -74,29 +75,102 @@ const guests = [
   { vmid: 996, status: "stopped", lock: "template", name: "debian-13" },
 ];
 
-test("redesign-host: the KPI strip reads CPU, memory with its promise, root, pool and exact container counts", () => {
-  const k = hostKpis(fleet(), guests);
+test("fix-371-1: the Host tiles are the eight figures, each with the 15-minute average as the big number", () => {
   assert.deepEqual(
-    k.map((x) => x.label),
-    ["CPU", "Memory", "Root disk", "Container pool", "Containers"],
+    HOST_FIGURES.map((f) => f.key),
+    ["cpu", "memory", "load", "disk", "diskio", "network", "temp", "swap"],
   );
-  assert.equal(k[0].ctx, "16 cores · load 0.80");
-  assert.equal(k[1].value, "25.4");
-  assert.equal(k[1].unit, "of 64 GiB");
-  assert.equal(k[1].ctx, "29.3 GiB promised to stacks (46%)");
-  assert.equal(k[1].meter.mark, 46);
-  assert.equal(k[2].ctx, "66 GB free of 96 GB");
-  // The host sends the pool's size, not its use: never a made-up percent.
-  assert.equal(k[3].value, "—");
-  assert.equal(k[3].meter.pct, null);
-  assert.equal(k[4].value, "3");
-  assert.equal(k[4].unit, "of 4 running");
-  assert.equal(k[4].ctx, "2 of 2 stacks online");
-  // Before pct list answered: a dash, not "0 of 0".
-  assert.equal(hostKpis(fleet(), null)[4].value, "—");
-  assert.equal(meterTone({ pct: 90 }), "bad");
-  assert.equal(meterTone({ pct: 75 }), "warn");
-  assert.equal(meterTone({ pct: 90, neutral: true }), "");
+  /** @param {number[]} vs @returns {[number, number][]} */
+  const pts = (vs) => vs.map((v, i) => [1_000_000 + i * 600, v]);
+  const fig = (/** @type {string} */ k) =>
+    /** @type {import("../js/host.js").HostFigure} */ (
+      HOST_FIGURES.find((f) => f.key === k)
+    );
+  const mem = hostTile(
+    fig("memory"),
+    {
+      key: "memory",
+      series: pts([30, 62, 40]),
+      recent: pts([38, 40, 42, 44]),
+    },
+    fleet(),
+  );
+  assert.equal(mem.label, "Memory · avg 15 min");
+  assert.equal(mem.value, "41");
+  assert.equal(mem.unit, "%");
+  assert.equal(mem.now, "44 %");
+  assert.equal(mem.rest, "peak 62 % · 28.2 of 64 GiB");
+  assert.equal(mem.href, "/charts#chart-mem");
+  assert.equal(mem.points.length, 3);
+  assert.equal(mem.from, 1_000_000);
+  // A rate picks its unit by its size; load keeps two decimals.
+  const net = hostTile(
+    fig("network"),
+    {
+      key: "network",
+      series: pts([12_000, 822_903]),
+      recent: pts([12_000, 14_000]),
+    },
+    fleet(),
+  );
+  assert.equal(`${net.value} ${net.unit}`, "13 kB/s");
+  assert.equal(net.rest, "peak 823 kB/s · in + out, the bridges");
+  const io = hostTile(
+    fig("diskio"),
+    {
+      key: "diskio",
+      series: pts([2e6, 577e6]),
+      recent: pts([14.9e6, 14.9e6]),
+    },
+    fleet(),
+  );
+  assert.equal(`${io.value} ${io.unit}`, "14.9 MB/s");
+  assert.equal(io.rest, "peak 577 MB/s · read + written");
+  // fix-371-1 follow-up: every tile lands on its own chart; Network on the
+  // card with both directions it adds up.
+  const swap = hostTile(
+    fig("swap"),
+    { key: "swap", series: pts([5]), recent: pts([5]) },
+    fleet(),
+  );
+  assert.equal(swap.href, "/charts#chart-swap");
+  assert.equal(swap.title, "Open Swap on Charts");
+  assert.equal(io.href, "/charts#chart-diskio");
+  assert.equal(net.href, "/charts#chart-netio");
+  const cards = new Set(
+    HOST_SECTIONS.flatMap((s) => s.cards).map((c) => c.key),
+  );
+  for (const f of HOST_FIGURES)
+    assert.ok(f.chart && cards.has(f.chart), `${f.key} has no chart`);
+  const load = hostTile(
+    fig("load"),
+    { key: "load", series: pts([0.2, 3.19]), recent: pts([0.84]) },
+    fleet(),
+  );
+  assert.equal(load.value, "0.84");
+  assert.equal(load.rest, "peak 3.19 · 16 cores");
+});
+
+test("fix-371-1: without a trend a Host tile shows the fleet's own reading as now, never a made-up average", () => {
+  const cpu = /** @type {import("../js/host.js").HostFigure} */ (
+    HOST_FIGURES[0]
+  );
+  const t = hostTile(cpu, null, fleet(), "the host's trends: no Prometheus");
+  assert.equal(t.label, "CPU");
+  assert.equal(t.value, "7");
+  assert.equal(t.avg, false);
+  assert.equal(t.rest, "now · no trend: Prometheus did not answer · 16 cores");
+  assert.equal(t.points.length, 0);
+  const swap = /** @type {import("../js/host.js").HostFigure} */ (
+    HOST_FIGURES[7]
+  );
+  const s = hostTile(
+    swap,
+    { key: "swap", series: [], recent: [], error: "down" },
+    fleet(),
+  );
+  assert.equal(s.value, "—");
+  assert.match(s.rest, /^not measured · no trend/);
 });
 
 test("redesign-host: a container row carries its stack's measured memory and CPU, and its kind", () => {

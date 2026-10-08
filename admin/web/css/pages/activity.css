@@ -13,22 +13,9 @@
 }
 
 /* ── page rhythm ─────────────────────────────────────────────────────── */
-/* The header's own buttons sit in one row against the right edge (the
-   shared `.actions-row` is a 13 rem column grid for a stack's action
-   lists, which stacked Pause / Download / Run a command into a column
-   here); on a phone they fold under the title from its left edge. */
-.ac-page .nx-head-actions,
-.con-page .nx-head-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
+/* The header's buttons are kp-themes' page header actions (one row
+   against the right edge, from the left on a narrow page). */
 @media (max-width: 30rem) {
-  .ac-page .nx-head-actions,
-  .con-page .nx-head-actions {
-    justify-content: flex-start;
-  }
   /* The Window control's first button starts at the title's left edge,
      its pill's border and padding hanging outside it. */
   .ac-page .nx-head-actions > .nx-seg:first-child {
@@ -911,53 +898,22 @@
 }
 
 /* ── Console: the live chip beside the title, the shell bar ──────────── */
-/* The chip follows the title; the buttons keep the right edge. */
-.con-head .title-row > .con-live {
-  margin-inline-start: 0;
-}
-.con-head .title-row > .nx-head-right {
-  margin-inline-start: auto;
-}
 /* The demo's phone header: title + chip, the description, "Run a
-   command" across the width, then Pause and Download side by side; the
-   selectors outweigh the kit's own narrow header (app.css). */
+   command" across the width (kp's narrow header puts the primary first),
+   then Pause and Download side by side at equal widths. */
 @media (max-width: 48rem) {
-  .con-page .nx-head.con-head:not(.nx-head--meta) {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px 10px;
+  .con-page .con-head .kp-page-header__inner {
+    grid-template-columns: minmax(0, 1fr);
   }
-  .con-page .nx-head.con-head:not(.nx-head--meta) .title-row,
-  .con-page .nx-head.con-head:not(.nx-head--meta) .nx-head-right,
-  .con-page .nx-head.con-head:not(.nx-head--meta) .nx-head-actions {
-    display: contents;
+  .con-page .con-head .nx-head-actions {
+    justify-content: flex-start;
   }
-  .con-page .nx-head.con-head:not(.nx-head--meta) .title-row > h1 {
-    order: 1;
-    flex: none;
-  }
-  .con-page .nx-head.con-head:not(.nx-head--meta) .con-live {
-    order: 2;
-  }
-  .con-page .nx-head.con-head:not(.nx-head--meta) .nx-head-desc {
-    order: 3;
+  .con-page .con-head .nx-head-actions > .kp-button--primary {
     flex: 1 1 100%;
-    margin-block-start: 0 !important;
-  }
-  .con-page
-    .nx-head.con-head:not(.nx-head--meta)
-    .nx-head-actions
-    > .kp-button--primary {
-    order: 4;
-    flex: 1 1 100%;
+    order: -1;
     justify-content: center;
   }
-  .con-page
-    .nx-head.con-head:not(.nx-head--meta)
-    .nx-head-actions
-    > .kp-button--secondary {
-    order: 5;
+  .con-page .con-head .nx-head-actions > .kp-button--secondary {
     flex: 1 1 0;
     justify-content: center;
   }

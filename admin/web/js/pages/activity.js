@@ -71,6 +71,7 @@ import { tabRow } from "../dom.js";
 import { mountJobsTable } from "./jobs.js";
 import { mountHostLog } from "./log.js";
 import { mount as mountSchedules } from "./schedules.js";
+import { leave } from "/static/kp/js/motion.js";
 
 const SVG = "http://www.w3.org/2000/svg";
 /** History rows drawn per page (the demo drew about forty). */
@@ -957,9 +958,12 @@ function mountNow(body, x) {
   const paintRunning = () => {
     const run = runningJobs();
     const ids = new Set(run.map((j) => j.job));
+    // A job that ended leaves the theme's way (kp-themes' leave()).
+    /** @type {Promise<void>[]} */
+    const gone = [];
     for (const [id, b] of blocks)
       if (!ids.has(id)) {
-        b.el.remove();
+        gone.push(leave(b.el));
         blocks.delete(id);
       }
     for (const j of run) {
@@ -971,7 +975,8 @@ function mountNow(body, x) {
       runList.append(b.el);
     }
     if (!run.length) {
-      if (!runList.querySelector(".nx-empty"))
+      const idle = () => {
+        if (runningJobs().length || runList.querySelector(".nx-empty")) return;
         runList.replaceChildren(
           act.jobsRead
             ? emptyState({
@@ -980,6 +985,10 @@ function mountNow(body, x) {
               })
             : skeletonLines(3, "Reading the jobs"),
         );
+      };
+      // The empty state waits for the last job's exit.
+      if (gone.length) void Promise.all(gone).then(idle);
+      else idle();
     } else runList.querySelector(".nx-empty, .nx-skeleton")?.remove();
     const queued = run.filter((j) => j.state === "queued").length;
     runFoot.textContent = `${run.length - queued} running · ${queued} queued`;

@@ -2504,6 +2504,26 @@ pub fn rollback_script(unit: &str, prev: &str, binary: &str) -> String {
     )
 }
 
+/// fix-371-1: why Update (native) did nothing for a service with no
+/// `update_cmd`, in one line, pointing at what does install a newer
+/// version. A `manual` service is updated only on a person's word, which is
+/// Install newest (the signed release); any other names the missing verb.
+pub fn update_skip_note(m: &NativeServiceManifest) -> String {
+    use crate::native::UpdatePolicy;
+    match m.update_policy {
+        UpdatePolicy::Manual => format!(
+            "{} has no update of its own (update_policy: manual, no update_cmd); \
+             Install newest installs its newest signed release",
+            m.unit
+        ),
+        _ => format!(
+            "{} has no update_cmd in the host's copy of its stack file; \
+             Install newest installs its newest signed release",
+            m.unit
+        ),
+    }
+}
+
 /// `stored_at` is when the host last wrote the manifest this runs from —
 /// `StackState::applied_at`, passed in because core never reads a clock. It is
 /// only used to make the skip message below say where its facts come from.
@@ -2541,7 +2561,9 @@ pub async fn update_native(
                 m.stack_name, when
             ),
         );
-        return runner.finish_ok();
+        // fix-371-1 (CORRECTION, Kenny 2026-10-04): the run's outcome says
+        // why nothing happened and what does update it.
+        return runner.finish_noted(update_skip_note(m));
     };
 
     // fix-171 round 3: `m.update_cmd` is a manifest field, so by this point

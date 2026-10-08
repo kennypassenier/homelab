@@ -1114,7 +1114,8 @@ export function mount(root, opts = {}) {
         h(
           "details",
           {
-            class: "kp-card nx-card st-grp",
+            class:
+              "kp-card nx-card st-grp kp-accordion__item kp-accordion__item--bare",
             id: slug(g),
             open: open ? true : null,
             "data-group": g,

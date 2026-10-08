@@ -123,33 +123,12 @@
 /* Review item 13: on a phone the header reads title, its sentence, then
    the checked time beside Check again at its own width. */
 @media (max-width: 40rem) {
-  .inbox-head {
-    display: grid;
+  .inbox-head .kp-page-header__inner {
     grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
-  }
-  .inbox-head .title-row {
-    display: contents;
-  }
-  .inbox-head h1 {
-    order: 1;
-  }
-  .inbox-head .nx-head-desc {
-    order: 2;
-    margin: 0;
-  }
-  .inbox-head .nx-head-right {
-    order: 3;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px 12px;
-    inline-size: 100%;
   }
   .inbox-head .nx-head-actions {
-    inline-size: auto;
-    flex: 0 0 auto;
+    justify-content: space-between;
+    gap: 8px 12px;
   }
   .inbox-head .nx-head-actions .kp-button {
     inline-size: auto;

@@ -55,13 +55,23 @@
 // with a ruled foot, a segmented control, a quieter KPI. A page picks its
 // look by its demo; the blocks never ask.
 //
-// The shared time chart lives in timechart.js.
+// The shared time chart lives in charts.js (kp-themes' own chart.js).
 
 import { agoEl, setAgo } from "./ago.js";
-import { h } from "./dom.js";
+import { h, setLive } from "./dom.js";
 import { dialogControl, drivable } from "./drivable.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
 import { toast as kpToast } from "/static/kp/js/overlays.js";
+import { leave } from "/static/kp/js/motion.js";
+import { setAttention } from "/static/kp/js/attention.js";
+import { drawSparkline } from "/static/kp/js/kpi.js";
+import {
+  MENU_SELECT_EVENT,
+  attachMenuButtons,
+  closeMenu,
+  openMenu,
+  setMenu,
+} from "/static/kp/js/menu-button.js";
 import { RESET_SORT } from "./sortclick.js";
 import { applySort, keepSort, nextSort, rememberedSort } from "./sortstate.js";
 
@@ -157,9 +167,8 @@ export function liveStatus(verb = "updated") {
  *   pages' "working copy bb5dce9" / "read 3 s ago"), the actions still
  *   against the right edge;
  *   `sub`: a muted part of the title ("Host demo");
- *   `split`: the next.css header (Secrets): the live status beside the
- *   title, the description under them, the actions against the right
- *   edge spanning both rows (one column on a phone, actions last);
+ *   `split`: the next.css header (Secrets); every header is that shape
+ *   since kp-themes 9.2.0's `.kp-page-header`;
  *   `level`: the title's heading level, `h1` by default; `h2` when the
  *   page is embedded under another page's title (Schedules as Activity's
  *   "Planned" view);
@@ -168,9 +177,7 @@ export function liveStatus(verb = "updated") {
  *   `primary`: the ONE primary action, after them;
  *   `more`: the overflow menu (`moreMenu`), last;
  *   `meta`: chips and facts in a row under the description (the live
- *   status joins them); the header then takes the demo's grid, its
- *   actions against the right edge spanning the title, description and
- *   meta rows (one column on a phone, actions last).
+ *   status joins them).
  */
 
 let countIds = 0;
@@ -190,13 +197,15 @@ export function countOf(count, list, rows = ":scope > *") {
 }
 
 /**
- * The page header (DESIGN_LANGUAGE §1.1): breadcrumbs, then one title row
- * (title left; live status and the actions grouped against the right
- * edge, the primary one last), then the page's one-sentence description
- * right under it. Markup the whole-screen invariants read: `.title-row`
- * holding the `h1`, the description its next sibling `p` (rows 32, 36, 40,
- * 41); with `meta`, the description is the `h1`'s own next sibling.
- * @param {HeaderSpec} spec
+ * The page header (DESIGN_LANGUAGE §1.1) on kp-themes 9.2.0's
+ * `.kp-page-header`: breadcrumbs, then the title with its live status and
+ * the page's one-sentence description right under it (and the meta row) on
+ * the left, the actions against the right edge — secondaries, the ONE
+ * primary, the more menu last; on a narrow header it reads top to bottom,
+ * the primary first at the full width. Markup the whole-screen invariants
+ * read: `.title-row` holding the `h1`, the description its next sibling
+ * `p` (rows 32, 36, 40, 41), the actions `.nx-head-actions`.
+ * @param {HeaderSpec} spec `split` is the same header since kp-themes 9.2.0
  * @returns {{el: HTMLElement, title: HTMLHeadingElement,
  *   desc: HTMLParagraphElement, actions: HTMLElement,
  *   meta: HTMLElement | null,
@@ -205,7 +214,7 @@ export function countOf(count, list, rows = ":scope > *") {
 export function pageHeader(spec) {
   const title = h(
     spec.level ?? "h1",
-    null,
+    { class: "kp-page-header__title" },
     spec.title,
     ...(spec.sub ? [h("span", { class: "nx-head-sub" }, ` ${spec.sub}`)] : []),
   );
@@ -215,42 +224,27 @@ export function pageHeader(spec) {
       : liveStatus(typeof spec.live === "string" ? spec.live : "updated");
   const actions = h(
     "div",
-    { class: "actions-row nx-head-actions" },
+    { class: "kp-page-header__actions nx-head-actions" },
     ...(spec.actions ?? []),
     ...(spec.primary ? [spec.primary] : []),
     ...(spec.more ? [spec.more] : []),
   );
-  const desc = h("p", { class: "section-head__desc nx-head-desc" }, spec.desc);
+  const desc = h(
+    "p",
+    { class: "kp-page-header__description section-head__desc nx-head-desc" },
+    spec.desc,
+  );
   const crumbs = spec.crumbs?.length ? [breadcrumbs(spec.crumbs)] : [];
-  // redesign-final X1: the page's freshness ("updated 4 s ago") has one
-  // slot on every page, as the demos draw it: right after the title.
-  if (spec.meta) {
-    const meta = h("div", { class: "nx-head-meta" }, ...spec.meta);
-    const e = h(
-      "header",
-      { class: "nx-head nx-head--meta" },
-      ...crumbs,
-      h("div", { class: "title-row" }, title, live?.el ?? null),
-      desc,
-      meta,
-      actions,
-    );
-    return { el: e, title, desc, actions, meta, live };
-  }
-  if (spec.split) {
-    const e = h(
-      "header",
-      { class: "nx-head nx-head--split" },
-      ...crumbs,
-      h("div", { class: "title-row" }, title, live?.el ?? null),
-      desc,
-      actions,
-    );
-    return { el: e, title, desc, actions, meta: null, live };
-  }
+  // titleMeta: chips right beside the title in its row (the Configure
+  // pages' "working copy bb5dce9"); meta: a row under the description.
   const titleMeta = spec.titleMeta
     ? h("div", { class: "nx-head-titlemeta" }, ...spec.titleMeta)
     : null;
+  const meta = spec.meta
+    ? h("div", { class: "nx-head-meta" }, ...spec.meta)
+    : null;
+  // redesign-final X1: the page's freshness ("updated 4 s ago") has one
+  // slot on every page, as the demos draw it: right after the title.
   const row = h(
     "div",
     { class: "title-row" },
@@ -258,10 +252,18 @@ export function pageHeader(spec) {
     live?.el ?? null,
     titleMeta,
   );
-  if (actions.childElementCount > 0)
-    row.append(h("div", { class: "nx-head-right" }, actions));
-  const e = h("header", { class: "nx-head" }, ...crumbs, row, desc);
-  return { el: e, title, desc, actions, meta: titleMeta, live };
+  const e = h(
+    "header",
+    { class: `kp-page-header nx-head${meta ? " nx-head--meta" : ""}` },
+    ...crumbs,
+    h(
+      "div",
+      { class: "kp-page-header__inner" },
+      h("div", { class: "nx-head-lead" }, row, desc, meta),
+      actions,
+    ),
+  );
+  return { el: e, title, desc, actions, meta: meta ?? titleMeta, live };
 }
 
 /**
@@ -334,6 +336,7 @@ export function kpi(k) {
   const label = h("span", { class: "nx-kpi__label" });
   const hint = h("span", { class: "nx-kpi__hint", "aria-hidden": "true" });
   const value = h("span", { class: "nx-kpi__value" });
+  const num = h("span", { class: "nx-kpi__num" });
   const ctx = h("span", { class: "nx-kpi__ctx" });
   let m = k.meter ? meter(k.meter) : null;
   /** @type {HTMLElement | null} */
@@ -383,14 +386,19 @@ export function kpi(k) {
     label.textContent = cur.label;
     if (loading) e.dataset.loading = "";
     else delete e.dataset.loading;
-    value.replaceChildren(
-      ...(loading
-        ? [skeleton("3ch")]
-        : [
-            cur.value ?? "—",
-            ...(cur.unit ? [h("small", null, cur.unit)] : []),
-          ]),
-    );
+    if (loading) value.replaceChildren(skeleton("3ch"));
+    else {
+      // A figure that changed plays the theme's update (kp-themes'
+      // update()); the first fill after the skeleton is written plainly.
+      const text = cur.value ?? "—";
+      if (num.parentNode === value && num.textContent !== text)
+        setLive(num, text);
+      else num.textContent = text;
+      value.replaceChildren(
+        num,
+        ...(cur.unit ? [h("small", null, cur.unit)] : []),
+      );
+    }
     ctx.replaceChildren(
       ...(loading || !cur.ctxMeter ? [] : [ctxBar(cur.ctxMeter, cur.label)]),
       ...(loading
@@ -497,51 +505,34 @@ export function kpiStrip(tiles, opts = {}) {
  */
 
 /**
- * The attention band (DESIGN_LANGUAGE §1.3): one kp-alert per problem,
- * worst first, each with its own fix; absent — zero height, never "all
- * fine" filler — when nothing needs a person.
+ * The attention band (DESIGN_LANGUAGE §1.3): kp-themes' `.kp-attention`,
+ * one alert per problem, worst first, each with its own fix; no room at
+ * all, never "all fine" filler, when nothing needs a person. `set` goes by
+ * each item's key (kp's `setAttention`): an unchanged problem stays the
+ * same element, so it is announced once and a focused fix keeps its
+ * focus; a new one arrives and a solved one leaves, the theme's way.
  * @param {Attention[]} [items]
  * @returns {{el: HTMLElement, set: (items: Attention[]) => void}}
  */
 export function attentionBand(items = []) {
   const el = h("div", {
-    class: "nx-attention",
+    class: "kp-attention nx-attention",
     role: "region",
     "aria-label": "Needs a look",
   });
-  const order = { bad: 0, warn: 1, info: 2 };
-  const set = (/** @type {Attention[]} */ list) => {
-    const sorted = [...list].sort((a, b) => order[a.tone] - order[b.tone]);
-    el.replaceChildren(
-      ...sorted.map((a) =>
-        h(
-          "div",
-          {
-            class: `kp-alert kp-alert--${a.tone === "bad" ? "destructive" : a.tone === "warn" ? "warning" : "info"} nx-attention__item`,
-            role: a.tone === "bad" ? "alert" : "status",
-            ...(a.key ? { "data-key": a.key } : {}),
-          },
-          h(
-            "span",
-            { class: "nx-attention__icon", "aria-hidden": "true" },
-            a.tone === "info" ? "i" : "!",
-          ),
-          h(
-            "div",
-            { class: "nx-attention__text" },
-            h("strong", null, a.title),
-            ...(a.text ? [h("span", null, a.text)] : []),
-          ),
-          h(
-            "div",
-            { class: "nx-attention__act" },
-            ...(a.action ? [a.action] : []),
-          ),
-        ),
-      ),
+  /** @type {Record<Attention["tone"], "critical" | "warning" | "info">} */
+  const severity = { bad: "critical", warn: "warning", info: "info" };
+  const set = (/** @type {Attention[]} */ list) =>
+    setAttention(
+      el,
+      list.map((a) => ({
+        key: a.key ?? a.title,
+        severity: severity[a.tone],
+        title: a.title,
+        ...(a.text ? { text: a.text } : {}),
+        action: a.action ?? null,
+      })),
     );
-    el.hidden = sorted.length === 0;
-  };
   set(items);
   return { el, set };
 }
@@ -736,7 +727,11 @@ export function section(spec) {
       h(
         "details",
         {
-          class: cls(" nx-card--fold"),
+          // kp's bare accordion item (port spec J3): the fold glides
+          // open and shut the theme's way, without the accordion's chrome.
+          class: cls(
+            " nx-card--fold kp-accordion__item kp-accordion__item--bare",
+          ),
           ...(spec.id ? { id: spec.id } : {}),
           ...named,
           ...(spec.open ? { open: "" } : {}),
@@ -945,25 +940,6 @@ export function stackName(name, opts = {}) {
 }
 
 /**
- * The points of a sparkline in a w×h box.
- * @param {number[]} values
- * @param {number} [w]
- * @param {number} [hgt]
- * @returns {{line: string, area: string}}
- */
-export function sparkPath(values, w = 100, hgt = 28) {
-  const lo = Math.min(...values);
-  const hi = Math.max(...values);
-  const span = hi - lo || 1;
-  const pts = values.map((v, i) => [
-    (i / Math.max(1, values.length - 1)) * w,
-    hgt - 2 - ((v - lo) / span) * (hgt - 4),
-  ]);
-  const line = `M${pts.map((p) => p.map((n) => n.toFixed(1)).join(",")).join("L")}`;
-  return { line, area: `${line}L${w},${hgt}L0,${hgt}Z` };
-}
-
-/**
  * A 28 px sparkline (DESIGN_LANGUAGE §9.2), drawn in `--chart-1` unless
  * told otherwise; the numbers always stand beside it.
  * @param {number[]} values
@@ -971,20 +947,17 @@ export function sparkPath(values, w = 100, hgt = 28) {
  * @returns {SVGSVGElement}
  */
 export function sparkline(values, opts = {}) {
-  const { line, area } = sparkPath(values);
-  const svg = document.createElementNS(SVG, "svg");
+  // kp-themes' drawSparkline (js/kpi.js), the line its KPI tiles and time
+  // charts draw; `data-kp-spark` holds the numbers, so update() can move
+  // its last point the theme's way.
+  const svg = /** @type {SVGSVGElement} */ (
+    document.createElementNS(SVG, "svg")
+  );
   svg.setAttribute("class", "nx-spark");
-  svg.setAttribute("viewBox", "0 0 100 28");
-  svg.setAttribute("preserveAspectRatio", "none");
   svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("data-kp-spark", values.join(" "));
   if (opts.colour) svg.style.color = opts.colour;
-  const a = document.createElementNS(SVG, "path");
-  a.setAttribute("class", "area");
-  a.setAttribute("d", area);
-  const l = document.createElementNS(SVG, "path");
-  l.setAttribute("class", "line");
-  l.setAttribute("d", line);
-  svg.append(a, l);
+  drawSparkline(svg, values, { parts: "nx-spark" });
   return svg;
 }
 
@@ -1789,38 +1762,18 @@ export function rowMenu(spec) {
  */
 
 /**
- * What a more menu draws, as one string: a refill that changes nothing in
- * it must not redraw it (that took the keyboard focus away).
- * @param {{group: string, items: {label: string, hint?: string,
- *   href?: string, disabled?: string | null, danger?: boolean,
- *   attrs?: Record<string, string | null>}[]}[]} groups
- */
-export const menuSignature = (groups) =>
-  JSON.stringify(
-    groups.map((g) => [
-      g.group,
-      g.items.map((i) => [
-        i.label,
-        i.hint ?? "",
-        i.href ?? "",
-        i.disabled ?? "",
-        !!i.danger,
-        i.attrs ?? null,
-      ]),
-    ]),
-  );
-
-/**
- * A header's more menu: a button and a list of entries, flat (`items`) or
- * under small headings (`groups`, the stack hub's More ▾). The button is
- * the `···` icon marked as the Live view control `drive`, or the page's
- * own (`button`: its text, class, key and mark). Opening it focuses the
- * first usable entry; a second click on the button, Escape (the focus back
- * on the button), a click outside or picking an entry closes it; ↑ ↓ Home
- * End move between the usable entries. It listens on the document only
- * while it is open. `fill` redraws the entries only when what they show
- * changed, and never while the menu is open (the change waits until it
- * closes). A closed menu's entries stay in the DOM, so a Live view step
+ * A header's more menu: kp-themes' menu button (js/menu-button.js, the
+ * rich menu ported from this dashboard's More ▾), its entries flat
+ * (`items`) or under small headings (`groups`, the stack hub's). The
+ * button is the `···` icon marked as the Live view control `drive`, or
+ * the page's own (`button`: its text, class, key and mark). kp does the
+ * rest: it opens on the first usable entry, closes on a second click,
+ * Escape (the focus back on the button), a click outside or a pick, with
+ * the theme's own open and close; ↑ ↓ Home End and a first letter move;
+ * the menu stays whole on the screen; an entry that cannot be used now
+ * stays reachable and says why. `fill` redraws only when what the entries
+ * show changed, and never while the menu is open (the change waits until
+ * it closes). A closed menu's entries stay in the DOM, so a Live view step
  * aimed at one marks the menu's button (its wrap's first button).
  * @param {{label: string, items?: MenuEntry[], groups?: MenuGroup[],
  *   drive?: Drive, button?: {text: string, class?: string, keys?: string,
@@ -1830,11 +1783,9 @@ export const menuSignature = (groups) =>
  *   fill: (groups: MenuGroup[]) => void, stop: () => void}}
  */
 export function moreMenu(spec) {
-  const grouped = !!spec.groups;
   const list = h("div", {
-    class: `nx-menu${grouped ? " nx-menu--grouped" : ""}`,
+    class: "kp-menu kp-menu--rich nx-menu",
     role: "menu",
-    hidden: true,
     "aria-label": spec.label,
   });
   const btn = h(
@@ -1843,123 +1794,67 @@ export function moreMenu(spec) {
       type: "button",
       class: spec.button?.class ?? "nx-icon-btn",
       "aria-label": spec.button ? null : spec.label,
-      "aria-haspopup": "menu",
-      "aria-expanded": "false",
       "aria-keyshortcuts": spec.button?.keys ?? null,
       title: spec.label,
-      onclick: () => (list.hidden ? open() : close()),
     },
     spec.button?.text ?? "···",
   );
   if (spec.drive) drive(btn, spec.drive);
   spec.button?.mark?.(btn);
-  const wrap = h("div", { class: "nx-more" }, btn, list);
-  /** The usable entries, in order. */
-  const usable = () =>
-    /** @type {HTMLElement[]} */ ([
-      ...list.querySelectorAll('[role="menuitem"]'),
-    ]).filter((e) => e.getAttribute("disabled") == null);
-  /** @param {MouseEvent} e */
-  const outside = (e) => {
-    if (!wrap.contains(/** @type {Node} */ (e.target))) close();
-  };
-  /** @param {KeyboardEvent} e */
-  const keys = (e) => {
-    if (list.hidden) return;
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      close(true);
-    } else if (
-      list.contains(/** @type {Node} */ (e.target)) ||
-      e.target === btn
-    )
-      menuKey(list, e);
-  };
-  const open = () => {
-    if (!list.hidden) return;
-    list.hidden = false;
-    btn.setAttribute("aria-expanded", "true");
-    document.addEventListener("click", outside);
-    // Capture: the menu's Escape is its own, not the page's as well.
-    document.addEventListener("keydown", keys, true);
-    usable()[0]?.focus();
-  };
-  const close = (focus = false) => {
-    if (list.hidden) return;
-    list.hidden = true;
-    btn.setAttribute("aria-expanded", "false");
-    document.removeEventListener("click", outside);
-    document.removeEventListener("keydown", keys, true);
-    if (focus) btn.focus();
-    if (pending) {
-      const p = pending;
-      pending = null;
-      fill(p);
-    }
-  };
-  /** @param {MenuEntry} it */
-  const entry = (it) => {
-    const item = h(
-      it.href ? "a" : "button",
-      {
-        ...(it.href
-          ? { href: it.href, download: it.download ?? null }
-          : { type: "button" }),
-        role: "menuitem",
-        class: `nx-menu__item${it.danger ? " nx-menu__item--danger" : ""}`,
-        title: it.disabled ?? it.hint,
-        disabled: !it.href && it.disabled ? true : null,
-        "aria-disabled": it.href && it.disabled ? "true" : null,
-        ...(it.attrs ?? {}),
-      },
-      h("b", null, it.label),
-      h("span", null, it.disabled ?? it.hint),
-    );
-    it.mark?.(item);
-    item.addEventListener("click", (e) => {
-      if (it.disabled) {
-        e.preventDefault();
-        return;
-      }
-      close();
-      it.onClick?.();
-    });
-    return item;
-  };
-  let drawn = "";
-  /** @type {MenuGroup[] | null} */
-  let pending = null;
+  const wrap = h(
+    "div",
+    { class: "kp-menu-button nx-more", "data-kp-menu-button": "" },
+    btn,
+    list,
+  );
+  /** The entries drawn now, by their `data-kp-value`. @type {Map<string, MenuEntry>} */
+  let byValue = new Map();
+  // kp wires the menu buttons under a root: this one, under a holder it
+  // leaves as soon as the page puts it in place.
+  attachMenuButtons(h("div", null, wrap), {
+    decorate: (part, info) => {
+      if (info.kind === "menu-item" && info.value != null)
+        byValue.get(info.value)?.mark?.(part);
+    },
+  });
+  wrap.addEventListener(MENU_SELECT_EVENT, (e) => {
+    const value = /** @type {CustomEvent<{value: string}>} */ (e).detail.value;
+    byValue.get(value)?.onClick?.();
+  });
   /** @param {MenuGroup[]} groups */
   const fill = (groups) => {
-    const sig = menuSignature(groups);
-    if (sig === drawn) {
-      pending = null;
-      return;
-    }
-    if (!list.hidden) {
-      pending = groups;
-      return;
-    }
-    drawn = sig;
-    list.replaceChildren(
-      ...groups.flatMap((g) => [
-        ...(g.group
-          ? [h("p", { class: "nx-menu__group", role: "presentation" }, g.group)]
-          : []),
-        ...g.items.map(entry),
-      ]),
-    );
+    /** @type {Map<string, MenuEntry>} */
+    const next = new Map();
+    const kp = groups.map((g, gi) => ({
+      group: g.group,
+      items: g.items.map((it, ii) => {
+        const value = `${gi}.${ii}`;
+        next.set(value, it);
+        return {
+          label: it.label,
+          hint: it.hint,
+          value,
+          ...(it.href ? { href: it.href } : {}),
+          ...(it.download ? { download: it.download } : {}),
+          ...(it.disabled ? { disabled: it.disabled } : {}),
+          ...(it.danger ? { danger: true } : {}),
+          ...(it.attrs ? { attrs: it.attrs } : {}),
+        };
+      }),
+    }));
+    byValue = next;
+    setMenu(wrap, kp);
   };
   fill(spec.groups ?? [{ group: "", items: spec.items ?? [] }]);
+  const isOpen = () => btn.getAttribute("aria-expanded") === "true";
   return {
     el: wrap,
     button: btn,
-    open,
-    close,
-    toggle: () => (list.hidden ? open() : close()),
+    open: () => openMenu(wrap),
+    close: (focus = false) => closeMenu(wrap, { focus }),
+    toggle: () => (isOpen() ? closeMenu(wrap) : openMenu(wrap)),
     fill,
-    stop: () => close(),
+    stop: () => closeMenu(wrap),
   };
 }
 
@@ -2644,7 +2539,7 @@ export function explainNote(key, words) {
     close,
   );
   close.addEventListener("click", () => {
-    el.remove();
+    void leave(el);
     try {
       localStorage.setItem(key, "1");
     } catch {

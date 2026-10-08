@@ -1613,11 +1613,15 @@ test("invariants: every action button's label fits on one line, uncut, on deskto
       for (const path of ["stacks/kp-soft", "host"]) {
         await page.goto(`${BASE}/${path}`);
         await page
-          .locator(".actions-row .kp-button")
+          .locator(":is(.actions-row, .nx-head-actions) .kp-button")
           .first()
           .waitFor({ timeout: 15000 });
         const found = await page.evaluate(() =>
-          [...document.querySelectorAll(".actions-row .kp-button")]
+          [
+            ...document.querySelectorAll(
+              ":is(.actions-row, .nx-head-actions) .kp-button",
+            ),
+          ]
             .filter((b) => /** @type {HTMLElement} */ (b).offsetParent)
             .filter((b) => {
               const el = /** @type {HTMLElement} */ (b);
@@ -2200,7 +2204,7 @@ test("invariants: every red action button belongs to an action the catalog marks
     for (const path of ["host", "stacks/kp-soft"]) {
       await page.goto(`${BASE}/${path}`);
       await page
-        .locator(".actions-row .kp-button")
+        .locator(":is(.actions-row, .nx-head-actions) .kp-button")
         .first()
         .waitFor({ timeout: 15000 });
       const red = await page.evaluate(() =>
@@ -3068,6 +3072,10 @@ test("invariants: the Host page lays out two columns, Containers first, the line
         .locator("#host-guests tr[data-vmid]")
         .first()
         .waitFor({ timeout: 10000 });
+      await page
+        .locator(".hx-kpi:not([data-loading])")
+        .first()
+        .waitFor({ timeout: 10000 });
       const r = await page.evaluate(() => {
         const box = (/** @type {string} */ sel) =>
           document.querySelector(sel)?.getBoundingClientRect() ?? null;
@@ -3108,11 +3116,13 @@ test("invariants: the Host page lays out two columns, Containers first, the line
         "host-connection,host-about-card,host-templates-card,host-checks-card"
       )
         bad.push(`${width}px: right column ${r.side}`);
+      // fix-371-1 (Kenny approved the Host tiles demo 2026-10-04): the
+      // eight figures, each its 15-minute average with a 24 h trend.
       if (
-        r.kpis.join() !== "cpu,memory,root,pool,containers" ||
-        !/7\s*of 8 running/.test(r.kpiText[4])
+        r.kpis.join() !== "cpu,memory,load,disk,diskio,network,temp,swap" ||
+        !r.kpiText.every((t) => /avg 15 min/i.test(t) && /yesterday/.test(t))
       )
-        bad.push(`${width}px: KPI strip ${r.kpis} / ${r.kpiText[4]}`);
+        bad.push(`${width}px: KPI tiles ${r.kpis} / ${r.kpiText[0]}`);
       const labels = r.primary.map((p) => p.label);
       if (
         labels.join("|") !== "Open the console|Host log|Run host checks" ||
@@ -3173,9 +3183,9 @@ test("invariants: the Host page shows every host fact the demo host sends, none 
             .trim();
         return {
           all: text("main") || document.body.textContent || "",
-          pool: text(".nx-kpi[data-key='pool']"),
           promised: text("#host-pool-promised"),
           written: text("#host-pool-written"),
+          free: text("#host-pool-free"),
           disk: text("#host-disk .hk-disk-line"),
           about: text("#host-about"),
           signature: text("#host-daemon-signature"),
@@ -3187,12 +3197,15 @@ test("invariants: the Host page shows every host fact the demo host sends, none 
         bad.push(
           `${width}px: the page still says "not reported": ${r.all.match(/.{0,60}not reported.{0,40}/i)?.[0]}`,
         );
-      if (!/41\s*%/.test(r.pool) || !/460 GB free of 780 GB/.test(r.pool))
-        bad.push(`${width}px: pool KPI "${r.pool}"`);
+      // fix-371-1: the pool has no KPI tile since the eight Host tiles
+      // (Kenny's demo pick); its fill is the Disk card's "written" below
+      // and its free space the Disk card's "free in the pool".
       if (!/412 GB/.test(r.promised))
         bad.push(`${width}px: promised "${r.promised}"`);
       if (!/320 GB · 41%/.test(r.written))
         bad.push(`${width}px: written "${r.written}"`);
+      if (!/460 GB of 780 GB/.test(r.free))
+        bad.push(`${width}px: free in the pool "${r.free}"`);
       if (!/\(932 GB SSD\)/.test(r.disk))
         bad.push(`${width}px: root disk line "${r.disk}"`);
       if (!/Up for ?12 days 3 h/.test(r.about))
@@ -4019,8 +4032,9 @@ test("invariants: Stacks has the host strip, Deploy all changes and New stack; N
       (await page.locator(".sk-kpis .nx-spark").count()) >= 1,
       "Host CPU draws no line",
     );
-    const heads = await page.$$eval(".nx-head .actions-row > button", (bs) =>
-      bs.map((b) => b.textContent?.trim()),
+    const heads = await page.$$eval(
+      ".nx-head .nx-head-actions > button",
+      (bs) => bs.map((b) => b.textContent?.trim()),
     );
     assert.ok(
       heads.some((t) => t?.startsWith("Deploy all changes")),
@@ -4911,7 +4925,7 @@ test("invariants: redesign-kit: a bad attention item is a soft red tint with a r
         ]);
         document.querySelector("main")?.prepend(band.el);
         const item = /** @type {HTMLElement} */ (
-          band.el.querySelector(".nx-attention__item")
+          band.el.querySelector(".kp-attention__item")
         );
         const probe = document.createElement("span");
         probe.style.color = "var(--foreground)";
@@ -7559,7 +7573,7 @@ test("invariants: stack hub — the header keeps Back up · Update · Deploy (pr
       .click({ position: { x: 5, y: 500 }, timeout: 5000 });
     await page.keyboard.press(".");
     const groups = await page
-      .locator(".sh-head .nx-menu:not([hidden]) .nx-menu__group")
+      .locator(".sh-head .nx-menu:not([hidden]) .kp-menu__heading")
       .allTextContents();
     assert.deepEqual(groups, ["Data", "Change", "Pause", "Tools", "Remove"]);
     for (const a of ["restore", "deploy-commit", "resize", "guards", "disable"])
@@ -7569,7 +7583,10 @@ test("invariants: stack hub — the header keeps Back up · Update · Deploy (pr
         `More has no ${a}`,
       );
     await page.keyboard.press("Escape");
-    assert.equal(await page.locator(".sh-head .nx-menu").isHidden(), true);
+    // kp's menu closes as it opened, backwards, then hides.
+    await page
+      .locator(".sh-head .nx-menu")
+      .waitFor({ state: "hidden", timeout: 3000 });
     // redesign-openpoints-3 (the shared ui.js menu): Esc gives the focus
     // back to More, and a click outside closes it.
     assert.equal(
@@ -7584,7 +7601,9 @@ test("invariants: stack hub — the header keeps Back up · Update · Deploy (pr
     await page
       .locator("body")
       .click({ position: { x: 5, y: 500 }, timeout: 5000 });
-    assert.equal(await page.locator(".sh-head .nx-menu").isHidden(), true);
+    await page
+      .locator(".sh-head .nx-menu")
+      .waitFor({ state: "hidden", timeout: 3000 });
     // `b` opens the Back up dialog, as the button does.
     await page.keyboard.press("b");
     const dialog = page.locator("dialog#action-dialog[open]");
@@ -8864,6 +8883,10 @@ const AUDIT_CLASSES = /** @type {const} */ ([
     "grid",
     "an action dialog lays its fields on one grid, labels on one edge, controls on another",
   ],
+  [
+    "uni",
+    "tiles in one strip or board share one height, cards side by side share one height, a card's foot sits at its bottom",
+  ],
 ]);
 
 test("invariants: redesign-final-gen: one walk over every page and action dialog at 1894 and 390 px reports every layout class", async (t) => {
@@ -10014,7 +10037,7 @@ test("invariants: redesign-final-contrast: every banner, badge and chip's text m
           return out;
         };
         const SEL =
-          ".kp-alert, .nx-attention__item, .kp-badge, [class*='badge'], .nx-count, [class*='chip']";
+          ".kp-alert, .kp-attention__item, .kp-badge, [class*='badge'], .nx-count, [class*='chip']";
         /** @type {string[]} */
         const out = [];
         const html = document.documentElement;

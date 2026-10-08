@@ -39,6 +39,11 @@ pub struct OperationReport {
     /// `serde(default)` keeps an older client able to read a newer report.
     #[serde(default)]
     pub deferred: Option<String>,
+    /// fix-371-1: why an operation that finished well did nothing, in one
+    /// line a person reads with its outcome ("0 step(s), 0 changed" said
+    /// nothing). None when it did its work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// Outcome of a step body: did it change anything? (Feeds B1's
@@ -280,7 +285,16 @@ impl<'a> Runner<'a> {
             ok: true,
             error: None,
             deferred: None,
+            note: None,
         }
+    }
+
+    /// fix-371-1: a run that finished well without doing anything, and the
+    /// one line that says why.
+    pub fn finish_noted(self, note: impl Into<String>) -> OperationReport {
+        let mut r = self.finish_ok();
+        r.note = Some(note.into());
+        r
     }
 
     pub fn finish_err(self, step: &str, err: &CoreError) -> OperationReport {
@@ -301,6 +315,7 @@ impl<'a> Runner<'a> {
                 CoreError::Deferred(why) => Some(why.clone()),
                 _ => None,
             },
+            note: None,
         }
     }
 }

@@ -263,6 +263,70 @@ pub fn fleet_traffic_panels(stacks: &[String]) -> Vec<Panel> {
     ]
 }
 
+/// fix-371-1 (Kenny approved the Host tiles demo 2026-10-04:
+/// redesign-3.71/demos-3711/host-kpis.html, captured from these very
+/// queries by its capture.py): the Host page's eight KPI tiles, each one
+/// series of node_exporter on the hypervisor — CPU, memory, load, root
+/// disk, disk traffic, network, CPU temperature and swap — as
+/// `(key, query)`. Percentages are 0..100, traffic is bytes per second
+/// (read plus written; in plus out on the Proxmox bridges), the
+/// temperature is the hottest CPU core; a host without swap reads 0.
+pub fn host_kpi_queries(host: &str) -> Vec<(&'static str, String)> {
+    let h = host.replace('"', "");
+    let hl = format!("host=\"{h}\"");
+    vec![
+        (
+            "cpu",
+            format!("100 * (1 - avg(rate(node_cpu_seconds_total{{{hl},mode=\"idle\"}}[5m])))"),
+        ),
+        (
+            "memory",
+            format!(
+                "100 * (1 - node_memory_MemAvailable_bytes{{{hl}}} / node_memory_MemTotal_bytes{{{hl}}})"
+            ),
+        ),
+        ("load", format!("node_load1{{{hl}}}")),
+        (
+            "disk",
+            format!(
+                "100 * (1 - node_filesystem_avail_bytes{{{hl},mountpoint=\"/\"}} / node_filesystem_size_bytes{{{hl},mountpoint=\"/\"}})"
+            ),
+        ),
+        (
+            "diskio",
+            format!(
+                "sum(rate(node_disk_read_bytes_total{{{hl}}}[5m]) + rate(node_disk_written_bytes_total{{{hl}}}[5m]))"
+            ),
+        ),
+        (
+            "network",
+            format!(
+                "sum(rate(node_network_receive_bytes_total{{{hl},device=~\"vmbr.*\"}}[5m]) + rate(node_network_transmit_bytes_total{{{hl},device=~\"vmbr.*\"}}[5m]))"
+            ),
+        ),
+        (
+            "temp",
+            format!("max(node_hwmon_temp_celsius{{{hl},chip=~\"platform_coretemp.*\"}})"),
+        ),
+        (
+            "swap",
+            format!(
+                "100 * (node_memory_SwapTotal_bytes{{{hl}}} - node_memory_SwapFree_bytes{{{hl}}}) / clamp_min(node_memory_SwapTotal_bytes{{{hl}}}, 1)"
+            ),
+        ),
+    ]
+}
+
+/// One of [`host_kpi_queries`] by its key, for a chart that draws the very
+/// figure a Host tile shows.
+fn kpi_query(host: &str, key: &str) -> String {
+    host_kpi_queries(host)
+        .into_iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, q)| q)
+        .unwrap_or_default()
+}
+
 /// The hypervisor's panels: node_exporter on the host (`host="pve"` in
 /// prometheus.yml's static target is the only host label it sets; `host`
 /// here is that value), and every guest's memory as Proxmox counts it.
@@ -324,6 +388,44 @@ pub fn host_panels(host: &str) -> Vec<Panel> {
             "sum by (id) (pve_memory_usage_bytes{id=~\"lxc/.*\"})".to_string(),
             Unit::Bytes,
             Some("id"),
+        ),
+        p(
+            // fix-371-1: the Host page's Network tile (in + out on the
+            // bridges, host_kpi_queries' "network") lands here; the same
+            // two rates, drawn apart.
+            "Network in and out",
+            "How much traffic the hypervisor's Proxmox bridges receive and \
+             send per second, the two directions the Host page's Network \
+             tile adds up.",
+            format!(
+                "label_replace(sum(rate(node_network_receive_bytes_total{{host=\"{h}\",device=~\"vmbr.*\"}}[5m])), \"direction\", \"in\", \"\", \"\") or label_replace(sum(rate(node_network_transmit_bytes_total{{host=\"{h}\",device=~\"vmbr.*\"}}[5m])), \"direction\", \"out\", \"\", \"\")"
+            ),
+            Unit::Bytes,
+            Some("direction"),
+        ),
+        p(
+            // fix-371-1: the Host page's Swap tile lands here; the very
+            // query the tile reads (host_kpi_queries' "swap").
+            "Swap used",
+            "How much of the hypervisor's swap space is in use; a host \
+             without swap reads 0.",
+            kpi_query(&h, "swap"),
+            Unit::Percent,
+            None,
+        ),
+        p(
+            // fix-371-1: the Host page's Disk traffic tile (read + written,
+            // host_kpi_queries' "diskio") lands here; the same two rates,
+            // drawn apart.
+            "Disk traffic",
+            "How many bytes the hypervisor's disks read and write per \
+             second, the two halves the Host page's Disk traffic tile adds \
+             up.",
+            format!(
+                "label_replace(sum(rate(node_disk_read_bytes_total{{host=\"{h}\"}}[5m])), \"direction\", \"read\", \"\", \"\") or label_replace(sum(rate(node_disk_written_bytes_total{{host=\"{h}\"}}[5m])), \"direction\", \"written\", \"\", \"\")"
+            ),
+            Unit::Bytes,
+            Some("direction"),
         ),
         p(
             // replace-grafana parity (2026-10-01): "Network in per host".
@@ -615,6 +717,28 @@ mod visuals_query_tests {
         assert!(panels[0].query.contains("receive"));
         assert!(panels[1].query.contains("transmit"));
         assert!(panels.iter().all(|p| p.legend.as_deref() == Some("stack")));
+    }
+
+    #[test]
+    fn fix_371_1_the_host_tiles_without_a_chart_get_one() {
+        let panels = host_panels("pve");
+        let by = |t: &str| panels.iter().find(|p| p.title == t).unwrap();
+        let io = by("Disk traffic");
+        assert_eq!(io.legend.as_deref(), Some("direction"));
+        assert!(
+            io.query
+                .contains("node_disk_read_bytes_total{host=\"pve\"}")
+        );
+        assert!(
+            io.query
+                .contains("node_disk_written_bytes_total{host=\"pve\"}")
+        );
+        let net = by("Network in and out");
+        assert_eq!(net.legend.as_deref(), Some("direction"));
+        assert!(net.query.contains("\"in\"") && net.query.contains("\"out\""));
+        let swap = by("Swap used");
+        assert_eq!(swap.query, kpi_query("pve", "swap"));
+        assert!(swap.query.contains("SwapFree"));
     }
 
     #[test]

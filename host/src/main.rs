@@ -3911,6 +3911,7 @@ span_days = 7\n";
                 remedy: "unlock it".into(),
             }),
             deferred: None,
+            note: None,
         };
         notify(
             &state,
@@ -10032,12 +10033,16 @@ where
         RpcResponse {
             id: req_id,
             ok: true,
-            message: format!(
-                "{} complete — {} step(s), {} changed",
-                label,
-                report.steps.len(),
-                report.steps.iter().filter(|s| s.changed).count()
-            ),
+            // fix-371-1: a run that did nothing says why, in one line.
+            message: match &report.note {
+                Some(note) => format!("{} complete — nothing to do: {}", label, note),
+                None => format!(
+                    "{} complete — {} step(s), {} changed",
+                    label,
+                    report.steps.len(),
+                    report.steps.iter().filter(|s| s.changed).count()
+                ),
+            },
             deferred: None,
         }
     } else if let Some(why) = report.deferred.clone() {

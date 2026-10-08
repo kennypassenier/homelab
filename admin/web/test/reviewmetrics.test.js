@@ -131,7 +131,7 @@ test("review finding 5: Metrics and the Map draw with ui.js, no page kit of thei
 });
 
 test("review finding 10: the chart's source, Show all and zoom Reset are declared Live view controls", async () => {
-  await import("../js/timechart.js");
+  await import("../js/charts.js");
   const { control } = await import("../js/drivable.js");
   for (const id of ["chart-source", "chart-show-all", "chart-zoom-reset"])
     assert.ok(control(id), `${id} is not declared`);
@@ -139,10 +139,12 @@ test("review finding 10: the chart's source, Show all and zoom Reset are declare
 });
 
 test("review finding 15: from the sixth source on, a chart's line is dashed", async () => {
-  const tc = await import("../js/timechart.js");
-  const dashOf = /** @type {any} */ (tc).dashOf;
-  assert.equal(typeof dashOf, "function", "timechart.js has no dashOf");
-  for (let i = 0; i < 5; i += 1) assert.equal(dashOf(i), null);
+  // kp-themes' own chart.js owns dashOf now (js/charts.js re-exports it):
+  // 0 = solid for the first five, a dash index (1-3) once the colours come
+  // round again.
+  const { dashOf } = await import("../js/charts.js");
+  assert.equal(typeof dashOf, "function", "charts.js has no dashOf");
+  for (let i = 0; i < 5; i += 1) assert.equal(dashOf(i), 0);
   assert.ok(dashOf(5), "the sixth source repeats colour 1 without a dash");
   assert.notEqual(dashOf(5), dashOf(10));
 });

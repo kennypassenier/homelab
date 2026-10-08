@@ -478,6 +478,91 @@ pub fn body(query: &str, w: &Window, now: u64) -> serde_json::Value {
         };
         return answer("stack", &[shape], w, now);
     }
+    // fix-371-1: Charts' "Disk traffic" and "Network in and out" cards
+    // (charts::host_panels), the Host tiles' two sums drawn apart; asked
+    // before the tiles' own queries, which name the same metrics.
+    if query.contains("\"direction\"") && query.contains("node_disk_read_bytes_total") {
+        return answer(
+            "direction",
+            &[
+                Shape::new("read", 900_000.0)
+                    .base(700_000.0)
+                    .wave(0.4)
+                    .jitter(0.5)
+                    .night(40_000_000.0),
+                Shape::new("written", 1_500_000.0)
+                    .base(1_100_000.0)
+                    .wave(0.4)
+                    .jitter(0.5)
+                    .night(20_000_000.0),
+            ],
+            w,
+            now,
+        );
+    }
+    if query.contains("\"direction\"") && query.contains("node_network_receive_bytes_total") {
+        return answer(
+            "direction",
+            &[
+                Shape::new("in", 120_000.0)
+                    .base(60_000.0)
+                    .wave(0.6)
+                    .jitter(0.5)
+                    .bump(7_560, 2_000_000.0, 600.0),
+                Shape::new("out", 60_000.0)
+                    .base(30_000.0)
+                    .wave(0.6)
+                    .jitter(0.5)
+                    .bump(7_560, 400_000.0, 600.0),
+            ],
+            w,
+            now,
+        );
+    }
+    // fix-371-1: the Host tiles' eight figures (charts::host_kpi_queries),
+    // one series each, ending on what the demo fleet reports where it
+    // reports the same figure (memory 26000 of 65536 MB, root 31 %).
+    let one = |shape: Shape| answer("", &[shape], w, now);
+    if query.contains("node_hwmon_temp_celsius") && query.contains("coretemp") {
+        return one(Shape::new("", 48.0)
+            .base(44.0)
+            .wave(0.05)
+            .jitter(0.03)
+            .night(8.0));
+    }
+    if query.contains("node_memory_SwapFree_bytes") {
+        return one(Shape::new("", 6.0)
+            .base(5.0)
+            .wave(0.1)
+            .jitter(0.02)
+            .night(3.0));
+    }
+    if query.contains("1 - node_memory_MemAvailable_bytes") {
+        return one(Shape::new("", 39.7)
+            .base(37.0)
+            .wave(0.03)
+            .jitter(0.01)
+            .night(5.0));
+    }
+    if query.contains("node_disk_read_bytes_total") {
+        return one(Shape::new("", 2_400_000.0)
+            .base(1_800_000.0)
+            .wave(0.4)
+            .jitter(0.5)
+            .night(60_000_000.0));
+    }
+    if query.contains("node_network_transmit_bytes_total")
+        && query.contains("node_network_receive_bytes_total")
+    {
+        return one(Shape::new("", 180_000.0)
+            .base(90_000.0)
+            .wave(0.6)
+            .jitter(0.5)
+            .bump(7_560, 2_400_000.0, 600.0));
+    }
+    if query.contains("node_filesystem") && query.contains("mountpoint=\"/\"") {
+        return one(Shape::new("", 31.0).per_day(0.03));
+    }
     // The hypervisor's own charts.
     if query.contains("node_hwmon_temp_celsius") {
         return answer(

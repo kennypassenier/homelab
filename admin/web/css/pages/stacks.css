@@ -1,28 +1,5 @@
-/* Phone (DESIGN_LANGUAGE §1.1): the header's actions fold under the
-   description, the primary one full-width; the key row is for keyboards. */
+/* Phone: the key row is for keyboards. */
 @media (max-width: 48rem) {
-  .sk-page .nx-head,
-  .ap-page .nx-head {
-    display: grid;
-  }
-  .sk-page .nx-head .title-row,
-  .ap-page .nx-head .title-row {
-    display: contents;
-  }
-  .sk-page .nx-head .title-row > h1,
-  .ap-page .nx-head .title-row > h1 {
-    order: 1;
-  }
-  .sk-page .nx-head .nx-head-desc,
-  .ap-page .nx-head .nx-head-desc {
-    order: 2;
-  }
-  .sk-page .nx-head .nx-head-right,
-  .ap-page .nx-head .nx-head-right {
-    order: 3;
-    margin-block-start: var(--kp-space-md, 12px);
-    justify-content: flex-start;
-  }
   .sk-page .nx-keys {
     display: none;
   }
@@ -64,25 +41,6 @@ main.shell.ap-page > [hidden] {
   display: none;
 }
 
-/* The header's actions sit in one row against the right edge (the shared
-   `.actions-row` grid stacks them when it is not a title row's own child). */
-.sk-page .nx-head-right > .actions-row,
-.ap-page .nx-head-right > .actions-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
-}
-@media (max-width: 48rem) {
-  .sk-page .nx-head-right,
-  .sk-page .nx-head-right > .actions-row {
-    justify-content: flex-start;
-  }
-  .sk-page .nx-head-right > .actions-row > .kp-button--primary {
-    flex: 1 1 100%;
-  }
-}
 .sk-page .nx-keys code {
   padding: 0 4px;
   border-radius: 4px;
@@ -702,16 +660,49 @@ dialog.nx-drawer.sk-drawer--plan {
 .ap-verdict strong {
   color: var(--foreground);
 }
+/* fix-371-1 (Kenny approved the packed-columns demo 2026-10-04): the
+   board has as many columns as its width allows (home.js sets --ap-cols
+   and --ap-min: 22rem from a 53rem board, 18rem below), each column a
+   stack of whole groups packed by tile count; Starred, a search's groups
+   and the empty and failed states span every column above them. */
 .ap-board {
+  --ap-min: 22rem;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+  grid-template-columns: repeat(var(--ap-cols, 1), minmax(0, 1fr));
   gap: var(--sk-gap);
   align-items: start;
 }
 .ap-board > .ap-grp--wide {
   grid-column: 1 / -1;
 }
-.ap-grp > h2 {
+.ap-pack {
+  display: grid;
+  gap: var(--sk-gap);
+  align-content: start;
+  min-inline-size: 0;
+}
+/* fix-371-1: a group's title row folds the group (a <details>). */
+.ap-grp__title {
+  list-style: none;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.ap-grp__title::-webkit-details-marker {
+  display: none;
+}
+.ap-grp__title:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.ap-grp__chev {
+  display: inline-block;
+  transition: transform 150ms var(--sk-ease);
+}
+.ap-grp[open] > .ap-grp__title .ap-grp__chev {
+  transform: rotate(90deg);
+}
+.ap-grp > h2,
+.ap-grp > .ap-grp__title > h2 {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -725,13 +716,15 @@ dialog.nx-drawer.sk-drawer--plan {
   letter-spacing: 0.06em;
   color: var(--muted-foreground);
 }
+/* A group's tiles are a kp-themes `.kp-tiles` grid, one height across the
+   whole board (`data-kp-tiles-set`, js/tiles.js). A packed column's group
+   is one tile wide; a wide group has as many columns as --ap-min allows. */
 .ap-tiles {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--kp-space-md, 12px);
+  --kp-tile-min: 100%;
+  --kp-tiles-gap: var(--kp-space-md, 12px);
 }
 .ap-grp--wide .ap-tiles {
-  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+  --kp-tile-min: var(--ap-min, 22rem);
   column-gap: var(--sk-gap);
 }
 .ap-tile {
@@ -798,6 +791,22 @@ dialog.nx-drawer.sk-drawer--plan {
   grid-column: 2 / -1;
   font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
+  /* fix-371-1 (uniform tiles): one line, the whole text in its title. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* fix-371-1 (Kenny, 2026-10-04: Jellyfin's tile was taller than
+   Paperless'): when any tile on the board carries live lines, every tile
+   keeps that row, empty or not, so all tiles share one height. */
+.ap-board--lines .ap-tile {
+  grid-template-rows: auto auto auto;
+}
+.ap-board:not(.ap-board--lines) .ap-tile__lines:empty {
+  display: none;
+}
+.ap-board--lines .ap-tile__lines:empty::before {
+  content: "\00a0";
 }
 .ap-tile__pin {
   all: unset;
@@ -881,15 +890,12 @@ dialog.nx-drawer.sk-drawer--plan {
   .ap-launch .nx-keys {
     display: none;
   }
-  .ap-board,
-  .ap-grp--wide .ap-tiles {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .ap-tile,
   .sk-card,
-  .sk-meter > span {
+  .sk-meter > span,
+  .ap-grp__chev {
     transition: none;
   }
   .ap-tile:hover,
@@ -904,16 +910,6 @@ dialog.nx-drawer.sk-drawer--plan {
   align-self: center;
   margin-inline-start: 0;
   font-size: var(--kp-text-sm);
-}
-.sk-page .sk-head .title-row > .nx-head-right,
-.ap-page .sk-head .title-row > .nx-head-right {
-  margin-inline-start: auto;
-}
-@media (max-width: 48rem) {
-  .sk-page .sk-head .title-row > .nx-live,
-  .ap-page .sk-head .title-row > .nx-live {
-    order: 1;
-  }
 }
 
 /* The cards' order: every option shown, the active one pressed. */

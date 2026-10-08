@@ -23,6 +23,7 @@
 
 import { badgeCell, fetchJson, h, tableBlock, td } from "../dom.js";
 import { humanDuration } from "../format.js";
+import { pageHeader } from "../ui.js";
 import { humanMb } from "../fleet.js";
 import { openAction } from "../actiondialog.js";
 import {
@@ -204,12 +205,10 @@ export function mount(root) {
     columns: RETIRED_COLUMNS,
   });
   root.replaceChildren(
-    h("div", { class: "title-row" }, h("h1", null, "Removed stacks")),
-    h(
-      "p",
-      null,
-      "Every stack, app or native unit a destroy, forget or deploy retired: nothing here is deleted on its own. Wipe deletes exactly what one entry kept — its restic repositories, /appdata directories and vault copies — after you type its key to confirm; what a managed stack still uses is kept even then.",
-    ),
+    pageHeader({
+      title: "Removed stacks",
+      desc: "Every stack, app or native unit a destroy, forget or deploy retired: nothing here is deleted on its own. Wipe deletes exactly what one entry kept — its restic repositories, /appdata directories and vault copies — after you type its key to confirm; what a managed stack still uses is kept even then.",
+    }).el,
     table.wrap,
   );
   const detach = attachDataTables(root);

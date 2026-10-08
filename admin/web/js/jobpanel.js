@@ -72,6 +72,11 @@ export function mountJobPanel(jobId, opts = {}) {
     role: "log",
     "aria-live": "polite",
     "aria-label": "The host's lines for this job",
+    // A log streams: a line is appended, never news of its own. Each line
+    // unfolding the theme's way moved the follow-the-tail scroll and the
+    // dialog's height with it on every line (fix-261's dialog that must
+    // never resize while lines arrive); the box's own size glide stays.
+    "data-kp-arrive": "none",
   });
   const logCount = h("span", { class: "measured" });
   const element = h(

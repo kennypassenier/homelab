@@ -160,7 +160,14 @@ export { goPlan } from "../applyplan.js";
 function skeleton() {
   return h(
     "div",
-    { class: "ap-body apply-grid--skeleton", "aria-hidden": "true" },
+    // `data-kp-skeleton`: the plan that replaces it is the data it waited
+    // for, not news (kp-themes motion.js): it is drawn at once rather than
+    // unfolding piece by piece for a second after the read lands.
+    {
+      class: "ap-body apply-grid--skeleton",
+      "aria-hidden": "true",
+      "data-kp-skeleton": "",
+    },
     h(
       "div",
       { class: "ap-counts" },
@@ -837,7 +844,7 @@ export function mount(root, opts = {}) {
     go.replaceChildren(
       h(
         "p",
-        { class: "ap-hint" },
+        { class: "ap-hint", "data-kp-skeleton": "" },
         "Reading every stack (latch is asked for the secrets the host's hash covers)…",
       ),
     );

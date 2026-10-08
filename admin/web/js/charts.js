@@ -228,6 +228,13 @@ export function zoomChip() {
  */
 export function timeChart(host, opt) {
   host.setAttribute("data-kp-chart", "");
+  // The chart's own parts (its plot, tooltip, legend, note) are the chart
+  // drawing itself, never news arriving in the card around it: without this
+  // main.js's attachMotion let every plot fold in as the theme's leave
+  // turned around, one card after the other, on every 30 s repaint, and a
+  // plot read in that time stood at scaleY(0) (fix-253's lone reading had
+  // no visible point for over a second).
+  host.setAttribute("data-kp-arrive", "none");
   setChartData(host, toKpData(opt));
   if (opt.onSelect)
     host.addEventListener(CHART_SELECT_EVENT, (e) =>

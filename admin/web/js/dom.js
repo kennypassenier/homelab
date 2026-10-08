@@ -620,10 +620,16 @@ export function patchKeyed(
   next,
   keyOf = (el) => el.getAttribute("data-kp-row-key"),
 ) {
+  // A row that still arrives carries `data-kp-leaving` as well (kp's
+  // arrival is its leave played backwards, `data-kp-arriving` beside it):
+  // it is a live row, and treating it as leaving left it in place next to
+  // its own repaint (two Setup rows in the Inbox, both `#setup-noenv`).
+  const leavingNow = (/** @type {Element} */ c) =>
+    c.hasAttribute("data-kp-leaving") && !c.hasAttribute("data-kp-arriving");
   /** @type {Map<string, Element>} */
   const old = new Map();
   for (const c of [...list.children]) {
-    if (c.hasAttribute("data-kp-leaving")) continue;
+    if (leavingNow(c)) continue;
     const k = keyOf(c);
     if (k == null || old.has(k)) c.remove();
     else old.set(k, c);
@@ -633,10 +639,7 @@ export function patchKeyed(
   const leaving = new Set(gone);
   let cursor = list.firstElementChild;
   const skip = () => {
-    while (
-      cursor &&
-      (leaving.has(cursor) || cursor.hasAttribute("data-kp-leaving"))
-    )
+    while (cursor && (leaving.has(cursor) || leavingNow(cursor)))
       cursor = cursor.nextElementSibling;
   };
   for (const n of next) {

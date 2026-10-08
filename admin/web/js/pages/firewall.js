@@ -1076,7 +1076,13 @@ export function mount(root) {
         // own width), never a table scrolling sideways inside its card.
         h(
           "div",
-          { class: "kp-table-wrap cf-table-wrap" },
+          {
+            class: "kp-table-wrap cf-table-wrap",
+            // kp's tables.js makes this scroll box a keyboard region; its
+            // name says which rules it holds, not kp's generic "Table".
+            "data-kp-region-label":
+              dir === "in" ? "Inbound rules" : "Outbound rules",
+          },
           h(
             "table",
             { class: "kp-table fw-rules", "data-kp-cards": "" },

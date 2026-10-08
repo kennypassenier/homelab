@@ -474,10 +474,17 @@ export function pageChecks() {
       // The freshness after the title (redesign-final X1) and the chips
       // beside it (pageHeader titleMeta) are no controls; since kp-themes
       // 9.2.0's page header the actions sit outside the title row.
+      // A title's own identity (the stack hub's mark before the name, its
+      // state word after it) is no control either: only what can be used
+      // counts (kp-themes 10's page header keeps the actions in
+      // `.kp-page-header__actions`, outside the row).
+      const CONTROL =
+        "button, a[href], input, select, textarea, summary, [role=button], [tabindex]:not([tabindex='-1'])";
       const kids = [...r.children].filter(
         (c) =>
           /** @type {HTMLElement} */ (c).offsetParent &&
-          !c.matches(":is(h1, h2), .nx-live, .nx-head-titlemeta"),
+          !c.matches(":is(h1, h2), .nx-live, .nx-head-titlemeta") &&
+          (c.matches(CONTROL) || !!c.querySelector(CONTROL)),
       );
       if (!kids.length) continue;
       const short = Math.round(

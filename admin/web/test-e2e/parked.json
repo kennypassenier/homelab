@@ -8,12 +8,6 @@
       "note": "parked by Kenny 2026-10-04 for 3.71.1"
     },
     {
-      "class": "descgap",
-      "finding": "red on base fe2940ba: at 390 px a page's description sits a section gap below its title",
-      "date": "2026-10-04",
-      "note": "parked by Kenny 2026-10-04 for 3.71.1"
-    },
-    {
       "class": "mono",
       "finding": "red on base fe2940ba: /map draws /mnt/pve-backup in monospace at 11.7 px, smaller than its row",
       "date": "2026-10-04",

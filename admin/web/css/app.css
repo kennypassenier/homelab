@@ -863,6 +863,11 @@ p:has(> .measured:only-child):first-child {
      a minimum the log grew with every line and the dialog with it (650 →
      968 px for a long deploy). The log is the one region that scrolls. */
   block-size: min(60vh, 30rem);
+  /* kp's size glide (motion.js `glide`) measures and animates a box as
+     border-box; a content-box card with a fixed block-size read 34 px
+     taller after each glide than during it, so it glided again on every
+     change and the dialog around it pulsed while lines arrived. */
+  box-sizing: border-box;
 }
 .job-panel--compact .job-log-wrap {
   display: flex;
@@ -902,6 +907,9 @@ p:has(> .measured:only-child):first-child {
   max-block-size: 18rem;
   overflow: auto;
   overflow-wrap: anywhere;
+  /* The floor is room, not spacing: kp's log is a grid, and its rows
+     stretched to share the ten-line floor (five lines stood 38 px apart). */
+  align-content: start;
 }
 .job-log-wrap summary {
   cursor: pointer;

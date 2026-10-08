@@ -355,10 +355,12 @@ cmd_node() {
 # serves it, drives the suite, tears it down). It depends on both admin/web
 # (the pages it drives) and admin/src (the demo host and driver it drives
 # against), so it tracks both — unlike the node family above, which only
-# cares about admin/web. No sub-test carry (it is Kenny's "one short smoke
-# per milestone", not a suite worth rerunning piecemeal): full run or
-# skipped, same shape as rust/node's own full path, just without the
-# failing-test bookkeeping.
+# cares about admin/web. A red run records its failing cases by name, and
+# the next run reruns only those (Kenny, 2026-10-09, the 3.73.0 release:
+# "we doen toch enkel die rooie opnieuw he?" — standing rule 7: tests run
+# once per release, then only the failures are rerun). A run that has no
+# names to go by (no earlier run, a toolchain change, GATE_CARRY_MODE=full,
+# a red run whose cases could not be read) runs the whole smoke.
 cmd_invariants() {
   local state="$gitdir/gate-carry/invariants"
   mkdir -p "$state"
@@ -399,13 +401,33 @@ cmd_invariants() {
     if [ -n "$changed" ]; then why="admin/web, admin/src or the smoke script changed since $(git rev-parse --short "$base")"
     else why="the last smoke failed — rerun"; fi
   fi
-  echo "gate-carry: invariants smoke run — $why"
-  local rc=0
-  "$root"/scripts/invariants-run.sh || rc=$?
+  # The cases the last red run named, as one anchored name pattern.
+  local only=""
+  if [ -z "${reason:-}" ] && grep -q $'^invariants\t' "$old_fail" 2>/dev/null; then
+    only=$(cut -f2- "$old_fail" | sed -e 's/[][\\.*+?^${}()|/]/\\&/g' | paste -sd'|')
+    only="^(${only})\$"
+  fi
+  local rc=0 kind=full
+  if [ -n "$only" ]; then
+    kind="carry:$(git rev-parse --short "$base")"
+    echo "gate-carry: invariants smoke carried — rerunning the $(grep -c $'^invariants\t' "$old_fail") case(s) the last run failed"
+    INVARIANTS_ONLY="$only" "$root"/scripts/invariants-run.sh > >(tee "$workdir/out.txt") 2>&1 || rc=$?
+  else
+    echo "gate-carry: invariants smoke run — $why"
+    "$root"/scripts/invariants-run.sh > >(tee "$workdir/out.txt") 2>&1 || rc=$?
+  fi
   : > "$workdir/failing.tsv"
-  [ "$rc" = 0 ] || echo "invariants-smoke" > "$workdir/failing.tsv"
-  record_state invariants "$(current_tree)" "$cur_tc" "$workdir/failing.tsv" full
-  { echo "full run, $(date -Iseconds)"; echo "reason: $why"; } > "$state/last-run.txt"
+  if [ "$rc" != 0 ]; then
+    # node's summary: the cases under "failing tests:", one "✖ name (N ms)" each.
+    sed -n '/^✖ failing tests:/,$p' "$workdir/out.txt" | sed -n 's/^✖ \(.*\) ([0-9.]*ms)$/invariants\t\1/p' | sort -u > "$workdir/failing.tsv"
+    [ -s "$workdir/failing.tsv" ] || echo "invariants-smoke" > "$workdir/failing.tsv"
+  fi
+  record_state invariants "$(current_tree)" "$cur_tc" "$workdir/failing.tsv" "$kind"
+  if [ -n "$only" ]; then
+    { echo "carried run, $(date -Iseconds)"; echo "base: $base"; echo "reran: the $(echo "$only" | tr '|' '\n' | wc -l) case(s) the last run failed"; } > "$state/last-run.txt"
+  else
+    { echo "full run, $(date -Iseconds)"; echo "reason: $why"; } > "$state/last-run.txt"
+  fi
   return "$rc"
 }
 

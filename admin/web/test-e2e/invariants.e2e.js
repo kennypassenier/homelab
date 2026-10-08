@@ -1218,13 +1218,15 @@ test("invariants: no /charts series label matches a raw-id pattern and every cha
     // redesign-371-metrics: each chart is a card (`.mk-card`) drawing the
     // shared time chart; its sources are the legend's items, the drives
     // the Drives table's first column.
-    await page.waitForSelector(".mk-card .tc-plot svg", { timeout: 8000 });
+    await page.waitForSelector(".mk-card .kp-chart__plot svg", {
+      timeout: 8000,
+    });
     await page.waitForTimeout(300);
     const found = await page.evaluate(() => {
       /** @type {string[]} */
       const labels = [];
       for (const li of document.querySelectorAll(
-        ".tc-legend__item > span, .tc-tip__row > span:nth-child(2)",
+        ".kp-chart__source-label, .kp-chart__tip-row > span:nth-child(2)",
       ))
         labels.push(li.textContent ?? "");
       for (const td of document.querySelectorAll(
@@ -1296,7 +1298,7 @@ test("invariants: the Drive health panel draws a status table naming each drive'
       `expected at least 2 drives, got: ${JSON.stringify(rows)}`,
     );
     assert.equal(
-      await page.locator('[data-key="drives"] .tc-plot').count(),
+      await page.locator('[data-key="drives"] .kp-chart__plot').count(),
       0,
       "drive health must never be drawn as lines",
     );
@@ -1894,7 +1896,29 @@ test("invariants: a running job's log scrolls inside its dialog and never makes 
     const log = page.locator("#action-dialog .job-log").first();
     await log.waitFor({ timeout: 5000 });
     const dialog = page.locator("#action-dialog");
-    const before = await dialog.boundingBox();
+    // kp-themes 10: the dialog glides from its confirm form to the running
+    // job's panel (motion.js size glide); "before" is the size it settles
+    // at with the log on screen, not a frame of that glide.
+    await page.waitForFunction(
+      () => {
+        const d = document.querySelector("#action-dialog");
+        return (
+          d instanceof HTMLElement &&
+          !d.hasAttribute("data-kp-resizing") &&
+          !d.querySelector("[data-kp-resizing]")
+        );
+      },
+      null,
+      { timeout: 5000 },
+    );
+    let before = await dialog.boundingBox();
+    for (let i = 0; i < 20; i += 1) {
+      await page.waitForTimeout(250);
+      const now = await dialog.boundingBox();
+      if (now && before && Math.round(now.height) === Math.round(before.height))
+        break;
+      before = now;
+    }
     assert.ok(before, "the dialog is not on screen");
     // A long deploy prints hundreds of lines; append them the way the
     // panel does (one element per line) and measure again.
@@ -2028,7 +2052,7 @@ test("invariants: every chart and timeline axis label renders at 11 px or more o
     for (const path of ["charts", "charts?tab=traffic", "timeline"]) {
       await page.goto(`${BASE}/${path}`);
       await page
-        .waitForSelector(".tc-plot svg text, .timeline svg text", {
+        .waitForSelector(".kp-chart__plot svg text, .timeline svg text", {
           timeout: 8000,
         })
         .catch(() => {});
@@ -2037,7 +2061,7 @@ test("invariants: every chart and timeline axis label renders at 11 px or more o
         const out = [];
         let n = 0;
         for (const t of document.querySelectorAll(
-          ".tc-plot svg text, .timeline svg text",
+          ".kp-chart__plot svg text, .timeline svg text",
         )) {
           const svg = /** @type {SVGSVGElement | null} */ (t.closest("svg"));
           if (!svg) continue;
@@ -2080,17 +2104,19 @@ test("invariants: a chart with one reading per series shows a visible point and 
       await route.fulfill({ response: r, json: body });
     });
     // redesign-371-metrics: each card draws the shared time chart; its y
-    // ticks are the end-anchored `.tc-tick`s, a lone reading a `.tc-point`.
+    // ticks are the end-anchored `.kp-chart__tick`s, a lone reading a `.kp-chart__point`.
     await page.goto(`${BASE}/charts`);
-    await page.waitForSelector(".mk-card .tc-plot svg", { timeout: 8000 });
+    await page.waitForSelector(".mk-card .kp-chart__plot svg", {
+      timeout: 8000,
+    });
     await page.waitForTimeout(300);
     const charts = await page.evaluate(() =>
       [...document.querySelectorAll(".mk-card")]
-        .filter((f) => f.querySelector(".tc-plot svg"))
+        .filter((f) => f.querySelector(".kp-chart__plot svg"))
         .map((f) => ({
           title: f.querySelector(".nx-card__head > h3")?.textContent ?? "",
-          series: Math.max(1, f.querySelectorAll(".tc-legend__item").length),
-          points: [...f.querySelectorAll(".tc-point")].filter((c) => {
+          series: Math.max(1, f.querySelectorAll(".kp-chart__source").length),
+          points: [...f.querySelectorAll(".kp-chart__point")].filter((c) => {
             const r = c.getBoundingClientRect();
             return r.width >= 4 && r.height >= 4;
           }).length,
@@ -2107,18 +2133,22 @@ test("invariants: a chart with one reading per series shows a visible point and 
         [...document.querySelectorAll(".mk-card")]
           .map((f) => ({
             title: f.querySelector(".nx-card__head > h3")?.textContent ?? "",
-            ticks: [...f.querySelectorAll('.tc-tick[text-anchor="end"]')].map(
-              (t) => t.textContent ?? "",
-            ),
+            ticks: [
+              ...f.querySelectorAll('.kp-chart__tick[text-anchor="end"]'),
+            ].map((t) => t.textContent ?? ""),
           }))
           .filter((c) => new Set(c.ticks).size !== c.ticks.length),
       );
     const dupOne = await dupAt();
     await page.unroute("**/data/charts*");
     await page.goto(`${BASE}/charts`);
-    await page.waitForSelector(".mk-card .tc-plot svg", { timeout: 8000 });
+    await page.waitForSelector(".mk-card .kp-chart__plot svg", {
+      timeout: 8000,
+    });
     await page.waitForTimeout(300);
-    const yTicks = await page.locator('.tc-tick[text-anchor="end"]').count();
+    const yTicks = await page
+      .locator('.kp-chart__tick[text-anchor="end"]')
+      .count();
     assert.ok(yTicks > 0, "no y tick labels found");
     const dupMany = await dupAt();
     assert.deepEqual(
@@ -3501,6 +3531,18 @@ test("invariants: every Inbox row says what and why and carries its fix, and a p
       // The kit (redesign-kit-1) marks a chip with data-v.
       const chip = page.locator("#page .nx-tb button[data-v=setup]");
       await chip.click();
+      // kp-themes 10: the other rows leave the theme's way (dom.js
+      // patchKeyed); the count is read once their exit is over.
+      await page
+        .waitForFunction(
+          () =>
+            !document.querySelector(
+              "#page .inbox-card .nx-inbox__row[data-kp-leaving]",
+            ),
+          null,
+          { timeout: 5000 },
+        )
+        .catch(() => {});
       assert.equal(
         await page.locator("#page .inbox-card .nx-inbox__row:visible").count(),
         1,
@@ -3917,15 +3959,17 @@ test("invariants: Stacks keeps its ticks across Table/Cards and live updates, th
       const tr = document.querySelector(`.sk-table tr[data-stack="${n}"]`);
       if (tr) /** @type {any} */ (tr).__kept = true;
     }, two[0]);
+    // kp-themes 10's freshness line (ago.js) carries its moment in
+    // `datetime`, not the old `data-ago-at`.
     const at0 = await page.getAttribute(
-      ".sk-head [data-ago-at]",
-      "data-ago-at",
+      ".sk-head [data-kp-ago][datetime]",
+      "datetime",
     );
     await page.waitForFunction(
       (a) =>
         document
-          .querySelector(".sk-head [data-ago-at]")
-          ?.getAttribute("data-ago-at") !== a,
+          .querySelector(".sk-head [data-kp-ago][datetime]")
+          ?.getAttribute("datetime") !== a,
       at0,
       { timeout: 15000 },
     );
@@ -3958,6 +4002,19 @@ test("invariants: Stacks keeps its ticks across Table/Cards and live updates, th
       (await chip.locator(".nx-chip-toggle__count").innerText()).trim(),
     );
     await chip.click();
+    // kp-themes 10: the rows the chip leaves out leave the theme's way, one
+    // after another (dom.js patchKeyed); the rows are counted once none is
+    // still leaving.
+    await page
+      .waitForFunction(
+        () =>
+          !document.querySelector(
+            ".sk-table tbody tr[data-stack][data-kp-leaving]:not([data-kp-arriving])",
+          ),
+        null,
+        { timeout: 5000 },
+      )
+      .catch(() => {});
     const shown = await page.locator(".sk-table tbody tr[data-stack]").count();
     assert.equal(shown, want, "the chip's count is not the rows it shows");
     assert.ok(
@@ -4277,8 +4334,16 @@ test("invariants: Apps groups the stacks' tiles, each opening in a new tab; the 
       shown.every((s) => s.target === "_blank"),
       "a tile does not open in a new tab",
     );
-    const groups = await page.$$eval(".ap-grp > h2", (hs) =>
-      hs.map((x) => x.firstChild?.textContent?.trim()),
+    // fix-371-1: a group is a fold (`<details>`), its label the summary's
+    // h2 behind the chevron; the label is the h2's own text node.
+    const groups = await page.$$eval(".ap-grp > summary > h2", (hs) =>
+      hs.map((x) =>
+        [...x.childNodes]
+          .filter((n) => n.nodeType === Node.TEXT_NODE)
+          .map((n) => n.textContent ?? "")
+          .join("")
+          .trim(),
+      ),
     );
     assert.deepEqual(
       groups,
@@ -6264,7 +6329,9 @@ test("invariants: the Metrics page is laid out as the approved demo, every chart
     await page.goto(`${BASE}/charts`);
     // Loading shows in the final geometry from the first frame.
     await page.waitForSelector(".nx-kpis .nx-kpi", { timeout: 8000 });
-    await page.waitForSelector(".mk-card .tc-plot svg", { timeout: 10000 });
+    await page.waitForSelector(".mk-card .kp-chart__plot svg", {
+      timeout: 10000,
+    });
     await page.waitForTimeout(400);
     const got = await page.evaluate(() => ({
       chip: document.querySelector(".nx-head-meta .nx-chip")?.textContent,
@@ -6288,8 +6355,8 @@ test("invariants: the Metrics page is laid out as the approved demo, every chart
       sections: [...document.querySelectorAll(".mk-section__head h2")].map(
         (x) => x.textContent,
       ),
-      charts: document.querySelectorAll(".mk-card .tc-plot svg").length,
-      marks: document.querySelectorAll(".mk-card .tc-mark").length,
+      charts: document.querySelectorAll(".mk-card .kp-chart__plot svg").length,
+      marks: document.querySelectorAll(".mk-card .kp-chart__mark").length,
       window: document.querySelector(".mk-window")?.textContent ?? "",
     }));
     assert.match(got.chip ?? "", /Live · reads every 30 s/);
@@ -6323,14 +6390,14 @@ test("invariants: a plain click on a Metrics chart source turns it on or off, se
     const page = await freshPage(context);
     await page.goto(`${BASE}/charts`);
     const card = page.locator('[data-key="net"]');
-    await card.locator(".tc-legend__item").nth(2).waitFor({ timeout: 10000 });
-    const items = card.locator(".tc-legend__item");
+    await card.locator(".kp-chart__source").nth(2).waitFor({ timeout: 10000 });
+    const items = card.locator(".kp-chart__source");
     const state = () =>
       items.evaluateAll((els) =>
         els.map((e) =>
           e.getAttribute("aria-pressed") === "true"
             ? "on"
-            : e.hasAttribute("data-off")
+            : e.hasAttribute("data-kp-off")
               ? "off"
               : "all",
         ),
@@ -6343,11 +6410,11 @@ test("invariants: a plain click on a Metrics chart source turns it on or off, se
     assert.deepEqual(await state(), ["on", "on", "off"]);
     await items.nth(0).click();
     assert.deepEqual(await state(), ["off", "on", "off"]);
-    await card.locator(".tc-legend__reset").click();
+    await card.locator(".kp-chart__show-all").click();
     assert.deepEqual(await state(), ["all", "all", "all"]);
     // Esc on the chart resets it too.
     await items.nth(2).click();
-    await card.locator(".tc-plot").focus();
+    await card.locator(".kp-chart__plot").focus();
     await page.keyboard.press("Escape");
     assert.deepEqual(await state(), ["all", "all", "all"]);
   } finally {
@@ -6363,7 +6430,7 @@ test("invariants: hovering a Metrics chart shows the reading and the change over
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/charts`);
-    const plot = page.locator('[data-key="cpu"] .tc-plot');
+    const plot = page.locator('[data-key="cpu"] .kp-chart__plot');
     await plot.locator("svg").waitFor({ timeout: 10000 });
     await plot.scrollIntoViewIfNeeded();
     await page.waitForTimeout(300);
@@ -6372,7 +6439,7 @@ test("invariants: hovering a Metrics chart shows the reading and the change over
     await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
     await page.waitForTimeout(100);
     const tip = await page
-      .locator('[data-key="cpu"] .tc-tip')
+      .locator('[data-key="cpu"] .kp-chart__tip')
       .evaluate((t) => ({
         hidden: /** @type {HTMLElement} */ (t).hidden,
         text: t.textContent ?? "",
@@ -6381,8 +6448,8 @@ test("invariants: hovering a Metrics chart shows the reading and the change over
     assert.match(tip.text, /change over the hour before/);
     assert.match(tip.text, /[▲▼]|±0/);
     const synced = await page.evaluate(() => ({
-      charts: document.querySelectorAll(".mk-card .tc-plot svg").length,
-      lines: document.querySelectorAll(".mk-card .tc-xhair").length,
+      charts: document.querySelectorAll(".mk-card .kp-chart__plot svg").length,
+      lines: document.querySelectorAll(".mk-card .kp-chart__crosshair").length,
     }));
     assert.equal(
       synced.lines,
@@ -6391,7 +6458,7 @@ test("invariants: hovering a Metrics chart shows the reading and the change over
     );
     const ticks = () =>
       page
-        .locator('[data-key="mem"] .tc-tick[text-anchor="middle"]')
+        .locator('[data-key="mem"] .kp-chart__tick[text-anchor="middle"]')
         .allTextContents();
     const before = await ticks();
     await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5);
@@ -6400,7 +6467,7 @@ test("invariants: hovering a Metrics chart shows the reading and the change over
       steps: 6,
     });
     await page.mouse.up();
-    const chip = page.locator(".mk-toolbar .tc-zoom");
+    const chip = page.locator(".mk-toolbar .kp-chart-zoom");
     await chip.waitFor({ state: "visible", timeout: 3000 });
     assert.match((await chip.textContent()) ?? "", /Zoomed/);
     assert.notDeepEqual(await ticks(), before, "the other charts did not zoom");
@@ -6440,10 +6507,10 @@ test("invariants: the Traffic tab stacks requests by status class, and a plain c
         .textContent()) ?? "";
     assert.match(req, /^\d{1,3}(,\d{3})*$/);
     const classes = await page
-      .locator('[data-key="requests"] .tc-legend__item > span')
+      .locator('[data-key="requests"] .kp-chart__source-label')
       .allTextContents();
     assert.deepEqual(classes, ["2xx", "3xx", "4xx", "5xx"]);
-    const legend = page.locator('[data-key="perhost"] .tc-legend__item');
+    const legend = page.locator('[data-key="perhost"] .kp-chart__source');
     const row = page.locator('[data-key="hostnames"] tbody tr').first();
     const name = ((await row.locator("td").first().textContent()) ?? "").trim();
     const labels = await legend.locator("span").allTextContents();
@@ -6526,6 +6593,13 @@ test("invariants: the Map is laid out as the approved demo, and a plain click on
     await page.locator(".mp-list tbody tr").first().waitFor({ timeout: 3000 });
     assert.equal(await page.locator(".mp-topo").isVisible(), false);
     await seg.filter({ hasText: "Graph" }).click();
+    // kp-themes 10: the graph comes back the theme's way (motion.js: a
+    // shown element arrives, folding open from nothing), so it is on
+    // screen once that arrival has begun, not in the same frame.
+    await page
+      .locator(".mp-topo")
+      .waitFor({ state: "visible", timeout: 3000 })
+      .catch(() => {});
     assert.equal(await page.locator(".mp-topo").isVisible(), true);
   } finally {
     await browser.close();
@@ -6695,7 +6769,7 @@ test("invariants: review metrics — hostname rows follow the chart (Esc and Sho
     await page.setViewportSize({ width: 1894, height: 1000 });
     await page.goto(`${BASE}/charts?tab=traffic`);
     await page.waitForSelector("#chart-hostnames tbody tr");
-    await page.waitForSelector("#chart-perhost .tc-legend__item");
+    await page.waitForSelector("#chart-perhost .kp-chart__source");
     await page.mouse.move(0, 0);
     // The legend's total and the table's Requests are one number.
     const pairs = await page.evaluate(() => {
@@ -6708,10 +6782,10 @@ test("invariants: review metrics — hostname rows follow the chart (Esc and Sho
         ),
       );
       return [
-        ...document.querySelectorAll("#chart-perhost .tc-legend__item"),
+        ...document.querySelectorAll("#chart-perhost .kp-chart__source"),
       ].map((b) => ({
         host: b.querySelector("span")?.textContent,
-        legend: b.querySelector(".tc-num")?.textContent?.trim(),
+        legend: b.querySelector(".kp-chart__value")?.textContent?.trim(),
         table: table.get(b.querySelector("span")?.textContent ?? ""),
         drive: /** @type {HTMLElement} */ (b).dataset.drive,
         row: /** @type {HTMLElement} */ (b).dataset.driveRow,
@@ -6728,20 +6802,29 @@ test("invariants: review metrics — hostname rows follow the chart (Esc and Sho
     }
     assert.equal(
       await page
-        .locator("#chart-perhost .tc-legend__reset")
+        .locator("#chart-perhost .kp-chart__show-all")
         .getAttribute("data-drive"),
       "chart-show-all",
     );
     assert.equal(
-      await page.locator(".tc-zoom__reset").first().getAttribute("data-drive"),
+      await page
+        .locator(".kp-chart-zoom__reset")
+        .first()
+        .getAttribute("data-drive"),
       "chart-zoom-reset",
     );
-    // The sixth source's line is dashed, the first five are not.
+    // The sixth source's line is dashed, the first five are not (kp draws
+    // the dash in CSS, from the series' data-kp-dash: read what renders).
     const dashes = await page
-      .locator("#chart-perhost .tc-line")
-      .evaluateAll((els) => els.map((e) => e.getAttribute("stroke-dasharray")));
-    assert.deepEqual(dashes.slice(0, 5), Array(5).fill(null));
-    assert.ok(dashes[5], "the sixth line repeats colour 1 undashed");
+      .locator("#chart-perhost .kp-chart__line")
+      .evaluateAll((els) =>
+        els.map((e) => getComputedStyle(e).strokeDasharray),
+      );
+    assert.deepEqual(dashes.slice(0, 5), Array(5).fill("none"));
+    assert.ok(
+      dashes[5] && dashes[5] !== "none",
+      "the sixth line repeats colour 1 undashed",
+    );
     // A plain click on a row turns it on; Esc on the chart clears it.
     const row = page.locator("#chart-hostnames tbody tr").first();
     const state = async () =>
@@ -6751,12 +6834,12 @@ test("invariants: review metrics — hostname rows follow the chart (Esc and Sho
       ]);
     await row.click();
     assert.deepEqual(await state(), [true, "true"], "the click did not take");
-    await page.locator("#chart-perhost .tc-plot").focus();
+    await page.locator("#chart-perhost .kp-chart__plot").focus();
     await page.keyboard.press("Escape");
     assert.deepEqual(await state(), [false, "false"], "Esc left the row on");
     await row.click();
     assert.deepEqual(await state(), [true, "true"]);
-    await page.locator("#chart-perhost .tc-legend__reset").click();
+    await page.locator("#chart-perhost .kp-chart__show-all").click();
     assert.deepEqual(await state(), [false, "false"], "Show all left it on");
   } finally {
     await browser.close();
@@ -6771,11 +6854,11 @@ test("invariants: review metrics — a pointer resting on a chart keeps that cha
     await page.clock.install();
     await page.setViewportSize({ width: 1894, height: 1000 });
     await page.goto(`${BASE}/charts`);
-    await page.waitForSelector("#chart-cpu .tc-plot");
-    await page.locator("#chart-cpu .tc-plot").hover();
+    await page.waitForSelector("#chart-cpu .kp-chart__plot");
+    await page.locator("#chart-cpu .kp-chart__plot").hover();
     await page.evaluate(() => {
       /** @type {any} */ (window).__plot = document.querySelector(
-        "#chart-cpu .tc-plot",
+        "#chart-cpu .kp-chart__plot",
       );
     });
     await page.clock.runFor(31_000);
@@ -6784,7 +6867,7 @@ test("invariants: review metrics — a pointer resting on a chart keeps that cha
       await page.evaluate(
         () =>
           /** @type {any} */ (window).__plot ===
-          document.querySelector("#chart-cpu .tc-plot"),
+          document.querySelector("#chart-cpu .kp-chart__plot"),
       ),
       "the refresh replaced the chart under the pointer",
     );
@@ -6807,7 +6890,7 @@ test("invariants: review metrics — the wording is the demo's, Connections is g
       ].map((e) => e.textContent?.trim()),
       foot: document.querySelector("#chart-drives .nx-card__foot")?.textContent,
       ct: [
-        ...document.querySelectorAll("#chart-ctmem .tc-legend__item > span"),
+        ...document.querySelectorAll("#chart-ctmem .kp-chart__source-label"),
       ].map((e) => e.textContent),
     }));
     assert.deepEqual(sys.back, ["Back up devices now"]);
@@ -6840,15 +6923,21 @@ test("invariants: review metrics — the wording is the demo's, Connections is g
     });
     const t = await freshPage(touch);
     await t.goto(`${BASE}/charts`);
-    await t.waitForSelector(".tc-legend__hint");
+    // kp hides a one-source chart's hint (nothing to single out): wait
+    // for a chart that has one.
+    await t.waitForSelector(".kp-chart__hint:not([hidden])");
     const hints = await t.evaluate(() => ({
       hover: matchMedia("(hover: none)").matches,
       pointer: [
-        ...document.querySelectorAll(".tc-hint--pointer, .mk-pointer-only"),
+        ...document.querySelectorAll(
+          ".kp-chart__hint > [data-kp-when='pointer'], .mk-pointer-only",
+        ),
       ].some((e) => /** @type {HTMLElement} */ (e).checkVisibility()),
-      touch: [...document.querySelectorAll(".tc-hint--touch")].some((e) =>
-        /** @type {HTMLElement} */ (e).checkVisibility(),
-      ),
+      touch: [
+        ...document.querySelectorAll(
+          ".kp-chart__hint > [data-kp-when='touch']",
+        ),
+      ].some((e) => /** @type {HTMLElement} */ (e).checkVisibility()),
       keys: [...document.querySelectorAll(".mk-page .nx-keys")].some((e) =>
         /** @type {HTMLElement} */ (e).checkVisibility(),
       ),
@@ -7246,6 +7335,10 @@ test("invariants: redesign-config every control Firewall, Settings and Presets d
             .filter(
               (e) => !e.closest("[data-kp-datatable], .nx-crumbs, .nx-tip"),
             )
+            // kp-themes 10 (tables.js): a table's scroll box is a named
+            // region in the tab order so a keyboard can scroll it; it does
+            // nothing when used, so it is no control for Live view to drive.
+            .filter((e) => !e.matches(".kp-table-wrap[role=region]"))
             .map((e) => ({
               drive: /** @type {HTMLElement} */ (e).dataset.drive ?? null,
               form: /** @type {HTMLElement} */ (e).dataset.driveForm ?? null,
@@ -7505,7 +7598,7 @@ test("invariants: Apps loads as its grouped board, its group labels are the body
       "the loading state is not the grouped board",
     );
     const groups = page.locator(
-      ".ap-board .ap-grp:not(.ap-grp--skeleton) > h2",
+      ".ap-board .ap-grp:not(.ap-grp--skeleton) > summary > h2",
     );
     await groups.first().waitFor({ timeout: 10000 });
     const font = await groups.first().evaluate((e) => {
@@ -7648,7 +7741,9 @@ test("invariants: stack hub — six tabs; Overview has five KPI tiles, Is it hea
       who: [...document.querySelectorAll(".sh-feed li[data-who]")].map((l) =>
         l.getAttribute("data-who"),
       ),
-      noEnv: !!document.querySelector('.nx-attention [data-key="no-env"]'),
+      // kp-themes 10's attention band (ui.js attentionBand → attention.js)
+      // keys its items with `data-kp-key`.
+      noEnv: !!document.querySelector('.nx-attention [data-kp-key="no-env"]'),
     }));
     assert.deepEqual(r.tabs, [
       "Overview",
@@ -9658,6 +9753,9 @@ test("invariants: redesign-final-low-sort: a plain click on a second header adds
     const reset = page.locator(
       '[data-drive="table-reset-sort"][data-drive-row="host-containers"]',
     );
+    // kp-themes 10: the sort line arrives the theme's way when it is shown
+    // (motion.js unfolds it from nothing), so it is read once it is there.
+    await reset.waitFor({ state: "visible", timeout: 3000 }).catch(() => {});
     assert.ok(await reset.isVisible(), "no Reset sort while sorted");
     await reset.click();
     assert.equal(

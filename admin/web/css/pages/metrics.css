@@ -2,7 +2,7 @@
    pages as the approved demos draw them (metrics.html, fleetview.html +
    ops-kit.css), kp-themes tokens only. The page-local kit
    (js/pages/metricskit.js) uses the `mk-` prefix; everything else is the
-   foundation's `nx-` / `tc-` classes. */
+   foundation's `nx-` classes and kp-themes' own chart (`kp-chart`). */
 
 .mk-page {
   --mk-gap: var(--kp-space-xl, 1.5rem);
@@ -70,7 +70,7 @@ main.mk-page > .mk-failed:empty {
 .mk-window[hidden] {
   display: none;
 }
-.mk-toolbar .tc-zoom {
+.mk-toolbar .kp-chart-zoom {
   font-size: var(--kp-text-sm);
 }
 @media (max-width: 48rem) {
@@ -365,19 +365,18 @@ main.mk-page > .mk-failed:empty {
 }
 
 /* ---------- pointer hints never show on a touch screen (finding 17) ----
-   `!important`: the hints sit in rows that set their own display. */
-.mk-touch-only,
-.tc-hint--touch {
+   `!important`: the hints sit in rows that set their own display. The
+   charts' own hint line (`.kp-chart__hint > [data-kp-when]`) is kp's and
+   switches on (hover: none) by itself. */
+.mk-touch-only {
   display: none !important;
 }
 @media (hover: none) {
   .mk-pointer-only,
-  .tc-hint--pointer,
   .mk-page .nx-keys {
     display: none !important;
   }
-  .mk-touch-only,
-  .tc-hint--touch {
+  .mk-touch-only {
     display: inline !important;
   }
 }

@@ -205,7 +205,6 @@ together.
 | Parked (`admin/web/test-e2e/invariants.e2e.js`) | Finding | Date | Parked |
 |---|---|---|---|
 | every data-loading page shows a loading indicator before its data (or error) arrives | M7 (final review 3.71.0): Settings draws its data without a loading indicator first | 2026-10-04 | parked by Kenny 2026-10-04 for 3.71.1 |
-| layout class `descgap`: a page's description sits directly under its title, never a section gap away | red on base fe2940ba: at 390 px a page's description sits a section gap below its title | 2026-10-04 | parked by Kenny 2026-10-04 for 3.71.1 |
 | layout class `mono`: monospace text reads at nearly its row's own size | red on base fe2940ba: /map draws /mnt/pve-backup in monospace at 11.7 px, smaller than its row | 2026-10-04 | parked by Kenny 2026-10-04 for 3.71.1 |
 
 ## How this list is kept honest

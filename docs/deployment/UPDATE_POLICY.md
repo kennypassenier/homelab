@@ -57,10 +57,10 @@ fails while this section is stale.
 | kp-soft | kp-soft | kp-soft | `manual` | `ghcr.io/kennypassenier/kp-soft:v0.4.0@sha256:b9fd7be0bd3e…` |  |
 | media | bazarr | bazarr | `auto` | `lscr.io/linuxserver/bazarr:latest` |  |
 | media | flaresolverr | flaresolverr | `auto` | `ghcr.io/flaresolverr/flaresolverr:latest` |  |
-| media | jellyfin | jellyfin | `manual` | `jellyfin/jellyfin:12.1@sha256:78d3ea1207d1…` |  |
+| media | jellyfin | jellyfin | `manual` | `jellyfin/jellyfin:12.2@sha256:357724bf0ae2…` |  |
 | media | prowlarr | prowlarr | `auto` | `lscr.io/linuxserver/prowlarr:latest` |  |
 | media | radarr | radarr | `auto` | `lscr.io/linuxserver/radarr:latest` |  |
-| media | recyclarr | recyclarr | `manual` | `ghcr.io/recyclarr/recyclarr:8.7.2@sha256:6e69e009e1cd…` |  |
+| media | recyclarr | recyclarr | `manual` | `ghcr.io/recyclarr/recyclarr:8.7.3@sha256:9c6c74d52cfc…` |  |
 | media | seerr | seerr | `auto` | `ghcr.io/seerr-team/seerr:latest` |  |
 | media | sonarr | sonarr | `auto` | `lscr.io/linuxserver/sonarr:latest` |  |
 | metrics | alertmanager | alertmanager | `manual` | `prom/alertmanager:v0.34.1@sha256:e9733bafb1bd…` |  |

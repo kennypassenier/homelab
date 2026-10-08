@@ -668,7 +668,7 @@ test("redesign-kit-19: the page sheets loaded on every page keep every rule behi
 // shared more menu draws groups under headings, buttons beside links, a
 // disabled entry with its reason, a danger entry, a page's own button and
 // marks, and redraws only when what it shows changed (never while open).
-test("redesign-openpoints-3: the shared more menu draws grouped entries, closes after one, on a click outside and on Esc (focus back), and redraws only on change", () => {
+test("redesign-openpoints-3: the shared more menu hands kp its grouped entries, runs the picked one, and redraws only on change", () => {
   /** @type {string[]} */
   const ran = [];
   /** @type {any[]} */

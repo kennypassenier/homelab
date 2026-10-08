@@ -4569,9 +4569,12 @@ test("invariants: Schedules page: a plain click turns a schedule off, greys its 
     await row.locator('[data-drive="schedule-menu"]').click();
     await page.locator('dialog.nx-rowmenu[open] [data-drive="delete"]').click();
     assert.equal(await row.isVisible(), false, "a deleted row still shows");
+    // kp-themes 10.0.0: the turn-off toast may still be playing its leave
+    // while the delete toast arrives; the newest one carries this Undo.
     await page
       .locator(".nx-toast")
       .getByRole("button", { name: "Undo" })
+      .last()
       .click();
     await page.waitForTimeout(300);
     assert.equal(

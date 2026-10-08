@@ -30,7 +30,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 sha2 = "0.10"
 base64 = "0.22"
 rcgen = "0.13"
-tokio-tungstenite = "0.29"
+tokio-tungstenite = "0.30"
 
 # `unsafe` is refused everywhere except the handful of sites that opt out
 # with their own `#[allow(unsafe_code)]` + SAFETY comment: fix-53's

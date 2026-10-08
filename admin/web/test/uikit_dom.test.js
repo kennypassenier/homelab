@@ -82,9 +82,19 @@ test("redesign-kit-5: a toast is kp-themes' own, in a .kp-toasts region inside #
   assert.equal(b.dataset.drive, "kit-test-undo");
   b.click();
   assert.equal(undone, 1, "Undo ran its action");
+  // kp-themes 10.0.0: a toast plays its theme's leave before it goes
+  // (js/motion.js leave()), so the removal is awaited, not read at once.
+  for (let i = 0; i < 50 && region.querySelector(".kp-toast"); i++)
+    await new Promise((r) => setTimeout(r, 20));
   assert.equal(region.querySelector(".kp-toast"), null, "Undo closed it");
   ui.toast("plain one", { ms: 0 });
   const last = ui.toast("plain two", { ms: 0 });
+  for (
+    let i = 0;
+    i < 50 && region.querySelectorAll(".kp-toast").length > 1;
+    i++
+  )
+    await new Promise((r) => setTimeout(r, 20));
   assert.equal(
     region.querySelectorAll(".kp-toast").length,
     1,

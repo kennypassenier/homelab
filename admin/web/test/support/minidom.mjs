@@ -530,7 +530,11 @@ export function install() {
     scrollX: 0,
     scrollY: 0,
     scrollTo() {},
-    matchMedia: () => ({ matches: false }),
+    matchMedia: () => ({
+      matches: false,
+      addEventListener() {},
+      removeEventListener() {},
+    }),
     getComputedStyle: () => ({ getPropertyValue: () => "" }),
     requestAnimationFrame: (/** @type {Function} */ f) => setTimeout(f, 0),
   });

@@ -7,7 +7,7 @@ services:
   cloudflared:
     # fix-82 (manual-images-latest-unpinned, 2026-09-27): the version and
     # digest CT 104 ran that day; moving it is an edit of this line.
-    image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+    image: cloudflare/cloudflared:2026.10.0@sha256:9b49eed8f62806d5d45ddf59ecefb5710429598ea6d3fcccd2af938f621b2b07
     container_name: cloudflared
     networks:
       - gateway_net

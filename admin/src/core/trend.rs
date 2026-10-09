@@ -6,6 +6,12 @@
 //! so a page opened now still draws the shape of the last 24 hours.
 //!
 //! Pure: the caller hands in every snapshot with its time.
+//!
+//! The day outlives a restart (Kenny, 2026-10-09, after the 3.73.0 rollout:
+//! "De cpu grafieken zijn fucked?" — every row a straight line, because the
+//! restart had left two or three points): the shell saves the trend as
+//! [`Saved`] whenever a bucket is started and hands it back through
+//! [`Trend::restored`] at the next start.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -17,7 +23,7 @@ pub const STEP_S: u64 = 300;
 pub const POINTS: usize = 288;
 
 /// The running sums of one bucket.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 struct Bucket {
     /// Which bucket: `at / step`.
     slot: u64,
@@ -27,7 +33,7 @@ struct Bucket {
     stacks: BTreeMap<String, Mean>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 struct Mean {
     sum: u64,
     n: u64,
@@ -44,12 +50,23 @@ impl Mean {
 }
 
 /// The last day of the fleet, one point per [`STEP_S`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Trend {
     step_s: u64,
     cap: usize,
     buckets: VecDeque<Bucket>,
 }
+
+/// The trend as the dashboard keeps it on disk (arch-state: typed JSON
+/// with a `schema_version`).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Saved {
+    pub schema_version: u32,
+    pub trend: Trend,
+}
+
+/// The `schema_version` [`Saved`] is written with.
+pub const SAVED_SCHEMA: u32 = 1;
 
 impl Default for Trend {
     fn default() -> Self {
@@ -65,6 +82,40 @@ impl Trend {
             cap: cap.max(2),
             buckets: VecDeque::new(),
         }
+    }
+
+    /// The trend to keep on disk.
+    pub fn saved(&self) -> Saved {
+        Saved {
+            schema_version: SAVED_SCHEMA,
+            trend: self.clone(),
+        }
+    }
+
+    /// A saved trend picked up again at `now` (unix seconds): the buckets
+    /// still inside the last day, in the default step and length. A file of
+    /// another schema or step starts an empty trend, never a bent line.
+    pub fn restored(saved: Saved, now: u64) -> Trend {
+        let mut t = Trend::default();
+        if saved.schema_version != SAVED_SCHEMA || saved.trend.step_s != t.step_s {
+            return t;
+        }
+        let newest = now / t.step_s;
+        let oldest = newest.saturating_sub(t.cap as u64 - 1);
+        let mut last = None;
+        for b in saved.trend.buckets {
+            if b.slot < oldest || b.slot > newest || last.is_some_and(|l| b.slot <= l) {
+                continue;
+            }
+            last = Some(b.slot);
+            t.buckets.push_back(b);
+        }
+        t
+    }
+
+    /// The newest bucket's slot, to tell when a new one was started.
+    pub fn newest_slot(&self) -> Option<u64> {
+        self.buckets.back().map(|b| b.slot)
     }
 
     /// Add one snapshot, read at `at` (unix seconds). A snapshot older than
@@ -237,5 +288,36 @@ mod tests {
         let v = Trend::default().view();
         assert_eq!(v["points"], 0);
         assert_eq!(v["step_s"], STEP_S);
+    }
+
+    #[test]
+    fn fix_trend_restart_a_saved_day_comes_back_after_a_restart_and_the_line_keeps_its_shape() {
+        let mut t = Trend::default();
+        for k in 0..10u64 {
+            t.record(
+                &fleet(Some(k * 10), 100, &[("films", Some(k as u32 * 5))]),
+                1_000_000 + k * STEP_S,
+            );
+        }
+        let json = serde_json::to_string(&t.saved()).expect("serialises");
+        let back: Saved = serde_json::from_str(&json).expect("reads back");
+        let r = Trend::restored(back, 1_000_000 + 10 * STEP_S);
+        assert_eq!(r, t);
+        assert_eq!(r.view()["points"], 10);
+    }
+
+    #[test]
+    fn fix_trend_restart_a_restored_trend_drops_what_is_older_than_a_day_and_a_foreign_file() {
+        let mut t = Trend::default();
+        t.record(&fleet(Some(10), 100, &[]), 1_000_000);
+        t.record(&fleet(Some(20), 100, &[]), 1_000_000 + STEP_S);
+        let day_later = 1_000_000 + STEP_S * POINTS as u64;
+        assert_eq!(Trend::restored(t.saved(), day_later).view()["points"], 1);
+        let mut foreign = t.saved();
+        foreign.schema_version = 99;
+        assert_eq!(
+            Trend::restored(foreign, 1_000_000 + STEP_S).view()["points"],
+            0
+        );
     }
 }

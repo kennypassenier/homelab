@@ -151,6 +151,10 @@ pub struct LinkConfig {
     /// feat-platform-10: whether this dashboard takes `homelab ui` steps
     /// (`UiAttach`). fix-158: never for one running `dev_without_locks`.
     pub ui_attach: bool,
+    /// fix-trend-restart: where the Stacks page's last day of fleet
+    /// snapshots is kept, so a restart (a rollout) does not wipe it;
+    /// `None`: kept in memory only.
+    pub trend_file: Option<std::path::PathBuf>,
 }
 
 impl LinkConfig {
@@ -165,6 +169,9 @@ impl LinkConfig {
             // fix-158: a developer's dashboard on the same host token took
             // the steps over from CT 120's, and on exit left it detached.
             ui_attach: !c.dev_without_locks,
+            trend_file: crate::core::actions_config::from_env(&|k| std::env::var(k).ok())
+                .ok()
+                .map(|a| a.data_dir.join("fleet-trend.json")),
         }
     }
 }
@@ -209,6 +216,19 @@ pub async fn run(
     live: Live,
     mut asks: HostAsks,
 ) {
+    // fix-trend-restart: the day the last run saw, back before the first
+    // snapshot lands.
+    if let Some(path) = &cfg.trend_file {
+        match crate::shell::actions_state::read_json::<crate::core::trend::Saved>(path) {
+            Ok(Some(saved)) => {
+                shared.write().await.trend = crate::core::trend::Trend::restored(saved, now_s());
+            }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(error = %e, "the saved fleet trend could not be read; starting an empty one")
+            }
+        }
+    }
     let mut backoff = cfg.backoff_min;
     loop {
         match session(&target, &cfg, &shared, &live, &mut asks).await {
@@ -336,11 +356,23 @@ async fn session_loop(
                             let s = shared.read().await;
                             s.fleet.as_ref().map(|f| (&f.stacks, &f.counts)) != Some((&view.stacks, &view.counts))
                         };
-                        {
+                        let started = {
                             let mut s = shared.write().await;
+                            let before = s.trend.newest_slot();
                             s.trend.record(&view, now_s());
                             s.fleet = Some(view.clone());
                             s.home_address = state.host.home_address.clone();
+                            (s.trend.newest_slot() != before).then(|| s.trend.saved())
+                        };
+                        // fix-trend-restart: saved once per bucket (every
+                        // five minutes), so a restart loses at most the one
+                        // being filled.
+                        if let (Some(saved), Some(path)) = (started, cfg.trend_file.clone()) {
+                            tokio::task::spawn_blocking(move || {
+                                if let Err(e) = crate::shell::actions_state::write_json(&path, &saved) {
+                                    tracing::warn!(error = %e, "the fleet trend could not be saved");
+                                }
+                            });
                         }
                         // Every snapshot carries a new "measured at"; the
                         // event goes out on every poll so the page's

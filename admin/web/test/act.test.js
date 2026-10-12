@@ -14,6 +14,7 @@ import {
   formFields,
   initialValues,
   nameTyped,
+  pressGate,
   previewArgs,
   schedulableActions,
   scheduleArgFields,
@@ -114,6 +115,7 @@ const catalog = {
     }),
     entry("wipe", {
       args: ["confirm"],
+      confirm: true,
       refused_for_self: true,
       scope: "all",
       destructive: true,
@@ -215,10 +217,6 @@ test("the body carries only what is set; the preview sends a typed name only onc
     skip_safety_copy: true,
     confirm: "media",
   });
-  // A wipe only lists unless the name was typed right.
-  const w = actionForm(find("wipe"), ctx);
-  assert.deepEqual(previewArgs(w, { confirm: "med" }), {});
-  assert.deepEqual(previewArgs(w, { confirm: "media" }), { confirm: "media" });
 });
 
 test("the checks name the field and say what to do", () => {
@@ -1019,4 +1017,19 @@ test("the server's job list wins over a stale local copy", () => {
     fresh.some((j) => j.job === 5),
     true,
   );
+});
+
+// covers: fix-wipe-1 — Kenny, 2026-10-12: the Wipe button ran with the
+// name left empty. The button stays off until the name is typed exactly.
+test("pressGate keeps a typed-name action off until the name is exact", () => {
+  const w = actionForm(find("wipe"), ctx);
+  const ok = { ready: true, reason: "" };
+  for (const confirm of ["", "medi", "Media"])
+    assert.equal(pressGate(w, { confirm }, ok).ready, false, confirm);
+  assert.equal(pressGate(w, { confirm: "media" }, ok).ready, true);
+  assert.match(pressGate(w, {}, ok).reason, /Type media exactly/);
+  // A refusing preview wins; an action without a typed name is untouched.
+  const refused = { ready: false, reason: "the host refuses" };
+  assert.equal(pressGate(w, { confirm: "media" }, refused), refused);
+  assert.equal(pressGate(actionForm(find("backup"), ctx), {}, ok), ok);
 });

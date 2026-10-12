@@ -235,6 +235,18 @@ fn arch_schedule_only_what_needs_no_typed_name_can_be_planned() {
         let r = check_input(&input(a, args)).unwrap_err();
         assert!(r.why.contains("cannot be scheduled"), "{a}: {r}");
     }
+    // fix-wipe-1: an exec deletes whatever its command deletes.
+    let mut exec = input(
+        "exec",
+        ActionArgs {
+            vmid: Some("105".into()),
+            command: Some("rm -rf /tmp/x".into()),
+            ..Default::default()
+        },
+    );
+    exec.stack = "_host".into();
+    let r = check_input(&exec).unwrap_err();
+    assert!(r.why.contains("cannot be scheduled"), "exec: {r}");
     let mut bad_time = input("backup", ActionArgs::default());
     bad_time.when = When::Day { at: "25:00".into() };
     assert!(check_input(&bad_time).is_err());

@@ -1598,6 +1598,34 @@ impl Actions {
         }))
     }
 
+    /// fix-wipe-1: what a wipe of `key` deletes, as the host lists it
+    /// (a `WipeRetired` without a name only lists, never deletes) — the
+    /// preview shows it before the name is typed.
+    pub async fn wipe_plan(&self, key: &str) -> Result<String, Refusal> {
+        let r = self
+            .inner
+            .host
+            .ask_traced(
+                Command::WipeRetired {
+                    name: key.to_string(),
+                    confirm: None,
+                },
+                Duration::from_secs(30),
+                None,
+            )
+            .await
+            .map_err(|e| Refusal::new("the wipe list", e, "check that the host answers"))?;
+        if r.ok {
+            Ok(r.message)
+        } else {
+            Err(Refusal::new(
+                "the wipe list",
+                r.message,
+                "read the Retired page",
+            ))
+        }
+    }
+
     /// dash-apply: the plan against the host, as `homelab apply --plan`
     /// prints it; `with_specs` builds what a deploy sends (for the run).
     pub async fn apply_plan(
@@ -2463,6 +2491,10 @@ async fn preview(
         },
         ActionKind::Apply => match a.apply_plan(false).await {
             Ok((view, _)) => out["apply"] = serde_json::json!(view),
+            Err(r) => out["plan_unavailable"] = serde_json::json!(r.why),
+        },
+        ActionKind::Wipe => match a.wipe_plan(&stack).await {
+            Ok(text) => out["wipe_plan"] = serde_json::json!(text),
             Err(r) => out["plan_unavailable"] = serde_json::json!(r.why),
         },
         _ => {}

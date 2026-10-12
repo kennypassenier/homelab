@@ -21,6 +21,7 @@ import {
   initialValues,
   lockedFields,
   nameTyped,
+  pressGate,
   previewArgs,
   shownField,
 } from "./actionforms.js";
@@ -698,12 +699,18 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
       },
       reason || "Reading what this would do…",
     );
+  /** @type {{ready: boolean, reason: string}} */
+  let lastGate = { ready: true, reason: "" };
+  let onReview = form.steps.length === 1 && form.steps[0].id === REVIEW;
   /**
    * The primary button follows the preview: held back, with the reason as
-   * its description, while the preview says the action cannot run.
-   * @param {{ready: boolean, reason: string}} g
+   * its description, while the preview says the action cannot run; on the
+   * review step also until the typed name is right (fix-wipe-1).
+   * @param {{ready: boolean, reason: string}} given
    */
-  const setReady = (g) => {
+  const setReady = (given) => {
+    lastGate = given;
+    const g = onReview ? pressGate(form, values, given) : given;
     const b = /** @type {HTMLButtonElement} */ (next);
     b.disabled = !g.ready;
     if (g.ready) b.removeAttribute("title");
@@ -784,6 +791,24 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
           ...diffBlocks(files),
         ),
       );
+    } else if (p.wipe_plan) {
+      // fix-wipe-1: what the press deletes, before the name is typed.
+      const [head, ...rows] = String(p.wipe_plan).split("\n");
+      previewBox.append(
+        h(
+          "div",
+          {
+            class: "act-plan kp-accordion__item kp-accordion__item--bare",
+            "data-wipe-plan": "",
+          },
+          h("p", null, capital(head)),
+          h(
+            "ul",
+            null,
+            ...rows.map((l) => h("li", { class: "mono" }, l.trim())),
+          ),
+        ),
+      );
     } else if (p.apply) {
       const s = applySummary(p.apply);
       previewBox.append(
@@ -826,6 +851,7 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
   // cli-yes: the line carries --yes once the name is typed right.
   let typedBefore = nameTyped(form, values);
   inputs.get("confirm")?.addEventListener("input", () => {
+    setReady(lastGate);
     const now = nameTyped(form, values);
     if (now !== typedBefore) {
       typedBefore = now;
@@ -855,10 +881,16 @@ function drawActionDialog(form, values, sources, driven, locked = []) {
   });
   wiz.addEventListener(STEP_EVENT, (e) => {
     const detail = /** @type {CustomEvent} */ (e).detail;
-    if (form.steps[detail.step]?.id === REVIEW) void preview();
-    else setReady({ ready: true, reason: "" });
+    onReview = form.steps[detail.step]?.id === REVIEW;
+    if (onReview) {
+      setReady({ ready: false, reason: "" });
+      void preview();
+    } else setReady({ ready: true, reason: "" });
   });
-  if (form.steps.length === 1) void preview();
+  if (form.steps.length === 1) {
+    setReady({ ready: false, reason: "" });
+    void preview();
+  }
 
   let running = false;
   /** @param {number} job */
@@ -1027,6 +1059,7 @@ export async function openBatch(action, stacks) {
     x.input.addEventListener("input", () => {
       values[key] = x.input.value;
       if (x.input.getAttribute("aria-invalid") === "true") clearError(x.input);
+      syncRun();
     });
     return x.wrap;
   });
@@ -1061,6 +1094,14 @@ export async function openBatch(action, stacks) {
     },
     form.submit,
   );
+  // fix-wipe-1: off until every stack's name is typed exactly.
+  function syncRun() {
+    const wrong = batchConfirmErrors(form, values);
+    run.disabled = wrong.length > 0;
+    if (wrong.length) run.title = batchConfirmText(wrong[0]);
+    else run.removeAttribute("title");
+  }
+  syncRun();
   const cancel = h(
     "button",
     { type: "button", class: "kp-button", "data-kp-dialog-close": "" },
@@ -1227,7 +1268,7 @@ export async function openBatch(action, stacks) {
       batchBody(form, values),
       form.title,
     );
-    run.disabled = false;
+    syncRun();
     if (!r.ok) {
       runError.replaceChildren(refusalCallout(r.error));
       await refusalAlarm(r.error, r.status);

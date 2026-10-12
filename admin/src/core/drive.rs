@@ -58,14 +58,6 @@ pub struct Choice {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct ListOnly {
-    pub label: String,
-    pub help: String,
-    pub required: bool,
-    pub placeholder: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct FieldDef {
     pub kind: FieldKind,
     pub label: String,
@@ -85,8 +77,6 @@ pub struct FieldDef {
     pub when: Option<String>,
     #[serde(default)]
     pub expect: Option<String>,
-    #[serde(default)]
-    pub list_only: Option<ListOnly>,
     #[serde(default)]
     pub help_for: BTreeMap<String, String>,
     /// A choice whose values are part of the description (the verdict).
@@ -313,24 +303,21 @@ pub fn arg_field(arg: Arg, action: ActionKind, stack: &str) -> Field {
     let name = arg_name(arg);
     let def = &spec().fields[name];
     let f = |s: &str| fill(s, &[("stack", stack)]);
-    let list_only = (arg == Arg::Confirm && !action.confirm())
-        .then_some(def.list_only.as_ref())
-        .flatten();
     let help = def
         .help_for
         .get(action.slug())
         .cloned()
-        .unwrap_or_else(|| list_only.map_or(def.help.clone(), |l| l.help.clone()));
+        .unwrap_or_else(|| def.help.clone());
     let label = def
         .label_for
         .get(action.slug())
         .cloned()
-        .unwrap_or_else(|| list_only.map_or(def.label.clone(), |l| l.label.clone()));
+        .unwrap_or_else(|| def.label.clone());
     let required = def
         .required_for
         .get(action.slug())
         .copied()
-        .unwrap_or_else(|| list_only.map_or(def.required, |l| l.required));
+        .unwrap_or(def.required);
     Field {
         name: name.to_string(),
         id: format!("act-{}", name.replace('_', "-")),
@@ -342,10 +329,7 @@ pub fn arg_field(arg: Arg, action: ActionKind, stack: &str) -> Field {
             .pattern
             .as_ref()
             .map(|p| spec().patterns.get(p).cloned().unwrap_or_else(|| p.clone())),
-        placeholder: list_only
-            .map(|l| l.placeholder.clone())
-            .or_else(|| def.placeholder.clone())
-            .map(|p| f(&p)),
+        placeholder: def.placeholder.as_ref().map(|p| f(p)),
         source: def.source.clone(),
         empty: def.empty.clone(),
         danger: def.danger,

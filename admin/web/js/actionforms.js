@@ -105,8 +105,6 @@ export const ROLLBACK_ACTIONS = /** @type {const} */ ([
  *   required: boolean, pattern?: string, placeholder?: string,
  *   source?: Field["source"], empty?: string, danger?: boolean,
  *   when?: "guard", expect?: string,
- *   list_only?: {label: string, help: string, required: boolean,
- *     placeholder: string},
  *   help_for?: Record<string, string>,
  *   label_for?: Record<string, string>,
  *   required_for?: Record<string, boolean>,
@@ -131,20 +129,10 @@ export const fill = (template, values) =>
  */
 export function argField(arg, entry, stack) {
   const def = /** @type {FieldDef} */ (SPEC.fields[arg]);
-  const {
-    list_only,
-    help_for,
-    label_for,
-    required_for,
-    show_when_for,
-    pattern,
-    ...base
-  } = def;
+  const { help_for, label_for, required_for, show_when_for, pattern, ...base } =
+    def;
   /** @type {Record<string, unknown>} */
-  const merged = {
-    ...base,
-    ...(arg === "confirm" && !entry.confirm ? list_only : {}),
-  };
+  const merged = { ...base };
   if (help_for && help_for[entry.action]) merged.help = help_for[entry.action];
   if (label_for && label_for[entry.action])
     merged.label = label_for[entry.action];
@@ -329,8 +317,7 @@ export function buildArgs(form, values) {
  * The body for the preview: the same as the run's, but a typed name that is
  * not (yet) right is left out; the server fills it in for the preview, so
  * the CLI line shows before the name is typed, and carries `--yes` only once
- * it is (cli-yes). A wipe keeps its list-only meaning unless the name was
- * typed right.
+ * it is (cli-yes).
  * @param {ActionForm} form
  * @param {Values} values
  * @returns {ActionArgs}
@@ -350,6 +337,23 @@ export function previewArgs(form, values) {
  */
 export const nameTyped = (form, values) =>
   typeof values.confirm === "string" && values.confirm.trim() === form.stack;
+
+/**
+ * fix-wipe-1: the primary button of a form that asks for the typed name
+ * stays off until that name is typed exactly, whatever the preview says
+ * (Kenny, 2026-10-12: the Wipe button ran with the name left empty).
+ * @param {ActionForm} form
+ * @param {Values} values
+ * @param {{ready: boolean, reason: string}} gate the preview's verdict
+ * @returns {{ready: boolean, reason: string}}
+ */
+export function pressGate(form, values, gate) {
+  if (!gate.ready || !form.confirmName || nameTyped(form, values)) return gate;
+  return {
+    ready: false,
+    reason: `Type ${form.confirmName} exactly to turn ${form.submit} on.`,
+  };
+}
 
 /**
  * What is wrong with the values of one step (or of the whole form), by
@@ -599,14 +603,12 @@ export function batchConfirmErrors(form, values) {
 
 /**
  * What a schedule can run (arch-schedule): anything that needs no typed
- * name and no pick from a live list; a wipe only lists without its name,
- * so it is left out as well.
+ * name and no pick from a live list.
  * @param {Catalog} catalog
  */
 export const schedulableActions = (catalog) =>
   catalog.actions.filter(
-    (a) =>
-      !a.confirm && a.action !== "wipe" && !a.args.some((x) => PER_RUN.has(x)),
+    (a) => !a.confirm && !a.args.some((x) => PER_RUN.has(x)),
   );
 
 /**

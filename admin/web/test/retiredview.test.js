@@ -3,6 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  changesRetired,
   operationLabel,
   repoTotals,
   splitInUse,
@@ -115,4 +116,15 @@ test("wipeStatus: refused outranks an empty in_use — never shown as removable"
     }),
     "refused",
   );
+});
+
+// covers: fix-wipe-1 — a wiped key leaves the list without a refresh.
+test("changesRetired re-reads after a finished wipe, destroy, forget, apply or deploy", () => {
+  for (const action of ["wipe", "destroy", "forget", "apply", "deploy"]) {
+    assert.equal(changesRetired({ action, state: "done" }), true, action);
+    assert.equal(changesRetired({ action, state: "failed" }), true, action);
+    assert.equal(changesRetired({ action, state: "running" }), false, action);
+  }
+  assert.equal(changesRetired({ action: "backup", state: "done" }), false);
+  assert.equal(changesRetired(null), false);
 });

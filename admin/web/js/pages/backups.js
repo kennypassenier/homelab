@@ -48,6 +48,7 @@ import { current, listen, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
 import { stackHues } from "../topology.js";
 import { RETIRED_COLUMNS, retiredRow } from "./retired.js";
+import { changesRetired } from "../retiredview.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
 import {
   allRepos,
@@ -1892,6 +1893,10 @@ export function mount(root) {
     }
   };
   cleanups.push(
+    // fix-wipe-1: "Kept from retired stacks" follows its jobs too.
+    listen("action", (j) => {
+      if (changesRetired(j)) void loadRetired();
+    }),
     listen("action", (j) => {
       if (!j || !touching.has(j.action)) return;
       if (j.state !== "done" && j.state !== "failed") return;

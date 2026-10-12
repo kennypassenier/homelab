@@ -976,6 +976,11 @@ pub async fn run_demo(
             h
         }));
     let incidents = activity_demo_incidents(&history.lock().unwrap_or_else(|e| e.into_inner()));
+    // fix-wipe-1: one made-up retired stack, so Removed stacks and Backups'
+    // "Kept from retired stacks" have a row whose Wipe can be clicked
+    // through; a wipe with the right name removes it, as the real host does.
+    let retired: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(vec!["olddemo".to_string()]));
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     loop {
         tokio::select! {
@@ -1004,8 +1009,34 @@ pub async fn run_demo(
                     let _ = reply.send(Ok(answer(format!("DEMO_VALUE=made-up-for-{}", rel.replace('/', "-")))));
                     continue;
                 }
+                if let Command::WipeRetired { name, confirm: None } = &command {
+                    let known = retired.lock().unwrap_or_else(|e| e.into_inner()).contains(name);
+                    let r = if known {
+                        answer(format!(
+                            "wipe '{name}' deletes, permanently:\n  restic repository  {name}-config\n  /appdata directory /appdata/{name}/config\n  vault copy         /var/lib/homelab/secrets/{name}"
+                        ))
+                    } else {
+                        RpcResponse { id, ok: false, message: format!("nothing retired is recorded as '{name}'"), deferred: None }
+                    };
+                    let _ = reply.send(Ok(r));
+                    continue;
+                }
                 if command.is_read_only() {
                     let body = match command {
+                        Command::GetRetired => {
+                            let keys = retired.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                            let rows: Vec<serde_json::Value> = keys.iter().map(|k| serde_json::json!({
+                                "key": k, "kind": "stack", "stack": k, "name": k, "vmid": 353,
+                                "retired_at": now_s().saturating_sub(9 * 86_400),
+                                "repos": [{ "name": format!("{k}-config"), "in_use": false,
+                                    "snapshot_count": 4, "size_bytes": 52_428_800u64,
+                                    "newest_snapshot": null, "measured_at": now_s() }],
+                                "appdata": [format!("/appdata/{k}/config")],
+                                "vault": [format!("/var/lib/homelab/secrets/{k}")],
+                                "in_use": [], "refused": null,
+                            })).collect();
+                            serde_json::json!({ "retired": rows }).to_string()
+                        }
                         Command::History { since, limit } => serde_json::json!({
                             "entries": homelab_core::history::select(history.lock().unwrap_or_else(|e| e.into_inner()).clone(), since, limit),
                         }).to_string(),
@@ -1255,6 +1286,11 @@ pub async fn run_demo(
                 let stack = command_stack(&command);
                 let recorded = history.clone();
                 let started = now_s();
+                let wiped = match &command {
+                    Command::WipeRetired { name, confirm: Some(c) } if c == name => Some(name.clone()),
+                    _ => None,
+                };
+                let retired = retired.clone();
                 tokio::spawn(async move {
                     let op = format!("{}-demo", name.split('_').next().unwrap_or("op"));
                     for step in ["prepare", "apply", "verify"] {
@@ -1274,6 +1310,9 @@ pub async fn run_demo(
                     }
                     // redesign-activity: the job lands in History as the
                     // real host records an operation.
+                    if let Some(k) = wiped {
+                        retired.lock().unwrap_or_else(|e| e.into_inner()).retain(|x| *x != k);
+                    }
                     let label = name.replace('_', "-");
                     let end = now_s();
                     recorded.lock().unwrap_or_else(|e| e.into_inner()).push(

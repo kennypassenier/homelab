@@ -329,12 +329,32 @@ fn arch_self_the_dashboard_never_destroys_forgets_or_wipes_itself() {
     assert!(!restarts_dashboard("home", ActionKind::Deploy));
 }
 
+/// covers: fix-wipe-1
+/// Kenny, 2026-10-12: the Wipe button ran without the typed name. The press
+/// of a wipe always deletes, so the server refuses it unless the exact name
+/// came along — whatever the browser did or skipped.
 #[test]
-fn feat_stacks_4_a_wipe_without_a_name_only_lists() {
-    let req = validate("drill", "wipe", ActionArgs::default()).unwrap();
+fn fix_wipe_1_a_wipe_without_the_exact_name_is_refused() {
+    for confirm in [None, Some(""), Some("dril"), Some("Drill")] {
+        let args = ActionArgs {
+            confirm: confirm.map(str::to_string),
+            ..Default::default()
+        };
+        let r = validate("drill", "wipe", args).unwrap_err();
+        assert!(r.why.contains("typed name"), "{confirm:?}: {r}");
+    }
+    let req = validate(
+        "drill",
+        "wipe",
+        ActionArgs {
+            confirm: Some("drill".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     assert!(matches!(
         commands(&req, Material::None).unwrap().as_slice(),
-        [Command::WipeRetired { confirm: None, .. }]
+        [Command::WipeRetired { confirm: Some(c), .. }] if c == "drill"
     ));
 }
 
@@ -366,8 +386,12 @@ fn feat_retired_1_wipe_accepts_a_compound_stack_app_key() {
         "jellyfin/",
         "jellyfin//sonarr",
     ] {
+        let args = ActionArgs {
+            confirm: Some(bad.into()),
+            ..Default::default()
+        };
         assert!(
-            validate(bad, "wipe", ActionArgs::default()).is_err(),
+            validate(bad, "wipe", args).is_err(),
             "{bad} should be refused"
         );
     }

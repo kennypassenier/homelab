@@ -385,7 +385,6 @@ impl ActionKind {
             RollbackNative => &[Arg::Unit],
             PruneOrphans | Forget => &[Arg::Confirm],
             Destroy => &[Arg::Confirm, Arg::SkipBackup],
-            // Without `confirm` a wipe only lists what it would delete.
             Wipe => &[Arg::Confirm],
             Exec => &[Arg::Vmid, Arg::Command],
             GuardsCt => &[Arg::Vmid],
@@ -409,12 +408,13 @@ impl ActionKind {
         }
     }
 
-    /// Must the stack name be typed? (Wipe asks only for the real run.)
+    /// Must the stack name be typed? fix-wipe-1: a wipe too — its press
+    /// always deletes; what it would delete is the preview's job.
     pub fn confirm(self) -> bool {
         use ActionKind::*;
         matches!(
             self,
-            Restore | RestoreNative | PruneOrphans | Destroy | Forget
+            Restore | RestoreNative | PruneOrphans | Destroy | Forget | Wipe
         )
     }
 
@@ -547,9 +547,7 @@ impl ActionKind {
                 "back up, then destroy the container; from the host's record when the directory is gone"
             }
             Forget => "for a container already gone: drop its record and registrations",
-            Wipe => {
-                "delete what a retired stack kept: backups, /appdata, vault copies (without confirm: list only)"
-            }
+            Wipe => "delete what a retired stack kept: backups, /appdata, vault copies",
             Patch => "apt update and dist-upgrade every managed container, one at a time",
             ZfsReplicate => "run the ZFS snapshot and replication jobs now",
             BackupHostMeta => {
@@ -886,8 +884,7 @@ pub fn validate(stack: &str, action: &str, args: ActionArgs) -> Result<ActionReq
             "use the CLI for that: `homelab destroy admin` from a workstation",
         ));
     }
-    let needs_name = kind.confirm() || (kind == ActionKind::Wipe && args.confirm.is_some());
-    if needs_name && args.confirm.as_deref() != Some(stack) {
+    if kind.confirm() && args.confirm.as_deref() != Some(stack) {
         return Err(Refusal::new(
             what,
             "the typed name does not match the stack",

@@ -14,7 +14,7 @@
  */
 
 /** The actions whose run is the plan their preview shows. */
-const PLANNED = new Set(["deploy", "deploy-commit"]);
+const PLANNED = new Set(["deploy", "deploy-commit", "wipe"]);
 
 /** @param {string} s */
 const capital = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);

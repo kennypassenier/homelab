@@ -62,12 +62,14 @@
     {
       "action": "wipe",
       "args": ["confirm"],
-      "confirm": false,
+      "confirm": true,
       "stack": "drill",
       "values": {
         "confirm": ""
       },
-      "errors": {}
+      "errors": {
+        "confirm": "Type drill to confirm."
+      }
     },
     {
       "action": "destroy",

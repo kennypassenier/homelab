@@ -26,7 +26,9 @@ import { humanDuration } from "../format.js";
 import { pageHeader } from "../ui.js";
 import { humanMb } from "../fleet.js";
 import { openAction } from "../actiondialog.js";
+import { listen } from "../store.js";
 import {
+  changesRetired,
   operationLabel,
   repoTotals,
   splitInUse,
@@ -214,8 +216,10 @@ export function mount(root) {
   const detach = attachDataTables(root);
   const abort = new AbortController();
 
-  const load = async () => {
-    table.loading({ words: "Reading the retired list from the host…" });
+  /** @param {boolean} [quiet] a re-read after a job keeps the rows up */
+  const load = async (quiet = false) => {
+    if (!quiet)
+      table.loading({ words: "Reading the retired list from the host…" });
     const r = await fetchJson(
       "/data/retired",
       "the retired list",
@@ -233,8 +237,14 @@ export function mount(root) {
   const retry = () => void load().catch(() => {});
   root.addEventListener("kp-datatable-retry", retry);
   retry();
+  // fix-wipe-1: a finished wipe, destroy, forget, apply or deploy changes
+  // this list; read it again so a wiped key leaves without a refresh.
+  const off = listen("action", (j) => {
+    if (changesRetired(j)) void load(true).catch(() => {});
+  });
   return () => {
     abort.abort();
+    off();
     root.removeEventListener("kp-datatable-retry", retry);
     detach();
   };

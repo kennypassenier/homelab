@@ -28,7 +28,7 @@
     "prune-orphans": "Removes files on the container that the working copy's files no longer declare, without running a full deploy — a cleanup for drift that built up outside a deploy.",
     "destroy": "Backs up the stack's data, then deletes the container entirely. When the stack's own files are already gone from the working copy, it goes from the host's own record of what it last deployed instead.",
     "forget": "For a container that is already gone (deleted outside this dashboard): drops its record from the host's own state and registrations, without touching anything that might still exist.",
-    "wipe": "Deletes what a retired stack left behind: its backups, its /appdata directory, and any copies kept in the vault. Left empty, Confirm only lists what a real wipe would delete — nothing is deleted until the stack's name is typed below.",
+    "wipe": "Deletes what a retired stack left behind: its backups, its /appdata directory, and any copies kept in the vault. The list below is everything it deletes; the button stays off until the name is typed exactly.",
     "patch": "Runs `apt update && apt dist-upgrade` on every managed container, one at a time — routine OS patching for the whole fleet.",
     "zfs-replicate": "Runs the declared ZFS snapshot and replication jobs right now, instead of waiting for their own schedule.",
     "backup-host-meta": "Takes a snapshot of the host daemon's own state right now: its vault, its state file, its TLS material and the intent repository — not any managed stack's data.",
@@ -72,13 +72,7 @@
       "help": "The name of the stack, exactly; this cannot be undone from the dashboard.",
       "required": true,
       "expect": "{stack}",
-      "placeholder": "{stack}",
-      "list_only": {
-        "label": "Type {stack} to delete for real",
-        "help": "Leave it empty and the wipe only lists what it would delete.",
-        "required": false,
-        "placeholder": "empty: only list"
-      }
+      "placeholder": "{stack}"
     },
     "snapshot": {
       "kind": "text",

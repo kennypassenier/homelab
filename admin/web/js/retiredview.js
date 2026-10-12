@@ -106,3 +106,26 @@ export function wipeStatus(entry) {
   if (entry.refused) return "refused";
   return entry.in_use.length === 0 ? "removable" : "partial";
 }
+
+/**
+ * The actions whose finished job can add, change or remove a retired
+ * entry: a wipe removes one; a destroy, forget, apply or deploy can add one.
+ */
+const CHANGES_RETIRED = new Set([
+  "wipe",
+  "destroy",
+  "forget",
+  "apply",
+  "deploy",
+]);
+
+/**
+ * fix-wipe-1: whether a job event means the retired list must be read
+ * again (Kenny, 2026-10-12: "als ik iets wis, dan mag het niet meer in die
+ * lijst staan") — once the job has ended, done or failed, never on the way.
+ * @param {{action?: string, state?: string} | null | undefined} job
+ */
+export function changesRetired(job) {
+  if (!job || !CHANGES_RETIRED.has(job.action ?? "")) return false;
+  return job.state === "done" || job.state === "failed";
+}

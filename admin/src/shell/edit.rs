@@ -151,6 +151,10 @@ async fn repo_sync(State(c): State<EditCtx>) -> Response {
 #[serde(deny_unknown_fields)]
 struct UnpushedBody {
     choice: Unpushed,
+    /// fix-wipe-1: a drop carries the typed word `drop`, checked here and
+    /// not only in the browser.
+    #[serde(default)]
+    confirm: Option<String>,
 }
 
 async fn repo_unpushed(
@@ -161,6 +165,16 @@ async fn repo_unpushed(
         Ok(b) => b,
         Err(r) => return refusal(StatusCode::BAD_REQUEST, r),
     };
+    if b.choice == Unpushed::Drop && b.confirm.as_deref() != Some("drop") {
+        return refusal(
+            StatusCode::BAD_REQUEST,
+            Refusal::new(
+                "drop the unpushed commits",
+                "the typed word does not match",
+                "type drop exactly to confirm",
+            ),
+        );
+    }
     let wc = c.wc.clone();
     let r = blocking(move || wc.resolve(b.choice)).await.and_then(|r| r);
     publish_repo(&c).await;
@@ -2059,7 +2073,29 @@ pub async fn issue_token(
     }
 }
 
-async fn tokens_revoke(State(c): State<EditCtx>, UrlPath(name): UrlPath<String>) -> Response {
+#[derive(Deserialize)]
+struct RevokeQuery {
+    #[serde(default)]
+    confirm: Option<String>,
+}
+
+/// fix-wipe-1: the revoke carries the typed name (`?confirm=<name>`),
+/// checked here and not only in the browser.
+async fn tokens_revoke(
+    State(c): State<EditCtx>,
+    UrlPath(name): UrlPath<String>,
+    axum::extract::Query(q): axum::extract::Query<RevokeQuery>,
+) -> Response {
+    if q.confirm.as_deref() != Some(name.as_str()) {
+        return refusal(
+            StatusCode::BAD_REQUEST,
+            Refusal::new(
+                "revoke a token",
+                "the typed name does not match the token",
+                format!("type {name:?} exactly to confirm"),
+            ),
+        );
+    }
     answer(revoke_token(&c, name).await)
 }
 

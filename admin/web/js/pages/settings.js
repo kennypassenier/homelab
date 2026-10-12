@@ -1641,6 +1641,11 @@ export function mount(root, opts = {}) {
         "Revoke",
       )
     );
+    // fix-wipe-1: off until the name is typed exactly.
+    go.disabled = true;
+    typed.addEventListener("input", () => {
+      go.disabled = typed.value.trim() !== name;
+    });
     const cancel = h(
       "button",
       { type: "button", class: "kp-button" },
@@ -1677,7 +1682,7 @@ export function mount(root, opts = {}) {
       go.disabled = true;
       const r = await send(
         "DELETE",
-        `/data/tokens/${encodeURIComponent(name)}`,
+        `/data/tokens/${encodeURIComponent(name)}?confirm=${encodeURIComponent(name)}`,
         undefined,
         "revoke a token",
       );
@@ -1977,11 +1982,18 @@ function resolveButton(choice, reload) {
           placeholder: "drop",
         })
       );
-      const go = h(
-        "button",
-        { type: "button", class: "kp-button kp-button--destructive" },
-        "Drop the commits",
+      const go = /** @type {HTMLButtonElement} */ (
+        h(
+          "button",
+          { type: "button", class: "kp-button kp-button--destructive" },
+          "Drop the commits",
+        )
       );
+      // fix-wipe-1: off until "drop" is typed exactly.
+      go.disabled = true;
+      typed.addEventListener("input", () => {
+        go.disabled = typed.value.trim() !== "drop";
+      });
       const d = openDialog({
         title: "Drop the unpushed commits",
         description:
@@ -2024,7 +2036,7 @@ async function resolve(choice, reload) {
   const r = await send(
     "POST",
     "/data/repo/unpushed",
-    { choice },
+    choice === "drop" ? { choice, confirm: "drop" } : { choice },
     "the unpushed commits",
   );
   if (!r.ok) await refusalAlarm(r.error, r.status);

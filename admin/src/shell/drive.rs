@@ -1026,14 +1026,9 @@ impl Driver {
             return;
         };
         // As the preview route: a typed name not typed yet is filled in
-        // (the line then leaves the name to the CLI), and a wipe keeps its
-        // list-only meaning unless the name was typed right.
+        // (the line then leaves the name to the CLI).
         let typed = args.confirm.as_deref() == Some(stack.as_str());
-        if confirm {
-            args.confirm = Some(stack.clone());
-        } else if !typed {
-            args.confirm = None;
-        }
+        args.confirm = confirm.then(|| stack.clone());
         let Ok(req) = act::validate(&stack, &action, args) else {
             return;
         };

@@ -29,7 +29,7 @@ import {
   stackKind,
   stackLine,
 } from "../secretsview.js";
-import { current, subscribe } from "../store.js";
+import { current, listen, subscribe } from "../store.js";
 import {
   chartColour,
   chip,
@@ -1121,12 +1121,21 @@ export function mount(root, opts = {}) {
 
   paintAll();
   void load();
+  // fix-wipe-1: a finished change-secret job changes what this page lists;
+  // read it again rather than wait for a refresh.
+  const offJobs = listen("action", (j) => {
+    if (j?.action !== "change-secret") return;
+    if (j.state !== "done" && j.state !== "failed") return;
+    if (S.stack === j.stack && !S.change) void pick(j.stack);
+    else void load();
+  });
   return () => {
     abort.abort();
     reveals.clear();
     clearInterval(ticker);
     document.removeEventListener("keydown", onKey);
     off();
+    offJobs();
     tip.stop();
   };
 }

@@ -303,10 +303,17 @@ pub struct ScheduleInput {
 pub fn check_input(input: &ScheduleInput) -> Result<ActionRequest, Refusal> {
     let req = super::actions::validate(&input.stack, &input.action, input.args.clone())?;
     let what = format!("schedule {} {}", input.action, input.stack);
-    if req.action.confirm() || req.action == super::actions::ActionKind::Wipe {
+    // fix-wipe-1: nothing that deletes runs unattended — a typed-name
+    // action, an exec, or an apply that destroys a stack.
+    let destroys = req
+        .args
+        .destroy
+        .as_deref()
+        .is_some_and(|d| !d.trim().is_empty());
+    if req.action.confirm() || req.action.destructive() || destroys {
         return Err(Refusal::new(
             what,
-            "an action that asks for the typed stack name cannot be scheduled",
+            "an action that deletes something, or asks for the typed stack name, cannot be scheduled",
             "run it by hand when it is needed",
         ));
     }

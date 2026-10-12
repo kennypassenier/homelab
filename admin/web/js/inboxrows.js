@@ -13,6 +13,7 @@ import { checkAnswer } from "./checks.js";
 import { drillState } from "./backupsview.js";
 import { versionNotes } from "./parity.js";
 import { majorJump } from "./staleimages.js";
+import { formatDateTime } from "./format.js";
 
 /**
  * Which filter chip a row answers to (flows/inbox.html "Show").
@@ -144,7 +145,7 @@ export function updateRows(body) {
         .join(
           " · ",
         )}. Each is backed up first; Roll back puts the old version back.`,
-      href: "/needs-you?update=all",
+      href: "/inbox?update=all",
       stack: stacks.length === 1 ? stacks[0] : null,
       at,
       source: "updates",
@@ -174,7 +175,7 @@ export function setupRows(fleet) {
       kind: "setup",
       title: `${plural(names.length, "stack has", "stacks have")} no sealed env on the host`,
       why: "Running containers are fine, but the host's vault holds no copy of their secrets, so a lost container could not get them back. A deploy of each stack gives the vault its copy.",
-      href: "/needs-you#setup-noenv",
+      href: "/inbox#setup-noenv",
       stack: names.length === 1 ? names[0] : null,
       at: 0,
       source: "setup",
@@ -207,7 +208,7 @@ export function checkRowsOf(report) {
         a === "not ok"
           ? "Answered “it fails”. Fix the cause, then answer it again; “Not now” asks again in 7 days."
           : "Only a person can confirm this one. Answer it here; “Not now” asks again in 7 days.",
-      href: `/needs-you#check-${c.id}`,
+      href: `/inbox#check-${c.id}`,
       stack: r.stack ?? null,
       at: Number(r.answered_at ?? r.registered_at) || 0,
       source: "checks",
@@ -249,7 +250,7 @@ export function todayRows(body, setupStacks = []) {
       kind: i.source === "incident" ? "fail" : "check",
       title: i.what,
       why: `What to do: ${i.remedy}`,
-      href: "/needs-you#today",
+      href: "/inbox#today",
       stack: i.fix?.stack ?? null,
       at,
       source: "today",
@@ -286,7 +287,21 @@ export function todayRows(body, setupStacks = []) {
  * @returns {SrcChip[]}
  */
 export function chipsOf(r) {
-  if (r.chips) return r.chips;
+  // fix-inbox-group-1 (Kenny, 2026-10-09: "er staat geen datum van de
+  // 'storing' bij"): every row says when, and how often when it stands for
+  // several notices of the same thing.
+  /** @type {SrcChip[]} */
+  const when = [];
+  if (r.at > 0) {
+    const first = r.first_at ?? r.at;
+    when.push({
+      label:
+        (r.count ?? 1) > 1
+          ? `${r.count}× since ${formatDateTime(first)}, last ${formatDateTime(r.at)}`
+          : formatDateTime(r.at),
+    });
+  }
+  if (r.chips) return [...r.chips, ...when];
   /** @type {SrcChip[]} */
   const out = [{ label: r.source === "asks" ? "question" : "failure" }];
   if (r.stack)
@@ -296,7 +311,7 @@ export function chipsOf(r) {
     });
   if (r.source === "notices")
     out.push({ label: "in Activity", href: "/activity" });
-  return out;
+  return [...out, ...when];
 }
 
 /**

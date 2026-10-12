@@ -63,7 +63,9 @@ export const RETIRED_STACK_TABS = /** @type {const} */ (["checks", "firewall"]);
 export const CURRENT_PATHS = {
   "": "landing",
   apps: "home",
-  "needs-you": "needs-you",
+  // Kenny, 2026-10-09: the Inbox lives at /inbox (its page id stays
+  // "needs-you", which every Live view control names).
+  inbox: "needs-you",
   stacks: "overview",
   activity: "activity",
   backups: "backups",
@@ -91,6 +93,8 @@ export const CURRENT_PATHS = {
  * @type {Record<string, (search: string, ctx: {stacks: string[]}) => string>}
  */
 const REDIRECTS = {
+  // The Inbox's 3.71.0 address (Kenny, 2026-10-09: "/inbox").
+  "needs-you": (s) => `/inbox${s}`,
   // 3.71.0 IA (feat-shell-1)
   overview: (s) => {
     const p = new URLSearchParams(s);
@@ -100,7 +104,7 @@ const REDIRECTS = {
   apply: (s) => `/stacks${setParams(s, { "deploy-all": "1" })}`,
   health: (s) => {
     const block = new URLSearchParams(s).get("block");
-    return `/needs-you${setParams(s, { block: null, kind: block })}`;
+    return `/inbox${setParams(s, { block: null, kind: block })}`;
   },
   jobs: (s) => `/activity${setParams(s, { view: "running" })}`,
   log: (s) => `/activity${setParams(s, { view: "host-log" })}`,
@@ -108,7 +112,7 @@ const REDIRECTS = {
   backupcalendar: (s) => `/backups${setParams(s, { section: "coverage" })}`,
   retired: (s) => `/backups${setParams(s, { section: "removed" })}`,
   fleetview: (s) => `/map${s}`,
-  notifications: (s) => `/needs-you${s}`,
+  notifications: (s) => `/inbox${s}`,
   shell: (s) => `/console${s}`,
   passkeys: (s) => `/settings${setParams(s, { section: "sign-in" })}`,
   secrets: (s, ctx) => {
@@ -118,12 +122,12 @@ const REDIRECTS = {
   },
   // 2026-10-02: the kit's Status page is off; its address goes where
   // Health's did.
-  status: (s) => `/needs-you${s}`,
+  status: (s) => `/inbox${s}`,
   // 2026-09-30's retired addresses, collapsed to one hop.
   start: (s) => `/${s}`,
-  today: (s) => `/needs-you${setParams(s, { kind: "today" })}`,
-  doctor: (s) => `/needs-you${setParams(s, { kind: "doctor" })}`,
-  checks: (s) => `/needs-you${setParams(s, { kind: "checks" })}`,
+  today: (s) => `/inbox${setParams(s, { kind: "today" })}`,
+  doctor: (s) => `/inbox${setParams(s, { kind: "doctor" })}`,
+  checks: (s) => `/inbox${setParams(s, { kind: "checks" })}`,
   traffic: (s) => `/charts${setParams(s, { tab: "traffic" })}`,
   timeline: (s) => `/activity${setParams(s, { view: "timeline" })}`,
   // Pre-3.1.0 address of the tile page.

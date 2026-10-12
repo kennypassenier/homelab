@@ -11,7 +11,7 @@
 // here), the palette ("update kp-soft", "Update apps with a newer
 // version…") and the Map's stale-image rows. It lives at its own address
 // since the review (redesign-flows-11): `/update?all=1` or
-// `/update?stack=<stack>[&app=<key>]`; the old `/needs-you?update=…` is sent on.
+// `/update?stack=<stack>[&app=<key>]`; the old `/inbox?update=…` is sent on.
 //
 // redesign-flows-6 (review items 3 and 4): steps 3-5 are ONE job on the
 // dashboard's server (`update-apps`, admin/src/shell/actions_flow.rs) —
@@ -218,7 +218,7 @@ export function mount(root, scope) {
   const crumbs = fromStacks
     ? [{ label: "Stacks", href: "/stacks" }, { label: "Update apps" }]
     : scope.all
-      ? [{ label: "Inbox", href: "/needs-you" }, { label: "Update apps" }]
+      ? [{ label: "Inbox", href: "/inbox" }, { label: "Update apps" }]
       : [
           { label: "Stacks", href: "/stacks" },
           {
@@ -236,7 +236,7 @@ export function mount(root, scope) {
   const back = fromStacks
     ? "/stacks"
     : scope.all
-      ? "/needs-you"
+      ? "/inbox"
       : `/stacks/${encodeURIComponent(scope.stack)}`;
 
   // ---- 1 · See -------------------------------------------------------
@@ -1089,7 +1089,7 @@ export function mount(root, scope) {
               "a",
               {
                 class: "kp-button kp-button--primary",
-                href: "/needs-you",
+                href: "/inbox",
                 title: "What else waits for you",
               },
               left ? `Back to the Inbox · ${left} left` : "Back to the Inbox",

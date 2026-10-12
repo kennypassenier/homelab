@@ -2635,7 +2635,7 @@ test("invariants: every pre-3.71.0 address lands on its new home", async () => {
       // Apps by itself (Kenny, 2026-10-03).
       const landed = (/** @type {URL} */ u) =>
         want === "/"
-          ? ["/needs-you", "/apps"].includes(u.pathname)
+          ? ["/inbox", "/apps"].includes(u.pathname)
           : u.pathname + u.search === want;
       await page.waitForURL(landed, { timeout: 5000 }).catch(() => {});
       await page.waitForTimeout(200);
@@ -8841,7 +8841,7 @@ test("invariants: redesign-integrate-1: on a 390 px phone the Firewall's rules t
 const AUDIT_PAGES = [
   "/",
   "/apps",
-  "/needs-you",
+  "/inbox",
   "/stacks",
   "/stacks?deploy-all=1",
   "/activity",
@@ -8885,8 +8885,8 @@ const AUDIT_PAGES = [
  *   then?: (page: import("playwright").Page) => Promise<void>}[]}
  */
 const AUDIT_DIALOGS = [
-  { path: "/needs-you", drive: "inbox-fix" },
-  { path: "/needs-you", drive: "inbox-push-envs" },
+  { path: "/inbox", drive: "inbox-fix" },
+  { path: "/inbox", drive: "inbox-push-envs" },
   { path: "/stacks", drive: "stacks-new" },
   { path: "/activity", drive: "activity-run-again" },
   { path: "/activity", drive: "activity-open-incident" },

@@ -31,7 +31,7 @@ export const AREAS = Object.freeze([
   {
     id: "needs-you",
     label: "Inbox",
-    href: "/needs-you",
+    href: "/inbox",
     what: "Everything waiting for a person, worst first",
     rare: false,
     phone: "tab",

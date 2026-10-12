@@ -1286,7 +1286,7 @@ function problemAction(c, p) {
           "a",
           {
             class: "kp-button",
-            href: /** @type {any} */ (a).href ?? "/needs-you",
+            href: /** @type {any} */ (a).href ?? "/inbox",
             title: a.title,
           },
           a.label,

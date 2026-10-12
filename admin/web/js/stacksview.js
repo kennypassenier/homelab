@@ -422,7 +422,7 @@ export function hostStrip(fleet, trend, needs, newer = new Map()) {
           ? "nothing waiting"
           : `${needs.urgent} urgent · open the list`,
       tone: needs.urgent ? "bad" : needs.count ? "warn" : null,
-      href: "/needs-you",
+      href: "/inbox",
       title: "Everything waiting for a person; open the Inbox",
     },
     {

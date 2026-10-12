@@ -69,7 +69,8 @@ export function scopeOf(search) {
 }
 
 /**
- * The old address (`/needs-you?update=all`, `/needs-you?update=<stack>&app=…`)
+ * The old address (`/inbox?update=all`, `/inbox?update=<stack>&app=…`;
+ * `/needs-you?…` before 3.73.1)
  * sent on to the flow's own; null when the query is not the flow's.
  * @param {string} search
  */

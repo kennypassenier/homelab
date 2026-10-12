@@ -493,3 +493,48 @@ fn settings_the_digest_time_is_checked_and_old_files_still_load() {
     let json = serde_json::to_value(&old).unwrap();
     assert!(json.get("long_action_s").is_none());
 }
+
+/// covers: fix-inbox-resolve-1
+/// Kenny, 2026-10-09: "deploy media failed" settles itself the next time
+/// media deploys well; another stack's or another operation's failure
+/// stays.
+#[test]
+fn fix_inbox_resolve_a_success_settles_the_same_operations_failure_on_the_same_stack() {
+    let mut f = NotifyFile::default();
+    let failed = f.add(
+        draft(Kind::ActionFailed, Some("backup")),
+        10,
+        PushOutcome::Sent,
+        KEEP,
+        0,
+    );
+    let missed = f.add(
+        draft(Kind::ScheduleMissed, Some("backup")),
+        20,
+        PushOutcome::Sent,
+        KEEP,
+        0,
+    );
+    let mut other_stack = draft(Kind::ActionFailed, Some("backup"));
+    other_stack.stack = Some("films".into());
+    let other_stack = f.add(other_stack, 30, PushOutcome::Sent, KEEP, 0);
+    let mut deploy = Draft::new(Kind::ActionFailed, "deploy-media", "t", "b");
+    deploy.stack = Some("media".into());
+    deploy.detail.label = Some("deploy".into());
+    let deploy = f.add(deploy, 40, PushOutcome::Sent, KEEP, 0);
+    let done = f.add(
+        draft(Kind::ActionDone, Some("backup")),
+        50,
+        PushOutcome::Sent,
+        KEEP,
+        0,
+    );
+    let by = |id: u64| f.notices.iter().find(|n| n.id == id).cloned().unwrap();
+    assert!(by(failed.id).read && by(failed.id).resolved_by == Some(done.id));
+    assert!(
+        by(missed.id).read,
+        "a missed schedule of the same backup is settled too"
+    );
+    assert!(!by(other_stack.id).read, "another stack's failure stays");
+    assert!(!by(deploy.id).read, "another operation's failure stays");
+}

@@ -17,8 +17,12 @@ import { levelBadge } from "./notices.js";
 /**
  * @typedef {"bad" | "warn" | "info"} Severity
  * @typedef {{key: string, severity: Severity, title: string, why: string,
- *   href: string, stack: string | null, at: number, source: string}} InboxItem
- *   `key`: stable over reads; `source`: which list it came from.
+ *   href: string, stack: string | null, at: number, source: string,
+ *   count?: number, first_at?: number, ids?: number[]}} InboxItem
+ *   `key`: stable over reads; `source`: which list it came from; `count`
+ *   and `first_at`: how often the same thing was said and since when, for
+ *   a row that stands for several notices; `ids`: the notices a row stands
+ *   for, all marked seen together.
  */
 
 /** Notice kinds that report something finished well: never an Inbox row. */
@@ -47,25 +51,50 @@ export function inboxItems(src) {
       severity: "bad",
       title: v.title,
       why: `${v.what} (${v.left})`,
-      href: `/needs-you#ask-${encodeURIComponent(v.key)}`,
+      href: `/inbox#ask-${encodeURIComponent(v.key)}`,
       stack: null,
       at: a.asked_at,
       source: "asks",
     });
   }
+  // fix-inbox-group-1 (Kenny, 2026-10-09: "nu wordt ik gespammed met
+  // 'opnsense does not answer' ... Dit kan opgelost worden met een
+  // counter"): the same thing said again is one row, newest first, that
+  // counts how often and says since when.
+  /** @type {Map<string, InboxItem>} */
+  const same = new Map();
   for (const n of src.notices ?? []) {
     if (n.read || QUIET_KINDS.has(n.kind) || n.level === "ok") continue;
     const tone = levelBadge(n).tone;
-    out.push({
+    const group = `${n.stack ?? ""}|${n.kind}|${n.level ?? ""}|${n.title}`;
+    const had = same.get(group);
+    if (had) {
+      had.count = (had.count ?? 1) + 1;
+      had.ids = [...(had.ids ?? []), n.id];
+      had.first_at = Math.min(had.first_at ?? had.at, n.at);
+      if (n.at > had.at) {
+        had.at = n.at;
+        had.key = `notice:${n.id}`;
+        had.why = n.consequence || n.body || "";
+      }
+      continue;
+    }
+    /** @type {InboxItem} */
+    const row = {
       key: `notice:${n.id}`,
       severity: tone === "bad" ? "bad" : tone === "warn" ? "warn" : "info",
       title: n.title,
       why: n.consequence || n.body || "",
-      href: n.link || `/needs-you#notice-${n.id}`,
+      href: n.link || `/inbox#notice-${n.id}`,
       stack: n.stack ?? null,
       at: n.at,
+      first_at: n.at,
+      count: 1,
+      ids: [n.id],
       source: "notices",
-    });
+    };
+    same.set(group, row);
+    out.push(row);
   }
   const seen = new Set(out.map((i) => i.key));
   for (const i of src.extra ?? []) if (!seen.has(i.key)) out.push(i);

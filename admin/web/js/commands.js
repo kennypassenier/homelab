@@ -301,7 +301,7 @@ export const editCommands =
         label: "Update apps with a newer version…",
         hint: "see what is newer and what it changes, then back up, update and verify",
         words: "update upgrade newer version stale images all apps",
-        href: "/needs-you?update=all",
+        href: "/inbox?update=all",
       },
       ...(openImportBundle
         ? [

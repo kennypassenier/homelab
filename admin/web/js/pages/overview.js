@@ -370,7 +370,7 @@ export function mount(root, ctx) {
   const strip = kpiStrip(
     [
       { key: "online", label: "Stacks running", href: "/stacks" },
-      { key: "needs-you", label: "Need you", href: "/needs-you" },
+      { key: "needs-you", label: "Need you", href: "/inbox" },
       { key: "newer", label: "Newer versions", href: "/update?all=1" },
       { key: "cpu", label: "Host CPU", href: "/host" },
       { key: "disk", label: "Root disk", href: "/host" },

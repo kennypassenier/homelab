@@ -48,11 +48,11 @@ fails while this section is stale.
 | Stack | App | Service | Policy | Image | Note |
 |---|---|---|---|---|---|
 | downloader | qbittorrent | gluetun | `manual` | `qmcgaw/gluetun@sha256:89e3cbe22e0d…` |  |
-| downloader | qbittorrent | qbittorrent | `manual` | `lscr.io/linuxserver/qbittorrent:5.2.4@sha256:b522f9f4b769…` |  |
-| gateway | cloudflared | cloudflared | `manual` | `cloudflare/cloudflared:2026.9.3@sha256:072c067d25cc…` |  |
+| downloader | qbittorrent | qbittorrent | `manual` | `lscr.io/linuxserver/qbittorrent:5.2.4_v2.0.15-ls479@sha256:b522f9f4b769…` |  |
+| gateway | cloudflared | cloudflared | `manual` | `cloudflare/cloudflared:2026.10.0@sha256:9b49eed8f628…` |  |
 | gateway | crowdsec | crowdsec | `manual` | `crowdsecurity/crowdsec:v1.8.1@sha256:0f2523fa61ef…` |  |
 | gateway | socket-proxy | socket-proxy | `manual` | `tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6…` |  |
-| gateway | traefik | traefik | `manual` | `traefik:v3.7.13@sha256:24841fe2de73…` |  |
+| gateway | traefik | traefik | `manual` | `traefik:v3.7.14@sha256:575fa15b1350…` |  |
 | kp-soft | jobtracker | jobtracker | `auto` | `ghcr.io/kennypassenier/jobtracker:latest` |  |
 | kp-soft | kp-soft | kp-soft | `manual` | `ghcr.io/kennypassenier/kp-soft:v0.4.0@sha256:b9fd7be0bd3e…` |  |
 | media | bazarr | bazarr | `auto` | `lscr.io/linuxserver/bazarr:latest` |  |

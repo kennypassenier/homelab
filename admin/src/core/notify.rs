@@ -137,6 +137,43 @@ pub struct Notice {
     pub key: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fixes: Vec<Fix>,
+    /// fix-inbox-resolve-1: the operation it is about (`deploy-media`), so a
+    /// later success of the same operation settles a failure of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub op: Option<String>,
+    /// The operation's kind ("deploy", "backup"), the same in a failure, a
+    /// missed schedule and a success.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// fix-inbox-resolve-1: settled by a later notice (its id): a failure
+    /// that a success of the same operation on the same stack ended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_by: Option<u64>,
+}
+
+/// Whether the success `done` settles the earlier notice `x`: a failure,
+/// an incident or a missed schedule on the same stack, of the same
+/// operation (its `op`, with a schedule's `schedule-` prefix taken off) or
+/// the same kind of operation (its `label`).
+pub fn settles(done: &Notice, x: &Notice) -> bool {
+    if x.at > done.at
+        || x.id == done.id
+        || x.stack.is_none()
+        || x.stack != done.stack
+        || !matches!(
+            x.kind,
+            Kind::ActionFailed | Kind::Incident | Kind::ScheduleMissed
+        )
+    {
+        return false;
+    }
+    let bare = |op: &Option<String>| {
+        op.as_deref()
+            .map(|o| o.strip_prefix("schedule-").unwrap_or(o).to_string())
+    };
+    let same_op = bare(&x.op).is_some() && bare(&x.op) == bare(&done.op);
+    let same_label = x.label.is_some() && x.label == done.label;
+    same_op || same_label
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -470,8 +507,24 @@ impl NotifyFile {
             source: d.detail.source,
             key: d.detail.key,
             fixes: d.detail.fixes,
+            op: (!d.op.is_empty()).then(|| d.op.clone()),
+            label: d.detail.label.clone(),
+            resolved_by: None,
         };
         self.next_id += 1;
+        // fix-inbox-resolve-1 (Kenny, 2026-10-09: "als er in inbox meldingen
+        // zijn zoals bv 'deploy media failed', dan moet die melding zelf
+        // resolven de volgende keer dat media succesvol deployed"): a
+        // success settles every open failure, incident or missed schedule
+        // of the same operation on the same stack.
+        if n.kind == Kind::ActionDone {
+            for x in self.notices.iter_mut() {
+                if !x.read && settles(&n, x) {
+                    x.read = true;
+                    x.resolved_by = Some(n.id);
+                }
+            }
+        }
         self.notices.push(n.clone());
         if self.notices.len() > keep {
             let cut = self.notices.len() - keep;

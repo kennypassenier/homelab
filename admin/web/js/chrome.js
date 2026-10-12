@@ -655,7 +655,7 @@ export function mountChrome(where, ctx) {
           }
         : {
             label: "Open the Inbox",
-            onClick: () => ctx.navigate("/needs-you"),
+            onClick: () => ctx.navigate("/inbox"),
           },
     );
   });
@@ -673,7 +673,7 @@ export function mountChrome(where, ctx) {
         "warning",
         {
           label: "Answer in the Inbox",
-          onClick: () => ctx.navigate("/needs-you"),
+          onClick: () => ctx.navigate("/inbox"),
         },
       );
     }

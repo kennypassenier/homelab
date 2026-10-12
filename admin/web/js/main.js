@@ -199,7 +199,7 @@ function landing() {
     history.replaceState(
       null,
       "",
-      `${items.length > 0 ? "/needs-you" : "/apps"}${location.search}`,
+      `${items.length > 0 ? "/inbox" : "/apps"}${location.search}`,
     );
     render();
     return true;

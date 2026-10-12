@@ -46,7 +46,7 @@ const pageSet = {
   home: "/",
   pages: [
     reg("home", "Apps", "/apps", true),
-    reg("needs-you", "Inbox", "/needs-you", true),
+    reg("needs-you", "Inbox", "/inbox", true),
     reg("overview", "Stacks", "/stacks", true),
     reg("activity", "Activity", "/activity", true),
     reg("backups", "Backups", "/backups", true),
@@ -61,7 +61,7 @@ const pageSet = {
 test("every current path lives at the root", () => {
   assert.deepEqual(route("/"), { page: "landing" });
   assert.deepEqual(route("/apps"), { page: "home" });
-  assert.deepEqual(route("/needs-you"), { page: "needs-you" });
+  assert.deepEqual(route("/inbox"), { page: "needs-you" });
   assert.deepEqual(route("/stacks"), { page: "overview" });
   assert.deepEqual(route("/activity?view=planned"), { page: "activity" });
   assert.deepEqual(route("/backups"), { page: "backups" });
@@ -91,23 +91,23 @@ test("feat-shell-1: every old address redirects to its new home in one hop, its 
     ["/overview?section=apply", "/stacks?deploy-all=1"],
     ["/apply", "/stacks?deploy-all=1"],
     ["/apply?fleet.q=media", "/stacks?fleet.q=media&deploy-all=1"],
-    ["/health", "/needs-you"],
-    ["/health?block=doctor", "/needs-you?kind=doctor"],
+    ["/health", "/inbox"],
+    ["/health?block=doctor", "/inbox?kind=doctor"],
     ["/jobs?job=3", "/activity?job=3&view=running"],
     ["/log?source=media", "/activity?source=media&view=host-log"],
     ["/schedules", "/activity?view=planned"],
     ["/backupcalendar", "/backups?section=coverage"],
     ["/retired", "/backups?section=removed"],
     ["/fleetview?traffic=1", "/map?traffic=1"],
-    ["/notifications", "/needs-you"],
+    ["/notifications", "/inbox"],
     ["/shell?vmid=104", "/console?vmid=104"],
     ["/passkeys", "/settings?section=sign-in"],
     ["/secrets?stack=gateway", "/stacks/gateway/settings?section=secrets"],
-    ["/status", "/needs-you"],
+    ["/status", "/inbox"],
     ["/start", "/"],
-    ["/today", "/needs-you?kind=today"],
-    ["/doctor?doctor.q=x", "/needs-you?doctor.q=x&kind=doctor"],
-    ["/checks/", "/needs-you?kind=checks"],
+    ["/today", "/inbox?kind=today"],
+    ["/doctor?doctor.q=x", "/inbox?doctor.q=x&kind=doctor"],
+    ["/checks/", "/inbox?kind=checks"],
     ["/traffic?range=7d", "/charts?range=7d&tab=traffic"],
     ["/timeline?days=30", "/activity?days=30&view=timeline"],
     ["/home", "/apps"],
@@ -137,7 +137,7 @@ test("feat-shell-1: every old address redirects to its new home in one hop, its 
   assert.equal(needsFleet(route("/secrets"), ""), true);
   assert.equal(needsFleet(route("/secrets"), "?stack=x"), false);
   // A current route has nothing to redirect.
-  for (const p of ["/", "/needs-you", "/stacks", "/stacks/media/logs"])
+  for (const p of ["/", "/inbox", "/stacks", "/stacks/media/logs"])
     assert.equal(redirectFor(route(p), ""), null, p);
 });
 
@@ -190,7 +190,7 @@ test("feat-shell-1: a page module shown as a view of its new home is found there
 });
 
 test("feat-shell-1: the bar is the six areas, the current one marked from any page inside it", () => {
-  const top = navEntries(pageSet, route("/needs-you"), areaOf);
+  const top = navEntries(pageSet, route("/inbox"), areaOf);
   assert.deepEqual(
     top.map((n) => n.label),
     ["Apps", "Inbox", "Stacks", "Activity", "Backups", "System"],
@@ -213,7 +213,7 @@ test("feat-shell-1: the bar is the six areas, the current one marked from any pa
   );
   assert.equal(pageTitle(route("/map"), pageSet), "Homelab · Map");
   // Before the registry has answered: the local fallback title, never blank.
-  assert.equal(pageTitle(route("/needs-you")), "Homelab · Inbox");
+  assert.equal(pageTitle(route("/inbox")), "Homelab · Inbox");
   assert.equal(pageTitle(route("/x")), "Homelab · Not found");
 });
 
@@ -246,9 +246,7 @@ test("feat-shell-1: the trail above a page names its area and links up", () => {
     crumbs(route("/settings"), "/settings", "?section=sign-in"),
     [{ label: "System", href: "/system" }, { label: "Sign-in" }],
   );
-  assert.deepEqual(crumbs(route("/needs-you"), "/needs-you", ""), [
-    { label: "Inbox" },
-  ]);
+  assert.deepEqual(crumbs(route("/inbox"), "/inbox", ""), [{ label: "Inbox" }]);
   assert.deepEqual(crumbs(route("/nope"), "/nope", ""), []);
 });
 

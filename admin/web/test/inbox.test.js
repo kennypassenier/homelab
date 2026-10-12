@@ -94,7 +94,7 @@ test("feat-shell-4: a page's slower source joins the same list, so the count is 
       severity: "warn",
       title: "kp-soft has a newer version",
       why: "",
-      href: "/needs-you",
+      href: "/inbox",
       stack: "kp-soft",
       at: 1,
       source: "x",
@@ -110,4 +110,43 @@ test("feat-shell-4: a page's slower source joins the same list, so the count is 
   assert.deepEqual(counts, [2, 1]);
   wireInbox(() => ({ asks: [], notices: null }));
   assert.equal(inboxNow().ready, false);
+});
+
+test("fix-inbox-group-1: the same notice said again is one row that counts how often and since when", () => {
+  const items = inboxItems({
+    now: 1000,
+    notices: [
+      notice({
+        id: 1,
+        level: "warning",
+        at: 100,
+        title: "Proxmox does not answer",
+      }),
+      notice({
+        id: 2,
+        level: "warning",
+        at: 300,
+        title: "Proxmox does not answer",
+      }),
+      notice({
+        id: 3,
+        level: "warning",
+        at: 200,
+        title: "Proxmox does not answer",
+      }),
+      notice({
+        id: 4,
+        level: "warning",
+        at: 250,
+        title: "OPNsense does not answer",
+      }),
+    ],
+  });
+  assert.deepEqual(
+    items.map((i) => [i.key, i.count, i.first_at, i.at, i.ids]),
+    [
+      ["notice:2", 3, 100, 300, [1, 2, 3]],
+      ["notice:4", 1, 250, 250, [4]],
+    ],
+  );
 });

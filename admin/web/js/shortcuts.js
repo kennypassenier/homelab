@@ -16,7 +16,7 @@ export const CHORD_MS = 1500;
  */
 const PAGES = {
   home: { href: "/apps", label: "Apps" },
-  "needs-you": { href: "/needs-you", label: "the Inbox" },
+  "needs-you": { href: "/inbox", label: "the Inbox" },
   stacks: { href: "/stacks", label: "Stacks" },
   activity: { href: "/activity", label: "Activity" },
   backups: { href: "/backups", label: "Backups" },

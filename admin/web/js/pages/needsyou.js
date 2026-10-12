@@ -160,7 +160,7 @@ const rowId = (key) => key.replace(/[^a-z0-9-]/gi, "-");
  */
 export function mount(root) {
   // redesign-flows-11: the Update flow has its own address; the old
-  // `/needs-you?update=…` is sent on to it.
+  // `/inbox?update=…` is sent on to it.
   const legacy = legacyUpdateHref(location.search);
   if (legacy) {
     history.replaceState(null, "", legacy);
@@ -539,7 +539,7 @@ export function mount(root) {
         const res = await send(
           "POST",
           "/data/notifications/read",
-          { ids: [notice], read: true },
+          { ids: r.ids ?? [notice], read: true },
           "marking it seen",
         );
         if (res.ok) void loadNotices();

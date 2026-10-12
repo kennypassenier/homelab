@@ -39,7 +39,7 @@ test("redesign-final-c3/h3: every control or field the rules page and the Restor
 });
 
 test("redesign-final-c3/h3: the old notices address redirects, the rules and the Restore flow have their own", () => {
-  assert.equal(redirectFor(route("/notifications"), ""), "/needs-you");
+  assert.equal(redirectFor(route("/notifications"), ""), "/inbox");
   assert.deepEqual(route("/system/notifications"), { page: "notifications" });
   assert.deepEqual(route("/backups/restore"), { page: "restore" });
 });

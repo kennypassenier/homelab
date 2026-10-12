@@ -311,7 +311,8 @@ async fn drive_reach_an_old_control_name_is_not_refused_by_the_dashboard() {
 async fn drive_reach_goto_an_old_address_lands_on_its_new_home() {
     let (d, _live) = driver("goto-old");
     for (from, to) in [
-        ("/status", "/needs-you"),
+        ("/status", "/inbox"),
+        ("/needs-you", "/inbox"),
         ("/home", "/apps"),
         ("/schedules", "/activity?view=planned"),
         ("/secrets", "/stacks/media/settings?section=secrets"),

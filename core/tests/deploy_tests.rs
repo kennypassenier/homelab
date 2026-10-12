@@ -2015,6 +2015,10 @@ async fn b1_second_run_is_quiet() {
         CmdOutput::ok(&sha_hex(guards::PRUNE_TIMER)),
     );
     exec.respond_always(
+        "sha256sum '/usr/local/sbin/homelab-image-prune'",
+        CmdOutput::ok(&sha_hex(guards::IMAGE_PRUNE_SCRIPT)),
+    );
+    exec.respond_always(
         "sha256sum '/etc/apt/apt.conf.d/60homelab-clean'",
         CmdOutput::ok(&sha_hex(guards::APT_AUTOCLEAN)),
     );
@@ -4635,4 +4639,58 @@ async fn fix_142_a_deploy_records_the_hash_of_every_file_it_pushed() {
         "{:?}",
         hashes
     );
+}
+
+/// covers: feat-imageprune-1
+/// The weekly prune keeps what runs and, per repository, the newest image
+/// nothing runs (a rollback's way back); every other unused image goes.
+#[test]
+fn feat_imageprune_1_keeps_what_runs_and_one_previous_version_per_app() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("image-prune-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("prune");
+    std::fs::write(&script, homelab_core::ops::guards::IMAGE_PRUNE_SCRIPT).unwrap();
+    let docker = dir.join("docker");
+    // app: v3 runs, v2 and v1 do not; db: v9 runs only; tool: two unused.
+    std::fs::write(
+        &docker,
+        "#!/bin/sh\n\
+         case \"$1\" in\n\
+         ps) echo c1; echo c2;;\n\
+         inspect) shift 3; for c in \"$@\"; do case $c in c1) echo sha256:a3;; c2) echo sha256:d9;; esac; done;;\n\
+         image) printf '%s\\n' \
+           'app sha256:a3 2026-10-10 10:00:00 +0200 CEST' \
+           'app sha256:a2 2026-10-05 10:00:00 +0200 CEST' \
+           'app sha256:a1 2026-09-01 10:00:00 +0200 CEST' \
+           'db sha256:d9 2026-09-01 10:00:00 +0200 CEST' \
+           'tool sha256:t2 2026-10-02 10:00:00 +0200 CEST' \
+           'tool sha256:t1 2026-09-02 10:00:00 +0200 CEST' \
+           '<none> sha256:n1 2026-09-02 10:00:00 +0200 CEST';;\n\
+         rmi) echo \"$2\" >> \"$RMI_LOG\";;\n\
+         esac\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&docker, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let log = dir.join("rmi.log");
+    std::fs::write(&log, "").unwrap();
+    let out = std::process::Command::new("sh")
+        .arg(&script)
+        .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
+        .env("RMI_LOG", &log)
+        .output()
+        .unwrap();
+    let mut removed: Vec<String> = std::fs::read_to_string(&log)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    removed.sort();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(removed, vec!["sha256:a1", "sha256:t1"]);
 }

@@ -182,7 +182,36 @@ Unattended-Upgrade::Automatic-Reboot "false";
 Unattended-Upgrade::Remove-Unused-Dependencies "true";
 "#;
 
-pub const PRUNE_SERVICE: &str = "[Unit]\nDescription=Prune stale Docker data (homelab runaway guard)\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/docker system prune -f --filter until=168h\n";
+pub const PRUNE_SERVICE: &str = "[Unit]\nDescription=Prune stale Docker data (homelab runaway guard)\n\n[Service]\nType=oneshot\nExecStart=/usr/local/sbin/homelab-image-prune\nExecStart=/usr/bin/docker system prune -f --filter until=168h\n";
+
+/// Where [`IMAGE_PRUNE_SCRIPT`] is installed.
+pub const IMAGE_PRUNE_PATH: &str = "/usr/local/sbin/homelab-image-prune";
+
+/// feat-imageprune-1 (Kenny, 2026-10-12, form image-prune "Bouwen"): old
+/// versions of an app's image piled up (CT 106: 6.5 GB of 13.2 GB
+/// reclaimable, CT 104: 1.15 of 2.2 GB) because `docker system prune`
+/// without `-a` removes only untagged images. This keeps every image a
+/// container uses and, per repository, the newest one no container uses
+/// (the version a rollback goes back to), and removes every other unused
+/// image. An image another tag still holds is left, and said so.
+pub const IMAGE_PRUNE_SCRIPT: &str = r#"#!/bin/sh
+# homelab runaway guard (feat-imageprune-1): keep what runs, plus per
+# repository the newest image nothing runs; remove the other unused images.
+set -u
+used=$(mktemp)
+trap 'rm -f "$used"' EXIT
+docker ps -aq | xargs -r docker inspect -f '{{.Image}}' | sort -u > "$used"
+docker image ls --no-trunc --format '{{.Repository}} {{.ID}} {{.CreatedAt}}'   | grep -v '^<none> '   | sort -k1,1 -k3,4r   | awk 'NR == FNR { keep[$1] = 1; next }
+         ($2 in keep) { next }
+         !($1 in spare) { spare[$1] = 1; next }
+         { print $2 }' "$used" -   | sort -u   | while read -r id; do
+      if docker rmi "$id" >/dev/null 2>&1; then
+        echo "removed $id"
+      else
+        echo "kept $id (another tag or container still holds it)"
+      fi
+    done
+"#;
 
 pub const PRUNE_TIMER: &str = "[Unit]\nDescription=Weekly Docker prune (homelab runaway guard)\n\n[Timer]\nOnCalendar=weekly\nRandomizedDelaySec=1h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n";
 
@@ -319,7 +348,8 @@ pub async fn apply(
 
     // 4. Weekly docker prune timer — only where there is docker to prune.
     if docker {
-        push_content(
+        let script = push_content(exec, vmid, IMAGE_PRUNE_PATH, IMAGE_PRUNE_SCRIPT, "755").await?;
+        let service = push_content(
             exec,
             vmid,
             "/etc/systemd/system/docker-prune.service",
@@ -327,15 +357,15 @@ pub async fn apply(
             "644",
         )
         .await?;
-        if push_content(
+        let timer = push_content(
             exec,
             vmid,
             "/etc/systemd/system/docker-prune.timer",
             PRUNE_TIMER,
             "644",
         )
-        .await?
-        {
+        .await?;
+        if script || service || timer {
             pct_sh(
                 exec,
                 vmid,

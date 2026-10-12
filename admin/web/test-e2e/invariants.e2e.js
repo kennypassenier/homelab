@@ -296,7 +296,7 @@ test("invariants: the kit's Status and Clients pages are switched off, Passkeys 
     // approved "Health → Inbox" merge) — never the old page.
     const old = await page.goto(`${BASE}/status`);
     if (old && old.status() !== 404) {
-      await page.waitForURL("**/needs-you", { timeout: 5000 });
+      await page.waitForURL("**/inbox", { timeout: 5000 });
     }
   } finally {
     await browser.close();
@@ -2802,7 +2802,7 @@ test("invariants: the Inbox counter shows the exact number, never 9+, and equals
       await logIn(context);
       // `/` opens the Inbox when it holds something (Kenny, 2026-10-03).
       await page.goto(`${BASE}/`);
-      await page.waitForURL("**/needs-you", { timeout: 5000 });
+      await page.waitForURL("**/inbox", { timeout: 5000 });
       await page.waitForTimeout(500);
       const badge =
         width > 960

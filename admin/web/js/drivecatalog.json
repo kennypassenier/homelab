@@ -1996,7 +1996,6 @@
       "page": "activity",
       "what": "show or hide a job log's lines of one level",
       "opens": "view",
-      "selects": true,
       "row": "<job>:<debug|info|warning|critical>",
       "href": "/activity",
       "was": [],

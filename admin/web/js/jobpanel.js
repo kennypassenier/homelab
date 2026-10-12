@@ -34,7 +34,6 @@ const LOG_LEVEL = declare({
   row: "<job>:<debug|info|warning|critical>",
   what: "show or hide a job log's lines of one level",
   shows: "in a job's log",
-  selects: true,
 });
 const LOG_WHOLE = declare({
   id: "job-log-whole",

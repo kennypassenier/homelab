@@ -434,6 +434,102 @@ pub fn prune(state: &mut HostState) {
     state.running_images = kept;
 }
 
+/// fix-registry-1 (Kenny, 2026-10-09): the image references to warm the cache
+/// with, one per pinned version its upstream has moved past — the same
+/// "behind" rule as [`evaluate_pins`]. Each is `<cache host>:<port>/<path>:<tag>`
+/// so a pull of it makes the cache fetch it from the origin.
+///
+/// Only plain `1.2.3` / `v1.2.3` tags are derived: a decorated tag
+/// (`-alpine`, `-ls474`) has no way to be turned into its successor without
+/// guessing, and guessing at a registry only fills the cache with 404s.
+/// Sorted and deduplicated (cAdvisor on twelve stacks is one pull).
+pub fn prefetch_refs(
+    state: &HostState,
+    cache: &crate::ops::registry_cache::CacheCfg,
+) -> Vec<String> {
+    let mut out = BTreeSet::new();
+    for (stack, images) in &state.running_images {
+        for (container, rec) in images {
+            if !is_current(state, stack, container) {
+                continue;
+            }
+            let (Some(up), Some(version)) = (rec.upstream.as_ref(), pinned_version(&rec.image))
+            else {
+                continue;
+            };
+            let Some(latest) = state
+                .upstream_releases
+                .get(up)
+                .filter(|r| r.error.is_none())
+                .and_then(|r| r.latest.as_ref())
+            else {
+                continue;
+            };
+            let bare = version.strip_prefix('v').unwrap_or(&version);
+            if !is_behind(&version, latest)
+                || bare.is_empty()
+                || !bare.chars().all(|c| c.is_ascii_digit() || c == '.')
+            {
+                continue;
+            }
+            let new_tag = format!(
+                "{}{}",
+                if version.starts_with('v') { "v" } else { "" },
+                latest.strip_prefix('v').unwrap_or(latest)
+            );
+            let name = rec.image.split('@').next().unwrap_or(&rec.image);
+            let (registry, path) = crate::ops::registry_cache::split_registry(name);
+            let port = cache
+                .upstreams
+                .iter()
+                .find(|u| {
+                    u.registry == registry || registry == format!("{}:{}", cache.host, u.port)
+                })
+                .map(|u| u.port);
+            let Some(port) = port else { continue };
+            let Some((repo, _)) = path.rsplit_once(':') else {
+                continue;
+            };
+            out.insert(format!("{}:{}/{}:{}", cache.host, port, repo, new_tag));
+        }
+    }
+    out.into_iter().collect()
+}
+
+/// How many images one prefetch round pulls at most, and how long each may
+/// take. Together they bound the round (6 x 10 min), with no clock read.
+pub const PREFETCH_MAX_IMAGES: usize = 6;
+pub const PREFETCH_PULL_TIMEOUT_S: u64 = 600;
+
+/// Pull each reference on the cache's own guest, one at a time, so the cache
+/// fetches (and keeps) it; the local copy is removed again, since the guest
+/// holds the cache and not the images (nothing may grow unbounded). Returns
+/// one log line per image. A failed pull is a line, never an error: the
+/// prefetch is an optimisation and the real pull later still works.
+pub async fn prefetch(exec: &dyn Executor, cache_vmid: u16, refs: &[String]) -> Vec<String> {
+    let mut lines = Vec::new();
+    for r in refs.iter().take(PREFETCH_MAX_IMAGES) {
+        let script = format!(
+            "docker pull -q '{r}' >/dev/null; rc=$?; docker rmi '{r}' >/dev/null 2>&1; exit $rc"
+        );
+        match pct_sh(exec, cache_vmid, &script, PREFETCH_PULL_TIMEOUT_S).await {
+            Ok(o) if o.success() => lines.push(format!("[prefetch] {r}: now in the cache")),
+            Ok(o) => lines.push(format!(
+                "[prefetch] {r}: the cache could not fetch it: {}",
+                o.stderr.trim()
+            )),
+            Err(e) => lines.push(format!("[prefetch] {r}: not fetched: {e}")),
+        }
+    }
+    if refs.len() > PREFETCH_MAX_IMAGES {
+        lines.push(format!(
+            "[prefetch] {} more image(s) wait for the next round",
+            refs.len() - PREFETCH_MAX_IMAGES
+        ));
+    }
+    lines
+}
+
 /// The fleet check's half: one `noted` finding per pinned version that its
 /// upstream has moved past (cAdvisor on twelve stacks is one line, not
 /// twelve), and one naming every upstream that could not be asked.

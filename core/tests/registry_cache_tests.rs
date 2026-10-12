@@ -173,3 +173,95 @@ async fn the_daemon_config_declares_the_cache_addresses() {
         .expect("guards apply");
     assert!(exec2.calls().join("\n").contains("daemon.json"));
 }
+
+// fix-registry-1: an update pulls through the cache without touching the
+// compose file; whatever the cache cannot cover falls back to a plain pull.
+#[test]
+fn fix_registry_1_update_pulls_are_planned_through_the_cache() {
+    use homelab_core::ops::registry_cache::{CacheCfg, CacheUpstream, plan_update_pulls};
+    let cfg = CacheCfg {
+        host: "10.10.10.17".into(),
+        upstreams: vec![
+            CacheUpstream {
+                registry: "ghcr.io".into(),
+                port: 5001,
+            },
+            CacheUpstream {
+                registry: "docker.io".into(),
+                port: 5000,
+            },
+        ],
+        pull_timeout_secs: 180,
+    };
+    let up = vec!["ghcr.io".to_string(), "docker.io".to_string()];
+    let imgs = vec!["ghcr.io/a/b:1.2".to_string(), "postgres:16".to_string()];
+    let (pairs, covered) = plan_update_pulls(&imgs, &cfg, &up, None);
+    assert!(covered);
+    assert_eq!(
+        pairs,
+        vec![
+            ("ghcr.io/a/b:1.2".into(), "10.10.10.17:5001/a/b:1.2".into()),
+            (
+                "postgres:16".into(),
+                "10.10.10.17:5000/library/postgres:16".into()
+            ),
+        ]
+    );
+    // A digest pin, a signed-in registry, a down upstream, an unknown one:
+    // not covered, so the plain pull still runs.
+    for (img, skip, avail) in [
+        ("ghcr.io/a/b:1@sha256:abc", None, up.clone()),
+        ("ghcr.io/a/b:1", Some("ghcr.io"), up.clone()),
+        ("ghcr.io/a/b:1", None, vec!["docker.io".to_string()]),
+        ("quay.io/a/b:1", None, up.clone()),
+    ] {
+        let (p, covered) = plan_update_pulls(&[img.to_string()], &cfg, &avail, skip);
+        assert!(p.is_empty() && !covered, "{img}");
+    }
+    // Already naming the cache: nothing to plan, still covered.
+    let (p, covered) = plan_update_pulls(&["10.10.10.17:5001/a/b:1".to_string()], &cfg, &up, None);
+    assert!(p.is_empty() && covered);
+    // No image listing at all: not covered.
+    assert!(!plan_update_pulls(&[], &cfg, &up, None).1);
+}
+
+// fix-registry-1: registry-gc runs every cache, reports per cache and exits
+// non-zero at the end. A stub `docker` makes dockerhub's collector fail; the
+// old `set -eu` script stopped there and never reached ghcr, gcr or lscr.
+#[test]
+fn fix_registry_1_registry_gc_continues_past_a_failing_cache() {
+    use std::os::unix::fs::PermissionsExt;
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stacks/registry/rootfs/usr/local/bin/registry-gc");
+    let dir = std::env::temp_dir().join(format!("registry-gc-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let docker = dir.join("docker");
+    std::fs::write(
+        &docker,
+        "#!/bin/sh\necho \"$@\" >> \"$GC_LOG\"\n\
+         case \"$*\" in *cache-dockerhub*garbage-collect*) exit 1;; esac\nexit 0\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&docker, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let log = dir.join("calls.log");
+    let out = std::process::Command::new("sh")
+        .arg(&script)
+        .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
+        .env("GC_LOG", &log)
+        .output()
+        .unwrap();
+    let calls = std::fs::read_to_string(&log).unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        !out.status.success(),
+        "a failed cache fails the run: {stdout}"
+    );
+    for c in ["dockerhub", "ghcr", "gcr", "lscr"] {
+        assert!(
+            calls.contains(&format!("cache-{c} registry garbage-collect")),
+            "{c} was collected: {calls}"
+        );
+    }
+    assert!(stdout.contains("failed for: dockerhub"), "{stdout}");
+}

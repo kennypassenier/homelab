@@ -483,3 +483,139 @@ fn fix_83_versions_compare_by_their_numbers_whatever_the_decoration() {
         );
     }
 }
+
+/// fix-stale-refresh-1: after a deploy or update the host folds ONE stack's
+/// freshly read images in. The other stacks and the cached upstream releases
+/// stay exactly as the nightly round left them (no GitHub call), and the
+/// stack's old digest is replaced.
+#[test]
+fn fix_stale_refresh_1_one_stack_refresh_replaces_only_that_stack() {
+    let mut state = fleet();
+    state
+        .running_images
+        .entry("gateway".into())
+        .or_default()
+        .insert("traefik".into(), recorded("traefik:v3.7.11", None));
+    state
+        .running_images
+        .entry("metrics".into())
+        .or_default()
+        .insert("grafana".into(), recorded("grafana:1", None));
+    state.upstream_releases.insert(
+        "github.com/traefik/traefik".into(),
+        UpstreamRelease {
+            checked_at: 5,
+            latest: Some("v3.7.12".into()),
+            ..Default::default()
+        },
+    );
+    let mut facts = homelab_core::ops::pins::PinFacts::default();
+    facts.images.insert(
+        "gateway".into(),
+        BTreeMap::from([("traefik".to_string(), recorded("traefik:v3.7.12", None))]),
+    );
+    apply(&mut state, facts);
+    assert_eq!(
+        state.running_images["gateway"]["traefik"].image,
+        "traefik:v3.7.12"
+    );
+    assert_eq!(
+        state.running_images["metrics"]["grafana"].image,
+        "grafana:1"
+    );
+    assert_eq!(
+        state.upstream_releases["github.com/traefik/traefik"].checked_at, 5,
+        "the cached release answer is reused, not asked again"
+    );
+}
+
+fn cache_cfg() -> homelab_core::ops::registry_cache::CacheCfg {
+    use homelab_core::ops::registry_cache::{CacheCfg, CacheUpstream};
+    CacheCfg {
+        host: "10.10.10.17".into(),
+        upstreams: vec![
+            CacheUpstream {
+                registry: "docker.io".into(),
+                port: 5000,
+            },
+            CacheUpstream {
+                registry: "ghcr.io".into(),
+                port: 5001,
+            },
+        ],
+        pull_timeout_secs: 180,
+    }
+}
+
+/// fix-registry-1: a newer pinned version the host learned of is warmed into
+/// the cache; decorated tags, current ones and failed lookups are not.
+#[tokio::test]
+async fn fix_registry_1_newer_pinned_versions_are_prefetched_into_the_cache() {
+    let mut state = fleet();
+    state.running_images.insert(
+        "gateway".into(),
+        BTreeMap::from([
+            // Cache-named, v-prefixed, behind.
+            (
+                "traefik".to_string(),
+                recorded(
+                    "10.10.10.17:5000/library/traefik:v3.7.11@sha256:aa",
+                    Some("github.com/traefik/traefik"),
+                ),
+            ),
+            // Origin-named, behind, two stacks run it: one reference.
+            (
+                "cadvisor".to_string(),
+                recorded(
+                    "ghcr.io/google/cadvisor:0.49.1",
+                    Some("github.com/google/cadvisor"),
+                ),
+            ),
+            // Decorated tag: no honest successor, skipped.
+            (
+                "goaccess".to_string(),
+                recorded(
+                    "allinurl/goaccess:1.9-alpine",
+                    Some("github.com/allinurl/goaccess"),
+                ),
+            ),
+        ]),
+    );
+    state.running_images.insert(
+        "metrics".into(),
+        BTreeMap::from([(
+            "grafana".to_string(),
+            recorded(
+                "ghcr.io/google/cadvisor:0.49.1",
+                Some("github.com/google/cadvisor"),
+            ),
+        )]),
+    );
+    for (up, tag) in [
+        ("github.com/traefik/traefik", "v3.7.12"),
+        ("github.com/google/cadvisor", "v0.50.0"),
+        ("github.com/allinurl/goaccess", "v1.10"),
+    ] {
+        state.upstream_releases.insert(up.into(), release(tag));
+    }
+    let refs = homelab_core::ops::pins::prefetch_refs(&state, &cache_cfg());
+    assert_eq!(
+        refs,
+        vec![
+            "10.10.10.17:5000/library/traefik:v3.7.12".to_string(),
+            "10.10.10.17:5001/google/cadvisor:0.50.0".to_string(),
+        ]
+    );
+    // Bounded and logged, and a failed pull is a line, not an error.
+    let exec = MockExecutor::new();
+    exec.respond_always("traefik", CmdOutput::failed(1, "no route"));
+    exec.respond_always("cadvisor", CmdOutput::ok(""));
+    let lines = homelab_core::ops::pins::prefetch(&exec, 117, &refs).await;
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(lines[0].contains("could not fetch") && lines[1].contains("now in the cache"));
+    assert!(
+        exec.timeouts_for("docker pull")
+            .iter()
+            .all(|t| *t <= homelab_core::ops::pins::PREFETCH_PULL_TIMEOUT_S + 30)
+    );
+}

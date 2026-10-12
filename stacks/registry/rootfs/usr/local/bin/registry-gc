@@ -14,8 +14,36 @@
 # manifest left orphaned are removed; nothing a container still names is
 # ever touched. Scheduled at 03:10, ahead of the host's own nightly round
 # (04:00) and OPNsense's backup (01:00), so it never competes with either.
-set -eu
+#
+# fix-registry-1 (Kenny, 2026-10-09): it used to stop at the first failing
+# cache. Measured: from 2026-10-05 dockerhub failed every night on a partial
+# repositories/grafana/promtail (a `_manifests` directory and no `_layers`,
+# left by an interrupted pull), and ghcr, gcr and lscr were never collected.
+# Now every cache runs, each reports its own result, a repository directory
+# the collector cannot walk is removed first (logged), and the exit status is
+# non-zero at the end if any cache failed, so the timer unit still shows red.
+set -u
+failed=""
 for name in dockerhub ghcr gcr lscr; do
     echo "== cache-$name =="
-    docker exec "cache-$name" registry garbage-collect --delete-untagged=false /etc/distribution/config.yml
+    # A repository with `_manifests` but no `_layers` aborts the whole walk
+    # ("filesystem: ... _layers: no such file"). Nothing references it, so the
+    # directory goes; the cache refetches it on the next pull.
+    docker exec "cache-$name" sh -c '
+        find /var/lib/registry/docker/registry/v2/repositories -type d -name _manifests 2>/dev/null |
+        while read -r m; do
+            repo=$(dirname "$m")
+            if [ ! -d "$repo/_layers" ]; then
+                echo "partial repository (no _layers), removed: $repo"
+                rm -rf "$repo"
+            fi
+        done' || echo "cache-$name: partial-repository scan failed"
+    if ! docker exec "cache-$name" registry garbage-collect --delete-untagged=false /etc/distribution/config.yml; then
+        echo "cache-$name: garbage-collect FAILED"
+        failed="$failed $name"
+    fi
 done
+if [ -n "$failed" ]; then
+    echo "registry-gc: failed for:$failed"
+    exit 1
+fi

@@ -294,6 +294,12 @@ pub struct HostState {
     /// repository (both copies).
     #[serde(default)]
     pub last_integrity_check: u64,
+    /// fix-nightly-1 (Kenny, 2026-10-09): when the NIGHTLY round last backed
+    /// up each stack. `StackState::last_backup` counts every backup, manual
+    /// ones included, so a backup by hand in the evening made the night skip
+    /// that stack. The nightly's due-decision reads only this.
+    #[serde(default)]
+    pub last_nightly_backup: BTreeMap<String, u64>,
     #[serde(default)]
     pub integrity: BTreeMap<String, IntegrityRecord>,
     /// fix-147 (restore-check-failure, 2026-09-27): data a deploy found

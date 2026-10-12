@@ -21,6 +21,93 @@ struct CapturedImage {
     repo_tag: String,
 }
 
+/// fix-registry-1 (Kenny, 2026-10-09): pull an app's images through the cache
+/// in the house, as a deploy does. Measured: `registry-gc` failed nightly and
+/// updates pulled past the cache, so the cache only ever filled from deploys.
+///
+/// Returns Ok(true) when every image of the app is now on the container via
+/// the cache (the plain pull is then skipped), Ok(false) when something was
+/// not covered or the cache did not deliver — the caller then pulls from the
+/// origin, which is the same fallback a deploy has. Never an error that stops
+/// the update: a broken cache costs speed, not the update.
+async fn pull_via_cache(
+    ctx: &OpCtx<'_>,
+    exec: &dyn Executor,
+    m: &StackManifest,
+    app: &str,
+) -> Result<bool, CoreError> {
+    let Some(cache) = ctx.registry_cache.as_ref() else {
+        return Ok(false);
+    };
+    let vmid = m.vmid;
+    let dir = super::util::app_dir_script(&m.stack_name, app);
+    let listed = super::util_pct_sh(
+        exec,
+        vmid,
+        &dir.raw("docker compose config --images 2>/dev/null")
+            .build(),
+        60,
+    )
+    .await?;
+    if !listed.success() {
+        return Ok(false);
+    }
+    let images: Vec<String> = listed
+        .stdout
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect();
+    // Which upstreams answer, asked from inside the container (as deploy does).
+    let mut up_now: Vec<String> = Vec::new();
+    for up in &cache.upstreams {
+        let probe = super::util_pct_sh(
+            exec,
+            vmid,
+            &format!(
+                "curl -fsS -m 3 -o /dev/null http://{}:{}/v2/ && echo UP",
+                cache.host, up.port
+            ),
+            30,
+        )
+        .await;
+        if matches!(&probe, Ok(o) if o.stdout.contains("UP")) {
+            up_now.push(up.registry.clone());
+        }
+    }
+    let (pairs, covered) = super::registry_cache::plan_update_pulls(
+        &images,
+        cache,
+        &up_now,
+        m.registry_login.as_ref().map(|r| r.registry.as_str()),
+    );
+    let mut all_ok = covered;
+    for (origin, via) in &pairs {
+        let cmd = format!(
+            "docker pull -q {via} >/dev/null && docker tag {via} {origin} && {{ docker rmi {via} >/dev/null 2>&1 || true; }}",
+            via = shq(via),
+            origin = shq(origin)
+        );
+        let r = super::util_pct_sh(exec, vmid, &cmd, cache.pull_timeout_secs).await;
+        let ok = matches!(&r, Ok(o) if o.success());
+        ctx.sink.emit(crate::sink::PipelineEvent::Line {
+            level: if ok { Level::Info } else { Level::Warn },
+            source: "HOST".into(),
+            msg: if ok {
+                format!("[cache] {origin} pulled via {}", cache.host)
+            } else {
+                format!(
+                    "[cache] {origin} not delivered by {} — pulling from its own registry",
+                    cache.host
+                )
+            },
+        });
+        all_ok &= ok;
+    }
+    Ok(all_ok)
+}
+
 async fn capture_app(
     exec: &dyn Executor,
     vmid: u16,
@@ -567,6 +654,13 @@ pub async fn update(
         // difference between seconds and minutes.
         let pull_failed = std::sync::Mutex::new(None::<String>);
         step!(runner, &pull_step, {
+            // fix-registry-1: through the house cache first, like a deploy;
+            // whatever it did not cover (or did not deliver) is pulled by the
+            // plain command below, straight from the origin.
+            let via_cache_covers_all = pull_via_cache(ctx, exec, m, app).await.unwrap_or(false);
+            if via_cache_covers_all {
+                return Ok(StepOutcome::Changed);
+            }
             let out = super::util_pct_sh(
                 exec,
                 vmid,

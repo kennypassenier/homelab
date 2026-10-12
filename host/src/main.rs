@@ -5051,6 +5051,70 @@ span_days = 7\n";
         );
     }
 
+    /// fix-nightly-1 (Kenny, 2026-10-09): a backup by hand in the evening
+    /// moved `last_backup`, the 20 h rule then skipped the stack that night.
+    /// The nightly reads its own clock; a manual backup does not move it.
+    #[test]
+    fn fix_nightly_1_a_manual_backup_does_not_count_as_tonights_nightly() {
+        let now = 1_800_000_000u64;
+        let mut hs = homelab_core::state::HostState::default();
+        let mut st = homelab_core::state::StackState {
+            applied_source: None,
+            vmid: 108,
+            hostname: "108-app-a".into(),
+            apps: vec![],
+            applied_at: 0,
+            // Backed up by hand three hours ago.
+            last_backup: now - 3 * 3600,
+            applied_hash: String::new(),
+            manifest: None,
+            enabled: true,
+            natives: Vec::new(),
+            incomplete_step: None,
+            route_file: None,
+            extra_route_files: Vec::new(),
+            pushed_file_hashes: std::collections::BTreeMap::new(),
+            component_digests: Default::default(),
+        };
+        hs.stacks.insert("a".into(), st.clone());
+        st.enabled = false;
+        hs.stacks.insert("parked".into(), st);
+        // The last night's own backup was 25 h ago.
+        hs.last_nightly_backup.insert("a".into(), now - 25 * 3600);
+        let inputs = nightly_stack_inputs(&hs);
+        let nst = NightlyState {
+            last_integrity_check: now,
+            last_second_copy: 0,
+            second_copy_configured: Default::default(),
+            last_host_meta: now,
+            last_zfs: now,
+            last_restore_drill: now,
+            restore_drill_interval_s: 90 * 24 * 3600,
+            zfs_configured: false,
+            devices_configured: false,
+        };
+        assert_eq!(
+            nightly_plan(4, 4, now, &inputs, &nst),
+            vec![NightlyTask::Stack("a".into())],
+            "the evening's manual backup must not cost the stack its night"
+        );
+        // Once the night recorded its own backup, it is not due again.
+        hs.last_nightly_backup.insert("a".into(), now - 600);
+        assert!(nightly_plan(4, 4, now, &nightly_stack_inputs(&hs), &nst).is_empty());
+    }
+
+    /// fix-stale-refresh-1: only operations that replace a stack's running
+    /// images re-read them afterwards.
+    #[test]
+    fn fix_stale_refresh_1_only_image_changing_operations_refresh() {
+        for l in ["deploy", "update", "restart"] {
+            assert!(refreshes_running_images(l), "{l}");
+        }
+        for l in ["backup", "restore", "resize", "verify-restore", "adopt"] {
+            assert!(!refreshes_running_images(l), "{l}");
+        }
+    }
+
     /// G14: the drill rides the backup hour and only when it is due.
     #[test]
     fn g14_the_restore_drill_is_planned_only_in_the_backup_hour_and_only_when_due() {
@@ -6991,6 +7055,25 @@ fn backup_due(cfg_hour: u8, local_hour: u8, last_backup: u64, now: u64) -> bool 
     in_night_window(cfg_hour, local_hour) && now.saturating_sub(last_backup) >= 20 * 3600
 }
 
+/// fix-nightly-1 (Kenny, 2026-10-09): the nightly's per-stack input is the
+/// stack's last NIGHTLY backup, never `StackState::last_backup`. That one
+/// also moves for a backup by hand, so a backup in the evening put the stack
+/// under the 20 h rule and it missed the night (measured: five stacks on
+/// 10-08 to 10-09, every stack on 10-10).
+fn nightly_stack_inputs(snapshot: &homelab_core::state::HostState) -> Vec<(String, bool, u64)> {
+    snapshot
+        .stacks
+        .iter()
+        .map(|(n, st)| {
+            (
+                n.clone(),
+                st.enabled,
+                snapshot.last_nightly_backup.get(n).copied().unwrap_or(0),
+            )
+        })
+        .collect()
+}
+
 /// One unit of work in a nightly run.
 #[derive(Debug, PartialEq, Eq)]
 enum NightlyTask {
@@ -7033,7 +7116,7 @@ fn home_address_after_deploy(vmid: u16, ok: bool, gateway_vmid: u16) -> bool {
 
 /// H12 pattern: the whole nightly decision as a pure function, so "does the
 /// host-meta backup actually run?" is a test instead of an assumption.
-/// `stacks` is (name, enabled, last_backup).
+/// `stacks` is (name, enabled, last NIGHTLY backup — fix-nightly-1).
 /// What the night needs to know beyond the clock and the stacks: when the
 /// host-wide jobs last ran, and which of them exist at all. Grouped because
 /// the argument list had grown past the point where a caller could get the
@@ -7886,11 +7969,7 @@ async fn scheduler_loop(state: AppState) {
         };
         // H10: one plan per tick — stacks that are due, then the host's own
         // crown jewels. Decided by a pure function so it is unit-tested.
-        let stack_inputs: Vec<(String, bool, u64)> = snapshot
-            .stacks
-            .iter()
-            .map(|(n, st)| (n.clone(), st.enabled, st.last_backup))
-            .collect();
+        let stack_inputs = nightly_stack_inputs(&snapshot);
         // G14: taken before the loop below consumes `snapshot.stacks`.
         let drill_repos: Vec<String> = homelab_core::ops::restoredrill::all_drill_repos(
             &snapshot
@@ -8029,6 +8108,9 @@ async fn scheduler_loop(state: AppState) {
                     if let Some(rec) = s.stacks.get_mut(&name) {
                         rec.last_backup = now;
                     }
+                    // fix-nightly-1: only the night's own backup counts as
+                    // tonight's.
+                    s.last_nightly_backup.insert(name.clone(), now);
                 })
                 .await;
             }
@@ -8296,7 +8378,10 @@ async fn scheduler_loop(state: AppState) {
             }
             if let Ok(mut s) = store.load().await {
                 homelab_core::ops::pins::apply(&mut s, facts);
-                let _ = store.save(s).await;
+                let _ = store.save(s.clone()).await;
+                // fix-registry-1: a newer pinned version was learned; warm the
+                // cache in the background, never in this round's way.
+                spawn_cache_prefetch(&state, &s);
             }
         }
 
@@ -9778,7 +9863,86 @@ where
 {
     let _guard = lock_ops(state).await;
     let _busy = BusyMark::set(state, label, 0, stack);
-    run_op_locked(state, exec, req_id, label, op).await
+    let resp = run_op_locked(state, exec, req_id, label, op).await;
+    // fix-stale-refresh-1: still under the operation lock, so nothing else
+    // replaces the containers between the operation and the reading.
+    if resp.ok
+        && let Some(stack) = stack
+        && refreshes_running_images(label)
+    {
+        refresh_running_images(state, exec, stack).await;
+    }
+    resp
+}
+
+/// fix-registry-1: one prefetch round at a time.
+static PREFETCH_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// fix-registry-1 (Kenny, 2026-10-09): pull the newer pinned versions the
+/// round just learned about into the pull-through cache, so the update that
+/// follows finds them there. A detached task: it holds no operation lock and
+/// the nightly round does not wait for it; one round at a time, at most
+/// `PREFETCH_MAX_IMAGES` images, each bounded (see `pins::prefetch`).
+fn spawn_cache_prefetch(state: &AppState, hs: &homelab_core::state::HostState) {
+    let Some(cache) = state.config.registry_cache.as_ref() else {
+        return;
+    };
+    // The cache lives on the `registry` stack's guest.
+    let Some(vmid) = hs.stacks.get("registry").map(|s| s.vmid) else {
+        return;
+    };
+    let refs = homelab_core::ops::pins::prefetch_refs(hs, cache);
+    if refs.is_empty() {
+        return;
+    }
+    if PREFETCH_RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        info!("[prefetch] a round is still running — not starting another");
+        return;
+    }
+    info!(
+        "[prefetch] {} newer pinned image(s) for the cache",
+        refs.len()
+    );
+    tokio::spawn(async move {
+        for line in homelab_core::ops::pins::prefetch(&RealExecutor, vmid, &refs).await {
+            info!("{}", line);
+        }
+        PREFETCH_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+    });
+}
+
+/// fix-stale-refresh-1 (Kenny, 2026-10-09, Cloudflared 2026.10.0): operations
+/// after which a stack's running images have changed.
+fn refreshes_running_images(label: &str) -> bool {
+    matches!(label, "deploy" | "update" | "restart")
+}
+
+/// fix-stale-refresh-1: read the stack's running images again and fold them
+/// into `running_images`, so the fleet check's "update available" rows for it
+/// settle now instead of at the next nightly round. No GitHub call: the
+/// cached `upstream_releases` are reused. A failed reading is only logged;
+/// the nightly round remains the fallback.
+async fn refresh_running_images(state: &AppState, exec: &RealExecutor, stack: &str) {
+    let store = homelab_core::state::StateStore::new(exec, &state.config.state_dir);
+    let Ok(snapshot) = store.load().await else {
+        return;
+    };
+    let Some(vmid) = snapshot.stacks.get(stack).map(|s| s.vmid) else {
+        return;
+    };
+    match homelab_core::ops::pins::read_runtime(exec, vmid, unix_now()).await {
+        Ok(rt) => {
+            let facts = homelab_core::ops::pins::PinFacts {
+                images: std::collections::BTreeMap::from([(stack.to_string(), rt.images)]),
+                releases: Default::default(),
+            };
+            record_state(&store, "running_images", |s| {
+                homelab_core::ops::pins::apply(s, facts)
+            })
+            .await;
+        }
+        Err(why) => tracing::warn!("[pins] {stack}: running images not refreshed: {why}"),
+    }
 }
 
 fn unix_now() -> u64 {

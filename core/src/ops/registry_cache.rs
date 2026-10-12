@@ -134,3 +134,49 @@ pub fn split_registry(image: &str) -> (String, String) {
         ("docker.io".to_string(), format!("library/{}", image))
     }
 }
+
+/// fix-registry-1 (Kenny, 2026-10-09): what an UPDATE pull should fetch
+/// through the cache. Deploy rewrites the compose file; an update must leave
+/// the file alone (the rollback and the "same images came up" check name the
+/// origin), so it pulls `host:port/path` and tags the result with the origin
+/// reference instead.
+///
+/// Returns the `(origin, via cache)` pairs to fetch and whether EVERY image
+/// is covered, either by those pairs or by already naming the cache. When not
+/// all are covered the caller still runs the plain `compose pull`, which is
+/// also the fallback when the cache does not deliver.
+///
+/// Digest-pinned references (`@sha256:`) are left to the plain pull: a pull
+/// by digest cannot be re-tagged to the origin name, and compose would not
+/// see the cache's copy as the image it asked for.
+pub fn plan_update_pulls(
+    images: &[String],
+    cfg: &CacheCfg,
+    available: &[String],
+    skip_registry: Option<&str>,
+) -> (Vec<(String, String)>, bool) {
+    let mut pairs = Vec::new();
+    let mut covered = !images.is_empty();
+    for image in images {
+        if cfg
+            .upstreams
+            .iter()
+            .any(|u| image.starts_with(&format!("{}:{}/", cfg.host, u.port)))
+        {
+            continue; // already names the cache: a plain pull goes through it
+        }
+        let (registry, path) = split_registry(image);
+        let up = cfg.upstreams.iter().find(|u| u.registry == registry);
+        match up {
+            Some(up)
+                if !image.contains('@')
+                    && Some(registry.as_str()) != skip_registry
+                    && available.iter().any(|a| a == &registry) =>
+            {
+                pairs.push((image.clone(), format!("{}:{}/{}", cfg.host, up.port, path)));
+            }
+            _ => covered = false,
+        }
+    }
+    (pairs, covered)
+}

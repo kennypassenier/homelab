@@ -30,6 +30,12 @@ const PLATFORM: &[(&str, &str)] = &[
         "registry",
         "the registry cache homelab pulls through, host.toml",
     ),
+    (
+        "inbox",
+        "the dashboard's own Inbox page at /inbox (Kenny, 2026-10-09: \"dat \
+         trouwens nog altijd niet het adres /inbox heeft\"), an ordinary word \
+         like home; never the inbox stack",
+    ),
     ("loki", "the log store homelab queries, loki_url"),
     (
         "prometheus",

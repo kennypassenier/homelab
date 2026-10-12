@@ -195,7 +195,7 @@ pub const IMAGE_PRUNE_PATH: &str = "/usr/local/sbin/homelab-image-prune";
 /// (the version a rollback goes back to), and removes every other unused
 /// image. An image another tag still holds is left, and said so.
 pub const IMAGE_PRUNE_SCRIPT: &str = r#"#!/bin/sh
-# homelab runaway guard (feat-imageprune-1): keep what runs, plus per
+# homelab runaway guard: keep what runs, plus per
 # repository the newest image nothing runs; remove the other unused images.
 set -u
 used=$(mktemp)

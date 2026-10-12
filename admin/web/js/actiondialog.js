@@ -1393,7 +1393,12 @@ export function mountBatchPanel(batch, jobs) {
     setProgress(bar, v.percent);
     text.textContent = `${v.percent}%`;
     setLive(totalTile.value, String(v.total));
-    setLive(doneTile.value, String(b.done));
+    // The Done tile counts the finished stacks; `b.done` is whether the
+    // whole batch is (it read "false" here before 3.74.0).
+    setLive(
+      doneTile.value,
+      String((b.ok ?? 0) + (b.failed ?? 0) + (b.deferred ?? 0)),
+    );
     setLive(okTile.value, String(b.ok));
     setLive(failedTile.value, String(b.failed));
     setLive(deferredTile.value, String(b.deferred));

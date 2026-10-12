@@ -400,7 +400,9 @@ export function staleFor(stack, images) {
  * fix (DESIGN_LANGUAGE §1.3).
  * @typedef {{key: string, tone: "bad" | "warn" | "info", title: string,
  *   text: string, act: {label: string, title: string} &
- *   ({kind: "action", action: string, preset?: Record<string, string>} |
+ *   ({kind: "action", action: string, preset?: Record<string, string>,
+ *     stack?: string} |
+ *    {kind: "seen", ids: number[]} | {kind: "none"} |
  *    {kind: "pin", stale: Stale} | {kind: "go", tab: string,
  *    section?: string} | {kind: "href", href: string})}} Problem
  */
@@ -412,7 +414,9 @@ export function staleFor(stack, images) {
  *   drift?: Drift | null, night?: string, last?: number | null,
  *   stale?: Stale[], openChecks?: number, now: number,
  *   inboxItems?: {key: string, severity: "bad" | "warn" | "info", title: string,
- *     why: string, href: string}[]}} x
+ *     why: string, href: string, ids?: number[], remedy?: string,
+ *     fix?: {action: string, stack: string, args?: Record<string, string>,
+ *       label: string}}[]}} x
  * @returns {Problem[]}
  */
 export function attentionItems(x) {
@@ -558,20 +562,55 @@ export function attentionItems(x) {
     });
   }
   const seen = new Set(out.map((p) => p.title));
+  // fix-ux-1: a row never links to the page it is already on. It offers
+  // the notice's own fix when it has one; a link elsewhere stays an Open;
+  // otherwise it says what is wrong and what to do, and can be marked seen.
+  const here = new RegExp(
+    `^/stacks/${encodeURIComponent(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:[/?#]|$)`,
+  );
   for (const i of x.inboxItems ?? [])
-    if (!seen.has(i.title))
-      out.push({
-        key: `needs-you:${i.key}`,
-        tone: i.severity,
-        title: i.title,
-        text: i.why,
-        act: {
+    if (!seen.has(i.title)) {
+      const todo = i.remedy ? `What to do: ${i.remedy}` : "";
+      const text = [i.why, todo && !i.why.includes(i.remedy ?? "") ? todo : ""]
+        .filter(Boolean)
+        .join(" ");
+      /** @type {Problem["act"]} */
+      let act;
+      if (i.fix)
+        act = {
+          kind: "action",
+          action: i.fix.action,
+          stack: i.fix.stack,
+          ...(i.fix.args ? { preset: i.fix.args } : {}),
+          label: `${i.fix.label}…`,
+          title:
+            "The action's own dialog, prefilled; nothing runs until you confirm",
+        };
+      else if (!here.test(i.href))
+        act = {
           kind: "href",
           href: i.href,
           label: "Open",
           title: "Where this came from",
-        },
+        };
+      else if (i.ids?.length)
+        act = {
+          kind: "seen",
+          ids: i.ids,
+          label: "Mark as seen",
+          title: "It leaves this list; Activity keeps it",
+        };
+      else act = { kind: "none", label: "", title: "" };
+      out.push({
+        key: `needs-you:${i.key}`,
+        tone: i.severity,
+        title: i.title,
+        text:
+          text ||
+          "No button fixes this from here: check the service itself; the row leaves when it reports healthy again.",
+        act,
       });
+    }
   const order = { bad: 0, warn: 1, info: 2 };
   return out.sort((a, b) => order[a.tone] - order[b.tone]);
 }

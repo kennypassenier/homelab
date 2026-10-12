@@ -248,6 +248,14 @@ impl NotifyCenter {
     /// Store, push when the rules say so, and tell the open pages.
     pub async fn notify(&self, draft: Draft) -> Notice {
         let now = (self.clock)();
+        // fix-watch-1: a Down still open and unread is kept, not repeated.
+        {
+            let mut s = self.state.lock().await;
+            if let Some(n) = s.refresh_open_down(&draft) {
+                self.save(&s);
+                return n;
+            }
+        }
         let settings = self.state.lock().await.settings.clone();
         let route = notify::route(&settings, &draft, now);
         let push = match route.push {

@@ -101,6 +101,14 @@ impl ParityCtx {
         publish: Arc<dyn super::actions::Publish>,
         drift_reuse_s: u64,
     ) -> Self {
+        let check_read = SlowRead::announced("the fleet check", "fleet-check", publish.clone());
+        {
+            // fix-stale-refresh-1: a settled stack drops its stale rows.
+            let r = check_read.clone();
+            actions.on_stack_settled(Arc::new(move |stack| {
+                r.drop_stale_rows_of(stack);
+            }));
+        }
         ParityCtx {
             host,
             shared,
@@ -110,7 +118,7 @@ impl ParityCtx {
             scratch,
             drift: Arc::new(Mutex::new(None)),
             today_read: SlowRead::announced("today", "today", publish.clone()),
-            check_read: SlowRead::announced("the fleet check", "fleet-check", publish.clone()),
+            check_read,
             backup_calendar_read: SlowRead::announced(
                 "the backup calendar",
                 "backup-calendar",

@@ -4,6 +4,7 @@
 // kp dialog opened from code.
 
 import { h } from "./dom.js";
+import { declare, drivable } from "./drivable.js";
 import { showAlarm } from "/static/kp/js/alarm.js";
 import { attachDialogs, openAtTop, toast } from "/static/kp/js/overlays.js";
 import { attachPatterns } from "/static/kp/js/patterns.js";
@@ -62,6 +63,7 @@ export function labeledCopyLine(label, text, srLabel) {
  * @param {string} [lead] the first words, before `what`
  */
 export function refusalCallout(e, tone = "destructive", lead = "Refused") {
+  const fix = fixOf(e);
   return h(
     "div",
     {
@@ -77,8 +79,54 @@ export function refusalCallout(e, tone = "destructive", lead = "Refused") {
       ...(e.fix
         ? [h("span", { class: "refusal-line" }, `What to do: ${e.fix}`)]
         : []),
+      ...(fix ? [fixButton(fix)] : []),
     ),
   );
+}
+
+// fix-stale-refresh-1: a refusal whose fix is a dashboard action offers
+// that action's own dialog right there.
+const REFUSAL_FIX = declare({
+  id: "refusal-fix",
+  page: "update",
+  opens: "dialog",
+  row: "<stack>",
+  what: "the button under a refusal whose fix is an action (Deploy a stack that already names the newer version)",
+  shows: "under a refusal that names an action",
+});
+
+/**
+ * The action a refusal names: the host's `fix_action`, or, from a host that
+ * does not send one, the words "deploy <stack> to run it".
+ * @param {import("./doctor.js").RouteError} e
+ * @returns {{action: string, stack: string} | null}
+ */
+export function fixOf(e) {
+  if (e.fix_action) return e.fix_action;
+  const m = /^deploy (\S+) to run it$/.exec(e.fix ?? "");
+  return m ? { action: "deploy", stack: m[1] } : null;
+}
+
+/** @param {{action: string, stack: string}} f */
+function fixButton(f) {
+  const b = h(
+    "button",
+    {
+      type: "button",
+      class: "kp-button kp-button--sm refusal-fix",
+      "data-action": f.action,
+      title: `Open the ${f.action} dialog for ${f.stack}; nothing runs until you confirm`,
+    },
+    `${capital(f.action)} ${f.stack}…`,
+  );
+  drivable(b, REFUSAL_FIX, f.stack);
+  b.addEventListener("click", () => {
+    // Imported on use: the action dialog imports this module.
+    void import("./actiondialog.js").then((m) =>
+      m.openAction(f.stack, f.action),
+    );
+  });
+  return b;
 }
 
 /**

@@ -26,7 +26,7 @@
 // /data/charts?stack= (how full the disk is), the Inbox and the action
 // catalog. What no source serves is said plainly, never invented.
 
-import { act, catalogReady, onAct } from "../act.js";
+import { act, catalogReady, onAct, send } from "../act.js";
 import { openAction } from "../actiondialog.js";
 import { onAnswered } from "../answer.js";
 import { checkRows } from "../checks.js";
@@ -250,6 +250,15 @@ const FIX = declare({
   row: "<stack>/<problem>",
   at: at("overview"),
   what: "the fix of one row of the stack's Needs you band (deploy, backup, unpark, pin update, or a link to where it is fixed)",
+});
+const PROBLEM_SEEN = declare({
+  id: "stack-problem-seen",
+  page: "stack",
+  opens: "run",
+  row: "<stack>/<problem>",
+  at: at("overview"),
+  what: "mark one row of the stack's Needs you band as seen (a notice with no fix to run)",
+  shows: "on a row whose notice has no fix and no other page to go to",
 });
 const TAB = declare({
   id: "stack-tab",
@@ -1031,7 +1040,19 @@ function overviewTab(panel, c) {
         stale,
         openChecks: open,
         now,
-        inboxItems: inboxNow().items.filter((i) => i.stack === name),
+        inboxItems: inboxNow()
+          .items.filter((i) => i.stack === name)
+          .map((i) => {
+            // fix-ux-1: the notice's own fix and remedy ride with its row.
+            const n = act.notices?.notices.find((x) =>
+              (i.ids ?? []).includes(x.id),
+            );
+            return {
+              ...i,
+              ...(n?.remedy ? { remedy: n.remedy } : {}),
+              ...(n?.fixes?.[0] ? { fix: n.fixes[0] } : {}),
+            };
+          }),
       })
         .filter((p) => S.fleetRead || p.key !== "not-deployed")
         .map((p) => ({
@@ -1230,12 +1251,55 @@ function answerButton(stack, id, after) {
  * The fix of one "needs you" row.
  * @param {Ctx} c
  * @param {import("../stackhub.js").Problem} p
- * @returns {HTMLElement}
+ * @returns {HTMLElement | null}
  */
 function problemAction(c, p) {
   const a = p.act;
   switch (a.kind) {
+    case "none":
+      return null;
+    case "seen": {
+      const b = drivable(
+        h(
+          "button",
+          { type: "button", class: "kp-button", title: a.title },
+          a.label,
+        ),
+        PROBLEM_SEEN,
+        `${c.name}/${p.key}`,
+      );
+      b.addEventListener("click", async () => {
+        b.setAttribute("disabled", "");
+        const res = await send(
+          "POST",
+          "/data/notifications/read",
+          { ids: a.ids, read: true },
+          "marking it seen",
+        );
+        if (!res.ok) b.removeAttribute("disabled");
+      });
+      return b;
+    }
     case "action":
+      if (a.stack && a.stack !== c.name) {
+        const b = drivable(
+          h(
+            "button",
+            { type: "button", class: "kp-button", title: a.title },
+            a.label,
+          ),
+          FIX,
+          `${c.name}/${p.key}`,
+        );
+        b.addEventListener(
+          "click",
+          () =>
+            void openAction(/** @type {string} */ (a.stack), a.action, {
+              preset: a.preset ?? {},
+            }),
+        );
+        return b;
+      }
       return actionButton(c, a.action, {
         label: a.label,
         title: a.title,

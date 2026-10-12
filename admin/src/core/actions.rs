@@ -26,14 +26,35 @@ pub struct Refusal {
     pub what: String,
     pub why: String,
     pub fix: String,
+    /// fix-stale-refresh-1: when the fix is an action the dashboard can run,
+    /// which one, so the page shows a button for it (`{action, stack}`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix_action: Option<Box<RefusalFix>>,
+}
+
+/// The dashboard action a refusal's `fix` names.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RefusalFix {
+    pub action: String,
+    pub stack: String,
 }
 
 impl Refusal {
+    /// The refusal's fix is this action on this stack (a button on the page).
+    pub fn with_fix_action(mut self, action: ActionKind, stack: &str) -> Self {
+        self.fix_action = Some(Box::new(RefusalFix {
+            action: action.slug().to_string(),
+            stack: stack.to_string(),
+        }));
+        self
+    }
+
     pub fn new(what: impl Into<String>, why: impl Into<String>, fix: impl Into<String>) -> Self {
         Refusal {
             what: what.into(),
             why: why.into(),
             fix: fix.into(),
+            fix_action: None,
         }
     }
 }
@@ -1477,6 +1498,25 @@ pub struct BatchRequest {
 }
 
 pub const BATCH_MAX: usize = 64;
+
+/// fix-batch-native-1: a batch "back up" names `backup` for every stack, but
+/// a stack with native services is backed up by `backup-native` (the
+/// compose backup only snapshots its manifest paths). Swap the action for
+/// each such stack, the same fact (`native`) the single-stack page uses.
+pub fn native_batch_backups(
+    reqs: Vec<ActionRequest>,
+    is_native: &dyn Fn(&str) -> bool,
+) -> Result<Vec<ActionRequest>, Refusal> {
+    reqs.into_iter()
+        .map(|r| {
+            if r.action == ActionKind::Backup && is_native(&r.stack) {
+                validate(&r.stack, ActionKind::BackupNative.slug(), r.args)
+            } else {
+                Ok(r)
+            }
+        })
+        .collect()
+}
 
 pub fn validate_batch(b: BatchRequest) -> Result<Vec<ActionRequest>, Refusal> {
     if b.stacks.is_empty() || b.stacks.len() > BATCH_MAX {

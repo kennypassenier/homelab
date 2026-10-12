@@ -10,7 +10,9 @@ import {
   addLog,
   applyOutcome,
   applyProgress,
+  finished,
   jobsAwaitingOutcome,
+  mergeJobLists,
   outcomeSubject,
   upsertJob,
 } from "./jobs.js";
@@ -132,8 +134,24 @@ async function loadCatalog() {
   }
 }
 
+/** Ids of jobs the live channel (or an outcome read) updated while a read
+ * of the list was on its way: newer than that read. Null between reads. */
+/** @type {Set<number> | null} */
+let freshDuringRead = null;
+/** Jobs whose end was settled from the host's history after a restart:
+ * the server's list does not know better. */
+/** @type {Set<number>} */
+const settledLocally = new Set();
+let readsInFlight = 0;
+
+/** @param {number} id */
+const markFresh = (id) => freshDuringRead?.add(id);
+
 export async function loadJobs() {
+  if (readsInFlight++ === 0) freshDuringRead = new Set();
   const r = await fetchJson("/data/actions/jobs", "the jobs");
+  const fresh = new Set([...(freshDuringRead ?? []), ...settledLocally]);
+  if (--readsInFlight === 0) freshDuringRead = null;
   if (!r.ok) {
     act.failed.jobs = r.error;
     tell("jobs");
@@ -141,12 +159,9 @@ export async function loadJobs() {
   }
   act.failed.jobs = null;
   act.jobsRead = true;
-  /** @type {import("./jobs.js").Job[]} */
-  let jobs = [];
-  for (const j of r.body.jobs ?? []) jobs = upsertJob(jobs, j);
-  // Jobs the live channel told about meanwhile are newer than the list.
-  for (const j of act.jobs) jobs = upsertJob(jobs, j);
-  act.jobs = jobs;
+  // fix-live-1: the server's list wins; only what the live channel said
+  // after this read began (or is provably further along) is kept.
+  act.jobs = mergeJobLists(r.body.jobs ?? [], act.jobs, fresh);
   tell("jobs");
 }
 
@@ -184,6 +199,7 @@ async function pollOutcome(job, tries = 0) {
   const out = r.ok ? r.body : { found: false };
   if (out.found || tries + 1 >= OUTCOME_TRIES) {
     act.jobs = applyOutcome(act.jobs, job.job, out);
+    settledLocally.add(job.job);
     tell("jobs", job.job);
     return;
   }
@@ -220,6 +236,9 @@ export function patchNoticeSettings(change) {
   tell("notices");
 }
 
+/** How often the job list is read while a job is queued or running. */
+export const JOBS_POLL_MS = 5000;
+
 let started = false;
 
 /** Read everything once and follow the live channel. */
@@ -227,10 +246,12 @@ export function startAct() {
   if (started) return;
   started = true;
   listen("action", (j) => {
+    markFresh(j.job);
     act.jobs = upsertJob(act.jobs, j);
     tell("jobs", j.job);
   });
   listen("action_progress", (ev) => {
+    markFresh(ev.job);
     act.jobs = applyProgress(act.jobs, ev);
     act.progressAt.set(ev.job, now());
     tell("jobs", ev.job);
@@ -280,6 +301,12 @@ export function startAct() {
     void loadNotices();
     void loadSchedules();
   });
+  // fix-live-1: a safety net under the live channel. While any job is
+  // queued or running the list is read again every few seconds, so a page
+  // whose stream was cut (a 502 from the edge) still follows the job.
+  setInterval(() => {
+    if (act.jobs.some((j) => !finished(j.state))) void loadJobs();
+  }, JOBS_POLL_MS);
   void loadCatalog();
   void loadJobs();
   void loadNotices();

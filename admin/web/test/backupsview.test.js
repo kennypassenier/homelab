@@ -127,6 +127,21 @@ test("the whole-fleet night counts only the stacks expected to back up that nigh
   assert.equal(fleetNight(stacks, "2026-10-03", now).wait, true);
 });
 
+test("a night with some stacks backed up counts the ones still waiting", () => {
+  const now = nightsNow(at("2026-10-03T13:00:00+02:00"));
+  const tonight = nightsNow(at("2026-10-03T13:00:00+02:00")).current;
+  const stacks = {
+    a: ok([at("2026-10-03T22:00:00+02:00")]),
+    b: ok([at("2026-10-02T03:00:00+02:00")]),
+  };
+  const f = fleetNight(stacks, tonight, now);
+  if (f.ok === 1) {
+    assert.equal(f.expected, 2);
+    assert.deepEqual(f.waiting, ["b"]);
+    assert.equal(f.wait, false);
+  } else assert.equal(f.ok, 0);
+});
+
 test("the side panel and the hover card name each app's snapshot id that night", () => {
   const now = nightsNow(at("2026-10-03T13:00:00+02:00"));
   const t1 = at("2026-10-02T03:00:00+02:00");

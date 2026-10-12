@@ -17,7 +17,7 @@ fn arch_config_defaults_fill_what_the_file_leaves_out() {
     .unwrap();
     assert_eq!(
         (c.poll_s, c.sse_buffer, c.backoff_min_s, c.backoff_max_s),
-        (10, 256, 1, 60)
+        (10, 2048, 1, 60)
     );
 }
 

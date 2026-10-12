@@ -44,7 +44,7 @@ import {
   viaForm,
 } from "../drivable.js";
 import { stackHref } from "../router.js";
-import { current, subscribe } from "../store.js";
+import { current, listen, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
 import { stackHues } from "../topology.js";
 import { RETIRED_COLUMNS, retiredRow } from "./retired.js";
@@ -768,6 +768,15 @@ export function mount(root) {
                 },
                 `${f.ok} of ${f.expected} stacks backed up`,
               ),
+        ...(f.waiting.length
+          ? [
+              h(
+                "span",
+                { class: "bk-hint" },
+                `Waiting: ${f.waiting.join(", ")}`,
+              ),
+            ]
+          : []),
         h("span", { class: "bk-hint" }, "Click to pin this night"),
       ]);
       fleetRow.append(b);
@@ -1862,6 +1871,40 @@ export function mount(root) {
     }
   });
   cleanups.push(off);
+
+  // fix-backups-fresh-1: a stack's backup, prune or restore job ended, so
+  // its repositories changed; read that stack again (past the host's cache)
+  // a moment later, and once more when a slow read finishes.
+  const touching = new Set(["backup", "backup-native", "prune", "restore"]);
+  /** @type {Set<string>} */
+  const stale = new Set();
+  /** @type {Set<string>} */
+  const rereading = new Set();
+  /** @param {string} name */
+  const reread = async (name) => {
+    if (abort.signal.aborted || !names.includes(name) || rereading.has(name))
+      return;
+    rereading.add(name);
+    try {
+      await readAndPaint(name, true);
+    } finally {
+      rereading.delete(name);
+    }
+  };
+  cleanups.push(
+    listen("action", (j) => {
+      if (!j || !touching.has(j.action)) return;
+      if (j.state !== "done" && j.state !== "failed") return;
+      stale.add(j.stack);
+      setTimeout(() => void reread(j.stack), 1500);
+    }),
+    listen("slow_read", () => {
+      for (const n of [...stale]) {
+        stale.delete(n);
+        setTimeout(() => void reread(n), 500);
+      }
+    }),
+  );
 
   // `/` focuses the filter (DESIGN_LANGUAGE §8); Esc unpins the night when
   // nothing else has it (a dialog, a field).

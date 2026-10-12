@@ -6,8 +6,22 @@
  *   remedy?: string | null}} DoctorCheck
  * @typedef {{overall: string, checks: DoctorCheck[]}} DoctorReport
  * @typedef {{label: string, tone: "ok" | "warn" | "bad"}} Health
- * @typedef {{what: string, why: string, fix: string}} RouteError
+ * @typedef {{what: string, why: string, fix: string,
+ *   fix_action?: {action: string, stack: string}}} RouteError
+ *   `fix_action` (fix-stale-refresh-1): the dashboard action the fix names,
+ *   which the page offers as a button.
  */
+
+/**
+ * @param {unknown} x
+ * @returns {{fix_action?: {action: string, stack: string}}}
+ */
+function fixAction(x) {
+  const f = /** @type {any} */ (x);
+  return f && typeof f.action === "string" && typeof f.stack === "string"
+    ? { fix_action: { action: f.action, stack: f.stack } }
+    : {};
+}
 
 /**
  * @param {string} h the host's `ok`, `warn` or `fail`
@@ -127,6 +141,7 @@ export function routeError(what, status, body, rawText = "") {
         what: b.what,
         why: b.why,
         fix: typeof b.fix === "string" ? b.fix : "",
+        ...fixAction(b.fix_action),
       };
     // chassis' own refusals (the request guard's timeout, the in-flight
     // cap) say `{error, remedy}`.

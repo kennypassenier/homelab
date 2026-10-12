@@ -550,6 +550,25 @@ impl NotifyFile {
         n
     }
 
+    /// fix-watch-1: a Down notice for `key` that is still open and unread.
+    /// The watch does not add a second one while it waits (every dashboard
+    /// restart used to announce the same outage again); its body is
+    /// refreshed instead, so the newest reason shows. `None` when no Down
+    /// is open or the draft is not a keyed Down.
+    pub fn refresh_open_down(&mut self, d: &Draft) -> Option<Notice> {
+        let key = d.detail.key.as_deref()?;
+        if d.kind != Kind::Down {
+            return None;
+        }
+        let x = self
+            .notices
+            .iter_mut()
+            .rev()
+            .find(|n| n.kind == Kind::Down && !n.read && n.key.as_deref() == Some(key))?;
+        x.body = d.body.clone();
+        Some(x.clone())
+    }
+
     pub fn unread(&self) -> usize {
         self.notices.iter().filter(|n| !n.read).count()
     }

@@ -40,6 +40,9 @@ import {
   remaining,
   stepText,
   upsertJob,
+  mergeJobLists,
+  queueOrder,
+  estimateRange,
 } from "../js/jobs.js";
 import {
   addNotice,
@@ -426,7 +429,10 @@ test("the job panel reads step 3/35 with the time run and the time left", () => 
   assert.equal(v.stepName, "pull images");
   assert.equal(v.elapsed, "2 min"); // 1130 - 1010
   assert.equal(v.remaining, "about 2 min 50 s left"); // 200 - 30
-  assert.equal(v.basis, "expected from 5 earlier runs");
+  assert.equal(
+    v.basis,
+    "expected from earlier runs: median 5 min over 5 earlier runs",
+  );
   // fix-189 (Kenny, 2026-10-02): a step total is the bar's one truth once
   // the host sends one; time history (which alone would say 41% here,
   // 120 / (120 + 170)) now only feeds "Expected remaining" above.
@@ -478,11 +484,14 @@ test("no earlier run: the step without a count and an honest remaining", () => {
   assert.equal(remaining(j, 1000, 1100).text, "no earlier run to go by");
   assert.equal(percent(j, 1000, 1100), null);
   const late = job({ progress: prog({ expected_remaining_s: 10 }) });
+  // fix-timing-1: past the estimate the time counts on as overdue.
   assert.deepEqual(remaining(late, 1000, 1100), {
-    text: "taking longer than earlier runs",
+    text: "1 min 30 s overdue",
     late: true,
     s: 0,
+    over: 90,
   });
+  assert.equal(remaining(late, 1000, 1110).over, 100);
   assert.equal(
     stepText(job({ state: "queued", started_at: null })),
     "waiting in the queue",
@@ -959,4 +968,55 @@ test("Today and the fleet check carry each row's Fix", () => {
   ]);
   assert.deepEqual(rows[0].fix, fix);
   assert.equal(rows[1].fix, null);
+});
+
+test("the estimate shows the median and, when sent, the fastest and slowest", () => {
+  assert.equal(estimateRange(prog())?.text, "median 5 min over 5 earlier runs");
+  assert.equal(
+    estimateRange(
+      prog({ expected_total_min_s: 200, expected_total_max_s: 460 }),
+    )?.text,
+    "median 5 min, 3 min 20 s to 7 min 40 s over 5 earlier runs",
+  );
+  assert.equal(estimateRange(prog({ runs: 0 })), null);
+});
+
+test("the queue runs the oldest first and ties by job id", () => {
+  const a = job({ job: 9, queued_at: 50 });
+  const b = job({ job: 7, queued_at: 50 });
+  const c = job({ job: 8, queued_at: 49 });
+  assert.deepEqual(
+    [a, b, c].sort(queueOrder).map((j) => j.job),
+    [8, 7, 9],
+  );
+});
+
+test("the server's job list wins over a stale local copy", () => {
+  const server = [
+    job({ job: 2, state: "running", progress: prog({ n: 40 }) }),
+    job({ job: 1, state: "done", finished_at: 900 }),
+  ];
+  const held = [
+    job({ job: 2, state: "running", progress: prog({ n: 3 }) }),
+    job({ job: 1, state: "running" }),
+    job({ job: 5, state: "running" }),
+  ];
+  const merged = mergeJobLists(server, held, new Set());
+  assert.equal(merged.find((j) => j.job === 2)?.progress?.n, 40);
+  assert.equal(merged.find((j) => j.job === 1)?.state, "done");
+  assert.equal(
+    merged.some((j) => j.job === 5),
+    false,
+  );
+  // an event that arrived after the read began is newer, if not behind
+  const fresh = mergeJobLists(
+    server,
+    [job({ job: 2, state: "done", finished_at: 1200 }), held[2]],
+    new Set([2, 5]),
+  );
+  assert.equal(fresh.find((j) => j.job === 2)?.state, "done");
+  assert.equal(
+    fresh.some((j) => j.job === 5),
+    true,
+  );
 });

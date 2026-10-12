@@ -944,15 +944,100 @@ p:has(> .measured:only-child):first-child {
   inline-size: auto;
   min-inline-size: 12rem;
 }
+/* feat-batch-1: both lists are grids whose rows share their columns
+   (subgrid), so every name, pill and button sits under the one above. */
 .batch-preview,
 .batch-jobs {
   display: grid;
-  gap: 6px;
-  padding-inline-start: 1.2em;
+  gap: 6px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.batch-preview {
+  grid-template-columns: max-content minmax(0, 1fr) auto;
+}
+.batch-jobs {
+  grid-template-columns:
+    max-content max-content minmax(0, 1fr) minmax(0, 2fr)
+    auto;
+  max-block-size: 14rem;
+  overflow-y: auto;
+  align-content: start;
 }
 .batch-preview li,
 .batch-jobs li {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: center;
   overflow-wrap: anywhere;
+}
+.batch-preview .cli-line {
+  display: contents;
+}
+.batch-preview .cli-line .kp-copyable__value {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-preview__bar {
+  block-size: 1.75rem;
+  inline-size: 100%;
+}
+.batch-preview__copy {
+  block-size: 1.75rem;
+  inline-size: 4rem;
+}
+.batch-preview__note,
+.batch-preview__guard {
+  grid-column: 2 / -1;
+}
+.batch-jobs__note {
+  min-inline-size: 0;
+}
+.batch-jobs__cancel {
+  justify-self: end;
+}
+.batch-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px 16px;
+  margin-block-end: 12px;
+}
+.batch-head__bar {
+  max-inline-size: none;
+  --kp-progressbar-max-width: none;
+}
+.batch-head__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: end;
+}
+.batch-running,
+.batch-totals {
+  margin-block-end: 12px;
+}
+.batch-list-title {
+  margin-block: 0 8px;
+  font-size: 1rem;
+}
+@media (max-width: 40rem) {
+  .batch-head {
+    grid-template-columns: 1fr;
+  }
+  .batch-head__actions {
+    justify-content: start;
+  }
+  .batch-jobs {
+    grid-template-columns: max-content max-content minmax(0, 1fr) auto;
+  }
+  .batch-jobs__note {
+    display: none;
+  }
 }
 /* feat-overview-5: the bell and its count. */
 .kp-nav .bell {
@@ -4744,6 +4829,18 @@ th[aria-sort="descending"] .nx-sort__mark {
 .nx-toast__act:focus-visible {
   outline: 2px solid var(--background);
 }
+/* fix-ux-1: a held toast's close button, in the toast's own ink. */
+.nx-toast__close {
+  margin-inline-start: auto;
+  min-inline-size: 2rem;
+  padding: 0 var(--kp-space-xs);
+  color: inherit;
+  background: transparent;
+  border-color: transparent;
+}
+.nx-toast__close:focus-visible {
+  outline: 2px solid var(--background);
+}
 
 /* a row's menu: a non-modal dialog */
 dialog.nx-rowmenu {
@@ -5733,4 +5830,9 @@ dialog.nx-rowmenu[open] {
 }
 .nx-sortline__said {
   min-inline-size: 0;
+}
+.refusal .refusal-fix {
+  display: block;
+  inline-size: fit-content;
+  margin-block-start: 6px;
 }

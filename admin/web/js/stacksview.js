@@ -103,8 +103,8 @@ export function series(values, scale = 1) {
 
 /**
  * The one action a row offers, the most useful first: a stack that differs
- * from its files is deployed, one with a newer version updated, one whose
- * backup was missed backed up; otherwise its logs.
+ * from its files is deployed, one with a newer version updated; otherwise backed up
+ * (a stack that is down shows its logs).
  * @param {{drift: boolean, newer: number, backup: Backup,
  *   state: {tone: string}}} r
  * @returns {RowAction}
@@ -128,16 +128,17 @@ export function rowAction(r) {
       label: "Update",
       title: "See which apps have a newer version and update them",
     };
-  if (r.backup.state === "missed" || r.backup.state === "none")
-    return {
-      kind: "backup",
-      label: "Back up",
-      title: "Take a backup of this stack now",
-    };
+  // fix-batch-native-1: a stack with nothing else to do offers a backup,
+  // whatever its last night looked like, so every row (admin included) can
+  // back up. A native stack's `backup` becomes `backup-native` in
+  // `openAction`.
   return {
-    kind: "logs",
-    label: "Logs",
-    title: "Read this stack's logs",
+    kind: "backup",
+    label: "Back up",
+    title:
+      r.backup.state === "missed" || r.backup.state === "none"
+        ? "Take a backup of this stack now"
+        : "Take a backup of this stack now; its logs are one click away on its page",
   };
 }
 

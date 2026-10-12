@@ -14,7 +14,6 @@
 
 import { act, actionLabel, onAct, startAct } from "./act.js";
 import { openAction } from "./actiondialog.js";
-import { notify } from "./actui.js";
 import { AREAS, moreAreas, phoneTabs } from "./areas.js";
 import { openAsks } from "./asks.js";
 import {
@@ -39,9 +38,10 @@ import {
 import { HELP_OPEN, helpPanel } from "./helptour.js";
 import { startInboxSources } from "./inboxsources.js";
 import { noMatchText, rankCommands } from "./intent.js";
-import { finished, stepText } from "./jobs.js";
+import { finished, queueOrder, stepText } from "./jobs.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { toastOf } from "./notices.js";
+import { holdToast } from "./ui.js";
 import { openImport } from "./importstack.js";
 import { openNewStack } from "./newstack.js";
 import { openRollback } from "./rollbackdialog.js";
@@ -64,6 +64,7 @@ import {
   themeMenuMarkup,
 } from "/static/kp/js/theme-picker.js";
 import { attachEffects } from "/static/kp/js/effects.js";
+import { toast as kpToast } from "/static/kp/js/overlays.js";
 
 /**
  * @typedef {{navigate: (href: string) => void,
@@ -240,9 +241,35 @@ function notOurs(e) {
  * @param {import("./jobs.js").Job[]} jobs
  */
 export const liveJobs = (jobs) =>
-  jobs
-    .filter((j) => !finished(j.state))
-    .sort((a, b) => a.queued_at - b.queued_at);
+  jobs.filter((j) => !finished(j.state)).sort(queueOrder);
+
+/**
+ * A kp toast with a tone, as actui.js `notify` draws it, but one that
+ * offers an action is held until it is used, hovered away or closed
+ * (fix-ux-1: the done toast left before a click could reach it).
+ * @param {string} text
+ * @param {"success" | "warning" | "info" | "error"} tone
+ * @param {{label: string, onClick: () => void}} [action]
+ */
+function notify(text, tone, action) {
+  /** @type {(HTMLElement & {dismiss: () => void}) | null} */
+  let t = null;
+  t = kpToast(text, {
+    className: `kp-toast kp-toast--${tone}`,
+    live: tone === "error" ? "assertive" : "polite",
+    ms: action ? 0 : tone === "error" ? 10000 : 6000,
+    action: action && {
+      label: action.label,
+      onClick: () => {
+        t?.dismiss();
+        action.onClick();
+      },
+    },
+    max: 4,
+  });
+  if (action) holdToast(t);
+  return t;
+}
 
 /**
  * The pill's words: "1 running · Deploy kp-soft · step 4/6".

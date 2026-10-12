@@ -25,7 +25,7 @@ The dashboard's own settings are the [admin] table of the config file:
   [admin]
   host = \"10.10.10.250:8443\"                     # homelab-host
   host_token = \"${HOMELAB_ADMIN_HOST_TOKEN}\"    # from the environment
-  poll_s = 10  sse_buffer = 256  backoff_min_s = 1  backoff_max_s = 60
+  poll_s = 10  sse_buffer = 2048  backoff_min_s = 1  backoff_max_s = 60
   access_team_domain = \"<team>.cloudflareaccess.com\"  access_aud = \"<64 hex>\"
   access_leeway_s = 60  access_certs_refresh_s = 3600
   loki_url = \"http://10.10.10.13:3100\"  loki_timeout_s = 15  ask_timeout_s = 600";
@@ -97,7 +97,7 @@ async fn main() -> std::process::ExitCode {
     } else {
         None
     };
-    let live = Live::new(config.as_ref().map(|c| c.sse_buffer).unwrap_or(256));
+    let live = Live::new(config.as_ref().map(|c| c.sse_buffer).unwrap_or(2048));
     // feat-pages-1 (chassis-rs 3.1.0): the web app mounts at the root by
     // default, is the router's fallback, and `index.html` answers for every
     // extensionless path that is not the kit's. `/app` and `/app/…` from

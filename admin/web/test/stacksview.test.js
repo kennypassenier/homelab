@@ -186,7 +186,17 @@ test("redesign-stacks: a row offers the one action that fits it best", () => {
       backup: { state: "ok", at: 1, text: "", tone: "ok" },
       state: { tone: "ok" },
     }).label,
-    "Logs",
+    "Back up",
+    "fix-batch-native-1: a healthy stack can still back up",
+  );
+  assert.equal(
+    rowAction({
+      drift: false,
+      newer: 0,
+      backup: { state: "ok", at: 1, text: "", tone: "ok" },
+      state: { tone: "bad" },
+    }).kind,
+    "logs",
   );
 });
 

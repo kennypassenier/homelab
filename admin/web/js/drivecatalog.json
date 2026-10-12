@@ -15,6 +15,30 @@
       "twins": false
     },
     {
+      "id": "activity-cancel-all-queued",
+      "page": "activity",
+      "what": "cancel every job that still waits in the queue",
+      "opens": "run",
+      "row": null,
+      "href": "/activity",
+      "was": [],
+      "shows": "while jobs wait in the queue",
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "activity-cancel-job",
+      "page": "activity",
+      "what": "cancel a queued job before it starts",
+      "opens": "run",
+      "row": "<job>",
+      "href": "/activity",
+      "was": [],
+      "shows": "on a job that waits in the queue",
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "activity-charts",
       "page": "activity",
       "what": "open the charts around an operation's moment",
@@ -82,6 +106,18 @@
       "href": "/activity",
       "was": [],
       "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "activity-open-batch",
+      "page": "activity",
+      "what": "open the batch a job belongs to",
+      "opens": "dialog",
+      "row": "<batch>",
+      "href": "/activity",
+      "was": [],
+      "shows": "on a job that came from a batch",
       "reach": [],
       "twins": false
     },
@@ -560,6 +596,18 @@
       "href": "/backups",
       "was": [],
       "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "batch-cancel-job",
+      "page": "activity",
+      "what": "take one queued job of a batch out of the queue (the batch panel's Cancel)",
+      "opens": "run",
+      "row": "<stack>",
+      "href": "/activity",
+      "was": [],
+      "shows": "in a batch's panel, on a job that has not started",
       "reach": [],
       "twins": false
     },
@@ -1522,6 +1570,18 @@
       "twins": false
     },
     {
+      "id": "host-log-copy-all",
+      "page": "log",
+      "what": "copy every line of the host log to the clipboard",
+      "opens": "run",
+      "row": null,
+      "href": "/activity?view=host-log",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "host-log-copy-line",
       "page": "log",
       "what": "copy an opened line to the clipboard",
@@ -1578,9 +1638,10 @@
     {
       "id": "host-log-level",
       "page": "log",
-      "what": "show lines of at least this level",
+      "what": "show or hide the host log's lines of one level",
       "opens": "view",
-      "row": "info|warn|error",
+      "selects": true,
+      "row": "debug|info|warning|critical",
       "href": "/activity?view=host-log",
       "was": [],
       "shows": null,
@@ -1660,7 +1721,7 @@
         {
           "do": "click",
           "control": "host-log-level",
-          "row": "error"
+          "row": "debug"
         }
       ],
       "twins": false
@@ -1915,6 +1976,43 @@
       "href": "/settings",
       "was": [],
       "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "job-log-copy",
+      "page": "activity",
+      "what": "copy a job's whole log to the clipboard",
+      "opens": "run",
+      "row": "<job>",
+      "href": "/activity",
+      "was": [],
+      "shows": "in a job's log",
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "job-log-level",
+      "page": "activity",
+      "what": "show or hide a job log's lines of one level",
+      "opens": "view",
+      "selects": true,
+      "row": "<job>:<debug|info|warning|critical>",
+      "href": "/activity",
+      "was": [],
+      "shows": "in a job's log",
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "job-log-whole",
+      "page": "activity",
+      "what": "show a job's whole log instead of its newest lines",
+      "opens": "view",
+      "row": "<job>",
+      "href": "/activity",
+      "was": [],
+      "shows": "in a job's log",
       "reach": [],
       "twins": false
     },
@@ -2389,6 +2487,18 @@
       "href": "/host",
       "was": [],
       "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "refusal-fix",
+      "page": "update",
+      "what": "the button under a refusal whose fix is an action (Deploy a stack that already names the newer version)",
+      "opens": "dialog",
+      "row": "<stack>",
+      "href": "/update",
+      "was": [],
+      "shows": "under a refusal that names an action",
       "reach": [],
       "twins": false
     },
@@ -3225,6 +3335,18 @@
       "href": "/stacks/<stack>/settings",
       "was": [],
       "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "stack-problem-seen",
+      "page": "stack",
+      "what": "mark one row of the stack's Needs you band as seen (a notice with no fix to run)",
+      "opens": "run",
+      "row": "<stack>/<problem>",
+      "href": "/stacks/<stack>",
+      "was": [],
+      "shows": "on a row whose notice has no fix and no other page to go to",
       "reach": [],
       "twins": false
     },

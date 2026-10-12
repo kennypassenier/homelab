@@ -101,8 +101,11 @@ pub struct AdminConfig {
 fn d_poll() -> u64 {
     10
 }
+/// fix-live-1: a deploy writes hundreds of `action_log` lines in seconds and
+/// the old 256 made a browser lag past its buffer (told to resync, the job
+/// page froze mid-run). 2048 events is a few hundred KB per open page.
 fn d_sse_buffer() -> usize {
-    256
+    2048
 }
 fn d_backoff_min() -> u64 {
     1

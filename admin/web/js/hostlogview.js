@@ -4,31 +4,30 @@
 // "only" one source, a minimum level, text), the counts the side column
 // prints beside each value, and the filter's place in the address.
 
+import {
+  DEFAULT_LOG_LEVELS,
+  levelBucket,
+  levelShown,
+  readLogLevels,
+} from "./logs.js";
+
 /**
  * @typedef {import("./parity.js").HostLine} HostLine
  * @typedef {{off: Set<string>, only: string | null,
- *   level: "" | "warn" | "error", q: string}} LogFilter
+ *   levels: Set<string>, q: string}} LogFilter
  *   `off`: sources turned off; `only`: one source alone (an old
- *   `/log?source=media` link, or "only" beside a source); `level`: "" for
- *   every level, else at least this severe.
+ *   `/log?source=media` link, or "only" beside a source); `levels`
+ *   (feat-logs-1): the levels shown, any mix of debug, info, warning and
+ *   critical, remembered between visits.
  */
 
-const RANK = /** @type {Record<string, number>} */ ({
-  debug: 0,
-  info: 1,
-  warn: 2,
-  error: 3,
-});
-
-/** The Level choices, in their fixed order. */
+/** The Level choices, in their fixed order (feat-logs-1: several at once). */
 export const LEVELS = /** @type {const} */ ([
-  { value: "", label: "Info and up", dot: "info" },
-  { value: "warn", label: "Warnings and up", dot: "warn" },
-  { value: "error", label: "Errors only", dot: "bad" },
+  { value: "debug", label: "Debug", dot: "info" },
+  { value: "info", label: "Info", dot: "info" },
+  { value: "warning", label: "Warning", dot: "warn" },
+  { value: "critical", label: "Critical", dot: "bad" },
 ]);
-
-/** @param {string} level */
-export const rank = (level) => RANK[String(level).toLowerCase()] ?? 1;
 
 /**
  * Whether a source's lines are shown.
@@ -46,8 +45,7 @@ export const sourceOn = (source, f) =>
  */
 export function lineShown(l, f) {
   if (!sourceOn(l.source, f)) return false;
-  // "Info and up" ("") hides debug lines (senior review, finding 14).
-  if (rank(l.level) < (f.level ? rank(f.level) : RANK.info)) return false;
+  if (!levelShown(l.level, f.levels)) return false;
   const q = f.q.trim().toLowerCase();
   if (q && !`${l.source} ${l.msg}`.toLowerCase().includes(q)) return false;
   return true;
@@ -94,13 +92,10 @@ export function counts(lines) {
   /** @type {Map<string, number>} */
   const bySource = new Map();
   /** @type {Record<string, number>} */
-  const byLevel = { "": 0, warn: 0, error: 0 };
+  const byLevel = { debug: 0, info: 0, warning: 0, critical: 0 };
   for (const l of lines) {
     bySource.set(l.source, (bySource.get(l.source) ?? 0) + 1);
-    const r = rank(l.level);
-    if (r >= RANK.info) byLevel[""] += 1;
-    if (r >= 2) byLevel.warn += 1;
-    if (r >= 3) byLevel.error += 1;
+    byLevel[levelBucket(l.level)] += 1;
   }
   return { bySource, byLevel };
 }
@@ -110,20 +105,44 @@ export function counts(lines) {
  * @param {LogFilter} f
  */
 export const narrowed = (f) =>
-  f.only != null || f.off.size > 0 || f.level !== "" || f.q.trim() !== "";
+  f.only != null ||
+  f.off.size > 0 ||
+  !sameLevels(f.levels, DEFAULT_LOG_LEVELS) ||
+  f.q.trim() !== "";
+
+/**
+ * @param {ReadonlySet<string>} a
+ * @param {Iterable<string>} b
+ */
+const sameLevels = (a, b) => {
+  const set = new Set(b);
+  return a.size === set.size && [...a].every((x) => set.has(x));
+};
+
+/** The levels a filter starts with: everything but debug. */
+export const defaultLevels = () => new Set(DEFAULT_LOG_LEVELS);
 
 /**
  * The filter from the address: `?source=` (one source alone, as the old
  * Live log's links), `?hide=a,b`, `?level=warn|error`, `?q=`.
  * @param {URLSearchParams} p
+ * @param {Set<string>} [remembered] the levels remembered between visits
  * @returns {LogFilter}
  */
-export function logFilterFromParams(p) {
+export function logFilterFromParams(p, remembered = readLogLevels()) {
+  // An old `?level=warn|error` link means "at least this severe"; without
+  // one the levels remembered between visits apply.
   const level = p.get("level");
+  const atLeast =
+    level === "warn"
+      ? ["warning", "critical"]
+      : level === "error"
+        ? ["critical"]
+        : null;
   return {
     only: p.get("source") || null,
     off: new Set((p.get("hide") ?? "").split(",").filter(Boolean)),
-    level: level === "warn" || level === "error" ? level : "",
+    levels: atLeast ? new Set(atLeast) : new Set(remembered),
     q: p.get("q") ?? "",
   };
 }
@@ -135,7 +154,7 @@ export function logFilterFromParams(p) {
 export const logFilterToParams = (f) => ({
   source: f.only,
   hide: f.only == null && f.off.size ? [...f.off].sort().join(",") : null,
-  level: f.level || null,
+  level: null,
   q: f.q.trim() || null,
 });
 

@@ -38,6 +38,10 @@ pub struct Expectation {
     pub steps: Vec<ExpectedStep>,
     /// Median of whole-run durations over the successful runs.
     pub total_s: Option<u64>,
+    /// feat-timing-1 (Kenny, 2026-10-09: "de mediaan ... en ook de minimum
+    /// en maximum gemeten tijden"): the shortest and longest of those runs.
+    pub total_min_s: Option<u64>,
+    pub total_max_s: Option<u64>,
     /// How many past runs the numbers come from.
     pub runs: usize,
 }
@@ -99,6 +103,8 @@ pub fn expectation(history: &[HistoryEntry], subject: &str) -> Expectation {
         subject: subject.to_string(),
         steps: plan,
         total_s: median(&totals),
+        total_min_s: totals.iter().copied().min(),
+        total_max_s: totals.iter().copied().max(),
         runs,
     }
 }
@@ -130,6 +136,9 @@ pub struct Progress {
     pub expected_step_s: Option<u64>,
     /// Median duration of the whole operation in past runs.
     pub expected_total_s: Option<u64>,
+    /// feat-timing-1: the shortest and longest past run.
+    pub expected_total_min_s: Option<u64>,
+    pub expected_total_max_s: Option<u64>,
     /// What is left by the medians: the rest of this step and every planned
     /// step not started yet.
     pub expected_remaining_s: Option<u64>,
@@ -276,6 +285,8 @@ impl Tracker {
             changed: mark.changed,
             expected_step_s,
             expected_total_s: plan.total_s,
+            expected_total_min_s: plan.total_min_s,
+            expected_total_max_s: plan.total_max_s,
             expected_remaining_s,
             elapsed_s: ts.saturating_sub(first),
             runs: plan.runs,

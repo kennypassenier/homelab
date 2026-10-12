@@ -131,45 +131,101 @@ export function listen(name, f) {
   return () => set.delete(f);
 }
 
+/** The wait before the live channel is reopened, in ms: it doubles from
+ * the first to the last (fix-live-1). */
+export const REOPEN_FIRST_MS = 1000;
+export const REOPEN_LAST_MS = 15000;
+
+/**
+ * The wait after `failures` failed reopenings in a row.
+ * @param {number} failures
+ */
+export const reopenDelay = (failures) =>
+  Math.min(REOPEN_LAST_MS, REOPEN_FIRST_MS * 2 ** Math.max(0, failures));
+
 /** Open the live channel and read the first snapshot. */
 export function start() {
-  const events = new EventSource("/events");
   let opens = 0;
-  events.addEventListener("open", () => {
-    if (opens++ > 0) listeners.get("reopened")?.forEach((f) => f(null));
-  });
-  for (const name of ACT_EVENTS)
-    events.addEventListener(name, (e) => {
-      /** @type {any} */
-      let data = null;
-      try {
-        data = JSON.parse(/** @type {MessageEvent} */ (e).data || "null");
-      } catch {
-        return;
-      }
-      listeners.get(name)?.forEach((f) => f(data));
+  let failures = 0;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let retry = null;
+  /** @type {EventSource | null} */
+  let events = null;
+
+  /**
+   * fix-live-1: an EventSource that got a 502/530 from the edge (the
+   * gateway paused for its backup, restarted by its deploy) is CLOSED for
+   * good and never retries by itself. Open a fresh one, with backoff.
+   */
+  const reopen = () => {
+    if (retry != null) return;
+    if (events && events.readyState !== EventSource.CLOSED) return;
+    retry = setTimeout(() => {
+      retry = null;
+      connect();
+    }, reopenDelay(failures++));
+  };
+  const reopenNow = () => {
+    if (events && events.readyState === EventSource.OPEN) return;
+    if (retry != null) clearTimeout(retry);
+    retry = null;
+    connect();
+  };
+
+  function connect() {
+    events?.close();
+    events = new EventSource("/events");
+    wire(events);
+  }
+
+  /** @param {EventSource} events */
+  function wire(events) {
+    events.addEventListener("open", () => {
+      failures = 0;
+      if (opens++ > 0) listeners.get("reopened")?.forEach((f) => f(null));
     });
-  events.addEventListener("fleet", (e) => {
-    state.fleet = JSON.parse(/** @type {MessageEvent} */ (e).data).fleet;
-    emit();
+    events.addEventListener("error", () => {
+      if (events.readyState === EventSource.CLOSED) reopen();
+    });
+    for (const name of ACT_EVENTS)
+      events.addEventListener(name, (e) => {
+        /** @type {any} */
+        let data = null;
+        try {
+          data = JSON.parse(/** @type {MessageEvent} */ (e).data || "null");
+        } catch {
+          return;
+        }
+        listeners.get(name)?.forEach((f) => f(data));
+      });
+    events.addEventListener("fleet", (e) => {
+      state.fleet = JSON.parse(/** @type {MessageEvent} */ (e).data).fleet;
+      emit();
+    });
+    events.addEventListener("link", (e) => {
+      const d = JSON.parse(/** @type {MessageEvent} */ (e).data);
+      if (d.up) {
+        state.hostVersion = d.host_version ?? null;
+        state.hostBuild = d.host_build ?? null;
+      }
+      setLink(
+        d.up,
+        d.up ? `host ${d.host_version}` : `host link down: ${d.error}`,
+      );
+      emit();
+    });
+    events.addEventListener("asks", (e) => {
+      state.asks = JSON.parse(/** @type {MessageEvent} */ (e).data).asks ?? [];
+      emit();
+    });
+    events.addEventListener("resync", () => void load());
+  }
+
+  window.addEventListener("online", reopenNow);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) reopenNow();
   });
-  events.addEventListener("link", (e) => {
-    const d = JSON.parse(/** @type {MessageEvent} */ (e).data);
-    if (d.up) {
-      state.hostVersion = d.host_version ?? null;
-      state.hostBuild = d.host_build ?? null;
-    }
-    setLink(
-      d.up,
-      d.up ? `host ${d.host_version}` : `host link down: ${d.error}`,
-    );
-    emit();
-  });
-  events.addEventListener("asks", (e) => {
-    state.asks = JSON.parse(/** @type {MessageEvent} */ (e).data).asks ?? [];
-    emit();
-  });
-  events.addEventListener("resync", () => void load());
+  connect();
   void load();
 }
 

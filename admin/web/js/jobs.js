@@ -9,7 +9,10 @@ import { formatClock, formatDateTime, humanDuration } from "./format.js";
  * @typedef {{op: string, step: string, n: number, m: number | null,
  *   finished: boolean, changed: boolean, expected_step_s: number | null,
  *   expected_total_s: number | null, expected_remaining_s: number | null,
- *   elapsed_s: number, runs: number}} Progress
+ *   elapsed_s: number, runs: number, expected_total_min_s?: number | null,
+ *   expected_total_max_s?: number | null}} Progress
+ *   `expected_total_s` is the median of the earlier runs; the fastest and
+ *   slowest (feat-timing-1) are optional until the host sends them.
  * @typedef {{from: "manual"} | {from: "batch", batch: number} |
  *   {from: "schedule", schedule: string, slot: number} |
  *   {from: "claude", by: string}} Origin
@@ -55,6 +58,67 @@ export const jobBadge = (s) => STATES[s] ?? { label: String(s), tone: "warn" };
 
 /** @param {JobState} s */
 export const finished = (s) => s !== "queued" && s !== "running";
+
+/**
+ * The queue's order (fix-live-1): the job that runs first on top. The
+ * queue time is whole seconds, so ties fall back to the job id, ascending.
+ * @param {Pick<Job, "job" | "queued_at">} a
+ * @param {Pick<Job, "job" | "queued_at">} b
+ */
+export const queueOrder = (a, b) => a.queued_at - b.queued_at || a.job - b.job;
+
+/**
+ * How far along a job is, for ranking two views of it: a finished view
+ * beats an unfinished one, then the later finish, then the further step.
+ * @param {Job} j
+ */
+function rankJob(j) {
+  return [
+    finished(j.state) ? 1 : 0,
+    j.finished_at ?? 0,
+    j.state === "running" ? 1 : 0,
+    j.progress?.n ?? 0,
+  ];
+}
+
+/**
+ * Whether view `a` is at least as far along as view `b` of the same job.
+ * @param {Job} a
+ * @param {Job} b
+ */
+export function atLeastAsFar(a, b) {
+  const x = rankJob(a);
+  const y = rankJob(b);
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] > y[i];
+  return true;
+}
+
+/**
+ * The server's job list and the views the page held before it was read
+ * (fix-live-1): the server's list wins, because a stale local copy used to
+ * overwrite it. A held view replaces the server's only when it is
+ * provably further along (finished while the server says running, or a
+ * later step) or when it arrived after the read began (`fresh`), and a job
+ * the server does not list at all is kept only when it arrived after the
+ * read began.
+ * @param {Job[]} server
+ * @param {Job[]} held
+ * @param {Set<number>} fresh ids of jobs the live channel updated after the read began
+ * @returns {Job[]}
+ */
+export function mergeJobLists(server, held, fresh) {
+  /** @type {Job[]} */
+  let jobs = [];
+  for (const j of server) jobs = upsertJob(jobs, j);
+  for (const j of held) {
+    const s = jobs.find((x) => x.job === j.job);
+    if (!s) {
+      if (fresh.has(j.job)) jobs = upsertJob(jobs, j);
+    } else if (fresh.has(j.job) ? atLeastAsFar(j, s) : false)
+      jobs = upsertJob(jobs, j);
+  }
+  return jobs;
+}
 
 /**
  * A job's new view in the list, newest first, the oldest dropped past
@@ -220,12 +284,13 @@ export function elapsedS(j, now) {
  * @param {Job} j
  * @param {number | null} progressAt unix seconds the last progress arrived
  * @param {number} now
- * @returns {{text: string, late: boolean, s: number | null}}
+ * @returns {{text: string, late: boolean, s: number | null, over: number}}
+ *   `over`: seconds past the estimate (fix-timing-1: it keeps counting up).
  */
 export function remaining(j, progressAt, now) {
   const p = j.progress;
-  if (finished(j.state)) return { text: "", late: false, s: null };
-  if (!p) return { text: "", late: false, s: null };
+  if (finished(j.state)) return { text: "", late: false, s: null, over: 0 };
+  if (!p) return { text: "", late: false, s: null, over: 0 };
   if (p.expected_remaining_s == null)
     return {
       text:
@@ -234,14 +299,41 @@ export function remaining(j, progressAt, now) {
           : "no estimate for these steps",
       late: false,
       s: null,
+      over: 0,
     };
   const left = p.expected_remaining_s - Math.max(0, now - (progressAt ?? now));
-  if (left <= 0)
-    return { text: "taking longer than earlier runs", late: true, s: 0 };
+  if (left <= 0) {
+    const over = Math.max(0, Math.round(-left));
+    return { text: `${humanDuration(over)} overdue`, late: true, s: 0, over };
+  }
   return {
     text: `about ${humanDuration(left)} left`,
     late: false,
     s: left,
+    over: 0,
+  };
+}
+
+/**
+ * What the earlier runs say about the whole job (feat-timing-1): the
+ * median, and the fastest and slowest when the host sends them.
+ * @param {Progress | null} p
+ * @returns {{median: number, min: number | null, max: number | null,
+ *   runs: number, text: string} | null}
+ */
+export function estimateRange(p) {
+  if (!p || p.runs <= 0 || p.expected_total_s == null) return null;
+  const min = p.expected_total_min_s ?? null;
+  const max = p.expected_total_max_s ?? null;
+  const parts = [`median ${humanDuration(p.expected_total_s)}`];
+  if (min != null && max != null)
+    parts.push(`${humanDuration(min)} to ${humanDuration(max)}`);
+  return {
+    median: p.expected_total_s,
+    min,
+    max,
+    runs: p.runs,
+    text: `${parts.join(", ")} over ${p.runs} earlier ${p.runs === 1 ? "run" : "runs"}`,
   };
 }
 
@@ -346,8 +438,9 @@ export function jobPanel(j, ctx) {
     cli: j.cli,
     origin: originText(j.origin),
     restarts: j.restarts_dashboard,
-    basis:
-      p && p.runs > 0
+    basis: estimateRange(p)?.text
+      ? `expected from earlier runs: ${estimateRange(p)?.text}`
+      : p && p.runs > 0
         ? `expected from ${p.runs} earlier ${p.runs === 1 ? "run" : "runs"}`
         : "",
   };

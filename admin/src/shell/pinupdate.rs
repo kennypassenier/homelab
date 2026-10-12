@@ -100,11 +100,14 @@ pub fn plan_target(
     };
     let tag = target_tag(&from_version, latest);
     if tag == from_version {
+        // fix-stale-refresh-1: the file is ahead of the running stack; the
+        // fix is the stack's deploy, offered as a button (`fix_action`).
         return Err(Refusal::new(
             what,
-            format!("the stack file already names {from_version}"),
-            "deploy the stack to run it; the fleet check updates the row tonight",
-        ));
+            format!("the stack file already names {from_version}, the stack does not run it yet"),
+            format!("deploy {stack} to run it"),
+        )
+        .with_fix_action(crate::core::actions::ActionKind::Deploy, stack));
     }
     let (registry, repository) = registry_of(&from);
     let digest = match resolve(&registry, &repository, &tag) {

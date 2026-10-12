@@ -45,7 +45,7 @@ const shown = (f) => LINES.filter((l) => lineShown(l, f)).map((l) => l.seq);
 const ALL = () => ({
   off: new Set(),
   only: null,
-  level: /** @type {"" | "warn" | "error"} */ (""),
+  levels: new Set(["info", "warning", "critical"]),
   q: "",
 });
 
@@ -66,8 +66,13 @@ test("redesign-console: a plain click turns one source on or off, several may be
 
 test("redesign-console: level and text narrow the lines", () => {
   assert.deepEqual(shown(ALL()), [1, 2, 3, 4], "debug stays hidden");
-  assert.deepEqual(shown({ ...ALL(), level: "warn" }), [2, 3]);
-  assert.deepEqual(shown({ ...ALL(), level: "error" }), [3]);
+  // feat-logs-1: any mix of the four levels, not a minimum.
+  assert.deepEqual(shown({ ...ALL(), levels: new Set(["warning"]) }), [2]);
+  assert.deepEqual(shown({ ...ALL(), levels: new Set(["critical"]) }), [3]);
+  assert.deepEqual(
+    shown({ ...ALL(), levels: new Set(["debug", "critical"]) }),
+    [3, 5],
+  );
   assert.deepEqual(shown({ ...ALL(), q: "RCLONE" }), [3]);
   assert.deepEqual(
     shown({ ...ALL(), q: "gateway" }),
@@ -76,13 +81,14 @@ test("redesign-console: level and text narrow the lines", () => {
   );
   assert.equal(narrowed(ALL()), false);
   assert.equal(narrowed({ ...ALL(), q: "x" }), true);
+  assert.equal(narrowed({ ...ALL(), levels: new Set(["info"]) }), true);
 });
 
 test("redesign-console: the side column's counts are exact", () => {
   const c = counts(LINES);
   assert.equal(c.bySource.get("gateway"), 2);
   assert.equal(c.bySource.get("HOST"), 1);
-  assert.deepEqual(c.byLevel, { "": 4, warn: 2, error: 1 });
+  assert.deepEqual(c.byLevel, { debug: 1, info: 2, warning: 1, critical: 1 });
   assert.equal(countText(2, 5), "2 of 5 lines");
   assert.equal(countText(1, 1), "1 of 1 line");
 });
@@ -92,13 +98,18 @@ test("redesign-console: the filter lives in the address, the old /log?source= in
     new URLSearchParams("source=notes&level=warn"),
   );
   assert.equal(old.only, "notes");
-  assert.equal(old.level, "warn");
+  assert.deepEqual([...old.levels].sort(), ["critical", "warning"]);
   assert.deepEqual(shown(old), [3]);
   const f = logFilterFromParams(
     new URLSearchParams("hide=gateway,HOST&q=r&level=bogus"),
+    new Set(["debug", "info"]),
   );
   assert.deepEqual([...f.off].sort(), ["HOST", "gateway"]);
-  assert.equal(f.level, "");
+  assert.deepEqual(
+    [...f.levels].sort(),
+    ["debug", "info"],
+    "the remembered levels",
+  );
   assert.deepEqual(logFilterToParams(f), {
     source: null,
     hide: "HOST,gateway",
@@ -134,7 +145,12 @@ test("redesign-console: the snapshot and the live lines merge by number, deduped
 // Senior review finding 14: "Info and up" hides debug lines.
 test("redesign-console: Info and up hides debug lines", () => {
   assert.deepEqual(shown(ALL()), [1, 2, 3, 4]);
-  assert.equal(counts(LINES).byLevel[""], 4);
+  assert.equal(
+    counts(LINES).byLevel.info +
+      counts(LINES).byLevel.warning +
+      counts(LINES).byLevel.critical,
+    4,
+  );
 });
 
 // Senior review finding 12: the page keys ignore a focused button or link

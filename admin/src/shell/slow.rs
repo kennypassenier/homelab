@@ -168,6 +168,76 @@ impl SlowRead {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// fix-stale-refresh-1: a deploy or update of `stack` finished well, so
+    /// the kept answer's "pinned to X; upstream Y released" rows of that
+    /// stack are stale until the nightly check. Drop them from the kept
+    /// answer, give it a newer run id (`read_run`, so a page can tell it from
+    /// what it shows) and announce `slow_read {read, run, ok, stack}`; the
+    /// open pages refetch (`?last=1`). Whether anything was dropped.
+    pub fn drop_stale_rows_of(&self, stack: &str) -> bool {
+        let prefix = format!("{stack}/");
+        let strip = |body: &mut serde_json::Value| -> bool {
+            let Some(list) = body["findings"].as_array_mut() else {
+                return false;
+            };
+            let before = list.len();
+            let mut changed = false;
+            list.retain_mut(|f| {
+                if !f["what"]
+                    .as_str()
+                    .is_some_and(|w| w.starts_with("pinned to "))
+                {
+                    return true;
+                }
+                let subject = f["subject"].as_str().unwrap_or_default().to_string();
+                let parts: Vec<&str> = subject.split(", ").collect();
+                let kept: Vec<&str> = parts
+                    .iter()
+                    .copied()
+                    .filter(|p| !p.starts_with(&prefix))
+                    .collect();
+                if kept.len() == parts.len() {
+                    return true;
+                }
+                changed = true;
+                if kept.is_empty() {
+                    return false;
+                }
+                f["subject"] = kept.join(", ").into();
+                true
+            });
+            changed || list.len() != before
+        };
+        let run = {
+            let mut s = self.lock();
+            let mut changed = false;
+            for f in s.finished.iter_mut() {
+                changed |= strip(&mut f.body);
+            }
+            let Some(mut last) = s.last.take() else {
+                return changed;
+            };
+            if strip(&mut last.body) {
+                changed = true;
+                last.id = s.next;
+                s.next += 1;
+                last.read_at = now_s();
+            }
+            let id = last.id;
+            s.last = Some(last);
+            changed.then_some(id)
+        };
+        let Some(run) = run else { return false };
+        self.done.send_replace(run);
+        if let Some(p) = &self.publish {
+            p.publish(
+                "slow_read",
+                serde_json::json!({ "read": &self.key, "run": run, "ok": true, "stack": stack }),
+            );
+        }
+        true
+    }
+
     /// redesign-flows-2: the kept last good answer (as `read` would hand it
     /// first), without starting a run; 204 No Content when there is none.
     pub fn kept(&self) -> Response {

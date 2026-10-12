@@ -130,16 +130,22 @@ export function fleetNight(stacks, night, now) {
   let expected = 0;
   let before = 0;
   let wait = 0;
-  for (const s of Object.values(stacks)) {
+  /** @type {string[]} */
+  const waiting = [];
+  for (const [name, s] of Object.entries(stacks)) {
     const st = cellState(s, night, now);
     if (st === "ok") (ok++, expected++);
     else if (st === "miss") expected++;
     else if (st === "before") before++;
-    else if (st === "wait") wait++;
+    else if (st === "wait") (wait++, waiting.push(name));
   }
+  // fix-backups-fresh-1: "wait" only while no stack has a snapshot; once
+  // some have, the ones still waiting count as not backed up yet.
+  if (ok > 0) expected += wait;
   return {
     ok,
     expected,
+    waiting: ok > 0 ? waiting : [],
     before: expected === 0 && before > 0,
     wait: expected === 0 && wait > 0,
     pct: expected === 0 ? 0 : Math.round((ok / expected) * 100),

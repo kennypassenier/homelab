@@ -114,7 +114,16 @@ async fn ask(http: &reqwest::Client, url: &str) -> Result<(), String> {
         Err(e) => Err(if e.is_timeout() {
             "no answer within 10 s".to_string()
         } else {
-            format!("no answer: {}", e.without_url())
+            // fix-watch-1: the whole cause chain (certificate, refused,
+            // DNS), not only the outermost "error sending request".
+            let e = e.without_url();
+            let mut m = format!("no answer: {}", e);
+            let mut src = std::error::Error::source(&e);
+            while let Some(s) = src {
+                m.push_str(&format!(": {}", s));
+                src = s.source();
+            }
+            m
         }),
     }
 }
@@ -267,6 +276,11 @@ pub async fn round(
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none())
+            // fix-watch-1: LAN backends (OPNsense, Proxmox) answer with their
+            // own self-signed certificates, which Traefik accepts through
+            // insecureSkipVerify; the watch only asks "is it there", so it
+            // does the same instead of reporting them down while they are up.
+            .danger_accept_invalid_certs(true)
             .build();
         if let Ok(http) = http {
             // Owner decision "default plus per tile": a tile checked less

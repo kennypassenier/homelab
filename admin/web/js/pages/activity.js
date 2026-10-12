@@ -17,8 +17,16 @@
 // ?view=host-log, /schedules → ?view=planned, /timeline → ?view=timeline
 // (this view, scrolled to the timeline).
 
-import { act, actionLabel, catalogReady, onAct } from "../act.js";
-import { openAction } from "../actiondialog.js";
+import {
+  act,
+  actionLabel,
+  catalogReady,
+  loadJobs,
+  onAct,
+  send,
+} from "../act.js";
+import { openAction, reopenBatch } from "../actiondialog.js";
+import { notify } from "../actui.js";
 import { fetchReport, h } from "../dom.js";
 import { declare, drivable, viaForm } from "../drivable.js";
 import {
@@ -44,12 +52,14 @@ import { formatDay, humanDuration } from "../format.js";
 import { openIncident } from "../incident.js";
 import {
   elapsedS,
+  estimateRange,
   finished,
   originText,
+  queueOrder,
   remaining,
   stepText,
 } from "../jobs.js";
-import { logLine } from "../jobs.js";
+import { levelShown } from "../logs.js";
 import { current, subscribe } from "../store.js";
 import {
   countOf,
@@ -65,12 +75,13 @@ import {
   skeletonLines,
   toolbar,
 } from "../ui.js";
-import { openJobDialog } from "../jobpanel.js";
+import { logLineEl, mountLogTools, openJobDialog } from "../jobpanel.js";
 import { setParams } from "../urlstate.js";
 import { tabRow } from "../dom.js";
 import { mountJobsTable } from "./jobs.js";
 import { mountHostLog } from "./log.js";
 import { mount as mountSchedules } from "./schedules.js";
+import { attachLogs } from "/static/kp/js/log.js";
 import { leave } from "/static/kp/js/motion.js";
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -86,6 +97,29 @@ const OPEN_JOB = declare({
   row: "<job>",
   what: "open a running job's live panel: its steps and its log",
   shows: "while a job runs (Running now)",
+});
+const CANCEL_JOB = declare({
+  id: "activity-cancel-job",
+  page: "activity",
+  opens: "run",
+  row: "<job>",
+  what: "cancel a queued job before it starts",
+  shows: "on a job that waits in the queue",
+});
+const CANCEL_QUEUED = declare({
+  id: "activity-cancel-all-queued",
+  page: "activity",
+  opens: "run",
+  what: "cancel every job that still waits in the queue",
+  shows: "while jobs wait in the queue",
+});
+const OPEN_BATCH = declare({
+  id: "activity-open-batch",
+  page: "activity",
+  opens: "dialog",
+  row: "<batch>",
+  what: "open the batch a job belongs to",
+  shows: "on a job that came from a batch",
 });
 const OPEN_INCIDENT = declare({
   id: "activity-open-incident",
@@ -259,8 +293,9 @@ const LOG_DRIVE = {
     id: "host-log-level",
     page: "log",
     opens: "view",
-    row: "info|warn|error",
-    what: "show lines of at least this level",
+    row: "debug|info|warning|critical",
+    what: "show or hide the host log's lines of one level",
+    selects: true,
   }),
   reset: declare({
     id: "host-log-reset",
@@ -268,7 +303,7 @@ const LOG_DRIVE = {
     opens: "view",
     what: "show every source and level again",
     shows: "while a source or level filter narrows the lines",
-    reach: [{ do: "click", control: "host-log-level", row: "error" }],
+    reach: [{ do: "click", control: "host-log-level", row: "debug" }],
   }),
   line: declare({
     id: "host-log-line",
@@ -543,6 +578,31 @@ function mountNow(body, x) {
   });
   const runList = h("div", { class: "ac-jobs" });
   const runFoot = h("span");
+  const cancelAll = drivable(
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--sm kp-button--ghost",
+        title: "Take every job that still waits out of the queue",
+        hidden: "",
+      },
+      "Cancel all queued",
+    ),
+    CANCEL_QUEUED,
+  );
+  cancelAll.addEventListener("click", () => {
+    const waiting = runningJobs().filter((j) => j.state === "queued");
+    cancelAll.disabled = true;
+    void cancelJobs(waiting).then((refused) => {
+      cancelAll.disabled = false;
+      if (!refused && !cancelGone)
+        notify(
+          `Cancelled ${waiting.length} queued ${waiting.length === 1 ? "job" : "jobs"}.`,
+          "success",
+        );
+    });
+  });
   const allJobs = h(
     "a",
     {
@@ -556,7 +616,12 @@ function mountNow(body, x) {
   drivable(allJobs, ALL_JOBS);
   running.body.append(
     runList,
-    h("div", { class: "ac-foot" }, runFoot, allJobs),
+    h(
+      "div",
+      { class: "ac-foot" },
+      h("span", { class: "ac-foot__queue" }, runFoot, cancelAll),
+      allJobs,
+    ),
   );
 
   // ── Timeline ──────────────────────────────────────────────────────────
@@ -684,9 +749,41 @@ function mountNow(body, x) {
     rows = feedRows(entries, { stacks: stackNames(), origins: origins() });
   };
   const runningJobs = () =>
-    act.jobs
-      .filter((j) => !finished(j.state))
-      .sort((a, b) => a.queued_at - b.queued_at);
+    act.jobs.filter((j) => !finished(j.state)).sort(queueOrder);
+
+  /** fix-batch: a 404 from a cancel route means this dashboard has none. */
+  let cancelGone = false;
+  /**
+   * Cancel queued jobs: one request per batch (its still-queued jobs) and
+   * one per job that came by hand or from a schedule.
+   * @param {import("../jobs.js").Job[]} jobs
+   * @returns {Promise<number>} how many requests were refused
+   */
+  const cancelJobs = async (jobs) => {
+    /** @type {Set<number>} */
+    const batches = new Set();
+    /** @type {string[]} */
+    const urls = [];
+    for (const j of jobs) {
+      if (j.origin.from === "batch") {
+        if (batches.has(j.origin.batch)) continue;
+        batches.add(j.origin.batch);
+        urls.push(`/data/actions/batch/${j.origin.batch}/cancel`);
+      } else urls.push(`/data/actions/jobs/${j.job}/cancel`);
+    }
+    let refused = 0;
+    for (const u of urls) {
+      const r = await send("POST", u, undefined, "cancel the queued job");
+      if (r.ok) continue;
+      if (r.status === 404) cancelGone = true;
+      else {
+        refused += 1;
+        notify(`${r.error.what}: ${r.error.why}.`, "warning");
+      }
+    }
+    await loadJobs();
+    return refused;
+  };
 
   /** A stack's name as a link to its hub. @param {string} name */
   const stackLink = (name) =>
@@ -818,8 +915,29 @@ function mountNow(body, x) {
   };
 
   // Running now: one block per job, updated in place.
-  /** @type {Map<number, {el: HTMLElement, update: () => void}>} */
+  /** @type {Map<number, {el: HTMLElement, update: () => void, stop?: () => void}>} */
   const blocks = new Map();
+  /** "batch N" as a link that opens the batch's panel. @param {number} n */
+  const batchLink = (n) => {
+    const a = drivable(
+      h(
+        "a",
+        {
+          class: "link",
+          href: `/activity?batch=${n}`,
+          title: "Open this batch: its progress and every job in it",
+        },
+        `batch ${n}`,
+      ),
+      OPEN_BATCH,
+      String(n),
+    );
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      void reopenBatch(n);
+    });
+    return h("span", { class: "ac-muted" }, " · ", a);
+  };
   /** @param {import("../jobs.js").Job} j0 */
   const jobBlock = (j0) => {
     const id = j0.job;
@@ -830,10 +948,41 @@ function mountNow(body, x) {
       role: "list",
       "aria-label": "Steps",
     });
-    const log = h("pre", {
-      class: "ac-job__log mono",
+    // feat-logs-1: kp-themes' log, as the job panel draws it.
+    const log = h("div", {
+      class: "kp-log ac-job__log",
+      role: "log",
       "aria-live": "polite",
       "aria-label": "The newest lines of this job",
+      "data-kp-arrive": "none",
+    });
+    const tools = mountLogTools(id, {
+      whole: false,
+      onChange: () => {
+        shownLines = -1;
+        update();
+      },
+    });
+    tools.el.classList.add("ac-job__tools");
+    const cancel = drivable(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--sm kp-button--ghost",
+          title: "Take this job out of the queue before it starts",
+          hidden: "",
+        },
+        "Cancel",
+      ),
+      CANCEL_JOB,
+      String(id),
+    );
+    cancel.addEventListener("click", () => {
+      cancel.disabled = true;
+      void cancelJobs(act.jobs.filter((x) => x.job === id)).then(() => {
+        cancel.disabled = false;
+      });
     });
     const openLog = drivable(
       h(
@@ -853,8 +1002,9 @@ function mountNow(body, x) {
       "article",
       { class: "ac-job", "data-job": String(id) },
       h("div", { class: "ac-job__main" }, title, facts),
-      h("div", { class: "ac-job__acts" }, openLog),
+      h("div", { class: "ac-job__acts" }, cancel, openLog),
       steps,
+      tools.el,
       log,
     );
     let shownLines = 0;
@@ -866,7 +1016,9 @@ function mountNow(body, x) {
         `${actionLabel(j.action)} `,
         j.stack === "_host" ? "the host" : stackLink(j.stack),
         h("span", { class: "ac-muted" }, ` · job ${j.job}`),
+        ...(j.origin.from === "batch" ? [batchLink(j.origin.batch)] : []),
       );
+      cancel.hidden = j.state !== "queued" || cancelGone;
       const p = j.progress;
       const ran = elapsedS(j, t);
       const left = remaining(j, act.progressAt.get(id) ?? null, t);
@@ -889,18 +1041,29 @@ function mountNow(body, x) {
           ? [h("span", null, "running ", h("b", null, humanDuration(ran)))]
           : []),
         ...(left.s != null
-          ? [
-              h(
-                "span",
-                null,
-                "about ",
-                h("b", null, humanDuration(left.s)),
-                " left",
-              ),
-            ]
+          ? left.late
+            ? [
+                h(
+                  "span",
+                  { class: "ac-late", title: "Past what earlier runs took" },
+                  h("b", null, left.text),
+                ),
+              ]
+            : [
+                h(
+                  "span",
+                  null,
+                  "about ",
+                  h("b", null, humanDuration(left.s)),
+                  " left",
+                ),
+              ]
           : left.text
             ? [h("span", null, left.text)]
             : []),
+        ...(estimateRange(p)
+          ? [h("span", null, estimateRange(p)?.text ?? "")]
+          : []),
         originText(j.origin).startsWith("by ")
           ? h("span", null, h("b", null, originText(j.origin)))
           : h("span", null, "by ", h("b", null, originText(j.origin))),
@@ -939,20 +1102,21 @@ function mountNow(body, x) {
       const ls = act.logs.get(id) ?? [];
       if (ls.length !== shownLines) {
         const near = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
-        log.textContent = ls
-          .slice(-200)
-          .map((l) => {
-            const v = logLine(l);
-            return `${v.time}  ${v.msg}`;
-          })
-          .join("\n");
+        const shown = ls.filter((l) => levelShown(l.level, tools.levels()));
+        tools.setHidden(ls.length - shown.length);
+        log.replaceChildren(...shown.slice(-200).map(logLineEl));
+        attachLogs(log);
         log.hidden = ls.length === 0;
         shownLines = ls.length;
         if (near || shownLines === ls.length) log.scrollTop = log.scrollHeight;
       }
     };
     update();
-    return { el, update };
+    return {
+      el,
+      update,
+      stop: () => tools.stop(),
+    };
   };
 
   const paintRunning = () => {
@@ -963,6 +1127,7 @@ function mountNow(body, x) {
     const gone = [];
     for (const [id, b] of blocks)
       if (!ids.has(id)) {
+        b.stop?.();
         gone.push(leave(b.el));
         blocks.delete(id);
       }
@@ -992,6 +1157,7 @@ function mountNow(body, x) {
     } else runList.querySelector(".nx-empty, .nx-skeleton")?.remove();
     const queued = run.filter((j) => j.state === "queued").length;
     runFoot.textContent = `${run.length - queued} running · ${queued} queued`;
+    cancelAll.hidden = queued === 0 || cancelGone;
   };
 
   // ── timeline ──────────────────────────────────────────────────────────
@@ -1203,16 +1369,17 @@ function mountNow(body, x) {
     const key = mk?.getAttribute("data-key");
     if (key) openRow(key);
     else {
+      // fix-ux-1: a click on a day opens only that day's group, not every
+      // day between it and today: History narrows to the day (the same
+      // range a drag across it makes; Show every day lifts it).
       const day = dayStart(inv(d.a));
-      // A day further down than the rows drawn so far: draw up to it.
-      const last = rows.filter((r) => rowMatches(r, filter));
-      const idx = last.findIndex((r) => dayStart(r.start) <= day);
-      if (idx >= limit) {
-        limit = idx + PAGE;
-        paintFeed();
-      }
-      const el = document.getElementById(`day-${day}`);
-      el?.scrollIntoView({ behavior: "smooth", block: "start" });
+      filter = {
+        ...filter,
+        range: { from: day, to: dayStart(day + 36 * 3600) - 1 },
+      };
+      limit = PAGE;
+      changed();
+      historyCard.el.scrollIntoView({ behavior: "smooth", block: "start" });
     }
     paintTimeline();
   });

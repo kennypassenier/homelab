@@ -55,6 +55,7 @@ import { openUpdateFlow } from "./pinupdate.js";
 import { codeSpans, previewGate } from "./previewgate.js";
 import { restoreHref } from "./restoreflow.js";
 import { current } from "./store.js";
+import { declare, dialogControl, drivable } from "./drivable.js";
 import { countOf } from "./ui.js";
 import { clearError, showError } from "/static/kp/js/forms.js";
 import {
@@ -152,6 +153,15 @@ async function readSources(form, given) {
 }
 
 /**
+ * Whether the fleet knows this stack as a native service.
+ * @param {string} stack
+ */
+const nativeStack = (stack) =>
+  current().fleet?.stacks?.some(
+    (/** @type {any} */ s) => s.name === stack && s.native === true,
+  ) === true;
+
+/**
  * Open one action's dialog on one stack (or on the host target).
  * `driven` (feat-platform-10): Claude drives it from the dashboard's
  * server; the dialog shows each step and never sends the press itself.
@@ -192,6 +202,9 @@ export async function openAction(stack, action, opts = {}) {
     dispatchEvent(new PopStateEvent("popstate"));
     return null;
   }
+  // fix-batch-native-1: a native service backs up the native way, whoever
+  // asked (a Stacks row, a batch).
+  if (action === "backup" && nativeStack(stack)) action = "backup-native";
   const catalog = await catalogReady();
   const entry = catalog?.actions.find((a) => a.action === action);
   if (!catalog || !entry) {
@@ -1017,14 +1030,25 @@ export async function openBatch(action, stacks) {
     });
     return x.wrap;
   });
-  const list = h("ul", { class: "batch-preview" });
+  // feat-batch-1: one grid, name | CLI line | Copy, every row under the
+  // last; while a preview is read each row shows a bar shaped like it.
+  const list = h("ul", {
+    class: "batch-preview",
+    "aria-busy": "true",
+    "data-kp-state": "loading",
+  });
   for (const s of stacks)
     list.append(
       h(
         "li",
-        { "data-stack": s },
-        h("strong", null, s),
-        h("span", { class: "measured" }, " reading…"),
+        { "data-stack": s, "data-loading": "" },
+        h("strong", { class: "batch-preview__name" }, s),
+        h("span", {
+          class: "kp-skeleton batch-preview__bar",
+          role: "status",
+          "aria-label": `Reading the preview of ${s}`,
+        }),
+        h("span", { class: "kp-skeleton batch-preview__copy" }),
       ),
     );
   const runError = h("div");
@@ -1134,10 +1158,16 @@ export async function openBatch(action, stacks) {
       );
       const li = list.querySelector(`[data-stack="${CSS.escape(s)}"]`);
       if (!li) return;
-      const parts = /** @type {Node[]} */ ([h("strong", null, s)]);
+      const parts = /** @type {Node[]} */ ([
+        h("strong", { class: "batch-preview__name" }, s),
+      ]);
       if (!r.ok)
         parts.push(
-          h("span", { class: "measured" }, ` no preview: ${r.error.why}`),
+          h(
+            "span",
+            { class: "measured batch-preview__note" },
+            `no preview: ${r.error.why}`,
+          ),
         );
       else {
         if (r.body.cli)
@@ -1146,20 +1176,31 @@ export async function openBatch(action, stacks) {
           parts.push(
             h(
               "span",
-              { class: "measured" },
-              ` no CLI line: ${r.body.cli_unavailable ?? "—"}`,
+              { class: "measured batch-preview__note" },
+              `no CLI line: ${r.body.cli_unavailable ?? "—"}`,
             ),
           );
         if (r.body.guard) {
           guarded += 1;
           parts.push(
-            refusalCallout(r.body.guard, "warning", "The deploy guard refuses"),
+            h(
+              "div",
+              { class: "batch-preview__guard" },
+              refusalCallout(
+                r.body.guard,
+                "warning",
+                "The deploy guard refuses",
+              ),
+            ),
           );
         }
       }
+      li.removeAttribute("data-loading");
       li.replaceChildren(...parts);
     }),
   );
+  list.removeAttribute("aria-busy");
+  list.removeAttribute("data-kp-state");
   const force = inputs.get("force");
   if (force)
     /** @type {HTMLElement} */ (force.closest(".kp-field")).hidden =
@@ -1196,8 +1237,19 @@ export async function openBatch(action, stacks) {
   });
 }
 
+const CANCEL_JOB = declare({
+  id: "batch-cancel-job",
+  page: "activity",
+  opens: "run",
+  row: "<stack>",
+  what: "take one queued job of a batch out of the queue (the batch panel's Cancel)",
+  shows: "in a batch's panel, on a job that has not started",
+});
+
 /**
  * A batch's progress from `action_batch`, and the running job's own panel.
+ * feat-batch-1: the overall progress with Stop batch and Cancel all queued
+ * first, the job running now under it, the per-stack list compact last.
  * @param {number} batch
  * @param {{job: number, stack: string}[]} jobs
  */
@@ -1224,13 +1276,19 @@ export function mountBatchPanel(batch, jobs) {
   const running = h("div", { class: "batch-running" });
   /** @type {{job: number, stop: () => void} | null} */
   let panel = null;
+  /** The cancel routes answered 404: this host does not have them. */
+  let cancelGone = false;
   // Kenny, 2026-09-30: a running batch could not be stopped halfway. The
   // job running now ends on its own; the queued ones never start.
-  const stopBtn = h(
-    "button",
-    { type: "button", class: "kp-button kp-button--destructive batch-stop" },
-    "Stop batch",
+  const stopBtn = dialogControl(
+    h(
+      "button",
+      { type: "button", class: "kp-button kp-button--destructive batch-stop" },
+      "Stop batch",
+    ),
+    "stop-batch",
   );
+  stopBtn.title = "The job running now finishes; the queued ones never start";
   stopBtn.addEventListener("click", async () => {
     stopBtn.setAttribute("disabled", "");
     const r = await send(
@@ -1244,6 +1302,30 @@ export function mountBatchPanel(batch, jobs) {
       notify(`${r.error.why}.`, "warning");
     }
   });
+  const cancelAll = dialogControl(
+    h(
+      "button",
+      { type: "button", class: "kp-button batch-cancel-all" },
+      "Cancel all queued",
+    ),
+    "cancel-all-queued",
+  );
+  cancelAll.title = "Take every job that has not started out of the queue";
+  cancelAll.addEventListener("click", async () => {
+    cancelAll.setAttribute("disabled", "");
+    const r = await send(
+      "POST",
+      `/data/actions/batch/${batch}/cancel`,
+      {},
+      "cancel the queued jobs",
+    );
+    cancelAll.removeAttribute("disabled");
+    if (!r.ok) {
+      if (r.status === 404) cancelGone = true;
+      else notify(`${r.error.why}.`, "warning");
+      paint();
+    }
+  });
   const element = h(
     "section",
     {
@@ -1253,21 +1335,40 @@ export function mountBatchPanel(batch, jobs) {
     },
     h(
       "div",
-      { class: "kp-progress-group" },
+      { class: "batch-head" },
       h(
         "div",
-        { class: "kp-progress__wrap" },
-        h("span", { class: "kp-progress__label" }, `Batch ${batch}`),
-        bar,
-        text,
+        { class: "kp-progress-group batch-head__bar" },
+        h(
+          "div",
+          { class: "kp-progress__wrap" },
+          h("span", { class: "kp-progress__label" }, `Batch ${batch}`),
+          bar,
+          text,
+        ),
       ),
-      stopBtn,
+      h("div", { class: "batch-head__actions" }, cancelAll, stopBtn),
     ),
-    totals,
-    rows,
     running,
+    totals,
+    h("h3", { class: "batch-list-title" }, "Stacks in this batch"),
+    rows,
   );
-  const paint = () => {
+  /** @param {number} job */
+  const cancelOne = async (job) => {
+    const r = await send(
+      "POST",
+      `/data/actions/jobs/${job}/cancel`,
+      {},
+      "cancel the queued job",
+    );
+    if (!r.ok) {
+      if (r.status === 404) cancelGone = true;
+      else notify(`${r.error.why}.`, "warning");
+      paint();
+    }
+  };
+  function paint() {
     const b = act.batches.get(batch) ?? {
       batch,
       jobs: jobs.map((j) => ({
@@ -1282,7 +1383,13 @@ export function mountBatchPanel(batch, jobs) {
       deferred: 0,
     };
     const v = batchView(b);
+    const queued = v.rows.filter(
+      (r) =>
+        (act.jobs.find((x) => x.job === r.job)?.state ?? "queued") ===
+          "queued" && !b.done,
+    ).length;
     stopBtn.hidden = !!b.done;
+    cancelAll.hidden = cancelGone || queued === 0;
     setProgress(bar, v.percent);
     text.textContent = `${v.percent}%`;
     setLive(totalTile.value, String(v.total));
@@ -1293,20 +1400,41 @@ export function mountBatchPanel(batch, jobs) {
     rows.replaceChildren(
       ...v.rows.map((r) => {
         const live = act.jobs.find((x) => x.job === r.job);
+        const state = live?.state ?? "queued";
         const b2 = live ? jobBadge(live.state) : r.badge;
+        const cancel =
+          state === "queued" && !cancelGone
+            ? drivable(
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "kp-button kp-button--sm batch-jobs__cancel",
+                    title: `Take ${r.stack} out of the queue`,
+                  },
+                  "Cancel",
+                ),
+                CANCEL_JOB,
+                r.stack,
+              )
+            : h("span");
+        if (cancel instanceof HTMLButtonElement)
+          cancel.addEventListener("click", () => {
+            cancel.setAttribute("disabled", "");
+            void cancelOne(r.job);
+          });
         return h(
           "li",
           { "data-job": String(r.job) },
           badge(b2),
-          ` ${r.stack} `,
+          h("strong", { class: "batch-jobs__stack" }, r.stack),
           h(
             "a",
             { href: `/activity?view=running&job=${r.job}` },
             `job ${r.job}`,
           ),
-          ...(r.message
-            ? [h("span", { class: "measured" }, ` · ${r.message}`)]
-            : []),
+          h("span", { class: "measured batch-jobs__note" }, r.message || ""),
+          cancel,
         );
       }),
     );
@@ -1320,7 +1448,7 @@ export function mountBatchPanel(batch, jobs) {
       panel = { job: now.job, stop: p.stop };
       running.replaceChildren(p.element);
     }
-  };
+  }
   const offB = onBatch(paint);
   paint();
   return {
@@ -1330,6 +1458,52 @@ export function mountBatchPanel(batch, jobs) {
       panel?.stop();
     },
   };
+}
+
+/**
+ * feat-batch-1: open the panel of a batch that is already running or done,
+ * from its id (Activity's batch rows). The host answers with the same
+ * shape as the `action_batch` event.
+ * @param {number} id
+ * @returns {Promise<boolean>} whether the batch was found
+ */
+export async function reopenBatch(id) {
+  const r = await fetchJson(`/data/actions/batch/${id}`, `batch ${id}`);
+  if (!r.ok || !r.body) {
+    notify(
+      r.ok ? `The dashboard does not know batch ${id}.` : `${r.error.why}.`,
+      "warning",
+    );
+    return false;
+  }
+  /** @type {import("./jobs.js").Batch} */
+  const b = { ...r.body, batch: r.body.batch ?? id };
+  act.batches.set(id, b);
+  const panel = mountBatchPanel(id, b.jobs ?? []);
+  const close = h(
+    "button",
+    {
+      type: "button",
+      class: "kp-button kp-button--primary",
+      "data-kp-dialog-close": "",
+    },
+    "Close",
+  );
+  const d = openDialog({
+    title: `Batch ${id}`,
+    body: [
+      h(
+        "div",
+        { class: "act-body", "data-form": "batch-view" },
+        panel.element,
+        h("div", { class: "kp-dialog__actions" }, close),
+      ),
+    ],
+    id: "batch-dialog",
+    wide: true,
+  });
+  d.closed.then(() => panel.stop());
+  return true;
 }
 
 /** @param {() => void} f */

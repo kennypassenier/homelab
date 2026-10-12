@@ -622,9 +622,19 @@ pub trait PauseGate: Send + Sync {
 /// Jobs kept for `GET /data/actions/jobs` and reloads, unless
 /// [`Actions::set_limits`] says otherwise (`HOMELAB_ADMIN_KEEP_JOBS`).
 const KEEP_JOBS: usize = 200;
+/// feat-logs-1: the most `action_log` lines kept per job for
+/// `GET /data/actions/jobs/{job}/log` (the newest win). The page showed 1000
+/// (web `LOG_LIMIT`); a deploy writes some hundreds, so 20000 is the whole
+/// log of any real job while one runaway job cannot grow memory without
+/// bound (200 kept jobs at most).
+pub const JOB_LOG_MAX: usize = 20_000;
 /// History read for the expected durations, unless [`Actions::set_limits`]
 /// says otherwise (`HOMELAB_ADMIN_HISTORY_WINDOW_S`).
 const HISTORY_WINDOW_S: i64 = 180 * 86_400;
+
+/// fix-stale-refresh-1: told the stack of a deploy, update or restart that
+/// finished well.
+pub type SettledFn = Arc<dyn Fn(&str) + Send + Sync>;
 
 struct Inner {
     host: Arc<dyn HostPort>,
@@ -637,6 +647,8 @@ struct Inner {
     queue: mpsc::UnboundedSender<Job>,
     jobs: std::sync::Mutex<VecDeque<JobView>>,
     batches: std::sync::Mutex<BTreeMap<u64, Vec<u64>>>,
+    /// feat-logs-1: the `action_log` lines per kept job.
+    job_logs: std::sync::Mutex<BTreeMap<u64, VecDeque<serde_json::Value>>>,
     next_job: AtomicU64,
     /// TUI parity: where "Update host" and install-native read releases.
     releases: std::sync::OnceLock<Arc<dyn super::releases::Releases>>,
@@ -659,6 +671,9 @@ struct Inner {
     committer: std::sync::OnceLock<Arc<dyn ImageCommitter>>,
     flow_store: std::sync::OnceLock<PathBuf>,
     flow_timing: std::sync::OnceLock<(Duration, Duration)>,
+    /// fix-stale-refresh-1: told the stack of every deploy, update or
+    /// restart that finished well (the fleet check forgets its stale rows).
+    settled: std::sync::OnceLock<SettledFn>,
 }
 
 /// feat-secrets-2: how long a staged secret value waits for the job that
@@ -725,6 +740,7 @@ impl Actions {
             queue: tx,
             jobs: std::sync::Mutex::new(VecDeque::new()),
             batches: std::sync::Mutex::new(BTreeMap::new()),
+            job_logs: std::sync::Mutex::new(BTreeMap::new()),
             // Job ids from the start time, so a restarted dashboard never
             // reuses one a page still shows.
             next_job: AtomicU64::new(first.max(1)),
@@ -736,6 +752,7 @@ impl Actions {
             committer: std::sync::OnceLock::new(),
             flow_store: std::sync::OnceLock::new(),
             flow_timing: std::sync::OnceLock::new(),
+            settled: std::sync::OnceLock::new(),
         });
         let worker = Actions {
             inner: inner.clone(),
@@ -762,6 +779,10 @@ impl Actions {
     /// fix-172: the drive session registers itself here once it exists
     /// (mount builds the driver from an `Actions` it already has, so this
     /// comes after `start`). Set once.
+    pub fn on_stack_settled(&self, f: SettledFn) {
+        let _ = self.inner.settled.set(f);
+    }
+
     pub fn set_pause_gate(&self, gate: Arc<dyn PauseGate>) {
         let _ = self.inner.pause_gate.set(gate);
     }
@@ -875,11 +896,51 @@ impl Actions {
                 while jobs.len() > keep_jobs {
                     jobs.pop_front();
                 }
+                // feat-logs-1: a job's kept log goes with the job.
+                if let Ok(mut l) = self.inner.job_logs.lock() {
+                    l.retain(|id, _| jobs.iter().any(|j| j.job == *id));
+                }
+                // feat-batch-1: a batch goes with its jobs; one whose jobs
+                // are all gone is no longer reopenable, so it is not kept.
+                if let Ok(mut b) = self.inner.batches.lock() {
+                    b.retain(|_, ids| ids.iter().any(|id| jobs.iter().any(|j| j.job == *id)));
+                }
             }
         }
         self.inner
             .publish
             .publish("action", serde_json::to_value(view).unwrap_or_default());
+    }
+
+    /// feat-logs-1: one `action_log` line, kept for the job (so the whole
+    /// log can be fetched later, not only what a page happened to see live)
+    /// and pushed to the open pages. Per job at most [`JOB_LOG_MAX`] lines
+    /// are kept (the newest); a job's log goes when the job is pruned.
+    fn log_event(&self, line: serde_json::Value) {
+        if let Some(job) = line["job"].as_u64()
+            && let Ok(mut logs) = self.inner.job_logs.lock()
+        {
+            let l = logs.entry(job).or_default();
+            l.push_back(line.clone());
+            while l.len() > JOB_LOG_MAX {
+                l.pop_front();
+            }
+        }
+        self.inner.publish.publish("action_log", line);
+    }
+
+    /// feat-logs-1: every line kept of one job, oldest first; None for a job
+    /// this dashboard does not keep.
+    pub fn job_log_lines(&self, job: u64) -> Option<Vec<serde_json::Value>> {
+        self.job(job)?;
+        Some(
+            self.inner
+                .job_logs
+                .lock()
+                .ok()
+                .and_then(|l| l.get(&job).map(|v| v.iter().cloned().collect()))
+                .unwrap_or_default(),
+        )
     }
 
     /// Every job kept, newest first.
@@ -1063,6 +1124,24 @@ impl Actions {
         b: actions::BatchRequest,
     ) -> Result<serde_json::Value, (StatusCode, Refusal)> {
         let reqs = actions::validate_batch(b).map_err(|r| (StatusCode::BAD_REQUEST, r))?;
+        // fix-batch-native-1: native stacks back up with backup-native.
+        let native: std::collections::BTreeSet<String> = self
+            .inner
+            .shared
+            .try_read()
+            .ok()
+            .and_then(|s| {
+                s.fleet.as_ref().map(|f| {
+                    f.stacks
+                        .iter()
+                        .filter(|x| x.native)
+                        .map(|x| x.name.clone())
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+        let reqs = actions::native_batch_backups(reqs, &|s| native.contains(s))
+            .map_err(|r| (StatusCode::BAD_REQUEST, r))?;
         for r in &reqs {
             self.precheck(r).map_err(|r| (StatusCode::CONFLICT, r))?;
         }
@@ -1120,6 +1199,60 @@ impl Actions {
         }
         self.publish_batch(batch);
         stopped
+    }
+
+    /// feat-batch-1: cancel ONE queued job (Kenny, 2026-10-09). A job that
+    /// runs or has finished is left alone. It leaves the queue as refused
+    /// ("cancelled by …"); the `action` event goes out through `store`, and
+    /// the batch it belongs to is published again. `Err` says why not.
+    pub fn cancel_job(&self, id: u64, who: &str) -> Result<JobView, String> {
+        let Some(mut v) = self.job(id) else {
+            return Err(format!("this dashboard knows no job {id}"));
+        };
+        if v.state != JobState::Queued {
+            return Err(format!(
+                "job {id} is not queued any more, so it cannot be cancelled"
+            ));
+        }
+        v.state = JobState::Refused;
+        v.finished_at = Some(self.now());
+        v.message = Some(format!("cancelled by {who}; this stack was not touched"));
+        self.store(&v);
+        if let Origin::Batch { batch } = v.origin {
+            self.publish_batch(batch);
+        }
+        Ok(v)
+    }
+
+    /// feat-batch-1: every still-queued job of a batch is cancelled, the
+    /// running one is left (the same boundary as [`Self::stop_batch`]). The
+    /// ids cancelled.
+    pub fn cancel_batch(&self, batch: u64, who: &str) -> Vec<u64> {
+        let ids = self
+            .inner
+            .batches
+            .lock()
+            .ok()
+            .and_then(|b| b.get(&batch).cloned())
+            .unwrap_or_default();
+        let cancelled: Vec<u64> = ids
+            .into_iter()
+            .filter(|id| self.cancel_job(*id, who).is_ok())
+            .collect();
+        self.publish_batch(batch);
+        cancelled
+    }
+
+    /// feat-batch-1: the batches still kept, newest first, as
+    /// [`Self::batch_view`] shows each.
+    pub fn batches(&self) -> Vec<serde_json::Value> {
+        let ids: Vec<u64> = self
+            .inner
+            .batches
+            .lock()
+            .map(|b| b.keys().rev().copied().collect())
+            .unwrap_or_default();
+        ids.into_iter().filter_map(|b| self.batch_view(b)).collect()
     }
 
     /// The batch with the latest view of its jobs, as `action_batch` sends
@@ -1613,6 +1746,20 @@ impl Actions {
         // all) is masked by shape before it goes over the live channel.
         let message = homelab_core::executor::mask_secrets(&message);
         self.finish(&mut view, state, message.clone());
+        // fix-stale-refresh-1: the stack now runs what its files name.
+        if state == JobState::Done
+            && matches!(
+                view.action,
+                ActionKind::Deploy
+                    | ActionKind::DeployCommit
+                    | ActionKind::Update
+                    | ActionKind::UpdateApps
+                    | ActionKind::Enable
+            )
+            && let Some(f) = self.inner.settled.get()
+        {
+            f(&view.stack);
+        }
         let ran_s = view
             .started_at
             .zip(view.finished_at)
@@ -1831,13 +1978,10 @@ impl Actions {
             .copied()
             .unwrap_or(Duration::from_secs(300));
         let say = |msg: String| {
-            self.inner.publish.publish(
-                "action_log",
-                serde_json::json!({
-                    "job": view.job, "req": null, "level": "info", "source": "ADMIN",
-                    "msg": msg, "ts": self.now(),
-                }),
-            );
+            self.log_event(serde_json::json!({
+                "job": view.job, "req": null, "level": "info", "source": "ADMIN",
+                "msg": msg, "ts": self.now(),
+            }));
         };
         say(if is_restart {
             format!(
@@ -1953,7 +2097,7 @@ impl Actions {
                         None => early.push(m),
                     },
                     Err(broadcast::error::RecvError::Lagged(n)) => {
-                        self.inner.publish.publish("action_log", serde_json::json!({
+                        self.log_event(serde_json::json!({
                             "job": view.job, "req": req, "level": "warn", "source": "ADMIN",
                             "msg": format!("{n} line(s) of the host were missed here; the activity page has them all"),
                             "ts": self.now(),
@@ -2000,13 +2144,10 @@ impl Actions {
             return;
         }
         let ts = ts.map(|t| t as i64).unwrap_or_else(|| self.now());
-        self.inner.publish.publish(
-            "action_log",
-            serde_json::json!({
-                "job": view.job, "req": id, "level": level, "source": source,
-                "msg": homelab_core::executor::mask_secrets(&msg), "ts": ts,
-            }),
-        );
+        self.log_event(serde_json::json!({
+            "job": view.job, "req": id, "level": level, "source": source,
+            "msg": homelab_core::executor::mask_secrets(&msg), "ts": ts,
+        }));
         // fix-171 round 2: an op's own plan, before its first step mark —
         // for a single-command job this is what sets `m`; for Apply/a
         // batch item `execute` already fixed the whole total up front
@@ -2145,7 +2286,73 @@ async fn catalog() -> Json<serde_json::Value> {
 }
 
 async fn jobs(State(a): State<Actions>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "jobs": a.jobs() }))
+    // feat-batch-1: `batches` lets Activity reopen a batch.
+    Json(serde_json::json!({ "jobs": a.jobs(), "batches": a.batches() }))
+}
+
+/// feat-batch-1: one batch, the shape the `action_batch` event carries.
+async fn get_batch(State(a): State<Actions>, UrlPath(batch): UrlPath<u64>) -> Response {
+    match a.batch_view(batch) {
+        Some(v) => Json(v).into_response(),
+        None => refusal(
+            StatusCode::NOT_FOUND,
+            Refusal::new(
+                "open the batch",
+                format!("this dashboard knows no batch {batch}"),
+                "the jobs page lists what ran",
+            ),
+        ),
+    }
+}
+
+/// feat-logs-1: the whole kept log of a job.
+async fn job_log(State(a): State<Actions>, UrlPath(job): UrlPath<u64>) -> Response {
+    match a.job_log_lines(job) {
+        Some(lines) => Json(serde_json::json!({
+            "job": job, "lines": lines, "max": JOB_LOG_MAX,
+        }))
+        .into_response(),
+        None => refusal(
+            StatusCode::NOT_FOUND,
+            Refusal::new(
+                "read the job's log",
+                format!("this dashboard keeps no job {job}"),
+                "the jobs page lists what is kept",
+            ),
+        ),
+    }
+}
+
+/// feat-batch-1: cancel one queued job.
+async fn cancel_job(State(a): State<Actions>, UrlPath(job): UrlPath<u64>) -> Response {
+    match a.cancel_job(job, "a viewer") {
+        Ok(v) => Json(serde_json::json!({ "job": v.job, "state": v.state, "message": v.message }))
+            .into_response(),
+        Err(why) if a.job(job).is_none() => refusal(
+            StatusCode::NOT_FOUND,
+            Refusal::new("cancel the job", why, "the jobs page lists what is kept"),
+        ),
+        Err(why) => refusal(
+            StatusCode::CONFLICT,
+            Refusal::new("cancel the job", why, "only a queued job can be cancelled"),
+        ),
+    }
+}
+
+/// feat-batch-1: cancel every still-queued job of a batch.
+async fn cancel_batch(State(a): State<Actions>, UrlPath(batch): UrlPath<u64>) -> Response {
+    if a.batch_view(batch).is_none() {
+        return refusal(
+            StatusCode::NOT_FOUND,
+            Refusal::new(
+                "cancel the batch",
+                format!("this dashboard knows no batch {batch}"),
+                "the jobs page lists what ran",
+            ),
+        );
+    }
+    let cancelled = a.cancel_batch(batch, "a viewer");
+    Json(serde_json::json!({ "batch": batch, "cancelled": cancelled })).into_response()
 }
 
 fn accepted(view: &JobView) -> Response {
@@ -2425,6 +2632,10 @@ pub fn router(actions: Actions) -> Router {
         .route("/data/actions/jobs", get(jobs))
         .route("/data/actions/batch", post(batch))
         .route("/data/actions/batch/{batch}/stop", post(stop_batch))
+        .route("/data/actions/batch/{batch}", get(get_batch))
+        .route("/data/actions/batch/{batch}/cancel", post(cancel_batch))
+        .route("/data/actions/jobs/{job}/cancel", post(cancel_job))
+        .route("/data/actions/jobs/{job}/log", get(job_log))
         .route(
             "/data/actions/{stack}/rollback-options",
             get(rollback_options),

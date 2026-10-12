@@ -5,10 +5,278 @@
 
 import { act, actionLabel, onAct } from "./act.js";
 import { badge, labeledCopyLine, openDialog } from "./actui.js";
-import { h, progressBar, setProgress } from "./dom.js";
+import { ensureStyle, fetchJson, h, progressBar, setProgress } from "./dom.js";
+import { declare, drivable } from "./drivable.js";
 import { jobFacts, jobPanel, jobSteps, logLine } from "./jobs.js";
+import {
+  LOG_LEVELS,
+  levelShown,
+  logText,
+  readLogLevels,
+  saveLogLevels,
+  wholeLogLines,
+} from "./logs.js";
 import { countOf, checkList } from "./ui.js";
 import { attachLogs } from "/static/kp/js/log.js";
+
+const LOG_COPY = declare({
+  id: "job-log-copy",
+  page: "activity",
+  opens: "run",
+  row: "<job>",
+  what: "copy a job's whole log to the clipboard",
+  shows: "in a job's log",
+});
+const LOG_LEVEL = declare({
+  id: "job-log-level",
+  page: "activity",
+  opens: "view",
+  row: "<job>:<debug|info|warning|critical>",
+  what: "show or hide a job log's lines of one level",
+  shows: "in a job's log",
+  selects: true,
+});
+const LOG_WHOLE = declare({
+  id: "job-log-whole",
+  page: "activity",
+  opens: "view",
+  row: "<job>",
+  what: "show a job's whole log instead of its newest lines",
+  shows: "in a job's log",
+});
+
+/**
+ * One log line as the kp log component draws it.
+ * @param {import("./jobs.js").LogLine} l
+ */
+export function logLineEl(l) {
+  const x = logLine(l);
+  return h(
+    "p",
+    { class: "kp-log__line", "data-kp-severity": x.severity },
+    h("time", { class: "kp-log__time" }, x.time),
+    h(
+      "span",
+      { class: "kp-log__source", "data-kp-source": x.source },
+      x.source,
+    ),
+    h("span", { class: "kp-log__level" }, x.level),
+    h("span", { class: "kp-log__message" }, x.msg),
+  );
+}
+
+/**
+ * The whole log of a job from the dashboard: every line it kept (the page
+ * itself holds only the newest 500), or null when the dashboard cannot say
+ * (an older one without the route, a job it no longer keeps).
+ * @param {number} jobId
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<{lines: import("./jobs.js").LogLine[], max: number | null} | null>}
+ */
+export async function fetchWholeLog(jobId, signal) {
+  const r = await fetchJson(
+    `/data/actions/jobs/${jobId}/log`,
+    "the job's whole log",
+    signal,
+  );
+  if (!r.ok) return null;
+  const lines = wholeLogLines(r.body);
+  return lines ? { lines, max: r.body?.max ?? null } : null;
+}
+
+/**
+ * feat-logs-1: the tools every job log carries: a level filter (debug,
+ * info, warning, critical; several at once, remembered for every log), Copy
+ * (the whole log, not only what the page holds) and, unless `whole` is
+ * off, "Show the whole log".
+ * @param {number} jobId
+ * @param {{onChange: () => void, whole?: boolean}} opts
+ * @returns {{el: HTMLElement, levels: () => Set<string>,
+ *   wholeLines: () => import("./jobs.js").LogLine[] | null,
+ *   addLive: (l: import("./jobs.js").LogLine) => boolean,
+ *   setHidden: (n: number) => void, stop: () => void}}
+ */
+export function mountLogTools(jobId, opts) {
+  ensureStyle("/css/pages/activity.css");
+  /** @type {Set<string>} */
+  let levels = readLogLevels();
+  /** The job's whole log while it is shown. @type {import("./jobs.js").LogLine[] | null} */
+  let whole = null;
+  /** @type {Set<string>} */
+  let wholeKeys = new Set();
+  let base = "";
+  let hidden = 0;
+  const abort = new AbortController();
+  const note = h("span", {
+    class: "measured log-tools__note",
+    role: "status",
+  });
+  const paintNote = () => {
+    note.textContent = [
+      base,
+      hidden
+        ? `${hidden} ${hidden === 1 ? "line" : "lines"} hidden by the level filter`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  };
+  const group = h("div", {
+    class: "log-tools__levels",
+    role: "group",
+    "aria-label": "Show lines of these levels",
+  });
+  const buttons = LOG_LEVELS.map((lv) => {
+    const b = drivable(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--sm kp-button--ghost log-tools__level",
+          title: `Show or hide the ${lv.label.toLowerCase()} lines; several levels can be on`,
+        },
+        lv.label,
+      ),
+      LOG_LEVEL,
+      `${jobId}:${lv.value}`,
+    );
+    b.addEventListener("click", () => {
+      if (levels.has(lv.value)) levels.delete(lv.value);
+      else levels.add(lv.value);
+      saveLogLevels(levels);
+      paintLevels();
+      opts.onChange();
+    });
+    return { value: lv.value, b };
+  });
+  group.append(...buttons.map((x) => x.b));
+  const paintLevels = () => {
+    for (const { value, b } of buttons)
+      b.setAttribute("aria-pressed", String(levels.has(value)));
+  };
+  paintLevels();
+
+  const copy = drivable(
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--sm kp-button--secondary",
+        title: "Copy the job's whole log to the clipboard",
+      },
+      "Copy",
+    ),
+    LOG_COPY,
+    String(jobId),
+  );
+  copy.addEventListener("click", () => {
+    void (async () => {
+      copy.disabled = true;
+      /** @type {import("./jobs.js").LogLine[]} */
+      let lines = whole ?? [];
+      if (!whole) {
+        const all = await fetchWholeLog(jobId, abort.signal);
+        if (all) lines = all.lines;
+        else {
+          lines = act.logs.get(jobId) ?? [];
+          base = `The dashboard could not give the whole log, so Copy took the ${lines.length} ${lines.length === 1 ? "line" : "lines"} this page holds`;
+          paintNote();
+        }
+      }
+      try {
+        await navigator.clipboard.writeText(logText(lines));
+        copy.textContent = "Copied";
+      } catch {
+        copy.textContent = "Press Ctrl C";
+      }
+      copy.disabled = false;
+      setTimeout(() => {
+        if (copy.isConnected) copy.textContent = "Copy";
+      }, 1500);
+    })();
+  });
+
+  /** @type {HTMLButtonElement | null} */
+  let wholeBtn = null;
+  if (opts.whole !== false) {
+    wholeBtn = /** @type {HTMLButtonElement} */ (
+      drivable(
+        h(
+          "button",
+          {
+            type: "button",
+            class: "kp-button kp-button--sm kp-button--ghost",
+            title:
+              "The page keeps the newest lines; this reads every line the dashboard kept for the job",
+          },
+          "Show the whole log",
+        ),
+        LOG_WHOLE,
+        String(jobId),
+      )
+    );
+    const btn = wholeBtn;
+    btn.addEventListener("click", () => {
+      void (async () => {
+        if (whole) {
+          whole = null;
+          wholeKeys = new Set();
+          base = "";
+          btn.textContent = "Show the whole log";
+          paintNote();
+          opts.onChange();
+          return;
+        }
+        btn.disabled = true;
+        const all = await fetchWholeLog(jobId, abort.signal);
+        btn.disabled = false;
+        if (!all) {
+          base = `The dashboard could not give the whole log; this shows the ${(act.logs.get(jobId) ?? []).length} lines the page holds`;
+          paintNote();
+          return;
+        }
+        whole = [...all.lines];
+        wholeKeys = new Set(whole.map((l) => `${l.ts}|${l.msg}`));
+        base = `The whole log: ${whole.length} ${whole.length === 1 ? "line" : "lines"}${all.max && whole.length >= all.max ? ` (the dashboard keeps at most ${all.max})` : ""}`;
+        btn.textContent = "Show the newest lines only";
+        paintNote();
+        opts.onChange();
+      })();
+    });
+  }
+
+  const el = h(
+    "div",
+    { class: "log-tools" },
+    group,
+    h(
+      "div",
+      { class: "log-tools__acts" },
+      copy,
+      ...(wholeBtn ? [wholeBtn] : []),
+    ),
+    note,
+  );
+  return {
+    el,
+    levels: () => levels,
+    wholeLines: () => whole,
+    /** A live line while the whole log is shown: kept once. */
+    addLive: (l) => {
+      if (!whole) return false;
+      const k = `${l.ts}|${l.msg}`;
+      if (wholeKeys.has(k)) return true;
+      wholeKeys.add(k);
+      whole.push(l);
+      return true;
+    },
+    setHidden: (n) => {
+      hidden = n;
+      paintNote();
+    },
+    stop: () => abort.abort(),
+  };
+}
 
 /**
  * @param {number} jobId
@@ -79,6 +347,7 @@ export function mountJobPanel(jobId, opts = {}) {
     "data-kp-arrive": "none",
   });
   const logCount = h("span", { class: "measured" });
+  const tools = mountLogTools(jobId, { onChange: () => redraw() });
   const element = h(
     "section",
     {
@@ -112,6 +381,7 @@ export function mountJobPanel(jobId, opts = {}) {
         open: "",
       },
       h("summary", null, "Log ", logCount),
+      tools.el,
       log,
     ),
   );
@@ -192,22 +462,6 @@ export function mountJobPanel(jobId, opts = {}) {
     }
   };
 
-  /** @param {import("./jobs.js").LogLine} l */
-  const lineEl = (l) => {
-    const x = logLine(l);
-    return h(
-      "p",
-      { class: "kp-log__line", "data-kp-severity": x.severity },
-      h("time", { class: "kp-log__time" }, x.time),
-      h(
-        "span",
-        { class: "kp-log__source", "data-kp-source": x.source },
-        x.source,
-      ),
-      h("span", { class: "kp-log__level" }, x.level),
-      h("span", { class: "kp-log__message" }, x.msg),
-    );
-  };
   // fix-371-1 (Kenny, 2026-10-04): the box itself (app.css `.job-log`) is
   // always at least ten lines tall, empty or loading too; an empty job
   // reads one placeholder row inside it rather than the box collapsing
@@ -222,7 +476,23 @@ export function mountJobPanel(jobId, opts = {}) {
       if (!ph) log.append(emptyRow());
     } else ph?.remove();
   };
-  for (const l of act.logs.get(jobId) ?? []) log.append(lineEl(l));
+  /** The lines the level filter lets through, drawn in the box. */
+  const redraw = () => {
+    const all = tools.wholeLines() ?? act.logs.get(jobId) ?? [];
+    const shown = all.filter((l) => levelShown(l.level, tools.levels()));
+    tools.setHidden(all.length - shown.length);
+    log.replaceChildren(...shown.map(logLineEl));
+    attachLogs(log);
+    countLines();
+    log.scrollTop = log.scrollHeight;
+  };
+  for (const l of act.logs.get(jobId) ?? [])
+    if (levelShown(l.level, tools.levels())) log.append(logLineEl(l));
+  tools.setHidden(
+    (act.logs.get(jobId) ?? []).filter(
+      (l) => !levelShown(l.level, tools.levels()),
+    ).length,
+  );
   attachLogs(log);
   // redesign-final (exact counts): "(N lines)" is the log's lines.
   countOf(logCount, log, ":scope > .kp-log__line");
@@ -235,11 +505,21 @@ export function mountJobPanel(jobId, opts = {}) {
     "log",
     (/** @type {import("./jobs.js").LogLine} */ l) => {
       if (l.job !== jobId) return;
+      tools.addLive(l);
+      if (!levelShown(l.level, tools.levels())) {
+        tools.setHidden(
+          (tools.wholeLines() ?? act.logs.get(jobId) ?? []).filter(
+            (x) => !levelShown(x.level, tools.levels()),
+          ).length,
+        );
+        return;
+      }
       const near = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
       log.querySelector(".job-log-empty")?.remove();
-      const el = lineEl(l);
+      const el = logLineEl(l);
       log.append(el);
-      while (log.childElementCount > 500) log.firstElementChild?.remove();
+      while (!tools.wholeLines() && log.childElementCount > 500)
+        log.firstElementChild?.remove();
       attachLogs(el);
       countLines();
       if (near) log.scrollTop = log.scrollHeight;
@@ -252,6 +532,7 @@ export function mountJobPanel(jobId, opts = {}) {
     stop: () => {
       offJobs();
       offLog();
+      tools.stop();
       clearInterval(timer);
     },
   };

@@ -16,9 +16,10 @@
 import { act } from "../act.js";
 import { ownerOf } from "../activityview.js";
 import { fetchJson, h } from "../dom.js";
-import { drivable } from "../drivable.js";
+import { declare, drivable } from "../drivable.js";
 import {
   LEVELS,
+  defaultLevels,
   counts,
   countText,
   keyAction,
@@ -33,6 +34,7 @@ import {
   toggleSource,
 } from "../hostlogview.js";
 import { logLine } from "../jobs.js";
+import { logText, saveLogLevels } from "../logs.js";
 import { openJobDialog } from "../jobpanel.js";
 import { transferView } from "../parity.js";
 import { current, listen, subscribe } from "../store.js";
@@ -41,6 +43,15 @@ import { setParams } from "../urlstate.js";
 
 /** Lines kept in the page, as the server's ring. */
 const KEEP = 2000;
+
+// feat-logs-1: Copy for the whole host log, declared here because Activity's
+// Host log and Console both draw this explorer.
+const COPY_ALL = declare({
+  id: "host-log-copy-all",
+  page: "log",
+  opens: "run",
+  what: "copy every line of the host log to the clipboard",
+});
 
 /**
  * @typedef {{follow: string, source: string, only: string, level: string,
@@ -93,6 +104,29 @@ export function mountHostLog(root, opts) {
     opts.drive.follow,
   );
   followBtn.addEventListener("click", () => setFollow(!follow));
+  const copyAll = drivable(
+    h(
+      "button",
+      {
+        type: "button",
+        class: "kp-button kp-button--ghost kp-button--sm hl-copyall",
+        title: "Copy every line the page holds to the clipboard",
+      },
+      "Copy",
+    ),
+    COPY_ALL,
+  );
+  copyAll.addEventListener("click", () => {
+    void navigator.clipboard
+      ?.writeText(logText(lines))
+      .then(() => (copyAll.textContent = "Copied"))
+      .catch(() => (copyAll.textContent = "Press Ctrl C"))
+      .finally(() =>
+        setTimeout(() => {
+          if (copyAll.isConnected) copyAll.textContent = "Copy";
+        }, 1500),
+      );
+  });
   const hints = h(
     "span",
     { class: "hl-hints" },
@@ -112,7 +146,7 @@ export function mountHostLog(root, opts) {
       },
     },
     groups: [],
-    state: [countEl, ...(opts.followInBar ? [followBtn] : []), hints],
+    state: [countEl, copyAll, ...(opts.followInBar ? [followBtn] : []), hints],
   });
   tb.el.classList.add("hl-bar");
   if (tb.search) drivable(tb.search, opts.drive.search);
@@ -245,19 +279,29 @@ export function mountHostLog(root, opts) {
   const levelRows = LEVELS.map((lv) => {
     const input = /** @type {HTMLInputElement} */ (
       drivable(
-        h("input", { type: "radio", name: `hl-level-${opts.drive.level}` }),
+        h("input", {
+          type: "checkbox",
+          "aria-label": `Show the ${lv.label.toLowerCase()} lines`,
+        }),
         opts.drive.level,
-        lv.value || "info",
+        lv.value,
       )
     );
     input.addEventListener("change", () => {
-      f = { ...f, level: /** @type {any} */ (lv.value) };
+      const levels = new Set(f.levels);
+      if (levels.has(lv.value)) levels.delete(lv.value);
+      else levels.add(lv.value);
+      f = { ...f, levels };
+      saveLogLevels(levels);
       changed();
     });
     const count = h("small");
     const label = h(
       "label",
-      { class: "hl-opt", title: `Show ${lv.label.toLowerCase()}` },
+      {
+        class: "hl-opt",
+        title: `Show or hide the ${lv.label.toLowerCase()} lines; several levels can be on`,
+      },
       input,
       h("span", { class: `hl-dot hl-dot--${lv.dot}`, "aria-hidden": "true" }),
       h("span", null, lv.label),
@@ -274,7 +318,8 @@ export function mountHostLog(root, opts) {
     opts.drive.reset,
   );
   reset.addEventListener("click", () => {
-    f = { off: new Set(), only: null, level: "", q: "" };
+    f = { off: new Set(), only: null, levels: defaultLevels(), q: "" };
+    saveLogLevels(f.levels);
     if (tb.search) tb.search.value = "";
     changed();
   });
@@ -315,7 +360,7 @@ export function mountHostLog(root, opts) {
       row.count.textContent = String(c.bySource.get(s) ?? 0);
     }
     for (const r of levelRows) {
-      r.input.checked = f.level === r.value;
+      r.input.checked = f.levels.has(r.value);
       r.count.textContent = String(c.byLevel[r.value]);
     }
     const n = narrowed(f);

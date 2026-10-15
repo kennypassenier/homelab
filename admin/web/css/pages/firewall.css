@@ -337,16 +337,6 @@
   .fw-stacks td.cf-row-actions {
     justify-content: flex-end;
   }
-  /* redesign-config-13: a KPI's context takes two lines on a phone
-     instead of being cut. */
-  .fw-page .nx-kpi__ctx {
-    white-space: normal;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    min-block-size: 2.8em;
-  }
 }
 
 /* the Actions column's header is for a screen reader only */

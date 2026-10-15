@@ -260,7 +260,7 @@ export function layoutAudit(rootSel) {
       )
     )
       continue;
-    if (el.closest("[data-count-of], .nx-kpi, [class*='chip'], button, a"))
+    if (el.closest("[data-count-of], .kp-kpi, [class*='chip'], button, a"))
       continue;
     out.h.push(`count ${say(el)} names no list (ui.js countOf)`);
   }
@@ -311,8 +311,8 @@ export function layoutAudit(rootSel) {
   // ---- uni: uniform siblings (fix-371-1, Kenny 2026-10-04) ----
   const tall = (/** @type {Element} */ e) => e.getBoundingClientRect().height;
   for (const set of [
-    ...[...root.querySelectorAll(".nx-kpis")].map((s) => [
-      ...s.querySelectorAll(":scope > .nx-kpi"),
+    ...[...root.querySelectorAll(".kp-kpis")].map((s) => [
+      ...s.querySelectorAll(":scope > .kp-kpi"),
     ]),
     ...[...root.querySelectorAll(".ap-board")].map((b) => [
       ...b.querySelectorAll(".ap-tile:not(.ap-tile--skeleton)"),
@@ -373,21 +373,21 @@ export function layoutAudit(rootSel) {
 
   // ---- e: a problems counter of 0 beside red chips ----
   const bad =
-    ".nx-chip--bad,.cf-chip--bad,.sk-chip--bad,.kp-badge--destructive,[data-tone='bad']";
-  const counters = [...root.querySelectorAll(".nx-kpi,button")].filter(
+    ".cf-chip--bad,.sk-chip--bad,.kp-badge--destructive,[data-tone='bad']";
+  const counters = [...root.querySelectorAll(".kp-kpi,button")].filter(
     (c) => shown(c) && !c.closest("dialog") === !rootSel,
   );
   for (const k of counters) {
-    const label = k.classList.contains("nx-kpi")
-      ? (k.querySelector(".nx-kpi__label")?.textContent ?? "")
+    const label = k.classList.contains("kp-kpi")
+      ? (k.querySelector(".kp-kpi__label")?.textContent ?? "")
       : (k.textContent ?? "").replace(/[\d\s·]+$/, "");
     if (!/^\s*(problems?|failing|failures?|broken)\s*$/i.test(label)) continue;
-    const num = k.classList.contains("nx-kpi")
-      ? (k.querySelector(".nx-kpi__value")?.textContent ?? "")
+    const num = k.classList.contains("kp-kpi")
+      ? (k.querySelector(".kp-kpi__value")?.textContent ?? "")
       : ((k.textContent ?? "").match(/(\d+)\s*$/)?.[1] ?? "");
     if (parseInt(num, 10) !== 0) continue;
     const red = [...root.querySelectorAll(bad)].filter(
-      (c) => shown(c) && !c.closest(".nx-kpi"),
+      (c) => shown(c) && !c.closest(".kp-kpi"),
     );
     if (red.length)
       out.e.push(
@@ -500,7 +500,7 @@ export function pageChecks() {
   if (h1 && row) {
     const t = h1.getBoundingClientRect();
     const ctls = [
-      ...row.querySelectorAll("button, a.kp-button, .state, .badge"),
+      ...row.querySelectorAll("button, a.kp-button, .kp-badge, .kp-health"),
     ]
       .filter((e) => /** @type {HTMLElement} */ (e).offsetParent)
       .map((e) => e.getBoundingClientRect())
@@ -508,8 +508,20 @@ export function pageChecks() {
     if (ctls.length) {
       const stacked = ctls.some((a) => ctls.some((b) => b.top >= a.bottom - 1));
       const below = ctls.filter((b) => b.top >= t.bottom - 2);
+      // The title's edge is where its line starts: the stack hub puts its
+      // mark before the name, and what folds under the title lines up with
+      // the mark, not with the name's first letter.
+      const edge = Math.min(
+        t.left,
+        ...[...row.children]
+          .map((e) => e.getBoundingClientRect())
+          .filter(
+            (b) => b.width > 0 && b.top < t.bottom - 2 && b.bottom > t.top,
+          )
+          .map((b) => b.left),
+      );
       const left = below.length
-        ? Math.round(Math.min(...below.map((b) => b.left)) - t.left)
+        ? Math.round(Math.min(...below.map((b) => b.left)) - edge)
         : null;
       if (wide && stacked) out.titlerow.push("controls stacked in a column");
       if (left !== null && Math.abs(left) > 2)

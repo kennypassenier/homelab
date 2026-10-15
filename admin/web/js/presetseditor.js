@@ -175,7 +175,7 @@ function metaCard(name, meta, reload) {
     "Give a /dev/net/tun device (VPN clients)",
     m.vpn,
   );
-  const status = h("span", { class: "measured state-word", role: "status" });
+  const status = h("span", { class: "measured kp-state-word", role: "status" });
   const save = h(
     "button",
     {

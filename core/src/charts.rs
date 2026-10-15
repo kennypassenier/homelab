@@ -209,6 +209,27 @@ pub fn fleet_disk_growth_query(stacks: &[String]) -> Panel {
     )
 }
 
+/// Percent used of each of the hypervisor's filesystems, one series per
+/// filesystem. A ZFS pool is one series (its root's mountpoint): node_exporter
+/// reports every dataset with the pool's free space, so per-dataset series
+/// repeated each pool several times and a pool's root alone reads only what
+/// the root itself holds. The pool's use is the sum of what each dataset
+/// holds, against that plus the root's free space (what `zfs list` shows).
+fn host_fs_used(h: &str) -> String {
+    let z = format!("host=\"{h}\",fstype=\"zfs\"");
+    let pool = r#""mountpoint", "/$1", "device", "([^/]+)(/.*)?""#;
+    let used = format!(
+        "sum by (mountpoint) (label_replace(max by (device) (node_filesystem_size_bytes{{{z}}} - node_filesystem_avail_bytes{{{z}}}), {pool}))"
+    );
+    let free = format!(
+        "max by (mountpoint) (label_replace(max by (device) (node_filesystem_avail_bytes{{{z},device=~\"[^/]+\"}}), {pool}))"
+    );
+    let o = format!("host=\"{h}\",fstype=~\"ext4|xfs\",mountpoint!~\".*/subvol-.*\"");
+    format!(
+        "100 * {used} / ({used} + {free}) or 100 - (node_filesystem_avail_bytes{{{o}}} / node_filesystem_size_bytes{{{o}}} * 100)"
+    )
+}
+
 /// feat-overview-12: the same prediction, for every filesystem of the
 /// hypervisor itself (where capacity usually matters most: a ZFS pool, not
 /// one container's root disk).
@@ -218,9 +239,7 @@ pub fn host_disk_growth_query(host: &str) -> Panel {
         "Disk used per filesystem",
         "How each of the hypervisor's own filesystems has filled up over the \
          window, fitted forward to warn before it runs out.",
-        format!(
-            "100 - (node_filesystem_avail_bytes{{host=\"{h}\",fstype=~\"zfs|ext4|xfs\",mountpoint!~\".*/subvol-.*\"}} / node_filesystem_size_bytes{{host=\"{h}\",fstype=~\"zfs|ext4|xfs\",mountpoint!~\".*/subvol-.*\"}} * 100)"
-        ),
+        host_fs_used(&h),
         Unit::Percent,
         Some("mountpoint"),
     )
@@ -356,9 +375,7 @@ pub fn host_panels(host: &str) -> Vec<Panel> {
         p(
             "Disk used per filesystem",
             "How full each of the hypervisor's own filesystems is right now.",
-            format!(
-                "100 - (node_filesystem_avail_bytes{{host=\"{h}\",fstype=~\"zfs|ext4|xfs\",mountpoint!~\".*/subvol-.*\"}} / node_filesystem_size_bytes{{host=\"{h}\",fstype=~\"zfs|ext4|xfs\",mountpoint!~\".*/subvol-.*\"}} * 100)"
-            ),
+            host_fs_used(&h),
             Unit::Percent,
             Some("mountpoint"),
         ),
@@ -434,7 +451,7 @@ pub fn host_panels(host: &str) -> Vec<Panel> {
              container's virtual network device is receiving, labelled by \
              the container it belongs to.",
             format!(
-                "sum by (device) (rate(node_network_receive_bytes_total{{host=\"{h}\",device!~\"lo|veth.*|docker.*|br-.*\"}}[5m]))"
+                "sum by (device) (label_replace(rate(node_network_receive_bytes_total{{host=\"{h}\",device=~\"(veth|tap)[0-9]+i[0-9]+\"}}[5m]), \"device\", \"veth${{1}}i0\", \"device\", \"(?:veth|tap)([0-9]+)i[0-9]+\")) or sum by (device) (rate(node_network_receive_bytes_total{{host=\"{h}\",device=~\"vmbr[0-9]+\"}}[5m]))"
             ),
             Unit::Bytes,
             Some("device"),
@@ -703,10 +720,39 @@ mod visuals_query_tests {
     }
 
     #[test]
-    fn host_disk_growth_query_excludes_lxc_subvolumes() {
+    fn host_disk_growth_query_draws_each_zfs_pool_once() {
+        // fix-charts-1: a dataset is no series of its own; every dataset of
+        // a pool (container subvolumes included) folds into the pool's
+        // line, and only ext4/xfs leave out a container's subvolume.
         let panel = host_disk_growth_query("pve");
-        assert!(panel.query.contains("subvol"));
+        assert!(panel.query.contains("sum by (mountpoint) (label_replace("));
+        assert!(panel.query.contains("\"([^/]+)(/.*)?\""));
+        assert!(
+            panel
+                .query
+                .contains("fstype=~\"ext4|xfs\",mountpoint!~\".*/subvol-.*\"")
+        );
         assert!(panel.query.contains("host=\"pve\""));
+    }
+
+    #[test]
+    fn host_network_in_has_one_series_per_guest_and_bridge() {
+        // fix-charts-1: Proxmox gives a guest's NIC up to four host devices
+        // (veth/tap plus fwbr, fwln, fwpr) carrying the same bytes, and the
+        // physical NICs and VLAN devices repeat their bridge's traffic. Only
+        // veth/tap count, folded per vmid, plus the vmbrN bridges.
+        let panels = host_panels("pve");
+        let net = panels
+            .iter()
+            .find(|p| p.title == "Network in")
+            .expect("Network in panel");
+        assert!(net.query.contains("device=~\"(veth|tap)[0-9]+i[0-9]+\""));
+        assert!(net.query.contains("device=~\"vmbr[0-9]+\""));
+        for gone in ["fwbr", "fwln", "fwpr", "nic"] {
+            assert!(!net.query.contains(gone), "{gone} in {}", net.query);
+        }
+        let stacks = vec![(104, "gateway".to_string())];
+        assert_eq!(humanize::iface("veth104i0", &stacks), "CT 104 · gateway");
     }
 
     #[test]

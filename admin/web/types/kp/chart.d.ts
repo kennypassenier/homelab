@@ -1,5 +1,5 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/chart.js (kp-themes
-// 10.0.0); copied from kp-themes js/chart.d.ts.
+// The kp-themes module chassis-rs serves at /static/kp/js/chart.js (kp-themes 10.1.1),
+// copied from kp-themes js/chart.d.ts: chassis serves the module, not its types.
 /** A chart: `data-kp-chart` (a plot) or `data-kp-chart="spark"`. */
 export declare const CHART = "[data-kp-chart]";
 /** Charts that share one crosshair, one zoom and one range. */

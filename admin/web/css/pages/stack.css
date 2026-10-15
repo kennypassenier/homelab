@@ -169,7 +169,7 @@
 /* ---------- small parts: foot, kv, hint (dot and chip are ui.js's) ---------- */
 /* Claude's chip: its colour on the border, its words in the text colour
    (a chart token is for marks, not text: it fell under 4.5:1). */
-.sh-page .nx-chip--claude {
+.sh-page .kp-badge[data-tone="claude"] {
   border-color: color-mix(in oklab, var(--chart-2) 60%, var(--border));
   color: var(--foreground);
 }
@@ -254,7 +254,7 @@
 .sh-checks li:last-child {
   border-block-end: 0;
 }
-.sh-checks li .nx-dot {
+.sh-checks li .kp-health {
   white-space: normal;
 }
 .sh-checks li > span:last-child {
@@ -285,7 +285,7 @@
 .sh-feed li:last-child {
   border-block-end: 0;
 }
-.sh-feed li > .nx-dot {
+.sh-feed li > .kp-health {
   align-self: center;
 }
 .sh-feed__what {
@@ -294,7 +294,7 @@
 .sh-feed__what > b {
   font-weight: 500;
 }
-.sh-feed__what > .nx-chip {
+.sh-feed__what > .kp-badge {
   margin-inline-start: 8px;
   vertical-align: 1px;
 }
@@ -445,42 +445,18 @@
 .sh-count-text {
   font-variant-numeric: tabular-nums;
 }
+/* The kp log is the component; this fixes its height (a scroller that does
+   not move the card as lines come) and lets the states span its grid. */
 .sh-log {
-  font: 0.85rem/1.55
-    var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  background: var(--background);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
   block-size: 26rem;
   overflow: auto;
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  align-content: start;
 }
 .sh-log:focus-visible {
   outline: 2px solid var(--ring);
 }
-.sh-log > .nx-empty,
-.sh-log > .kp-alert {
-  white-space: normal;
-  font-family: inherit;
-  font-size: var(--kp-text-sm);
-}
-.sh-log__t {
-  color: var(--muted-foreground);
-}
-.sh-log__a {
-  color: var(--chart-1);
-  font-weight: 600;
-}
-.sh-log__l--w {
-  color: var(--sh-warn);
-}
-.sh-log__l--e {
-  color: var(--sh-bad);
-  font-weight: 600;
+.sh-log > :not(.kp-log__line) {
+  grid-column: 1 / -1;
 }
 @media (max-width: 48rem) {
   .sh-log {
@@ -507,7 +483,7 @@
 .sh-table td.id {
   font-weight: 600;
 }
-.sh-table td .nx-chip + .nx-chip {
+.sh-table td .kp-badge + .kp-badge {
   margin-inline-start: 6px;
 }
 
@@ -651,20 +627,6 @@
   }
 }
 
-/* ---------- phone (review 3, DESIGN_LANGUAGE line 30: one column) ---------- */
-@media (max-width: 30rem) {
-  /* The foundation draws two tiles a row under 30rem; the design language
-     says one, and a label or its context wraps instead of being cut. */
-  .sh-page .nx-kpis {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .sh-page .nx-kpi__label,
-  .sh-page .nx-kpi__ctx {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
-  }
-}
 /* A table as cards (the kp datatable's own container query, 40rem): a
    row's actions wrap inside the card rather than running past its edge. */
 @container kp-table (max-width: 40rem) {

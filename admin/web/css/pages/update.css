@@ -203,18 +203,14 @@
   gap: 8px;
   padding-block-start: 8px;
 }
+/* The kp log is the component; this is only the floor under it: seven of its
+   own lines from the first frame, so the card does not jump as lines come. */
 .uf-log {
-  font-family: var(--theme-font-mono, ui-monospace, monospace);
-  font-size: 0.82rem;
-  line-height: 1.55;
-  background: var(--background);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin: 0;
-  white-space: pre-wrap;
+  min-block-size: calc(
+    7 * 1lh + 2 * var(--kp-log-padding, var(--kp-space-sm, 0.5rem)) + 2px
+  );
+  align-content: start;
   overflow-wrap: anywhere;
-  min-block-size: 7.5em;
 }
 .uf-done {
   display: grid;

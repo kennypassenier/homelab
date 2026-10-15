@@ -3,7 +3,7 @@
 // a toast, a form field drawn from its description (actionforms.js), and a
 // kp dialog opened from code.
 
-import { h } from "./dom.js";
+import { h, stateBadge } from "./dom.js";
 import { declare, drivable } from "./drivable.js";
 import { showAlarm } from "/static/kp/js/alarm.js";
 import { attachDialogs, openAtTop, toast } from "/static/kp/js/overlays.js";
@@ -168,8 +168,7 @@ export function notify(text, tone, action) {
  * A state badge like the tables use.
  * @param {{label: string, tone: string}} b
  */
-export const badge = (b) =>
-  h("span", { class: `state ${b.tone}` }, h("span", null, b.label));
+export const badge = (b) => stateBadge(b);
 
 /**
  * One form field, drawn from its description. The input's id is the

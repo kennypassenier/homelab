@@ -305,8 +305,8 @@ function settingsCard(stack, e, reload) {
   });
   // Sized for its one text, so it never reflows the row when it appears.
   const status = h("span", {
-    class: "measured state-word",
-    "data-size": "Changed; not committed.",
+    class: "measured kp-state-word",
+    "data-kp-words": "Changed; not committed.",
     role: "status",
   });
   const review = h(
@@ -939,8 +939,8 @@ function settingsExtCard(stack, e, reload) {
     onChange: () => repaintStatus(),
   });
   const status = h("span", {
-    class: "measured state-word",
-    "data-size": "Changed; not committed.",
+    class: "measured kp-state-word",
+    "data-kp-words": "Changed; not committed.",
     role: "status",
   });
   const repaintStatus = () => {
@@ -1381,8 +1381,8 @@ function appsEditCard(stack, e, reload) {
   });
 
   const status = h("span", {
-    class: "measured state-word",
-    "data-size": "Changed; not committed.",
+    class: "measured kp-state-word",
+    "data-kp-words": "Changed; not committed.",
     role: "status",
   });
   const repaintStatus = () => {
@@ -1552,8 +1552,8 @@ function latchEditCard(stack, e, reload) {
   });
 
   const status = h("span", {
-    class: "measured state-word",
-    "data-size": "Changed; not committed.",
+    class: "measured kp-state-word",
+    "data-kp-words": "Changed; not committed.",
     role: "status",
   });
   const repaintStatus = () => {
@@ -1660,8 +1660,8 @@ function tilesEditCard(stack, e, reload) {
     row: /** @type {Record<string, unknown>} */ ({ key, ...t }),
   }));
   const status = h("span", {
-    class: "measured state-word",
-    "data-size": "Changed; not committed.",
+    class: "measured kp-state-word",
+    "data-kp-words": "Changed; not committed.",
     role: "status",
   });
   const table = rowTable({
@@ -1823,8 +1823,8 @@ function checksEditCard(stack, e, apps, reload) {
     })
   );
   const status = h("span", {
-    class: "measured state-word",
-    "data-size": "Changed; not committed.",
+    class: "measured kp-state-word",
+    "data-kp-words": "Changed; not committed.",
     role: "status",
   });
   /** @type {{checksTable?: RowTable, manualTable?: RowTable, probesTable?: RowTable,
@@ -2251,7 +2251,7 @@ function nativeUnitForm(stack, natives, reload) {
     ],
     "measured",
   );
-  const status = h("span", { class: "measured state-word", role: "status" });
+  const status = h("span", { class: "measured kp-state-word", role: "status" });
   const review = h(
     "button",
     {
@@ -2594,8 +2594,8 @@ function drawFirewall(panel, stack, e, reload) {
   }
   const state = h("span", { class: "state" });
   const dirty = h("span", {
-    class: "measured state-word",
-    "data-size": "Changed; not committed.",
+    class: "measured kp-state-word",
+    "data-kp-words": "Changed; not committed.",
     role: "status",
     id: "fw-dirty",
   });

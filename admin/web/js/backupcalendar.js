@@ -165,23 +165,6 @@ export function earliestSnapshot(stacks) {
 }
 
 /**
- * fix-214: one calendar month's identity (year, 1-12 month), shifted by
- * `delta` months — the pure half of the prev/next/PageUp/PageDown
- * navigation, so moving from December back a month lands on last
- * December, not month 0.
- * @param {{year: number, month: number}} ym
- * @param {number} delta
- * @returns {{year: number, month: number}}
- */
-export function shiftMonth(ym, delta) {
-  const total = ym.year * 12 + (ym.month - 1) + delta;
-  return {
-    year: Math.floor(total / 12),
-    month: (((total % 12) + 12) % 12) + 1,
-  };
-}
-
-/**
  * fix-214: everything the calendar can honestly say about one night, per
  * stack — built from the SAME `results` the grid itself reads (fix-224's
  * `StackResult` shape: `ok`/`no_backup`/`failed`/`pending`), so the detail
@@ -214,38 +197,69 @@ export function dayDetail(results, date, tz) {
 }
 
 /**
- * `calendarDays` grouped into whole weeks (Monday first), the leading and
- * trailing days of the partial weeks at each end padded with `null` so
- * every row has 7 cells — a plain grid, no week-of-year arithmetic a
- * caller has to get right twice.
- * @param {CalendarDay[]} daysOldestFirst
- * @returns {(CalendarDay | null)[][]}
+ * What kp-themes' calendar shows for one day: the tone, the count under the
+ * number and the words a screen reader and the title say after the date.
+ * The same plain words the day cells used to carry.
+ * @param {CalendarDay} d
+ * @returns {{tone: CalendarDay["tone"], count?: string, label: string}}
  */
-export function calendarWeeks(daysOldestFirst) {
-  if (!daysOldestFirst.length) return [];
-  /** @param {string} iso */
-  const weekday = (iso) => {
-    // Monday = 0 … Sunday = 6, from the ISO date alone (UTC midnight is
-    // fine: only the weekday is read, never the time).
-    const js = new Date(`${iso}T00:00:00Z`).getUTCDay();
-    return (js + 6) % 7;
+export function dayCell(d) {
+  if (d.tone === "future")
+    return { tone: d.tone, label: "in the future — nothing to read yet" };
+  if (d.tone === "before")
+    return {
+      tone: d.tone,
+      label:
+        "before the fleet's oldest known backup — no data from this far back",
+    };
+  if (!d.expected.length) return { tone: d.tone, label: "no stack keeps data" };
+  return {
+    tone: d.tone,
+    count: `${d.backed_up.length}/${d.expected.length}`,
+    label: `${d.backed_up.length}/${d.expected.length} stacks backed up${d.missing.length ? ` — missing: ${d.missing.join(", ")}` : ""}`,
   };
-  /** @type {(CalendarDay | null)[][]} */
-  const weeks = [];
-  /** @type {(CalendarDay | null)[]} */
-  let row = new Array(weekday(daysOldestFirst[0].date)).fill(null);
-  for (const d of daysOldestFirst) {
-    row.push(d);
-    if (row.length === 7) {
-      weeks.push(row);
-      row = [];
+}
+
+/**
+ * Every day the fleet's answers can speak to, keyed `YYYY-MM-DD` as kp's
+ * `setCalendarDays` wants it (it takes the whole history, so changing
+ * month needs no new call): from a year before the oldest snapshot (those
+ * days read "before") through the month of `today`. Later days are the
+ * calendar's own "future"; older ones read "unknown".
+ * @param {Record<string, number[]>} stacks
+ * @param {string[]} expected
+ * @param {string} today YYYY-MM-DD
+ * @param {TimeZone} [tz]
+ * @returns {Record<string, ReturnType<typeof dayCell>>}
+ */
+export function historyCells(stacks, expected, today, tz) {
+  const earliest = earliestSnapshot(stacks);
+  /** @type {Record<string, ReturnType<typeof dayCell>>} */
+  const out = {};
+  if (earliest == null) return out;
+  const first = dayKey(earliest - 366 * 86400, tz);
+  let year = Number(first.slice(0, 4));
+  let month = Number(first.slice(5, 7));
+  const lastYear = Number(today.slice(0, 4));
+  const lastMonth = Number(today.slice(5, 7));
+  while (year < lastYear || (year === lastYear && month <= lastMonth)) {
+    for (const d of monthDays(
+      stacks,
+      expected,
+      year,
+      month,
+      today,
+      earliest,
+      tz,
+    ))
+      out[d.date] = dayCell(d);
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
     }
   }
-  if (row.length) {
-    while (row.length < 7) row.push(null);
-    weeks.push(row);
-  }
-  return weeks;
+  return out;
 }
 
 // ── fix-177: per-stack progressive loading ──────────────────────────────

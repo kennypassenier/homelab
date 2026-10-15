@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/tiles.js (kp-themes 10.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/tiles.js (kp-themes 10.1.1),
 // copied from kp-themes js/tiles.d.ts: chassis serves the module, not its types.
 /** The marker of a board whose grids share one tile height. */
 export declare const TILES_SET = "[data-kp-tiles-set]";

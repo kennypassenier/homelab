@@ -88,29 +88,6 @@
 }
 
 /* ---------- loading: the final geometry from the first frame ---------- */
-.sch-sk {
-  display: block;
-  background: linear-gradient(
-    90deg,
-    var(--muted),
-    color-mix(in oklab, var(--muted) 60%, var(--card)),
-    var(--muted)
-  );
-  background-size: 200% 100%;
-  animation: sch-sk 1.4s linear infinite;
-  border-radius: var(--sch-r-sm);
-}
-@keyframes sch-sk {
-  to {
-    background-position: -200% 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .sch-sk {
-    animation: none;
-  }
-}
-
 /* ---------- the Next run hero ----------------------------------------- */
 .sch-hero {
   display: grid;
@@ -559,6 +536,17 @@ dialog.sch-drawer::backdrop {
   border-radius: var(--sch-r-sm);
   background: var(--background);
   color: var(--foreground);
+}
+/* kp's date picker sits in the sentence like the other fields: inline, its
+   box and its calendar button on the line. */
+.sch-sentence .kp-datepicker {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  vertical-align: middle;
+}
+.sch-sentence .kp-datepicker > input {
+  inline-size: 8.5rem;
 }
 .sch-field {
   display: grid;

@@ -217,21 +217,55 @@ test("redesign-kit-7: segSwitch moves without a change event; sort state is mult
 });
 
 test("redesign-kit-7: chip, dot, meter, shareBar, failBox, rowKeys, drawer and keyRow are shared blocks", () => {
+  // kp-themes' badge, status dot and meter (kpa-3, kpa-4).
   const c = ui.chip("!", { tone: "warn", label: "unreadable" });
-  assert.equal(c.className, "nx-chip nx-chip--warn");
+  assert.equal(c.className, "kp-badge kp-badge--warning");
   assert.equal(c.getAttribute("aria-label"), "unreadable");
-  assert.equal(ui.dot("ok", "running").className, "nx-dot nx-dot--ok");
+  assert.equal(ui.chip("3").className, "kp-badge", "no tone: the plain badge");
+  assert.equal(
+    ui.chip("x", { tone: "bad" }).className,
+    "kp-badge kp-badge--destructive",
+  );
+  assert.equal(
+    ui.chip("x", { tone: "ok" }).className,
+    "kp-badge kp-badge--success",
+  );
+  const live = ui.chip("Live", { tone: "live", dot: true });
+  assert.equal(live.className, "kp-badge kp-badge--info");
+  assert.ok(live.querySelector(".kp-health__dot"), "a dot leads the word");
+  const okDot = ui.dot("ok", "running");
+  assert.equal(okDot.className, "kp-health");
+  assert.equal(okDot.dataset.state, "ok");
+  assert.equal(
+    okDot.querySelector(".kp-health__dot")?.getAttribute("aria-hidden"),
+    "true",
+  );
+  assert.equal(
+    ui.dot("bad", "down").dataset.state,
+    "down",
+    "kp says down for bad",
+  );
+  assert.equal(ui.dot("").dataset.state, undefined, "no tone: kp's muted dot");
   assert.equal(ui.dot("bad").getAttribute("aria-hidden"), "true");
   const m = ui.meter({ pct: 140, mark: 46, tone: "bad" });
-  assert.equal(m.el.className, "nx-meter nx-meter--bad");
-  assert.equal(
-    /** @type {any} */ (m.el.querySelector("i")).style.width,
-    "100%",
-  );
-  assert.equal(/** @type {any} */ (m.el.querySelector("b")).style.left, "46%");
+  assert.equal(m.el.className, "kp-meter");
+  assert.equal(m.el.getAttribute("role"), "meter");
+  assert.equal(m.el.dataset.kpTone, "destructive");
+  assert.equal(m.el.style.getPropertyValue("--kp-value"), "1.4");
+  assert.equal(m.el.style.getPropertyValue("--kp-mark"), "0.46");
+  assert.equal(m.el.dataset.kpOver, "", "a share past the end says so");
+  assert.ok(m.el.querySelector(".kp-meter__mark"), "the tick is kp's mark");
+  m.set({ pct: null });
+  assert.equal(m.el.hasAttribute("aria-valuenow"), false, "not measured");
   const sb = ui.shareBar(41, "41 %", "var(--chart-2)");
   assert.equal(sb.querySelector(".nx-share__num")?.textContent, "41 %");
-  assert.equal(/** @type {any} */ (sb.querySelector("i")).style.width, "41%");
+  assert.equal(
+    /** @type {any} */ (sb.querySelector(".kp-meter"))?.style.getPropertyValue(
+      "--kp-value",
+    ),
+    "0.41",
+  );
+  assert.equal(sb.style.getPropertyValue("--kp-meter-fill"), "var(--chart-2)");
 
   let retried = 0;
   const f = ui.failBox(
@@ -282,6 +316,14 @@ test("redesign-kit-7: chip, dot, meter, shareBar, failBox, rowKeys, drawer and k
   });
   d.open();
   assert.ok(d.el.open && d.el.isConnected);
+  // kp-themes' drawer: head, body and foot are its parts (kpa-11).
+  assert.equal(d.el.className, "kp-drawer kp-dialog");
+  assert.ok(d.el.querySelector(".kp-drawer__head > .kp-dialog__title"));
+  assert.equal(
+    d.el.querySelector(".kp-drawer__desc")?.textContent,
+    "Read it as a sentence.",
+  );
+  assert.equal(d.body.className, "kp-drawer__body");
   const x = /** @type {any} */ (d.el.querySelector('[data-drive="close"]'));
   assert.ok(x, "Close is the dialog control `close`");
   x.click();
@@ -463,45 +505,29 @@ test("redesign-kit-12: the duplicates are gone: Schedules' icon button, Host's o
     assert.doesNotMatch(read(f), /sx-tip/, f);
 });
 
-test("redesign-kit-13: a row menu says it is open, closes on a second click, and its keys walk the items", () => {
-  const anchor = /** @type {any} */ (doc.createElement("button"));
-  doc.body.append(anchor);
-  const items = ["edit", "run-now", "delete"].map((name) => ({
-    name,
-    label: name,
-    hint: name,
-    run() {},
-  }));
-  const m = ui.rowMenu({ anchor, label: "menu", title: "menu", items });
-  assert.ok(m);
-  assert.equal(anchor.getAttribute("aria-expanded"), "true");
-  const btns = m.el.querySelectorAll('[role="menuitem"]');
-  assert.equal(doc.activeElement, btns[0]);
-  press(btns[0], "ArrowDown");
-  assert.equal(doc.activeElement, btns[1]);
-  press(btns[1], "End");
-  assert.equal(doc.activeElement, btns[2]);
-  press(btns[2], "ArrowDown");
-  assert.equal(doc.activeElement, btns[0], "wraps");
-  press(btns[0], "Home");
-  assert.equal(doc.activeElement, btns[0]);
-  pointerDown(anchor);
-  assert.equal(
-    m.el.open,
-    true,
-    "pressing its own button is not a click outside",
+test("redesign-kit-13, kpa-10: a row menu is kp-themes' menu button on the button already in the row, not a dialog of its own", () => {
+  const src = read("js/ui.js");
+  const rowMenu = src.slice(
+    src.indexOf("export function rowMenu"),
+    src.indexOf("The entries a row menu's wrapper runs"),
   );
-  assert.equal(
-    ui.rowMenu({ anchor, label: "menu", title: "menu", items }),
-    null,
+  assert.match(rowMenu, /kp-menu-button/);
+  assert.match(rowMenu, /attachMenuButtons\(/);
+  assert.match(rowMenu, /setMenu\(/);
+  assert.match(rowMenu, /openMenu\(/);
+  assert.doesNotMatch(
+    rowMenu,
+    /createElement\("dialog"\)|"dialog"/,
+    "no dialog",
   );
-  assert.equal(m.el.isConnected, false, "the second click closed it");
-  assert.equal(anchor.getAttribute("aria-expanded"), "false");
-  anchor.remove();
-  assert.match(
+  assert.doesNotMatch(
+    src,
+    /menuPlace|menuKey|pointerdown/,
+    "no copy of kp's placement, keys or outside click",
+  );
+  assert.doesNotMatch(
     read("css/app.css"),
-    /dialog\.nx-rowmenu \{[^}]*box-sizing: border-box/,
-    "the menu's 260 px include its padding and border",
+    /nx-rowmenu button|dialog\.nx-rowmenu/,
   );
 });
 
@@ -583,6 +609,7 @@ test("redesign-kit-16: a KPI toggle without its Live view control is refused", (
   });
   assert.equal(k.el.dataset.drive, "kit-test-kpi");
   assert.equal(k.el.getAttribute("aria-pressed"), "true");
+  assert.match(k.el.className, /\bkp-kpi\b.*\bkp-kpi--toggle\b/);
 });
 
 test("redesign-kit-16: a section's foot is hidden while it has nothing to say", () => {
@@ -756,4 +783,218 @@ test("redesign-openpoints-3: the stack hub has no menu of its own", () => {
     /function groupedMenu|sh-menu/,
   );
   assert.doesNotMatch(read("css/pages/stack.css"), /sh-menu/);
+});
+
+test("kpa-1: a KPI tile is kp-themes' key figure: its parts, its tone, its meter or spark, its toggle event", () => {
+  const strip = ui.kpiStrip(
+    [
+      {
+        key: "a",
+        label: "Stacks",
+        value: "12",
+        unit: "of 14",
+        ctx: "2 parked",
+        tone: "warn",
+      },
+      { key: "b", label: "Disk", value: "71", meter: { pct: 71, mark: 80 } },
+      {
+        key: "c",
+        label: "CPU",
+        value: "9",
+        spark: [1, 2, 3, 2],
+        colour: "var(--chart-2)",
+      },
+      { key: "d", label: "Down", value: "0", tone: "bad", href: "/x" },
+    ],
+    { label: "At a glance" },
+  );
+  assert.equal(strip.el.className, "kp-kpis");
+  assert.equal(strip.el.getAttribute("data-kp-kpis-columns"), "all 3 2 1");
+  assert.equal(strip.el.getAttribute("aria-label"), "At a glance");
+  assert.equal(
+    strip.el.style.getPropertyValue("--kpi-n"),
+    "",
+    "no column count of ours",
+  );
+  const [a, b, c, dd] = [...strip.tiles.values()].map((t) => t.el);
+  assert.equal(a.className, "kp-kpi");
+  assert.equal(a.querySelector(".kp-kpi__label")?.textContent, "Stacks");
+  assert.equal(a.querySelector(".kp-kpi__value")?.textContent, "12of 14");
+  assert.equal(a.querySelector(".kp-kpi__value small")?.textContent, "of 14");
+  assert.equal(a.querySelector(".kp-kpi__trend")?.textContent, "2 parked");
+  assert.equal(a.dataset.kpTone, "warning", "warn is kp's warning");
+  assert.equal(dd.dataset.kpTone, "destructive", "bad is kp's destructive");
+  assert.equal(dd.localName, "a");
+  assert.equal(dd.getAttribute("href"), "/x");
+  assert.equal(a.dataset.key, "a");
+  const meter = /** @type {any} */ (b.querySelector(".kp-kpi__meter"));
+  assert.ok(meter, "a meter fills the fourth row");
+  assert.equal(meter.style.getPropertyValue("--kp-value"), "0.71");
+  assert.equal(meter.style.getPropertyValue("--kp-mark"), "0.8");
+  const spark = /** @type {any} */ (c.querySelector("svg.kp-kpi__spark"));
+  assert.ok(spark, "a spark fills the fourth row");
+  assert.equal(spark.getAttribute("data-kp-spark"), "1 2 3 2");
+  assert.ok(spark.querySelector(".kp-kpi__spark-line"));
+  assert.equal(spark.style.color, "var(--chart-2)");
+  assert.equal(
+    a.querySelector(".kp-kpi__meter, .kp-kpi__spark"),
+    null,
+    "no fourth row asked",
+  );
+  // A later set brings the row, then a meter replaces the spark.
+  strip.tiles.get("a")?.set({ spark: [1, 2] });
+  assert.ok(a.querySelector("svg.kp-kpi__spark"));
+  strip.tiles.get("c")?.set({ meter: { pct: 5 } });
+  assert.ok(c.querySelector(".kp-kpi__meter") && !c.querySelector("svg"));
+  // Loading is its own skeleton at the final geometry.
+  strip.tiles.get("a")?.set({ loading: true });
+  assert.equal(a.hasAttribute("data-loading"), true);
+  assert.ok(a.querySelector(".kp-skeleton"));
+  strip.tiles.get("a")?.set({ value: "13" });
+  assert.equal(a.hasAttribute("data-loading"), false, "a value ends loading");
+});
+
+test("kpa-1: a toggle tile has kp's hint and flips on kp's event, the page keeps the filter", () => {
+  /** @type {boolean[]} */
+  const calls = [];
+  let pressedNow = false;
+  const k = ui.kpi({
+    label: "Failed",
+    value: "3",
+    toggle: {
+      pressed: false,
+      onToggle: () => calls.push((pressedNow = !pressedNow)),
+      drive: { id: "kit-test-kpi" },
+    },
+  });
+  assert.equal(k.el.localName, "button");
+  assert.equal(k.el.getAttribute("aria-pressed"), "false");
+  const hint = k.el.querySelector(".kp-kpi__hint");
+  assert.ok(hint);
+  assert.equal(
+    hint.querySelector('[data-kp-when="off"]')?.textContent,
+    "filter",
+  );
+  assert.equal(
+    hint.querySelector('[data-kp-when="on"]')?.textContent,
+    "filtering ×",
+  );
+  k.el.dispatchEvent(
+    new CustomEvent("kp-kpi-toggle", {
+      bubbles: true,
+      detail: { pressed: true },
+    }),
+  );
+  assert.deepEqual(calls, [true]);
+  k.set({ toggle: { pressed: true, onToggle() {} } });
+  assert.equal(
+    k.el.getAttribute("aria-pressed"),
+    "true",
+    "set writes the page's state back",
+  );
+});
+
+test("kpa-1: a tile's context can lead with a dot, or with a small inline meter", () => {
+  const k = ui.kpi({
+    label: "Backups",
+    value: "9",
+    ctxParts: [
+      { text: "7 ok", tone: "ok" },
+      { text: "2 late", tone: "warn" },
+    ],
+  });
+  const dots = k.el.querySelectorAll(".kp-kpi__trend .kp-health");
+  assert.deepEqual(
+    [...dots].map((x) => /** @type {any} */ (x).dataset.state),
+    ["ok", "warn"],
+  );
+  const m = ui.kpi({
+    label: "Disk",
+    value: "7",
+    ctx: "of 10",
+    ctxMeter: { pct: 70 },
+  });
+  assert.ok(m.el.querySelector(".kp-kpi__trend > .kp-meter.kp-meter--inline"));
+});
+
+test("kpa-2, kpa-4, kpa-8: stat tiles, state badges and state words are kp-themes' own markup", () => {
+  const grid = dom.statGrid([{ label: "Done", value: "3" }]);
+  assert.equal(grid.className, "kp-kpis");
+  assert.equal(
+    grid.querySelector(".kp-kpi > .kp-kpi__label")?.textContent,
+    "Done",
+  );
+  const t = dom.statTile("Total", "5");
+  t.value.textContent = "6";
+  assert.equal(t.el.querySelector(".kp-kpi__value")?.textContent, "6");
+  const td = dom.badgeCell({ label: "ok", tone: "ok" });
+  assert.equal(
+    td.querySelector(".kp-badge")?.className,
+    "kp-badge kp-badge--success",
+  );
+  assert.equal(
+    dom.stateBadge({ label: "x", tone: "bad" }).className,
+    "kp-badge kp-badge--destructive",
+  );
+  assert.equal(
+    dom.stateBadge({ label: "x", tone: "weird" }).className,
+    "kp-badge",
+  );
+  const w = dom.stateWord("on", ["muted"]);
+  assert.equal(w.className, "kp-state-word");
+  assert.equal(w.getAttribute("data-kp-words"), "on\nmuted");
+  assert.equal(w.textContent, "on", "the text a table reads stays the text");
+});
+
+test("kpa-7: the live status is kp-themes' status dot beside kp's ticking line", () => {
+  const l = ui.liveStatus("read");
+  assert.match(l.el.className, /\bkp-health\b.*\bnx-live\b/);
+  assert.ok(l.el.querySelector(".kp-health__dot"));
+  assert.ok(l.el.querySelector("time[data-kp-ago]"), "kp's freshness line");
+  assert.equal(l.el.dataset.state, undefined, "not read yet: the muted dot");
+  l.set(1_700_000_000);
+  assert.equal(l.el.dataset.state, "ok");
+  l.set(null, "reading 2 of 6…");
+  assert.equal(l.el.dataset.state, undefined);
+  assert.equal(l.el.hasAttribute("aria-busy"), true);
+  l.fail("not read");
+  assert.equal(l.el.dataset.state, "down");
+  assert.equal(l.el.hasAttribute("aria-busy"), false);
+});
+
+test("kpa-19: the stepper is kp's wizard steps, the note a kp info alert that remembers its dismissal", () => {
+  const st = ui.stepper(["Pick", "Check", "Run"]);
+  assert.equal(st.el.className, "kp-wizard__steps");
+  st.set(2);
+  const li = st.el.querySelectorAll("li");
+  assert.deepEqual(
+    [...li].map((x) => /** @type {any} */ (x).dataset.state),
+    ["done", "current", undefined],
+  );
+  assert.equal(li[1].getAttribute("aria-current"), "step");
+  assert.equal(li[0].hasAttribute("aria-current"), false);
+  const rows = ui.checkList([
+    { title: "A", desc: "a", state: "run" },
+    { title: "B", desc: "b", state: "ok" },
+  ]);
+  assert.ok(
+    rows.querySelector('li[data-s="run"] .nx-check__st > .kp-spinner'),
+    "the running step spins with kp's spinner",
+  );
+  assert.equal(rows.querySelector('li[data-s="ok"] .kp-spinner'), null);
+  localStorage.removeItem("kit-note");
+  const n = ui.explainNote("kit-note", ["Words"]);
+  assert.ok(n);
+  assert.match(n.el.className, /\bkp-alert\b.*\bkp-alert--info\b/);
+  assert.match(n.close.className, /\bkp-alert__close\b/);
+  n.el.dispatchEvent(new CustomEvent("kp-alert-dismiss", { bubbles: true }));
+  assert.equal(localStorage.getItem("kit-note"), "1");
+  assert.equal(ui.explainNote("kit-note", ["Words"]), null, "gone for good");
+});
+
+test("kpa-9: the hover card wears kp-themes' tooltip look; placement is ours", () => {
+  const card = ui.hoverCard();
+  assert.match(card.el.className, /\bkp-popover\b.*\bkp-tooltip\b/);
+  assert.equal(card.el.getAttribute("role"), "tooltip");
+  card.stop();
 });

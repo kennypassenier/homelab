@@ -85,34 +85,6 @@ main.mk-page > .mk-failed:empty {
   }
 }
 
-/* ---------- KPI tiles: meter and context tones ---------- */
-.mk-page .nx-kpi__spark {
-  display: grid;
-  align-items: center;
-  min-inline-size: 0;
-}
-@media (min-width: 75.0625rem) and (max-width: 1499px) {
-  .mk-page .nx-kpis {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-/* The phone strip as the demo lays it out (ops-kit.css .kpis): two tiles a
-   row from 640 px down, 8 px apart, and the context line wraps onto a
-   second line instead of being cut off (review finding 14). */
-@media (max-width: 640px) {
-  .mk-page .nx-kpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--kp-space-sm, 8px);
-  }
-  .mk-page .nx-kpi__ctx {
-    white-space: normal;
-    overflow-wrap: anywhere;
-    min-block-size: 2.8em;
-  }
-  .mk-page .nx-kpi__value {
-    font-size: 1.5rem;
-  }
-}
 /* ---------- attention band actions, the marker key ---------- */
 .mk-acts {
   display: flex;
@@ -300,7 +272,7 @@ main.mk-page > .mk-failed:empty {
   .mk-table .nx-share {
     grid-template-columns: minmax(0, 1fr);
   }
-  .mk-table .nx-share__bar {
+  .mk-table .nx-share > .kp-meter {
     display: none;
   }
   .mk-table .mk-share {

@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/motion.js (kp-themes 10.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/motion.js (kp-themes 10.1.1),
 // copied from kp-themes js/motion.d.ts: chassis serves the module, not its types.
 /** Any box a consumer wants eased, beside the components below. */
 export declare const SIZE_ATTRIBUTE = "data-kp-size-motion";
@@ -20,6 +20,16 @@ export declare const ARRIVE_KEYS: readonly string[];
  */
 export declare function motionWatchCount(): number;
 /**
+ * A time a register names in a custom property, in ms, played as slowly or
+ * as fast as the page plays every motion (`--kp-motion-scale`, default 1);
+ * `null` when the register names none. A bare number is ms. The property is
+ * read where `el` stands, so a nested theme island answers with its own.
+ * @param {Element} el
+ * @param {string} name a custom property, such as `--kp-update-time`
+ * @returns {number | null}
+ */
+export declare function registerTime(el: Element, name: string): number | null;
+/**
  * The theme's motion, read from its dialog entrance: a dialog drawn for an
  * instant out of sight, in the theme `scope` wears.
  *
@@ -32,6 +42,78 @@ export declare function themeMotion(scope?: Element): {
   close: number;
   size: number;
 };
+export type Entrance = {
+  target: Element;
+  keyframes: Keyframe[];
+  easing: string;
+  pseudoElement: string | null;
+  line: Line;
+};
+/**
+ * `read`, the keyframes `getKeyframes()` reports (every ordinary property,
+ * the implicit first and last frame filled in, each frame on the animation's
+ * curve), with the custom properties that `own` (a copy of the same effect)
+ * keeps and `read` does not. Chromium's `getKeyframes()` leaves the custom
+ * properties of a register's animation out, even a whole frame that holds
+ * nothing else, and an `Element.animate()` fed with it plays nothing for a
+ * `--x` (package finding of 2026-10-08). A frame `read` has gets the custom
+ * properties it lacks; a frame it lacks (same offset) is added, on the curve
+ * and the composite `own` gives it. When `own` has no custom property, `read`
+ * is returned as it is. Pure.
+ * @param {Keyframe[]} read
+ * @param {Keyframe[]} own
+ * @returns {Keyframe[]}
+ */
+export declare function withCustomProperties(
+  read: Keyframe[],
+  own: Keyframe[],
+): Keyframe[];
+export type Line = {
+  delay: number;
+  duration: number;
+  end: number;
+};
+/**
+ * The lines of a part that closes as its open played backwards, line by line
+ * (`--kp-lines: keep`): the part takes `total` ms from its first line's start
+ * to its last line's end, each line keeps its own share of that time and its
+ * own wait, and the whole is turned round, so the line that came in last
+ * goes first. Pure: the lines as the register's entrance plays them in, the
+ * timing of each in the close and in the opening out. Where the part's
+ * entrance is as long as `total` the scale is 1 and every wait is the one the
+ * register wrote.
+ * @param {readonly Line[]} lines
+ * @param {number} total the time the part's close (and its open) takes
+ * @returns {{ duration: number, openDelay: number, closeDelay: number }[]}
+ */
+export declare function turnLines(
+  lines: readonly Line[],
+  total: number,
+): {
+  duration: number;
+  openDelay: number;
+  closeDelay: number;
+}[];
+/**
+ * turnLines() for a dialog's kept entrances. The shade behind it
+ * (`::backdrop`) is no line of the dialog: it belongs to the whole part and
+ * takes the whole `total`, as it does without `--kp-lines: keep`, and it
+ * neither lengthens the span the lines are scaled by nor is scaled with them.
+ * @param {readonly { pseudoElement: string | null, line: Line }[]} kept
+ * @param {number} total
+ * @returns {{ duration: number, openDelay: number, closeDelay: number }[]}
+ */
+export declare function turnEntrances(
+  kept: readonly {
+    pseudoElement: string | null;
+    line: Line;
+  }[],
+  total: number,
+): {
+  duration: number;
+  openDelay: number;
+  closeDelay: number;
+}[];
 /**
  * Close a dialog the way it opened, backwards, then close it for real. With
  * no entrance to reverse (reduced motion, a theme without one) it closes at
@@ -137,6 +219,33 @@ export declare function sizeMotion(
   easing: string;
 };
 /**
+ * Let `el` arrive the theme's way, now: for a part a script brings back by
+ * itself (an alert dismissed and shown again), outside any box motion
+ * watches. A part that already arrives, or leaves, is left alone.
+ * @param {HTMLElement} el
+ */
+export declare function arriveShown(el: HTMLElement): void;
+/** The attribute a group carries while glideGroup() moves its height. */
+export declare const GROUP_FOLDING_ATTRIBUTE = "data-kp-group-folding";
+/**
+ * Open or shut a group whose shut state is not drawn (a tree branch's
+ * children, `display: none` while `aria-expanded="false"`) by gliding its
+ * height, the accordion's way: the theme's growth curve and time, and the
+ * same curve turned around to shut, so the close is the open played
+ * backwards. `apply()` flips the state (the caller's attribute); the group
+ * is kept drawn through a shutting glide by the theme's rule on
+ * `[data-kp-group-folding]`. The box around it follows the group instead of
+ * gliding itself (followsAFold()). Under reduced motion, in a theme that
+ * switches, or inside a group that glides already, the state is applied at
+ * once and the box glides as it always did.
+ * @param {HTMLElement} group @param {boolean} opening @param {() => void} apply
+ */
+export declare function glideGroup(
+  group: HTMLElement,
+  opening: boolean,
+  apply: () => void,
+): void;
+/**
  * Play backwards the arrival arrive() gives `el` in a theme where it does
  * not arrive as a leave turned around (a table row; Kenny, 2026-10-05: the
  * rows of a group unfolded the theme's way and folded away at once): the
@@ -153,6 +262,15 @@ export type Arriving = {
   total: number;
   lag: number;
 };
+/**
+ * Whether the theme lets a part that a script is about to remove or hide
+ * (a state's layer, an empty state, a file row, a tree's children) leave
+ * first, as leave() plays it: a theme says so with `--kp-leave-state:
+ * leave`, and the others keep taking such a part out at once.
+ * @param {Element} el
+ * @returns {boolean}
+ */
+export declare function leavesState(el: Element): boolean;
 /**
  * Let `el` leave the theme's way, then take it out [scope-142; Kenny,
  * 2026-10-04: "die grow/shrink bewegingen moeten ook zijn als er opeens

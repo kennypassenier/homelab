@@ -65,6 +65,7 @@ import {
 import { listen } from "../store.js";
 import {
   chip,
+  countOf,
   dot,
   ensureStyle,
   failBand,
@@ -1110,6 +1111,12 @@ export function mount(root, opts = {}) {
         narrowed ||
         S.open.has(g) ||
         fs.some((f) => f.key === S.editing || f.key === S.howto);
+      // The chip's first number is the rows this body draws (a kp badge,
+      // not a `chip`, so the count names its list: ui.js countOf).
+      const body = h("div", { class: "st-grp__body" }, fs.map(row));
+      const groupCount = chip(groupChip(fs.length, all.length, changed));
+      body.id = `${slug(g)}-keys`;
+      countOf(groupCount, body);
       const d = /** @type {HTMLDetailsElement} */ (
         h(
           "details",
@@ -1126,7 +1133,7 @@ export function mount(root, opts = {}) {
             slug(g),
             { title: "Click to open or close this group" },
             h("h2", null, g),
-            chip(groupChip(fs.length, all.length, changed)),
+            groupCount,
             h(
               "span",
               { class: "st-grp__meta" },
@@ -1136,7 +1143,7 @@ export function mount(root, opts = {}) {
                 .join(" · ") + (fs.length > 4 ? " …" : ""),
             ),
           ),
-          h("div", { class: "st-grp__body" }, fs.map(row)),
+          body,
         )
       );
       d.addEventListener("toggle", () => {

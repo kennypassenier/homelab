@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/attention.js (kp-themes 10.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/attention.js (kp-themes 10.1.1),
 // copied from kp-themes js/attention.d.ts: chassis serves the module, not its types.
 /** The band, and the severities it orders by, worst first. */
 export declare const ATTENTION = ".kp-attention";

@@ -73,6 +73,7 @@ import {
   attentionBand,
   button,
   filterChip,
+  dot,
   hoverCard,
   hueColour,
   kbd,
@@ -671,8 +672,6 @@ export function mount(root) {
     const n = stackNight(r, night, nightsNow(nowS()));
     /** @type {Node[]} */
     const out = [h("b", null, `${s} · ${shortDate(night)}`)];
-    const dot = (/** @type {string} */ tone, /** @type {string} */ w) =>
-      h("span", { class: `nx-dot nx-dot--${tone}` }, w);
     if (n.state === "ok")
       out.push(
         dot("ok", `snapshot at ${n.times.map(hhmm).join(", ")}`),
@@ -762,11 +761,8 @@ export function mount(root) {
           ? h("span", null, "before any backup history")
           : f.wait
             ? h("span", null, "tonight's round has not run yet")
-            : h(
-                "span",
-                {
-                  class: `nx-dot nx-dot--${f.ok === f.expected ? "ok" : f.ok ? "warn" : "bad"}`,
-                },
+            : dot(
+                f.ok === f.expected ? "ok" : f.ok ? "warn" : "bad",
                 `${f.ok} of ${f.expected} stacks backed up`,
               ),
         ...(f.waiting.length
@@ -1012,12 +1008,12 @@ export function mount(root) {
           let state;
           if (sn.state === "load") state = skeleton("6ch");
           else if (sn.state === "ok")
-            state = h(
-              "span",
-              { class: "nx-dot nx-dot--ok mono" },
+            state = dot(
+              "ok",
               sn.times.length > 1
                 ? `${hhmm(sn.times[0])}–${hhmm(sn.times[sn.times.length - 1])}`
                 : hhmm(sn.times[0]),
+              { cls: "mono" },
             );
           else if (sn.state === "none")
             state = h("span", { class: "bk-muted" }, "keeps no data");
@@ -1025,9 +1021,8 @@ export function mount(root) {
             state = h("span", { class: "bk-muted" }, "no history yet");
           else if (sn.state === "wait")
             state = h("span", { class: "bk-muted" }, "not run yet");
-          else if (sn.state === "unread")
-            state = h("span", { class: "nx-dot nx-dot--bad" }, "not read");
-          else state = h("span", { class: "nx-dot nx-dot--bad" }, "missed");
+          else if (sn.state === "unread") state = dot("bad", "not read");
+          else state = dot("bad", "missed");
           /** @type {Node} */
           let act = h("span");
           if (sn.state === "ok" && r.status === "ok" && r.repos.length) {
@@ -1134,7 +1129,9 @@ export function mount(root) {
                 RETRY,
                 s,
               )
-            : h("span");
+            : null;
+      // The group's Restore… (or Retry) shares the repo rows' Restore slot.
+      if (groupRestore) groupRestore.dataset.kpAction = "restore";
       const gtr = drivable(
         h(
           "tr",
@@ -1228,9 +1225,8 @@ export function mount(root) {
               "td",
               { "data-label": "Age" },
               newest
-                ? h(
-                    "span",
-                    { class: `nx-dot nx-dot--${fresh ? "ok" : "bad"}` },
+                ? dot(
+                    fresh ? "ok" : "bad",
                     `${humanDuration(now - newest.time)} ago`,
                   )
                 : h("span", { class: "bk-muted" }, "—"),
@@ -1263,13 +1259,10 @@ export function mount(root) {
             h(
               "td",
               { "data-label": "Restore drill" },
-              h(
-                "span",
-                {
-                  class: `nx-dot nx-dot--${d === "never" ? "warn" : d === "failed" ? "bad" : "ok"} bk-drill`,
-                  tabindex: "0",
-                },
+              dot(
+                d === "never" ? "warn" : d === "failed" ? "bad" : "ok",
                 drillWords(d),
+                { cls: "bk-drill", attrs: { tabindex: "0" } },
               ),
             ),
             h(
@@ -1528,6 +1521,10 @@ export function mount(root) {
       }),
       "verify-restore",
     );
+    // kp-themes action columns: a named role per button gives each action
+    // one fixed slot, so a row without Show a file keeps that slot empty.
+    restore.dataset.kpAction = "restore";
+    verify.dataset.kpAction = "verify";
     /** @type {Node[]} */
     const out = [restore, verify];
     // A native unit's snapshot is one tar stream, not a tree of files, so
@@ -1543,9 +1540,10 @@ export function mount(root) {
         SNAPSHOT_FILE,
         `${stack}/${r.owner}`,
       );
+      file.dataset.kpAction = "show-file";
       out.push(file);
     }
-    return [h("span", { class: "bk-actions" }, ...out)];
+    return out;
   };
 
   rowKeys(repos.el);

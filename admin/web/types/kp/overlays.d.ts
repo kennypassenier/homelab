@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/overlays.js (kp-themes 8.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/overlays.js (kp-themes 10.1.1),
 // copied from kp-themes js/overlays.d.ts: chassis serves the module, not its types.
 /** How long a toast stays before it removes itself. An operational knob; per toast as `ms`. */
 export declare const TOAST_MS = 5000;
@@ -175,12 +175,14 @@ export declare const DISMISS_OWNED = "[data-kp-dismiss-owner]";
  * worse than no button at all. Delegated from `root`, so a toast raised
  * after attach is covered too.
  *
- * An alert is hidden (`hidden`, which the base layer holds above every
- * layout class) after ALERT_DISMISS_EVENT, which a consumer may cancel to
- * keep it or to animate it out first — setting `hidden = false` brings it
- * back. A toast leaves through its own `dismiss()` when `toast()` made it,
- * so TOAST_HIDE_EVENT fires as it does on a timeout; otherwise it is
- * removed and the same event is dispatched on its region.
+ * An alert leaves the theme's way (js/motion.js leave(), its space folding
+ * shut) and is then hidden (`hidden`, which the base layer holds above
+ * every layout class), after ALERT_DISMISS_EVENT, which a consumer may
+ * cancel to keep it or to animate it out itself — setting `hidden = false`
+ * brings it back. A toast leaves through its own `dismiss()` when `toast()` made it,
+ * so TOAST_HIDE_EVENT fires as it does on a timeout; otherwise it
+ * leaves the theme's way (js/motion.js leave()) and the same event is
+ * dispatched on its region once it is gone.
  *
  * @param {ParentNode} root
  * @param {{ ownedBy?: string }} [options] `ownedBy: ''` wires even the buttons another channel marked

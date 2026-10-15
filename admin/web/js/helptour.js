@@ -17,6 +17,11 @@ import { ensureStyle, h } from "./dom.js";
 import { SHORTCUTS } from "./shortcuts.js";
 import { declare, dialogControl } from "./drivable.js";
 import { isMac } from "/static/kp/js/palette.js";
+import {
+  shouldStartTour,
+  startTour as startKpTour,
+  tourRemembered,
+} from "/static/kp/js/tour.js";
 
 /** Review item 15: the bar's "?" (chrome.js), a Live view control on every
  * page — `bar`: found in the bar, never by going to a page first. */
@@ -28,8 +33,14 @@ export const HELP_OPEN = declare({
   what: "open Help: the six areas, the words, the keys and the tour",
 });
 
-/** Remembers that this browser has seen (or skipped) the tour. */
-export const TOURED_KEY = "homelab-toured";
+/** The name kp's tour remembers itself under (`kp-remember:tour:homelab:done`). */
+export const TOUR_NAME = "homelab";
+
+/**
+ * The key this dashboard used before kp's tour.js remembered it. Read once, so
+ * a browser that has seen the tour does not get it again; never written.
+ */
+export const LEGACY_TOURED_KEY = "homelab-toured";
 
 /** The words the Help panel explains (FLOWS.md §1.2, §1.4). */
 export const GLOSSARY = /** @type {const} */ ([
@@ -131,165 +142,55 @@ export function tourSteps() {
  * Whether this page load starts the tour on its own: `?tour` asks for it;
  * otherwise only on a first visit, and never for an automated browser (the
  * whole-screen tests, Live view's own tab), which would get it on every
- * fresh profile.
+ * fresh profile. kp's `shouldStartTour`, with this dashboard's word for it.
  * @param {{search: string, toured: boolean, automated: boolean}} s
  * @returns {number | null} the step to start at (0-based), or null
  */
 export function shouldTour(s) {
-  const q = new URLSearchParams(s.search);
-  if (q.has("tour")) return Math.max(0, (Number(q.get("tour")) || 1) - 1);
-  if (s.toured || s.automated) return null;
-  return 0;
+  return shouldStartTour({
+    search: s.search,
+    remembered: s.toured,
+    automated: s.automated,
+  });
 }
 
-/** @param {string} key @returns {string | null} */
-function stored(key) {
+/** Has this browser seen the tour, under kp's key or the old one? */
+function toured() {
+  if (tourRemembered(TOUR_NAME)) return true;
   try {
-    return localStorage.getItem(key);
+    return localStorage.getItem(LEGACY_TOURED_KEY) != null;
   } catch {
-    return null;
+    return false;
   }
 }
-
-/** @param {string} key @param {string} value */
-function store(key, value) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    /* a private window: the tour simply comes again */
-  }
-}
-
-/** The element a step points at, if it is on screen. @param {string} sel */
-function visible(sel) {
-  for (const el of document.querySelectorAll(sel)) {
-    const r = el.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0) return /** @type {HTMLElement} */ (el);
-  }
-  return null;
-}
-
-/** @type {(() => void) | null} */
-let endTour = null;
 
 /**
- * Show the tour from step `i` (FLOWS.md §1.2): a card under what it points
- * at, Next / Skip, "n of 6"; Esc or Skip ends it, and the browser
- * remembers it was seen.
+ * Show the tour from step `i` (FLOWS.md §1.2): kp's tour card beside what
+ * it points at, Back / Skip / Next, "n of 6" counted from the steps that
+ * are on screen; Esc or Skip ends it, and the browser remembers it was seen.
  * @param {number} [i]
  */
 export function startTour(i = 0) {
-  endTour?.();
-  const steps = tourSteps();
   const phone = matchMedia("(max-width: 60rem)").matches;
-  /** @type {HTMLElement | null} */
-  let target = null;
-  /** @type {HTMLElement | null} */
-  let box = null;
-  const clear = () => {
-    box?.remove();
-    target?.classList.remove("tour-target");
-    box = null;
-    target = null;
-  };
-  const finish = () => {
-    clear();
-    document.removeEventListener("keydown", onKey, true);
-    removeEventListener("resize", place);
-    endTour = null;
-    store(TOURED_KEY, "1");
-  };
-  const place = () => {
-    if (!box || !target) return;
-    const r = target.getBoundingClientRect();
-    const w = box.offsetWidth;
-    const hgt = box.offsetHeight;
-    const left = Math.max(
-      16,
-      Math.min(innerWidth - w - 16, r.left + r.width / 2 - w / 2),
-    );
-    const top =
-      r.top > innerHeight / 2 ? Math.max(16, r.top - hgt - 12) : r.bottom + 12;
-    box.style.left = `${left}px`;
-    box.style.top = `${top}px`;
-  };
-  /** @param {number} n */
-  const show = (n) => {
-    clear();
-    if (n >= steps.length) {
-      finish();
-      return;
-    }
-    const s = steps[n];
-    target = visible(phone ? s.phone : s.desktop);
-    if (!target) {
-      show(n + 1);
-      return;
-    }
-    target.classList.add("tour-target");
-    const next = h(
-      "button",
-      {
-        type: "button",
-        class: "kp-button kp-button--sm kp-button--primary",
-        title:
-          n + 1 === steps.length
-            ? "End the tour"
-            : "Show the next part of the dashboard",
-      },
-      n + 1 === steps.length ? "Done" : "Next",
-    );
-    const skip = h(
-      "button",
-      {
-        type: "button",
-        class: "kp-button kp-button--sm",
-        title: "End the tour; Help (?) can start it again",
-      },
-      "Skip",
-    );
-    dialogControl(next, "tour-next");
-    dialogControl(skip, "tour-skip");
-    next.addEventListener("click", () => show(n + 1));
-    skip.addEventListener("click", finish);
-    // A non-modal <dialog>: its Next and Skip are dialog controls Live view
-    // finds by name, and the page stays usable behind it.
-    box = h(
-      "dialog",
-      // Review item 17: named by its step's title, no aria-live on a
-      // dialog (opening it already announces it).
-      {
-        class: "tour",
-        "aria-labelledby": "tour-title",
-      },
-      h("h3", { id: "tour-title" }, s.title),
-      h("p", null, s.text),
-      h(
-        "footer",
-        null,
-        h("span", null, `${n + 1} of ${steps.length}`),
-        h("span", { class: "tour__btns" }, skip, next),
-      ),
-    );
-    document.body.append(box);
-    /** @type {HTMLDialogElement} */ (box).show();
-    place();
-    next.focus();
-  };
-  /** @param {KeyboardEvent} e */
-  const onKey = (e) => {
-    if (e.key !== "Escape" || !box) return;
-    e.preventDefault();
-    e.stopPropagation();
-    finish();
-  };
-  document.addEventListener("keydown", onKey, true);
-  addEventListener("resize", place);
-  endTour = finish;
-  show(i);
+  startKpTour(
+    tourSteps().map((s) => ({
+      target: phone ? s.phone : s.desktop,
+      title: s.title,
+      text: s.text,
+    })),
+    {
+      start: i,
+      remember: TOUR_NAME,
+      // Live view finds the card's buttons by name.
+      decorate: (part, info) => void dialogControl(part, info.kind),
+    },
+  );
 }
 
-/** A card of the Help panel: heading, one sentence, then its list. */
+/**
+ * A card of the Help panel, kp-themes' `.kp-help`: heading, one sentence,
+ * then its list of terms beside their meanings.
+ */
 function card(
   /** @type {string} */ title,
   /** @type {string} */ desc,
@@ -297,13 +198,9 @@ function card(
 ) {
   return h(
     "section",
-    { class: "kp-card nx-card help-card" },
-    h(
-      "div",
-      { class: "nx-card__head" },
-      h("h3", null, title),
-      h("p", { class: "section-head__desc" }, desc),
-    ),
+    { class: "kp-help kp-card" },
+    h("h3", null, title),
+    h("p", null, desc),
     body,
   );
 }
@@ -312,7 +209,7 @@ function card(
 const kv = (rows) =>
   h(
     "dl",
-    { class: "help-kv" },
+    { class: "kp-help__list" },
     ...rows.flatMap(([k, v]) => [h("dt", null, k), h("dd", null, v)]),
   );
 
@@ -328,7 +225,7 @@ export function helpPanel() {
     "button",
     {
       type: "button",
-      class: "kp-button kp-button--ghost kp-dialog__close",
+      class: "kp-icon-button kp-dialog__close",
       "aria-label": "Close",
       title: "Close Help (Esc)",
     },
@@ -350,11 +247,7 @@ export function helpPanel() {
       "Optional; every key also has a button.",
       kv(
         g.shortcuts.map((s) => [
-          h(
-            "kbd",
-            { class: "nx-kbd" },
-            s.keys === "Ctrl K" && isMac() ? "⌘ K" : s.keys,
-          ),
+          h("kbd", null, s.keys === "Ctrl K" && isMac() ? "⌘ K" : s.keys),
           s.what,
         ]),
       ),
@@ -364,25 +257,25 @@ export function helpPanel() {
     h(
       "dialog",
       {
-        class: "kp-dialog nx-drawer help-panel",
+        class: "kp-drawer kp-dialog help-panel",
         id: "shortcuts",
         "data-kp-shortcuts": "",
         "aria-label": "Help, words and shortcuts",
       },
       h(
-        "div",
-        { class: "nx-drawer__head" },
+        "header",
+        { class: "kp-drawer__head" },
         h("h2", { class: "kp-dialog__title" }, "Help"),
         close,
         h(
           "p",
-          { class: "section-head__desc" },
+          { class: "kp-drawer__desc" },
           "What the words mean, where things live, and the keys.",
         ),
       ),
       h(
         "div",
-        { class: "nx-drawer__body help-panel__body" },
+        { class: "kp-drawer__body" },
         card(
           "Where things live",
           "Six areas, left to right in the order you usually need them.",
@@ -409,7 +302,7 @@ export function helpPanel() {
         ),
         ...keys,
       ),
-      h("div", { class: "nx-drawer__foot" }, tour),
+      h("footer", { class: "kp-drawer__foot" }, tour),
     )
   );
   dialogControl(close, "close");
@@ -427,7 +320,7 @@ export function helpPanel() {
   setTimeout(() => {
     const at = shouldTour({
       search: location.search,
-      toured: stored(TOURED_KEY) != null,
+      toured: toured(),
       automated: navigator.webdriver === true,
     });
     if (at != null) startTour(at);

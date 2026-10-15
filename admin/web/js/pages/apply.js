@@ -172,7 +172,7 @@ function skeleton() {
       "div",
       { class: "ap-counts" },
       ...Array.from({ length: 4 }, () =>
-        h("div", { class: "nx-kpi apply-row apply-row--skeleton" }),
+        h("div", { class: "kp-kpi apply-row apply-row--skeleton" }),
       ),
     ),
     h(
@@ -363,14 +363,21 @@ export function mount(root, opts = {}) {
           "button",
           {
             type: "button",
-            class: `nx-kpi ap-tile${tone ? ` ap-tile--${tone}` : ""}`,
+            class: "kp-kpi kp-kpi--toggle ap-tile",
+            // The page keeps which column is on (its own click, below).
+            "data-kp-kpi-owned": "",
+            "data-kp-tone": tone
+              ? tone === "bad"
+                ? "destructive"
+                : "warning"
+              : null,
             "aria-pressed": String(only === key),
             title:
               "Click to show only this column; again, Show all or Esc shows all",
           },
-          h("span", { class: "nx-kpi__label" }, label),
-          h("span", { class: "nx-kpi__value" }, String(n)),
-          h("span", { class: "nx-kpi__ctx" }, ctx),
+          h("span", { class: "kp-kpi__label" }, label),
+          h("span", { class: "kp-kpi__value" }, String(n)),
+          h("span", { class: "kp-kpi__trend" }, ctx),
         ),
         TILE,
         key,

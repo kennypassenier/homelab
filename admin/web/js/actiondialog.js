@@ -1306,7 +1306,7 @@ export function mountBatchPanel(batch, jobs) {
   const deferredTile = statTile("Deferred");
   const totals = h(
     "div",
-    { class: "stat-grid batch-totals" },
+    { class: "kp-kpis batch-totals", "data-kp-kpis-columns": "all 3 2 1" },
     totalTile.el,
     doneTile.el,
     okTile.el,

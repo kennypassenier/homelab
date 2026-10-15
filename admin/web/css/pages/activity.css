@@ -194,24 +194,9 @@
   border-radius: 3px;
   background: var(--chart-1, var(--primary));
 }
-.ac-step--whole[data-s="run"] i::after {
-  inset: 0;
-  animation: ac-busy 1.6s var(--ac-ease) infinite;
-  transform-origin: left;
-}
-@keyframes ac-busy {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(100%);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ac-step--whole[data-s="run"] i::after {
-    animation: none;
-    inset: 0 40% 0 0;
-  }
+.ac-step--whole .kp-progressbar {
+  --kp-progressbar-max-width: none;
+  inline-size: 100%;
 }
 .ac-step[data-s="run"] {
   color: var(--foreground);
@@ -721,68 +706,28 @@
   background: var(--primary);
   border-radius: 3px;
 }
-.hl-ln {
-  display: grid;
-  grid-template-columns: 6.2rem 3.4rem 7rem minmax(0, 1fr);
-  gap: 0 12px;
-  padding: 1px var(--nx-pad);
-  align-items: center;
-  cursor: pointer;
+/* The lines are kp's log grid (time, source, level, message); the line is
+   `display: contents`, so hover and the open plate paint its cells. The
+   message cell is the button that opens the detail. */
+.hl-lines {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding-inline: var(--nx-pad);
+  align-content: start;
 }
-.hl-ln:hover {
+.hl-lines > :not(.kp-log__line, .hl-sk, .hl-more) {
+  grid-column: 1 / -1;
+}
+.hl-lines .kp-log__line:hover > * {
   background: color-mix(in oklab, var(--muted) 70%, transparent);
 }
-.hl-ln:focus-visible {
+.hl-msg {
+  cursor: pointer;
+}
+.hl-msg:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
-}
-.hl-ln[aria-expanded="true"] {
-  background: color-mix(in oklab, var(--accent) 45%, transparent);
-}
-.hl-ln--sk {
-  padding-block: 5px;
-  cursor: default;
-}
-.hl-ln--sk .kp-skeleton {
-  display: block;
-  block-size: 0.9em;
-}
-.hl-ln time {
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
-.hl-lv {
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted-foreground);
-}
-.hl-lv--warn {
-  color: var(--warning-foreground);
-}
-.hl-lv--error {
-  color: var(--destructive);
-}
-.hl-ln--warn {
-  background: color-mix(in oklab, var(--warning) 35%, transparent);
-}
-.hl-ln--error {
-  background: color-mix(in oklab, var(--destructive) 10%, transparent);
-  box-shadow: inset 3px 0 0 var(--destructive);
-}
-.hl-src {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-inline-size: 0;
-  color: var(--muted-foreground);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.hl-msg {
-  overflow-wrap: anywhere;
 }
 .hl-msg em {
   font-style: normal;
@@ -793,7 +738,21 @@
   color: inherit;
   border-radius: 2px;
 }
-.hl-ln.is-new {
+.hl-lines .kp-log__source {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 0;
+}
+.hl-sk {
+  display: contents;
+}
+.hl-sk .kp-skeleton {
+  display: block;
+  block-size: 0.9em;
+  align-self: center;
+}
+.hl-lines .kp-log__line.is-new > * {
   animation: hl-flash 900ms ease-out;
 }
 @keyframes hl-flash {
@@ -802,14 +761,15 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hl-ln.is-new {
+  .hl-lines .kp-log__line.is-new > * {
     animation: none;
   }
 }
 .hl-more {
   display: grid;
   gap: 6px;
-  margin: 0 var(--nx-pad) 6px calc(var(--nx-pad) + 6.2rem + 12px);
+  grid-column: 1 / -1;
+  margin: 2px 0 6px;
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -869,21 +829,9 @@
   .hl-side {
     grid-template-columns: minmax(0, 1fr);
   }
-  .hl-ln {
-    grid-template-columns: 4.6rem minmax(0, 1fr);
-  }
-  .hl-lv {
-    display: none;
-  }
-  .hl-src {
-    grid-column: 2;
-    grid-row: 1;
-  }
-  .hl-msg {
+  /* On a phone a line's message gets a row of its own. */
+  .hl-lines .hl-msg {
     grid-column: 1 / -1;
-  }
-  .hl-more {
-    margin-inline-start: var(--nx-pad);
   }
   .hl-xfer {
     grid-template-columns: minmax(0, 1fr) auto;

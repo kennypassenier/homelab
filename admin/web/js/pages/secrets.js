@@ -34,6 +34,7 @@ import {
   chartColour,
   chip,
   kbd,
+  dot,
   hoverCard,
   liveStatus,
   pageHeader,
@@ -186,8 +187,11 @@ function styled(el, props) {
   return el;
 }
 
-/** A skeleton bar. @param {string} w */
-const sk = (w) => styled(h("span", { class: "sk" }, "·"), { "--w": w });
+/** A skeleton bar (kp's `.kp-skeleton`). @param {string} w */
+const sk = (w) =>
+  styled(h("span", { class: "kp-skeleton", "aria-hidden": "true" }), {
+    "inline-size": w,
+  });
 
 /**
  * A plain message at the foot of the screen (ui.js `toast`, drawn the
@@ -490,11 +494,7 @@ export function mount(root, opts = {}) {
                     .join(", "),
                 )
               : kk === "unreadable" && e?.unreadable
-                ? h(
-                    "span",
-                    { class: "nx-dot nx-dot--warn" },
-                    splitReason(e.unreadable).why,
-                  )
+                ? dot("warn", splitReason(e.unreadable).why)
                 : h("span", null, "No latch_secrets or latch_files declared."),
             h(
               "span",

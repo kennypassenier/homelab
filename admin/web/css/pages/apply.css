@@ -103,52 +103,20 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--kp-space-md, 12px);
 }
-button.ap-tile {
-  font: inherit;
-  text-align: start;
-  cursor: pointer;
-  grid-template-rows: auto auto auto;
-  min-inline-size: 0;
-}
-/* redesign-final-c1: the Apps page's own `.ap-tile` (stacks.css, an icon
-   column beside the name) laid these tiles out in three columns, so
-   "Will deploy" broke per letter and the number was cut; a plan tile is
-   one column: label, number, context. */
+/* A plan tile is kp-themes' toggle key figure (ui.js kpi look): one
+   column, label, number, context; the Apps page's own `.ap-tile`
+   (stacks.css, an icon column beside the name) must not lay it out. */
 .ap-root button.ap-tile {
+  display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
+  grid-template-rows: auto auto auto;
   align-items: start;
-  padding: var(--kp-space-md, 12px) var(--nx-pad, 16px);
-}
-.ap-root button.ap-tile .nx-kpi__ctx {
-  white-space: normal;
-  overflow: visible;
-  text-overflow: clip;
-}
-/* A tile's label wraps on a phone instead of being cut off (review 13). */
-.ap-tile .nx-kpi__label {
-  white-space: normal;
-  overflow: visible;
-  text-overflow: clip;
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
 }
 .ap-filter {
   margin: 0;
   font-size: var(--kp-text-sm);
   color: var(--muted-foreground);
-}
-button.ap-tile:hover {
-  border-color: var(--ring);
-}
-button.ap-tile[aria-pressed="true"] {
-  border-color: var(--primary);
-  box-shadow: inset 0 0 0 1px var(--primary);
-}
-.ap-tile--bad .nx-kpi__value {
-  color: var(--destructive);
-}
-.ap-tile--warn .nx-kpi__value {
-  color: var(--warning-foreground, var(--foreground));
 }
 .ap-cols {
   display: grid;

@@ -51,7 +51,7 @@ const panes = (page) =>
       ),
       scrollW: document.documentElement.scrollWidth,
       viewW: innerWidth,
-      skeletons: root ? root.querySelectorAll(".sk").length : -1,
+      skeletons: root ? root.querySelectorAll(".kp-skeleton").length : -1,
     };
   });
 

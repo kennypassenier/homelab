@@ -116,9 +116,34 @@ export function sectionHeader(title, description, opts = {}) {
   );
 }
 
+/**
+ * kp-themes' badge variant for a state tone (`ok`, `warn`, `bad`; any
+ * other tone is the plain badge).
+ * @type {Record<string, string>}
+ */
+const STATE_BADGE = {
+  ok: "success",
+  warn: "warning",
+  bad: "destructive",
+  info: "info",
+};
+
+/**
+ * A state as kp-themes' badge: the word on its status plate.
+ * @param {{label: string, tone: string}} st
+ */
+export function stateBadge(st) {
+  const variant = STATE_BADGE[st.tone];
+  return h(
+    "span",
+    { class: `kp-badge${variant ? ` kp-badge--${variant}` : ""}` },
+    st.label,
+  );
+}
+
 /** @param {{label: string, tone: string}} st */
 export function badgeCell(st) {
-  return h("td", { class: `state ${st.tone}` }, h("span", null, st.label));
+  return h("td", null, stateBadge(st));
 }
 
 /**
@@ -524,15 +549,20 @@ export function elapsed(paint) {
  * A word that changes with a control's state ("on" / "muted"), in a box as
  * wide as the widest word it can show, so nothing beside or after it moves
  * when it changes (Kenny, 2026-09-29: the layout never shifts under the
- * pointer). The other words are only a sizer (CSS `.state-word`); the text
- * a table reads, sorts and filters on stays `text`.
+ * pointer): kp-themes' `.kp-state-word`, whose `data-kp-words` lists the
+ * words; change it with kp's `setStateWord(el, word)`, which also adds a
+ * new word to the list. The text a table reads, sorts and filters on stays
+ * `text`.
  * @param {string} text
  * @param {string[]} words every text this element can show
  */
 export function stateWord(text, words) {
   return h(
     "span",
-    { class: "state-word", "data-size": [text, ...words].join("\n") },
+    {
+      class: "kp-state-word",
+      "data-kp-words": [text, ...words].join("\n"),
+    },
     text,
   );
 }
@@ -591,13 +621,14 @@ export function fillFacts(dl, facts) {
 
 /**
  * A row of stat tiles from a plain list, redrawn whole (Kenny, 2026-10-01):
- * for a count that does not need its own live-updating node.
+ * for a count that does not need its own live-updating node. kp-themes'
+ * key figures without a trend: `.kp-kpis` of `.kp-kpi`.
  * @param {{label: string, value: string}[]} stats
  */
 export function statGrid(stats) {
   return h(
     "div",
-    { class: "stat-grid" },
+    { class: "kp-kpis", "data-kp-kpis-columns": "all 3 2 1" },
     ...stats.map((s) => statTile(s.label, s.value).el),
   );
 }
@@ -714,18 +745,18 @@ export function fillStatGrid(grid, stats) {
 }
 
 /**
- * One stat tile with an updatable value node, for a panel that repaints a
- * number in place rather than rebuilding the whole grid (Kenny, 2026-10-01:
- * job panel and batch panel totals).
+ * One stat tile (`.kp-kpi`: label over a figure) with an updatable value
+ * node, for a panel that repaints a number in place rather than rebuilding
+ * the whole grid (Kenny, 2026-10-01: job panel and batch panel totals).
  * @param {string} label
  * @param {string} [value]
  */
 export function statTile(label, value = "") {
-  const valueEl = h("span", { class: "stat-tile__value" }, value);
+  const valueEl = h("span", { class: "kp-kpi__value" }, value);
   const el = h(
     "div",
-    { class: "stat-tile" },
-    h("span", { class: "stat-tile__label" }, label),
+    { class: "kp-kpi" },
+    h("span", { class: "kp-kpi__label" }, label),
     valueEl,
   );
   return { el, value: valueEl };

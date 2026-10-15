@@ -92,6 +92,7 @@ import { stackEntries, stackIncidents, stackChecks } from "../stacktabs.js";
 import { current, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
+import { attachLogs } from "/static/kp/js/log.js";
 import { watchTabOverflow } from "/static/kp/js/overlays.js";
 import { mount as mountSecrets } from "./secrets.js";
 import {
@@ -766,8 +767,9 @@ const nowS = () => Math.floor(Date.now() / 1000);
  * @param {Ctx} c
  * @param {string} action
  * @param {{label: string, title: string, cls?: string,
- *   preset?: Record<string, string>,
- *   drive: [string, string]}} o `drive`: the declared id and its row
+ *   preset?: Record<string, string>, slot?: string,
+ *   drive: [string, string]}} o `drive`: the declared id and its row;
+ *   `slot`: the kp-themes action-column role (its fixed place in a row)
  */
 function actionButton(c, action, o) {
   const b = h(
@@ -776,6 +778,7 @@ function actionButton(c, action, o) {
       type: "button",
       class: `kp-button ${o.cls ?? ""}`.trim(),
       "data-action": action,
+      ...(o.slot ? { "data-kp-action": o.slot } : {}),
       title: o.title,
     },
     o.label,
@@ -869,7 +872,7 @@ function overviewTab(panel, c) {
   // button inside a link is invalid): its label, value and context move
   // over, and the tile's own `set` keeps painting them.
   const plain = h("div", {
-    class: "nx-kpi sh-kpi--plain",
+    class: "kp-kpi sh-kpi--plain",
     "data-loading": "",
   });
   if (driftTile) {
@@ -879,7 +882,7 @@ function overviewTab(panel, c) {
     // spark or a meter, which this tile has neither of; the button went
     // into a row that was never there, so Compare now was never drawn.
     const act = h("span", { class: "sh-kpi__act" }, compareBtn);
-    const slot = plain.querySelector(".nx-kpi__spark");
+    const slot = plain.querySelector(".kp-kpi__spark, .kp-kpi__meter");
     if (slot) slot.replaceWith(act);
     else plain.append(act);
   }
@@ -1516,13 +1519,15 @@ function logsTab(panel, c) {
     state: [count, followSw],
   });
   if (tb.search) drivable(tb.search, LOG_SEARCH, name);
-  const pre = h("pre", {
-    class: "sh-log",
+  // The kp log component (gap-kplog-1); `.sh-log` only fixes its height.
+  const pre = h("div", {
+    class: "kp-log sh-log",
+    role: "log",
     tabindex: "0",
     "aria-label": `Log lines of ${name}`,
   });
   pre.append(skeletonLines(12, "Asking Loki for the lines"));
-  countOf(count, pre, ".sh-log__line");
+  countOf(count, pre, ".kp-log__line");
   const footLeft = h("span", null, "Loki");
   const footRight = h("span", null, "");
   const card = h(
@@ -1571,7 +1576,6 @@ function logsTab(panel, c) {
     );
     if (only.app) side.only("apps", only.app);
     const v = logView(lines, side.off("apps"), side.off("levels"));
-    const pad = Math.max(12, ...v.shown.map((l) => (l.source || "—").length));
     side.setCounts("apps", v.sources);
     side.setCounts("levels", v.levels);
     if (failed) {
@@ -1603,24 +1607,36 @@ function logsTab(panel, c) {
       pre.replaceChildren(
         ...v.shown.map((l) => {
           const g = levelGroup(l.level);
+          const source = l.source || "—";
           return h(
-            "span",
-            { class: "sh-log__line", "data-src": l.source, "data-lvl": g },
-            h("span", { class: "sh-log__t" }, lineTime(l.ts_ms).split(" ")[1]),
-            " ",
-            h("span", { class: "sh-log__a" }, (l.source || "—").padEnd(pad)),
-            " ",
+            "p",
+            {
+              class: "kp-log__line",
+              "data-kp-severity":
+                g === "e" ? "error" : g === "w" ? "warning" : "info",
+              "data-src": l.source,
+              "data-lvl": g,
+            },
+            h(
+              "time",
+              { class: "kp-log__time" },
+              lineTime(l.ts_ms).split(" ")[1],
+            ),
             h(
               "span",
-              { class: `sh-log__l sh-log__l--${g}` },
-              g === "e" ? "error" : g === "w" ? "warn " : "info ",
+              { class: "kp-log__source", "data-kp-source": source },
+              source,
             ),
-            " ",
-            l.line,
-            "\n",
+            h(
+              "span",
+              { class: "kp-log__level" },
+              g === "e" ? "error" : g === "w" ? "warn" : "info",
+            ),
+            h("span", { class: "kp-log__message" }, l.line),
           );
         }),
       );
+    attachLogs(pre);
     if (atBottom) pre.scrollTop = pre.scrollHeight;
     count.textContent =
       v.shown.length === v.total
@@ -1784,6 +1800,9 @@ function appsTab(panel, c) {
           `${r.name}'s log lines`,
           `${name}/logs/app-${r.name}`,
         );
+        // kp-themes action columns: one named slot per action, so a row
+        // without Update… or Publish… keeps that slot empty.
+        logs.dataset.kpAction = "logs";
         /** @type {HTMLElement[]} */
         const acts = [logs];
         if (r.newer?.key) {
@@ -1813,17 +1832,22 @@ function appsTab(panel, c) {
                 upstream: st.upstream,
               }),
           );
+          up.dataset.kpAction = "update";
           acts.push(up);
         } else if (!r.extra && S.inFleet) {
-          acts.push(
-            actionButton(c, S.s?.native ? "update-native" : "update", {
+          const pull = actionButton(
+            c,
+            S.s?.native ? "update-native" : "update",
+            {
               label: "Update…",
               title: `Pull the newest image for ${r.name} and recreate it, with rollback`,
               cls: "kp-button--sm",
               preset: S.s?.native ? undefined : { app: r.name },
               drive: [APP_PULL, `${name}/${r.name}`],
-            }),
+            },
           );
+          pull.dataset.kpAction = "update";
+          acts.push(pull);
         }
         if (!r.extra) {
           // feat-publish-1: a hostname and a port for this one app.
@@ -1843,6 +1867,7 @@ function appsTab(panel, c) {
           pub.addEventListener("click", () =>
             openPublishDialog(name, r.name, () => c.reloadEdit()),
           );
+          pub.dataset.kpAction = "publish";
           acts.push(pub);
         }
         return h(
@@ -2096,6 +2121,7 @@ function backupsTab(panel, c) {
                 label: "Restore…",
                 title: `Bring ${r.app}'s data back from a snapshot`,
                 cls: "kp-button--sm",
+                slot: "restore",
                 preset: nat
                   ? r.newest?.short_id
                     ? { snapshot: r.newest.short_id }
@@ -2114,6 +2140,7 @@ function backupsTab(panel, c) {
                     label: "Verify…",
                     title: `Prove ${r.app}'s newest snapshot restores, without touching live data`,
                     cls: "kp-button--sm kp-button--ghost",
+                    slot: "verify",
                     preset: { app: r.app },
                     drive: [BACKUP_ROW, `${name}/${r.app}/verify`],
                   }),

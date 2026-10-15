@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/forms.js (kp-themes 8.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/forms.js (kp-themes 10.1.1),
 // copied from kp-themes js/forms.d.ts: chassis serves the module, not its types.
 /**
  * Fired when a form passes validation. A contract value [TH26]: the
@@ -134,7 +134,7 @@ export declare function attachForms(
  *   </label>
  *
  * @param {ParentNode} [root]
- * @param {{ strings?: Record<string, unknown> }} [options]
+ * @param {{ strings?: Partial<import('./strings.js').Strings> }} [options]
  * @returns {() => void} detach: removes the words this call put in
  */
 export declare function attachSwitches(
@@ -142,6 +142,6 @@ export declare function attachSwitches(
   {
     strings,
   }?: {
-    strings?: Record<string, unknown>;
+    strings?: Partial<import("./strings.js").Strings>;
   },
 ): () => void;

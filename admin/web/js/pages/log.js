@@ -40,6 +40,7 @@ import { transferView } from "../parity.js";
 import { current, listen, subscribe } from "../store.js";
 import { countOf, emptyState, kbd, stackMark, toolbar } from "../ui.js";
 import { setParams } from "../urlstate.js";
+import { attachLogs } from "/static/kp/js/log.js";
 
 /** Lines kept in the page, as the server's ring. */
 const KEEP = 2000;
@@ -151,9 +152,10 @@ export function mountHostLog(root, opts) {
   tb.el.classList.add("hl-bar");
   if (tb.search) drivable(tb.search, opts.drive.search);
   const transfers = h("div", { class: "hl-xfers" });
-  const list = h("div", { class: "hl-lines" });
+  // The kp log component: its grid holds the lines (gap-kplog-1).
+  const list = h("div", { class: "kp-log hl-lines", "data-kp-arrive": "none" });
   // redesign-final (exact counts): "N of M lines" is the lines drawn.
-  countOf(countEl, list, ".hl-ln:not(.hl-ln--sk)");
+  countOf(countEl, list, ".kp-log__line");
   const blocks = h("div", { class: "hl-blocks" });
   const newPill = h("button", {
     type: "button",
@@ -372,50 +374,60 @@ export function mountHostLog(root, opts) {
   const lineEls = (l, fresh = false) => {
     const x = logLine(/** @type {any} */ ({ ...l, job: 0 }));
     const isOpen = open === l.seq;
-    const tone =
-      x.severity === "error" ? "error" : x.severity === "warning" ? "warn" : "";
-    const row = drivable(
+    // The line is `display: contents` (kp's grid), so the button is its
+    // message cell; a click anywhere on the line still reaches the line.
+    const message = drivable(
       h(
-        "div",
+        "span",
         {
-          class: `hl-ln${tone ? ` hl-ln--${tone}` : ""}${fresh ? " is-new" : ""}`,
+          class: "kp-log__message hl-msg",
           role: "button",
           tabindex: "0",
           "aria-expanded": String(isOpen),
           title: "Click for when, who and the request it belongs to",
-          "data-seq": String(l.seq),
         },
-        h("time", null, x.time),
-        h("span", { class: `hl-lv hl-lv--${tone || "info"}` }, x.level),
-        h("span", { class: "hl-src" }, swatch(l.source), sourceLabel(l.source)),
-        h(
-          "span",
-          { class: "hl-msg" },
-          ...mark(l.msg),
-          l.by
-            ? h(
-                "em",
-                null,
-                `  · ${l.by === "admin" ? "this dashboard" : ownerOf(l.by)}`,
-              )
-            : "",
-        ),
+        ...mark(l.msg),
+        l.by
+          ? h(
+              "em",
+              null,
+              `  · ${l.by === "admin" ? "this dashboard" : ownerOf(l.by)}`,
+            )
+          : "",
       ),
       opts.drive.line,
       String(l.seq),
+    );
+    const row = h(
+      "p",
+      {
+        class: `kp-log__line${fresh ? " is-new" : ""}`,
+        "data-kp-severity": x.severity,
+        ...(isOpen ? { "data-kp-current": "" } : {}),
+        "data-seq": String(l.seq),
+      },
+      h("time", { class: "kp-log__time" }, x.time),
+      h(
+        "span",
+        { class: "kp-log__source", "data-kp-source": l.source },
+        swatch(l.source),
+        sourceLabel(l.source),
+      ),
+      h("span", { class: "kp-log__level" }, x.level),
+      message,
     );
     const toggle = () => {
       open = isOpen ? null : l.seq;
       paintLines();
       // The repainted row keeps focus, so the next key reaches it.
       /** @type {HTMLElement | null} */ (
-        list.querySelector(`.hl-ln[data-seq="${l.seq}"]`)
+        list.querySelector(`.kp-log__line[data-seq="${l.seq}"] [role=button]`)
       )?.focus({ preventScroll: true });
     };
     row.addEventListener("click", toggle);
-    row.addEventListener("keydown", (e) => {
+    message.addEventListener("keydown", (e) => {
       // A role=button row answers Space like Enter (finding 12).
-      if (e.target === row && (e.key === "Enter" || e.key === " ")) {
+      if (e.target === message && (e.key === "Enter" || e.key === " ")) {
         e.preventDefault();
         toggle();
       }
@@ -560,9 +572,12 @@ export function mountHostLog(root, opts) {
         ...Array.from({ length: 12 }, () =>
           h(
             "div",
-            { class: "hl-ln hl-ln--sk", "data-kp-state": "loading" },
-            ...[80, 60, 80, 70].map((w) =>
-              h("span", { class: "kp-skeleton", style: `inline-size:${w}%` }),
+            { class: "hl-sk", "data-kp-state": "loading" },
+            ...[5, 6, 3, 80].map((w, i) =>
+              h("span", {
+                class: "kp-skeleton",
+                style: `inline-size:${w}${i === 3 ? "%" : "rem"}`,
+              }),
             ),
           ),
         ),
@@ -607,6 +622,7 @@ export function mountHostLog(root, opts) {
             ]),
       );
     }
+    attachLogs(list);
     paintCount();
     if (follow) toTail();
   };
@@ -660,8 +676,18 @@ export function mountHostLog(root, opts) {
     }
     if (!follow) unseen += 1;
     if (list.querySelector(".nx-empty")) list.replaceChildren();
-    list.append(...lineEls(l, true));
-    while (list.childElementCount > KEEP) list.firstElementChild?.remove();
+    const els = lineEls(l, true);
+    list.append(...els);
+    // Only the new line: the colour of a source is written per element.
+    for (const el of els) attachLogs(el);
+    // The oldest line is dropped to keep the page at the server's ring, but
+    // never the one holding focus: losing it would send the next Space to
+    // the page's pause shortcut instead of the line.
+    while (list.childElementCount > KEEP) {
+      const oldest = list.firstElementChild;
+      if (!oldest || oldest.contains(document.activeElement)) break;
+      oldest.remove();
+    }
     if (follow) toTail();
     paintCount();
   };

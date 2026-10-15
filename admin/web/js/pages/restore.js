@@ -23,6 +23,7 @@ import {
 } from "../restoreflow.js";
 import { current, subscribe } from "../store.js";
 import {
+  dot,
   ensureStyle,
   pageHeader,
   section,
@@ -331,12 +332,7 @@ export function mount(root, ctx) {
                         "aria-disabled": "true",
                       },
                       h("strong", null, n.label),
-                      h(
-                        "small",
-                        null,
-                        h("span", { class: "nx-dot nx-dot--bad" }),
-                        " no snapshot (missed)",
-                      ),
+                      h("small", null, dot("bad"), " no snapshot (missed)"),
                     )
                   : drivable(
                       card(

@@ -8,11 +8,11 @@ import {
   calendarInputs,
   calendarNoBackup,
   calendarProgress,
-  calendarWeeks,
+  dayCell,
   dayDetail,
   earliestSnapshot,
+  historyCells,
   monthDays,
-  shiftMonth,
   withStackResult,
 } from "../js/backupcalendar.js";
 // Fixed dates only: the calendar is driven by the dates it is given.
@@ -78,21 +78,6 @@ test("the window is oldest first and spans exactly `days` days", () => {
   assert.equal(days.length, 3);
   assert.equal(days[0].date, "2026-09-18");
   assert.equal(days[2].date, "2026-09-20");
-});
-
-test("calendarWeeks pads the first and last week to 7 cells, Monday first", () => {
-  // Sunday 2026-09-20 alone: weekday 6 (Mon=0), so 6 leading nulls then
-  // the one real day, then one trailing week is not started.
-  const days = calendarDays({}, [], 1, SUN_20, UTC);
-  const weeks = calendarWeeks(days);
-  assert.equal(weeks.length, 1);
-  assert.equal(weeks[0].length, 7);
-  assert.equal(weeks[0][6]?.date, "2026-09-20");
-  assert.deepEqual(weeks[0].slice(0, 6), [null, null, null, null, null, null]);
-});
-
-test("calendarWeeks of an empty day list is an empty grid", () => {
-  assert.deepEqual(calendarWeeks([]), []);
 });
 
 // ── fix-177: per-stack progress and merge ────────────────────────────────
@@ -300,15 +285,11 @@ test("monthDays: a day that did back up reads ok, same rule as calendarDays", ()
   assert.equal(days[19].tone, "ok");
 });
 
-test("monthDays feeds calendarWeeks the same way calendarDays does: never more than 6 weeks", () => {
+test("monthDays: one entry per day of the month, never more than six weeks of days", () => {
   for (let m = 1; m <= 12; m++) {
     const days = monthDays({}, [], 2026, m, "2026-12-31", null, UTC);
-    const weeks = calendarWeeks(days);
-    assert.ok(
-      weeks.length <= 6,
-      `month ${m} produced ${weeks.length} week rows`,
-    );
-    for (const w of weeks) assert.equal(w.length, 7);
+    assert.equal(days.length, new Date(Date.UTC(2026, m, 0)).getUTCDate());
+    assert.equal(days[0].date, `2026-${String(m).padStart(2, "0")}-01`);
   }
 });
 
@@ -318,29 +299,104 @@ test("earliestSnapshot: the oldest time across every stack, or null for nothing 
   assert.equal(earliestSnapshot({ gateway: [] }), null);
 });
 
-test("shiftMonth: a month back from January lands on last December", () => {
-  assert.deepEqual(shiftMonth({ year: 2026, month: 1 }, -1), {
-    year: 2025,
-    month: 12,
+test("dayCell: the tone, the n/m count and the plain words kp's calendar shows for a day", () => {
+  const ok = calendarDays(
+    { gateway: [SUN_20], media: [SUN_20] },
+    ["gateway", "media"],
+    1,
+    SUN_20,
+    UTC,
+  )[0];
+  assert.deepEqual(dayCell(ok), {
+    tone: "ok",
+    count: "2/2",
+    label: "2/2 stacks backed up",
   });
+  const warn = calendarDays(
+    { gateway: [SUN_20] },
+    ["gateway", "media"],
+    1,
+    SUN_20,
+    UTC,
+  )[0];
+  assert.deepEqual(dayCell(warn), {
+    tone: "warn",
+    count: "1/2",
+    label: "1/2 stacks backed up — missing: media",
+  });
+  const bad = calendarDays({}, ["gateway"], 1, SUN_20, UTC)[0];
+  assert.deepEqual(dayCell(bad), {
+    tone: "bad",
+    count: "0/1",
+    label: "0/1 stacks backed up — missing: gateway",
+  });
+  const muted = calendarDays({}, [], 1, SUN_20, UTC)[0];
+  assert.deepEqual(dayCell(muted), {
+    tone: "muted",
+    label: "no stack keeps data",
+  });
+  const month = monthDays(
+    { gateway: [SUN_20] },
+    ["gateway"],
+    2026,
+    9,
+    "2026-09-25",
+    SUN_20,
+    UTC,
+  );
+  assert.equal(
+    dayCell(month[4]).tone,
+    "before",
+    "a day before the oldest snapshot",
+  );
+  assert.match(
+    dayCell(month[4]).label,
+    /before the fleet's oldest known backup/,
+  );
+  assert.equal(dayCell(month[25]).tone, "future");
+  assert.match(dayCell(month[25]).label, /in the future/);
+  assert.equal(
+    "count" in dayCell(month[25]),
+    false,
+    "no count for a day with nothing to read",
+  );
 });
 
-test("shiftMonth: a month forward from December lands on next January", () => {
-  assert.deepEqual(shiftMonth({ year: 2026, month: 12 }, 1), {
-    year: 2027,
-    month: 1,
+test("historyCells: every day from a year before the oldest snapshot through today's month, keyed for kp", () => {
+  const cells = historyCells(
+    { gateway: [SUN_20] },
+    ["gateway"],
+    "2026-09-25",
+    UTC,
+  );
+  assert.deepEqual(cells["2026-09-20"], {
+    tone: "ok",
+    count: "1/1",
+    label: "1/1 stacks backed up",
   });
-});
-
-test("shiftMonth: a year (12 months) forward or back lands on the same month", () => {
-  assert.deepEqual(shiftMonth({ year: 2026, month: 5 }, 12), {
-    year: 2027,
-    month: 5,
-  });
-  assert.deepEqual(shiftMonth({ year: 2026, month: 5 }, -12), {
-    year: 2025,
-    month: 5,
-  });
+  assert.equal(cells["2026-09-10"].tone, "before");
+  assert.equal(
+    cells["2025-09-01"].tone,
+    "before",
+    "the year before the oldest snapshot is there",
+  );
+  assert.equal(cells["2026-09-26"].tone, "future", "the rest of today's month");
+  assert.equal(
+    cells["2026-10-01"],
+    undefined,
+    "a later month is absent: kp draws its own future",
+  );
+  assert.equal(
+    cells["2025-08-31"],
+    undefined,
+    "an older day is absent: kp draws unknown",
+  );
+  assert.equal(Object.keys(cells).length, 395, "Sep 2025 through Sep 2026");
+  assert.deepEqual(
+    historyCells({}, ["gateway"], "2026-09-25", UTC),
+    {},
+    "nothing read yet: nothing",
+  );
 });
 
 // ── fix-214: the day detail panel, built from the same `results` the grid

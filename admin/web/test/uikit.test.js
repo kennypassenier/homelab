@@ -1,38 +1,18 @@
 // redesign-kit-1 (3.71.0): the pure halves of the building blocks the
 // Backups, Host, Schedules and Secrets pages brought into the shared
-// ui.js — the KPI meter, the segmented toggle group, the sortable table,
-// the hover card and row menu placement, the toast's replace rule and the
+// ui.js — the segmented toggle group, the sortable table,
+// the hover card placement, the toast's replace rule and the
 // stack colours.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   chartColour,
   hueColour,
-  menuPlace,
-  meterParts,
   sortValue,
   tipPlace,
   toastsToDrop,
   toggleValue,
 } from "../js/ui.js";
-
-test("redesign-kit-1: a KPI meter is clamped to its bar, with its tick and tone", () => {
-  assert.deepEqual(meterParts({ pct: 41 }), { fill: 41, mark: null, tone: "" });
-  assert.deepEqual(meterParts({ pct: 140, mark: -5, tone: "bad" }), {
-    fill: 100,
-    mark: 0,
-    tone: "bad",
-  });
-  // An unknown reading draws an empty track, never a broken width.
-  assert.deepEqual(meterParts({ pct: null }), {
-    fill: 0,
-    mark: null,
-    tone: "",
-  });
-  assert.equal(meterParts({ pct: Number.NaN }).fill, 0);
-  assert.equal(meterParts(null).fill, 0);
-  assert.equal(meterParts({ pct: 50, mark: 46 }).mark, 46);
-});
 
 test("redesign-kit-1: a toggle group click turns one value on or off; every value on is All", () => {
   let on = new Set();
@@ -75,23 +55,6 @@ test("redesign-kit-1: the hover card sits under its element, above it at the foo
   assert.equal(
     tipPlace({ left: 990, top: 0, bottom: 10, width: 10 }, 200, 50, view).left,
     792,
-  );
-});
-
-test("redesign-kit-1: a row menu opens under its button's right edge, upwards near the foot", () => {
-  const view = { w: 1200, h: 800, x: 0, y: 300 };
-  assert.deepEqual(
-    menuPlace({ top: 100, bottom: 130, right: 1000 }, 150, view, 260),
-    { top: 434, left: 740 },
-  );
-  assert.deepEqual(
-    menuPlace({ top: 700, bottom: 730, right: 1000 }, 150, view, 260),
-    { top: 846, left: 740 },
-  );
-  assert.equal(
-    menuPlace({ top: 100, bottom: 130, right: 100 }, 150, view, 260).left,
-    8,
-    "never past the left edge",
   );
 });
 

@@ -21,7 +21,6 @@ import { startAgoTicker } from "./ago.js";
 import { areaOf, crumbs } from "./areas.js";
 import { mountChrome } from "./chrome.js";
 import { mountFollow } from "./drive.js";
-import { attachRowToggle } from "./rowtoggle.js";
 import { h } from "./dom.js";
 import { countText, inboxNow, onInbox, worst } from "./inboxlist.js";
 import { attachNavMenus, attachNavToggles } from "/static/kp/js/components.js";
@@ -29,6 +28,10 @@ import { attachMotion } from "/static/kp/js/motion.js";
 import { attachTableRegions } from "/static/kp/js/tables.js";
 import { attachActionColumns } from "/static/kp/js/actions.js";
 import { attachTileSets } from "/static/kp/js/tiles.js";
+import { attachKpiStrips, attachKpiToggles } from "/static/kp/js/kpi.js";
+import { attachDismissals } from "/static/kp/js/overlays.js";
+import { attachSelects } from "/static/kp/js/combobox.js";
+import { attachLoadingPieces } from "/static/kp/js/loading-pieces.js";
 import { loadPages, pages, subscribePages } from "./pages.js";
 import {
   STACK_TABS,
@@ -431,7 +434,6 @@ function fitBar() {
 }
 fitBar();
 addEventListener("resize", fitBar);
-attachRowToggle();
 // kp-themes' motion on the whole dashboard (Kenny, 2026-10-08: "alles wat
 // kp-themes te bieden heeft ten volle benutten"): every card eases to its
 // new height, and what is added to one arrives the theme's way. A live
@@ -452,6 +454,21 @@ attachActionColumns(document);
 // kp-themes' tiles.js: the tiles of every grid on one board (the Apps
 // groups, `data-kp-tiles-set`) share one height.
 attachTileSets(document);
+// kp-themes' kpi.js: a key figure strip takes the column count that fits its
+// own width, and a tile that toggles a filter flips and says so (ui.js kpi).
+attachKpiStrips(document);
+attachKpiToggles(document);
+// kp-themes' overlays.js: an alert's ✕ closes it the theme's way (explainNote).
+attachDismissals(document);
+// kp-themes' loading-pieces.js: a theme that draws its loading pictures from
+// pieces (pastel's caterpillar) gets them on every part that waits; the other
+// themes draw nothing extra.
+attachLoadingPieces(document);
+// kp-themes' combobox.js: every single select is the theme's drawn list over
+// the native select, which keeps the value (Live view and `.value` code are
+// unaffected); `data-kp-select="native"` opts one out. A page or a dialog
+// drawn later is covered by the observer.
+attachSelects(document);
 new MutationObserver((records) => {
   const roots = new Set();
   for (const r of records)
@@ -460,6 +477,11 @@ new MutationObserver((records) => {
   for (const root of roots)
     if (root instanceof Element && root.isConnected) attachTableRegions(root);
 }).observe(page, { childList: true, subtree: true });
+new MutationObserver((records) => {
+  for (const r of records)
+    for (const n of r.addedNodes)
+      if (n instanceof Element && n.isConnected) attachSelects(n);
+}).observe(document.body, { childList: true, subtree: true });
 // fix-176: the bar's content changes after the first paint, so it is
 // measured again whenever its content or its own size moves. Only
 // childList/characterData are watched: fitBar's own data-fold toggle is an

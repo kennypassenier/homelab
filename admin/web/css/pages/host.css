@@ -62,43 +62,6 @@ main.shell.hk-page > [hidden] {
   color: var(--foreground);
   white-space: nowrap;
 }
-.hk-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--muted-foreground);
-  flex: none;
-  display: inline-block;
-}
-.hk-dot--ok {
-  background: var(--hk-ok);
-}
-.hk-dot--warn {
-  background: var(--hk-warn);
-}
-.hk-dot--bad {
-  background: var(--hk-bad);
-}
-.hk-dot--live {
-  background: var(--hk-ok);
-  animation: hk-pulse 2s var(--hk-ease) infinite;
-}
-@keyframes hk-pulse {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in oklab, var(--hk-ok) 55%, transparent);
-  }
-  70% {
-    box-shadow: 0 0 0 6px transparent;
-  }
-  100% {
-    box-shadow: 0 0 0 0 transparent;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .hk-dot--live {
-    animation: none;
-  }
-}
 .hk-status {
   display: inline-flex;
   align-items: center;
@@ -204,31 +167,9 @@ main.shell.hk-page > [hidden] {
 .hk-tbl tr[hidden] {
   display: none;
 }
-.hk-bar {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  gap: 10px;
+/* a container's memory: ui.js shareBar (a kp meter and its figure) */
+.hk-tbl .nx-share {
   min-width: 200px;
-}
-.hk-bar > span:first-child {
-  height: 6px;
-  background: var(--muted);
-  border-radius: 3px;
-  overflow: hidden;
-  min-width: 60px;
-}
-.hk-bar > span:first-child > i {
-  display: block;
-  height: 100%;
-  background: var(--chart-1);
-  border-radius: 3px;
-}
-.hk-bar > span:last-child {
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 .hk-name {
   display: grid;
@@ -513,93 +454,4 @@ main.shell.hk-page > [hidden] {
   grid-column: 2;
   color: var(--muted-foreground);
   font-size: var(--kp-text-xs);
-}
-
-/* fix-371-1 (Kenny approved the Host tiles demo 2026-10-04:
-   redesign-3.71/demos-3711/host-kpis.html): the KPI tiles with a 24 h
-   trend at their foot that answers a pointer with its moment and value,
-   and "Charts ↗" in the corner. Label and context wrap rather than cut;
-   the strip's grid gives every tile the tallest one's height. */
-.hk-page .hx-kpi {
-  grid-template-rows: auto auto 1fr auto;
-  cursor: pointer;
-}
-.hk-page .hx-kpi .nx-kpi__label {
-  padding-inline-end: 5.5em;
-  white-space: normal;
-  overflow: visible;
-}
-.hk-page .hx-kpi .nx-kpi__ctx {
-  white-space: normal;
-  overflow: visible;
-}
-.hk-page .hx-kpi__ctx b {
-  color: var(--foreground);
-  font-weight: 600;
-}
-.hk-page .hx-kpi__go {
-  position: absolute;
-  inset-block-start: var(--kp-space-sm, 8px);
-  inset-inline-end: var(--kp-space-md, 12px);
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-.hk-page .hx-kpi:hover .hx-kpi__go,
-.hk-page .hx-kpi:focus-visible .hx-kpi__go {
-  color: var(--foreground);
-}
-.hk-page .hx-kpi:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-.hk-page .hx-trend {
-  position: relative;
-  display: grid;
-  grid-template-rows: 44px auto;
-  margin-block-start: var(--kp-space-xs, 4px);
-}
-.hk-page .hx-trend .nx-spark {
-  block-size: 44px;
-}
-.hk-page .hx-trend__axis {
-  display: flex;
-  justify-content: space-between;
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
-.hk-page .hx-trend__mark {
-  position: absolute;
-  inset-block: 0 auto;
-  block-size: 44px;
-  inline-size: 1px;
-  background: var(--foreground);
-  opacity: 0.5;
-  pointer-events: none;
-}
-.hk-page .hx-trend__read {
-  position: absolute;
-  inset-block-end: 100%;
-  transform: translateX(-50%);
-  padding: 2px var(--kp-space-xs, 6px);
-  border-radius: var(--hk-r-sm);
-  background: var(--popover, var(--card));
-  color: var(--popover-foreground, var(--foreground));
-  border: 1px solid var(--border);
-  font-size: var(--kp-text-xs);
-  white-space: nowrap;
-  pointer-events: none;
-  font-variant-numeric: tabular-nums;
-}
-.hk-page .hx-trend__mark[hidden],
-.hk-page .hx-trend__read[hidden] {
-  display: none;
-}
-@media (max-width: 48rem) {
-  .hk-page .hx-kpi .nx-kpi__label {
-    padding-inline-end: 1.5em;
-  }
-  .hk-page .hx-kpi__word {
-    display: none;
-  }
 }

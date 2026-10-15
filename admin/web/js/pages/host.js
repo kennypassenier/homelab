@@ -24,7 +24,7 @@ import { agoEl, setAgo } from "../ago.js";
 import { doctorRows } from "../doctor.js";
 import { fetchJson, h, slowReport } from "../dom.js";
 import { declare, declareField, drivable, viaForm } from "../drivable.js";
-import { formatClock, formatDateTime, humanDuration } from "../format.js";
+import { humanDuration } from "../format.js";
 import {
   actionBlurb,
   daemonSignature,
@@ -53,16 +53,18 @@ import {
   countOf,
   attentionBand,
   keyRow,
+  dot,
   moreMenu,
   pageHeader,
   section,
   segSwitch,
+  shareBar,
   skeleton,
   sortableTable,
   swatch,
   toggleGroup,
 } from "../ui.js";
-import { drawSparkline } from "/static/kp/js/kpi.js";
+import { attachTrendCharts, setTrendData } from "/static/kp/js/chart.js";
 
 /** Seconds between two readings of the container list and the ping. */
 const EVERY_S = 30;
@@ -148,95 +150,60 @@ const SORT_SETTINGS = declare({
   what: "sort the host settings table: each header clicked is a further sort key (again reverses it, a third time takes it out)",
 });
 
-/** @param {"ok" | "warn" | "bad" | "live" | ""} tone */
-const dot = (tone) =>
-  h("span", { class: `hk-dot${tone ? ` hk-dot--${tone}` : ""}` });
-
-const SVG = "http://www.w3.org/2000/svg";
-
 /**
  * fix-371-1: one Host tile, a link to its figure on Charts: label, the
  * big number, "now · peak · context", and the 24 h trend, which answers a
- * pointer with its moment and value. Loading until `set` gives it a tile.
+ * pointer with its moment and value. kp-themes' trend tile
+ * (`.kp-kpi--trend`: the whole tile is its `.kp-kpi__link`, the trend is
+ * the time chart's spark variant with the axis and the reading chip, drawn
+ * by `attachTrendCharts`). Loading until `set` gives it a tile.
  * @param {import("../host.js").HostFigure} fig
  */
 function trendTile(fig) {
-  const label = h("span", { class: "nx-kpi__label" }, fig.label);
-  const value = h("span", { class: "nx-kpi__value" }, skeleton("3ch"));
-  const ctx = h("span", { class: "nx-kpi__ctx hx-kpi__ctx" }, skeleton("80%"));
-  const svg = document.createElementNS(SVG, "svg");
-  svg.setAttribute("class", "nx-spark hx-spark");
-  svg.setAttribute("viewBox", "0 0 100 28");
-  svg.setAttribute("preserveAspectRatio", "none");
-  svg.setAttribute("aria-hidden", "true");
-  svg.style.color = `var(--chart-${fig.colour})`;
-  const from = h("span", null, "\u00a0");
-  const to = h("span", null, "\u00a0");
-  const mark = h("span", { class: "hx-trend__mark", hidden: "" });
-  const read = h("span", { class: "hx-trend__read", hidden: "" });
-  const box = h(
-    "span",
-    { class: "hx-trend" },
-    svg,
-    h("span", { class: "hx-trend__axis" }, from, to),
-    mark,
-    read,
-  );
-  const el = drivable(
+  const label = h("span", { class: "kp-kpi__label" }, fig.label);
+  const value = h("span", { class: "kp-kpi__value" }, skeleton("3ch"));
+  const ctx = h("span", { class: "kp-kpi__trend" }, skeleton("80%"));
+  const figure = h("figure", {
+    class: "kp-kpi__chart",
+    "data-kp-chart": "spark",
+    "data-kp-spark-head": "none",
+    "data-kp-spark-axis": "relative",
+    "data-kp-chart-loading": "",
+    "aria-label": `${fig.label}, last 24 hours`,
+    style: `--kp-chart-series: var(--chart-${fig.colour})`,
+  });
+  const link = drivable(
     h(
       "a",
       {
-        class: "nx-kpi hx-kpi",
+        class: "kp-kpi__link",
         href: fig.chart ? `/charts#chart-${fig.chart}` : "/charts",
-        "data-key": fig.key,
-        "data-loading": "",
+        title: "Open this figure on Charts",
       },
-      label,
-      h(
-        "span",
-        { class: "hx-kpi__go", "aria-hidden": "true" },
-        h("span", { class: "hx-kpi__word" }, "Charts "),
-        "↗",
-      ),
-      value,
-      ctx,
-      box,
+      h("span", { class: "kp-kpi__link-word" }, "Charts"),
+      " ↗",
     ),
     KPI_CHART,
     fig.key,
   );
-  /** @type {import("../host.js").HostTile | null} */
-  let cur = null;
-  const hide = () => {
-    mark.hidden = true;
-    read.hidden = true;
-  };
-  box.addEventListener("pointermove", (e) => {
-    const pts = cur?.points ?? [];
-    if (pts.length < 2 || !cur) return;
-    const r = svg.getBoundingClientRect();
-    const i = Math.max(
-      0,
-      Math.min(
-        pts.length - 1,
-        Math.round(((e.clientX - r.left) / r.width) * (pts.length - 1)),
-      ),
-    );
-    const x = (i / (pts.length - 1)) * r.width;
-    const [t, v] = pts[i];
-    mark.style.insetInlineStart = `${x}px`;
-    read.style.insetInlineStart = `${Math.max(56, Math.min(r.width - 56, x))}px`;
-    read.textContent = `${formatDateTime(t)} · ${cur.fmt(v)}`;
-    mark.hidden = false;
-    read.hidden = false;
-  });
-  box.addEventListener("pointerleave", hide);
+  const el = h(
+    "div",
+    {
+      class: "kp-kpi kp-kpi--trend hx-kpi",
+      "data-key": fig.key,
+      "data-loading": "",
+    },
+    label,
+    link,
+    value,
+    ctx,
+    figure,
+  );
   return {
     fig,
     el,
     /** @param {import("../host.js").HostTile} t */
     set: (t) => {
-      cur = t;
       delete el.dataset.loading;
       el.title = t.title;
       label.textContent = t.label;
@@ -248,14 +215,13 @@ function trendTile(fig) {
         ...(t.now ? ["now ", h("b", null, t.now), " · "] : []),
         t.rest,
       );
-      const vs = t.points.map((p) => p[1]);
-      // kp-themes' drawSparkline (js/kpi.js), the line every sparkline of
-      // the dashboard draws (ui.js sparkline); under two points, nothing.
-      drawSparkline(svg, vs, { parts: "nx-spark" });
-      from.textContent =
-        t.from != null ? `${formatClock(t.from)} yesterday` : "\u00a0";
-      to.textContent = t.from != null ? "now" : "\u00a0";
-      if (vs.length < 2) hide();
+      // The points are unix seconds; kp's trend takes milliseconds.
+      setTrendData(figure, {
+        points: t.points.map(([s, v]) => [s * 1000, v]),
+        step: 600_000,
+        digits: 1,
+      });
+      attachTrendCharts(document);
     },
   };
 }
@@ -361,13 +327,13 @@ export function mount(root, ctx) {
   const kpisEl = h(
     "div",
     {
-      class: "nx-kpis hx-kpis",
+      class: "kp-kpis hx-kpis",
+      "data-kp-kpis-columns": "4 2 1",
       role: "group",
       "aria-label": "The host's figures",
     },
     ...tiles.map((t) => t.el),
   );
-  kpisEl.style.setProperty("--kpi-n", "4");
 
   // ── Containers ────────────────────────────────────────────────────────
   /** @type {import("../host.js").Guest[] | null} */
@@ -539,16 +505,10 @@ export function mount(root, ctx) {
             "td",
             { class: "hk-hide-phone", "data-sort": g.ramUsed ?? -1 },
             g.ramUsed != null && g.ramMax
-              ? (() => {
-                  const fill = h("i");
-                  fill.style.width = `${Math.min(100, (g.ramUsed / g.ramMax) * 100)}%`;
-                  return h(
-                    "div",
-                    { class: "hk-bar" },
-                    h("span", null, fill),
-                    h("span", null, `${gib(g.ramUsed)} / ${gib(g.ramMax)} GiB`),
-                  );
-                })()
+              ? shareBar(
+                  (g.ramUsed / g.ramMax) * 100,
+                  `${gib(g.ramUsed)} / ${gib(g.ramMax)} GiB`,
+                )
               : h(
                   "span",
                   {
@@ -984,9 +944,9 @@ export function mount(root, ctx) {
         ? `Answered in ${r.body.ms} ms: ${r.body.message}`
         : `No answer after ${r.body.ms} ms: ${r.body.message}`;
     }
-    pingDot.className = `hk-dot hk-dot--${lineOk ? "ok" : "bad"}`;
+    pingDot.dataset.state = lineOk ? "ok" : "down";
     reach.replaceChildren(
-      dot(lineOk ? "live" : "bad"),
+      dot(lineOk ? "ok" : "bad"),
       lineOk && r.ok ? `Reachable · ${r.body.ms} ms` : "Not reachable",
     );
     attention.set(

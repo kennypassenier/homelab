@@ -164,53 +164,6 @@ a.kp-button:visited {
   }
 }
 
-/* `.stat-grid` is the other half (Kenny, 2026-10-01): short stat tiles —
-   a host card, a batch's totals — that should sit in a grid of their own
-   place rather than trail down the page as a single column. */
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 10px 12px;
-  margin: 0;
-}
-.stat-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius, 6px);
-  background: var(--card);
-  color: var(--card-foreground, inherit);
-}
-.stat-tile__label {
-  font-size: 0.8em;
-  color: var(--muted-foreground);
-}
-.stat-tile__value {
-  font-size: 1.2em;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
-}
-/* A fixed three-across grid for a known six tiles (the host card): auto-fit
-   left five in a row and one orphan, and the longest value ("25.4 GB of
-   64.0 GB") wrapped in a 160px tile, giving the row uneven heights. Three
-   columns divide six evenly and give every value room for one line. */
-.stat-grid--3 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-.stat-grid--3 .stat-tile__value {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-@media (max-width: 40rem) {
-  .stat-grid--3 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 /* A label beside its value on one row (Kenny, 2026-10-01): "The same from
    a workstation:" used to sit on its own line above the CLI line below it.
    `.cli-row` keeps both on one row and wraps only when the row itself runs
@@ -280,26 +233,7 @@ a.kp-button:visited {
   );
   font-size: var(--kp-mono-size, 0.9em);
 }
-.state {
-  font-size: 0.85em;
-}
-.state span {
-  padding: 2px 8px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-.state.ok span {
-  background: var(--success);
-  color: var(--success-foreground);
-}
-.state.warn span {
-  background: var(--warning);
-  color: var(--warning-foreground);
-}
-.state.bad span {
-  background: var(--destructive);
-  color: var(--destructive-foreground);
-}
+
 .error p {
   margin: 4px 0 0;
 }
@@ -387,27 +321,7 @@ p:has(> .measured:only-child):first-child {
 .kp-tabs__list a.kp-tab {
   text-decoration: none;
 }
-/* feat-ops-4: the logs tab's controls wrap on a phone. */
-.logs-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: 8px 16px;
-  margin-block: 12px;
-}
-.logs-field {
-  min-inline-size: 10rem;
-}
-.logs-follow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding-block-end: 8px;
-}
-.logline {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
+
 /* feat-ops-7: the timeline's own SVG, coloured by the theme's tokens. */
 .timeline {
   inline-size: 100%;
@@ -446,9 +360,7 @@ p:has(> .measured:only-child):first-child {
   stroke: var(--foreground);
   stroke-width: 2;
 }
-.timeline-detail {
-  min-block-size: 1.5em;
-}
+
 .timeline-legend {
   display: flex;
   flex-wrap: wrap;
@@ -498,20 +410,12 @@ p:has(> .measured:only-child):first-child {
 #host-bars .kp-progress-group {
   max-inline-size: 40rem;
 }
-/* Milestone act. */
-.state.info span {
-  background: var(--muted);
-  color: var(--foreground);
-}
+
 /* feat-stacks-4: the actions area, grouped buttons that wrap on a phone. */
 .actions-area h2 {
   margin-block: 0 8px;
 }
-.actions-group__label {
-  font-size: 0.85em;
-  color: var(--muted-foreground);
-  margin: 12px 0 6px;
-}
+
 /* fix-233: every action group lays its buttons on the same column grid, so
    buttons line up across groups instead of each row ending ragged. */
 .actions-row {
@@ -527,9 +431,7 @@ p:has(> .measured:only-child):first-child {
   text-align: center;
   white-space: nowrap;
 }
-.actions-running:not(:empty) {
-  margin-block-start: 12px;
-}
+
 /* The action dialog and its wizard; full width on a phone. Widened
    (Kenny, 2026-10-01): a review step's plan, diff and CLI line were
    cramped at 40rem and wrapped far more than the screen needed to. */
@@ -940,10 +842,7 @@ p:has(> .measured:only-child):first-child {
   gap: 8px;
   margin-block: 8px;
 }
-.batch-action {
-  inline-size: auto;
-  min-inline-size: 12rem;
-}
+
 /* feat-batch-1: both lists are grids whose rows share their columns
    (subgrid), so every name, pill and button sits under the one above. */
 .batch-preview,
@@ -1047,34 +946,7 @@ p:has(> .measured:only-child):first-child {
 .kp-nav .bell[data-snoozed="true"] {
   opacity: 0.6;
 }
-.bell-count {
-  position: absolute;
-  inset-block-start: -2px;
-  inset-inline-end: -4px;
-  font-size: 0.7em;
-  padding: 0 5px;
-  background: var(--destructive);
-  color: var(--destructive-foreground);
-}
-.notify-settings .kp-switch {
-  margin-block: 4px;
-}
-.inline-fields {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: 8px 12px;
-}
-.inline-fields .kp-field {
-  min-inline-size: 12rem;
-  margin: 0;
-}
-/* The field's help sits under the row, so the row holds only a label, a
-   control and buttons of the control's height, aligned on their bottoms. */
-.inline-fields__help {
-  display: block;
-  margin: 4px 0 12px;
-}
+
 .snooze-state[data-on="true"] {
   font-weight: 600;
 }
@@ -1349,31 +1221,7 @@ td.stack-flags {
   display: table-cell;
   white-space: nowrap;
 }
-.stack-links,
-.host-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-block: 8px;
-}
-/* Today: the verdict first. `.kp-alert` is `display: flex` but still a
-   block box, so it filled the page's full width under a short line like
-   "1 thing needs you" — a tinted bar mostly empty space (Kenny,
-   2026-10-02). `inline-flex` shrinks it to its own content, same icon,
-   padding and colour kp's alert already draws; `max-inline-size: 100%`
-   keeps a long verdict wrapping inside the page rather than overflowing. */
-.today-verdict {
-  display: inline-flex;
-  max-inline-size: 100%;
-  font-size: 1.1em;
-  margin-block: 8px;
-}
-.today-unread {
-  list-style: none;
-  padding: 0;
-  display: grid;
-  gap: 6px;
-}
+
 /* The live log: tall, wrapping, scrollable back. */
 .host-log {
   min-block-size: 8rem;
@@ -1382,9 +1230,7 @@ td.stack-flags {
   overflow-wrap: anywhere;
   align-content: start;
 }
-.host-log__who {
-  font-size: 0.85em;
-}
+
 .transfers {
   margin-block: 8px;
 }
@@ -1392,30 +1238,7 @@ td.stack-flags {
   margin-block: 0 8px;
   font-size: 1em;
 }
-/* The shell: a transcript, then the prompt. */
-.shell-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  align-items: end;
-}
-.shell-out {
-  border: 1px solid var(--kp-color-border, var(--border, currentColor));
-  border-radius: var(--radius, 6px);
-  padding: 8px;
-  margin-block: 12px 8px;
-  min-block-size: 12rem;
-  max-block-size: 60vh;
-  overflow: auto;
-}
-.shell-entry {
-  margin-block-end: 10px;
-}
-.shell-cmd {
-  margin: 0 0 4px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
+
 .shell-output,
 .incident-text {
   margin: 0;
@@ -1423,19 +1246,7 @@ td.stack-flags {
   overflow-wrap: anywhere;
   font-size: 0.9em;
 }
-.shell-output--failed {
-  border-inline-start: 3px solid var(--destructive, currentColor);
-  padding-inline-start: 6px;
-}
-.shell-input {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.shell-input input {
-  flex: 1;
-  min-inline-size: 0;
-}
+
 .incident-text {
   max-block-size: 70vh;
   overflow: auto;
@@ -1447,27 +1258,7 @@ td.stack-flags {
 .act-plan summary {
   cursor: pointer;
 }
-.apply-stack summary a {
-  font-weight: 600;
-}
-/* fix-210: the fleet-wide Apply section, now embedded in Overview — its
-   groups (deploy/destroy/rest) and their rows sit in one CSS grid column
-   so every row aligns to the same left edge and width instead of the
-   loose paragraphs/`<ul>`s the old standalone page had. */
-.apply-step + .apply-step {
-  margin-block-start: 16px;
-}
-.apply-group {
-  margin-block: 8px;
-}
-.apply-group h3 {
-  margin-block-end: 4px;
-}
-.apply-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 6px;
-}
+
 .apply-row {
   margin: 0;
 }
@@ -1502,7 +1293,7 @@ td.stack-flags {
     display: none;
   }
   /* fix-371-1 (Kenny, 2026-10-04): at 390 px the theme button wrapped to a
-     second row in 21 of 22 themes (measured). The bar is one row: the
+     second row in 21 of the themes then shipped (measured; 16 ship now). The bar is one row: the
      brand, Live view and the theme button keep their size, the search box
      takes what is left, and Live view's switch shows its state without the
      "Off" word beside it (the switch reads On or Off to a screen reader). */
@@ -1541,43 +1332,10 @@ td.stack-flags {
    changes, so a second click without moving the mouse hits the same
    element; controls of one height line up; a button never wraps. */
 
-/* A word that changes with its control ("on" / "muted", "off" / a time):
-   as wide as the widest word it can show (dom.js stateWord; the words sit
-   in data-size, one per line, in an invisible zero-height sizer). */
-.state-word {
-  display: inline-flex;
-  flex-direction: column;
-  font-variant-numeric: tabular-nums;
-}
-.state-word::after {
-  content: attr(data-size);
-  white-space: pre;
-  block-size: 0;
-  overflow: hidden;
-  visibility: hidden;
-}
-
 /* A button's label stays on one line: "Mark read", "Answer…", "Review and
    commit…". The table around it scrolls sideways before a label breaks. */
 .kp-button {
   white-space: nowrap;
-}
-/* The column of a row's own button keeps the button's width when the
-   button gives way to a word ("Mark read" → "read"), and the cell keeps
-   the button's height. */
-.grid th.col-button {
-  width: 1%;
-  min-inline-size: 7rem;
-  white-space: nowrap;
-}
-.read-mark {
-  display: inline-flex;
-  align-items: center;
-  min-block-size: var(
-    --kp-button-height-sm,
-    max(1.75rem, calc(var(--kp-control-height, 2.25rem) - 0.5rem))
-  );
-  min-inline-size: 6rem;
 }
 
 /* Decision notify-detail (2026-09-30): a notice's page link and its Fix
@@ -1612,12 +1370,6 @@ td.stack-flags {
 [data-kp-remember="notices"] .num,
 [data-kp-remember="notify-stacks"] .num {
   text-align: right;
-}
-.notify-title {
-  max-width: 32rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* A table the page fills on request stays out of sight until then. */
@@ -2051,447 +1803,11 @@ td.stack-flags {
 }
 /* ==== END Live view cursor ==== */
 
-/* replace-homepage (2026-09-30): the start page's tiles. */
-.start {
-  display: grid;
-  gap: 20px;
-}
-.start-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
-  gap: 12px;
-}
-.start-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: inherit;
-  text-decoration: none;
-}
-.start-tile:hover,
-.start-tile:focus-visible {
-  border-color: var(--primary);
-}
-.start-tile__name {
-  font-weight: 600;
-}
-.start-tile__desc,
-.start-tile__line {
-  font-size: 0.9em;
+/* topology.js's empty figure */
+.chart__empty {
   color: var(--muted-foreground);
-}
-.start-tile__error {
-  font-size: 0.85em;
-  color: var(--destructive);
 }
 
-/* Activity (2026-09-30): the List/Timeline toggle; the Timeline sub-page
-   still paints its own h1, hidden here since the page's own h1 already
-   says Activity. */
-.activity-body h1 {
-  display: none;
-}
-
-/* Health (2026-09-30): Today, Doctor and Checks as three <details> blocks;
-   each sub-page still paints its own h1, hidden here since the <summary>
-   already carries the block's name. */
-.health-block {
-  margin-block: 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 12px;
-}
-.health-block summary {
-  display: flex;
-  align-items: center;
-  gap: 8px 12px;
-  flex-wrap: wrap;
-  cursor: pointer;
-  list-style: none;
-}
-/* fix-233: a summary laid out as flex loses the browser's own disclosure
-   triangle, so a closed block gave no sign it opens. One chevron, turned
-   when open, on every collapsible block. */
-.health-block summary::-webkit-details-marker {
-  display: none;
-}
-.health-block summary::before {
-  content: "";
-  flex: none;
-  inline-size: 0.5rem;
-  block-size: 0.5rem;
-  border-inline-end: 2px solid currentColor;
-  border-block-end: 2px solid currentColor;
-  transform: rotate(-45deg);
-  transition: transform 0.15s ease;
-  margin-inline: 2px 4px;
-}
-.health-block[open] > summary::before {
-  transform: rotate(45deg);
-}
-.health-block summary h2 {
-  display: inline;
-  margin: 0;
-}
-/* fix-250: a heading with its description (`sectionHeader`) is wider than
-   a phone's line beside the chevron, so the flex row wrapped it onto a
-   line of its own and left the chevron alone above it. It shrinks into
-   the space beside the chevron instead. */
-.health-block summary > .section-head {
-  flex: 1 1 12rem;
-  min-inline-size: 0;
-}
-/* The sub-page's own action buttons (Today's "Read again", Doctor's
-   Refresh + its state badge) move into the summary itself (health.js
-   `adoptActions`), right-aligned beside the block's name, so opening a
-   block and acting on it read as one line instead of a bare button sitting
-   alone under the heading (Kenny, 2026-10-02). */
-.health-block summary .kp-button,
-.health-block summary .state {
-  margin-inline-start: auto;
-}
-.health-block summary .kp-button + .kp-button,
-.health-block summary .kp-button + .state,
-.health-block summary .state + .kp-button {
-  margin-inline-start: 0;
-}
-/* The sub-page's own h1 sits inside a `.title-row` with its own buttons
-   (Today's "Read again", Doctor's refresh), not as the body's direct
-   child, so the selector has to reach it as a descendant (Kenny,
-   2026-10-01: "Today" was painting twice — once as the <summary>, once as
-   this hidden-in-theory heading right under it). */
-.health-block__body h1 {
-  display: none;
-}
-
-/* replace-homepage's health strip (2026-09-30): below the tiles, only when
-   something needs Kenny. It is a `kp-alert` now (Kenny, 2026-10-02: it used
-   to be a one-off tinted box, its own border colour and no gap above it —
-   it sat flush against the last tile group); the same 20px the tile groups
-   themselves are spaced by, instead of a bare block right under them. */
-.health-strip {
-  margin-block-start: 20px;
-}
-.health-strip__toggle {
-  all: unset;
-  cursor: pointer;
-  display: block;
-  width: 100%;
-}
-.health-strip__glyph {
-  display: inline-block;
-  width: 1em;
-}
-.health-strip__list {
-  margin: 8px 0 0;
-  padding-inline-start: 1.5em;
-}
-.health-strip__list[hidden] {
-  display: none;
-}
-
-/* replace-grafana (2026-09-30): the charts page. fix-206: `min(26rem,
-   100%)` instead of a bare `26rem` — at 390px a bare 26rem (416px) track
-   forced the whole page to scroll sideways; clamping the minimum to the
-   container lets the grid fall back to one column instead. */
-/* fix-235: the Metrics page's header and toolbar, the same on both tabs. */
-.metrics-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "title tabs" "desc tabs";
-  column-gap: var(--kp-space-lg, 1.5rem);
-  row-gap: 4px;
-  align-items: center;
-}
-.metrics-head__title {
-  grid-area: title;
-  margin: 0;
-}
-.metrics-head__desc {
-  grid-area: desc;
-  margin: 0;
-}
-.metrics-head__tabs {
-  grid-area: tabs;
-  justify-self: end;
-}
-.metrics-toolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 28rem) 1fr auto;
-  grid-template-areas: "scope . ranges" "status status status";
-  column-gap: var(--kp-space-lg, 1.5rem);
-  row-gap: 8px;
-  align-items: center;
-}
-.metrics-toolbar__scope-cell {
-  grid-area: scope;
-  min-width: 0;
-}
-.metrics-toolbar__scope-cell > * {
-  margin: 0;
-  width: 100%;
-}
-.metrics-toolbar__ranges {
-  grid-area: ranges;
-}
-.metrics-toolbar__status {
-  grid-area: status;
-}
-.metrics-toolbar__status > p {
-  margin: 0;
-}
-@media (max-width: 40rem) {
-  .metrics-head {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "title" "desc" "tabs";
-  }
-  .metrics-head__tabs {
-    justify-self: start;
-  }
-  .metrics-toolbar {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "scope" "ranges" "status";
-  }
-}
-.chart-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(26rem, 100%), 1fr));
-  gap: 16px;
-}
-.chart {
-  margin: 0;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.chart figcaption {
-  font-weight: 600;
-  margin-block-end: 6px;
-}
-.chart__desc {
-  margin: 0 0 8px;
-  font-size: 0.85em;
-  color: var(--muted-foreground);
-}
-.chart__svg {
-  width: 100%;
-  height: auto;
-}
-.chart__grid {
-  stroke: var(--border);
-  stroke-width: 1;
-}
-.chart__tick {
-  font-size: 11px;
-  fill: var(--muted-foreground);
-}
-/* fix-220 (Kenny, 2026-10-02: "amper van elkaar te distinguieren"): one hue
-   per series, evenly spaced (`charts.js`'s `seriesHues`), the same pattern
-   `--stack-hue` gives the topology's legend — enough separation for any
-   number of series, not just the first 6. `--dim` (hover/focus isolation,
-   mirroring `.topology__edge--dim`) fades every series but the one pointed
-   at. */
-.chart__line {
-  fill: none;
-  stroke-width: 1.6;
-  stroke: light-dark(
-    hsl(var(--chart-hue, 210) 65% 42%),
-    hsl(var(--chart-hue, 210) 70% 64%)
-  );
-  opacity: 0.9;
-  transition: opacity 0.15s ease;
-}
-.chart__line--dim {
-  opacity: 0.15;
-}
-/* fix-253: a series with one reading draws as a point, in its line's hue. */
-.chart__point {
-  fill: light-dark(
-    hsl(var(--chart-hue, 210) 65% 42%),
-    hsl(var(--chart-hue, 210) 70% 64%)
-  );
-  transition: opacity 0.15s ease;
-}
-.chart__point.chart__line--dim {
-  opacity: 0.15;
-}
-.chart__note {
-  margin: 4px 0 0;
-  font-size: 0.85em;
-}
-.chart__legend {
-  list-style: none;
-  padding: 0;
-  margin: 6px 0 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  font-size: 0.85em;
-}
-.chart__key {
-  transition: opacity 0.15s ease;
-}
-.chart__key--dim {
-  opacity: 0.4;
-}
-.chart__key::before {
-  content: "";
-  display: inline-block;
-  width: 10px;
-  height: 3px;
-  margin-inline-end: 6px;
-  vertical-align: middle;
-  background: light-dark(
-    hsl(var(--chart-hue, 210) 65% 42%),
-    hsl(var(--chart-hue, 210) 70% 64%)
-  );
-}
-/* fix-220: Drive health draws as a status table, not a line chart — every
-   healthy drive used to read the same constant value and overlap into what
-   looked like one line. */
-.chart--health .chart__health-table {
-  margin-top: 4px;
-}
-.chart__empty,
-.chart__error {
-  color: var(--muted-foreground);
-}
-.chart__error {
-  color: var(--destructive);
-}
-.chart-ranges {
-  display: flex;
-  gap: 4px;
-}
-
-/* feat-overview-10: the backup calendar. */
-/* fix-202 (Kenny, 2026-10-02, verbatim: "die kalender zelf is veeeeeeel te
- * klein, die gebruikt misschien een derde van de breedte van de pagina?
- * hetzelfde voor alles vanaf de legende"): everything from the legend down
- * used to be capped at a hard 28rem regardless of the page's own width
- * (`.shell`'s `max(80vw, 64rem)`), so on a 4K screen it sat in a third of a
- * third of the page. Nothing here carries its own max-width any more — it
- * fills whatever `.shell` gives it, fluid down to a phone, with bigger
- * cells and type to match. */
-.backup-cal__legend {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  font-size: 0.95em;
-  color: var(--muted-foreground);
-  margin-block-end: 10px;
-}
-.backup-cal__grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 6px;
-  width: 100%;
-}
-.backup-cal__head {
-  font-size: 0.8em;
-  color: var(--muted-foreground);
-  text-align: center;
-}
-.backup-cal__cell {
-  aspect-ratio: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  font-size: 1em;
-  width: 1.4em;
-  height: 1.4em;
-}
-/* fix-214: the grid's cells are buttons now (a day picker, clickable and
- * tabbable), reset to the plain block the calendar always drew — merged
- * with the sizing rule below so there is exactly one `.backup-cal__grid
- * .backup-cal__cell` rule. The border reset excludes `--future`/`--before`
- * (`:not()`, found from a screenshot, not a test): an EQUAL-specificity
- * `border: none` here used to win over their single-class dashed border
- * regardless of source order, in both the grid AND the legend swatch. */
-.backup-cal__grid .backup-cal__cell {
-  width: auto;
-  height: auto;
-  font-size: clamp(0.85rem, 1.4vw, 1.15rem);
-  appearance: none;
-  font-family: inherit;
-  cursor: pointer;
-  flex-direction: column;
-  gap: 1px;
-  padding: 0;
-}
-.backup-cal__grid
-  .backup-cal__cell:not(.backup-cal__cell--future):not(
-    .backup-cal__cell--before
-  ) {
-  border: none;
-}
-/* fix-259 (design review, 2026-10-03): a cell's colour is a status, so it
- * comes from kp-themes' status tokens, never the decorative chart palette
- * (`--chart-3` is pink in dark). The foreground-strength tokens fill: the
- * plain `--success`/`--warning` are the faint plates a badge's text sits on. */
-.backup-cal__cell--ok {
-  background: var(--success-foreground);
-  color: var(--background);
-}
-.backup-cal__cell--warn {
-  background: var(--warning-foreground);
-  color: var(--background);
-}
-.backup-cal__cell--bad {
-  background: var(--destructive);
-  color: var(--destructive-foreground, var(--background));
-}
-.backup-cal__cell--muted {
-  background: var(--border);
-  color: var(--muted-foreground);
-}
-/* fix-214: a day the host's data cannot speak to — later than today, or
- * before the fleet's oldest snapshot ever — reads as its own plain,
- * unmistakably-not-measured state, never a false "no stack backed up" red.
- * Applies both in the grid (a real day cell) and in the legend (a plain
- * swatch) — the grid's own border reset above explicitly excludes these
- * two classes, so this one rule is enough for both. */
-.backup-cal__cell--future,
-.backup-cal__cell--before {
-  background: transparent;
-  border: 2px dashed var(--muted-foreground);
-  color: var(--muted-foreground);
-}
-.backup-cal__cell--pad {
-  background: transparent;
-}
-.backup-cal__cell--selected {
-  outline: 2px solid var(--ring, var(--foreground));
-  outline-offset: 1px;
-}
-.backup-cal__cell--today {
-  box-shadow: inset 0 0 0 2px var(--foreground);
-}
-.backup-cal__cell-day {
-  font-weight: 600;
-}
-.backup-cal__cell-count {
-  font-size: 0.7em;
-  opacity: 0.85;
-}
-/* fix-177: the grid's shape (headers, 35 cells, the week padding) is laid
- * out at once; a cell waiting on its stack's own read is this modifier
- * instead of a tone, so nothing resizes when the real colour lands — only
- * the cell's own background changes, reusing kp-themes' own skeleton pulse
- * (`kp-pulse`, kp-themes.css) rather than a hand-rolled animation. */
-.backup-cal__cell--skeleton {
-  background: var(--muted);
-}
-@media (prefers-reduced-motion: no-preference) {
-  .backup-cal__cell--skeleton {
-    animation: kp-pulse 1600ms ease-in-out infinite;
-  }
-}
 /* fix-224 (Kenny, Dutch: "welke doet die dan niet? waarom kan ik dat niet
  * zien?"): a per-stack read's progress as a named chip grid — one chip per
  * stack, every state its own colour, instead of a bare "N of M" a reader
@@ -2547,17 +1863,7 @@ td.stack-flags {
 .perstack-chip__retry {
   flex: none;
 }
-.backups__chips-wrap {
-  margin-block-end: 8px;
-}
-/* fix-241: Restore and "Show a file…" side by side in one cell, a grid so
- * both buttons keep their place on every row. */
-.backups__actions {
-  display: grid;
-  grid-auto-flow: column;
-  justify-content: start;
-  gap: 6px;
-}
+
 /* fix-241: the "Show a file…" dialog — fields, the button, the status and
  * the file, one grid; the file pane keeps its height before, during and
  * after a read, so nothing moves when the answer arrives (rule 6). */
@@ -2587,86 +1893,6 @@ td.stack-flags {
   padding: 8px;
   border: 1px solid var(--kp-color-border, currentColor);
   border-radius: 6px;
-}
-
-/* fix-214: month navigation (prev/next/Today + the "Month Year" heading)
- * and the calendar/detail two-column layout — a grid, per rule 6, so the
- * two panes keep the same place across every state (loading, a day picked,
- * nothing picked) rather than the detail pane appearing and shoving things
- * around. */
-/* M9: the month's ‹ title › and Today on one grid row; on a phone the
-   title takes the space left, so Today never pushes the page sideways. */
-.backup-cal__nav {
-  display: grid;
-  grid-template-columns: auto minmax(0, max-content) auto auto;
-  justify-content: start;
-  align-items: center;
-  gap: 10px;
-  margin-block-end: 10px;
-}
-.backup-cal__nav h2 {
-  margin: 0;
-  min-width: 0;
-  text-align: center;
-  font-size: 1.1em;
-}
-.backup-cal__chips-wrap {
-  margin-block-end: 8px;
-}
-/* fix-214: the detail pane is a FIXED width, not a fraction of the row — a
- * proportional column would eat into the grid Kenny already measured at
- * 75% of the content width (fix-202's own invariant), and the day detail
- * never needs more than this to read comfortably. */
-.backup-cal__layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 16rem;
-  gap: 16px;
-  align-items: start;
-}
-@media (max-width: 720px) {
-  .backup-cal__layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-.backup-cal__detail {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  min-height: 8rem;
-}
-.backup-cal__detail h3 {
-  margin: 0 0 8px;
-}
-.backup-cal__detail-empty {
-  margin: 0;
-}
-.backup-cal__detail-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 4px;
-}
-.backup-cal__detail-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 0.92em;
-  padding: 2px 0;
-  border-bottom: 1px solid var(--border);
-}
-.backup-cal__detail-row--backed_up .backup-cal__detail-state {
-  color: var(--success-foreground);
-}
-.backup-cal__detail-row--missing .backup-cal__detail-state {
-  color: var(--destructive);
-}
-.backup-cal__detail-row--no_backup .backup-cal__detail-state,
-.backup-cal__detail-row--not_read .backup-cal__detail-state {
-  color: var(--muted-foreground);
-}
-.backup-cal__detail-stack {
-  font-weight: 600;
 }
 
 /* feat-overview-7 / feat-firewall-3: the topology graph. */
@@ -2902,116 +2128,6 @@ td.stack-flags {
   );
 }
 
-/* replace-kuma (2026-09-30): the minute watch's dot on a tile. */
-.start-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-inline-end: 8px;
-  vertical-align: middle;
-  /* "Not watched": visible as a deliberate grey on light and dark grounds,
-     not a missing dot (screenshot review 2026-10-01). */
-  background: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
-}
-/* Status colours mean the same in every theme (Kenny, 2026-10-01: in Dark
-   the chart hues made "up" pink and "failing" purple). Fixed hues, not the
-   theme's chart palette; a thin ring keeps a dot visible on any ground. */
-.start-dot {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 25%, transparent);
-}
-.start-dot--up {
-  background: #2fa86a;
-}
-.start-dot--flaky {
-  background: #e3a21a;
-}
-.start-dot--down {
-  background: #e5484d;
-}
-/* Decision "deploys are known outages" (2026-09-30): a known outage, not a
-   fault — an accent colour, never the up/down/flaky ones. */
-.start-dot--deploying {
-  background: #3e8ed0;
-}
-.start-legend {
-  margin-block-start: 24px;
-  padding: 12px 16px;
-}
-.start-legend__title {
-  font-size: 0.95rem;
-  margin: 0 0 8px;
-}
-.start-legend__list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 24px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: 0.9em;
-  color: var(--muted-foreground);
-}
-.start-legend__item {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.start-legend .kp-swatch.start-dot {
-  inline-size: 10px;
-  block-size: 10px;
-  margin: 0;
-}
-
-/* feat-pages-1 (chassis-rs 3.1.0): the kit's own pages, drawn by this app
-   (Status, Clients, Passkeys). */
-.status-rows {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 4px 16px;
-  margin: 0;
-}
-.status-rows dt {
-  color: var(--muted-foreground);
-}
-.status-rows dd {
-  margin: 0;
-}
-.status-actions {
-  margin-block-start: 12px;
-  flex-wrap: wrap;
-}
-.status-action {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.status-problems {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0 0 16px;
-  padding: 0;
-  list-style: none;
-}
-.client-manage {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-block-start: 8px;
-}
-.client-manage h4 {
-  margin: 8px 0 0;
-  font-size: 0.9rem;
-}
-.passkeys-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
 /* fix-230 (Kenny, 2026-10-02): kp's failed slot — "Could not read the
    capacity map…" with its Try again — is a flex row, and at 390 px the
    reason's long words pushed the button past the box's right edge. One
@@ -3044,20 +2160,7 @@ td.stack-flags {
   row-gap: 4px;
   overflow-wrap: anywhere;
 }
-/* fix-231: the stale-image row's own action column, and its Update
-   dialog — the facts on the shared `.facts` grid, the steps and their
-   states on one three-column grid (number, step, state), so nothing moves
-   sideways as a step goes from waiting to done. */
-.stale__action {
-  white-space: nowrap;
-}
-td.measured.stale__action {
-  white-space: normal;
-  min-width: 14em;
-}
-.stale__latest .state {
-  margin-inline-start: 4px;
-}
+
 .pin-update {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -3181,20 +2284,7 @@ td.measured.stale__action {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.nx-spin {
-  flex: none;
-  inline-size: 10px;
-  block-size: 10px;
-  border-radius: 50%;
-  border: 2px solid var(--primary);
-  border-inline-end-color: transparent;
-  animation: nx-rot 900ms linear infinite;
-}
-@keyframes nx-rot {
-  to {
-    transform: rotate(1turn);
-  }
-}
+
 /* The trail above a page below an area's own (Stacks / gateway / Logs). */
 .crumbs-slot {
   max-width: max(80vw, 64rem);
@@ -3286,51 +2376,6 @@ td.measured.stale__action {
   }
 }
 
-/* -- side drawer and the More sheet, on a native <dialog> -- */
-dialog.nx-drawer {
-  margin: 0 0 0 auto;
-  block-size: 100dvh;
-  max-block-size: 100dvh;
-  inline-size: min(34rem, 100vw);
-  padding: 0;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-}
-dialog.nx-drawer[open] {
-  display: grid;
-}
-.nx-drawer__head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 4px 12px;
-  padding: 18px 20px 12px;
-  border-block-end: 1px solid var(--border);
-}
-.nx-drawer__head h2 {
-  margin: 0;
-}
-.nx-drawer__head p {
-  grid-column: 1;
-  margin: 0;
-}
-.nx-drawer__body {
-  padding: 16px 20px;
-  overflow: auto;
-  align-content: start;
-}
-.nx-drawer__foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 14px 20px;
-  border-block-start: 1px solid var(--border);
-}
-@media (max-width: 48rem) {
-  dialog.nx-drawer {
-    inline-size: 100vw;
-  }
-}
-
 /* -- the command palette's own additions -- */
 .nx-palette__foot {
   margin: 0;
@@ -3415,121 +2460,26 @@ dialog.nx-drawer[open] {
   color: var(--muted-foreground);
   white-space: nowrap;
 }
-.nx-live::before {
+/* ui.js liveStatus is kp-themes' `.kp-health` (a real dot, its state in
+   `data-state`); the two hand-made status words (Apps' "watched every
+   minute", the Console's line) still draw their dot here. */
+.nx-live:not(.kp-health)::before {
   content: "";
   inline-size: 8px;
   block-size: 8px;
   border-radius: 50%;
   background: var(--nx-ok);
 }
-.nx-live:has([data-kp-stale])::before {
-  background: var(--nx-warn);
-}
-.nx-live[data-state="none"]::before {
-  background: var(--muted-foreground);
-}
-.nx-live[data-state="failed"]::before {
-  background: var(--nx-bad);
-}
-
-/* -- KPI strip (DESIGN_LANGUAGE §1.2) -- */
-/* fix-371-1 (Kenny, 2026-10-04: "alle tegels moeten uniform zijn"): every
-   tile of a strip is as tall as its tallest, on every row it wraps to, and
-   inside a tile the label and the value sit on the same lines as their
-   neighbours' while the trend row keeps to the tile's bottom. */
-.nx-kpis {
-  display: grid;
-  grid-template-columns: repeat(var(--kpi-n, 4), minmax(0, 1fr));
-  grid-auto-rows: 1fr;
-  gap: var(--kp-space-md, 12px);
-}
-@media (max-width: 75rem) {
-  .nx-kpis {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-@media (max-width: 48rem) {
-  .nx-kpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--kp-space-sm, 8px);
-  }
-}
-.nx-kpi {
-  display: grid;
-  grid-template-rows: auto auto 1fr 28px;
-  row-gap: 2px;
-  min-inline-size: 0;
-  padding: var(--kp-space-md, 12px) var(--nx-pad);
-  background: var(--card);
-  color: inherit;
-  border: 1px solid var(--border);
-  border-radius: var(--nx-radius);
-  text-decoration: none;
-}
-a.nx-kpi:hover {
-  border-color: var(--ring);
-}
-.nx-kpi__label {
-  font-size: var(--kp-text-xs);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted-foreground);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.nx-kpi__value {
-  font-size: 1.75rem;
-  font-weight: 600;
-  line-height: 1.15;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.nx-kpi__value small {
-  font-size: 0.55em;
-  font-weight: 500;
-  color: var(--muted-foreground);
-  margin-inline-start: 3px;
-}
-.nx-kpi__ctx {
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-  min-block-size: 1.4em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* redesign-final (layout audit): on a phone a tile's label and context
-   wrap onto a second line instead of being cut off, on every page. */
-@media (max-width: 48rem) {
-  .nx-kpi__label,
-  .nx-kpi__ctx {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
-    overflow-wrap: break-word;
-  }
+.nx-live > .kp-health__dot {
+  flex: none;
 }
 /* A context line led by a status dot wraps under its dot rather than
    being cut off in a narrow tile. */
-.nx-kpi__ctx > .nx-dot {
-  white-space: normal;
+.kp-kpi__trend .kp-health {
   align-items: baseline;
+  white-space: normal;
 }
-.nx-kpi[data-tone="warn"] {
-  box-shadow: inset 3px 0 0 var(--nx-warn);
-}
-.nx-kpi[data-tone="warn"] .nx-kpi__value {
-  color: var(--nx-warn);
-}
-.nx-kpi[data-tone="bad"] {
-  border-color: color-mix(in oklab, var(--nx-bad) 55%, var(--border));
-  box-shadow: inset 3px 0 0 var(--nx-bad);
-}
-.nx-kpi[data-tone="bad"] .nx-kpi__value {
-  color: var(--nx-bad);
-}
+
 .nx-spark {
   display: block;
   inline-size: 100%;
@@ -3910,256 +2860,6 @@ details.nx-card--fold[open] > summary::before {
   color: var(--muted-foreground);
 }
 
-/* -- the shared time chart (DESIGN_LANGUAGE §10, timechart.js) -- */
-.tc {
-  position: relative;
-}
-.tc svg {
-  display: block;
-  inline-size: 100%;
-  overflow: visible;
-}
-.tc-plot {
-  position: relative;
-  cursor: crosshair;
-  touch-action: pan-y;
-  border-radius: 4px;
-}
-.tc-plot:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 4px;
-}
-.tc-grid {
-  stroke: var(--border);
-  stroke-width: 1;
-}
-.tc-tick {
-  fill: var(--muted-foreground);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-.tc-line {
-  fill: none;
-  stroke-linejoin: round;
-}
-.tc-ann {
-  stroke: var(--muted-foreground);
-  stroke-dasharray: 2 3;
-  opacity: 0.7;
-}
-.tc-mark {
-  cursor: pointer;
-  stroke: var(--card);
-  stroke-width: 1.5;
-  fill: var(--info-foreground);
-}
-.tc-mark--bad {
-  fill: var(--destructive);
-}
-.tc-mark--warn {
-  fill: var(--warning-foreground);
-}
-.tc-xhair {
-  stroke: var(--foreground);
-  opacity: 0.35;
-}
-.tc-xhair--pinned {
-  opacity: 0.8;
-  stroke-width: 1.5;
-}
-.tc-snap {
-  stroke: var(--card);
-  stroke-width: 2;
-}
-.tc-threshold {
-  stroke: var(--destructive);
-  stroke-dasharray: 4 4;
-  opacity: 0.8;
-}
-.tc-brush {
-  fill: color-mix(in oklab, var(--chart-1) 16%, transparent);
-  stroke: var(--chart-1);
-  stroke-dasharray: 3 3;
-}
-.tc-tip {
-  position: absolute;
-  z-index: 5;
-  pointer-events: none;
-  display: grid;
-  gap: 3px;
-  min-inline-size: 220px;
-  max-inline-size: 280px;
-  padding: 8px 10px;
-  font-size: var(--kp-text-xs);
-  background: var(--popover);
-  color: var(--popover-foreground);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px color-mix(in oklab, var(--foreground) 14%, transparent);
-}
-.tc-tip[hidden] {
-  display: none;
-}
-.tc-tip > b {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  margin-block-end: 4px;
-  font-variant-numeric: tabular-nums;
-}
-.tc-tip--pinned {
-  pointer-events: auto;
-  box-shadow:
-    0 0 0 1px var(--ring),
-    0 8px 24px color-mix(in oklab, var(--foreground) 14%, transparent);
-}
-.tc-tip__pin {
-  font-weight: 400;
-  color: var(--muted-foreground);
-}
-.tc-tip__x {
-  all: unset;
-  cursor: pointer;
-  margin-inline-start: 8px;
-  padding: 0 4px;
-  border-radius: 4px;
-  color: var(--foreground);
-}
-.tc-tip__row {
-  display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto 64px;
-  gap: 6px;
-  align-items: center;
-}
-.tc-tip__row > span:nth-child(2) {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.tc-tip__row--hot {
-  font-weight: 700;
-}
-.tc-tip__d {
-  text-align: end;
-  color: var(--muted-foreground);
-}
-.tc-tip__d.up {
-  color: var(--warning-foreground);
-}
-.tc-tip__d.down {
-  color: var(--info-foreground);
-}
-.tc-tip__foot {
-  margin: 2px 0 0;
-  color: var(--muted-foreground);
-  text-align: end;
-}
-.tc-tip__ev {
-  margin: 4px 0 0;
-  padding-block-start: 4px;
-  border-block-start: 1px solid var(--border);
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.tc-dot {
-  inline-size: 8px;
-  block-size: 8px;
-  border-radius: 50%;
-  background: var(--info-foreground);
-}
-.tc-dot--bad {
-  background: var(--destructive);
-}
-.tc-dot--warn {
-  background: var(--warning-foreground);
-}
-.tc-num {
-  font-variant-numeric: tabular-nums;
-}
-.tc-swatch {
-  display: inline-block;
-  inline-size: 10px;
-  block-size: 3px;
-  border-radius: 2px;
-}
-.tc-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-block-start: 10px;
-}
-.tc-legend__item {
-  all: unset;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-.tc-legend__item b {
-  color: var(--foreground);
-  font-weight: 600;
-}
-.tc-legend__item:hover,
-.tc-legend__item:focus-visible {
-  border-color: var(--border);
-  color: var(--foreground);
-}
-.tc-legend__item:focus-visible {
-  outline: 2px solid var(--ring);
-}
-.tc-legend__item[aria-pressed="true"] {
-  border-color: var(--border);
-  background: var(--card);
-  color: var(--foreground);
-  box-shadow: 0 0 0 1px var(--ring);
-}
-.tc-legend__item[data-off] {
-  opacity: 0.45;
-}
-.tc-legend__item[data-off] .tc-swatch {
-  background: var(--muted-foreground) !important;
-}
-.tc-legend__reset {
-  all: unset;
-  cursor: pointer;
-  font-size: var(--kp-text-xs);
-  padding: 3px 10px;
-  border-radius: 999px;
-  border: 1px dashed var(--border);
-  color: var(--foreground);
-}
-.tc-legend__reset[hidden] {
-  display: none;
-}
-.tc-legend__hint {
-  margin: 4px 0 0;
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-.tc-zoom {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  font-size: var(--kp-text-sm);
-}
-.tc-zoom[hidden] {
-  display: none;
-}
-.tc-zoom__reset {
-  all: unset;
-  cursor: pointer;
-  font-weight: 600;
-  color: var(--foreground);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
 /* -- redesign-kit-1: the blocks the Backups, Host, Schedules and Secrets
       pages brought along (their local kits), now ui.js's. -- */
 :root {
@@ -4170,8 +2870,53 @@ details.nx-card--fold[open] > summary::before {
 .nx-live > [hidden] {
   display: none;
 }
-.nx-live[data-state="busy"]::before {
-  background: var(--nx-info, var(--primary));
+/* kp-health knows ok / warn / down; the dashboard's info dot (the Map's
+   operations key) and the pill's spinner are its own two additions. */
+.kp-health[data-state="info"] .kp-health__dot {
+  background: var(--info);
+}
+/* TEMPORARY: kp-themes defect .kp-log (css/components.css `.kp-log`,
+   `grid-template-columns: auto auto auto minmax(0, 1fr)`): on a phone the
+   time, source and level columns leave the message 42 px at 390 px and its
+   `overflow-wrap: anywhere` breaks every word per letter. Time, source and
+   level share the first row, the message takes the row under them.
+   Remove when kp-themes gives .kp-log a narrow layout. */
+@media (max-width: 48rem) {
+  .kp-log {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .kp-log__line > .kp-log__message {
+    grid-column: 1 / -1;
+  }
+}
+.nx-pill__spin {
+  --kp-spinner-size: 0.75rem;
+  flex: none;
+}
+/* a badge is a label: one line, figures that line up (kp's default breaks
+   anywhere, for a badge that holds a long value) */
+:root {
+  --kp-badge-wrap: normal;
+}
+.kp-badge {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.kp-badge > .kp-health__dot {
+  flex: none;
+  background: currentColor;
+  border-color: currentColor;
+}
+/* a drawer's foot with more than one action: side by side, equal widths */
+.kp-drawer__foot {
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: var(--kp-space-sm);
+}
+@media (max-width: 48rem) {
+  .kp-drawer__foot {
+    grid-auto-flow: row;
+  }
 }
 .nx-sk {
   display: inline-block;
@@ -4187,29 +2932,7 @@ details.nx-card--fold[open] > summary::before {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
-.nx-dot {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--kp-space-xs);
-  white-space: nowrap;
-}
-.nx-dot::before {
-  content: "";
-  inline-size: 8px;
-  block-size: 8px;
-  border-radius: 50%;
-  background: var(--muted-foreground);
-  flex: none;
-}
-.nx-dot--ok::before {
-  background: var(--nx-ok);
-}
-.nx-dot--warn::before {
-  background: var(--nx-warn);
-}
-.nx-dot--bad::before {
-  background: var(--nx-bad);
-}
+
 .nx-swatch {
   inline-size: 10px;
   block-size: 10px;
@@ -4218,54 +2941,6 @@ details.nx-card--fold[open] > summary::before {
   display: inline-block;
   background: var(--c, var(--chart-1));
 }
-/* a small status chip (ui.js `chip`): a count or a state word */
-.nx-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--kp-space-xs);
-  padding: 1px var(--kp-space-sm);
-  border-radius: 999px;
-  font-size: var(--kp-text-xs);
-  font-weight: 500;
-  border: 1px solid var(--border);
-  color: var(--muted-foreground);
-  background: var(--card);
-  white-space: nowrap;
-  line-height: 1.6;
-  font-variant-numeric: tabular-nums;
-}
-.nx-chip--warn {
-  background: var(--warning);
-  color: var(--warning-foreground);
-  border-color: transparent;
-}
-.nx-chip--bad {
-  background: var(--destructive);
-  color: var(--destructive-foreground, var(--background));
-  border-color: transparent;
-}
-/* redesign-final (contrast in every theme): a status chip is text on its
-   status plate, the kp-themes pairing that holds in every theme (the
-   *-foreground tokens are made for their plate, not for a card). */
-.nx-chip--ok {
-  background: var(--success);
-  color: var(--success-foreground);
-  border-color: transparent;
-}
-.nx-chip--info,
-.nx-chip--live {
-  background: var(--info);
-  color: var(--info-foreground);
-  border-color: transparent;
-}
-.nx-chip--dot::before {
-  content: "";
-  inline-size: 6px;
-  block-size: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
 /* a row's share of a whole (ui.js `shareBar`): bar, then its number */
 .nx-share {
   display: grid;
@@ -4273,18 +2948,7 @@ details.nx-card--fold[open] > summary::before {
   gap: var(--kp-space-sm);
   align-items: center;
 }
-.nx-share__bar {
-  display: block;
-  block-size: 6px;
-  border-radius: 3px;
-  background: var(--muted);
-  overflow: hidden;
-}
-.nx-share__bar > i {
-  display: block;
-  block-size: 100%;
-  background: var(--c, var(--chart-1));
-}
+
 .nx-share__num {
   font-variant-numeric: tabular-nums;
   font-size: var(--kp-text-sm);
@@ -4328,16 +2992,6 @@ details.nx-card--fold[open] > summary::before {
   align-items: center;
   min-inline-size: 0;
 }
-/* a KPI tile's inline meter (`ctxMeter`) before its context words */
-.nx-kpi__ctx:has(> .nx-meter) {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px var(--kp-space-sm);
-}
-.nx-kpi__ctx > .nx-meter {
-  flex: 0 0 3rem;
-}
 /* the empty and all-clear drawings (ui.js `art`) */
 .nx-art {
   color: var(--muted-foreground);
@@ -4363,30 +3017,7 @@ details.nx-card--fold[open] > summary::before {
 }
 /* a flow's blocks (ui.js stepper, checkList, explainNote, doneMark; the
    Update flow and the Inbox) */
-.nx-explain {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: var(--kp-space-sm);
-  align-items: start;
-  padding: var(--kp-space-sm) var(--kp-space-md);
-  border-radius: 10px;
-  border: 1px dashed var(--border);
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-}
-.nx-explain b {
-  color: var(--foreground);
-}
-.nx-explain__x {
-  all: unset;
-  cursor: pointer;
-  color: var(--muted-foreground);
-  padding-inline: var(--kp-space-xs);
-}
-.nx-explain__x:focus-visible {
-  outline: 2px solid var(--ring);
-  border-radius: 4px;
-}
+
 .nx-done__mark {
   inline-size: 64px;
   block-size: 64px;
@@ -4396,55 +3027,6 @@ details.nx-card--fold[open] > summary::before {
 }
 .nx-done__mark--bad {
   color: var(--nx-bad, var(--destructive));
-}
-
-/* the flow stepper (the demo flows.css .fx-steps) */
-.nx-steps {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(var(--n, 6), minmax(0, 1fr));
-  gap: var(--kp-space-xs);
-  counter-reset: nx-s;
-}
-.nx-steps li {
-  display: grid;
-  gap: var(--kp-space-xs);
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-  counter-increment: nx-s;
-}
-.nx-steps li::before {
-  content: "";
-  block-size: 4px;
-  border-radius: 999px;
-  background: var(--muted);
-}
-.nx-steps li span::before {
-  content: counter(nx-s) " · ";
-}
-.nx-steps li[data-s="done"]::before {
-  background: var(--nx-ok, var(--success));
-}
-.nx-steps li[data-s="now"]::before {
-  background: var(--primary);
-}
-.nx-steps li[data-s="now"] {
-  color: var(--foreground);
-  font-weight: 600;
-}
-/* On a phone only the step you stand on names itself, wrapping in its own
-   column; the others' names take no room (M9: a hidden but laid-out
-   "4 · Restore and check" pushed the page 18 px sideways). */
-@media (max-width: 48rem) {
-  .nx-steps li span {
-    display: none;
-  }
-  .nx-steps li[data-s="now"] span {
-    display: inline;
-    white-space: normal;
-  }
 }
 
 /* the live step list (the demo flows.css .fx-check) */
@@ -4477,10 +3059,13 @@ details.nx-card--fold[open] > summary::before {
   font-weight: 700;
   line-height: 1;
 }
+/* the running step shows kp-themes' spinner (ui.js checkList), which each
+   theme draws its own way; the ring around it goes */
 .nx-check li[data-s="run"] .nx-check__st {
-  border-color: var(--primary);
-  border-inline-end-color: transparent;
-  animation: nx-rot 900ms linear infinite;
+  border: 0;
+}
+.nx-check li[data-s="run"] .kp-spinner {
+  --kp-spinner-size: 18px;
 }
 .nx-check li[data-s="ok"] .nx-check__st {
   border-color: var(--nx-ok, var(--success));
@@ -4514,16 +3099,7 @@ details.nx-card--fold[open] > summary::before {
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
 }
-@keyframes nx-rot {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .nx-check li[data-s="run"] .nx-check__st {
-    animation: none;
-  }
-}
+
 /* A key printed inside a button sits apart from its label. */
 .kp-button > .nx-kbd {
   margin-inline-start: var(--kp-space-xs);
@@ -4555,71 +3131,9 @@ details.nx-card--fold[open] > summary::before {
 .nx-ops .nx-head-meta > .nx-live > .measured {
   display: inline;
 }
-.nx-ops .nx-head-meta > .nx-live::before {
+.nx-ops .nx-head-meta > .nx-live::before,
+.nx-ops .nx-head-meta > .nx-live > .kp-health__dot {
   display: none;
-}
-
-/* KPI: a tile with no trend row, a tile that toggles a filter, a meter */
-.nx-kpi--bare {
-  grid-template-rows: auto auto 1fr;
-}
-.nx-kpi {
-  position: relative;
-}
-.nx-kpi--toggle {
-  font: inherit;
-  text-align: start;
-  cursor: pointer;
-  transition: border-color 150ms var(--nx-ease);
-}
-.nx-kpi--toggle:hover {
-  border-color: var(--ring);
-}
-.nx-kpi--toggle[aria-pressed="true"] {
-  border-color: var(--primary);
-  box-shadow: inset 0 0 0 1px var(--primary);
-}
-.nx-kpi__hint {
-  position: absolute;
-  inset-block-start: var(--kp-space-sm);
-  inset-inline-end: var(--kp-space-md);
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-.nx-kpi__hint:empty {
-  display: none;
-}
-@media (max-width: 48rem) {
-  .nx-kpi__hint {
-    display: none;
-  }
-}
-.nx-meter {
-  display: block;
-  block-size: 6px;
-  border-radius: 3px;
-  background: var(--muted);
-  position: relative;
-  align-self: center;
-}
-.nx-meter > i {
-  position: absolute;
-  inset: 0 auto 0 0;
-  background: var(--chart-1);
-  border-radius: 3px;
-}
-.nx-meter > b {
-  position: absolute;
-  inset-block: -3px;
-  inline-size: 2px;
-  background: var(--foreground);
-  opacity: 0.7;
-}
-.nx-meter--warn > i {
-  background: var(--nx-warn);
-}
-.nx-meter--bad > i {
-  background: var(--nx-bad);
 }
 
 /* a card's foot line, and the chevron a folded card shows in its tools */
@@ -4762,20 +3276,17 @@ th[aria-sort="descending"] .nx-sort__mark {
 
 /* the hover card */
 .nx-tip {
+  /* kp-themes' tooltip look (.kp-popover.kp-tooltip: border, plate, radius
+     and the theme's own entrance); this card is placed by ui.js hoverCard */
   position: fixed;
+  inset: auto;
+  margin: 0;
   z-index: 50;
   pointer-events: none;
   max-inline-size: 24rem;
   display: grid;
   gap: var(--kp-space-xs);
   padding: var(--kp-space-sm) var(--kp-space-md);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--popover, var(--card));
-  color: var(--popover-foreground, var(--foreground));
-  font-size: var(--kp-text-sm);
-  box-shadow: 0 10px 28px -8px
-    color-mix(in oklab, var(--foreground) 30%, transparent);
 }
 .nx-tip[hidden] {
   display: none;
@@ -4783,9 +3294,7 @@ th[aria-sort="descending"] .nx-sort__mark {
 .nx-tip b {
   font-weight: 600;
 }
-.nx-tip .nx-dot {
-  white-space: normal;
-}
+
 .nx-tip__hint {
   font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
@@ -4842,48 +3351,6 @@ th[aria-sort="descending"] .nx-sort__mark {
   outline: 2px solid var(--background);
 }
 
-/* a row's menu: a non-modal dialog */
-dialog.nx-rowmenu {
-  position: absolute;
-  inset: auto;
-  margin: 0;
-  z-index: 50;
-  inline-size: 260px;
-  box-sizing: border-box;
-  background: var(--popover);
-  color: var(--popover-foreground);
-  border: 1px solid var(--nx-line);
-  border-radius: var(--nx-radius);
-  padding: var(--kp-space-xs);
-  box-shadow: 0 12px 32px
-    color-mix(in oklab, var(--foreground) 18%, transparent);
-}
-dialog.nx-rowmenu[open] {
-  display: grid;
-}
-.nx-rowmenu button {
-  all: unset;
-  cursor: pointer;
-  display: grid;
-  gap: 1px;
-  padding: var(--kp-space-sm) var(--kp-space-sm);
-  border-radius: var(--nx-r-sm);
-}
-.nx-rowmenu button:hover,
-.nx-rowmenu button:focus-visible {
-  background: var(--nx-soft);
-}
-.nx-rowmenu b {
-  font-size: var(--kp-text-sm);
-}
-.nx-rowmenu span {
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-.nx-rowmenu .danger b {
-  color: var(--destructive);
-}
-
 /* the header's overflow menu */
 .nx-icon-btn {
   all: unset;
@@ -4928,34 +3395,7 @@ dialog.nx-rowmenu[open] {
 /* -- `.nx-ops`: the ops-kit look (Host, Schedules; the demos built on
       ops-kit.css), set on a page's root: flush cards with a ruled foot,
       a quieter KPI strip, the plain alert, a lighter key cap. -- */
-.nx-ops .nx-kpis {
-  grid-template-columns: repeat(var(--kpi-n, 5), minmax(0, 1fr));
-  gap: var(--kp-space-md);
-}
-@media (max-width: 1199px) {
-  .nx-ops .nx-kpis {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-@media (max-width: 48rem) {
-  .nx-ops .nx-kpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--kp-space-sm);
-  }
-}
-.nx-ops .nx-kpi {
-  padding: var(--kp-space-md) var(--kp-space-lg) var(--kp-space-md);
-  border-color: var(--nx-line);
-}
-.nx-ops .nx-kpi__value {
-  letter-spacing: -0.01em;
-}
-.nx-ops .nx-kpi__value small {
-  letter-spacing: 0;
-}
-.nx-ops .nx-kpi__ctx {
-  min-block-size: 0;
-}
+
 .nx-ops .kp-attention__item {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--kp-space-xs) var(--kp-space-md);
@@ -5053,9 +3493,6 @@ dialog.nx-rowmenu[open] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .nx-spin {
-    animation: none;
-  }
   details.nx-card--fold > summary::before {
     transition: none;
   }
@@ -5078,9 +3515,6 @@ dialog.nx-rowmenu[open] {
    `redesign-3.71/backups.html`). Tokens only. Built from ui.js's shared
    blocks; the first part below is only where the demo measures them
    differently from the foundation's default. ────────── */
-.bk-page .nx-live[data-state="ok"]::before {
-  background: var(--nx-ok);
-}
 .bk-page .nx-live .measured {
   margin: 0;
   font-size: inherit;
@@ -5104,49 +3538,7 @@ dialog.nx-rowmenu[open] {
     order: -1;
   }
 }
-.bk-page .nx-kpis {
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-  gap: var(--kp-space-md, 0.75rem);
-}
-.bk-page .nx-kpi {
-  gap: 4px;
-  border-radius: 10px;
-  color: var(--card-foreground, inherit);
-}
-.bk-page .nx-kpi__value {
-  min-block-size: 1.15em;
-}
-.bk-page .nx-kpi__value small {
-  margin-inline-start: 4px;
-}
-.bk-page .nx-kpi__ctx {
-  white-space: normal;
-}
-.bk-page .nx-kpi[data-tone="warn"],
-.bk-page .nx-kpi[data-tone="bad"] {
-  box-shadow: none;
-}
-.bk-page .nx-kpi[data-tone="warn"] {
-  border-color: color-mix(in oklab, var(--nx-warn) 45%, var(--border));
-}
-.bk-page .nx-kpi[data-tone="bad"] {
-  border-color: color-mix(in oklab, var(--nx-bad) 45%, var(--border));
-}
-.bk-page .nx-kpi--toggle[aria-pressed="true"] {
-  box-shadow: inset 0 0 0 1px var(--primary);
-}
-@media (max-width: 48rem) {
-  .bk-page .nx-kpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--kp-space-sm, 0.5rem);
-  }
-  .bk-page .nx-kpis > :last-child:nth-child(odd) {
-    grid-column: 1 / -1;
-  }
-  .bk-page .nx-kpi__value {
-    font-size: 1.4rem;
-  }
-}
+
 .bk-page .kp-attention__item {
   gap: var(--kp-space-md, 0.75rem);
 }
@@ -5342,12 +3734,13 @@ dialog.nx-rowmenu[open] {
     inset 0 0 0 1px var(--border),
     0 0 0 2px var(--ring);
 }
+/* a night still being read: kp-themes' skeleton pulse (kp-pulse) */
 .bk-heat__cell--load {
-  animation: bk-pulse 1.4s ease-in-out infinite;
+  background: var(--muted);
 }
-@keyframes bk-pulse {
-  50% {
-    opacity: 0.45;
+@media (prefers-reduced-motion: no-preference) {
+  .bk-heat__cell--load {
+    animation: kp-pulse 1600ms ease-in-out infinite;
   }
 }
 .bk-heat__fleet .bk-heat__cell {
@@ -5540,11 +3933,6 @@ dialog.nx-rowmenu[open] {
   text-align: end;
   white-space: nowrap;
 }
-.bk-actions {
-  display: inline-grid;
-  grid-auto-flow: column;
-  gap: 6px;
-}
 .bk-repo-group td {
   background: color-mix(in oklab, var(--muted) 55%, transparent);
   font-weight: 600;
@@ -5726,22 +4114,26 @@ dialog.nx-rowmenu[open] {
     grid-row: 1;
   }
   .bk-table tr.bk-repo {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     padding-block: var(--kp-space-sm);
   }
   .bk-table tr.bk-repo > td {
     padding-block: var(--kp-space-xs);
   }
   .bk-table tr.bk-repo > td.bk-app {
-    grid-column: 1 / 3;
+    grid-column: 1 / -1;
     grid-row: 1;
     padding-inline-start: var(--kp-space-sm);
     font-weight: 600;
   }
+  /* The actions sit under the name, across the card: beside the pairs they
+     took a third of the width and the words in the cells broke per letter. */
   .bk-table tr.bk-repo > td.bk-row-actions {
-    grid-column: 3;
-    grid-row: 1 / span 4;
+    grid-column: 1 / -1;
+    grid-row: 2;
     align-self: start;
+    padding-inline-start: var(--kp-space-sm);
+    text-align: start;
   }
   .bk-table tr.bk-repo > td[data-label] {
     display: grid;
@@ -5756,9 +4148,6 @@ dialog.nx-rowmenu[open] {
     letter-spacing: 0.06em;
     color: var(--muted-foreground);
   }
-  .bk-table .bk-actions {
-    grid-auto-flow: row;
-  }
   .bk-table tr.bk-snaps {
     display: block;
   }
@@ -5768,10 +4157,7 @@ dialog.nx-rowmenu[open] {
     overflow-x: auto;
   }
 }
-.bk-dlg {
-  display: grid;
-  gap: var(--kp-space-md, 0.75rem);
-}
+
 .bk-drill-list {
   list-style: none;
   margin: 0;
@@ -5806,7 +4192,6 @@ dialog.nx-rowmenu[open] {
 }
 @media (prefers-reduced-motion: reduce) {
   .bk-heat__cell,
-  .bk-heat__cell--load,
   .bk-caret {
     animation: none;
     transition: none;

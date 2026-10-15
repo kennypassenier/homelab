@@ -102,6 +102,14 @@ class Node_ {
     for (const c of [...this.childNodes]) c.remove();
     this.append(...kids);
   }
+  /** @param {...(Node_ | string)} kids */
+  replaceWith(...kids) {
+    const p = this.parentNode;
+    if (!p) return;
+    const at = p.childNodes.indexOf(this);
+    this.remove();
+    kids.forEach((k, i) => p._insert(k, at + i));
+  }
   /** @param {Node_ | string} k @param {number} at */
   _insert(k, at) {
     const n = typeof k === "string" ? new Text_(k) : k;
@@ -285,6 +293,14 @@ class Element_ extends Node_ {
   /** @param {string} k */
   getAttribute(k) {
     return this._a.get(k.toLowerCase()) ?? null;
+  }
+  /** @param {string} k @param {boolean} [force] */
+  toggleAttribute(k, force) {
+    const on = force ?? !this.hasAttribute(k);
+    if (on) {
+      if (!this.hasAttribute(k)) this.setAttribute(k, "");
+    } else this.removeAttribute(k);
+    return on;
   }
   /** @param {string} k */
   hasAttribute(k) {

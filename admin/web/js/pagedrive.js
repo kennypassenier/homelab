@@ -71,11 +71,27 @@ export function topDialog() {
   return /** @type {HTMLDialogElement | null} */ (open.at(-1) ?? null);
 }
 
-/** @param {HTMLDialogElement | null} d */
+/**
+ * What a step is aimed at: the dialog on top, or a row menu that is open
+ * (kp-themes' menu button: not a dialog, open while its button says
+ * `aria-expanded`; its entries are marked Live view controls, so a press
+ * names one like a dialog's button).
+ * @returns {HTMLElement | null}
+ */
+function topLayer() {
+  const menu = document.querySelector(
+    "[data-kp-row-menu]:has(> button[aria-expanded=true]) > .kp-menu",
+  );
+  return /** @type {HTMLElement | null} */ (menu ?? topDialog());
+}
+
+/** @param {HTMLElement | null} d */
 const titleOf = (d) =>
   d
-    ? (d.querySelector(".kp-dialog__title")?.textContent ?? "").trim() ||
-      "a dialog"
+    ? d.matches(".kp-menu")
+      ? (d.getAttribute("aria-label") ?? "").trim() || "a menu"
+      : (d.querySelector(".kp-dialog__title")?.textContent ?? "").trim() ||
+        "a dialog"
     : null;
 
 /**
@@ -165,7 +181,7 @@ async function find(rootOf, inDialog, want, ms, budget, settle = 0) {
  * @returns {TabAnswer}
  */
 const answer = (a) => {
-  const d = topDialog();
+  const d = topLayer();
   return {
     ok: false,
     page: location.pathname,
@@ -233,7 +249,7 @@ function unknownControl(id) {
  * @returns {Promise<TabAnswer>}
  */
 async function click(id, row, navigate, show, budget) {
-  const d = topDialog();
+  const d = topLayer();
   if (d) {
     // redesign-integrate-8: a page drawn as a dialog (Deploy all changes
     // on Stacks) draws its declared controls after its own read; wait for
@@ -246,7 +262,10 @@ async function click(id, row, navigate, show, budget) {
       budget,
     );
     if (!f.el) return answer({ why: `${f.why} in ${titleOf(d)}`, fix: f.fix });
-    return press(f.el, show, false, budget);
+    return press(f.el, show, false, budget, async () => {
+      const g = await find(() => d, true, { id, row }, 1500, budget);
+      return g.el;
+    });
   }
   // drive-reach: a page's toasts (an Undo) sit at the screen's edge, outside
   // #page; declared controls are found wherever the page drew them.
@@ -304,6 +323,7 @@ async function click(id, row, navigate, show, budget) {
     show,
     opensFor(c, row) === "dialog" || hit.press != null,
     budget,
+    async () => (await find(page, false, want, 2000, budget)).el,
   );
 }
 
@@ -312,11 +332,16 @@ async function click(id, row, navigate, show, budget) {
  * @param {(el: HTMLElement) => Promise<void>} show
  * @param {boolean} opensDialog
  * @param {Budget} budget
+ * @param {() => Promise<HTMLElement | null>} [again] finds the control anew
  * @returns {Promise<TabAnswer>}
  */
-async function press(el, show, opensDialog, budget) {
-  const before = topDialog();
+async function press(el, show, opensDialog, budget, again) {
+  const before = topLayer();
   await show(el);
+  // The pointer takes seconds to arrive; a page that redrew its rows in the
+  // meantime (a push, a refresh) took the control away, and a click on the
+  // detached one opens nothing. Press the one that stands there now.
+  if (!el.isConnected && again) el = (await again()) ?? el;
   const href = location.href;
   if (budget.cancelled())
     return answer({
@@ -345,7 +370,7 @@ async function press(el, show, opensDialog, budget) {
   // up and Deploy are dialogs) opens no dialog; it answers at once.
   if (opensDialog) {
     const end = Date.now() + Math.min(3000, left(budget));
-    while (topDialog() === before && location.href === href && Date.now() < end)
+    while (topLayer() === before && location.href === href && Date.now() < end)
       await sleep(50);
     if (location.href !== href) await sleep(150);
   } else await sleep(150);
@@ -455,7 +480,7 @@ export async function takeStep(step, navigate, show, cancelled) {
         budget,
       );
     case "press":
-      if (!topDialog())
+      if (!topLayer())
         return answer({
           why: "no dialog is open",
           fix: "homelab ui click the control that opens it first",

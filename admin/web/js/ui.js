@@ -25,22 +25,29 @@
 //                collapsible and mounted only when first opened, with a
 //                foot line (source left, "read 4 s ago" right)
 //   sortHead / sortableTable / nextSort / applySort / rememberedSort
-//                sorting on several keys, remembered per table
+//                sorting on several keys, remembered per table, for the
+//                three tables that are not a kp datatable (Host's two, the
+//                Backups repositories: their rows are filtered, grouped or
+//                opened by the page itself); every other table is a kp
+//                datatable (dataTable / dom.js tableBlock)
 //   toast        kp-themes' toast in a region inside #page, so Live view
 //                can press its Undo
-//   rowMenu / moreMenu   a row's menu (a non-modal <dialog>) and a
+//   rowMenu / moreMenu   a row's menu on a button already in the row and a
 //                header's more menu (the `···` one, or grouped under
-//                headings like the stack hub's More ▾), both keyboard menus
-//   drawer       a side panel on a modal <dialog>
+//                headings like the stack hub's More ▾), both kp-themes'
+//                menu button
+//   drawer       a side panel, kp-themes' `dialog.kp-drawer`
 //   hoverCard    one floating detail card for hover and keyboard focus
 //   chip / dot / meter / shareBar / swatch / stackMark   small marks
+//                (kp-badge, kp-health, kp-meter)
 //   failBox / skeleton… / emptyState   the error, loading and empty states
 //                in the block's own footprint
 //   rowKeys / kbd / keyRow   keyboard: list rows, a key, the shortcut line
 //   sparkline    a 28 px trend line for a tile or a table row
-//   stepper / checkList / explainNote / doneMark   a flow's steps, its
-//                live step list, a dismissible "this replaces" note and
-//                the big done tick (the Update flow, the Inbox)
+//   stepper / checkList / explainNote / doneMark   a flow's steps (kp's
+//                wizard steps), its live step list, a dismissible "this
+//                replaces" note (kp-alert) and the big done tick (the
+//                Update flow, the Inbox)
 //   art          the small empty and all-clear line drawings of
 //                graphics.html, for emptyState's `art`
 //
@@ -61,10 +68,16 @@ import { agoEl, setAgo } from "./ago.js";
 import { h, setLive } from "./dom.js";
 import { dialogControl, drivable } from "./drivable.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
-import { toast as kpToast } from "/static/kp/js/overlays.js";
-import { leave } from "/static/kp/js/motion.js";
+import {
+  ALERT_DISMISS_EVENT,
+  toast as kpToast,
+} from "/static/kp/js/overlays.js";
 import { setAttention } from "/static/kp/js/attention.js";
-import { drawSparkline } from "/static/kp/js/kpi.js";
+import {
+  KPI_TOGGLE_EVENT,
+  drawSparkline,
+  setMeter,
+} from "/static/kp/js/kpi.js";
 import {
   MENU_SELECT_EVENT,
   attachMenuButtons,
@@ -127,10 +140,12 @@ export function breadcrumbs(trail) {
 }
 
 /**
- * The live freshness of a page or a card: a dot and "updated 4 s ago",
- * ticking (ago.js), greyed out once it is older than three minutes.
+ * The live freshness of a page or a card: kp-themes' status dot
+ * (`.kp-health`) and "updated 4 s ago", ticking (ago.js; the theme draws
+ * the stale plate once it is older than three minutes).
  * `set(at, words)`: `words` stand in for the time while something is under
- * way ("reading 3 of 6 stacks…"); `data-state` says none / ok / busy.
+ * way ("reading 3 of 6 stacks…", `aria-busy`); `data-state` is kp-health's:
+ * `ok` once read, `down` after `fail`, none before.
  * @param {string} [verb] "updated", "read", "measured"
  * `fail(words)`: the read failed ("not read"), a red dot.
  * @returns {{el: HTMLElement,
@@ -139,21 +154,35 @@ export function breadcrumbs(trail) {
  */
 export function liveStatus(verb = "updated") {
   const ago = agoEl(verb, null, { live: true });
-  const words = h("span", { class: "nx-live__words" });
-  const e = h("span", { class: "nx-live", role: "status" }, ago, words);
+  // The words are the live region; kp's ticking line must stay out of one.
+  const words = h("span", { class: "nx-live__words", role: "status" });
+  const e = h(
+    "span",
+    { class: "kp-health nx-live" },
+    h("span", { class: "kp-health__dot", "aria-hidden": "true" }),
+    ago,
+    words,
+  );
+  /** @param {"ok" | "down" | null} state kp-health's own words; none: muted */
+  const say = (state) => {
+    if (state) e.dataset.state = state;
+    else delete e.dataset.state;
+  };
   /** @param {number | null} at @param {string} [w] */
   const set = (at, w) => {
     setAgo(ago, at);
     ago.hidden = w != null;
     words.hidden = w == null;
     words.textContent = w ?? "";
-    e.dataset.state = w != null ? "busy" : at == null ? "none" : "ok";
+    e.toggleAttribute("aria-busy", w != null);
+    say(w == null && at != null ? "ok" : null);
   };
   set(null);
   /** @param {string} w */
   const fail = (w) => {
     set(null, w);
-    e.dataset.state = "failed";
+    e.removeAttribute("aria-busy");
+    say("down");
   };
   return { el: e, set, fail };
 }
@@ -268,10 +297,34 @@ export function pageHeader(spec) {
 
 /**
  * @typedef {{pct: number | null, mark?: number | null, markTitle?: string,
- *   tone?: "" | "warn" | "bad" | null}} Meter
- *   a bar `pct` percent full, with a tick at `mark` percent (what is
- *   promised, a limit), in the warn / bad colour when `tone` says so
+ *   tone?: "" | "warn" | "bad" | null, label?: string}} Meter
+ *   a bar `pct` percent full (kp-themes' `.kp-meter`: a share past 100 fills
+ *   the bar and says so), with a tick at `mark` percent (what is promised,
+ *   a limit; `markTitle` names it for a screen reader), in the warn / bad
+ *   colour when `tone` says so; `label`: what the share is ("full")
  */
+
+/**
+ * kp-themes' word for a dashboard tone, on a tile, a meter or a badge.
+ * @type {Record<string, "warning" | "destructive">}
+ */
+const KP_TONE = { warn: "warning", bad: "destructive" };
+
+/**
+ * Write a dashboard `Meter` into a kp-themes meter element (`setMeter`:
+ * the share, the mark, the tone and the ARIA in one call).
+ * @param {HTMLElement} el
+ * @param {Meter | null | undefined} m
+ */
+function paintMeter(el, m) {
+  setMeter(el, {
+    value: m?.pct == null ? null : m.pct / 100,
+    mark: m?.mark == null ? null : m.mark / 100,
+    tone: m?.tone ? (KP_TONE[m.tone] ?? null) : null,
+    ...(m?.label ? { label: m.label } : {}),
+    ...(m?.markTitle ? { markLabel: m.markTitle } : {}),
+  });
+}
 
 /**
  * @typedef {{key?: string, label: string, value?: string, unit?: string,
@@ -284,7 +337,8 @@ export function pageHeader(spec) {
  *   `spark` or `meter` fill the tile's fourth row (a tile given neither
  *   has three rows). `href`: the tile links to its filtered detail;
  *   `toggle`: the tile is a button turning a filter on this page on or
- *   off (`aria-pressed`), the Live view control `drive` (required when the
+ *   off (`aria-pressed`; kp-themes' `attachKpiToggles` flips it and fires
+ *   `kp-kpi-toggle`), the Live view control `drive` (required when the
  *   tile is made; a later `set` may leave it out). `ctxTone` puts a
  *   status dot before the context line; `ctxParts` draws the context as
  *   pieces, each with its own dot ("7 enforced" green, "2 open" amber).
@@ -294,21 +348,6 @@ export function pageHeader(spec) {
  *   the start of the context line (the Stacks demo's tiles). A tile made without a spark or meter grows
  *   its fourth row when a later `set` brings one.
  */
-
-/**
- * A meter's geometry, clamped to its bar.
- * @param {Meter | null | undefined} m
- * @returns {{fill: number, mark: number | null, tone: string}}
- */
-export function meterParts(m) {
-  const clamp = (/** @type {number} */ n) =>
-    Math.max(0, Math.min(100, Number.isFinite(n) ? n : 0));
-  return {
-    fill: clamp(m?.pct ?? 0),
-    mark: m?.mark == null ? null : clamp(m.mark),
-    tone: m?.tone ?? "",
-  };
-}
 
 /**
  * A pulsing placeholder of a given width (DESIGN_LANGUAGE §7), inline.
@@ -323,40 +362,40 @@ export function skeleton(width = "70%") {
 }
 
 /**
- * One KPI tile (DESIGN_LANGUAGE §1.2): label (xs uppercase), value
- * (tabular), a context line, an optional sparkline or meter; a tile with
- * an `href` is a link to its filtered detail, one with a `toggle` a
- * button. `set` repaints it in place, so the strip never reflows (rule 6);
- * `set({loading: true})` shows skeletons in the value and the context.
+ * One KPI tile (DESIGN_LANGUAGE §1.2) as kp-themes draws a key figure
+ * (`.kp-kpi`): label, value (tabular), a context line, an optional
+ * sparkline or meter; a tile with an `href` is a link to its filtered
+ * detail, one with a `toggle` a button. `set` repaints it in place, so the
+ * strip never reflows (rule 6); `set({loading: true})` shows skeletons in
+ * the value and the context.
  * @param {Kpi} k
  * @returns {{el: HTMLElement,
  *   set: (k: Partial<Kpi> & {loading?: boolean}) => void}}
  */
 export function kpi(k) {
-  const label = h("span", { class: "nx-kpi__label" });
-  const hint = h("span", { class: "nx-kpi__hint", "aria-hidden": "true" });
-  const value = h("span", { class: "nx-kpi__value" });
-  const num = h("span", { class: "nx-kpi__num" });
-  const ctx = h("span", { class: "nx-kpi__ctx" });
-  let m = k.meter ? meter(k.meter) : null;
-  /** @type {HTMLElement | null} */
-  let foot = m
-    ? m.el
-    : k.spark
-      ? h("span", { class: "nx-kpi__spark", "aria-hidden": "true" })
-      : null;
+  const label = h("span", { class: "kp-kpi__label" });
+  const hint = h(
+    "span",
+    { class: "kp-kpi__hint", "aria-hidden": "true" },
+    h("span", { "data-kp-when": "off" }, "filter"),
+    h("span", { "data-kp-when": "on" }, "filtering ×"),
+  );
+  const value = h("span", { class: "kp-kpi__value" });
+  const num = h("span");
+  const ctx = h("span", { class: "kp-kpi__trend" });
+  /** The fourth row: a kp meter or a kp sparkline (an svg). @type {HTMLElement | SVGSVGElement | null} */
+  let foot = k.meter ? tileMeter() : k.spark ? tileSpark() : null;
   // A same-site path (invariant 35), the card's id as its hash.
   const href = k.target
     ? `${location.pathname}${location.search}#${k.target}`
     : k.href;
   /** @type {HTMLElement} */
   const e = k.toggle
-    ? h("button", { type: "button", class: "nx-kpi nx-kpi--toggle" })
+    ? h("button", { type: "button", class: "kp-kpi kp-kpi--toggle" })
     : h(href ? "a" : "div", {
-        class: "nx-kpi",
+        class: "kp-kpi",
         ...(href ? { href } : {}),
       });
-  if (!foot) e.classList.add("nx-kpi--bare");
   e.append(label, ...(k.toggle ? [hint] : []), value, ctx);
   if (foot) e.append(foot);
   /** @type {Kpi} */
@@ -374,8 +413,48 @@ export function kpi(k) {
     if (!k.toggle.drive)
       throw new Error(`the KPI toggle ${k.label} needs its Live view control`);
     drive(e, k.toggle.drive);
-    e.addEventListener("click", () => cur.toggle?.onToggle());
+    // kp's attachKpiToggles flips `aria-pressed` and says so; the page keeps
+    // the filter, and `set` writes its state back.
+    e.addEventListener(KPI_TOGGLE_EVENT, () => cur.toggle?.onToggle());
   }
+  /** @returns {HTMLElement} */
+  function tileMeter() {
+    return h("span", { class: "kp-kpi__meter" });
+  }
+  /** @returns {SVGSVGElement} */
+  function tileSpark() {
+    const svg = /** @type {SVGSVGElement} */ (
+      document.createElementNS(SVG, "svg")
+    );
+    svg.setAttribute("class", "kp-kpi__spark");
+    svg.setAttribute("aria-hidden", "true");
+    return svg;
+  }
+  /**
+   * The fourth row holds a meter or a sparkline. Once a tile has the row it
+   * keeps it (a tile never shrinks); a meter that went away leaves a
+   * sparkline's row, a spark that arrives late makes the row.
+   */
+  const paintFoot = () => {
+    const spark = cur.spark && cur.spark.length > 1 ? cur.spark : null;
+    /** @param {HTMLElement | SVGSVGElement} next */
+    const put = (next) => {
+      if (foot) foot.replaceWith(next);
+      else e.append(next);
+      foot = next;
+    };
+    if (cur.meter) {
+      if (!foot || isSvg(foot)) put(tileMeter());
+      paintMeter(/** @type {HTMLElement} */ (foot), cur.meter);
+    } else if (spark || foot) {
+      if (!foot || !isSvg(foot)) put(tileSpark());
+      const svg = /** @type {SVGSVGElement} */ (foot);
+      svg.setAttribute("data-kp-spark", (spark ?? []).join(" "));
+      if (cur.colour) svg.style.color = cur.colour;
+      else svg.style.removeProperty("color");
+      drawSparkline(svg, spark ?? []);
+    }
+  };
   let loading = false;
   const set = (/** @type {Partial<Kpi> & {loading?: boolean}} */ next) => {
     const { loading: l, ...rest } = next;
@@ -406,49 +485,18 @@ export function kpi(k) {
         : cur.ctxParts?.length
           ? cur.ctxParts.flatMap((p, i) => [
               ...(i ? [" · "] : []),
-              h(
-                "span",
-                p.tone ? { class: `nx-dot nx-dot--${p.tone}` } : null,
-                p.text,
-              ),
+              p.tone ? dot(p.tone, p.text) : p.text,
             ])
-          : [
-              cur.ctxTone
-                ? h(
-                    "span",
-                    { class: `nx-dot nx-dot--${cur.ctxTone}` },
-                    cur.ctx ?? "",
-                  )
-                : (cur.ctx ?? ""),
-            ]),
+          : [cur.ctxTone ? dot(cur.ctxTone, cur.ctx ?? "") : (cur.ctx ?? "")]),
     );
-    e.dataset.tone = cur.tone ?? "";
+    // kp-themes' tone: a coloured edge, the figure on its status plate.
+    const tone = cur.tone ? KP_TONE[cur.tone] : undefined;
+    if (tone) e.dataset.kpTone = tone;
+    else delete e.dataset.kpTone;
     e.dataset.key = cur.key ?? cur.label;
     if (cur.title) e.title = cur.title;
-    if (cur.toggle) {
-      e.setAttribute("aria-pressed", String(cur.toggle.pressed));
-      hint.textContent = cur.toggle.pressed ? "filtering ×" : "filter";
-    }
-    if (!foot && (cur.meter || (cur.spark && cur.spark.length > 1))) {
-      foot = h("span", { class: "nx-kpi__spark", "aria-hidden": "true" });
-      e.classList.remove("nx-kpi--bare");
-      e.append(foot);
-    }
-    if (cur.meter) {
-      if (m) m.set(cur.meter);
-      else if (foot) {
-        m = meter(cur.meter);
-        foot.replaceChildren(m.el);
-      }
-    } else if (foot) {
-      if (m && foot !== m.el) m = null;
-      if (!m)
-        foot.replaceChildren(
-          ...(cur.spark && cur.spark.length > 1
-            ? [sparkline(cur.spark, cur.colour ? { colour: cur.colour } : {})]
-            : []),
-        );
-    }
+    if (cur.toggle) e.setAttribute("aria-pressed", String(cur.toggle.pressed));
+    paintFoot();
     if (cur.href && e instanceof HTMLAnchorElement) e.href = cur.href;
   };
   set({});
@@ -456,24 +504,20 @@ export function kpi(k) {
 }
 
 /**
- * A tile's inline meter, read out as its percentage.
+ * A tile's inline meter (`.kp-meter--inline`), read out as its percentage.
  * @param {Meter} m @param {string} label
  */
 function ctxBar(m, label) {
-  const e = meter(m).el;
-  const pct = Math.round(meterParts(m).fill);
-  e.removeAttribute("aria-hidden");
-  e.setAttribute("role", "meter");
-  e.setAttribute("aria-valuenow", String(pct));
-  e.setAttribute("aria-valuemin", "0");
-  e.setAttribute("aria-valuemax", "100");
-  e.setAttribute("aria-label", `${label}: ${pct}%`);
+  const e = meter(m, "kp-meter kp-meter--inline").el;
+  e.setAttribute("aria-label", label);
   return e;
 }
 
 /**
- * A row of 3 to 6 KPI tiles; while `loading` each tile is its own skeleton
- * in the final geometry.
+ * A row of 3 to 6 KPI tiles (`.kp-kpis`, every tile as tall as the
+ * tallest); kp-themes' `attachKpiStrips` takes it to the column count that
+ * fits its own width. While `loading` each tile is its own skeleton in the
+ * final geometry.
  * @param {Kpi[]} tiles
  * @param {{loading?: boolean, label?: string, drive?: {id: string}}} [opts]
  *   `drive`: the Live view control every tile is, on its own row (the
@@ -484,11 +528,11 @@ export function kpiStrip(tiles, opts = {}) {
   /** @type {Map<string, ReturnType<typeof kpi>>} */
   const map = new Map();
   const e = h("div", {
-    class: "nx-kpis",
+    class: "kp-kpis",
+    "data-kp-kpis-columns": "all 3 2 1",
     role: "group",
     "aria-label": opts.label ?? "Key figures",
   });
-  e.style.setProperty("--kpi-n", String(Math.max(1, tiles.length)));
   for (const t of tiles) {
     const k = kpi(t);
     if (opts.drive) drive(k.el, { id: opts.drive.id, row: t.key ?? t.label });
@@ -887,6 +931,9 @@ export function markCells(name) {
 }
 
 const SVG = "http://www.w3.org/2000/svg";
+
+/** @param {Element} e */
+const isSvg = (e) => e.namespaceURI === SVG;
 
 /**
  * The per-stack identity mark (DESIGN_LANGUAGE §11): an SVG square in the
@@ -1462,8 +1509,12 @@ export function tipPlace(r, w, ht, view) {
  * @param {{cls?: string}} [opts]
  */
 export function hoverCard(opts = {}) {
+  // kp-themes' tooltip look (`.kp-popover.kp-tooltip`, painted by every
+  // register); the placement is ours: one shared card, filled on demand
+  // for whatever the pointer or the focus is on (kp's `attachTooltips`
+  // wants a tooltip element inside every anchor, found once at attach).
   const tip = h("div", {
-    class: `nx-tip${opts.cls ? ` ${opts.cls}` : ""}`,
+    class: `kp-popover kp-tooltip nx-tip${opts.cls ? ` ${opts.cls}` : ""}`,
     role: "tooltip",
   });
   tip.hidden = true;
@@ -1659,149 +1710,79 @@ export function toast(text, opts = {}) {
 }
 
 /**
- * Where a row menu opens: under its button's right edge, or above the
- * button near the foot of the screen so every item shows.
- * @param {{top: number, bottom: number, right: number}} r the button's box
- * @param {number} ht the menu's height
- * @param {{w: number, h: number, x: number, y: number}} view viewport size
- *   and scroll
- * @param {number} width the menu's width
- * @returns {{top: number, left: number}} document coordinates
- */
-export function menuPlace(r, ht, view, width) {
-  const left = Math.max(8, r.right + view.x - width);
-  const top =
-    r.bottom + ht + 8 > view.h
-      ? Math.max(8, r.top + view.y - ht - 4)
-      : r.bottom + view.y + 4;
-  return { top, left };
-}
-
-/**
- * The keys of an open `role=menu`: ↓ / ↑ move the focus to the next or
- * previous item (wrapping), Home / End to the first or last.
- * @param {HTMLElement} menu
- * @param {KeyboardEvent} e
- * @returns {boolean} whether the key was one of them
- */
-export function menuKey(menu, e) {
-  // A disabled entry (its reason in place of its hint) takes no focus.
-  const items = /** @type {HTMLElement[]} */ ([
-    ...menu.querySelectorAll('[role="menuitem"]'),
-  ]).filter((e) => e.getAttribute("disabled") == null);
-  if (!items.length) return false;
-  const i = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
-  const to =
-    e.key === "ArrowDown"
-      ? (i + 1) % items.length
-      : e.key === "ArrowUp"
-        ? (i - 1 + items.length) % items.length
-        : e.key === "Home"
-          ? 0
-          : e.key === "End"
-            ? items.length - 1
-            : null;
-  if (to == null) return false;
-  e.preventDefault();
-  items[to].focus({ preventScroll: true });
-  return true;
-}
-
-/** @type {{close: () => void, anchor: HTMLElement} | null} */
-let openRowMenu = null;
-
-/**
- * A row's menu (Edit…, Run now, Delete) as a NON-modal `<dialog>`, so the
- * page stays usable and Live view presses its items by their dialog
- * control `name` (drivable.js) while it is open. One open at a time; a
- * second click on its button, Escape, a click outside or picking an item
- * closes it, and Escape gives the focus back to its button; ↑ ↓ Home End
- * move between the items. The button says whether it is open
- * (`aria-expanded`).
+ * A row's menu (Edit…, Run now, Delete) on the button already in the row,
+ * as kp-themes' menu button (js/menu-button.js): the button is wrapped once
+ * in a `.kp-menu-button` with its rich menu beside it, and kp does the rest
+ * — it opens on the first entry, closes on a second click, Escape (the
+ * focus back on the button), a click outside or a pick, with the theme's
+ * own open and close; ↑ ↓ Home End and a first letter move; the menu stays
+ * whole on the screen and tells the theme where the button is
+ * (`--kp-menu-anchor-x`, `--kp-menu-count`). The page stays usable, and
+ * Live view presses an entry by its `name` (drivable.js) while the menu is
+ * open. The first call opens the menu; later calls only refill it, as the
+ * button's own click is kp's from then on.
  * @param {{anchor: HTMLElement, label: string, title: string,
  *   items: {name: string, label: string, hint: string, run: () => void,
  *   danger?: boolean}[], width?: number}} spec
- * @returns {{el: HTMLDialogElement, close: () => void} | null} null when
- *   the click closed the menu its button had open
+ * @returns {{el: HTMLElement, close: () => void}}
  */
 export function rowMenu(spec) {
-  if (openRowMenu?.anchor === spec.anchor) {
-    openRowMenu.close();
-    return null;
-  }
-  openRowMenu?.close();
-  const width = spec.width ?? 260;
-  const r = spec.anchor.getBoundingClientRect();
-  const m = /** @type {HTMLDialogElement} */ (
-    h(
-      "dialog",
-      { class: "nx-rowmenu", role: "menu", "aria-label": spec.label },
-      h("h2", { class: "kp-dialog__title nx-vh" }, spec.title),
-      spec.items.map((it) =>
-        dialogControl(
-          h(
-            "button",
-            {
-              type: "button",
-              role: "menuitem",
-              class: it.danger ? "danger" : null,
-              onclick: () => {
-                close();
-                it.run();
-              },
-            },
-            h("b", null, it.label),
-            h("span", null, it.hint),
-          ),
-          it.name,
-        ),
-      ),
-    )
-  );
-  m.style.width = `${width}px`;
-  const close = () => {
-    if (m.open) m.close();
-    m.remove();
-  };
-  const outside = (/** @type {PointerEvent} */ e) => {
-    const t = /** @type {Node} */ (e.target);
-    if (!m.contains(t) && !spec.anchor.contains(t)) close();
-  };
-  m.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      close();
-      spec.anchor.focus();
-    } else menuKey(m, e);
-  });
-  const handle = { el: m, close, anchor: spec.anchor };
-  m.addEventListener("close", () => {
-    document.removeEventListener("pointerdown", outside);
-    spec.anchor.setAttribute("aria-expanded", "false");
-    m.remove();
-    if (openRowMenu === handle) openRowMenu = null;
-  });
-  document.addEventListener("pointerdown", outside);
-  spec.anchor.setAttribute("aria-haspopup", "menu");
-  spec.anchor.setAttribute("aria-expanded", "true");
-  // show() focuses the first item, which scrolls the page to wherever the
-  // dialog sits at that moment; keep the page where the user clicked and
-  // place the menu against the button from there, by its real width.
-  const view = { w: innerWidth, h: innerHeight, x: scrollX, y: scrollY };
-  m.style.top = `${r.bottom + view.y + 4}px`;
-  m.style.left = `${Math.max(8, r.right + view.x - width)}px`;
-  document.body.append(m);
-  m.show();
-  if (scrollX !== view.x || scrollY !== view.y) scrollTo(view.x, view.y);
-  const p = menuPlace(r, m.offsetHeight, view, m.offsetWidth);
-  m.style.top = `${p.top}px`;
-  m.style.left = `${p.left}px`;
-  openRowMenu = handle;
-  /** @type {HTMLElement | null} */ (m.querySelector("button"))?.focus({
-    preventScroll: true,
-  });
-  return { el: m, close };
+  const anchor = spec.anchor;
+  const had = anchor.parentElement;
+  const made = !had?.hasAttribute("data-kp-row-menu");
+  /** @type {HTMLElement} */
+  let wrap;
+  if (made) {
+    const menu = h("div", {
+      class: "kp-menu kp-menu--rich",
+      role: "menu",
+    });
+    wrap = h("span", {
+      class: "kp-menu-button nx-rowmenu",
+      "data-kp-menu-button": "",
+      "data-kp-row-menu": "",
+    });
+    const focused = document.activeElement === anchor;
+    // kp's arrival reads `data-kp-arrive` on the element that receives the
+    // new child: the wrapper is made around a button already on screen, and
+    // its arrival would squeeze it to nothing while the menu, placed at
+    // once, measured it (the menu then hung past the button).
+    had?.setAttribute("data-kp-arrive", "none");
+    anchor.replaceWith(wrap);
+    wrap.append(anchor, menu);
+    if (focused) anchor.focus({ preventScroll: true });
+    wrap.addEventListener(MENU_SELECT_EVENT, (e) => {
+      const value = /** @type {CustomEvent<{value: string}>} */ (e).detail
+        .value;
+      rowItems.get(wrap)?.get(value)?.run();
+    });
+    attachMenuButtons(wrap.parentElement ?? wrap, {
+      decorate: (part, info) => {
+        // The entry is the Live view control named for it (dialogControl).
+        if (info.kind === "menu-item" && info.value)
+          dialogControl(part, info.value);
+      },
+    });
+  } else wrap = /** @type {HTMLElement} */ (had);
+  wrap.querySelector("[role=menu]")?.setAttribute("aria-label", spec.label);
+  rowItems.set(wrap, new Map(spec.items.map((it) => [it.name, it])));
+  setMenu(wrap, [
+    {
+      group: "",
+      items: spec.items.map((it) => ({
+        label: it.label,
+        hint: it.hint,
+        value: it.name,
+        ...(it.danger ? { danger: true } : {}),
+      })),
+    },
+  ]);
+  if (made) openMenu(wrap);
+  return { el: wrap, close: () => closeMenu(wrap) };
 }
+
+/** The entries a row menu's wrapper runs, by their name. @type {WeakMap<HTMLElement, Map<string, {run: () => void}>>} */
+const rowItems = new WeakMap();
 
 /**
  * One entry of a more menu: a link (`href`) or a button (`onClick`), its
@@ -1977,85 +1958,103 @@ export { ensureStyle } from "./dom.js";
 
 /** @typedef {"ok" | "warn" | "bad" | "info" | "live" | ""} Tone */
 
+/** kp-themes' badge variant for a dashboard tone. @type {Record<string, string>} */
+const BADGE_TONE = {
+  ok: "success",
+  warn: "warning",
+  bad: "destructive",
+  info: "info",
+  live: "info",
+};
+
 /**
- * A small status chip: a count, a state word ("3", "unreadable"), in a
- * tone. With `dot`, a status dot leads the word.
+ * A small status chip, kp-themes' `.kp-badge`: a count, a state word ("3",
+ * "unreadable"), on its status plate (`--success` and the like, each with
+ * its own ink) or plain. With `dot`, a status dot leads the word.
  * @param {import("./dom.js").Child} text
  * @param {{tone?: Tone, dot?: boolean, title?: string, label?: string}} [o]
  *   `label`: what a screen reader says instead of the text ("!")
  */
 export function chip(text, o = {}) {
+  const variant = o.tone ? BADGE_TONE[o.tone] : undefined;
   return h(
     "span",
     {
-      class: `nx-chip${o.tone ? ` nx-chip--${o.tone}` : ""}${o.dot ? " nx-chip--dot" : ""}`,
+      class: `kp-badge${variant ? ` kp-badge--${variant}` : ""}`,
+      // A page's own tone (Claude's chip) has no kp variant: a hook only.
+      "data-tone": o.tone && !variant ? o.tone : null,
       title: o.title ?? null,
       "aria-label": o.label ?? null,
     },
+    o.dot
+      ? h("span", { class: "kp-health__dot", "aria-hidden": "true" })
+      : null,
     text,
   );
 }
 
 /**
- * A status dot, with its word beside it (the word is what a screen reader
- * reads; a dot without one is decorative).
+ * A status dot, kp-themes' `.kp-health` with its word beside it (the word
+ * is what a screen reader reads; a dot without one is decorative). kp
+ * knows ok / warn / down; `info` and `live` are the dashboard's own two
+ * (see app.css).
  * @param {Tone} tone
- * @param {string} [word]
+ * @param {import("./dom.js").Child} [word]
+ * @param {{cls?: string, attrs?: Record<string, string>}} [o] further
+ *   classes and attributes of the element
  */
-export function dot(tone, word) {
+export function dot(tone, word, o = {}) {
+  const state = {
+    ok: "ok",
+    warn: "warn",
+    bad: "down",
+    info: "info",
+    live: "ok",
+  }[/** @type {"ok" | "warn" | "bad" | "info" | "live"} */ (tone)];
   return h(
     "span",
     {
-      class: `nx-dot${tone ? ` nx-dot--${tone}` : ""}`,
+      class: o.cls ? `kp-health ${o.cls}` : "kp-health",
+      "data-state": state ?? null,
       "aria-hidden": word ? null : "true",
+      ...(o.attrs ?? {}),
     },
-    word ?? "",
+    h("span", { class: "kp-health__dot", "aria-hidden": "true" }),
+    word ?? null,
   );
 }
 
 /**
- * A meter on its own (a KPI tile's, a table cell's): a bar `pct` full,
- * with a tick at `mark` and the warn / bad tone (`meterParts`).
+ * A meter on its own (a KPI tile's, a table cell's), kp-themes'
+ * `.kp-meter`: a bar `pct` full, with a tick at `mark` and the warn / bad
+ * tone (`setMeter` writes the share, the mark and the ARIA).
  * @param {Meter} m
+ * @param {string} [cls] the element's classes (`kp-meter`)
  * @returns {{el: HTMLElement, set: (m: Meter) => void}}
  */
-export function meter(m) {
-  const e = h("span", { class: "nx-meter", "aria-hidden": "true" });
-  const set = (/** @type {Meter} */ next) => {
-    const p = meterParts(next);
-    e.className = `nx-meter${p.tone ? ` nx-meter--${p.tone}` : ""}`;
-    const fill = h("i");
-    fill.style.width = `${p.fill}%`;
-    /** @type {HTMLElement[]} */
-    const parts = [fill];
-    if (p.mark != null) {
-      const tick = h("b", next.markTitle ? { title: next.markTitle } : null);
-      tick.style.left = `${p.mark}%`;
-      parts.push(tick);
-    }
-    e.replaceChildren(...parts);
-  };
+export function meter(m, cls = "kp-meter") {
+  const e = h("span", { class: cls });
+  const set = (/** @type {Meter} */ next) => paintMeter(e, next);
   set(m);
   return { el: e, set };
 }
 
 /**
  * One row's share of a whole as a bar with its number beside it ("41 %",
- * "2.1 GB"): the bar in `colour` (a stack's) or the first chart colour.
+ * "2.1 GB"): a kp meter in `colour` (a stack's) or the primary colour.
  * @param {number | null} pct
  * @param {string} text the number the bar stands for, always shown
  * @param {string} [colour]
  */
 export function shareBar(pct, text, colour) {
-  const fill = h("i");
-  fill.style.width = `${meterParts({ pct }).fill}%`;
+  const bar = meter({ pct }).el;
   const e = h(
     "span",
     { class: "nx-share" },
-    h("span", { class: "nx-share__bar", "aria-hidden": "true" }, fill),
+    bar,
     h("span", { class: "nx-share__num" }, text),
   );
-  if (colour) e.style.setProperty("--c", colour);
+  if (colour) e.style.setProperty("--kp-meter-fill", colour);
   return e;
 }
 
@@ -2147,11 +2146,12 @@ export function rowKeys(root, selector, onEnter) {
 }
 
 /**
- * A side panel (DESIGN_LANGUAGE §6): a modal `<dialog>` against the right
- * edge (the whole width on a phone) with a head (title, one sentence,
- * Close), a body and a foot of actions. Escape, Close and a click on the
- * backdrop close it; its buttons are found by Live view among the open
- * dialog's own (Close is the dialog control `close`).
+ * A side panel (DESIGN_LANGUAGE §6) as kp-themes draws one
+ * (`dialog.kp-drawer`): a modal `<dialog>` against the end edge (the whole
+ * width on a phone) with a head (title, one sentence, Close), a body that
+ * scrolls and a foot of actions. Escape, Close and a click on the backdrop
+ * close it; its buttons are found by Live view among the open dialog's own
+ * (Close is the dialog control `close`).
  * @param {{title: string, desc: string, body?: import("./dom.js").Child,
  *   foot?: import("./dom.js").Child, onClose?: () => void,
  *   cls?: string}} spec
@@ -2160,8 +2160,8 @@ export function rowKeys(root, selector, onEnter) {
  */
 export function drawer(spec) {
   const id = `nx-drawer-${++drawers}`;
-  const body = h("div", { class: "nx-drawer__body" }, spec.body ?? null);
-  const foot = h("div", { class: "nx-drawer__foot" }, spec.foot ?? null);
+  const body = h("div", { class: "kp-drawer__body" }, spec.body ?? null);
+  const foot = h("footer", { class: "kp-drawer__foot" }, spec.foot ?? null);
   foot.hidden = spec.foot == null;
   const close = () => {
     if (d.open) d.close();
@@ -2172,7 +2172,7 @@ export function drawer(spec) {
       {
         type: "button",
         // kp-dialog__close: the same ✕ every dialog of the app has.
-        class: "nx-icon-btn kp-dialog__close",
+        class: "kp-icon-button kp-dialog__close",
         "aria-label": "Close",
         title: "Close (Esc)",
         onclick: close,
@@ -2185,15 +2185,15 @@ export function drawer(spec) {
     h(
       "dialog",
       {
-        class: `kp-dialog nx-drawer${spec.cls ? ` ${spec.cls}` : ""}`,
+        class: `kp-drawer kp-dialog${spec.cls ? ` ${spec.cls}` : ""}`,
         "aria-labelledby": `${id}-h`,
       },
       h(
-        "div",
-        { class: "nx-drawer__head" },
+        "header",
+        { class: "kp-drawer__head" },
         h("h2", { id: `${id}-h`, class: "kp-dialog__title" }, spec.title),
         x,
-        h("p", { class: "section-head__desc" }, spec.desc),
+        h("p", { class: "kp-drawer__desc" }, spec.desc),
       ),
       body,
       foot,
@@ -2490,30 +2490,27 @@ export const art = {
 };
 
 /**
- * A flow's stepper (flows/update.html `.fx-steps`): one bar per step, the
- * done ones green, the current one in the primary colour and bold.
+ * A flow's stepper: kp-themes' wizard steps (`.kp-wizard__steps`), a
+ * numbered circle per step, the done ones ticked, the current one filled
+ * and bold (`aria-current="step"`).
  * @param {string[]} labels
  * @returns {{el: HTMLElement, set: (step: number) => void}}
  */
 export function stepper(labels) {
-  const items = labels.map((l) => h("li", null, h("span", null, l)));
+  const items = labels.map((l) => h("li", null, l));
   const e = h(
     "ol",
-    {
-      class: "nx-steps",
-      style: `--n:${labels.length}`,
-      "aria-label": "Steps",
-    },
+    { class: "kp-wizard__steps", "aria-label": "Steps" },
     ...items,
   );
   return {
     el: e,
     set: (step) =>
       items.forEach((li, i) => {
-        const s = i + 1 < step ? "done" : i + 1 === step ? "now" : "";
-        if (s) li.dataset.s = s;
-        else delete li.dataset.s;
-        if (s === "now") li.setAttribute("aria-current", "step");
+        const s = i + 1 < step ? "done" : i + 1 === step ? "current" : "";
+        if (s) li.dataset.state = s;
+        else delete li.dataset.state;
+        if (s === "current") li.setAttribute("aria-current", "step");
         else li.removeAttribute("aria-current");
       }),
   };
@@ -2526,7 +2523,8 @@ export function stepper(labels) {
 
 /**
  * A live list of steps (flows/update.html `.fx-check`): a status ring
- * (waiting, spinning, ticked, failed, skipped), the step and its one-line
+ * (waiting, ticked, failed, skipped; the running step shows kp-themes'
+ * spinner, which each theme draws its own way), the step and its one-line
  * description, and how long it took.
  * @param {CheckRow[]} rows
  */
@@ -2538,19 +2536,25 @@ export function checkList(rows) {
       h(
         "li",
         { "data-s": r.state },
-        h("span", {
-          class: "nx-check__st",
-          "aria-label":
-            r.state === "ok"
-              ? "done"
-              : r.state === "run"
-                ? "running"
-                : r.state === "bad"
-                  ? "failed"
-                  : r.state === "skip"
-                    ? "skipped"
-                    : "waiting",
-        }),
+        h(
+          "span",
+          {
+            class: "nx-check__st",
+            "aria-label":
+              r.state === "ok"
+                ? "done"
+                : r.state === "run"
+                  ? "running"
+                  : r.state === "bad"
+                    ? "failed"
+                    : r.state === "skip"
+                      ? "skipped"
+                      : "waiting",
+          },
+          r.state === "run"
+            ? h("span", { class: "kp-spinner", "aria-hidden": "true" })
+            : null,
+        ),
         h(
           "span",
           null,
@@ -2564,8 +2568,10 @@ export function checkList(rows) {
 }
 
 /**
- * A dismissible explanation (FLOWS.md §1.5 "ⓘ This replaces…"), gone for
- * good in this browser once closed.
+ * A dismissible explanation (FLOWS.md §1.5 "ⓘ This replaces…") as a
+ * kp-themes info alert; its ✕ is kp's `.kp-alert__close` (main.js attaches
+ * `attachDismissals`, which hides it the theme's way and says
+ * `kp-alert-dismiss`), and it is gone for good in this browser once closed.
  * @param {string} key the browser's memory of the dismissal
  * @param {(Node | string)[]} words
  * @returns {{el: HTMLElement, close: HTMLElement} | null} null once dismissed
@@ -2580,7 +2586,7 @@ export function explainNote(key, words) {
     "button",
     {
       type: "button",
-      class: "nx-explain__x",
+      class: "kp-alert__close kp-icon-button",
       "aria-label": "Hide this explanation",
       title: "Hide this explanation for good",
     },
@@ -2588,13 +2594,12 @@ export function explainNote(key, words) {
   );
   const el = h(
     "div",
-    { class: "nx-explain", role: "note" },
-    h("span", { "aria-hidden": "true" }, "ⓘ"),
-    h("span", null, ...words),
+    { class: "kp-alert kp-alert--info", role: "note" },
+    h("span", { class: "kp-alert__icon", "aria-hidden": "true" }, "ⓘ"),
+    h("div", { class: "kp-alert__body" }, ...words),
     close,
   );
-  close.addEventListener("click", () => {
-    void leave(el);
+  el.addEventListener(ALERT_DISMISS_EVENT, () => {
     try {
       localStorage.setItem(key, "1");
     } catch {

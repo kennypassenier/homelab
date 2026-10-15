@@ -28,6 +28,7 @@ import { declare, declareField, drivable, fieldId } from "../drivable.js";
 import { diffBlocks } from "../editui.js";
 import { formatDateTime, humanDuration } from "../format.js";
 import { inboxNow } from "../inboxlist.js";
+import { logLineEl } from "../jobpanel.js";
 import { feedUpdates } from "../inboxsources.js";
 import { openPinRollback } from "../pinupdate.js";
 import { planView } from "../plan.js";
@@ -57,6 +58,7 @@ import {
   updatesBody,
   whoNotices,
 } from "../updateflow.js";
+import { attachLogs } from "/static/kp/js/log.js";
 
 // review M5: every page field Live view may set is declared (drivable.js
 // `declareField`); the client and the dashboard refuse any other.
@@ -369,10 +371,14 @@ export function mount(root, scope) {
     ],
   });
   const runList = h("div");
-  const log = h("pre", {
-    class: "uf-log",
+  // The kp log component, the same lines the job panel draws (gap-kplog-1).
+  const log = h("div", {
+    class: "kp-log uf-log",
+    role: "log",
     "aria-live": "polite",
     "aria-label": "What the host did",
+    // A log streams: a line is appended, never news of its own.
+    "data-kp-arrive": "none",
   });
   runCard.body.append(runList, log);
 
@@ -908,12 +914,10 @@ export function mount(root, scope) {
         ),
       ),
     );
-    log.textContent = (act.logs.get(j.job) ?? [])
-      .slice(-14)
-      .map(
-        (l) => `${new Date(l.ts * 1000).toTimeString().slice(0, 8)}  ${l.msg}`,
-      )
-      .join("\n");
+    log.replaceChildren(
+      ...(act.logs.get(j.job) ?? []).slice(-14).map(logLineEl),
+    );
+    attachLogs(log);
     if (done) {
       if (logsFor !== j.job) {
         logsFor = j.job;

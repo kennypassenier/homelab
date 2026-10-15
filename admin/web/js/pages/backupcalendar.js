@@ -54,36 +54,32 @@
 
 import {
   calendarInputs,
-  calendarWeeks,
   dayDetail,
-  earliestSnapshot,
-  monthDays,
-  shiftMonth,
+  historyCells,
   withStackResult,
 } from "../backupcalendar.js";
-import { h, perstackChips, slowRead } from "../dom.js";
+import { ensureStyle, h, perstackChips, slowRead } from "../dom.js";
 import { pageHeader } from "../ui.js";
 import { stackChips } from "../perstack.js";
-import { agoText, formatDateTime } from "../format.js";
+import { ZONE, agoText, formatDateTime } from "../format.js";
 import { current, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
+import {
+  CALENDAR_MONTH_EVENT,
+  CALENDAR_PICK_EVENT,
+  attachCalendars,
+  calendarSelect,
+  dayKey,
+  formatDayKey,
+  setCalendarDays,
+  setCalendarLegend,
+  setCalendarState,
+} from "/static/kp/js/calendar.js";
 
-// calendar-words: the month grid's column heads, not a moment's format.
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const MONTH_NAMES = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
+// kp-themes' calendar.js draws the month (the title with Prev / Next /
+// Today, the six-week grid, the keys, the legend, the pulse while loading);
+// this page gives it the days (`backupcalendar.js`'s `historyCells`) and
+// draws the picked day's detail beside it.
 
 /**
  * `ok`: read, with its snapshot times (possibly none yet, still a stack the
@@ -119,89 +115,6 @@ async function fleetStackNames() {
     });
   }
   return (current().fleet?.stacks ?? []).map((s) => s.name).sort();
-}
-
-/** @param {Date} d */
-function localIso(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-/**
- * fix-214: the month grid's shape — headers + every day of `year`/`month`,
- * padded to whole weeks — built from the clock alone (no stack data), so
- * the skeleton paint and the final paint of the SAME month share the exact
- * geometry: no layout shift when the data replaces the pulsing cells.
- * @param {number} year
- * @param {number} month 1-12
- * @param {string} today YYYY-MM-DD
- */
-function gridShape(year, month, today) {
-  return calendarWeeks(monthDays({}, [], year, month, today, null));
-}
-
-/**
- * @param {(import("../backupcalendar.js").CalendarDay | null)[][]} weeks
- * @param {(day: import("../backupcalendar.js").CalendarDay | null) => Node} cell
- */
-function renderGrid(weeks, cell) {
-  return h(
-    "div",
-    { class: "backup-cal__grid", role: "grid" },
-    ...WEEKDAYS.map((w) => h("div", { class: "backup-cal__head" }, w)),
-    ...weeks.flatMap((week) => week.map(cell)),
-  );
-}
-
-/** @param {import("../backupcalendar.js").CalendarDay | null} d */
-function skeletonCell(d) {
-  return d
-    ? h("div", {
-        class: "backup-cal__cell backup-cal__cell--skeleton",
-        "aria-hidden": "true",
-      })
-    : h("div", { class: "backup-cal__cell backup-cal__cell--pad" });
-}
-
-/**
- * fix-214: the compact "11/13" count alongside the day number, and a
- * selected/today marker — months outside the data the host returned (the
- * future, or before the fleet's oldest snapshot ever) say so plainly
- * instead of drawing a false, empty-looking red cell.
- * @param {import("../backupcalendar.js").CalendarDay | null} d
- * @param {{selected: string | null, today: string, onPick: (date: string) => void}} opts
- */
-function finishedCell(d, opts) {
-  if (!d) return h("div", { class: "backup-cal__cell backup-cal__cell--pad" });
-  const day = d.date.slice(8);
-  const outOfRange = d.tone === "future" || d.tone === "before";
-  const count = outOfRange ? "" : `${d.backed_up.length}/${d.expected.length}`;
-  const label = outOfRange
-    ? d.tone === "future"
-      ? `${d.date}: in the future — nothing to read yet`
-      : `${d.date}: before the fleet's oldest known backup — no data from this far back`
-    : d.expected.length
-      ? `${d.date}: ${d.backed_up.length}/${d.expected.length} stacks backed up${d.missing.length ? ` — missing: ${d.missing.join(", ")}` : ""}`
-      : `${d.date}: no stack keeps data`;
-  const cell = h(
-    "button",
-    {
-      type: "button",
-      class: `backup-cal__cell backup-cal__cell--${d.tone}${d.date === opts.selected ? " backup-cal__cell--selected" : ""}${d.date === opts.today ? " backup-cal__cell--today" : ""}`,
-      title: label,
-      "aria-label": label,
-      "aria-selected": String(d.date === opts.selected),
-      "data-date": d.date,
-      role: "gridcell",
-      tabindex: d.date === opts.selected ? "0" : "-1",
-    },
-    h("span", { class: "backup-cal__cell-day" }, day),
-    ...(count ? [h("span", { class: "backup-cal__cell-count" }, count)] : []),
-  );
-  cell.addEventListener("click", () => opts.onPick(d.date));
-  return cell;
 }
 
 /** fix-180: how long a stack may stay "not read yet" before it is named. */
@@ -246,7 +159,8 @@ function sleep(ms, signal) {
  * @returns {() => void}
  */
 export function mount(root) {
-  const today = localIso(new Date());
+  ensureStyle("/css/pages/backupcalendar.css");
+  const today = dayKey(Date.now(), ZONE);
   const params = new URLSearchParams(location.search);
   const wantedY = Number(params.get("y"));
   const wantedM = Number(params.get("m"));
@@ -258,50 +172,19 @@ export function mount(root) {
   /** @type {string | null} */
   let selected = params.get("day") || null;
 
-  const heading = h(
-    "h2",
-    { id: "backup-cal-heading" },
-    `${MONTH_NAMES[ym.month - 1]} ${ym.year}`,
-  );
-  const prevBtn = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--sm",
-      "aria-label": "Previous month",
-    },
-    "‹ Prev",
-  );
-  const nextBtn = h(
-    "button",
-    {
-      type: "button",
-      class: "kp-button kp-button--sm",
-      "aria-label": "Next month",
-    },
-    "Next ›",
-  );
-  const todayBtn = h(
-    "button",
-    { type: "button", class: "kp-button kp-button--sm" },
-    "Today",
-  );
   const chipsWrap = h("div", { class: "backup-cal__chips-wrap" });
-  // fix-202/fix-214: the skeleton grid is laid out at once, synchronously,
-  // in the SAME markup `root.replaceChildren` paints — never left for the
-  // async load to fill in later, which is exactly what used to show a
-  // blank area while `fleetStackNames()`'s own await was still pending.
-  const grid = h(
-    "div",
-    {
-      class: "backup-cal",
-      "aria-label": "Backup calendar",
-      role: "grid",
-      "aria-labelledby": "backup-cal-heading",
-    },
-    renderGrid(gridShape(ym.year, ym.month, today), skeletonCell),
-  );
-  const detail = h("div", {
+  // fix-202/fix-214: the calendar is on the page at once, synchronously, in
+  // the loading state (every day pulsing at its final size), never left for
+  // the async load to fill in later.
+  const calendar = h("section", {
+    class: "kp-calendar",
+    "aria-label": "Backup calendar",
+    "data-kp-calendar": "",
+    "data-kp-week-starts-on": "1",
+    "data-kp-calendar-month": `${ym.year}-${String(ym.month).padStart(2, "0")}`,
+    ...(selected ? { "data-kp-calendar-selected": selected } : {}),
+  });
+  const detail = h("aside", {
     class: "backup-cal__detail",
     "aria-live": "polite",
   });
@@ -321,34 +204,20 @@ export function mount(root) {
       desc: "One month at a time: every stack that keeps data is expected to have at least one restic snapshot each night. Reads restic directly over the network, one stack at a time, so a slow repository only ever holds up its own chip — never the whole page.",
       primary: refresh,
     }).el,
-    h(
-      "div",
-      { class: "backup-cal__legend" },
-      h("span", { class: "backup-cal__cell backup-cal__cell--ok" }, ""),
-      "every stack  ",
-      h("span", { class: "backup-cal__cell backup-cal__cell--warn" }, ""),
-      "some stacks  ",
-      h("span", { class: "backup-cal__cell backup-cal__cell--bad" }, ""),
-      "no stack  ",
-      h("span", { class: "backup-cal__cell backup-cal__cell--muted" }, ""),
-      "no stack keeps data  ",
-      h("span", { class: "backup-cal__cell backup-cal__cell--before" }, ""),
-      "before any backup history  ",
-      h("span", { class: "backup-cal__cell backup-cal__cell--future" }, ""),
-      "in the future",
-    ),
     chipsWrap,
-    h(
-      "div",
-      { class: "backup-cal__nav", role: "group", "aria-label": "Month" },
-      prevBtn,
-      heading,
-      nextBtn,
-      todayBtn,
-    ),
-    h("div", { class: "backup-cal__layout" }, grid, detail),
+    h("div", { class: "kp-calendar-layout" }, calendar, detail),
     status,
   );
+  const detachCalendar = attachCalendars(root, { timeZone: ZONE });
+  setCalendarLegend(calendar, [
+    { tone: "ok", label: "every stack" },
+    { tone: "warn", label: "some stacks" },
+    { tone: "bad", label: "no stack" },
+    { tone: "muted", label: "no stack keeps data" },
+    { tone: "before", label: "before any backup history" },
+    { tone: "future", label: "in the future" },
+  ]);
+  setCalendarState(calendar, "loading", "Reading the fleet…");
 
   const abort = new AbortController();
   /** @type {Record<string, StackResult>} */
@@ -383,7 +252,7 @@ export function mount(root) {
       );
       return;
     }
-    const rows = dayDetail(results, selected);
+    const rows = dayDetail(results, selected, ZONE);
     const words = {
       backed_up: "backed up",
       missing: "no backup that night",
@@ -391,7 +260,7 @@ export function mount(root) {
       not_read: "not read",
     };
     detail.replaceChildren(
-      h("h3", null, selected),
+      h("h3", null, formatDayKey(selected)),
       h(
         "ul",
         { class: "backup-cal__detail-list" },
@@ -416,82 +285,36 @@ export function mount(root) {
   };
 
   const paintGrid = () => {
-    heading.textContent = `${MONTH_NAMES[ym.month - 1]} ${ym.year}`;
-    const shape = gridShape(ym.year, ym.month, today);
     const { stacks, expected } = calendarInputs(results);
     const anyOk = Object.values(results).some((r) => r.status === "ok");
     if (!anyOk) {
-      grid.replaceChildren(renderGrid(shape, skeletonCell));
+      // Nothing to draw yet: pulsing while a stack is still being read,
+      // plain words once every one of them has settled.
+      if (Object.values(results).every((r) => r.status !== "pending"))
+        setCalendarState(
+          calendar,
+          "error",
+          "No stack could be read; the chips above say why.",
+        );
+      else setCalendarState(calendar, "loading", "Reading the fleet…");
       return;
     }
-    const earliest = earliestSnapshot(stacks);
-    const days = monthDays(
-      stacks,
-      expected,
-      ym.year,
-      ym.month,
-      today,
-      earliest,
-    );
-    grid.replaceChildren(
-      renderGrid(calendarWeeks(days), (d) =>
-        finishedCell(d, { selected, today, onPick: pickDay }),
-      ),
-    );
+    setCalendarState(calendar, "ready");
+    setCalendarDays(calendar, historyCells(stacks, expected, today, ZONE));
   };
 
-  /** @param {string} date */
-  function pickDay(date) {
-    selected = date;
+  // The calendar tells the page which day was picked and which month is
+  // shown; the address keeps both, so a link opens the same view.
+  calendar.addEventListener(CALENDAR_PICK_EVENT, (e) => {
+    selected = /** @type {CustomEvent} */ (e).detail.date;
     writeUrl();
-    paintGrid();
-    paintDetail();
-  }
-
-  /** @param {number} delta */
-  const moveMonth = (delta) => {
-    ym = shiftMonth(ym, delta);
-    writeUrl();
-    paintGrid();
-  };
-  prevBtn.addEventListener("click", () => moveMonth(-1));
-  nextBtn.addEventListener("click", () => moveMonth(1));
-  todayBtn.addEventListener("click", () => {
-    ym = { year: Number(today.slice(0, 4)), month: Number(today.slice(5, 7)) };
-    selected = today;
-    writeUrl();
-    paintGrid();
     paintDetail();
   });
-
-  /** fix-214: arrows move the selected day, PageUp/PageDown change month. */
-  grid.addEventListener("keydown", (e) => {
-    const deltas = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
-    if (e.key in deltas) {
-      e.preventDefault();
-      const base = selected ?? today;
-      const d = new Date(`${base}T00:00:00`);
-      d.setDate(
-        d.getDate() + deltas[/** @type {keyof typeof deltas} */ (e.key)],
-      );
-      const iso = localIso(d);
-      ym = { year: d.getFullYear(), month: d.getMonth() + 1 };
-      pickDay(iso);
-      /** @type {HTMLElement | null} */ (
-        root.querySelector(`.backup-cal__cell[data-date="${iso}"]`)
-      )?.focus();
-      return;
-    }
-    if (e.key === "PageUp" || e.key === "PageDown") {
-      e.preventDefault();
-      moveMonth(e.key === "PageUp" ? -1 : 1);
-      return;
-    }
-    if (e.key === "Enter" && selected) {
-      e.preventDefault();
-      paintDetail();
-    }
+  calendar.addEventListener(CALENDAR_MONTH_EVENT, (e) => {
+    ym = /** @type {CustomEvent} */ (e).detail;
+    writeUrl();
   });
+  if (selected) calendarSelect(calendar, selected);
 
   /**
    * fix-224: the plain-words line names the longest-pending stack, not
@@ -624,7 +447,7 @@ export function mount(root) {
     if (names.length === 0) {
       status.textContent = "";
       results = {};
-      paintGrid();
+      setCalendarState(calendar, "empty", "There are no stacks to read.");
       return;
     }
 
@@ -647,6 +470,7 @@ export function mount(root) {
   void load().catch(() => {});
   return () => {
     abort.abort();
+    detachCalendar();
     if (tickTimer != null) window.clearInterval(tickTimer);
   };
 }

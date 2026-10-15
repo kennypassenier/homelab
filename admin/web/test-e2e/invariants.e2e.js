@@ -181,8 +181,9 @@ test("invariants: the backup calendar shows its skeleton grid immediately, befor
       await route.continue();
     });
     await page.goto(`${BASE}/backupcalendar`);
+    // kp-themes' calendar: a day waiting is `loading`, pulsing at its size.
     const skeletonCells = await page
-      .locator(".backup-cal__cell--skeleton")
+      .locator('.kp-calendar__day[data-kp-tone="loading"]')
       .count();
     assert.ok(
       skeletonCells > 0,
@@ -454,9 +455,7 @@ test("invariants: the backup calendar paints a stack's own cells as soon as it a
     await page.goto(`${BASE}/backupcalendar`);
     await page.waitForTimeout(900);
     const finishedCells = await page
-      .locator(
-        ".backup-cal__cell:not(.backup-cal__cell--skeleton):not(.backup-cal__cell--pad)",
-      )
+      .locator('.kp-calendar__day[data-kp-date]:not([data-kp-tone="loading"])')
       .count();
     assert.ok(
       finishedCells > 0,
@@ -510,7 +509,8 @@ test("invariants: the backup calendar's grid uses at least 75% of the content ar
     await page.setViewportSize({ width: 1920, height: 1000 });
     await page.goto(`${BASE}/backupcalendar`);
     await page.waitForTimeout(600);
-    const gridBox = await page.locator(".backup-cal__grid").boundingBox();
+    // The calendar and the day detail beside it are the page's one layout.
+    const gridBox = await page.locator(".kp-calendar-layout").boundingBox();
     const shellBox = await page.locator("main#page.shell").boundingBox();
     assert.ok(gridBox && shellBox, "grid or shell did not render");
     const ratio = gridBox.width / shellBox.width;
@@ -531,7 +531,7 @@ test("invariants: the backup calendar shows a month heading, and prev/next chang
     const context = await browser.newContext();
     const page = await freshPage(context);
     await page.goto(`${BASE}/backupcalendar`);
-    const heading = page.locator("#backup-cal-heading");
+    const heading = page.locator(".kp-calendar__title");
     const before = await heading.textContent();
     assert.ok(
       /^[A-Z][a-z]+ \d{4}$/.test(before ?? ""),
@@ -554,11 +554,11 @@ test("invariants: the backup calendar grid is never more than 6 week rows, in ev
     const context = await browser.newContext();
     const page = await freshPage(context);
     await page.goto(`${BASE}/backupcalendar`);
-    await page.waitForSelector(".backup-cal__grid");
+    await page.waitForSelector(".kp-calendar__grid");
     for (let i = 0; i < 12; i++) {
-      const cells = await page.locator(".backup-cal__grid > *").count();
-      // 7 weekday headers + 7 cells per week row.
-      const weeks = (cells - 7) / 7;
+      // kp-themes' calendar always draws six week rows (42 cells).
+      const weeks =
+        (await page.locator(".kp-calendar__grid tbody td").count()) / 7;
       assert.ok(
         Number.isInteger(weeks) && weeks <= 6 && weeks >= 4,
         `month ${i}: ${weeks} week rows, expected 4-6`,
@@ -581,11 +581,11 @@ test("invariants: clicking a day in the backup calendar shows its detail with th
     await page.waitForFunction(
       () =>
         document.querySelectorAll(
-          ".backup-cal__cell:not(.backup-cal__cell--skeleton):not(.backup-cal__cell--pad)",
+          '.kp-calendar__day[data-kp-date]:not([data-kp-tone="loading"])',
         ).length > 0,
       { timeout: 5000 },
     );
-    const todayCell = page.locator(".backup-cal__cell--today");
+    const todayCell = page.locator(".kp-calendar__day[data-kp-today]");
     await todayCell.first().click();
     const detail = page.locator(".backup-cal__detail");
     await detail.locator(".backup-cal__detail-row").first().waitFor({
@@ -2394,7 +2394,7 @@ test("invariants: the backup calendar's status colours are the status tokens, in
       await page.evaluate((t) => localStorage.setItem("theme", t), theme);
       await page.goto(`${BASE}/backupcalendar`);
       await page
-        .locator(".backup-cal__cell--ok")
+        .locator('.kp-calendar__day[data-kp-tone="ok"]')
         .first()
         .waitFor({ timeout: 15000 });
       await page.waitForTimeout(300);
@@ -2405,18 +2405,23 @@ test("invariants: the backup calendar's status colours are the status tokens, in
           probe.style.background = `var(${t})`;
           return getComputedStyle(probe).backgroundColor;
         };
+        // kp-themes paints a calendar day as its status plate (the plate
+        // colour and its own ink), not the old foreground-colour fill.
         const want = {
-          "backup-cal__cell--ok": tokenColour("--success-foreground"),
-          "backup-cal__cell--warn": tokenColour("--warning-foreground"),
-          "backup-cal__cell--bad": tokenColour("--destructive"),
+          ok: tokenColour("--success"),
+          warn: tokenColour("--warning"),
+          bad: tokenColour("--destructive"),
         };
         const out = [];
         let n = 0;
-        for (const [cls, colour] of Object.entries(want))
-          for (const el of document.querySelectorAll(`.${cls}`)) {
+        for (const [tone, colour] of Object.entries(want))
+          for (const el of document.querySelectorAll(
+            `.kp-calendar__day[data-kp-tone="${tone}"]`,
+          )) {
             n++;
             const got = getComputedStyle(el).backgroundColor;
-            if (got !== colour) out.push(`.${cls} is ${got}, not ${colour}`);
+            if (got !== colour)
+              out.push(`a ${tone} day is ${got}, not ${colour}`);
           }
         const okBorder = tokenColour("--success-foreground");
         for (const el of document.querySelectorAll(".perstack-chip--read")) {
@@ -2503,7 +2508,7 @@ test("invariants: the Doctor shows no verdict and one loading indicator until ev
         const main =
           document.querySelector("#host-checks-card") ?? document.body;
         return {
-          verdict: [...main.querySelectorAll(".state")]
+          verdict: [...main.querySelectorAll("td .kp-badge")]
             .map((s) => s.textContent ?? "")
             .join(" "),
           spinners: [...main.querySelectorAll(".kp-spinner")].filter(shown)
@@ -2719,7 +2724,7 @@ test("invariants: Ctrl K finds an action by intent, in any word order, and Enter
     const title = await page.locator("#page h1").innerText();
     assert.match(title, /^Update kp-soft/, `the flow that opened: ${title}`);
     assert.equal(
-      await page.locator("#page .nx-steps li").count(),
+      await page.locator("#page .kp-wizard__steps li").count(),
       6,
       "the Update flow shows its six steps",
     );
@@ -3120,10 +3125,10 @@ test("invariants: the Host page lays out two columns, Containers first, the line
           side,
           containers: box("#host-containers"),
           connection: box("#host-connection"),
-          kpis: [...document.querySelectorAll(".nx-kpi")].map(
+          kpis: [...document.querySelectorAll(".kp-kpi")].map(
             (k) => /** @type {HTMLElement} */ (k).dataset.key,
           ),
-          kpiText: [...document.querySelectorAll(".nx-kpi")].map(
+          kpiText: [...document.querySelectorAll(".kp-kpi")].map(
             (k) => k.textContent ?? "",
           ),
           primary: [
@@ -3599,7 +3604,9 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
     // when only one has newer apps.
     await page.waitForURL(/\/update\?/, { timeout: 5000 });
     const now = () =>
-      page.locator("#page .nx-steps li[data-s=now] span").innerText();
+      page
+        .locator("#page .kp-wizard__steps li[data-state=current]")
+        .innerText();
     assert.equal(await now(), "See");
     await page.locator("#page .uf-item").first().waitFor({ timeout: 15000 });
     // A plain click on a row leaves it out, again includes it.
@@ -3726,18 +3733,18 @@ test("invariants: ? opens Help with the six areas, the words and the keys, and i
       ])
         assert.ok(text.includes(w), `${width}px: Help does not say ${w}`);
       await help.getByText("Take the 1-minute tour").click();
-      const tour = page.locator(".tour");
+      const tour = page.locator(".kp-tour");
       /** @type {string[]} */
       const titles = [];
       for (let i = 0; i < 6; i++) {
         await tour.waitFor({ timeout: 3000 });
-        titles.push(await tour.locator("h3").innerText());
+        titles.push(await tour.locator(".kp-tour__title").innerText());
         assert.equal(
-          await tour.locator("footer span").first().innerText(),
+          await tour.locator(".kp-tour__count").innerText(),
           `${i + 1} of 6`,
         );
         assert.equal(
-          await page.locator(".tour-target").count(),
+          await page.locator("[data-kp-tour-target]").count(),
           1,
           `${width}px: step ${i + 1} points at nothing`,
         );
@@ -3758,11 +3765,17 @@ test("invariants: ? opens Help with the six areas, the words and the keys, and i
         "Backups",
         "System",
       ]);
-      assert.equal(await page.locator(".tour").count(), 0);
+      // kp-themes plays the card's entrance backwards before it is removed.
+      await page
+        .locator(".kp-tour")
+        .waitFor({ state: "detached", timeout: 3000 });
+      assert.equal(await page.locator(".kp-tour").count(), 0);
       assert.equal(
-        await page.evaluate(() => localStorage.getItem("homelab-toured")),
-        "1",
-        "the tour remembers it was seen",
+        await page.evaluate(() =>
+          localStorage.getItem("kp-remember:tour:homelab:done"),
+        ),
+        "true",
+        "the tour remembers it was seen (kp-themes' remember.js)",
       );
       await context.close();
     }
@@ -4034,12 +4047,12 @@ test("invariants: Stacks has the host strip, Deploy all changes and New stack; N
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/stacks`);
-    await page.waitForSelector(".sk-kpis .nx-kpi:not([data-loading])", {
+    await page.waitForSelector(".sk-kpis .kp-kpi:not([data-loading])", {
       timeout: 8000,
     });
-    const tiles = await page.$$eval(".sk-kpis .nx-kpi", (els) =>
+    const tiles = await page.$$eval(".sk-kpis .kp-kpi", (els) =>
       els.map((e) => ({
-        label: e.querySelector(".nx-kpi__label")?.textContent?.trim(),
+        label: e.querySelector(".kp-kpi__label")?.textContent?.trim(),
         href: e.getAttribute("href"),
         h: Math.round(e.getBoundingClientRect().height),
       })),
@@ -4086,7 +4099,7 @@ test("invariants: Stacks has the host strip, Deploy all changes and New stack; N
     // The sparklines come from the last day's trend, not one point.
     // redesign-final M1: the Host CPU tile's line (Load left the strip).
     assert.ok(
-      (await page.locator(".sk-kpis .nx-spark").count()) >= 1,
+      (await page.locator(".sk-kpis .kp-kpi__spark").count()) >= 1,
       "Host CPU draws no line",
     );
     const heads = await page.$$eval(
@@ -4288,7 +4301,7 @@ test("invariants: a row's Update and the batch Update… open the one Update flo
       (q.get("only") ?? "").split(",").sort(),
       [names[0], names[1]].sort(),
     );
-    await page.locator("#page .nx-steps").waitFor({ timeout: 10000 });
+    await page.locator("#page .kp-wizard__steps").waitFor({ timeout: 10000 });
     assert.match(
       await page.locator("#page .nx-crumbs").innerText(),
       /Stacks/,
@@ -4646,7 +4659,9 @@ test("invariants: Schedules page: a plain click turns a schedule off, greys its 
       if (r.method() === "DELETE") deletes.push(r.url());
     });
     await row.locator('[data-drive="schedule-menu"]').click();
-    await page.locator('dialog.nx-rowmenu[open] [data-drive="delete"]').click();
+    await page
+      .locator('.nx-rowmenu > .kp-menu:not([hidden]) [data-drive="delete"]')
+      .click();
     assert.equal(await row.isVisible(), false, "a deleted row still shows");
     // kp-themes 10.0.0: the turn-off toast may still be playing its leave
     // while the delete toast arrives; the newest one carries this Undo.
@@ -4809,7 +4824,9 @@ test("invariants: Schedules page: Live view reaches the drawer and its fields, t
       assert.equal(await page.locator("dialog.sch-drawer[open]").count(), 0);
       r = await step({ do: "click", control: "schedule-menu", row: id });
       assert.ok(r.ok, `schedule-menu: ${JSON.stringify(r.refusal)}`);
-      await page.locator("dialog.nx-rowmenu[open]").waitFor({ timeout: 3000 });
+      await page
+        .locator(".nx-rowmenu > .kp-menu:not([hidden])")
+        .waitFor({ timeout: 3000 });
       r = await step({ do: "press", button: "delete" });
       assert.ok(r.ok, `press delete: ${JSON.stringify(r.refusal)}`);
       assert.equal(await row.isVisible(), false, "the deleted row still shows");
@@ -5053,11 +5070,13 @@ test("invariants: redesign-kit: a row menu opened near the foot of the screen si
     }, sel);
     const before = await page.evaluate(() => scrollY);
     await page.locator(sel).click();
-    await page.locator("dialog.nx-rowmenu[open]").waitFor({ timeout: 3000 });
+    await page
+      .locator(".nx-rowmenu > .kp-menu:not([hidden])")
+      .waitFor({ timeout: 3000 });
     const placed = await page.evaluate((q) => {
       const b = /** @type {HTMLElement} */ (document.querySelector(q));
       const m = /** @type {HTMLElement} */ (
-        document.querySelector("dialog.nx-rowmenu[open]")
+        document.querySelector(".nx-rowmenu > .kp-menu:not([hidden])")
       );
       return {
         scrollY,
@@ -5098,11 +5117,13 @@ test("invariants: redesign-kit-13: a row menu's right edge lines up with its but
     const sel = `tr[data-id="${id}"] [data-drive="schedule-menu"]`;
     await page.locator(sel).waitFor({ timeout: 10000 });
     await page.locator(sel).click();
-    await page.locator("dialog.nx-rowmenu[open]").waitFor({ timeout: 3000 });
+    await page
+      .locator(".nx-rowmenu > .kp-menu:not([hidden])")
+      .waitFor({ timeout: 3000 });
     const r = await page.evaluate((q) => {
       const b = /** @type {HTMLElement} */ (document.querySelector(q));
       const m = /** @type {HTMLElement} */ (
-        document.querySelector("dialog.nx-rowmenu[open]")
+        document.querySelector(".nx-rowmenu > .kp-menu:not([hidden])")
       );
       return {
         button: b.getBoundingClientRect().right,
@@ -5115,11 +5136,18 @@ test("invariants: redesign-kit-13: a row menu's right edge lines up with its but
       Math.abs(r.button - r.menu) <= 1,
       `the menu ends ${r.menu - r.button} px past its button: ${JSON.stringify(r)}`,
     );
-    assert.equal(r.width, 260, "the menu is the width it plans for");
+    assert.ok(
+      r.width >= 260,
+      "the menu is at least the width it plans for (kp's rich menu)",
+    );
     assert.equal(r.expanded, "true");
     await page.locator(sel).click();
+    // kp-themes plays the menu's close before it is hidden.
+    await page
+      .locator(".nx-rowmenu > .kp-menu:not([hidden])")
+      .waitFor({ state: "detached", timeout: 3000 });
     assert.equal(
-      await page.locator("dialog.nx-rowmenu[open]").count(),
+      await page.locator(".nx-rowmenu > .kp-menu:not([hidden])").count(),
       0,
       "a second click on the button closes the menu",
     );
@@ -5183,10 +5211,10 @@ test("invariants: redesign-kit-18: Backups keeps its KPI context whole at 390 px
       const { context, page } = await phonePage(browser, "light");
       await page.goto(`${BASE}/backups`);
       await page
-        .locator('.nx-kpi[data-key="newest"]:not([data-loading])')
+        .locator('.kp-kpi[data-key="newest"]:not([data-loading])')
         .waitFor({ timeout: 10000 });
       const cut = await page.evaluate(() =>
-        [...document.querySelectorAll("main .nx-kpi__ctx")]
+        [...document.querySelectorAll("main .kp-kpi__trend")]
           .filter((c) => {
             const box = c.getBoundingClientRect();
             return [...c.querySelectorAll("*")].some(
@@ -5221,14 +5249,14 @@ test("invariants: redesign-kit-18: Backups keeps its KPI context whole at 390 px
       `the / hint is not inside the search box: ${JSON.stringify(r)}`,
     );
     await page
-      .locator('.nx-kpi[data-key="newest"]:not([data-loading])')
+      .locator('.kp-kpi[data-key="newest"]:not([data-loading])')
       .waitFor({ timeout: 10000 });
     const tile = await page.evaluate(() => ({
       value:
-        document.querySelector('.nx-kpi[data-key="newest"] .nx-kpi__value')
+        document.querySelector('.kp-kpi[data-key="newest"] .kp-kpi__value')
           ?.textContent ?? "",
       ctx:
-        document.querySelector('.nx-kpi[data-key="newest"] .nx-kpi__ctx')
+        document.querySelector('.kp-kpi[data-key="newest"] .kp-kpi__trend')
           ?.textContent ?? "",
     }));
     assert.match(
@@ -5593,10 +5621,10 @@ test("invariants: Activity is one page with Now and history, Planned and Host lo
         .first()
         .waitFor({ timeout: 10000 });
       const k = await page.evaluate(() => ({
-        tiles: [...document.querySelectorAll(".nx-kpi .nx-kpi__label")].map(
+        tiles: [...document.querySelectorAll(".kp-kpi .kp-kpi__label")].map(
           (e) => (e.textContent ?? "").trim(),
         ),
-        values: [...document.querySelectorAll(".nx-kpi .nx-kpi__value")].map(
+        values: [...document.querySelectorAll(".kp-kpi .kp-kpi__value")].map(
           (e) => (e.textContent ?? "").trim(),
         ),
         unnamed: [...document.querySelectorAll("#history .ac-row")].filter(
@@ -5717,24 +5745,27 @@ test("invariants: a running job's log in Activity scrolls inside its box and nev
     const card = page.locator("#running");
     const before = await card.boundingBox();
     assert.ok(before, "Running now is not on screen");
-    await log.evaluate((el) => {
+    // Injected and measured inside one task (reading a box lays it out), so
+    // the job's next poll cannot redraw the log with its real lines between.
+    const grown = await log.evaluate((el) => {
       el.hidden = false;
       el.textContent += Array.from(
         { length: 400 },
         (_, i) =>
           `12:00:${String(i % 60).padStart(2, "0")}  step ${i} of a long deploy`,
       ).join("\n");
+      return {
+        height: el.closest("#running")?.getBoundingClientRect().height ?? 0,
+        scrolls: el.scrollHeight > el.clientHeight + 1,
+      };
     });
-    await page.waitForTimeout(200);
-    const after = await card.boundingBox();
-    assert.ok(after, "Running now left the screen");
     assert.equal(
-      Math.round(after.height),
+      Math.round(grown.height),
       Math.round(before.height),
-      `Running now grew from ${before.height} to ${after.height} px as log lines arrived`,
+      `Running now grew from ${before.height} to ${grown.height} px as log lines arrived`,
     );
     assert.ok(
-      await log.evaluate((el) => el.scrollHeight > el.clientHeight + 1),
+      grown.scrolls,
       "the job's log does not scroll inside its own box",
     );
     // Open the log: the dialog's log scrolls too (invariant 47).
@@ -5768,9 +5799,12 @@ test("invariants: the host log puts its filters in a side column and its toolbar
       const page = await freshPage(context);
       for (const path of ["/console", "/activity?view=host-log"]) {
         await page.goto(`${BASE}${path}`);
-        await page.locator(".hl-out .hl-ln[data-seq]").first().waitFor({
-          timeout: 10000,
-        });
+        await page
+          .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
+          .first()
+          .waitFor({
+            timeout: 10000,
+          });
         const r = await page.evaluate(() => {
           const box = (/** @type {Element | null} */ e) =>
             e?.getBoundingClientRect() ?? null;
@@ -5819,10 +5853,14 @@ test("invariants: the host log puts its filters in a side column and its toolbar
       }
       // A source turns off with a plain click, and the lines follow.
       await page.goto(`${BASE}/console`);
-      await page.locator(".hl-out .hl-ln[data-seq]").first().waitFor({
-        timeout: 10000,
-      });
-      const lines = () => page.locator(".hl-out .hl-ln[data-seq]").count();
+      await page
+        .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
+        .first()
+        .waitFor({
+          timeout: 10000,
+        });
+      const lines = () =>
+        page.locator(".hl-out .kp-log__line[data-seq]").count();
       const n0 = await lines();
       await page
         .locator(
@@ -5853,7 +5891,9 @@ test("invariants: Console shows the host's lines with the shell bar under them, 
     const page = await freshPage(context);
     await page.goto(`${BASE}/shell?vmid=104`);
     assert.equal(new URL(page.url()).pathname, "/console");
-    const first = page.locator(".hl-out .hl-ln[data-seq]").first();
+    const first = page
+      .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
+      .first();
     await first.waitFor({ timeout: 10000 });
     const r = await page.evaluate(() => ({
       h1: (document.querySelector("#page h1")?.textContent ?? "").trim(),
@@ -5962,13 +6002,16 @@ test("invariants: review-activity: the host log merges early live lines with its
     assert.ok(snap > 1, `the demo snapshot holds ${snap} lines`);
     await pushLines(page, [hostLine(9_000_000, "HOST", "early live line")]);
     release();
-    await page.locator(".hl-out .hl-ln[data-seq]").first().waitFor({
-      timeout: 10000,
-    });
+    await page
+      .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
+      .first()
+      .waitFor({
+        timeout: 10000,
+      });
     await page.waitForTimeout(300);
     const r = await page.evaluate(() => ({
       count: (document.querySelector(".hl-count")?.textContent ?? "").trim(),
-      early: !!document.querySelector('.hl-ln[data-seq="9000000"]'),
+      early: !!document.querySelector('.kp-log__line[data-seq="9000000"]'),
     }));
     const total = Number(/of (\d+)/.exec(r.count)?.[1] ?? 0);
     assert.ok(r.early, "the early live line is missing");
@@ -6012,7 +6055,9 @@ test("invariants: review-activity: a host line opens with Space, Copy line comes
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/console`);
-    const first = page.locator(".hl-out .hl-ln[data-seq]").first();
+    const first = page
+      .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
+      .first();
     await first.waitFor({ timeout: 10000 });
     const hint = async () =>
       page.evaluate(() => {
@@ -6045,7 +6090,9 @@ test("invariants: review-activity: a host line opens with Space, Copy line comes
         '.hl-side input[data-drive="console-source"][data-drive-row="HOST"]',
       )
       .click();
-    const row = page.locator(".hl-out .hl-ln[data-seq]").first();
+    const row = page
+      .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
+      .first();
     await row.focus();
     // redesign-final-52: focusing the first line scrolls a long log away
     // from its bottom, which stops following by itself; Space must not
@@ -6101,9 +6148,12 @@ test("invariants: review-activity: Console's header and shell bar are the demo's
       const page = await freshPage(context);
       await page.route("**/data/host-settings*", (r) => r.abort());
       await page.goto(`${BASE}/console`);
-      await page.locator(".hl-out .hl-ln[data-seq]").first().waitFor({
-        timeout: 10000,
-      });
+      await page
+        .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
+        .first()
+        .waitFor({
+          timeout: 10000,
+        });
       const r = await page.evaluate(() => {
         const box = (/** @type {string} */ q) =>
           document.querySelector(q)?.getBoundingClientRect() ?? null;
@@ -6245,7 +6295,7 @@ test("invariants: review-activity: History's Show switch counts, By names owners
     // The Host log: Pause and Download in the card's head, hints once.
     await page.goto(`${BASE}/activity?view=host-log`);
     await page
-      .locator(".hl-out .hl-ln[data-seq]")
+      .locator(".hl-out .kp-log__line[data-seq] .kp-log__message")
       .first()
       .waitFor({ timeout: 10000 });
     const hl = await page.evaluate(() => {
@@ -6328,13 +6378,13 @@ test("invariants: the Metrics page is laid out as the approved demo, every chart
     const page = await freshPage(context);
     await page.goto(`${BASE}/charts`);
     // Loading shows in the final geometry from the first frame.
-    await page.waitForSelector(".nx-kpis .nx-kpi", { timeout: 8000 });
+    await page.waitForSelector(".kp-kpis .kp-kpi", { timeout: 8000 });
     await page.waitForSelector(".mk-card .kp-chart__plot svg", {
       timeout: 10000,
     });
     await page.waitForTimeout(400);
     const got = await page.evaluate(() => ({
-      chip: document.querySelector(".nx-head-meta .nx-chip")?.textContent,
+      chip: document.querySelector(".nx-head-meta .kp-badge")?.textContent,
       views: [
         ...document.querySelectorAll(
           '.nx-seg[aria-label="Metrics view"] button',
@@ -6348,7 +6398,7 @@ test("invariants: the Metrics page is laid out as the approved demo, every chart
       pressed: document.querySelector(
         '.nx-seg[aria-label="Window"] [aria-pressed="true"]',
       )?.textContent,
-      tiles: [...document.querySelectorAll(".nx-kpis .nx-kpi__label")].map(
+      tiles: [...document.querySelectorAll(".kp-kpis .kp-kpi__label")].map(
         (l) => l.textContent,
       ),
       attention: document.querySelector(".nx-attention")?.textContent ?? "",
@@ -6491,7 +6541,7 @@ test("invariants: the Traffic tab stacks requests by status class, and a plain c
       timeout: 10000,
     });
     const tiles = await page
-      .locator(".nx-kpis .nx-kpi__label")
+      .locator(".kp-kpis .kp-kpi__label")
       .allTextContents();
     assert.deepEqual(tiles, [
       "Requests",
@@ -6503,7 +6553,7 @@ test("invariants: the Traffic tab stacks requests by status class, and a plain c
     // Exact counters, never "38.1k".
     const req =
       (await page
-        .locator('.nx-kpi[data-key="requests"] .nx-kpi__value')
+        .locator('.kp-kpi[data-key="requests"] .kp-kpi__value')
         .textContent()) ?? "";
     assert.match(req, /^\d{1,3}(,\d{3})*$/);
     const classes = await page
@@ -6537,7 +6587,7 @@ test("invariants: the Map is laid out as the approved demo, and a plain click on
     await page.waitForSelector(".mp-node", { timeout: 10000 });
     const layout = await page.evaluate(() => ({
       title: document.querySelector("#page h1")?.textContent,
-      tiles: [...document.querySelectorAll(".nx-kpis .nx-kpi__label")].map(
+      tiles: [...document.querySelectorAll(".kp-kpis .kp-kpi__label")].map(
         (l) => l.textContent,
       ),
       blocks: [...document.querySelectorAll("#page section.nx-card h2")].map(
@@ -6618,7 +6668,7 @@ test("invariants: review metrics — Metrics and the Map fit a phone: no table s
     /** No KPI context line cut off with an ellipsis. */
     const cutCtx = () =>
       page.evaluate(() =>
-        [...document.querySelectorAll(".nx-kpi__ctx")]
+        [...document.querySelectorAll(".kp-kpi__trend")]
           .filter((e) => e.scrollWidth > e.clientWidth + 1)
           .map((e) => e.textContent),
       );
@@ -6630,7 +6680,7 @@ test("invariants: review metrics — Metrics and the Map fit a phone: no table s
       await page.setViewportSize({ width: 1894, height: 1000 });
       await page.goto(`${BASE}${path}`);
       await page.waitForSelector(ready);
-      await page.waitForSelector(".nx-kpi:not([data-loading])");
+      await page.waitForSelector(".kp-kpi:not([data-loading])");
       assert.deepEqual(await cutCtx(), [], `${path} at 1894: cut KPI lines`);
       await page.setViewportSize({ width: 390, height: 900 });
       await page.waitForTimeout(300);
@@ -6645,7 +6695,7 @@ test("invariants: review metrics — Metrics and the Map fit a phone: no table s
           document.documentElement.scrollWidth -
           document.documentElement.clientWidth,
         cols: getComputedStyle(
-          /** @type {Element} */ (document.querySelector(".nx-kpis")),
+          /** @type {Element} */ (document.querySelector(".kp-kpis")),
         ).gridTemplateColumns.split(" ").length,
       }));
       assert.deepEqual(r.wraps, [], `${path} at 390: a table scrolls sideways`);
@@ -6729,9 +6779,9 @@ test("invariants: review metrics — the tiles are skeletons until the read land
       });
     });
     await page.goto(`${BASE}/charts`);
-    await page.waitForSelector(".nx-kpi[data-loading]");
+    await page.waitForSelector(".kp-kpi[data-loading]");
     const loading = await page.evaluate(() => ({
-      tiles: document.querySelectorAll(".nx-kpi[data-loading]").length,
+      tiles: document.querySelectorAll(".kp-kpi[data-loading]").length,
       skeletons: document.querySelectorAll(
         ".mk-card .kp-skeleton[data-kp-state=loading]",
       ).length,
@@ -6742,11 +6792,11 @@ test("invariants: review metrics — the tiles are skeletons until the read land
     await page.waitForSelector(".mk-card-error");
     await page.waitForTimeout(300);
     const after = await page.evaluate(() => ({
-      loading: document.querySelectorAll(".nx-kpi[data-loading]").length,
-      values: [...document.querySelectorAll(".nx-kpi__value")].map((e) =>
+      loading: document.querySelectorAll(".kp-kpi[data-loading]").length,
+      values: [...document.querySelectorAll(".kp-kpi__value")].map((e) =>
         e.textContent?.trim(),
       ),
-      ctx: [...document.querySelectorAll(".nx-kpi__ctx")].map((e) =>
+      ctx: [...document.querySelectorAll(".kp-kpi__trend")].map((e) =>
         e.textContent?.trim(),
       ),
       band: document.querySelectorAll(".hk-attention > *, .nx-attention > *")
@@ -6901,15 +6951,15 @@ test("invariants: review metrics — the wording is the demo's, Connections is g
     );
     await page.goto(`${BASE}/map`);
     await page.waitForSelector(
-      '.nx-kpi[data-key="connections"]:not([data-loading])',
+      '.kp-kpi[data-key="connections"]:not([data-loading])',
     );
     const conn = await page.evaluate(() => {
       const c = document.querySelector(
-        '.nx-kpi[data-key="connections"] .nx-kpi__ctx',
+        '.kp-kpi[data-key="connections"] .kp-kpi__trend',
       );
       return {
-        ok: c?.querySelector(".nx-dot--ok")?.textContent,
-        warn: c?.querySelector(".nx-dot--warn")?.textContent,
+        ok: c?.querySelector('.kp-health[data-state="ok"]')?.textContent,
+        warn: c?.querySelector('.kp-health[data-state="warn"]')?.textContent,
       };
     });
     assert.match(conn.ok ?? "", /enforced$/);
@@ -6971,14 +7021,14 @@ test("invariants: redesign-config Firewall shows its totals, one attention row p
     await page.goto(`${BASE}/firewall`);
     await page.locator("tr.fw-row").first().waitFor({ timeout: 10000 });
     const labels = await page
-      .locator(".nx-kpis .nx-kpi__label")
+      .locator(".kp-kpis .kp-kpi__label")
       .allTextContents();
     assert.deepEqual(
       labels.map((l) => l.trim().toLowerCase()),
       ["protected", "unprotected", "open paths", "rules"],
     );
     const rulesValue = await page
-      .locator('.nx-kpi:has(.nx-kpi__label:text-is("Rules")) .nx-kpi__value')
+      .locator('.kp-kpi:has(.kp-kpi__label:text-is("Rules")) .kp-kpi__value')
       .innerText();
     assert.equal(rulesValue.trim(), String(fw.matrix.rules.length));
     const undeclared = fw.stacks.filter(
@@ -7036,7 +7086,7 @@ test("invariants: redesign-config Firewall pins a square with its story and outl
     assert.ok(/every port/.test(story), story);
     assert.equal(new URL(page.url()).searchParams.get("cell"), `${from}>${to}`);
     // A rule naming a managed stack outlines its squares while hovered.
-    const named = page.locator("tr.fw-rule:has(.nx-chip)").first();
+    const named = page.locator("tr.fw-rule:has(.kp-badge)").first();
     await named.hover();
     assert.ok(
       (await page.locator(".fw-mx__cell.is-rule").count()) > 0,
@@ -7245,7 +7295,7 @@ test("invariants: redesign-config pages show their skeleton from the first frame
       const shapes = {
         firewall: [
           [".fw-mx__cell--sk", 25],
-          [".nx-kpi[data-loading]", 4],
+          [".kp-kpi[data-loading]", 4],
         ],
         settings: [[".st-grp--sk", 4]],
         presets: [[".ps-card--sk", 8]],
@@ -7396,7 +7446,7 @@ test("invariants: redesign-config review Firewall on a phone: no Stacks cell dra
       (w) => w.scrollWidth - w.clientWidth,
     );
     assert.ok(clipped <= 1, `the Stacks table is cut by ${clipped}px`);
-    const cut = await page.$$eval(".nx-kpi__ctx", (cs) =>
+    const cut = await page.$$eval(".kp-kpi__trend", (cs) =>
       cs
         .filter(
           (c) =>
@@ -7553,11 +7603,11 @@ test("invariants: redesign-config review a Presets search marks the match inside
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/presets`);
-    await page.locator(".ps-apps .nx-chip").first().waitFor({
+    await page.locator(".ps-apps .kp-badge").first().waitFor({
       timeout: 10000,
     });
     const chips = () =>
-      page.$$eval(".ps-apps .nx-chip", (cs) =>
+      page.$$eval(".ps-apps .kp-badge", (cs) =>
         Object.fromEntries(
           cs.map((c) => [
             c.textContent,
@@ -7731,10 +7781,10 @@ test("invariants: stack hub — six tabs; Overview has five KPI tiles, Is it hea
       tabs: [...document.querySelectorAll(".sh-tabs .kp-tab")].map((t) =>
         (t.firstChild?.textContent ?? "").trim(),
       ),
-      kpis: [...document.querySelectorAll(".nx-kpis .nx-kpi__label")].map(
+      kpis: [...document.querySelectorAll(".kp-kpis .kp-kpi__label")].map(
         (l) => l.textContent,
       ),
-      links: [...document.querySelectorAll(".nx-kpis a.nx-kpi")].length,
+      links: [...document.querySelectorAll(".kp-kpis a.kp-kpi")].length,
       checks: [...document.querySelectorAll("#healthy .sh-checks li")].map(
         (l) => l.getAttribute("data-key"),
       ),
@@ -7787,8 +7837,13 @@ test("invariants: stack hub — Logs' side column turns an app or a level on and
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/stacks/gateway/logs`);
-    const lines = page.locator(".sh-log .sh-log__line");
-    await lines.first().waitFor({ timeout: 10000 });
+    // A `.kp-log__line` has no box of its own (display: contents): wait on
+    // its message cell, count the lines.
+    const lines = page.locator(".sh-log .kp-log__line");
+    await page
+      .locator(".sh-log .kp-log__message")
+      .first()
+      .waitFor({ timeout: 10000 });
     const total = await lines.count();
     assert.ok(total > 5, `only ${total} log lines`);
     assert.equal(
@@ -7956,8 +8011,8 @@ test("invariants: stack hub — every tab fits 390 and 1894 px in light and dark
               bad.push(`${theme} ${width}px ${tab || "/"}: ${over}px`);
             // Review 3: nothing clipped INSIDE a card either — no table that
             // scrolls sideways in its own box, no button past its card's
-            // edge; on a phone the KPI tiles are one column and their words
-            // wrap, and a table as cards opens sorted by something.
+            // edge; on a phone the KPI tiles are one or two columns (kp's count)
+            // and their words wrap, and a table as cards opens sorted by something.
             const inside = await page.evaluate((w) => {
               const out = [];
               for (const t of document.querySelectorAll("main .kp-table-wrap"))
@@ -7966,7 +8021,7 @@ test("invariants: stack hub — every tab fits 390 and 1894 px in light and dark
               for (const b of document.querySelectorAll(
                 "main button, main a.kp-button",
               )) {
-                const card = b.closest(".kp-card, .nx-card, .nx-kpi");
+                const card = b.closest(".kp-card, .nx-card, .kp-kpi");
                 if (!card || !b.checkVisibility()) continue;
                 const r = b.getBoundingClientRect();
                 const c = card.getBoundingClientRect();
@@ -7975,13 +8030,16 @@ test("invariants: stack hub — every tab fits 390 and 1894 px in light and dark
               }
               if (w === 390) {
                 const lefts = new Set(
-                  [...document.querySelectorAll("main .nx-kpis > *")].map((t) =>
+                  [...document.querySelectorAll("main .kp-kpis > *")].map((t) =>
                     Math.round(t.getBoundingClientRect().left),
                   ),
                 );
-                if (lefts.size > 1) out.push(`${lefts.size} KPI columns`);
+                // kp-themes' strip picks its own count by its width ("all 3
+                // 2 1": two 9 rem tiles fit a phone); the old home-made
+                // strip was always one column. Two is kp's look, more is not.
+                if (lefts.size > 2) out.push(`${lefts.size} KPI columns`);
                 for (const e of document.querySelectorAll(
-                  "main .nx-kpi__label, main .nx-kpi__ctx",
+                  "main .kp-kpi__label, main .kp-kpi__trend",
                 ))
                   if (e.scrollWidth > e.clientWidth + 1)
                     out.push(`KPI text cut: ${e.textContent}`);
@@ -8035,7 +8093,7 @@ test("invariants: stack hub review — Update and the u key open the stack's Upd
         await page.keyboard.press("u");
       }
       await page.waitForURL("**/update?stack=gateway**", { timeout: 5000 });
-      await page.locator("#page .nx-steps").waitFor({ timeout: 10000 });
+      await page.locator("#page .kp-wizard__steps").waitFor({ timeout: 10000 });
       assert.match(
         await page.locator("#page h1").innerText(),
         /Update gateway/,
@@ -8068,7 +8126,7 @@ test("invariants: redesign-openpoints-2: an app's Update… in the stack hub ope
     const u = new URL(page.url());
     assert.equal(u.searchParams.get("stack"), "gateway");
     assert.equal(u.searchParams.get("app"), app, "the flow names the app");
-    await page.locator("#page .nx-steps").waitFor({ timeout: 10000 });
+    await page.locator("#page .kp-wizard__steps").waitFor({ timeout: 10000 });
     await page
       .locator('#page [data-drive="update-pick"]')
       .first()
@@ -8194,13 +8252,13 @@ test("invariants: stack hub review — Restarts counts 24 h with a sparkline and
       '[data-drive="stack-kpi"][data-drive-row="kp-soft/restarts"]',
     );
     await page
-      .locator(".nx-kpi__ctx", { hasText: "in the last 24 h" })
+      .locator(".kp-kpi__trend", { hasText: "in the last 24 h" })
       .waitFor({ timeout: 15000 });
     assert.equal(
-      (await tile.locator(".nx-kpi__value").textContent())?.trim(),
+      (await tile.locator(".kp-kpi__value").textContent())?.trim(),
       "3",
     );
-    assert.equal(await tile.locator(".nx-kpi__spark svg").count(), 1);
+    assert.equal(await tile.locator("svg.kp-kpi__spark").count(), 1);
     assert.equal(
       await tile.getAttribute("href"),
       "/charts?stack=kp-soft&range=24h",
@@ -8278,7 +8336,7 @@ test("invariants: stack hub review — History says Kenny in chip and rows, date
       "Kenny",
     );
     const you = await page
-      .locator('.sh-feed--full li[data-who="you"] .nx-chip')
+      .locator('.sh-feed--full li[data-who="you"] .kp-badge')
       .allTextContents();
     assert.ok(
       // A CLI session reads "Kenny · CLI on wsl", as Activity names it.
@@ -8582,7 +8640,7 @@ test("invariants: on a phone the Deploy all changes tiles wrap their labels and 
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/stacks?deploy-all=1`);
-    const labels = page.locator("#apply-section .ap-tile .nx-kpi__label");
+    const labels = page.locator("#apply-section .ap-tile .kp-kpi__label");
     await labels.first().waitFor({ timeout: 15000 });
     for (const l of await labels.all())
       assert.ok(
@@ -8637,10 +8695,10 @@ test("invariants: the Update flow has its own address, the old one redirects, an
     await page.waitForURL(/\/update\?stack=kp-soft$/, { timeout: 5000 });
     const current = () =>
       page.locator(".kp-nav__link[aria-current=page]").innerText();
-    await page.locator("#page .nx-steps").waitFor({ timeout: 10000 });
+    await page.locator("#page .kp-wizard__steps").waitFor({ timeout: 10000 });
     assert.equal((await current()).trim(), "Stacks");
     await page.goto(`${BASE}/update?all=1`);
-    await page.locator("#page .nx-steps").waitFor({ timeout: 10000 });
+    await page.locator("#page .kp-wizard__steps").waitFor({ timeout: 10000 });
     assert.match((await current()).trim(), /^Inbox/);
     // The page is capped at the demo's width.
     const w = await page
@@ -8766,14 +8824,14 @@ test("invariants: Help's close button stays inside its panel, the bar's ? is the
       `the close button is clipped: ${JSON.stringify({ panel, close })}`,
     );
     await help.getByText("Take the 1-minute tour").click();
-    const tour = page.locator("dialog.tour");
+    const tour = page.locator("dialog.kp-tour");
     await tour.waitFor({ timeout: 3000 });
     assert.equal(await tour.getAttribute("aria-live"), null);
     const by = await tour.getAttribute("aria-labelledby");
     assert.ok(by, "the tour card has no label");
     assert.equal(
       await page.locator(`#${by}`).innerText(),
-      await tour.locator("h3").innerText(),
+      await tour.locator(".kp-tour__title").innerText(),
     );
   } finally {
     await browser.close();
@@ -9210,7 +9268,7 @@ test("invariants: redesign-final-c1: Deploy all changes opens as a wide sheet wh
         d.setAttribute("data-audit", "");
         return {
           w: d.getBoundingClientRect().width,
-          cut: [...d.querySelectorAll(".ap-tile .nx-kpi__value")]
+          cut: [...d.querySelectorAll(".ap-tile .kp-kpi__value")]
             .filter((v) => v.scrollWidth > v.clientWidth + 1)
             .map((v) => v.textContent),
           over: [...d.querySelectorAll(".ap-steps li")].flatMap((li) => {
@@ -9616,8 +9674,8 @@ test("invariants: redesign-final-h3: Restore… opens the Restore flow page, Bac
       crumbs: [...document.querySelectorAll(".nx-crumbs li")].map((x) =>
         (x.textContent ?? "").trim(),
       ),
-      steps: [...document.querySelectorAll("main .nx-steps li")].map((x) =>
-        (x.textContent ?? "").trim(),
+      steps: [...document.querySelectorAll("main .kp-wizard__steps li")].map(
+        (x) => (x.textContent ?? "").trim(),
       ),
     }));
     assert.equal(head.h1, "Restore kp-soft");
@@ -9806,7 +9864,7 @@ test("invariants: redesign-final-m1: Stacks is the approved demo: no Inbox banne
     const page = await freshPage(context);
     await page.evaluate(() => localStorage.removeItem("homelab.stacks.view"));
     await page.goto(`${BASE}/stacks`);
-    await page.waitForSelector(".sk-kpis .nx-kpi:not([data-loading])", {
+    await page.waitForSelector(".sk-kpis .kp-kpi:not([data-loading])", {
       timeout: 8000,
     });
     await page.waitForTimeout(800);
@@ -9818,7 +9876,7 @@ test("invariants: redesign-final-m1: Stacks is the approved demo: no Inbox banne
         before.push(n.textContent ?? "");
       return {
         band: document.querySelectorAll("#page .nx-attention .kp-alert").length,
-        tiles: [...document.querySelectorAll(".sk-kpis .nx-kpi__label")].map(
+        tiles: [...document.querySelectorAll(".sk-kpis .kp-kpi__label")].map(
           (e) => e.textContent?.trim(),
         ),
         table: !!document.querySelector(".sk-table tbody tr[data-stack]"),

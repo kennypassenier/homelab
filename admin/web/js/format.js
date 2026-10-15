@@ -2,41 +2,23 @@
 // reads is in human units and in the viewer's own locale, never an ISO
 // string or a bare count of seconds.
 
-/**
- * @param {number} n
- * @param {string} one
- * @param {string} many
- */
-const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+import {
+  agoText as kpAgoText,
+  humanDuration as kpHumanDuration,
+} from "/static/kp/js/freshness.js";
 
 /**
- * A span of seconds in the unit a person reads best: seconds below a
- * minute, minutes and seconds below an hour, hours and minutes below a day,
- * days and hours above. A zero second part is left out ("2 min").
+ * A span of seconds in the unit a person reads best, kp-themes' own
+ * `humanDuration` (freshness.js: seconds below a minute, minutes and seconds
+ * below an hour, hours and minutes below a day, days and hours above; a zero
+ * second part is left out, "2 min"); a span that is not a number, or
+ * negative, reads as a dash.
  * @param {number | null | undefined} seconds
  * @returns {string}
  */
 export function humanDuration(seconds) {
   if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return "—";
-  const d = Math.round(seconds);
-  if (d < 60) return `${d} s`;
-  if (d < 3600) {
-    const s = d % 60;
-    return s === 0
-      ? `${Math.floor(d / 60)} min`
-      : `${Math.floor(d / 60)} min ${s} s`;
-  }
-  if (d < 86400) {
-    const m = Math.floor((d % 3600) / 60);
-    return m === 0
-      ? `${Math.floor(d / 3600)} h`
-      : `${Math.floor(d / 3600)} h ${m} min`;
-  }
-  const days = Math.floor(d / 86400);
-  const h = Math.floor((d % 86400) / 3600);
-  return h === 0
-    ? plural(days, "day", "days")
-    : `${plural(days, "day", "days")} ${h} h`;
+  return kpHumanDuration(seconds);
 }
 
 /**
@@ -131,14 +113,13 @@ export function formatDateTime(unix, opts = {}) {
 
 /**
  * "measured 12 s ago", "read 2 min 5 s ago" (feat-overview-4): how old a
- * reading is, in the units `humanDuration` uses. A moment in the future (a
- * clock ahead of this one) reads as 0 s.
+ * reading is, in the words of kp-themes' freshness line (`agoText`). A
+ * moment in the future (a clock ahead of this one) reads as 0 s.
  * @param {string} verb what happened at `at` ("measured", "read")
  * @param {number | null | undefined} at unix seconds
  * @param {number} now unix seconds
  * @returns {string}
  */
 export function agoText(verb, at, now) {
-  if (at == null || !Number.isFinite(at)) return `not ${verb} yet`;
-  return `${verb} ${humanDuration(Math.max(0, now - at))} ago`;
+  return kpAgoText(verb, at == null ? null : at * 1000, now * 1000);
 }

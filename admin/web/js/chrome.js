@@ -59,6 +59,7 @@ import {
   currentTheme,
   storeTheme,
 } from "/static/kp/js/theme-core.js";
+import { settleStoredTheme } from "./themesettle.js";
 import {
   attachThemePickers,
   themeMenuMarkup,
@@ -302,7 +303,7 @@ function mountRunningPill(navigate) {
       hidden: "",
       title: "Follow the running job",
     },
-    h("span", { class: "nx-spin", "aria-hidden": "true" }),
+    h("span", { class: "kp-spinner nx-pill__spin", "aria-hidden": "true" }),
     short,
     long,
   );
@@ -346,7 +347,7 @@ function openJobDrawer(jobId, count, navigate) {
     "button",
     {
       type: "button",
-      class: "kp-button kp-button--ghost kp-dialog__close",
+      class: "kp-icon-button kp-dialog__close",
       "aria-label": "Close",
     },
     "✕",
@@ -367,20 +368,20 @@ function openJobDrawer(jobId, count, navigate) {
   const d = /** @type {HTMLDialogElement} */ (
     h(
       "dialog",
-      { class: "kp-dialog nx-drawer job-drawer", "aria-label": "Running job" },
+      { class: "kp-drawer kp-dialog job-drawer", "aria-label": "Running job" },
       h(
-        "div",
-        { class: "nx-drawer__head" },
+        "header",
+        { class: "kp-drawer__head" },
         h("h2", { class: "kp-dialog__title" }, named),
         close,
         h(
           "p",
-          { class: "section-head__desc" },
+          { class: "kp-drawer__desc" },
           "This job runs on the host; closing this panel or the page does not stop it.",
         ),
       ),
-      h("div", { class: "nx-drawer__body" }, panel.element),
-      h("div", { class: "nx-drawer__foot" }, all, flow),
+      h("div", { class: "kp-drawer__body" }, panel.element),
+      h("footer", { class: "kp-drawer__foot" }, all, flow),
     )
   );
   const done = () => d.close();
@@ -477,7 +478,7 @@ function mountTabBar(ctx, openPalette, openHelp) {
       "button",
       {
         type: "button",
-        class: "kp-button kp-button--ghost kp-dialog__close",
+        class: "kp-icon-button kp-dialog__close",
         "aria-label": "Close",
       },
       "✕",
@@ -485,21 +486,21 @@ function mountTabBar(ctx, openPalette, openHelp) {
     const d = /** @type {HTMLDialogElement} */ (
       h(
         "dialog",
-        { class: "kp-dialog nx-drawer nx-sheet", "aria-label": "More" },
+        { class: "kp-drawer kp-dialog nx-sheet", "aria-label": "More" },
         h(
-          "div",
-          { class: "nx-drawer__head" },
+          "header",
+          { class: "kp-drawer__head" },
           h("h2", { class: "kp-dialog__title" }, "More"),
           close,
           h(
             "p",
-            { class: "section-head__desc" },
+            { class: "kp-drawer__desc" },
             "The two areas you need less often, plus search and help.",
           ),
         ),
         h(
           "div",
-          { class: "nx-drawer__body nx-actions" },
+          { class: "kp-drawer__body nx-actions" },
           ...moreAreas().map((a) =>
             item(a.label, a.what, () => ctx.navigate(a.href)),
           ),
@@ -630,6 +631,7 @@ export function mountChrome(where, ctx) {
   const pill = mountRunningPill(ctx.navigate);
   where.nav.append(trigger, pill, help, themes);
   document.body.append(dialog, sheet);
+  settleStoredTheme();
   attachThemePickers(themes);
   // The themes' pointer effects (the dark theme's cursor glow) follow the
   // mouse only once attached (Kenny, 2026-09-29 05:53).

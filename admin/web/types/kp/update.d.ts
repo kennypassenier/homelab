@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/update.js (kp-themes 10.0.0),
+// The kp-themes module chassis-rs serves at /static/kp/js/update.js (kp-themes 10.1.1),
 // copied from kp-themes js/update.d.ts: chassis serves the module, not its types.
 /** The attribute written on an element while its update plays. */
 export declare const UPDATING_ATTRIBUTE = "data-kp-updating";
@@ -15,18 +15,23 @@ export declare function updateIdea(value: string | null | undefined): string;
 /**
  * How long an update plays and on which curve, from the theme's motion: the
  * box's resize time or the dialog's close time, whichever is longer, times
- * 1.25; the entrance's curve without its overshoot. 0 without motion.
- * @param {{ size: number, close: number, ease: string }} motion what themeMotion() returns
+ * 1.25; the entrance's curve without its overshoot. 0 without motion. A
+ * register that knows its own update time says it with `--kp-update-time`
+ * (`time`, in ms, read by updateTiming()): when set it is the time, whatever
+ * the dialog's is; unset, the time above.
+ * @param {{ size: number, close: number, ease: string, time?: number | null }} motion what themeMotion() returns, and the register's own time
  * @returns {{ duration: number, ease: string }}
  */
 export declare function updateTimingOf({
   size,
   close,
   ease,
+  time,
 }: {
   size: number;
   close: number;
   ease: string;
+  time?: number | null;
 }): {
   duration: number;
   ease: string;

@@ -44,6 +44,12 @@ import {
 } from "../schedules.js";
 import { current } from "../store.js";
 import {
+  DATE_EVENT,
+  attachDatePickers,
+  datePicker,
+} from "/static/kp/js/datepicker.js";
+import { MENU_CLOSE_EVENT } from "/static/kp/js/menu-button.js";
+import {
   TOAST_MS,
   keyRow,
   pageHeader,
@@ -308,7 +314,7 @@ export function mount(root, opts = {}) {
             null,
             h("div", { class: "sch-label" }, "Next run"),
             h("span", {
-              class: "sch-sk",
+              class: "kp-skeleton",
               style: "width:180px;height:32px;margin-top:4px",
             }),
           ),
@@ -324,7 +330,7 @@ export function mount(root, opts = {}) {
         title: "The next 7 days",
         desc: "Every run on the calendar, read from the schedules below.",
         body: h("span", {
-          class: "sch-sk",
+          class: "kp-skeleton",
           style: `height:${COL_PX + 24}px`,
         }),
       }),
@@ -335,7 +341,7 @@ export function mount(root, opts = {}) {
           "div",
           { style: "display:grid;gap:10px" },
           [0, 1, 2].map(() =>
-            h("span", { class: "sch-sk", style: "height:36px" }),
+            h("span", { class: "kp-skeleton", style: "height:36px" }),
           ),
         ),
       }),
@@ -362,8 +368,18 @@ export function mount(root, opts = {}) {
     ]);
   };
 
+  /** A change that arrived while a row menu was open waits for it to close. */
+  let drawLater = false;
   const render = () => {
     if (!alive || !act.schedules) return;
+    // The rows hold the open row menu (kp's menu button wraps the row's
+    // own button): drawing them anew would take the menu from under the
+    // pointer, or from under a Live view press.
+    if (root.querySelector(".nx-rowmenu > button[aria-expanded=true]")) {
+      drawLater = true;
+      return;
+    }
+    drawLater = false;
     paintZone();
     const all = list();
     // The empty page says it in its own card; the demo shows no "0 · 0".
@@ -1063,19 +1079,46 @@ export function mount(root, opts = {}) {
       Object.entries(EVERY_WORDS).map(([v, w]) => h("option", { value: v }, w)),
     );
     everySel.value = d.every;
+    // kp's date picker: the text shows dd/mm/yyyy (rule 52), the ISO date
+    // the server is sent is `dataset.kpDateValue`. Live view fills the text
+    // box by its id; the picker reads an ISO date there as well.
     const date = h("input", {
-      type: "date",
+      type: "text",
       id: SCHED_DATE,
+      inputmode: "numeric",
+      autocomplete: "off",
       "aria-label": "On the date",
+      "data-kp-date-input": "",
     });
-    date.value = d.date;
+    const datePick = h(
+      "span",
+      { class: "kp-datepicker", "data-kp-datepicker": "" },
+      date,
+      h(
+        "button",
+        {
+          type: "button",
+          class: "kp-button kp-button--sm",
+          "aria-label": "Open the calendar",
+          "data-kp-date-open": "",
+        },
+        "📅",
+      ),
+      h("div", {
+        class: "kp-datepicker__panel",
+        "data-kp-date-panel": "",
+        hidden: "",
+      }),
+    );
+    attachDatePickers(datePick);
+    if (d.date) datePicker(datePick)?.set(d.date);
     const at = h("input", {
       type: "time",
       id: SCHED_AT,
       "aria-label": "At",
     });
     at.value = d.at;
-    const dateBit = h("span", null, " on ", date);
+    const dateBit = h("span", null, " on ", datePick);
     const sentence = h(
       "p",
       { class: "sch-sentence" },
@@ -1262,7 +1305,7 @@ export function mount(root, opts = {}) {
         every: everySel.value,
         days: [...days].sort(),
         at: at.value,
-        date: date.value,
+        date: date.dataset.kpDateValue ?? "",
         note: note.value,
         enabled: d.enabled,
         args,
@@ -1277,8 +1320,8 @@ export function mount(root, opts = {}) {
     everySel.addEventListener("change", repaint);
     at.addEventListener("input", repaint);
     at.addEventListener("change", repaint);
-    date.addEventListener("input", repaint);
-    date.addEventListener("change", repaint);
+    // Fired for a typed date, a chosen one and one Live view fills in.
+    datePick.addEventListener(DATE_EVENT, repaint);
     fillStacks();
     repaint();
 
@@ -1459,9 +1502,13 @@ export function mount(root, opts = {}) {
     nightly = h;
     render();
   });
+  root.addEventListener(MENU_CLOSE_EVENT, () => {
+    if (drawLater) render();
+  });
   // The relative times ("in 2 h 14 min") move on.
   const tick = setInterval(() => {
-    if (!document.querySelector("dialog.nx-rowmenu[open]")) render();
+    if (!document.querySelector(".nx-rowmenu > .kp-menu:not([hidden])"))
+      render();
   }, 30_000);
   first();
   render();

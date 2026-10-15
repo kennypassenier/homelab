@@ -27,7 +27,7 @@ import {
 } from "../act.js";
 import { openAction, reopenBatch } from "../actiondialog.js";
 import { notify } from "../actui.js";
-import { fetchReport, h } from "../dom.js";
+import { fetchReport, h, progressBar } from "../dom.js";
 import { declare, drivable, viaForm } from "../drivable.js";
 import {
   SHOW,
@@ -941,8 +941,25 @@ function mountNow(body, x) {
   /** @param {import("../jobs.js").Job} j0 */
   const jobBlock = (j0) => {
     const id = j0.job;
-    const title = h("div", { class: "ac-job__title" });
-    const facts = h("div", { class: "ac-job__facts" });
+    // Both are redrawn every second the job moves: the facts do not arrive
+    // the theme's way each time (kp's arrival squeezes a new span, and the
+    // line wrapped and grew the card while it played).
+    const title = h("div", {
+      class: "ac-job__title",
+      "data-kp-arrive": "none",
+    });
+    const facts = h("div", {
+      class: "ac-job__facts",
+      "data-kp-arrive": "none",
+    });
+    // The step bar of a job with no step count: kp's busy bar, drawn by the theme.
+    const wholeWords = h("span");
+    const whole = h(
+      "div",
+      { class: "ac-step ac-step--whole", role: "listitem", "data-s": "run" },
+      progressBar("Working", null),
+      wholeWords,
+    );
     const steps = h("div", {
       class: "ac-job__steps",
       role: "list",
@@ -1086,19 +1103,13 @@ function mountNow(body, x) {
             ),
           ),
         );
-      else
-        steps.replaceChildren(
-          h(
-            "div",
-            {
-              class: "ac-step ac-step--whole",
-              role: "listitem",
-              "data-s": "run",
-            },
-            h("i"),
-            h("span", null, p?.step ?? stepText(j)),
-          ),
-        );
+      else {
+        // One busy bar, kept between updates: a bar built anew on every
+        // line would restart the theme's busy picture each time.
+        wholeWords.textContent = p?.step ?? stepText(j);
+        if (steps.firstElementChild !== whole || steps.childElementCount > 1)
+          steps.replaceChildren(whole);
+      }
       const ls = act.logs.get(id) ?? [];
       if (ls.length !== shownLines) {
         const near = log.scrollHeight - log.scrollTop - log.clientHeight < 24;

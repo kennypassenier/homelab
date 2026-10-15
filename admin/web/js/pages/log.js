@@ -655,6 +655,14 @@ export function mountHostLog(root, opts) {
     if (!quiet && on) toTail();
   };
 
+  /** The seq of the line holding focus in this log, or null. */
+  const focusedSeq = () => {
+    const at = document.activeElement?.closest?.(".kp-log__line[data-seq]");
+    return at && list.contains(at)
+      ? Number(/** @type {HTMLElement} */ (at).dataset.seq)
+      : null;
+  };
+
   /** @param {import("../parity.js").HostLine} l */
   const add = (l) => {
     // Until the snapshot is in, a live line waits: the two merge by number
@@ -667,7 +675,14 @@ export function mountHostLog(root, opts) {
     if (l.seq <= lastSeq) return;
     lastSeq = l.seq;
     lines.push(l);
-    if (lines.length > KEEP) lines = lines.slice(lines.length - KEEP);
+    if (lines.length > KEEP) {
+      // The ring drops its oldest lines, but never the open one or the one
+      // holding focus: a repaint (Space on that line) must still find it,
+      // or Space opens a different line and the focus falls to the page.
+      const held = new Set([open, focusedSeq()]);
+      const cut = lines.length - KEEP;
+      lines = lines.filter((x, i) => i >= cut || held.has(x.seq));
+    }
     seen.add(l.source);
     queueSide();
     if (!loaded || !lineShown(l, f)) {
@@ -683,10 +698,13 @@ export function mountHostLog(root, opts) {
     // The oldest line is dropped to keep the page at the server's ring, but
     // never the one holding focus: losing it would send the next Space to
     // the page's pause shortcut instead of the line.
-    while (list.childElementCount > KEEP) {
-      const oldest = list.firstElementChild;
-      if (!oldest || oldest.contains(document.activeElement)) break;
-      oldest.remove();
+    let oldest = list.firstElementChild;
+    while (oldest && list.childElementCount > KEEP) {
+      const next = oldest.nextElementSibling;
+      const seq = Number(/** @type {HTMLElement} */ (oldest).dataset.seq);
+      if (!oldest.contains(document.activeElement) && seq !== open)
+        oldest.remove();
+      oldest = next;
     }
     if (follow) toTail();
     paintCount();

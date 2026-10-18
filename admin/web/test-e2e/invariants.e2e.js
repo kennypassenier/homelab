@@ -1960,7 +1960,7 @@ test("invariants: every timeline mark and legend swatch contrasts at least 3:1 w
     });
     const page = await freshPage(context);
     const bad = [];
-    for (const theme of ["dark", "light"]) {
+    for (const theme of ["dark", "formal"]) {
       await page.evaluate((t) => localStorage.setItem("theme", t), theme);
       await page.goto(`${BASE}/timeline`);
       await page.waitForSelector(".timeline-legend .swatch", {
@@ -2390,7 +2390,7 @@ test("invariants: the backup calendar's status colours are the status tokens, in
     const page = await freshPage(context);
     const bad = [];
     let seen = 0;
-    for (const theme of ["dark", "light"]) {
+    for (const theme of ["dark", "formal"]) {
       await page.evaluate((t) => localStorage.setItem("theme", t), theme);
       await page.goto(`${BASE}/backupcalendar`);
       await page
@@ -2912,7 +2912,7 @@ test("invariants: the Backups heatmap paints status in the status tokens, in lig
     const page = await freshPage(context);
     const bad = [];
     const seen = { ok: 0, miss: 0, fleet: 0 };
-    for (const theme of ["dark", "light"]) {
+    for (const theme of ["dark", "formal"]) {
       await page.evaluate((t) => localStorage.setItem("theme", t), theme);
       await page.goto(`${BASE}/backups`);
       await page
@@ -4928,7 +4928,7 @@ test("invariants: redesign-kit: a narrow page header reads the title with its li
   // description) — read title, description, actions.
   const browser = await launch();
   try {
-    for (const theme of ["light", "dark"])
+    for (const theme of ["formal", "dark"])
       for (const path of ["/backups", "/host", "/schedules"]) {
         const { context, page } = await phonePage(browser, theme);
         await page.goto(`${BASE}${path}`);
@@ -4996,7 +4996,7 @@ test("invariants: redesign-kit: a narrow page header reads the title with its li
 test("invariants: redesign-kit: a bad attention item is a soft red tint with a red border and the page's text colour", async () => {
   const browser = await launch();
   try {
-    for (const theme of ["light", "dark"]) {
+    for (const theme of ["formal", "dark"]) {
       const { context, page } = await phonePage(browser, theme);
       await page.goto(`${BASE}/backups`);
       await page.locator("main .nx-head h1").waitFor({ timeout: 10000 });
@@ -5208,7 +5208,7 @@ test("invariants: redesign-kit-18: Backups keeps its KPI context whole at 390 px
   const browser = await launch();
   try {
     {
-      const { context, page } = await phonePage(browser, "light");
+      const { context, page } = await phonePage(browser, "formal");
       await page.goto(`${BASE}/backups`);
       await page
         .locator('.kp-kpi[data-key="newest"]:not([data-loading])')

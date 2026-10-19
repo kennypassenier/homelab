@@ -67,7 +67,14 @@
 }
 
 /* ---------- the next run: the countdown and the three after it ---------- */
-.sch-hero .kp-card__stage {
+.sch-hero {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.sch-hero .kp-card__stage,
+.sch-hero__then {
   min-block-size: 17rem;
 }
 .sch-hero__grid {

@@ -87,7 +87,7 @@ import {
   masterDetail,
   setPaneState,
 } from "/static/kp/js/master-detail.js";
-import { attachRuns, setRuns } from "/static/kp/js/runs.js";
+import { attachRuns, setRuns, setRunsState } from "/static/kp/js/runs.js";
 import {
   SELECTION_ACTION_EVENT,
   attachSelectionBars,
@@ -386,6 +386,9 @@ export function mount(root, opts = {}) {
     "data-kp-time-zone": zone(),
     id: "sched-then",
   });
+  // The card's own state is the countdown and the schedule it names; the
+  // three runs after it are the runs list's component, with its own busy
+  // card and plates, so they stand beside that stage, never inside it.
   const hero = h(
     "section",
     {
@@ -399,7 +402,7 @@ export function mount(root, opts = {}) {
       { class: "kp-card__stage" },
       h(
         "div",
-        { class: "kp-card__data sch-hero__grid" },
+        { class: "kp-card__data" },
         h(
           "div",
           { class: "sch-hero__main" },
@@ -408,14 +411,19 @@ export function mount(root, opts = {}) {
           heroNote,
           h("div", { class: "sch-hero__actions" }, runNow, skip),
         ),
-        h("div", { class: "sch-hero__then" }, thenEl),
       ),
     ),
+  );
+  const heroFrame = h(
+    "div",
+    { class: "kp-card sch-hero__grid" },
+    hero,
+    h("div", { class: "sch-hero__then" }, thenEl),
   );
   const heroCard = card({
     title: "The next run, counting down",
     desc: "Tells what starts next and how long that is, with the exact date beside the countdown and the three runs after it, flagging a run that starts in the same minute as another.",
-    body: hero,
+    body: heroFrame,
   });
 
   // ── 3 · the form beside the list ──
@@ -717,6 +725,9 @@ export function mount(root, opts = {}) {
     count.textContent = "";
     setWeekState(weekEl, "loading");
     setCardState(hero, "loading");
+    setRunsState(thenEl, "loading");
+    paneLoading = true;
+    setPaneState(panes, "loading", { words: "Reading the schedules…" });
     table.loading({ words: "Reading the schedules" });
     setHeat(heatEl, {
       columns: hourColumns(),
@@ -740,6 +751,10 @@ export function mount(root, opts = {}) {
     setWeekState(weekEl, "error", why);
     setCardState(hero, "error", {
       title: "The next run could not be read",
+      text: `${e.why}. The schedules are unchanged.`,
+    });
+    setRunsState(thenEl, "error", {
+      title: "The next runs could not be read",
       text: `${e.why}. The schedules are unchanged.`,
     });
     paneError = true;
@@ -813,6 +828,7 @@ export function mount(root, opts = {}) {
         title: "No run planned",
         text: "Every schedule is off or has no further run. Turn one on in the table.",
       });
+      setRuns(thenEl, [], { reason: "No run is planned." });
       return;
     }
     setCardState(hero, "ready");
@@ -1440,6 +1456,7 @@ export function mount(root, opts = {}) {
 
   // ── the form in the detail pane ──
   let paneError = false;
+  let paneLoading = false;
   /** @type {string | null} */
   let formKey = null;
   /** @type {ReturnType<typeof buildScheduleForm> | null} */
@@ -1649,6 +1666,7 @@ export function mount(root, opts = {}) {
   });
   hero.addEventListener("kp-card-retry", () => first());
   weekEl.addEventListener("kp-week-retry", () => first());
+  thenEl.addEventListener("kp-runs-retry", () => first());
   table.wrap.addEventListener("kp-datatable-retry", () => first());
   heatEl.addEventListener("kp-heat-retry", () => first());
   matrixEl.addEventListener("kp-uses-retry", () => first());
@@ -1703,8 +1721,9 @@ export function mount(root, opts = {}) {
     drawWeek();
     drawHero();
     drawPaneList();
-    if (!formKey && paneError) {
+    if (!formKey && (paneError || paneLoading)) {
       paneError = false;
+      paneLoading = false;
       closeForm();
     }
     drawTable();

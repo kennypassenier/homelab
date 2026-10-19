@@ -338,9 +338,8 @@ export function mount(root) {
   const routing = h(
     "section",
     {
-      class: "kp-card nr-card nr-card--routing",
+      class: "kp-card nr-card",
       id: "per-stack",
-      "data-kp-state": "loading",
       "aria-labelledby": "nr-routing-t",
     },
     h(
@@ -354,28 +353,29 @@ export function mount(root) {
       { class: "kp-card__body" },
       "Decides, for every stack, whether it pushes to your phone or waits for the digest, and shows what the last five notices would have done under these rules. A muted stack still lands in the Inbox; it never pushes.",
     ),
-    // The last five notices are the notices centre's own component, with its
-    // own busy card and failed plate, so it stands beside the card's stage
-    // (a state of the stacks' data would hide it) on the card's grid.
     h(
       "div",
-      { class: "nr-routing__preview" },
-      h(
-        "h3",
-        { class: "nr-h", id: "nr-preview-h" },
-        "The last five notices under these rules",
-      ),
-      preview,
-    ),
-    h(
-      "div",
-      { class: "kp-card__stage nr-routing__stage" },
+      { class: "kp-card__stage" },
       h(
         "div",
-        { class: "kp-card__data nr-routing__stacks" },
-        h("h3", { class: "nr-h", id: "nr-stacks-h" }, "By stack"),
-        stacksEl,
-        stacksSay,
+        { class: "kp-card__data nr-routing" },
+        h(
+          "div",
+          { class: "nr-routing__preview" },
+          h(
+            "h3",
+            { class: "nr-h", id: "nr-preview-h" },
+            "The last five notices under these rules",
+          ),
+          preview,
+        ),
+        h(
+          "div",
+          { class: "nr-routing__stacks" },
+          h("h3", { class: "nr-h", id: "nr-stacks-h" }, "By stack"),
+          stacksEl,
+          stacksSay,
+        ),
       ),
     ),
   );
@@ -562,11 +562,16 @@ export function mount(root) {
     const r = await saveSettings({ muted_stacks: muted });
     if (!r.ok) paintRouting();
   });
-  routing.addEventListener("kp-card-retry", () => void retry(routing));
+  // The routing card holds two components with states of their own (the last
+  // five notices, whose busy card and failed plate stand in the card), so the
+  // card itself carries none that would hide them.
+  preview.addEventListener("kp-notices-retry", () => void retry(routing));
   delivery.addEventListener("kp-card-retry", () => void retry(delivery));
   /** @param {HTMLElement} which */
   const retry = async (which) => {
-    putState(which, "loading", { words: "Reading the rules…" });
+    if (which === delivery)
+      putState(which, "loading", { words: "Reading the rules…" });
+    else setNotices(preview, { state: "loading", items: [], sources: [] });
     await loadNotices();
     paintAll();
   };
@@ -619,13 +624,6 @@ export function mount(root) {
   const paintRouting = () => {
     const snap = act.notices;
     if (!snap) {
-      putState(
-        routing,
-        failed() ? "error" : "loading",
-        failed() ? failedState : { words: "Reading the rules…" },
-      );
-      // The preview is the package's notices centre: its own busy card and
-      // failed plate while the rules are not here.
       lastRouting = "";
       setNotices(preview, {
         state: failed() ? "error" : "loading",
@@ -639,15 +637,10 @@ export function mount(root) {
     const rows = stackMuteRows(names, snap);
     stackNames = rows.map((r) => r.stack);
     if (rows.length === 0) {
-      putState(routing, "empty", {
-        title: "No stacks yet",
-        text: "Stacks appear here once the host knows them.",
-      });
       lastRouting = "";
       setNotices(preview, { state: "empty", items: [], sources: [] });
       return;
     }
-    putState(routing, "ready");
     const now = Date.now() / 1000;
     const last = [...snap.notices]
       .sort((a, b) => b.at - a.at || b.id - a.id)

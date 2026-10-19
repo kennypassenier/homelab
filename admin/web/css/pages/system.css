@@ -5,10 +5,6 @@
 .sy-links {
   margin: 0;
 }
-.sy-links a.nx-action {
-  text-decoration: none;
-  color: inherit;
-}
 .sy-kpi {
   font-size: var(--kp-text-xs);
   color: var(--muted-foreground);

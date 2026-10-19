@@ -18,7 +18,7 @@
 @media (max-width: 30rem) {
   /* The Window control's first button starts at the title's left edge,
      its pill's border and padding hanging outside it. */
-  .ac-page .nx-head-actions > .nx-seg:first-child {
+  .ac-page .nx-head-actions > .kp-segmented:first-child {
     margin-inline-start: -4px;
   }
 }
@@ -32,54 +32,6 @@
   min-inline-size: 0;
 }
 .ac-body > [hidden] {
-  display: none;
-}
-
-/* ── segmented switch: the header's Window ───────────────────────────
-   ui.js's segSwitch draws `.nx-seg` (hostkit's `.hk-seg` until the 3.71.0
-   merge); this page gives it its own look, scoped, over app.css's. */
-:is(.ac-page, .con-page) .nx-seg {
-  display: inline-grid;
-  grid-auto-flow: column;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--ac-soft);
-}
-:is(.ac-page, .con-page) .nx-seg button {
-  all: unset;
-  font-size: var(--kp-text-sm);
-  padding: 4px 14px;
-  border-radius: 999px;
-  color: var(--muted-foreground);
-  cursor: pointer;
-  white-space: nowrap;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-:is(.ac-page, .con-page) .nx-seg button:hover {
-  color: var(--foreground);
-}
-:is(.ac-page, .con-page) .nx-seg button[aria-pressed="true"] {
-  background: var(--card);
-  color: var(--foreground);
-  font-weight: 600;
-  box-shadow: 0 0 0 1px var(--border);
-}
-:is(.ac-page, .con-page) .nx-seg button:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 1px;
-}
-:is(.ac-page, .con-page) .nx-seg__count {
-  margin-inline-start: 6px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 500;
-}
-:is(.ac-page, .con-page) .nx-seg__count:empty {
   display: none;
 }
 
@@ -105,30 +57,6 @@
   gap: 8px;
   align-items: center;
 }
-:is(.ac-page, .con-page) .nx-keys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 20px;
-  margin: 0;
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-:is(.ac-page, .con-page) .nx-keys span {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-:is(.ac-page, .con-page) .nx-kbd {
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.72rem;
-  border: 1px solid var(--border);
-  border-bottom-width: 2px;
-  border-radius: 4px;
-  padding: 0 5px;
-  color: var(--muted-foreground);
-  background: var(--card);
-}
-
 /* ── Running now ─────────────────────────────────────────────────────── */
 .ac-jobs {
   display: grid;
@@ -329,13 +257,6 @@
   }
   .ac-foot {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .ac-page .nx-seg {
-    grid-auto-columns: minmax(0, 1fr);
-    max-inline-size: 100%;
-  }
-  .ac-page .nx-seg button {
-    padding-inline: 8px;
   }
 }
 

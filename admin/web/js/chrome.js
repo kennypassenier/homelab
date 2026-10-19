@@ -471,9 +471,10 @@ function mountTabBar(ctx, openPalette, openHelp) {
   const item = (title, what, go) => {
     const b = h(
       "button",
-      { type: "button", class: "nx-action" },
-      h("strong", null, title),
-      h("span", null, what),
+      { type: "button", class: "kp-action" },
+      h("strong", { class: "kp-action__title" }, title),
+      h("span", { class: "kp-action__mark", "aria-hidden": "true" }),
+      h("span", { class: "kp-action__text" }, what),
     );
     b.addEventListener("click", () => {
       sheet.close();
@@ -512,7 +513,7 @@ function mountTabBar(ctx, openPalette, openHelp) {
       ),
       h(
         "div",
-        { class: "kp-drawer__body nx-actions" },
+        { class: "kp-drawer__body kp-actions" },
         ...moreAreas().map((a) =>
           item(a.label, a.what, () => ctx.navigate(a.href)),
         ),

@@ -3872,7 +3872,8 @@ test("invariants: Stacks lists every stack once as a card and as a table row, wi
       ["cards", ".fl-cards > .kp-card--entity"],
       ["table", ".fl-table tbody tr[data-kp-row-key]"],
     ]) {
-      if (view === "table") await page.click(".nx-seg button[data-v=table]");
+      if (view === "table")
+        await page.click(".kp-segmented button[data-value=table]");
       await page.locator(sel).first().waitFor({ timeout: 8000 });
       const got = await read(sel);
       // Only the view that is on is drawn, so a Live view lookup by id and
@@ -3901,7 +3902,7 @@ test("invariants: Stacks lists every stack once as a card and as a table row, wi
         );
       }
     }
-    await page.click(".nx-seg button[data-v=cards]");
+    await page.click(".kp-segmented button[data-value=cards]");
     // The view is in the address (Table, the default, is not), so a reload
     // keeps it.
     assert.ok(page.url().includes("view=cards"), "the view is not in the URL");
@@ -3963,7 +3964,7 @@ test("invariants: Stacks keeps its ticks across Table/Cards and live updates, th
       (await page.locator('#fl-bar [data-batch="deploy"]').innerText()).trim(),
       "Deploy",
     );
-    await page.click(".nx-seg button[data-v=table]");
+    await page.click(".kp-segmented button[data-value=table]");
     const tickedRows = await page.$$eval(
       ".fl-table tbody input[data-kp-select-row]:checked",
       (els) => els.map((e) => /** @type {HTMLInputElement} */ (e).value),
@@ -6029,7 +6030,7 @@ test("invariants: review-activity: History's By names owners, the Host log group
       return {
         outside,
         inBar: !!document.querySelector(".hl-bar .hl-follow"),
-        keys: document.querySelector(".nx-keys, .ac-keys")?.textContent ?? "",
+        keys: document.querySelector(".kp-keys, .ac-keys")?.textContent ?? "",
         desc: card?.textContent ?? "",
       };
     });
@@ -6112,7 +6113,7 @@ test("invariants: the Metrics page is laid out as the approved demo, every chart
     const got = await page.evaluate(() => ({
       views: [
         ...document.querySelectorAll(
-          '.nx-seg[aria-label="Metrics view"] button',
+          '.kp-segmented[aria-label="Metrics view"] button',
         ),
       ].map((b) => b.textContent),
       // kp-themes 11: the window is kp's range, the refresh kp's control.
@@ -6428,7 +6429,7 @@ test("invariants: the Map is laid out as the approved demo, and a plain click on
     assert.equal(await node.getAttribute("aria-pressed"), "false");
     assert.doesNotMatch(page.url(), /select=/);
     // List view: one row per stack, the graph hidden; back again.
-    const seg = page.locator('.nx-seg[aria-label="View"] button');
+    const seg = page.locator('.kp-segmented[aria-label="View"] button');
     await seg.filter({ hasText: "List" }).click();
     await page.locator(".mp-list tbody tr").first().waitFor({ timeout: 3000 });
     assert.equal(await page.locator(".mp-topo").isVisible(), false);
@@ -6780,7 +6781,7 @@ test("invariants: review metrics — the wording is the demo's, Connections is g
           ".kp-chart__hint > [data-kp-when='touch']",
         ),
       ].some((e) => /** @type {HTMLElement} */ (e).checkVisibility()),
-      keys: [...document.querySelectorAll(".mk-page .nx-keys")].some((e) =>
+      keys: [...document.querySelectorAll(".mk-page .kp-keys")].some((e) =>
         /** @type {HTMLElement} */ (e).checkVisibility(),
       ),
     }));
@@ -9155,7 +9156,7 @@ test("invariants: redesign-final-h5: Planned is a section of Activity and the Do
         rivals: [...document.querySelectorAll("main h2")]
           .filter((x) => parseFloat(getComputedStyle(x).fontSize) >= big)
           .map((x) => x.textContent),
-        badge: document.querySelectorAll("#sched-new kbd, #sched-new .nx-kbd")
+        badge: document.querySelectorAll("#sched-new kbd, #sched-new .kp-kbd")
           .length,
       };
     });
@@ -9644,7 +9645,7 @@ test("invariants: redesign-final-m1: Stacks is the approved demo: no Inbox banne
         table: !!document.querySelector(".fl-table tbody tr[data-kp-row-key]"),
         cards: !!document.querySelector(".fl-cards > .kp-card--entity"),
         title: card?.querySelector("h2")?.textContent?.trim(),
-        keysInFoot: !!card?.querySelector(".nx-card__foot .nx-keys"),
+        keysInFoot: !!card?.querySelector(".nx-card__foot .kp-keys"),
       };
     });
     assert.equal(f.band, 0, "an Inbox banner beside the Need you tile");

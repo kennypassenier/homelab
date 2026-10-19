@@ -1,6 +1,6 @@
 /* Phone: the key row is for keyboards. */
 @media (max-width: 48rem) {
-  .sk-page .nx-keys {
+  .sk-page .kp-keys {
     display: none;
   }
 }
@@ -41,7 +41,7 @@ main.shell.ap-page > [hidden] {
   display: none;
 }
 
-.sk-page .nx-keys code {
+.sk-page .kp-keys code {
   padding: 0 4px;
   border-radius: 4px;
   background: var(--muted);
@@ -246,12 +246,6 @@ dialog.kp-drawer.sk-drawer--plan {
   display: grid;
   gap: 8px;
 }
-.sk-route {
-  text-align: start;
-  font: inherit;
-  cursor: pointer;
-  inline-size: 100%;
-}
 
 /* ===== Apps (home when the Inbox is empty; apps.html) ================== */
 .ap-launch {
@@ -286,7 +280,7 @@ dialog.kp-drawer.sk-drawer--plan {
   .ap-launch {
     grid-template-columns: minmax(0, 1fr);
   }
-  .ap-launch .nx-keys {
+  .ap-launch .kp-keys {
     display: none;
   }
 }

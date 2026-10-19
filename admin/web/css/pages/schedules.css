@@ -28,7 +28,7 @@
 }
 /* ---------- header chips ---------------------------------------------- */
 /* The page's key caps are flat (no under-shadow). */
-.sch-root .nx-kbd {
+.sch-root .kp-kbd {
   box-shadow: none;
 }
 /* The "read 4 s ago" line keeps `.measured`'s own block margin here, so the

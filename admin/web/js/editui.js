@@ -219,14 +219,26 @@ export function diffBlocks(files, opts = { open: true }) {
   for (const f of files) {
     // kp-themes' diff component [TH54]: a `<pre class="kp-diff">` of
     // `.kp-diff__line[data-kind]` lines, each a number, a sign (its own
-    // column, so the change survives without colour) and the text. kp has
-    // no hunk-header element, so `@@ … @@` stays a small local style.
+    // column, so the change survives without colour) and the text. A hunk
+    // opens with kp's `.kp-diff__hunk` row: the `@@ … @@` range, then the
+    // place it sits in as `.kp-diff__hunk-context`.
     const table = h("pre", {
       class: "kp-diff",
       "aria-label": `Changes in ${f.path}`,
     });
     for (const hk of f.hunks) {
-      table.append(h("div", { class: "diff-hunk kp-text-muted" }, hk.head));
+      const [, range = hk.head, context = ""] =
+        /^(@@[^@]*@@)\s*(.*)$/.exec(hk.head) ?? [];
+      table.append(
+        h(
+          "div",
+          { class: "kp-diff__hunk" },
+          context ? `${range} ` : range,
+          ...(context
+            ? [h("span", { class: "kp-diff__hunk-context" }, context)]
+            : []),
+        ),
+      );
       for (const l of hk.lines)
         table.append(
           h(

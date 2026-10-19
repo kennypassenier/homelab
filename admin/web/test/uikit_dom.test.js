@@ -44,7 +44,8 @@ const read = (/** @type {string} */ p) =>
 /** @param {any} e */
 const pressed = (e) =>
   [...e.querySelectorAll("button")].map(
-    (b) => `${b.dataset.v}:${b.getAttribute("aria-pressed")}`,
+    (b) =>
+      `${b.dataset.value}:${b.getAttribute("aria-pressed") ?? b.getAttribute("aria-checked")}`,
   );
 
 test("redesign-kit-4: a page embedded under another page's title draws its header title as an h2", () => {
@@ -130,7 +131,7 @@ test("redesign-kit-6: Secrets draws its header and cards with the kit; its sheet
     ".sx .nx-card__foot",
     ".sx .nx-chip",
     ".sx .nx-dot",
-    ".sx .nx-kbd",
+    ".sx .kp-kbd",
     ".sx .nx-empty",
     ".sx .nx-live {",
     ".sx-tip",
@@ -155,7 +156,7 @@ test("redesign-kit-7: segSwitch moves without a change event; sort state is mult
   assert.equal(sw.value(), "y");
   assert.deepEqual(pressed(sw.el), ["x:false", "y:true"]);
   assert.deepEqual(changes, [], "set() is the address moving it, no change");
-  /** @type {any} */ (sw.el.querySelector('[data-v="x"]')).click();
+  /** @type {any} */ (sw.el.querySelector('[data-value="x"]')).click();
   assert.deepEqual(changes, ["x"]);
 
   const { nextSort, applySort, rememberedSort, keepSort } = sortstate;
@@ -447,7 +448,7 @@ test("redesign-kit-10: one toggle group, one rule: drive is required, every valu
       drive: { id: "kit-test-toggle" },
     });
     const btn = (/** @type {string} */ v) =>
-      /** @type {any} */ (g.el.querySelector(`[data-v="${v}"]`));
+      /** @type {any} */ (g.el.querySelector(`[data-value="${v}"]`));
     assert.equal(btn("a").dataset.drive, "kit-test-toggle");
     assert.equal(btn("a").dataset.driveRow, "a");
     btn("a").click();

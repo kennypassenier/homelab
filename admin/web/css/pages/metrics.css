@@ -384,7 +384,8 @@ main.mk-page > .mk-failed:empty {
    charts' own hint line (`.kp-chart__hint > [data-kp-when]`) is kp's and
    switches on (hover: none) by itself. */
 @media (hover: none) {
-  .mk-page .nx-keys {
+  .mk-pointer-only,
+  .mk-page .kp-keys {
     display: none !important;
   }
 }

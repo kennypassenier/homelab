@@ -324,31 +324,33 @@ export function mount(root) {
   setupCard.body.append(
     h(
       "nav",
-      { class: "nx-actions sy-links", "aria-label": "Set up" },
+      { class: "kp-actions sy-links", "aria-label": "Set up" },
       ...(setup?.cards ?? []).map((c) =>
         h(
           "a",
           {
-            class: "nx-action",
+            class: "kp-action",
             href: c.href ?? hrefOf(c.id),
             "data-card": c.id,
           },
-          h("strong", null, c.label),
-          h("span", null, c.what),
+          h("strong", { class: "kp-action__title" }, c.label),
+          h("span", { class: "kp-action__mark", "aria-hidden": "true" }),
+          h("span", { class: "kp-action__text" }, c.what),
         ),
       ),
       h(
         "a",
         {
-          class: "nx-action",
+          class: "kp-action",
           href: "/data/download/runbook",
           download: "DR_RUNBOOK.md",
           "data-card": "runbook",
         },
-        h("strong", null, "Disaster runbook"),
+        h("strong", { class: "kp-action__title" }, "Disaster runbook"),
+        h("span", { class: "kp-action__mark", "aria-hidden": "true" }),
         h(
           "span",
-          null,
+          { class: "kp-action__text" },
           "Download the step-by-step to rebuild everything from backups",
         ),
       ),

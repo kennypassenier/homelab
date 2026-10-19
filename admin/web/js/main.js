@@ -69,9 +69,9 @@ import { mount as metricsPage } from "./pages/metrics.js";
 import { mount as fleetviewPage } from "./pages/fleetview.js";
 import { mount as passkeysPage } from "./pages/passkeys.js";
 import { mountVersions } from "./versions.js";
-import { installSortClick } from "./sortclick.js";
+import { installTableResets } from "./tableresets.js";
 
-installSortClick();
+installTableResets();
 // "Follow my system" (Settings ▸ This browser) works from every page.
 startFollowingSystem();
 

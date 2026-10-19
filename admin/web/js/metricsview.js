@@ -5,7 +5,7 @@
 // marked on every chart — so it is tested without a browser. The page
 // itself (js/pages/metrics.js) only draws what these return.
 
-import { formatDateTime } from "./format.js";
+import { formatClock, formatDateTime, formatDay } from "./format.js";
 import { entryWhat } from "./activity.js";
 
 /**
@@ -297,7 +297,8 @@ const lastOf = (pts) => (pts?.length ? pts[pts.length - 1][1] : null);
 /**
  * @typedef {{name: string, ok: boolean, since: number | null,
  *   temp: number | null, tempPoints: Point[], pending: number | null,
- *   pendPoints: Point[], realloc: number | null, hours: number | null}}
+ *   pendPoints: Point[], healthPoints: Point[], realloc: number | null,
+ *   hours: number | null}}
  *   Drive one row of the Drives table; the two `…Points` are the readings
  *   over the window, the two lines in a drive's detail
  */
@@ -335,10 +336,70 @@ export function drives(P) {
       tempPoints: temp ?? [],
       pending: lastOf(pend),
       pendPoints: pend ?? [],
+      healthPoints: s.points,
       realloc: lastOf(find("Drive reallocated sectors", s.label)),
       hours: lastOf(find("Drive power-on hours", s.label)),
     };
   });
+}
+
+/**
+ * @typedef {{key: string, label: string,
+ *   state: "up" | "degraded" | "down" | "none", uptime?: number,
+ *   incidents?: number, details?: string[]}} HealthPeriod
+ */
+
+/**
+ * A drive's health strip: the window cut into cells (10 minutes for a
+ * short window, an hour up to two days, else a day), each "down" when SMART
+ * was not ok in it, "degraded" when pending sectors showed, "none" when
+ * nothing was read. The share up and the incidents that began in a cell
+ * come from the same readings.
+ * @param {Pick<Drive, "name" | "healthPoints" | "pendPoints">} d
+ * @returns {HealthPeriod[]} oldest first
+ */
+export function healthPeriods(d) {
+  const pts = d.healthPoints;
+  if (!pts.length) return [];
+  const span = pts[pts.length - 1][0] - pts[0][0];
+  const size = span <= 7200 ? 600 : span <= 2 * 86400 ? 3600 : 86400;
+  const first = Math.floor(pts[0][0] / size);
+  const last = Math.floor(pts[pts.length - 1][0] / size);
+  /** @type {HealthPeriod[]} */
+  const out = [];
+  for (let b = first; b <= last; b++) {
+    const lo = b * size;
+    const hi = lo + size;
+    const inside = pts.filter((p) => p[0] >= lo && p[0] < hi);
+    const label =
+      size === 86400 ? formatDay(lo + 43200) : formatClock(lo).slice(0, 5);
+    const key = new Date(lo * 1000).toISOString();
+    if (!inside.length) {
+      out.push({ key, label, state: "none" });
+      continue;
+    }
+    const down = inside.filter((p) => p[1] < 1).length;
+    const pending = d.pendPoints.some(
+      (p) => p[0] >= lo && p[0] < hi && p[1] > 0,
+    );
+    const incidents = inside.filter((p) => {
+      const i = pts.indexOf(p);
+      return p[1] < 1 && i > 0 && pts[i - 1][1] >= 1;
+    }).length;
+    out.push({
+      key,
+      label,
+      state: down ? "down" : pending ? "degraded" : "up",
+      uptime: (inside.length - down) / inside.length,
+      ...(incidents ? { incidents } : {}),
+      ...(down
+        ? { details: [`SMART not ok on ${d.name} during ${label}`] }
+        : pending
+          ? { details: [`Pending sectors appeared during ${label}`] }
+          : {}),
+    });
+  }
+  return out;
 }
 
 /**

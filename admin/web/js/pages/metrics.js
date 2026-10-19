@@ -35,6 +35,7 @@ import {
   drives,
   extremes,
   fill,
+  healthPeriods,
   hostHeat,
   hostLegend,
   machinesOf,
@@ -112,6 +113,7 @@ import {
   dataTable as tableOf,
 } from "/static/kp/js/datatable.js";
 import { attachBarCells, setBarCell } from "/static/kp/js/barcell.js";
+import { attachUptimes, setUptime } from "/static/kp/js/uptime.js";
 
 const RANGES = /** @type {const} */ (["1h", "6h", "24h", "7d", "30d"]);
 const TABS = /** @type {const} */ (["system", "traffic"]);
@@ -1630,6 +1632,7 @@ export function mount(root, ctx) {
               ...list.flatMap((d) => [driveRow(d), driveDetail(d)]),
             );
             detachers.push(attachBarCells(tbody));
+            detachers.push(attachUptimes(tbody));
             queueMicrotask(() => attachPageCharts(tbody));
           }
           for (const d of list) fillDrive(d);
@@ -1691,6 +1694,11 @@ export function mount(root, ctx) {
               "div",
               { class: "mk-drive-detail", "data-mk-detail": d.name },
               h("p", { class: "mk-drive-detail__state" }),
+              h("div", {
+                class: "kp-uptime",
+                "data-kp-uptime": "",
+                "data-mk-health": d.name,
+              }),
               h(
                 "div",
                 { class: "mk-pair" },
@@ -1771,6 +1779,19 @@ export function mount(root, ctx) {
           sentence.textContent = d.ok
             ? `${d.name} reports SMART ok.`
             : `${d.name} reports SMART not ok${d.since ? `, since ${formatDateTime(d.since)}` : ", for this whole window"}.`;
+        const strip = /** @type {HTMLElement | null} */ (
+          detail?.querySelector("[data-mk-health]") ?? null
+        );
+        if (strip) {
+          const periods = healthPeriods(d);
+          setUptime(strip, {
+            label: `${d.name} health`,
+            periods,
+            from: periods[0]?.label,
+            to: periods.length > 1 ? periods.at(-1)?.label : undefined,
+            open: "info",
+          });
+        }
         for (const fig of tbody.querySelectorAll(
           `[data-mk-spark$=":${CSS.escape(d.name)}"]`,
         )) {
@@ -2064,10 +2085,16 @@ export function mount(root, ctx) {
     /** @type {string[]} */
     let hostNames = [];
     let bucketMs = 3600_000;
+    // A part shows that class alone in the chart; the same part again shows
+    // every class (the demo's behaviour for the Status class keys).
+    let pickedClass = -1;
     mixBar.addEventListener(STACKBAR_PICK_EVENT, (e) => {
       const key = /** @type {CustomEvent} */ (e).detail?.key;
       const i = CLASSES.findIndex((c) => c.label === key);
-      if (i >= 0) chartSelect(over.fig, i);
+      if (i < 0) return;
+      chartSelect(over.fig, null);
+      pickedClass = pickedClass === i ? -1 : i;
+      if (pickedClass >= 0) chartSelect(over.fig, pickedClass, true);
     });
     mixBar.addEventListener(STACKBAR_RETRY_EVENT, () =>
       refreshOf(refreshEl)?.now("retry"),

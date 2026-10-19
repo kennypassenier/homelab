@@ -13,6 +13,7 @@ import {
   drives,
   extremes,
   fill,
+  healthPeriods,
   heatColumns,
   hostHeat,
   machinesOf,
@@ -464,4 +465,37 @@ test("kp11-metrics: the picker lists the host and the three heaviest stacks firs
     "kyu",
     "almanac",
   ]);
+});
+
+test("kp11-metrics: a drive's health strip cuts the window into cells: down when SMART failed, degraded when sectors are pending", () => {
+  const day = 86400;
+  const t0 = 1_760_000_000 - (1_760_000_000 % day);
+  const d = {
+    name: "sdb",
+    healthPoints: /** @type {[number, number][]} */ ([
+      [t0 + 100, 1],
+      [t0 + day + 100, 1],
+      [t0 + day + 200, 0],
+      [t0 + 3 * day + 100, 1],
+    ]),
+    pendPoints: /** @type {[number, number][]} */ ([[t0 + 3 * day + 100, 4]]),
+  };
+  const p = healthPeriods(d);
+  assert.deepEqual(
+    p.map((x) => x.state),
+    ["up", "down", "none", "degraded"],
+  );
+  assert.equal(p[1].incidents, 1);
+  assert.equal(p[1].uptime, 0.5);
+  assert.deepEqual(healthPeriods({ ...d, healthPoints: [] }), []);
+  // A short window is cut in hours.
+  const hourly = healthPeriods({
+    name: "sda",
+    healthPoints: [
+      [t0, 1],
+      [t0 + 10800, 1],
+    ],
+    pendPoints: [],
+  });
+  assert.equal(hourly.length, 4);
 });

@@ -161,3 +161,27 @@ test("review finding 15: from the sixth source on, a chart's line is dashed", as
   assert.ok(dashOf(5), "the sixth source repeats colour 1 without a dash");
   assert.notEqual(dashOf(5), dashOf(10));
 });
+
+test("kp11-metrics: a typical-level chart with one reading draws its dot; with a few it says it is too early", async () => {
+  const { chartData } = await import("../js/charts.js");
+  const spec = (/** @type {number} */ n) => ({
+    key: "cpu",
+    label: "CPU used",
+    unit: /** @type {const} */ ("percent"),
+    typical: true,
+    from: 0,
+    to: 100,
+    series: [
+      {
+        label: "pve",
+        points: /** @type {[number, number][]} */ (
+          Array.from({ length: n }, (_, i) => [i, i])
+        ),
+      },
+    ],
+  });
+  assert.equal(chartData(spec(1)).minPoints, undefined);
+  assert.equal(chartData(spec(1)).onePointNote, true);
+  assert.equal(chartData(spec(3)).minPoints, 48);
+  assert.equal(chartData(spec(3)).minUnit, "readings");
+});

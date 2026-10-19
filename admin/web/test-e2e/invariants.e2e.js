@@ -2134,10 +2134,7 @@ test("invariants: a chart with one reading per series shows a visible point and 
             return r.width >= 4 && r.height >= 4;
           }).length,
           note: f.textContent?.includes("one reading so far") ?? false,
-          // kp-themes 11: a chart that draws its typical level (CPU, load,
-          // memory per container) asks for 48 readings and says so instead
-          // of drawing a trend from fewer.
-          few: /1 of 48 readings needed/.test(
+          few: /of 48 readings needed/.test(
             f.querySelector(".kp-chart__few-plate")?.textContent ?? "",
           ),
         })),
@@ -2147,9 +2144,12 @@ test("invariants: a chart with one reading per series shows a visible point and 
       (c) => !c.few && (c.points < c.series || !c.note),
     );
     assert.deepEqual(bad, [], "charts that look empty with one reading");
-    assert.ok(
-      charts.some((c) => c.few),
-      "no chart said it is too early for a trend",
+    // The demo's "One reading": a typical-level chart with a single reading
+    // draws its dot and says the line grows; "too early" is for two to 47.
+    assert.deepEqual(
+      charts.filter((c) => c.few).map((c) => c.title),
+      [],
+      "a one-reading chart said it is too early instead of drawing its dot",
     );
     // Distinct y ticks, over the demo's own (multi-point) answer and the
     // one-reading one above.

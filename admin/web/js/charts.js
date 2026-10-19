@@ -157,7 +157,8 @@ const toKpEvent = (a) => ({
 /**
  * The chart's data in kp's shape. A typical-level chart asks kp for the
  * dashed line and the rings, and says it is too early below 48 readings
- * (counting readings); every chart says so when it holds one reading.
+ * (counting readings); a chart holding one reading draws its dot and says the
+ * line grows as more readings arrive.
  * @param {ChartSpec} opt
  * @returns {ChartData}
  */
@@ -182,7 +183,15 @@ export const chartData = (opt) => ({
   height: opt.height,
   onePointNote: true,
   ...(opt.typical
-    ? { median: "typical", runs: "mark", minPoints: 48, minUnit: "readings" }
+    ? {
+        median: "typical",
+        runs: "mark",
+        // One reading draws its dot and says the line grows (the demo's
+        // "One reading"); two to 47 say it is too early for a trend.
+        ...(opt.series.some((s) => s.points.length > 1)
+          ? { minPoints: 48, minUnit: "readings" }
+          : {}),
+      }
     : {}),
 });
 

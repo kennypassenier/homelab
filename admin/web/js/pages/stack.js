@@ -3207,7 +3207,7 @@ function settingsHub(panel, c) {
  * the stack's identity mark, its name, state and live status on the title
  * row, the one-sentence description under it and the meta chips; the
  * actions against the right edge (Back up · Update · Deploy, the primary
- * one, then More). Markup the whole-screen invariants read: `.title-row`
+ * one, then More). Markup the whole-screen invariants read: `.kp-page-header__line`
  * holding the h1, the description its next sibling `p`, the buttons in
  * `.sh-head__actions`.
  * @param {{name: string, desc: string, actions: Node[], primary: Node,
@@ -3229,15 +3229,13 @@ function hubHeader(spec) {
     spec.more,
   );
   const mark = stackMark(spec.name, 40);
-  mark.classList.add("sh-head__mark");
+  mark.classList.add("sh-head__mark", "kp-page-header__lead");
   // redesign-final X1: the freshness right after the title and its state.
   const row = h(
     "div",
-    { class: "title-row sh-head__row" },
+    { class: "kp-page-header__heading sh-head__row" },
     mark,
-    title,
-    state,
-    live.el,
+    h("div", { class: "kp-page-header__line" }, title, state, live.el),
   );
   const desc = /** @type {HTMLParagraphElement} */ (
     h(

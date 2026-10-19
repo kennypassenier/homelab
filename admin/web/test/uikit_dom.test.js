@@ -652,7 +652,7 @@ test("redesign-kit-16, redesign-final X1: a meta header reads the title with its
   assert.deepEqual(
     lead.children.map((/** @type {any} */ c) => c.className),
     [
-      "title-row",
+      "kp-page-header__heading",
       "kp-page-header__description section-head__desc nx-head-desc",
       "nx-head-meta",
     ],

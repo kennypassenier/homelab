@@ -2197,16 +2197,10 @@ td.stack-flags {
 .nx-head-lead {
   min-inline-size: 0;
 }
-.nx-head .title-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--kp-space-xs, 4px) var(--kp-space-md, 12px);
-}
-.nx-head .title-row > * {
+.nx-head .kp-page-header__line > * {
   margin-inline-start: 0;
 }
-.nx-head .title-row > :is(h1, h2) {
+.nx-head .kp-page-header__line > :is(h1, h2) {
   margin: 0;
   font-size: min(var(--kp-text-display, 2.25rem), 2.25rem);
   line-height: 1.1;
@@ -2684,7 +2678,7 @@ details.nx-card--fold[open] > summary::before {
 }
 /* chips beside the title in its row (pageHeader `titleMeta`); the
    actions keep the right edge */
-.title-row > .nx-head-titlemeta {
+.kp-page-header__line > .nx-head-titlemeta {
   display: flex;
   flex-wrap: wrap;
   gap: var(--kp-space-xs) var(--kp-space-md);

@@ -245,7 +245,7 @@ export function countOf(count, list, rows = ":scope > *") {
  * the left, the actions against the right edge — secondaries, the ONE
  * primary, the more menu last; on a narrow header it reads top to bottom,
  * the primary first at the full width. Markup the whole-screen invariants
- * read: `.title-row` holding the `h1`, the description its next sibling
+ * read: `.kp-page-header__line` holding the `h1`, the description its next sibling
  * `p` (rows 32, 36, 40, 41), the actions `.nx-head-actions`.
  * @param {HeaderSpec} spec `split` is the same header since kp-themes 9.2.0
  * @returns {{el: HTMLElement, title: HTMLHeadingElement,
@@ -276,7 +276,10 @@ export function pageHeader(spec) {
     { class: "kp-page-header__description section-head__desc nx-head-desc" },
     spec.desc,
   );
+  // The trail goes BEFORE `.kp-page-header__inner` (kp-themes
+  // `.kp-page-header__back`), so it is not the left cell's first baseline.
   const crumbs = spec.crumbs?.length ? [breadcrumbs(spec.crumbs)] : [];
+  for (const c of crumbs) c.classList.add("kp-page-header__back");
   // titleMeta: chips right beside the title in its row (the Configure
   // pages' "working copy bb5dce9"); meta: a row under the description.
   const titleMeta = spec.titleMeta
@@ -289,10 +292,14 @@ export function pageHeader(spec) {
   // slot on every page, as the demos draw it: right after the title.
   const row = h(
     "div",
-    { class: "title-row" },
-    title,
-    live?.el ?? null,
-    titleMeta,
+    { class: "kp-page-header__heading" },
+    h(
+      "div",
+      { class: "kp-page-header__line" },
+      title,
+      live?.el ?? null,
+      titleMeta,
+    ),
   );
   const e = h(
     "header",

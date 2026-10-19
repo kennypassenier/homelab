@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/overlays.js (kp-themes 10.1.1),
+// The kp-themes module chassis-rs serves at /static/kp/js/overlays.js (kp-themes 11.0.0),
 // copied from kp-themes js/overlays.d.ts: chassis serves the module, not its types.
 /** How long a toast stays before it removes itself. An operational knob; per toast as `ms`. */
 export declare const TOAST_MS = 5000;
@@ -6,9 +6,17 @@ export declare const TOAST_MS = 5000;
 export declare const DIALOG_OPEN_EVENT = "kp-dialog-open";
 /** Dispatched on a tab list, bubbling, when the selected tab changed: `{ index, tab, panel, previous }`. */
 export declare const TAB_CHANGE_EVENT = "kp-tab-change";
+/**
+ * How long a toast that was hovered or focused stays after the pointer and
+ * the focus have left it, so the eye that was on it can finish reading. An
+ * operational knob; per toast as `linger`.
+ */
+export declare const TOAST_LINGER_MS = 2000;
 /** Dispatched on the toast region when a toast was shown / removed: `{ toast, text }`. */
 export declare const TOAST_SHOW_EVENT = "kp-toast-show";
 export declare const TOAST_HIDE_EVENT = "kp-toast-hide";
+/** Dispatched on the toast region, bubbling, when a toast's clock stopped or started again because the pointer or focus came or went: `{ toast, paused }`. */
+export declare const TOAST_PAUSE_EVENT = "kp-toast-pause";
 /**
  * Put a dialog that has just opened, and its `.kp-dialog__body`, back at
  * the top [scope-96]. A closed dialog keeps its scroll position, so a
@@ -134,9 +142,19 @@ export declare function toastRegion({
  * own toast, which gets its own live region so the politeness is per
  * message rather than per page.
  *
+ * A toast does not leave under a reader's eye: while the pointer is on it or
+ * focus is inside it, its clock stops (`data-kp-paused` on the toast, and
+ * TOAST_PAUSE_EVENT), and `linger` ms after both have gone it leaves. Esc on a
+ * focused toast closes it. `pause: false` brings back the plain timer.
+ * `close: true` adds a close button; `sticky: true` is `ms: 0` plus that
+ * button, a toast that stays until it is closed (an undo that needs a
+ * decision, an error to be read). The buttons sit at the toast's end.
+ *
  * @param {string | Node} content text, or a node the consumer built
- * @param {{ ms?: number, region?: HTMLElement | null, live?: 'polite' | 'assertive', className?: string, action?: { label: string, onClick: () => void }, max?: number }} [options]
- *   ms: 0 keeps the toast until dismissed; max: drop the oldest beyond this many
+ * @param {{ ms?: number, region?: HTMLElement | null, live?: 'polite' | 'assertive', className?: string, action?: { label: string, onClick: () => void }, max?: number, pause?: boolean, linger?: number, close?: boolean, sticky?: boolean }} [options]
+ *   ms: 0 keeps the toast until dismissed; max: drop the oldest beyond this many;
+ *   pause: stop the clock while hovered or focused (default true); linger: ms left after both have gone (default TOAST_LINGER_MS);
+ *   close: add a close button; sticky: stay until closed, with a close button
  * @returns {HTMLElement & { dismiss: () => void }} the toast, so a caller can remove it early
  */
 export declare function toast(
@@ -148,6 +166,10 @@ export declare function toast(
     className,
     action,
     max,
+    pause,
+    linger,
+    close,
+    sticky,
   }?: {
     ms?: number;
     region?: HTMLElement | null;
@@ -158,6 +180,10 @@ export declare function toast(
       onClick: () => void;
     };
     max?: number;
+    pause?: boolean;
+    linger?: number;
+    close?: boolean;
+    sticky?: boolean;
   },
 ): HTMLElement & {
   dismiss: () => void;

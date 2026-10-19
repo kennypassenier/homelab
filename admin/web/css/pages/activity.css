@@ -816,3 +816,49 @@
 .ac-foot__queue > [hidden] {
   display: none;
 }
+
+/* feat-kpadopt-2 (kp-themes 11.0.0, app-homelab-backups demo): the log's
+   levels and the picture of the window stand on form-grid tracks; the
+   console is kp's, in its own pane under the lines. */
+.hl-levelsrow,
+.hl-density {
+  margin-block: var(--kp-space-xs, 0.25rem);
+  padding-inline: var(--nx-pad, 1rem);
+}
+.hl-levelread {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm, 0.8125rem);
+}
+.hl-picture {
+  min-block-size: 9rem;
+  min-inline-size: 0;
+  overflow-x: auto;
+}
+.hl-picture > [hidden] {
+  display: none;
+}
+.con-foot {
+  display: grid;
+  gap: var(--kp-space-md, 1rem);
+  padding: var(--kp-space-sm, 0.5rem) var(--nx-pad, 1rem);
+  border-block-start: 1px solid var(--border);
+}
+.con-pane {
+  min-block-size: 18rem;
+  min-inline-size: 0;
+}
+.con-chips {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: var(--kp-space-xs, 0.25rem);
+}
+.con-tools .kp-formgrid__row--buttons .kp-formgrid__actions {
+  justify-self: start;
+}
+.con-read {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm, 0.8125rem);
+}
+.con-pane .kp-console__output {
+  white-space: pre-wrap;
+}

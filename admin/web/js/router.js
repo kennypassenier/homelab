@@ -110,7 +110,7 @@ const REDIRECTS = {
   jobs: (s) => `/activity${setParams(s, { view: "running" })}`,
   log: (s) => `/activity${setParams(s, { view: "host-log" })}`,
   schedules: (s) => `/activity${setParams(s, { view: "planned" })}`,
-  backupcalendar: (s) => `/backups${setParams(s, { section: "coverage" })}`,
+  backupcalendar: (s) => `/backups${setParams(s, { view: "month" })}`,
   retired: (s) => `/backups${setParams(s, { section: "removed" })}`,
   fleetview: (s) => `/map${s}`,
   notifications: (s) => `/inbox${s}`,
@@ -221,7 +221,6 @@ export const VIEWS = {
   // view click on an activity-* control there keeps the filters.
   log: { at: "activity", param: "view", value: "host-log" },
   schedules: { at: "activity", param: "view", value: "planned" },
-  backupcalendar: { at: "backups", param: "section", value: "coverage" },
   retired: { at: "backups", param: "section", value: "removed" },
   passkeys: { at: "settings", param: "section", value: "sign-in" },
   doctor: { at: "host", param: "section", value: "doctor" },

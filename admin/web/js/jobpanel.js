@@ -307,8 +307,9 @@ export function mountLogTools(jobId, opts) {
  * left; a failed job says what happened, why and what to do, with the error
  * as a code block; the host's lines follow in the log.
  * @param {number} jobId
- * @param {{compact?: boolean}} [opts] compact: no heading (inside a dialog
- *   that has its own)
+ * @param {{compact?: boolean, steps?: boolean}} [opts] compact: no heading
+ *   (inside a dialog that has its own); steps: false leaves the step list
+ *   out (the Restore wizard draws its own)
  * @returns {{element: HTMLElement, stop: () => void}}
  */
 export function mountJobPanel(jobId, opts = {}) {
@@ -356,7 +357,10 @@ export function mountJobPanel(jobId, opts = {}) {
     ),
   );
   const bar = h("figure", { class: "kp-stackbar job-bar" });
-  const stepsHost = h("div", { class: "job-steps" });
+  const stepsHost = h("div", {
+    class: "job-steps",
+    hidden: opts.steps === false ? "" : null,
+  });
   const discEl = h("div", {
     class: "kp-timer-disc job-disc",
     "data-kp-timer-disc": "1m",
@@ -440,6 +444,7 @@ export function mountJobPanel(jobId, opts = {}) {
   let stepsShape = "";
   /** @param {import("./ui.js").CheckRow[]} rows @param {Map<string, number>} times */
   const paintSteps = (rows, times) => {
+    if (opts.steps === false) return;
     const stateOf =
       /** @type {Record<string, import("/static/kp/js/steplist.js").StepState>} */ ({
         ok: "done",

@@ -1,13 +1,23 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/calendar.js (kp-themes 10.1.1),
-// copied from kp-themes js/calendar.d.ts: chassis serves the module, not its types.
 /** A month heatmap: `section.kp-calendar[data-kp-calendar]`. */
 export declare const CALENDAR = "[data-kp-calendar]";
 /** Fired on the calendar, bubbling, when a day is picked: `detail` `{ date: 'YYYY-MM-DD', source: 'pointer' | 'keyboard' }`. */
 export declare const CALENDAR_PICK_EVENT = "kp-calendar-pick";
 /** Fired on the calendar, bubbling, when a person moves it to another month: `detail` `{ year, month }` (month 1-12). */
 export declare const CALENDAR_MONTH_EVENT = "kp-calendar-month";
+/** Fired on a calm calendar, bubbling, when Retry is pressed on its failed plate. */
+export declare const CALENDAR_RETRY_EVENT = "kp-calendar-retry";
 export type CalendarTone =
-  "ok" | "warn" | "bad" | "muted" | "future" | "before" | "loading" | "none";
+  | "ok"
+  | "warn"
+  | "bad"
+  | "muted"
+  | "future"
+  | "before"
+  | "loading"
+  | "none"
+  | "logged"
+  | "quiet"
+  | "paused";
 export type CalendarDay = {
   tone: CalendarTone;
   count?: string;
@@ -195,3 +205,10 @@ export declare function setCalendarLegend(
     label: string;
   }[],
 ): void;
+/**
+ * A sentence under the grid, for the page's own words (a calm calendar's "trends count the days that were logged"); an empty
+ * text hides it.
+ * @param {Element} el
+ * @param {string} text
+ */
+export declare function setCalendarCaption(el: Element, text: string): void;

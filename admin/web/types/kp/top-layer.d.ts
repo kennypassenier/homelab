@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/top-layer.js (kp-themes 10.1.1),
-// copied from kp-themes js/top-layer.d.ts: chassis serves the module, not its types.
 /**
  * Where an element's box lies in window coordinates with its own `translate`
  * (and a `transform` that only translates) set aside: where the layout put

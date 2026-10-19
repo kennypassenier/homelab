@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/remember.js (kp-themes 10.1.1),
-// copied from kp-themes js/remember.d.ts: chassis serves the module, not its types.
 /** The attribute an author writes to ask for a memory. A contract value [TH26]. */
 export declare const REMEMBER_ATTRIBUTE = "data-kp-remember";
 /** Fired on the element that was refused a memory because its name was taken: `{ name, component, other }`. */
@@ -7,7 +5,20 @@ export declare const REMEMBER_CLASH_EVENT = "kp-remember-clash";
 /** The first segment of every key this package writes. */
 export declare const REMEMBER_PREFIX = "kp-remember";
 export type Remembered =
-  "sidenav" | "disclosure" | "tree" | "split" | "datatable" | "tour";
+  | "sidenav"
+  | "disclosure"
+  | "tree"
+  | "split"
+  | "datatable"
+  | "tour"
+  | "refresh"
+  | "notices"
+  | "claim"
+  | "availability"
+  | "time"
+  | "console"
+  | "focus-steps"
+  | "picker";
 export type Memory = {
   /**
    * the name the element gave itself

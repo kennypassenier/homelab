@@ -5,6 +5,8 @@
 // one flat grid of nine cards. Pure, so `node --test` holds the groups and
 // the live line; system.js draws them.
 
+import { cellState, nightsNow } from "./backupsview.js";
+
 /**
  * @typedef {{id: string, label: string, what: string, href?: string,
  *   download?: string}} SystemCard
@@ -115,4 +117,33 @@ export function hostLine(fleet, versions, failed) {
   if (failed) return { tone: "bad", word: "host not answering", line: "" };
   if (!fleet) return { tone: "", word: "reading the host…", line: "" };
   return { tone: "ok", word: "host healthy", line: parts.join(" · ") };
+}
+
+/**
+ * feat-kpadopt-2: how many stacks that keep data were backed up last night,
+ * from the one `/data/backup-calendar` answer (every stack's snapshot
+ * times). A stack that keeps no data is not counted.
+ * @param {{stacks?: Record<string, number[]>, no_backup?: string[]} | null | undefined} cal
+ * @param {string[]} names
+ * @param {number} now unix seconds
+ */
+export function backupsLastNight(cal, names, now) {
+  const at = nightsNow(now);
+  /** @type {string[]} */
+  const missed = [];
+  let covered = 0;
+  for (const n of names) {
+    if (cal?.no_backup?.includes(n)) continue;
+    const read = /** @type {import("./backupsview.js").StackRead} */ ({
+      status: "ok",
+      noBackup: false,
+      native: false,
+      repos: [],
+      times: cal?.stacks?.[n] ?? [],
+    });
+    const st = cellState(read, at.last, at);
+    if (st === "ok") covered++;
+    else if (st === "miss") missed.push(n);
+  }
+  return { covered, expected: covered + missed.length, missed };
 }

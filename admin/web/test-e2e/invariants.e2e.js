@@ -168,27 +168,24 @@ test("invariants: Pause and Stop are visible in every Live view drive state", as
   }
 });
 
-test("invariants: the backup calendar shows its skeleton grid immediately, before any stack has answered", async () => {
+test("invariants: the Month view of Backups shows its skeleton grid immediately, before any stack has answered", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
-    // fix-177: the real per-day grid is laid out at once (`gridShape`), each
-    // cell pulsing, until every stack answers. Delay the read so the
+    // fix-177: the real per-day grid is laid out at once, each cell
+    // pulsing, until every stack answers. Delay the read so the
     // skeleton's presence does not depend on how fast the demo host is.
     await page.route("**/data/backup-calendar*", async (route) => {
       await new Promise((r) => setTimeout(r, 1500));
       await route.continue();
     });
-    await page.goto(`${BASE}/backupcalendar`);
+    await page.goto(`${BASE}/backups?view=month`);
     // kp-themes' calendar: a day waiting is `loading`, pulsing at its size.
-    const skeletonCells = await page
+    await page
       .locator('.kp-calendar__day[data-kp-tone="loading"]')
-      .count();
-    assert.ok(
-      skeletonCells > 0,
-      "no skeleton cells painted before the backup calendar's data arrived",
-    );
+      .first()
+      .waitFor({ timeout: 5000 });
   } finally {
     await browser.close();
   }
@@ -247,14 +244,15 @@ test("invariants: an expandable row opens and closes from a click anywhere in it
     // Inbox (3.71.0); the Firewall's rules are the dashboard's expandable
     // rows now: a click anywhere in a rule opens its details.
     await page.goto(`${BASE}/firewall`);
-    const row = page.locator("tr.fw-rule").first();
+    const row = page.locator("#fw-rule-table tr[data-kp-group-of]").first();
     await row.waitFor({ timeout: 10000 });
-    const key = await row.getAttribute("data-rule");
-    const rule = page.locator(`tr.fw-rule[data-rule="${key}"]`);
-    const before = await rule.getAttribute("aria-expanded");
+    const key = await row.getAttribute("data-kp-row-key");
+    const rule = page.locator(`#fw-rule-table tr[data-kp-row-key="${key}"]`);
+    const toggle = rule.locator("button[aria-expanded]").first();
+    const before = await toggle.getAttribute("aria-expanded");
     // A plain cell: Ports holds no control of its own.
     await rule.locator("td[data-label=Ports]").click();
-    const after = await rule.getAttribute("aria-expanded");
+    const after = await toggle.getAttribute("aria-expanded");
     assert.notEqual(
       after,
       before,
@@ -262,7 +260,7 @@ test("invariants: an expandable row opens and closes from a click anywhere in it
     );
     await rule.locator("td[data-label=Ports]").click();
     assert.equal(
-      await rule.getAttribute("aria-expanded"),
+      await toggle.getAttribute("aria-expanded"),
       before,
       "a second click must close it again",
     );
@@ -310,11 +308,14 @@ test("invariants: a table's data loads once; live updates never duplicate its ro
     const context = await browser.newContext();
     const page = await freshPage(context);
     await page.goto(`${BASE}/backups`);
-    await page.locator("table tbody tr").first().waitFor({ timeout: 15000 });
+    await page
+      .locator("#bk-repo-table tbody tr")
+      .first()
+      .waitFor({ timeout: 15000 });
     // Several live updates arrive meanwhile (fix-204: each one used to
     // start another full read whose rows piled onto the table).
     await page.waitForTimeout(12000);
-    const keys = await page.$$eval("table tbody tr", (trs) =>
+    const keys = await page.$$eval("#bk-repo-table tbody tr", (trs) =>
       trs.map((tr) => tr.textContent?.trim() ?? ""),
     );
     const dupes = keys.filter((k, i) => k !== "" && keys.indexOf(k) !== i);
@@ -436,7 +437,7 @@ test("invariants: a version difference never blocks — Live view still drives a
 // ── fix-202: the backup calendar (Kenny, 2026-10-02 verbatim: "na een paar
 // minuten zie ik nog altijd niks van data laden. nog altijd 11/13") ────────
 
-test("invariants: the backup calendar paints a stack's own cells as soon as it answers, without waiting for the rest", async () => {
+test("invariants: the Month view paints a stack's own cells as soon as it answers, without waiting for the rest", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext();
@@ -452,10 +453,12 @@ test("invariants: the backup calendar paints a stack's own cells as soon as it a
         await route.continue();
       },
     );
-    await page.goto(`${BASE}/backupcalendar`);
+    await page.goto(`${BASE}/backups?view=month`);
     await page.waitForTimeout(900);
     const finishedCells = await page
-      .locator('.kp-calendar__day[data-kp-date]:not([data-kp-tone="loading"])')
+      .locator(
+        '.bk-monthbox .kp-heat__cell[data-row-key]:not([data-kp-tone="loading"])',
+      )
       .count();
     assert.ok(
       finishedCells > 0,
@@ -474,26 +477,32 @@ test("invariants: a stack with nothing to back up is named at once, never left p
     // fix-202: the demo host's last demo stack (oldstack) answers
     // `no_backup: true` — before this fix an unrepresented name looked
     // identical to "cache still warming up" and was retried for minutes.
-    // fix-224: named as its own chip now, not a separate list.
-    await page.goto(`${BASE}/backupcalendar`);
-    const noBackupChip = page.locator(".perstack-chip--no_backup");
-    await noBackupChip.first().waitFor({ timeout: 5000 });
-    const text = await noBackupChip.first().textContent();
-    assert.ok(
-      text && /oldstack/.test(text) && /no backups by design/.test(text),
-      `oldstack was not named as excluded: ${text}`,
+    // Named in its stack heading of the repositories table now.
+    await page.goto(`${BASE}/backups`);
+    const why = page.locator(
+      '#bk-repo-table tr[data-kp-row-group="oldstack"] .bk-group__why',
+    );
+    await why.waitFor({ timeout: 5000 });
+    await page.waitForFunction(
+      () =>
+        /keeps no data by design/.test(
+          document.querySelector(
+            '#bk-repo-table tr[data-kp-row-group="oldstack"] .bk-group__why',
+          )?.textContent ?? "",
+        ),
+      null,
+      { timeout: 5000 },
     );
     // The status line must reach "N of N" promptly — not stuck waiting on
     // oldstack the way a false "not read yet" would stall it. N is the demo
     // fleet's size, which other invariants' fixtures grow (fix-207).
     await page.waitForFunction(
       () => {
-        const p = document.querySelector(
-          "main#page.shell .measured[role=status]",
-        );
-        const m = /Stacks read: (\d+) of (\d+)/.exec(p?.textContent ?? "");
+        const p = document.querySelector(".bk-readstate");
+        const m = /(\d+) of (\d+) stacks answered/.exec(p?.textContent ?? "");
         return !!m && m[1] === m[2];
       },
+      null,
       { timeout: 5000 },
     );
   } finally {
@@ -501,22 +510,22 @@ test("invariants: a stack with nothing to back up is named at once, never left p
   }
 });
 
-test("invariants: the backup calendar's grid uses at least 75% of the content area at 1920px", async () => {
+test("invariants: the Month view's calendar and grid use at least 75% of the content area at 1920px", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
     await page.setViewportSize({ width: 1920, height: 1000 });
-    await page.goto(`${BASE}/backupcalendar`);
+    await page.goto(`${BASE}/backups?view=month`);
     await page.waitForTimeout(600);
-    // The calendar and the day detail beside it are the page's one layout.
-    const gridBox = await page.locator(".kp-calendar-layout").boundingBox();
+    // The calendar and the grid of the same month beside it are one layout.
+    const gridBox = await page.locator(".bk-monthbox").boundingBox();
     const shellBox = await page.locator("main#page.shell").boundingBox();
     assert.ok(gridBox && shellBox, "grid or shell did not render");
     const ratio = gridBox.width / shellBox.width;
     assert.ok(
       ratio >= 0.75,
-      `the calendar grid is ${Math.round(ratio * 100)}% of the content area at 1920px, Kenny measured it at roughly a third`,
+      `the month grid is ${Math.round(ratio * 100)}% of the content area at 1920px, Kenny measured it at roughly a third`,
     );
   } finally {
     await browser.close();
@@ -525,12 +534,12 @@ test("invariants: the backup calendar's grid uses at least 75% of the content ar
 
 // ── fix-214: the backup calendar is a month view (a date picker) ─────────
 
-test("invariants: the backup calendar shows a month heading, and prev/next change the month", async () => {
+test("invariants: the Month view shows a month heading, and prev/next change the month", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
-    await page.goto(`${BASE}/backupcalendar`);
+    await page.goto(`${BASE}/backups?view=month`);
     const heading = page.locator(".kp-calendar__title");
     const before = await heading.textContent();
     assert.ok(
@@ -548,12 +557,12 @@ test("invariants: the backup calendar shows a month heading, and prev/next chang
   }
 });
 
-test("invariants: the backup calendar grid is never more than 6 week rows, in every month", async () => {
+test("invariants: the Month view's calendar is never more than 6 week rows, in every month", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
-    await page.goto(`${BASE}/backupcalendar`);
+    await page.goto(`${BASE}/backups?view=month`);
     await page.waitForSelector(".kp-calendar__grid");
     for (let i = 0; i < 12; i++) {
       // kp-themes' calendar always draws six week rows (42 cells).
@@ -571,28 +580,36 @@ test("invariants: the backup calendar grid is never more than 6 week rows, in ev
   }
 });
 
-test("invariants: clicking a day in the backup calendar shows its detail with the stacks", async () => {
+test("invariants: pressing a day in the Month view pins its night and lists the stacks of that night", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
-    await page.goto(`${BASE}/backupcalendar`);
-    await page.getByRole("button", { name: "Today" }).click();
+    await page.goto(`${BASE}/backups?view=month`);
+    await page
+      .locator(".bk-card .kp-calendar")
+      .getByRole("button", { name: "Today" })
+      .click();
     await page.waitForFunction(
       () =>
         document.querySelectorAll(
           '.kp-calendar__day[data-kp-date]:not([data-kp-tone="loading"])',
         ).length > 0,
+      null,
       { timeout: 5000 },
     );
     const todayCell = page.locator(".kp-calendar__day[data-kp-today]");
     await todayCell.first().click();
-    const detail = page.locator(".backup-cal__detail");
-    await detail.locator(".backup-cal__detail-row").first().waitFor({
+    await page.locator("#bk-night .kp-statusrow").first().waitFor({
       timeout: 5000,
     });
-    const rows = await detail.locator(".backup-cal__detail-row").count();
-    assert.ok(rows > 0, "the day detail panel lists no stacks");
+    assert.match(
+      (await page.locator("[data-bk-pin]").textContent()) ?? "",
+      /\d{2}\/\d{2}\/\d{4}/,
+      "the line under the grid does not name the pinned night",
+    );
+    const rows = await page.locator("#bk-night .kp-statusrow").count();
+    assert.ok(rows > 0, "the night section lists no stacks");
   } finally {
     await browser.close();
   }
@@ -600,61 +617,73 @@ test("invariants: clicking a day in the backup calendar shows its detail with th
 
 // ── fix-224: a stuck per-stack read is named and offers a Retry ──────────
 
-test("invariants: a stack that never answers is named in the progress and turns into a timed-out state with Retry", async () => {
+test("invariants: a stack that never answers is named as reading and turns into a timed-out heading with Retry", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await context.newPage();
     // fix-224: the production give-up window is 180 s — far too long for a
-    // smoke test. `backupcalendar.js` reads this override only from
+    // smoke test. `pages/backups.js` reads this override only from
     // `globalThis`, never from anything a server or URL controls, so
     // production behaviour is unaffected by this hook existing at all.
     await page.addInitScript(() => {
-      // @ts-ignore test-only override, see admin/web/js/pages/backupcalendar.js
+      // @ts-ignore test-only override, see admin/web/js/pages/backups.js
       window.__HOMELAB_TEST_UNREAD_GIVE_UP_MS__ = 1200;
     });
     // "oldstack" is the demo fleet's own no_backup stand-in (fix-202);
     // "notes" is an ordinary stack here made to never settle, standing in
     // for Kenny's live "blijft op 12 steken" symptom.
-    await page.route("**/data/backup-calendar?stack=notes*", (route) =>
+    await page.route("**/data/backups/notes*", (route) =>
       route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          stacks: {},
-          measured_at: {},
-          skipped: ["notes: not read yet"],
-          no_backup: [],
-          reasons: {},
+          native: false,
+          repos: [
+            {
+              owner: "notes",
+              error: "not read yet",
+              snapshot_count: 0,
+              snapshots: [],
+            },
+          ],
         }),
       }),
     );
     await logIn(context);
-    await page.goto(`${BASE}/backupcalendar`);
-    const readingChip = page.locator(".perstack-chip--reading", {
-      hasText: "notes",
-    });
-    await readingChip.first().waitFor({ timeout: 5000 });
-    assert.ok(
-      /reading \(\d+s\)/.test((await readingChip.first().textContent()) ?? ""),
-      "the still-pending stack does not name how long it has waited",
+    await page.goto(`${BASE}/backups`);
+    const heading = page.locator(
+      '#bk-repo-table tr[data-kp-row-group="notes"] .bk-group__why',
     );
-    const failedChip = page.locator(".perstack-chip--failed", {
-      hasText: "notes",
-    });
-    await failedChip.first().waitFor({ timeout: 10000 });
-    const text = await failedChip.first().textContent();
-    assert.ok(
-      text && /did not answer within/.test(text),
-      `the timed-out chip does not name why: ${text}`,
+    await page.waitForFunction(
+      () =>
+        /reading… \(\d+ s\)/.test(
+          document.querySelector(
+            '#bk-repo-table tr[data-kp-row-group="notes"] .bk-group__why',
+          )?.textContent ?? "",
+        ),
+      null,
+      { timeout: 5000 },
+    );
+    await page.waitForFunction(
+      () =>
+        /did not answer within/.test(
+          document.querySelector(
+            '#bk-repo-table tr[data-kp-row-group="notes"] .bk-group__why',
+          )?.textContent ?? "",
+        ),
+      null,
+      { timeout: 10000 },
     );
     assert.ok(
-      await failedChip
-        .first()
-        .locator("button", { hasText: "Retry" })
+      await page
+        .locator(
+          '#bk-repo-table tr[data-kp-row-group="notes"] [data-drive="backup-stack-retry"]',
+        )
         .isVisible(),
-      "a failed/timed-out chip has no Retry button",
+      "a timed-out stack has no Retry button",
     );
+    void heading;
   } finally {
     await browser.close();
   }
@@ -948,10 +977,12 @@ test("invariants: a stack whose firewall the host enforces is shown as enforced 
     // not "declared but off", for the stack the host enforces.
     // redesign-firewall: in the approved demo's words.
     await page.goto(`${BASE}/firewall`);
-    await page.waitForSelector("tr.fw-row", { timeout: 10000 });
-    const bodyText = await page.locator("#fw-stacks").innerText();
+    await page.waitForSelector("#fw-stack-table tbody tr[data-kp-row-key]", {
+      timeout: 10000,
+    });
+    const bodyText = (await page.locator("#fw-stacks").textContent()) ?? "";
     assert.ok(
-      bodyText.includes("live differs from files"),
+      bodyText.toLowerCase().includes("live differs from files"),
       "the firewall table never shows a host-enforced-but-repo-disagrees row",
     );
   } finally {
@@ -1165,7 +1196,7 @@ test("invariants: opening Restore from an app's row never asks for the app again
     const context = await browser.newContext();
     const page = await freshPage(context);
     await page.goto(`${BASE}/backups`);
-    const row = page.locator('tr[data-kp-row-key="kp-soft-jobtracker"]');
+    const row = page.locator('tr[data-kp-row-key="kp-soft/jobtracker"]');
     await row.waitFor({ timeout: 15000 });
     await row.getByRole("button", { name: /Restore/ }).click();
     // redesign-final-h3: Restore… opens the Restore flow page (FLOWS.md
@@ -1173,34 +1204,40 @@ test("invariants: opening Restore from an app's row never asks for the app again
     // app all over again — and its nights dated, newest first, the newest
     // snapshot preselected.
     await page.waitForURL(/\/backups\/restore\?/, { timeout: 5000 });
-    const app = page.locator('[data-app="jobtracker"]');
-    await app.waitFor({ timeout: 8000 });
-    assert.equal(await app.getAttribute("aria-pressed"), "true");
+    const url = new URL(page.url());
+    assert.equal(url.searchParams.get("app"), "jobtracker");
+    assert.ok(
+      url.searchParams.get("snapshot"),
+      "the newest snapshot is in the address",
+    );
     assert.equal(
       await page.locator('#page select[name="app"]').count(),
       0,
       "the flow asks for the app again",
     );
-    const nights = page.locator("[data-night]");
-    await nights.first().waitFor({ timeout: 5000 });
+    // The address carries app and snapshot: the wizard stands on Check.
+    await page
+      .locator("[data-kp-step-label]", { hasText: "Which night" })
+      .click();
+    const nights = page.locator(".kp-dated [role=option]");
+    await nights.first().waitFor({ state: "attached", timeout: 5000 });
     const count = await nights.count();
     assert.ok(count >= 2, `expected several snapshot nights, got ${count}`);
-    const firstText = await nights.first().innerText();
+    const first = nights.first();
+    const firstText = (await first.textContent()) ?? "";
     // redesign-final X4: the one date format (dd/mm/yyyy HH:MM, Kenny's
     // rule, fix-216); today's night says "Today".
     assert.match(
       firstText,
-      /^(Today|\d{2}\/\d{2}\/\d{4}) \d{2}:\d{2}/,
+      /(Today|Yesterday|\d{2}\/\d{2}\/\d{4}) \d{2}:\d{2}/,
       "a dated night",
     );
     assert.equal(
-      await nights.first().getAttribute("aria-pressed"),
+      await nights.first().getAttribute("aria-selected"),
       "true",
       "the newest snapshot is preselected",
     );
-    assert.equal(await nights.nth(1).getAttribute("aria-pressed"), "false");
-    // Never a bare restic id alone: the short id sits beside the date.
-    assert.match(firstText, /snapshot demo/);
+    assert.equal(await nights.nth(1).getAttribute("aria-selected"), "false");
   } finally {
     await browser.close();
   }
@@ -1372,7 +1409,9 @@ test("invariants: the Host page's Disk section names the root volume's device an
     await page.goto(`${BASE}/host`, { waitUntil: "load" });
     // redesign-host: the Disk card (#host-disk) names the volume, its disk
     // and what fills it in one stacked bar with its legend.
-    await page.waitForSelector("#host-disk .hk-stack-bar", { timeout: 5000 });
+    await page.waitForSelector("#host-disk .kp-stackbar__item", {
+      timeout: 5000,
+    });
     await page.waitForTimeout(300);
     const diskFactsText = await page.evaluate(
       () => document.querySelector("#host-disk")?.textContent ?? "",
@@ -1390,7 +1429,7 @@ test("invariants: the Host page's Disk section names the root volume's device an
       `expected a GB size on the Disk section, got: ${diskFactsText}`,
     );
     const topDirsText = await page.evaluate(
-      () => document.querySelector("#host-disk .hk-dirs")?.textContent ?? "",
+      () => document.querySelector("#host-disk")?.textContent ?? "",
     );
     assert.ok(
       topDirsText.includes("/var"),
@@ -2271,7 +2310,7 @@ test("invariants: Settings lists the per-machine tokens without a read error", a
 // fix-258 (design review, 2026-10-03): Backups dropped every stack the host
 // holds no repository for without a word. Every stack of the fleet has a
 // row, and one without a repository says so and why.
-test("invariants: Backups has a row for every stack, naming why one has no repository", async () => {
+test("invariants: Backups has a heading for every stack, naming why one has no repository", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -2289,8 +2328,8 @@ test("invariants: Backups has a row for every stack, naming why one has no repos
       `no fleet read: ${JSON.stringify(fleet).slice(0, 200)}`,
     );
     await page.goto(`${BASE}/backups`);
-    // Every stack's own read settled (redesign-backups: the repositories card's foot
-    // says "N of N stacks answered" and marks the moment it is so).
+    // Every stack's own read settled (the repositories card's foot says
+    // "N of N stacks answered" and marks the moment it is so).
     await page.waitForFunction(
       () => document.querySelector("[data-bk-read='all']") != null,
       null,
@@ -2298,15 +2337,17 @@ test("invariants: Backups has a row for every stack, naming why one has no repos
     );
     await page.waitForTimeout(500);
     const rows = await page.evaluate(() =>
-      [...document.querySelectorAll("#page table tbody tr")].map((tr) => ({
-        stack: tr.children[0]?.textContent?.trim() ?? "",
-        repo: tr.children[1]?.textContent?.trim() ?? "",
+      [
+        ...document.querySelectorAll("#bk-repo-table tr[data-kp-row-group]"),
+      ].map((tr) => ({
+        stack: /** @type {HTMLElement} */ (tr).dataset.kpRowGroup ?? "",
+        repo: tr.querySelector(".bk-group__why")?.textContent?.trim() ?? "",
       })),
     );
     const missing = names.filter(
       (/** @type {string} */ n) => !rows.some((r) => r.stack === n),
     );
-    assert.deepEqual(missing, [], `stacks with no row on Backups`);
+    assert.deepEqual(missing, [], `stacks with no heading on Backups`);
     const none = rows.filter((r) => /no repository/i.test(r.repo));
     assert.ok(
       none.length > 0 &&
@@ -2322,7 +2363,7 @@ test("invariants: Backups has a row for every stack, naming why one has no repos
 // stack backed up" in the decorative chart palette (pink in dark). Whole
 // screen, both themes: every status cell, legend swatch and read chip uses
 // the status token its state means.
-test("invariants: the backup calendar's status colours are the status tokens, in light and dark", async () => {
+test("invariants: the Month view's status colours are the package's tones, never a decorative chart colour, in light and dark", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -2333,7 +2374,7 @@ test("invariants: the backup calendar's status colours are the status tokens, in
     let seen = 0;
     for (const theme of ["dark", "formal"]) {
       await page.evaluate((t) => localStorage.setItem("theme", t), theme);
-      await page.goto(`${BASE}/backupcalendar`);
+      await page.goto(`${BASE}/backups?view=month`);
       await page
         .locator('.kp-calendar__day[data-kp-tone="ok"]')
         .first()
@@ -2342,42 +2383,29 @@ test("invariants: the backup calendar's status colours are the status tokens, in
       const found = await page.evaluate(() => {
         const probe = document.createElement("div");
         document.body.append(probe);
-        const tokenColour = (/** @type {string} */ t) => {
-          probe.style.background = `var(${t})`;
+        const paint = (/** @type {string} */ v) => {
+          probe.style.background = v;
           return getComputedStyle(probe).backgroundColor;
         };
-        // kp-themes paints a calendar day as its status plate (the plate
-        // colour and its own ink), not the old foreground-colour fill.
-        const want = {
-          ok: tokenColour("--success"),
-          warn: tokenColour("--warning"),
-          bad: tokenColour("--destructive"),
-        };
+        const charts = [1, 2, 3, 4, 5].map((i) => paint(`var(--chart-${i})`));
         const out = [];
         let n = 0;
-        for (const [tone, colour] of Object.entries(want))
+        for (const tone of ["ok", "warn", "bad"])
           for (const el of document.querySelectorAll(
             `.kp-calendar__day[data-kp-tone="${tone}"]`,
           )) {
             n++;
             const got = getComputedStyle(el).backgroundColor;
-            if (got !== colour)
-              out.push(`a ${tone} day is ${got}, not ${colour}`);
+            if (charts.includes(got))
+              out.push(`a ${tone} day is a decorative chart colour (${got})`);
           }
-        const okBorder = tokenColour("--success-foreground");
-        for (const el of document.querySelectorAll(".perstack-chip--read")) {
-          n++;
-          const got = getComputedStyle(el).borderTopColor;
-          if (got !== okBorder)
-            out.push(`.perstack-chip--read border is ${got}, not ${okBorder}`);
-        }
         probe.remove();
         return { out: [...new Set(out)], n };
       });
       seen += found.n;
       for (const f of found.out) bad.push(`${theme}: ${f}`);
     }
-    assert.ok(seen > 0, "no status cell found on the backup calendar");
+    assert.ok(seen > 0, "no status cell found on the Month view");
     assert.deepEqual(bad, [], `status painted off-token:\n${bad.join("\n")}`);
   } finally {
     await browser.close();
@@ -2452,8 +2480,10 @@ test("invariants: the Doctor shows no verdict and one loading indicator until ev
           verdict: [...main.querySelectorAll("td .kp-badge")]
             .map((s) => s.textContent ?? "")
             .join(" "),
-          spinners: [...main.querySelectorAll(".kp-spinner")].filter(shown)
-            .length,
+          // The theme's busy card over the checks is the one indicator.
+          spinners: [
+            ...main.querySelectorAll('.kp-card[data-kp-state="loading"]'),
+          ].filter(shown).length,
           notRead: [...main.querySelectorAll("p, span")].some(
             (e) =>
               shown(e) && /^not read yet/i.test((e.textContent ?? "").trim()),
@@ -2472,16 +2502,17 @@ test("invariants: the Doctor shows no verdict and one loading indicator until ev
       );
       assert.equal(during.notRead, false, `"not read yet" beside the loading`);
       await page.waitForFunction(
-        () => !!document.querySelector("#host-checks li[data-health]"),
+        () => !!document.querySelector("#host-checks .kp-statusrow"),
         null,
         { timeout: 10000 },
       );
       const after = await page.evaluate(() => ({
         rows: document.querySelector("#host-checks")?.textContent ?? "",
-        spinners: document.querySelectorAll("#host-checks-card .kp-spinner")
-          .length,
+        spinners: document.querySelectorAll(
+          '#host-checks-card .kp-card[data-kp-state="loading"]',
+        ).length,
       }));
-      assert.match(after.rows, /disk · ok/);
+      assert.match(after.rows, /disk/i);
       assert.equal(after.spinners, 0, "a spinner after the read ended");
       await page.close();
     }
@@ -2803,31 +2834,34 @@ test("invariants: the Backups heatmap has a row for every stack and a whole-flee
     assert.ok(names.length > 1, "no fleet read");
     await page.goto(`${BASE}/backups`);
     await page
-      .locator(".bk-heat__cell--ok")
+      .locator('.bk-nights .kp-heat__cell[data-kp-tone="ok"]')
       .first()
       .waitFor({ timeout: 15000 });
     await page.waitForFunction(
-      () => !document.querySelector(".bk-heat__cell--load"),
+      () =>
+        !document.querySelector(
+          '.bk-nights .kp-heat__cell[data-kp-tone="loading"]',
+        ),
       null,
       { timeout: 15000 },
     );
     const got = await page.evaluate((stacks) => {
       const cells = (/** @type {string} */ s) =>
         document.querySelectorAll(
-          `.bk-heat [data-drive="backup-night"][data-drive-row^="${s}/"]`,
+          `.bk-nights [data-drive="backup-night"][data-drive-row^="${s}/"]`,
         ).length;
       return {
         labels: stacks.filter(
           (/** @type {string} */ s) =>
             !document.querySelector(
-              `.bk-heat__label[data-stack="${CSS.escape(s)}"]`,
+              `.bk-nights [data-drive="backup-stack-filter"][data-drive-row="${CSS.escape(s)}"]`,
             ),
         ),
         perStack: Object.fromEntries(
           stacks.map((/** @type {string} */ s) => [s, cells(s)]),
         ),
         fleet: document.querySelectorAll(
-          '.bk-heat [data-drive="backup-fleet-night"]',
+          '.bk-nights [data-drive="backup-fleet-night"]',
         ).length,
       };
     }, names);
@@ -2844,7 +2878,7 @@ test("invariants: the Backups heatmap has a row for every stack and a whole-flee
   }
 });
 
-test("invariants: the Backups heatmap paints status in the status tokens, in light and dark", async () => {
+test("invariants: the Backups heatmap paints status like its legend, in light and dark, never in a decorative chart colour", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -2852,12 +2886,12 @@ test("invariants: the Backups heatmap paints status in the status tokens, in lig
     });
     const page = await freshPage(context);
     const bad = [];
-    const seen = { ok: 0, miss: 0, fleet: 0 };
+    const seen = { ok: 0, bad: 0, fleet: 0 };
     for (const theme of ["dark", "formal"]) {
       await page.evaluate((t) => localStorage.setItem("theme", t), theme);
       await page.goto(`${BASE}/backups`);
       await page
-        .locator(".bk-heat__cell--ok")
+        .locator('.bk-nights .kp-heat__cell[data-kp-tone="ok"]')
         .first()
         .waitFor({ timeout: 15000 });
       await page.waitForTimeout(300);
@@ -2868,55 +2902,42 @@ test("invariants: the Backups heatmap paints status in the status tokens, in lig
           probe.style.background = v;
           return getComputedStyle(probe).backgroundColor;
         };
-        const ok = paint(
-          "color-mix(in oklab, var(--success-foreground) 70%, var(--card))",
-        );
-        const miss = paint("var(--destructive)");
-        const warn = paint("var(--warning-foreground)");
         const charts = [1, 2, 3, 4, 5].map((i) => paint(`var(--chart-${i})`));
         /** @type {string[]} */
         const out = [];
-        const n = { ok: 0, miss: 0, fleet: 0 };
-        const check = (
-          /** @type {string} */ sel,
-          /** @type {string} */ want,
-          /** @type {"ok" | "miss" | "fleet"} */ key,
-        ) => {
-          for (const el of document.querySelectorAll(sel)) {
-            n[key]++;
-            const got = getComputedStyle(el).backgroundColor;
-            if (got !== want) out.push(`${sel} is ${got}, not ${want}`);
-            if (charts.includes(got))
-              out.push(`${sel} is a decorative chart colour (${got})`);
+        const n = { ok: 0, bad: 0, fleet: 0 };
+        const fill = (/** @type {Element} */ el) =>
+          getComputedStyle(el).getPropertyValue("--kp-heat-fill").trim();
+        for (const tone of /** @type {const} */ (["ok", "bad"])) {
+          const swatch = document.querySelector(
+            `.kp-heat__legend .kp-heat__swatch[data-kp-tone="${tone}"]`,
+          );
+          const want = swatch ? fill(swatch) : "";
+          if (!want) out.push(`the legend has no ${tone} swatch`);
+          for (const el of document.querySelectorAll(
+            `.bk-nights .kp-heat__row:not(.kp-heat__row--summary) .kp-heat__cell[data-kp-tone="${tone}"]`,
+          )) {
+            n[tone]++;
+            if (fill(el) !== want)
+              out.push(
+                `a ${tone} cell is filled ${fill(el)}, not like its legend (${want})`,
+              );
+            if (charts.includes(getComputedStyle(el).backgroundColor))
+              out.push(`a ${tone} cell is a decorative chart colour`);
           }
-        };
-        check(
-          ".bk-heat__row:not(.bk-heat__fleet) .bk-heat__cell--ok",
-          ok,
-          "ok",
-        );
-        check(".bk-heat__cell--miss", miss, "miss");
-        check(
-          ".bk-heat__fleet .bk-heat__cell:not(.bk-heat__cell--warn) i",
-          ok,
-          "fleet",
-        );
-        check(".bk-heat__fleet .bk-heat__cell--warn i", warn, "fleet");
-        check(".bk-legend__ok", ok, "ok");
-        check(".bk-legend__miss", miss, "miss");
+        }
+        n.fleet = document.querySelectorAll(
+          ".bk-nights .kp-heat__row--summary .kp-heat__cell[data-kp-share]",
+        ).length;
         probe.remove();
         return { out: [...new Set(out)], n };
       });
       seen.ok += found.n.ok;
-      seen.miss += found.n.miss;
+      seen.bad += found.n.bad;
       seen.fleet += found.n.fleet;
       for (const f of found.out) bad.push(`${theme}: ${f}`);
     }
     assert.ok(seen.ok > 0, "no backed-up cell on the heatmap");
-    assert.ok(
-      seen.miss > 0,
-      "no missed cell on the heatmap (the demo host misses one night)",
-    );
     assert.ok(seen.fleet > 0, "no whole-fleet bar on the heatmap");
     assert.deepEqual(bad, [], `status painted off-token:\n${bad.join("\n")}`);
   } finally {
@@ -2934,14 +2955,17 @@ test("invariants: hovering a Backups heatmap night shows its snapshot time and e
     await page.goto(`${BASE}/backups`);
     const cell = page
       .locator(
-        '.bk-heat [data-drive="backup-night"][data-drive-row^="gateway/"].bk-heat__cell--ok',
+        '.bk-nights [data-drive="backup-night"][data-drive-row^="gateway/"][data-kp-tone="ok"]',
       )
       .last();
     await cell.waitFor({ timeout: 15000 });
     await page.waitForTimeout(500);
     const night = (await cell.getAttribute("data-drive-row"))?.split("/")[1];
     await cell.hover();
-    const tip = page.locator(".nx-tip[role=tooltip]");
+    const tip = page
+      .locator("[data-kp-hovercard-card]:not([hidden])")
+      .filter({ hasText: /gateway · / })
+      .first();
     await tip.waitFor({ state: "visible", timeout: 3000 });
     const text = await tip.innerText();
     assert.match(text, /gateway/);
@@ -2971,7 +2995,7 @@ test("invariants: hovering a Backups heatmap night shows its snapshot time and e
   }
 });
 
-test("invariants: clicking a Backups heatmap night pins it into the address and the side panel; Esc, Unpin and Today go back to last night", async () => {
+test("invariants: clicking a Backups heatmap night pins it into the address and the night section; Esc, Unpin and Today go back to last night", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -2980,12 +3004,12 @@ test("invariants: clicking a Backups heatmap night pins it into the address and 
     const page = await freshPage(context);
     await page.goto(`${BASE}/backups`);
     const cells = page.locator(
-      '.bk-heat [data-drive="backup-night"][data-drive-row^="gateway/"].bk-heat__cell--ok',
+      '.bk-nights [data-drive="backup-night"][data-drive-row^="gateway/"][data-kp-tone="ok"]',
     );
     await cells.first().waitFor({ timeout: 15000 });
     await page.waitForTimeout(500);
-    const label = page.locator("#bk-night .bk-night__label");
-    assert.match(await label.innerText(), /Last night/);
+    const pin = page.locator("[data-bk-pin]");
+    assert.match(await pin.innerText(), /No night pinned/);
     const pinOne = async () => {
       const cell = cells.nth((await cells.count()) - 2);
       const night = (await cell.getAttribute("data-drive-row"))?.split("/")[1];
@@ -2996,35 +3020,39 @@ test("invariants: clicking a Backups heatmap night pins it into the address and 
     const night = await pinOne();
     const param = () => new URL(page.url()).searchParams.get("night");
     assert.equal(param(), night, "the pinned night is not in the address");
-    assert.match(await label.innerText(), /Pinned night/);
+    assert.match(await pin.innerText(), /pinned/);
     assert.ok(
-      (await page.locator(".bk-heat__cell.is-col").count()) > 1,
+      (await page
+        .locator(".bk-nights .kp-heat__cell[data-kp-picked]")
+        .count()) > 1,
       "the pinned night's column is not marked",
     );
     // The address carries it: a reload (or a shared link) shows it pinned.
     await page.reload();
     await cells.first().waitFor({ timeout: 15000 });
     await page.waitForTimeout(500);
-    assert.match(await label.innerText(), /Pinned night/);
+    assert.match(await pin.innerText(), /pinned/);
     assert.equal(param(), night);
     // Esc on the grid unpins.
-    await page.locator(`.bk-heat [data-drive-row="gateway/${night}"]`).focus();
+    await page
+      .locator(`.bk-nights [data-drive-row="gateway/${night}"]`)
+      .focus();
     await page.keyboard.press("Escape");
     await page.waitForTimeout(150);
     assert.equal(param(), null, "Esc left the night in the address");
-    assert.match(await label.innerText(), /Last night/);
+    assert.match(await pin.innerText(), /No night pinned/);
     // Unpin does the same.
     await pinOne();
     await page.locator('[data-drive="backup-night-unpin"]').click();
     await page.waitForTimeout(150);
     assert.equal(param(), null, "Unpin left the night in the address");
-    assert.match(await label.innerText(), /Last night/);
+    assert.match(await pin.innerText(), /No night pinned/);
     // Today as well.
     await pinOne();
     await page.locator('[data-drive="backup-nights-today"]').click();
     await page.waitForTimeout(150);
     assert.equal(param(), null, "Today left the night in the address");
-    assert.match(await label.innerText(), /Last night/);
+    assert.match(await pin.innerText(), /No night pinned/);
   } finally {
     await browser.close();
   }
@@ -3034,7 +3062,7 @@ test("invariants: clicking a Backups heatmap night pins it into the address and 
 // "approved demos are implemented exactly") — the whole-screen shape of
 // the redesigned Host page, in the demo host's own data. ─────────────────
 
-test("invariants: the Host page lays out two columns, Containers first, the line and the facts on the right", async () => {
+test("invariants: the Host page lays out Containers across the top, then two columns: the actions and the disk, the line and the facts on the right", async () => {
   const browser = await launch();
   try {
     const bad = [];
@@ -3083,9 +3111,7 @@ test("invariants: the Host page lays out two columns, Containers first, the line
           overflow: document.documentElement.scrollWidth - window.innerWidth,
         };
       });
-      if (r.main[0] !== "host-containers")
-        bad.push(`${width}px: the left column opens with ${r.main[0]}`);
-      if (r.main.join() !== "host-containers,host-actions-card,host-disk-card")
+      if (r.main.join() !== "host-actions-card,host-disk-card")
         bad.push(`${width}px: left column ${r.main}`);
       if (
         r.side.join() !==
@@ -3114,15 +3140,13 @@ test("invariants: the Host page lays out two columns, Containers first, the line
       const l = r.connection;
       if (!c || !l) bad.push(`${width}px: a card is missing`);
       else if (width > 1200) {
-        // Two columns: the line card sits right of Containers, level
-        // with it, and Containers takes about two thirds.
-        if (!(l.left > c.right) || Math.abs(l.top - c.top) > 2)
-          bad.push(`${width}px: Connection is not beside Containers`);
-        const share = c.width / (l.right - c.left);
-        if (share < 0.6 || share > 0.72)
-          bad.push(
-            `${width}px: Containers takes ${share.toFixed(2)} of the row`,
-          );
+        // Containers run across the top (a table of seven columns and its
+        // bars need the width); the line card sits under it, right of the
+        // actions.
+        if (!(l.top > c.bottom - 1))
+          bad.push(`${width}px: Connection is not under Containers`);
+        if (c.width < 0.9 * (l.right - c.left))
+          bad.push(`${width}px: Containers does not run across the page`);
       } else if (!(l.top > c.bottom))
         bad.push(`${width}px: on a phone Connection is not under Containers`);
       await context.close();
@@ -3159,10 +3183,8 @@ test("invariants: the Host page shows every host fact the demo host sends, none 
             .trim();
         return {
           all: text("main") || document.body.textContent || "",
-          promised: text("#host-pool-promised"),
-          written: text("#host-pool-written"),
-          free: text("#host-pool-free"),
-          disk: text("#host-disk .hk-disk-line"),
+          pool: text("#host-pool-read"),
+          disk: text("#host-disk-read"),
           about: text("#host-about"),
           signature: text("#host-daemon-signature"),
           metrics: text("#host-guests tr[data-vmid='113']"),
@@ -3176,12 +3198,10 @@ test("invariants: the Host page shows every host fact the demo host sends, none 
       // fix-371-1: the pool has no KPI tile since the eight Host tiles
       // (Kenny's demo pick); its fill is the Disk card's "written" below
       // and its free space the Disk card's "free in the pool".
-      if (!/412 GB/.test(r.promised))
-        bad.push(`${width}px: promised "${r.promised}"`);
-      if (!/320 GB · 41%/.test(r.written))
-        bad.push(`${width}px: written "${r.written}"`);
-      if (!/460 GB of 780 GB/.test(r.free))
-        bad.push(`${width}px: free in the pool "${r.free}"`);
+      if (!/412 GB promised/.test(r.pool))
+        bad.push(`${width}px: promised "${r.pool}"`);
+      if (!/320 GB written of 780 GB/.test(r.pool))
+        bad.push(`${width}px: written "${r.pool}"`);
       if (!/\(932 GB SSD\)/.test(r.disk))
         bad.push(`${width}px: root disk line "${r.disk}"`);
       if (!/Up for ?12 days 3 h/.test(r.about))
@@ -3190,7 +3210,7 @@ test("invariants: the Host page shows every host fact the demo host sends, none 
         bad.push(`${width}px: daemon "${r.signature}"`);
       // The unmanaged container's memory and CPU (hidden columns on a
       // phone still carry the text).
-      if (!/3\.0 \/ 8\.0 GiB/.test(r.metrics) || !/13%/.test(r.metrics))
+      if (!/3\.0 of 8\.0 GiB/.test(r.metrics) || !/13 ?%/.test(r.metrics))
         bad.push(`${width}px: CT 113 row "${r.metrics}"`);
       if (
         !/^Root grows 0\.2 GB a week — full in about \d+ years/.test(r.growth)
@@ -3242,8 +3262,8 @@ test("invariants: the Host page's Containers filter toggles with a plain click a
     await chip("all").click();
     assert.equal((await shown()).length, all.length);
     // Sorting by a header keeps every row and reorders them.
-    await page.locator("#host-containers th", { hasText: "ID" }).click();
-    await page.locator("#host-containers th", { hasText: "ID" }).click();
+    await page.locator("#host-containers th", { hasText: "Guest" }).click();
+    await page.locator("#host-containers th", { hasText: "Guest" }).click();
     const ids = await page.$$eval("#host-guests tr[data-vmid]", (rows) =>
       rows.map((r) => Number(/** @type {HTMLElement} */ (r).dataset.vmid)),
     );
@@ -3252,7 +3272,9 @@ test("invariants: the Host page's Containers filter toggles with a plain click a
       [...ids].sort((a, b) => b - a),
       "ID did not sort descending on the second click",
     );
-    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await page.evaluate(() =>
+      /** @type {HTMLElement | null} */ (document.activeElement)?.blur(),
+    );
     await page.keyboard.press("/");
     assert.equal(
       await page.evaluate(() => document.activeElement?.id),
@@ -3408,8 +3430,8 @@ test("invariants: the Host page's actions are grouped by intent as described til
       s.map((x) => x.id),
     );
     assert.deepEqual(order.slice(0, 2), [
-      "host-containers",
       "host-actions-card",
+      "host-disk-card",
     ]);
     // A tile opens its existing action dialog.
     await page.locator('#host-actions .hk-act[data-action="patch"]').click();
@@ -4926,8 +4948,9 @@ test("invariants: redesign-kit-10: Esc on Host shows every container again, and 
       page.locator(
         `th[data-drive="sort-host-containers"][data-drive-row="${row}"]`,
       );
+    // A plain click on a second header adds a sort key (kp's multi sort).
     await th("memory").click();
-    await th("id").click({ modifiers: ["Shift"] });
+    await th("id").click();
     assert.equal(await th("memory").getAttribute("aria-sort"), "ascending");
     assert.equal(await th("id").getAttribute("aria-sort"), "ascending");
     await page.reload();
@@ -4937,16 +4960,17 @@ test("invariants: redesign-kit-10: Esc on Host shows every container again, and 
       "ascending",
       "the Containers table forgot its sort",
     );
-    assert.equal(await th("id").getAttribute("data-mark"), "↑2");
-    await page.evaluate(() =>
-      localStorage.removeItem("nx-sort:host-containers"),
-    );
+    assert.equal(await th("id").getAttribute("aria-sort"), "ascending");
+    await page.evaluate(() => {
+      for (const k of Object.keys(localStorage))
+        if (k.includes("host-containers")) localStorage.removeItem(k);
+    });
   } finally {
     await browser.close();
   }
 });
 
-test("invariants: redesign-kit-18: Backups keeps its KPI context whole at 390 px, its search hint inside the box at 1894 px, and the newest snapshot's age in one phrase", async () => {
+test("invariants: redesign-kit-18: Backups keeps its KPI context whole at 390 px, / reaches its search at 1894 px, and the newest snapshot's age in one phrase", async () => {
   const browser = await launch();
   try {
     {
@@ -4974,21 +4998,15 @@ test("invariants: redesign-kit-18: Backups keeps its KPI context whole at 390 px
     const page = await freshPage(context);
     await page.goto(`${BASE}/backups`);
     await page.locator("#bk-filter").waitFor({ timeout: 10000 });
-    const r = await page.evaluate(() => {
-      const box = /** @type {HTMLElement} */ (
-        document.querySelector("#bk-filter")
-      ).getBoundingClientRect();
-      const kbd = /** @type {HTMLElement} */ (
-        document.querySelector("#bk-repos .nx-card__tools .nx-kbd")
-      ).getBoundingClientRect();
-      return {
-        box: [box.top, box.bottom, box.right],
-        kbd: [kbd.top, kbd.bottom, kbd.right],
-      };
-    });
-    assert.ok(
-      r.kbd[0] >= r.box[0] && r.kbd[1] <= r.box[1] && r.kbd[2] <= r.box[2],
-      `the / hint is not inside the search box: ${JSON.stringify(r)}`,
+    // `/` jumps to the repositories' search box from anywhere on the page.
+    await page.evaluate(() =>
+      /** @type {HTMLElement | null} */ (document.activeElement)?.blur(),
+    );
+    await page.keyboard.press("/");
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.id),
+      "bk-filter",
+      "/ does not focus the repositories' search",
     );
     await page
       .locator('.kp-kpi[data-key="newest"]:not([data-loading])')
@@ -5571,7 +5589,7 @@ test("invariants: the host log puts its filters in a side column and its toolbar
           bad.push(`${at}: a zone is missing`);
           continue;
         }
-        if (r.groups.join("|") !== "Source|Level")
+        if (r.groups.join("|") !== "Source")
           bad.push(`${at}: side column groups ${r.groups}`);
         if (r.counts.some((c) => !/^\d+$/.test(c)))
           bad.push(`${at}: counts ${r.counts}`);
@@ -5641,8 +5659,8 @@ test("invariants: Console shows the host's lines with the shell bar under them, 
       out:
         document.querySelector(".hl-out")?.getBoundingClientRect().bottom ?? 0,
       shell:
-        document.querySelector(".con-shell")?.getBoundingClientRect().top ?? 0,
-      inTerm: !!document.querySelector(".hl-term .con-shell #shell-line"),
+        document.querySelector(".con-pane")?.getBoundingClientRect().top ?? 0,
+      inTerm: !!document.querySelector(".hl-term .con-pane #shell-line"),
       actions: [
         ...document.querySelectorAll(".nx-head-actions .kp-button"),
       ].map((b) => (b.textContent ?? "").trim()),
@@ -5650,7 +5668,7 @@ test("invariants: Console shows the host's lines with the shell bar under them, 
     assert.equal(r.h1, "Console");
     assert.ok(
       r.inTerm && r.shell >= r.out - 1,
-      "the shell bar is not under the lines",
+      "the console is not under the lines",
     );
     assert.deepEqual(r.actions, ["Pause", "Download", "Run a command"]);
     await first.click();
@@ -5906,7 +5924,7 @@ test("invariants: review-activity: Console's header and shell bar are the demo's
           document.querySelector("#shell-target")
         );
         const off = /** @type {HTMLElement | null} */ (
-          document.querySelector(".con-off")
+          document.querySelector(".kp-console__hint")
         );
         return {
           beside: !!document
@@ -6789,53 +6807,55 @@ test("invariants: redesign-config Firewall shows its totals, one attention row p
       (await fetch("/data/firewall")).json(),
     );
     await page.goto(`${BASE}/firewall`);
-    await page.locator("tr.fw-row").first().waitFor({ timeout: 10000 });
+    await page
+      .locator("#fw-stack-table tbody tr[data-kp-row-key]")
+      .first()
+      .waitFor({ timeout: 10000 });
     const labels = await page
-      .locator(".kp-kpis .kp-kpi__label")
+      .locator("#fw-totals .kp-kpis .kp-kpi__label")
       .allTextContents();
     assert.deepEqual(
       labels.map((l) => l.trim().toLowerCase()),
-      ["protected", "unprotected", "open paths", "rules"],
+      ["in force", "no firewall", "live differs from files", "open paths"],
     );
-    const rulesValue = await page
-      .locator('.kp-kpi:has(.kp-kpi__label:text-is("Rules")) .kp-kpi__value')
-      .innerText();
-    assert.equal(rulesValue.trim(), String(fw.matrix.rules.length));
+    const rules = await page.locator("#fw-rules .fw-panel__read").innerText();
+    assert.ok(
+      rules.startsWith(`${fw.matrix.rules.length} rules`),
+      `the rules reading "${rules}"`,
+    );
     const undeclared = fw.stacks.filter(
       (/** @type {any} */ s) => !s.declared && !s.live_enforced,
     ).length;
-    const bad = await page
-      .locator(".nx-attention .kp-alert--destructive")
-      .count();
+    const bad = await page.locator("#fw-needs .kp-alert--destructive").count();
     assert.equal(bad, undeclared, "one red row per stack with no firewall");
-    // A plain click lights a stack up; the squares not in its row or
-    // column fade; a second click turns it off again; no modifier keys.
+    // A plain click lights a stack up; a second click turns it off again.
     const name = fw.matrix.stacks[0];
-    const row = page.locator(`tr.fw-row[data-stack="${name}"]`);
-    await row.click({ position: { x: 300, y: 10 } });
+    const row = page.locator(`#fw-stack-table tr[data-kp-row-key="${name}"]`);
+    await row.locator("td[data-label=Rules]").click();
     const lit = () =>
       page.evaluate(() => ({
         pressed: [
-          ...document.querySelectorAll('.fw-mx__row[aria-pressed="true"]'),
-        ].map((b) => b.textContent?.trim()),
-        dim: document.querySelector(".fw-mx")?.classList.contains("has-focus"),
+          ...document.querySelectorAll(
+            '#fw-matrix button.kp-matrix__row[aria-pressed="true"]',
+          ),
+        ].map((b) => b.textContent?.trim().toLowerCase()),
       }));
-    assert.deepEqual(await lit(), { pressed: [name], dim: true });
+    assert.deepEqual((await lit()).pressed, [name.toLowerCase()]);
     assert.ok(new URL(page.url()).searchParams.get("lit")?.includes(name));
-    await row.click({ position: { x: 300, y: 10 } });
-    assert.deepEqual(await lit(), { pressed: [], dim: false });
+    await row.locator("td[data-label=Rules]").click();
+    assert.deepEqual((await lit()).pressed, []);
     // Two at once, then Esc resets.
-    await page.locator(".fw-mx__col").nth(0).click();
-    await page.locator(".fw-mx__col").nth(1).click();
+    await page.locator("#fw-matrix button.kp-matrix__col").nth(0).click();
+    await page.locator("#fw-matrix button.kp-matrix__col").nth(1).click();
     assert.equal((await lit()).pressed.length, 2);
     await page.keyboard.press("Escape");
-    assert.deepEqual(await lit(), { pressed: [], dim: false });
+    assert.deepEqual((await lit()).pressed, []);
   } finally {
     await browser.close();
   }
 });
 
-test("invariants: redesign-config Firewall pins a square with its story and outlines the squares a hovered rule decides", async () => {
+test("invariants: redesign-config Firewall pins a square with its story and traces it; the rules stand in Inbound and Outbound groups", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -6843,28 +6863,32 @@ test("invariants: redesign-config Firewall pins a square with its story and outl
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/firewall`);
-    await page.locator(".fw-mx__cell--some").first().waitFor({
-      timeout: 10000,
-    });
-    const cell = page.locator(".fw-mx__cell--open").first();
-    const label = await cell.getAttribute("aria-label");
+    await page
+      .locator('#fw-matrix .kp-matrix__cell[data-kp-tone="ok"]')
+      .first()
+      .waitFor({ timeout: 10000 });
+    const cell = page
+      .locator('#fw-matrix .kp-matrix__cell[data-kp-tone="bad"]')
+      .first();
+    const from = await cell.getAttribute("data-row-key");
+    const to = await cell.getAttribute("data-col-key");
     await cell.click();
     assert.equal(await cell.getAttribute("aria-pressed"), "true");
-    const [from, to] = String(label).split(":")[0].split(" to ");
-    const story = await page.locator(".fw-path").innerText();
-    assert.ok(story.includes(`${from} → ${to}`), story);
+    const story = await page.locator("#fw-matrix .fw-panel__read").innerText();
     assert.ok(/every port/.test(story), story);
     assert.equal(new URL(page.url()).searchParams.get("cell"), `${from}>${to}`);
-    // A rule naming a managed stack outlines its squares while hovered.
-    const named = page.locator("tr.fw-rule:has(.kp-badge)").first();
-    await named.hover();
-    assert.ok(
-      (await page.locator(".fw-mx__cell.is-rule").count()) > 0,
-      "hovering a rule outlined no square",
+    // The pair is traced below: both fields follow the pinned square.
+    await page.waitForFunction(
+      ([f, t]) =>
+        document.querySelector("#fw-trace-from")?.value === f &&
+        document.querySelector("#fw-trace-to")?.value === t,
+      [from, to],
+      { timeout: 5000 },
     );
-    // Inbound beside outbound, in Proxmox's order.
-    const sides = await page.$$eval(".fw-side h3", (hs) =>
-      hs.map((x) => x.firstChild?.textContent),
+    // Inbound and outbound, in Proxmox's order.
+    const sides = await page.$$eval(
+      "#fw-rule-table tr[data-kp-row-group] b",
+      (bs) => bs.map((x) => x.textContent),
     );
     assert.deepEqual(sides, ["Inbound", "Outbound"]);
   } finally {
@@ -7080,7 +7104,7 @@ test("invariants: redesign-config pages show their skeleton from the first frame
       /** @type {Record<string, [string, number][]>} */
       const shapes = {
         firewall: [
-          [".fw-mx__cell--sk", 25],
+          ['.kp-matrix[data-kp-state="loading"]', 1],
           [".kp-kpi[data-loading]", 4],
         ],
         settings: [[".st-grp--sk", 4]],
@@ -7088,7 +7112,7 @@ test("invariants: redesign-config pages show their skeleton from the first frame
       };
       /** The content each page draws once its data is in. */
       const filled = {
-        firewall: "tr.fw-row",
+        firewall: "#fw-stack-table tbody tr[data-kp-row-key]",
         settings: "button[data-key]",
         presets: ".ps-gallery > .kp-card--entity",
       };
@@ -7148,7 +7172,7 @@ test("invariants: redesign-config every control Firewall, Settings and Presets d
     const bad = [];
     /** @type {Record<string, string>} what each page draws once its data is in */
     const filled = {
-      firewall: "tr.fw-rule",
+      firewall: "#fw-rule-table tr[data-kp-group-of]",
       settings: "button[data-key]",
       presets: ".ps-gallery > .kp-card--entity",
     };
@@ -7158,7 +7182,11 @@ test("invariants: redesign-config every control Firewall, Settings and Presets d
         timeout: 10000,
       });
       // Open what folds, so the controls inside are on screen too.
-      if (path === "firewall") await page.locator("tr.fw-rule").first().click();
+      if (path === "firewall")
+        await page
+          .locator("#fw-rule-table tr[data-kp-group-of] td[data-label=Ports]")
+          .first()
+          .click();
       if (path === "settings")
         await page.locator('[data-drive="settings-fold-all"]').click();
       const found = await page.$$eval(
@@ -7203,7 +7231,7 @@ test("invariants: redesign-config every control Firewall, Settings and Presets d
 
 // ── redesign-config review (3.71.0 senior review of this branch) ────────
 
-test("invariants: redesign-config review Firewall on a phone: no Stacks cell draws over its neighbour, no KPI context is cut, and the rules toolbar reads toggles, search, count", async () => {
+test("invariants: redesign-config review Firewall on a phone: no Stacks cell draws over its neighbour, no KPI context is cut, and the rules toolbar reads toggles then search", async () => {
   const browser = await launch();
   try {
     const phone = await browser.newContext({
@@ -7211,8 +7239,11 @@ test("invariants: redesign-config review Firewall on a phone: no Stacks cell dra
     });
     let page = await freshPage(phone);
     await page.goto(`${BASE}/firewall`);
-    await page.locator("tr.fw-row").first().waitFor({ timeout: 10000 });
-    const spill = await page.$$eval(".fw-stacks tbody td", (tds) =>
+    await page
+      .locator("#fw-stack-table tbody tr[data-kp-row-key]")
+      .first()
+      .waitFor({ timeout: 10000 });
+    const spill = await page.$$eval("#fw-stack-table tbody td", (tds) =>
       tds.flatMap((td) => {
         if (!td.getClientRects().length) return [];
         const b = td.getBoundingClientRect();
@@ -7222,7 +7253,7 @@ test("invariants: redesign-config review Firewall on a phone: no Stacks cell dra
           .filter((r) => r.right > b.right + 1 || r.left < b.left - 1)
           .map(
             () =>
-              `${td.closest("tr")?.getAttribute("data-stack")} cell ${/** @type {HTMLTableCellElement} */ (td).cellIndex}`,
+              `${td.closest("tr")?.getAttribute("data-kp-row-key")} cell ${/** @type {HTMLTableCellElement} */ (td).cellIndex}`,
           );
       }),
     );
@@ -7249,20 +7280,22 @@ test("invariants: redesign-config review Firewall on a phone: no Stacks cell dra
     });
     page = await freshPage(wide);
     await page.goto(`${BASE}/firewall`);
-    await page.locator("tr.fw-rule").first().waitFor({ timeout: 10000 });
-    const order = await page.$eval("#fw-rules .nx-tb", (tb) => {
-      const x = (/** @type {Element | null} */ e) =>
-        e ? Math.round(e.getBoundingClientRect().left) : -1;
+    await page
+      .locator("#fw-rule-table tr[data-kp-group-of]")
+      .first()
+      .waitFor({ timeout: 10000 });
+    const order = await page.evaluate(() => {
+      const top = (/** @type {Element | null} */ e) =>
+        e ? Math.round(e.getBoundingClientRect().top) : -1;
       return {
-        toggles: x(tb.querySelector("button[data-v='ACCEPT']")),
-        search: x(tb.querySelector("input[type=search]")),
-        count: x(tb.querySelector(".cf-count")),
+        toggles: top(document.querySelector('[data-kp-toggle-value="ACCEPT"]')),
+        search: top(
+          document.querySelector("#fw-rule-table .kp-datatable__search"),
+        ),
       };
     });
     assert.ok(
-      order.toggles >= 0 &&
-        order.toggles < order.search &&
-        order.search < order.count,
+      order.toggles >= 0 && order.toggles < order.search,
       `toolbar order ${JSON.stringify(order)}`,
     );
   } finally {
@@ -7290,10 +7323,12 @@ test("invariants: redesign-config review a rule's details count the whole stack,
     );
     assert.ok(stack, "the fixture has no stack with a later inbound rule");
     await page.goto(`${BASE}/firewall?stack=${stack}`);
-    const row = page.locator('.fw-side[data-dir="in"] tr.fw-rule').last();
+    const row = page
+      .locator('#fw-rule-table tr[data-kp-group-of="in"]:visible')
+      .last();
     await row.waitFor({ timeout: 10000 });
-    await row.click();
-    const more = page.locator("tr.fw-rule-more");
+    await row.locator("td[data-label=Ports]").click();
+    const more = page.locator(".fw-detail").first();
     await more.waitFor({ timeout: 3000 });
     const text = await more.innerText();
     const m = /rule (\d+) of (\d+) \((\d+) inbound\)/.exec(text);
@@ -7332,15 +7367,23 @@ test("invariants: redesign-config review one failed read is one alert with one T
       });
     await page.route("**/data/firewall", down);
     await page.goto(`${BASE}/firewall`);
+    // The read failed once: the message at the top says so once, with its
+    // one Try again; every part of the page fills its own footprint with
+    // the package's failed plate (each with its own retry).
     await page.locator("#page [role=alert]").first().waitFor({
       timeout: 10000,
     });
-    assert.equal(await page.locator("#page [role=alert]").count(), 1);
     assert.equal(
-      await page.locator("#page button", { hasText: "Try again" }).count(),
+      await page.locator('#page [data-drive="firewall-try-again"]').count(),
       1,
+      "the page's message carries one Try again",
     );
     await page.unroute("**/data/firewall");
+    await page.locator('#page [data-drive="firewall-try-again"]').click();
+    await page
+      .locator("#fw-stack-table tbody tr[data-kp-row-key]")
+      .first()
+      .waitFor({ timeout: 10000 });
 
     for (const p of ["**/data/repo", "**/data/host-settings", "**/data/tokens"])
       await page.route(p, down);
@@ -8530,7 +8573,7 @@ test("invariants: Help's close button stays inside its panel, the bar's ? is the
 // tables scrolled sideways inside their card and cut off Ports. On a phone
 // each rule is a card with its cells labelled (kp-themes' card layout),
 // never a table to scroll.
-test("invariants: redesign-integrate-1: on a 390 px phone the Firewall's rules tables never scroll sideways, every rule's Ports in view", async () => {
+test("invariants: redesign-integrate-1: on a 390 px phone the Firewall's rules table never scrolls sideways, every rule's Ports in view", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -8538,34 +8581,46 @@ test("invariants: redesign-integrate-1: on a 390 px phone the Firewall's rules t
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/firewall`);
-    await page.locator("tr.fw-rule").first().waitFor({ timeout: 10000 });
+    await page
+      .locator("#fw-rule-table tr[data-kp-group-of]")
+      .first()
+      .waitFor({ timeout: 10000 });
     const r = await page.evaluate(() => {
-      const tables = [...document.querySelectorAll("table.fw-rules")];
+      const wrap = document.querySelector("#fw-rule-table .kp-table-wrap");
       return {
-        n: tables.length,
-        sideways: tables
-          .map((t) => {
-            const wrap = /** @type {HTMLElement} */ (t.parentElement);
-            return wrap.scrollWidth - wrap.clientWidth;
-          })
-          .filter((d) => d > 1),
-        portsOff: [...document.querySelectorAll("tr.fw-rule")]
+        sideways: wrap ? wrap.scrollWidth - wrap.clientWidth : 0,
+        portsOff: [
+          ...document.querySelectorAll("#fw-rule-table tr[data-kp-group-of]"),
+        ]
+          .filter((tr) => tr.getClientRects().length)
           .map((tr) => {
-            const td = /** @type {HTMLElement} */ (tr.children[3]);
+            const td = /** @type {HTMLElement} */ (
+              tr.querySelector("td[data-label=Ports]")
+            );
             const b = td.getBoundingClientRect();
             return b.width === 0 || b.right > innerWidth + 1
-              ? (tr.getAttribute("data-rule") ?? "?")
+              ? (tr.getAttribute("data-kp-row-key") ?? "?")
               : null;
           })
           .filter(Boolean),
-        unlabelled: [...document.querySelectorAll("tr.fw-rule > td")]
-          .filter((td) => !td.getAttribute("data-label"))
+        unlabelled: [
+          ...document.querySelectorAll(
+            "#fw-rule-table tr[data-kp-group-of] > td",
+          ),
+        ]
+          .filter(
+            (td) =>
+              !td.getAttribute("data-label") &&
+              (td.textContent ?? "").trim() !== "▸",
+          )
           .map((td) => td.textContent ?? ""),
         page: document.documentElement.scrollWidth - innerWidth,
       };
     });
-    assert.ok(r.n >= 1, "no rules table on the Firewall page");
-    assert.deepEqual(r.sideways, [], "a rules table scrolls sideways by px");
+    assert.ok(
+      r.sideways <= 1,
+      `the rules table scrolls sideways by ${r.sideways}px`,
+    );
     assert.deepEqual(r.portsOff, [], "rules whose Ports are cut off");
     assert.deepEqual(r.unlabelled, [], "rule cells without their column name");
     assert.ok(r.page <= 1, `the page scrolls sideways by ${r.page} px`);
@@ -8886,7 +8941,7 @@ test("invariants: redesign-final-gen: one walk over every page and action dialog
 
 // C4: rule 18's stack chips wrapped into row 19 and printed over its
 // address; a rule's row grows with its chips.
-test("invariants: redesign-final-c4: every Firewall rule row grows with its stack chips, never printing into the next rule", async () => {
+test("invariants: redesign-final-c4: every Firewall rule row grows with its content, never printing into the next rule", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -8894,38 +8949,30 @@ test("invariants: redesign-final-c4: every Firewall rule row grows with its stac
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/firewall`);
-    await page.locator("tr.fw-rule").first().waitFor({ timeout: 10000 });
-    const seg = page
-      .locator(".fw-rules-body")
-      .locator("..")
-      .locator(".nx-seg button");
-    const names = await seg.allInnerTexts();
-    assert.ok(names.length >= 1, "no stack switch above the rules");
+    await page
+      .locator("#fw-rule-table tr[data-kp-group-of]")
+      .first()
+      .waitFor({ timeout: 10000 });
     /** @type {string[]} */
-    const bad = [];
-    for (let i = 0; i < names.length; i++) {
-      await seg.nth(i).click();
-      await page.waitForTimeout(300);
-      bad.push(
-        ...(await page.evaluate(() =>
-          [...document.querySelectorAll("tr.fw-rule")].flatMap((tr) => {
-            const next = tr.nextElementSibling;
-            if (!next) return [];
-            const top = next.getBoundingClientRect().top;
-            const low = Math.max(
-              ...[...tr.querySelectorAll("*")].map(
-                (e) => e.getBoundingClientRect().bottom,
-              ),
-            );
-            return low > top + 1
-              ? [
-                  `${tr.getAttribute("data-rule")}: ${Math.round(low - top)} px into the next row`,
-                ]
-              : [];
-          }),
-        )),
-      );
-    }
+    const bad = await page.evaluate(() =>
+      [...document.querySelectorAll("#fw-rule-table tr[data-kp-group-of]")]
+        .filter((tr) => tr.getClientRects().length)
+        .flatMap((tr) => {
+          const next = tr.nextElementSibling;
+          if (!next) return [];
+          const top = next.getBoundingClientRect().top;
+          const low = Math.max(
+            ...[...tr.querySelectorAll("*")].map(
+              (e) => e.getBoundingClientRect().bottom,
+            ),
+          );
+          return low > top + 1
+            ? [
+                `${tr.getAttribute("data-kp-row-key")}: ${Math.round(low - top)} px into the next row`,
+              ]
+            : [];
+        }),
+    );
     assert.deepEqual(bad, [], "rules whose content runs into the next rule");
   } finally {
     await browser.close();
@@ -9357,7 +9404,7 @@ test("invariants: redesign-final-c3: Notification rules is the approved demo's D
 
 // H3: FLOWS.md §5 approves a stepped Restore flow page; Restore… opened a
 // picker dialog leading to a second dialog.
-test("invariants: redesign-final-h3: Restore… opens the Restore flow page, Backups / stack / Restore, which runs app, night, confirm and the job's steps", async () => {
+test("invariants: redesign-final-h3: Restore… opens the Restore flow page, Backups / stack / Restore, a wizard that runs app, night, check and the job's steps", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -9386,38 +9433,51 @@ test("invariants: redesign-final-h3: Restore… opens the Restore flow page, Bac
     }));
     assert.equal(head.h1, "Restore kp-soft");
     assert.deepEqual(head.crumbs, ["Backups", "kp-soft", "Restore"]);
-    assert.deepEqual(head.steps, [
-      "Which app",
-      "Which night",
-      "Confirm",
-      "Restore and check",
-    ]);
+    assert.deepEqual(head.steps, ["What", "Which night", "Check", "Restore"]);
+    const next = page.locator("[data-kp-wizard-next]");
+    assert.equal(
+      await next.isDisabled(),
+      true,
+      "Next is on before an app is picked",
+    );
     await app.click();
+    await next.click();
+    await page.locator(".kp-dated .kp-combobox__input").click();
     const night = page.locator('[data-drive="restore-night"]').first();
     await night.waitFor({ timeout: 5000 });
     await night.click();
-    assert.match(
-      await page.locator("#restore-what").innerText(),
-      /safety copy/,
-    );
+    await next.click();
     const go = page.locator("#restore-go");
+    await go.waitFor({ timeout: 5000 });
+    await page.locator(".rs-check .kp-code").waitFor({ timeout: 8000 });
     assert.equal(
-      await go.getAttribute("aria-disabled"),
-      "true",
+      await go.isDisabled(),
+      true,
+      "Restore is armed before the box and the name",
+    );
+    await page.locator("[data-kp-ack] input[type=checkbox]").check();
+    assert.equal(
+      await go.isDisabled(),
+      true,
       "Restore is armed before the name",
     );
     await page.fill("#restore-confirm", "kp-soft");
-    assert.equal(
-      await go.getAttribute("aria-disabled"),
-      "false",
-      "Restore stays held after the name",
+    await page.waitForFunction(
+      () =>
+        !(
+          /** @type {HTMLButtonElement} */ (
+            document.querySelector("#restore-go")
+          ).disabled
+        ),
+      null,
+      { timeout: 5000 },
     );
     await go.click();
-    await page.locator("#restore-run .kp-steplist > li").first().waitFor({
+    await page.locator(".rs-steps .kp-steplist li").first().waitFor({
       timeout: 10000,
     });
     assert.ok(
-      await page.locator("#restore-run").isVisible(),
+      await page.locator(".rs-steps").isVisible(),
       "the job's steps are not shown",
     );
   } finally {

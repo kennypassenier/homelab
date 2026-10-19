@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/effects.js (kp-themes 10.1.1),
-// copied from kp-themes js/effects.d.ts: chassis serves the module, not its types.
 export declare const HOOKS: Readonly<{
   surface: "data-kp-surface";
   reveal: "data-kp-reveal";

@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/palette.js (kp-themes 10.1.1),
-// copied from kp-themes js/palette.d.ts: chassis serves the module, not its types.
 /** The attribute that opens a palette or a sheet on a press [gap-12]. */
 export declare const OPENER = "[data-kp-palette-open]";
 /**
@@ -39,6 +37,15 @@ export type PaletteHandle = {
    * re-filter after the consumer changed the commands
    */
   refresh: () => void;
+  /**
+   * the commands are still arriving (the busy card over the list) or could not be read (the failed plate with Retry, `kp-palette-retry`; commands marked `data-kp-static` stay)
+   */
+  setState: (
+    state: "ready" | "loading" | "error",
+    options?: {
+      message?: string;
+    },
+  ) => void;
 };
 /** The handle for an attached palette or sheet. @param {Element} element */
 export declare function palette(element: Element): PaletteHandle | null;
@@ -47,7 +54,7 @@ export declare function palette(element: Element): PaletteHandle | null;
  *
  * @param {ParentNode} root
  * @param {{ hotkey?: string | null, sheetKey?: string | null, match?: keyof typeof MATCHERS | Matcher, clearOnClose?: boolean, closeOnRun?: boolean, typingSelector?: string }} [options]
- *   Defaults; per element: `data-kp-hotkey` (a letter, or "none"), `data-kp-primary` (this one answers the key when there are several), `data-kp-match` (`substring` by default, or `subsequence`, `prefix`), `data-kp-clear-on-close="false"`, `data-kp-close-on-run="false"`.
+ *   Defaults; per element: `data-kp-hotkey` (a letter, or "none"), `data-kp-primary` (this one answers the key when there are several), `data-kp-match` (`intent` by default: words in any order, js/intent.js; or `substring`, `subsequence`, `prefix`), `data-kp-clear-on-close="false"`, `data-kp-close-on-run="false"`.
  * @returns {(() => void) & { handles: PaletteHandle[] }} detach
  */
 export declare function attachPalettes(

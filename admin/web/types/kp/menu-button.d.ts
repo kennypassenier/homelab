@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/menu-button.js (kp-themes 10.1.1),
-// copied from kp-themes js/menu-button.d.ts: chassis serves the module, not its types.
 /** A menu button's wrapper: a button, then its `[role=menu]`. */
 export declare const MENU_BUTTON = "[data-kp-menu-button]";
 /** Fired on the wrapper, bubbling, when the menu opened. */

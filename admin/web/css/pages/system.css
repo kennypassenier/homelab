@@ -23,3 +23,51 @@
   font-size: var(--kp-text-sm);
   color: var(--muted-foreground);
 }
+
+/* feat-kpadopt-2 (kp-themes 11.0.0, app-homelab-backups demo): the tiles of
+   the landing, each with a live line, in a grid of one height. */
+.sy-areascard {
+  min-block-size: 14rem;
+}
+.sy-tiles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--kp-space-md, 1rem);
+}
+.sy-tile {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: var(--kp-space-sm, 0.5rem);
+  min-inline-size: 0;
+}
+.sy-tile .kp-card__title {
+  margin: 0;
+}
+.sy-tile .kp-lede {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+.sy-tile__foot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--kp-space-sm, 0.5rem);
+}
+.sy-vlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.sy-vnote {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm, 0.8125rem);
+}
+.sy-card {
+  min-block-size: 6rem;
+}
+.sy-diag {
+  min-block-size: 10rem;
+}

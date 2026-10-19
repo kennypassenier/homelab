@@ -84,6 +84,8 @@ export function nightRange(end, n, offset) {
  * @returns {Map<string, number[]>}
  */
 export function nightsOf(times) {
+  const cached = NIGHTS.get(times);
+  if (cached) return cached;
   /** @type {Map<string, number[]>} */
   const out = new Map();
   for (const t of [...times].sort((a, b) => a - b)) {
@@ -92,8 +94,12 @@ export function nightsOf(times) {
     list.push(t);
     out.set(k, list);
   }
+  NIGHTS.set(times, out);
   return out;
 }
+
+/** A read's nights, kept per times array: a month of days asks 13 stacks 400 times. @type {WeakMap<number[], Map<string, number[]>>} */
+const NIGHTS = new WeakMap();
 
 /**
  * One heatmap cell: `ok` a snapshot that night; `miss` none although the

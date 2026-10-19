@@ -3426,15 +3426,17 @@ decisions behind each one.
     code) reads "updated with a homelab release, not from here".
 - Every Fleet view block opens with a heading and one sentence saying what
   it shows (fix-230).
-- **Backup calendar** (`/backupcalendar`, feat-overview-10): the last
-  35 nights, one cell per day, green when every stack that keeps data has
-  at least one restic snapshot that night, amber for some, red for none.
-  Its own host command (`Command::BackupCalendar`, read-only, asks restic
-  directly through `homelab_core::ops::backup::snapshot_nights_unix`) and
-  its own `SlowRead` (`backup-calendar`, ~1–3 s per repository, so a large
-  fleet takes a while over the network) — kept apart from the Backups page
-  on purpose, so the two can be built in parallel without touching each
-  other's files.
+- **Backup calendar** (feat-overview-10; since kp-themes 11 the **Month**
+  option of Backups, `/backups?view=month`, and `/backupcalendar` lands
+  there): one month as a calendar, one cell per day, green when every stack
+  that keeps data has at least one restic snapshot that night, amber for
+  some, red for none, with the grid of every stack against that month's
+  nights beside it. Its own host command (`Command::BackupCalendar`,
+  read-only, asks restic directly through
+  `homelab_core::ops::backup::snapshot_nights_unix`) and its own `SlowRead`
+  (`backup-calendar`, ~1–3 s per repository, so a large fleet takes a while
+  over the network); the answer holds each stack's whole history, so the
+  7, 30 and 90 night ranges and any month need no further read.
 - **Measured traffic on the topology** (feat-firewall-3): the Firewall
   page draws the same topology as Fleet view, with a ring around each
   container sized by its own measured network throughput

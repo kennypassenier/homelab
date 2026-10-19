@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/update.js (kp-themes 10.1.1),
-// copied from kp-themes js/update.d.ts: chassis serves the module, not its types.
 /** The attribute written on an element while its update plays. */
 export declare const UPDATING_ATTRIBUTE = "data-kp-updating";
 /** The custom property a register names its update idea in. */

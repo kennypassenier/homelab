@@ -1,0 +1,212 @@
+/* feat-kpadopt-2 (kp-themes 11.0.0, the approved app-homelab-backups demo):
+   the Backups page's frame. Everything with a kp- class is the package's;
+   these bk- rules only lay the page out on shared grid tracks (Kenny,
+   2026-10-19: labels, fields, values and buttons align to column tracks,
+   never left/right flex rows) and keep each area one height in every state. */
+
+.bk-page .nx-card__body {
+  display: grid;
+  gap: var(--kp-space-md, 1rem);
+  align-content: start;
+  min-inline-size: 0;
+}
+
+/* The toolbar, the readings and the pickers are form grids: one set of
+   tracks per section, so the segmented switch, the range, the buttons and
+   the readings share their left edges. */
+.bk-toolbar,
+.bk-reads,
+.bk-night__pick {
+  margin-block: var(--kp-space-xs, 0.25rem);
+}
+.bk-toolbar .kp-formgrid__row[hidden],
+.bk-reads .kp-formgrid__row[hidden] {
+  display: none;
+}
+.bk-range {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm, 0.8125rem);
+  font-variant-numeric: tabular-nums;
+}
+.bk-reads .kp-formgrid__control {
+  margin: 0;
+  font-size: var(--kp-text-sm, 0.8125rem);
+}
+.bk-summary {
+  color: var(--foreground);
+  font-weight: 600;
+  font-size: var(--kp-text-sm, 0.8125rem);
+  margin: 0;
+}
+
+/* The coverage card keeps its height whatever it shows or says, so the
+   legend and the readings under it never move. A row is about 1.75 rem,
+   plus the axis and the whole-fleet row. */
+.bk-card {
+  min-inline-size: 0;
+}
+.bk-cov__body {
+  min-block-size: calc(var(--bk-rows, 13) * 1.75rem + 6rem);
+  min-inline-size: 0;
+}
+.bk-nights,
+.bk-monthbox {
+  min-inline-size: 0;
+}
+.bk-nights[hidden],
+.bk-monthbox[hidden] {
+  display: none;
+}
+.bk-monthbox {
+  display: grid;
+  grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr);
+  gap: var(--kp-space-lg, 1.5rem);
+  align-items: start;
+}
+.bk-monthbox > .kp-heat {
+  margin-block-start: 3px;
+}
+@media (max-width: 62rem) {
+  .bk-monthbox {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* One night: the week and the stacks, one card that carries the state. */
+.bk-night__cols {
+  display: grid;
+  gap: var(--kp-space-lg, 1.5rem);
+  min-inline-size: 0;
+}
+.bk-night__pick {
+  padding-inline-end: var(--kp-space-md, 0.75rem);
+}
+.bk-night__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-lg, 1.5rem);
+  min-inline-size: 0;
+}
+.bk-night__week,
+.bk-night__list {
+  display: grid;
+  gap: var(--kp-space-sm, 0.5rem);
+  min-inline-size: 0;
+  align-content: start;
+}
+.bk-night__list .kp-statuslist {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--kp-space-lg, 1.5rem);
+}
+@media (max-width: 62rem) {
+  .bk-night__list .kp-statuslist {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The repositories: the bar, the stack list, the selection and the table
+   stack in one column and keep their widths. */
+.bk-repos__facets h3 {
+  margin: 0;
+}
+.bk-tablehost {
+  min-inline-size: 0;
+  min-block-size: 24rem;
+}
+.bk-tablehost .kp-datatable {
+  min-block-size: 24rem;
+}
+.bk-table .kp-uptime {
+  min-inline-size: 10rem;
+}
+.bk-table .bk-repo__note {
+  display: block;
+}
+
+/* A stack's heading row (Kenny, 2026-10-19: the icon and the name sat glued
+   under the fold button; give them room and centre them on the row). The
+   package puts its fold button first in the cell; the group follows it on
+   the same line, every part on one centre line, with a gap between all. */
+.bk-table tr[data-kp-row-group] > th {
+  padding-block: var(--kp-space-sm, 0.5rem);
+}
+.bk-table tr[data-kp-row-group] .kp-datatable__group-toggle {
+  vertical-align: middle;
+  margin-inline-end: var(--kp-space-md, 0.75rem);
+}
+.bk-group {
+  display: inline-grid;
+  grid-template-columns: auto auto auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--kp-space-md, 0.75rem);
+  inline-size: calc(100% - 3.5rem);
+  vertical-align: middle;
+  min-inline-size: 0;
+}
+.bk-group .kp-idmark {
+  align-self: center;
+}
+.bk-group__name {
+  font-weight: 600;
+  color: inherit;
+  text-decoration: none;
+}
+.bk-group__name:hover {
+  text-decoration: underline;
+}
+.bk-group__ct {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm, 0.8125rem);
+  font-weight: 400;
+}
+.bk-group__why {
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm, 0.8125rem);
+  font-weight: 400;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+.bk-group__act {
+  justify-self: end;
+}
+@container kp-table (max-width: 40rem) {
+  .bk-group {
+    inline-size: 100%;
+    grid-template-columns: auto auto auto minmax(0, 1fr);
+    row-gap: var(--kp-space-sm, 0.5rem);
+  }
+  .bk-group__why,
+  .bk-group__act {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+  .bk-table .kp-bar-cell {
+    margin-inline-end: var(--kp-space-sm, 0.5rem);
+  }
+}
+
+/* The snapshots under an opened row: two fixed button columns. */
+.bk-snaps {
+  display: grid;
+  gap: var(--kp-space-xs, 0.25rem);
+  padding: var(--kp-space-sm, 0.5rem);
+}
+.bk-snaps__table {
+  inline-size: 100%;
+}
+.bk-snaps__table td,
+.bk-snaps__table th {
+  padding-inline: var(--kp-space-sm, 0.5rem);
+}
+
+.bk-retired-load {
+  min-block-size: 6rem;
+}
+
+/* The range has presets only: the history read takes no custom bounds
+   (kp-gaps/homelab.md, the Custom… button of kp-range). */
+.bk-page .kp-range__custom,
+.bk-page .kp-range__panel {
+  display: none;
+}

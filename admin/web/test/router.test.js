@@ -96,7 +96,7 @@ test("feat-shell-1: every old address redirects to its new home in one hop, its 
     ["/jobs?job=3", "/activity?job=3&view=running"],
     ["/log?source=media", "/activity?source=media&view=host-log"],
     ["/schedules", "/activity?view=planned"],
-    ["/backupcalendar", "/backups?section=coverage"],
+    ["/backupcalendar", "/backups?view=month"],
     ["/retired", "/backups?section=removed"],
     ["/fleetview?traffic=1", "/map?traffic=1"],
     ["/notifications", "/inbox"],
@@ -186,7 +186,8 @@ test("feat-shell-1: a page module shown as a view of its new home is found there
   // Senior review finding 15: Running now is part of Activity's own view,
   // so a Live view click on an activity-* control there stays put.
   assert.equal(shownPage("/activity", "?view=running"), "activity");
-  assert.equal(shownPage("/backups", "?section=coverage"), "backupcalendar");
+  // The Calendar is the Month option of Backups now (feat-kp11demo-8): no view of its own.
+  assert.equal(shownPage("/backups", "?view=month"), "backups");
 });
 
 test("feat-shell-1: the bar is the six areas, the current one marked from any page inside it", () => {

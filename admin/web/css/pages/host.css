@@ -455,3 +455,66 @@ main.shell.hk-page > [hidden] {
   color: var(--muted-foreground);
   font-size: var(--kp-text-xs);
 }
+
+/* ---------- feat-kpadopt-2 (kp-themes 11.0.0, app-homelab-backups demo) ---------- */
+/* The containers' three views keep one footprint; the toolbar, the refresh
+   control and the disk bars stand on form-grid tracks. */
+.hk-page .hk-toolbar,
+.hk-page .hk-refresh {
+  margin-block: var(--kp-space-xs, 0.25rem);
+}
+.hk-page .hk-ho-view {
+  min-block-size: 18rem;
+  min-inline-size: 0;
+}
+.hk-page .hk-ho-view > [hidden] {
+  display: none;
+}
+.hk-page .hk-dt {
+  min-block-size: 18rem;
+}
+.hk-page .hk-dt td[data-label="Memory"] .kp-bar-cell {
+  --kp-bar-cell-value: 13ch;
+  --kp-bar-cell-bar: 4rem;
+}
+.hk-page .hk-dt td[data-label="CPU"] .kp-bar-cell {
+  --kp-bar-cell-value: 6ch;
+}
+.hk-page .hk-ct {
+  margin-inline-start: var(--kp-space-sm, 0.5rem);
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm, 0.8125rem);
+}
+.hk-page .hk-detail {
+  margin: 0;
+}
+.hk-page .hk-disk {
+  align-content: start;
+}
+.hk-page .hk-disk > .kp-stackbar {
+  grid-column: 1 / -1;
+  min-block-size: 8rem;
+}
+.hk-page .hk-disk__head h3 {
+  margin: 0;
+  font-size: var(--kp-text-base, 1rem);
+}
+.hk-page .hk-disk__head > p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm, 0.8125rem);
+}
+.hk-page .hk-checkscard {
+  min-block-size: 12rem;
+}
+.hk-page #host-lat {
+  min-block-size: 3rem;
+}
+.hk-page .kp-stackbar {
+  --kp-stackbar-legend-min: 24rem;
+}
+@media (max-width: 48rem) {
+  .hk-page .hk-dt td[data-label="Memory"] .kp-bar-cell {
+    --kp-bar-cell-value: auto;
+  }
+}

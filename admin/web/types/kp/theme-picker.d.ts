@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/theme-picker.js (kp-themes 10.1.1),
-// copied from kp-themes js/theme-picker.d.ts: chassis serves the module, not its types.
 import { THEMES } from "./theme-core.js";
 /** Dispatched on the picker, bubbling, when a person chose a theme here: `{ theme, stored }`. */
 export declare const PICK_EVENT = "kp-theme-pick";

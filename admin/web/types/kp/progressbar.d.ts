@@ -1,5 +1,3 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/progressbar.js (kp-themes 10.1.1),
-// copied from kp-themes js/progressbar.d.ts: chassis serves the module, not its types.
 /** The bars this module looks after. */
 export declare const PROGRESSBAR_SELECTOR = ".kp-progressbar";
 /** The custom property the bar paints from, 0 to 1. */

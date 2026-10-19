@@ -375,3 +375,263 @@ export function busiestStack(names, rules) {
   }
   return best;
 }
+
+// ── feat-kpadopt-2 (kp-themes 11.0.0, the approved app-homelab-backups
+// demo, Firewall sections): the figures and sentences the new Firewall page
+// hands to the package's tiles, matrix, trace and tables. Pure.
+
+/**
+ * @typedef {"live" | "files"} CellMode
+ * @typedef {{title: string, note?: string, verdict: "allowed" | "refused" | "unknown", rule?: string}} TraceHop
+ */
+
+/** @param {RuleRow} r the ports of a rule as `proto port` words; a rule with no port names every port @returns {string[]} */
+const portsOfRule = (r) =>
+  r.ports
+    ? r.ports
+        .split(/,\s*/)
+        .filter(Boolean)
+        .map((p) => `${r.proto || "tcp"} ${p}`)
+    : [`${r.proto || "tcp"} any`];
+
+/**
+ * Whether a stack's firewall counts as on in a reading: `live` is what pve
+ * enforces now (the host's word wins, fix-207); `files` is what the stack
+ * files declare, every declared firewall in force.
+ * @param {StackFw} s
+ * @param {CellMode} mode
+ */
+const onIn = (s, mode) =>
+  mode === "files"
+    ? s.declared
+    : (s.live_enforced ?? (s.declared && s.enabled));
+
+/**
+ * What `from` can open on `to` in a reading: both ends' rules, first match
+ * wins (homelab-core's evaluation, drawn again for the files reading, which
+ * the host does not send). A rule switched off is skipped.
+ * @param {FirewallRead} d
+ * @param {string} from
+ * @param {string} to
+ * @param {CellMode} [mode]
+ * @returns {Cell | null}
+ */
+export function cellIn(d, from, to, mode = "live") {
+  const m = d.matrix;
+  if (!m) return null;
+  if (mode === "live") return cellOf(m, from, to);
+  const f = d.stacks.find((s) => s.stack === from);
+  const t = d.stacks.find((s) => s.stack === to);
+  if (!f || !t) return null;
+  if (!onIn(t, mode))
+    return { from, to, state: "open", allowed: [], stopped_at_source: [] };
+  const live = (/** @type {RuleRow} */ r) =>
+    !r.disabled && r.action === "ACCEPT";
+  const into = m.rules
+    .filter(
+      (r) =>
+        r.dir === "in" &&
+        r.stack === to &&
+        live(r) &&
+        r.peer_stacks.includes(from),
+    )
+    .flatMap(portsOfRule);
+  if (!onIn(f, mode) || f.policy_out === "ACCEPT")
+    return {
+      from,
+      to,
+      state: into.length ? "some" : "none",
+      allowed: into,
+      stopped_at_source: [],
+    };
+  const out = m.rules
+    .filter(
+      (r) =>
+        r.dir === "out" &&
+        r.stack === from &&
+        live(r) &&
+        r.peer_stacks.includes(to),
+    )
+    .flatMap(portsOfRule);
+  const anyOut = out.some((p) => p.endsWith(" any"));
+  const allowed = into.filter((p) => anyOut || out.includes(p));
+  const stopped = into.filter((p) => !(anyOut || out.includes(p)));
+  return {
+    from,
+    to,
+    state: allowed.length ? "some" : "none",
+    allowed,
+    stopped_at_source: stopped,
+  };
+}
+
+/**
+ * Whether the live reading of a pair differs from the files'.
+ * @param {FirewallRead} d
+ * @param {string} from
+ * @param {string} to
+ */
+export function pairDiffers(d, from, to) {
+  const a = cellIn(d, from, to, "live");
+  const b = cellIn(d, from, to, "files");
+  if (!a || !b) return false;
+  return a.state !== b.state || a.allowed.join() !== b.allowed.join();
+}
+
+/**
+ * The stacks each total tile counts: those with no firewall declared, those
+ * whose live firewall is not what the file says, and the targets that let
+ * every stack in (an open path ends in them).
+ * @param {FirewallRead} d
+ */
+export function fwSets(d) {
+  const stacks = d.stacks ?? [];
+  const cells = d.matrix?.cells ?? [];
+  return {
+    none: stacks.filter((s) => !s.declared).map((s) => s.stack),
+    differs: stacks
+      .filter(
+        (s) =>
+          s.declared &&
+          (s.live_enforced === false || s.live_matches_repo === false),
+      )
+      .map((s) => s.stack),
+    openTargets: [
+      ...new Set(cells.filter((c) => c.state === "open").map((c) => c.to)),
+    ],
+  };
+}
+
+/**
+ * How many stacks a stack reaches (a pair with named ports) and is reached
+ * by (any way in, an open target included).
+ * @param {Matrix} m
+ * @param {string} stack
+ */
+export const reachCounts = (m, stack) => ({
+  reaches: m.cells.filter((c) => c.from === stack && c.state === "some").length,
+  reachedBy: m.cells.filter((c) => c.to === stack && c.state !== "none").length,
+});
+
+/**
+ * Every port the rules and cells name, for the trace's port picker, in
+ * number order.
+ * @param {Matrix} m
+ */
+export function allPorts(m) {
+  const set = new Set(m.cells.flatMap((c) => c.allowed));
+  return [...set].sort(
+    (a, b) =>
+      Number(a.split(" ")[1]) - Number(b.split(" ")[1]) || a.localeCompare(b),
+  );
+}
+
+/**
+ * The pair as the packet meets it: out of the source, in at the target.
+ * Hops for kp's path trace. `port` is "any" or `tcp 22`.
+ * @param {FirewallRead} d
+ * @param {string} from
+ * @param {string} to
+ * @param {string} port
+ * @returns {TraceHop[]}
+ */
+export function traceHops(d, from, to, port) {
+  const m = d.matrix;
+  const f = d.stacks.find((s) => s.stack === from);
+  const t = d.stacks.find((s) => s.stack === to);
+  if (!m || !f || !t) return [];
+  const probe = port === "any" ? "every port" : port;
+  const hit = (/** @type {string[]} */ ps) =>
+    port === "any"
+      ? ps.length > 0
+      : ps.includes(port) || ps.some((p) => p.endsWith(" any"));
+  /** @type {TraceHop[]} */
+  const hops = [
+    {
+      title: from,
+      note: `source, ${(f.ip ?? "").split("/")[0]}`,
+      verdict: "allowed",
+    },
+  ];
+  const fOn = onIn(f, "live");
+  const tOn = onIn(t, "live");
+  if (!fOn || f.policy_out === "ACCEPT") {
+    hops.push({
+      title: `Firewall out of ${from}`,
+      note: `${probe}: nothing holds it back`,
+      verdict: "allowed",
+      rule: `${from} out policy ${fOn ? "ACCEPT" : "(no firewall)"}`,
+    });
+  } else {
+    const outs = m.rules.filter(
+      (r) =>
+        r.dir === "out" &&
+        r.stack === from &&
+        !r.disabled &&
+        r.action === "ACCEPT" &&
+        r.peer_stacks.includes(to),
+    );
+    const ok = hit(outs.flatMap(portsOfRule));
+    hops.push({
+      title: `Firewall out of ${from}`,
+      note: ok ? `${probe}: let out` : `${probe}: no outbound rule lets it out`,
+      verdict: ok ? "allowed" : "refused",
+      rule: ok
+        ? `${from} out #${outs[0]?.n ?? 1}`
+        : `${from} out policy ${f.policy_out ?? "DROP"}`,
+    });
+  }
+  if (!tOn) {
+    hops.push({
+      title: `Firewall in at ${to}`,
+      note: `${probe}: ${to} has no firewall in force, everything is let in`,
+      verdict: "allowed",
+      rule: `${to} in (no firewall)`,
+    });
+  } else {
+    const ins = m.rules.filter(
+      (r) =>
+        r.dir === "in" &&
+        r.stack === to &&
+        !r.disabled &&
+        r.action === "ACCEPT" &&
+        r.peer_stacks.includes(from),
+    );
+    const ok = hit(ins.flatMap(portsOfRule));
+    hops.push({
+      title: `Firewall in at ${to}`,
+      note: ok ? `${probe}: let in` : `${probe}: no inbound rule lets it in`,
+      verdict: ok ? "allowed" : "refused",
+      rule: ok
+        ? `${to} in #${ins[0]?.n ?? 1}`
+        : `${to} in policy ${t.policy_in ?? "DROP"}`,
+    });
+  }
+  hops.push({
+    title: to,
+    note: `target, ${(t.ip ?? "").split("/")[0]}`,
+    verdict: "allowed",
+  });
+  return hops;
+}
+
+/**
+ * One sentence for a pair that differs: what live says, what the files say.
+ * @param {FirewallRead} d
+ * @param {string} from
+ * @param {string} to
+ */
+export function diffWords(d, from, to) {
+  const live = cellIn(d, from, to, "live");
+  const files = cellIn(d, from, to, "files");
+  /** @param {Cell | null} c */
+  const say = (c) =>
+    !c
+      ? "unknown"
+      : c.state === "open"
+        ? "all"
+        : c.state === "some"
+          ? cellLabel(c)
+          : "blocked";
+  return `${from} to ${to}. Live: ${say(live)}. Files: ${say(files)}.`;
+}

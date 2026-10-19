@@ -338,7 +338,7 @@ export function mount(root) {
   const routing = h(
     "section",
     {
-      class: "kp-card nr-card",
+      class: "kp-card nr-card nr-card--routing",
       id: "per-stack",
       "data-kp-state": "loading",
       "aria-labelledby": "nr-routing-t",
@@ -354,29 +354,28 @@ export function mount(root) {
       { class: "kp-card__body" },
       "Decides, for every stack, whether it pushes to your phone or waits for the digest, and shows what the last five notices would have done under these rules. A muted stack still lands in the Inbox; it never pushes.",
     ),
+    // The last five notices are the notices centre's own component, with its
+    // own busy card and failed plate, so it stands beside the card's stage
+    // (a state of the stacks' data would hide it) on the card's grid.
     h(
       "div",
-      { class: "kp-card__stage" },
+      { class: "nr-routing__preview" },
+      h(
+        "h3",
+        { class: "nr-h", id: "nr-preview-h" },
+        "The last five notices under these rules",
+      ),
+      preview,
+    ),
+    h(
+      "div",
+      { class: "kp-card__stage nr-routing__stage" },
       h(
         "div",
-        { class: "kp-card__data nr-routing" },
-        h(
-          "div",
-          { class: "nr-routing__preview" },
-          h(
-            "h3",
-            { class: "nr-h", id: "nr-preview-h" },
-            "The last five notices under these rules",
-          ),
-          preview,
-        ),
-        h(
-          "div",
-          { class: "nr-routing__stacks" },
-          h("h3", { class: "nr-h", id: "nr-stacks-h" }, "By stack"),
-          stacksEl,
-          stacksSay,
-        ),
+        { class: "kp-card__data nr-routing__stacks" },
+        h("h3", { class: "nr-h", id: "nr-stacks-h" }, "By stack"),
+        stacksEl,
+        stacksSay,
       ),
     ),
   );
@@ -625,6 +624,15 @@ export function mount(root) {
         failed() ? "error" : "loading",
         failed() ? failedState : { words: "Reading the rules…" },
       );
+      // The preview is the package's notices centre: its own busy card and
+      // failed plate while the rules are not here.
+      lastRouting = "";
+      setNotices(preview, {
+        state: failed() ? "error" : "loading",
+        items: [],
+        sources: [],
+        ...(failed() ? { error: failedState.title } : {}),
+      });
       return;
     }
     const names = (current().fleet?.stacks ?? []).map((s) => s.name);
@@ -635,6 +643,8 @@ export function mount(root) {
         title: "No stacks yet",
         text: "Stacks appear here once the host knows them.",
       });
+      lastRouting = "";
+      setNotices(preview, { state: "empty", items: [], sources: [] });
       return;
     }
     putState(routing, "ready");

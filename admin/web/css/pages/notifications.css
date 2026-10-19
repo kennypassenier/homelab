@@ -62,10 +62,18 @@
 
 /* Routing: the last five notices on the start side, the stacks on the end
    side at a width of their own; one column on a phone. */
-.nr-routing {
+.nr-card--routing {
   display: grid;
   gap: var(--kp-space-lg, 1.5rem);
   grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+}
+.nr-card--routing > * {
+  min-inline-size: 0;
+  margin: 0;
+}
+.nr-routing__stage {
+  min-block-size: var(--kp-card-stage-min, 0);
 }
 .nr-h {
   margin: 0 0 var(--kp-space-xs, 0.25rem);
@@ -80,9 +88,12 @@
   min-block-size: 14rem;
 }
 @media (min-width: 64rem) {
-  .nr-routing {
+  .nr-card--routing {
     grid-template-columns: minmax(0, 1fr) 28rem;
-    align-items: start;
+  }
+  .nr-card--routing > .kp-card__header,
+  .nr-card--routing > .kp-card__body {
+    grid-column: 1 / -1;
   }
 }
 

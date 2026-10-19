@@ -50,7 +50,7 @@ test("drive-reach: every page's controls are in the catalog, each once, with whe
     assert.ok(!ids.includes(w), `${w} is both an id and an old name`);
     assert.ok(resolve(w)?.was === w, `${w} does not resolve`);
   }
-  assert.ok(old.includes("edit-schedule") && old.includes("delete-schedule"));
+  assert.ok(old.includes("schedule-menu"));
   // redesign-final-44 (Kenny, 2026-10-04: Live view knows every control,
   // the whole-screen press of each old name is gone): the field verbs too.
   // An old field id answers as the field it became; an old name of a

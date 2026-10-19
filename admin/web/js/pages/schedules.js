@@ -1,11 +1,13 @@
-// Schedules (feat-stacks-8, arch-schedule; redesigned for release 3.71.0 as
-// the demo Kenny approved on 2026-10-03): what the dashboard runs on its
-// own and when. A "Next run" hero (Run now, Skip this run), the next seven
-// days as a calendar with the host's nightly round for reference, every
-// schedule in a table with its switch first, and a New/Edit drawer that
-// reads as a sentence and previews the next three runs. Every time is the
-// host's wall clock. A page module of its own, so Activity can host it as a
-// tab: `mount(root)` draws into any container and returns its cleanup.
+// Schedules (feat-stacks-8, arch-schedule; rebuilt for kp-themes 11.0.0 as the
+// demo Kenny approved on 2026-10-19, feat-kp11demo-9): what the dashboard runs
+// on its own and when. The next seven days as kp's week, the next run counting
+// down with the three after it, a list with the schedule's form beside it
+// (kp's master-detail: Kenny chose "beside the list", not a drawer), every
+// schedule in a datatable with its last fourteen slots, the busy hours and the
+// stacks without a backup schedule, and the history of what the schedules ran.
+// Every time is the host's wall clock. A page module of its own, so Activity
+// can host it as a tab: `mount(root)` draws into any container and returns its
+// cleanup.
 
 import {
   act,
@@ -15,117 +17,115 @@ import {
   onAct,
   send,
 } from "../act.js";
-import { scheduleArgFields, schedulableActions } from "../actionforms.js";
-import { fieldEl, refusalCallout } from "../actui.js";
+import { schedulableActions } from "../actionforms.js";
 import { agoEl, setAgo } from "../ago.js";
-import { fetchJson, h } from "../dom.js";
-import { declare, declareField, dialogControl, drivable } from "../drivable.js";
+import { fetchJson, h, patchKeyed, tableBlock } from "../dom.js";
+import { declare, declareField, drivable } from "../drivable.js";
+import { openJobDialog } from "../jobpanel.js";
 import {
-  EVERY_WORDS,
+  COVERAGE,
+  LEGEND,
   TEMPLATES,
   WEEKDAYS,
-  agenda,
-  cadenceText,
+  busyModel,
+  cadenceWords,
+  clashWhen,
   countText,
+  coverageModel,
   dateTimeText,
-  dayText,
-  draftBody,
   draftFor,
-  lastRunView,
-  nearNightly,
-  nextRuns,
+  historyModel,
+  HISTORY_LANES,
+  movedTime,
   nextUp,
+  runsWithClash,
   scheduleTitle,
-  stackTops,
+  shortWhen,
+  slotPeriods,
   targetText,
-  timeText,
-  untilText,
-  weekPlan,
+  weekEvents,
+  zoneParts,
 } from "../schedules.js";
-import { current } from "../store.js";
-import {
-  DATE_EVENT,
-  attachDatePickers,
-  datePicker,
-} from "/static/kp/js/datepicker.js";
-import { MENU_CLOSE_EVENT } from "/static/kp/js/menu-button.js";
+import { buildScheduleForm } from "../schedulesform.js";
+import { current, subscribe } from "../store.js";
 import {
   TOAST_MS,
   keyRow,
   pageHeader,
-  rowMenu,
   section,
   toast,
+  toastRegion,
 } from "../ui.js";
-
-/** How long a change can be undone: as long as its toast shows. */
-const UNDO_MS = TOAST_MS;
-
-/**
- * One of the page's cards (ui.js `section`), its foot one line of text.
- * @param {{title?: string, desc?: string, body: import("../dom.js").Child,
- *   foot?: string, id?: string, label?: string}} spec
- */
-const card = (spec) =>
-  section({
-    ...spec,
-    plain: true,
-    foot: spec.foot ? [spec.foot] : undefined,
-  }).el;
+import { ACTION_TILE, attachActionTiles } from "/static/kp/js/action-tiles.js";
+import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
+import { openConfirmation } from "/static/kp/js/components.js";
+import {
+  COUNTDOWN_END_EVENT,
+  attachCountdowns,
+  countdownOf,
+} from "/static/kp/js/countdown.js";
+import { attachDataTables, dataTable } from "/static/kp/js/datatable.js";
+import {
+  GANTT_OPEN_EVENT,
+  attachGantts,
+  setGanttKinds,
+  setGanttLegend,
+  setGanttPoints,
+  setGanttRuns,
+  setGanttState,
+} from "/static/kp/js/gantt.js";
+import {
+  attachHeats,
+  attachMatrices,
+  setHeat,
+  setMatrix,
+} from "/static/kp/js/heat.js";
+import {
+  PANE_RETRY_EVENT,
+  PANE_SELECT_EVENT,
+  attachMasterDetails,
+  masterDetail,
+  setPaneState,
+} from "/static/kp/js/master-detail.js";
+import { attachRuns, setRuns } from "/static/kp/js/runs.js";
+import {
+  SELECTION_ACTION_EVENT,
+  attachSelectionBars,
+  setSelectionBusy,
+  setSelectionResult,
+} from "/static/kp/js/selection-bar.js";
+import { undoToast } from "/static/kp/js/undo-toast.js";
+import { attachUptimes, setUptime } from "/static/kp/js/uptime.js";
+import {
+  WEEK_OPEN_EVENT,
+  attachWeeks,
+  setWeekEvents,
+  setWeekLegend,
+  setWeekState,
+} from "/static/kp/js/week.js";
 
 /**
  * @typedef {import("../schedules.js").ScheduleView} ScheduleView
  * @typedef {import("../schedules.js").Schedule} Schedule
- * @typedef {import("../schedules.js").Draft} Draft
  * @typedef {import("../schedules.js").Template} Template
  */
 
-// fix-239, invariant 39: Live view reaches every control on this page.
-// review M5: every page field Live view may set is declared (drivable.js
-// `declareField`); the client and the dashboard refuse any other.
-const SCHED_ACTION = declareField({
-  id: "sched-action",
-  page: "schedules",
-  what: "what the schedule runs (New schedule drawer)",
-});
-const SCHED_STACK = declareField({
-  id: "sched-stack",
-  page: "schedules",
-  what: "the stack the schedule runs on (New schedule drawer)",
-});
-const SCHED_EVERY = declareField({
-  id: "sched-every",
-  page: "schedules",
-  what: "how often the schedule runs (New schedule drawer)",
-});
-const SCHED_DATE = declareField({
-  id: "sched-date",
-  page: "schedules",
-  what: "the date of a one-time run (New schedule drawer)",
-});
-const SCHED_AT = declareField({
-  id: "sched-at",
-  page: "schedules",
-  what: "the time of day the schedule runs (New schedule drawer)",
-});
-const SCHED_NOTE = declareField({
-  id: "sched-note",
-  page: "schedules",
-  what: "the schedule's note (New schedule drawer)",
-});
+/** How long a change can be undone: as long as its toast shows. */
+const UNDO_MS = TOAST_MS;
 
+// fix-239, invariant 39: Live view reaches every control on this page.
 const NEW_SCHEDULE = declare({
   id: "new-schedule",
   page: "schedules",
-  opens: "dialog",
-  what: "open the New schedule drawer",
+  opens: "view",
+  what: "open the form of a new schedule beside the list",
 });
 const SCHEDULE_TEMPLATE = declare({
   id: "schedule-template",
   page: "schedules",
-  opens: "dialog",
+  opens: "view",
   row: "<template id>",
-  what: "open the New schedule drawer filled in from a template (empty page only)",
+  what: "open the form of a new schedule filled in from a template (empty page only)",
   shows: "on an empty Schedules page",
 });
 const TOGGLE_SCHEDULE = declare({
@@ -135,17 +135,29 @@ const TOGGLE_SCHEDULE = declare({
   row: "<schedule id>",
   what: "turn one schedule on or off (Undo for 6 s)",
 });
-const SCHEDULE_MENU = declare({
-  id: "schedule-menu",
+const EDIT_SCHEDULE = declare({
+  id: "edit-schedule",
   page: "schedules",
-  opens: "dialog",
+  opens: "view",
   row: "<schedule id>",
-  what: "open one schedule's menu: press edit, run-now or delete",
-  // drive-reach: 3.71.0 moved a row's Edit and Delete into this menu.
-  was: [
-    { id: "edit-schedule", press: "edit" },
-    { id: "delete-schedule", press: "delete" },
-  ],
+  what: "open one schedule's form beside the list",
+  // kp-themes 11: the row's menu is three buttons in the table; its old
+  // name opens the form, the button that was its first entry.
+  was: [{ id: "schedule-menu" }],
+});
+const RUN_SCHEDULE = declare({
+  id: "run-schedule",
+  page: "schedules",
+  opens: "run",
+  row: "<schedule id>",
+  what: "start one schedule's action now, as a job; its times stay",
+});
+const DELETE_SCHEDULE = declare({
+  id: "delete-schedule",
+  page: "schedules",
+  opens: "run",
+  row: "<schedule id>",
+  what: "delete one schedule (Undo for 6 s; jobs it ran stay on Activity)",
 });
 const RUN_NEXT = declare({
   id: "run-next-now",
@@ -165,32 +177,41 @@ const UNDO_CHANGE = declare({
   opens: "run",
   what: "undo the last switch or delete while its toast shows (6 s)",
   shows: "for 6 s after a switch or a delete",
-  reach: [
-    { do: "click", control: "schedule-menu", row: "*" },
-    { do: "press", button: "delete" },
-  ],
+  reach: [{ do: "click", control: "delete-schedule", row: "*" }],
 });
 const FIND_SCHEDULE = declare({
   id: "find-schedule",
   page: "schedules",
   opens: "run",
   row: "<schedule id>",
-  what: "click a run on the calendar to find its schedule in the list",
+  what: "click a run on the calendar to find its schedule in the table",
 });
 const SORT_SCHEDULES = declare({
   id: "sort-schedules",
   page: "schedules",
   opens: "run",
-  row: "<column: on, what, when, next, last, note>",
+  row: "<column: on, what, when, next>",
   what: "sort the schedules by a column (again: the other way)",
+});
+const MOVE_CLASH = declare({
+  id: "move-schedule-clash",
+  page: "schedules",
+  opens: "run",
+  row: "<schedule id>",
+  what: "move one of two schedules that start in the same minute 15 minutes",
+  shows: "under the busy hours, when two schedules start together",
+});
+
+const ONLY_GAPS = declareField({
+  id: "sched-only-gaps",
+  page: "schedules",
+  what: "show only the stacks without a backup schedule (coverage)",
 });
 
 /** The zone a host answers in before its list has come. */
 const DEFAULT_ZONE = "Europe/Brussels";
-/** Calendar geometry: a 24-hour column this tall, pills at least this far apart. */
-const COL_PX = 240;
-const PILL_GAP = 20;
-const COLOURS = ["", "c2", "c3", "c4", "c5"];
+/** The pane list's key for the form of a schedule that does not exist yet. */
+const NEW_KEY = "+new";
 
 /** The host's nightly round hour, read once per page visit. */
 async function readNightly() {
@@ -207,6 +228,22 @@ const hostTarget = () => act.catalog?.host_target ?? "_host";
 /** @param {Schedule} s */
 const titleOf = (s) =>
   scheduleTitle(actionLabel(s.action), s.stack, hostTarget());
+/** @param {number} t @param {string} z "Tue 20/10/2026 03:30" */
+const withWeekday = (t, z) =>
+  `${WEEKDAYS[zoneParts(t, z).wd]} ${dateTimeText(t, z)}`;
+const pad = (/** @type {number} */ n) => String(n).padStart(2, "0");
+
+/**
+ * One of the page's cards (ui.js `section`), its foot one line of text.
+ * @param {{title?: string, desc?: string, body: import("../dom.js").Child,
+ *   foot?: string, id?: string, label?: string}} spec
+ */
+const card = (spec) =>
+  section({
+    ...spec,
+    plain: true,
+    foot: spec.foot ? [spec.foot] : undefined,
+  });
 
 /**
  * @param {HTMLElement} root
@@ -219,29 +256,32 @@ export function mount(root, opts = {}) {
   root.classList.add("sch-root", "nx-ops");
   /** @type {number | null | undefined} undefined: not read (yet) */
   let nightly;
-  /** Deletes waiting out their Undo: id → timer. */
-  /** @type {Map<string, ReturnType<typeof setTimeout>>} */
-  const pendingDeletes = new Map();
-  /** @type {{key: string, dir: 1 | -1}} */
-  let sort = readSort();
   let alive = true;
+  /** Deletes waiting out their Undo: the rows are hidden meanwhile. */
+  /** @type {Set<string>} */
+  const removed = new Set();
   /** A toast on this page; its Undo is a control Live view can press. */
-  /** @param {string} text @param {() => void} [undo] */
-  const say = (text, undo) =>
-    toast(text, {
-      host: root,
-      replace: "all",
-      action: undo
-        ? { label: "Undo", run: undo, drive: { id: UNDO_CHANGE } }
-        : undefined,
-    });
+  /** @param {string} text */
+  const say = (text) => toast(text, { host: root, replace: "all" });
+  /** @param {ReturnType<typeof undoToast>} t */
+  const driveUndo = (t) => {
+    const b = [...t.toast.querySelectorAll("button")].find((x) =>
+      /undo/i.test(x.textContent ?? ""),
+    );
+    if (b) drivable(b, UNDO_CHANGE);
+  };
 
   const zone = () => act.schedules?.zone ?? DEFAULT_ZONE;
   const list = () =>
-    (act.schedules?.schedules ?? []).filter(
-      (v) => !pendingDeletes.has(v.schedule.id),
-    );
+    (act.schedules?.schedules ?? []).filter((v) => !removed.has(v.schedule.id));
+  /** @param {string} id */
+  const viewOf = (id) => list().find((v) => v.schedule.id === id);
+  const stackNames = () => {
+    const fleet = current().fleet;
+    return fleet ? fleet.stacks.map((x) => x.name) : null;
+  };
 
+  // ── the header ──
   const count = h("span", { id: "sched-count", class: "sch-num" });
   const zoneChip = h("span", { class: "sch-chip", id: "sched-zone" });
   const read = agoEl("read");
@@ -252,7 +292,7 @@ export function mount(root, opts = {}) {
       class: "kp-button kp-button--primary",
       id: "sched-new",
       title: "Pick an action, a target and when it runs (N)",
-      onclick: () => void openDrawer(null, null),
+      onclick: () => void openForm(NEW_KEY),
     },
     // redesign-final-h5: no key badge on this one button; N is in its
     // description, as every other button's key is.
@@ -269,11 +309,6 @@ export function mount(root, opts = {}) {
   // redesign-final-h5: hosted in Activity's Planned view this is a section
   // of that page (an h2 at section size), never a second page title.
   if (opts.level === "h2") header.classList.add("sch-head--hosted");
-  const body = h("div", { class: "sch-body" });
-  // The page's top-level pieces sit straight in `root`, so the shell's one
-  // section gap (fix-206) spaces them.
-  /** @type {HTMLElement[]} */
-  let pieces = [];
 
   const paintZone = () => {
     const z = zone();
@@ -291,594 +326,976 @@ export function mount(root, opts = {}) {
     );
   };
 
-  const show = (/** @type {HTMLElement[]} */ next) => {
-    for (const p of pieces) p.remove();
-    pieces = next;
-    root.append(...next);
-  };
+  // ── 1 · the week ──
+  const weekEl = h("section", {
+    class: "kp-week",
+    "data-kp-week": "",
+    "data-kp-week-nav": "",
+    "data-kp-week-upcoming": "8",
+    "data-kp-week-upcoming-label": "The next runs",
+    "data-kp-week-upcoming-empty": "No run in the next 7 days.",
+    "data-kp-time-zone": zone(),
+    "aria-label": "Runs in the next 7 days",
+  });
+  const weekCard = card({
+    title: "The next 7 days: every run on one calendar",
+    desc: "Shows every run of the coming week as a pill at its time of day, with the host's own nightly round dashed for reference, and the very next run ringed.",
+    body: h("div", { class: "sch-weekbox" }, weekEl),
+    id: "sched-week",
+  });
 
-  const loading = () => {
-    count.textContent = "";
-    show([
-      card({
-        label: "Reading the schedules",
-        body: h(
+  // ── 2 · the next run ──
+  const countdown = h("div", {
+    class: "kp-countdown",
+    "data-kp-countdown": "1:00:00",
+    "data-kp-countdown-name": "Next run in",
+    id: "sched-countdown",
+  });
+  const heroTitle = h("b", { id: "sched-hero-title" });
+  const heroWhen = h("span", { id: "sched-hero-when" });
+  const heroNote = h("p", {
+    class: "sch-hero__note",
+    id: "sched-hero-note",
+    role: "status",
+  });
+  const runNow = h(
+    "button",
+    {
+      type: "button",
+      class: "kp-button kp-button--primary",
+      id: "sched-run-now",
+      title: "Start this action now as a job; the schedule keeps its next slot",
+    },
+    "Run now",
+  );
+  drivable(runNow, RUN_NEXT);
+  const skip = h(
+    "button",
+    {
+      type: "button",
+      class: "kp-button",
+      id: "sched-skip",
+      title: "Skip only this one run; the schedule stays on",
+    },
+    "Skip this run",
+  );
+  drivable(skip, SKIP_NEXT);
+  const thenEl = h("div", {
+    class: "kp-runs",
+    "data-kp-runs": "",
+    "data-kp-time-zone": zone(),
+    id: "sched-then",
+  });
+  const hero = h(
+    "section",
+    {
+      class: "kp-card sch-hero",
+      "data-kp-state": "loading",
+      id: "sched-hero",
+      "aria-label": "The next run",
+    },
+    h(
+      "div",
+      { class: "kp-card__stage" },
+      h(
+        "div",
+        { class: "kp-card__data sch-hero__grid" },
+        h(
           "div",
-          {
-            "data-kp-state": "loading",
-            class: "sch-hero",
-            "aria-busy": "true",
-          },
-          h(
-            "div",
-            null,
-            h("div", { class: "sch-label" }, "Next run"),
-            h("span", {
-              class: "kp-skeleton",
-              style: "width:180px;height:32px;margin-top:4px",
-            }),
-          ),
-          h(
-            "div",
-            { class: "sch-hero__what" },
-            "Reading the schedules from the dashboard…",
-          ),
-          h("span"),
+          { class: "sch-hero__main" },
+          countdown,
+          h("p", { class: "sch-hero__what" }, heroTitle, heroWhen),
+          heroNote,
+          h("div", { class: "sch-hero__actions" }, runNow, skip),
         ),
-      }),
-      card({
-        title: "The next 7 days",
-        desc: "Every run on the calendar, read from the schedules below.",
-        body: h("span", {
-          class: "kp-skeleton",
-          style: `height:${COL_PX + 24}px`,
-        }),
-      }),
-      card({
-        title: "All schedules",
-        desc: "Turn one off with its switch; its slots are kept but nothing runs.",
-        body: h(
-          "div",
-          { style: "display:grid;gap:10px" },
-          [0, 1, 2].map(() =>
-            h("span", { class: "kp-skeleton", style: "height:36px" }),
-          ),
-        ),
-      }),
-    ]);
-  };
+        h("div", { class: "sch-hero__then" }, thenEl),
+      ),
+    ),
+  );
+  const heroCard = card({
+    title: "The next run, counting down",
+    desc: "Tells what starts next and how long that is, with the exact date beside the countdown and the three runs after it, flagging a run that starts in the same minute as another.",
+    body: hero,
+  });
 
-  const failed = (/** @type {import("../doctor.js").RouteError} */ e) => {
-    const retry = h(
-      "button",
-      { type: "button", class: "kp-button", onclick: () => void first() },
-      "Read again",
+  // ── 3 · the form beside the list ──
+  const paneList = h("ul", {
+    class: "kp-pane__list",
+    role: "listbox",
+    "aria-label": "Schedules",
+    id: "sched-pane-list",
+  });
+  const paneBody = h("div", { class: "kp-pane__body", id: "sched-pane-body" });
+  const paneHeading = h("h3", { "data-kp-pane-heading": "", tabindex: "-1" });
+  const panes = h(
+    "div",
+    {
+      class: "kp-split kp-split--panes",
+      "data-kp-master-detail": "",
+      "data-kp-pane-widths": "22rem 1fr",
+      "data-kp-pane-history": "off",
+      id: "sched-panes",
+    },
+    h(
+      "section",
+      {
+        class: "kp-split__pane",
+        "data-kp-pane": "list",
+        "aria-label": "Schedules",
+      },
+      paneList,
+    ),
+    h(
+      "section",
+      {
+        class: "kp-split__pane",
+        "data-kp-pane": "detail",
+        "aria-label": "Schedule",
+      },
+      paneHeading,
+      paneBody,
+    ),
+  );
+  const editCard = card({
+    title: "Change a schedule, or make a new one",
+    desc: "Opens the schedule you pick from the list in a form beside it, and shows the next five runs while you type.",
+    body: h("div", { class: "sch-surface" }, panes),
+    id: "sched-edit",
+  });
+
+  // ── 4 · the table ──
+  const tableId = "sched-table";
+  const table = tableBlock({
+    remember: "schedules",
+    caption: "All schedules",
+    captionHidden: true,
+    search: "Search a stack or an action",
+    state: "loading",
+    nothing: "No schedules yet",
+    pageSize: 10,
+    pageSizes: "10,25,50",
+    columns: [
+      { label: "On", sort: "text", filter: "choice" },
+      { label: "What", sort: "text", filter: "choice" },
+      { label: "When", sort: "text" },
+      { label: "Next run", sort: "number", cls: "kp-numeric" },
+      { label: "Last 14", sort: null },
+      { label: "Actions", sort: null },
+    ],
+  });
+  table.wrap.id = tableId;
+  const COLS = ["on", "what", "when", "next"];
+  {
+    const headRow = /** @type {HTMLTableRowElement} */ (
+      table.wrap.querySelector("thead tr")
     );
-    show([
-      card({
-        title: "The schedules could not be read",
-        desc: "Nothing changed; the dashboard's answer is below.",
-        body: h(
-          "div",
-          { style: "display:grid;gap:12px;justify-items:start" },
-          refusalCallout(e, "destructive", "Could not read"),
-          retry,
-        ),
+    headRow.prepend(
+      h(
+        "th",
+        { scope: "col", class: "select-col" },
+        h("input", {
+          class: "kp-field__check",
+          type: "checkbox",
+          "data-kp-select-all": "",
+          "aria-label": "Select every schedule on this page",
+        }),
+      ),
+    );
+    const ths = [...headRow.querySelectorAll("th")];
+    ths[ths.length - 1].replaceChildren(
+      h("span", { class: "kp-sr-only" }, "Actions"),
+    );
+    // Live view sorts a column by pressing its header.
+    ths
+      .filter((th) => th.hasAttribute("data-kp-sort"))
+      .forEach((th, i) => drivable(th, SORT_SCHEDULES, COLS[i]));
+    // kp's "Search in" choice, as the demo has it.
+    const bar = table.wrap.querySelector(".kp-datatable__bar");
+    bar?.append(
+      h("select", {
+        class: "kp-field__input kp-datatable__select",
+        "data-kp-datatable-scope": "",
+        "aria-label": "Search in",
       }),
-    ]);
+    );
+  }
+  const bulkOff = h(
+    "button",
+    {
+      type: "button",
+      class: "kp-button",
+      "data-kp-selection-action": "off",
+      title: "Turn the ticked schedules off; their slots are kept",
+    },
+    "Turn off",
+  );
+  const bulkOn = h(
+    "button",
+    {
+      type: "button",
+      class: "kp-button",
+      "data-kp-selection-action": "on",
+      title: "Turn the ticked schedules on",
+    },
+    "Turn on",
+  );
+  const selectionBar = h(
+    "div",
+    {
+      class: "kp-selection",
+      "data-kp-selection": "",
+      "data-kp-selection-for": tableId,
+      "data-kp-placement": "sticky-top",
+      "aria-label": "Selected schedules",
+    },
+    h("div", { class: "kp-selection__actions" }, bulkOff, bulkOn),
+  );
+  const tiles = h("div", {
+    class: "kp-actions sch-templates",
+    role: "group",
+    "aria-label": "Starting points",
+  });
+  {
+    const none = table.wrap.querySelector("[data-kp-datatable-empty-none]");
+    none?.append(
+      h(
+        "p",
+        { class: "kp-empty__body" },
+        "Nothing runs on its own apart from the host's nightly round. Start from one of these, or make your own with New schedule.",
+      ),
+      tiles,
+    );
+  }
+  const tableCard = card({
+    title: "All schedules: search, sort, bulk turn off, delete with undo",
+    desc: "Lists every schedule with its next run and the last fourteen slots (ran, failed, missed), lets you turn several off at once, and gives a deleted schedule back for six seconds.",
+    body: h("div", { class: "sch-tablebox" }, selectionBar, table.wrap),
+    foot: "Times are the host's clock; a run that starts becomes a job on Activity.",
+    id: "sched-all",
+  });
+
+  // ── 5 · the busy hours ──
+  const heatEl = h("div", {
+    class: "kp-heat sch-heat",
+    "data-kp-heat": "",
+    "aria-label": "Schedule starts by weekday and hour",
+  });
+  const clashList = h("ul", {
+    class: "sch-clashes kp-formgrid",
+    "aria-label": "Clashes",
+  });
+  const busyCard = card({
+    title: "The busy hours: where two schedules start together",
+    desc: "Maps the week by weekday and hour and marks the hours in which two schedules (or a schedule and the host's nightly round) start in the same minute, so you move one before they fight over the disk.",
+    body: h(
+      "div",
+      { class: "sch-busybox" },
+      h(
+        "div",
+        {
+          class: "sch-heatwrap",
+          tabindex: 0,
+          role: "region",
+          "aria-label": "Schedule starts by weekday and hour",
+        },
+        heatEl,
+      ),
+      clashList,
+    ),
+    id: "sched-busy",
+  });
+
+  // ── 6 · coverage ──
+  const coverSummary = h("p", { class: "sch-summary", role: "status" });
+  const matrixEl = h("div", {
+    class: "kp-matrix sch-matrix",
+    "data-kp-matrix": "",
+    "data-kp-view": "grid",
+    "aria-label": "Which stack has which schedule",
+  });
+  const onlyGaps = h("input", {
+    class: "kp-field__check",
+    type: "checkbox",
+    id: ONLY_GAPS,
+  });
+  const coverCard = card({
+    title: "Coverage: which stack has no backup schedule",
+    desc: "Crosses every stack with every action and shows at a glance where a schedule exists and where none does, so a stack that is never backed up cannot hide in a list.",
+    body: h(
+      "div",
+      { class: "sch-coverbox" },
+      h(
+        "div",
+        { class: "sch-coverhead" },
+        coverSummary,
+        h(
+          "label",
+          { class: "sch-gapsonly", for: "sched-only-gaps" },
+          onlyGaps,
+          " Only gaps",
+        ),
+      ),
+      matrixEl,
+    ),
+    id: "sched-coverage",
+  });
+
+  // ── 7 · history ──
+  const ganttEl = h("section", {
+    class: "kp-gantt",
+    "data-kp-gantt": "",
+    "data-kp-gantt-days": "",
+    "data-kp-gantt-ranges": "24h 7d",
+    "data-kp-gantt-range": "7d",
+    "data-kp-gantt-ghosts": "1 1 1 1 1 1 1",
+    "data-kp-time-zone": zone(),
+    "aria-label": "Runs of the last 7 days",
+  });
+  const historyCard = card({
+    title: "History: what ran, when and for how long",
+    desc: "Draws every run of the last days as a bar in the lane of the schedule that started it, so a failed or overlong run stands out, and opens the job behind a bar.",
+    body: h("div", { class: "sch-historybox" }, ganttEl),
+    id: "sched-history",
+  });
+
+  const keys = keyRow([
+    ["N", "new schedule"],
+    ["Space", "turn the focused schedule on or off"],
+    ["E", "edit it"],
+    ["Esc", "close a menu or the list of times"],
+    ["click a header", "sort"],
+  ]);
+
+  root.replaceChildren(
+    header,
+    weekCard.el,
+    heroCard.el,
+    editCard.el,
+    tableCard.el,
+    busyCard.el,
+    coverCard.el,
+    historyCard.el,
+    keys,
+  );
+
+  // ── attach every kp part, now that it stands in the page ──
+  /** @type {(() => void)[]} */
+  const detach = [];
+  detach.push(
+    attachWeeks(weekCard.el, {
+      decorate: (part, info) => {
+        if (info.kind === "pill" && info.id && !info.id.startsWith("nightly@"))
+          drivable(part, FIND_SCHEDULE, info.id.split("@")[0]);
+      },
+    }),
+    attachCardStates(root),
+    attachCountdowns(root),
+    attachRuns(root),
+    attachMasterDetails(editCard.el, { history: false }),
+    attachDataTables(tableCard.el),
+    attachSelectionBars(tableCard.el),
+    attachActionTiles(tableCard.el),
+    attachUptimes(tableCard.el),
+    attachHeats(busyCard.el),
+    attachMatrices(coverCard.el),
+    attachGantts(historyCard.el),
+  );
+  setWeekLegend(weekEl, LEGEND);
+  setGanttLegend(ganttEl, LEGEND);
+  setGanttKinds(ganttEl, [
+    { kind: "missed", label: "Missed", shape: "triangle", tone: "destructive" },
+  ]);
+  const handle = masterDetail(panes);
+  setPaneState(panes, "empty", {
+    title: "Pick a schedule",
+    text: "Choose one in the list to change it, or start a new one.",
+  });
+  const dt = () => dataTable(table.wrap);
+
+  // First frame: every section is loading in its final geometry.
+  const loadingAll = () => {
+    count.textContent = "";
+    setWeekState(weekEl, "loading");
+    setCardState(hero, "loading");
+    table.loading({ words: "Reading the schedules" });
+    setHeat(heatEl, {
+      columns: hourColumns(),
+      rows: [],
+      state: "loading",
+      skeleton: { rows: 7, columns: 24 },
+    });
+    setMatrix(matrixEl, {
+      rows: [],
+      columns: [],
+      state: "loading",
+      skeleton: 5,
+    });
+    setGanttState(ganttEl, "loading");
   };
 
-  /** A change that arrived while a row menu was open waits for it to close. */
-  let drawLater = false;
-  const render = () => {
-    if (!alive || !act.schedules) return;
-    // The rows hold the open row menu (kp's menu button wraps the row's
-    // own button): drawing them anew would take the menu from under the
-    // pointer, or from under a Live view press.
-    if (root.querySelector(".nx-rowmenu > button[aria-expanded=true]")) {
-      drawLater = true;
+  /** @param {import("../doctor.js").RouteError} e */
+  const failedAll = (e) => {
+    const why = `The schedules could not be read: ${e.why}`;
+    count.textContent = "";
+    setWeekState(weekEl, "error", why);
+    setCardState(hero, "error", {
+      title: "The next run could not be read",
+      text: `${e.why}. The schedules are unchanged.`,
+    });
+    paneError = true;
+    setPaneState(panes, "error", {
+      title: "The schedules could not be read",
+      text: `${e.why}. Nothing was changed.`,
+    });
+    table.failed(e);
+    setHeat(heatEl, {
+      columns: hourColumns(),
+      rows: [],
+      state: "error",
+      message: "The schedules could not be read.",
+    });
+    setMatrix(matrixEl, {
+      rows: [],
+      columns: [],
+      state: "error",
+      message: "The schedules could not be read.",
+    });
+    setGanttState(ganttEl, "error", "The history could not be read.");
+  };
+
+  const hourColumns = () => {
+    const every = 3;
+    return Array.from({ length: 24 }, (_, hh) => ({
+      key: String(hh),
+      label: hh % every === 0 ? pad(hh) : "",
+    }));
+  };
+
+  const ctx = () => ({
+    zone: zone(),
+    nightly: typeof nightly === "number" ? nightly : null,
+    name: (/** @type {Schedule} */ s) => titleOf(s),
+  });
+
+  // ── drawing the data ──
+  /** @type {ScheduleView | null} */
+  let heroNext = null;
+  let heroTimer = 0;
+
+  const drawWeek = () => {
+    const all = list();
+    if (!all.length) {
+      setWeekEvents(weekEl, []);
+      setWeekState(weekEl, "empty", "No schedule has a run in this week.");
       return;
     }
-    drawLater = false;
-    paintZone();
+    setWeekEvents(
+      weekEl,
+      weekEvents(all, {
+        now: now(),
+        zone: zone(),
+        nightly: typeof nightly === "number" ? nightly : null,
+        label: actionLabel,
+        hostTarget: hostTarget(),
+      }),
+    );
+    setWeekState(weekEl, "ready");
+  };
+
+  const drawHero = () => {
+    window.clearTimeout(heroTimer);
     const all = list();
-    // The empty page says it in its own card; the demo shows no "0 · 0".
-    count.textContent = all.length ? countText(all) : "";
-    const focused = /** @type {HTMLElement | null} */ (
-      document.activeElement?.closest?.("tr[data-id]") ?? null
-    )?.dataset.id;
-    show(all.length ? filled(all) : empty());
-    if (focused)
-      /** @type {HTMLElement | null} */ (
-        root.querySelector(`tr[data-id="${CSS.escape(focused)}"]`)
-      )?.focus({ preventScroll: true });
-  };
-
-  // ── the empty page ──
-  const empty = () => {
-    const round =
-      typeof nightly === "number"
-        ? `Nothing runs on its own apart from the host's nightly round at ${pad(nightly)}:00.`
-        : "Nothing runs on its own yet.";
-    return [
-      card({
-        title: "No schedules yet",
-        desc: `${round} Start from one of these, or make your own with New schedule.`,
-        body: h(
-          "div",
-          { class: "sch-templates" },
-          TEMPLATES.map((t) =>
-            drivable(
-              h(
-                "button",
-                {
-                  type: "button",
-                  class: "sch-tpl",
-                  "data-template": t.id,
-                  onclick: () => void openDrawer(null, t),
-                },
-                h("b", null, t.title),
-                h("span", null, t.says),
-              ),
-              SCHEDULE_TEMPLATE,
-              t.id,
-            ),
-          ),
-        ),
-      }),
-    ];
-  };
-
-  // ── the filled page ──
-  const filled = (/** @type {ScheduleView[]} */ all) => {
-    const z = zone();
-    const t = now();
     const next = nextUp(all);
-    /** @type {Map<string, string>} */
-    const colour = new Map(
-      all.map((v, i) => [v.schedule.id, COLOURS[i % COLOURS.length]]),
-    );
-    return [
-      hero(next, z, t),
-      card({
-        title: "The next 7 days",
-        desc:
-          typeof nightly === "number"
-            ? "Every run on the calendar; the dashed blocks are the host's own nightly round, for reference."
-            : nightly === null
-              ? "Every run on the calendar; the host has no nightly round."
-              : "Every run on the calendar; the host's nightly round is not shown, its hour could not be read.",
-        body: [week(all, z, t, colour), agendaList(all, z, t)],
-        id: "sched-week",
-      }),
-      card({
-        title: "All schedules",
-        desc: "Turn one off with its switch; its slots are kept but nothing runs.",
-        body: h("div", { class: "sch-scroll" }, table(all, z, t)),
-        foot: "Times are the host's clock; a run that starts becomes a job on Activity.",
-        id: "sched-all",
-      }),
-      keyRow([
-        ["N", "new schedule"],
-        ["Space", "turn the focused schedule on or off"],
-        ["E", "edit it"],
-        ["Esc", "close the drawer or menu"],
-        ["click a header", "sort"],
-      ]),
-    ];
-  };
-
-  const hero = (
-    /** @type {ScheduleView | null} */ next,
-    /** @type {string} */ z,
-    /** @type {number} */ t,
-  ) => {
-    if (!next || next.next_run == null)
-      return card({
-        label: "Next run",
-        id: "sched-hero",
-        body: h(
-          "div",
-          { class: "sch-hero" },
-          h(
-            "div",
-            null,
-            h("div", { class: "sch-label" }, "Next run"),
-            h("div", { class: "sch-hero__when" }, "None"),
-          ),
-          h(
-            "div",
-            { class: "sch-hero__what" },
-            "Every schedule is off or has no further run.",
-          ),
-          h("span"),
-        ),
+    heroNext = next;
+    heroNote.textContent = "";
+    if (!next || next.next_run == null) {
+      setCardState(hero, "empty", {
+        title: "No run planned",
+        text: "Every schedule is off or has no further run. Turn one on in the table.",
       });
-    const s = next.schedule;
-    const at = next.next_run;
-    const runNow = h(
-      "button",
-      {
-        type: "button",
-        class: "kp-button kp-button--sm",
-        id: "sched-run-now",
-        title:
-          "Start this action now as a job; the schedule keeps its next slot",
-        onclick: () => void runNowFor(s),
-      },
-      "Run now",
-    );
-    drivable(runNow, RUN_NEXT);
-    const skip = h(
-      "button",
-      {
-        type: "button",
-        class: "kp-button kp-button--sm",
-        id: "sched-skip",
-        title: "Skip only this one run; the schedule stays on",
-        onclick: () => void skipRun(s, at),
-      },
-      "Skip this run",
-    );
-    drivable(skip, SKIP_NEXT);
-    return card({
-      label: "Next run",
-      id: "sched-hero",
-      body: h(
-        "div",
-        { class: "sch-hero" },
-        h(
-          "div",
-          null,
-          h("div", { class: "sch-label" }, "Next run"),
-          h("div", { class: "sch-hero__when" }, untilText(at, t)),
-        ),
-        h(
-          "div",
-          { class: "sch-hero__what" },
-          h("b", null, titleOf(s)),
-          `${dateTimeText(at, z)} · ${lowerFirst(cadenceText(s.when))}`,
-        ),
-        h("div", { class: "sch-btn-row" }, runNow, skip),
-      ),
-    });
-  };
-
-  const week = (
-    /** @type {ScheduleView[]} */ all,
-    /** @type {string} */ z,
-    /** @type {number} */ t,
-    /** @type {Map<string, string>} */ colour,
-  ) => {
-    const plan = weekPlan(
-      all,
-      t,
-      z,
-      typeof nightly === "number" ? nightly : null,
-      actionLabel,
-      hostTarget(),
-    );
-    const y = (/** @type {number} */ h) => (h / 24) * COL_PX;
-    const wrap = h("div", {
-      class: "sch-week",
-      role: "group",
-      "aria-label": "Runs in the next 7 days",
-    });
-    wrap.append(
-      h(
-        "div",
-        { class: "sch-week__head" },
-        h("div"),
-        plan.days.map((d) =>
-          h(
-            "div",
-            { class: `sch-week__day${d.today ? " today" : ""}` },
-            d.head,
-          ),
-        ),
-      ),
-      h(
-        "div",
-        { class: "sch-week__axis", "aria-hidden": "true" },
-        [0, 6, 12, 18, 24].map((hr) =>
-          h("span", { style: `top:${y(hr)}px` }, `${pad(hr)}:00`),
-        ),
-      ),
-    );
-    for (const d of plan.days) {
-      const col = h("div", {
-        class: `sch-week__col${d.today ? " today" : ""}`,
-      });
-      const tops = stackTops(
-        d.pills.map((p) => Math.max(10, y(p.hour))),
-        PILL_GAP,
-      );
-      d.pills.forEach((p, i) => {
-        const top = `top:${Math.min(tops[i], COL_PX - 10)}px`;
-        if (p.host) {
-          col.append(
-            h(
-              "div",
-              {
-                class: "sch-pill sch-pill--host",
-                style: top,
-                title: `The host's own nightly round at ${p.at} (backups, updates), for reference`,
-              },
-              h("b", null, p.at),
-              p.text,
-            ),
-          );
-          return;
-        }
-        const id = /** @type {string} */ (p.id);
-        const cls = [
-          "sch-pill",
-          colour.get(id) ?? "",
-          p.next ? "next" : "",
-          p.off ? "off" : "",
-          p.skipped ? "skipped" : "",
-        ]
-          .filter(Boolean)
-          .join(" ");
-        const state = p.off
-          ? " (off)"
-          : p.skipped
-            ? " (skipped)"
-            : p.next
-              ? " (next run)"
-              : "";
-        col.append(
-          drivable(
-            h(
-              "button",
-              {
-                type: "button",
-                class: cls,
-                style: top,
-                "data-id": id,
-                title: `${p.text} · ${dateTimeText(p.t, z)}${state}: click to find it in the list`,
-                onclick: () => flash(id),
-              },
-              h("b", null, p.at),
-              p.text,
-            ),
-            FIND_SCHEDULE,
-            id,
-          ),
-        );
-      });
-      if (d.today)
-        col.append(
-          h("div", {
-            class: "sch-nowline",
-            style: `top:${y(plan.nowHour)}px`,
-            title: `now, ${timeText(t, z)}`,
-          }),
-        );
-      wrap.append(col);
+      return;
     }
-    return wrap;
-  };
-
-  const agendaList = (
-    /** @type {ScheduleView[]} */ all,
-    /** @type {string} */ z,
-    /** @type {number} */ t,
-  ) => {
-    const rows = agenda(all, t, z, actionLabel, 8, hostTarget());
-    return h(
-      "div",
-      { class: "sch-agenda", "aria-label": "The next runs" },
-      rows.length
-        ? rows.map((r) =>
-            h("div", { "data-id": r.id }, h("span", null, r.when), r.text),
-          )
-        : h("div", null, h("span", null, "—"), "No run in the next 7 days."),
+    setCardState(hero, "ready");
+    const s = next.schedule;
+    heroTitle.textContent = titleOf(s);
+    heroWhen.textContent = `${withWeekday(next.next_run, zone())} · ${cadenceWords(s.when)}`;
+    const clock = countdownOf(countdown);
+    const left = Math.round(next.next_run - now());
+    if (left > 0) {
+      clock?.reset(left);
+      clock?.start();
+    } else clock?.reset(1);
+    setRuns(
+      thenEl,
+      runsWithClash(
+        all.filter((v) => v !== next),
+        s.when,
+        next.next_run,
+        3,
+        ctx(),
+      ),
+      { reason: "This was the last run of the schedule." },
     );
   };
 
-  /** @type {[string, string, (v: ScheduleView) => string | number][]} */
-  const COLUMNS = [
-    ["on", "On", (v) => (v.schedule.enabled ? 0 : 1)],
-    ["what", "What", (v) => titleOf(v.schedule).toLowerCase()],
-    ["when", "When", (v) => cadenceText(v.schedule.when)],
-    ["next", "Next run", (v) => v.next_run ?? Number.MAX_SAFE_INTEGER],
-    [
-      "last",
-      "Last run",
-      (v) =>
-        Math.max(
-          v.schedule.last_run?.slot ?? 0,
-          v.schedule.last_missed?.slot ?? 0,
-        ),
-    ],
-    ["note", "Note", (v) => v.schedule.note.toLowerCase()],
-  ];
-
-  const table = (
-    /** @type {ScheduleView[]} */ all,
-    /** @type {string} */ z,
-    /** @type {number} */ t,
-  ) => {
-    const col = COLUMNS.find((c) => c[0] === sort.key);
-    const rows = col
-      ? [...all].sort((a, b) => {
-          const x = col[2](a);
-          const y = col[2](b);
-          return (x < y ? -1 : x > y ? 1 : 0) * sort.dir;
-        })
-      : all;
-    const head = h(
-      "tr",
-      null,
-      COLUMNS.map(([key, label]) => {
-        const b = drivable(
-          h(
-            "button",
-            {
-              type: "button",
-              class: "sch-sort",
-              title: `Sort by ${label.toLowerCase()}`,
-              onclick: () => {
-                sort =
-                  sort.key === key
-                    ? { key, dir: sort.dir === 1 ? -1 : 1 }
-                    : { key, dir: 1 };
-                saveSort(sort);
-                render();
-              },
-            },
-            label,
-          ),
-          SORT_SCHEDULES,
-          key,
-        );
-        return h(
-          "th",
-          {
-            class: key === "last" || key === "note" ? "sch-hide-phone" : null,
-            "aria-sort":
-              sort.key === key
-                ? sort.dir === 1
-                  ? "ascending"
-                  : "descending"
-                : null,
-          },
-          b,
-        );
-      }),
-      h("th", null, h("span", { class: "nx-vh" }, "Actions")),
-    );
-    return h(
-      "table",
-      { class: "sch-table" },
-      h("thead", null, head),
+  /** Where the pane list's rows are drawn from. */
+  const drawPaneList = () => {
+    const all = list();
+    paneList.replaceChildren(
       h(
-        "tbody",
-        null,
-        rows.map((v) => row(v, z, t)),
+        "li",
+        { role: "option", "data-kp-pane-key": NEW_KEY },
+        h(
+          "span",
+          { class: "sch-pane__what" },
+          h("b", null, "New schedule"),
+          h("small", null, "Pick an action, a stack and when it runs"),
+        ),
+      ),
+      ...all.map((v) =>
+        h(
+          "li",
+          { role: "option", "data-kp-pane-key": v.schedule.id },
+          h(
+            "span",
+            { class: "sch-pane__what" },
+            h("b", null, titleOf(v.schedule)),
+            h(
+              "small",
+              null,
+              `${cadenceWords(v.schedule.when)}${v.schedule.enabled ? "" : " · off"}`,
+            ),
+          ),
+        ),
       ),
     );
+    if (formKey) handle?.select(formKey);
   };
 
-  const row = (
-    /** @type {ScheduleView} */ v,
-    /** @type {string} */ z,
-    /** @type {number} */ t,
-  ) => {
+  /** @param {ScheduleView} v */
+  const argSummary = (v) => {
+    const a = v.schedule.args ?? {};
+    const x = a.commit ?? a.app ?? a.unit ?? a.tag;
+    return typeof x === "string" ? x : "";
+  };
+
+  /** @param {ScheduleView} v */
+  const rowEl = (v) => {
     const s = v.schedule;
+    const t = titleOf(s);
+    const act_ = actionLabel(s.action);
+    const next = s.enabled && v.next_run != null ? v.next_run : null;
+    const nextText = !s.enabled
+      ? "off"
+      : next == null
+        ? "no further run"
+        : dateTimeText(next, zone());
     const sw = h("input", {
       class: "kp-switch__input",
       type: "checkbox",
       role: "switch",
-      "aria-label": `${titleOf(s)} on`,
+      "data-sch-switch": s.id,
       title: "On: runs at its times. Off: keeps the schedule, runs nothing.",
-      onchange: (/** @type {Event} */ e) =>
-        void setOn(s, /** @type {HTMLInputElement} */ (e.target).checked),
     });
     sw.checked = s.enabled;
     drivable(sw, TOGGLE_SCHEDULE, s.id);
-    const menuBtn = h(
-      "button",
-      {
-        type: "button",
-        class: "nx-icon-btn",
-        "aria-label": `Edit, run now or delete ${titleOf(s)}`,
-        "aria-haspopup": "menu",
-        title: "Edit · Run now · Delete",
-        onclick: (/** @type {MouseEvent} */ e) =>
-          openMenu(/** @type {HTMLElement} */ (e.currentTarget), s),
-      },
-      "···",
+    const arg = argSummary(v);
+    const strip = h("div", {
+      class: "kp-uptime sch-strip",
+      "data-kp-uptime": "",
+      "data-kp-uptime-count": "14",
+      "data-kp-uptime-label": "",
+      "data-sch-strip": s.id,
+    });
+    const btn = (
+      /** @type {string} */ role,
+      /** @type {string} */ text,
+      /** @type {string} */ title,
+      /** @type {string} */ extra,
+    ) =>
+      h(
+        "button",
+        {
+          type: "button",
+          class: `kp-button kp-button--sm${extra}`,
+          "data-kp-action": role,
+          "data-sch-act": role,
+          "data-sch-id": s.id,
+          title,
+        },
+        text,
+      );
+    const edit = drivable(
+      btn("edit", "Edit…", "Change what, where or when", ""),
+      EDIT_SCHEDULE,
+      s.id,
     );
-    drivable(menuBtn, SCHEDULE_MENU, s.id);
-    const last = lastRunView(v, z);
-    const arg = argSummary(s.args);
-    return h(
+    const run = drivable(
+      btn("run", "Run now", "Start it once as a job; its times stay", ""),
+      RUN_SCHEDULE,
+      s.id,
+    );
+    const del = drivable(
+      btn(
+        "delete",
+        "Delete",
+        "Remove it; jobs it ran stay on Activity; Undo for 6 s",
+        " kp-button--destructive",
+      ),
+      DELETE_SCHEDULE,
+      s.id,
+    );
+    const cell = (
+      /** @type {string} */ label,
+      /** @type {import("../dom.js").Child[]} */ ...kids
+    ) => h("td", { "data-label": label }, ...kids);
+    const tr = h(
       "tr",
-      { class: s.enabled ? null : "off", "data-id": s.id, tabindex: 0 },
-      h("td", null, h("label", { class: "kp-switch" }, sw)),
+      {
+        "data-kp-row-key": s.id,
+        "data-id": s.id,
+        class: s.enabled ? null : "off",
+        tabindex: 0,
+      },
       h(
         "td",
-        { class: "sch-what" },
-        h("b", null, actionLabel(s.action)),
+        { class: "select-col", "data-label": "" },
+        h("input", {
+          class: "kp-field__check",
+          type: "checkbox",
+          "data-kp-select-row": "",
+          "data-kp-label": t,
+          value: s.id,
+          "aria-label": `Select ${t}`,
+        }),
+      ),
+      h(
+        "td",
+        {
+          "data-label": "On",
+          "data-kp-filter-value": s.enabled ? "on" : "off",
+          "data-kp-sort-value": s.enabled ? 0 : 1,
+        },
         h(
-          "small",
-          null,
-          targetText(s.stack, hostTarget()),
-          arg ? h("span", { class: "mono" }, ` · ${arg}`) : null,
+          "label",
+          { class: "kp-switch" },
+          sw,
+          h("span", { class: "kp-switch__state", "aria-hidden": "true" }),
+          h("span", { class: "kp-sr-only" }, `${t} turned on`),
         ),
       ),
       h(
         "td",
-        null,
-        h(
-          "div",
-          { class: "sch-cadence" },
-          cadenceText(s.when),
-          s.when.every === "week"
-            ? h(
-                "span",
-                { class: "sch-days", "aria-hidden": "true" },
-                WEEKDAYS.map((d, i) =>
-                  h(
-                    "i",
-                    {
-                      class:
-                        s.when.every === "week" && s.when.days.includes(i)
-                          ? "on"
-                          : null,
-                    },
-                    d[0],
-                  ),
-                ),
-              )
-            : null,
+        {
+          "data-label": "What",
+          "data-kp-filter-value": act_,
+          "data-kp-sort-value": t.toLowerCase(),
+        },
+        h("b", null, act_),
+        ` · ${targetText(s.stack, hostTarget())}${arg ? ` · ${arg}` : ""}`,
+        s.note ? h("small", { class: "sch-note" }, s.note) : null,
+      ),
+      cell("When", cadenceWords(s.when)),
+      h(
+        "td",
+        {
+          class: "kp-numeric",
+          "data-label": "Next run",
+          "data-kp-sort-value": next ?? 9e15,
+        },
+        nextText,
+      ),
+      cell("Last 14", strip),
+      h(
+        "td",
+        { "data-label": "" },
+        h("div", { class: "kp-row-actions" }, edit, run, del),
+      ),
+    );
+    return tr;
+  };
+
+  const drawTable = () => {
+    const all = list();
+    const keep = dt()?.selected() ?? [];
+    const focused =
+      /** @type {HTMLElement | null} */ (document.activeElement)
+        ?.closest?.("tr[data-id]")
+        ?.getAttribute("data-id") ?? null;
+    const rows = all.map(rowEl);
+    patchKeyed(table.tbody, rows);
+    table.ready();
+    attachUptimes(table.tbody);
+    for (const v of all) {
+      const el = /** @type {HTMLElement | null} */ (
+        table.tbody.querySelector(
+          `[data-sch-strip="${CSS.escape(v.schedule.id)}"]`,
+        )
+      );
+      if (el)
+        setUptime(el, {
+          label: "",
+          periods: slotPeriods(v, act.jobs, { now: now(), zone: zone() }),
+          open: "info",
+        });
+    }
+    const ids = new Set(all.map((v) => v.schedule.id));
+    const still = keep.filter((k) => ids.has(k));
+    if (still.length) dt()?.select(still);
+    if (focused)
+      /** @type {HTMLElement | null} */ (
+        table.tbody.querySelector(`tr[data-id="${CSS.escape(focused)}"]`)
+      )?.focus({ preventScroll: true });
+  };
+
+  const drawTemplates = () => {
+    tiles.replaceChildren(
+      ...TEMPLATES.map((tpl) =>
+        drivable(
+          h(
+            "button",
+            {
+              type: "button",
+              class: ACTION_TILE.slice(1),
+              "data-template": tpl.id,
+              onclick: () => void openForm(NEW_KEY, { template: tpl }),
+            },
+            h("strong", { class: "kp-action__title" }, tpl.title),
+            h("span", { class: "kp-action__mark", "aria-hidden": "true" }),
+            h("span", { class: "kp-action__text" }, tpl.says),
+          ),
+          SCHEDULE_TEMPLATE,
+          tpl.id,
         ),
       ),
-      h(
-        "td",
-        null,
-        s.enabled && v.next_run != null
-          ? h(
-              "div",
-              { class: "sch-cadence" },
-              h("span", { class: "sch-num" }, untilText(v.next_run, t)),
-              h("small", null, dateTimeText(v.next_run, z)),
-            )
-          : h(
-              "span",
-              { class: "sch-muted" },
-              s.enabled ? "no further run" : "off",
-            ),
-      ),
-      h(
-        "td",
-        { class: "sch-hide-phone" },
-        last.tone === "none" && last.job == null
-          ? h("span", { class: "sch-muted" }, last.text)
-          : h(
-              "span",
-              { class: "sch-status" },
-              h("span", {
-                class: `sch-dot${last.tone === "none" ? "" : ` sch-dot--${last.tone}`}`,
-              }),
-              last.job == null ? last.text : `${last.text} · `,
-              last.job == null
-                ? null
-                : h(
-                    "a",
-                    { class: "sch-link", href: `/jobs?job=${last.job}` },
-                    `job ${last.job}`,
-                  ),
-            ),
-      ),
-      h("td", { class: "sch-hide-phone sch-muted" }, s.note || "—"),
-      h("td", null, menuBtn),
     );
   };
 
-  // ── actions ──
+  const drawBusy = () => {
+    const all = list();
+    const { grid, clashes } = busyModel(all, { now: now(), ...ctx() });
+    const columns = hourColumns();
+    if (!all.length) {
+      setHeat(heatEl, {
+        columns,
+        rows: [],
+        state: "empty",
+        message: "No schedules yet, so nothing starts.",
+      });
+    } else {
+      const per = Array.from({ length: 24 }, (_, hh) =>
+        grid.reduce((sum, day) => sum + day[hh].length, 0),
+      );
+      const most = Math.max(1, ...per);
+      setHeat(heatEl, {
+        label: "Schedule starts by weekday and hour",
+        every: 3,
+        columns,
+        rows: grid.map((day, wd) => ({
+          key: WEEKDAYS[wd],
+          label: WEEKDAYS[wd],
+          cells: day.map((cell, hh) => {
+            const where = `${WEEKDAYS[wd]} ${pad(hh)}:00 to ${pad(hh)}:59`;
+            const names = cell.map(
+              (x) =>
+                `${x.v ? titleOf(x.v.schedule) : "Host's nightly round"} ${timeOf(x.at)}`,
+            );
+            const same = clashes.some(
+              (c) => c.days.includes(wd) && c.time.startsWith(pad(hh)),
+            );
+            if (!cell.length)
+              return {
+                tone: /** @type {const} */ ("none"),
+                label: `${where}: nothing starts`,
+              };
+            if (same)
+              return {
+                tone: /** @type {const} */ ("bad"),
+                label: `${where}: ${cell.length} starts, two in the same minute`,
+                tip: names.join("\n"),
+              };
+            if (cell.length > 1)
+              return {
+                tone: /** @type {const} */ ("warn"),
+                label: `${where}: ${cell.length} starts in the same hour`,
+                tip: names.join("\n"),
+              };
+            return {
+              tone: /** @type {const} */ ("ok"),
+              label: `${where}: 1 start`,
+              tip: names.join("\n"),
+            };
+          }),
+        })),
+        summary: {
+          key: "all",
+          label: "Starts",
+          cells: per.map((n, hh) => ({
+            tone: /** @type {const} */ ("ok"),
+            share: n / most,
+            label: `${pad(hh)}:00: ${n} ${n === 1 ? "start" : "starts"} in the week`,
+          })),
+        },
+      });
+    }
+    clashList.setAttribute(
+      "aria-label",
+      `${clashes.length} ${clashes.length === 1 ? "clash" : "clashes"}`,
+    );
+    clashList.replaceChildren(
+      ...(clashes.length
+        ? clashes.map((c) => {
+            const mv = c.move;
+            const to = mv ? movedTime(mv.schedule.when.at) : null;
+            const b = mv
+              ? drivable(
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      class: "kp-button kp-button--sm",
+                      onclick: () => void moveSchedule(mv),
+                    },
+                    `Move ${titleOf(mv.schedule)} 15 minutes ${to?.later === false ? "earlier" : "later"}`,
+                  ),
+                  MOVE_CLASH,
+                  mv.schedule.id,
+                )
+              : null;
+            return h(
+              "li",
+              { class: "kp-formgrid__row" },
+              h("span", { class: "kp-formgrid__label" }, clashWhen(c)),
+              h(
+                "span",
+                { class: "kp-formgrid__control" },
+                h("b", null, c.a),
+                " and ",
+                h("b", null, c.b),
+              ),
+              h("span", { class: "kp-formgrid__actions" }, b),
+            );
+          })
+        : [
+            h(
+              "li",
+              { class: "kp-formgrid__row" },
+              h("span", { class: "kp-formgrid__label" }, "No clashes"),
+              h(
+                "span",
+                { class: "kp-formgrid__control" },
+                "Nothing starts in the same minute as anything else.",
+              ),
+              h("span", { class: "kp-formgrid__actions" }),
+            ),
+          ]),
+    );
+  };
+  /** @param {number} at */
+  const timeOf = (at) => dateTimeText(at, zone()).slice(11);
+
+  const drawCoverage = () => {
+    const all = list();
+    const cov = coverageModel(all, stackNames() ?? [], hostTarget());
+    const stacks = onlyGaps.checked ? cov.gaps : cov.rows;
+    const n = cov.gaps.length;
+    coverSummary.textContent = cov.rows.length
+      ? `${n} ${n === 1 ? "stack has" : "stacks have"} no backup schedule${n ? `: ${cov.gaps.join(", ")}` : ""}.`
+      : "";
+    const columns = COVERAGE.map((c) => ({ key: c.key, label: c.label }));
+    if (!cov.rows.length) {
+      setMatrix(matrixEl, {
+        rows: [],
+        columns: [],
+        state: "empty",
+        message: "No stacks known to the host.",
+      });
+      return;
+    }
+    setMatrix(matrixEl, {
+      corner: "Stack ↓ Action →",
+      view: "grid",
+      rows: stacks.map((s) => ({
+        key: s,
+        label: s,
+        tone: /** @type {"muted" | "bad"} */ (
+          cov.has(s, "backup") ? "muted" : "bad"
+        ),
+      })),
+      columns,
+      cell: (row, column) => {
+        const s = cov.has(row, column);
+        const colLabel =
+          COVERAGE.find((c) => c.key === column)?.label ?? column;
+        if (s)
+          return {
+            tone: "ok",
+            text: shortWhen(s.when),
+            label: `${row}: ${colLabel}, ${cadenceWords(s.when)}`,
+          };
+        if (column === "backup")
+          return {
+            tone: "bad",
+            text: "No backup schedule",
+            label: `${row} has no backup schedule`,
+          };
+        return {
+          tone: "none",
+          label: `${row}: no ${colLabel.toLowerCase()} schedule`,
+        };
+      },
+    });
+  };
+
+  /** The jobs the schedules started: the history and the strips follow them. */
+  const drawHistory = () => {
+    const m = historyModel(list(), act.jobs, {
+      now: now(),
+      zone: zone(),
+      label: actionLabel,
+      hostTarget: hostTarget(),
+    });
+    if (!m.lanes.length) {
+      setGanttRuns(ganttEl, [], []);
+      setGanttState(ganttEl, "empty", "Nothing has run in this window.");
+      historyCard.setFoot([]);
+      return;
+    }
+    setGanttRuns(ganttEl, m.runs, m.lanes);
+    setGanttPoints(ganttEl, m.points, m.lanes);
+    setGanttState(ganttEl, "ready");
+    historyCard.setFoot(
+      m.hidden > 0
+        ? [
+            `Showing the ${HISTORY_LANES} schedules with the most runs in the last 7 days; ${m.hidden} more ${m.hidden === 1 ? "has" : "have"} runs too.`,
+          ]
+        : [],
+    );
+  };
+
+  // ── what a person does ──
+  /** The row of a schedule in the table, found, marked and focused. @param {string} id */
+  const flash = (id) => {
+    const tr = /** @type {HTMLElement | null} */ (
+      table.tbody.querySelector(`tr[data-id="${CSS.escape(id)}"]`)
+    );
+    if (!tr) return;
+    tr.scrollIntoView({ block: "center", behavior: "smooth" });
+    tr.classList.add("sch-flash");
+    tr.focus({ preventScroll: true });
+    setTimeout(() => tr.classList.remove("sch-flash"), 1400);
+  };
+
+  /** @param {Schedule} s */
+  const bodyOf = (s) => ({
+    stack: s.stack,
+    action: s.action,
+    args: s.args,
+    when: s.when,
+    enabled: s.enabled,
+    note: (s.note ?? "").trim(),
+  });
+
   /** @param {Schedule} s @param {boolean} on @param {boolean} [quiet] */
   const setOn = async (s, on, quiet = false) => {
     paintOn(s.id, on);
@@ -891,30 +1308,37 @@ export function mount(root, opts = {}) {
     if (!r.ok) {
       paintOn(s.id, !on);
       say(`Not saved: ${r.error.why}`);
-      return;
+      return false;
     }
     const view = /** @type {ScheduleView} */ (r.body);
-    if (!quiet)
-      say(
+    if (!quiet) {
+      const t = undoToast(
         on
           ? `${titleOf(s)} is on again: next run ${view.next_run == null ? "none" : dateTimeText(view.next_run, zone())}.`
           : `${titleOf(s)} is off. Its slots are kept; nothing runs until you turn it on.`,
-        () => void setOn({ ...s, enabled: on }, !on, true),
+        {
+          region: toastRegion(root),
+          ms: UNDO_MS,
+          mode: "revert",
+          clock: "ring",
+          key: "Mod+Z",
+          undo: () => void setOn({ ...s, enabled: on }, !on, true),
+        },
       );
+      driveUndo(t);
+    }
     void loadSchedules();
+    return true;
   };
 
-  /** The row and its pills show `on` at once, before the host answers. */
+  /** The row and its pill show `on` at once, before the host answers. */
   const paintOn = (/** @type {string} */ id, /** @type {boolean} */ on) => {
-    const tr = root.querySelector(`tr[data-id="${CSS.escape(id)}"]`);
+    const tr = table.tbody.querySelector(`tr[data-id="${CSS.escape(id)}"]`);
     tr?.classList.toggle("off", !on);
     const input = /** @type {HTMLInputElement | null} */ (
       tr?.querySelector('input[role="switch"]') ?? null
     );
     if (input) input.checked = on;
-    root
-      .querySelectorAll(`.sch-pill[data-id="${CSS.escape(id)}"]`)
-      .forEach((p) => p.classList.toggle("off", !on));
     const all = list().map((v) =>
       v.schedule.id === id
         ? { ...v, schedule: { ...v.schedule, enabled: on } }
@@ -924,7 +1348,7 @@ export function mount(root, opts = {}) {
   };
 
   /** @param {Schedule} s */
-  const runNowFor = async (s) => {
+  const runNowFor = async (s, note = false) => {
     const r = await send(
       "POST",
       `/data/actions/${encodeURIComponent(s.stack)}/${encodeURIComponent(s.action)}`,
@@ -935,7 +1359,9 @@ export function mount(root, opts = {}) {
       say(`Not started: ${r.error.why}`);
       return;
     }
-    say(`${titleOf(s)} started as job ${r.body?.job}. Follow it on Activity.`);
+    const text = `${titleOf(s)} started as job ${r.body?.job}. Follow it on Activity.`;
+    if (note) heroNote.textContent = text;
+    else say(text);
   };
 
   /** @param {Schedule} s @param {number} slot */
@@ -951,500 +1377,282 @@ export function mount(root, opts = {}) {
       void loadSchedules();
       return;
     }
-    const z = zone();
     const next = /** @type {ScheduleView} */ (r.body).next_run;
-    say(
-      `The ${timeText(slot, z)} run is skipped; ${next == null ? "there is no next one" : `the next one is ${dayWord(next, z)}`}.`,
+    heroNote.textContent = `Skipped ${withWeekday(slot, zone())}. Only this run: ${titleOf(s)} stays on${
+      next == null
+        ? "; there is no next one."
+        : `; the next one is ${withWeekday(next, zone())}.`
+    }`;
+    void loadSchedules();
+  };
+
+  /** @param {ScheduleView} v moved 15 minutes, so two schedules stop starting together */
+  const moveSchedule = async (v) => {
+    const s = v.schedule;
+    const to = movedTime(s.when.at);
+    const r = await send(
+      "PUT",
+      `/data/schedules/${encodeURIComponent(s.id)}`,
+      { ...bodyOf(s), when: { ...s.when, at: to.at } },
+      "the schedule",
     );
+    if (!r.ok) {
+      say(`Not moved: ${r.error.why}`);
+      return;
+    }
+    say(`${titleOf(s)} now starts at ${to.at}.`);
     void loadSchedules();
   };
 
   /** @param {Schedule} s */
   const remove = (s) => {
-    const prior = pendingDeletes.get(s.id);
-    if (prior) clearTimeout(prior);
-    pendingDeletes.set(
-      s.id,
-      setTimeout(() => void commitDelete(s.id), UNDO_MS),
-    );
+    removed.add(s.id);
     render();
-    say(`${titleOf(s)} deleted.`, () => {
-      const timer = pendingDeletes.get(s.id);
-      if (timer) clearTimeout(timer);
-      pendingDeletes.delete(s.id);
-      render();
+    const t = undoToast(`${titleOf(s)} deleted`, {
+      region: toastRegion(root),
+      ms: UNDO_MS,
+      clock: "ring",
+      key: "Mod+Z",
+      leave: "commit",
+      commit: async () => {
+        const r = await send(
+          "DELETE",
+          `/data/schedules/${encodeURIComponent(s.id)}`,
+          undefined,
+          "the schedule",
+        );
+        removed.delete(s.id);
+        if (!r.ok) throw new Error(r.error.why);
+        void loadSchedules();
+      },
+      undo: () => {
+        removed.delete(s.id);
+        render();
+      },
+      restore: () => {
+        removed.delete(s.id);
+        render();
+      },
+    });
+    driveUndo(t);
+    if (formKey === s.id) closeForm();
+  };
+
+  // ── the form in the detail pane ──
+  let paneError = false;
+  /** @type {string | null} */
+  let formKey = null;
+  /** @type {ReturnType<typeof buildScheduleForm> | null} */
+  let form = null;
+
+  const closeForm = () => {
+    form?.destroy();
+    form = null;
+    formKey = null;
+    paneBody.replaceChildren();
+    paneHeading.textContent = "";
+    handle?.select(null);
+    handle?.close();
+    setPaneState(panes, "empty", {
+      title: "Pick a schedule",
+      text: "Choose one in the list to change it, or start a new one.",
     });
   };
 
-  const commitDelete = async (/** @type {string} */ id) => {
-    const timer = pendingDeletes.get(id);
-    if (timer) clearTimeout(timer);
-    const r = await send(
-      "DELETE",
-      `/data/schedules/${encodeURIComponent(id)}`,
-      undefined,
-      "the schedule",
-    );
-    pendingDeletes.delete(id);
-    if (!r.ok && alive) say(`Not deleted: ${r.error.why}`);
-    void loadSchedules();
-  };
-
-  const flash = (/** @type {string} */ id) => {
-    const tr = /** @type {HTMLElement | null} */ (
-      root.querySelector(`tr[data-id="${CSS.escape(id)}"]`)
-    );
-    if (!tr) return;
-    tr.scrollIntoView({ block: "center", behavior: "smooth" });
-    tr.classList.add("sch-flash");
-    tr.focus({ preventScroll: true });
-    setTimeout(() => tr.classList.remove("sch-flash"), 1400);
-  };
-
-  // ── the row menu: a non-modal dialog, so Live view can press its items ──
-  /** @type {ReturnType<typeof rowMenu> | null} */
-  let menu = null;
-  const closeMenu = () => {
-    menu?.close();
-    menu = null;
-  };
-  /** @param {HTMLElement} btn @param {Schedule} s */
-  const openMenu = (btn, s) => {
-    menu = rowMenu({
-      anchor: btn,
-      label: `${titleOf(s)}: edit, run now or delete`,
-      title: titleOf(s),
-      items: [
-        {
-          name: "edit",
-          label: "Edit…",
-          hint: "change what, where or when",
-          run: () => void openDrawer(s, null),
-        },
-        {
-          name: "run-now",
-          label: "Run now",
-          hint: "start it once as a job; its times stay",
-          run: () => void runNowFor(s),
-        },
-        {
-          name: "delete",
-          label: "Delete",
-          hint: "remove it; jobs it ran stay on Activity; Undo for 6 s",
-          run: () => remove(s),
-          danger: true,
-        },
-      ],
+  /** @param {HTMLElement} anchor @param {() => void} then */
+  const askLose = (anchor, then) => {
+    const n = form?.dirty() ?? 0;
+    if (!n) return then();
+    openConfirmation(anchor, {
+      phrase: `Leave this form and lose ${n} ${n === 1 ? "change" : "changes"}?`,
+      onAccept: then,
+      initialFocus: "cancel",
     });
   };
 
-  // ── the New / Edit drawer ──
-  const ctx = () => ({
-    stacks: (current().fleet?.stacks ?? []).map((x) => x.name),
-    hostTarget: hostTarget(),
-    now: now(),
-    zone: zone(),
-  });
-
-  /** @param {Schedule | null} existing @param {Template | null} template */
-  const openDrawer = async (existing, template) => {
-    document
-      .querySelectorAll("dialog.sch-drawer")
-      .forEach((d) => /** @type {HTMLDialogElement} */ (d).close());
-    closeMenu();
+  /**
+   * @param {string} key a schedule id, or NEW_KEY
+   * @param {{template?: Template, stack?: string, action?: string}} [preset]
+   */
+  const openForm = async (key, preset = {}) => {
     const catalog = await catalogReady();
     if (!catalog || !alive) return;
-    const c = ctx();
-    const d = draftFor(existing, template, c);
-    const actions = schedulableActions(catalog);
-    const stackActions = actions.filter((a) => a.target === "stack");
-    const hostActions = actions.filter((a) => a.target === "host");
-    if (!actions.some((a) => a.action === d.action) && actions[0]) {
-      d.action = actions[0].action;
-      d.stack = actions[0].target === "host" ? c.hostTarget : d.stack;
-    }
-
-    const actionSel = h(
-      "select",
-      { id: SCHED_ACTION, "aria-label": "Action" },
-      [...stackActions, ...hostActions].map((a) =>
-        h("option", { value: a.action }, a.label),
-      ),
-    );
-    actionSel.value = d.action;
-    const stackSel = h("select", { id: SCHED_STACK, "aria-label": "On" });
-    const everySel = h(
-      "select",
-      { id: SCHED_EVERY, "aria-label": "How often" },
-      Object.entries(EVERY_WORDS).map(([v, w]) => h("option", { value: v }, w)),
-    );
-    everySel.value = d.every;
-    // kp's date picker: the text shows dd/mm/yyyy (rule 52), the ISO date
-    // the server is sent is `dataset.kpDateValue`. Live view fills the text
-    // box by its id; the picker reads an ISO date there as well.
-    const date = h("input", {
-      type: "text",
-      id: SCHED_DATE,
-      inputmode: "numeric",
-      autocomplete: "off",
-      "aria-label": "On the date",
-      "data-kp-date-input": "",
-    });
-    const datePick = h(
-      "span",
-      { class: "kp-datepicker", "data-kp-datepicker": "" },
-      date,
-      h(
-        "button",
-        {
-          type: "button",
-          class: "kp-button kp-button--sm",
-          "aria-label": "Open the calendar",
-          "data-kp-date-open": "",
+    const go = () => {
+      const existing = key === NEW_KEY ? null : (viewOf(key)?.schedule ?? null);
+      if (key !== NEW_KEY && !existing) return;
+      const d = draftFor(existing, preset.template ?? null, {
+        stacks: stackNames() ?? [],
+        hostTarget: hostTarget(),
+        now: now(),
+        zone: zone(),
+        nightly: typeof nightly === "number" ? nightly : null,
+      });
+      if (preset.action) d.action = preset.action;
+      if (preset.stack) d.stack = preset.stack;
+      form?.destroy();
+      formKey = key;
+      paneHeading.textContent = existing ? titleOf(existing) : "New schedule";
+      paneBody.replaceChildren();
+      setPaneState(panes, "ready");
+      form = buildScheduleForm(paneBody, {
+        title: existing
+          ? `Edit schedule: ${titleOf(existing)}`
+          : "New schedule",
+        draft: d,
+        id: existing?.id ?? null,
+        actions: schedulableActions(catalog),
+        stacks: stackNames,
+        others: list,
+        hostTarget: hostTarget(),
+        zone: zone(),
+        nightly: typeof nightly === "number" ? nightly : null,
+        label: actionLabel,
+        now,
+        appsOf: (stack) =>
+          current()
+            .fleet?.stacks.find((x) => x.name === stack)
+            ?.apps?.map((a) => a.name) ?? [],
+        save: async (b) => {
+          const r = existing
+            ? await send(
+                "PUT",
+                `/data/schedules/${encodeURIComponent(existing.id)}`,
+                b.body,
+                "the schedule",
+              )
+            : await send("POST", "/data/schedules", b.body, "the schedule");
+          if (!r.ok) return { ok: false, why: r.error.why };
+          const id = /** @type {ScheduleView} */ (r.body)?.schedule?.id;
+          await loadSchedules();
+          if (!existing && id) void openForm(id);
+          say(existing ? "Schedule saved." : "Schedule added.");
+          return { ok: true };
         },
-        "📅",
-      ),
-      h("div", {
-        class: "kp-datepicker__panel",
-        "data-kp-date-panel": "",
-        hidden: "",
-      }),
-    );
-    attachDatePickers(datePick);
-    if (d.date) datePicker(datePick)?.set(d.date);
-    const at = h("input", {
-      type: "time",
-      id: SCHED_AT,
-      "aria-label": "At",
-    });
-    at.value = d.at;
-    const dateBit = h("span", null, " on ", datePick);
-    const sentence = h(
-      "p",
-      { class: "sch-sentence" },
-      "Run ",
-      actionSel,
-      " on ",
-      stackSel,
-      " ",
-      everySel,
-      dateBit,
-      " at ",
-      at,
-    );
-    const days = new Set(d.days.length ? d.days : [1, 4]);
-    const dayBox = h("span", { class: "sch-daypick" });
-    const daysWhy = h("span", { class: "sch-field__why", role: "alert" });
-    const daysField = h(
-      "div",
-      { class: "sch-field" },
-      h("span", { class: "sch-field__label" }, "Weekdays"),
-      dayBox,
-      daysWhy,
-    );
-    const argBox = h("div", { class: "sch-field" });
-    /** @type {Map<string, HTMLInputElement | HTMLSelectElement>} */
-    let argInputs = new Map();
-    const hour = typeof nightly === "number" ? nightly : null;
-    const near = h(
-      "div",
-      { class: "sch-alert", id: "sched-near", role: "status" },
-      h("span", { class: "sch-alert__icon", "aria-hidden": "true" }, "!"),
-      h(
-        "div",
-        null,
-        h("div", { class: "sch-alert__t" }, "Close to the nightly round"),
-        h(
-          "div",
-          { class: "sch-alert__d" },
-          hour == null
-            ? ""
-            : `This is within an hour of the host's nightly round at ${pad(hour)}:00; a long run may still be busy when the round starts, and the round then waits. ${pad((hour + 1) % 24)}:00 or later avoids that.`,
-        ),
-      ),
-    );
-    const preview = h("div", {
-      class: "sch-preview",
-      "aria-live": "polite",
-    });
-    const note = h("input", {
-      id: SCHED_NOTE,
-      type: "text",
-      maxlength: 200,
-      placeholder: "Why this runs; shown in the list",
-    });
-    note.value = d.note;
-    const formErr = h("div");
-
-    const fillStacks = () => {
-      const entry = actions.find((a) => a.action === actionSel.value);
-      const host = entry?.target === "host";
-      const names = host
-        ? [c.hostTarget]
-        : [
-            ...new Set([
-              ...c.stacks,
-              ...(existing && existing.stack !== c.hostTarget
-                ? [existing.stack]
-                : []),
-            ]),
-          ];
-      const keep = stackSel.value || d.stack;
-      stackSel.replaceChildren(
-        ...names.map((n) =>
-          h("option", { value: n }, n === c.hostTarget ? "the whole host" : n),
-        ),
-      );
-      if (names.includes(keep)) stackSel.value = keep;
-      fillArgs();
+        onClose: closeForm,
+        onSaved: () => {},
+      });
+      handle?.select(key);
+      handle?.open(key);
+      form.focus();
+      editCard.el.scrollIntoView({ block: "nearest", behavior: "smooth" });
     };
-    const fillArgs = () => {
-      const entry = actions.find((a) => a.action === actionSel.value);
-      argInputs = new Map();
-      const fields = entry ? scheduleArgFields(entry, stackSel.value) : [];
-      const apps =
-        current()
-          .fleet?.stacks.find((x) => x.name === stackSel.value)
-          ?.apps?.map((a) => a.name) ?? [];
-      argBox.hidden = fields.length === 0;
-      argBox.replaceChildren(
-        h("span", { class: "sch-field__label" }, "Options"),
-        ...fields.map((f) => {
-          const prev =
-            existing?.action === entry?.action ? d.args[f.name] : undefined;
-          const x = fieldEl(
-            f,
-            f.kind === "check"
-              ? prev === true
-              : typeof prev === "string"
-                ? prev
-                : "",
-            f.source === "apps"
-              ? [
-                  { value: "", label: f.empty ?? "Every app" },
-                  ...apps.map((a) => ({ value: a, label: a })),
-                ]
-              : [],
-          );
-          argInputs.set(f.name, x.input);
-          return x.wrap;
-        }),
-      );
-    };
-    const repaint = () => {
-      const every = everySel.value;
-      daysField.hidden = every !== "week";
-      dateBit.hidden = every !== "once";
-      dayBox.replaceChildren(
-        ...WEEKDAYS.map((name, i) =>
-          dialogControl(
-            h(
-              "button",
-              {
-                type: "button",
-                "aria-pressed": String(days.has(i)),
-                title: `Run on ${name}`,
-                onclick: () => {
-                  if (days.has(i)) days.delete(i);
-                  else days.add(i);
-                  repaint();
-                },
-              },
-              name,
-            ),
-            `day-${name.toLowerCase()}`,
-          ),
-        ),
-      );
-      daysWhy.textContent = "";
-      near.hidden = !nearNightly(at.value, hour);
-      const when = whenOf();
-      const z = zone();
-      const runs = when ? nextRuns(when, now(), 3, z) : [];
-      preview.replaceChildren(
-        h("h3", null, "It will run"),
-        ...(runs.length
-          ? runs.map((t) =>
-              h(
-                "div",
-                { "data-slot": t },
-                dateTimeText(t, z),
-                h("span", null, untilText(t, now())),
-              ),
-            )
-          : [
-              h(
-                "p",
-                null,
-                every === "week" && days.size === 0
-                  ? "Pick at least one weekday."
-                  : every === "once"
-                    ? "Pick a date and time still to come."
-                    : "Pick a time.",
-              ),
-            ]),
-      );
-    };
-    /** @returns {import("../schedules.js").When | null} */
-    const whenOf = () => {
-      const b = draftBody(draft());
-      return b.ok ? b.body.when : null;
-    };
-    /** @returns {Draft} */
-    const draft = () => {
-      /** @type {Record<string, unknown>} */
-      const args = {};
-      for (const [name, input] of argInputs) {
-        if (input instanceof HTMLInputElement && input.type === "checkbox") {
-          if (input.checked) args[name] = true;
-        } else if (input.value.trim()) args[name] = input.value.trim();
-      }
-      return {
-        action: actionSel.value,
-        stack: stackSel.value,
-        every: everySel.value,
-        days: [...days].sort(),
-        at: at.value,
-        date: date.dataset.kpDateValue ?? "",
-        note: note.value,
-        enabled: d.enabled,
-        args,
-      };
-    };
-
-    actionSel.addEventListener("change", () => {
-      fillStacks();
-      repaint();
-    });
-    stackSel.addEventListener("change", fillArgs);
-    everySel.addEventListener("change", repaint);
-    at.addEventListener("input", repaint);
-    at.addEventListener("change", repaint);
-    // Fired for a typed date, a chosen one and one Live view fills in.
-    datePick.addEventListener(DATE_EVENT, repaint);
-    fillStacks();
-    repaint();
-
-    const cancel = dialogControl(
-      h(
-        "button",
-        {
-          type: "button",
-          class: "kp-button",
-          onclick: () => dlg.close(),
-        },
-        "Cancel",
-      ),
-      "cancel",
-    );
-    const save = dialogControl(
-      h(
-        "button",
-        {
-          type: "button",
-          class: "kp-button kp-button--primary",
-          title: existing
-            ? "Save the changes; a changed time starts from now"
-            : "Add the schedule; it runs at the times previewed above",
-        },
-        existing ? "Save" : "Add schedule",
-      ),
-      "save",
-    );
-    const title = existing ? "Edit schedule" : "New schedule";
-    const dlg = h(
-      "dialog",
-      { class: "sch-drawer", "aria-labelledby": "sched-drawer-title" },
-      h(
-        "div",
-        { class: "sch-drawer__h" },
-        h("h2", { id: "sched-drawer-title", class: "kp-dialog__title" }, title),
-        h(
-          "p",
-          null,
-          "Read it as a sentence; the preview shows exactly when it will run.",
-        ),
-      ),
-      h(
-        "div",
-        { class: "sch-drawer__b" },
-        sentence,
-        daysField,
-        argBox,
-        near,
-        preview,
-        h(
-          "div",
-          { class: "sch-field" },
-          h(
-            "label",
-            { for: "sched-note" },
-            "Note ",
-            h(
-              "span",
-              { class: "sch-muted", style: "font-weight:400" },
-              "(optional)",
-            ),
-          ),
-          note,
-        ),
-        formErr,
-      ),
-      h("div", { class: "sch-drawer__f" }, cancel, save),
-    );
-    dlg.addEventListener("close", () => dlg.remove());
-    // A click on the backdrop (the dialog itself, outside its box) closes it.
-    dlg.addEventListener("click", (e) => {
-      if (e.target !== dlg) return;
-      const b = dlg.getBoundingClientRect();
-      if (
-        e.clientX < b.left ||
-        e.clientX > b.right ||
-        e.clientY < b.top ||
-        e.clientY > b.bottom
-      )
-        dlg.close();
-    });
-    save.addEventListener("click", async () => {
-      formErr.replaceChildren();
-      const v = draft();
-      const b = draftBody(v);
-      if (!b.ok) {
-        if (b.field === "days") daysWhy.textContent = b.why;
-        else
-          formErr.replaceChildren(
-            refusalCallout(
-              { what: "the schedule", why: b.why, fix: "" },
-              "warning",
-              "Not yet",
-            ),
-          );
-        return;
-      }
-      save.disabled = true;
-      const r = existing
-        ? await send(
-            "PUT",
-            `/data/schedules/${encodeURIComponent(existing.id)}`,
-            b.body,
-            "the schedule",
-          )
-        : await send("POST", "/data/schedules", b.body, "the schedule");
-      save.disabled = false;
-      if (!r.ok) {
-        formErr.replaceChildren(
-          refusalCallout(r.error, "destructive", "Not saved"),
-        );
-        return;
-      }
-      dlg.close();
-      say(existing ? "Schedule saved." : "Schedule added.");
-      void loadSchedules();
-    });
-    document.body.append(dlg);
-    dlg.showModal();
-    actionSel.focus();
+    if (key === formKey && !preset.template && !preset.action && !preset.stack)
+      return;
+    askLose(paneList, go);
   };
+
+  panes.addEventListener(PANE_SELECT_EVENT, (event) => {
+    const key = /** @type {CustomEvent} */ (event).detail?.key;
+    if (!key || key === formKey) return;
+    // The list moved at once; a form with changes asks first and the list
+    // goes back to the form that stays.
+    if (form?.dirty()) {
+      const was = formKey;
+      handle?.select(was);
+    }
+    void openForm(key);
+  });
+  panes.addEventListener(PANE_RETRY_EVENT, () => first());
+
+  // The edit buttons, run buttons and delete buttons of the rows.
+  tableCard.el.addEventListener("click", (event) => {
+    const b = /** @type {HTMLElement | null} */ (
+      /** @type {Element} */ (event.target).closest("[data-sch-act]")
+    );
+    if (!b) return;
+    const v = viewOf(b.getAttribute("data-sch-id") ?? "");
+    if (!v) return;
+    const role = b.getAttribute("data-sch-act");
+    if (role === "edit") void openForm(v.schedule.id);
+    else if (role === "run") void runNowFor(v.schedule);
+    else if (role === "delete") remove(v.schedule);
+  });
+  tableCard.el.addEventListener("change", (event) => {
+    const c = /** @type {HTMLInputElement} */ (event.target);
+    const id = c.getAttribute?.("data-sch-switch");
+    if (!id) return;
+    const v = viewOf(id);
+    if (v) void setOn(v.schedule, c.checked);
+  });
+
+  // Bulk turn on and off, the host may refuse one.
+  tableCard.el.addEventListener(SELECTION_ACTION_EVENT, (event) => {
+    const d = /** @type {CustomEvent} */ (event).detail;
+    const items = /** @type {{key: string, label: string}[]} */ (
+      d?.items ?? []
+    );
+    if (!items.length) return;
+    const on = d.action === "on";
+    event.preventDefault();
+    void (async () => {
+      setSelectionBusy(
+        selectionBar,
+        `${on ? "Turning on" : "Turning off"} ${items.length}…`,
+      );
+      /** @type {{key: string, reason: string}[]} */
+      const refused = [];
+      for (const it of items) {
+        const v = viewOf(it.key);
+        if (!v) continue;
+        const r = await send(
+          "PUT",
+          `/data/schedules/${encodeURIComponent(it.key)}`,
+          { ...bodyOf(v.schedule), enabled: on },
+          "the schedule",
+        );
+        if (!r.ok) refused.push({ key: it.key, reason: r.error.why });
+      }
+      setSelectionBusy(selectionBar, null);
+      setSelectionResult(selectionBar, {
+        done: items.length - refused.length,
+        refused,
+      });
+      void loadSchedules();
+    })();
+  });
+
+  onlyGaps.addEventListener("change", drawCoverage);
+  matrixEl.addEventListener("kp-matrix-pick", (event) => {
+    const d = /** @type {CustomEvent} */ (event).detail;
+    const col = COVERAGE.find((c) => c.key === d.colKey);
+    if (
+      !col ||
+      coverageModel(list(), stackNames() ?? [], hostTarget()).has(
+        d.rowKey,
+        d.colKey,
+      )
+    )
+      return;
+    void openForm(NEW_KEY, { stack: d.rowKey, action: col.actions[0] });
+  });
+  ganttEl.addEventListener(GANTT_OPEN_EVENT, (event) => {
+    const d = /** @type {CustomEvent} */ (event).detail;
+    const job = Number(String(d?.run?.id ?? "").replace(/^j/, ""));
+    if (Number.isInteger(job) && job > 0) openJobDialog(job);
+  });
+  weekEl.addEventListener(WEEK_OPEN_EVENT, (event) => {
+    const id = String(/** @type {CustomEvent} */ (event).detail?.id ?? "");
+    if (id.includes("@") && !id.startsWith("nightly@")) flash(id.split("@")[0]);
+  });
+
+  runNow.addEventListener("click", () => {
+    if (heroNext) void runNowFor(heroNext.schedule, true);
+  });
+  skip.addEventListener("click", () => {
+    if (heroNext?.next_run != null)
+      void skipRun(heroNext.schedule, heroNext.next_run);
+  });
+  countdown.addEventListener(COUNTDOWN_END_EVENT, () => {
+    heroNote.textContent =
+      "Started just now; it runs on Activity. Moving on to the next schedule.";
+    heroTimer = window.setTimeout(() => void loadSchedules(), 2500);
+  });
+  hero.addEventListener("kp-card-retry", () => first());
+  weekEl.addEventListener("kp-week-retry", () => first());
+  table.wrap.addEventListener("kp-datatable-retry", () => first());
+  heatEl.addEventListener("kp-heat-retry", () => first());
+  matrixEl.addEventListener("kp-uses-retry", () => first());
+  ganttEl.addEventListener("kp-gantt-retry", () => first());
 
   // ── keys: N new, Space toggles the focused row, E edits it ──
   let lastG = 0;
@@ -1465,120 +1673,88 @@ export function mount(root, opts = {}) {
     if (Date.now() - lastG < 1500) return;
     if (e.key === "n" || e.key === "N") {
       e.preventDefault();
-      void openDrawer(null, null);
+      void openForm(NEW_KEY);
       return;
     }
     const tr = /** @type {HTMLElement | null} */ (
       t?.closest?.("tr[data-id]") ?? null
     );
     if (!tr || !root.contains(tr)) return;
-    const v = list().find((x) => x.schedule.id === tr.dataset.id);
+    const v = viewOf(tr.dataset.id ?? "");
     if (!v) return;
     if (e.key === " ") {
       e.preventDefault();
       void setOn(v.schedule, !v.schedule.enabled);
     } else if (e.key === "e" || e.key === "E") {
       e.preventDefault();
-      void openDrawer(v.schedule, null);
+      void openForm(v.schedule.id);
     }
   };
   document.addEventListener("keydown", onKey);
 
-  root.replaceChildren(header);
+  // ── the whole page, from what the dashboard holds ──
+  let lastSig = "";
+  const render = () => {
+    if (!alive || !act.schedules) return;
+    paintZone();
+    const all = list();
+    count.textContent = all.length ? countText(all) : "";
+    weekEl.setAttribute("data-kp-time-zone", zone());
+    drawWeek();
+    drawHero();
+    drawPaneList();
+    if (!formKey && paneError) {
+      paneError = false;
+      closeForm();
+    }
+    drawTable();
+    drawTemplates();
+    drawBusy();
+    drawCoverage();
+    drawHistory();
+    lastSig = JSON.stringify([all, nightly, act.jobs.length]);
+  };
+  const renderIfChanged = () => {
+    const sig = JSON.stringify([list(), nightly, act.jobs.length]);
+    if (sig !== lastSig) render();
+  };
+
+  const first = () => {
+    if (!act.schedules) loadingAll();
+    void loadSchedules().then((e) => {
+      if (e && !act.schedules) failedAll(e);
+    });
+  };
+
+  root.prepend(header);
   paintZone();
   // "read … ago" counts from the moment the list last arrived.
   if (act.schedules) setAgo(read, now());
-  const off = onAct("schedules", () => {
+  const offAct = onAct("schedules", () => {
     setAgo(read, now());
     render();
   });
-  const first = () => {
-    if (!act.schedules) loading();
-    void loadSchedules().then((e) => {
-      if (e && !act.schedules) failed(e);
-    });
-  };
-  void readNightly().then((h) => {
-    nightly = h;
-    render();
+  const offJobs = onAct("jobs", renderIfChanged);
+  const offStore = subscribe(() => {
+    form?.stacksChanged();
+    if (act.schedules) drawCoverage();
   });
-  root.addEventListener(MENU_CLOSE_EVENT, () => {
-    if (drawLater) render();
+  void readNightly().then((v) => {
+    nightly = v;
+    if (act.schedules) render();
   });
-  // The relative times ("in 2 h 14 min") move on.
-  const tick = setInterval(() => {
-    if (!document.querySelector(".nx-rowmenu > .kp-menu:not([hidden])"))
-      render();
-  }, 30_000);
+  loadingAll();
   first();
   render();
   return () => {
     alive = false;
-    off();
-    clearInterval(tick);
+    offAct();
+    offJobs();
+    offStore();
+    window.clearTimeout(heroTimer);
     document.removeEventListener("keydown", onKey);
-    closeMenu();
-    document
-      .querySelectorAll("dialog.sch-drawer")
-      .forEach((d) => /** @type {HTMLDialogElement} */ (d).close());
-    // A delete still waiting out its Undo goes through now.
-    for (const id of [...pendingDeletes.keys()]) void commitDelete(id);
+    form?.destroy();
+    for (const d of detach) d();
     root.classList.remove("sch-root", "nx-ops");
   };
-}
-
-/** "Every day at 10:00" → "every day at 10:00"; a weekday keeps its capital. */
-const lowerFirst = (/** @type {string} */ s) =>
-  /^(Every|Once)\b/.test(s) ? s[0].toLowerCase() + s.slice(1) : s;
-
-/** @param {number} n */
-const pad = (n) => String(n).padStart(2, "0");
-
-/** "tomorrow at 10:00", "today at 22:00" or "05/10/2026 10:00". */
-function dayWord(/** @type {number} */ t, /** @type {string} */ z) {
-  const today = dayText(now(), z);
-  const tomorrow = dayText(now() + 86_400, z);
-  const day = dayText(t, z);
-  if (day === today) return `today at ${timeText(t, z)}`;
-  if (day === tomorrow) return `tomorrow at ${timeText(t, z)}`;
-  return dateTimeText(t, z);
-}
-
-/** The arguments worth showing beside the target: an app, a commit. */
-function argSummary(/** @type {Record<string, unknown>} */ args) {
-  const v = args.commit ?? args.app ?? args.unit ?? args.tag;
-  return typeof v === "string" ? v : "";
-}
-
-/** The body PUT wants for a schedule as it is. @param {Schedule} s */
-function bodyOf(s) {
-  return {
-    stack: s.stack,
-    action: s.action,
-    args: s.args,
-    when: s.when,
-    enabled: s.enabled,
-    note: (s.note ?? "").trim(),
-  };
-}
-
-const SORT_KEY = "sched-sort";
-/** @returns {{key: string, dir: 1 | -1}} */
-function readSort() {
-  try {
-    const v = JSON.parse(localStorage.getItem(SORT_KEY) ?? "null");
-    if (v && typeof v.key === "string" && (v.dir === 1 || v.dir === -1))
-      return v;
-  } catch {
-    /* a private window: the default order */
-  }
-  return { key: "", dir: 1 };
-}
-/** @param {{key: string, dir: 1 | -1}} s */
-function saveSort(s) {
-  try {
-    localStorage.setItem(SORT_KEY, JSON.stringify(s));
-  } catch {
-    /* not kept; the page still sorts */
-  }
 }

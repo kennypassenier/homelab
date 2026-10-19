@@ -3314,6 +3314,10 @@ th[aria-sort="descending"] .nx-sort__mark {
   justify-items: center;
   pointer-events: none;
 }
+/* kp's undo toast (undoToast, region = this one) takes presses like .nx-toast. */
+.nx-toasts .kp-toast--undo {
+  pointer-events: auto;
+}
 .nx-toast {
   pointer-events: auto;
   border: 0;

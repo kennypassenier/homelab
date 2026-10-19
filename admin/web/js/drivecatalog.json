@@ -308,6 +308,23 @@
       "twins": false
     },
     {
+      "id": "add-schedule",
+      "page": "schedules",
+      "what": "add the new schedule as the form reads now",
+      "opens": "run",
+      "row": null,
+      "href": "/activity?view=planned",
+      "was": [],
+      "shows": "in the form of a new schedule",
+      "reach": [
+        {
+          "do": "click",
+          "control": "new-schedule"
+        }
+      ],
+      "twins": false
+    },
+    {
       "id": "apps-group-fold",
       "page": "home",
       "what": "fold or unfold one group of apps by its title (remembered per group)",
@@ -666,6 +683,23 @@
       "twins": false
     },
     {
+      "id": "close-schedule-form",
+      "page": "schedules",
+      "what": "close the schedule form (asks first when something is changed)",
+      "opens": "view",
+      "row": null,
+      "href": "/activity?view=planned",
+      "was": [],
+      "shows": "in the schedule form",
+      "reach": [
+        {
+          "do": "click",
+          "control": "new-schedule"
+        }
+      ],
+      "twins": false
+    },
+    {
       "id": "close-secret-change",
       "page": "secrets",
       "what": "close the change drawer without writing",
@@ -969,6 +1003,18 @@
       "twins": false
     },
     {
+      "id": "delete-schedule",
+      "page": "schedules",
+      "what": "delete one schedule (Undo for 6 s; jobs it ran stay on Activity)",
+      "opens": "run",
+      "row": "<schedule id>",
+      "href": "/activity?view=planned",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "deploy-all-destroy",
       "page": "overview",
       "what": "open the destroy of the armed gone stacks, a separate confirmed step after the deploys",
@@ -1128,6 +1174,39 @@
       "twins": false
     },
     {
+      "id": "discard-schedule-changes",
+      "page": "schedules",
+      "what": "put every value of the schedule form back (Undo for 6 s)",
+      "opens": "view",
+      "row": null,
+      "href": "/activity?view=planned",
+      "was": [],
+      "shows": "in the schedule form, once something is changed",
+      "reach": [
+        {
+          "do": "click",
+          "control": "new-schedule"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "edit-schedule",
+      "page": "schedules",
+      "what": "open one schedule's form beside the list",
+      "opens": "view",
+      "row": "<schedule id>",
+      "href": "/activity?view=planned",
+      "was": [
+        {
+          "id": "schedule-menu"
+        }
+      ],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "edit-secret",
       "page": "secrets",
       "what": "open the change drawer for one secret",
@@ -1197,7 +1276,7 @@
     {
       "id": "find-schedule",
       "page": "schedules",
-      "what": "click a run on the calendar to find its schedule in the list",
+      "what": "click a run on the calendar to find its schedule in the table",
       "opens": "run",
       "row": "<schedule id>",
       "href": "/activity?view=planned",
@@ -2250,10 +2329,22 @@
       "twins": false
     },
     {
+      "id": "move-schedule-clash",
+      "page": "schedules",
+      "what": "move one of two schedules that start in the same minute 15 minutes",
+      "opens": "run",
+      "row": "<schedule id>",
+      "href": "/activity?view=planned",
+      "was": [],
+      "shows": "under the busy hours, when two schedules start together",
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "new-schedule",
       "page": "schedules",
-      "what": "open the New schedule drawer",
-      "opens": "dialog",
+      "what": "open the form of a new schedule beside the list",
+      "opens": "view",
       "row": null,
       "href": "/activity?view=planned",
       "was": [],
@@ -2686,6 +2777,18 @@
       "twins": false
     },
     {
+      "id": "run-schedule",
+      "page": "schedules",
+      "what": "start one schedule's action now, as a job; its times stay",
+      "opens": "run",
+      "row": "<schedule id>",
+      "href": "/activity?view=planned",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "save-digest",
       "page": "notifications",
       "what": "save the digest time",
@@ -2698,36 +2801,49 @@
       "twins": false
     },
     {
-      "id": "schedule-menu",
+      "id": "save-schedule",
       "page": "schedules",
-      "what": "open one schedule's menu: press edit, run-now or delete",
-      "opens": "dialog",
-      "row": "<schedule id>",
+      "what": "save the changes of the schedule form (kp's unsaved bar)",
+      "opens": "run",
+      "row": null,
       "href": "/activity?view=planned",
-      "was": [
+      "was": [],
+      "shows": "in the schedule form, once something is changed",
+      "reach": [
         {
-          "id": "edit-schedule",
-          "press": "edit"
-        },
-        {
-          "id": "delete-schedule",
-          "press": "delete"
+          "do": "click",
+          "control": "new-schedule"
         }
       ],
-      "shows": null,
-      "reach": [],
       "twins": false
     },
     {
       "id": "schedule-template",
       "page": "schedules",
-      "what": "open the New schedule drawer filled in from a template (empty page only)",
-      "opens": "dialog",
+      "what": "open the form of a new schedule filled in from a template (empty page only)",
+      "opens": "view",
       "row": "<template id>",
       "href": "/activity?view=planned",
       "was": [],
       "shows": "on an empty Schedules page",
       "reach": [],
+      "twins": false
+    },
+    {
+      "id": "schedule-weekday",
+      "page": "schedules",
+      "what": "turn one weekday of a weekly schedule on or off in the form",
+      "opens": "view",
+      "row": "<mon|tue|wed|thu|fri|sat|sun>",
+      "href": "/activity?view=planned",
+      "was": [],
+      "shows": "in the schedule form, once its sentence says every week",
+      "reach": [
+        {
+          "do": "click",
+          "control": "new-schedule"
+        }
+      ],
       "twins": false
     },
     {
@@ -3033,7 +3149,7 @@
       "page": "schedules",
       "what": "sort the schedules by a column (again: the other way)",
       "opens": "run",
-      "row": "<column: on, what, when, next, last, note>",
+      "row": "<column: on, what, when, next>",
       "href": "/activity?view=planned",
       "was": [],
       "shows": null,
@@ -3726,12 +3842,8 @@
       "reach": [
         {
           "do": "click",
-          "control": "schedule-menu",
+          "control": "delete-schedule",
           "row": "*"
-        },
-        {
-          "do": "press",
-          "button": "delete"
         }
       ],
       "twins": false
@@ -4053,42 +4165,49 @@
     {
       "id": "sched-action",
       "page": "schedules",
-      "what": "what the schedule runs (New schedule drawer)",
+      "what": "what the schedule runs (schedule form)",
       "was": [],
       "row": null
     },
     {
       "id": "sched-at",
       "page": "schedules",
-      "what": "the time of day the schedule runs (New schedule drawer)",
+      "what": "the time of day the schedule runs, 24 hours (schedule form)",
       "was": [],
       "row": null
     },
     {
       "id": "sched-date",
       "page": "schedules",
-      "what": "the date of a one-time run (New schedule drawer)",
+      "what": "the date of a one-time run, dd/mm/yyyy (schedule form)",
       "was": [],
       "row": null
     },
     {
       "id": "sched-every",
       "page": "schedules",
-      "what": "how often the schedule runs (New schedule drawer)",
+      "what": "how often the schedule runs (schedule form)",
       "was": [],
       "row": null
     },
     {
       "id": "sched-note",
       "page": "schedules",
-      "what": "the schedule's note (New schedule drawer)",
+      "what": "the schedule's note (schedule form)",
+      "was": [],
+      "row": null
+    },
+    {
+      "id": "sched-only-gaps",
+      "page": "schedules",
+      "what": "show only the stacks without a backup schedule (coverage)",
       "was": [],
       "row": null
     },
     {
       "id": "sched-stack",
       "page": "schedules",
-      "what": "the stack the schedule runs on (New schedule drawer)",
+      "what": "the stack the schedule runs on (schedule form)",
       "was": [],
       "row": null
     },

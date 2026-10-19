@@ -6,22 +6,26 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  agenda,
-  cadenceText,
+  busyModel,
+  cadenceWords,
   countText,
+  coverageModel,
   dateTimeText,
+  dayStart,
   draftBody,
   draftFor,
-  lastRunView,
-  nearNightly,
+  historyModel,
+  isoDate,
+  movedTime,
   nextRuns,
   nextUp,
+  runsWithClash,
   scheduleTitle,
-  sentenceText,
-  stackTops,
+  seriesOf,
+  shortWhen,
+  slotPeriods,
   TEMPLATES,
-  untilText,
-  weekPlan,
+  weekEvents,
   zonedInstant,
   zoneParts,
 } from "../js/schedules.js";
@@ -118,270 +122,248 @@ test("redesign-schedules: the next runs of a schedule, as the drawer previews th
   );
 });
 
-test("redesign-schedules: when, until, titles and counters in the demo's words", () => {
+test("redesign-schedules: cadence, titles and counters in the demo's words", () => {
   assert.equal(
-    cadenceText({ every: "day", at: "10:00" }),
-    "Every day at 10:00",
+    cadenceWords({ every: "day", at: "10:00" }),
+    "every day at 10:00",
   );
   assert.equal(
-    cadenceText({ every: "week", days: [3, 0], at: "22:00" }),
-    "Mon, Thu at 22:00",
+    cadenceWords({ every: "week", days: [3, 0], at: "22:00" }),
+    "on Mon, Thu at 22:00",
   );
   assert.equal(
-    cadenceText({ every: "week", days: [5], at: "14:30" }),
-    "Sat at 14:30",
+    cadenceWords({ every: "week", days: [0, 1, 2, 3, 4], at: "18:00" }),
+    "on weekdays at 18:00",
   );
   assert.equal(
-    cadenceText({ every: "week", days: [0, 1, 2, 3, 4, 5, 6], at: "01:00" }),
-    "Every day at 01:00",
+    cadenceWords({ every: "week", days: [5, 6], at: "09:00" }),
+    "at the weekend at 09:00",
   );
   assert.equal(
-    cadenceText({ every: "once", date: "2026-10-05", at: "08:00" }),
-    "Once, 05/10/2026 at 08:00",
+    cadenceWords({ every: "once", date: "2026-10-05", at: "08:00" }),
+    "once on 05/10/2026 at 08:00",
   );
-  assert.equal(untilText(NOW + 2 * 3600 + 14 * 60, NOW), "in 2 h 14 min");
-  assert.equal(untilText(NOW + 30 * 60, NOW), "in 30 min");
-  assert.equal(untilText(NOW + 3 * 86400 + 600, NOW), "in 3 d");
-  // Rounded as a whole: never "in 21 h 60 min" or "in 60 min".
-  assert.equal(untilText(NOW + 21 * 3600 + 59 * 60 + 50, NOW), "in 22 h 0 min");
-  assert.equal(untilText(NOW + 59 * 60 + 50, NOW), "in 1 h 0 min");
-  assert.equal(scheduleTitle("Back up", "films"), "Back up films");
+  assert.equal(
+    shortWhen({ every: "week", days: [5, 6], at: "09:00" }),
+    "Weekend 09:00",
+  );
+  assert.equal(shortWhen({ every: "day", at: "03:30" }), "Daily 03:30");
+  assert.equal(scheduleTitle("Back up", "films"), "Back up · films");
   assert.equal(scheduleTitle("Patch the fleet", "_host"), "Patch the fleet");
   assert.equal(
     scheduleTitle("ZFS replicate", "_host"),
-    "ZFS replicate the host",
-  );
-  assert.equal(
-    scheduleTitle("Deploy a commit", "kp-soft"),
-    "Deploy a commit kp-soft",
+    "ZFS replicate · the whole host",
   );
   const six = [1, 2, 3, 4, 5, 6].map((i) =>
     view(`s${i}`, { every: "day", at: "10:00" }, { enabled: i !== 6 }),
   );
   assert.equal(countText(six), "6 schedules · 5 on");
   assert.equal(countText(six.slice(5)), "1 schedule · 0 on");
-  assert.equal(nearNightly("02:30", 3), true);
-  assert.equal(nearNightly("03:59", 3), true);
-  assert.equal(nearNightly("04:00", 3), false);
-  assert.equal(nearNightly("02:00", 3), false);
-  assert.equal(nearNightly("23:30", 0), true, "an hour before midnight");
-  assert.equal(nearNightly("02:30", null), false, "no nightly round");
 });
 
-test("redesign-schedules: the drawer's sentence, its defaults, the templates and the body it sends", () => {
+test("redesign-schedules: the form's defaults, the templates, dates and the body it sends", () => {
   const ctx = {
     stacks: ["films", "notes"],
     hostTarget: "_host",
     now: NOW,
     zone: Z,
+    nightly: 2,
   };
   const d = draftFor(null, null, ctx);
   assert.deepEqual(
-    [d.action, d.stack, d.every, d.days, d.at],
-    ["backup", "films", "week", [1, 4], "02:30"],
-    "a new schedule starts as the demo's: Tue and Fri at 02:30",
+    [d.action, d.stack, d.every, d.at],
+    ["backup", "films", "day", "03:00"],
   );
-  assert.equal(
-    sentenceText(d, label, "_host"),
-    "Run Back up on films on chosen weekdays at 02:30",
-  );
-  assert.deepEqual(draftBody(d), {
-    ok: true,
-    body: {
-      stack: "films",
-      action: "backup",
-      args: {},
-      when: { every: "week", days: [1, 4], at: "02:30" },
-      enabled: true,
-      note: "",
-    },
-  });
-  assert.deepEqual(draftBody({ ...d, days: [] }), {
-    ok: false,
-    field: "days",
-    why: "Pick at least one day.",
-  });
-  assert.equal(draftBody({ ...d, every: "once", date: "" }).ok, false);
-  assert.equal(
-    sentenceText({ ...d, every: "once", date: "2026-10-05" }, label, "_host"),
-    "Run Back up on films once on 05/10/2026 at 02:30",
-  );
-  const patch = draftFor(null, TEMPLATES[1], ctx);
-  assert.deepEqual(
-    [patch.action, patch.stack, patch.every, patch.days, patch.at],
-    ["patch", "_host", "week", [6], "22:00"],
-  );
-  assert.equal(
-    sentenceText(patch, label, "_host"),
-    "Run Patch the fleet on the whole host on chosen weekdays at 22:00",
-  );
-  assert.equal(TEMPLATES.length, 3);
-  const later = draftFor(null, TEMPLATES[2], ctx);
-  assert.deepEqual([later.every, later.date], ["once", "2026-10-04"]);
-  // Editing keeps what the schedule has, its switch included.
-  const v = view(
-    "s3",
-    { every: "day", at: "06:00" },
-    { stack: "_host", action: "zfs-replicate", enabled: false, note: "n" },
-  );
-  const e = draftFor(v.schedule, null, ctx);
-  assert.deepEqual(
-    [e.action, e.stack, e.every, e.at, e.enabled, e.note],
-    ["zfs-replicate", "_host", "day", "06:00", false, "n"],
-  );
+  assert.equal(TEMPLATES.length, 4);
+  const t = draftFor(null, TEMPLATES[2], ctx);
+  assert.deepEqual([t.every, t.date, t.at], ["once", "2026-10-04", "20:00"]);
+  assert.equal(isoDate("05/10/2026"), "2026-10-05");
+  assert.equal(isoDate("2026-10-05"), "2026-10-05");
+  assert.equal(isoDate("31/02/2026"), "");
+  assert.equal(isoDate("soon"), "");
+  assert.equal(draftBody({ ...d, every: "week", days: [] }).ok, false);
+  const ok = draftBody({ ...d, note: " n " });
+  assert.ok(ok.ok && ok.body.note === "n");
+  assert.deepEqual(movedTime("03:30"), { at: "03:45", later: true });
+  assert.deepEqual(movedTime("23:50"), { at: "23:35", later: false });
 });
 
-test("redesign-schedules: the last run names the job, or the slot missed and why", () => {
-  const job = (/** @type {string} */ state) =>
-    /** @type {any} */ ({ job: 398, state });
-  const at = { slot: 100, job: 398 };
-  assert.deepEqual(lastRunView(view("a", { every: "day", at: "10:00" }), Z), {
-    tone: "none",
-    text: "not run yet",
-    job: null,
+test("redesign-schedules: the week gives every run, the round as reference, the next run ringed and a clash named", () => {
+  const next = nextRuns({ every: "day", at: "10:00" }, NOW, 1, Z)[0];
+  const a = view(
+    "a",
+    { every: "day", at: "10:00" },
+    { stack: "films" },
+    { next_run: next },
+  );
+  const b = view(
+    "b",
+    { every: "day", at: "03:00" },
+    { stack: "notes" },
+    { next_run: next },
+  );
+  const off = view("c", { every: "day", at: "11:00" }, { enabled: false });
+  const ev = weekEvents([a, b, off], {
+    now: NOW,
+    zone: Z,
+    nightly: 3,
+    label: (x) => x,
+    hostTarget: "_host",
   });
-  assert.deepEqual(
-    lastRunView(
-      view(
-        "a",
-        { every: "day", at: "10:00" },
-        { last_run: at },
-        {
-          last_job: job("done"),
-        },
-      ),
-      Z,
-    ),
-    { tone: "ok", text: "ok", job: 398 },
-  );
-  assert.equal(
-    lastRunView(
-      view(
-        "a",
-        { every: "day", at: "10:00" },
-        { last_run: at },
-        {
-          last_job: job("failed"),
-        },
-      ),
-      Z,
-    ).tone,
-    "bad",
-  );
-  const sat26 = utc(2026, 9, 26, 12, 30);
-  assert.deepEqual(
-    lastRunView(
-      view(
-        "a",
-        { every: "day", at: "10:00" },
-        {
-          last_run: at,
-          last_missed: { slot: sat26, why: "down" },
-        },
-      ),
-      Z,
-    ),
-    { tone: "warn", text: "missed 26/09/2026 (dashboard down)", job: null },
-  );
-  // A run after the miss is the last run again.
-  assert.equal(
-    lastRunView(
-      view(
-        "a",
-        { every: "day", at: "10:00" },
-        {
-          last_run: { slot: sat26 + 86400, job: 9 },
-          last_missed: { slot: sat26, why: "busy" },
-        },
-      ),
-      Z,
-    ).job,
-    9,
-  );
-});
-
-test("redesign-schedules: the week from today, the nightly round, the now-line, the next run and the agenda", () => {
-  const list = [
-    view(
-      "s1",
-      { every: "day", at: "10:00" },
-      {},
-      {
-        next_run: utc(2026, 10, 3, 8, 0),
-      },
-    ),
-    view(
-      "s2",
-      { every: "week", days: [0, 3], at: "22:00" },
-      { stack: "_host", action: "patch" },
-      { next_run: utc(2026, 10, 5, 20, 0) },
-    ),
-    view("s6", { every: "day", at: "12:00" }, { enabled: false }),
-  ];
-  const w = weekPlan(list, NOW, Z, 3, label);
-  assert.deepEqual(
-    w.days.map((d) => d.head),
-    ["Today", "Sun 4", "Mon 5", "Tue 6", "Wed 7", "Thu 8", "Fri 9"],
-  );
-  assert.ok(Math.abs(w.nowHour - (7 + 46 / 60)) < 1e-9);
-  for (const d of w.days) {
-    const host = d.pills.filter((p) => p.host);
-    assert.deepEqual(
-      host.map((p) => [p.at, p.text]),
-      [["03:00", "nightly round"]],
-    );
-  }
-  const today = w.days[0].pills.filter((p) => !p.host);
-  assert.deepEqual(
-    today.map((p) => [p.at, p.text, p.next, p.off]),
-    [
-      ["10:00", "Back up films", true, false],
-      ["12:00", "Back up films", false, true],
-    ],
-  );
-  assert.deepEqual(
-    w.days[2].pills.filter((p) => p.id === "s2").map((p) => p.at),
-    ["22:00"],
-  );
-  assert.equal(nextUp(list)?.schedule.id, "s1");
-  const a = agenda(list, NOW, Z, label);
-  assert.equal(a.length, 8);
-  assert.deepEqual(
-    a.slice(0, 3).map((r) => [r.when, r.text]),
-    [
-      ["03/10/2026 10:00", "Back up films"],
-      ["04/10/2026 10:00", "Back up films"],
-      ["05/10/2026 10:00", "Back up films"],
-    ],
-  );
   assert.ok(
-    !a.some((r) => r.id === "s6"),
-    "a schedule that is off is not listed",
+    ev.filter((e) => e.state === "reference").length >= 70,
+    "a round a day",
   );
-  // A run skipped on purpose shows as skipped, the next one as next.
-  const skipped = weekPlan(
-    [{ ...list[0], next_run: utc(2026, 10, 4, 8, 0) }],
-    NOW,
-    Z,
-    null,
-    label,
+  assert.equal(ev.filter((e) => e.state === "next").length, 1);
+  assert.ok(
+    ev.every(
+      (e) =>
+        e.id.startsWith("c@") === (e.state === "off") ||
+        e.state === "reference",
+    ),
   );
-  assert.deepEqual(
-    skipped.days[0].pills.map((p) => [p.skipped, p.next]),
-    [[true, false]],
+  const clash = ev.find(
+    (e) =>
+      e.id.startsWith("b@") &&
+      /same minute as the host's nightly round/.test(e.detail),
   );
-  assert.deepEqual(
-    skipped.days[1].pills.map((p) => p.next),
-    [true],
-  );
-  assert.equal(
-    skipped.days[0].pills.filter((p) => p.host).length,
-    0,
-    "no nightly round when the host has none",
-  );
+  assert.ok(clash, "03:00 starts with the round");
+  assert.equal(seriesOf("backup"), 1);
+  assert.equal(seriesOf("patch"), 3);
+  assert.equal(seriesOf("guards"), 5);
 });
 
-test("redesign-schedules: pills that would overlap are stacked, in time order", () => {
-  assert.deepEqual(stackTops([60, 20, 62, 200], 20), [60, 20, 80, 200]);
-  assert.deepEqual(stackTops([10, 12, 14], 20), [10, 30, 50]);
+test("redesign-schedules: the busy hours, the clash lines and the preview's conflicts", () => {
+  const a = view("a", { every: "day", at: "03:30" }, { stack: "films" });
+  const b = view(
+    "b",
+    { every: "week", days: [0, 3], at: "03:30" },
+    { stack: "notes" },
+  );
+  const m = busyModel([a, b], {
+    now: NOW,
+    zone: Z,
+    nightly: 3,
+    name: (s) => s.stack,
+  });
+  assert.equal(m.grid.length, 7);
+  assert.equal(m.clashes.length, 1, "one line for the pair on Mon and Thu");
+  assert.deepEqual(m.clashes[0].days, [0, 3]);
+  assert.equal(m.clashes[0].time, "03:30");
+  const runs = runsWithClash([a], { every: "day", at: "03:30" }, NOW, 5, {
+    zone: Z,
+    nightly: 3,
+    name: (s) => s.stack,
+  });
+  assert.equal(runs.length, 5);
+  assert.ok(runs.every((r) => r.conflict === "Same minute as films"));
+  const none = runsWithClash([a], { every: "day", at: "05:00" }, NOW, 2, {
+    zone: Z,
+    nightly: 3,
+    name: (s) => s.stack,
+  });
+  assert.ok(none.every((r) => !r.conflict));
+  assert.equal(dayStart(NOW, Z), zonedInstant(2026, 10, 3, 0, 0, Z));
+});
+
+test("redesign-schedules: coverage names the stacks without a backup schedule", () => {
+  const v = [
+    view("a", { every: "day", at: "03:00" }, { stack: "films" }),
+    view(
+      "b",
+      { every: "day", at: "04:00" },
+      { stack: "notes", action: "update" },
+    ),
+    view("c", { every: "day", at: "05:00" }, { stack: "off", enabled: false }),
+  ];
+  const c = coverageModel(v, ["films", "notes", "off"]);
+  assert.deepEqual(c.gaps, ["notes", "off"]);
+  assert.ok(c.has("notes", "update"));
+  assert.equal(nextUp(v), null, "no next run known");
+});
+
+test("redesign-schedules: the last fourteen slots are ran, failed, missed or no record, padded at the start", () => {
+  const when = /** @type {const} */ ({ every: "day", at: "10:00" });
+  const slots = nextRuns(when, NOW - 5 * 86400, 5, Z);
+  const v = view("a", when, { last_missed: { slot: slots[1], why: "down" } });
+  const job = (
+    /** @type {number} */ n,
+    /** @type {number} */ slot,
+    state = "done",
+  ) =>
+    /** @type {any} */ ({
+      job: n,
+      state,
+      origin: { from: "schedule", schedule: "a", slot },
+      queued_at: slot,
+      started_at: slot,
+      finished_at: slot + 60,
+      action: "backup",
+      stack: "films",
+    });
+  const p = slotPeriods(v, [job(1, slots[0]), job(2, slots[2], "failed")], {
+    now: NOW,
+    zone: Z,
+  });
+  assert.equal(p.length, 14);
+  const named = p.filter(
+    (x) => x.state !== "none" || !x.key.startsWith("none-"),
+  );
+  const states = named.slice(-8).map((x) => x.state);
+  assert.ok(states.includes("up") && states.includes("down"));
+  assert.equal(p.find((x) => x.key === String(slots[2]))?.state, "down");
+  assert.match(
+    p.find((x) => x.key === String(slots[1]))?.tip ?? "",
+    /Missed .*dashboard was down/,
+  );
+  assert.equal(p.find((x) => x.key === String(slots[0]))?.href, "/jobs?job=1");
+});
+
+test("redesign-schedules: the history draws the schedules' jobs as bars, the busiest lanes, the missed slot as a mark", () => {
+  const when = /** @type {const} */ ({ every: "day", at: "10:00" });
+  const a = view("a", when, {
+    stack: "films",
+    last_missed: { slot: NOW - 86400, why: "busy" },
+  });
+  const b = view("b", when, { stack: "notes" });
+  const job = (
+    /** @type {number} */ n,
+    /** @type {string} */ sch,
+    /** @type {string} */ state,
+  ) =>
+    /** @type {any} */ ({
+      job: n,
+      state,
+      origin: { from: "schedule", schedule: sch, slot: NOW - 3600 * n },
+      queued_at: NOW - 3600 * n,
+      started_at: NOW - 3600 * n,
+      finished_at: NOW - 3600 * n + 60,
+      action: "backup",
+      stack: "films",
+    });
+  const manual = /** @type {any} */ ({
+    job: 9,
+    state: "done",
+    origin: { from: "manual" },
+    queued_at: NOW,
+    started_at: NOW,
+    action: "backup",
+    stack: "films",
+  });
+  const m = historyModel(
+    [a, b],
+    [job(1, "a", "done"), job(2, "a", "failed"), job(3, "b", "done"), manual],
+    { now: NOW, zone: Z, label: (x) => x },
+  );
+  assert.equal(m.runs.length, 3, "a manual job is no schedule's run");
+  assert.deepEqual(
+    m.lanes.map((l) => l.id),
+    ["a", "b"],
+  );
+  assert.equal(m.runs.find((r) => r.id === "j2")?.state, "failed");
+  assert.equal(m.points.length, 1);
+  assert.match(m.points[0].detail, /Missed .*previous run was still going/);
+  assert.equal(m.hidden, 0);
+  void dateTimeText;
+  void zoneParts;
 });

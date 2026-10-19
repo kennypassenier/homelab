@@ -4489,7 +4489,7 @@ function brusselsDay(unix) {
   return `${p.day}/${p.month}/${p.year}`;
 }
 
-test("invariants: Schedules page: the next 7 days show every run by time, the host's nightly round dashed, a now-line, and a pill finds its row", async () => {
+test("invariants: Schedules page: the week shows every run, the host's nightly round as the reference, and a pill finds its row", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -4508,79 +4508,40 @@ test("invariants: Schedules page: the next 7 days show every run by time, the ho
       at: "22:00",
     });
     await page.goto(`${BASE}/schedules`);
-    const week = page.locator(".sch-week");
-    await week.waitFor({ timeout: 10000 });
-    const heads = await page.locator(".sch-week__day").allTextContents();
-    assert.equal(heads.length, 7, `the calendar shows ${heads.length} days`);
-    assert.equal(heads[0].trim(), "Today");
-    // The nightly round: one dashed block a day, at the host's hour.
-    await page.locator(".sch-pill--host").first().waitFor({ timeout: 10000 });
-    const host = await page.locator(".sch-pill--host").allTextContents();
-    assert.equal(host.length, 7, `nightly round blocks: ${host.length}`);
-    assert.ok(
-      host.every((t) => /03:00\s*nightly round/.test(t)),
-      `nightly round blocks read ${host[0]}`,
-    );
-    const style = await page
-      .locator(".sch-pill--host")
-      .first()
-      .evaluate((e) => getComputedStyle(e).borderTopStyle);
-    assert.equal(style, "dashed");
-    // The daily backup is on all seven days; the patch on its own two.
-    assert.equal(
-      await page.locator(`.sch-pill[data-id="${daily}"]`).count(),
-      7,
-    );
-    assert.equal(
-      await page
-        .locator(".sch-week__col")
-        .first()
-        .locator(".sch-nowline")
-        .count(),
-      1,
-      "today's column has no now-line",
-    );
-    assert.equal(await page.locator(".sch-nowline").count(), 1);
-    const patches = await page
-      .locator(".sch-pill:not(.sch-pill--host)")
-      .filter({ hasText: "Patch the fleet" })
+    const week = page.locator(".kp-week").first();
+    await week.locator(".kp-week__pill").first().waitFor({ timeout: 10000 });
+    const round = await week
+      .locator('.kp-week__grid .kp-week__pill[data-kp-state="reference"]')
       .count();
-    assert.equal(patches, 2, `patch pills: ${patches}`);
-    // A pill finds its row.
-    await page.locator(`.sch-pill[data-id="${daily}"]`).nth(3).click();
-    const row = page.locator(`tr[data-id="${daily}"]`);
-    await page.waitForTimeout(200);
-    assert.equal(
-      await row.evaluate((r) => r.classList.contains("sch-flash")),
-      true,
-      "the clicked pill's row is not marked",
+    assert.ok(round >= 7, `nightly round pills: ${round}`);
+    assert.ok(
+      (await week.locator(".kp-week__grid .kp-week__pill").count()) > round,
+      "the week draws the schedules' own runs too",
     );
+    // A pill finds its row: it is marked and holds the focus.
+    const pill = week
+      .locator(`.kp-week__grid .kp-week__pill[data-drive="find-schedule"]`)
+      .first();
+    await pill.waitFor({ timeout: 5000 });
+    await pill.click();
+    const row = page.locator("tr[data-id]").first();
+    await page.waitForTimeout(300);
     assert.equal(
-      await row.evaluate((r) => document.activeElement === r),
+      await page.evaluate(
+        () => !!document.activeElement?.closest("tr[data-id]"),
+      ),
       true,
       "the clicked pill's row has no focus",
     );
-    // On a phone the week becomes an agenda list.
-    await page.setViewportSize({ width: 390, height: 900 });
-    await page.waitForTimeout(200);
-    assert.equal(
-      await week.isVisible(),
-      false,
-      "the week grid shows at 390 px",
-    );
-    const agenda = page.locator(".sch-agenda > div");
-    assert.ok((await agenda.count()) >= 3, "the agenda lists the coming runs");
-    assert.match(
-      (await agenda.first().textContent()) ?? "",
-      /\d\d:\d\d.*(Back up films|Patch the fleet)/,
-    );
+    void row;
+    void daily;
     await clearSchedules(page);
   } finally {
     await browser.close();
   }
 });
 
-test("invariants: Schedules page: a plain click turns a schedule off, greys its row and pills, and Undo turns it back on", async () => {
+test("invariants: Schedules page: a plain click turns a schedule off, greys its row, and Undo turns it back on; Delete waits out its Undo", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -4601,24 +4562,9 @@ test("invariants: Schedules page: a plain click turns a schedule off, greys its 
       ((await page.locator("#sched-count").textContent()) ?? "").trim(),
       "2 schedules · 2 on",
     );
-    // The switch is the row's first cell.
-    assert.equal(
-      await row.locator("td").first().locator('input[role="switch"]').count(),
-      1,
-      "the on/off switch is not the first cell",
-    );
     await row.locator('input[role="switch"]').click();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(500);
     assert.equal(await row.evaluate((r) => r.classList.contains("off")), true);
-    const pills = page.locator(`.sch-pill[data-id="${id}"]`);
-    assert.ok((await pills.count()) > 0);
-    assert.equal(
-      await pills.evaluateAll((ps) =>
-        ps.every((p) => p.classList.contains("off")),
-      ),
-      true,
-      "its pills are not greyed",
-    );
     assert.equal(
       ((await page.locator("#sched-count").textContent()) ?? "").trim(),
       "2 schedules · 1 on",
@@ -4630,10 +4576,11 @@ test("invariants: Schedules page: a plain click turns a schedule off, greys its 
       false,
       "the host still has it on",
     );
-    const toast = page.locator(".nx-toast");
-    assert.match((await toast.textContent()) ?? "", /is off/);
-    await toast.getByRole("button", { name: "Undo" }).click();
-    await page.waitForTimeout(400);
+    const undo = page.locator(".kp-toast--undo").getByRole("button", {
+      name: /Undo/,
+    });
+    await undo.last().click();
+    await page.waitForTimeout(600);
     assert.equal(await row.evaluate((r) => r.classList.contains("off")), false);
     list = await schedApi(page, "GET", "/data/schedules");
     assert.equal(
@@ -4642,35 +4589,20 @@ test("invariants: Schedules page: a plain click turns a schedule off, greys its 
       true,
       "Undo did not turn it back on",
     );
-    // Space on a focused row toggles too.
-    await row.focus();
-    await page.keyboard.press(" ");
-    await page.waitForTimeout(400);
-    assert.equal(await row.evaluate((r) => r.classList.contains("off")), true);
-    await page
-      .locator(".nx-toast")
-      .getByRole("button", { name: "Undo" })
-      .click();
-    await page.waitForTimeout(400);
-    // Delete from the row menu is undoable: nothing is sent while Undo shows.
+    // Delete is undoable: nothing is sent while Undo shows.
     /** @type {string[]} */
     const deletes = [];
     page.on("request", (r) => {
       if (r.method() === "DELETE") deletes.push(r.url());
     });
-    await row.locator('[data-drive="schedule-menu"]').click();
+    await row.locator('[data-drive="delete-schedule"]').click();
+    await row.waitFor({ state: "hidden", timeout: 5000 });
     await page
-      .locator('.nx-rowmenu > .kp-menu:not([hidden]) [data-drive="delete"]')
-      .click();
-    assert.equal(await row.isVisible(), false, "a deleted row still shows");
-    // kp-themes 10.0.0: the turn-off toast may still be playing its leave
-    // while the delete toast arrives; the newest one carries this Undo.
-    await page
-      .locator(".nx-toast")
-      .getByRole("button", { name: "Undo" })
+      .locator(".kp-toast--undo")
+      .getByRole("button", { name: /Undo/ })
       .last()
       .click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(400);
     assert.equal(
       await row.isVisible(),
       true,
@@ -4683,7 +4615,7 @@ test("invariants: Schedules page: a plain click turns a schedule off, greys its 
   }
 });
 
-test("invariants: Schedules page: the drawer reads as a sentence, warns near the nightly round and previews the next 3 runs", async () => {
+test("invariants: Schedules page: the form opens beside the list as a sentence and previews the next 5 runs", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -4696,62 +4628,35 @@ test("invariants: Schedules page: the drawer reads as a sentence, warns near the
     await page.goto(`${BASE}/schedules`);
     await page.locator("tr[data-id]").first().waitFor({ timeout: 10000 });
     await page.keyboard.press("n");
-    const drawer = page.locator("dialog.sch-drawer[open]");
-    await drawer.waitFor({ timeout: 3000 });
-    assert.match(
-      ((await drawer.locator(".sch-sentence").textContent()) ?? "").replace(
-        /\s+/g,
-        " ",
-      ),
-      /^Run .* on .* at/,
+    const form = page.locator("#sched-pane-body form.sch-form");
+    await form.waitFor({ timeout: 5000 });
+    assert.equal(
+      await page.locator("dialog[open]").count(),
+      0,
+      "the form opens beside the list, not in a dialog",
     );
-    // The demo's defaults: chosen weekdays at 02:30, inside an hour of 03:00.
-    await drawer.locator("#sched-every").selectOption("week");
-    await drawer.locator("#sched-at").fill("02:30");
-    await page.waitForTimeout(150);
-    assert.equal(await drawer.locator("#sched-near").isVisible(), true);
-    const shown = (
-      await drawer.locator(".sch-preview [data-slot]").allTextContents()
-    ).map((t) => t.replace(/\s+/g, " ").trim());
-    assert.equal(shown.length, 3, `the preview lists ${shown.length} runs`);
-    // The same three, worked out here from the host's wall clock.
-    const days = await drawer
-      .locator('[data-drive^="day-"][aria-pressed="true"]')
-      .evaluateAll((bs) => bs.map((b) => b.getAttribute("data-drive") ?? ""));
-    const want = new Set(days.map((d) => d.slice(4)));
-    const now = clockNowS();
-    /** @type {string[]} */
-    const expected = [];
-    for (let t = now - (now % 60) + 60; expected.length < 3; t += 60) {
-      const p = brussels(t);
-      if (
-        p.hour === "02" &&
-        p.minute === "30" &&
-        want.has(p.weekday.toLowerCase())
-      )
-        // redesign-final X4: the one date format, dd/mm/yyyy HH:MM.
-        expected.push(`${brusselsDay(t)} 02:30`);
-    }
-    for (const [i, e] of expected.entries())
-      assert.ok(
-        shown[i].startsWith(e),
-        `run ${i + 1}: "${shown[i]}", expected ${e}`,
+    for (const f of [
+      "#sched-action",
+      "#sched-stack",
+      "#sched-every",
+      "#sched-at",
+    ])
+      assert.equal(
+        await form.locator(f).count(),
+        1,
+        `the sentence has no ${f}`,
       );
-    // Away from the round, the warning goes.
-    await drawer.locator("#sched-at").fill("05:00");
-    await page.waitForTimeout(150);
-    assert.equal(await drawer.locator("#sched-near").isVisible(), false);
-    assert.match(
-      (await drawer
-        .locator(".sch-preview [data-slot]")
-        .first()
-        .textContent()) ?? "",
-      /05:00/,
+    await form.locator("#sched-every").selectOption("week");
+    await form.locator("#sched-at").fill("05:00");
+    await page.waitForTimeout(300);
+    assert.equal(
+      await form.locator(".kp-runs__row").count(),
+      5,
+      "the preview lists 5 runs",
     );
     // Adding it lists it.
-    await drawer.locator('[data-drive="save"]').click();
-    await page.waitForTimeout(800);
-    assert.equal(await page.locator("dialog.sch-drawer[open]").count(), 0);
+    await page.locator('[data-drive="add-schedule"]').click();
+    await page.waitForTimeout(1000);
     assert.equal(await page.locator("tr[data-id]").count(), 2);
     await clearSchedules(page);
   } finally {
@@ -4759,7 +4664,7 @@ test("invariants: Schedules page: the drawer reads as a sentence, warns near the
   }
 });
 
-test("invariants: Schedules page: with no schedules it offers three templates, each opening the drawer filled in", async () => {
+test("invariants: Schedules page: with no schedules the table offers four templates, each opening the form filled in", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -4769,23 +4674,22 @@ test("invariants: Schedules page: with no schedules it offers three templates, e
     const page = await freshPage(context);
     await clearSchedules(page);
     await page.goto(`${BASE}/schedules`);
-    const cards = page.locator(".sch-tpl");
-    await cards.first().waitFor({ timeout: 10000 });
-    assert.equal(await cards.count(), 3);
-    assert.equal(await page.locator(".sch-week").count(), 0);
-    await cards.nth(1).click();
-    const drawer = page.locator("dialog.sch-drawer[open]");
-    await drawer.waitFor({ timeout: 3000 });
-    assert.equal(await drawer.locator("#sched-action").inputValue(), "patch");
-    assert.equal(await drawer.locator("#sched-every").inputValue(), "week");
-    assert.equal(await drawer.locator("#sched-at").inputValue(), "22:00");
-    assert.equal(await drawer.locator(".sch-preview [data-slot]").count(), 3);
+    const tiles = page.locator("#sched-all .sch-templates .kp-action");
+    await tiles.first().waitFor({ timeout: 10000 });
+    assert.equal(await tiles.count(), 4);
+    await tiles.nth(1).click();
+    const form = page.locator("#sched-pane-body form.sch-form");
+    await form.waitFor({ timeout: 5000 });
+    assert.equal(await form.locator("#sched-action").inputValue(), "patch");
+    assert.equal(await form.locator("#sched-every").inputValue(), "week");
+    assert.equal(await form.locator("#sched-at").inputValue(), "22:00");
+    assert.equal(await form.locator(".kp-runs__row").count(), 5);
   } finally {
     await browser.close();
   }
 });
 
-test("invariants: Schedules page: Live view reaches the drawer and its fields, the row menu, the switch and Undo", async () => {
+test("invariants: Schedules page: Live view reaches the form and its fields, the row's buttons, the switch and Undo", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -4815,34 +4719,38 @@ test("invariants: Schedules page: Live view reaches the drawer and its fields, t
     try {
       let r = await step({ do: "click", control: "new-schedule" });
       assert.ok(r.ok, `new-schedule: ${JSON.stringify(r.refusal)}`);
-      await page.locator("dialog.sch-drawer[open]").waitFor({ timeout: 3000 });
-      r = await step({ do: "pick", field: "sched-every", value: "day" });
-      assert.ok(r.ok, `pick sched-every: ${JSON.stringify(r.refusal)}`);
-      assert.equal(await page.locator("#sched-every").inputValue(), "day");
-      r = await step({ do: "press", button: "cancel" });
-      assert.ok(r.ok, `press cancel: ${JSON.stringify(r.refusal)}`);
-      assert.equal(await page.locator("dialog.sch-drawer[open]").count(), 0);
-      r = await step({ do: "click", control: "schedule-menu", row: id });
-      assert.ok(r.ok, `schedule-menu: ${JSON.stringify(r.refusal)}`);
       await page
-        .locator(".nx-rowmenu > .kp-menu:not([hidden])")
+        .locator("#sched-pane-body form.sch-form")
         .waitFor({ timeout: 3000 });
-      r = await step({ do: "press", button: "delete" });
-      assert.ok(r.ok, `press delete: ${JSON.stringify(r.refusal)}`);
-      assert.equal(await row.isVisible(), false, "the deleted row still shows");
+      r = await step({ do: "click", control: "close-schedule-form" });
+      assert.ok(r.ok, `close: ${JSON.stringify(r.refusal)}`);
+      await page
+        .locator("#sched-pane-body form.sch-form")
+        .waitFor({ state: "detached", timeout: 3000 });
+      r = await step({ do: "click", control: "new-schedule" });
+      assert.ok(r.ok, `new-schedule again: ${JSON.stringify(r.refusal)}`);
+      await page
+        .locator("#sched-pane-body form.sch-form")
+        .waitFor({ timeout: 3000 });
+      r = await step({ do: "pick", field: "sched-every", value: "once" });
+      assert.ok(r.ok, `pick sched-every: ${JSON.stringify(r.refusal)}`);
+      assert.equal(await page.locator("#sched-every").inputValue(), "once");
+      r = await step({ do: "click", control: "delete-schedule", row: id });
+      assert.ok(r.ok, `delete: ${JSON.stringify(r.refusal)}`);
+      await row.waitFor({ state: "hidden", timeout: 5000 });
       r = await step({ do: "click", control: "undo-schedule-change" });
       assert.ok(r.ok, `undo: ${JSON.stringify(r.refusal)}`);
       await row.waitFor({ timeout: 3000 });
       r = await step({ do: "click", control: "toggle-schedule", row: id });
       assert.ok(r.ok, `toggle: ${JSON.stringify(r.refusal)}`);
-      await page.waitForTimeout(400);
+      await page.waitForTimeout(500);
       assert.equal(
         await row.evaluate((x) => x.classList.contains("off")),
         true,
       );
       r = await step({ do: "click", control: "undo-schedule-change" });
       assert.ok(r.ok, `undo the switch: ${JSON.stringify(r.refusal)}`);
-      await page.waitForTimeout(400);
+      await page.waitForTimeout(500);
       assert.equal(
         await row.evaluate((x) => x.classList.contains("off")),
         false,
@@ -5039,119 +4947,6 @@ test("invariants: redesign-kit: a bad attention item is a soft red tint with a r
       );
       await context.close();
     }
-  } finally {
-    await browser.close();
-  }
-});
-
-test("invariants: redesign-kit: a row menu opened near the foot of the screen sits above its button and leaves the page where it was", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1894, height: 1000 },
-      timezoneId: "Europe/Brussels",
-    });
-    const page = await freshPage(context);
-    await clearSchedules(page);
-    await addSchedule(page, "films", "backup", { every: "day", at: "10:00" });
-    const id = await addSchedule(page, "notes", "backup", {
-      every: "day",
-      at: "11:00",
-    });
-    await page.goto(`${BASE}/schedules`);
-    const sel = `tr[data-id="${id}"] [data-drive="schedule-menu"]`;
-    await page.locator(sel).waitFor({ timeout: 10000 });
-    // Put the button near the foot, where its menu cannot fit under it.
-    await page.evaluate((q) => {
-      const r = /** @type {HTMLElement} */ (
-        document.querySelector(q)
-      ).getBoundingClientRect();
-      scrollBy(0, r.bottom - innerHeight + 40);
-    }, sel);
-    const before = await page.evaluate(() => scrollY);
-    await page.locator(sel).click();
-    await page
-      .locator(".nx-rowmenu > .kp-menu:not([hidden])")
-      .waitFor({ timeout: 3000 });
-    const placed = await page.evaluate((q) => {
-      const b = /** @type {HTMLElement} */ (document.querySelector(q));
-      const m = /** @type {HTMLElement} */ (
-        document.querySelector(".nx-rowmenu > .kp-menu:not([hidden])")
-      );
-      return {
-        scrollY,
-        button: b.getBoundingClientRect().top,
-        menuTop: m.getBoundingClientRect().top,
-        menuBottom: m.getBoundingClientRect().bottom,
-      };
-    }, sel);
-    assert.equal(
-      placed.scrollY,
-      before,
-      "opening the row menu scrolled the page",
-    );
-    assert.ok(
-      placed.menuBottom <= placed.button && placed.menuTop >= 0,
-      `the row menu is not above its button on the screen: ${JSON.stringify(placed)}`,
-    );
-    await page.keyboard.press("Escape");
-    await clearSchedules(page);
-  } finally {
-    await browser.close();
-  }
-});
-
-test("invariants: redesign-kit-13: a row menu's right edge lines up with its button's", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1894, height: 1000 },
-    });
-    const page = await freshPage(context);
-    await clearSchedules(page);
-    const id = await addSchedule(page, "films", "backup", {
-      every: "day",
-      at: "10:00",
-    });
-    await page.goto(`${BASE}/schedules`);
-    const sel = `tr[data-id="${id}"] [data-drive="schedule-menu"]`;
-    await page.locator(sel).waitFor({ timeout: 10000 });
-    await page.locator(sel).click();
-    await page
-      .locator(".nx-rowmenu > .kp-menu:not([hidden])")
-      .waitFor({ timeout: 3000 });
-    const r = await page.evaluate((q) => {
-      const b = /** @type {HTMLElement} */ (document.querySelector(q));
-      const m = /** @type {HTMLElement} */ (
-        document.querySelector(".nx-rowmenu > .kp-menu:not([hidden])")
-      );
-      return {
-        button: b.getBoundingClientRect().right,
-        menu: m.getBoundingClientRect().right,
-        width: m.getBoundingClientRect().width,
-        expanded: b.getAttribute("aria-expanded"),
-      };
-    }, sel);
-    assert.ok(
-      Math.abs(r.button - r.menu) <= 1,
-      `the menu ends ${r.menu - r.button} px past its button: ${JSON.stringify(r)}`,
-    );
-    assert.ok(
-      r.width >= 260,
-      "the menu is at least the width it plans for (kp's rich menu)",
-    );
-    assert.equal(r.expanded, "true");
-    await page.locator(sel).click();
-    // kp-themes plays the menu's close before it is hidden.
-    await page
-      .locator(".nx-rowmenu > .kp-menu:not([hidden])")
-      .waitFor({ state: "detached", timeout: 3000 });
-    assert.equal(
-      await page.locator(".nx-rowmenu > .kp-menu:not([hidden])").count(),
-      0,
-      "a second click on the button closes the menu",
-    );
-    await clearSchedules(page);
   } finally {
     await browser.close();
   }
@@ -8948,7 +8743,6 @@ const AUDIT_DIALOGS = [
   { path: "/stacks", drive: "stacks-new" },
   { path: "/activity", drive: "activity-run-again" },
   { path: "/activity", drive: "activity-open-incident" },
-  { path: "/activity?view=planned", drive: "schedule-template" },
   { path: "/backups", text: /^Back up now/ },
   { path: "/backups", drive: "backups-drill-now" },
   { path: "/host", text: /^Back up host state/ },

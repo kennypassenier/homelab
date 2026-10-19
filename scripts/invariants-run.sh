@@ -195,8 +195,11 @@ ln -f "$target_dir/debug/homelab-admin" "$bin"
 # redesign-final (B): one injected clock for the demo host, every browser
 # context and the cases (admin/web/test-e2e/clock.js): no case depends on
 # the time of day it runs at. INVARIANTS_CLOCK (unix seconds) picks it; the
-# default is a fixed moment, 2026-10-03 12:00 UTC.
-clock="${INVARIANTS_CLOCK:-1791028800}"
+# default is 12:00 UTC of today's date: a fixed moment would age out of
+# Activity's 14-day window (two cases went red 2026-10-17) and drift from
+# the real time the host stamps new entries with (a reveal, a copy), while
+# noon of the day keeps one run on one clock whatever the hour it starts at.
+clock="${INVARIANTS_CLOCK:-$(( $(date -u +%s) / 86400 * 86400 + 43200 ))}"
 export INVARIANTS_CLOCK="$clock"
 echo "invariants: starting the demo host on $listen"
 HOMELAB_ADMIN_TOKEN="$token" \

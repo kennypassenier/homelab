@@ -353,32 +353,43 @@ function isoDayText(/** @type {string} */ date) {
 export const WEEKDAYS = SHORT_DAYS;
 
 /**
- * The table's "When": "Every day at 10:00", "Mon, Thu at 22:00",
- * "Once, Mon 5 Oct at 08:00".
+ * A cadence in words, as a sentence part: "every day at 12:00", "on
+ * weekdays at 18:00", "on Mon, Thu at 03:30", "once on 25/10/2026 at 20:00".
  * @param {When} w
  */
-export function cadenceText(w) {
-  if (w.every === "day") return `Every day at ${w.at}`;
-  if (w.every === "week") {
-    const d = [...new Set(w.days)].filter((x) => x >= 0 && x <= 6).sort();
-    if (d.length === 7) return `Every day at ${w.at}`;
-    return `${d.map((x) => SHORT_DAYS[x]).join(", ")} at ${w.at}`;
-  }
-  return `Once, ${isoDayText(w.date)} at ${w.at}`;
+export function cadenceWords(w) {
+  if (w.every === "day") return `every day at ${w.at}`;
+  if (w.every === "once") return `once on ${isoDayText(w.date)} at ${w.at}`;
+  const d = [...new Set(w.days)].filter((x) => x >= 0 && x <= 6).sort();
+  const days =
+    d.length === 7
+      ? "every day"
+      : d.join() === "0,1,2,3,4"
+        ? "on weekdays"
+        : d.join() === "5,6"
+          ? "at the weekend"
+          : `on ${d.map((x) => SHORT_DAYS[x]).join(", ")}`;
+  return `${days} at ${w.at}`;
 }
 
 /**
- * "in 30 min", "in 2 h 14 min", "in 3 d".
- * @param {number} t
- * @param {number} now
+ * A cadence short enough for a cell or a lane: "Daily 03:30", "Weekdays
+ * 18:00", "Weekend 09:00", "Mon, Thu 03:30", "25/10 20:00".
+ * @param {When} w
  */
-export function untilText(t, now) {
-  const s = Math.max(0, t - now);
-  // Whole minutes first, so the hour and the minutes never read "60".
-  const min = Math.round(s / 60);
-  if (min < 60) return `in ${min} min`;
-  if (min < 1440) return `in ${Math.floor(min / 60)} h ${min % 60} min`;
-  return `in ${Math.round(s / 86_400)} d`;
+export function shortWhen(w) {
+  if (w.every === "day") return `Daily ${w.at}`;
+  if (w.every === "once") return `${isoDayText(w.date).slice(0, 5)} ${w.at}`;
+  const d = [...new Set(w.days)].filter((x) => x >= 0 && x <= 6).sort();
+  const days =
+    d.length === 7
+      ? "Daily"
+      : d.join() === "0,1,2,3,4"
+        ? "Weekdays"
+        : d.join() === "5,6"
+          ? "Weekend"
+          : d.map((x) => SHORT_DAYS[x]).join(", ");
+  return `${days} ${w.at}`;
 }
 
 /** The host target's name in a sentence. */
@@ -388,17 +399,17 @@ export const targetText = (
 ) => (stack === hostTarget ? "the host" : stack);
 
 /**
- * "Back up films", "Patch the fleet", "ZFS replicate the host": the action
- * with what it acts on, unless its label already names that.
+ * "Back up · films", "Patch the fleet", "ZFS replicate · the whole host": the
+ * action with what it acts on, unless its label already names that.
  * @param {string} label
  * @param {string} stack
  * @param {string} [hostTarget]
  */
 export function scheduleTitle(label, stack, hostTarget = "_host") {
-  if (stack !== hostTarget) return `${label} ${stack}`;
+  if (stack !== hostTarget) return `${label} · ${stack}`;
   return /\b(the|a|host|fleet|devices|repository)\b/i.test(label)
     ? label
-    : `${label} the host`;
+    : `${label} · the whole host`;
 }
 
 /**
@@ -408,19 +419,6 @@ export function scheduleTitle(label, stack, hostTarget = "_host") {
 export function countText(list) {
   const on = list.filter((v) => v.schedule.enabled).length;
   return `${list.length} ${list.length === 1 ? "schedule" : "schedules"} · ${on} on`;
-}
-
-/**
- * Whether `at` lies within an hour of the host's nightly round (either
- * side, across midnight too). No round, no warning.
- * @param {string} at
- * @param {number | null} hour
- */
-export function nearNightly(at, hour) {
-  if (hour == null || !/^\d\d:\d\d$/.test(at)) return false;
-  const { h, m } = hhmm(at);
-  const diff = Math.abs(h * 60 + m - hour * 60);
-  return Math.min(diff, 1440 - diff) < 60;
 }
 
 /**
@@ -469,14 +467,27 @@ export const TEMPLATES = [
     at: "20:00",
     tomorrow: true,
   },
+  {
+    id: "restore-test-weekly",
+    title: "Test a restore every Monday",
+    says: "Restores the newest backup into a scratch directory at 06:00, so a backup is proven, not assumed.",
+    action: "verify-restore",
+    host: false,
+    every: "week",
+    days: [0],
+    at: "06:00",
+    tomorrow: false,
+  },
 ];
 
 /**
- * The drawer's first values: the schedule being edited, else a template,
- * else the demo's own start (Back up, chosen weekdays Tue and Fri, 02:30).
+ * The form's first values: the schedule being edited, else a template,
+ * else the demo's own start (Back up, every day, an hour after the host's
+ * nightly round, or 03:00 when it has none).
  * @param {Schedule | null} existing
  * @param {Template | null} template
- * @param {{stacks: string[], hostTarget: string, now: number, zone: string}} ctx
+ * @param {{stacks: string[], hostTarget: string, now: number, zone: string,
+ *   nightly?: number | null}} ctx
  * @returns {Draft}
  */
 export function draftFor(existing, template, ctx) {
@@ -511,12 +522,13 @@ export function draftFor(existing, template, ctx) {
       args: {},
     };
   }
+  const after = typeof ctx.nightly === "number" ? (ctx.nightly + 1) % 24 : 3;
   return {
     action: "backup",
     stack: first,
-    every: "week",
+    every: "day",
     days: [1, 4],
-    at: "02:30",
+    at: `${String(after).padStart(2, "0")}:00`,
     date: "",
     note: "",
     enabled: true,
@@ -525,34 +537,18 @@ export function draftFor(existing, template, ctx) {
 }
 
 /**
- * The words of the "how often" choice, in the demo's order.
+ * The words of the "how often" choice, as the sentence reads them.
  * @type {Record<string, string>}
  */
 export const EVERY_WORDS = {
-  week: "on chosen weekdays",
   day: "every day",
+  week: "every week",
   once: "once",
 };
 
 /**
- * The drawer read as one sentence: "Run Back up on films on chosen
- * weekdays at 02:30".
- * @param {Draft} d
- * @param {(action: string) => string} label
- * @param {string} hostTarget
- */
-export function sentenceText(d, label, hostTarget) {
-  const on = d.stack === hostTarget ? "the whole host" : d.stack;
-  const how =
-    d.every === "once"
-      ? `once on ${isoDayText(d.date)}`
-      : (EVERY_WORDS[d.every] ?? d.every);
-  return `Run ${label(d.action)} on ${on} ${how} at ${d.at}`;
-}
-
-/**
- * The drawer to the body POST or PUT /data/schedules wants, or what is
- * wrong with it.
+ * The form to the body POST or PUT /data/schedules wants, or what is wrong
+ * with it.
  * @param {Draft} d
  * @returns {{ok: true, body: ReturnType<typeof scheduleBody>} |
  *   {ok: false, field: string, why: string}}
@@ -578,51 +574,29 @@ export function draftBody(d) {
   };
 }
 
+/**
+ * A date typed as dd/mm/yyyy (the page's one format) or given as an ISO
+ * date, as the ISO date the host wants; "" when it is neither.
+ * @param {string} text
+ */
+export function isoDate(text) {
+  const t = text.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(t);
+  if (!m) return "";
+  const [d, mo, y] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const c = new Date(Date.UTC(y, mo - 1, d));
+  if (c.getUTCFullYear() !== y || c.getUTCMonth() !== mo - 1) return "";
+  if (c.getUTCDate() !== d) return "";
+  return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
 /** @type {Record<string, string>} */
 const MISSED_WHY = {
-  down: "dashboard down",
-  busy: "previous run still going",
-  refused: "refused",
+  down: "the dashboard was down",
+  busy: "the previous run was still going",
+  refused: "the host refused it",
 };
-
-/** @type {Record<string, "ok" | "bad" | "warn" | "info">} */
-const JOB_TONE = {
-  done: "ok",
-  failed: "bad",
-  refused: "bad",
-  running: "info",
-  queued: "info",
-  deferred: "warn",
-  unknown: "warn",
-};
-
-/**
- * The "Last run" cell: its status dot, its words and the job to link.
- * @param {ScheduleView} v
- * @param {string} zone
- * @returns {{tone: "ok" | "bad" | "warn" | "info" | "none", text: string,
- *   job: number | null}}
- */
-export function lastRunView(v, zone) {
-  const s = v.schedule;
-  const ran = s.last_run;
-  const miss = s.last_missed;
-  if (miss && (!ran || miss.slot > ran.slot))
-    return {
-      tone: "warn",
-      text: `missed ${dayText(miss.slot, zone)} (${MISSED_WHY[miss.why] ?? miss.why})`,
-      job: null,
-    };
-  const job = v.last_job;
-  if (job)
-    return {
-      tone: JOB_TONE[job.state] ?? "warn",
-      text: job.state === "done" ? "ok" : job.state,
-      job: job.job,
-    };
-  if (ran) return { tone: "none", text: "ran", job: ran.job };
-  return { tone: "none", text: "not run yet", job: null };
-}
 
 /**
  * The schedule that runs first, of those that are on.
@@ -639,129 +613,520 @@ export function nextUp(list) {
   return best;
 }
 
-/**
- * One block on the calendar.
- * @typedef {{id: string | null, t: number, at: string, hour: number,
- *   text: string, host: boolean, off: boolean, next: boolean,
- *   skipped: boolean}} Pill
- * @typedef {{head: string, today: boolean, start: number, pills: Pill[]}} Day
- */
+// ── the kinds of action: the colour a run is drawn in ───────────────────
+// kp's week and timeline colour a run by `series` 1 to 5. The five families
+// below are what the legend names; an action none of them lists (guards,
+// resize, a template build…) is drawn in the fifth.
+
+/** @typedef {1 | 2 | 3 | 4 | 5} Series */
+export const FAMILIES = /** @type {const} */ ([
+  {
+    series: 1,
+    label: "Back up",
+    actions: [
+      "backup",
+      "backup-native",
+      "backup-host-meta",
+      "backup-devices",
+      "zfs-replicate",
+    ],
+  },
+  {
+    series: 2,
+    label: "Update",
+    actions: [
+      "update",
+      "update-native",
+      "release-update-native",
+      "update-host",
+    ],
+  },
+  { series: 3, label: "Patch the fleet", actions: ["patch"] },
+  {
+    series: 4,
+    label: "Deploy",
+    actions: ["deploy", "deploy-commit", "apply"],
+  },
+  { series: 5, label: "Restore test and others", actions: [] },
+]);
+
+/** What the legend under the week and the timeline names. */
+export const LEGEND = FAMILIES.map(({ series, label }) => ({ series, label }));
 
 /**
- * The next seven days from today in the host's clock: every run of every
- * schedule (one that is off greyed, one skipped on purpose marked), the
- * host's nightly round on each day, and where now is on today's column.
- * @param {ScheduleView[]} list
- * @param {number} now
- * @param {string} zone
- * @param {number | null} nightly the round's hour, null when it has none
- * @param {(action: string) => string} label
- * @param {string} [hostTarget]
- * @returns {{days: Day[], nowHour: number}}
+ * The colour (series) of an action.
+ * @param {string} action
+ * @returns {Series}
  */
-export function weekPlan(
-  list,
-  now,
-  zone,
-  nightly,
-  label,
-  hostTarget = "_host",
-) {
-  const p = zoneParts(now, zone);
-  const next = nextUp(list);
-  /** @type {Day[]} */
-  const days = [];
-  for (let k = 0; k < 7; k += 1) {
-    const c = addDays(p.y, p.m, p.d, k);
-    const n = addDays(p.y, p.m, p.d, k + 1);
-    const start = zonedInstant(c.y, c.m, c.d, 0, 0, zone);
-    const end = zonedInstant(n.y, n.m, n.d, 0, 0, zone);
-    /** @type {Pill[]} */
-    const pills = [];
-    if (nightly != null)
-      pills.push({
-        id: null,
-        t: zonedInstant(c.y, c.m, c.d, nightly, 0, zone),
-        at: `${String(nightly).padStart(2, "0")}:00`,
-        hour: nightly,
-        text: "nightly round",
-        host: true,
-        off: false,
-        next: false,
-        skipped: false,
-      });
-    for (const v of list) {
-      const s = v.schedule;
-      for (const t of runsBetween(s.when, start, end, zone)) {
-        const q = zoneParts(t, zone);
-        pills.push({
-          id: s.id,
-          t,
-          at: timeText(t, zone),
-          hour: q.hh + q.mm / 60,
-          text: scheduleTitle(label(s.action), s.stack, hostTarget),
-          host: false,
-          off: !s.enabled,
-          next: v === next && t === v.next_run,
-          skipped: s.enabled && t > now && v.next_run != null && t < v.next_run,
-        });
-      }
-    }
-    pills.sort((a, b) => a.t - b.t);
-    days.push({
-      head: k === 0 ? "Today" : `${SHORT_DAYS[c.wd]} ${c.d}`,
-      today: k === 0,
-      start,
-      pills,
-    });
-  }
-  return { days, nowHour: p.hh + p.mm / 60 };
+export function seriesOf(action) {
+  return (
+    FAMILIES.find((f) =>
+      /** @type {readonly string[]} */ (f.actions).includes(action),
+    )?.series ?? 5
+  );
 }
 
-/**
- * The phone's agenda: the next `n` runs of the schedules that are on,
- * within the coming week.
- * @param {ScheduleView[]} list
- * @param {number} now
- * @param {string} zone
- * @param {(action: string) => string} label
- * @param {number} [n]
- * @param {string} [hostTarget]
- * @returns {{id: string, t: number, when: string, text: string}[]}
- */
-export function agenda(list, now, zone, label, n = 8, hostTarget = "_host") {
-  /** @type {{id: string, t: number, when: string, text: string}[]} */
-  const rows = [];
-  for (const v of list) {
-    const s = v.schedule;
-    if (!s.enabled) continue;
-    for (const t of runsBetween(s.when, now + 1, now + 7 * 86_400, zone)) {
-      if (v.next_run != null && t < v.next_run) continue;
-      rows.push({
-        id: s.id,
-        t,
-        when: dateTimeText(t, zone),
-        text: scheduleTitle(label(s.action), s.stack, hostTarget),
-      });
-    }
-  }
-  return rows.sort((a, b) => a.t - b.t).slice(0, n);
-}
+// ── the host's clock, day by day ────────────────────────────────────────
 
 /**
- * Tops for blocks wanted at `tops` (pixels), pushed down in time order so
- * no two are closer than `gap`; same order as given.
- * @param {number[]} tops
- * @param {number} gap
+ * Local midnight of the day `k` days from the one `unix` falls on.
+ * @param {number} unix
+ * @param {string} zone
+ * @param {number} [k]
  */
-export function stackTops(tops, gap) {
-  const order = tops.map((t, i) => ({ t, i })).sort((a, b) => a.t - b.t);
-  const out = [...tops];
-  let last = -Infinity;
-  for (const o of order) {
-    const t = Math.max(o.t, last + gap);
-    out[o.i] = t;
-    last = t;
+export function dayStart(unix, zone, k = 0) {
+  const p = zoneParts(unix, zone);
+  const c = addDays(p.y, p.m, p.d, k);
+  return zonedInstant(c.y, c.m, c.d, 0, 0, zone);
+}
+
+/** Who a clash is with, when it is the host's own round. */
+export const NIGHTLY_WORDS = "the host's nightly round";
+
+/**
+ * The host's nightly round on every day in [from, to).
+ * @param {number} from
+ * @param {number} to
+ * @param {number | null | undefined} hour null: the host has no round
+ * @param {string} zone
+ * @returns {number[]}
+ */
+export function nightlyRounds(from, to, hour, zone) {
+  /** @type {number[]} */
+  const out = [];
+  if (typeof hour !== "number") return out;
+  for (let k = 0; ; k += 1) {
+    const day = dayStart(from, zone, k);
+    if (day >= to) break;
+    const p = zoneParts(day, zone);
+    const t = zonedInstant(p.y, p.m, p.d, hour, 0, zone);
+    if (t >= from && t < to) out.push(t);
   }
   return out;
+}
+
+/**
+ * Every start of the schedules that are on in [from, to), by its minute,
+ * and the minutes of the nightly round.
+ * @param {ScheduleView[]} list
+ * @param {number} from
+ * @param {number} to
+ * @param {string} zone
+ * @param {number | null | undefined} nightly
+ */
+function startsIn(list, from, to, zone, nightly) {
+  /** @type {Map<number, ScheduleView[]>} */
+  const starts = new Map();
+  for (const v of list) {
+    if (!v.schedule.enabled) continue;
+    for (const t of runsBetween(v.schedule.when, from, to, zone)) {
+      const at = starts.get(t);
+      if (at) at.push(v);
+      else starts.set(t, [v]);
+    }
+  }
+  return { starts, round: new Set(nightlyRounds(from, to, nightly, zone)) };
+}
+
+/**
+ * Another schedule (or the host's round) that starts in the very minute of
+ * `t`, by its name.
+ * @param {ReturnType<typeof startsIn>} idx
+ * @param {ScheduleView | null} v the schedule asking (it never clashes with itself)
+ * @param {number} t
+ * @param {(s: Schedule) => string} name
+ * @returns {string | null}
+ */
+function clashAt(idx, v, t, name) {
+  if (idx.round.has(t)) return NIGHTLY_WORDS;
+  const other = idx.starts.get(t)?.find((o) => o !== v);
+  return other ? name(other.schedule) : null;
+}
+
+/**
+ * The next `n` runs of `when` after a moment, each with what it starts
+ * together with (the form's preview and the next-run card's "Then").
+ * @param {ScheduleView[]} others the schedules it can clash with
+ * @param {When} when
+ * @param {number} after
+ * @param {number} n
+ * @param {{zone: string, nightly?: number | null,
+ *   name: (s: Schedule) => string}} o
+ * @returns {{at: number, conflict?: string}[]} `at` in ms, as kp's runs list takes it
+ */
+export function runsWithClash(others, when, after, n, o) {
+  const runs = nextRuns(when, after, n, o.zone);
+  if (!runs.length) return [];
+  const idx = startsIn(
+    others,
+    runs[0],
+    runs[runs.length - 1] + 1,
+    o.zone,
+    o.nightly,
+  );
+  return runs.map((t) => {
+    const c = clashAt(idx, null, t, o.name);
+    return c
+      ? { at: t * 1000, conflict: `Same minute as ${c}` }
+      : { at: t * 1000 };
+  });
+}
+
+// ── the week ────────────────────────────────────────────────────────────
+
+/**
+ * What kp's week takes: every run of every schedule from two weeks back to
+ * nine weeks ahead (the buttons move the range), a turned-off schedule
+ * dimmed, the next run ringed, a run skipped on purpose struck, and the
+ * host's nightly round each day as the dashed reference.
+ * @param {ScheduleView[]} list
+ * @param {{now: number, zone: string, nightly?: number | null,
+ *   label: (action: string) => string, hostTarget?: string}} o
+ * @returns {{id: string, start: number, label: string, series: Series,
+ *   state?: "next" | "off" | "skipped" | "reference", detail: string}[]}
+ */
+export function weekEvents(list, o) {
+  const { now, zone } = o;
+  const hostTarget = o.hostTarget ?? "_host";
+  const from = dayStart(now, zone, -14);
+  const to = dayStart(now, zone, 63);
+  const name = (/** @type {Schedule} */ s) =>
+    scheduleTitle(o.label(s.action), s.stack, hostTarget);
+  const idx = startsIn(list, from, to, zone, o.nightly);
+  const next = nextUp(list);
+  /** @type {ReturnType<typeof weekEvents>} */
+  const out = [];
+  for (const v of list) {
+    const s = v.schedule;
+    for (const t of runsBetween(s.when, from, to, zone)) {
+      const skipped =
+        s.enabled && t > now && v.next_run != null && t < v.next_run;
+      const clash = s.enabled ? clashAt(idx, v, t, name) : null;
+      /** @type {"next" | "off" | "skipped" | undefined} */
+      const state = !s.enabled
+        ? "off"
+        : v === next && t === v.next_run
+          ? "next"
+          : skipped
+            ? "skipped"
+            : undefined;
+      out.push({
+        id: `${s.id}@${t}`,
+        start: t * 1000,
+        label: s.stack === hostTarget ? "whole host" : s.stack,
+        series: seriesOf(s.action),
+        ...(state ? { state } : {}),
+        detail: `${o.label(s.action)} · ${SHORT_DAYS[zoneParts(t, zone).wd]} ${dateTimeText(t, zone)} · ${cadenceWords(s.when)}${
+          !s.enabled ? " · turned off" : skipped ? " · skipped" : ""
+        }${clash ? ` · same minute as ${clash}` : ""}`,
+      });
+    }
+  }
+  for (const t of nightlyRounds(from, to, o.nightly, zone))
+    out.push({
+      id: `nightly@${t}`,
+      start: t * 1000,
+      label: "Host nightly round",
+      series: 5,
+      state: "reference",
+      detail: `${SHORT_DAYS[zoneParts(t, zone).wd]} ${dateTimeText(t, zone)} · backups and updates of the host itself, for reference`,
+    });
+  return out;
+}
+
+// ── the busy hours ──────────────────────────────────────────────────────
+
+/**
+ * @typedef {{at: number, v: ScheduleView | null}} Start v null: the host's round
+ * @typedef {{days: number[], at: number, time: string, a: string, b: string,
+ *   move: ScheduleView | null}} Clash one pair at one time of day, on the
+ *   weekdays (0 = Monday) it happens
+ */
+
+/**
+ * The starts of the current week (Monday first) by weekday and hour, and
+ * the pairs that start in the same minute, one line for the same pair at
+ * the same time of day on several days.
+ * @param {ScheduleView[]} list
+ * @param {{now: number, zone: string, nightly?: number | null,
+ *   name: (s: Schedule) => string}} o
+ * @returns {{grid: Start[][][], clashes: Clash[]}}
+ */
+export function busyModel(list, o) {
+  const monday = dayStart(o.now, o.zone, -zoneParts(o.now, o.zone).wd);
+  const end = dayStart(monday, o.zone, 7);
+  /** @type {Start[][][]} */
+  const grid = Array.from({ length: 7 }, () =>
+    Array.from({ length: 24 }, () => []),
+  );
+  for (const v of list) {
+    if (!v.schedule.enabled) continue;
+    for (const at of runsBetween(v.schedule.when, monday, end, o.zone)) {
+      const p = zoneParts(at, o.zone);
+      grid[p.wd][p.hh].push({ at, v });
+    }
+  }
+  for (const at of nightlyRounds(monday, end, o.nightly, o.zone)) {
+    const p = zoneParts(at, o.zone);
+    grid[p.wd][p.hh].push({ at, v: null });
+  }
+  const who = (/** @type {Start} */ x) =>
+    x.v ? o.name(x.v.schedule) : NIGHTLY_WORDS;
+  /** @type {Map<string, Clash>} */
+  const groups = new Map();
+  for (let wd = 0; wd < 7; wd += 1)
+    for (let hh = 0; hh < 24; hh += 1) {
+      const cell = grid[wd][hh];
+      for (let i = 0; i < cell.length; i += 1)
+        for (let j = i + 1; j < cell.length; j += 1) {
+          if (cell[i].at !== cell[j].at) continue;
+          const time = timeText(cell[i].at, o.zone);
+          const a = who(cell[i]);
+          const b = who(cell[j]);
+          const key = `${a}|${b}|${time}`;
+          const g = groups.get(key);
+          if (g) g.days.push(wd);
+          else
+            groups.set(key, {
+              days: [wd],
+              at: cell[i].at,
+              time,
+              a,
+              b,
+              move: cell[i].v ?? cell[j].v,
+            });
+        }
+    }
+  return { grid, clashes: [...groups.values()] };
+}
+
+/**
+ * "Every day at 03:30" or "Mon, Thu at 03:30": when a clash happens.
+ * @param {Clash} c
+ */
+export function clashWhen(c) {
+  const d = [...c.days].sort();
+  return d.length === 7
+    ? `Every day at ${c.time}`
+    : `${d.map((x) => SHORT_DAYS[x]).join(", ")} at ${c.time}`;
+}
+
+/**
+ * The time a schedule moves to when a clash is resolved: 15 minutes later
+ * (earlier when that would cross midnight, so the weekday does not change).
+ * @param {string} at HH:MM
+ * @returns {{at: string, later: boolean}}
+ */
+export function movedTime(at) {
+  const { h, m } = hhmm(at);
+  const t = h * 60 + m;
+  const later = t + 15 < 1440;
+  const next = later ? t + 15 : t - 15;
+  const pad = (/** @type {number} */ n) => String(n).padStart(2, "0");
+  return { at: `${pad(Math.floor(next / 60))}:${pad(next % 60)}`, later };
+}
+
+// ── coverage ────────────────────────────────────────────────────────────
+
+/** The columns of the coverage matrix and the actions each one counts. */
+export const COVERAGE = /** @type {const} */ ([
+  { key: "backup", label: "Back up", actions: ["backup", "backup-native"] },
+  { key: "update", label: "Update", actions: ["update", "update-native"] },
+  { key: "restore-test", label: "Restore test", actions: ["verify-restore"] },
+]);
+
+/**
+ * Which stack has which schedule: the stacks of the fleet (and any stack a
+ * schedule names), and for each column the schedule that is on, if any.
+ * @param {ScheduleView[]} list
+ * @param {string[]} stacks
+ * @param {string} [hostTarget]
+ */
+export function coverageModel(list, stacks, hostTarget = "_host") {
+  const rows = [
+    ...new Set([
+      ...stacks,
+      ...list.map((v) => v.schedule.stack).filter((s) => s !== hostTarget),
+    ]),
+  ];
+  /** @param {string} stack @param {string} column @returns {Schedule | undefined} */
+  const has = (stack, column) => {
+    const c = COVERAGE.find((x) => x.key === column);
+    return list.find(
+      (v) =>
+        v.schedule.enabled &&
+        v.schedule.stack === stack &&
+        /** @type {readonly string[]} */ (c?.actions ?? []).includes(
+          v.schedule.action,
+        ),
+    )?.schedule;
+  };
+  return { rows, has, gaps: rows.filter((r) => !has(r, "backup")) };
+}
+
+// ── the last fourteen slots ─────────────────────────────────────────────
+
+/**
+ * The last `count` slots of a schedule as kp's uptime strip takes them,
+ * oldest first: ran (a job it started), failed, missed (the host's record
+ * of the newest slot that passed without a run), or no record (older than
+ * the jobs the dashboard keeps, or skipped on purpose, which is not
+ * recorded). A schedule with fewer slots than `count` pads the start.
+ * @param {ScheduleView} v
+ * @param {import("./jobs.js").Job[]} jobs
+ * @param {{now: number, zone: string, count?: number}} o
+ * @returns {{key: string, label: string, state: "up" | "degraded" | "down" | "none",
+ *   tip?: string, details?: string[], href?: string}[]}
+ */
+export function slotPeriods(v, jobs, o) {
+  const count = o.count ?? 14;
+  const s = v.schedule;
+  const slots = runsBetween(s.when, o.now - 400 * 86_400, o.now, o.zone).slice(
+    -count,
+  );
+  /** @type {Map<number, import("./jobs.js").Job>} */
+  const byslot = new Map();
+  for (const j of jobs)
+    if (j.origin.from === "schedule" && j.origin.schedule === s.id)
+      byslot.set(j.origin.slot, j);
+  /** @type {ReturnType<typeof slotPeriods>} */
+  const out = [];
+  for (let i = 0; i < count - slots.length; i += 1)
+    out.push({ key: `none-${i}`, label: "No slot yet", state: "none" });
+  for (const slot of slots) {
+    const label = dateTimeText(slot, o.zone);
+    const job = byslot.get(slot);
+    if (job) {
+      const failed = ["failed", "refused"].includes(job.state);
+      const odd = ["unknown", "deferred"].includes(job.state);
+      out.push({
+        key: String(slot),
+        label,
+        state: failed ? "down" : odd ? "degraded" : "up",
+        tip:
+          failed || odd
+            ? `${label}: job ${job.job} ${job.state}`
+            : `Ran ${label} as job ${job.job}`,
+        details: [`Job ${job.job} ${job.state}`],
+        href: `/jobs?job=${job.job}`,
+      });
+    } else if (s.last_missed?.slot === slot) {
+      out.push({
+        key: String(slot),
+        label,
+        state: "down",
+        tip: `Missed ${label}: ${MISSED_WHY[s.last_missed.why] ?? s.last_missed.why}`,
+      });
+    } else
+      out.push({
+        key: String(slot),
+        label,
+        state: "none",
+        tip: `${label}: no record of this slot`,
+      });
+  }
+  return out;
+}
+
+// ── history ─────────────────────────────────────────────────────────────
+
+/** How many schedules the history draws a lane for. */
+export const HISTORY_LANES = 7;
+
+/**
+ * The runs the schedules started in the last `days` days as kp's timeline
+ * takes them, one lane per schedule (the busiest `HISTORY_LANES`), and the
+ * slots the host recorded as missed as marks in the lane.
+ * @param {ScheduleView[]} list
+ * @param {import("./jobs.js").Job[]} jobs
+ * @param {{now: number, zone: string, days?: number,
+ *   label: (action: string) => string, hostTarget?: string}} o
+ */
+export function historyModel(list, jobs, o) {
+  const since = o.now - (o.days ?? 7) * 86_400;
+  const hostTarget = o.hostTarget ?? "_host";
+  const byId = new Map(list.map((v) => [v.schedule.id, v]));
+  const title = (/** @type {string} */ action, /** @type {string} */ stack) =>
+    scheduleTitle(o.label(action), stack, hostTarget);
+  /** @type {Map<string, number>} */
+  const busy = new Map();
+  /** @type {{id: string, lane: string, label: string, start: number,
+   *   end?: number, state: "queued" | "running" | "ok" | "failed",
+   *   series: Series, detail: string}[]} */
+  const runs = [];
+  for (const j of jobs) {
+    if (j.origin.from !== "schedule") continue;
+    const v = byId.get(j.origin.schedule);
+    const at = j.started_at ?? j.queued_at;
+    if (!v || at < since) continue;
+    busy.set(v.schedule.id, (busy.get(v.schedule.id) ?? 0) + 1);
+    const state =
+      j.state === "done"
+        ? "ok"
+        : j.state === "running"
+          ? "running"
+          : j.state === "queued" || j.state === "deferred"
+            ? "queued"
+            : "failed";
+    runs.push({
+      id: `j${j.job}`,
+      lane: v.schedule.id,
+      label: title(j.action, j.stack),
+      start: at * 1000,
+      ...(j.finished_at != null && state !== "running" && state !== "queued"
+        ? { end: j.finished_at * 1000 }
+        : {}),
+      state,
+      series: seriesOf(j.action),
+      detail:
+        j.state === "unknown"
+          ? `Job ${j.job}: the outcome is not known, the dashboard restarted during the run`
+          : j.state === "failed" || j.state === "refused"
+            ? `Job ${j.job} ${j.state}${j.message ? `: ${j.message}` : ""}`
+            : `Job ${j.job} started by the schedule`,
+    });
+  }
+  /** @type {{id: string, lane: string, at: number, kind: string,
+   *   label: string, detail: string}[]} */
+  const points = [];
+  for (const v of list) {
+    const m = v.schedule.last_missed;
+    if (!m || m.slot < since) continue;
+    busy.set(v.schedule.id, (busy.get(v.schedule.id) ?? 0) + 1);
+    points.push({
+      id: `m${v.schedule.id}@${m.slot}`,
+      lane: v.schedule.id,
+      at: m.slot * 1000,
+      kind: "missed",
+      label: title(v.schedule.action, v.schedule.stack),
+      detail: `Missed ${dateTimeText(m.slot, o.zone)}: ${MISSED_WHY[m.why] ?? m.why}`,
+    });
+  }
+  const shown = [...busy.entries()]
+    .sort(
+      (a, b) =>
+        b[1] - a[1] ||
+        (byId.get(a[0])?.next_run ?? Infinity) -
+          (byId.get(b[0])?.next_run ?? Infinity),
+    )
+    .slice(0, HISTORY_LANES)
+    .map(([id]) => id);
+  const lanes = shown.flatMap((id) => {
+    const v = byId.get(id);
+    return v
+      ? [
+          {
+            id,
+            label: title(v.schedule.action, v.schedule.stack),
+            sub: shortWhen(v.schedule.when),
+          },
+        ]
+      : [];
+  });
+  return {
+    lanes,
+    runs: runs.filter((r) => shown.includes(r.lane)),
+    points: points.filter((p) => shown.includes(p.lane)),
+    hidden: busy.size - shown.length,
+  };
 }

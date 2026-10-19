@@ -7,8 +7,12 @@
 // performance.now(), which is no date. scripts/check-test-clock.mjs refuses
 // any other clock in a test.
 
-/** The injected moment, unix ms (a fixed default when run alone). */
-const CLOCK0 = Number(process.env.INVARIANTS_CLOCK ?? "1791028800") * 1000;
+/** The injected moment, unix ms (12:00 UTC today when run alone). */
+const CLOCK0 =
+  Number(
+    process.env.INVARIANTS_CLOCK ??
+      Math.floor(Date.now() / 86400000) * 86400 + 43200,
+  ) * 1000;
 /** When this process started counting from it. */
 const T0 = performance.now();
 

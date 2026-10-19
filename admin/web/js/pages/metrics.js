@@ -1,71 +1,124 @@
-// Metrics (redesign-371-metrics, release 3.71.0; Kenny approved the demo
-// 2026-10-03: ~/.local/share/homelab/redesign-3.71/metrics.html,
-// implemented exactly). Two views of one page, System (replace-grafana)
-// and Traffic (replace-goaccess), sharing the window (1h … 30d) in the
-// address, so switching keeps it.
+// Metrics (redesign-371-metrics, release 3.71.0; rebuilt on kp-themes 11.0.0
+// from the demo Kenny approved in full on 2026-10-19, app-homelab-metrics,
+// feat-kp11demo-10). Two views of one page, System (replace-grafana) and
+// Traffic (replace-goaccess), sharing the window (1h … 30d) in the address,
+// so switching keeps it.
 //
-// Top to bottom: the header (live chip, freshness, the data's source; the
-// System | Traffic switch on the right), one toolbar row (what is shown,
-// the window in words with the events counted, the zoom chip, the window
-// switch), the KPI strip, the attention band (a failing drive), the key to
-// the event markers, then the charts in sections on a 3-column grid. Every
-// chart is kp-themes' own (js/charts.js wraps it): hover a point for its
-// reading and the change over the hour before, a plain click on a legend
-// source turns it on or off (Show all or Esc resets — Kenny, 2026-10-03:
-// "shift-klik wil ik niet, ik wil dat een klik aan/uit is"), drag to zoom
-// every chart of the page together, and what the host did in the window
-// (/data/history) marked on each. The page reads again every 30 s, unless
-// someone is zoomed in, has a reading pinned or a source picked.
+// Top to bottom: the header (the source of the data; the System | Traffic
+// switch on the right), one grid of three rows on shared columns (which
+// machines are shown, the window, the refresh), the key figures with their
+// 24-hour trends, the attention band (a failing drive), then the charts in
+// sections. Every section is a kp chart group of its own: its window keys,
+// its zoom chip and its crosshair; the page's window sets every section at
+// once and a section's own keys change only that section. The charts are
+// fed in place on every read (kp's live update), so a pinned reading, a
+// zoom and a source switched off survive each refresh and the page never
+// skips one. What the host did in the window is marked on every chart (a
+// window of work as a hatched band, a failure as a line) and listed in the
+// operations ribbon under the sections.
 //
 // Data: /data/charts (Prometheus), /data/traffic (Loki), /data/history,
 // the fleet store (the host's own CPU, memory, disk and load).
 
 import { errorBox, fetchJson, fetchReport, h } from "../dom.js";
-import { declare, drivable } from "../drivable.js";
+import { declare, declareField, drivable } from "../drivable.js";
 import {
   CLASSES,
   HOST_SECTIONS,
+  RANGE_SECONDS,
+  RIBBON_LANES,
   STACK_SECTIONS,
   annotations,
   byTitle,
   changeText,
   count,
   drives,
+  extremes,
   fill,
+  hostHeat,
   hostLegend,
+  machinesOf,
   nowValue,
   peak,
   poweredOn,
+  ribbonRuns,
   statusClasses,
+  statusParts,
   trafficFigures,
-  windowText,
+  usualMachines,
 } from "../metricsview.js";
 import { current, subscribe } from "../store.js";
-import { fmtValue, hhmm, pageCharts, timeChart, zoomChip } from "../charts.js";
 import {
-  countOf,
+  attachPageCharts,
+  failChart,
+  feedChart,
+  fmtValue,
+  hhmm,
+} from "../charts.js";
+import {
   attentionBand,
-  chip,
-  dataTable,
   dot,
   ensureStyle,
   keyRow,
-  kpiStrip,
   pageHeader,
   section,
   segSwitch,
-  shareBar,
-  skeletonBlock,
-  sparkline,
-  tableSlot,
-  toolbar,
 } from "../ui.js";
+import { formatClock, formatDateTime, formatDay } from "../format.js";
 import { choice, setParams } from "../urlstate.js";
+import {
+  CHART_RANGE_EVENT,
+  CHART_RETRY_EVENT,
+  CHART_SELECT_EVENT,
+  CHART_ZOOM_EVENT,
+  chartSelect,
+  chartZoom,
+  setTrendData,
+} from "/static/kp/js/chart.js";
+import { RANGE_EVENT, attachRanges } from "/static/kp/js/range.js";
+import {
+  REFRESH_EVENT,
+  attachRefresh,
+  refreshOf,
+} from "/static/kp/js/auto-refresh.js";
+import {
+  GANTT_OPEN_EVENT,
+  GANTT_WINDOW_EVENT,
+  attachGantts,
+  setGanttRuns,
+  setGanttState,
+  setGanttWindow,
+} from "/static/kp/js/gantt.js";
+import { CHANGE_EVENT, combobox } from "/static/kp/js/combobox.js";
+import { attachUsualPickers, setUsual } from "/static/kp/js/usual-picker.js";
+import { attachIdmarks, idmarkColours } from "/static/kp/js/idmark.js";
+import { attachHoverCards } from "/static/kp/js/hovercard.js";
+import {
+  STACKBAR_PICK_EVENT,
+  STACKBAR_RETRY_EVENT,
+  setStackbar,
+} from "/static/kp/js/stackbar.js";
+import {
+  HEAT_PICK_EVENT,
+  HEAT_ROW_EVENT,
+  attachHeats,
+  setHeat,
+  setHeatPick,
+  setHeatRows,
+} from "/static/kp/js/heat.js";
+import {
+  RETRY_EVENT as TABLE_RETRY_EVENT,
+  attachDataTables,
+  dataTable as tableOf,
+} from "/static/kp/js/datatable.js";
+import { attachBarCells, setBarCell } from "/static/kp/js/barcell.js";
 
 const RANGES = /** @type {const} */ (["1h", "6h", "24h", "7d", "30d"]);
 const TABS = /** @type {const} */ (["system", "traffic"]);
-/** Seconds between two reads. */
+/** Seconds between two reads, until a person picks another interval. */
 const EVERY_S = 30;
+/** The window every key figure's trend covers. */
+const TREND_RANGE = "24h";
 
 // Live view (invariant 39): every control this page draws.
 const VIEW = declare({
@@ -98,11 +151,32 @@ const HOSTNAME = declare({
   shows: "on the Traffic view",
   reach: [{ do: "click", control: "metrics-view", row: "traffic" }],
 });
+const HOSTNAMES_AS = declare({
+  id: "metrics-hostnames-as",
+  page: "metrics",
+  opens: "view",
+  row: "heat|table",
+  what: "show the hostnames as a heat grid (hostname by hour) or as a sortable table",
+  shows: "on the Traffic view",
+  reach: [{ do: "click", control: "metrics-view", row: "traffic" }],
+});
 const SHOWING = declare({
   id: "metrics-showing",
   page: "metrics",
   opens: "view",
   what: "pick whose charts the System view shows: the host or one stack",
+});
+const SCOPE_FIELD = declareField({
+  id: "metrics-scope",
+  page: "metrics",
+  what: "the machines picker on Metrics: type a stack name to search the list",
+});
+const SECTION_WINDOW = declare({
+  id: "metrics-section-window",
+  page: "metrics",
+  opens: "view",
+  row: "<section>/<window>",
+  what: "show one section's charts over the last hour, 6 hours, day, week or 30 days, the others stay as they are",
 });
 const TILE = declare({
   id: "metrics-kpi",
@@ -122,8 +196,23 @@ const BACKUPS = declare({
 /**
  * @typedef {import("../metricsview.js").Panel} Panel
  * @typedef {import("../metricsview.js").Card} Card
- * @typedef {ReturnType<typeof timeChart>} Chart
+ * @typedef {import("../metricsview.js").Section} Section
+ * @typedef {import("../charts.js").Annotation} Annotation
+ * @typedef {import("../charts.js").Point} Point
+ * @typedef {import("../charts.js").Unit} Unit
+ * @typedef {{ok: true, body: any} | {ok: false, error: import("../doctor.js").RouteError}} Read
+ * @typedef {{key: string, el: HTMLElement, range: string, group: HTMLElement,
+ *   cards: Map<string, {el: HTMLElement, fig: HTMLElement, body: HTMLElement,
+ *   setFoot: (parts: import("../dom.js").Child[]) => void,
+ *   card: Card}>, section: Section}} Block one section of charts
  */
+
+/** Why a read failed, in one sentence a chart can print in its plot. @param {import("../doctor.js").RouteError} e */
+const notReadWords = (e) => `Could not read ${e.what}: ${e.why}.`;
+
+/** What a machine in the address is called to a person. @param {string} m */
+const machineName = (m) =>
+  m === "host" ? (current().fleet?.host.name ?? "host") : m;
 
 /**
  * @param {HTMLElement} root
@@ -136,15 +225,16 @@ export function mount(root, ctx) {
   const params = new URLSearchParams(location.search);
   const tab = choice(params, "tab", TABS, "system");
   const range = choice(params, "range", RANGES, "24h");
-  const stack = tab === "system" ? (params.get("stack") ?? "") : "";
+  const machines =
+    tab === "system" ? machinesOf(params.get("stack")) : ["host"];
+  const lead = machines[0];
+  /** The stack the sections show; empty for the host. */
+  const stack = lead === "host" ? "" : lead;
   const go = (/** @type {Record<string, string | null>} */ p) =>
     ctx.navigate(`/charts${setParams(location.search, p)}`);
   const abort = new AbortController();
   /** @type {(() => void)[]} */
   const stops = [];
-  /** @type {Chart[]} */
-  let charts = [];
-  pageCharts.setZoom(null);
 
   // ── header ────────────────────────────────────────────────────────────
   const view = segSwitch({
@@ -172,7 +262,6 @@ export function mount(root, ctx) {
         ? "How hard the host and each stack are working, over time, with what the host did marked on every chart."
         : "Who visits the services behind the gateway, how much, and how many requests fail.",
     meta: [
-      chip(`Live · reads every ${EVERY_S} s`, { tone: "live", dot: true }),
       h(
         "span",
         null,
@@ -181,235 +270,372 @@ export function mount(root, ctx) {
           : "Source: the gateway's access log in Loki",
       ),
     ],
-    live: "updated",
+    live: false,
     actions: [view.el],
   });
 
-  // ── toolbar: what is shown · the window in words · the window ─────────
-  const scope =
-    tab === "system"
-      ? (() => {
-          const pick = /** @type {HTMLSelectElement} */ (
-            h("select", {
-              class: "kp-field__input mk-select",
-              "aria-label": "Which machine",
-              title: "Show the host's own charts, or one stack's container",
-            })
-          );
-          const paint = () => {
-            const names = (current().fleet?.stacks ?? [])
-              .map((s) => s.name)
-              .sort();
-            pick.replaceChildren(
-              h(
-                "option",
-                { value: "" },
-                `The host${current().fleet?.host.name ? ` (${current().fleet?.host.name})` : ""}`,
-              ),
-              ...names.map((n) => h("option", { value: n }, `Stack ${n}`)),
-            );
-            pick.value = stack;
-          };
-          paint();
-          stops.push(subscribe(paint));
-          drivable(pick, SHOWING);
-          pick.addEventListener("change", () => go({ stack: pick.value }));
-          return h(
-            "label",
-            { class: "nx-tb__group" },
-            h("b", null, "Showing"),
-            pick,
-          );
-        })()
-      : h(
-          "div",
-          { class: "nx-tb__group" },
-          h("b", null, "Showing"),
-          h("span", { class: "mk-muted" }, "Every hostname behind the gateway"),
-        );
-  const span = h("span", { class: "mk-window", role: "status" }, "Reading…");
-  const zoom = zoomChip();
-  stops.push(zoom.stop);
-  stops.push(
-    pageCharts.onZoom((z) => {
-      span.hidden = z != null;
-    }),
+  // ── the three rows on shared columns: what is shown, the window, the refresh ──
+  const refreshEl = h("div", {
+    class: "kp-refresh mk-field",
+    "data-kp-refresh": EVERY_S,
+    "data-kp-refresh-choices": "0,15,30,60,300",
+    id: "mk-refresh",
+    "aria-label": "Refresh the charts",
+  });
+  const rangeEl = h("div", {
+    class: "kp-range mk-field",
+    "data-kp-range": range,
+    "data-kp-range-presets": RANGES.join(" "),
+    id: "mk-range",
+    "aria-label": "Time range",
+  });
+  const picker = tab === "system" ? scopePicker() : null;
+  const rows = h(
+    "section",
+    { class: "mk-controls", "aria-label": "What this page shows" },
+    h(
+      "div",
+      { class: "mk-row" },
+      h(
+        "label",
+        {
+          class: "mk-label",
+          for: picker ? SCOPE_FIELD : "mk-scope-fixed",
+        },
+        "Showing",
+      ),
+      picker
+        ? picker.el
+        : h(
+            "span",
+            { class: "mk-field mk-fixed", id: "mk-scope-fixed" },
+            "Every hostname behind the gateway",
+          ),
+      h(
+        "p",
+        { class: "mk-aside" },
+        picker
+          ? "Picks whose charts the page shows: the host or a stack, or up to three machines side by side."
+          : "The access log covers every hostname the gateway serves.",
+      ),
+    ),
+    h(
+      "div",
+      { class: "mk-row" },
+      h("span", { class: "mk-label", id: "mk-range-label" }, "Window"),
+      rangeEl,
+      h(
+        "p",
+        { class: "mk-aside" },
+        "Sets how far back every section reaches; a section's own keys change only that section.",
+      ),
+    ),
+    h(
+      "div",
+      { class: "mk-row" },
+      h("span", { class: "mk-label", id: "mk-refresh-label" }, "Refresh"),
+      refreshEl,
+      h(
+        "p",
+        { class: "mk-aside" },
+        "Reads the charts again and adds the new readings in place: a pinned reading, a zoom and the sources you switched off stay.",
+      ),
+    ),
   );
-  const win = segSwitch({
-    label: "Window",
-    items: RANGES.map((r) => ({
-      value: r,
-      label: r,
-      hint: `Show the last ${r}`,
-    })),
-    value: range,
-    onChange: (v) => go({ range: v === "24h" ? null : v }),
-    drive: { id: WINDOW },
-  });
-  const bar = toolbar({
-    groups: [scope, h("div", { class: "mk-window-zone" }, span, zoom.el)],
-    state: [win.el],
-  });
-  bar.el.classList.add("mk-toolbar");
+  rangeEl.setAttribute("aria-labelledby", "mk-range-label");
 
   const failed = h("div", { class: "mk-failed" });
-  root.replaceChildren(head.el, bar.el, failed);
+  root.replaceChildren(head.el, rows, failed);
 
-  /** @type {import("../charts.js").Annotation[]} */
-  let marks = [];
-  /** @param {number} from @param {number} to */
-  const readMarks = async (from, to) => {
+  // ── what the host did, read once per tick ─────────────────────────────
+  /** @type {import("../activity.js").Entry[]} */
+  let entries = [];
+  let historyOk = true;
+  /** The longest window anything on the page has asked for, seconds. */
+  let historySpan = RANGE_SECONDS[range];
+  /** @param {number} span seconds */
+  const readHistory = async (span) => {
+    historySpan = Math.max(historySpan, span);
+    const since = Math.floor(Date.now() / 1000) - historySpan;
     const r = await fetchReport(
-      `/data/history?since=${from}&limit=500`,
+      `/data/history?since=${since}&limit=500`,
       "the history",
       abort.signal,
     );
-    marks = r.ok
-      ? annotations(r.report?.entries ?? [], {
-          from,
-          to,
-          ...(stack ? { stack } : {}),
-        })
-      : [];
+    historyOk = r.ok;
+    entries = r.ok ? (r.report?.entries ?? []) : [];
   };
+  /** @param {number} from @param {number} to */
+  const marksIn = (from, to) =>
+    annotations(entries, { from, to, ...(stack ? { stack } : {}) });
 
-  /** Someone is reading a chart: a zoom, a pinned reading, a picked source. */
-  const busy = () =>
-    pageCharts.zoom != null ||
-    root.querySelector(".kp-chart__tip[data-kp-pinned]:not([hidden])") !=
-      null ||
-    root.querySelector('.kp-chart__source[aria-pressed="true"]') != null ||
-    root.querySelector(".kp-chart__plot:focus") != null ||
-    // A pointer over a chart or its legend: the reading under it stays put
-    // (a repaint would destroy the chart under the hover).
-    root.querySelector(".kp-chart:hover") != null;
-
-  const destroyCharts = () => {
-    for (const c of charts) c.destroy();
-    charts = [];
+  // ── a section of charts: its group, its window keys, its zoom chip ────
+  /**
+   * @param {{key: string, title: string, desc: string}} meta
+   * @param {Card[]} cards
+   * @returns {Block}
+   */
+  const block = (meta, cards) => {
+    const ranges = h(
+      "div",
+      {
+        class: "kp-chart-ranges",
+        role: "group",
+        "aria-label": `Time range, ${meta.title}`,
+      },
+      RANGES.map((r) =>
+        h(
+          "button",
+          {
+            type: "button",
+            class: "kp-button kp-button--sm",
+            "data-kp-chart-range": r,
+            title: `Show ${meta.title} over the last ${r}`,
+          },
+          r,
+        ),
+      ),
+    );
+    const bar = h(
+      "div",
+      { class: "kp-chart-group__bar mk-groupbar" },
+      ranges,
+      h("span", {
+        class: "kp-chart-zoom",
+        "data-kp-chart-zoom": "",
+        hidden: "",
+      }),
+    );
+    /** @type {Block["cards"]} */
+    const made = new Map();
+    const panels = h(
+      "div",
+      { class: "mk-panels" },
+      cards.map((c) => {
+        const k = card(c);
+        made.set(c.key, { ...k, card: c });
+        return k.el;
+      }),
+    );
+    const group = h(
+      "div",
+      {
+        class: "kp-chart-group mk-group",
+        "data-kp-chart-group": "",
+        "data-kp-chart-span": range,
+        "data-kp-key": meta.key,
+      },
+      bar,
+      panels,
+    );
+    const el = h(
+      "section",
+      {
+        class: "mk-section",
+        "aria-labelledby": `mk-h-${meta.key}`,
+      },
+      h(
+        "div",
+        { class: "mk-section__head" },
+        h("h2", { id: `mk-h-${meta.key}` }, meta.title),
+        h("p", null, meta.desc),
+      ),
+      group,
+    );
+    return {
+      key: meta.key,
+      el,
+      range,
+      group,
+      cards: made,
+      section: { title: meta.title, desc: meta.desc, cards },
+    };
   };
 
   /**
-   * One chart card: heading, one sentence, the figure "now" on the right,
-   * the chart (a skeleton until it is read), an optional foot.
-   * @param {{key: string, title: string, desc: string, span: number,
-   *   nowLabel?: string}} c
+   * One chart card: heading, one sentence, the chart (kp's, waiting for its
+   * first reading at its final height).
+   * @param {Card} c
    */
   const card = (c) => {
-    const nowB = h("b", null, "");
-    const nowS = h("span", null, c.nowLabel ?? "now");
-    const now = h("div", { class: "mk-now", hidden: "" }, nowB, nowS);
     const s = section({
       title: c.title,
       desc: c.desc,
       id: `chart-${c.key}`,
-      tools: [now],
       level: "h3",
     });
     s.el.classList.add("mk-card", `mk-span-${c.span}`);
     s.el.dataset.key = c.key;
-    s.body.replaceChildren(skeletonBlock("168px", `Reading ${c.title}`));
-    return {
-      el: s.el,
-      body: s.body,
-      /** @param {string | null} v @param {string} [label] */
-      setNow: (v, label) => {
-        now.hidden = v == null;
-        nowB.textContent = v ?? "";
-        if (label) nowS.textContent = label;
+    const fig = h("figure", {
+      class: "kp-chart mk-chart",
+      "data-kp-chart": "",
+      "data-kp-chart-loading": "",
+      "aria-label": c.title,
+      ...(c.sources ? { "data-kp-chart-sources": c.sources } : {}),
+    });
+    s.body.replaceChildren(fig);
+    return { el: s.el, fig, body: s.body, setFoot: s.setFoot };
+  };
+
+  /** A chart whose read failed: the reason in its plot, with kp's Retry. @param {HTMLElement} fig @param {string} label @param {string} why */
+  const notRead = (fig, label, why) => failChart(fig, label, why);
+
+  // ── key figures: kp's trend tiles ─────────────────────────────────────
+  /**
+   * @typedef {{key: string, label: string, note?: string, target: string,
+   *   chart: string, unit: "percent" | "bytes" | "count" | "celsius"}} TileSpec
+   */
+  /**
+   * @param {TileSpec[]} specs
+   * @param {string} label
+   */
+  const tileStrip = (specs, label) => {
+    const el = h("div", {
+      class: "kp-kpis mk-tiles",
+      "data-kp-kpis-columns": "5 3 2 1",
+      role: "group",
+      "aria-label": label,
+    });
+    /** @type {Map<string, ReturnType<typeof tile>>} */
+    const map = new Map();
+    for (const s of specs) {
+      const t = tile(s);
+      map.set(s.key, t);
+      el.append(t.el);
+    }
+    const group = h(
+      "div",
+      {
+        class: "kp-chart-group mk-tilegroup",
+        "data-kp-chart-group": "",
+        "data-kp-chart-span": TREND_RANGE,
       },
+      el,
+    );
+    return { el: group, strip: el, tiles: map };
+  };
+
+  /** @param {TileSpec} s */
+  const tile = (s) => {
+    const link = h(
+      "a",
+      {
+        class: "kp-kpi__link",
+        href: `${location.pathname}${location.search}#${s.target}`,
+        "aria-label": `${s.label}: open the ${s.chart} chart`,
+      },
+      h("span", { class: "kp-kpi__link-word" }, "Chart"),
+      " ↗",
+    );
+    drivable(link, TILE, s.key);
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      document
+        .getElementById(s.target)
+        ?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+    const value = h("span", { class: "kp-kpi__value" }, "—");
+    const trend = h("span", { class: "kp-kpi__trend" }, "reading…");
+    const fig = h("figure", {
+      class: "kp-kpi__chart",
+      "data-kp-chart": "spark",
+      "data-kp-spark-head": "none",
+      "data-kp-spark-axis": "relative",
+      "aria-label": `${s.label}, last 24 hours`,
+    });
+    const el = h(
+      "div",
+      { class: "kp-kpi kp-kpi--trend", "data-key": s.key },
+      h(
+        "span",
+        { class: "kp-kpi__label" },
+        s.label,
+        s.note
+          ? [" ", h("span", { class: "kp-kpi__label-note" }, s.note)]
+          : null,
+      ),
+      link,
+      value,
+      trend,
+      fig,
+    );
+    return {
+      el,
       /**
-       * redesign-final (exact counts): the "now" figure counts these rows.
-       * @param {HTMLElement} list @param {string} rows
+       * @param {{value: string, unit?: string, trend: (string | Node)[],
+       *   hover: string, points?: Point[], step?: number,
+       *   tone?: "warn" | "bad" | ""} | null} next null: still reading
        */
-      countOf: (list, rows) => countOf(nowB, list, rows),
-      /**
-       * The card's foot line: the source left, a note right (section's
-       * foot). @param {(Node | string)[]} left @param {(Node | string)[]} [right]
-       */
-      foot: (left, right = []) => {
-        s.foot.replaceChildren(
-          h("span", null, ...left),
-          h("span", null, ...right),
+      set(next) {
+        if (!next) {
+          value.replaceChildren("—");
+          trend.replaceChildren("reading…");
+          link.removeAttribute("data-kp-hovercard");
+          el.removeAttribute("data-kp-tone");
+          setTrendData(fig, null);
+          return;
+        }
+        value.replaceChildren(
+          next.value,
+          ...(next.unit ? [h("small", null, next.unit)] : []),
         );
-        s.foot.hidden = false;
+        trend.replaceChildren(...next.trend);
+        link.setAttribute("data-kp-hovercard", next.hover);
+        if (next.tone)
+          el.dataset.kpTone = next.tone === "bad" ? "destructive" : "warning";
+        else el.removeAttribute("data-kp-tone");
+        setTrendData(fig, {
+          points: (next.points ?? []).map(([t, v]) => [t * 1000, v]),
+          step: (next.step ?? 600) * 1000,
+          unitKind: s.unit,
+        });
+      },
+      /** The read failed: the tile says so instead of pulsing for ever. */
+      fail() {
+        value.replaceChildren("—");
+        trend.replaceChildren("not read");
+        link.removeAttribute("data-kp-hovercard");
+        el.removeAttribute("data-kp-tone");
+        setTrendData(fig, { points: [] });
       },
     };
   };
 
   /**
-   * Draw a time chart into a card's body.
-   * @param {HTMLElement} body
-   * @param {Omit<import("../charts.js").ChartSpec, "from" | "to" | "annotations">} spec
-   *   `key`: the card's key, the chart's name for Live view
-   * @param {{from: number, to: number}} w
+   * The trend sentence of a tile: "now 42% · peak 61%".
+   * @param {string} now @param {string | null} top
    */
-  const draw = (body, spec, w) => {
-    const box = h("div", { class: "mk-chart" });
-    const single = spec.series.every((s) => s.points.length === 1);
-    body.replaceChildren(
-      box,
-      ...(single
-        ? [
-            h(
-              "p",
-              { class: "mk-note" },
-              "Only one reading so far: the line grows as more readings arrive.",
-            ),
-          ]
-        : []),
-    );
-    const c = timeChart(box, {
-      ...spec,
-      from: w.from,
-      to: w.to,
-      annotations: marks,
-    });
-    charts.push(c);
-    return c;
-  };
-
-  /** @param {HTMLElement} body @param {string} why */
-  const notRead = (body, why) =>
-    body.replaceChildren(h("p", { class: "mk-card-error" }, dot("bad"), why));
+  const nowPeak = (now, top) => [
+    "now ",
+    h("b", null, now),
+    ...(top ? [` · peak ${top}`] : []),
+  ];
 
   /**
-   * A read that failed: every tile says so instead of pulsing for ever, and
-   * nothing is left in the attention band from an earlier read.
-   * @param {ReturnType<typeof kpiStrip>} strip
-   * @param {ReturnType<typeof attentionBand> | null} band
+   * What the card says when a person rests on a tile: the highest and the
+   * lowest reading with their time, then the tile's own context.
+   * @param {Point[]} points @param {(v: number) => string} fmt @param {string} [extra]
    */
-  const tilesNotRead = (strip, band) => {
-    for (const t of strip.tiles.values())
-      t.set({
-        value: "—",
-        unit: "",
-        ctx: "not read",
-        ctxTone: "",
-        ctxParts: null,
-        tone: "",
-        spark: [],
-        meter: null,
-      });
-    band?.set([]);
+  const hoverOf = (points, fmt, extra) => {
+    const e = extremes(points);
+    const words = e
+      ? `Highest ${fmt(e.high.value)} at ${formatDateTime(e.high.at)}. Lowest ${fmt(e.low.value)} at ${formatDateTime(e.low.at)}.`
+      : "No readings in the last 24 hours.";
+    return extra ? `${words} ${extra}` : words;
   };
 
-  /** @param {string} title @param {string} desc @param {Node[]} cards */
-  const sect = (title, desc, cards) =>
-    h(
-      "section",
-      { class: "mk-section", "aria-label": title },
-      h(
-        "div",
-        { class: "mk-section__head" },
-        h("h2", null, title),
-        h("p", null, desc),
-      ),
-      h("div", { class: "mk-panels" }, ...cards),
-    );
+  /** @type {(() => void)[]} */
+  const detachers = [];
+  /** A read that failed: every tile says so. @param {Map<string, ReturnType<typeof tile>>} tiles */
+  const tilesNotRead = (tiles) => {
+    for (const t of tiles.values()) t.fail();
+  };
+  /** What runs once kp's parts are attached: the loading states of the parts that draw their own. @type {(() => void)[]} */
+  const inits = [];
 
-  /** @type {() => Promise<void>} */
-  let read = async () => {};
+  /** @type {() => Promise<boolean>} */
+  let read = async () => true;
   if (tab === "system") read = system();
   else read = traffic();
 
@@ -419,93 +645,319 @@ export function mount(root, ctx) {
       ["← →", "move through time (Shift: ten steps)"],
       ["Enter", "pin the reading"],
       ["Esc", "release · show all · reset zoom"],
-      ["drag", "zoom every chart"],
+      ["drag", "zoom a section's charts"],
       ["click", "a source turns it on or off"],
     ]),
   );
 
-  const tick = async () => {
-    if (busy()) return;
-    await read();
+  // ── attach kp's parts, once the page stands ───────────────────────────
+  detachers.push(attachPageCharts(root));
+  detachers.push(attachRanges(rangeEl));
+  detachers.push(attachRefresh(refreshEl));
+  detachers.push(attachHoverCards(root));
+  detachers.push(attachIdmarks(root));
+  detachers.push(attachHeats(root));
+  detachers.push(attachGantts(root));
+  if (picker) detachers.push(attachUsualPickers(picker.el));
+  for (const f of inits) f();
+  for (const b of rangeEl.querySelectorAll(".kp-range__presets [data-value]"))
+    drivable(
+      /** @type {HTMLElement} */ (b),
+      WINDOW,
+      /** @type {HTMLElement} */ (b).dataset.value,
+    );
+  rangeEl.addEventListener(RANGE_EVENT, (e) => {
+    const preset = /** @type {CustomEvent} */ (e).detail?.preset;
+    if (preset && preset !== range && RANGES.includes(preset))
+      go({ range: preset === "24h" ? null : preset });
+  });
+  if (picker) picker.attach();
+
+  // The refresh control owns the timer, the "updated … ago" line and the
+  // retries; the page answers each tick with a read.
+  let reading = false;
+  const tick = async (/** @type {{done: (ok: boolean) => void}} */ detail) => {
+    if (reading) return detail.done(true);
+    reading = true;
+    let ok = true;
+    try {
+      ok = await read();
+    } catch (e) {
+      if (!abort.signal.aborted) ok = false;
+    } finally {
+      reading = false;
+    }
+    detail.done(ok);
   };
-  void read().catch(() => {});
-  const timer = setInterval(() => void tick().catch(() => {}), EVERY_S * 1000);
+  refreshEl.addEventListener(
+    REFRESH_EVENT,
+    (e) => void tick(/** @type {CustomEvent} */ (e).detail),
+  );
+  // A chart's own Retry reads everything again, through the same control.
+  root.addEventListener(CHART_RETRY_EVENT, () =>
+    refreshOf(refreshEl)?.now("retry"),
+  );
+  queueMicrotask(() => refreshOf(refreshEl)?.now("now"));
 
   return () => {
     abort.abort();
-    clearInterval(timer);
-    destroyCharts();
-    pageCharts.setZoom(null);
+    for (const d of detachers) d();
     for (const s of stops) s();
     root.classList.remove("mk-page", "nx-ops");
   };
 
+  // ── the scope picker: kp's usual picker, up to three machines ─────────
+  function scopePicker() {
+    const input = h("input", {
+      class: "kp-combobox__input",
+      id: SCOPE_FIELD,
+      type: "text",
+      role: "combobox",
+      autocomplete: "off",
+      "aria-label": "Machines to show",
+      "aria-expanded": "false",
+      "aria-controls": "mk-scope-list",
+    });
+    const list = h("ul", {
+      class: "kp-combobox__list",
+      id: "mk-scope-list",
+      role: "listbox",
+      hidden: "",
+    });
+    const usual = () => usualMachines(current().fleet?.stacks ?? []);
+    /** The stacks the fleet names now, as one string to compare. */
+    const listing = () =>
+      (current().fleet?.stacks ?? [])
+        .map((s) => `${s.name}:${s.vmid}`)
+        .sort()
+        .join(",") + (current().fleet?.host.name ?? "");
+    const el = h(
+      "div",
+      {
+        class: "kp-combobox kp-usual mk-field",
+        "data-kp-combobox": "",
+        "data-kp-usual": JSON.stringify(usual()),
+        "data-kp-usual-label": "Usual",
+        "data-kp-multiple": "",
+        "data-kp-max-tags": "3",
+        "data-kp-remember": "metrics-scope-compare",
+        id: "mk-scope",
+      },
+      h("ul", { class: "kp-tag-list", "data-kp-tag-list": "" }),
+      input,
+      list,
+      h("p", {
+        class: "kp-combobox__status",
+        "data-kp-combobox-status": "",
+        role: "status",
+        "aria-live": "polite",
+      }),
+    );
+    drivable(input, SHOWING);
+    /** One option: its name, its colour mark, its detail. @param {string} value @param {string} label @param {string} mark @param {string} meta */
+    const option = (value, label, mark, meta) =>
+      h(
+        "li",
+        {
+          class: "kp-combobox__option",
+          role: "option",
+          "data-kp-option": "",
+          "data-value": value,
+          "data-kp-label": label,
+        },
+        h("span", { class: "mk-opt__name" }, label),
+        h("span", {
+          class: "kp-idmark kp-idmark--sm mk-opt__mark",
+          "data-kp-idmark": mark,
+          "aria-hidden": "true",
+        }),
+        h("small", { class: "mk-opt__meta" }, meta),
+      );
+    const paint = () => {
+      const f = current().fleet;
+      const names = (f?.stacks ?? [])
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name));
+      list.replaceChildren(
+        option(
+          "host",
+          `The host${f?.host.name ? ` (${f.host.name})` : ""}`,
+          f?.host.name ?? "host",
+          "Proxmox host",
+        ),
+        ...names.map((s) => option(s.name, s.name, s.name, `CT ${s.vmid}`)),
+      );
+      attachIdmarks(list);
+    };
+    paint();
+    return {
+      el,
+      attach() {
+        const handle = combobox(el);
+        handle?.set(machines);
+        let listed = listing();
+        stops.push(
+          subscribe(() => {
+            // Only a change in the stacks the fleet names redraws the list:
+            // a repaint under a person typing in it would be news of nothing.
+            if (listing() === listed) return;
+            listed = listing();
+            const had = handle?.values() ?? machines;
+            paint();
+            setUsual(el, usual());
+            handle?.refresh();
+            handle?.set(had);
+          }),
+        );
+        el.addEventListener(CHANGE_EVENT, (e) => {
+          const d = /** @type {CustomEvent} */ (e).detail;
+          if (d?.action === "set") return;
+          /** @type {string[]} */
+          const values = d?.values ?? [];
+          const next = values.length ? values : ["host"];
+          if (next.join(",") === machines.join(",")) return;
+          go({
+            stack:
+              next.length === 1 && next[0] === "host" ? null : next.join(","),
+          });
+        });
+      },
+    };
+  }
+
   // ── System ──────────────────────────────────────────────────────────
   function system() {
     const sections = stack ? STACK_SECTIONS : HOST_SECTIONS;
+    /** @type {TileSpec[]} */
     const hostTiles = [
-      { key: "cpu", label: "CPU", target: "chart-cpu" },
-      { key: "mem", label: "Memory", target: "chart-mem" },
-      { key: "disk", label: "Root disk", target: "chart-disk" },
-      { key: "load", label: "Load (1 min)", target: "chart-load" },
-      { key: "temp", label: "Hottest chip", target: "chart-temp" },
-      { key: "drives", label: "Drives", target: "chart-drives" },
-    ];
-    const stackTiles = [
-      { key: "cpu", label: "CPU", target: "chart-cpu" },
-      { key: "mem", label: "Memory", target: "chart-mem" },
-      { key: "disk", label: "Disk", target: "chart-disk" },
-      { key: "apps", label: "Apps running", target: "chart-appcpu" },
       {
-        key: "restarts",
-        label: "Restarts (last hour)",
-        target: "chart-restarts",
+        key: "cpu",
+        label: "CPU",
+        note: "5 min avg",
+        target: "chart-cpu",
+        chart: "CPU used",
+        unit: "percent",
+      },
+      {
+        key: "mem",
+        label: "Memory",
+        target: "chart-mem",
+        chart: "Memory used",
+        unit: "bytes",
+      },
+      {
+        key: "disk",
+        label: "Root disk",
+        target: "chart-disk",
+        chart: "Disk used per filesystem",
+        unit: "percent",
+      },
+      {
+        key: "load",
+        label: "Load",
+        note: "1 min",
+        target: "chart-load",
+        chart: "Load average",
+        unit: "count",
+      },
+      {
+        key: "temp",
+        label: "Hottest chip",
+        target: "chart-temp",
+        chart: "Chip temperature",
+        unit: "celsius",
       },
     ];
-    const strip = kpiStrip(stack ? stackTiles : hostTiles, {
-      loading: true,
-      label: stack ? `Stack ${stack} right now` : "The host right now",
-      drive: { id: TILE },
-    });
+    /** @type {TileSpec[]} */
+    const stackTiles = [
+      {
+        key: "cpu",
+        label: "CPU",
+        note: "5 min avg",
+        target: "chart-cpu",
+        chart: "CPU used",
+        unit: "percent",
+      },
+      {
+        key: "mem",
+        label: "Memory",
+        target: "chart-mem",
+        chart: "Memory used",
+        unit: "bytes",
+      },
+      {
+        key: "disk",
+        label: "Disk",
+        target: "chart-disk",
+        chart: "Disk used",
+        unit: "percent",
+      },
+      {
+        key: "apps",
+        label: "Apps running",
+        target: "chart-appcpu",
+        chart: "CPU per app",
+        unit: "count",
+      },
+      {
+        key: "restarts",
+        label: "Restarts",
+        note: "1 h",
+        target: "chart-restarts",
+        chart: "Restarts",
+        unit: "count",
+      },
+    ];
+    const strip = tileStrip(
+      stack ? stackTiles : hostTiles,
+      stack ? `Stack ${stack} right now` : "The host right now",
+    );
+    for (const t of strip.tiles.values()) t.set(null);
     const attention = attentionBand([]);
-    const drivesTable = tableSlot();
-    stops.push(drivesTable.stop);
-    const annKey = h(
-      "p",
-      { class: "mk-annkey", "aria-label": "Chart markers" },
-      h("span", null, dot("info"), "an operation the host ran"),
-      h("span", null, dot("warn"), "an update"),
-      h("span", null, dot("bad"), "a failure"),
-      h(
-        "span",
-        { class: "mk-pointer-only" },
-        "Point at a chart: every chart follows the same moment.",
-      ),
-      h(
-        "span",
-        { class: "mk-touch-only" },
-        "Touch a chart: every chart follows the same moment.",
-      ),
-    );
-    /** @type {Map<string, ReturnType<typeof card>>} */
-    const cards = new Map();
     const blocks = sections.map((s) =>
-      sect(
-        s.title,
-        s.desc,
-        s.cards.map((c) => {
-          const k = card({
-            key: c.key,
-            title: c.title,
-            desc: fill(c.desc, { cores: current().fleet?.host.cores_total }),
-            span: c.span,
-          });
-          cards.set(c.key, k);
-          return k.el;
-        }),
+      block(
+        { key: s.title.toLowerCase().replace(/[^a-z]+/g, "-"), ...s },
+        s.cards.map((c) => ({
+          ...c,
+          desc: fill(c.desc, { cores: current().fleet?.host.cores_total }),
+        })),
       ),
     );
-    root.append(strip.el, attention.el, annKey, ...blocks);
+    const drivesCard = blocks
+      .flatMap((b) => [...b.cards.values()])
+      .find((c) => c.card.kind === "drives");
+    const drivesView = drivesCard ? drivesTable(drivesCard) : null;
+    const compare = machines.length > 1 ? comparison() : null;
+    const ribbon = ribbonSection();
+    root.append(
+      strip.el,
+      attention.el,
+      ...(compare ? [compare.block.el] : []),
+      ...blocks.map((b) => b.el),
+      ribbon.el,
+    );
+    const all = [...(compare ? [compare.block] : []), ...blocks];
+    // A section's own window keys: only that section is read again.
+    for (const b of all) {
+      b.group.addEventListener(CHART_RANGE_EVENT, (e) => {
+        const next = /** @type {CustomEvent} */ (e).detail?.range;
+        if (!next || next === b.range) return;
+        b.range = next;
+        for (const c of b.cards.values())
+          c.fig.setAttribute("data-kp-chart-loading", "");
+        void readOne(b);
+      });
+    }
+    for (const b of all)
+      for (const key of RANGES) {
+        const btn = b.group.querySelector(`[data-kp-chart-range="${key}"]`);
+        if (btn)
+          drivable(
+            /** @type {HTMLElement} */ (btn),
+            SECTION_WINDOW,
+            `${b.key}/${key}`,
+          );
+      }
     // fix-371-1: a Host tile opens its own figure here (/charts#chart-cpu);
     // the card stands in its final size from the first frame, so the page
     // scrolls to it at once.
@@ -515,202 +967,266 @@ export function mount(root, ctx) {
     if (asked?.matches(".mk-card"))
       requestAnimationFrame(() => asked.scrollIntoView({ block: "start" }));
 
-    return async () => {
-      const q = setParams("", { stack: stack || null, range });
-      const r = await fetchJson(`/data/charts${q}`, "the charts", abort.signal);
+    /** `/data/charts` for a window, one machine. @param {string} rng @param {string} which */
+    const fetchCharts = (rng, which) =>
+      fetchJson(
+        `/data/charts${setParams("", { stack: which && which !== "host" ? which : null, range: rng })}`,
+        "the charts",
+        abort.signal,
+      );
+
+    /** Paint one section from the answer for its window. @param {Block} b @param {Read} r */
+    const paintBlock = (b, r) => {
+      if (b === compare?.block) return compare.paint(r);
       if (!r.ok) {
-        failed.replaceChildren(errorBox(r.error));
-        span.textContent = "";
-        for (const c of cards.values()) notRead(c.body, "Not read: see above.");
-        tilesNotRead(strip, attention);
+        for (const c of b.cards.values())
+          if (c.card.kind === "drives")
+            drivesView?.notRead(notReadWords(r.error));
+          else notRead(c.fig, c.card.title, notReadWords(r.error));
         return;
       }
-      failed.replaceChildren();
       const { from, to } = r.body;
-      await readMarks(from, to);
-      span.textContent = `${windowText(from, to)} · ${marks.length} ${marks.length === 1 ? "event" : "events"} marked · drag across a chart to zoom`;
       const P = byTitle(r.body.panels);
-      destroyCharts();
       const fleet = current().fleet;
       const host = fleet?.host;
       const st = fleet?.stacks.find((s) => s.name === stack);
-      for (const s of sections)
-        for (const c of s.cards) {
-          const k = cards.get(c.key);
-          if (!k) continue;
-          const p = P.get(c.panel);
-          if (c.kind === "drives") {
-            paintDrives(k, P);
-            continue;
-          }
-          if (!p) {
-            notRead(k.body, "This chart is not part of the answer.");
-            continue;
-          }
-          if (p.error) {
-            notRead(k.body, `Prometheus did not answer: ${p.error}`);
-            continue;
-          }
-          if (!p.series.length || !p.series.some((x) => x.points.length)) {
-            notRead(k.body, "No readings in this window yet.");
-            continue;
-          }
-          const unit = c.unit ?? "count";
-          const threshold =
-            c.threshold === "committed"
-              ? host?.ram_committed_mb
-                ? host.ram_committed_mb * 1048576
+      const marks = marksIn(from, to);
+      for (const [, k] of b.cards) {
+        const c = k.card;
+        const p = P.get(c.panel);
+        if (c.kind === "drives") {
+          drivesView?.paint(P);
+          continue;
+        }
+        if (!p) {
+          notRead(k.fig, c.title, "This chart is not part of the answer.");
+          continue;
+        }
+        if (p.error) {
+          notRead(k.fig, c.title, `Prometheus did not answer: ${p.error}`);
+          continue;
+        }
+        const unit = c.unit ?? "count";
+        const threshold =
+          c.threshold === "committed"
+            ? host?.ram_committed_mb
+              ? host.ram_committed_mb * 1048576
+              : undefined
+            : c.threshold === "allowance"
+              ? st?.ram_max_mb
+                ? st.ram_max_mb * 1048576
                 : undefined
-              : c.threshold === "allowance"
-                ? st?.ram_max_mb
-                  ? st.ram_max_mb * 1048576
-                  : undefined
-                : c.threshold;
-          draw(
-            k.body,
-            {
-              key: c.key,
-              label: c.title,
-              unit,
-              series: p.series.map((x) => ({
+              : c.threshold;
+        const has = p.series.some((x) => x.points.length);
+        feedChart(k.fig, {
+          key: c.key,
+          label: c.title,
+          unit,
+          series: has
+            ? p.series.map((x) => ({
                 label: x.label || c.title,
                 points: x.points,
-              })),
-              ...(threshold != null ? { threshold } : {}),
-              ...(c.yMax != null ? { yMax: c.yMax } : {}),
-            },
-            { from, to },
-          );
-          const now = nowValue(p, c.now);
-          k.setNow(
-            now == null
-              ? null
-              : unit === "percent"
-                ? `${Math.round(now)}%`
-                : fmtValue(now, unit),
-          );
-          const d = k.el.querySelector(".nx-card__head > p");
-          if (d) d.textContent = fill(c.desc, { cores: host?.cores_total });
-        }
-      if (stack) paintStackTiles(P);
-      else paintHostTiles(P);
-      head.live?.set(Math.floor(Date.now() / 1000));
+              }))
+            : [{ label: c.title, points: [] }],
+          from,
+          to,
+          annotations: marks,
+          ...(threshold != null ? { threshold } : {}),
+          ...(c.yMax != null ? { yMax: c.yMax } : {}),
+          ...(c.typical ? { typical: true } : {}),
+        });
+      }
     };
 
-    /**
-     * The Drives card: one row per drive (invariant 27), and the attention
-     * band for each failing one.
-     * @param {ReturnType<typeof card>} k
-     * @param {Map<string, Panel>} P
-     */
-    function paintDrives(k, P) {
+    /** One section on its own (its window key was pressed). @param {Block} b */
+    const readOne = async (b) => {
+      const asked = b.range;
+      const r = await (b === compare?.block
+        ? compare.fetch(asked)
+        : fetchCharts(asked, stack));
+      await readHistory(
+        RANGE_SECONDS[/** @type {keyof typeof RANGE_SECONDS} */ (asked)],
+      );
+      if (b.range === asked) paintBlock(b, r);
+      ribbon.paint();
+    };
+
+    /** The whole page, once. @returns {Promise<boolean>} */
+    const readAll = async () => {
+      const asked = all.map((b) => b.range);
+      const span = Math.max(
+        ...all.map(
+          (b) =>
+            RANGE_SECONDS[/** @type {keyof typeof RANGE_SECONDS} */ (b.range)],
+        ),
+        RANGE_SECONDS[range],
+      );
+      /** @type {Map<string, Promise<Read>>} */
+      const memo = new Map();
+      /** @param {string} rng */
+      const get = (rng) => {
+        let p = memo.get(rng);
+        if (!p) memo.set(rng, (p = fetchCharts(rng, stack)));
+        return p;
+      };
+      const [day, , ...results] = await Promise.all([
+        get(TREND_RANGE),
+        readHistory(span),
+        ...all.map((b) =>
+          b === compare?.block ? compare.fetch(b.range) : get(b.range),
+        ),
+      ]);
+      if (!day.ok) {
+        failed.replaceChildren(errorBox(day.error));
+        tilesNotRead(strip.tiles);
+        attention.set([]);
+      } else {
+        failed.replaceChildren();
+        if (stack) paintStackTiles(day.body);
+        else paintHostTiles(day.body);
+      }
+      all.forEach((b, i) => {
+        if (b.range === asked[i]) paintBlock(b, results[i]);
+      });
+      ribbon.paint();
+      return results.every((r) => r.ok) && day.ok;
+    };
+
+    /** @param {any} body */
+    function paintHostTiles(body) {
+      const P = byTitle(body.panels);
+      const host = current().fleet?.host;
+      const T = strip.tiles;
+      const step = body.step;
+      const cores = host?.cores_total ?? null;
+      const cpu = P.get("CPU used")?.series[0]?.points ?? [];
+      const pk = peak(cpu);
+      const cpuNow = host?.cpu_pct ?? Math.round(cpu.at(-1)?.[1] ?? 0);
+      const pct = (/** @type {number} */ v) => `${Math.round(v)}%`;
+      T.get("cpu")?.set({
+        value: String(cpuNow),
+        unit: "%",
+        trend: nowPeak(`${cpuNow}%`, pk ? pct(pk.value) : null),
+        hover: hoverOf(cpu, pct, cores ? `The host has ${cores} cores.` : ""),
+        points: cpu,
+        step,
+      });
+      const gib = (/** @type {number} */ v) =>
+        `${(v / 1073741824).toFixed(1)} GiB`;
+      const memPts = P.get("Memory used")?.series[0]?.points ?? [];
+      if (host) {
+        const used = host.ram_used_mb;
+        const total = host.ram_total_mb;
+        const promised = host.ram_committed_mb ?? 0;
+        const mpk = peak(memPts);
+        T.get("mem")?.set({
+          value: (used / 1024).toFixed(1),
+          unit: `of ${(total / 1024).toFixed(0)} GiB`,
+          trend: nowPeak(
+            `${(used / 1024).toFixed(1)} GiB`,
+            mpk ? gib(mpk.value) : null,
+          ),
+          hover: hoverOf(
+            memPts,
+            gib,
+            `${Math.round((promised / total) * 100)}% of it is promised to stacks.`,
+          ),
+          points: memPts,
+          step,
+          tone:
+            used / total >= 0.9 ? "bad" : used / total >= 0.75 ? "warn" : "",
+        });
+        const rootPts =
+          P.get("Disk used per filesystem")?.series.find((s) => s.label === "/")
+            ?.points ?? [];
+        const moved =
+          rootPts.length > 1
+            ? rootPts[rootPts.length - 1][1] - rootPts[0][1]
+            : null;
+        const d = host.disk_detail;
+        const dpk = peak(rootPts);
+        T.get("disk")?.set({
+          value: String(host.disk_pct),
+          unit: "%",
+          trend: nowPeak(`${host.disk_pct}%`, dpk ? pct(dpk.value) : null),
+          hover: hoverOf(
+            rootPts,
+            pct,
+            `${d ? `${d.root_lv_size_gb} GB on ${d.root_disk_device.replace(/^\/dev\//, "")}` : "The host's root"}${
+              moved == null
+                ? ""
+                : Math.abs(moved) < 0.5
+                  ? ", flat in this window."
+                  : `, ${moved > 0 ? "+" : "−"}${Math.abs(moved).toFixed(1)} pts in this window.`
+            }`,
+          ),
+          points: rootPts,
+          step,
+          tone: host.disk_pct >= 90 ? "bad" : host.disk_pct >= 75 ? "warn" : "",
+        });
+        const load = host.load1_x100 == null ? null : host.load1_x100 / 100;
+        const loadPts = P.get("Load average (5 min)")?.series[0]?.points ?? [];
+        const lpk = peak(loadPts);
+        const num = (/** @type {number} */ v) => v.toFixed(2);
+        T.get("load")?.set({
+          value: load == null ? "—" : num(load),
+          trend: nowPeak(
+            load == null ? "—" : num(load),
+            lpk ? num(lpk.value) : null,
+          ),
+          hover: hoverOf(
+            loadPts,
+            num,
+            load == null || cores == null
+              ? "Not reported."
+              : load < cores / 2
+                ? `Well under ${cores} cores.`
+                : load < cores
+                  ? `Near ${cores} cores.`
+                  : `Above ${cores} cores: work queues up.`,
+          ),
+          points: loadPts,
+          step,
+          tone: load != null && cores != null && load >= cores ? "warn" : "",
+        });
+      }
+      const temps =
+        P.get("Temperature (hottest sensor per chip)")?.series ?? [];
+      const hot = temps
+        .map((s) => ({ s, v: s.points.at(-1)?.[1] ?? -Infinity }))
+        .sort((a, b) => b.v - a.v)[0];
+      const deg = (/** @type {number} */ v) => `${v.toFixed(0)} °C`;
+      if (hot) {
+        const tpk = peak(hot.s.points);
+        T.get("temp")?.set({
+          value: hot.v.toFixed(0),
+          unit: "°C",
+          trend: nowPeak(deg(hot.v), tpk ? deg(tpk.value) : null),
+          hover: hoverOf(
+            hot.s.points,
+            deg,
+            `${hot.s.label} is the hottest chip.`,
+          ),
+          points: hot.s.points,
+          step,
+          tone: hot.v >= 85 ? "bad" : hot.v >= 75 ? "warn" : "",
+        });
+      } else
+        T.get("temp")?.set({
+          value: "—",
+          trend: ["no sensor reported"],
+          hover: "No temperature sensor reported.",
+        });
+      // The attention band for a failing drive (the Drives table keeps the rest).
       const list = drives(P);
       const bad = list.filter((d) => !d.ok);
-      k.setNow(
-        list.length ? `${bad.length || list.length} of ${list.length}` : null,
-        bad.length ? "failing" : "healthy",
-      );
-      if (!list.length) {
-        notRead(k.body, "Prometheus reports no SMART readings.");
-        return;
-      }
-      const t = dataTable({
-        cls: "mk-table",
-        remember: "metrics-drives",
-        caption: "Drives",
-        columns: [
-          { label: "Drive", sort: "text" },
-          { label: "SMART", sort: "text" },
-          { label: "Temp.", sort: "number", cls: "mk-n" },
-          { label: "Trend", cls: "mk-hide-phone" },
-          { label: "Pending", sort: "number", cls: "mk-n" },
-          { label: "Trend", cls: "mk-hide-phone" },
-          // A soft hyphen: on a phone the header breaks as "Real-located"
-          // instead of pushing the table 48 px past its card.
-          { label: "Real\u00ADlocated", sort: "number", cls: "mk-n" },
-          { label: "Powered on", sort: "number", cls: "mk-n mk-hide-phone" },
-        ],
-      });
-      t.tbody.replaceChildren(
-        ...list.map((d) =>
-          h(
-            "tr",
-            { "data-kp-row-key": d.name },
-            h("td", null, h("b", { class: "mono" }, d.name)),
-            h(
-              "td",
-              { class: d.ok ? "" : "mk-bad" },
-              h(
-                "span",
-                { class: "mk-state" },
-                dot(d.ok ? "ok" : "bad"),
-                h(
-                  "span",
-                  null,
-                  d.ok ? "ok" : "not ok",
-                  ...(!d.ok
-                    ? [
-                        h(
-                          "span",
-                          { class: "mk-hide-phone" },
-                          d.since
-                            ? `, since ${windowText(d.since, d.since).split(" → ")[0]}`
-                            : ", for this whole window",
-                        ),
-                      ]
-                    : []),
-                ),
-              ),
-            ),
-            h(
-              "td",
-              { class: "mk-n" },
-              d.temp == null ? "—" : `${d.temp.toFixed(0)} °C`,
-            ),
-            h(
-              "td",
-              { class: "mk-hide-phone mk-trend" },
-              d.tempTrend.length > 1
-                ? sparkline(d.tempTrend, { colour: "var(--chart-4)" })
-                : "",
-            ),
-            h(
-              "td",
-              { class: `mk-n${d.pending ? " mk-bad" : ""}` },
-              d.pending == null ? "—" : String(d.pending),
-            ),
-            h(
-              "td",
-              { class: "mk-hide-phone mk-trend" },
-              d.pendTrend.length > 1
-                ? sparkline(d.pendTrend, {
-                    colour: d.pending ? "var(--destructive)" : "var(--chart-3)",
-                  })
-                : "",
-            ),
-            h(
-              "td",
-              { class: `mk-n${d.realloc ? " mk-bad" : ""}` },
-              d.realloc == null ? "—" : String(d.realloc),
-            ),
-            h("td", { class: "mk-n mk-hide-phone" }, poweredOn(d.hours)),
-          ),
-        ),
-      );
-      k.countOf(
-        t.tbody,
-        bad.length ? ":scope > tr:has(td.mk-bad)" : ":scope > tr",
-      );
-      k.body.replaceChildren(t.wrap);
-      k.foot(
-        [
-          "A rising pending or reallocated count is the early warning; temperature above 50 °C shortens a drive's life.",
-        ],
-        ["smartctl via node-exporter"],
-      );
-      drivesTable.attach(k.body);
-      const seeDrive = (/** @type {string} */ name) =>
-        drivable(
+      attention.set(bad.map(attentionFor));
+    }
+
+    /** @param {import("../metricsview.js").Drive} d */
+    function attentionFor(d) {
+      const see = drivable(
+        /** @type {HTMLButtonElement} */ (
           h(
             "button",
             {
@@ -719,318 +1235,915 @@ export function mount(root, ctx) {
               title: "Scroll to the Drives table",
             },
             "See the drive",
-          ),
-          SEE_DRIVE,
-          name,
-        );
-      attention.set(
-        bad.map((d) => {
-          const b = seeDrive(d.name);
-          b.addEventListener("click", () =>
-            k.el.scrollIntoView({ block: "start", behavior: "smooth" }),
-          );
-          const back = h(
-            "a",
-            {
-              class: "kp-button kp-button--sm kp-button--primary",
-              href: "/backups",
-              title:
-                "Open Backups to back up the stacks now, before the drive gets worse",
-            },
-            "Back up devices now",
-          );
-          drivable(back, BACKUPS, d.name);
-          return {
-            key: `drive-${d.name}`,
-            tone: "bad",
-            title: `Drive ${d.name} reports SMART not ok`,
-            text: `${d.pending ?? 0} ${d.pending === 1 ? "sector waits" : "sectors wait"} to be re-read and ${d.realloc ?? 0} ${d.realloc === 1 ? "was" : "were"} already swapped for spares. Data on it is at risk.`,
-            action: h("span", { class: "mk-acts" }, b, back),
-          };
-        }),
+          )
+        ),
+        SEE_DRIVE,
+        d.name,
       );
-    }
-
-    /** @param {Map<string, Panel>} P */
-    function paintHostTiles(P) {
-      const host = current().fleet?.host;
-      const T = strip.tiles;
-      const cores = host?.cores_total ?? null;
-      const cpu = P.get("CPU used")?.series[0]?.points ?? [];
-      const pk = peak(cpu);
-      T.get("cpu")?.set({
-        value: String(host?.cpu_pct ?? Math.round(cpu.at(-1)?.[1] ?? 0)),
-        unit: "%",
-        ctx: `${cores ?? "?"} cores${pk ? ` · peak ${Math.round(pk.value)}% at ${hhmm(pk.at)}` : ""}`,
-        spark: cpu.map((p) => p[1]),
-        colour: "var(--chart-1)",
+      see.addEventListener("click", () => {
+        drivesCard?.el.scrollIntoView({ block: "start", behavior: "smooth" });
+        drivesView?.open([d.name]);
       });
-      if (host) {
-        const used = host.ram_used_mb;
-        const total = host.ram_total_mb;
-        const promised = host.ram_committed_mb ?? 0;
-        T.get("mem")?.set({
-          value: (used / 1024).toFixed(1),
-          unit: `of ${(total / 1024).toFixed(0)} GiB`,
-          ctx: `${Math.round((promised / total) * 100)}% promised to stacks`,
-          meter: {
-            pct: (used / total) * 100,
-            mark: (promised / total) * 100,
-            tone:
-              used / total >= 0.9 ? "bad" : used / total >= 0.75 ? "warn" : "",
-          },
-        });
-        const root = P.get("Disk used per filesystem")?.series.find(
-          (s) => s.label === "/",
-        )?.points;
-        const moved =
-          root && root.length > 1
-            ? root[root.length - 1][1] - root[0][1]
-            : null;
-        const d = host.disk_detail;
-        T.get("disk")?.set({
-          value: String(host.disk_pct),
-          unit: "%",
-          // Short enough for one line of a wide tile (finding 14).
-          ctx: `${d ? `${d.root_lv_size_gb} GB on ${d.root_disk_device.replace(/^\/dev\//, "")}` : "the host's root"}${
-            moved == null
-              ? ""
-              : Math.abs(moved) < 0.5
-                ? " · flat"
-                : ` · ${moved > 0 ? "+" : "−"}${Math.abs(moved).toFixed(1)} pts`
-          }`,
-          meter: {
-            pct: host.disk_pct,
-            tone:
-              host.disk_pct >= 90 ? "bad" : host.disk_pct >= 75 ? "warn" : "",
-          },
-        });
-        const load = host.load1_x100 == null ? null : host.load1_x100 / 100;
-        const loadPts = P.get("Load average (5 min)")?.series[0]?.points ?? [];
-        T.get("load")?.set({
-          value: load == null ? "—" : load.toFixed(2),
-          ctx:
-            load == null || cores == null
-              ? "not reported"
-              : load < cores / 2
-                ? `well under ${cores} cores`
-                : load < cores
-                  ? `near ${cores} cores`
-                  : `above ${cores} cores: work queues up`,
-          tone: load != null && cores != null && load >= cores ? "warn" : "",
-          spark: loadPts.map((p) => p[1]),
-          colour: "var(--chart-2)",
-        });
-      }
-      const temps =
-        P.get("Temperature (hottest sensor per chip)")?.series ?? [];
-      const hot = temps
-        .map((s) => ({ s, v: s.points.at(-1)?.[1] ?? -Infinity }))
-        .sort((a, b) => b.v - a.v)[0];
-      T.get("temp")?.set(
-        hot
-          ? {
-              value: hot.v.toFixed(0),
-              unit: "°C",
-              ctx: hot.s.label,
-              tone: hot.v >= 85 ? "bad" : hot.v >= 75 ? "warn" : "",
-              spark: hot.s.points.map((p) => p[1]),
-              colour: "var(--chart-4)",
-            }
-          : { value: "—", ctx: "no sensor reported" },
+      const back = h(
+        "a",
+        {
+          class: "kp-button kp-button--sm kp-button--primary",
+          href: "/backups",
+          title:
+            "Open Backups to back up the stacks now, before the drive gets worse",
+        },
+        "Back up devices now",
       );
-      const list = drives(P);
-      const bad = list.filter((d) => !d.ok);
-      const health = P.get("Drive health (SMART, 1 = ok)")?.series ?? [];
-      const failing = (health[0]?.points ?? []).map((_, i) =>
-        health.reduce((a, s) => a + ((s.points[i]?.[1] ?? 1) < 1 ? 1 : 0), 0),
-      );
-      T.get("drives")?.set(
-        bad.length
-          ? {
-              value: String(bad.length),
-              unit: `of ${list.length} failing`,
-              ctx: `${bad.map((d) => d.name).join(", ")}: SMART not ok`,
-              ctxTone: "bad",
-              tone: "bad",
-              spark: failing,
-              colour: "var(--destructive)",
-            }
-          : {
-              value: String(list.length),
-              unit: list.length === 1 ? "drive" : "drives",
-              ctx: list.length ? "all report SMART ok" : "no SMART readings",
-              ctxTone: list.length ? "ok" : "",
-              tone: "",
-              spark: failing,
-              colour: "var(--success-foreground)",
-            },
-      );
+      drivable(back, BACKUPS, d.name);
+      return {
+        key: `drive-${d.name}`,
+        tone: /** @type {const} */ ("bad"),
+        title: `Drive ${d.name} reports SMART not ok`,
+        text: `${d.pending ?? 0} ${d.pending === 1 ? "sector waits" : "sectors wait"} to be re-read and ${d.realloc ?? 0} ${d.realloc === 1 ? "was" : "were"} already swapped for spares. Data on it is at risk.`,
+        action: h("span", { class: "mk-acts" }, see, back),
+      };
     }
 
-    /** @param {Map<string, Panel>} P */
-    function paintStackTiles(P) {
+    /** @param {any} body */
+    function paintStackTiles(body) {
+      const P = byTitle(body.panels);
       const st = current().fleet?.stacks.find((s) => s.name === stack);
       const T = strip.tiles;
+      const step = body.step;
+      const pct = (/** @type {number} */ v) => `${Math.round(v)}%`;
       const cpu = P.get("CPU (whole container)")?.series[0]?.points ?? [];
       const pk = peak(cpu);
       T.get("cpu")?.set({
         value: cpu.length ? (cpu.at(-1)?.[1] ?? 0).toFixed(0) : "—",
         unit: "%",
-        ctx: pk
-          ? `of its own cores · peak ${Math.round(pk.value)}% at ${hhmm(pk.at)}`
-          : "not read",
-        spark: cpu.map((p) => p[1]),
-        colour: "var(--chart-1)",
+        trend: nowPeak(pct(cpu.at(-1)?.[1] ?? 0), pk ? pct(pk.value) : null),
+        hover: hoverOf(cpu, pct, "Share of this container's own cores."),
+        points: cpu,
+        step,
       });
       const memPts =
         P.get("Memory used (whole container)")?.series[0]?.points ?? [];
       const usedMb = st?.ram_used_mb ?? (memPts.at(-1)?.[1] ?? 0) / 1048576;
       const maxMb = st?.ram_max_mb ?? null;
+      const size = (/** @type {number} */ mb) =>
+        mb >= 1024 ? `${(mb / 1024).toFixed(1)} GiB` : `${Math.round(mb)} MiB`;
+      const mpk = peak(memPts);
       T.get("mem")?.set({
         value:
           usedMb >= 1024
             ? (usedMb / 1024).toFixed(1)
             : String(Math.round(usedMb)),
-        unit: `${usedMb >= 1024 ? "GiB" : "MiB"}${maxMb ? ` of ${maxMb >= 1024 ? `${(maxMb / 1024).toFixed(1)} GiB` : `${maxMb} MiB`}` : ""}`,
-        ctx: maxMb
-          ? `${Math.round((usedMb / maxMb) * 100)}% of its allowance`
-          : "no allowance set",
-        meter: maxMb
-          ? {
-              pct: (usedMb / maxMb) * 100,
-              tone:
-                usedMb / maxMb >= 0.9
-                  ? "bad"
-                  : usedMb / maxMb >= 0.75
-                    ? "warn"
-                    : "",
-            }
-          : null,
+        unit: `${usedMb >= 1024 ? "GiB" : "MiB"}${maxMb ? ` of ${size(maxMb)}` : ""}`,
+        trend: nowPeak(size(usedMb), mpk ? size(mpk.value / 1048576) : null),
+        hover: hoverOf(
+          memPts,
+          (v) => size(v / 1048576),
+          maxMb
+            ? `${Math.round((usedMb / maxMb) * 100)}% of its allowance.`
+            : "No allowance set.",
+        ),
+        points: memPts,
+        step,
+        tone: maxMb
+          ? usedMb / maxMb >= 0.9
+            ? "bad"
+            : usedMb / maxMb >= 0.75
+              ? "warn"
+              : ""
+          : "",
       });
       const disk =
         P.get("Disk used (root filesystem)")?.series[0]?.points ?? [];
       const dv = disk.at(-1)?.[1];
+      const dpk = peak(disk);
       T.get("disk")?.set({
         value: dv == null ? "—" : dv.toFixed(0),
         unit: "%",
-        ctx: "of its own root disk",
-        meter:
-          dv == null
-            ? null
-            : { pct: dv, tone: dv >= 90 ? "bad" : dv >= 75 ? "warn" : "" },
+        trend: nowPeak(dv == null ? "—" : pct(dv), dpk ? pct(dpk.value) : null),
+        hover: hoverOf(disk, pct, "Of its own root disk."),
+        points: disk,
+        step,
+        tone: dv == null ? "" : dv >= 90 ? "bad" : dv >= 75 ? "warn" : "",
       });
+      const running = st?.apps_running ?? 0;
+      const total = st?.apps_total ?? 0;
       T.get("apps")?.set({
-        value: st ? String(st.apps_running ?? 0) : "—",
-        unit: st ? `of ${st.apps_total ?? 0}` : "",
-        ctx: st
-          ? (st.apps_running ?? 0) === (st.apps_total ?? 0)
-            ? "every app is up"
-            : `${(st.apps_total ?? 0) - (st.apps_running ?? 0)} not running`
-          : "not in the fleet",
-        tone: st && (st.apps_running ?? 0) < (st.apps_total ?? 0) ? "warn" : "",
-        meter: st?.apps_total
-          ? { pct: ((st.apps_running ?? 0) / st.apps_total) * 100 }
-          : null,
+        value: st ? String(running) : "—",
+        unit: st ? `of ${total}` : "",
+        trend: st
+          ? [
+              running === total
+                ? "every app is up"
+                : `${total - running} not running`,
+            ]
+          : ["not in the fleet"],
+        hover: st
+          ? `${running} of ${total} apps in this stack run now.`
+          : "This stack is not in the fleet.",
+        tone: st && running < total ? "warn" : "",
       });
       const restarts = P.get("Restarts (last hour)")?.series ?? [];
       const n = restarts.reduce((a, s) => a + (s.points.at(-1)?.[1] ?? 0), 0);
+      /** @type {Point[]} */
+      const sum = (restarts[0]?.points ?? []).map((p, i) => [
+        p[0],
+        restarts.reduce((a, s) => a + (s.points[i]?.[1] ?? 0), 0),
+      ]);
       T.get("restarts")?.set({
         value: String(Math.round(n)),
-        ctx: n ? "an app is restarting" : "a healthy app reads 0",
+        trend: [n ? "an app is restarting" : "a healthy app reads 0"],
+        hover: hoverOf(sum, (v) => String(Math.round(v))),
+        points: sum,
+        step,
         tone: n ? "warn" : "",
-        spark: (restarts[0]?.points ?? []).map((_, i) =>
-          restarts.reduce((a, s) => a + (s.points[i]?.[1] ?? 0), 0),
-        ),
-        colour: "var(--warning-foreground)",
       });
+    }
+
+    inits.push(() => {
+      detachers.push(attachDataTables(root));
+      detachers.push(attachBarCells(root));
+      ribbon.init();
+    });
+    return readAll;
+
+    /**
+     * The machines side by side: one CPU line per machine, in the colour of
+     * its mark.
+     */
+    function comparison() {
+      const names = machines.map(machineName);
+      const slots = idmarkColours(names);
+      const b = block(
+        {
+          key: "compared",
+          title: "Compared",
+          desc: `CPU of ${names.join(", ")} side by side, each line in the colour of its mark.`,
+        },
+        [
+          {
+            key: "compare-cpu",
+            panel: "",
+            title: "CPU used",
+            desc: "Share of each machine's own cores in use, 5-minute average.",
+            span: 3,
+            unit: "percent",
+            typical: false,
+            sources: machines.length,
+          },
+        ],
+      );
+      /** @param {string} rng */
+      const fetchAll = (rng) =>
+        Promise.all(machines.map((m) => fetchCharts(rng, m)));
+      return {
+        block: b,
+        /** @param {string} rng @returns {Promise<Read>} */
+        async fetch(rng) {
+          const all = await fetchAll(rng);
+          const bad = all.find((r) => !r.ok);
+          if (bad) return bad;
+          return {
+            ok: true,
+            body: {
+              .../** @type {any} */ (all[0]).body,
+              machines: all.map((r) => /** @type {any} */ (r).body),
+            },
+          };
+        },
+        /** @param {Read} r */
+        paint(r) {
+          const fig = /** @type {HTMLElement} */ (
+            b.cards.get("compare-cpu")?.fig
+          );
+          if (!r.ok) return notRead(fig, "CPU used", notReadWords(r.error));
+          const { from, to } = r.body;
+          const marks = annotations(entries, { from, to });
+          const series = /** @type {any[]} */ (r.body.machines).map(
+            (body, i) => {
+              const P = byTitle(body.panels);
+              const points =
+                (machines[i] === "host"
+                  ? P.get("CPU used")
+                  : P.get("CPU (whole container)")
+                )?.series[0]?.points ?? [];
+              return {
+                label: names[i],
+                points,
+                colour: `var(--chart-${slots.get(names[i]) ?? 1})`,
+              };
+            },
+          );
+          feedChart(fig, {
+            key: "compare-cpu",
+            label: "CPU used",
+            unit: "percent",
+            series,
+            from,
+            to,
+            annotations: marks,
+          });
+        },
+      };
+    }
+
+    /** The operations ribbon under the sections. */
+    function ribbonSection() {
+      const el = h("section", {
+        class: "kp-gantt mk-ribbon",
+        "data-kp-gantt": "",
+        "data-kp-gantt-ranges": RANGES.join(" "),
+        "data-kp-gantt-range": range,
+        "data-kp-gantt-ghosts": "1 1 1",
+        id: "mk-ribbon",
+        "aria-label": "What the host did",
+      });
+      const counted = h(
+        "p",
+        { class: "mk-ribbon__count", role: "status" },
+        "Reading what the host did…",
+      );
+      const wrap = h(
+        "section",
+        { class: "mk-section", "aria-labelledby": "mk-h-ribbon" },
+        h(
+          "div",
+          { class: "mk-section__head" },
+          h("h2", { id: "mk-h-ribbon" }, "What the host did"),
+          h(
+            "p",
+            null,
+            "Lists the operations, updates and failures the host ran in this window, in lanes under the charts that mark them; press a bar to open it in Activity.",
+          ),
+        ),
+        counted,
+        el,
+      );
+      el.addEventListener(GANTT_OPEN_EVENT, () => ctx.navigate("/activity"));
+      el.addEventListener(GANTT_WINDOW_EVENT, (e) => {
+        const secs = /** @type {CustomEvent} */ (e).detail?.span;
+        const key = Object.entries(RANGE_SECONDS).find(
+          ([, v]) => v === secs,
+        )?.[0];
+        if (key && key !== range) go({ range: key === "24h" ? null : key });
+      });
+      return {
+        el: wrap,
+        init() {
+          setGanttState(el, "loading");
+        },
+        paint() {
+          if (!historyOk) {
+            counted.textContent = "";
+            return setGanttState(
+              el,
+              "error",
+              "The history could not be read: the dashboard did not answer.",
+            );
+          }
+          const to = Math.floor(Date.now() / 1000);
+          const from = to - RANGE_SECONDS[range];
+          const runs = ribbonRuns(entries, {
+            from,
+            to,
+            ...(stack ? { stack } : {}),
+          });
+          setGanttWindow(el, {
+            span: RANGE_SECONDS[range],
+            live: false,
+            to: to * 1000,
+          });
+          setGanttRuns(el, runs, RIBBON_LANES);
+          counted.textContent = `${count(runs.length)} ${runs.length === 1 ? "operation" : "operations"} in this window.`;
+        },
+      };
+    }
+
+    /**
+     * The Drives card: kp's data table, one row per drive; a row opens to
+     * the drive's two lines. Rows are written once and updated in place, so
+     * an open row and the sort survive each read.
+     * @param {Block["cards"] extends Map<string, infer V> ? V : never} k
+     */
+    function drivesTable(k) {
+      const tbody = h("tbody");
+      const empty = h(
+        "div",
+        { class: "kp-empty", "data-kp-datatable-empty": "", hidden: "" },
+        "No drive was found on the host: Prometheus reports no SMART readings.",
+      );
+      const wrap = h(
+        "div",
+        {
+          class: "kp-datatable mk-table",
+          "data-kp-datatable": "",
+          "data-kp-expandable": "",
+          "data-kp-page-size": "500",
+          "data-kp-page-sizes": "none",
+          "data-kp-sort-multi": "",
+          "data-kp-remember": "metrics-drives",
+        },
+        h(
+          "div",
+          { class: "kp-table-wrap" },
+          h(
+            "table",
+            { class: "kp-table" },
+            h(
+              "caption",
+              { class: "kp-sr-only" },
+              "Drives of the host; open a drive for its temperature and pending sectors",
+            ),
+            h(
+              "thead",
+              null,
+              h(
+                "tr",
+                null,
+                h("th", { scope: "col", "data-kp-sort": "text" }, "Drive"),
+                h("th", { scope: "col", "data-kp-sort": "text" }, "SMART"),
+                h(
+                  "th",
+                  { scope: "col", "data-kp-sort": "number" },
+                  "Temperature",
+                ),
+                h(
+                  "th",
+                  {
+                    scope: "col",
+                    "data-kp-sort": "number",
+                    class: "kp-text-end",
+                  },
+                  "Pending sectors",
+                ),
+                h(
+                  "th",
+                  {
+                    scope: "col",
+                    "data-kp-sort": "number",
+                    class: "kp-text-end",
+                  },
+                  "Reallocated sectors",
+                ),
+                h(
+                  "th",
+                  {
+                    scope: "col",
+                    "data-kp-sort": "number",
+                    class: "kp-text-end",
+                  },
+                  "Powered on",
+                ),
+              ),
+            ),
+            tbody,
+          ),
+        ),
+        empty,
+      );
+      k.body.replaceChildren(wrap);
+      k.setFoot([
+        "A rising pending or reallocated count is the early warning; temperature above 50 °C shortens a drive's life.",
+        "smartctl via node-exporter",
+      ]);
+      let first = true;
+      /** @type {string} */
+      let names = "";
+      const handle = () => tableOf(wrap);
+      return {
+        /** @param {string} why */
+        notRead(why) {
+          handle()?.fail(why);
+        },
+        /** @param {string[]} keys */
+        open(keys) {
+          handle()?.expand(keys);
+        },
+        /** @param {Map<string, Panel>} P */
+        paint(P) {
+          const list = drives(P);
+          const bad = list.filter((d) => !d.ok);
+          const key = list.map((d) => d.name).join(",");
+          const rebuild = key !== names;
+          if (rebuild) {
+            names = key;
+            tbody.replaceChildren(
+              ...list.flatMap((d) => [driveRow(d), driveDetail(d)]),
+            );
+            detachers.push(attachBarCells(tbody));
+            queueMicrotask(() => attachPageCharts(tbody));
+          }
+          for (const d of list) fillDrive(d);
+          const t = handle();
+          t?.state("ready");
+          t?.refresh();
+          if (first && bad.length) t?.expand(bad.map((d) => d.name));
+          first = false;
+        },
+      };
+
+      /** @param {import("../metricsview.js").Drive} d */
+      function driveRow(d) {
+        const cells = [
+          h("td", { "data-label": "Drive" }, h("b", { class: "mono" }, d.name)),
+          h("td", { "data-label": "SMART", "data-mk-cell": "smart" }),
+          h(
+            "td",
+            { "data-label": "Temperature", "data-mk-cell": "temp" },
+            h("span", { class: "kp-bar-cell" }),
+          ),
+          h("td", {
+            class: "kp-text-end",
+            "data-label": "Pending sectors",
+            "data-mk-cell": "pending",
+          }),
+          h("td", {
+            class: "kp-text-end",
+            "data-label": "Reallocated sectors",
+            "data-mk-cell": "realloc",
+          }),
+          h("td", {
+            class: "kp-text-end mk-nowrap",
+            "data-label": "Powered on",
+            "data-mk-cell": "hours",
+          }),
+        ];
+        return h("tr", { "data-kp-row-key": d.name }, ...cells);
+      }
+      /** @param {import("../metricsview.js").Drive} d */
+      function driveDetail(d) {
+        const spark = (
+          /** @type {string} */ what,
+          /** @type {string} */ label,
+        ) =>
+          h("figure", {
+            class: "kp-chart",
+            "data-kp-chart": "spark",
+            "data-mk-spark": `${what}:${d.name}`,
+            "aria-label": `${label} of ${d.name}`,
+          });
+        return h(
+          "tr",
+          { "data-kp-row-detail": "" },
+          h(
+            "td",
+            { colspan: 6 },
+            h(
+              "div",
+              { class: "mk-drive-detail", "data-mk-detail": d.name },
+              h("p", { class: "mk-drive-detail__state" }),
+              h(
+                "div",
+                { class: "mk-pair" },
+                spark("temp", "Temperature"),
+                spark("pending", "Pending sectors"),
+              ),
+            ),
+          ),
+        );
+      }
+      /** Write a drive's cells, its sentence and its two lines. @param {import("../metricsview.js").Drive} d */
+      function fillDrive(d) {
+        const row = /** @type {HTMLElement | null} */ (
+          tbody.querySelector(`tr[data-kp-row-key="${CSS.escape(d.name)}"]`)
+        );
+        if (!row) return;
+        const cell = (/** @type {string} */ k) =>
+          /** @type {HTMLElement} */ (
+            row.querySelector(`[data-mk-cell="${k}"]`)
+          );
+        const smart = cell("smart");
+        smart.setAttribute("data-kp-sort-value", d.ok ? "ok" : "not ok");
+        smart.replaceChildren(
+          h(
+            "span",
+            {
+              class: `kp-badge mk-nowrap ${d.ok ? "kp-badge--success" : "kp-badge--destructive"}`,
+            },
+            d.ok ? "ok" : "not ok",
+          ),
+        );
+        const temp = cell("temp");
+        const bar = /** @type {HTMLElement} */ (
+          temp.querySelector(".kp-bar-cell")
+        );
+        setBarCell(
+          bar,
+          d.temp == null
+            ? { value: null, text: "—", sortValue: "" }
+            : {
+                value: d.temp / 80,
+                text: `${d.temp.toFixed(0)} °C`,
+                warnAt: 0.75,
+                badAt: 0.9,
+                sortValue: d.temp,
+                label: "of 80 °C",
+              },
+        );
+        const num = (
+          /** @type {string} */ k,
+          /** @type {number | null} */ v,
+          /** @type {string} */ text,
+          /** @type {boolean} */ warn,
+        ) => {
+          const c = cell(k);
+          c.setAttribute("data-kp-sort-value", v == null ? "" : String(v));
+          c.textContent = text;
+          c.classList.toggle("mk-bad", warn);
+        };
+        num(
+          "pending",
+          d.pending,
+          d.pending == null ? "—" : count(d.pending),
+          !!d.pending,
+        );
+        num(
+          "realloc",
+          d.realloc,
+          d.realloc == null ? "—" : count(d.realloc),
+          !!d.realloc,
+        );
+        num("hours", d.hours, poweredOn(d.hours), false);
+        const detail = tbody.querySelector(
+          `[data-mk-detail="${CSS.escape(d.name)}"]`,
+        );
+        const sentence = detail?.querySelector(".mk-drive-detail__state");
+        if (sentence)
+          sentence.textContent = d.ok
+            ? `${d.name} reports SMART ok.`
+            : `${d.name} reports SMART not ok${d.since ? `, since ${formatDateTime(d.since)}` : ", for this whole window"}.`;
+        for (const fig of tbody.querySelectorAll(
+          `[data-mk-spark$=":${CSS.escape(d.name)}"]`,
+        )) {
+          const what = /** @type {HTMLElement} */ (fig).dataset.mkSpark?.split(
+            ":",
+          )[0];
+          const pts = what === "temp" ? d.tempPoints : d.pendPoints;
+          feedChart(fig, {
+            label: what === "temp" ? "Temperature" : "Pending sectors",
+            unit: what === "temp" ? "celsius" : "count",
+            series: [
+              {
+                label: what === "temp" ? "Temperature" : "Pending sectors",
+                points: pts,
+              },
+            ],
+            from: pts[0]?.[0] ?? 0,
+            to: pts.at(-1)?.[0] ?? 0,
+          });
+        }
+      }
     }
   }
 
   // ── Traffic ─────────────────────────────────────────────────────────
   function traffic() {
-    const strip = kpiStrip(
+    const strip = tileStrip(
       [
-        { key: "requests", label: "Requests", target: "chart-requests" },
-        { key: "5xx", label: "Server errors (5xx)", target: "chart-requests" },
-        { key: "4xx", label: "Client errors (4xx)", target: "chart-mix" },
-        { key: "hosts", label: "Hostnames", target: "chart-hostnames" },
-        { key: "clients", label: "Client addresses", target: "chart-clients" },
+        {
+          key: "requests",
+          label: "Requests",
+          target: "chart-requests",
+          chart: "Requests over time",
+          unit: "count",
+        },
+        {
+          key: "5xx",
+          label: "Server errors (5xx)",
+          target: "chart-requests",
+          chart: "Requests over time",
+          unit: "count",
+        },
+        {
+          key: "4xx",
+          label: "Client errors (4xx)",
+          target: "chart-mix",
+          chart: "Status mix",
+          unit: "count",
+        },
+        {
+          key: "hosts",
+          label: "Hostnames",
+          target: "chart-hostnames",
+          chart: "Hostnames",
+          unit: "count",
+        },
+        {
+          key: "clients",
+          label: "Client addresses",
+          target: "chart-clients",
+          chart: "Busiest clients",
+          unit: "count",
+        },
       ],
-      { loading: true, label: "Traffic in this window", drive: { id: TILE } },
+      "Traffic in this window",
     );
+    for (const t of strip.tiles.values()) t.set(null);
+
     const over = card({
       key: "requests",
+      panel: "",
       title: "Requests over time",
       desc: "Requests per interval, stacked by status class; red is the server failing.",
       span: 2,
     });
-    const mix = card({
-      key: "mix",
+    const mix = section({
       title: "Status mix",
-      desc: "Share of all requests per status class in this window.",
-      span: 1,
+      desc: "Share of all requests per status class in this window; press a part to show only that class in the chart.",
+      id: "chart-mix",
+      level: "h3",
     });
+    mix.el.classList.add("mk-card", "mk-span-1");
+    mix.el.dataset.key = "mix";
+    const mixBar = h("figure", {
+      class: "kp-stackbar mk-mix",
+      "aria-label": "Status mix",
+    });
+    const mixNote = h("p", { class: "mk-muted mk-sm" }, "");
+    mix.body.replaceChildren(mixBar, mixNote);
+    setStackbar(mixBar, { state: "loading", label: "Status mix" });
     const perHost = card({
       key: "perhost",
+      panel: "",
       title: "Requests per hostname",
-      desc: "Requests per interval for each hostname; click a row in Hostnames below to switch one on or off.",
+      desc: "Requests per interval for each hostname; press a name in Hostnames below to switch one on or off.",
       span: 3,
+      sources: 8,
     });
-    const hostsCard = card({
-      key: "hostnames",
+    // Hostnames: a heat grid (hostname by hour) or a sortable table.
+    const hostsView = segSwitch({
+      label: "Hostnames as",
+      items: [
+        { value: "heat", label: "Heat grid", hint: "Hostname by hour" },
+        { value: "table", label: "Table", hint: "Exact counts, sortable" },
+      ],
+      value: "heat",
+      onChange: (v) => setHostsView(v),
+      drive: { id: HOSTNAMES_AS },
+    });
+    const hostsCard = section({
       title: "Hostnames",
-      desc: "Requests per hostname, its trend and its share of the total. Click a row to switch it on or off in the chart; Show all resets.",
-      span: 2,
-      nowLabel: "active",
+      desc: "Requests per hostname: a heat grid by hour, or a table with exact counts and each hostname's share. Press a name to switch it on or off in the chart; press an hour to zoom the chart to it.",
+      id: "chart-hostnames",
+      level: "h3",
+      tools: [hostsView.el],
     });
-    const clientsCard = card({
-      key: "clients",
-      title: "Busiest clients",
-      desc: "The addresses that made the most requests.",
-      span: 1,
+    hostsCard.el.classList.add("mk-card", "mk-span-2");
+    hostsCard.el.dataset.key = "hostnames";
+    const heatEl = h("div", {
+      class: "kp-heat mk-heat",
+      "data-kp-heat": "",
+      "data-kp-heat-toggle": "",
+      id: "traffic-heat",
+      "aria-label": "Requests per hostname per hour",
     });
-    for (const c of [mix, hostsCard, clientsCard])
-      c.body.replaceChildren(skeletonBlock("168px", "Reading the access log"));
-    const hostsTable = tableSlot();
-    const clientsTable = tableSlot();
-    stops.push(hostsTable.stop, clientsTable.stop);
-    root.append(
-      strip.el,
+    const heatBox = h(
+      "div",
+      { class: "mk-hosts" },
+      heatEl,
       h(
-        "section",
-        { class: "mk-section", "aria-label": "Traffic" },
+        "ul",
+        { class: "kp-heat__legend mk-legend" },
         h(
-          "div",
-          { class: "mk-panels" },
-          over.el,
-          mix.el,
-          perHost.el,
-          hostsCard.el,
-          clientsCard.el,
+          "li",
+          null,
+          h("span", { class: "kp-heat__ramp" }),
+          " fewer to more requests for that hostname",
         ),
       ),
     );
+    const hostsBody = h("tbody");
+    const hostsTable = h(
+      "div",
+      {
+        class: "kp-datatable mk-table",
+        "data-kp-datatable": "",
+        "data-kp-page-size": "500",
+        "data-kp-page-sizes": "none",
+        "data-kp-sort-multi": "",
+        "data-kp-remember": "metrics-hostnames",
+        hidden: "",
+      },
+      h(
+        "div",
+        { class: "kp-table-wrap" },
+        h(
+          "table",
+          { class: "kp-table" },
+          h(
+            "caption",
+            { class: "kp-sr-only" },
+            "Requests per hostname in this window",
+          ),
+          h(
+            "thead",
+            null,
+            h(
+              "tr",
+              null,
+              h("th", { scope: "col", "data-kp-sort": "text" }, "Hostname"),
+              h(
+                "th",
+                { scope: "col", "data-kp-sort": "number", class: "mk-n" },
+                "Requests",
+              ),
+              h(
+                "th",
+                { scope: "col", "data-kp-sort": "number" },
+                "Share of all",
+              ),
+            ),
+          ),
+          hostsBody,
+        ),
+      ),
+      h(
+        "div",
+        { class: "kp-empty", "data-kp-datatable-empty": "", hidden: "" },
+        "No requests reached the gateway in this window.",
+      ),
+    );
+    hostsCard.body.replaceChildren(heatBox, hostsTable);
+    /** @param {string} v */
+    function setHostsView(v) {
+      heatBox.hidden = v !== "heat";
+      hostsTable.hidden = v !== "table";
+    }
+    const clientsCard = section({
+      title: "Busiest clients",
+      desc: "The addresses that made the most requests.",
+      id: "chart-clients",
+      level: "h3",
+    });
+    clientsCard.el.classList.add("mk-card", "mk-span-1");
+    clientsCard.el.dataset.key = "clients";
+    const clientsBody = h("tbody");
+    const clientsTable = h(
+      "div",
+      {
+        class: "kp-datatable mk-table",
+        "data-kp-datatable": "",
+        "data-kp-page-size": "500",
+        "data-kp-page-sizes": "none",
+        "data-kp-sort-multi": "",
+        "data-kp-remember": "metrics-clients",
+      },
+      h(
+        "div",
+        { class: "kp-table-wrap" },
+        h(
+          "table",
+          { class: "kp-table" },
+          h("caption", { class: "kp-sr-only" }, "Busiest clients"),
+          h(
+            "thead",
+            null,
+            h(
+              "tr",
+              null,
+              h("th", { scope: "col", "data-kp-sort": "text" }, "Client"),
+              h("th", { scope: "col", "data-kp-sort": "number" }, "Share"),
+            ),
+          ),
+          clientsBody,
+        ),
+      ),
+      h(
+        "div",
+        { class: "kp-empty", "data-kp-datatable-empty": "", hidden: "" },
+        "No client addresses in this window.",
+      ),
+    );
+    clientsCard.body.replaceChildren(clientsTable);
+
+    const group = h(
+      "div",
+      {
+        class: "kp-chart-group mk-group",
+        "data-kp-chart-group": "",
+        "data-kp-chart-span": range,
+        "data-kp-key": "traffic",
+      },
+      h(
+        "div",
+        { class: "kp-chart-group__bar mk-groupbar" },
+        h("span", {
+          class: "kp-chart-zoom",
+          "data-kp-chart-zoom": "",
+          hidden: "",
+        }),
+      ),
+      h(
+        "div",
+        { class: "mk-panels" },
+        over.el,
+        mix.el,
+        perHost.el,
+        hostsCard.el,
+        clientsCard.el,
+      ),
+    );
+    root.append(
+      strip.el,
+      h("section", { class: "mk-section", "aria-label": "Traffic" }, group),
+    );
+    inits.push(() => {
+      detachers.push(attachDataTables(root));
+      detachers.push(attachBarCells(root));
+      tableOf(hostsTable)?.state("loading");
+      tableOf(clientsTable)?.state("loading");
+      setHeat(heatEl, {
+        state: "loading",
+        skeleton: { rows: 8, columns: 24 },
+        label: "Requests per hostname per hour",
+      });
+    });
+
+    // The pieces that follow one another: the share bar presses a class in
+    // the stacked chart, the heat grid and the chart's legend press each
+    // other, an hour zooms the chart.
+    /** @type {string[]} */
+    let hostNames = [];
+    let bucketMs = 3600_000;
+    mixBar.addEventListener(STACKBAR_PICK_EVENT, (e) => {
+      const key = /** @type {CustomEvent} */ (e).detail?.key;
+      const i = CLASSES.findIndex((c) => c.label === key);
+      if (i >= 0) chartSelect(over.fig, i);
+    });
+    mixBar.addEventListener(STACKBAR_RETRY_EVENT, () =>
+      refreshOf(refreshEl)?.now("retry"),
+    );
+    heatEl.addEventListener(HEAT_PICK_EVENT, (e) => {
+      const d = /** @type {CustomEvent} */ (e).detail;
+      chartZoom(
+        group,
+        d.picked
+          ? { from: Number(d.colKey), to: Number(d.colKey) + bucketMs }
+          : null,
+      );
+    });
+    heatEl.addEventListener(HEAT_ROW_EVENT, (e) => {
+      const keys = /** @type {string[]} */ (
+        /** @type {CustomEvent} */ (e).detail.keys
+      );
+      chartSelect(perHost.fig, null);
+      for (const k of keys)
+        chartSelect(perHost.fig, hostNames.indexOf(k), true);
+    });
+    perHost.fig.addEventListener(CHART_SELECT_EVENT, (e) => {
+      const on = /** @type {number[]} */ (
+        /** @type {CustomEvent} */ (e).detail?.on ?? []
+      );
+      const names = on.map((i) => hostNames[i]).filter(Boolean);
+      setHeatRows(heatEl, names);
+      paintRows(on);
+    });
+    group.addEventListener(CHART_ZOOM_EVENT, (e) => {
+      if (!(/** @type {CustomEvent} */ (e).detail)) setHeatPick(heatEl, null);
+    });
+    /** The table's rows, pressed as the chart's sources are on. @param {number[]} on */
+    const paintRows = (on) => {
+      for (const row of hostsBody.querySelectorAll("tr[data-kp-row-key]")) {
+        const key = /** @type {HTMLElement} */ (row).dataset.kpRowKey ?? "";
+        const j = hostNames.indexOf(key || "no hostname");
+        const pressed = j >= 0 && on.includes(j);
+        row.classList.toggle("is-on", pressed);
+        row.setAttribute("aria-pressed", String(pressed));
+      }
+    };
 
     return async () => {
-      const r = await fetchJson(
-        `/data/traffic${setParams("", { range })}`,
-        "the traffic",
-        abort.signal,
-      );
+      const [r] = await Promise.all([
+        fetchJson(
+          `/data/traffic${setParams("", { range })}`,
+          "the traffic",
+          abort.signal,
+        ),
+        readHistory(RANGE_SECONDS[range]),
+      ]);
       if (!r.ok) {
         failed.replaceChildren(errorBox(r.error));
-        span.textContent = "";
-        for (const c of [over, mix, perHost, hostsCard, clientsCard])
-          notRead(c.body, "Not read: see above.");
-        tilesNotRead(strip, null);
-        return;
+        const why = notReadWords(r.error);
+        notRead(over.fig, "Requests over time", why);
+        notRead(perHost.fig, "Requests per hostname", why);
+        setStackbar(mixBar, {
+          state: "error",
+          message: why,
+          label: "Status mix",
+        });
+        setHeat(heatEl, {
+          state: "error",
+          skeleton: { rows: 8, columns: 24 },
+          message: why,
+          label: "Requests per hostname per hour",
+        });
+        tableOf(hostsTable)?.fail(why);
+        tableOf(clientsTable)?.fail(why);
+        tilesNotRead(strip.tiles);
+        return false;
       }
       failed.replaceChildren();
       const b = r.body;
-      await readMarks(b.from, b.to);
-      span.textContent = `${windowText(b.from, b.to)} · ${marks.length} ${marks.length === 1 ? "event" : "events"} marked · drag across a chart to zoom`;
-      destroyCharts();
+      const marks = marksIn(b.from, b.to);
       const P = byTitle(b.panels ?? []);
       const status = P.get("Requests per status");
       const hostsP = P.get("Requests per hostname");
@@ -1040,192 +2153,215 @@ export function mount(root, ctx) {
         prevTotal: b.prev_total ?? null,
         errors: b.errors?.rows ?? [],
       });
-      const w = { from: b.from, to: b.to };
 
       // Requests over time, stacked by class.
       if (status?.error)
-        notRead(over.body, `Loki did not answer: ${status.error}`);
-      else if (!classes[0]?.points.length)
-        notRead(over.body, "No requests in this window.");
-      else
-        draw(
-          over.body,
-          {
-            key: "requests",
-            label: "Requests over time",
-            unit: "count",
-            stacked: true,
-            series: classes,
-          },
-          w,
+        notRead(
+          over.fig,
+          "Requests over time",
+          `Loki did not answer: ${status.error}`,
         );
+      else
+        feedChart(over.fig, {
+          key: "requests",
+          label: "Requests over time",
+          unit: "count",
+          stacked: true,
+          series: classes[0]?.points.length
+            ? classes
+            : [{ label: "Requests", points: [] }],
+          from: b.from,
+          to: b.to,
+          annotations: marks,
+        });
 
-      // Status mix.
-      mix.body.replaceChildren(
-        h(
-          "div",
-          { class: "mk-mix" },
-          ...CLASSES.map((c) =>
-            h(
-              "div",
-              { class: "mk-mix__row" },
-              h("b", null, c.label),
-              shareBar(
-                (f.shares[c.label] ?? 0) * 100,
-                `${((f.shares[c.label] ?? 0) * 100).toFixed(1)}%`,
-                c.colour,
-              ),
-            ),
-          ),
-        ),
-        h(
-          "p",
-          { class: "mk-muted mk-sm" },
-          f.top4xx
-            ? `${f.top4xx.status} is the biggest 4xx (${f.top4xx.host}${f.top4xx.path}, ${count(f.top4xx.n)} times).`
-            : b.errors?.error
-              ? `The biggest error answers were not read: ${b.errors.error}`
-              : "No 4xx answers in this window.",
-        ),
-      );
+      // Status mix: one bar over the exact total.
+      setStackbar(mixBar, {
+        title: "Status mix",
+        total: f.total,
+        summary: `${count(f.total)} requests`,
+        format: count,
+        label: "Status mix",
+        parts: statusParts(classes),
+      });
+      mixNote.textContent = f.top4xx
+        ? `${f.top4xx.status} is the biggest 4xx (${f.top4xx.host}${f.top4xx.path}, ${count(f.top4xx.n)} times).`
+        : b.errors?.error
+          ? `The biggest error answers were not read: ${b.errors.error}`
+          : "No 4xx answers in this window.";
 
       // Requests per hostname: the legend's totals are the Hostnames
       // table's own numbers (one count, two places, never two sums).
       const rows = /** @type {[string, number][]} */ (b.hosts?.rows ?? []);
       const hostSeries = hostLegend(hostsP?.series ?? [], rows);
-      /** The table's rows, pressed as the chart's sources are on. */
-      const paintRows = (/** @type {number[]} */ on) => {
-        for (const row of hostsCard.body.querySelectorAll(
-          "tr[data-kp-row-key]",
-        )) {
-          const key = /** @type {HTMLElement} */ (row).dataset.kpRowKey ?? "";
-          const j = hostSeries.findIndex(
-            (s) => s.label === (key || "no hostname"),
-          );
-          const pressed = j >= 0 && on.includes(j);
-          row.classList.toggle("is-on", pressed);
-          row.setAttribute("aria-pressed", String(pressed));
-        }
-      };
-      /** @type {Chart | null} */
-      let hostChart = null;
+      hostNames = hostSeries.map((s) => s.label);
       if (hostsP?.error)
-        notRead(perHost.body, `Loki did not answer: ${hostsP.error}`);
-      else if (!hostSeries.length)
-        notRead(perHost.body, "No requests in this window.");
+        notRead(
+          perHost.fig,
+          "Requests per hostname",
+          `Loki did not answer: ${hostsP.error}`,
+        );
       else
-        hostChart = draw(
-          perHost.body,
-          {
-            key: "perhost",
-            label: "Requests per hostname",
-            unit: "count",
-            series: hostSeries,
-            onSelect: paintRows,
-          },
-          w,
-        );
-
-      // Hostnames table.
-      const top = rows[0]?.[1] ?? 0;
-      hostsCard.setNow(String(rows.length), "active");
-      if (b.hosts?.error)
-        notRead(hostsCard.body, `Loki did not answer: ${b.hosts.error}`);
-      else {
-        const t = dataTable({
-          cls: "mk-table",
-          remember: "metrics-hostnames",
-          caption: "Hostnames",
-          columns: [
-            { label: "Hostname", sort: "text" },
-            { label: "Trend", cls: "mk-hide-phone" },
-            { label: "Requests", sort: "number", cls: "mk-n" },
-            { label: "Share", sort: "number" },
-          ],
+        feedChart(perHost.fig, {
+          key: "perhost",
+          label: "Requests per hostname",
+          unit: "count",
+          series: hostSeries.length
+            ? hostSeries
+            : [{ label: "Requests", points: [] }],
+          from: b.from,
+          to: b.to,
+          annotations: marks,
         });
-        t.tbody.replaceChildren(
-          ...rows.map(([name, n]) => {
-            const si = hostSeries.findIndex(
-              (s) => s.label === (name || "no hostname"),
-            );
-            const tr = h(
-              "tr",
-              {
-                "data-kp-row-key": name,
-                class: "mk-rowpick",
-                tabindex: "0",
-                "aria-pressed": "false",
-                title: "Switch this hostname on or off in the chart above",
-              },
-              h(
-                "td",
-                null,
-                h("span", { class: "mono mk-host" }, name || "no hostname"),
-              ),
-              h(
-                "td",
-                { class: "mk-hide-phone mk-trend" },
-                si >= 0 && hostSeries[si].points.length > 1
-                  ? sparkline(
-                      hostSeries[si].points.map((p) => p[1]),
-                      { colour: `var(--chart-${(si % 5) + 1})` },
-                    )
-                  : "",
-              ),
-              h("td", { class: "mk-n" }, count(n)),
-              h(
-                "td",
-                { class: "mk-share" },
-                shareBar(
-                  top ? (n / top) * 100 : 0,
-                  `${f.total ? ((n / f.total) * 100).toFixed(1) : "0.0"}%`,
-                ),
-              ),
-            );
-            drivable(tr, HOSTNAME, name || "no hostname");
-            // The chart owns the selection; its onSelect repaints the rows.
-            const pickIt = () => {
-              if (si >= 0) hostChart?.select(si);
+
+      // Hostnames: the heat grid …
+      const heat = hostHeat(hostSeries, b.from, b.to);
+      bucketMs = heat.bucket * 1000;
+      const label = (/** @type {number} */ at) =>
+        heat.unit === "day"
+          ? formatDay(at).slice(0, 5)
+          : heat.bucket >= 3600
+            ? formatClock(at).slice(0, 2)
+            : formatClock(at);
+      if (!heat.rows.length)
+        setHeat(heatEl, {
+          state: "empty",
+          skeleton: { rows: 8, columns: 24 },
+          message: "No requests reached the gateway in this window.",
+          label: "Requests per hostname per hour",
+        });
+      else if (hostsP?.error || b.hosts?.error)
+        setHeat(heatEl, {
+          state: "error",
+          message: `Loki did not answer: ${hostsP?.error ?? b.hosts?.error}`,
+          label: "Requests per hostname per hour",
+        });
+      else
+        setHeat(heatEl, {
+          label: "Requests per hostname per hour",
+          every: heat.every,
+          columns: heat.columns.map((c) => ({
+            key: String(c.at * 1000),
+            label: label(c.at),
+          })),
+          rows: heat.rows.map((row, i) => {
+            const top = Math.max(1, ...row.counts);
+            return {
+              key: row.host,
+              label: row.host,
+              mark: `var(--chart-${(i % 5) + 1})`,
+              pressed: false,
+              cells: row.counts.map((n, k) => ({
+                tone: /** @type {const} */ ("level"),
+                level: n / top,
+                label: `${count(n)} requests`,
+                tip: `${row.host}, ${formatDateTime(heat.columns[k].at)} to ${formatClock(heat.columns[k].at + heat.bucket)}: ${count(n)} requests`,
+              })),
             };
-            tr.addEventListener("click", pickIt);
-            tr.addEventListener("keydown", (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                pickIt();
-              }
-            });
-            return tr;
           }),
-        );
-        hostsCard.body.replaceChildren(t.wrap);
-        hostsTable.attach(hostsCard.body);
+        });
+      for (const rowEl of heatEl.querySelectorAll(
+        ".kp-heat__row[data-row-key]",
+      )) {
+        const btn = rowEl.querySelector(".kp-heat__label-button");
+        if (btn)
+          drivable(
+            /** @type {HTMLElement} */ (btn),
+            HOSTNAME,
+            /** @type {HTMLElement} */ (rowEl).dataset.rowKey ?? "",
+          );
       }
+      // … and the table.
+      hostsBody.replaceChildren(
+        ...rows.map(([name, n]) => {
+          const shown = name || "no hostname";
+          const tr = h(
+            "tr",
+            {
+              "data-kp-row-key": name,
+              class: "mk-rowpick",
+              tabindex: "0",
+              "aria-pressed": "false",
+              title: "Switch this hostname on or off in the chart above",
+            },
+            h(
+              "td",
+              { "data-label": "Hostname" },
+              h(
+                "span",
+                { class: "mk-host" },
+                h("span", {
+                  class: "kp-idmark kp-idmark--sm",
+                  "data-kp-idmark": shown,
+                  "aria-hidden": "true",
+                }),
+                h("span", { class: "mono" }, shown),
+              ),
+            ),
+            h(
+              "td",
+              {
+                class: "mk-n",
+                "data-label": "Requests",
+                "data-kp-sort-value": n,
+              },
+              count(n),
+            ),
+            h(
+              "td",
+              { "data-label": "Share of all" },
+              h("span", { class: "kp-bar-cell" }),
+            ),
+          );
+          const share = f.total ? n / f.total : 0;
+          setBarCell(
+            /** @type {HTMLElement} */ (tr.querySelector(".kp-bar-cell")),
+            {
+              value: share,
+              text: `${(share * 100).toFixed(1)}%`,
+              tone: null,
+              sortValue: share,
+            },
+          );
+          drivable(tr, HOSTNAME, shown);
+          const pickIt = () => {
+            const i = hostNames.indexOf(shown);
+            if (i >= 0) chartSelect(perHost.fig, i);
+          };
+          tr.addEventListener("click", pickIt);
+          tr.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              pickIt();
+            }
+          });
+          return tr;
+        }),
+      );
+      attachIdmarks(hostsBody);
+      tableOf(hostsTable)?.refresh();
 
       // Busiest clients.
       const clients = /** @type {[string, number][]} */ (b.clients?.rows ?? []);
       const busiest = clients[0]?.[1] ?? 0;
       if (b.clients?.error)
-        notRead(clientsCard.body, `Loki did not answer: ${b.clients.error}`);
+        tableOf(clientsTable)?.fail(`Loki did not answer: ${b.clients.error}`);
       else {
-        const t = dataTable({
-          cls: "mk-table",
-          remember: "metrics-clients",
-          caption: "Busiest clients",
-          columns: [
-            { label: "Client", sort: "text" },
-            { label: "Share", sort: "number" },
-          ],
-        });
-        t.tbody.replaceChildren(
-          ...clients.slice(0, 8).map(([c, n]) =>
-            h(
+        clientsBody.replaceChildren(
+          ...clients.slice(0, 8).map(([c, n]) => {
+            const tr = h(
               "tr",
               { "data-kp-row-key": c || "-" },
               c
-                ? h("td", null, h("span", { class: "mono" }, c))
+                ? h(
+                    "td",
+                    { "data-label": "Client" },
+                    h("span", { class: "mono" }, c),
+                  )
                 : h(
                     "td",
                     {
+                      "data-label": "Client",
                       class: "mk-muted",
                       title:
                         "The access log line carried no client address for these requests",
@@ -1234,59 +2370,84 @@ export function mount(root, ctx) {
                   ),
               h(
                 "td",
-                { class: "mk-share" },
-                shareBar(
-                  busiest ? (n / busiest) * 100 : 0,
-                  `${f.total ? Math.round((n / f.total) * 100) : 0}%`,
-                  "var(--chart-2)",
-                ),
+                { "data-label": "Share" },
+                h("span", { class: "kp-bar-cell" }),
               ),
-            ),
-          ),
+            );
+            const share = f.total ? n / f.total : 0;
+            setBarCell(
+              /** @type {HTMLElement} */ (tr.querySelector(".kp-bar-cell")),
+              {
+                value: busiest ? n / busiest : 0,
+                text: `${Math.round(share * 100)}%`,
+                tone: null,
+                sortValue: share,
+              },
+            );
+            return tr;
+          }),
         );
-        clientsCard.body.replaceChildren(t.wrap);
-        clientsTable.attach(clientsCard.body);
+        tableOf(clientsTable)?.state("ready");
+        tableOf(clientsTable)?.refresh();
       }
 
       // The tiles.
       const T = strip.tiles;
-      const sum = classes[0]?.points.map((_, i) =>
+      const step = b.step ?? 600;
+      /** @type {Point[]} */
+      const sum = (classes[0]?.points ?? []).map((p, i) => [
+        p[0],
         classes.reduce((a, c) => a + (c.points[i]?.[1] ?? 0), 0),
-      );
+      ]);
+      const n0 = (/** @type {number} */ v) => count(v);
       T.get("requests")?.set({
         value: count(f.total),
-        ctx: changeText(f.change, range),
-        spark: sum,
-        colour: "var(--chart-1)",
+        trend: [changeText(f.change, range)],
+        hover: hoverOf(sum, n0, "Requests per interval in this window."),
+        points: sum,
+        step,
       });
       const s5 = (f.shares["5xx"] ?? 0) * 100;
       T.get("5xx")?.set({
         value: s5.toFixed(1),
         unit: "%",
-        ctx: `${count(f.counts["5xx"] ?? 0)} requests${f.spikeAt ? ` · spike at ${hhmm(f.spikeAt)}` : ""}`,
-        ctxTone: s5 >= 1 ? "bad" : s5 > 0.1 ? "warn" : "",
+        trend: [
+          `${count(f.counts["5xx"] ?? 0)} requests${f.spikeAt ? ` · spike at ${hhmm(f.spikeAt)}` : ""}`,
+        ],
+        hover: hoverOf(
+          (classes[3]?.points ?? []).map((p) => [p[0], p[1]]),
+          n0,
+          "Server errors per interval.",
+        ),
+        points: classes[3]?.points ?? [],
+        step,
         tone: s5 >= 1 ? "bad" : s5 > 0.1 ? "warn" : "",
-        spark: classes[3]?.points.map((p) => p[1]),
-        colour: "var(--destructive)",
       });
       const s4 = (f.shares["4xx"] ?? 0) * 100;
       T.get("4xx")?.set({
         value: s4.toFixed(1),
         unit: "%",
-        ctx: f.top4xx
-          ? `mostly ${f.top4xx.status} on ${f.top4xx.host}`
-          : `${count(f.counts["4xx"] ?? 0)} requests`,
-        spark: classes[2]?.points.map((p) => p[1]),
-        colour: "var(--warning-foreground)",
+        trend: [
+          f.top4xx
+            ? `mostly ${f.top4xx.status} on ${f.top4xx.host}`
+            : `${count(f.counts["4xx"] ?? 0)} requests`,
+        ],
+        hover: hoverOf(
+          classes[2]?.points ?? [],
+          n0,
+          "Client errors per interval.",
+        ),
+        points: classes[2]?.points ?? [],
+        step,
       });
       T.get("hosts")?.set({
         value: String(rows.length),
-        ctx: rows[0]
-          ? `busiest: ${rows[0][0] || "no hostname"}`
-          : "no requests",
-        meter:
-          f.total && rows[0] ? { pct: (rows[0][1] / f.total) * 100 } : null,
-        title: "The bar is the busiest hostname's share of all requests",
+        trend: [
+          rows[0] ? `busiest: ${rows[0][0] || "no hostname"}` : "no requests",
+        ],
+        hover: rows[0]
+          ? `The busiest hostname carries ${f.total ? Math.round((rows[0][1] / f.total) * 100) : 0}% of all requests.`
+          : "No requests in this window.",
       });
       const unknown = clients.find(([c]) => c === "")?.[1] ?? 0;
       T.get("clients")?.set({
@@ -1294,13 +2455,18 @@ export function mount(root, ctx) {
           b.clients_total != null
             ? count(b.clients_total)
             : String(clients.length),
-        ctx: f.total
-          ? `${Math.round((unknown / f.total) * 100)}% without an address`
-          : "no requests",
-        meter: f.total && busiest ? { pct: (busiest / f.total) * 100 } : null,
-        title: "The bar is the busiest address's share of all requests",
+        trend: [
+          f.total
+            ? `${Math.round((unknown / f.total) * 100)}% without an address`
+            : "no requests",
+        ],
+        hover: busiest
+          ? `The busiest address made ${f.total ? Math.round((busiest / f.total) * 100) : 0}% of all requests.`
+          : "No requests in this window.",
       });
-      head.live?.set(Math.floor(Date.now() / 1000));
+      return true;
     };
   }
 }
+
+void [dot, fmtValue];

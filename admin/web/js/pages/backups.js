@@ -890,7 +890,14 @@ export function mount(root) {
   );
   const barSlot = h("div", { class: "bk-barslot" });
   const shell = reposShell("bk-repo-table", BK_FILTER);
-  const tableHost = h("div", { class: "bk-tablehost" }, shell.wrap);
+  // The nights column is a strip with a head and an axis, taller than the
+  // row it arrives in: rows that grow in would show its text over the next
+  // row's for a second, so the table's rows are drawn in place.
+  const tableHost = h(
+    "div",
+    { class: "bk-tablehost", "data-kp-arrive": "none" },
+    shell.wrap,
+  );
   barSlot.append(selectionBar("bk-repo-table"));
   const readState = h("span", { class: "bk-readstate" });
   const repos = section({

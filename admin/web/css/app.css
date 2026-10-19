@@ -2526,11 +2526,6 @@ details.nx-card--fold[open] > summary::before {
 .nx-skeleton-block {
   inline-size: 100%;
 }
-.nx-empty {
-  display: grid;
-  justify-items: center;
-  gap: 6px;
-}
 
 /* -- the per-stack identity mark (DESIGN_LANGUAGE §11, graphics.html):
       generated per name, so its hue is the one colour not from a token -- */
@@ -2659,14 +2654,12 @@ details.nx-card--fold[open] > summary::before {
   font-variant-numeric: tabular-nums;
   font-size: var(--kp-text-sm);
 }
-/* a block's error state (ui.js `failBox`), in the block's own footprint */
-.nx-fail .kp-alert__body {
-  display: grid;
-  gap: var(--kp-space-xs);
-  justify-items: start;
-}
-.nx-fail p {
-  margin: 0;
+/* a block's error state (ui.js `failBox`, dom.js `errorBox`) is the package's
+   failed plate in the block's own footprint; its why and fix stand on their
+   own lines */
+.nx-fail .kp-stateplate__text,
+.kp-stateplate.error .kp-stateplate__text {
+  white-space: pre-line;
 }
 /* one alert for every read a page lost (ui.js `failBand`), and the
    blocks' muted line under it (`failNote`) */

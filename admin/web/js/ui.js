@@ -73,6 +73,7 @@ import {
   toast as kpToast,
 } from "/static/kp/js/overlays.js";
 import { setAttention } from "/static/kp/js/attention.js";
+import { statePlate } from "/static/kp/js/state-plate.js";
 import {
   KPI_TOGGLE_EVENT,
   drawSparkline,
@@ -902,14 +903,17 @@ export const skeletonBlock = (height, label = "Loading") =>
  *   art?: Node | null}} spec
  */
 export function emptyState(spec) {
-  return h(
-    "div",
-    { class: "kp-empty nx-empty" },
-    ...(spec.art ? [spec.art] : []),
-    h("p", { class: "kp-empty__title" }, spec.title),
-    h("p", { class: "kp-empty__body" }, spec.text),
-    ...(spec.action ? [spec.action] : []),
-  );
+  // The package's own empty plate (centred, the title at heading size); its
+  // `nx-empty` class stays so a page can find the one it drew.
+  const plate = statePlate(document, {
+    kind: "empty",
+    title: spec.title,
+    text: spec.text,
+    ...(spec.art ? { art: spec.art } : {}),
+  });
+  plate.classList.add("nx-empty");
+  if (spec.action) plate.append(spec.action);
+  return plate;
 }
 
 /**
@@ -2030,36 +2034,25 @@ export function shareBar(pct, text, colour) {
  * @param {{run: () => void, drive: Drive, label?: string} | null} [retry]
  */
 export function failBox(err, retry = null) {
-  return h(
-    "div",
-    {
-      class: "kp-alert kp-alert--destructive nx-fail",
-      role: "alert",
-      "data-kp-state": "error",
-    },
-    h(
-      "div",
-      { class: "kp-alert__body" },
-      h("strong", null, err.what),
-      h("p", null, err.why),
-      err.fix ? h("p", null, `Fix: ${err.fix}`) : null,
-      retry
-        ? drive(
-            h(
-              "button",
-              {
-                type: "button",
-                class: "kp-button kp-button--sm",
-                title: "Read it again",
-                onclick: retry.run,
-              },
-              retry.label ?? "Try again",
-            ),
-            retry.drive,
-          )
-        : null,
-    ),
-  );
+  const plate = statePlate(document, {
+    kind: "error",
+    title: err.what,
+    text: [err.why, ...(err.fix ? [`Fix: ${err.fix}`] : [])].join("\n"),
+    ...(retry
+      ? {
+          actionLabel: retry.label ?? "Try again",
+          onAction: retry.run,
+        }
+      : {}),
+  });
+  plate.classList.add("nx-fail");
+  plate.setAttribute("data-kp-state", "error");
+  const again = plate.querySelector(".kp-stateplate__action");
+  if (retry && again instanceof HTMLElement) {
+    again.title = "Read it again";
+    drive(again, retry.drive);
+  }
+  return plate;
 }
 
 /**
@@ -2325,32 +2318,23 @@ export function failBand(spec) {
     set: (f, retry) => {
       box.hidden = !f;
       if (!f) return box.replaceChildren();
-      box.replaceChildren(
-        h(
-          "div",
-          { class: "kp-alert kp-alert--destructive nx-fail", role: "alert" },
-          h(
-            "div",
-            { class: "kp-alert__body" },
-            h("strong", null, f.title),
-            h("p", null, `Why: ${f.why}`),
-            f.fix ? h("p", null, `What to do: ${f.fix}`) : null,
-            drive(
-              h(
-                "button",
-                {
-                  type: "button",
-                  class: "kp-button kp-button--sm",
-                  title: "Read it again",
-                  onclick: retry,
-                },
-                "Try again",
-              ),
-              spec.drive,
-            ),
-          ),
-        ),
-      );
+      const plate = statePlate(document, {
+        kind: "error",
+        title: f.title,
+        text: [
+          `Why: ${f.why}`,
+          ...(f.fix ? [`What to do: ${f.fix}`] : []),
+        ].join("\n"),
+        actionLabel: "Try again",
+        onAction: retry,
+      });
+      plate.classList.add("nx-fail");
+      const again = plate.querySelector(".kp-stateplate__action");
+      if (again instanceof HTMLElement) {
+        again.title = "Read it again";
+        drive(again, spec.drive);
+      }
+      box.replaceChildren(plate);
     },
   };
 }

@@ -90,9 +90,7 @@
 /* ---------- tabs and the key row ---------- */
 .sh-tabbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 4px 16px;
+  grid-template-columns: minmax(0, 1fr);
   border-block-end: 1px solid var(--border);
 }
 .sh-tabbar .kp-tabs__list {
@@ -109,14 +107,16 @@
   line-height: 1.6;
   font-variant-numeric: tabular-nums;
 }
-.sh-tabbar .hk-keys {
-  margin: 0 0 10px;
+.sh-tabbar ~ .hk-keys {
+  /* the shortcuts stand on their own line under the tabs, not squeezed
+     beside them */
+  margin: var(--kp-space-sm, 0.5rem) 0 var(--kp-space-md, 0.75rem);
 }
 @media (max-width: 75rem) {
   .sh-tabbar {
     grid-template-columns: minmax(0, 1fr);
   }
-  .sh-tabbar .hk-keys {
+  .sh-tabbar ~ .hk-keys {
     display: none;
   }
 }
@@ -238,10 +238,13 @@
   margin: 0;
   padding: 0;
   display: grid;
+  /* every row on the same three tracks: the mark, what happened, when */
+  grid-template-columns: 16px minmax(0, 1fr) max-content;
 }
 .sh-feed li {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   gap: 4px 10px;
   padding-block: 9px;
   border-block-end: 1px solid var(--border);

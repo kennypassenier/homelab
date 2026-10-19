@@ -127,7 +127,7 @@ test("redesign-kit-6: Secrets draws its header and cards with the kit; its sheet
     ".sx .nx-card__foot",
     ".sx .nx-chip",
     ".sx .nx-dot",
-    ".sx .nx-kbd",
+    ".sx .kp-kbd",
     ".sx .nx-empty",
     ".sx .nx-live {",
     ".sx-tip",

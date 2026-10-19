@@ -96,7 +96,8 @@ import {
   setSegmentedValues,
   valueOf,
 } from "/static/kp/js/segmented.js";
-import { RESET_SORT } from "./sortclick.js";
+import { setKeys } from "/static/kp/js/keys.js";
+import { RESET_SORT } from "./tableresets.js";
 import { applySort, keepSort, nextSort, rememberedSort } from "./sortstate.js";
 
 export {
@@ -640,7 +641,7 @@ export function toolbar(spec) {
         "div",
         { class: "nx-tb__search" },
         search,
-        h("kbd", { class: "nx-kbd", "aria-hidden": "true" }, "/"),
+        h("kbd", { class: "kp-kbd", "aria-hidden": "true" }, "/"),
       ),
     );
   }
@@ -1863,21 +1864,19 @@ export function moreMenu(spec) {
  * A keyboard key, as printed beside the action it triggers.
  * @param {string} k
  */
-export const kbd = (k) => h("kbd", { class: "nx-kbd" }, k);
+export const kbd = (k) => h("kbd", { class: "kp-kbd" }, k);
 
 /**
- * The page's compact line of shortcuts ("/ search containers · …"). A key
- * may be several keys for one action (`[["↑", "↓"], "move"]`).
+ * The page's compact line of shortcuts ("/ search containers · …"), kp's
+ * `.kp-keys`. A key may be several keys for one action (`[["↑", "↓"],
+ * "move"]`).
  * @param {[string | string[], string][]} pairs keys, what they do
  */
-export const keyRow = (pairs) =>
-  h(
-    "p",
-    { class: "nx-keys", "aria-label": "Keyboard shortcuts" },
-    ...pairs.map(([k, what]) =>
-      h("span", null, ...(Array.isArray(k) ? k : [k]).map(kbd), what),
-    ),
-  );
+export const keyRow = (pairs) => {
+  const el = h("p");
+  setKeys(el, pairs);
+  return el;
+};
 
 /** The same block under its first name. */
 export const keysLine = keyRow;
@@ -2194,7 +2193,7 @@ export const PHONE = "(max-width: 48rem)";
 
 /**
  * A kp datatable with no search bar of its own: sortable headers,
- * a click adds a further key (sortclick.js), the sort remembered under `remember`; the
+ * a click adds a further key (data-kp-sort-multi="click"), the sort remembered under `remember`; the
  * caller fills `tbody`, then wires it with a `tableSlot` (or
  * `attachDataTables`). `cls` adds the page's own class (Metrics, the Map).
  * @param {{remember: string, caption: string, cls?: string,
@@ -2207,7 +2206,7 @@ export function dataTable(spec) {
     {
       class: `kp-datatable${spec.cls ? ` ${spec.cls}` : ""}`,
       "data-kp-datatable": "",
-      "data-kp-sort-multi": "",
+      "data-kp-sort-multi": "click",
       "data-kp-remember": spec.remember,
       "data-kp-page-sizes": "none",
       "data-kp-page-size": "500",

@@ -276,7 +276,8 @@ comparing the code with the kp CHANGELOG.
   `data-kp-words="a\nb"` + `setStateWord(el, word)` (`kp:js/components.js:1173`, CHANGELOG 9.2.0 "A state word
   that keeps its width"; `update()` accepts it). Replace the 1 caller, delete the CSS block.
 
-### kpa-32 `sortclick.js` -- NOT provided by 10.1.1 (keep, ask kp)
+### kpa-32 `sortclick.js` -- kp 11.0.0 provides it (done, step-kp11-13: `data-kp-sort-multi="click"`; only the Live view reset mark stays, in `js/tableresets.js`)
+(Historic text, 10.1.1:)
 - `js/sortclick.js` (93 lines) rewrites a plain header click into a Shift-click so each click adds a sort key
   (Kenny: "multi-sort without Shift"). kp 10.1.1 still only adds a key on Shift (`kp:js/datatable.js:2856,2868`;
   USER_GUIDE.md:1888). Not removable; candidate request: `data-kp-sort-multi="click"`.
@@ -476,7 +477,7 @@ kp pin changes (`scripts/merge-cases.mjs:98`): this release changes both.
 | kpa-20 | Tabs, accordions etc. | dom.js:794 | already kp | none | none |
 | kpa-30 | Row click expand | rowtoggle.js | kp 8.1.1+ built in | small | dead code |
 | kpa-31 | State word | dom.js:532 | `.kp-state-word` (9.2.0) | small | workaround |
-| kpa-32 | Plain-click multi sort | sortclick.js | not shipped | n/a | keep, request |
+| kpa-32 | Plain-click multi sort | sortclick.js | shipped in 11.0.0 | data-kp-sort-multi="click" | done (step-kp11-13) |
 | kpa-33 | No kp component | segmented, toast hold, bar fold, diff hunk | not shipped | n/a | keep, request |
 | kpa-34 | Register asks | REGISTER gap-kplog-1, gap-themeuni-1 | shipped | n/a | close rows |
 | kpa-35 | Stale text, type stubs | "22 themes", types/kp | 16 themes, 10.1.1 stubs | small | docs |

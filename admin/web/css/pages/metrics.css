@@ -345,7 +345,7 @@ main.mk-page > .mk-failed:empty {
 }
 @media (hover: none) {
   .mk-pointer-only,
-  .mk-page .nx-keys {
+  .mk-page .kp-keys {
     display: none !important;
   }
   .mk-touch-only {

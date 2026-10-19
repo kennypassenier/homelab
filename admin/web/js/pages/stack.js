@@ -1950,7 +1950,7 @@ function datatable(spec) {
     {
       class: "kp-datatable sh-table",
       "data-kp-datatable": "",
-      "data-kp-sort-multi": "",
+      "data-kp-sort-multi": "click",
       "data-kp-cards": "",
       "data-kp-remember": spec.remember,
       "data-kp-page-sizes": "none",

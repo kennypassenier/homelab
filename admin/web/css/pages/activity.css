@@ -60,30 +60,6 @@
   gap: 8px;
   align-items: center;
 }
-:is(.ac-page, .con-page) .nx-keys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 20px;
-  margin: 0;
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-:is(.ac-page, .con-page) .nx-keys span {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-:is(.ac-page, .con-page) .nx-kbd {
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.72rem;
-  border: 1px solid var(--border);
-  border-bottom-width: 2px;
-  border-radius: 4px;
-  padding: 0 5px;
-  color: var(--muted-foreground);
-  background: var(--card);
-}
-
 /* ── Running now ─────────────────────────────────────────────────────── */
 .ac-jobs {
   display: grid;

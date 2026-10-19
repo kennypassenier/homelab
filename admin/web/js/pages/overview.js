@@ -588,7 +588,7 @@ export function mount(root, ctx) {
     {
       class: "kp-datatable sk-table",
       "data-kp-datatable": "",
-      "data-kp-sort-multi": "",
+      "data-kp-sort-multi": "click",
       "data-kp-remember": "stacks",
       "data-kp-page-sizes": "none",
     },
@@ -1347,9 +1347,10 @@ export function mount(root, ctx) {
         dialogControl(
           h(
             "button",
-            { type: "button", class: "nx-action sk-route" },
-            h("strong", null, title),
-            h("span", null, text),
+            { type: "button", class: "kp-action sk-route" },
+            h("strong", { class: "kp-action__title" }, title),
+            h("span", { class: "kp-action__mark", "aria-hidden": "true" }),
+            h("span", { class: "kp-action__text" }, text),
           ),
           name,
         ),
@@ -1368,7 +1369,7 @@ export function mount(root, ctx) {
       body: [
         h(
           "div",
-          { class: "nx-actions sk-routes" },
+          { class: "kp-actions sk-routes" },
           route(
             "From a preset",
             "Jellyfin, Vaultwarden, a static site… — tested settings; you pick a name and a disk size",

@@ -35,20 +35,24 @@ export function mount(root) {
     card.body.append(
       h(
         "nav",
-        { class: "nx-actions sy-links", "aria-label": g.title },
+        { class: "kp-actions sy-links", "aria-label": g.title },
         ...g.cards.map((c) => {
-          const line = c.id === "host" ? h("span", { class: "sy-kpi" }) : null;
+          const line =
+            c.id === "host"
+              ? h("span", { class: "kp-action__meta sy-kpi" })
+              : null;
           if (line) liveLine = line;
           return h(
             "a",
             {
-              class: "nx-action",
+              class: "kp-action",
               href: c.href ?? hrefOf(c.id),
               ...(c.download ? { download: c.download } : {}),
               "data-card": c.id,
             },
-            h("strong", null, c.label),
-            h("span", null, c.what),
+            h("strong", { class: "kp-action__title" }, c.label),
+            h("span", { class: "kp-action__mark", "aria-hidden": "true" }),
+            h("span", { class: "kp-action__text" }, c.what),
             line,
           );
         }),

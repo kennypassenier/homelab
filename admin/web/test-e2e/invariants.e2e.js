@@ -4011,9 +4011,9 @@ test("invariants: Stacks keeps its ticks across Table/Cards and live updates, th
       "Esc did not untick",
     );
     // An Only chip narrows the list and says its exact count.
-    const chip = page.locator(".nx-chip-toggle[data-v=newer]");
+    const chip = page.locator(".kp-segmented button[data-value=newer]");
     const want = Number(
-      (await chip.locator(".nx-chip-toggle__count").innerText()).trim(),
+      (await chip.locator(".kp-segmented__count").innerText()).trim(),
     );
     await chip.click();
     // kp-themes 10: the rows the chip leaves out leave the theme's way, one
@@ -4822,7 +4822,11 @@ test("invariants: Schedules page: Live view reaches the drawer and its fields, t
       assert.equal(await page.locator("#sched-every").inputValue(), "day");
       r = await step({ do: "press", button: "cancel" });
       assert.ok(r.ok, `press cancel: ${JSON.stringify(r.refusal)}`);
-      assert.equal(await page.locator("dialog.sch-drawer[open]").count(), 0);
+      // A kp drawer leaves the theme's way: it stays [open] until its exit
+      // is over.
+      await page
+        .locator("dialog.sch-drawer[open]")
+        .waitFor({ state: "detached", timeout: 3000 });
       r = await step({ do: "click", control: "schedule-menu", row: id });
       assert.ok(r.ok, `schedule-menu: ${JSON.stringify(r.refusal)}`);
       await page
@@ -5238,7 +5242,7 @@ test("invariants: redesign-kit-18: Backups keeps its KPI context whole at 390 px
         document.querySelector("#bk-filter")
       ).getBoundingClientRect();
       const kbd = /** @type {HTMLElement} */ (
-        document.querySelector("#bk-repos .nx-card__tools .nx-kbd")
+        document.querySelector("#bk-repos .nx-card__tools .kp-kbd")
       ).getBoundingClientRect();
       return {
         box: [box.top, box.bottom, box.right],
@@ -6307,7 +6311,7 @@ test("invariants: review-activity: History's Show switch counts, By names owners
       return {
         outside,
         inBar: !!document.querySelector(".hl-bar .hl-follow"),
-        keys: document.querySelector(".nx-keys, .ac-keys")?.textContent ?? "",
+        keys: document.querySelector(".kp-keys, .ac-keys")?.textContent ?? "",
         desc: card?.textContent ?? "",
       };
     });
@@ -6989,7 +6993,7 @@ test("invariants: review metrics — the wording is the demo's, Connections is g
           ".kp-chart__hint > [data-kp-when='touch']",
         ),
       ].some((e) => /** @type {HTMLElement} */ (e).checkVisibility()),
-      keys: [...document.querySelectorAll(".mk-page .nx-keys")].some((e) =>
+      keys: [...document.querySelectorAll(".mk-page .kp-keys")].some((e) =>
         /** @type {HTMLElement} */ (e).checkVisibility(),
       ),
     }));
@@ -9420,7 +9424,7 @@ test("invariants: redesign-final-h5: Planned is a section of Activity and the Do
         rivals: [...document.querySelectorAll("main h2")]
           .filter((x) => parseFloat(getComputedStyle(x).fontSize) >= big)
           .map((x) => x.textContent),
-        badge: document.querySelectorAll("#sched-new kbd, #sched-new .nx-kbd")
+        badge: document.querySelectorAll("#sched-new kbd, #sched-new .kp-kbd")
           .length,
       };
     });
@@ -9883,7 +9887,7 @@ test("invariants: redesign-final-m1: Stacks is the approved demo: no Inbox banne
         table: !!document.querySelector(".sk-table tbody tr[data-stack]"),
         cards: !!document.querySelector(".sk-cards .sk-card[data-stack]"),
         title: card?.querySelector("h2")?.textContent?.trim(),
-        keysInFoot: !!card?.querySelector(".sk-foot .nx-keys"),
+        keysInFoot: !!card?.querySelector(".sk-foot .kp-keys"),
         aboveToolbar: before.join(" "),
       };
     });

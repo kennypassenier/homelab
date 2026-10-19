@@ -154,7 +154,7 @@ export function badgeCell(st) {
 
 /**
  * The kp datatable block every table on the dashboard is (ui-tables):
- * sortable columns, each header clicked a further key (sortclick.js), its sort remembered
+ * sortable columns, each header clicked a further key (data-kp-sort-multi="click"), its sort remembered
  * under its own name, no row selection (the one exception, the fleet's
  * batch actions, passes `select`).
  *
@@ -219,7 +219,7 @@ export function tableBlock(spec) {
     // its cells labelled, never a table scrolling sideways (kp-themes'
     // card layout; `labelCells` writes the labels it reads).
     "data-kp-cards": "",
-    "data-kp-sort-multi": "",
+    "data-kp-sort-multi": "click",
     "data-kp-remember": spec.remember,
     "data-kp-page-sizes": spec.pageSizes ?? "none",
   };

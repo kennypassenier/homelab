@@ -1086,11 +1086,6 @@ tr.unread td:first-child {
   cursor: pointer;
   overflow-wrap: anywhere;
 }
-/* The diff itself is kp-themes' `.kp-diff` component [TH54]; kp has no
- * hunk-header element, so the `@@ … @@` line keeps this one local rule. */
-.diff-hunk {
-  padding: 0.125rem 0.5rem;
-}
 tr.rule-new td {
   font-style: italic;
 }
@@ -2520,19 +2515,11 @@ td.stack-flags {
   box-sizing: border-box;
   padding-inline-end: 34px;
 }
-.nx-tb__search .nx-kbd {
+.nx-tb__search .kp-kbd {
   position: absolute;
   inset-inline-end: 8px;
   inset-block-start: 50%;
   transform: translateY(-50%);
-}
-.nx-kbd {
-  font: 500 var(--kp-text-xs) / 1 var(--font-mono, ui-monospace, monospace);
-  border: 1px solid var(--border);
-  border-block-end-width: 2px;
-  border-radius: 4px;
-  padding: 2px 5px;
-  color: var(--muted-foreground);
 }
 .nx-tb__filters {
   display: flex;
@@ -2831,35 +2818,6 @@ details.nx-card--fold[open] > summary::before {
     justify-content: flex-start;
   }
 }
-.nx-actions {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
-  gap: var(--kp-space-sm, 8px);
-}
-.nx-action {
-  display: grid;
-  gap: 2px;
-  text-align: start;
-  font: inherit;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--card);
-  color: inherit;
-  text-decoration: none;
-  cursor: pointer;
-}
-.nx-action:hover {
-  border-color: var(--ring);
-}
-.nx-action strong {
-  font-weight: 600;
-}
-.nx-action span {
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-}
-
 /* -- redesign-kit-1: the blocks the Backups, Host, Schedules and Secrets
       pages brought along (their local kits), now ui.js's. -- */
 :root {
@@ -3100,11 +3058,6 @@ details.nx-card--fold[open] > summary::before {
   font-variant-numeric: tabular-nums;
 }
 
-/* A key printed inside a button sits apart from its label. */
-.kp-button > .nx-kbd {
-  margin-inline-start: var(--kp-space-xs);
-}
-
 /* the page header's sub-title part and its meta row (pageHeader `sub`,
    `meta`): facts under the description, in the header's left column */
 .nx-head-sub {
@@ -3331,21 +3284,6 @@ th[aria-sort="descending"] .nx-sort__mark {
    menu (js/menu-button.js): every theme draws them, opens and closes them
    its own way and keeps them whole on the screen. */
 
-/* the page's line of shortcuts */
-.nx-keys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--kp-space-xs) var(--kp-space-lg);
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-  margin: 0;
-}
-.nx-keys span {
-  display: inline-flex;
-  gap: var(--kp-space-xs);
-  align-items: center;
-}
-
 /* -- `.nx-ops`: the ops-kit look (Host, Schedules; the demos built on
       ops-kit.css), set on a page's root: flush cards with a ruled foot,
       a quieter KPI strip, the plain alert, a lighter key cap. -- */
@@ -3437,7 +3375,7 @@ th[aria-sort="descending"] .nx-sort__mark {
 .nx-ops details[open] .nx-chev {
   transform: rotate(90deg);
 }
-.nx-ops .nx-kbd {
+.nx-ops .kp-kbd {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.72rem;
   font-weight: inherit;

@@ -28,7 +28,8 @@ import { formatDateTime } from "./format.js";
  * @typedef {import("./inboxlist.js").InboxItem & {kind?: Kind,
  *   chips?: SrcChip[], stacks?: string[], apps?: NewerApp[],
  *   fix?: import("./notices.js").Fix | null, check?: string,
- *   checkState?: "open" | "not ok"}} Row
+ *   checkState?: "open" | "not ok", checkText?: string,
+ *   previous?: "ok" | "fail" | null}} Row
  */
 
 /** The chips' order and words (flows/inbox.html). */
@@ -220,6 +221,10 @@ export function checkRowsOf(report) {
       ],
       check: c.id,
       checkState: a,
+      checkText: String(r.text ?? ""),
+      // kp11: "Same as last time" is offered only for a check that was
+      // answered "fails" before; a never-answered one has no last time.
+      previous: a === "not ok" ? "fail" : null,
     });
   }
   return out;
@@ -369,23 +374,201 @@ export function worthRows(backups, versions) {
 }
 
 /**
- * The rows a set of chips shows: none on means all; "worst first" keeps
- * inboxlist.js's order, "newest" sorts by time.
+ * The rows a set of chips shows: none on means all; the order is
+ * inboxlist.js's (worst first, newest first within a weight).
  * @param {Row[]} rows
  * @param {Set<string>} kinds
- * @param {"worst" | "newest"} order
  */
-export function shownRows(rows, kinds, order) {
-  const out = rows.filter((r) => kinds.size === 0 || kinds.has(kindOf(r)));
-  return order === "newest" ? [...out].sort((a, b) => b.at - a.at) : out;
+export function shownRows(rows, kinds) {
+  return rows.filter((r) => kinds.size === 0 || kinds.has(kindOf(r)));
+}
+
+/** The list's group headings, in the order they stand (the approved demo). */
+export const GROUPS = /** @type {const} */ ([
+  "Urgent",
+  "Updates",
+  "Setup",
+  "Checks",
+]);
+
+/**
+ * The heading a row stands under: the host's questions and the failures
+ * are Urgent, the rest by what they are.
+ * @param {Row} r
+ * @returns {(typeof GROUPS)[number]}
+ */
+export function groupOf(r) {
+  const k = kindOf(r);
+  return k === "update"
+    ? "Updates"
+    : k === "setup"
+      ? "Setup"
+      : k === "check"
+        ? "Checks"
+        : "Urgent";
 }
 
 /**
- * The card's heading: "5 things need you · 1 is urgent".
+ * The rows under their headings, headings in GROUPS' order, a heading with
+ * no row left out; a row keeps its place within its heading.
  * @param {Row[]} rows
+ * @returns {{name: (typeof GROUPS)[number], rows: Row[]}[]}
  */
-export function headline(rows) {
-  const urgent = rows.filter((r) => r.severity === "bad").length;
-  const n = rows.length;
-  return `${n} ${n === 1 ? "thing needs" : "things need"} you${urgent ? ` · ${urgent} ${urgent === 1 ? "is" : "are"} urgent` : ""}`;
+export function groupRows(rows) {
+  return GROUPS.map((name) => ({
+    name,
+    rows: rows.filter((r) => groupOf(r) === name),
+  })).filter((g) => g.rows.length > 0);
+}
+
+/**
+ * kp11: a failure's "What went wrong" fold, drawn from what the notice
+ * carries: what happened, why it matters and what to do. Null when the
+ * notice has no remedy to show.
+ * @param {Row} r
+ * @returns {{key: string, what: string, why?: string, remedy: string, severity: "critical" | "warning"} | null}
+ */
+export function problemOf(r) {
+  const p = r.problem;
+  if (!p?.remedy) return null;
+  return {
+    key: r.key,
+    what: p.what,
+    ...(p.why ? { why: p.why } : {}),
+    remedy: p.remedy,
+    severity: r.severity === "bad" ? "critical" : "warning",
+  };
+}
+
+/**
+ * The exact count the card's timestamp shows.
+ * @param {number} shown
+ * @param {number} all
+ */
+export function countWords(shown, all) {
+  return shown === all
+    ? `${plural(all, "item")} waiting`
+    : `${shown} of ${plural(all, "item")} shown`;
+}
+
+// ---- kp11: the host's questions as question cards -----------------------
+
+/**
+ * The key a question has in the Inbox (`ask:` + this is its row's key).
+ * @param {import("./asks.js").Ask} a
+ */
+export const askKey = (a) => `${a.boot ?? ""}:${a.id}`;
+
+/**
+ * The id a question card gets: a CSS-safe word, one per question.
+ * @param {import("./asks.js").Ask} a
+ */
+export const askId = (a) =>
+  `${a.boot || "boot"}-${a.id}`.replace(/[^a-z0-9-]/gi, "-");
+
+/**
+ * One sentence from a clause the host sends ("the deploy goes on"): a
+ * capital letter and a full stop.
+ * @param {string} clause
+ * @param {string} fallback
+ */
+function sentence(clause, fallback) {
+  const t = (clause || fallback).trim();
+  const up = t.charAt(0).toUpperCase() + t.slice(1);
+  return /[.!?]$/.test(up) ? up : `${up}.`;
+}
+
+/**
+ * A host question as kp-themes' question card reads it: what it asks, what
+ * each answer sets in motion, and the safe answer when nobody answers.
+ * @param {import("./asks.js").Ask} a
+ * @returns {import("/static/kp/js/question-card.js").QuestionSpec}
+ */
+export function askSpec(a) {
+  const allow = sentence(a.if_allowed, "the operation goes on");
+  const stop = sentence(a.if_stopped, "the operation stops here");
+  return {
+    id: askId(a),
+    question: `${a.op} is waiting at “${a.step}”`,
+    text: a.what,
+    deadline: a.deadline * 1000,
+    asked: a.asked_at * 1000,
+    countdown: "ring",
+    defaultAnswer: "stop",
+    answers: [
+      {
+        value: "allow",
+        label: "Allow",
+        tone: "primary",
+        consequence: allow,
+        outcome: `Allowed. ${allow}`,
+      },
+      {
+        value: "stop",
+        label: "Leave it stopped",
+        consequence: stop,
+        outcome: `Stopped. ${stop}`,
+      },
+    ],
+  };
+}
+
+// ---- kp11: the notices of the last day, to tick and act on together -----
+
+/** How many notices the bulk card lists; the rest are offered as "match". */
+export const BULK_SHOWN = 10;
+
+/**
+ * The unread notices of the last 24 hours, newest first: the first
+ * `BULK_SHOWN` to list, how many match in all, and every id.
+ * @param {import("./notices.js").Notice[]} notices
+ * @param {number} now unix seconds
+ */
+export function bulkRows(notices, now) {
+  const all = notices
+    .filter((n) => !n.read && n.at >= now - 86400)
+    .sort((a, b) => b.at - a.at || b.id - a.id);
+  return {
+    rows: all.slice(0, BULK_SHOWN),
+    matching: all.length,
+    ids: all.map((n) => n.id),
+  };
+}
+
+/**
+ * Why "Fix all" is off for these notices, or "" when it is on: one batch
+ * runs one action on several stacks, so every picked notice needs a fix,
+ * the same action, no choices of its own, and a stack.
+ * @param {number[]} ids
+ * @param {Map<number, import("./notices.js").Notice>} byId
+ */
+export function fixAllRule(ids, byId) {
+  const picked = ids.flatMap((id) => byId.get(id) ?? []);
+  const fixes = picked.flatMap((n) => n.fixes?.[0] ?? []);
+  if (fixes.length === 0) return "None of these can be fixed";
+  if (fixes.length < picked.length)
+    return `${fixes.length} of ${picked.length} can be fixed`;
+  if (fixes.some((f) => f.action !== fixes[0].action))
+    return "These need different fixes: fix them one by one";
+  if (
+    fixes.some((f) => f.stack === "_host" || Object.keys(f.args ?? {}).length)
+  )
+    return "Their fixes carry their own choices: fix them from the list";
+  return "";
+}
+
+/**
+ * The action and the stacks a "Fix all" runs as one batch (call after
+ * `fixAllRule` said "").
+ * @param {number[]} ids
+ * @param {Map<number, import("./notices.js").Notice>} byId
+ * @returns {{action: string, stacks: string[]} | null}
+ */
+export function fixAllBatch(ids, byId) {
+  const fixes = ids.flatMap((id) => byId.get(id)?.fixes?.[0] ?? []);
+  if (!fixes.length) return null;
+  return {
+    action: fixes[0].action,
+    stacks: [...new Set(fixes.map((f) => f.stack))],
+  };
 }

@@ -49,9 +49,35 @@ export function feedToday(body) {
   setInboxSource("today", todayRows(body, setupStacks()));
 }
 
+/** @typedef {"loading" | "ready" | "error"} ChecksState */
+/** @type {ChecksState} */
+let checksState = "loading";
+/** @type {Set<() => void>} */
+const checksListeners = new Set();
+
+/** Whether the manual checks have been read, and whether that worked. */
+export const checksStatus = () => checksState;
+
+/**
+ * @param {() => void} f called when the checks' read state changes
+ * @returns {() => void} stop
+ */
+export function onChecksStatus(f) {
+  checksListeners.add(f);
+  return () => checksListeners.delete(f);
+}
+
+/** @param {ChecksState} next */
+function setChecksState(next) {
+  if (next === checksState) return;
+  checksState = next;
+  for (const f of checksListeners) f();
+}
+
 /** Read the manual checks again. */
 export async function readChecks() {
   const r = await fetchReport("/data/manual-checks", "the manual checks");
+  setChecksState(r.ok ? "ready" : "error");
   if (r.ok) setInboxSource("checks", checkRowsOf(r.report));
 }
 

@@ -1,98 +1,111 @@
-/* redesign-flows-2 (3.71.0, demo flows/inbox.html): the Inbox's own
-   styles on top of the foundation's .nx-inbox rows. kp-themes tokens only.
-   the shared flow blocks are ui.js's (app.css). */
+/* The Inbox on kp-themes 11.0.0 (feat-kp11demo-4, the review demo
+   app-homelab-inbox, approved 2026-10-19). Everything with a kp- class is
+   the package's; these ib- rules only lay the cards out on one grid and
+   draw the few readouts the package has no part for. kp-themes tokens only.
+   The shared flow blocks are ui.js's (app.css). */
 
-.inbox-card,
-.inbox-clear,
-.inbox-worth {
+.ib-page {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--nx-gap, 1.5rem);
+  align-content: start;
 }
-.inbox-card .nx-card__head h2 {
-  margin: 0;
+.ib-page > * {
+  min-inline-size: 0;
 }
-.inbox-shown {
+.ib-card {
+  min-inline-size: 0;
+}
+
+/* A card's readouts in its header sit on one row of their own tracks. */
+.ib-card .kp-card__actions {
+  display: grid;
+  grid-auto-flow: column;
+  align-items: center;
+  column-gap: var(--kp-space-md, 1rem);
+}
+
+/* Each card holds the height of its content so loading, empty and failed
+   fill the same footprint (UI principles section 6). */
+#inbox-questions {
+  --kp-card-stage-min: 12rem;
+}
+.inbox-card {
+  --kp-card-stage-min: 22rem;
+}
+#inbox-checks {
+  --kp-card-stage-min: 22rem;
+}
+#inbox-bulk {
+  --kp-card-stage-min: 14rem;
+}
+
+.inbox-shown,
+.ib-qcount {
   font-variant-numeric: tabular-nums;
 }
-.inbox-list > li {
-  padding-block: 14px;
+
+/* 1 · the list: the kind filter holds one height; the keys line sits under. */
+.ib-kinds {
+  min-block-size: 2.5rem;
+  margin-block-start: var(--kp-space-sm, 0.5rem);
 }
-.inbox-list > li:focus-visible {
+.ib-keys {
+  margin-block-start: var(--kp-space-sm, 0.5rem);
+}
+.ib-list > li:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
-  border-radius: 6px;
 }
-.inbox-list .nx-inbox__acts {
+
+/* An update row names each app with its jump; a chip is one app. */
+.ib-apps {
+  display: flex;
   flex-wrap: wrap;
-}
-.inbox-src {
-  display: flex !important;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-block-start: 6px;
-}
-.inbox-src .kp-badge {
-  font-weight: 400;
-}
-.inbox-src a.kp-badge {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  color: inherit;
-}
-.inbox-loading {
-  list-style: none;
-  padding: 8px 0;
-}
-.inbox-foot {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 16px;
   align-items: center;
-  padding-block-start: 12px;
-  border-block-start: 1px solid var(--border);
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
+  gap: var(--kp-space-xs, 0.25rem) var(--kp-space-md, 1rem);
 }
-.inbox-hint {
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
+.ib-app {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kp-space-xs, 0.25rem);
 }
-.inbox-clear {
-  justify-items: center;
-  text-align: center;
-  padding-block: 28px;
+.ib-app > b {
+  font-weight: 600;
 }
-.inbox-clear[hidden] {
-  display: none;
+
+/* 2 · the notices of the last 24 hours: the bar and the list share a column. */
+.ib-bar {
+  margin-block: var(--kp-space-sm, 0.5rem);
 }
-.inbox-clear h2 {
-  margin: 0;
+.ib-bulk .kp-action-list__lead {
+  min-inline-size: 1.5rem;
 }
-.inbox-clear p {
-  max-inline-size: 52ch;
-  margin: 0;
+
+/* 3 · the questions stand one under the other. */
+.ib-questions {
+  display: grid;
+  gap: var(--kp-space-sm, 0.5rem);
+  align-content: start;
+}
+
+/* 4 · the manual checks keep the height of a question. */
+.ib-checks {
+  min-block-size: 22rem;
+}
+
+/* Worth a look: a fold with a chevron, its rows the kp action list. */
+.inbox-worth {
+  display: grid;
+  gap: var(--kp-space-sm, 0.75rem);
 }
 .inbox-worth > summary {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  cursor: pointer;
-  list-style-position: inside;
-}
-@media (max-width: 40rem) {
-  .inbox-foot,
-  .inbox-worth > summary {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-/* Review item 8: Worth a look's heading over its one-sentence
-   description. M5: a fold with its chevron (the demo's details), turning
-   when open. */
-.inbox-worth > summary {
   grid-template-columns: 16px minmax(0, 1fr);
   column-gap: 10px;
   row-gap: 2px;
+  align-items: center;
+  cursor: pointer;
   list-style: none;
 }
 .inbox-worth > summary::-webkit-details-marker {
@@ -120,6 +133,7 @@
   font-size: var(--kp-text-sm);
   color: var(--muted-foreground);
 }
+
 /* Review item 13: on a phone the header reads title, its sentence, then
    the checked time beside Check again at its own width. */
 @media (max-width: 40rem) {

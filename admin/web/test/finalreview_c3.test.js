@@ -5,10 +5,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  SNOOZE_MAX_MINUTES,
   dayTime,
-  digestWords,
+  digestLast,
   pushChip,
-  snoozeChoices,
+  pushVerdict,
+  snoozeMinutes,
 } from "../js/notifyrules.js";
 
 // 2026-10-04 12:00 UTC, a Sunday.
@@ -43,30 +45,56 @@ test("redesign-final-c3: the push chip says on, snoozed until when, or off", () 
   );
 });
 
-test("redesign-final-c3: the snooze segment is the demo's 1 h · 4 h · Until 07:00 · 1 day", () => {
-  const c = snoozeChoices(NOW);
-  assert.deepEqual(
-    c.map((x) => x.label),
-    ["1 h", "4 h", "Until 07:00", "1 day"],
-  );
-  const morning = /** @type {{minutes: number}} */ (
-    c.find((x) => x.value === "morning")
-  );
-  assert.ok(morning.minutes > 0 && morning.minutes <= 24 * 60);
-  for (const x of c) assert.ok(x.hint, `${x.label} has no description`);
+test("kp11: a snooze is the minutes to its moment, at least one and at most the week the server takes", () => {
+  const ms = NOW * 1000;
+  assert.equal(snoozeMinutes(ms + 3_600_000, ms), 60);
+  assert.equal(snoozeMinutes(ms + 3_600_001, ms), 61);
+  assert.equal(snoozeMinutes(ms + 1, ms), 1);
+  assert.equal(snoozeMinutes(ms - 5000, ms), 1);
+  assert.equal(snoozeMinutes(ms + 9 * 86_400_000, ms), SNOOZE_MAX_MINUTES);
+  assert.equal(SNOOZE_MAX_MINUTES, 7 * 24 * 60);
 });
 
-test("redesign-final-c3: the digest line says when and what came last, in words", () => {
+test("kp11: the last digest is said in words under the digest's time", () => {
+  assert.equal(digestLast(null), "None sent yet.");
   assert.equal(
-    digestWords({ push: true, digest_at: null }, null),
-    "No digest: only urgent pushes.",
+    digestLast({ at: NOW, count: 2 }, "UTC"),
+    "Last one 04/10/2026 12:00: 2 things waited.",
   );
   assert.equal(
-    digestWords(
-      { push: true, digest_at: "07:30" },
-      { at: NOW, count: 2 },
+    digestLast({ at: NOW, count: 1 }, "UTC"),
+    "Last one 04/10/2026 12:00: 1 thing waited.",
+  );
+});
+
+test("kp11: the rules would push an urgent notice at once and hold the rest for the digest, in the server's order", () => {
+  const rules = { push: true, digest_at: "09:00", muted_stacks: ["loki"] };
+  const urgent = { level: "critical", stack: "vaultwarden" };
+  assert.equal(pushVerdict(urgent, rules, NOW, "UTC").pushed, true);
+  assert.equal(
+    pushVerdict({ level: "warning", stack: "immich" }, rules, NOW, "UTC").why,
+    "Held for the 09:00 digest: only urgent notices push at once.",
+  );
+  assert.match(
+    pushVerdict({ level: "info" }, { push: true }, NOW).why,
+    /no daily digest/,
+  );
+  assert.equal(
+    pushVerdict({ level: "critical", stack: "loki" }, rules, NOW).why,
+    "Not pushed: loki is muted.",
+  );
+  assert.equal(
+    pushVerdict(urgent, { ...rules, push: false }, NOW).why,
+    "Not pushed: push to the phone is off.",
+  );
+  // A snooze silences everything, even an urgent notice on a muted stack.
+  assert.equal(
+    pushVerdict(
+      { level: "critical", stack: "loki" },
+      { ...rules, snooze_until: NOW + 7200 },
+      NOW,
       "UTC",
-    ),
-    "One push at 07:30 with what still waits, worst first. Last one 04/10/2026 12:00: 2 things waited.",
+    ).why,
+    "Not pushed: every push is snoozed until 04/10/2026 14:00.",
   );
 });

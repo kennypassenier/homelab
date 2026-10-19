@@ -1,9 +1,12 @@
-// redesign-final-c3 (3.71.0's final review, 2026-10-04): System ›
-// Notification rules as the approved notifications.html draws its rules —
-// a Delivery card (push, the daily digest, a snooze segment) and a Per
-// stack card — without the notice list, which lives in the Inbox. The
-// words and the snooze choices, pure, so `node --test` holds them; the
-// page (pages/notifications.js) draws them.
+// redesign-final-c3 (3.71.0's final review, 2026-10-04), rebuilt on
+// kp-themes 11.0.0 (feat-kp11demo-4, the review demo app-homelab-inbox,
+// approved 2026-10-19): System › Notification rules. The words of the
+// rules, pure, so `node --test` holds them; the page (pages/notifications.js)
+// draws them. The snooze choices and their moments are kp-themes' own
+// snooze picker's now (js/snooze.js), so this file holds only what the
+// picker cannot know: how long the server lets a snooze last, the header's
+// state word, the last digest in words, and what a rule set would have done
+// with a notice.
 
 /**
  * @typedef {{push: boolean, digest_at?: string | null,
@@ -12,8 +15,11 @@
 
 import { formatDateTime } from "./format.js";
 
+/** The longest snooze the server takes, in minutes (a week). */
+export const SNOOZE_MAX_MINUTES = 10080;
+
 /**
- * A moment as the demos write it: "Sat 4 Oct, 14:00" (never dd/mm/yyyy).
+ * A moment as every page writes it: "04/10/2026 14:00".
  * @param {number} unix seconds
  * @param {string} [timeZone] the viewer's by default; tests pin it
  */
@@ -22,52 +28,20 @@ export function dayTime(unix, timeZone) {
 }
 
 /**
- * The snooze segment's choices (the demo's 1 h · 4 h · Until 07:00 ·
- * 1 day), each in minutes from `now`; "Until 07:00" is the next 07:00 on
- * the viewer's clock.
- * @param {number} now unix seconds
- * @returns {{value: string, label: string, minutes: number, hint: string}[]}
+ * The minutes a snooze until `untilMs` is, as the server takes them: at
+ * least one, at most a week.
+ * @param {number} untilMs
+ * @param {number} nowMs
  */
-export function snoozeChoices(now) {
-  const d = new Date(now * 1000);
-  const seven = new Date(d);
-  seven.setHours(7, 0, 0, 0);
-  if (seven.getTime() <= d.getTime()) seven.setDate(seven.getDate() + 1);
-  const morning = Math.max(
-    1,
-    Math.round((seven.getTime() - d.getTime()) / 60000),
+export const snoozeMinutes = (untilMs, nowMs) =>
+  Math.min(
+    SNOOZE_MAX_MINUTES,
+    Math.max(1, Math.ceil((untilMs - nowMs) / 60000)),
   );
-  return [
-    {
-      value: "60",
-      label: "1 h",
-      minutes: 60,
-      hint: "Hold every push for an hour; the list keeps filling",
-    },
-    {
-      value: "240",
-      label: "4 h",
-      minutes: 240,
-      hint: "Hold every push for four hours",
-    },
-    {
-      value: "morning",
-      label: "Until 07:00",
-      minutes: morning,
-      hint: "Hold every push until 07:00",
-    },
-    {
-      value: "1440",
-      label: "1 day",
-      minutes: 1440,
-      hint: "Hold every push for a day",
-    },
-  ];
-}
 
 /**
- * The header's push chip: "Push on · not snoozed", "Snoozed until Sat 4
- * Oct, 14:00", "Push off".
+ * The card's push state word: "Push on · not snoozed", "Snoozed until
+ * 04/10/2026 14:00", "Push off".
  * @param {Rules | null | undefined} s
  * @param {number} now
  * @param {string} [timeZone]
@@ -87,15 +61,45 @@ export function pushChip(s, now, timeZone) {
 }
 
 /**
- * The digest's line under its setting.
- * @param {Rules | null | undefined} s
+ * The last digest in words, for under the digest's time.
  * @param {{at: number, count: number} | null | undefined} last the last digest
  * @param {string} [timeZone]
  */
-export function digestWords(s, last, timeZone) {
-  if (!s?.digest_at) return "No digest: only urgent pushes.";
-  const then = last
-    ? ` Last one ${dayTime(last.at, timeZone)}: ${last.count} ${last.count === 1 ? "thing" : "things"} waited.`
-    : " None sent yet.";
-  return `One push at ${s.digest_at} with what still waits, worst first.${then}`;
+export function digestLast(last, timeZone) {
+  return last
+    ? `Last one ${dayTime(last.at, timeZone)}: ${last.count} ${last.count === 1 ? "thing" : "things"} waited.`
+    : "None sent yet.";
+}
+
+/**
+ * What the rules would do with one notice, in the server's own order
+ * (core/notify.rs `decide`): a snooze silences everything, then only an
+ * urgent notice pushes, then the global switch, then the stack's.
+ * @param {{level?: string, stack?: string}} n
+ * @param {Rules} s
+ * @param {number} now unix seconds
+ * @param {string} [timeZone]
+ * @returns {{pushed: boolean, why: string}}
+ */
+export function pushVerdict(n, s, now, timeZone) {
+  if (s.snooze_until != null && s.snooze_until > now)
+    return {
+      pushed: false,
+      why: `Not pushed: every push is snoozed until ${dayTime(s.snooze_until, timeZone)}.`,
+    };
+  if (n.level !== "critical")
+    return {
+      pushed: false,
+      why: s.digest_at
+        ? `Held for the ${s.digest_at} digest: only urgent notices push at once.`
+        : "Not pushed: only urgent notices push at once, and there is no daily digest.",
+    };
+  if (!s.push)
+    return { pushed: false, why: "Not pushed: push to the phone is off." };
+  if (n.stack && (s.muted_stacks ?? []).includes(n.stack))
+    return { pushed: false, why: `Not pushed: ${n.stack} is muted.` };
+  return {
+    pushed: true,
+    why: "Pushed: an urgent notice goes to the phone at once.",
+  };
 }

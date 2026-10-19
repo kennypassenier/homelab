@@ -1,98 +1,99 @@
-/* redesign-final-c3 (3.71.0): System › Notification rules as the approved
-   notifications.html draws its rules — Delivery and Per stack side by
-   side, the notice list in the Inbox. kp-themes tokens only. */
+/* System › Notification rules on kp-themes 11.0.0 (feat-kp11demo-4, the
+   review demo app-homelab-inbox, approved 2026-10-19): a Delivery card and
+   a Routing card, one under the other. Everything with a kp- class is the
+   package's; these nr- rules lay the cards out on shared tracks. kp-themes
+   tokens only. */
 
-.nr-cols {
+.nr-page {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--nx-gap, 1.5rem);
-  align-items: start;
+  align-content: start;
 }
-@media (max-width: 64rem) {
-  .nr-cols {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.nr-page > * {
+  min-inline-size: 0;
 }
-.nr-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.nr-settings {
-  display: grid;
-  gap: 18px;
-}
-.nr-setting {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px 16px;
-  align-items: center;
-}
-.nr-setting > div:first-child b {
-  display: block;
-  font-weight: 600;
-  font-size: var(--kp-text-sm);
-}
-.nr-setting > div:first-child > span {
-  display: block;
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-  line-height: 1.45;
-}
-.nr-setting > .nx-seg {
-  grid-column: 1 / -1;
-  justify-self: start;
-}
-.nr-setting [hidden] {
+.nr-err:empty {
   display: none;
 }
-.nr-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.nr-time {
-  inline-size: 8rem;
-}
-.nr-hr {
-  block-size: 1px;
-  background: var(--border);
-}
-.nr-stacks {
+.nr-card .kp-card__actions {
   display: grid;
-}
-.nr-stack {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 12px;
+  grid-auto-flow: column;
   align-items: center;
-  padding: 8px 0;
-  border-block-start: 1px solid var(--border);
-  font-size: var(--kp-text-sm);
+  column-gap: var(--kp-space-md, 1rem);
 }
-.nr-stack:first-child {
-  border-block-start: 0;
+#delivery {
+  --kp-card-stage-min: 18rem;
 }
-.nr-stack > b {
-  font-weight: 500;
-  overflow-wrap: anywhere;
+#per-stack {
+  --kp-card-stage-min: 18rem;
 }
-.nr-stack.is-muted > b {
+
+/* Delivery: laid out by .kp-formgrid (label, control, note, buttons on
+   shared tracks); the kp-themes 11.0.0 served here carries no CSS for it yet. */
+.nr-snooze {
+  justify-self: stretch;
+}
+.nr-col-btn {
+  min-inline-size: 11rem;
+  justify-content: center;
+}
+.nr-hint {
+  margin: var(--kp-space-xs, 0.25rem) 0 0;
   color: var(--muted-foreground);
-  text-decoration: line-through;
+  font-size: var(--kp-text-sm, 0.8125rem);
+  min-block-size: 1lh;
 }
-.nr-count {
-  min-inline-size: 22px;
-  text-align: center;
-  padding: 0 7px;
-  border-radius: 999px;
-  font-size: var(--kp-text-xs);
-  font-variant-numeric: tabular-nums;
-  background: var(--muted);
-  color: var(--muted-foreground);
+.nr-gate {
+  display: grid;
+  gap: var(--kp-space-sm, 0.5rem);
+  margin-block-start: var(--kp-space-sm, 0.5rem);
+  inline-size: min(100%, 44rem);
 }
-.nr-count.is-hot {
-  background: var(--chart-1);
-  color: var(--card);
-  font-weight: 700;
+.nr-gate[hidden] {
+  display: none;
+}
+.nr-gate__actions {
+  display: grid;
+  grid-auto-flow: column;
+  justify-content: start;
+  gap: var(--kp-space-sm, 0.5rem);
+}
+
+/* Routing: the last five notices on the start side, the stacks on the end
+   side at a width of their own; one column on a phone. */
+.nr-routing {
+  display: grid;
+  gap: var(--kp-space-lg, 1.5rem);
+  grid-template-columns: minmax(0, 1fr);
+}
+.nr-h {
+  margin: 0 0 var(--kp-space-xs, 0.25rem);
+  font-size: var(--kp-text-sm, 0.8125rem);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.nr-facets {
+  max-inline-size: 28rem;
+}
+.nr-notices {
+  min-block-size: 14rem;
+}
+@media (min-width: 64rem) {
+  .nr-routing {
+    grid-template-columns: minmax(0, 1fr) 28rem;
+    align-items: start;
+  }
+}
+
+@media (max-width: 40rem) {
+  .nr-rules {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .nr-rule > dt {
+    padding-block-start: 0;
+  }
+  .nr-col-btn {
+    min-inline-size: 0;
+  }
 }

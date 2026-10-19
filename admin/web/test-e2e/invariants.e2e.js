@@ -3533,8 +3533,8 @@ test("invariants: every Inbox row says what and why and carries its fix, and a p
           : page.locator(".nx-tabbar [data-area='needs-you'] .nx-count");
       assert.equal((await badge.innerText()).trim(), String(rows));
       // A plain click on Setup shows only the Setup row; again shows all.
-      // The kit (redesign-kit-1) marks a chip with data-v.
-      const chip = page.locator("#page .nx-tb button[data-v=setup]");
+      // The kit (redesign-kit-1) marks a chip with data-value.
+      const chip = page.locator("#page .nx-tb button[data-value=setup]");
       await chip.click();
       // kp-themes 10: the other rows leave the theme's way (dom.js
       // patchKeyed); the count is read once their exit is over.
@@ -3870,7 +3870,8 @@ test("invariants: Stacks lists every stack once as a card and as a table row, wi
       ["cards", ".sk-cards .sk-card[data-stack]"],
       ["table", ".sk-table tbody tr[data-stack]"],
     ]) {
-      if (view === "table") await page.click(".nx-seg button[data-v=table]");
+      if (view === "table")
+        await page.click(".kp-segmented button[data-value=table]");
       const got = await read(sel);
       // Only the view that is on is drawn, so a Live view lookup by id and
       // row never lands on the hidden twin (redesign-stacks review 6).
@@ -3898,7 +3899,7 @@ test("invariants: Stacks lists every stack once as a card and as a table row, wi
         );
       }
     }
-    await page.click(".nx-seg button[data-v=cards]");
+    await page.click(".kp-segmented button[data-value=cards]");
     // The view is in the address (Table, the default since redesign-final
     // M1, is not), so a reload keeps it.
     assert.ok(page.url().includes("view=cards"), "the view is not in the URL");
@@ -3952,7 +3953,7 @@ test("invariants: Stacks keeps its ticks across Table/Cards and live updates, th
       (await page.locator(".sk-batch [data-batch=deploy]").innerText()).trim(),
       "Deploy 2 stacks",
     );
-    await page.click(".nx-seg button[data-v=table]");
+    await page.click(".kp-segmented button[data-value=table]");
     const tickedRows = await page.$$eval(
       ".sk-table tbody input[data-tick]:checked",
       (els) => els.map((e) => /** @type {HTMLElement} */ (e).dataset.tick),
@@ -6328,7 +6329,7 @@ test("invariants: review-activity: a failed History reread keeps the rows and th
       viewport: { width: 1894, height: 1000 },
     });
     const page = await freshPage(context);
-    await page.clock.install();
+    await page.clock.install({ time: clockNow() });
     let reads = 0;
     await page.route("**/data/history*", (route) =>
       ++reads > 1 ? route.abort() : route.continue(),
@@ -6387,16 +6388,16 @@ test("invariants: the Metrics page is laid out as the approved demo, every chart
       chip: document.querySelector(".nx-head-meta .kp-badge")?.textContent,
       views: [
         ...document.querySelectorAll(
-          '.nx-seg[aria-label="Metrics view"] button',
+          '.kp-segmented[aria-label="Metrics view"] button',
         ),
       ].map((b) => b.textContent),
       windows: [
         ...document.querySelectorAll(
-          '.mk-toolbar .nx-seg[aria-label="Window"] button',
+          '.mk-toolbar .kp-segmented[aria-label="Window"] button',
         ),
       ].map((b) => b.textContent),
       pressed: document.querySelector(
-        '.nx-seg[aria-label="Window"] [aria-pressed="true"]',
+        '.kp-segmented[aria-label="Window"] [aria-checked="true"]',
       )?.textContent,
       tiles: [...document.querySelectorAll(".kp-kpis .kp-kpi__label")].map(
         (l) => l.textContent,
@@ -6638,7 +6639,7 @@ test("invariants: the Map is laid out as the approved demo, and a plain click on
     assert.equal(await node.getAttribute("aria-pressed"), "false");
     assert.doesNotMatch(page.url(), /select=/);
     // List view: one row per stack, the graph hidden; back again.
-    const seg = page.locator('.nx-seg[aria-label="View"] button');
+    const seg = page.locator('.kp-segmented[aria-label="View"] button');
     await seg.filter({ hasText: "List" }).click();
     await page.locator(".mp-list tbody tr").first().waitFor({ timeout: 3000 });
     assert.equal(await page.locator(".mp-topo").isVisible(), false);
@@ -6901,7 +6902,7 @@ test("invariants: review metrics — a pointer resting on a chart keeps that cha
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
-    await page.clock.install();
+    await page.clock.install({ time: clockNow() });
     await page.setViewportSize({ width: 1894, height: 1000 });
     await page.goto(`${BASE}/charts`);
     await page.waitForSelector("#chart-cpu .kp-chart__plot");
@@ -7468,7 +7469,7 @@ test("invariants: redesign-config review Firewall on a phone: no Stacks cell dra
       const x = (/** @type {Element | null} */ e) =>
         e ? Math.round(e.getBoundingClientRect().left) : -1;
       return {
-        toggles: x(tb.querySelector("button[data-v='ACCEPT']")),
+        toggles: x(tb.querySelector("button[data-value='ACCEPT']")),
         search: x(tb.querySelector("input[type=search]")),
         count: x(tb.querySelector(".cf-count")),
       };
@@ -9212,7 +9213,7 @@ test("invariants: redesign-final-c4: every Firewall rule row grows with its stac
     const seg = page
       .locator(".fw-rules-body")
       .locator("..")
-      .locator(".nx-seg button");
+      .locator(".kp-segmented button");
     const names = await seg.allInnerTexts();
     assert.ok(names.length >= 1, "no stack switch above the rules");
     /** @type {string[]} */
@@ -9611,9 +9612,9 @@ test("invariants: redesign-final-c3: Notification rules is the approved demo's D
           ),
           tables: document.querySelectorAll("main table").length,
           selects: document.querySelectorAll("main select").length,
-          seg: [...document.querySelectorAll("#delivery .nx-seg button")].map(
-            (b) => b.firstChild?.textContent?.trim(),
-          ),
+          seg: [
+            ...document.querySelectorAll("#delivery .kp-segmented button"),
+          ].map((b) => b.firstChild?.textContent?.trim()),
           // redesign-final X4: the one date format is dd/mm/yyyy HH:MM
           // (Kenny's rule, fix-216); a weekday or month name is the drift.
           numeric:

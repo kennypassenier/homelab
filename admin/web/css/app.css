@@ -3158,52 +3158,6 @@ details.nx-card--fold[open] > summary::before {
   display: none;
 }
 
-/* segmented plain-click toggles (toggleGroup, segSwitch) */
-.nx-seg {
-  display: inline-grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(max-content, 1fr);
-  border: 1px solid var(--border);
-  border-radius: var(--nx-radius);
-  background: var(--nx-soft);
-  padding: 3px;
-  gap: 2px;
-}
-.nx-seg button {
-  all: unset;
-  cursor: pointer;
-  text-align: center;
-  padding: var(--kp-space-xs) var(--kp-space-md);
-  border-radius: var(--nx-r-sm);
-  font-size: var(--kp-text-sm);
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
-.nx-seg button:hover {
-  color: var(--foreground);
-}
-.nx-seg button[aria-pressed="true"] {
-  background: var(--card);
-  color: var(--foreground);
-  font-weight: 600;
-  box-shadow:
-    0 1px 2px color-mix(in oklab, var(--foreground) 14%, transparent),
-    0 0 0 1px var(--nx-line);
-}
-.nx-seg button:focus-visible {
-  outline: 2px solid var(--ring);
-}
-.nx-seg__count {
-  margin-inline-start: var(--kp-space-xs);
-  padding: 0 var(--kp-space-xs);
-  border-radius: 999px;
-  background: var(--muted);
-  font-size: 0.72rem;
-}
-.nx-seg__count:empty {
-  display: none;
-}
-
 /* sortable headers: a plain table's (sortableTable), a kept order's
    (sortHead) */
 th.nx-sortable {

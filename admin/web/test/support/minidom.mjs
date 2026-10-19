@@ -542,6 +542,7 @@ export function install() {
     Element: Element_,
     HTMLElement: Element_,
     HTMLAnchorElement: Element_,
+    HTMLButtonElement: Element_,
     HTMLDetailsElement: class {},
     HTMLDialogElement: Element_,
     HTMLInputElement: Element_,

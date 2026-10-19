@@ -39,7 +39,7 @@
   color: var(--muted-foreground);
   line-height: 1.45;
 }
-.nr-setting > .nx-seg {
+.nr-setting > .kp-segmented {
   grid-column: 1 / -1;
   justify-self: start;
 }

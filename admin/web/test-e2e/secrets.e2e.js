@@ -8,6 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { launch } from "./harness.js";
+import { clockNow } from "./clock.js";
 
 const BASE = process.env.INVARIANTS_BASE_URL ?? "http://127.0.0.1:8099";
 const TOKEN = process.env.INVARIANTS_TOKEN ?? "test-invariants-token-1234";
@@ -134,7 +135,7 @@ test("secrets: a reveal hides itself after 30 s, Copy copies, and Activity names
       origin: BASE,
     });
     const page = await login(context);
-    await page.clock.install();
+    await page.clock.install({ time: clockNow() });
     await page.goto(`${BASE}/secrets?stack=gateway`);
     const row = "gateway/traefik/.env";
     const reveal = page.locator(

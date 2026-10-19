@@ -681,7 +681,7 @@ function mountNow(body, x) {
   /** Pick one of the switch's values as a click would. @param {string} v */
   const pickShow = (v) =>
     /** @type {HTMLElement | null} */ (
-      chips.el.querySelector(`button[data-v="${v}"]`)
+      chips.el.querySelector(`button[data-value="${v}"]`)
     )?.click();
   const tb = toolbar({
     search: {

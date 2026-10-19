@@ -85,6 +85,17 @@ import {
   openMenu,
   setMenu,
 } from "/static/kp/js/menu-button.js";
+import {
+  SEGMENTED_EVENT,
+  attachSegmented,
+  getSegmentedValues,
+  itemsOf,
+  resetSegmented,
+  setSegmentedCounts,
+  setSegmentedItems,
+  setSegmentedValues,
+  valueOf,
+} from "/static/kp/js/segmented.js";
 import { RESET_SORT } from "./sortclick.js";
 import { applySort, keepSort, nextSort, rememberedSort } from "./sortstate.js";
 
@@ -1081,114 +1092,70 @@ export function toggleGroup(spec) {
       `the toggle group ${spec.label} needs its Live view control`,
     );
   const chipsLook = spec.look === "chips";
+  const driveId = spec.drive.id;
   /** @type {Chip[]} */
   let chips = spec.chips;
-  /** @type {Set<string>} */
-  let on = new Set(spec.selected ?? []);
-  if (on.size >= chips.length) on = new Set();
   /** @type {Record<string, number | null | undefined>} */
   let n = Object.fromEntries(chips.map((c) => [c.value, c.count]));
-  const box = h("span", { class: chipsLook ? "nx-chips" : "nx-seg__btns" });
+  const group = segmentedGroup(
+    spec.label,
+    "multi",
+    chipsLook ? "kp-segmented kp-segmented--chips" : "kp-segmented",
+  );
+  /** The items as kp draws them: All first, each with its hint and count. */
+  const items = () => [
+    ...(spec.all
+      ? [
+          {
+            value: "all",
+            label: spec.all.label,
+            hint: spec.all.hint ?? "Show every row",
+            count: n.all ?? null,
+            all: true,
+          },
+        ]
+      : []),
+    ...chips.map((c) => ({
+      value: c.value,
+      label: c.label,
+      hint: c.hint ?? `Show or hide ${c.label}; each click turns it on or off`,
+      count: n[c.value] ?? null,
+    })),
+  ];
+  /** @param {Iterable<string>} values */
+  const keep = (values) => {
+    setSegmentedItems(group, items());
+    for (const b of itemsOf(group)) drive(b, { id: driveId, row: valueOf(b) });
+    setSegmentedValues(
+      group,
+      [...values].filter((v) => chips.some((c) => c.value === v)),
+    );
+  };
+  keep(spec.selected ?? []);
+  group.addEventListener(SEGMENTED_EVENT, () =>
+    spec.onChange(new Set(getSegmentedValues(group))),
+  );
   const e = chipsLook
     ? h(
         "div",
-        { class: "nx-tb__group", role: "group", "aria-label": spec.label },
-        h("b", null, spec.label),
-        box,
+        { class: "nx-tb__group" },
+        h("b", { "aria-hidden": "true" }, spec.label),
+        group,
       )
-    : h("div", { class: "nx-seg", role: "group", "aria-label": spec.label });
-  const changed = () => {
-    paint();
-    spec.onChange(new Set(on));
-  };
-  /**
-   * @param {string} value @param {string} label @param {string} title
-   * @param {() => void} click
-   */
-  const btn = (value, label, title, click) => {
-    const c = n[value];
-    return drive(
-      h(
-        "button",
-        {
-          type: "button",
-          class: chipsLook ? "nx-chip-toggle" : null,
-          "data-v": value,
-          "aria-pressed": String(
-            value === "all" ? on.size === 0 : on.has(value),
-          ),
-          title,
-          onclick: click,
-        },
-        label,
-        h(
-          "span",
-          { class: chipsLook ? "nx-chip-toggle__count" : "nx-seg__count" },
-          c == null ? "" : String(c),
-        ),
-      ),
-      { id: spec.drive.id, row: value },
-    );
-  };
-  const paint = () => {
-    const btns = [
-      ...(spec.all
-        ? [
-            btn(
-              "all",
-              spec.all.label,
-              spec.all.hint ?? "Show every row",
-              () => {
-                on = new Set();
-                changed();
-              },
-            ),
-          ]
-        : []),
-      ...chips.map((c) =>
-        btn(
-          c.value,
-          c.label,
-          c.hint ?? `Show or hide ${c.label}; each click turns it on or off`,
-          () => {
-            on = toggleValue(on, c.value, chips.length);
-            changed();
-          },
-        ),
-      ),
-    ];
-    const focused = e.querySelector(":focus");
-    const v = focused instanceof HTMLElement ? focused.dataset.v : null;
-    (chipsLook ? box : e).replaceChildren(...btns);
-    if (v != null)
-      /** @type {HTMLElement | undefined} */ (
-        btns.find((b) => b.dataset.v === v)
-      )?.focus();
-  };
-  paint();
+    : group;
   return {
     el: e,
-    selected: () => new Set(on),
-    set: (values) => {
-      on = new Set(values);
-      if (on.size >= chips.length) on = new Set();
-      paint();
-    },
-    reset: () => {
-      if (on.size === 0) return;
-      on = new Set();
-      changed();
-    },
+    selected: () => new Set(getSegmentedValues(group)),
+    set: (values) => setSegmentedValues(group, values),
+    reset: () => resetSegmented(group),
     counts: (next) => {
       n = { ...n, ...next };
-      paint();
+      setSegmentedCounts(group, next);
     },
     setChips: (next) => {
       chips = next;
       for (const c of chips) if (c.count !== undefined) n[c.value] = c.count;
-      for (const v of [...on])
-        if (!chips.some((c) => c.value === v)) on.delete(v);
-      paint();
+      keep(getSegmentedValues(group));
     },
   };
 }
@@ -1216,53 +1183,51 @@ export const toggleChips = (spec) => toggleGroup({ ...spec, look: "chips" });
 export function segSwitch(spec) {
   if (!spec.drive && !spec.mark)
     throw new Error(`the switch ${spec.label} needs its Live view control`);
-  /** @type {Map<string, HTMLElement>} */
-  const counts = new Map();
-  let cur = spec.value;
-  const btns = spec.items.map((it) => {
-    const c = h("span", { class: "nx-seg__count" });
-    counts.set(it.value, c);
-    const b = h(
-      "button",
-      {
-        type: "button",
-        "data-v": it.value,
-        title: it.hint ?? null,
-        onclick: () => {
-          if (cur === it.value) return;
-          cur = it.value;
-          paint();
-          spec.onChange(cur);
-        },
-      },
-      it.label,
-      c,
-    );
-    if (spec.drive) drive(b, { id: spec.drive.id, row: it.value });
-    else spec.mark?.(b, it.value);
-    return b;
+  const group = segmentedGroup(spec.label, "single", "kp-segmented");
+  setSegmentedItems(
+    group,
+    spec.items.map((it) => ({
+      value: it.value,
+      label: it.label,
+      hint: it.hint,
+      count: null,
+    })),
+  );
+  for (const b of itemsOf(group)) {
+    if (spec.drive) drive(b, { id: spec.drive.id, row: valueOf(b) });
+    else spec.mark?.(b, valueOf(b));
+  }
+  setSegmentedValues(group, [spec.value]);
+  group.addEventListener(SEGMENTED_EVENT, (ev) => {
+    const v = /** @type {CustomEvent} */ (ev).detail?.value;
+    if (typeof v === "string") spec.onChange(v);
   });
-  const paint = () =>
-    btns.forEach((b, i) =>
-      b.setAttribute("aria-pressed", String(spec.items[i].value === cur)),
-    );
-  paint();
   return {
-    el: h(
-      "div",
-      { class: "nx-seg", role: "group", "aria-label": spec.label },
-      ...btns,
-    ),
-    set: (v) => {
-      cur = v;
-      paint();
-    },
-    value: () => cur,
-    counts: (n) => {
-      for (const [v, c] of counts)
-        c.textContent = n[v] == null ? "" : String(n[v]);
-    },
+    el: group,
+    set: (v) => setSegmentedValues(group, [v]),
+    value: () => getSegmentedValues(group)[0] ?? spec.value,
+    counts: (n) =>
+      setSegmentedCounts(
+        group,
+        Object.fromEntries(spec.items.map((it) => [it.value, n[it.value]])),
+      ),
   };
+}
+
+/**
+ * An empty kp-themes segmented group, wired to its own clicks and keys.
+ * Whoever draws it fills it with `setSegmentedItems`.
+ * @param {string} label @param {"single" | "multi"} mode @param {string} cls
+ * @returns {HTMLElement}
+ */
+function segmentedGroup(label, mode, cls) {
+  const group = h("div", {
+    class: cls,
+    "data-kp-segmented": mode,
+    "aria-label": label,
+  });
+  attachSegmented(group);
+  return group;
 }
 
 /**

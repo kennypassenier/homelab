@@ -898,7 +898,11 @@ export function mount(root) {
     title: "Repositories",
     desc: "One restic repository per app that keeps data (a native service has its own), grouped by stack: which stack takes the space, the last 7 nights, the restore drill, and every snapshot under a row.",
   });
-  repos.body.append(stackbar, facetGrid, barSlot, tableHost);
+  repos.body.append(
+    stackbar,
+    h("div", { class: "bk-repos__chooser" }, facetGrid, barSlot),
+    tableHost,
+  );
   repos.foot.hidden = false;
   repos.foot.append(
     readState,
@@ -1604,12 +1608,10 @@ export function mount(root) {
     setFacetItems(
       facets,
       state === "ready"
-        ? sizes.map((s, i) => ({
+        ? sizes.map((s) => ({
             value: s.stack,
             label: s.stack,
             count: s.count,
-            swatch: `var(--chart-${(i % 5) + 1})`,
-            pattern: s.stack,
           }))
         : [],
     );

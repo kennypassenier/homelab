@@ -119,28 +119,6 @@
 .fw-card {
   min-inline-size: 0;
 }
-.fw-lines-box {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--kp-space-lg, 1.5rem);
-  min-block-size: 18rem;
-  align-items: start;
-}
-.fw-lines-col {
-  display: grid;
-  gap: var(--kp-space-sm, 0.5rem);
-  min-inline-size: 0;
-}
-.fw-lines-title {
-  margin: 0;
-  font-size: var(--kp-text-sm, 0.8125rem);
-  color: var(--muted-foreground);
-  font-weight: 600;
-}
-.fw-lines-box[hidden],
-.fw-lines {
-  min-inline-size: 0;
-}
 .fw-tracebox {
   min-block-size: 12rem;
 }
@@ -148,11 +126,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--kp-space-xs, 0.25rem);
-}
-@media (max-width: 62rem) {
-  .fw-lines-box {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 .fw-panel .kp-formgrid__row[hidden] {
   display: none;

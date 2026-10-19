@@ -1644,24 +1644,6 @@
       "twins": false
     },
     {
-      "id": "firewall-follow",
-      "page": "firewall",
-      "what": "the stack the Lines view follows",
-      "opens": "view",
-      "row": null,
-      "href": "/firewall",
-      "was": [],
-      "shows": "in the Lines view",
-      "reach": [
-        {
-          "do": "click",
-          "control": "firewall-view",
-          "row": "lines"
-        }
-      ],
-      "twins": false
-    },
-    {
       "id": "firewall-guard-stack",
       "page": "firewall",
       "what": "choose the stack whose rules Edit rules… opens",
@@ -1935,18 +1917,6 @@
           "row": "*"
         }
       ],
-      "twins": false
-    },
-    {
-      "id": "firewall-view",
-      "page": "firewall",
-      "what": "read the reachability as the full grid or as lines around one stack",
-      "opens": "view",
-      "row": "grid|lines",
-      "href": "/firewall",
-      "was": [],
-      "shows": null,
-      "reach": [],
       "twins": false
     },
     {
@@ -4902,13 +4872,6 @@
       "id": "fleetview-traffic",
       "page": "fleetview",
       "what": "show the measured traffic on the map",
-      "was": [],
-      "row": null
-    },
-    {
-      "id": "fw-follow",
-      "page": "firewall",
-      "what": "the stack the Lines view follows",
       "was": [],
       "row": null
     },

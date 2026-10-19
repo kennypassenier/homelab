@@ -1422,7 +1422,7 @@ export function mount(root, ctx) {
     ),
     READ_CHECKS,
   );
-  const checksNote = h("p", { role: "status", id: "host-checks-note" });
+  const checksNote = h("span", { role: "status", id: "host-checks-note" });
   let checksList = h("ul", { class: "kp-statuslist", id: "host-checks" });
   const checksKp = h(
     "section",
@@ -1441,18 +1441,16 @@ export function mount(root, ctx) {
     id: "host-checks-card",
     title: "Host checks",
     desc: "The doctor's checks about the host itself: disk, state file, clock, certificates.",
+    tools: [checksBtn],
+    foot: [checksNote],
   });
-  checksCard.body.append(
-    formGrid([
-      gridRow({
-        label: "Checks",
-        control: checksNote,
-        actions: checksBtn,
-        wide: true,
-      }),
-    ]),
-    checksKp,
-  );
+  // The count line lives in the card's foot and shows only when it has words.
+  const setNote = (/** @type {string} */ text) => {
+    checksNote.textContent = text;
+    checksCard.foot.hidden = !text;
+  };
+  setNote("");
+  checksCard.body.append(checksKp);
   const notRead = () =>
     setCardState(checksKp, "empty", {
       title: "Not read yet",
@@ -1460,7 +1458,6 @@ export function mount(root, ctx) {
       action: null,
     });
   notRead();
-  checksNote.textContent = "Not read yet. Press Run checks to read them.";
   /** @param {any} report */
   const paintChecks = (report) => {
     const rows = doctorRows({ ...report, checks: hostChecks(report) });
@@ -1484,9 +1481,11 @@ export function mount(root, ctx) {
     checksList = next;
     attachStatusLists(checksKp);
     const c = countStatus(checksList);
-    checksNote.textContent = rows.length
-      ? `${c.ok.toLocaleString("en-GB")} of ${c.total.toLocaleString("en-GB")} checks pass, ${c.warn.toLocaleString("en-GB")} with a reservation, ${c.failed.toLocaleString("en-GB")} failed`
-      : "The host reports no host-level checks.";
+    setNote(
+      rows.length
+        ? `${c.ok.toLocaleString("en-GB")} of ${c.total.toLocaleString("en-GB")} checks pass, ${c.warn.toLocaleString("en-GB")} with a reservation, ${c.failed.toLocaleString("en-GB")} failed`
+        : "",
+    );
     setCardState(checksKp, rows.length ? "ready" : "empty", {
       title: "The host has no checks yet",
       text: "The first read after the host starts fills this list.",
@@ -1501,14 +1500,10 @@ export function mount(root, ctx) {
     checksBtn.setAttribute("disabled", "");
     const began = Date.now();
     let haveRows = false;
-    const words = () =>
-      `The doctor is running on the host (about 30 s): ${Math.round((Date.now() - began) / 1000)} s so far…`;
-    if (!haveRows) setCardState(checksKp, "loading", { words: words() });
-    checksNote.textContent = "The doctor is running on the host (about 30 s).";
-    const tick = setInterval(() => {
-      if (!haveRows) setCardState(checksKp, "loading", { words: words() });
-      else checksNote.textContent = words();
-    }, 1000);
+    // The theme's own busy card carries the wait; the host reports no
+    // progress, so none is drawn and no words are counted out.
+    setCardState(checksKp, "loading");
+    setNote("");
     try {
       const r = await slowReport(
         "/data/doctor",
@@ -1518,7 +1513,6 @@ export function mount(root, ctx) {
           if (!hostChecks(b.report).length) return;
           paintChecks(b.report);
           haveRows = true;
-          checksNote.textContent = `The last reading, while the host runs the doctor again.`;
         },
       );
       const secs = Math.round((Date.now() - began) / 1000);
@@ -1527,14 +1521,14 @@ export function mount(root, ctx) {
           title: "The doctor did not answer",
           text: `After ${humanDuration(secs)}: ${r.error.why}`,
         });
-        checksNote.textContent = `The doctor did not answer (after ${humanDuration(secs)}): ${r.error.why}`;
+        setNote("");
         return;
       }
       const n = paintChecks(r.report);
-      checksNote.textContent = `${checksNote.textContent}, read in ${humanDuration(secs)}.`;
+      if (checksNote.textContent)
+        setNote(`${checksNote.textContent}, read in ${humanDuration(secs)}.`);
       void n;
     } finally {
-      clearInterval(tick);
       checking = false;
       runChecks.removeAttribute("disabled");
       checksBtn.removeAttribute("disabled");

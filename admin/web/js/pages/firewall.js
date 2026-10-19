@@ -6,8 +6,7 @@
 // fix), four totals (In force; No firewall, Live differs from files and Open
 // paths filter the stacks and light the matrix), the stacks as one datatable,
 // "Who can reach whom" as a matrix you can read live, from the files or as
-// the differences — or as lines around one stack — a hop-by-hop trace of one
-// pair, the rules as one grouped table, and the guard in front of editing a
+// the differences, a hop-by-hop trace of one pair, the rules as one grouped table, and the guard in front of editing a
 // stack whose management is open.
 //
 // feat-firewall-2 still holds: everything is read from the working copy's
@@ -24,7 +23,6 @@ import { declare, declareField, drivable } from "../drivable.js";
 import { failSummary } from "../settingsview.js";
 import {
   allPorts,
-  busiestStack,
   cellIn,
   cellLabel,
   cellOf,
@@ -84,7 +82,6 @@ import {
   trace,
   traceSummary,
 } from "/static/kp/js/path-trace.js";
-import { USES_PIN_EVENT } from "/static/kp/js/uses-map.js";
 import {
   CHANGE_EVENT,
   attachComboboxes,
@@ -295,13 +292,6 @@ const KPI = declare({
   row: "none|differs|open",
   what: "show only the stacks a total counts, and light them in the matrix (again shows every stack)",
 });
-const VIEW = declare({
-  id: "firewall-view",
-  page: "firewall",
-  opens: "view",
-  row: "grid|lines",
-  what: "read the reachability as the full grid or as lines around one stack",
-});
 const COMPARE_MODE = declare({
   id: "firewall-compare-mode",
   page: "firewall",
@@ -330,11 +320,6 @@ const TRACE_PORT = declare({
 // review M5: the page's own form fields (the controls above are what Live
 // view presses; these are the ids the inputs carry in the page).
 declareField({
-  id: "fw-follow",
-  page: "firewall",
-  what: "the stack the Lines view follows",
-});
-declareField({
   id: "fw-trace-from",
   page: "firewall",
   what: "the stack a traced connection starts at",
@@ -348,14 +333,6 @@ declareField({
   id: "fw-trace-port",
   page: "firewall",
   what: "the port of the traced connection",
-});
-const FOLLOW_STACK = declare({
-  id: "firewall-follow",
-  page: "firewall",
-  opens: "view",
-  what: "the stack the Lines view follows",
-  shows: "in the Lines view",
-  reach: [{ do: "click", control: "firewall-view", row: "lines" }],
 });
 const TRACE_COPY = declare({
   id: "firewall-trace-copy",
@@ -481,14 +458,10 @@ export function mount(root) {
     mode: ["live", "files", "differences"].includes(q0.get("compare") ?? "")
       ? /** @type {any} */ (q0.get("compare"))
       : "live",
-    /** @type {"grid" | "lines"} */
-    view: q0.get("view") === "lines" ? "lines" : "grid",
     /** @type {"calm" | "caution"} how a pair that can connect is coloured */
     tone: "calm",
     /** @type {Set<string>} totals pressed */
     totals: new Set(),
-    /** the stack the Lines view follows */
-    follow: q0.get("follow") ?? "",
     from: q0.get("from") ?? "",
     to: q0.get("to") ?? "",
     port: "any",
@@ -503,8 +476,6 @@ export function mount(root) {
       stack: S.stack,
       cell: S.cell,
       compare: S.mode === "live" ? null : S.mode,
-      view: S.view === "grid" ? null : S.view,
-      follow: S.view === "lines" ? S.follow : null,
     });
     history.replaceState(history.state, "", `${location.pathname}${next}`);
   };
@@ -737,29 +708,13 @@ export function mount(root) {
   stacks.el.append(h("div", { class: "fw-table" }, stTable));
   const foot = h("p", { class: "fw-foot" }, ago);
 
-  // ── the matrix and its lines ──────────────────────────────────────────
+  // ── the matrix ──────────────────────────────────────────
   const mxp = panel({
     title: "Who can reach whom",
     desc: "From a row to a column: the ports a connection may use. Press a cell to read it and to trace it below.",
     id: "fw-matrix",
     span: "12",
   });
-  const viewItem = (/** @type {string} */ v, /** @type {string} */ label) =>
-    drivable(
-      h(
-        "button",
-        {
-          type: "button",
-          class: "kp-segmented__item",
-          role: "radio",
-          "aria-checked": String(S.view === v),
-          "data-value": v,
-        },
-        label,
-      ),
-      VIEW,
-      v,
-    );
   const modeItem = (/** @type {string} */ v, /** @type {string} */ label) =>
     drivable(
       h(
@@ -776,17 +731,6 @@ export function mount(root) {
       COMPARE_MODE,
       v,
     );
-  const viewSeg = h(
-    "div",
-    {
-      class: "kp-segmented",
-      "data-kp-segmented": "single",
-      role: "radiogroup",
-      "aria-label": "View",
-    },
-    viewItem("grid", "Grid"),
-    viewItem("lines", "Lines"),
-  );
   const modeSeg = h(
     "div",
     {
@@ -815,7 +759,6 @@ export function mount(root) {
   const mxEl = h("div", {
     class: "kp-matrix",
     "data-kp-matrix": "",
-    "data-kp-matrix-select": "follow",
   });
   const legend = h(
     "ul",
@@ -839,63 +782,7 @@ export function mount(root) {
       h("span", { class: "kp-keys", "data-fw-keys": "" }),
     ),
   );
-  const followSel = /** @type {HTMLSelectElement} */ (
-    h("select", {
-      class: "kp-field__input",
-      id: "fw-follow",
-      "data-kp-select": "",
-    })
-  );
-  const followRow = gridRow({
-    label: "Follow",
-    labelFor: "fw-follow",
-    control: followSel,
-    value: h(
-      "span",
-      { class: "fw-hint" },
-      "Lines show one stack at a time: what it reaches and what reaches it.",
-    ),
-    hidden: true,
-  });
-  const reachMap = h("div", {
-    class: "kp-matrix fw-lines",
-    "data-kp-matrix": "",
-    "data-kp-view": "lines",
-    "data-kp-lines-shape": "curve",
-    "data-kp-lines-side": "sources-left",
-  });
-  const reachedMap = h("div", {
-    class: "kp-matrix fw-lines",
-    "data-kp-matrix": "",
-    "data-kp-view": "lines",
-    "data-kp-lines-shape": "curve",
-    "data-kp-lines-side": "sources-right",
-  });
-  const linesBox = h(
-    "div",
-    { class: "fw-lines-box", hidden: "" },
-    h(
-      "div",
-      { class: "fw-lines-col" },
-      h(
-        "h3",
-        { class: "fw-lines-title", "data-fw-reached-title": "" },
-        "Reached by",
-      ),
-      reachedMap,
-    ),
-    h(
-      "div",
-      { class: "fw-lines-col" },
-      h(
-        "h3",
-        { class: "fw-lines-title", "data-fw-reaches-title": "" },
-        "Reaches",
-      ),
-      reachMap,
-    ),
-  );
-  const mxCard = card("Who can reach whom", [mxEl, linesBox]);
+  const mxCard = card("Who can reach whom", [mxEl]);
   mxp.el.append(
     gridRow({
       label: "Compare",
@@ -903,8 +790,6 @@ export function mount(root) {
       control: modeSeg,
       value: mxAgo,
     }),
-    gridRow({ label: "View", hideLabel: true, control: viewSeg }),
-    followRow,
     gridRow({ label: "Lit", control: lit, actions: showAll }),
     h("div", { class: "fw-matrix", "data-fw-span": "all" }, mxCard.el),
     legend,
@@ -1142,7 +1027,6 @@ export function mount(root) {
   const toInput = toBox.querySelector("input");
   if (toInput) drivable(toInput, TRACE_TO);
   drivable(portSel, TRACE_PORT);
-  drivable(followSel, FOLLOW_STACK);
   /** The package may redraw its parts after a call returns; mark them again. */
   const watch = (
     /** @type {HTMLElement} */ el,
@@ -1595,86 +1479,6 @@ export function mount(root) {
       ? cellIn(data, p[0], p[1], S.mode === "files" ? "files" : "live")
       : null;
     return c ? cellWords(c) : "";
-  };
-
-  // lines (rebuilt: one stack and its neighbours) --------------------------
-  const paintLines = () => {
-    const isLines = S.view === "lines";
-    mxEl.hidden = isLines;
-    linesBox.hidden = !isLines;
-    legend.hidden = isLines;
-    followRow.hidden = !isLines;
-    if (!isLines || !data?.matrix) return;
-    const m = data.matrix;
-    const ns = names();
-    if (!S.follow || !ns.includes(S.follow))
-      S.follow =
-        (fwAttention(data.stacks)[0]?.stack ?? busiestStack(ns, m.rules)) ||
-        (ns[0] ?? "");
-    followSel.replaceChildren(...ns.map((n) => h("option", { value: n }, n)));
-    followSel.value = S.follow;
-    const me = S.follow;
-    const toStack = data.stacks.find((s) => s.stack === me);
-    const node = (/** @type {string} */ k) => {
-      const s = data?.stacks.find((x) => x.stack === k);
-      const off = s && fwState(s).word === "no firewall";
-      return {
-        key: k,
-        label: k,
-        sub: off
-          ? "no firewall: every stack reaches it"
-          : s
-            ? `CT ${s.vmid}, ${s.rules} rules`
-            : "",
-        tone: off ? /** @type {const} */ ("bad") : undefined,
-        href: stackHref(k),
-      };
-    };
-    const reaches = ns.filter(
-      (k) => k !== me && data && cellIn(data, me, k)?.state === "some",
-    );
-    const reachedBy = ns.filter(
-      (k) =>
-        k !== me &&
-        (data ? (cellIn(data, k, me)?.state ?? "none") : "none") !== "none",
-    );
-    const countLabel = (/** @type {number} */ n) =>
-      `${n} ${n === 1 ? "stack" : "stacks"}`;
-    const base = {
-      corner: "",
-      view: /** @type {const} */ ("lines"),
-      countLabel,
-      sourcesLabel: "Sources",
-      usersLabel: "Reached stacks",
-    };
-    setMatrix(reachMap, {
-      ...base,
-      label: `${me} reaches`,
-      rows: [node(me)],
-      columns: reaches.map(node),
-      cell: (_r, c) =>
-        reaches.includes(c) ? { tone: /** @type {const} */ ("ok") } : null,
-      state: "ready",
-    });
-    setMatrix(reachedMap, {
-      ...base,
-      label: `${me} is reached by`,
-      rows: [node(me)],
-      columns: reachedBy.map(node),
-      cell: (_r, c) =>
-        reachedBy.includes(c) ? { tone: /** @type {const} */ ("ok") } : null,
-      state: "ready",
-    });
-    const t1 = linesBox.querySelector("[data-fw-reaches-title]");
-    const t2 = linesBox.querySelector("[data-fw-reached-title]");
-    if (t1)
-      t1.textContent = `${me} reaches ${reaches.length.toLocaleString("en-GB")} ${reaches.length === 1 ? "stack" : "stacks"}`;
-    if (t2)
-      t2.textContent = `${me} is reached by ${reachedBy.length.toLocaleString("en-GB")} ${reachedBy.length === 1 ? "stack" : "stacks"}`;
-    const open = toStack && fwState(toStack).word === "no firewall";
-    mxp.read.textContent = open
-      ? `${me} has no firewall: every stack reaches it on every port (the ${names().length - 1} open paths are not drawn).`
-      : `${me}: reaches ${reaches.length}, reached by ${reachedBy.length}. Only pairs with named ports are drawn.`;
   };
 
   // the trace ---------------------------------------------------------------
@@ -2207,9 +2011,7 @@ export function mount(root) {
     paintTotals();
     paintStacks();
     setSegmentedValues(modeSeg, [S.mode]);
-    setSegmentedValues(viewSeg, [S.view]);
     paintMx();
-    paintLines();
     paintTrace();
     paintRules();
     paintGuard();
@@ -2230,20 +2032,6 @@ export function mount(root) {
     S.mode = v === "files" || v === "differences" ? v : "live";
     keepUrl();
     paintMx();
-  });
-  viewSeg.addEventListener(SEGMENTED_EVENT, (e) => {
-    S.view =
-      /** @type {CustomEvent} */ (e).detail.value === "lines"
-        ? "lines"
-        : "grid";
-    keepUrl();
-    paintMx();
-    paintLines();
-  });
-  followSel.addEventListener("change", () => {
-    S.follow = followSel.value;
-    keepUrl();
-    paintLines();
   });
   mxEl.addEventListener(MATRIX_PICK_EVENT, (e) => {
     const d = /** @type {CustomEvent} */ (e).detail;
@@ -2269,15 +2057,6 @@ export function mount(root) {
     showAll.hidden = S.lit.size === 0;
     paintStacks();
   });
-  for (const map of [reachMap, reachedMap])
-    map.addEventListener(USES_PIN_EVENT, (e) => {
-      const d = /** @type {CustomEvent} */ (e).detail;
-      if (d.pinned && d.key !== S.follow && names().includes(d.key)) {
-        S.follow = d.key;
-        keepUrl();
-        paintLines();
-      }
-    });
   fromBox.addEventListener(CHANGE_EVENT, (e) => {
     const v = /** @type {CustomEvent} */ (e).detail.value;
     if (putting || !v || v === S.from) return;

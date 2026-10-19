@@ -110,6 +110,86 @@
 .bk-repos__facets h3 {
   margin: 0;
 }
+
+/* The stack chooser (Kenny, 2026-10-19, "wat een verspilling van plaats"):
+   - the legend of the disk bar is one grid of three tracks (swatch, name,
+     size) that is only as wide as its content, with a gap after every
+     swatch, so a name never touches its mark;
+   - the chooser is a grid of boxes that are as wide as their content (check,
+     name, count): no icon in a box, no empty column after the count (the
+     "only" button is the bar's own pick, so its column goes);
+   - the selection bar stands in the chooser's own cell, so it reserves no
+     height of its own: ticking rows covers the chooser, nothing moves. */
+#bk-repos .kp-stackbar__legend {
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, max-content));
+  justify-content: start;
+  gap: var(--kp-space-xs, 0.25rem) var(--kp-space-lg, 1.5rem);
+}
+#bk-repos .kp-stackbar__item {
+  grid-column: auto;
+  grid-template-columns: auto auto auto;
+  justify-content: start;
+  column-gap: var(--kp-space-sm, 0.5rem);
+  padding-inline: 0;
+}
+#bk-repos .kp-stackbar__item > .kp-stackbar__label {
+  padding-inline-end: var(--kp-space-sm, 0.5rem);
+}
+.bk-repos__chooser {
+  display: grid;
+  min-inline-size: 0;
+}
+.bk-repos__chooser > * {
+  grid-area: 1 / 1;
+  min-inline-size: 0;
+}
+.bk-repos__facets .kp-formgrid__row {
+  align-items: center;
+}
+.bk-repos__facets .kp-facets__list {
+  grid-template-columns: repeat(auto-fill, minmax(6.5rem, max-content));
+  grid-auto-flow: row;
+  grid-auto-columns: auto;
+  gap: var(--kp-space-xs, 0.25rem) var(--kp-space-sm, 0.5rem);
+  padding: 3px;
+  overflow: visible;
+}
+.bk-repos__facets .kp-facet {
+  grid-template-columns: minmax(0, 1fr);
+  padding-inline: var(--kp-space-sm, 0.5rem);
+  min-block-size: 2rem;
+}
+.bk-repos__facets .kp-facet__option {
+  min-block-size: 2rem;
+  gap: var(--kp-space-sm, 0.5rem);
+}
+.bk-repos__facets .kp-facet__name {
+  flex: 0 1 auto;
+}
+.bk-repos__facets .kp-facet__count {
+  margin-inline-start: auto;
+  min-inline-size: 0;
+  padding-inline-start: var(--kp-space-xs, 0.25rem);
+}
+.bk-repos__facets .kp-facet__swatch,
+.bk-repos__facets .kp-facet__only {
+  display: none;
+}
+.bk-barslot {
+  pointer-events: none;
+}
+.bk-barslot .kp-selection {
+  position: relative;
+  inset: auto;
+  margin: 0;
+  min-block-size: 0;
+  block-size: 100%;
+}
+.bk-barslot .kp-selection__panel {
+  pointer-events: auto;
+  block-size: 100%;
+  min-block-size: 2.5rem;
+}
 .bk-tablehost {
   min-inline-size: 0;
   min-block-size: 24rem;
@@ -119,6 +199,12 @@
 }
 .bk-table .kp-uptime {
   min-inline-size: 10rem;
+}
+.bk-table .kp-bar-cell {
+  --kp-bar-cell-value: max-content;
+}
+.bk-table .kp-bar-cell__value {
+  white-space: nowrap;
 }
 .bk-table .bk-repo__note {
   display: block;
@@ -130,6 +216,13 @@
    the same line, every part on one centre line, with a gap between all. */
 .bk-table tr[data-kp-row-group] > th {
   padding-block: var(--kp-space-sm, 0.5rem);
+}
+/* A heading cell is as high as what it holds: the package fixes a cell's
+   height to one row, and the group wraps under its fold button in the card
+   layout. */
+.bk-table tr[data-kp-row-group] > th {
+  block-size: auto;
+  min-block-size: var(--kp-row-height, 2.5rem);
 }
 .bk-table tr[data-kp-row-group] .kp-datatable__group-toggle {
   vertical-align: middle;

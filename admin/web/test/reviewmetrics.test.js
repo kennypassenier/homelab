@@ -112,6 +112,8 @@ test("review finding 9: a card keeps one datatable stop, called before its table
 test("review finding 5: Metrics and the Map draw with ui.js, no page kit of their own", () => {
   // The 3.71.0 integration moved metricskit.js into ui.js (kpiStrip's
   // ctxParts / target / per-tile drive, tableSlot, dataTable) and deleted it.
+  // Metrics (kp-themes 11.0.0, feat-kp11demo-10) draws its key figures as
+  // kp's own trend tiles, so only the Map still takes kpiStrip from ui.js.
   const url = (/** @type {string} */ f) =>
     new URL(`../js/pages/${f}`, import.meta.url);
   assert.throws(() => readFileSync(url("metricskit.js")), /ENOENT/);
@@ -126,8 +128,19 @@ test("review finding 5: Metrics and the Map draw with ui.js, no page kit of thei
       /createElement\("link"\)/,
     ])
       assert.doesNotMatch(src, copy, `${f} holds its own ${copy}`);
-    assert.match(src, /\bkpiStrip,[\s\S]*\} from "\.\.\/ui\.js"/, f);
   }
+  assert.match(
+    readFileSync(url("fleetview.js"), "utf8"),
+    /\bkpiStrip,[\s\S]*\} from "\.\.\/ui\.js"/,
+  );
+  const metrics = readFileSync(url("metrics.js"), "utf8");
+  assert.match(metrics, /kp-kpi--trend/, "Metrics draws kp's trend tiles");
+  assert.doesNotMatch(metrics, /\bkpiStrip\b/, "Metrics took kpiStrip back");
+  for (const gone of ["timeChart", "pageCharts", "zoomChip", "busy()"])
+    assert.ok(
+      !metrics.includes(gone),
+      `Metrics still holds ${gone}: a poll feeds the charts in place now`,
+    );
 });
 
 test("review finding 10: the chart's source, Show all and zoom Reset are declared Live view controls", async () => {
@@ -147,4 +160,28 @@ test("review finding 15: from the sixth source on, a chart's line is dashed", as
   for (let i = 0; i < 5; i += 1) assert.equal(dashOf(i), 0);
   assert.ok(dashOf(5), "the sixth source repeats colour 1 without a dash");
   assert.notEqual(dashOf(5), dashOf(10));
+});
+
+test("kp11-metrics: a typical-level chart with one reading draws its dot; with a few it says it is too early", async () => {
+  const { chartData } = await import("../js/charts.js");
+  const spec = (/** @type {number} */ n) => ({
+    key: "cpu",
+    label: "CPU used",
+    unit: /** @type {const} */ ("percent"),
+    typical: true,
+    from: 0,
+    to: 100,
+    series: [
+      {
+        label: "pve",
+        points: /** @type {[number, number][]} */ (
+          Array.from({ length: n }, (_, i) => [i, i])
+        ),
+      },
+    ],
+  });
+  assert.equal(chartData(spec(1)).minPoints, undefined);
+  assert.equal(chartData(spec(1)).onePointNote, true);
+  assert.equal(chartData(spec(3)).minPoints, 48);
+  assert.equal(chartData(spec(3)).minUnit, "readings");
 });

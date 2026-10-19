@@ -1,8 +1,12 @@
 /* redesign-371-metrics / redesign-371-map (3.71.0): the Metrics and Map
    pages as the approved demos draw them (metrics.html, fleetview.html +
-   ops-kit.css), kp-themes tokens only. The page-local kit
-   (js/pages/metricskit.js) uses the `mk-` prefix; everything else is the
-   foundation's `nx-` classes and kp-themes' own chart (`kp-chart`). */
+   ops-kit.css), kp-themes tokens only. Metrics was rebuilt on kp-themes
+   11.0.0 from the demo approved on 2026-10-19 (app-homelab-metrics,
+   feat-kp11demo-10): the page kit uses the `mk-` prefix, everything else is
+   the foundation's `nx-` classes and kp-themes' own parts (`kp-range`,
+   `kp-refresh`, `kp-chart-group`, `kp-kpi--trend`, `kp-gantt`, `kp-heat`,
+   `kp-stackbar`, `kp-datatable`). The Map page loads this file too and
+   shares the `mk-page` tokens, the page rhythm and the table rules. */
 
 .mk-page {
   --mk-gap: var(--kp-space-xl, 1.5rem);
@@ -44,68 +48,104 @@ main.mk-page > .mk-failed:empty {
   font-size: var(--kp-text-sm);
 }
 
-/* ---------- the page's toolbar (the window, what is shown) ---------- */
-.mk-toolbar {
-  padding-block: 10px;
-  border-block-end: 1px solid var(--mk-line);
+/* ---------- the three rows: what is shown, the window, the refresh ----
+   One grid, three columns shared by every row (label, field, words about
+   it): the labels, the fields and the sentences line up down the page, and
+   a row keeps its height whatever its field holds. kp-themes 11.0.0 has no
+   form grid of its own; this is the page's. */
+.mk-controls {
+  display: grid;
+  grid-template-columns:
+    [label] max-content
+    [field] minmax(0, 36rem)
+    [aside] minmax(0, 1fr);
+  column-gap: var(--kp-space-lg, 1.5rem);
+  row-gap: var(--kp-space-md, 1rem);
+  align-items: start;
+  --mk-control: 2.5rem;
 }
-.mk-select {
-  inline-size: auto;
-  min-inline-size: 12rem;
+.mk-row {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: start;
 }
-.mk-window-zone {
+.mk-label {
   display: flex;
-  min-inline-size: 0;
   align-items: center;
-  gap: 8px;
+  min-block-size: var(--mk-control);
+  margin: 0;
+  font-weight: 600;
 }
-.mk-window {
+.mk-field {
+  min-inline-size: 0;
+}
+.mk-fixed {
+  display: flex;
+  align-items: center;
+  min-block-size: var(--mk-control);
+}
+.mk-aside {
+  display: flex;
+  align-items: center;
+  min-block-size: var(--mk-control);
+  margin: 0;
   font-size: var(--kp-text-sm);
   color: var(--muted-foreground);
-  min-inline-size: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.mk-window[hidden] {
+/* The window is kp's range; its Custom… needs a start and an end the
+   dashboard's data route does not take yet (ask-kp11be-1), so only the
+   presets are offered. */
+#mk-range .kp-range__custom,
+#mk-range .kp-range__panel {
   display: none;
 }
-.mk-toolbar .kp-chart-zoom {
-  font-size: var(--kp-text-sm);
+@media (max-width: 64rem) {
+  .mk-controls {
+    grid-template-columns: [label] max-content [field] minmax(0, 1fr);
+  }
+  .mk-aside {
+    grid-column: 1 / -1;
+    min-block-size: 0;
+  }
 }
-@media (max-width: 48rem) {
-  .mk-toolbar .nx-tb__filters {
-    flex-wrap: wrap;
+@media (max-width: 40rem) {
+  .mk-controls {
+    grid-template-columns: minmax(0, 1fr);
   }
-  .mk-window {
-    white-space: normal;
+  .mk-row {
+    grid-template-columns: minmax(0, 1fr);
   }
-  .mk-toolbar .nx-seg {
-    inline-size: 100%;
+  .mk-label {
+    min-block-size: 0;
   }
+}
+/* An option of the machine picker: its name first (what a tag reads), its
+   colour mark before it, its detail after. */
+.kp-combobox__option:has(> .mk-opt__name) {
+  display: flex;
+  align-items: center;
+  gap: var(--kp-space-sm, 0.5rem);
+}
+.mk-opt__mark {
+  order: -1;
+}
+.mk-opt__meta {
+  margin-inline-start: var(--kp-space-sm, 0.5rem);
+  color: var(--muted-foreground);
 }
 
-/* ---------- attention band actions, the marker key ---------- */
+/* ---------- key figures, the attention band's actions ---------- */
+.mk-tilegroup {
+  min-inline-size: 0;
+}
 .mk-acts {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
 }
-.mk-annkey {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  margin-block-end: 0;
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-.mk-annkey span {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
 
-/* ---------- sections and the 3-column grid of chart cards ---------- */
+/* ---------- sections, each a chart group of its own ---------- */
 .mk-section {
   display: grid;
   gap: var(--kp-space-lg, 1rem);
@@ -119,6 +159,18 @@ main.mk-page > .mk-failed:empty {
   margin: 2px 0 0;
   font-size: var(--kp-text-sm);
   color: var(--muted-foreground);
+}
+/* The window keys and the zoom chip on one grid row of a fixed height: the
+   chip appearing moves nothing. */
+.mk-group {
+  gap: var(--kp-space-md, 1rem);
+}
+.mk-groupbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--kp-space-md, 1rem);
+  min-block-size: var(--mk-control, 2.5rem);
 }
 .mk-panels {
   display: grid;
@@ -161,43 +213,78 @@ main.mk-page > .mk-failed:empty {
     min-block-size: calc(2 * 1.45em);
   }
 }
-.mk-now {
-  display: grid;
-  justify-items: end;
-  text-align: end;
-}
-.mk-now[hidden] {
-  display: none;
-}
-.mk-now b {
-  font-size: 1.375rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.1;
-  white-space: nowrap;
-}
-.mk-now span {
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
 .mk-chart {
   min-inline-size: 0;
+  margin: 0;
 }
-.mk-note {
-  margin: 6px 0 0;
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-.mk-card-error {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  min-block-size: 168px;
+
+/* ---------- what the host did: the ribbon ---------- */
+.mk-ribbon__count {
   margin: 0;
   font-size: var(--kp-text-sm);
   color: var(--muted-foreground);
 }
-/* ---------- tables in cards ---------- */
+
+/* ---------- Drives: a row opens to its two lines ---------- */
+.mk-drive-detail {
+  display: grid;
+  gap: var(--kp-space-md, 1rem);
+  padding-block: var(--kp-space-sm, 0.5rem);
+}
+.mk-drive-detail__state {
+  margin: 0;
+  font-size: var(--kp-text-sm);
+}
+.mk-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--kp-space-md, 1rem);
+}
+.mk-pair > .kp-chart {
+  --kp-chart-height: 7rem;
+  min-inline-size: 0;
+  margin: 0;
+}
+@media (max-width: 40rem) {
+  .mk-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.mk-nowrap {
+  white-space: nowrap;
+}
+
+/* ---------- Traffic: the hostnames' heat grid and table ---------- */
+.mk-hosts {
+  display: grid;
+  gap: var(--kp-space-sm, 0.5rem);
+  min-inline-size: 0;
+}
+.mk-hosts[hidden],
+.mk-card .kp-datatable[hidden] {
+  display: none;
+}
+.mk-legend {
+  margin: 0;
+  padding: 0;
+}
+/* Hostnames are long: the grid's name column is wide enough for the longest. */
+#traffic-heat {
+  --kp-heat-label: 14rem;
+}
+.mk-mix {
+  min-inline-size: 0;
+}
+.mk-mix + p {
+  margin: 14px 0 0;
+}
+.mk-host {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kp-space-sm, 0.5rem);
+}
+
+/* ---------- tables in cards (the Map's too) ---------- */
 .mk-table .kp-table {
   inline-size: 100%;
 }
@@ -210,50 +297,18 @@ main.mk-page > .mk-failed:empty {
   color: var(--mk-bad);
   font-weight: 600;
 }
-.mk-state {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-.mk-trend .nx-spark {
-  inline-size: 96px;
-  block-size: 22px;
-}
-.mk-share {
-  inline-size: 34%;
-}
-.mk-num {
-  text-align: end;
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
 .mk-rowpick {
   cursor: pointer;
 }
 .mk-rowpick.is-on td:first-child {
   box-shadow: inset 3px 0 0 var(--ring);
 }
-.mk-mix {
-  display: grid;
-  gap: 12px;
-}
-.mk-mix__row {
-  display: grid;
-  grid-template-columns: 3rem minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-  font-size: var(--kp-text-sm);
-}
-.mk-mix + p {
-  margin: 14px 0 0;
+.mk-rowpick[aria-pressed="true"] td:first-child {
+  font-weight: 600;
 }
 @media (max-width: 640px) {
-  .mk-hide-phone {
-    display: none;
-  }
-  /* Drives and Hostnames fit a phone (finding 3): tighter cells, the share
-     bar folded to its number, a smaller hostname. */
+  /* Drives and Hostnames fit a phone (finding 3): tighter cells, a smaller
+     hostname. */
   .mk-table .kp-table {
     font-size: var(--kp-text-sm);
   }
@@ -269,22 +324,10 @@ main.mk-page > .mk-failed:empty {
     word-break: normal;
     hyphens: manual;
   }
-  .mk-table .nx-share {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .mk-table .nx-share > .kp-meter {
-    display: none;
-  }
-  .mk-table .mk-share {
-    inline-size: auto;
-  }
   .mk-host {
     font-size: 0.8em;
     overflow-wrap: anywhere;
   }
-}
-.mk-rowpick[aria-pressed="true"] td:first-child {
-  font-weight: 600;
 }
 
 /* ---------- tables as cards on a phone (the demo's nx-table--cards) ---- */
@@ -336,19 +379,12 @@ main.mk-page > .mk-failed:empty {
   }
 }
 
-/* ---------- pointer hints never show on a touch screen (finding 17) ----
-   `!important`: the hints sit in rows that set their own display. The
+/* ---------- keyboard hints never show on a touch screen (finding 17) ---
+   `!important`: the line sits in a row that sets its own display. The
    charts' own hint line (`.kp-chart__hint > [data-kp-when]`) is kp's and
    switches on (hover: none) by itself. */
-.mk-touch-only {
-  display: none !important;
-}
 @media (hover: none) {
-  .mk-pointer-only,
   .mk-page .nx-keys {
     display: none !important;
-  }
-  .mk-touch-only {
-    display: inline !important;
   }
 }

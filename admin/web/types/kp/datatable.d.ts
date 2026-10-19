@@ -1,4 +1,4 @@
-// The kp-themes module chassis-rs serves at /static/kp/js/datatable.js (kp-themes 10.1.1),
+// The kp-themes module chassis-rs serves at /static/kp/js/datatable.js (kp-themes 11.0.0),
 // copied from kp-themes js/datatable.d.ts: chassis serves the module, not its types.
 /** A heading row that folds the rows of its group [J2]. */
 export declare const GROUP_ROW = "[data-kp-row-group]";
@@ -469,9 +469,13 @@ export type DataTableOptions = {
   debounceMs?: number;
   sortCycle?: "two" | "three";
   /**
-   * Shift + click adds a sort key. Default false; per table `data-kp-sort-multi`.
+   * Shift + click adds a sort key; 'click': a plain click adds it and Shift + click sorts on the column alone. Default false; per table `data-kp-sort-multi` (`="click"`).
    */
-  multiSort?: boolean;
+  multiSort?: boolean | "click";
+  /**
+   * The page sorts: the table draws and announces the sort, the rows keep the order the page renders [kpadopt4]. Default false; per table `data-kp-sort-external`.
+   */
+  sortExternal?: boolean;
   /**
    * How the header-declared filters are set: a panel of every filter, or "+ Add filter" with one pill per filter. Default panel; per table `data-kp-filter-mode`.
    */
@@ -534,7 +538,8 @@ export type DataTableDecorateInfo = {
  * @property {Filter} [filter]
  * @property {number} [debounceMs]  Default 0, and 300 for a server-backed table.
  * @property {'two' | 'three'} [sortCycle]
- * @property {boolean} [multiSort]  Shift + click adds a sort key. Default false; per table `data-kp-sort-multi`.
+ * @property {boolean | 'click'} [multiSort]  Shift + click adds a sort key; 'click': a plain click adds it and Shift + click sorts on the column alone. Default false; per table `data-kp-sort-multi` (`="click"`).
+ * @property {boolean} [sortExternal]  The page sorts: the table draws and announces the sort, the rows keep the order the page renders [kpadopt4]. Default false; per table `data-kp-sort-external`.
  * @property {'panel' | 'add'} [filterMode]  How the header-declared filters are set: a panel of every filter, or "+ Add filter" with one pill per filter. Default panel; per table `data-kp-filter-mode`.
  * @property {string} [pagerClassName]
  * @property {(at: number, of: number) => string} [pageLabel]
@@ -577,6 +582,7 @@ export declare function attachDataTables(
     debounceMs,
     sortCycle,
     multiSort,
+    sortExternal,
     filterMode,
     pagerClassName,
     pageLabel,

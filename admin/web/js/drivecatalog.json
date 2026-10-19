@@ -2269,11 +2269,41 @@
       "twins": false
     },
     {
+      "id": "metrics-hostnames-as",
+      "page": "metrics",
+      "what": "show the hostnames as a heat grid (hostname by hour) or as a sortable table",
+      "opens": "view",
+      "row": "heat|table",
+      "href": "/charts",
+      "was": [],
+      "shows": "on the Traffic view",
+      "reach": [
+        {
+          "do": "click",
+          "control": "metrics-view",
+          "row": "traffic"
+        }
+      ],
+      "twins": false
+    },
+    {
       "id": "metrics-kpi",
       "page": "metrics",
       "what": "a KPI tile: scroll to the chart it sums up",
       "opens": "view",
       "row": "<tile>",
+      "href": "/charts",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "metrics-section-window",
+      "page": "metrics",
+      "what": "show one section's charts over the last hour, 6 hours, day, week or 30 days, the others stay as they are",
+      "opens": "view",
+      "row": "<section>/<window>",
       "href": "/charts",
       "was": [],
       "shows": null,
@@ -4126,6 +4156,13 @@
       "what": "one host.toml key in its edit dialog (-<key>), and its typed confirmation (-<key>-confirm)",
       "was": [],
       "row": "<key with - for _>[-confirm]"
+    },
+    {
+      "id": "metrics-scope",
+      "page": "metrics",
+      "what": "the machines picker on Metrics: type a stack name to search the list",
+      "was": [],
+      "row": null
     },
     {
       "id": "mute",

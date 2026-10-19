@@ -166,8 +166,10 @@ const CLEAR = declare({
 /**
  * A card with data: a heading with its one sentence, the tools, and the
  * stage the package fills with loading, empty and failed (`data-kp-state`).
+ * A card that reads nothing (`state: "static"`, This browser) has no state to
+ * draw, so it carries none.
  * @param {{id: string, title: string, desc: string, tools?: Node[],
- *   data: Node[], state?: "loading" | "ready"}} spec
+ *   data: Node[], state?: "loading" | "ready" | "static"}} spec
  */
 function dataCard(spec) {
   const data = h("div", { class: "kp-card__data" }, ...spec.data);
@@ -176,7 +178,9 @@ function dataCard(spec) {
     {
       class: "kp-card nx-card cf-card",
       id: spec.id,
-      "data-kp-state": spec.state ?? "loading",
+      ...(spec.state === "static"
+        ? {}
+        : { "data-kp-state": spec.state ?? "loading" }),
       "aria-labelledby": `${spec.id}-h`,
     },
     h(
@@ -347,7 +351,7 @@ export function mount(root, opts = {}) {
     title: "This browser",
     desc: "Choices that belong to this device and never reach the host: the theme, calm mode, what Live view opens in, the tour, and a way to forget it all.",
     data: [],
-    state: "ready",
+    state: "static",
   });
   stops.push(mountThisBrowser(browserCard.data));
 
@@ -358,7 +362,7 @@ export function mount(root, opts = {}) {
     title: "Sign-in",
     desc: "Who can reach this dashboard and the host: your passkeys for the browser, one token per machine for the CLI and TUI.",
     data: [signinBody],
-    state: "ready",
+    state: "static",
   });
   stops.push(
     mountSignin(signinBody, (what, e, retry) => failed(what, e, retry)),

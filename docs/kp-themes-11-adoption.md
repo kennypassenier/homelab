@@ -379,3 +379,13 @@ Principles: fixes and shared wrappers first (they pay many pages and carry no vi
 * Section A: 45 swaps with work (step-kp11-1 to step-kp11-42, step-kp11-44 to step-kp11-46; step-kp11-43 is a pointer), about 4,600 lines removable by estimate.
 * Section B: 14 demo topics (feat-kp11demo-1 to feat-kp11demo-14), about 95 numbered items.
 * Section C: 11. Section F: 8 items waiting on kp-themes (gap-kp11wait-1 to gap-kp11wait-8). Section D: 28 open gaps (gap-kp11-1 to gap-kp11-37 minus the nine moved to F or resolved: gap-kp11-1 to gap-kp11-4, gap-kp11-6 to gap-kp11-8, gap-kp11-14, gap-kp11-27). Section E: 22.
+
+## I. Integration notes (2026-10-19)
+- Test clock: 6949debb briefly defaulted the clock to noon of today; reverted on kp11-swap-backups (aaecc8d3) and replaced by the real fix 5df18874 (cherry-picked as 92cc29d2): page.clock.install now takes the injected time. Cherry-pick 5df18874 into every branch that touches Activity or log.js.
+- metrics.js is changed on two branches: kp11-swap-pages (step-kp11-36, setChartData) and kp11-build-metrics (approved demo build). On merge the approved build wins; step-kp11-36 is covered by it.
+- types/kp/*.d.ts are still the 10.1.1 copies except where a branch refreshed them; refresh all from kp-themes 11.0.0 at merge.
+- At the chassis-rs 3.9.0 bump (kp-themes 11.1.0): drop --kp-stackbar-legend-min and --kp-stackbar-value-w page settings (stackbar legend is a subgrid now, gap 53); heat labels no longer split mid-word (gap 56).
+- At the 11.1.0 bump: timer-disc/countdown get data-kp-*-until and *-controls="none" (gap 29) — drop the page CSS that hides their buttons in Schedules/job detail; drop the gap-32 gantt workaround (7-lane cap); gantt has state planned and data-kp-gantt-toolbar/legend/hint="off".
+- kp11-build-ops (staged, msg ~/.cache/ops-kp11/commit-msg-ops.txt) added css/kp-formgrid.css as a temporary shim; delete it at the 11.1.0 bump. It folded the Backup calendar page into Backups Month view (route redirect). fw-lines (Lines view) not built: unreadable with this many pairs. dom.js perstackChips now dead. Unverified after last fixes: Restore night picker tests, Firewall trace ids, Host container sort after reload, redesign-final-gen hang.
+- kp11-swap-chrome (staged; msg ~/.cache/kp11-scratch/kp11-swap-chrome/kp11-swap-chrome-all-msg.txt): Settings, Sign-in, Secrets, frame. Also adds css/kp-formgrid.css shim (two branches add it: keep one, delete at 11.1.0). Rewritten Playwright cases never executed.
+- kp11-build-activity (staged; msg ~/.cache/kp11-scratch/kp11-build-activity/msg-all.txt): carries 5df18874 as a working-tree change.

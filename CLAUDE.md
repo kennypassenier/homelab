@@ -226,8 +226,10 @@ warnings, full suite) and both demanding IDs in brackets (`[B4]`,
    `git config core.hooksPath .githooks`. Holds from ANY session,
    terminal or tool. **One-time per clone: `make hooks`** (core.hooksPath
    is local config and is never committed). Ratified by Kenny 2026-08-28:
-   full suite on every commit, `--no-verify` stays as a documented
-   escape, merge/revert/fixup/squash exempt from the ID rule.
+   fast checks on every commit (fmt, clippy, build, unit tests; since
+   2026-10-19 the whole-screen cases run only at the release gate, Kenny:
+   "ja" to ask-kp11gate-1), `--no-verify` stays as a documented escape,
+   merge/revert/fixup/squash exempt from the ID rule.
    Human-facing docs: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 2. **session hook** — `.claude/hooks/check-commit.sh` (PreToolUse on
    Bash), which only loads in a session opened in this directory.

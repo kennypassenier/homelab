@@ -43,6 +43,9 @@
   align-items: center;
   padding-block-start: var(--kp-space-md, 12px);
   margin-block-start: var(--kp-space-md, 12px);
+  /* full-width line, words kept off the card's edge by its own padding */
+  margin-inline: calc(-1 * var(--nx-card-pad, 1rem));
+  padding-inline: var(--nx-card-pad, 1rem);
   border-block-start: 1px solid var(--ac-line);
   font-size: var(--kp-text-xs);
   color: var(--muted-foreground);

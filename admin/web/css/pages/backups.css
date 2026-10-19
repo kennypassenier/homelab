@@ -322,6 +322,7 @@
 /* The foot line's words keep a margin from the card's edge (the repositories'
    read state and key hints). */
 .bk-page .nx-card__foot {
+  margin-inline: 0;
   padding-inline: var(--kp-space-md, 0.75rem);
   padding-block: var(--kp-space-sm, 0.5rem);
 }

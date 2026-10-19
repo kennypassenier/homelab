@@ -2397,6 +2397,7 @@ td.stack-flags {
 
 /* -- a section as a card (DESIGN_LANGUAGE §5), folded or open -- */
 .nx-card {
+  --nx-card-pad: 1rem; /* kp-card's own padding */
   display: grid;
   gap: var(--kp-space-md, 12px);
   min-inline-size: 0;
@@ -2498,6 +2499,7 @@ details.nx-card--fold[open] > summary::before {
   color: var(--card-foreground);
   border: 1px solid var(--border);
   border-radius: var(--nx-radius);
+  --nx-card-pad: var(--nx-pad);
   padding: var(--nx-pad);
   grid-template-rows: auto 1fr auto;
 }
@@ -2838,6 +2840,10 @@ details.nx-card--fold[open] > summary::before {
   color: var(--muted-foreground);
   border-block-start: 1px solid var(--border);
   padding-block-start: var(--kp-space-sm, 0.5rem);
+  /* the line runs the card's full width and the words keep the card's own
+     padding from its edge, so they stay on the body's text edge */
+  margin-inline: calc(-1 * var(--nx-card-pad));
+  padding-inline: var(--nx-card-pad);
 }
 .nx-card__foot[hidden] {
   display: none;
@@ -3073,6 +3079,7 @@ th[aria-sort="descending"] .nx-sort__mark {
   padding: var(--kp-space-md) var(--kp-space-lg) var(--kp-space-lg);
 }
 .nx-ops .nx-card__foot {
+  margin-inline: 0;
   flex-wrap: nowrap;
   align-items: center;
   gap: var(--kp-space-md);

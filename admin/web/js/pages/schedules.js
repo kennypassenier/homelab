@@ -416,9 +416,9 @@ export function mount(root, opts = {}) {
   );
   const heroFrame = h(
     "div",
-    { class: "kp-card sch-hero__grid" },
+    { class: "sch-hero__grid" },
     hero,
-    h("div", { class: "sch-hero__then" }, thenEl),
+    h("div", { class: "kp-card sch-hero__then" }, thenEl),
   );
   const heroCard = card({
     title: "The next run, counting down",

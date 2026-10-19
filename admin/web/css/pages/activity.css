@@ -754,8 +754,10 @@
   grid-auto-flow: column;
   gap: var(--kp-space-xs, 0.25rem);
 }
+/* Every row's action stands in the one actions track and fills it (one role,
+   one width): the cells share their start and end edge. */
 .con-tools .kp-formgrid__row--buttons .kp-formgrid__actions {
-  justify-self: start;
+  justify-self: stretch;
 }
 .con-read {
   color: var(--muted-foreground);

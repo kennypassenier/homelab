@@ -447,41 +447,6 @@ export function jobPanel(j, ctx) {
 }
 
 /**
- * @typedef {{key: string, label: string, value: string, numeric?: boolean,
- *   late?: boolean, badge?: Badge}} FactCell
- */
-
-/**
- * The running-job panel's facts grid: one cell per fact, every value a
- * non-empty string so the grid never reflows as a job changes state
- * (Kenny, 2026-10-02: "maak hier ook een grid van, met vaste locatie").
- * `badge` on the State cell is drawn as the badge component, not plain
- * text; every other cell is text, right at home in a <dd>.
- * @param {ReturnType<typeof jobPanel>} v
- * @returns {FactCell[]}
- */
-export function jobFacts(v) {
-  return [
-    { key: "state", label: "State", value: v.badge.label, badge: v.badge },
-    { key: "step", label: "Step", value: v.step || "—", numeric: true },
-    { key: "origin", label: "Origin", value: v.origin || "—" },
-    {
-      key: "elapsed",
-      label: "Running for",
-      value: v.elapsed || "—",
-      numeric: true,
-    },
-    {
-      key: "remaining",
-      label: "Expected remaining",
-      value: v.finished ? "finished" : v.remaining || "—",
-      numeric: true,
-      late: v.late,
-    },
-  ];
-}
-
-/**
  * redesign-final-c2 (FLOWS.md §1.2): the running-job drawer's step list
  * (ui.js `checkList` rows) — the steps before the current one ticked, the
  * current one running (failed when the job failed, the rest then
@@ -629,3 +594,94 @@ export function logLine(l, opts = {}) {
  * @param {{locale?: string, timeZone?: string}} [opts]
  */
 export const queuedText = (j, opts) => formatDateTime(j.queued_at, opts);
+
+/** A job that waited less than this many seconds shows no waiting band. */
+export const WAIT_BAND_MIN_S = 8;
+
+/** How long a job waited before it started (a queued job: so far). @param {Job} j @param {number} now */
+export const waitedS = (j, now) =>
+  Math.max(0, (j.started_at ?? now) - j.queued_at);
+
+/**
+ * The jobs as the Jobs timeline draws them (kp gantt, epoch ms): a lane per
+ * stack that had a job in the last 24 hours (or has one open), a bar from
+ * the start to the end of each job, a queued job as a ghost bar from the
+ * moment it was queued, and the time a job waited as a thin band before its
+ * bar.
+ * @param {Job[]} jobs
+ * @param {(action: string) => string} label
+ * @param {number} now unix seconds
+ * @param {number} from unix seconds: waiting bands that begin before this
+ *   would start left of the plot and are left out
+ */
+export function jobTimeline(jobs, label, now, from) {
+  const recent = jobs.filter(
+    (j) => !finished(j.state) || (j.finished_at ?? j.queued_at) >= now - 86400,
+  );
+  const name = (/** @type {Job} */ j) =>
+    j.stack === "_host" ? "host" : j.stack;
+  const lanes = [...new Set(recent.map(name))]
+    .sort()
+    .map((id) => ({ id, label: id }));
+  /** @param {Job} j @returns {"queued" | "running" | "ok" | "failed"} */
+  const stateOf = (j) =>
+    j.state === "queued" || j.state === "running"
+      ? j.state
+      : j.state === "done" || j.state === "deferred"
+        ? "ok"
+        : "failed";
+  const runs = recent.map((j) => {
+    const waited = waitedS(j, now);
+    return {
+      id: `job-${j.job}`,
+      lane: name(j),
+      label: `${label(j.action)} · ${name(j)}`,
+      start:
+        (j.state === "queued" ? j.queued_at : (j.started_at ?? j.queued_at)) *
+        1000,
+      ...(finished(j.state) && j.finished_at != null
+        ? { end: j.finished_at * 1000 }
+        : {}),
+      state: stateOf(j),
+      detail: `Job #${j.job}, ${originText(j.origin)}. ${
+        j.state === "queued"
+          ? `Waiting since ${formatDateTime(j.queued_at)}.`
+          : `Waited ${humanDuration(waited)} before it started.`
+      }${j.message ? ` ${j.message}` : ""}`,
+    };
+  });
+  const zones = recent
+    .filter(
+      (j) =>
+        j.started_at != null &&
+        waitedS(j, now) >= WAIT_BAND_MIN_S &&
+        j.queued_at >= from,
+    )
+    .map((j) => ({
+      id: `wait-${j.job}`,
+      lane: name(j),
+      from: j.queued_at * 1000,
+      to: /** @type {number} */ (j.started_at) * 1000,
+      label: `waited ${humanDuration(waitedS(j, now))}`,
+      tone: /** @type {const} */ ("muted"),
+    }));
+  return { lanes, runs, zones };
+}
+
+/**
+ * The three figures under the Jobs timeline: the jobs in the view, how many
+ * wait or run now, and the longest wait in the view.
+ * @param {Job[]} jobs
+ * @param {number} now unix seconds
+ * @param {{from: number, to: number}} view unix seconds
+ */
+export function jobFigures(jobs, now, view) {
+  const inView = jobs.filter(
+    (j) => (j.finished_at ?? Infinity) >= view.from && j.queued_at <= view.to,
+  );
+  return {
+    inView: inView.length,
+    live: jobs.filter((j) => !finished(j.state)).length,
+    longestWaitS: inView.reduce((m, j) => Math.max(m, waitedS(j, now)), 0),
+  };
+}

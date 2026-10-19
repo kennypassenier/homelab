@@ -30,7 +30,6 @@ import {
   applyOutcome,
   applyProgress,
   batchView,
-  jobFacts,
   jobPanel,
   jobRows,
   jobsAwaitingOutcome,
@@ -535,41 +534,6 @@ test("the end of a job says what came of it", () => {
   );
   assert.equal(outcome(job({ state: "deferred" }))?.tone, "info");
   assert.equal(outcome(job()), null);
-});
-
-// feat-jobpanel-1 (Kenny, 2026-10-02): the panel's facts grid never shows
-// an empty cell — every state (queued, running, done, failed, paused-ish
-// via "unknown") gives State, Step, Origin, Running for and Expected
-// remaining a real value, so the grid's cells never collapse or reflow as
-// a job moves between states.
-test("feat_jobpanel_1_every_fact_cell_is_non_empty_in_every_state", () => {
-  const ctx = {
-    label: (/** @type {string} */ a) => a,
-    progressAt: 1100,
-    now: 1130,
-  };
-  const states = [
-    job({ state: "queued", started_at: null, progress: null }),
-    job({ state: "running", progress: prog() }),
-    job({ state: "running", progress: null }),
-    job({ state: "done", finished_at: 1210, progress: prog() }),
-    job({ state: "failed", finished_at: 1210, progress: prog() }),
-    job({ state: "unknown", progress: null }),
-  ];
-  for (const j of states) {
-    const cells = jobFacts(jobPanel(j, ctx));
-    assert.equal(cells.length, 5);
-    for (const c of cells)
-      assert.ok(
-        c.value && c.value.length > 0,
-        `${j.state}'s "${c.label}" cell must not be empty`,
-      );
-  }
-  // The State cell carries the badge to draw, not just its label text.
-  const stateCell = jobFacts(jobPanel(job({ state: "failed" }), ctx)).find(
-    (c) => c.key === "state",
-  );
-  assert.equal(stateCell?.badge?.label, "failed");
 });
 
 test("jobs merge newest first, progress survives a later job view", () => {

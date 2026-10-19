@@ -338,7 +338,7 @@ function openJobDrawer(jobId, count, navigate) {
   // redesign-final-c2 (FLOWS.md §1.2): the drawer is named after its job
   // and lists the job's steps above the log tail; the panel lays out in
   // one column at the drawer's own width (app.css `.job-panel` container).
-  const panel = mountJobPanel(jobId, { compact: true, steps: true });
+  const panel = mountJobPanel(jobId, { compact: true });
   const j = act.jobs.find((x) => x.job === jobId);
   const named = j
     ? `${actionLabel(j.action)} · ${j.stack === "_host" ? "the whole host" : j.stack}`

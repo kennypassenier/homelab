@@ -214,37 +214,69 @@ export const feedRows = (entries, ctx) =>
     .sort((a, b) => b.start - a.start);
 
 /**
- * Whether a row passes the feed's filter: a time range from the timeline,
- * any of the "Show" chips, and the search text.
+ * Whether a row lies inside the range picked on the timeline (no range:
+ * every row does).
  * @param {FeedRow} r
- * @param {FeedFilter} f
+ * @param {{from: number, to: number} | null} range
  */
-export function rowMatches(r, f) {
-  if (f.range && (r.start < f.range.from || r.start > f.range.to)) return false;
-  if (f.show.size) {
-    const any =
-      (f.show.has("failed") && r.state === "failed") ||
-      (f.show.has("nightly") && r.actor.kind === "nightly") ||
-      (f.show.has("claude") && r.actor.kind === "claude");
-    if (!any) return false;
-  }
-  const q = f.q.trim().toLowerCase();
-  if (q && !q.split(/\s+/).every((w) => r.search.includes(w))) return false;
-  return true;
-}
+export const inRange = (r, range) =>
+  !range || (r.start >= range.from && r.start <= range.to);
+
+/** The words of the History's Outcome column, by row state. */
+const OUTCOME = /** @type {Record<string, string>} */ ({
+  ok: "Done",
+  failed: "Failed",
+  running: "Running",
+  deferred: "Deferred",
+  round: "Round",
+});
 
 /**
- * The Show switch's exact counts (the demo's "All 129 · Failed 3"): the
- * rows the days and the search let through, and how many of them failed.
- * @param {FeedRow[]} rows
- * @param {FeedFilter} f
+ * A row's Outcome in a word.
+ * @param {FeedRow} r
  */
-export function showCounts(rows, f) {
-  const base = rows.filter((r) => rowMatches(r, { ...f, show: new Set() }));
-  return {
-    all: base.length,
-    failed: base.filter((r) => r.state === "failed").length,
-  };
+export const outcomeWord = (r) => OUTCOME[r.state] ?? r.state;
+
+/**
+ * The state badge tone of a row's Outcome (kp badge modifiers).
+ * @param {FeedRow} r
+ * @returns {"success" | "destructive" | "info" | "warning"}
+ */
+export const outcomeTone = (r) =>
+  r.state === "failed"
+    ? "destructive"
+    : r.state === "running" || r.state === "round"
+      ? "info"
+      : r.state === "deferred"
+        ? "warning"
+        : "success";
+
+/**
+ * What the History's Stack column says: the stack, "host" for an operation
+ * about the host, "all stacks" for a nightly round.
+ * @param {FeedRow} r
+ */
+export const stackWord = (r) =>
+  r.stack ?? (r.entry.kind === "phase" ? "all stacks" : "host");
+
+/**
+ * An old address's `?show=` (Failed, Nightly, By Claude) as the table
+ * filters it now: the Outcome column's words, or the By column's actors.
+ * @param {FeedRow[]} rows
+ * @param {Set<string>} show
+ * @returns {{outcome: string[], by: string[]}}
+ */
+export function showFilters(rows, show) {
+  /** @type {Set<string>} */
+  const outcome = new Set();
+  /** @type {Set<string>} */
+  const by = new Set();
+  if (show.has("failed")) outcome.add(OUTCOME.failed);
+  for (const r of rows) {
+    if (show.has("nightly") && r.actor.kind === "nightly") by.add(r.actor.text);
+    if (show.has("claude") && r.actor.kind === "claude") by.add(r.actor.text);
+  }
+  return { outcome: [...outcome], by: [...by] };
 }
 
 /**
@@ -268,7 +300,7 @@ export const plainError = (e) =>
   e == null ? null : e.replace(/\s*::\s*incident bundle \S+/g, "").trim() || e;
 
 /**
- * "Today · 03/10/2026", "Yesterday · 02/10/2026", "01/10/2026".
+ * "Today, 03/10/2026", "Yesterday, 02/10/2026", "01/10/2026".
  * @param {number} day a dayStart
  * @param {number} now
  * @param {{locale?: string, timeZone?: string}} [opts]
@@ -276,8 +308,8 @@ export const plainError = (e) =>
 export function dayLabel(day, now, opts = {}) {
   const words = formatDay(day, opts);
   const today = dayStart(now);
-  if (day === today) return `Today · ${words}`;
-  if (day === dayStart(today - 43200)) return `Yesterday · ${words}`;
+  if (day === today) return `Today, ${words}`;
+  if (day === dayStart(today - 43200)) return `Yesterday, ${words}`;
   return words;
 }
 
@@ -551,4 +583,147 @@ export const filterToParams = (f) => ({
 export function windowDays(p) {
   const d = Number(p.get("days"));
   return /** @type {readonly number[]} */ (WINDOWS).includes(d) ? d : 14;
+}
+
+/**
+ * @typedef {{id: string, lane: "ops" | "nightly", label: string,
+ *   start: number, end?: number, state: "ok" | "failed" | "running",
+ *   detail: string, series: 1 | 2 | 3}} TimelineRun
+ * @typedef {{id: string, lane: "ops" | "nightly", at: number,
+ *   kind: "failed", label: string, detail: string}} TimelinePoint
+ */
+
+/** The timeline's two lanes (kp gantt lanes). */
+export const TIMELINE_LANES = [
+  { id: "ops", label: "By hand", sub: "what you pressed" },
+  { id: "nightly", label: "Scheduled", sub: "backups, updates" },
+];
+
+/**
+ * The timeline's bars and failure marks (kp gantt, epoch ms): the nightly
+ * round is one bar, the operations it ran are inside it; a schedule's
+ * operations of one day and kind are one bar too; everything a person (or
+ * Claude) pressed is a bar of its own. A failed operation also gets a mark
+ * in its lane, so a failure stays visible when its bar is a hair wide.
+ * @param {FeedRow[]} rows newest first
+ * @param {{from: number, now: number}} x unix seconds
+ * @returns {{runs: TimelineRun[], points: TimelinePoint[],
+ *   rounds: Map<string, FeedRow[]>}}
+ */
+export function timelineModel(rows, x) {
+  const phases = rows.filter((r) => r.entry.kind === "phase");
+  /** @param {FeedRow} r */
+  const inPhase = (r) =>
+    phases.some(
+      (p) =>
+        r.start >= p.start &&
+        r.start <= (p.entry.end > 0 ? p.entry.end : p.start + 6 * 3600),
+    );
+  /** @type {TimelineRun[]} */
+  const runs = [];
+  /** @type {TimelinePoint[]} */
+  const points = [];
+  /** @type {Map<string, FeedRow[]>} */
+  const rounds = new Map();
+  /** @param {FeedRow} r @returns {"ok" | "failed" | "running"} */
+  const stateOf = (r) =>
+    r.state === "failed" ? "failed" : r.took == null ? "running" : "ok";
+  for (const r of rows) {
+    if (r.start < x.from) continue;
+    const phase = r.entry.kind === "phase";
+    const scheduled = r.actor.kind === "schedule" || r.actor.kind === "nightly";
+    /** @type {"ops" | "nightly"} */
+    const lane = phase || scheduled ? "nightly" : "ops";
+    if (!phase && r.actor.kind === "nightly" && inPhase(r)) {
+      // Drawn inside the round's bar; only a failure shows on its own.
+    } else if (!phase && r.actor.kind === "schedule") {
+      const id = `round-${dayStart(r.start)}-${r.verb}`;
+      rounds.set(id, [...(rounds.get(id) ?? []), r]);
+    } else {
+      const state = stateOf(r);
+      runs.push({
+        id: r.key,
+        lane,
+        label: r.what,
+        start: r.start * 1000,
+        ...(state === "running"
+          ? {}
+          : { end: (r.start + (r.took ?? 0)) * 1000 }),
+        state,
+        detail: `${r.actor.text}${r.error ? `. ${r.error}` : ""}`,
+        series: phase ? 1 : scheduled ? 1 : 3,
+      });
+    }
+    if (!phase && r.state === "failed")
+      points.push({
+        id: r.key,
+        lane,
+        at: (r.start + (r.took ?? 0)) * 1000,
+        kind: "failed",
+        label: `${r.stack ?? r.what}: ${r.verb} failed`,
+        detail: r.error ?? "",
+      });
+  }
+  for (const [id, list] of rounds) {
+    const failed = list.filter((r) => r.state === "failed");
+    const first = list[list.length - 1];
+    const last = list.reduce((m, r) => Math.max(m, r.start + (r.took ?? 0)), 0);
+    const running = list.some((r) => r.took == null);
+    runs.push({
+      id,
+      lane: "nightly",
+      label: `Scheduled ${first.verb.toLowerCase()} · ${list.length} ${list.length === 1 ? "operation" : "operations"}`,
+      start: first.start * 1000,
+      ...(running ? {} : { end: last * 1000 }),
+      state: failed.length ? "failed" : running ? "running" : "ok",
+      detail: failed.length
+        ? `${failed.length} failed: ${failed.map((r) => r.stack ?? r.what).join(", ")}`
+        : "all fine",
+      series: 2,
+    });
+  }
+  return { runs, points, rounds };
+}
+
+/**
+ * The stack-by-day grid: one cell per stack and day that says how many
+ * operations ran and how many failed (a stack that was not touched has no
+ * cell), and the fleet's share of failed stacks per day.
+ * @param {FeedRow[]} rows
+ * @param {{stacks: string[], days: number, now: number}} x
+ */
+export function heatModel(rows, x) {
+  const today = dayStart(x.now);
+  const columns = Array.from({ length: x.days }, (_, i) => {
+    const day = dayStart(today - (x.days - 1 - i) * 86400 + 43200);
+    return { day, key: String(day) };
+  });
+  const keys = new Set(columns.map((c) => c.key));
+  /** @type {Map<string, {n: number, f: number, kinds: Set<string>}>} */
+  const cells = new Map();
+  for (const r of rows) {
+    if (r.entry.kind !== "op" || !r.stack) continue;
+    const day = String(dayStart(r.start));
+    if (!keys.has(day)) continue;
+    const k = `${r.stack}|${day}`;
+    const c = cells.get(k) ?? { n: 0, f: 0, kinds: new Set() };
+    c.n += 1;
+    if (r.state === "failed") {
+      c.f += 1;
+      c.kinds.add(r.verb);
+    }
+    cells.set(k, c);
+  }
+  return {
+    columns,
+    cells,
+    /** @param {string} stack @param {string} day */
+    cell: (stack, day) => cells.get(`${stack}|${day}`) ?? null,
+    /** @param {string} day */
+    fleet: (day) => {
+      const ran = x.stacks.filter((s) => cells.has(`${s}|${day}`));
+      const bad = ran.filter((s) => (cells.get(`${s}|${day}`)?.f ?? 0) > 0);
+      return { ran: ran.length, bad: bad.length };
+    },
+  };
 }

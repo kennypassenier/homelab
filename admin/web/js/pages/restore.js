@@ -436,7 +436,6 @@ export function mount(root, ctx) {
     err.replaceChildren();
     const panel = mountJobPanel(/** @type {number} */ (r.body.job), {
       compact: true,
-      steps: true,
     });
     stopJob = panel.stop;
     runCard.el.hidden = false;

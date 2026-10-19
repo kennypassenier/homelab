@@ -3,6 +3,25 @@
   "schema": 1,
   "controls": [
     {
+      "id": "activity-add-filter",
+      "page": "activity",
+      "what": "add a History filter: stack, operation, by or outcome",
+      "opens": "view",
+      "row": null,
+      "href": "/activity",
+      "was": [
+        {
+          "id": "activity-show"
+        },
+        {
+          "id": "activity-show-more"
+        }
+      ],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
       "id": "activity-all-jobs",
       "page": "activity",
       "what": "unfold Every job: the last 200 jobs of this dashboard",
@@ -59,12 +78,24 @@
     {
       "id": "activity-clear-filters",
       "page": "activity",
-      "what": "clear every History filter",
+      "what": "clear the History's search and filters",
       "opens": "view",
       "row": null,
       "href": "/activity",
       "was": [],
-      "shows": "when the filters match no row",
+      "shows": "when the search and filters match no row",
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "activity-day",
+      "page": "activity",
+      "what": "fold or unfold one day of History",
+      "opens": "view",
+      "row": "<day>",
+      "href": "/activity",
+      "was": [],
+      "shows": null,
       "reach": [],
       "twins": false
     },
@@ -81,6 +112,75 @@
       "twins": false
     },
     {
+      "id": "activity-filter-remove",
+      "page": "activity",
+      "what": "drop one pick made on the timeline or the grid",
+      "opens": "view",
+      "row": "<range|day|stack:name>",
+      "href": "/activity",
+      "was": [
+        {
+          "id": "activity-show-every-day"
+        }
+      ],
+      "shows": "while a range, a day or a stack narrows History",
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "activity-filters-clear",
+      "page": "activity",
+      "what": "drop every pick made on the timeline and the grid",
+      "opens": "view",
+      "row": null,
+      "href": "/activity",
+      "was": [],
+      "shows": "while a range, a day or a stack narrows History",
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "activity-heat-day",
+      "page": "activity",
+      "what": "pick a day in the stack-by-day grid: History narrows to it",
+      "opens": "view",
+      "row": "<day>",
+      "href": "/activity",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": true
+    },
+    {
+      "id": "activity-heat-stack",
+      "page": "activity",
+      "what": "pick a stack in the stack-by-day grid: History narrows to it",
+      "opens": "view",
+      "row": "<stack>",
+      "href": "/activity",
+      "was": [],
+      "shows": null,
+      "reach": [],
+      "twins": false
+    },
+    {
+      "id": "activity-job-bar",
+      "page": "activity",
+      "what": "open a job from the Jobs timeline, live, in a dialog",
+      "opens": "dialog",
+      "row": "<job>",
+      "href": "/activity",
+      "was": [],
+      "shows": "in the unfolded Every job, once a job ran",
+      "reach": [
+        {
+          "do": "click",
+          "control": "activity-every-job"
+        }
+      ],
+      "twins": true
+    },
+    {
       "id": "activity-job-row",
       "page": "activity",
       "what": "open one job of Every job, live, in a dialog",
@@ -89,6 +189,40 @@
       "href": "/activity",
       "was": [],
       "shows": "in the unfolded Every job, once a job ran",
+      "reach": [
+        {
+          "do": "click",
+          "control": "activity-every-job"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "activity-jobs-filter-remove",
+      "page": "activity",
+      "what": "drop the range picked on the Jobs timeline",
+      "opens": "view",
+      "row": "range",
+      "href": "/activity",
+      "was": [],
+      "shows": "while a range narrows Every job",
+      "reach": [
+        {
+          "do": "click",
+          "control": "activity-every-job"
+        }
+      ],
+      "twins": false
+    },
+    {
+      "id": "activity-jobs-filters-clear",
+      "page": "activity",
+      "what": "drop every pick made on the Jobs timeline",
+      "opens": "view",
+      "row": null,
+      "href": "/activity",
+      "was": [],
+      "shows": "while a range narrows Every job",
       "reach": [
         {
           "do": "click",
@@ -194,30 +328,6 @@
       "twins": false
     },
     {
-      "id": "activity-show",
-      "page": "activity",
-      "what": "show All of History, or only Failed, Nightly or By Claude",
-      "opens": "view",
-      "row": "all|failed|nightly|claude",
-      "href": "/activity",
-      "was": [],
-      "shows": null,
-      "reach": [],
-      "twins": false
-    },
-    {
-      "id": "activity-show-every-day",
-      "page": "activity",
-      "what": "drop the days picked on the timeline",
-      "opens": "view",
-      "row": null,
-      "href": "/activity",
-      "was": [],
-      "shows": "while days picked on the timeline narrow History",
-      "reach": [],
-      "twins": false
-    },
-    {
       "id": "activity-show-log",
       "page": "activity",
       "what": "open the log of the job an operation in History ran as",
@@ -236,18 +346,6 @@
       "twins": false
     },
     {
-      "id": "activity-show-more",
-      "page": "activity",
-      "what": "draw the next 50 older History rows",
-      "opens": "view",
-      "row": null,
-      "href": "/activity",
-      "was": [],
-      "shows": null,
-      "reach": [],
-      "twins": false
-    },
-    {
       "id": "activity-stack-link",
       "page": "activity",
       "what": "go to the stack an operation or a job was about",
@@ -262,14 +360,14 @@
     {
       "id": "activity-timeline-mark",
       "page": "activity",
-      "what": "open a timeline mark's operation in History",
+      "what": "open a timeline bar's operation in History",
       "opens": "view",
       "row": "<row key>",
       "href": "/activity",
       "was": [],
       "shows": null,
       "reach": [],
-      "twins": false
+      "twins": true
     },
     {
       "id": "activity-update-again",

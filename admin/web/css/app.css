@@ -1288,21 +1288,12 @@ td.stack-flags {
 .kp-datatable__bar.kp-datatable__sort-line {
   padding-block: 0 0.125rem;
 }
-/* kp's failed slot and empty box inside the table's frame; the failed
-   slot's reason is three lines (what, why, what to do: tablestate.js
-   failReason). */
-.kp-datatable > [data-kp-datatable-failed] {
-  margin: var(--kp-space-sm, 0.5rem) var(--kp-space-md, 0.75rem);
-}
+/* The failed slot and the empty box are the package's own state plates
+   (js/datatable.js), filling the table's footprint: nothing of the page's is
+   laid over them. The failed slot's reason keeps its line breaks (what, why,
+   what to do: tablestate.js failReason). */
 [data-kp-datatable-failed-reason] {
-  margin: 0;
   white-space: pre-line;
-}
-.kp-datatable > .kp-empty {
-  margin: var(--kp-space-sm, 0.5rem) var(--kp-space-md, 0.75rem);
-}
-.kp-datatable > .kp-empty p {
-  margin: 0 0 6px;
 }
 /* The busy overlay is kp-themes' own (`data-kp-busy-overlay`, dom.js
    tableBlock; in a narrow table its panel lies flat since 9.2.0).
@@ -1991,32 +1982,6 @@ td.stack-flags {
   );
 }
 
-/* fix-230 (Kenny, 2026-10-02): kp's failed slot — "Could not read the
-   capacity map…" with its Try again — is a flex row, and at 390 px the
-   reason's long words pushed the button past the box's right edge. One
-   grid instead: the reason takes the room (and may break anywhere), Try
-   again sits beside it on a wide screen and under it on a phone, inside
-   the box in every width. The standard error box (`dom.js` errorBox) gets
-   the same one-column grid. */
-.kp-datatable > [data-kp-datatable-failed]:not([hidden]) {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  column-gap: var(--kp-space-md, 0.75rem);
-  row-gap: var(--kp-space-sm, 0.5rem);
-}
-.kp-datatable > [data-kp-datatable-failed] [data-kp-datatable-failed-reason] {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-@media (max-width: 40rem) {
-  .kp-datatable > [data-kp-datatable-failed]:not([hidden]) {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .kp-datatable > [data-kp-datatable-failed] [data-kp-datatable-retry] {
-    justify-self: start;
-  }
-}
 .kp-alert.error {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -2256,6 +2221,15 @@ td.stack-flags {
    extra is needed here for that. */
 .nx-head .kp-page-header__actions:empty {
   display: none;
+}
+.nx-head .kp-page-header__inner {
+  align-items: start;
+}
+/* The actions stand on the title's line: a box as high as the title's line,
+   its buttons on its centre, so the first lines of both columns coincide. */
+.nx-head .kp-page-header__actions {
+  align-items: center;
+  min-block-size: calc(min(var(--kp-text-display, 2.25rem), 2.25rem) * 1.1);
 }
 .nx-head .kp-page-header__inner:has(> .kp-page-header__actions:empty) {
   grid-template-columns: minmax(0, 1fr);
@@ -2871,8 +2845,10 @@ details.nx-card--fold[open] > summary::before {
   gap: var(--kp-space-md, 0.75rem);
   font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
-  border-block-start: 1px solid var(--border);
-  padding-block-start: var(--kp-space-sm, 0.5rem);
+  /* The rule above the line is a shadow, not a border: the line's words
+     stand on the card's own ground and share its content edge. */
+  box-shadow: inset 0 1px 0 var(--border);
+  padding-block-start: calc(var(--kp-space-sm, 0.5rem) + 1px);
 }
 .nx-card__foot[hidden] {
   display: none;
@@ -3112,7 +3088,7 @@ th[aria-sort="descending"] .nx-sort__mark {
   align-items: center;
   gap: var(--kp-space-md);
   padding: var(--kp-space-sm) var(--kp-space-lg);
-  border-block-start-color: var(--nx-line);
+  box-shadow: inset 0 1px 0 var(--nx-line);
 }
 @media (max-width: 48rem) {
   .nx-ops .nx-card__head {

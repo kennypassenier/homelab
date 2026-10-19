@@ -59,3 +59,29 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* The toolbar on one row: the search, then the two filters side by side, each
+   a label and its control; the count stands under the search. Two filters
+   stacked would make rows of different item counts that cannot share edges. */
+.ps-tb,
+.ps-tb:not(:has(> .kp-toolbar__search)) {
+  grid-template-columns: minmax(12rem, 1fr) auto;
+  align-items: center;
+}
+.ps-tb .kp-toolbar__filters {
+  flex-wrap: nowrap;
+}
+.ps-tb > .kp-toolbar__state {
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: start;
+}
+@media (max-width: 48rem) {
+  .ps-tb,
+  .ps-tb:not(:has(> .kp-toolbar__search)) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ps-tb > .kp-toolbar__state {
+    grid-row: auto;
+  }
+}

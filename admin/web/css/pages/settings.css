@@ -19,6 +19,7 @@
 }
 .st-main {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--cf-gap);
   min-inline-size: 0;
 }
@@ -26,6 +27,8 @@
   margin-block-start: 0;
 }
 .st-side {
+  /* the list's first line stands on the first card's title line */
+  padding-block-start: 1.0375rem;
   position: sticky;
   top: 72px;
   display: grid;
@@ -71,6 +74,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
   .st-side {
+    padding-block-start: 0;
     position: static;
     display: flex;
     overflow-x: auto;
@@ -99,15 +103,33 @@
   align-content: start;
   --kp-formgrid-label-min: 11rem;
   --kp-formgrid-label-max: 14rem;
-  /* Two tracks are enough here: the label, then the control, which runs to
-     the end of the row (the value and actions tracks stay empty). */
-  grid-template-columns:
-    [label-start] fit-content(var(--kp-formgrid-label-max))
-    [label-end control-start] minmax(0, 1fr)
-    [control-end value-start] 0
-    [value-end actions-start] 0
-    [actions-end];
-  align-items: start;
+}
+/* The refresh bar stands on the control, value and actions tracks of its row:
+   chooser under the fields' edge, the read line beside it, "Refresh now" in the
+   actions column (kp-gaps/homelab.md 52). */
+.st-working .kp-formgrid__control:has(> .kp-refresh) {
+  grid-template-columns: subgrid;
+  grid-template-rows: none;
+}
+.st-working .kp-refresh,
+.st-working .kp-refresh__bar {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  column-gap: inherit;
+}
+.st-working .kp-refresh__bar > .kp-refresh__chooser {
+  grid-column: 1;
+}
+.st-working .kp-refresh__bar > .kp-refresh__line {
+  grid-column: 2;
+}
+.st-working .kp-refresh__bar > .kp-refresh__now {
+  grid-column: 3;
+  justify-self: stretch;
+}
+.st-working .kp-refresh > :not(.kp-refresh__bar) {
+  grid-column: 1 / -1;
 }
 .st-wc__rows {
   display: contents;
@@ -133,6 +155,18 @@
   max-inline-size: 24rem;
 }
 
+@container kp-formgrid (max-width: 36rem) {
+  .st-working .kp-formgrid__control:has(> .kp-refresh),
+  .st-working .kp-refresh,
+  .st-working .kp-refresh__bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .st-working .kp-refresh__bar > * {
+    grid-column: 1;
+    justify-self: stretch;
+  }
+}
+
 /* ---------- This browser ---------- */
 .st-themes {
   display: flex;
@@ -147,6 +181,28 @@
 }
 .st-themes [data-kp-theme] .kp-swatch {
   align-self: center;
+}
+
+/* A row whose control is one action: on a phone it stays beside its label,
+   at the end of the label's line, instead of dropping under it. */
+.st-themes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+}
+.st-themes > li > [data-kp-theme] {
+  inline-size: 100%;
+}
+@container kp-formgrid (max-width: 36rem) {
+  .st-lines .st-actionrow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .st-lines .st-actionrow > .kp-formrow__label {
+    grid-column: 1;
+  }
+  .st-lines .st-actionrow > .kp-formrow__control {
+    grid-column: 2;
+    grid-row: 1;
+  }
 }
 
 /* ---------- sign-in ---------- */
@@ -247,6 +303,68 @@ details.st-grp[hidden] {
   --kp-formgrid-control: 5fr;
   --kp-formgrid-value: 3fr;
 }
+/* Rows on first-line alignment (the host's keys, this browser, the working
+   copy, the tokens): a label block of name, key, badge and sentence is taller
+   than the one-line control, so every cell of a row stretches to the row's
+   height and starts its first line on the centre line of a one-line control.
+   The label's first line, the field and the value then stand on one line and
+   the row reads as one. */
+:is(.st-keylist, .st-lines, .st-working) {
+  align-items: stretch;
+  --st-first-line: 2.75rem; /* the stepper, the tallest one-line control */
+}
+:is(.st-keylist, .st-lines, .st-working) :is(.kp-formrow, .kp-formgrid__row) {
+  align-items: stretch;
+}
+.st-lines,
+.st-working {
+  --st-first-line: 2.375rem; /* the theme buttons, the tallest one here */
+}
+:is(.st-keylist, .st-lines, .st-working)
+  :is(
+    .kp-formrow__label,
+    .kp-formgrid__label,
+    .kp-formrow__aside,
+    .kp-formgrid__value
+  ) {
+  align-content: start;
+  padding-block-start: calc((var(--st-first-line) - 1lh) / 2);
+}
+:is(.st-keylist, .st-lines, .st-working)
+  :is(.kp-formrow__control, .kp-formgrid__control) {
+  align-content: start;
+  grid-template-rows: minmax(var(--st-first-line), auto);
+}
+:is(.st-keylist, .st-lines, .st-working)
+  :is(.kp-formrow__control, .kp-formgrid__control)
+  > :first-child {
+  align-self: center;
+}
+/* A row's action stays one button high, on the first line. */
+:is(.st-keylist, .st-lines, .st-working) .kp-formgrid__actions {
+  align-self: start;
+  align-items: center;
+  min-block-size: var(--st-first-line);
+}
+/* A control that is itself a line of words and chips: one line high, centred. */
+.st-working :is(.st-versions, .st-wc__at, .st-wc__chips, .st-wc__remote) {
+  display: flex;
+  align-items: center;
+  min-block-size: var(--st-first-line);
+}
+/* One end edge for every short control: the stepper keeps the package's one
+   fixed step however long its unit is. */
+:is(.st-keylist, .st-lines) .kp-formrow__control > .kp-quantity {
+  min-inline-size: 0;
+}
+/* A tall field (a TOML editor) is read by its first control-height band: that
+   band stands on the label's first line. */
+:is(.st-keylist, .st-lines) .kp-formrow__control > textarea {
+  align-self: start;
+  margin-block-start: calc(
+    (var(--st-first-line) - var(--kp-control-height, 2.25rem)) / 2
+  );
+}
 .st-keylist .kp-formrow__aside {
   overflow-wrap: anywhere;
 }
@@ -308,4 +426,28 @@ details.st-grp[hidden] {
     [value-end actions-start] auto
     [actions-end];
   --kp-formgrid-label-min: 0;
+}
+
+/* A phone: a card's tools (the filter, the fold button) fill the card's width,
+   one under the other, and the filter's three choices share it in equal tracks
+   instead of pushing the card wider than the screen. */
+@media (max-width: 40rem) {
+  .st-main .kp-card__actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    inline-size: 100%;
+  }
+  .st-main .kp-card__actions .kp-segmented {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    max-inline-size: 100%;
+  }
+  .st-main .kp-card__actions .kp-segmented__item {
+    white-space: normal;
+    text-align: center;
+  }
+  .st-main .kp-card__actions > .kp-button {
+    justify-self: stretch;
+  }
 }

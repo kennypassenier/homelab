@@ -90,8 +90,8 @@ export function rememberedKeys() {
 /**
  * @param {string} name @param {string} what @param {string} control
  */
-const row = (name, what, control) =>
-  `<div class="kp-formrow kp-formrow--wide"><div class="kp-formrow__label">${esc(name)}<small>${esc(what)}</small></div><div class="kp-formrow__control">${control}</div></div>`;
+const row = (name, what, control, cls = "") =>
+  `<div class="kp-formrow kp-formrow--wide${cls ? ` ${cls}` : ""}"><div class="kp-formrow__label">${esc(name)}<small>${esc(what)}</small></div><div class="kp-formrow__control">${control}</div></div>`;
 
 /** @param {boolean} dark */
 const themes = (dark) =>
@@ -111,7 +111,7 @@ export function mountThisBrowser(body) {
     /** @type {string} */ word,
   ) =>
     `<label class="kp-switch"><input class="kp-switch__input" type="checkbox" role="switch" id="${id}"${on ? " checked" : ""} /><span>${word}</span></label>`;
-  body.innerHTML = `<div class="kp-formgrid" data-kp-formgrid-label="wide" data-kp-formgrid-lines="lines">${[
+  body.innerHTML = `<div class="kp-formgrid st-lines" data-kp-formgrid-label="wide" data-kp-formgrid-lines="lines">${[
     row(
       "Light theme",
       "The look of the dashboard on this device.",
@@ -133,15 +133,20 @@ export function mountThisBrowser(body) {
       "Uses the light theme by day and the dark one by night, as the system decides.",
       sw("st-follow", follow, follow ? "Following" : "Off"),
     ),
+  ].join(
+    "",
+  )}</div><div class="kp-formgrid st-lines" data-kp-formgrid-label="wide" data-kp-formgrid-lines="lines">${[
     row(
       "The tour",
       "The short walk over the dashboard.",
-      '<button type="button" class="kp-button" id="st-tour">Replay the tour</button>',
+      '<button type="button" class="kp-button" id="st-tour">Replay</button>',
+      "st-actionrow",
     ),
     row(
       "Remembered here",
       "Open groups, sort orders and folded sections this browser keeps.",
-      '<button type="button" class="kp-button kp-button--destructive" id="st-forget">Forget what this browser remembers</button>',
+      '<button type="button" class="kp-button kp-button--destructive" id="st-forget">Forget</button>',
+      "st-actionrow",
     ),
   ].join("")}</div>`;
   const stops = [

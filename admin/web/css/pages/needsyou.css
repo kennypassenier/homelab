@@ -60,15 +60,16 @@
 
 /* An update row names each app with its jump; a chip is one app. */
 .ib-apps {
-  display: flex;
-  flex-wrap: wrap;
+  /* One row per app on two shared tracks: the name, then its jump, so every
+     badge starts and ends on one edge. */
+  display: grid;
+  grid-template-columns: minmax(0, max-content) max-content;
+  justify-content: start;
   align-items: center;
   gap: var(--kp-space-xs, 0.25rem) var(--kp-space-md, 1rem);
 }
 .ib-app {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--kp-space-xs, 0.25rem);
+  display: contents;
 }
 .ib-app > b {
   font-weight: 600;

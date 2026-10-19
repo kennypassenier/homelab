@@ -334,7 +334,7 @@ export function mount(root, ctx) {
     ),
     h(
       "div",
-      { class: "mk-row" },
+      { class: "mk-row mk-row--refresh" },
       h("span", { class: "mk-label", id: "mk-refresh-label" }, "Refresh"),
       refreshEl,
       h(

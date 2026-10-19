@@ -332,26 +332,36 @@ dialog.kp-drawer.sk-drawer--plan {
   display: none;
 }
 .fl-ctl {
+  /* The control rows side by side on shared tracks: one equal column each,
+     the label over its control, every control as wide as its column, so the
+     segments of all three start and end on the same edges. */
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: var(--kp-space-sm, 0.5rem) var(--kp-space-md, 1rem);
-  align-items: center;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: var(--kp-space-sm, 0.5rem) var(--kp-space-lg, 1rem);
+  align-items: end;
 }
 .fl-ctl__row {
   display: grid;
-  grid-template-columns: subgrid;
-  grid-column: 1 / -1;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-xs, 0.25rem);
+  align-items: end;
 }
 .fl-ctl__row[hidden] {
   display: none;
 }
 .fl-ctl__label {
   font-weight: 600;
+  font-size: var(--kp-text-sm);
   white-space: nowrap;
 }
 .fl-ctl__control {
   min-inline-size: 0;
+}
+.fl-ctl__control > .kp-segmented {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  inline-size: 100%;
 }
 .fl-bar {
   margin: 0;

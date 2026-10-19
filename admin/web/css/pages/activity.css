@@ -41,9 +41,9 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px 16px;
   align-items: center;
-  padding-block-start: var(--kp-space-md, 12px);
+  padding-block-start: calc(var(--kp-space-md, 12px) + 1px);
   margin-block-start: var(--kp-space-md, 12px);
-  border-block-start: 1px solid var(--ac-line);
+  box-shadow: inset 0 1px 0 var(--ac-line);
   font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
 }
@@ -744,12 +744,9 @@
   min-inline-size: 0;
 }
 .con-chips {
-  display: inline-grid;
-  grid-auto-flow: column;
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--kp-space-xs, 0.25rem);
-}
-.con-tools .kp-formgrid__row--buttons .kp-formgrid__actions {
-  justify-self: start;
 }
 .con-read {
   color: var(--muted-foreground);

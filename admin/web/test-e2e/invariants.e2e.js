@@ -6123,7 +6123,7 @@ test("invariants: review-activity: a failed History reread keeps the rows and th
       viewport: { width: 1894, height: 1000 },
     });
     const page = await freshPage(context);
-    await page.clock.install();
+    await page.clock.install({ time: clockNow() });
     let reads = 0;
     await page.route("**/data/history*", (route) =>
       ++reads > 1 ? route.abort() : route.continue(),
@@ -6696,7 +6696,7 @@ test("invariants: review metrics — a pointer resting on a chart keeps that cha
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
-    await page.clock.install();
+    await page.clock.install({ time: clockNow() });
     await page.setViewportSize({ width: 1894, height: 1000 });
     await page.goto(`${BASE}/charts`);
     await page.waitForSelector("#chart-cpu .kp-chart__plot");

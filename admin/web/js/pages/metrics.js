@@ -1365,6 +1365,8 @@ export function mount(root, ctx) {
       detachers.push(attachDataTables(root));
       detachers.push(attachBarCells(root));
       ribbon.init();
+      // The Drives table waits in kp's own loading state until its read lands.
+      drivesView?.init();
     });
     return readAll;
 
@@ -1612,6 +1614,9 @@ export function mount(root, ctx) {
       let names = "";
       const handle = () => tableOf(wrap);
       return {
+        init() {
+          handle()?.state("loading");
+        },
         /** @param {string} why */
         notRead(why) {
           handle()?.fail(why);
@@ -2203,14 +2208,21 @@ export function mount(root, ctx) {
         });
 
       // Status mix: one bar over the exact total.
-      setStackbar(mixBar, {
-        title: "Status mix",
-        total: f.total,
-        summary: `${count(f.total)} requests`,
-        format: count,
-        label: "Status mix",
-        parts: statusParts(classes),
-      });
+      if (f.total === 0)
+        setStackbar(mixBar, {
+          state: "empty",
+          message: "No requests reached the gateway in this window.",
+          label: "Status mix",
+        });
+      else
+        setStackbar(mixBar, {
+          title: "Status mix",
+          total: f.total,
+          summary: `${count(f.total)} requests`,
+          format: count,
+          label: "Status mix",
+          parts: statusParts(classes),
+        });
       mixNote.textContent = f.top4xx
         ? `${f.top4xx.status} is the biggest 4xx (${f.top4xx.host}${f.top4xx.path}, ${count(f.top4xx.n)} times).`
         : b.errors?.error
@@ -2260,6 +2272,7 @@ export function mount(root, ctx) {
       else if (hostsP?.error || b.hosts?.error)
         setHeat(heatEl, {
           state: "error",
+          skeleton: { rows: 8, columns: 24 },
           message: `Loki did not answer: ${hostsP?.error ?? b.hosts?.error}`,
           label: "Requests per hostname per hour",
         });

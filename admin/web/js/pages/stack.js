@@ -1919,12 +1919,11 @@ function appsTab(panel, c) {
   ]);
   ths[0].setAttribute("data-kp-column-locked", "");
   ths[5].setAttribute("data-kp-column-hidden", "");
-  const stageEl = stage(block.wrap);
   const card = section({
     title: "Apps",
     desc: "The containers this stack runs, the version each is on, and whether a newer one exists; open one for its image, health and last log lines.",
   });
-  card.body.append(stageEl);
+  card.body.append(block.wrap);
   card.setFoot([
     "Versions from the stack's files; newer ones from the fleet check's last run.",
     link("/map", `${name}/apps/map`, "Every stale image in Map"),
@@ -1932,7 +1931,10 @@ function appsTab(panel, c) {
   panel.replaceChildren(card.el);
   const detachTables = attachDataTables(card.el);
   const detachCards = attachCardStates(panel);
-  setCardState(stageEl, "loading", { words: "Reading the apps" });
+  // The table is its own state: its busy card over the rows while the fleet
+  // is read, its failed plate when the host does not answer.
+  block.loading({ words: "Reading the apps", overlay: true });
+  block.wrap.addEventListener("kp-datatable-retry", () => retryStream());
   let drawnKey = "";
 
   /** @param {string} app */
@@ -1969,7 +1971,17 @@ function appsTab(panel, c) {
   });
 
   const paint = () => {
-    if (!S.fleetRead) return;
+    if (!S.fleetRead) {
+      if (current().up === false) {
+        drawnKey = "";
+        block.failed({
+          what: "the apps",
+          why: "the host did not answer",
+          fix: "Try again; the apps come as soon as it does.",
+        });
+      }
+      return;
+    }
     const rows = appRows({
       s: S.s,
       manifestApps: S.edit?.manifest?.apps ?? [],
@@ -1977,20 +1989,13 @@ function appsTab(panel, c) {
       stale: stale ?? [],
     });
     if (!rows.length) {
-      setCardState(stageEl, "empty", {
-        title: "This stack declares no apps",
-        text: "An app is added in Settings ▸ Files (Add an app), from a preset or by hand.",
-        action: linkButton(
-          `${stackHref(name, "settings")}?section=files`,
-          "Open the files",
-          "Settings ▸ Files",
-          `${name}/settings/files`,
-          "",
-        ),
-      });
+      block.setNothing(
+        "This stack declares no apps. Add one in Settings ▸ Files (Add an app), from a preset or by hand.",
+      );
+      block.tbody.replaceChildren();
+      block.ready();
       return;
     }
-    setCardState(stageEl, "ready");
     const sig = JSON.stringify([
       rows.map((r) => [
         r.name,

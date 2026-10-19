@@ -275,7 +275,7 @@ export function mount(root) {
     "section",
     {
       class: "kp-card sy-areascard",
-      "data-kp-state": "ready",
+      "data-kp-state": "loading",
       "aria-label": "Areas",
     },
     h(
@@ -285,6 +285,19 @@ export function mount(root) {
     ),
   );
   areas.body.append(areasCard);
+  /** Whether each area's last read failed; all of them failing is the card's failed plate. @type {Map<string, boolean>} */
+  const failedAreas = new Map();
+  // The Map area reads the store's stack list (the firewall count is a bonus), so it never fails with the network.
+  const READ_AREAS = AREAS.filter((a) => a.id !== "map");
+  const settleAreas = () => {
+    if (READ_AREAS.some((a) => !failedAreas.has(a.id))) return;
+    if (READ_AREAS.every((a) => failedAreas.get(a.id))) {
+      setCardState(areasCard, "error", {
+        title: "No area answered",
+        text: "None of the areas that read from the host answered, so there is nothing to show yet.",
+      });
+    } else setCardState(areasCard, "ready");
+  };
   const read = async (/** @type {(typeof AREAS)[number]} */ a) => {
     const list = /** @type {HTMLElement} */ (lists.get(a.id));
     setStatus(list, a.id, { state: "loading", detail: "reading…", fix: "" });
@@ -298,8 +311,12 @@ export function mount(root) {
         fix: "",
       });
       setAgo(/** @type {HTMLElement} */ (agos.get(a.id)), Date.now() / 1000);
+      failedAreas.set(a.id, x.state === "failed");
+      settleAreas();
     } catch (e) {
       if (abort.signal.aborted) return;
+      failedAreas.set(a.id, true);
+      settleAreas();
       setStatus(list, a.id, {
         label: a.title,
         state: "failed",
@@ -308,6 +325,11 @@ export function mount(root) {
       });
     }
   };
+  areasCard.addEventListener("kp-card-retry", () => {
+    failedAreas.clear();
+    setCardState(areasCard, "loading", { words: "Reading the areas…" });
+    for (const a of AREAS) void read(a);
+  });
   tiles.addEventListener(STATUS_RETRY_EVENT, (e) => {
     const id = /** @type {CustomEvent} */ (e).detail.id;
     const a = AREAS.find((x) => x.id === id);

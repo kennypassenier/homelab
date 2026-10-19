@@ -304,7 +304,7 @@ export function mount(root) {
             "A line that starts with one of these waits for a second Enter.",
           ),
         ],
-        wide: true,
+        span: "control-value",
       }),
       gridRow({
         label: "Screen",
@@ -333,7 +333,7 @@ export function mount(root) {
           h("span", { class: "kp-keys", "data-con-keys": "" }),
           toolRead,
         ],
-        wide: true,
+        span: "control-value",
       }),
     ],
     "con-tools",

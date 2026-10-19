@@ -134,6 +134,11 @@ main.mk-page > .mk-failed:empty {
   .mk-label {
     min-block-size: 0;
   }
+  .mk-row > .mk-aside,
+  .mk-row--refresh > .kp-refresh {
+    grid-column: 1;
+    grid-row: auto;
+  }
 }
 /* An option of the machine picker: its name first (what a tag reads), its
    colour mark before it, its detail after. */

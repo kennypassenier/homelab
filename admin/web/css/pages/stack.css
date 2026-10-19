@@ -107,7 +107,7 @@
   line-height: 1.6;
   font-variant-numeric: tabular-nums;
 }
-.sh-tabbar ~ .hk-keys {
+.sh-tabbar ~ .kp-keys {
   /* the shortcuts stand on their own line under the tabs, not squeezed
      beside them */
   margin: var(--kp-space-sm, 0.5rem) 0 var(--kp-space-md, 0.75rem);
@@ -116,7 +116,7 @@
   .sh-tabbar {
     grid-template-columns: minmax(0, 1fr);
   }
-  .sh-tabbar ~ .hk-keys {
+  .sh-tabbar ~ .kp-keys {
     display: none;
   }
 }
@@ -652,16 +652,6 @@
 }
 .hb-heat {
   --kp-heat-label: 9rem;
-}
-.hb-legend {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: max-content;
-  justify-content: start;
-  gap: var(--kp-space-xs, 0.25rem) var(--kp-space-lg, 1.5rem);
-  margin: 0;
-  padding: 0;
-  list-style: none;
 }
 .hb-readout {
   min-block-size: 2.25em;

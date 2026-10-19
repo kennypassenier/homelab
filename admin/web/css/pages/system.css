@@ -24,6 +24,16 @@
    the landing, each with a live line, in a grid of one height. */
 .sy-areascard {
   min-block-size: 14rem;
+  /* the tiles stand straight on the section: a card of tiles in a section
+     card is two frames and a lost column on a phone */
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+}
+.sy-areascard::before,
+.sy-areascard::after {
+  display: none;
 }
 .sy-tiles {
   list-style: none;
@@ -47,6 +57,10 @@
   color: var(--muted-foreground);
 }
 .sy-tile__foot {
+  /* the rule above the foot is a shadow: its words share the card's edge */
+  border-block-start: 0;
+  box-shadow: inset 0 1px 0 var(--border);
+  padding-block-start: calc(var(--kp-space-md, 0.75rem) + 1px);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;

@@ -284,12 +284,17 @@
   color: var(--muted-foreground);
 }
 .hl-opts {
+  /* every source row on the same four tracks: the box, its mark, its name and
+     its count, so the counts end on one edge */
   display: grid;
-  gap: 2px;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  column-gap: 8px;
+  row-gap: 2px;
 }
 .hl-opt {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   gap: 8px;
   align-items: center;
   padding: 5px 8px;
@@ -301,6 +306,7 @@
   background: color-mix(in oklab, var(--muted) 60%, transparent);
 }
 .hl-opt small {
+  text-align: end;
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
 }

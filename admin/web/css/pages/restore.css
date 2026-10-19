@@ -6,7 +6,8 @@
    gives the few parts the package has no class for their place. */
 
 .rs-page {
-  max-inline-size: min(72rem, 100%);
+  /* the page's own width (the shell's): the title, the crumbs and the card
+     share one left edge */
   display: grid;
   gap: var(--kp-space-lg, 1.5rem);
 }

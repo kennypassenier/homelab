@@ -2451,7 +2451,7 @@ function backupsTab(panel, c) {
             actionButton(c, nat ? "restore-native" : "restore", {
               label: "Restore…",
               title: `Bring ${r.app}'s data back from a snapshot`,
-              cls: "kp-button--sm",
+              // the card's own Restore… size, so the two stand as one column
               slot: "restore",
               preset: nat
                 ? r.newest?.short_id
@@ -2470,7 +2470,7 @@ function backupsTab(panel, c) {
               : actionButton(c, "verify-restore", {
                   label: "Verify…",
                   title: `Prove ${r.app}'s newest snapshot restores, without touching live data`,
-                  cls: "kp-button--sm kp-button--ghost",
+                  cls: "kp-button--ghost",
                   slot: "verify",
                   preset: { app: r.app },
                   drive: [BACKUP_ROW, `${name}/${r.app}/verify`],

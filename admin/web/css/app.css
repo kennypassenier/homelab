@@ -2227,9 +2227,32 @@ td.stack-flags {
 }
 /* The actions stand on the title's line: a box as high as the title's line,
    its buttons on its centre, so the first lines of both columns coincide. */
+.nx-head {
+  --nx-head-line: calc(min(var(--kp-text-display, 2.25rem), 2.25rem) * 1.1);
+}
+/* a section's own header (a smaller title) is one control high */
+.nx-head:has(h2.kp-page-header__title) {
+  --nx-head-line: 2.25rem;
+}
 .nx-head .kp-page-header__actions {
   align-items: center;
-  min-block-size: calc(min(var(--kp-text-display, 2.25rem), 2.25rem) * 1.1);
+  min-block-size: var(--nx-head-line);
+}
+.nx-head .title-row {
+  min-block-size: var(--nx-head-line);
+}
+/* On a phone the header's buttons are equal columns wide enough for their
+   words and counts (a badge in a button needs more than the package's 9rem),
+   one under the other when two do not fit. */
+@container kp-page-header (max-width: 40rem) {
+  .nx-head .kp-page-header__actions {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  }
+  /* the overflow menu's button is a column like the others */
+  .nx-head .kp-page-header__actions > .kp-menu-button {
+    justify-content: center;
+    justify-self: stretch;
+  }
 }
 .nx-head .kp-page-header__inner:has(> .kp-page-header__actions:empty) {
   grid-template-columns: minmax(0, 1fr);

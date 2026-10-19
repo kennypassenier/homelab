@@ -81,6 +81,27 @@
   .ps-tb:not(:has(> .kp-toolbar__search)) {
     grid-template-columns: minmax(0, 1fr);
   }
+  /* On a phone the two filters stand one under the other, each with its words
+     over its control, whole and in view: a line that scrolls sideways hid the
+     second one. */
+  .ps-tb .kp-toolbar__filters {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    overflow: visible;
+  }
+  .ps-tb .kp-toolbar__group,
+  .ps-tb .kp-toolbar__group + .kp-toolbar__group {
+    display: grid;
+    gap: var(--kp-space-xs, 0.25rem);
+    padding: 0;
+    border: 0;
+  }
+  .ps-tb .kp-toolbar__group > .kp-segmented {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    inline-size: 100%;
+  }
   .ps-tb > .kp-toolbar__state {
     grid-row: auto;
   }

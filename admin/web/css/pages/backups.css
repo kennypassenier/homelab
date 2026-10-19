@@ -342,10 +342,3 @@
   font-size: inherit;
   line-height: inherit;
 }
-
-/* A grid that loads is covered by the package's busy card over the whole
-   footprint (the card is otherwise only as tall as the skeleton's rows;
-   kp-gaps/homelab.md 80). */
-.bk-card .kp-heat > .kp-heat__busy {
-  min-block-size: calc(100% - var(--kp-busy-overlay-top, 0px));
-}

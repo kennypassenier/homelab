@@ -766,9 +766,3 @@
 .con-pane .kp-console__output {
   white-space: pre-wrap;
 }
-
-/* A grid that loads is covered by the package's busy card over the whole
-   footprint (kp-gaps/homelab.md 80). */
-.hl-grid > .kp-heat__busy {
-  min-block-size: calc(100% - var(--kp-busy-overlay-top, 0px));
-}

@@ -5,7 +5,8 @@
 /**
  * @typedef {{fleet: import("./fleet.js").Fleet | null, up: boolean | null,
  *   link: string, hostVersion: string | null, hostBuild: string | null,
- *   asks: import("./asks.js").Ask[]}} StoreState
+ *   asks: import("./asks.js").Ask[],
+ *   asksRead: "loading" | "ready" | "error"}} StoreState
  */
 
 /** @type {StoreState} */
@@ -16,6 +17,7 @@ const state = {
   hostVersion: null,
   hostBuild: null,
   asks: [],
+  asksRead: "loading",
 };
 /** @type {Set<() => void>} */
 const subs = new Set();
@@ -105,9 +107,14 @@ async function load() {
   }
   try {
     const body = await getJson("/data/asks");
-    if (body) state.asks = body.asks ?? [];
+    if (body) {
+      state.asks = body.asks ?? [];
+      state.asksRead = "ready";
+    }
   } catch {
-    // The questions come again with the next live event.
+    // The questions come again with the next live event; until then the
+    // Questions card says it could not read them.
+    if (state.asksRead === "loading") state.asksRead = "error";
   }
   emit();
 }
@@ -256,6 +263,7 @@ export function start() {
     });
     events.addEventListener("asks", (e) => {
       state.asks = JSON.parse(/** @type {MessageEvent} */ (e).data).asks ?? [];
+      state.asksRead = "ready";
       emit();
     });
     events.addEventListener("resync", () => void load());
@@ -275,11 +283,19 @@ export function start() {
   void load();
 }
 
+/** Read the fleet and the questions again (a card's Try again). */
+export function rereadStore() {
+  if (state.asksRead === "error") state.asksRead = "loading";
+  emit();
+  return load();
+}
+
 /**
  * Replace the open questions (after an answer, before the live event).
  * @param {import("./asks.js").Ask[]} asks
  */
 export function setAsks(asks) {
   state.asks = asks;
+  state.asksRead = "ready";
   emit();
 }

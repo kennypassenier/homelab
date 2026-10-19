@@ -31,7 +31,7 @@ import {
 } from "./inboxrows.js";
 import { checksStatus, onChecksStatus, readChecks } from "./inboxsources.js";
 import { kindBadge, levelBadge } from "./notices.js";
-import { current, setAsks, subscribe } from "./store.js";
+import { current, rereadStore, setAsks, subscribe } from "./store.js";
 import { toastRegion } from "./ui.js";
 import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
 import {
@@ -225,6 +225,20 @@ export function mountQuestions(page) {
     if (open === 0)
       all.setAttribute("data-kp-disabled-reason", "No question is waiting");
     else all.removeAttribute("data-kp-disabled-reason");
+    const read = current().asksRead;
+    if (cards.size === 0 && read !== "ready") {
+      putState(
+        el,
+        read,
+        read === "error"
+          ? {
+              title: "The questions could not be read",
+              text: "The host's open questions did not come through; they appear here as soon as a read succeeds.",
+            }
+          : { words: "Reading the questions…" },
+      );
+      return;
+    }
     putState(
       el,
       cards.size === 0 ? "empty" : "ready",
@@ -304,6 +318,7 @@ export function mountQuestions(page) {
     childList: true,
   });
   const off = subscribe(paint);
+  el.addEventListener("kp-card-retry", () => void rereadStore());
   paint();
 
   return {

@@ -273,7 +273,11 @@ export function mount(root) {
       h("div", { class: "kp-card__data" }, topoData),
     ),
   );
-  topo.body.replaceChildren(topoStage);
+  // The side panel is a card of its own beside the topology's card, never
+  // inside its data: a card inside another card's data is hidden with it
+  // (and loses its own loading look) when the topology fails.
+  const topoRow = h("div", { class: "mp-topo" }, topoStage);
+  topo.body.replaceChildren(topoRow);
   const detachStages = attachCardStates(topo.el);
   setCardState(topoStage, "loading", { words: "Reading the topology" });
 
@@ -361,7 +365,10 @@ export function mount(root) {
   const side = panel.el;
   const listBox = h("div", { class: "mp-list", hidden: "" });
   const matrixBox = h("div", { class: "mp-matrix", hidden: "" }, matrix.el);
-  const topoGrid = h("div", { class: "mp-topo" });
+  const topoGrid = h("div", { class: "mp-graphcell" });
+  topoRow.append(side);
+  /** The side panel has nothing to say when the topology could not be read or is empty. */
+  let sideOff = false;
   const listTable = tableSlot();
   stops.push(listTable.stop, panel.stop);
 
@@ -413,6 +420,7 @@ export function mount(root) {
     const list = v === "list";
     const grid = v === "matrix";
     topoGrid.hidden = list || grid;
+    side.hidden = list || grid || sideOff;
     listBox.hidden = !list;
     matrixBox.hidden = !grid;
     const url = new URL(location.href);
@@ -439,6 +447,8 @@ export function mount(root) {
     if (!topology) return;
     const t = topology;
     if (!t.nodes.length) {
+      sideOff = true;
+      side.hidden = true;
       setCardState(topoStage, "empty", {
         title: "No stacks to draw yet",
         text: "The topology is read from the working copy's stack files; once a stack has a working copy, it appears here.",
@@ -490,7 +500,8 @@ export function mount(root) {
       for (const b of legend.querySelectorAll("button"))
         b.setAttribute("aria-pressed", "true");
     });
-    topoGrid.replaceChildren(graph.el, side);
+    topoGrid.replaceChildren(graph.el);
+    sideOff = false;
     panel.set(t, "ready");
     matrix.set(t, "ready");
     // The list view: one row per stack.
@@ -573,6 +584,8 @@ export function mount(root) {
     const r = await fetchJson("/data/topology", "the topology", abort.signal);
     if (abort.signal.aborted) return;
     if (!r.ok) {
+      sideOff = true;
+      side.hidden = true;
       setCardState(topoStage, "error", {
         title: "Could not read the topology",
         text: `${r.error.what}: ${r.error.why}`,
@@ -591,7 +604,7 @@ export function mount(root) {
   // A stack coming online or going down repaints the side panel.
   stops.push(
     subscribe(() => {
-      if (graph) paintSide(graph.selected(), null);
+      if (graph) panel.redraw();
     }),
   );
 

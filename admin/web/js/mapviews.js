@@ -416,7 +416,13 @@ export function sidePanel(deps) {
     },
     /** @param {string[]} sel @param {string | null} hover */
     pick: (sel, hover) => {
-      ids = sel.length ? sel : hover ? [hover] : [];
+      const next = sel.length ? sel : hover ? [hover] : [];
+      // The same stacks again (the graph re-laid out, the pointer moved
+      // inside one node) change nothing the panel shows; `redraw` is the
+      // way to repaint after the stacks' own state moved.
+      if (next.length === ids.length && next.every((x, i) => x === ids[i]))
+        return;
+      ids = next;
       draw();
     },
     redraw: draw,

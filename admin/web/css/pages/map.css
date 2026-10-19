@@ -66,6 +66,13 @@
   gap: var(--kp-space-lg, 1rem);
   align-items: start;
 }
+.mp-topo:has(> .mp-side[hidden]) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.mp-side[hidden],
+.mp-graphcell[hidden] {
+  display: none;
+}
 .mp-topo[hidden],
 .mp-list[hidden] {
   display: none;
@@ -80,6 +87,10 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
+  /* An inset the drawing is scaled into, so no label (an address at the
+     rim) stands against the frame; the graph draws itself from the width of
+     the box and does not know of it. */
+  padding-inline: var(--kp-space-sm, 0.5rem);
   background:
     radial-gradient(
       circle at 50% 50%,

@@ -11,7 +11,8 @@ import { h } from "./dom.js";
  * @typedef {{label?: Child, labelFor?: string, labelId?: string,
  *   control?: Child | Child[], value?: Child | Child[],
  *   actions?: Child | Child[], buttons?: boolean, wide?: boolean,
- *   hidden?: boolean, cls?: string, hideLabel?: boolean}} GridRow
+ *   hidden?: boolean, cls?: string, hideLabel?: boolean,
+ *   span?: "control-value" | "wide" | "all"}} GridRow
  */
 
 /**
@@ -50,7 +51,7 @@ export function gridRow(spec) {
         "div",
         {
           class: "kp-formgrid__control",
-          "data-kp-formgrid-span": spec.wide ? "wide" : null,
+          "data-kp-formgrid-span": spec.span ?? (spec.wide ? "wide" : null),
         },
         ...list(spec.control),
       ),

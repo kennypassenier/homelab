@@ -305,6 +305,14 @@
   font-weight: 600;
   white-space: nowrap;
 }
+/* Every segmented control of the rows fills the same track in equal items, so
+   the rows start and end on one edge. */
+.mv-ctl > .kp-segmented {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  inline-size: 100%;
+}
 .mv-block {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

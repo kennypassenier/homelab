@@ -1009,7 +1009,7 @@ export function mount(root, opts = {}) {
           "div",
           {
             class: "kp-formgrid__control",
-            "data-kp-formgrid-span": "control-value",
+            "data-kp-formgrid-span": "wide",
           },
           r.value,
         ),

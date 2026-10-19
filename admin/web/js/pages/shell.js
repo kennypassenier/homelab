@@ -296,36 +296,44 @@ export function mount(root) {
     [
       gridRow({
         label: "Needs a second press",
-        control: chips,
-        value: h(
-          "span",
-          { class: "con-read" },
-          "A line that starts with one of these waits for a second Enter.",
-        ),
-        wide: false,
+        control: [
+          chips,
+          h(
+            "span",
+            { class: "con-read" },
+            "A line that starts with one of these waits for a second Enter.",
+          ),
+        ],
+        span: "control-value",
       }),
       gridRow({
         label: "Screen",
         control: "Empties the screen; Undo brings it back.",
+        span: "control-value",
         actions: clearBtn,
         buttons: true,
       }),
       gridRow({
         label: "Last command",
         control: "Repeats the last command in the same place.",
+        span: "control-value",
         actions: againBtn,
         buttons: true,
       }),
       gridRow({
         label: "Whole session",
         control: "Every block as one text file.",
+        span: "control-value",
         actions: saveBtn,
         buttons: true,
       }),
       gridRow({
         label: "Keys",
-        control: h("span", { class: "kp-keys", "data-con-keys": "" }),
-        value: toolRead,
+        control: [
+          h("span", { class: "kp-keys", "data-con-keys": "" }),
+          toolRead,
+        ],
+        span: "control-value",
       }),
     ],
     "con-tools",
@@ -424,7 +432,16 @@ export function mount(root) {
   const fillTargets = () => {
     const stacks = current().fleet?.stacks;
     if (!stacks) {
-      setConsole(consoleEl, { state: "loading" });
+      // The package's own states: the busy card while the host is asked, the
+      // failed plate (with its Retry) when it does not answer.
+      if (current().up === false)
+        setConsole(consoleEl, {
+          state: "error",
+          message:
+            "The host did not answer, so no container can be listed to run a command in.",
+        });
+      else setConsole(consoleEl, { state: "loading" });
+      decorate();
       return;
     }
     const list = shellTargets(stacks);

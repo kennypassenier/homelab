@@ -407,7 +407,7 @@ export function mountSignin(box, report) {
     ISSUE_TOKEN,
   );
   const tokenGrid = h("div", {
-    class: "kp-formgrid si-tokens",
+    class: "kp-formgrid si-tokens st-lines",
     "data-kp-formgrid-lines": "lines",
     "data-kp-formgrid-stack": "never",
   });

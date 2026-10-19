@@ -62,7 +62,8 @@ main.mk-page > .mk-failed:empty {
   column-gap: var(--kp-space-lg, 1.5rem);
   row-gap: var(--kp-space-md, 1rem);
   align-items: start;
-  --mk-control: 2.5rem;
+  --mk-control: 2.25rem; /* one control high: the field, the chooser, the label's line */
+  --mk-chip: 1.625rem; /* a picked machine's chip, the first line of the picker */
 }
 .mk-row {
   display: grid;
@@ -85,10 +86,24 @@ main.mk-page > .mk-failed:empty {
   align-items: center;
   min-block-size: var(--mk-control);
 }
+.mk-row:first-child .mk-label {
+  min-block-size: var(--mk-chip);
+}
+/* The refresh bar needs the room of its six choices, its read line and its
+   button: it runs over the field and the aside tracks; every row's sentence
+   stands under its field, on one edge. */
+.mk-row--refresh > .kp-refresh {
+  grid-column: 2 / -1;
+}
+.mk-row > .mk-aside {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  padding-block-start: 0;
+}
 .mk-aside {
-  display: flex;
-  align-items: center;
-  min-block-size: var(--mk-control);
+  display: block;
+  /* the sentence's first line stands on the field's centre line */
+  padding-block-start: calc((var(--mk-control) - 1lh) / 2);
   margin: 0;
   font-size: var(--kp-text-sm);
   color: var(--muted-foreground);
@@ -106,7 +121,7 @@ main.mk-page > .mk-failed:empty {
   }
   .mk-aside {
     grid-column: 1 / -1;
-    min-block-size: 0;
+    padding-block-start: 0;
   }
 }
 @media (max-width: 40rem) {
@@ -118,6 +133,11 @@ main.mk-page > .mk-failed:empty {
   }
   .mk-label {
     min-block-size: 0;
+  }
+  .mk-row > .mk-aside,
+  .mk-row--refresh > .kp-refresh {
+    grid-column: 1;
+    grid-row: auto;
   }
 }
 /* An option of the machine picker: its name first (what a tag reads), its

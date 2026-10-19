@@ -36,6 +36,7 @@ import { attachKpiStrips, attachKpiToggles } from "/static/kp/js/kpi.js";
 import { attachDismissals } from "/static/kp/js/overlays.js";
 import { attachSelects } from "/static/kp/js/combobox.js";
 import { attachLoadingPieces } from "/static/kp/js/loading-pieces.js";
+import { attachFootprints } from "/static/kp/js/footprint.js";
 import { loadPages, pages, subscribePages } from "./pages.js";
 import {
   STACK_TABS,
@@ -460,6 +461,7 @@ attachDismissals(document);
 // pieces (pastel's caterpillar) gets them on every part that waits; the other
 // themes draw nothing extra.
 attachLoadingPieces(document);
+attachFootprints(document);
 // kp-themes' combobox.js: every single select is the theme's drawn list over
 // the native select, which keeps the value (Live view and `.value` code are
 // unaffected); `data-kp-select="native"` opts one out. A page or a dialog
@@ -471,7 +473,13 @@ new MutationObserver((records) => {
     if ([...r.addedNodes].some((n) => n instanceof Element))
       roots.add(r.target);
   for (const root of roots)
-    if (root instanceof Element && root.isConnected) attachTableRegions(root);
+    if (root instanceof Element && root.isConnected) {
+      attachTableRegions(root);
+      // kp-themes' footprint.js: a data component keeps the height it had
+      // while its loading, empty or failed state shows (every page, every
+      // component drawn later, held once).
+      attachFootprints(root);
+    }
 }).observe(page, { childList: true, subtree: true });
 new MutationObserver((records) => {
   for (const r of records)

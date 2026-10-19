@@ -13,6 +13,7 @@ import { busyWords, emptyWords, failReason } from "./tablestate.js";
 import { VIEW_EVENT, dataTable } from "/static/kp/js/datatable.js";
 import { leave } from "/static/kp/js/motion.js";
 import { update } from "/static/kp/js/update.js";
+import { statePlate } from "/static/kp/js/state-plate.js";
 import {
   buildProgressbar,
   setIndeterminate,
@@ -450,17 +451,23 @@ export function selectCell(key, label) {
 }
 
 /**
- * A readable box for a route's `{what, why, fix}`.
+ * A readable failed state for a route's `{what, why, fix}`: the package's
+ * failed plate (what could not be read as its title, the why and the fix under
+ * it), with a Retry when the caller can read again.
  * @param {import("./doctor.js").RouteError} e
+ * @param {() => void} [retry]
  */
-export function errorBox(e) {
-  return h(
-    "div",
-    { class: "kp-alert kp-alert--destructive error", role: "alert" },
-    h("strong", null, `Could not read ${e.what}`),
-    h("p", null, `Why: ${e.why}`),
-    ...(e.fix ? [h("p", null, `What to do: ${e.fix}`)] : []),
-  );
+export function errorBox(e, retry) {
+  const plate = statePlate(document, {
+    kind: "error",
+    title: `Could not read ${e.what}`,
+    text: [`Why: ${e.why}`, ...(e.fix ? [`What to do: ${e.fix}`] : [])].join(
+      "\n",
+    ),
+    ...(retry ? { actionLabel: "Try again", onAction: retry } : {}),
+  });
+  plate.classList.add("error");
+  return plate;
 }
 
 /**

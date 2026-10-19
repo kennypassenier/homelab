@@ -105,7 +105,7 @@ import {
   WHO_CHIPS,
 } from "../stackhub.js";
 import { stackEntries, stackIncidents, stackChecks } from "../stacktabs.js";
-import { current, subscribe } from "../store.js";
+import { current, retryStream, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
 import { attachLogs } from "/static/kp/js/log.js";
@@ -641,7 +641,8 @@ export function mount(root, params) {
   ]);
   root.replaceChildren(
     header.el,
-    h("div", { class: "sh-tabbar" }, tabs, keys),
+    h("div", { class: "sh-tabbar" }, tabs),
+    keys,
     panel,
   );
   stops.push(
@@ -937,6 +938,8 @@ function overviewTab(panel, c) {
     onRetry: () => void readAll(),
   });
   const checkedAt = h("span", null, "checking…");
+  for (const card of [needsStage, checksStage])
+    card.addEventListener("kp-card-retry", () => retryStream());
   const healthy = section({
     id: "healthy",
     title: "Is it healthy?",
@@ -1129,7 +1132,15 @@ function overviewTab(panel, c) {
           };
         }),
     }).filter((p) => S.fleetRead || p.key !== "not-deployed");
-    if (!S.fleetRead)
+    // The host not answering is a failed read, said with the package's plate
+    // and its Retry, not a card that loads for ever.
+    const hostDown = !S.fleetRead && current().up === false;
+    if (hostDown)
+      setCardState(needsStage, "error", {
+        title: "The host did not answer",
+        text: "What needs you on this stack is not known until it does.",
+      });
+    else if (!S.fleetRead)
       setCardState(needsStage, "loading", { words: "Reading what needs you" });
     else if (!probs.length)
       setCardState(needsStage, "empty", {
@@ -1144,7 +1155,12 @@ function overviewTab(panel, c) {
         { mode: "fold", foldFrom: 3 },
       );
     }
-    if (!S.fleetRead)
+    if (hostDown)
+      setCardState(checksStage, "error", {
+        title: "The host did not answer",
+        text: "The checks cannot run until it does.",
+      });
+    else if (!S.fleetRead)
       setCardState(checksStage, "loading", { words: "Running the checks" });
     if (S.fleetRead) {
       const rows = healthChecks({
@@ -2435,7 +2451,7 @@ function backupsTab(panel, c) {
             actionButton(c, nat ? "restore-native" : "restore", {
               label: "Restore…",
               title: `Bring ${r.app}'s data back from a snapshot`,
-              cls: "kp-button--sm",
+              // the card's own Restore… size, so the two stand as one column
               slot: "restore",
               preset: nat
                 ? r.newest?.short_id
@@ -2454,7 +2470,7 @@ function backupsTab(panel, c) {
               : actionButton(c, "verify-restore", {
                   label: "Verify…",
                   title: `Prove ${r.app}'s newest snapshot restores, without touching live data`,
-                  cls: "kp-button--sm kp-button--ghost",
+                  cls: "kp-button--ghost",
                   slot: "verify",
                   preset: { app: r.app },
                   drive: [BACKUP_ROW, `${name}/${r.app}/verify`],

@@ -363,7 +363,18 @@ export function fleetGlance(ctx) {
     return Math.max(2, Math.ceil((3.5 * rem) / (room / count())) + 1);
   };
   let seenWidth = 0;
+  // Only a drawn grid depends on the width (its labels thin out): a grid in a
+  // state is the package's plate and is left as it stands.
+  const nightsState = () =>
+    fleetState === "loading" || calState === "loading"
+      ? "loading"
+      : fleetState === "failed" || calState === "failed"
+        ? "error"
+        : rows.length
+          ? "ready"
+          : "empty";
   const resize = new ResizeObserver(() => {
+    if (nightsState() !== "ready") return;
     if (Math.round(heat.clientWidth) !== seenWidth) paintNights();
   });
   resize.observe(heat);
@@ -377,14 +388,7 @@ export function fleetGlance(ctx) {
   function paintNights() {
     nightsSeg.set(String(win));
     seenWidth = Math.round(heat.clientWidth);
-    const state =
-      fleetState === "loading" || calState === "loading"
-        ? "loading"
-        : fleetState === "failed" || calState === "failed"
-          ? "error"
-          : rows.length
-            ? "ready"
-            : "empty";
+    const state = nightsState();
     if (state !== "ready") {
       setHeat(heat, {
         columns: [],

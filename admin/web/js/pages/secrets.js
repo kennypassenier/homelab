@@ -518,7 +518,29 @@ export function mount(root, opts = {}) {
   const attached = attachAll(root);
   stops.push(() => attached());
   setCardState(detailCard.el, "loading", { words: "Reading the secrets…" });
-  setCardState(drawerCard.el, "ready");
+  // The drawer stages a change to what the list shows: while the list is
+  // read or cannot be read, the drawer is in the same state (its own busy
+  // card and plate), not a form with nothing to change.
+  let drawerSeen = "";
+  const mirrorDrawer = () => {
+    const st = detailCard.el.dataset.kpState ?? "loading";
+    if (st === drawerSeen) return;
+    drawerSeen = st;
+    if (st === "loading")
+      setCardState(drawerCard.el, "loading", { words: "Reading the secrets…" });
+    else if (st === "error")
+      setCardState(drawerCard.el, "error", {
+        title: "Nothing to change yet",
+        text: "The secrets could not be read, so there is nothing to stage. Try again on the list.",
+        retry: false,
+      });
+    else setCardState(drawerCard.el, "ready");
+  };
+  new MutationObserver(mirrorDrawer).observe(detailCard.el, {
+    attributes: true,
+    attributeFilter: ["data-kp-state"],
+  });
+  mirrorDrawer();
 
   // ── the list pane ─────────────────────────────────────────────────────
   function paintList() {

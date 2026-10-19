@@ -1146,6 +1146,16 @@ export function mount(root, ctx) {
           dot(x.health.tone),
           h("span", null, h("b", null, x.name), ` · ${x.health.label}`),
           h("small", null, x.detail),
+          // fix-kp11-9: the doctor's remedy was computed and never drawn.
+          ...(x.remedy && x.health.tone !== "ok"
+            ? [
+                h(
+                  "small",
+                  { class: "hk-checks__fix" },
+                  `What to do: ${x.remedy}`,
+                ),
+              ]
+            : []),
         ),
       ),
     );

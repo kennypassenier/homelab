@@ -38,6 +38,7 @@ import { declare, drivable } from "./drivable.js";
 import { formatClock } from "./format.js";
 import {
   attachCharts,
+  CHART_RETRY_EVENT,
   CHART_SELECT_EVENT,
   CHART_ZOOM_EVENT,
   chartSelect,
@@ -58,10 +59,14 @@ import {
  * @typedef {{label: string, series: Series[], unit?: Unit, from: number,
  *   to: number, height?: number, annotations?: Annotation[],
  *   threshold?: number, yMax?: number, stacked?: boolean, key?: string,
+ *   error?: string, onePointNote?: boolean,
  *   onSelect?: (on: number[]) => void}} ChartSpec
  *   `key`: the chart's name for Live view (its card), `label` otherwise;
  *   `onSelect`: called with the sources turned on (none = all shown)
- *   whenever the selection changes — a click, Show all, Esc, `select`
+ *   whenever the selection changes — a click, Show all, Esc, `select`;
+ *   `error`: why there are no readings, drawn in the plot at its height
+ *   with kp's Retry (`onRetry`); `onePointNote`: kp says so under a plot
+ *   whose sources each have a single reading
  * @typedef {{destroy: () => void, host: HTMLElement,
  *   select: (i: number | null, on?: boolean) => void}} ChartState
  */
@@ -165,6 +170,8 @@ const toKpData = (opt) => ({
   threshold: opt.threshold,
   stacked: opt.stacked,
   height: opt.height,
+  error: opt.error,
+  onePointNote: opt.onePointNote,
 });
 
 /**
@@ -218,15 +225,31 @@ export function zoomChip() {
 }
 
 /**
+ * What a drawn host remembers between calls: its state, and the page's
+ * latest `onSelect` / `onRetry` (a poll's closure replaces the last one).
+ * @type {WeakMap<HTMLElement, {state: ChartState,
+ *   onSelect?: ChartSpec["onSelect"], onRetry?: () => void}>}
+ */
+const drawn = new WeakMap();
+
+/**
  * Draw an interactive time chart into `host` — kp's own chart, fed through
  * setChartData()/attachCharts(). `host` becomes the `[data-kp-chart]`
- * element itself (a fresh one is expected each call, as every card already
- * draws: a poll replaces its box rather than updating it in place).
+ * element itself. Called again with the same `host`, it is a live update
+ * (setChartData keeps the crosshair, the pin, the zoom and the selection),
+ * so a poll never replaces the chart under a hover.
  * @param {HTMLElement} host
- * @param {ChartSpec} opt
+ * @param {ChartSpec & {onRetry?: () => void}} opt
  * @returns {ChartState}
  */
 export function timeChart(host, opt) {
+  const known = drawn.get(host);
+  if (known) {
+    known.onSelect = opt.onSelect;
+    known.onRetry = opt.onRetry;
+    setChartData(host, toKpData(opt));
+    return known.state;
+  }
   host.setAttribute("data-kp-chart", "");
   // The chart's own parts (its plot, tooltip, legend, note) are the chart
   // drawing itself, never news arriving in the card around it: without this
@@ -236,14 +259,21 @@ export function timeChart(host, opt) {
   // no visible point for over a second).
   host.setAttribute("data-kp-arrive", "none");
   setChartData(host, toKpData(opt));
-  if (opt.onSelect)
-    host.addEventListener(CHART_SELECT_EVENT, (e) =>
-      opt.onSelect?.(/** @type {CustomEvent} */ (e).detail.on),
-    );
-  attachCharts(host.ownerDocument ?? document, CHART_OPTIONS);
-  return {
+  /** @type {ChartState} */
+  const state = {
     host,
     select: (i, on) => chartSelect(host, i, on),
-    destroy: () => detachChart(host),
+    destroy: () => {
+      drawn.delete(host);
+      detachChart(host);
+    },
   };
+  const mem = { state, onSelect: opt.onSelect, onRetry: opt.onRetry };
+  drawn.set(host, mem);
+  host.addEventListener(CHART_SELECT_EVENT, (e) =>
+    mem.onSelect?.(/** @type {CustomEvent} */ (e).detail.on),
+  );
+  host.addEventListener(CHART_RETRY_EVENT, () => mem.onRetry?.());
+  attachCharts(host.ownerDocument ?? document, CHART_OPTIONS);
+  return state;
 }

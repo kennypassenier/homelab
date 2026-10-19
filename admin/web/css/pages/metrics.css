@@ -183,11 +183,6 @@ main.mk-page > .mk-failed:empty {
 .mk-chart {
   min-inline-size: 0;
 }
-.mk-note {
-  margin: 6px 0 0;
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
 .mk-card-error {
   display: flex;
   gap: 8px;

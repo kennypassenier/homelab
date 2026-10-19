@@ -273,17 +273,6 @@ export function mount(root, ctx) {
       : [];
   };
 
-  /** Someone is reading a chart: a zoom, a pinned reading, a picked source. */
-  const busy = () =>
-    pageCharts.zoom != null ||
-    root.querySelector(".kp-chart__tip[data-kp-pinned]:not([hidden])") !=
-      null ||
-    root.querySelector('.kp-chart__source[aria-pressed="true"]') != null ||
-    root.querySelector(".kp-chart__plot:focus") != null ||
-    // A pointer over a chart or its legend: the reading under it stays put
-    // (a repaint would destroy the chart under the hover).
-    root.querySelector(".kp-chart:hover") != null;
-
   const destroyCharts = () => {
     for (const c of charts) c.destroy();
     charts = [];
@@ -345,33 +334,46 @@ export function mount(root, ctx) {
    * @param {{from: number, to: number}} w
    */
   const draw = (body, spec, w) => {
-    const box = h("div", { class: "mk-chart" });
-    const single = spec.series.every((s) => s.points.length === 1);
-    body.replaceChildren(
-      box,
-      ...(single
-        ? [
-            h(
-              "p",
-              { class: "mk-note" },
-              "Only one reading so far: the line grows as more readings arrive.",
-            ),
-          ]
-        : []),
+    let box = /** @type {HTMLElement | null} */ (
+      body.querySelector(":scope > .mk-chart[data-kp-chart]")
     );
+    if (!box) {
+      box = h("div", { class: "mk-chart" });
+      body.replaceChildren(box);
+    }
     const c = timeChart(box, {
       ...spec,
       from: w.from,
       to: w.to,
       annotations: marks,
+      onePointNote: true,
+      onRetry: () => void read().catch(() => {}),
     });
-    charts.push(c);
+    if (!charts.includes(c)) charts.push(c);
     return c;
   };
 
+  /**
+   * A chart that has nothing to draw: kp's own error in the plot at the
+   * chart's height, with its Retry, the next poll updating it in place.
+   * @param {HTMLElement} body
+   * @param {Omit<import("../charts.js").ChartSpec, "from" | "to" | "annotations" | "series">} spec
+   * @param {{from: number, to: number}} w
+   * @param {string} why
+   */
+  const drawError = (body, spec, w, why) =>
+    draw(body, { ...spec, series: [], error: why }, w);
+
   /** @param {HTMLElement} body @param {string} why */
-  const notRead = (body, why) =>
+  const notRead = (body, why) => {
+    // A card that stops being a chart lets go of the chart it had.
+    charts = charts.filter((c) => {
+      if (!body.contains(c.host)) return true;
+      c.destroy();
+      return false;
+    });
     body.replaceChildren(h("p", { class: "mk-card-error" }, dot("bad"), why));
+  };
 
   /**
    * A read that failed: every tile says so instead of pulsing for ever, and
@@ -424,12 +426,11 @@ export function mount(root, ctx) {
     ]),
   );
 
-  const tick = async () => {
-    if (busy()) return;
-    await read();
-  };
+  // A poll updates the drawn charts in place (setChartData keeps a pinned
+  // reading, a zoom and a picked source), so no read needs to wait for
+  // someone to finish looking at a chart.
   void read().catch(() => {});
-  const timer = setInterval(() => void tick().catch(() => {}), EVERY_S * 1000);
+  const timer = setInterval(() => void read().catch(() => {}), EVERY_S * 1000);
 
   return () => {
     abort.abort();
@@ -530,7 +531,6 @@ export function mount(root, ctx) {
       await readMarks(from, to);
       span.textContent = `${windowText(from, to)} · ${marks.length} ${marks.length === 1 ? "event" : "events"} marked · drag across a chart to zoom`;
       const P = byTitle(r.body.panels);
-      destroyCharts();
       const fleet = current().fleet;
       const host = fleet?.host;
       const st = fleet?.stacks.find((s) => s.name === stack);
@@ -543,19 +543,23 @@ export function mount(root, ctx) {
             paintDrives(k, P);
             continue;
           }
-          if (!p) {
-            notRead(k.body, "This chart is not part of the answer.");
-            continue;
-          }
-          if (p.error) {
-            notRead(k.body, `Prometheus did not answer: ${p.error}`);
-            continue;
-          }
-          if (!p.series.length || !p.series.some((x) => x.points.length)) {
-            notRead(k.body, "No readings in this window yet.");
-            continue;
-          }
           const unit = c.unit ?? "count";
+          const empty = !p
+            ? "This chart is not part of the answer."
+            : p.error
+              ? `Prometheus did not answer: ${p.error}`
+              : !p.series.length || !p.series.some((x) => x.points.length)
+                ? "No readings in this window yet."
+                : null;
+          if (empty != null || !p) {
+            drawError(
+              k.body,
+              { key: c.key, label: c.title, unit },
+              { from, to },
+              empty ?? "",
+            );
+            continue;
+          }
           const threshold =
             c.threshold === "committed"
               ? host?.ram_committed_mb
@@ -1030,7 +1034,6 @@ export function mount(root, ctx) {
       const b = r.body;
       await readMarks(b.from, b.to);
       span.textContent = `${windowText(b.from, b.to)} · ${marks.length} ${marks.length === 1 ? "event" : "events"} marked · drag across a chart to zoom`;
-      destroyCharts();
       const P = byTitle(b.panels ?? []);
       const status = P.get("Requests per status");
       const hostsP = P.get("Requests per hostname");
@@ -1043,10 +1046,20 @@ export function mount(root, ctx) {
       const w = { from: b.from, to: b.to };
 
       // Requests over time, stacked by class.
-      if (status?.error)
-        notRead(over.body, `Loki did not answer: ${status.error}`);
-      else if (!classes[0]?.points.length)
-        notRead(over.body, "No requests in this window.");
+      if (status?.error || !classes[0]?.points.length)
+        drawError(
+          over.body,
+          {
+            key: "requests",
+            label: "Requests over time",
+            unit: "count",
+            stacked: true,
+          },
+          w,
+          status?.error
+            ? `Loki did not answer: ${status.error}`
+            : "No requests in this window.",
+        );
       else
         draw(
           over.body,
@@ -1109,10 +1122,19 @@ export function mount(root, ctx) {
       };
       /** @type {Chart | null} */
       let hostChart = null;
-      if (hostsP?.error)
-        notRead(perHost.body, `Loki did not answer: ${hostsP.error}`);
-      else if (!hostSeries.length)
-        notRead(perHost.body, "No requests in this window.");
+      if (hostsP?.error || !hostSeries.length)
+        drawError(
+          perHost.body,
+          {
+            key: "perhost",
+            label: "Requests per hostname",
+            unit: "count",
+          },
+          w,
+          hostsP?.error
+            ? `Loki did not answer: ${hostsP.error}`
+            : "No requests in this window.",
+        );
       else
         hostChart = draw(
           perHost.body,

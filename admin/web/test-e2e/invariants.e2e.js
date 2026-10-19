@@ -851,7 +851,7 @@ test("invariants: every page keeps clear vertical spacing between its top-level 
           const before = kids[i - 1];
           const isTitle =
             before.tagName === "H1" ||
-            (before.classList.contains("title-row") &&
+            (before.classList.contains("kp-page-header__heading") &&
               !!before.querySelector(":scope > h1"));
           if (isTitle && kids[i].tagName === "P") continue;
           const prev = kids[i - 1].getBoundingClientRect();
@@ -1143,11 +1143,11 @@ test("invariants: every top-level section on Overview and the stack page has a h
           // The description is the shared `.section-head__desc` sibling
           // when the heading uses `sectionHeader()`, or the next element
           // sibling of the heading's own row otherwise (a plain paragraph
-          // right after it, or right after its enclosing `.title-row`).
+          // right after it, or right after its enclosing `.kp-page-header__heading`).
           let desc =
             head.parentElement?.querySelector(".section-head__desc") ?? null;
           if (!desc) {
-            const row = head.closest(".title-row") ?? head;
+            const row = head.closest(".kp-page-header__heading") ?? head;
             let sib = row.nextElementSibling;
             while (sib && sib.tagName === "SCRIPT")
               sib = sib.nextElementSibling;
@@ -4195,7 +4195,7 @@ test("invariants: Deploy all changes marks its steps, shows the plan as a table 
     // Both demos put the live status beside the title.
     assert.equal(
       await page
-        .locator(".sk-page .nx-head .title-row > h1 + .nx-live")
+        .locator(".sk-page .nx-head .kp-page-header__line > h1 + .nx-live")
         .count(),
       1,
       "the header's 'updated' is not beside the title",
@@ -7450,7 +7450,9 @@ test("invariants: Apps loads with the theme's busy card over its footprint, then
     assert.doesNotMatch(text, /a known outage/);
     // The live status sits beside the title, not with the buttons.
     assert.equal(
-      await page.locator(".nx-head .title-row > h1 + .nx-live").count(),
+      await page
+        .locator(".nx-head .kp-page-header__line > h1 + .nx-live")
+        .count(),
       1,
     );
   } finally {

@@ -300,7 +300,7 @@ export function layoutAudit(rootSel) {
   // ---- g: the page's freshness next to its title (redesign-final X1) ----
   for (const live of root.querySelectorAll(".nx-head .nx-live")) {
     if (!shown(live)) continue;
-    const row = live.closest(".title-row");
+    const row = live.closest(".kp-page-header__line");
     if (
       live.closest(".nx-head-meta, .nx-head-actions") ||
       !row?.querySelector(":scope > :is(h1, h2)")
@@ -448,8 +448,9 @@ export function pageChecks() {
 
   // ---- descgap: directly under it ----
   if (h1) {
-    const head = h1.closest(".title-row") ?? h1;
-    const desc = head.nextElementSibling;
+    const head = h1.closest(".kp-page-header__line") ?? h1;
+    const desc = (head.closest(".kp-page-header__heading") ?? head)
+      .nextElementSibling;
     if (desc && desc.tagName === "P") {
       const parts =
         head === h1
@@ -468,7 +469,7 @@ export function pageChecks() {
 
   // ---- titlerow ----
   if (wide)
-    for (const r of document.querySelectorAll("main .title-row")) {
+    for (const r of document.querySelectorAll("main .kp-page-header__line")) {
       if (!(/** @type {HTMLElement} */ (r).offsetParent)) continue;
       if (!r.querySelector(":scope > h1") || r.children.length < 2) continue;
       // The freshness after the title (redesign-final X1) and the chips
@@ -496,7 +497,7 @@ export function pageChecks() {
           `the controls stop ${short}px short of the right edge`,
         );
     }
-  const row = h1?.closest(".title-row");
+  const row = h1?.closest(".kp-page-header__line");
   if (h1 && row) {
     const t = h1.getBoundingClientRect();
     const ctls = [

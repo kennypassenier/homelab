@@ -36,13 +36,15 @@
    edge on one line. Under 60rem the demo's narrow header: the live status
    under the title, the actions under everything, two a row with Deploy
    across the width first and More across the width last. */
-.sh-head .title-row.sh-head__row {
-  column-gap: 12px;
+/* The mark is 40 px (stack.js stackMark(name, 40)); the package centres the
+   actions on the lead's size, so the header says so (--kp-idmark-size). */
+.sh-head {
+  --kp-idmark-size: 40px;
 }
 .sh-head__mark {
   border-radius: 10px;
 }
-.sh-head .title-row > h1 {
+.sh-head .kp-page-header__line > h1 {
   overflow-wrap: anywhere;
 }
 .sh-head__state {
@@ -65,7 +67,7 @@
   .sh-head .kp-page-header__inner {
     grid-template-columns: minmax(0, 1fr);
   }
-  .sh-head .sh-head__row > .nx-live {
+  .sh-head .kp-page-header__line > .nx-live {
     flex-basis: 100%;
   }
   .sh-head .sh-head__actions {

@@ -286,8 +286,8 @@ dialog.kp-drawer.sk-drawer--plan {
 }
 
 /* The header: "updated … ago" sits beside the title, as both demos draw it. */
-.sk-page .sk-head .title-row > .nx-live,
-.ap-page .sk-head .title-row > .nx-live {
+.sk-page .sk-head .kp-page-header__line > .nx-live,
+.ap-page .sk-head .kp-page-header__line > .nx-live {
   align-self: center;
   margin-inline-start: 0;
   font-size: var(--kp-text-sm);

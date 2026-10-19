@@ -3125,6 +3125,12 @@ th[aria-sort="descending"] .nx-sort__mark {
 .nx-ops details[open] .nx-chev {
   transform: rotate(90deg);
 }
+/* A folded card with tools of its own: the fold's chevron leads them, so the
+   tools end on the card's inner edge, the same edge every other card's
+   actions end on (a button never stops 38 px short of it). */
+.nx-ops .nx-card__tools > .nx-chev:not(:only-child) {
+  order: -1;
+}
 .nx-ops .kp-kbd {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.72rem;

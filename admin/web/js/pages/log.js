@@ -15,7 +15,7 @@
 
 import { act } from "../act.js";
 import { ownerOf } from "../activityview.js";
-import { fetchJson, h } from "../dom.js";
+import { fetchJson, h, progressBar } from "../dom.js";
 import { declare, drivable } from "../drivable.js";
 import {
   LEVELS,
@@ -739,24 +739,36 @@ export function mountHostLog(root, opts) {
       { class: "hl-more" },
       h(
         "dl",
-        { class: "hl-kv" },
-        h("dt", null, "When"),
-        h("dd", null, new Date(l.ts * 1000).toString().slice(0, 24)),
-        h("dt", null, "Started by"),
+        { class: "kp-kv" },
         h(
-          "dd",
-          null,
-          l.by
-            ? l.by === "admin"
-              ? "Kenny, from this dashboard"
-              : `${ownerOf(l.by)} (the token “${l.by}”)`
-            : "the host (the nightly round or its own work)",
+          "div",
+          { class: "kp-kv__row" },
+          h("dt", null, "When"),
+          h("dd", null, formatDateTime(l.ts)),
         ),
-        h("dt", null, "Line"),
         h(
-          "dd",
-          { class: "mono" },
-          `#${l.seq}${l.req != null ? ` · request ${l.req}` : ""}`,
+          "div",
+          { class: "kp-kv__row" },
+          h("dt", null, "Started by"),
+          h(
+            "dd",
+            null,
+            l.by
+              ? l.by === "admin"
+                ? "Kenny, from this dashboard"
+                : `${ownerOf(l.by)} (the token “${l.by}”)`
+              : "the host (the nightly round or its own work)",
+          ),
+        ),
+        h(
+          "div",
+          { class: "kp-kv__row" },
+          h("dt", null, "Line"),
+          h(
+            "dd",
+            { class: "mono" },
+            `#${l.seq}${l.req != null ? ` · request ${l.req}` : ""}`,
+          ),
         ),
       ),
       h(
@@ -985,16 +997,7 @@ export function mountHostLog(root, opts) {
           "div",
           { class: "hl-xfer" },
           h("span", null, h("strong", null, t.op), ` · ${t.label}`),
-          h(
-            "span",
-            {
-              class: "hl-meter",
-              role: "progressbar",
-              "aria-label": v.label,
-              ...(v.pct == null ? {} : { "aria-valuenow": String(v.pct) }),
-            },
-            h("span", { style: `inline-size:${v.pct ?? 100}%` }),
-          ),
+          progressBar(v.label, v.pct, "hl-xfer__bar"),
           h("span", { class: "hl-hint" }, v.text),
         );
       }),

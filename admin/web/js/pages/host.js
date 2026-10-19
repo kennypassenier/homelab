@@ -259,7 +259,12 @@ function trendTile(fig) {
       setTrendData(figure, {
         points: t.points.map(([s, v]) => [s * 1000, v]),
         step: 600_000,
-        digits: 1,
+        // The reading chip and tooltip print the figure's own unit.
+        ...(fig.rate
+          ? { unitKind: "bytes/s" }
+          : fig.unit === "%"
+            ? { unitKind: "percent" }
+            : { unit: fig.unit, digits: fig.digits ?? 1 }),
       });
       attachTrendCharts(document);
     },
@@ -1092,7 +1097,7 @@ export function mount(root, ctx) {
   /** @type {any} */
   let lineFacts = null;
   let lineOk = /** @type {boolean | null} */ (null);
-  const facts = h("dl", { class: "hk-facts", id: "host-line" });
+  const facts = h("dl", { class: "kp-kv", id: "host-line" });
   const lat = h("div", {
     class: "kp-uptime",
     id: "host-lat",
@@ -1188,7 +1193,9 @@ export function mount(root, ctx) {
           : f?.host.tls_fingerprint || "not asked yet",
     ]);
     facts.replaceChildren(
-      ...rows.flatMap(([k, v]) => [h("dt", null, k), h("dd", null, v)]),
+      ...rows.map(([k, v]) =>
+        h("div", { class: "kp-kv__row" }, h("dt", null, k), h("dd", null, v)),
+      ),
     );
     setUptime(lat, {
       label: "Line to the host",
@@ -1267,7 +1274,7 @@ export function mount(root, ctx) {
   };
 
   // ── About, Templates ──────────────────────────────────────────────────
-  const about = h("dl", { class: "hk-facts", id: "host-about" });
+  const about = h("dl", { class: "kp-kv", id: "host-about" });
   const aboutCard = section({
     id: "host-about-card",
     title: "About this host",
@@ -1314,7 +1321,9 @@ export function mount(root, ctx) {
       ],
     ];
     about.replaceChildren(
-      ...rows.flatMap(([k, v]) => [h("dt", null, k), h("dd", null, v)]),
+      ...rows.map(([k, v]) =>
+        h("div", { class: "kp-kv__row" }, h("dt", null, k), h("dd", null, v)),
+      ),
     );
   };
   const tplList = h(

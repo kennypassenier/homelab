@@ -357,22 +357,6 @@ main.shell.hk-page > [hidden] {
 }
 
 /* ---------- side column ---------- */
-.hk-page .hk-facts {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 8px 16px;
-  margin: 0;
-  font-size: var(--kp-text-sm);
-}
-.hk-page .hk-facts dt {
-  color: var(--muted-foreground);
-  margin: 0;
-}
-.hk-page .hk-facts dd {
-  margin: 0;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
 .hk-lat {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
@@ -507,7 +491,7 @@ main.shell.hk-page > [hidden] {
 }
 /* The fingerprint and its Copy button wrap as a pair on a narrow screen,
    never the fingerprint letter by letter. */
-.hk-facts .kp-copyable {
+.hk-page .kp-kv .kp-copyable {
   flex-wrap: wrap;
   overflow-wrap: normal;
 }

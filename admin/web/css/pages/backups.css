@@ -223,17 +223,19 @@
 .bk-table tr[data-kp-row-group] > th {
   block-size: auto;
   min-block-size: var(--kp-row-height, 2.5rem);
+  /* the same end padding as a row's Actions cell: one right edge */
+  padding-inline-end: 0.5rem;
 }
 .bk-table tr[data-kp-row-group] .kp-datatable__group-toggle {
   vertical-align: middle;
-  margin-inline-end: var(--kp-space-md, 0.75rem);
+  margin-inline-end: var(--bk-toggle-gap, 0.5rem);
 }
 .bk-group {
   display: inline-grid;
   grid-template-columns: auto auto auto auto minmax(0, 1fr) auto;
   align-items: center;
   column-gap: var(--kp-space-md, 0.75rem);
-  inline-size: calc(100% - 3.5rem);
+  inline-size: calc(100% - 1.75rem - var(--bk-toggle-gap, 0.5rem));
   vertical-align: middle;
   min-inline-size: 0;
 }
@@ -262,6 +264,13 @@
 }
 .bk-group__act {
   justify-self: end;
+}
+/* The group's Restore… is the row's Restore…: one look, one width, one right
+   edge (the heading cell inherits the head's capitals and small size). */
+.bk-group__act .kp-button {
+  text-transform: none;
+  font-variant-caps: normal;
+  letter-spacing: normal;
 }
 @container kp-table (max-width: 40rem) {
   .bk-group {
@@ -302,4 +311,10 @@
 .bk-page .kp-range__custom,
 .bk-page .kp-range__panel {
   display: none;
+}
+
+/* Every Restore… (the group's and the row's) is one width, so the column of
+   buttons is one column. */
+.bk-table button[data-kp-action="restore"] {
+  min-inline-size: 4.75rem;
 }

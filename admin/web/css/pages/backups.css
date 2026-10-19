@@ -114,6 +114,25 @@
   }
 }
 
+/* A narrow row (a phone, a failed stack with its Retry button): the action
+   goes under the label and detail, in the text column, instead of taking a
+   third column the detail has to squeeze past. */
+@media (max-width: 30rem) {
+  .bk-night__list .kp-statusrow {
+    grid-template-columns: var(--kp-statusrow-mark, 1.25rem) minmax(0, 1fr);
+  }
+  .bk-night__list .kp-statusrow__action {
+    grid-column: 2;
+    justify-self: start;
+    margin: var(--kp-space-xs, 0.25rem) 0 0;
+  }
+  .bk-night__list .kp-statusrow__body,
+  .bk-night__list .kp-statusrow__detail {
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
 /* The repositories: the bar, the stack list, the selection and the table
    stack in one column and keep their widths. */
 .bk-repos__facets h3 {

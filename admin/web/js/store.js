@@ -20,6 +20,43 @@ const state = {
 /** @type {Set<() => void>} */
 const subs = new Set();
 
+/**
+ * The live channel itself (feat-kp11demo-14, the connection banner): `open`
+ * while events arrive, `down` while it waits to be opened again, `trying`
+ * while a new one is being opened (the attempt's number in `attempt`).
+ * @typedef {{state: "connecting" | "open" | "down" | "trying",
+ *   attempt: number}} Stream
+ * @type {Stream}
+ */
+const stream = { state: "connecting", attempt: 0 };
+/** @type {Set<(s: Stream) => void>} */
+const streamSubs = new Set();
+/** @param {Stream["state"]} next @param {number} [attempt] */
+function setStream(next, attempt = stream.attempt) {
+  if (stream.state === next && stream.attempt === attempt) return;
+  stream.state = next;
+  stream.attempt = attempt;
+  streamSubs.forEach((f) => f({ ...stream }));
+}
+/** @type {() => void} */
+let retryNow = () => {};
+
+/** @returns {Stream} */
+export const streamNow = () => ({ ...stream });
+
+/**
+ * Hear the live channel open, drop and try again.
+ * @param {(s: Stream) => void} f
+ * @returns {() => void} stop
+ */
+export function onStream(f) {
+  streamSubs.add(f);
+  return () => streamSubs.delete(f);
+}
+
+/** Open the live channel again now (the banner's Retry now). */
+export const retryStream = () => retryNow();
+
 const emit = () => subs.forEach((f) => f());
 
 /** @returns {StoreState} */
@@ -174,6 +211,7 @@ export function start() {
 
   function connect() {
     events?.close();
+    setStream(failures > 0 ? "trying" : "connecting", failures);
     events = new EventSource("/events");
     wire(events);
   }
@@ -182,9 +220,11 @@ export function start() {
   function wire(events) {
     events.addEventListener("open", () => {
       failures = 0;
+      setStream("open", 0);
       if (opens++ > 0) listeners.get("reopened")?.forEach((f) => f(null));
     });
     events.addEventListener("error", () => {
+      if (events.readyState !== EventSource.OPEN) setStream("down");
       if (events.readyState === EventSource.CLOSED) reopen();
     });
     for (const name of ACT_EVENTS)
@@ -221,6 +261,12 @@ export function start() {
     events.addEventListener("resync", () => void load());
   }
 
+  // Retry now: open the channel again, or, when it is open and the host link
+  // is what is down, read the fleet again to hear whether the link is back.
+  retryNow = () => {
+    if (events && events.readyState === EventSource.OPEN) void load();
+    else reopenNow();
+  };
   window.addEventListener("online", reopenNow);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) reopenNow();

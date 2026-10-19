@@ -30,14 +30,13 @@ import { h } from "./dom.js";
 import { drivable } from "./drivable.js";
 import {
   changed as notifyInbox,
-  countText,
   inboxNow,
   onInbox,
   wireInbox,
 } from "./inboxlist.js";
 import { HELP_OPEN, helpPanel } from "./helptour.js";
 import { startInboxSources } from "./inboxsources.js";
-import { noMatchText, rankCommands } from "./intent.js";
+import { noMatch, rankPalette } from "./intent.js";
 import { finished, queueOrder, stepText } from "./jobs.js";
 import { mountJobPanel } from "./jobpanel.js";
 import { toastOf } from "./notices.js";
@@ -45,7 +44,15 @@ import { holdToast } from "./ui.js";
 import { openImport } from "./importstack.js";
 import { openNewStack } from "./newstack.js";
 import { openRollback } from "./rollbackdialog.js";
-import { idle, keyAction } from "./shortcuts.js";
+import {
+  GROUP_ANYWHERE,
+  GROUP_CONSOLE,
+  GROUP_SECRETS,
+  GROUP_STACK,
+  altDigit,
+  appShortcuts,
+  tabTarget,
+} from "./shortcuts.js";
 import { current, listen, subscribe } from "./store.js";
 import {
   OPEN_EVENT,
@@ -65,7 +72,18 @@ import {
   themeMenuMarkup,
 } from "/static/kp/js/theme-picker.js";
 import { attachEffects } from "/static/kp/js/effects.js";
-import { toast as kpToast } from "/static/kp/js/overlays.js";
+import { attachDialogs, toast as kpToast } from "/static/kp/js/overlays.js";
+import {
+  attachTabbars,
+  setTabbarBadge,
+  setTabbarBusy,
+  setTabbarCurrent,
+} from "/static/kp/js/tabbar.js";
+import {
+  attachShortcuts,
+  configureShortcuts,
+  registerShortcuts,
+} from "/static/kp/js/shortcuts.js";
 
 /**
  * @typedef {{navigate: (href: string) => void,
@@ -146,7 +164,7 @@ function fillPalette(list, query, here) {
     themes: THEMES,
     theme: currentTheme(),
   });
-  const groups = rankCommands(commands, query, { here });
+  const groups = rankPalette(commands, query, { here });
   if (groups.length === 0) {
     const verbs = [
       ...new Set(
@@ -159,7 +177,7 @@ function fillPalette(list, query, here) {
       h(
         "li",
         { role: "presentation", class: "nx-palette__empty" },
-        noMatchText(query, {
+        noMatch(query, {
           verbs,
           stacks: (current().fleet?.stacks ?? []).map((s) => s.name),
         }),
@@ -219,22 +237,6 @@ function fillPalette(list, query, here) {
     ),
   );
   return commands;
-}
-
-/**
- * Whether a key press belongs to a field or an open dialog, not to us.
- * @param {KeyboardEvent} e
- */
-function notOurs(e) {
-  if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return true;
-  const t = /** @type {HTMLElement | null} */ (e.target);
-  if (
-    t?.closest?.(
-      "input, textarea, select, [contenteditable=''], [contenteditable='true']",
-    )
-  )
-    return true;
-  return document.querySelector("dialog[open]") != null;
 }
 
 /**
@@ -427,117 +429,131 @@ const icon = (id) => {
 /**
  * The phone's bottom tab bar (FLOWS.md §1.1 "Phone"): the four frequent
  * areas within thumb reach, then More, whose sheet holds Backups, System,
- * Search and Help. Hidden above 60 rem by app.css.
+ * Search and Help. kp-themes' `.kp-tabbar` (feat-kp11demo-14): the exact
+ * Inbox count (never "99+"), the theme's own spinner in Activity's icon
+ * while a job runs, and More marked current while the page is behind it.
+ * Hidden above 60 rem by the package.
  * @param {ChromeCtx} ctx
  * @param {() => void} openPalette
  * @param {() => void} openHelp
  * @returns {{el: HTMLElement, paint: () => void}}
  */
 function mountTabBar(ctx, openPalette, openHelp) {
-  const badge = h("span", { class: "kp-badge nx-count", hidden: "" });
   const tabs = phoneTabs().map((a) =>
     h(
       "a",
-      { href: a.href, "data-area": a.id, class: "nx-tabbar__tab" },
-      icon(a.id),
-      h("span", null, a.label),
-      ...(a.id === "needs-you" ? [badge] : []),
+      { href: a.href, "data-kp-tab": a.id, class: "kp-tabbar__tab" },
+      h("span", { class: "kp-tabbar__icon" }, icon(a.id)),
+      h("span", { class: "kp-tabbar__label" }, a.label),
     ),
   );
   const more = h(
     "button",
-    { type: "button", class: "nx-tabbar__tab", "data-area": "more" },
-    icon("more"),
-    h("span", null, "More"),
+    {
+      type: "button",
+      class: "kp-tabbar__tab kp-tabbar__tab--more",
+      "data-kp-dialog": "more-sheet",
+      "data-kp-tab": "more",
+    },
+    h("span", {
+      class: "kp-tabbar__icon kp-tabbar__icon--more",
+      "aria-hidden": "true",
+    }),
+    h("span", { class: "kp-tabbar__label" }, "More"),
   );
   const el = h(
     "nav",
-    { class: "nx-tabbar", "aria-label": "Areas" },
+    { class: "kp-tabbar", "aria-label": "Areas" },
     ...tabs,
     more,
   );
-  more.addEventListener("click", () => {
-    const item = (
-      /** @type {string} */ title,
-      /** @type {string} */ what,
-      /** @type {() => void} */ go,
-    ) => {
-      const b = h(
-        "button",
-        { type: "button", class: "nx-action" },
-        h("strong", null, title),
-        h("span", null, what),
-      );
-      b.addEventListener("click", () => {
-        d.close();
-        go();
-      });
-      return b;
-    };
-    const close = h(
+  /** @param {string} title @param {string} what @param {() => void} go */
+  const item = (title, what, go) => {
+    const b = h(
       "button",
+      { type: "button", class: "nx-action" },
+      h("strong", null, title),
+      h("span", null, what),
+    );
+    b.addEventListener("click", () => {
+      sheet.close();
+      go();
+    });
+    return b;
+  };
+  const close = h(
+    "button",
+    {
+      type: "button",
+      class: "kp-icon-button kp-dialog__close",
+      "aria-label": "Close",
+    },
+    "✕",
+  );
+  const sheet = /** @type {HTMLDialogElement} */ (
+    h(
+      "dialog",
       {
-        type: "button",
-        class: "kp-icon-button kp-dialog__close",
-        "aria-label": "Close",
+        class: "kp-drawer kp-dialog nx-sheet",
+        id: "more-sheet",
+        "data-kp-tabbar-drawer": "",
+        "aria-label": "More",
       },
-      "✕",
-    );
-    const d = /** @type {HTMLDialogElement} */ (
       h(
-        "dialog",
-        { class: "kp-drawer kp-dialog nx-sheet", "aria-label": "More" },
+        "header",
+        { class: "kp-drawer__head" },
+        h("h2", { class: "kp-dialog__title" }, "More"),
+        close,
         h(
-          "header",
-          { class: "kp-drawer__head" },
-          h("h2", { class: "kp-dialog__title" }, "More"),
-          close,
-          h(
-            "p",
-            { class: "kp-drawer__desc" },
-            "The two areas you need less often, plus search and help.",
-          ),
+          "p",
+          { class: "kp-drawer__desc" },
+          "The two areas you need less often, plus search and help.",
         ),
-        h(
-          "div",
-          { class: "kp-drawer__body nx-actions" },
-          ...moreAreas().map((a) =>
-            item(a.label, a.what, () => ctx.navigate(a.href)),
-          ),
-          item(
-            "Search or do anything",
-            "Pages, stacks and actions in one box",
-            openPalette,
-          ),
-          item(
-            "Help and the words",
-            "What a stack, a deploy or a snapshot is",
-            openHelp,
-          ),
+      ),
+      h(
+        "div",
+        { class: "kp-drawer__body nx-actions" },
+        ...moreAreas().map((a) =>
+          item(a.label, a.what, () => ctx.navigate(a.href)),
         ),
-      )
-    );
-    close.addEventListener("click", () => d.close());
-    d.addEventListener("close", () => d.remove());
-    document.body.append(d);
-    d.showModal();
-  });
+        item(
+          "Search or do anything",
+          "Pages, stacks and actions in one box",
+          openPalette,
+        ),
+        item(
+          "Help and the words",
+          "What a stack, a deploy or a snapshot is",
+          openHelp,
+        ),
+      ),
+    )
+  );
+  close.addEventListener("click", () => sheet.close());
+  document.body.append(sheet);
+  const inbox = /** @type {HTMLElement} */ (
+    tabs.find((t) => t.dataset.kpTab === "needs-you")
+  );
+  const activity = /** @type {HTMLElement} */ (
+    tabs.find((t) => t.dataset.kpTab === "activity")
+  );
   const paint = () => {
     const r = ctx.route();
     const areaId =
       r.page === "stack"
         ? "overview"
         : (AREAS.find((a) => a.id === r.page)?.id ?? null);
-    for (const t of [...tabs, more]) t.removeAttribute("aria-current");
-    const hit = tabs.find((t) => t.dataset.area === areaId);
-    if (hit) hit.setAttribute("aria-current", "page");
-    else if (moreAreas().some((a) => a.id === areaId))
-      more.setAttribute("aria-current", "page");
-    const n = inboxNow().items.length;
-    badge.textContent = countText(n);
-    badge.hidden = n === 0;
+    setTabbarCurrent(el, areaId);
+    // A page behind More marks More itself (kp does it by the sheet's
+    // current link); the sheet's entries are buttons, so say it here.
+    if (areaId && moreAreas().some((a) => a.id === areaId))
+      more.setAttribute("aria-current", "true");
+    else more.removeAttribute("aria-current");
+    setTabbarBadge(inbox, inboxNow().items.length);
+    setTabbarBusy(activity, liveJobs(act.jobs).length > 0);
   };
   onInbox(paint);
+  onAct("jobs", paint);
   paint();
   return { el, paint };
 }
@@ -667,6 +683,8 @@ export function mountChrome(where, ctx) {
     () => palette(sheet)?.open(),
   );
   document.body.append(tabbar.el);
+  attachDialogs(tabbar.el);
+  attachTabbars(document);
 
   // The notices the bell used to count: a pop-up one still toasts, and
   // its Open goes to the Inbox (or the job's own flow).
@@ -709,21 +727,41 @@ export function mountChrome(where, ctx) {
   };
   subscribe(onAsks);
 
-  let chord = idle();
+  // feat-kp11demo-14: kp-themes' shortcut engine owns the chords, the cap
+  // that waits for the second key (in the middle of the screen: Kenny's
+  // default), the "No shortcut on g x" line, the AltGr warning and the dimmed
+  // keys; the list is shortcuts.js's. The help sheet fills itself from it.
+  configureShortcuts({
+    layoutGuard: "warn",
+    unknownHint: true,
+    hintPlace: "centre",
+    groupOrder: [GROUP_ANYWHERE, GROUP_STACK, GROUP_CONSOLE, GROUP_SECRETS],
+  });
+  const focusSearch = () => {
+    /** @type {HTMLInputElement | null} */ (
+      document.querySelector("#page .nx-search, #page .kp-datatable__search")
+    )?.focus();
+  };
+  registerShortcuts(
+    "app",
+    appShortcuts({ navigate: ctx.navigate, route: ctx.route, focusSearch }),
+  );
+  attachShortcuts(document);
+  // The engine reads `event.key`; on a Belgian AZERTY keyboard Alt + the
+  // digit row types a symbol there, so the physical key opens the tab.
   document.addEventListener("keydown", (e) => {
-    if (notOurs(e)) return;
-    const r = keyAction(chord, e.key, Date.now(), ctx.route());
-    chord = r.state;
-    const a = r.action;
-    if (!a) return;
+    const n = altDigit(e);
+    if (n == null || e.defaultPrevented || e.key === String(n)) return;
+    const t = /** @type {HTMLElement | null} */ (e.target);
+    if (
+      t?.closest?.("input, textarea, select, [contenteditable]") ||
+      document.querySelector("dialog[open]")
+    )
+      return;
+    const to = tabTarget(ctx.route(), { n });
+    if (!to) return;
     e.preventDefault();
-    if ("navigate" in a) ctx.navigate(a.navigate);
-    else {
-      const search = /** @type {HTMLInputElement | null} */ (
-        document.querySelector("#page .nx-search, #page .kp-datatable__search")
-      );
-      search?.focus();
-    }
+    ctx.navigate(to);
   });
   return { repaint: () => tabbar.paint() };
 }

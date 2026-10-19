@@ -2784,7 +2784,9 @@ test("invariants: the Inbox counter shows the exact number, never 9+, and equals
       const badge =
         width > 960
           ? page.locator("#nav a[data-area='needs-you'] .nx-count")
-          : page.locator(".nx-tabbar [data-area='needs-you'] .nx-count");
+          : page.locator(
+              ".kp-tabbar [data-kp-tab='needs-you'] .kp-tabbar__badge",
+            );
       // redesign-flows-2: the updates, setup, checks and Today sources
       // add their rows to the twelve notices; the counter is the rows.
       const rows = await page
@@ -3493,7 +3495,9 @@ test("invariants: every Inbox row says what and why and carries its fix, and a p
       const badge =
         width > 960
           ? page.locator("#nav a[data-area='needs-you'] .nx-count")
-          : page.locator(".nx-tabbar [data-area='needs-you'] .nx-count");
+          : page.locator(
+              ".kp-tabbar [data-kp-tab='needs-you'] .kp-tabbar__badge",
+            );
       assert.equal((await badge.innerText()).trim(), String(rows));
       // A plain click on Setup shows only the Setup row; again shows all.
       // kp11: the kinds are kp-themes' chips, each the Live view control
@@ -6896,7 +6900,7 @@ test("invariants: redesign-config Firewall pins a square with its story and trac
   }
 });
 
-test("invariants: redesign-config Settings stages an edit inline, counts it in the header, reviews it, and Discard can be undone", async () => {
+test("invariants: redesign-config Settings edits a key where it stands, counts it in the Save bar, keeps it across a look at another page, and Discard can be undone", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -6904,44 +6908,21 @@ test("invariants: redesign-config Settings stages an edit inline, counts it in t
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/settings`);
-    const edit = page.locator('button[data-key="backup_concurrency"]');
-    await edit.waitFor({ timeout: 10000 });
-    assert.equal(
-      (await page.locator("#settings-save").innerText()).trim(),
-      "Check and write",
-    );
-    assert.ok(await page.locator("#settings-save").isDisabled());
-    await edit.click();
-    const input = page.locator("#key-backup-concurrency");
-    await input.fill("99");
-    await page.locator("#key-stage").click();
+    const row = page.locator('.kp-formrow[data-key="backup_concurrency"]');
+    await row.waitFor({ timeout: 10000 });
+    const save = page.locator(".kp-unsaved__save");
+    await save.waitFor({ timeout: 10000 });
+    assert.ok(await save.isDisabled(), "Save is on with nothing changed");
+    // The stepper stays inside the host's limits (1 to 16): no way to type 99.
+    await row.locator('[data-kp-quantity-by="1"]').click();
+    const bar = page.locator(".kp-unsaved__bar");
+    await bar.getByText("1 change").first().waitFor({ timeout: 5000 });
     assert.ok(
-      await page.locator(".st-err").isVisible(),
-      "an out-of-range value was staged without a word",
+      await row.getAttribute("data-kp-changed"),
+      "the row is not marked",
     );
-    await input.fill("2");
-    await input.press("Enter");
-    assert.equal(
-      (await page.locator("#settings-save").innerText()).trim(),
-      "Check and write 1…",
-    );
-    assert.equal(
-      (await page.locator(".nx-head-actions .cf-chip").innerText()).trim(),
-      "1 change staged",
-    );
-    assert.ok(
-      await page
-        .locator('[data-key="backup_concurrency"].st-set--staged')
-        .count(),
-    );
-    await page.locator("#settings-save").click();
-    const dialog = page.locator("dialog#settings-review[open]");
-    await dialog.waitFor({ timeout: 3000 });
-    assert.match(await dialog.innerText(), /backup_concurrency/);
-    await dialog.locator("button", { hasText: "Back" }).click();
-    // redesign-config-5: leaving the page and coming back keeps what is
-    // staged (for this tab), and the page says so.
-    // An in-app link, as the nav's: the page unmounts, the tab stays.
+    assert.ok(!(await save.isDisabled()));
+    // A look at another page keeps what is staged for this tab (kp's bar).
     await page.evaluate(() => {
       const a = document.createElement("a");
       a.href = "/firewall";
@@ -6950,33 +6931,31 @@ test("invariants: redesign-config Settings stages an edit inline, counts it in t
       document.body.append(a);
     });
     await page.locator("#e2e-away").click();
+    // The bar asks before a link leaves a page with staged changes.
+    const leave = page.locator("dialog[open]");
+    if (await leave.count())
+      await leave.getByRole("button", { name: /Leave/ }).click();
     await page.waitForURL("**/firewall", { timeout: 5000 });
     await page.locator("tr.fw-row").first().waitFor({ timeout: 10000 });
     await page.goBack();
-    await page.locator('button[data-key="backup_concurrency"]').waitFor({
-      timeout: 10000,
-    });
     await page
-      .locator("#settings-save", { hasText: "Check and write 1…" })
-      .waitFor({ timeout: 5000 });
-    await page
-      .locator(".nx-head-actions button", { hasText: "Discard" })
-      .click();
-    assert.ok(await page.locator("#settings-save").isDisabled());
+      .locator('.kp-formrow[data-key="backup_concurrency"][data-kp-changed]')
+      .waitFor({ timeout: 10000 });
+    await page.locator(".kp-unsaved__discard").click();
+    assert.ok(await page.locator(".kp-unsaved__save").isDisabled());
     await page.locator(".kp-toast button", { hasText: "Undo" }).click();
-    assert.equal(
-      (await page.locator("#settings-save").innerText()).trim(),
-      "Check and write 1…",
-      "Undo did not bring the staged change back",
-    );
+    await page
+      .locator('.kp-formrow[data-key="backup_concurrency"][data-kp-changed]')
+      .waitFor({ timeout: 5000 });
     // Keys the dashboard must never change offer the ssh way instead.
-    const how = page.locator(
-      '[data-drive="settings-how-to"][data-drive-row="listen"]',
-    );
-    await how.click();
+    await page
+      .locator('[data-drive="settings-how-to"][data-drive-row="listen"]')
+      .click();
     assert.match(
-      await page.locator(".st-howto").innerText(),
-      /ssh pve, then set listen/,
+      await page
+        .locator('.kp-formrow[data-key="listen"] .kp-command')
+        .innerText(),
+      /sudoedit/,
     );
   } finally {
     await browser.close();
@@ -6998,7 +6977,11 @@ test("invariants: redesign-config Sign-in holds the passkeys beside the machine 
     const heads = await page.$$eval("#signin .si-col h3", (hs) =>
       hs.map((x) => x.textContent?.trim()),
     );
-    assert.deepEqual(heads, ["Passkeys", "Machine tokens"]);
+    assert.deepEqual(heads, [
+      "Passkeys",
+      "Register from your phone",
+      "Machine tokens",
+    ]);
     assert.equal(
       await page
         .locator("#signin button", { hasText: "Register a passkey" })
@@ -7203,6 +7186,17 @@ test("invariants: redesign-config every control Firewall, Settings and Presets d
             // region in the tab order so a keyboard can scroll it; it does
             // nothing when used, so it is no control for Live view to drive.
             .filter((e) => !e.matches(".kp-table-wrap[role=region]"))
+            // kp-themes 11 on Settings: a key's editor is reached by its row
+            // (settings-edit) and its field id (key-<key>); the parts the
+            // package draws inside a component (the passkey list, the QR, the
+            // refresh bar, a command block, the Save bar's menu) are its own
+            // and "This browser" decides nothing on the host.
+            .filter(
+              (e) =>
+                !e.closest(
+                  "#browser, .kp-passkeys, .kp-qr, .kp-refresh, .kp-command, .kp-code, .kp-anchor, .st-keylist .kp-formrow, .kp-unsaved__more, .kp-unsaved__panel",
+                ),
+            )
             .map((e) => ({
               drive: /** @type {HTMLElement} */ (e).dataset.drive ?? null,
               form: /** @type {HTMLElement} */ (e).dataset.driveForm ?? null,
@@ -7388,17 +7382,22 @@ test("invariants: redesign-config review one failed read is one alert with one T
     for (const p of ["**/data/repo", "**/data/host-settings", "**/data/tokens"])
       await page.route(p, down);
     await page.goto(`${BASE}/settings`);
-    const alert = page.locator("#page [role=alert]");
-    await alert
+    // One alert under the header for every read the page lost, with one Try
+    // again (each card also says what failed, in kp's failed state).
+    const alert = page
+      .locator("#page .kp-problems .kp-alert")
       .filter({ hasText: "the tokens" })
       .filter({ hasText: "the host settings" })
-      .filter({ hasText: "the working copy" })
-      .waitFor({ timeout: 10000 });
+      .filter({ hasText: "the working copy" });
+    await alert.waitFor({ timeout: 10000 });
     assert.equal(await alert.count(), 1);
     for (const p of ["**/data/repo", "**/data/host-settings", "**/data/tokens"])
       await page.unroute(p);
-    await page.locator("#page button", { hasText: "Try again" }).click();
-    await page.locator("button[data-key]").first().waitFor({ timeout: 10000 });
+    await page.locator('[data-drive="settings-try-again"]').click();
+    await page
+      .locator(".kp-formrow[data-key]")
+      .first()
+      .waitFor({ timeout: 10000 });
     await alert.waitFor({ state: "detached", timeout: 5000 });
 
     // Fetch now while the remote is slow: it says so, then comes back.
@@ -8019,8 +8018,9 @@ test("invariants: stack hub review — Settings ▸ Secrets is this stack's pane
         arrows: /↑\s*↓/.test(sec.textContent ?? ""),
         // A framed card: the kit's plain sections (no frame, the panes
         // since the 3.71.0 merge) are not cards in the card.
-        cards: sec.querySelectorAll(".kp-card, .nx-card:not(.nx-card--plain)")
-          .length,
+        cards: sec.querySelectorAll(
+          ".kp-card:not(.sx-card), .nx-card:not(.nx-card--plain):not(.sx-card)",
+        ).length,
       };
     });
     assert.deepEqual(r, { list: 0, open: 0, arrows: false, cards: 0 });

@@ -20,10 +20,14 @@
 import { startAgoTicker } from "./ago.js";
 import { areaOf, crumbs } from "./areas.js";
 import { mountChrome } from "./chrome.js";
+import { mountConnectionBar } from "./connectionbar.js";
+import { mountSystemRail } from "./systemrail.js";
+import { startFollowingSystem } from "./thisbrowser.js";
 import { mountFollow } from "./drive.js";
 import { h } from "./dom.js";
 import { countText, inboxNow, onInbox, worst } from "./inboxlist.js";
 import { attachNavMenus, attachNavToggles } from "/static/kp/js/components.js";
+import { attachNavFolds } from "/static/kp/js/nav-fold.js";
 import { attachMotion } from "/static/kp/js/motion.js";
 import { attachTableRegions } from "/static/kp/js/tables.js";
 import { attachActionColumns } from "/static/kp/js/actions.js";
@@ -68,13 +72,18 @@ import { mountVersions } from "./versions.js";
 import { installSortClick } from "./sortclick.js";
 
 installSortClick();
+// "Follow my system" (Settings ▸ This browser) works from every page.
+startFollowingSystem();
 
 const page = /** @type {HTMLElement} */ (document.getElementById("page"));
 const nav = /** @type {HTMLElement} */ (document.getElementById("nav"));
 const bar = /** @type {HTMLElement} */ (document.getElementById("bar"));
 const brand = /** @type {HTMLElement} */ (document.getElementById("brand"));
 const trail = /** @type {HTMLElement} */ (document.getElementById("crumbs"));
-const link = /** @type {HTMLElement} */ (document.getElementById("link"));
+
+const rail = mountSystemRail(
+  /** @type {HTMLElement} */ (document.getElementById("rail-slot")),
+);
 
 /** @type {() => void} */
 let cleanup = () => {};
@@ -148,7 +157,13 @@ function renderNav() {
         );
       }
       if (p) a["data-area"] = p.id;
-      out.push(h("li", null, h("a", a, ...kids)));
+      out.push(
+        h(
+          "li",
+          p?.id === "needs-you" ? { "data-kp-nav-keep": "" } : null,
+          h("a", a, ...kids),
+        ),
+      );
       return out;
     }),
   );
@@ -157,8 +172,8 @@ function renderNav() {
   });
   trail.replaceChildren(...(list.length > 1 ? [breadcrumbs(list)] : []));
   trail.hidden = list.length < 2;
+  rail.sync(areaOf(r) === "system", location.pathname, location.search);
   chrome.repaint();
-  queueMicrotask(fitBar);
 }
 
 /**
@@ -367,11 +382,9 @@ document.addEventListener("click", (e) => {
 });
 window.addEventListener("popstate", render);
 
-subscribe(() => {
-  const s = current();
-  link.textContent = s.link;
-  link.dataset.up = String(s.up);
-});
+mountConnectionBar(
+  /** @type {HTMLElement} */ (document.getElementById("connection")),
+);
 const chrome = mountChrome(
   { nav: bar },
   { navigate, route: () => route(location.pathname) },
@@ -411,27 +424,12 @@ void loadPages();
 attachNavToggles(bar);
 attachNavMenus(bar);
 
-/**
- * The bar in one row in every theme (Kenny, 2026-09-29): a theme whose font
- * is wide would wrap the links onto a second row, so the bar then folds its
- * links behind kp's menu button, as on a phone.
- */
-function fitBar() {
-  bar.removeAttribute("data-fold");
-  const kids = [...bar.children].filter(
-    (e) => e instanceof HTMLElement && e.offsetParent !== null,
-  );
-  if (kids.length === 0) return;
-  const firstBottom = Math.min(
-    ...kids.map((e) => e.getBoundingClientRect().bottom),
-  );
-  const wrapped = kids.some(
-    (e) => e.getBoundingClientRect().top >= firstBottom,
-  );
-  if (wrapped) bar.setAttribute("data-fold", "");
-}
-fitBar();
-addEventListener("resize", fitBar);
+// feat-kp11demo-14: the bar is one row in every theme (Kenny, 2026-09-29),
+// and what does not fit folds from the end behind kp's More menu; the Inbox
+// (`data-kp-nav-keep`, renderNav) never folds, because it carries the count
+// that needs a person. Before kp-themes 11 `fitBar` folded ALL the links
+// behind the phone toggle as soon as one wrapped.
+attachNavFolds(bar);
 // kp-themes' motion on the whole dashboard (Kenny, 2026-10-08: "alles wat
 // kp-themes te bieden heeft ten volle benutten"): every card eases to its
 // new height, and what is added to one arrives the theme's way. A live
@@ -480,19 +478,3 @@ new MutationObserver((records) => {
     for (const n of r.addedNodes)
       if (n instanceof Element && n.isConnected) attachSelects(n);
 }).observe(document.body, { childList: true, subtree: true });
-// fix-176: the bar's content changes after the first paint, so it is
-// measured again whenever its content or its own size moves. Only
-// childList/characterData are watched: fitBar's own data-fold toggle is an
-// attribute change and cannot re-trigger it.
-new MutationObserver(fitBar).observe(bar, {
-  childList: true,
-  subtree: true,
-  characterData: true,
-});
-if (typeof ResizeObserver === "function")
-  new ResizeObserver(fitBar).observe(bar);
-new MutationObserver(fitBar).observe(document.documentElement, {
-  attributes: true,
-  attributeFilter: ["data-theme", "class"],
-});
-void document.fonts?.ready.then(fitBar);

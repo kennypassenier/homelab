@@ -34,25 +34,31 @@ const panes = (page) =>
       return { x: r.x, y: r.y + scrollY, w: r.width, h: r.height };
     };
     const root = document.querySelector("#secrets .sx--one");
-    const detail = root?.querySelector(".sx-one-detail") ?? null;
+    const detail = root?.querySelector("#sd") ?? null;
     return {
       list: box(document.querySelector(".sx-stacks")),
       detail: box(detail),
-      drawer: box(root?.querySelector(".sx-drawer--one") ?? null),
+      drawer: box(root?.querySelector("#ch") ?? null),
       // review 5: inside the hub the pane is no second card: no heading of
       // its own, no Open stack, no other stack to move to.
-      heads: detail ? detail.querySelectorAll("h2, h3").length : -1,
-      cardInCard: detail?.classList.contains("kp-card") ?? null,
+      heads: detail ? detail.querySelectorAll(".kp-card__title").length : -1,
+      // The state host is kp's card machinery, drawn flat (`sx-card`).
+      cardInCard: detail
+        ? getComputedStyle(detail).boxShadow !== "none" ||
+          parseFloat(getComputedStyle(detail).borderTopWidth) > 0
+        : null,
       openStack: [...(detail?.querySelectorAll("a") ?? [])].some(
         (a) => (a.textContent ?? "").trim() === "Open stack",
       ),
-      keys: detail?.querySelector(".nx-card__foot")?.textContent ?? "",
+      keys: detail?.textContent ?? "",
       rows: [...document.querySelectorAll("[data-drive=reveal-secret]")].map(
         (b) => b.getAttribute("data-drive-row"),
       ),
       scrollW: document.documentElement.scrollWidth,
       viewW: innerWidth,
-      skeletons: root ? root.querySelectorAll(".kp-skeleton").length : -1,
+      skeletons: root
+        ? root.querySelectorAll('[data-kp-state="loading"]').length
+        : -1,
     };
   });
 
@@ -143,42 +149,51 @@ test("secrets: a reveal hides itself after 30 s, Copy copies, and Activity names
       `[data-drive=reveal-secret][data-drive-row="${row}"]`,
     );
     await reveal.waitFor();
-    const value = page.locator(`[data-secret-value="${row}"]`);
+    const field = page.locator(`[data-key="${row}"] .kp-secret`);
+    const value = field.locator(".kp-secret__value");
     await reveal.click();
     await page.waitForFunction(
       (r) =>
         document
-          .querySelector(`[data-secret-value="${r}"]`)
+          .querySelector(`[data-key="${r}"] .kp-secret__value`)
           ?.textContent?.startsWith("DEMO_VALUE="),
       row,
     );
     const secret = (await value.textContent()) ?? "";
     assert.match(secret, /^DEMO_VALUE=/);
-    assert.equal(await reveal.textContent(), "Hide");
+    assert.equal(await field.getAttribute("data-kp-secret-state"), "shown");
     await page.clock.fastForward(29_000);
     assert.equal(await value.textContent(), secret, "still shown at 29 s");
     await page.clock.fastForward(1_500);
     await page.waitForFunction(
       (r) =>
         !document
-          .querySelector(`[data-secret-value="${r}"]`)
+          .querySelector(`[data-key="${r}"] .kp-secret__value`)
           ?.textContent?.startsWith("DEMO_VALUE="),
       row,
     );
-    assert.equal(await reveal.textContent(), "Reveal", "hidden after 30 s");
+    assert.equal(
+      await field.getAttribute("data-kp-secret-state"),
+      "hidden",
+      "hidden after 30 s",
+    );
 
     // Copy: on the clipboard, never on screen.
     await page
       .locator(`[data-drive=copy-secret][data-drive-row="${row}"]`)
       .click();
-    await page.waitForSelector("#page .kp-toasts .kp-toast");
-    const toast = (await page.textContent("#page .kp-toasts .kp-toast")) ?? "";
-    assert.match(toast, /Copied traefik\/\.env|Press Ctrl C/);
-    if (toast.startsWith("Copied"))
-      assert.equal(
-        await page.evaluate(() => navigator.clipboard.readText()),
-        secret,
-      );
+    await page.waitForFunction(
+      (r) =>
+        /copied/i.test(
+          document.querySelector(`[data-key="${r}"] [data-audit]`)
+            ?.textContent ?? "",
+        ),
+      row,
+    );
+    assert.equal(
+      await page.evaluate(() => navigator.clipboard.readText()),
+      secret,
+    );
 
     // The audit trail: who and which, never the value.
     const history = await page.evaluate(async () => {

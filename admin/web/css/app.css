@@ -33,27 +33,10 @@
 main.shell > * + * {
   margin-block-start: var(--section-gap) !important;
 }
-.kp-nav .link {
-  margin: 0 0 0 auto;
-  font-size: 0.85em;
-  color: var(--muted-foreground);
-}
-/* fix-176: kp-themes' own .kp-nav__search already carries
-   margin-inline-start: auto (dist/kp-themes.css), so with .link's auto
-   margin above too, a flex row with TWO auto-margin items splits the
-   bar's free space between them instead of grouping it: the version text
-   floated in the middle of the bar, a few hundred pixels from "Go to…".
-   .link is the one item meant to open the right-hand group (it sits right
-   before .kp-nav__search in index.html); switching off the search
-   trigger's own auto margin here makes .link's auto margin the only one,
-   so it pulls itself and everything after it (search, bell, help, theme)
-   into one cluster at the end of the bar. */
-.kp-nav .kp-nav__search {
-  margin-inline-start: 0;
-}
-.link[data-up="false"] {
-  color: var(--destructive);
-}
+/* The bar's right-hand group (the palette door, Help, the theme menu, Live
+   view) follows kp's own nav-fold (main.js `attachNavFolds`): the links take
+   the room the brand and this group leave and fold behind More when they do
+   not fit. */
 .title-row {
   display: flex;
   align-items: center;
@@ -1195,7 +1178,6 @@ td.stack-flags {
    keyboard-shortcut sheet (no keyboard there) make room for the palette,
    the bell and the theme button. */
 @media (max-width: 40rem) {
-  .kp-nav .link,
   .kp-nav .help-button,
   .kp-nav [data-kp-palette-keys] {
     display: none;
@@ -1338,12 +1320,6 @@ td.stack-flags {
   opacity: 0;
 }
 /* ==== END data tables ==== */
-
-/* The version text in the bar wears the bar's ink, as kp's own bar
-   controls do (kp-themes 7.3.0, fix-77/82). */
-.kp-nav .link {
-  color: inherit;
-}
 
 /* ==== BEGIN Live view: announce, plan and pause (feat-platform-10, ====
    Kenny 2026-09-29, form "Live view aankondigen"; grid rebuild 2026-10-02,
@@ -1559,22 +1535,6 @@ td.stack-flags {
   }
 }
 /* ==== END Live view: announce, plan and pause ==== */
-
-/* The bar folds its links behind the menu button when a wide theme font
-   would wrap them (main.js fitBar); the same look as kp's phone bar. */
-.kp-nav[data-fold] > .kp-nav__toggle {
-  display: inline-flex;
-}
-.kp-nav[data-fold]:not([data-kp-nav-open]) > .kp-nav__links {
-  display: none;
-}
-.kp-nav[data-fold][data-kp-nav-open] > .kp-nav__links {
-  display: flex;
-  flex-basis: 100%;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.25rem;
-}
 
 /* ==== BEGIN Live view cursor (live-cursor, Kenny 2026-09-29) ====
    Claude's simulated pointer in a tab that follows: a fixed, zero-size
@@ -2153,8 +2113,7 @@ td.stack-flags {
   background: var(--border);
   list-style: none;
 }
-.kp-nav .nx-count,
-.nx-tabbar .nx-count {
+.kp-nav .nx-count {
   margin-inline-start: 6px;
   font-variant-numeric: tabular-nums;
   line-height: 1.5;
@@ -2211,13 +2170,9 @@ td.stack-flags {
 
 /* -- phone (≤ 60 rem): the areas move to a bottom tab bar with More;
       the top bar keeps brand, search, the running pill and the theme -- */
-.nx-tabbar {
-  display: none;
-}
 @media (max-width: 60rem) {
   .kp-nav > .kp-nav__links,
-  .kp-nav > .kp-nav__toggle,
-  .kp-nav[data-fold] > .kp-nav__toggle {
+  .kp-nav > .kp-nav__toggle {
     display: none !important;
   }
   .nx-search-trigger {
@@ -2231,56 +2186,6 @@ td.stack-flags {
   .nx-search-trigger [data-kp-palette-keys],
   .nx-pill__long {
     display: none;
-  }
-  .nx-tabbar {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    position: fixed;
-    inset: auto 0 0 0;
-    z-index: 40;
-    background: var(--card);
-    border-block-start: 1px solid var(--border);
-    padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
-  }
-  .nx-tabbar__tab {
-    all: unset;
-    cursor: pointer;
-    display: grid;
-    justify-items: center;
-    gap: 2px;
-    padding: 6px 2px;
-    border-radius: 8px;
-    font-size: var(--kp-text-xs);
-    color: var(--muted-foreground);
-    position: relative;
-  }
-  .nx-tabbar__tab:focus-visible {
-    outline: 2px solid var(--ring);
-  }
-  .nx-tabbar svg {
-    inline-size: 22px;
-    block-size: 22px;
-    stroke: currentColor;
-    fill: none;
-    stroke-width: 1.7;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  .nx-tabbar [aria-current="page"] {
-    color: var(--foreground);
-    font-weight: 600;
-  }
-  .nx-tabbar [aria-current="page"] svg {
-    stroke: var(--primary);
-  }
-  .nx-tabbar .nx-count {
-    position: absolute;
-    inset-block-start: 0;
-    inset-inline-start: 55%;
-    margin: 0;
-  }
-  body {
-    padding-block-end: 72px;
   }
 }
 
@@ -3546,4 +3451,38 @@ th[aria-sort="descending"] .nx-sort__mark {
   display: block;
   inline-size: fit-content;
   margin-block-start: 6px;
+}
+
+/* feat-kp11demo-14: System's pages in a slim rail beside the page. Two
+   columns while the rail stands (the rail's own width, then the page); one
+   otherwise. The rail sticks while the page scrolls; its peek lies over the
+   page and never moves it. On a phone the tab bar's More sheet takes over. */
+.app-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.app-body[data-rail] {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.app-body__rail {
+  position: sticky;
+  inset-block-start: 0;
+  align-self: start;
+  z-index: 5;
+  min-block-size: 20rem;
+  max-block-size: 100vh;
+}
+.app-body__rail[hidden] {
+  display: none;
+}
+.app-body__page {
+  min-inline-size: 0;
+}
+@media (max-width: 60rem) {
+  .app-body[data-rail] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .app-body__rail {
+    display: none;
+  }
 }

@@ -236,6 +236,22 @@ export function areaOf(r) {
 export const areaById = (id) => AREAS.find((a) => a.id === id) ?? null;
 
 /**
+ * The most specific sub-page a location is (most query keys matched).
+ * @param {string} path the location's path, without a trailing slash
+ * @param {URLSearchParams} params
+ * @returns {SubPage | undefined}
+ */
+export function subPageAt(path, params) {
+  return SUB_PAGES.map((s) => ({ s, u: new URL(s.href, "http://x") }))
+    .filter(
+      ({ u }) =>
+        u.pathname === path &&
+        [...u.searchParams].every(([k, v]) => params.get(k) === v),
+    )
+    .sort((a, b) => b.u.searchParams.size - a.u.searchParams.size)[0]?.s;
+}
+
+/**
  * The breadcrumb trail of a location, ending at the page itself:
  * `Stacks / gateway / Logs`, `System / Map`, `Activity / Planned`. A
  * crumb with an `href` is a link up; the last one has none.
@@ -277,14 +293,7 @@ export function crumbs(r, pathname, search, opts = {}) {
   }
   const params = new URLSearchParams(search);
   const path = pathname.replace(/\/+$/, "") || "/";
-  // The most specific sub-page this location is (most query keys matched).
-  const sub = SUB_PAGES.map((s) => ({ s, u: new URL(s.href, "http://x") }))
-    .filter(
-      ({ u }) =>
-        u.pathname === path &&
-        [...u.searchParams].every(([k, v]) => params.get(k) === v),
-    )
-    .sort((a, b) => b.u.searchParams.size - a.u.searchParams.size)[0]?.s;
+  const sub = subPageAt(path, params);
   if (sub)
     return [{ label: area.label, href: area.href }, { label: sub.label }];
   return [{ label: area.label }];

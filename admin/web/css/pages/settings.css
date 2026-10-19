@@ -88,31 +88,42 @@
   }
 }
 
-/* ---------- working copy ---------- */
-.st-wc {
-  display: grid;
-  gap: var(--kp-space-md, 12px);
+/* ---------- the cards of the page: data, with the package's states ---------- */
+.st-main > .kp-card {
+  --kp-card-stage-min: 8rem;
 }
-.st-wc__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--kp-space-lg, 16px);
-  align-items: center;
+
+/* ---------- working copy: a form grid; the refresh bar stands on the
+   control, value and actions tracks of its row (kp-gaps/homelab.md 52) ---------- */
+.st-working {
+  align-content: start;
+  --kp-formgrid-label-min: 11rem;
+  --kp-formgrid-label-max: 14rem;
+  /* Two tracks are enough here: the label, then the control, which runs to
+     the end of the row (the value and actions tracks stay empty). */
+  grid-template-columns:
+    [label-start] fit-content(var(--kp-formgrid-label-max))
+    [label-end control-start] minmax(0, 1fr)
+    [control-end value-start] 0
+    [value-end actions-start] 0
+    [actions-end];
+  align-items: start;
 }
-.st-wc__commit {
-  display: grid;
-  gap: 4px;
-  min-inline-size: 0;
+.st-wc__rows {
+  display: contents;
 }
-.st-wc__commit strong {
-  font-size: 1.05rem;
+.st-versions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--kp-space-xs, 0.25rem) var(--kp-space-md, 0.75rem);
 }
+.st-wc__at,
 .st-wc__chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  justify-content: flex-end;
+  gap: var(--kp-space-xs, 0.25rem) var(--kp-space-sm, 0.5rem);
+  align-items: baseline;
 }
 .st-remote {
   font-size: var(--kp-text-xs);
@@ -121,13 +132,21 @@
   white-space: nowrap;
   max-inline-size: 24rem;
 }
-@media (max-width: 40rem) {
-  .st-wc__grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .st-wc__chips {
-    justify-content: flex-start;
-  }
+
+/* ---------- This browser ---------- */
+.st-themes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kp-space-xs, 0.25rem) var(--kp-space-sm, 0.5rem);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.st-themes [data-kp-theme] {
+  align-items: baseline;
+}
+.st-themes [data-kp-theme] .kp-swatch {
+  align-self: center;
 }
 
 /* ---------- sign-in ---------- */
@@ -135,6 +154,7 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--cf-gap);
+  align-items: start;
 }
 .si-col {
   display: grid;
@@ -143,8 +163,8 @@
   min-inline-size: 0;
 }
 .si-col__head {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
 }
@@ -152,46 +172,33 @@
   margin: 0;
   font-size: 1rem;
 }
-.si-register {
-  display: grid;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: color-mix(in oklab, var(--muted) 55%, transparent);
+.si-col .kp-lede {
+  margin: 0;
 }
 .si-register[hidden] {
   display: none;
 }
-.si-register .kp-field {
-  margin: 0;
-}
-.si-register p {
-  margin: 0;
-}
-.si-items {
-  list-style: none;
-  margin: 0;
+.st-subcard {
+  box-shadow: none;
+  border: 0;
   padding: 0;
-  display: grid;
+  background: transparent;
 }
-.si-item {
+.st-sub {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 4px 12px;
-  align-items: center;
-  padding: 10px 0;
-  border-block-end: 1px solid var(--border);
-}
-.si-item:last-child {
-  border-block-end: 0;
-}
-.si-item__id {
-  display: grid;
-  gap: 2px;
+  gap: var(--kp-space-sm, 0.5rem);
   min-inline-size: 0;
 }
-.si-danger:not(:disabled) {
-  color: var(--destructive);
+.st-sub h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.st-scope {
+  min-inline-size: 6rem;
+  justify-content: center;
+}
+.st-made[hidden] {
+  display: none;
 }
 @media (max-width: 64rem) {
   .si-grid {
@@ -199,231 +206,106 @@
   }
 }
 
-/* ---------- host settings ---------- */
-.st-hs-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: end;
-}
-.st-hs-head h2 {
-  margin: 0;
-  font-size: 1.25rem;
-}
-.st-hs-head p {
-  margin: 2px 0 0;
-  color: var(--muted-foreground);
-  font-size: var(--kp-text-sm);
-}
-@media (max-width: 40rem) {
-  .st-hs-head {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
+/* ---------- host settings: groups of keys on one form grid ---------- */
 .st-groups {
   display: grid;
-  gap: var(--kp-space-lg, 16px);
+  gap: var(--kp-space-sm, 0.5rem);
 }
-.st-groups > .nx-card + .nx-card {
-  margin-block-start: 0;
-}
-details.st-grp {
-  padding: 0;
-  gap: 0;
-}
-.st-grp--sk {
-  padding: var(--cf-pad);
-  display: grid;
-  gap: 8px;
-}
-details.st-grp > summary {
-  list-style: none;
-  cursor: pointer;
-  padding: var(--cf-pad);
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
-  gap: 2px 10px;
-  align-items: center;
-}
-details.st-grp > summary::-webkit-details-marker {
+details.st-grp[hidden] {
   display: none;
 }
-details.st-grp > summary::before {
-  content: "";
-  inline-size: 8px;
-  block-size: 8px;
-  border-inline-end: 2px solid currentColor;
-  border-block-end: 2px solid currentColor;
-  transform: rotate(-45deg);
-  transition: transform 150ms var(--cf-ease);
+.st-grp__sum {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6rem 2rem;
+  align-items: center;
+  gap: var(--kp-space-sm, 0.5rem);
 }
-details.st-grp[open] > summary::before {
-  transform: rotate(45deg);
-}
-details.st-grp > summary h2 {
+.st-grp__title {
+  display: contents;
   margin: 0;
-  font-size: 1.125rem;
+  font-size: var(--kp-text-base, 1rem);
 }
-.st-grp__meta {
+.st-grp__count {
   grid-column: 2;
+  grid-row: 1;
+  justify-self: stretch;
+  text-align: center;
+}
+/* A group's anchor mark stands in a track of its own at the end of the
+   summary (kp-gaps/homelab.md 49), so it never moves the title. */
+.st-grp__sum .kp-anchor {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  margin-inline: 0;
+}
+/* One label width for every group, so the values of all groups start on one
+   edge; a row's anchor mark stands in the label cell's last 2rem. */
+.st-keylist {
+  --kp-formgrid-label-min: min(16rem, 40vw);
+  --kp-formgrid-label-max: min(16rem, 40vw);
+  --kp-formgrid-control: 5fr;
+  --kp-formgrid-value: 3fr;
+}
+.st-keylist .kp-formrow__aside {
+  overflow-wrap: anywhere;
+}
+.st-keylist .kp-formrow__label {
+  padding-inline-end: 2rem;
+}
+.st-keylist .kp-formrow > .kp-anchor {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: end;
+  align-self: baseline;
+}
+.kp-formgrid :is(.kp-formrow__label) > :is(code, .kp-badge) {
+  justify-self: start;
+}
+.st-key {
+  font-size: var(--kp-text-xs);
+  color: var(--muted-foreground);
+}
+.kp-formrow[hidden] {
+  display: none;
+}
+.st-when {
+  display: block;
+}
+.st-read {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.st-line {
+  margin: 0;
   color: var(--muted-foreground);
   font-size: var(--kp-text-sm);
 }
-details.st-grp > summary:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-  border-radius: var(--cf-r);
+.st-toml {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
-.st-grp__body {
-  padding: 0 var(--cf-pad) var(--kp-space-sm, 8px);
+.st-confirm[hidden] {
+  display: none;
+}
+[data-kp-anchor-landed] {
+  outline: 2px solid var(--ring, var(--primary));
+  outline-offset: 2px;
+}
+.st-nomatch {
+  min-block-size: 10rem;
+}
+.st-saveerr:empty {
+  display: none;
 }
 
-/* one key: name · value · when · edit */
-.st-set {
-  display: grid;
-  grid-template-columns: minmax(14rem, 1.1fr) minmax(0, 1.2fr) 11rem 7.5rem;
-  gap: 4px 20px;
-  align-items: center;
-  padding: 12px 0;
-  border-block-end: 1px solid var(--border);
-}
-.st-set:last-child {
-  border-block-end: 0;
-}
-.st-set__name {
-  display: grid;
-  gap: 2px;
-  min-inline-size: 0;
-}
-.st-set__name strong {
-  font-weight: 600;
-}
-.st-set__name small {
-  color: var(--muted-foreground);
-  font-size: var(--kp-text-xs);
-}
-.st-set__help {
-  color: var(--muted-foreground);
-  font-size: var(--kp-text-sm);
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-.st-set__val {
-  min-inline-size: 0;
-  overflow-wrap: anywhere;
-  display: grid;
-  gap: 4px;
-}
-.st-def {
-  color: var(--muted-foreground);
-}
-.st-err {
-  color: var(--destructive);
-  font-size: var(--kp-text-xs);
-}
-.st-err:empty {
-  display: none;
-}
-.st-err:not(:empty) + .st-hint {
-  display: none;
-}
-.st-set__when {
-  display: grid;
-  gap: 4px;
-  justify-items: start;
-  font-size: var(--kp-text-xs);
-}
-.st-set__edit {
-  justify-self: end;
-  display: flex;
-  gap: 4px;
-}
-.st-set--staged {
-  background: color-mix(in oklab, var(--info) 45%, transparent);
-  margin-inline: calc(-1 * var(--cf-pad));
-  padding-inline: var(--cf-pad);
-}
-.st-set--editing {
-  background: color-mix(in oklab, var(--accent) 35%, transparent);
-  margin-inline: calc(-1 * var(--cf-pad));
-  padding-inline: var(--cf-pad);
-}
-.st-edit-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-.st-edit-row .kp-field__input {
-  max-inline-size: 16rem;
-  min-inline-size: 0;
-  flex: 1 1 8rem;
-}
-.st-edit-row textarea.kp-field__input {
-  max-inline-size: none;
-  flex-basis: 100%;
-}
-.st-confirm {
-  display: grid;
-  gap: 4px;
-}
-.st-confirm .kp-field__input {
-  max-inline-size: 16rem;
-}
-.st-lock {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  color: var(--muted-foreground);
-}
-.st-lock::before {
-  content: "";
-  inline-size: 9px;
-  block-size: 7px;
-  border: 1.5px solid currentColor;
-  border-radius: 2px;
-  margin-block-start: 3px;
-  box-shadow: 0 -4px 0 -2.5px currentColor;
-  flex: none;
-}
-.st-howto {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: color-mix(in oklab, var(--muted) 60%, transparent);
-  font-size: var(--kp-text-sm);
-}
-.st-howto code {
-  display: block;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: var(--background);
-  border: 1px solid var(--border);
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  overflow-wrap: anywhere;
-}
-@media (max-width: 64rem) {
-  .st-set {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .st-set__val {
-    grid-column: 1 / -1;
-    grid-row: 2;
-  }
-  .st-set__when {
-    grid-column: 1 / -1;
-    grid-row: 3;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 12px;
-  }
-  .st-set__edit {
-    grid-column: 2;
-    grid-row: 1;
-    align-self: start;
-  }
+/* Machine tokens: name and what it is for, the scope, Revoke; the columns
+   stay at any width (the card is half the page). */
+.si-tokens {
+  grid-template-columns:
+    [label-start] minmax(0, 1fr)
+    [label-end control-start] auto
+    [control-end value-start] 0
+    [value-end actions-start] auto
+    [actions-end];
+  --kp-formgrid-label-min: 0;
 }

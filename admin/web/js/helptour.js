@@ -14,9 +14,7 @@
 
 import { AREAS } from "./areas.js";
 import { ensureStyle, h } from "./dom.js";
-import { SHORTCUTS } from "./shortcuts.js";
 import { declare, dialogControl } from "./drivable.js";
-import { isMac } from "/static/kp/js/palette.js";
 import {
   shouldStartTour,
   startTour as startKpTour,
@@ -97,7 +95,7 @@ export function tourSteps() {
   const area = (/** @type {string} */ id) => AREAS.find((a) => a.id === id);
   const nav = (/** @type {string} */ id) => `#nav a[data-area="${id}"]`;
   const tab = (/** @type {string} */ id) =>
-    `.nx-tabbar [data-area="${area(id)?.phone === "tab" ? id : "more"}"]`;
+    `.kp-tabbar [data-kp-tab="${area(id)?.phone === "tab" ? id : "more"}"]`;
   return [
     {
       desktop: ".nx-search-trigger",
@@ -241,17 +239,14 @@ export function helpPanel() {
     "Take the 1-minute tour",
   );
   dialogControl(tour, "take-the-tour");
-  const keys = SHORTCUTS.map((g) =>
-    card(
-      g.group,
-      "Optional; every key also has a button.",
-      kv(
-        g.shortcuts.map((s) => [
-          h("kbd", null, s.keys === "Ctrl K" && isMac() ? "⌘ K" : s.keys),
-          s.what,
-        ]),
-      ),
-    ),
+  // feat-kp11demo-14: the keys are not typed out here. kp's shortcut engine
+  // writes this body from the keys it handles, so the sheet cannot promise
+  // a key that does nothing; a key that does nothing on this page is dimmed
+  // with its reason (js/shortcuts.js, chrome.js).
+  const keys = card(
+    "Keys",
+    "Optional; every key also has a button.",
+    h("div", { "data-kp-shortcuts-body": "" }),
   );
   const d = /** @type {HTMLDialogElement} */ (
     h(
@@ -260,6 +255,7 @@ export function helpPanel() {
         class: "kp-drawer kp-dialog help-panel",
         id: "shortcuts",
         "data-kp-shortcuts": "",
+        "data-kp-shortcuts-live": "",
         "aria-label": "Help, words and shortcuts",
       },
       h(
@@ -300,7 +296,7 @@ export function helpPanel() {
           "The same word means the same thing on every page.",
           kv(GLOSSARY.map(([w, m]) => [w, m])),
         ),
-        ...keys,
+        keys,
       ),
       h("footer", { class: "kp-drawer__foot" }, tour),
     )

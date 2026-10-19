@@ -26,7 +26,8 @@ import { attachDisabledReasons } from "/static/kp/js/reason.js";
 import { declare, declareField, drivable } from "../drivable.js";
 import { shellResult, shellTargets } from "../parity.js";
 import { current, subscribe } from "../store.js";
-import { dot, ensureStyle, pageHeader } from "../ui.js";
+import { ensureStyle, pageHeader } from "../ui.js";
+import { onPageKey } from "../shortcuts.js";
 import { setParams } from "../urlstate.js";
 import { mountHostLog } from "./log.js";
 
@@ -554,17 +555,20 @@ export function mount(root) {
     setTimeout(() => URL.revokeObjectURL(url), 0);
     toolRead.textContent = `Downloaded host-console.txt: ${blocks.length.toLocaleString("en-GB")} blocks, ${text.length.toLocaleString("en-GB")} characters.`;
   });
-  runACommand.addEventListener("click", () =>
+  const focusPrompt = () =>
     /** @type {HTMLElement | null} */ (
       consoleEl.querySelector(".kp-console__input")
-    )?.focus(),
-  );
-  void dot;
+    )?.focus();
+  runACommand.addEventListener("click", focusPrompt);
+  // fix-kp11-7 / feat-kp11demo-14: ":" focuses the prompt while this page is
+  // mounted (shortcuts.js shows it dimmed, with why, on every other page).
+  const stopKeys = onPageKey("prompt", focusPrompt);
   return () => {
     abort.abort();
     explorer.cleanup();
     unsub();
     for (const d of detach) d();
+    stopKeys();
     root.classList.remove("con-page");
   };
 }

@@ -114,7 +114,11 @@ test("redesign-kit-6: Secrets draws its header and cards with the kit; its sheet
   const js = read("js/pages/secrets.js");
   const css = read("css/pages/secrets.css");
   assert.match(js, /pageHeader\(\{/, "Secrets does not use pageHeader");
-  assert.match(js, /section\(\{/, "Secrets does not use section");
+  // feat-kp11demo-6 (Kenny 2026-10-19): the approved kp-themes 11 demo
+  // `app-homelab-settings` draws these panes as kp-card (kp-card__header,
+  // __stage), not the old section() head; the page keeps the kit's card.
+  assert.match(js, /"kp-card nx-card sx-card"/, "Secrets lost its kp-card");
+  assert.match(js, /kp-card__header/, "Secrets lost the kp-card header");
   assert.doesNotMatch(
     js,
     /"nx-header|"nx-card(__head|__foot|__tools)?"|class: "nx-card /,

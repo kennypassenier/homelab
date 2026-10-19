@@ -1,68 +1,90 @@
-// feat-overview-8: the keys, from the same list the help sheet shows.
+// feat-overview-8, feat-kpadopt-2: the keys. kp-themes' engine handles the
+// chords and fills the help sheet; what is ours is where each letter goes,
+// the stack hub's tab keys, and that no key needs AltGr.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CHORD_MS, SHORTCUTS, idle, keyAction } from "../js/shortcuts.js";
+import {
+  GO,
+  altDigit,
+  appShortcuts,
+  goTarget,
+  tabTarget,
+} from "../js/shortcuts.js";
 import { route } from "../js/router.js";
+import { ALTGR_KEYS } from "/static/kp/js/shortcuts.js";
 
-const home = route("/");
-
-test("g then a letter goes to a page, within the chord's time", () => {
-  let r = keyAction(idle(), "g", 1000, home);
-  assert.equal(r.action, null);
-  assert.deepEqual(keyAction(r.state, "h", 1500, home).action, {
-    navigate: "/host",
-  });
+test("g then a letter names a page; an unknown letter names none", () => {
+  assert.equal(goTarget("h"), "/host");
   // feat-shell-1: the areas' own letters (g i = the Inbox).
-  assert.deepEqual(keyAction(r.state, "i", 1000, home).action, {
-    navigate: "/inbox",
-  });
-  assert.deepEqual(keyAction(r.state, "p", 1000, home).action, {
-    navigate: "/activity?view=planned",
-  });
-  // Too late: the second key is a key on its own.
-  assert.equal(keyAction(r.state, "h", 1000 + CHORD_MS + 1, home).action, null);
-  // An unknown second key does nothing and ends the chord.
-  r = keyAction(r.state, "z", 1100, home);
-  assert.equal(r.action, null);
-  assert.deepEqual(r.state, idle());
+  assert.equal(goTarget("i"), "/inbox");
+  assert.equal(goTarget("p"), "/activity?view=planned");
+  assert.equal(goTarget("z"), null);
 });
 
-test("/ searches; digits and brackets move between a stack's tabs", () => {
-  assert.deepEqual(keyAction(idle(), "/", 0, home).action, {
-    focusSearch: true,
-  });
-  // The hub's tabs, Overview · Resources · Logs · Apps · Backups ·
+test("a stack's tabs open by number and by t p / t n", () => {
+  // feat-shell-3: the hub's tabs, Overview · Resources · Logs · Apps · Backups ·
   // History · Settings.
   const logs = route("/stacks/media/logs");
-  assert.deepEqual(keyAction(idle(), "1", 0, logs).action, {
-    navigate: "/stacks/media",
-  });
-  assert.deepEqual(keyAction(idle(), "[", 0, logs).action, {
-    navigate: "/stacks/media/resources",
-  });
-  assert.deepEqual(keyAction(idle(), "]", 0, logs).action, {
-    navigate: "/stacks/media/apps",
-  });
-  assert.equal(keyAction(idle(), "3", 0, logs).action, null); // already there
-  assert.deepEqual(keyAction(idle(), "7", 0, logs).action, {
-    navigate: "/stacks/media/settings",
-  });
-  assert.equal(keyAction(idle(), "9", 0, logs).action, null);
-  assert.equal(
-    keyAction(idle(), "]", 0, route("/stacks/media/settings")).action,
-    null,
-  );
-  // Digits mean nothing off a stack's page.
-  assert.equal(keyAction(idle(), "1", 0, home).action, null);
+  assert.equal(tabTarget(logs, { n: 1 }), "/stacks/media");
+  assert.equal(tabTarget(logs, { n: 7 }), "/stacks/media/settings");
+  assert.equal(tabTarget(logs, { n: 3 }), null); // already there
+  assert.equal(tabTarget(logs, { n: 9 }), null);
+  assert.equal(tabTarget(logs, { step: -1 }), "/stacks/media/resources");
+  assert.equal(tabTarget(logs, { step: 1 }), "/stacks/media/apps");
+  const last = route("/stacks/media/settings");
+  assert.equal(tabTarget(last, { step: 1 }), null);
+  // Tab keys mean nothing off a stack's page.
+  assert.equal(tabTarget(route("/"), { n: 1 }), null);
 });
 
-test("the sheet lists every go-to key the handler knows", () => {
-  const listed = SHORTCUTS.flatMap((g) => g.shortcuts.map((s) => s.keys));
-  for (const k of ["u", "i", "s", "a", "b", "y", "m", "h", "f", "e"]) {
-    assert.ok(listed.includes(`g ${k}`), k);
-    const r = keyAction(keyAction(idle(), "g", 0, home).state, k, 1, home);
-    assert.ok(r.action && "navigate" in r.action, k);
-  }
-  assert.ok(listed.includes("?"));
-  assert.ok(listed.includes("Ctrl K"));
+test("altDigit: Alt+digit by the physical key; AltGr, Ctrl and a bare digit are never ours", () => {
+  const e = (/** @type {Record<string, unknown>} */ o) => ({
+    key: "",
+    code: "",
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    ...o,
+  });
+  // On AZERTY the unshifted digit row types "&": the code still says Digit1.
+  assert.equal(altDigit(e({ key: "&", code: "Digit1", altKey: true })), 1);
+  assert.equal(altDigit(e({ key: "3", code: "Digit3", altKey: true })), 3);
+  // AltGr reports Ctrl+Alt: a press that needs it is not ours.
+  assert.equal(
+    altDigit(e({ key: "[", code: "Digit5", altKey: true, ctrlKey: true })),
+    null,
+  );
+  assert.equal(altDigit(e({ key: "1", code: "Digit1" })), null);
+  assert.equal(altDigit(e({ key: "x", code: "KeyX", altKey: true })), null);
+});
+
+test("the list handles every go-to key, none needs AltGr, and tab keys are dimmed off a stack", () => {
+  /** @type {string[]} */
+  const went = [];
+  let at = route("/");
+  const list = appShortcuts({
+    navigate: (href) => went.push(href),
+    route: () => at,
+    focusSearch: () => went.push("search"),
+  });
+  const keys = list.map((s) => s.keys);
+  for (const k of Object.keys(GO)) assert.ok(keys.includes(`g ${k}`), k);
+  assert.ok(keys.includes("/"));
+  for (const s of list)
+    for (const step of s.keys.split(" "))
+      assert.ok(!ALTGR_KEYS.includes(step), `${s.keys} needs AltGr`);
+  const find = (/** @type {string} */ k) =>
+    /** @type {NonNullable<(typeof list)[number]>} */ (
+      list.find((s) => s.keys === k)
+    );
+  find("g s").run(/** @type {any} */ ({}));
+  assert.deepEqual(went, ["/stacks"]);
+  assert.equal(find("Alt 1").when?.(), false);
+  assert.ok(find("Alt 1").reason);
+  at = route("/stacks/media/logs");
+  assert.equal(find("Alt 1").when?.(), true);
+  find("Alt 1").run(/** @type {any} */ ({}));
+  find("t n").run(/** @type {any} */ ({}));
+  assert.deepEqual(went.slice(1), ["/stacks/media", "/stacks/media/apps"]);
 });

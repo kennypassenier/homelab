@@ -8,6 +8,9 @@
          copy of kp-themes' no-flash snippet; no inline script under CSP). -->
     <script src="/static/theme-boot.js"></script>
     <link rel="stylesheet" href="/static/kp/dist/kp-themes.css" />
+    <!-- Interim: kp-themes' form grid, until a pin serves it itself
+         (kp-gaps/homelab.md 44; the file says what to delete). -->
+    <link rel="stylesheet" href="/css/kp-formgrid.css" />
     <link rel="stylesheet" href="/css/app.css" />
     <!-- redesign-kit-1: the pages' own sheets load with the app, not when a
          page mounts, on purpose: (1) a page draws its skeletons in their
@@ -29,7 +32,7 @@
   </head>
   <body>
     <div class="kp-nav-wrap">
-      <nav class="kp-nav" aria-label="Pages" id="bar">
+      <nav class="kp-nav" aria-label="Pages" id="bar" data-kp-nav-fold>
         <a class="kp-nav__brand" id="brand" href="/">Homelab</a>
         <button
           type="button"
@@ -37,7 +40,6 @@
           data-kp-nav-toggle
         ></button>
         <ul class="kp-nav__links" id="nav"></ul>
-        <p id="link" class="link" aria-live="polite">connecting…</p>
       </nav>
     </div>
     <section
@@ -46,7 +48,24 @@
       aria-label="Versions"
       hidden
     ></section>
-    <div class="crumbs-slot" id="crumbs" hidden></div>
-    <main class="shell" id="page"></main>
+    <!-- feat-kp11demo-14: System's pages stand in a slim rail beside the page
+         (systemrail.js); on every other page the slot is empty and hidden. -->
+    <div class="app-body" id="app-body">
+      <div class="app-body__rail" id="rail-slot" hidden></div>
+      <div class="app-body__page">
+        <div class="crumbs-slot" id="crumbs" hidden></div>
+        <main class="shell" id="page"></main>
+      </div>
+    </div>
+    <!-- feat-kp11demo-14: the connection banner (connectionbar.js); it takes
+         no room at all while the connection is fine. -->
+    <div
+      class="kp-connection"
+      id="connection"
+      data-kp-connection
+      data-kp-connection-source="app"
+      data-kp-retry-delays="1,2,4,8,15"
+      data-kp-placement="bottom"
+    ></div>
   </body>
 </html>

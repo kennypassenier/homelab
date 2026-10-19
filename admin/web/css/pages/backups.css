@@ -81,6 +81,15 @@
 .bk-night__pick {
   padding-inline-end: var(--kp-space-md, 0.75rem);
 }
+/* The list's own state stage inside the One night card: flat, the card is
+   the frame. */
+.bk-stage {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  min-block-size: 8rem;
+}
 .bk-night__body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

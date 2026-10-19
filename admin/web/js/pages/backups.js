@@ -825,27 +825,28 @@ export function mount(root) {
     ],
     "bk-night__pick",
   );
+  // The card holds the pick, the week and the list; only the list is the
+  // card's own state (a flat stage inside it). The week is a component with
+  // its own busy card and failed plate, so it stands outside that stage and
+  // its plate is never hidden by the list's state.
   const nightCard = h(
-    "section",
-    {
-      class: "kp-card bk-card",
-      "data-kp-state": "loading",
-      "aria-label": "One night",
-    },
+    "div",
+    { class: "kp-card bk-stage", "data-kp-state": "loading" },
     h(
       "div",
       { class: "kp-card__stage" },
-      h(
-        "div",
-        { class: "kp-card__data bk-night__cols" },
-        pick,
-        h(
-          "div",
-          { class: "bk-night__body" },
-          h("div", { class: "bk-night__week" }, weekEl),
-          listBox,
-        ),
-      ),
+      h("div", { class: "kp-card__data" }, listBox),
+    ),
+  );
+  const nightFrame = h(
+    "section",
+    { class: "kp-card bk-card", "aria-label": "One night" },
+    h(
+      "div",
+      { class: "bk-night__cols" },
+      pick,
+      h("div", { class: "bk-night__week" }, weekEl),
+      nightCard,
     ),
   );
   const nightSec = section({
@@ -853,7 +854,7 @@ export function mount(root) {
     title: "One night",
     desc: "Lists every stack for the night you pick, with a repair next to each miss, and draws one stack's week so a backup that creeps later each night is visible.",
   });
-  nightSec.body.append(nightCard);
+  nightSec.body.append(nightFrame);
 
   // ── repositories ──────────────────────────────────────────────────────
   const stackbar = h("figure", { class: "kp-stackbar" });
@@ -1174,19 +1175,19 @@ export function mount(root) {
     monthBox.hidden = !isMonth;
     setSegmentedValues(viewSwitch, [S.view]);
     covCard.style.setProperty("--bk-rows", String(Math.max(names.length, 3)));
-    setCardState(covCard, state, {
-      words: "Reading the stacks…",
-      title:
-        state === "empty"
-          ? "No stack has a backup history yet"
-          : "The backup history could not be read",
-      text:
-        state === "empty"
-          ? "The first nightly round fills this view."
-          : "None of the stacks answered. Nothing was changed.",
-    });
+    // The grids are components with their own busy card and plates; the card
+    // around them never hides those.
+    setCardState(covCard, "ready");
     if (state !== "ready") {
-      setCalendarState(calendar, state === "loading" ? "loading" : "ready");
+      setCalendarState(
+        calendar,
+        state,
+        state === "loading"
+          ? "Reading the stacks…"
+          : state === "empty"
+            ? "No stack has a backup history yet"
+            : "The backup history could not be read",
+      );
       // Both grids carry the card's state themselves (the package's busy card
       // while it reads, its plate when empty or failed), never their last
       // face.
@@ -1878,8 +1879,9 @@ export function mount(root) {
     writeUrl();
     paintCoverage();
   });
-  for (const el of [covCard, nightCard]) {
-    el.addEventListener(CARD_RETRY_EVENT, () => void loadAll(true));
+  for (const el of [nightCard, nightsHeat, monthHeat, weekEl]) {
+    for (const ev of [CARD_RETRY_EVENT, "kp-heat-retry", "kp-week-retry"])
+      el.addEventListener(ev, () => void loadAll(true));
   }
   nightSel.addEventListener("change", () => {
     const night = nightSel.value;

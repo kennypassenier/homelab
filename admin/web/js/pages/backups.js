@@ -47,7 +47,7 @@ import { stackHref } from "../router.js";
 import { current, listen, subscribe } from "../store.js";
 import { setParams } from "../urlstate.js";
 import { stackHues } from "../topology.js";
-import { RETIRED_COLUMNS, retiredRow } from "./retired.js";
+import { retiredKit } from "./retired.js";
 import { changesRetired } from "../retiredview.js";
 import { attachDataTables } from "/static/kp/js/datatable.js";
 import {
@@ -1549,8 +1549,8 @@ export function mount(root) {
   rowKeys(repos.el);
 
   // ── retired ───────────────────────────────────────────────────────────
-  /** @type {(() => void) | null} */
-  let detachRetired = null;
+  /** @type {ReturnType<typeof retiredKit> | null} */
+  let retiredKitInstance = null;
   const paintRetired = () => {
     // redesign-final (exact counts): "N entries" is the retired table's rows.
     countOf(retiredCount, ret.body, "tbody > tr:not([data-kp-skeleton-row])");
@@ -1559,71 +1559,25 @@ export function mount(root) {
       : retiredError
         ? "not read"
         : "reading…";
-    detachRetired?.();
-    detachRetired = null;
-    if (retiredError) {
-      ret.body.replaceChildren(
-        h(
-          "div",
-          { class: "kp-alert kp-alert--destructive" },
-          h(
-            "div",
-            { class: "kp-alert__body" },
-            `Could not read the retired list: ${retiredError}`,
-          ),
-        ),
-      );
-      return;
+    // feat-kp11demo-12.6: the retired kit (retired.js) draws the key figure,
+    // the share bar, the age control, the table and Wipe, and its own
+    // loading, empty and failed states.
+    if (!retiredKitInstance) {
+      retiredKitInstance = retiredKit({ onRetry: () => void loadRetired() });
+      ret.body.replaceChildren(retiredKitInstance.el);
     }
-    if (!retired) {
-      ret.body.replaceChildren(skeleton("60%"), skeleton("40%"));
-      return;
-    }
-    if (!retired.length) {
-      ret.body.replaceChildren(
-        h(
-          "div",
-          { class: "bk-retired-empty" },
-          h(
-            "div",
-            null,
-            h("strong", null, "Nothing retired is kept"),
-            "Destroy, forget or a deploy that drops an app puts an entry here.",
-          ),
-          h(
-            "div",
-            null,
-            h("strong", null, "Wipe is per entry"),
-            "Wipe deletes exactly what one entry kept, after you type its key.",
-          ),
-          h(
-            "div",
-            null,
-            h("strong", null, "In-use data is safe"),
-            "Anything a managed stack still uses is kept even then.",
-          ),
-        ),
-      );
-      return;
-    }
-    const table = tableBlock({
-      remember: "retired",
-      caption:
-        "Every stack, app or native unit the host keeps a retired record of",
-      captionHidden: true,
-      search: "Search retired keys",
-      nothing: "Nothing retired is kept right now.",
-      pageSize: 25,
-      pageSizes: "25,50,100",
-      columns: RETIRED_COLUMNS,
-    });
-    ret.body.replaceChildren(table.wrap);
-    detachRetired = attachDataTables(ret.body);
-    table.tbody.replaceChildren(...retired.map(retiredRow));
-
-    table.ready();
+    retiredKitInstance.set(
+      retiredError
+        ? {
+            status: "failed",
+            error: { what: "the retired list", why: retiredError, fix: "" },
+          }
+        : !retired
+          ? { status: "loading" }
+          : { status: "ready", entries: retired },
+    );
   };
-  cleanups.push(() => detachRetired?.());
+  cleanups.push(() => retiredKitInstance?.stop());
 
   const paintAll = () => {
     paintLive();

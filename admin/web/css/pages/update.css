@@ -33,57 +33,6 @@
   max-inline-size: 100%;
   overflow-x: auto;
 }
-.uf-list {
-  display: grid;
-  gap: 10px;
-}
-.uf-item {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 4px 14px;
-  align-items: center;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--card);
-  cursor: pointer;
-}
-.uf-item:has(input:checked) {
-  border-color: var(--primary);
-  box-shadow: inset 3px 0 0 var(--primary);
-}
-/* redesign-final-h1: an app that comes with a homelab release: listed,
-   never ticked. */
-.uf-item--release {
-  cursor: default;
-  border-style: dashed;
-}
-.uf-norow {
-  inline-size: 18px;
-  text-align: center;
-  color: var(--muted-foreground);
-}
-.uf-item input {
-  inline-size: 18px;
-  block-size: 18px;
-  margin: 0;
-}
-.uf-item small {
-  grid-column: 2 / -1;
-  color: var(--muted-foreground);
-  font-size: var(--kp-text-sm);
-}
-.uf-item small a {
-  color: inherit;
-}
-.uf-ver {
-  font-family: var(--theme-font-mono, ui-monospace, monospace);
-  font-weight: 600;
-}
-.uf-ver s {
-  color: var(--muted-foreground);
-  font-weight: 400;
-}
 .uf-hint {
   font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
@@ -248,12 +197,6 @@
   margin: 0;
 }
 @media (max-width: 40rem) {
-  .uf-item {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-  .uf-item .uf-ver {
-    grid-column: 2;
-  }
   .uf-major__item {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -301,4 +244,51 @@
   .undo-updates__row {
     grid-template-columns: minmax(0, 1fr) auto;
   }
+}
+
+/* The Update flow on kp-themes 11 (feat-kp11demo-13): the list is a kp
+   datatable under a selection bar, the gates under it, the run a kp board. */
+.uf-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-md, 1rem);
+  align-content: start;
+}
+.uf-list > [hidden] {
+  display: none;
+}
+.uf-summary {
+  min-block-size: 1.5em;
+  margin: 0;
+  font-weight: 600;
+}
+.uf-ctl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--kp-space-md, 1rem);
+  align-items: center;
+}
+.uf-ctl__label {
+  font-weight: 600;
+}
+.uf-gates {
+  display: grid;
+  gap: var(--kp-space-sm, 0.5rem);
+  min-block-size: 0;
+}
+.uf-app {
+  display: inline-grid;
+  grid-auto-flow: column;
+  align-items: center;
+  column-gap: var(--kp-space-sm, 0.5rem);
+  white-space: nowrap;
+}
+.uf-run {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-md, 1rem);
+  align-content: start;
+}
+.uf-run > [hidden] {
+  display: none;
 }

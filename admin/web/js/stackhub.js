@@ -1245,12 +1245,13 @@ export const STRIP_NIGHTS = 14;
  * snapshot, how many are kept, and the last 14 nights as a strip — a
  * night before its oldest kept snapshot is "before" (pruned or not yet
  * made), never a missed one.
- * @param {{repos: import("./backupsview.js").Repo[], now: number}} x
+ * @param {{repos: import("./backupsview.js").Repo[], now: number,
+ *   nights?: number}} x `nights`: the strip's length (default 14)
  * @returns {BackupRow[]}
  */
 export function backupRows(x) {
   const now = nightsNow(x.now);
-  const nights = nightRange(now.last, STRIP_NIGHTS, 0);
+  const nights = nightRange(now.last, x.nights ?? STRIP_NIGHTS, 0);
   return (x.repos ?? []).map((r) => {
     const times = (r.snapshots ?? []).map((s) => s.time);
     if (r.newest_snapshot && !times.includes(r.newest_snapshot.time))

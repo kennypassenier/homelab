@@ -6,9 +6,8 @@
 
 .mp-page .mp-switch {
   white-space: nowrap;
-}
+} /* ---------- Topology: legends, the graph, the side panel ---------- */
 
-/* ---------- Topology: legends, the graph, the side panel ---------- */
 .mp-legends {
   display: grid;
   gap: 8px;
@@ -63,9 +62,9 @@
 
 .mp-topo {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 20rem;
+  grid-template-columns: minmax(0, 1fr) minmax(20rem, 26rem);
   gap: var(--kp-space-lg, 1rem);
-  min-block-size: 30rem;
+  align-items: start;
 }
 .mp-topo[hidden],
 .mp-list[hidden] {
@@ -207,96 +206,10 @@
   gap: 8px;
   flex-wrap: wrap;
 }
-.mp-side__p {
-  margin: 0;
-}
-.mp-side__label {
-  margin: 0;
-  font-size: var(--kp-text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted-foreground);
-}
-.mp-side__hr {
-  border: 0;
-  border-block-start: 1px solid var(--border);
-  margin: 0;
-  inline-size: 100%;
-}
-.mp-side__acts {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.mp-state {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  font-size: var(--kp-text-sm);
-  font-weight: 400;
-}
-.mp-kv {
-  display: grid;
-  grid-template-columns: 8.5rem minmax(0, 1fr);
-  gap: 6px 10px;
-  margin: 0;
-  font-size: var(--kp-text-sm);
-}
-.mp-kv dt {
-  color: var(--muted-foreground);
-}
-.mp-kv dd {
-  margin: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  min-inline-size: 0;
-  overflow-wrap: anywhere;
-}
 .mp-pill {
   display: inline-flex;
   gap: 6px;
   align-items: center;
-}
-.mp-feed {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  font-size: var(--kp-text-sm);
-}
-.mp-feed li {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-  padding: 7px 0;
-  border-block-end: 1px solid var(--mk-line);
-}
-.mp-feed li:last-child {
-  border-block-end: 0;
-}
-.mp-feed small {
-  display: block;
-  color: var(--muted-foreground);
-  font-size: var(--kp-text-xs);
-}
-.mp-feed__kind {
-  margin-block-start: 0.6em;
-  block-size: 0;
-  border-block-start: 2px solid var(--chart-3);
-}
-.mp-feed__kind--planned {
-  border-block-start: 2px dashed var(--muted-foreground);
-}
-.mp-feed__kind--open {
-  border-block-start: 2px dashed var(--mk-warn);
-}
-.mp-feed__kind--named {
-  border-block-start: 2px dotted var(--chart-2);
-}
-.mp-feed__kind--route {
-  border-block-start-color: var(--chart-1);
 }
 .mp-mark {
   --stack-hue: 210;
@@ -318,12 +231,11 @@
   display: inline-flex;
   gap: 8px;
   align-items: center;
-}
+} /* ---------- Capacity and Disk growth, side by side ---------- */
 
-/* ---------- Capacity and Disk growth, side by side ---------- */
 .mp-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--mk-gap);
   align-items: stretch;
 }
@@ -335,117 +247,166 @@
   .mp-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+} /* Disk growth on a phone (finding 2): no head row, two lines a row — the
+   name and "Full in", then the bar with its % and the trend — each value
+   with its own inline label. */ /* ---------- Stale images ---------- */
+
+/* ===== The Map's side views on kp-themes 11 (feat-kp11demo-2) ===========
+   The panel is as tall as its content, its names never break, every part
+   sits in a kp card that keeps its footprint while it loads. */
+.mv-stage {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  min-block-size: 8rem;
 }
-.mp-caps {
-  display: grid;
-  gap: 10px;
+.mv-stage--topo {
+  min-block-size: 30rem;
 }
-.mp-cap,
-.mp-growth {
+.mv-stage--chart {
+  min-block-size: 16rem;
+}
+.mv-chart {
+  --kp-chart-height: 14rem;
+  margin: 0;
+  min-inline-size: 0;
+}
+.mv-topo {
   display: grid;
-  grid-template-columns: 7rem repeat(3, minmax(0, 1fr));
-  gap: 8px 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-md, 1rem);
+}
+.mv-topo > [hidden] {
+  display: none;
+}
+.mv-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-md, 1rem);
+  align-content: start;
+}
+.mv-panelcard {
+  min-block-size: 12rem;
+}
+.mv-panel__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-md, 1rem);
+  align-content: start;
+}
+.mv-ctl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--kp-space-sm, 0.5rem) var(--kp-space-md, 1rem);
   align-items: center;
-  font-size: var(--kp-text-sm);
 }
-.mp-growth {
-  grid-template-columns:
-    minmax(8rem, 1.4fr) minmax(0, 1.2fr) minmax(0, 1fr)
-    minmax(0, 1fr);
-}
-.mp-cap > span:first-child a {
+.mv-ctl__label {
   font-weight: 600;
+  white-space: nowrap;
+}
+.mv-block {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-sm, 0.5rem);
+  align-content: start;
+}
+.mv-block + .mv-block {
+  padding-block-start: var(--kp-space-md, 1rem);
+  border-block-start: 1px solid var(--border);
+}
+.mv-block h4 {
+  margin: 0;
+  font-size: var(--kp-text-sm, 0.875rem);
+}
+.mv-block__head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--kp-space-sm, 0.5rem);
+}
+.mv-block__head h3 {
+  margin: 0;
+  min-inline-size: 0;
+  font-size: var(--kp-text-md, 1rem);
+}
+.mv-block__acts {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  justify-content: start;
+  gap: var(--kp-space-sm, 0.5rem);
+}
+.mv-line {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm, 0.875rem);
+}
+.mv-deplist .kp-deplist__row,
+.mv-deplist .kp-deplist__name,
+.mv-deplist li {
+  white-space: nowrap;
+}
+.mv-name {
+  display: inline-grid;
+  grid-auto-flow: column;
+  align-items: center;
+  column-gap: var(--kp-space-sm, 0.5rem);
+  white-space: nowrap;
+}
+.mv-name a {
   color: inherit;
   text-decoration: none;
 }
-.mp-cap--head {
-  font-size: var(--kp-text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted-foreground);
-}
-.mp-cap__cell {
+.mv-matrixbox {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 3rem;
-  gap: 8px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-md, 1rem);
 }
-.mp-cap__n {
-  text-align: end;
-  font-variant-numeric: tabular-nums;
+.mv-matrix {
+  min-block-size: 20rem;
+  --kp-matrix-head: 8rem;
+  --kp-matrix-cell-min: 4.4rem;
 }
-@media (max-width: 30rem) {
-  .mp-cap {
-    grid-template-columns: 5.5rem repeat(3, minmax(0, 1fr));
-    gap: 6px;
-  }
-  .mp-cap__cell {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .mp-cap__cell .mp-cap__n {
-    text-align: start;
-  }
+.mv-legend {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  column-gap: var(--kp-space-sm, 0.5rem);
+  row-gap: var(--kp-space-xs, 0.25rem);
+  align-items: baseline;
+  justify-items: start;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
-/* Disk growth on a phone (finding 2): no head row, two lines a row — the
-   name and "Full in", then the bar with its % and the trend — each value
-   with its own inline label. */
-.mp-inl {
+.mv-legend > li {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+}
+.mv-card .nx-card__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-md, 1rem);
+  align-content: start;
+}
+.mv-card .nx-card__body > [hidden] {
   display: none;
 }
-@media (max-width: 30rem) {
-  .mp-caps[aria-label="Disk growth per filesystem"] .mp-cap--head {
-    display: none;
-  }
-  .mp-growth {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "name full"
-      "bar trend";
-    gap: 4px 12px;
-    padding-block-end: 8px;
-    border-block-end: 1px solid var(--mk-line);
-  }
-  .mp-g-name {
-    grid-area: name;
-  }
-  .mp-g-full {
-    grid-area: full;
-    text-align: end;
-  }
-  .mp-g-bar {
-    grid-area: bar;
-    grid-template-columns: minmax(0, 1fr) 3rem;
-  }
-  .mp-g-trend {
-    grid-area: trend;
-  }
-  .mp-inl {
-    display: inline;
-    color: var(--muted-foreground);
-    font-size: var(--kp-text-xs);
-  }
+.mv-bullets {
+  min-block-size: 12rem;
 }
-.mp-illus {
-  color: var(--muted-foreground);
+.mv-detail {
+  display: grid;
+  gap: var(--kp-space-sm, 0.5rem);
+  padding-block: var(--kp-space-sm, 0.5rem);
+}
+.mv-detail h4 {
+  margin: 0;
 }
 
-/* ---------- Stale images ---------- */
-.mp-pin {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.mp-tag {
-  display: inline-block;
-  padding: 0 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  font-size: var(--kp-text-xs);
-  color: var(--muted-foreground);
-}
-.mp-tag--warn {
-  border-color: color-mix(in oklab, var(--mk-warn) 45%, var(--border));
-  background: color-mix(in oklab, var(--mk-warn) 14%, var(--card));
-  color: var(--foreground);
+/* The memory cell says "0.8 of 1.0 GB": its number column is as wide as that. */
+.mv-card .kp-bar-cell {
+  --kp-bar-cell-value: 9ch;
 }

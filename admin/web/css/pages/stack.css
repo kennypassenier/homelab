@@ -213,8 +213,7 @@
 .sh-kv > .nx-skeleton {
   grid-column: 1 / -1;
 }
-.sh-hint,
-.sh-legend {
+.sh-hint {
   margin: 0;
   font-size: var(--kp-text-xs);
   color: var(--muted-foreground);
@@ -231,40 +230,6 @@
 .sh-kpi__act .kp-button {
   padding-block: 2px;
   min-block-size: 0;
-}
-
-/* ---------- Is it healthy? ---------- */
-.sh-checks {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-}
-.sh-checks li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  font-size: var(--kp-text-sm);
-  padding-block: 7px;
-  border-block-end: 1px solid var(--border);
-  box-sizing: border-box;
-  min-block-size: 2.25rem;
-}
-.sh-checks li:last-child {
-  border-block-end: 0;
-}
-.sh-checks li .kp-health {
-  white-space: normal;
-}
-.sh-checks li > span:last-child {
-  color: var(--muted-foreground);
-  justify-self: end;
-}
-.sh-checks__act {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
 }
 
 /* ---------- feeds: history, incidents, files ---------- */
@@ -487,51 +452,6 @@
   margin-inline-start: 6px;
 }
 
-/* the 14-night strip */
-.sh-strip {
-  display: inline-grid;
-  grid-template-columns: repeat(14, 1fr);
-  gap: 3px;
-  inline-size: 100%;
-  max-inline-size: 190px;
-  min-inline-size: 120px;
-  vertical-align: middle;
-}
-.sh-strip i,
-.sh-legend i {
-  display: inline-block;
-  block-size: 14px;
-  border-radius: 3px;
-  background: var(--muted);
-}
-.sh-strip .sh-strip__ok,
-.sh-legend .sh-strip__ok {
-  background: color-mix(in oklab, var(--sh-ok) 70%, var(--card));
-}
-.sh-strip .sh-strip__miss,
-.sh-legend .sh-strip__miss {
-  background: var(--sh-bad);
-}
-.sh-strip .sh-strip__wait {
-  background: color-mix(in oklab, var(--muted) 60%, var(--card));
-  outline: 1px dashed var(--border);
-  outline-offset: -1px;
-}
-.sh-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  align-items: center;
-  margin-block-start: 10px;
-}
-.sh-legend i {
-  inline-size: 12px;
-  block-size: 12px;
-}
-.sh-legend i + * {
-  margin-inline-end: 6px;
-}
-
 /* ---------- Settings: folds, the danger zone ---------- */
 .sh-fold {
   border-block-start: 1px solid var(--border);
@@ -639,4 +559,109 @@
   .sh-table td.row-actions > * + * {
     margin-inline-start: 0;
   }
+}
+
+/* ===== The hub on kp-themes 11 (feat-kp11demo-13) ========================
+   Flat data-state cards inside the hub's sections, the checks' count line,
+   the app detail and the backup strips on shared grids. */
+.hb-stage {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  min-block-size: 8rem;
+}
+.hb-stage--chart {
+  min-block-size: 18rem;
+}
+.hb-chart {
+  --kp-chart-height: 16rem;
+  margin: 0;
+  min-inline-size: 0;
+}
+.sh-checks__count {
+  min-block-size: 1.5em;
+  margin: 0 0 var(--kp-space-sm, 0.5rem);
+  color: var(--muted-foreground);
+  font-size: var(--kp-text-sm);
+}
+.hb-app {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--kp-space-sm, 0.5rem);
+}
+.hb-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: var(--kp-space-md, 1rem);
+  padding-block: var(--kp-space-sm, 0.5rem);
+}
+@media (max-width: 48rem) {
+  .hb-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.hb-backups {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-md, 1rem);
+  align-content: start;
+}
+.hb-backups > [hidden] {
+  display: none;
+}
+.hb-ctl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--kp-space-md, 1rem);
+  align-items: center;
+}
+.hb-ctl__label {
+  font-weight: 600;
+}
+.hb-strips {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--kp-space-md, 1rem);
+}
+.hb-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8rem auto;
+  gap: var(--kp-space-sm, 0.5rem) var(--kp-space-md, 1rem);
+  align-items: center;
+}
+.hb-strip > .kp-uptime {
+  min-inline-size: 0;
+}
+.hb-strip__count {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+@media (max-width: 48rem) {
+  .hb-strip {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .hb-strip > .kp-uptime {
+    grid-column: 1 / -1;
+  }
+}
+.hb-heat {
+  --kp-heat-label: 9rem;
+}
+.hb-legend {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  justify-content: start;
+  gap: var(--kp-space-xs, 0.25rem) var(--kp-space-lg, 1.5rem);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hb-readout {
+  min-block-size: 2.25em;
+  margin: 0;
+  color: var(--muted-foreground);
 }

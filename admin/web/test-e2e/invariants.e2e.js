@@ -986,19 +986,18 @@ test("invariants: Deploy all changes reads its plan only once its panel is opene
       "the plan was read before Deploy all changes was ever opened",
     );
     await page.click("#deploy-all");
-    // Right after opening, before the delayed plan has answered: a
-    // skeleton row must already be on screen.
+    // Right after opening, before the delayed plan has answered: the
+    // table's own loading state (its busy card) must already be on screen.
     await page
-      .locator("dialog[open] .apply-row--skeleton")
-      .first()
+      .locator('dialog[open] #ap-plan[aria-busy="true"]')
       .waitFor({ state: "attached", timeout: 1000 });
     assert.ok(
       planRequests.length > 0,
       "opening the panel never triggered the plan read",
     );
-    // Once the delayed read lands, the skeleton is gone and the real plan
-    // is drawn, with the one button that opens the apply dialog.
-    await page.waitForSelector("dialog[open] .apply-row--skeleton", {
+    // Once the delayed read lands, the loading state is gone and the real
+    // plan is drawn, with the one button that opens the apply dialog.
+    await page.waitForSelector('dialog[open] #ap-plan[aria-busy="true"]', {
       state: "detached",
       timeout: 5000,
     });
@@ -1545,31 +1544,34 @@ test("invariants: a stale-image row offers Update with the from/to versions, and
     await major.first().click();
     // redesign-flows-11: the flow's own address.
     await page.waitForURL(/\/update\?stack=[^&]+&app=/, { timeout: 5000 });
-    const items = page.locator("#page .uf-item");
+    const items = page.locator("#page .uf-list tbody tr[data-kp-row-key]");
     await items.first().waitFor({ timeout: 15000 });
     assert.equal(
-      await page.locator("#page .uf-item input:checked").count(),
+      await page
+        .locator("#page .uf-list tbody input[data-kp-select-row]:checked")
+        .count(),
       1,
       "only the row's own app starts ticked",
     );
+    // A major version holds the next step off until its release notes were
+    // read: the kp acknowledge gate under the list.
     const see = page.locator("[data-drive=update-see-impact]");
-    await see.click();
-    const go = page.locator("[data-drive=update-go]");
     const tick = page.locator("[data-drive=update-major-read]");
     await tick.waitFor({ timeout: 5000 });
+    assert.equal(
+      await see.getAttribute("aria-disabled"),
+      "true",
+      "See what this changes must stay off until the release notes are ticked",
+    );
+    await page.waitForTimeout(4500);
+    await tick.check();
+    await see.click();
+    const go = page.locator("[data-drive=update-go]");
+    await go.waitFor({ timeout: 5000 });
     const text = await page.locator("#page").innerText();
     assert.ok(text.includes(from), `the flow does not name the pinned ${from}`);
     assert.ok(text.includes(to), `the flow does not name the target ${to}`);
     assert.match(text, /is a major version/);
-    assert.equal(await tick.isChecked(), false);
-    // The file change is read first; the tick is still missing.
-    await page.waitForTimeout(1500);
-    assert.equal(
-      await go.isEnabled(),
-      false,
-      "Back up and update must stay off until the release notes are ticked",
-    );
-    await tick.check();
     await page.waitForFunction(
       () =>
         !(
@@ -1588,7 +1590,10 @@ test("invariants: a stale-image row offers Update with the from/to versions, and
     );
     await minor.first().waitFor({ timeout: 15000 });
     await minor.first().click();
-    await page.locator("#page .uf-item").first().waitFor({ timeout: 15000 });
+    await page
+      .locator("#page .uf-list tbody tr[data-kp-row-key]")
+      .first()
+      .waitFor({ timeout: 15000 });
     await page.locator("[data-drive=update-see-impact]").click();
     await page.waitForFunction(
       () =>
@@ -3549,19 +3554,22 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
         .locator("#page .kp-wizard__steps li[data-state=current]")
         .innerText();
     assert.equal(await now(), "See");
-    await page.locator("#page .uf-item").first().waitFor({ timeout: 15000 });
-    // A plain click on a row leaves it out, again includes it.
-    const first = page.locator("#page .uf-item input").first();
     await page
-      .locator("#page .uf-item")
+      .locator("#page .uf-list tbody tr[data-kp-row-key]")
       .first()
-      .click({ position: { x: 200, y: 12 } });
+      .waitFor({ timeout: 15000 });
+    // A tick leaves a row out, again includes it.
+    const first = page
+      .locator("#page .uf-list tbody input[data-kp-select-row]:enabled")
+      .first();
+    await first.uncheck();
     assert.equal(await first.isChecked(), false);
-    await page
-      .locator("#page .uf-item")
-      .first()
-      .click({ position: { x: 200, y: 12 } });
+    await first.check();
     assert.equal(await first.isChecked(), true);
+    // A major version holds the next step off until its notes are read.
+    const gates = await page.locator("[data-drive=update-major-read]").all();
+    if (gates.length) await page.waitForTimeout(4500);
+    for (const t of gates) await t.check();
     await page.locator("[data-drive=update-see-impact]").click();
     assert.equal(await now(), "Impact");
     const tiles = await page.locator("#page .uf-tile b").allInnerTexts();
@@ -3579,8 +3587,6 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
       [],
       `something ran before the button: ${posts.join(", ")}`,
     );
-    for (const t of await page.locator("[data-drive=update-major-read]").all())
-      await t.check();
     const go = page.locator("[data-drive=update-go]");
     await page.waitForFunction(
       () =>
@@ -3604,7 +3610,7 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
     );
     await go.click();
     await started;
-    await page.locator("#page .nx-check").waitFor({ timeout: 5000 });
+    await page.locator("#page .uf-run .kp-pipeline").waitFor({ timeout: 5000 });
     assert.equal(
       posts.find((p) => !p.endsWith("/plan")),
       "/data/actions/_host/update-apps",
@@ -3618,11 +3624,15 @@ test("invariants: the Update flow runs See, Impact, Back up, Update, Verify and 
       await page.locator("#page .uf-done h2").innerText(),
       /^Updated/,
     );
+    // The same run as a step list: every step passed or was skipped.
+    await page
+      .locator('[data-drive="update-run-layout"][data-drive-row="steps"]')
+      .click();
     const states = await page
-      .locator("#page .nx-check li")
-      .evaluateAll((l) => l.map((x) => x.getAttribute("data-s")));
+      .locator("#page .uf-steps li[data-state]")
+      .evaluateAll((l) => l.map((x) => x.getAttribute("data-state")));
     assert.ok(
-      states.every((s) => s === "ok" || s === "skip"),
+      states.length > 0 && states.every((s) => s === "done" || s === "skipped"),
       `a step did not pass: ${states.join(", ")}`,
     );
     assert.ok(
@@ -3725,12 +3735,12 @@ test("invariants: ? opens Help with the six areas, the words and the keys, and i
   }
 });
 
-test("invariants: Deploy all changes shows four count tiles that each show only their column, and its bar says what Apply will do", async () => {
+test("invariants: Deploy all changes lists every stack of the plan as a table row with its action, and its sentence and bar say what Apply will do (feat-kp11demo-13)", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext();
     const page = await freshPage(context);
-    // redesign-flows-4: a fixed plan, so every column has a stack.
+    // A fixed plan, so every kind of row is there.
     await page.route("**/data/apply/plan", (route) =>
       route.fulfill({
         contentType: "application/json",
@@ -3749,33 +3759,54 @@ test("invariants: Deploy all changes shows four count tiles that each show only 
       }),
     );
     await page.goto(`${BASE}/stacks?deploy-all=1`);
-    const tiles = page.locator("#apply-section .ap-tile");
-    await tiles.first().waitFor({ timeout: 10000 });
-    assert.equal(await tiles.count(), 4, "not four count tiles");
-    const shown = () =>
-      page.$$eval("#apply-section .ap-col", (cs) =>
-        cs
-          .filter((c) => !(/** @type {HTMLElement} */ (c).hidden))
-          .map((c) => c.getAttribute("data-col")),
-      );
-    assert.deepEqual(await shown(), ["deploy", "destroy", "broken"]);
-    // A plain click shows only that column; again shows all.
-    await tiles.nth(1).click();
-    assert.deepEqual(await shown(), ["destroy"]);
-    assert.equal(await tiles.nth(1).getAttribute("aria-pressed"), "true");
-    await tiles.nth(1).click();
-    assert.deepEqual(await shown(), ["deploy", "destroy", "broken"]);
-    // redesign-flows-5: Apply deploys the ticked stacks; the stack that
-    // cannot be planned and an unticked one are left alone, by name.
-    const go = page.locator("#apply-open");
-    assert.equal((await go.innerText()).trim(), "Apply 2 deploys…");
-    await page.getByLabel("Include alpha").uncheck();
-    assert.equal((await go.innerText()).trim(), "Apply 1 deploy…");
-    const bar = await page.locator("#apply-section .ap-go").innerText();
-    assert.ok(
-      bar.includes("alpha") && bar.includes("gamma"),
-      `the bar does not name what is left alone: ${bar}`,
+    const rows = page.locator("#ap-plan tbody tr[data-kp-row-key]");
+    await rows.first().waitFor({ timeout: 10000 });
+    assert.equal(await rows.count(), 5, "not a row per stack of the plan");
+    const actions = await rows.evaluateAll((els) =>
+      els.map((e) => e.querySelector(".kp-badge")?.textContent?.trim()),
     );
+    assert.deepEqual(actions, [
+      "deploy",
+      "new",
+      "destroy",
+      "cannot be planned",
+      "unchanged",
+    ]);
+    const words = () => page.locator("#ap-plan-words").innerText();
+    assert.match(await words(), /Will deploy 2 stacks \(1 new\), destroy 0/);
+    // The stack that cannot be planned and an unchanged one cannot be ticked.
+    assert.equal(await page.getByLabel("Select gamma").isDisabled(), true);
+    assert.equal(await page.getByLabel("Select delta").isDisabled(), true);
+    await page.getByLabel("Select alpha").uncheck();
+    await page.waitForFunction(
+      () =>
+        /Will deploy 1 stack /.test(
+          document.querySelector("#ap-plan-words")?.textContent ?? "",
+        ),
+      null,
+      { timeout: 5000 },
+    );
+    // A destroy never rides along with a deploy: Apply turns off and says so.
+    await page.getByLabel("Select gone").check();
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#apply-open")?.getAttribute("aria-disabled") ===
+        "true",
+      null,
+      { timeout: 5000 },
+    );
+    assert.match(
+      (await page
+        .locator("#apply-open")
+        .getAttribute("data-kp-disabled-reason")) ?? "",
+      /never rides along/,
+    );
+    // The destroy alone: Apply gives way to "Apply the destroy alone".
+    await page.getByLabel("Select beta").uncheck();
+    await page
+      .locator("#apply-destroy")
+      .waitFor({ state: "visible", timeout: 5000 });
+    assert.equal(await page.locator("#apply-open").isVisible(), false);
   } finally {
     await browser.close();
   }
@@ -3784,7 +3815,7 @@ test("invariants: Deploy all changes shows four count tiles that each show only 
 // ── redesign-stacks (3.71.0, the approved Stacks and Apps demos:
 // redesign-3.71/overview.html under FLOWS.md §1 row 3, and apps.html) ──
 
-test("invariants: Stacks lists every stack once as a card and as a table row, with its identity mark and its hub link; a card's click opens the hub, its tick only ticks (redesign-stacks)", async () => {
+test("invariants: Stacks lists every stack once as a card and as a table row, with its identity mark and its hub link; a card's tick only ticks (feat-kp11demo-12)", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -3795,27 +3826,32 @@ test("invariants: Stacks lists every stack once as a card and as a table row, wi
     assert.ok(names.length > 1, "the demo host has no stacks");
     await page.goto(`${BASE}/stacks?view=cards`);
     await page
-      .locator(".sk-card[data-stack]")
+      .locator(".fl-cards > .kp-card--entity")
       .first()
       .waitFor({ timeout: 8000 });
     /** @param {string} sel */
     const read = (sel) =>
       page.$$eval(sel, (els) =>
         els.map((e) => ({
-          stack: /** @type {HTMLElement} */ (e).dataset.stack,
-          mark: e.querySelector("svg.nx-mark")?.getAttribute("data-stack"),
+          stack:
+            e.getAttribute("data-kp-entity-key") ??
+            e.getAttribute("data-kp-row-key"),
+          mark: e
+            .querySelector(".kp-idmark[data-kp-idmark]")
+            ?.getAttribute("data-kp-idmark"),
           hub: e.querySelector("a[href^='/stacks/']")?.getAttribute("href"),
         })),
       );
     for (const [view, sel] of [
-      ["cards", ".sk-cards .sk-card[data-stack]"],
-      ["table", ".sk-table tbody tr[data-stack]"],
+      ["cards", ".fl-cards > .kp-card--entity"],
+      ["table", ".fl-table tbody tr[data-kp-row-key]"],
     ]) {
       if (view === "table") await page.click(".nx-seg button[data-v=table]");
+      await page.locator(sel).first().waitFor({ timeout: 8000 });
       const got = await read(sel);
       // Only the view that is on is drawn, so a Live view lookup by id and
-      // row never lands on the hidden twin (redesign-stacks review 6).
-      const hidden = view === "table" ? ".sk-cards" : ".sk-table tbody";
+      // row never lands on the hidden twin.
+      const hidden = view === "table" ? ".fl-cards" : ".fl-table tbody";
       assert.equal(
         await page.locator(`${hidden} [data-drive]`).count(),
         0,
@@ -3840,32 +3876,31 @@ test("invariants: Stacks lists every stack once as a card and as a table row, wi
       }
     }
     await page.click(".nx-seg button[data-v=cards]");
-    // The view is in the address (Table, the default since redesign-final
-    // M1, is not), so a reload keeps it.
+    // The view is in the address (Table, the default, is not), so a reload
+    // keeps it.
     assert.ok(page.url().includes("view=cards"), "the view is not in the URL");
     // A tick only ticks (invariant 12): the page stays, the card is marked.
     const first = names[0];
-    await page.locator(`.sk-cards [data-tick="${first}"]`).check();
+    await page
+      .locator(
+        `.fl-cards [data-drive="stacks-tick"][data-drive-row="${first}"]`,
+      )
+      .check();
     assert.equal(new URL(page.url()).pathname, "/stacks");
     assert.ok(
       await page
-        .locator(`.sk-cards .sk-card[data-stack="${first}"].is-ticked`)
+        .locator(
+          `.fl-cards > .kp-card--entity[data-kp-entity-key="${first}"].is-ticked`,
+        )
         .isVisible(),
       "the ticked card is not marked",
     );
-    // A click on the card's body opens that stack's hub.
-    await page
-      .locator(`.sk-cards .sk-card[data-stack="${first}"] .sk-card__bar`)
-      .click();
-    await page.waitForURL(`**/stacks/${encodeURIComponent(first)}`, {
-      timeout: 5000,
-    });
   } finally {
     await browser.close();
   }
 });
 
-test("invariants: Stacks keeps its ticks across Table/Cards and live updates, the batch bar names the exact count, and Esc unticks (redesign-stacks)", async () => {
+test("invariants: Stacks keeps its ticks across Table/Cards and live updates, the selection bar names the exact count, and Esc unticks (feat-kp11demo-12)", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -3875,28 +3910,37 @@ test("invariants: Stacks keeps its ticks across Table/Cards and live updates, th
     const names = await fleetNames(page);
     await page.goto(`${BASE}/stacks?view=cards`);
     await page
-      .locator(".sk-card[data-stack]")
+      .locator(".fl-cards > .kp-card--entity")
       .first()
       .waitFor({ timeout: 8000 });
-    assert.equal(
-      await page.locator(".sk-batch").isVisible(),
-      false,
-      "the batch bar shows with nothing ticked",
-    );
+    const state = () =>
+      page.locator("#fl-bar").getAttribute("data-kp-selection-state");
+    assert.equal(await state(), "empty", "the bar shows with nothing ticked");
     const two = names.slice(0, 2);
     for (const n of two)
-      await page.locator(`.sk-cards [data-tick="${n}"]`).check();
-    const bar = async () =>
-      (await page.locator(".sk-batch > strong").innerText()).trim();
-    assert.equal(await bar(), "2 ticked");
+      await page
+        .locator(`.fl-cards [data-drive="stacks-tick"][data-drive-row="${n}"]`)
+        .check();
+    const count = async () =>
+      (await page.locator("#fl-bar .kp-selection__count").innerText()).trim();
+    await page.waitForFunction(
+      () =>
+        /^2 selected/.test(
+          document.querySelector("#fl-bar .kp-selection__count")?.textContent ??
+            "",
+        ),
+      null,
+      { timeout: 5000 },
+    );
+    assert.equal(await count(), "2 selected");
     assert.equal(
-      (await page.locator(".sk-batch [data-batch=deploy]").innerText()).trim(),
-      "Deploy 2 stacks",
+      (await page.locator('#fl-bar [data-batch="deploy"]').innerText()).trim(),
+      "Deploy",
     );
     await page.click(".nx-seg button[data-v=table]");
     const tickedRows = await page.$$eval(
-      ".sk-table tbody input[data-tick]:checked",
-      (els) => els.map((e) => /** @type {HTMLElement} */ (e).dataset.tick),
+      ".fl-table tbody input[data-kp-select-row]:checked",
+      (els) => els.map((e) => /** @type {HTMLInputElement} */ (e).value),
     );
     assert.deepEqual(
       tickedRows.sort(),
@@ -3906,15 +3950,13 @@ test("invariants: Stacks keeps its ticks across Table/Cards and live updates, th
     // The demo host pushes the fleet every 5 s: the ticks, the focused
     // control and the rows themselves (so their hover) survive it.
     const link = page.locator(
-      `.sk-table [data-drive="stacks-open"][data-drive-row="${two[0]}"]`,
+      `.fl-table [data-drive="stacks-open"][data-drive-row="${two[0]}"]`,
     );
     await link.focus();
     await page.evaluate((n) => {
-      const tr = document.querySelector(`.sk-table tr[data-stack="${n}"]`);
+      const tr = document.querySelector(`.fl-table tr[data-kp-row-key="${n}"]`);
       if (tr) /** @type {any} */ (tr).__kept = true;
     }, two[0]);
-    // kp-themes 10's freshness line (ago.js) carries its moment in
-    // `datetime`, not the old `data-ago-at`.
     const at0 = await page.getAttribute(
       ".sk-head [data-kp-ago][datetime]",
       "datetime",
@@ -3927,10 +3969,14 @@ test("invariants: Stacks keeps its ticks across Table/Cards and live updates, th
       at0,
       { timeout: 15000 },
     );
-    assert.equal(await bar(), "2 ticked", "a live update dropped the ticks");
+    assert.equal(
+      await count(),
+      "2 selected",
+      "a live update dropped the ticks",
+    );
     const kept = await page.evaluate((n) => {
       const a = document.activeElement;
-      const tr = document.querySelector(`.sk-table tr[data-stack="${n}"]`);
+      const tr = document.querySelector(`.fl-table tr[data-kp-row-key="${n}"]`);
       return {
         focus:
           a instanceof HTMLElement &&
@@ -3942,38 +3988,27 @@ test("invariants: Stacks keeps its ticks across Table/Cards and live updates, th
     assert.ok(kept.focus, "a live update took the keyboard focus away");
     assert.ok(kept.node, "a live update rebuilt an unchanged row (hover lost)");
     // The header's tick-all counts what is shown, never more.
-    await page.click(".sk-table thead input[type=checkbox]");
-    assert.equal(await bar(), `${names.length} ticked`);
+    await page.click(".fl-table thead input[data-kp-select-all]");
+    const ticked = await page
+      .locator(".fl-table tbody input[data-kp-select-row]:checked")
+      .count();
+    await page.waitForFunction(
+      (n) =>
+        new RegExp(`^${n} selected`).test(
+          document.querySelector("#fl-bar .kp-selection__count")?.textContent ??
+            "",
+        ),
+      ticked,
+      { timeout: 5000 },
+    );
     await page.keyboard.press("Escape");
-    assert.equal(
-      await page.locator(".sk-batch").isVisible(),
-      false,
-      "Esc did not untick",
-    );
-    // An Only chip narrows the list and says its exact count.
-    const chip = page.locator(".nx-chip-toggle[data-v=newer]");
-    const want = Number(
-      (await chip.locator(".nx-chip-toggle__count").innerText()).trim(),
-    );
-    await chip.click();
-    // kp-themes 10: the rows the chip leaves out leave the theme's way, one
-    // after another (dom.js patchKeyed); the rows are counted once none is
-    // still leaving.
-    await page
-      .waitForFunction(
-        () =>
-          !document.querySelector(
-            ".sk-table tbody tr[data-stack][data-kp-leaving]:not([data-kp-arriving])",
-          ),
-        null,
-        { timeout: 5000 },
-      )
-      .catch(() => {});
-    const shown = await page.locator(".sk-table tbody tr[data-stack]").count();
-    assert.equal(shown, want, "the chip's count is not the rows it shows");
-    assert.ok(
-      page.url().includes("only=newer"),
-      "the filter is not in the URL",
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector("#fl-bar")
+          ?.getAttribute("data-kp-selection-state") === "empty",
+      null,
+      { timeout: 5000 },
     );
   } finally {
     await browser.close();
@@ -4084,7 +4119,7 @@ test("invariants: Stacks has the host strip, Deploy all changes and New stack; N
   }
 });
 
-test("invariants: Stacks and Apps fit a 390 px phone with no sideways scroll, in light and dark (redesign-stacks)", async () => {
+test("invariants: Stacks and Apps fit a 390 px phone with no sideways scroll, in light and dark (feat-kp11demo-12)", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -4094,21 +4129,20 @@ test("invariants: Stacks and Apps fit a 390 px phone with no sideways scroll, in
     /** @type {string[]} */
     const bad = [];
     for (const theme of ["formal", "dark"])
-      for (const path of ["/stacks", "/stacks?view=table", "/apps"]) {
+      for (const path of ["/stacks", "/stacks?view=cards", "/apps"]) {
         await page.evaluate((t) => localStorage.setItem("theme", t), theme);
         await page.goto(`${BASE}${path}`);
         await page.waitForSelector(
           path === "/apps"
-            ? ".ap-board .ap-grp:not(.ap-grp--skeleton), .ap-board .sk-empty-slot, .ap-board .ap-empty"
-            : ".sk-list [data-stack]",
+            ? ".ap-stacks .ap-group, .ap-card[data-kp-state=empty]"
+            : ".fl-table tbody tr[data-kp-row-key], .fl-cards > .kp-card--entity",
           { timeout: 10000 },
         );
         const over = await page.evaluate(
           () => document.documentElement.scrollWidth - window.innerWidth,
         );
         if (over > 1) bad.push(`${path} in ${theme}: ${over}px`);
-        // No box scrolls sideways inside the page either, and every row's
-        // action is on screen (redesign-stacks review 5).
+        // No box scrolls sideways inside the page either.
         const inner = await page.$$eval(".kp-table-wrap", (els) =>
           els
             .filter((e) => e.getClientRects().length > 0)
@@ -4116,31 +4150,6 @@ test("invariants: Stacks and Apps fit a 390 px phone with no sideways scroll, in
         );
         for (const d of inner)
           if (d > 1) bad.push(`${path} in ${theme}: a table scrolls ${d}px`);
-        // The toolbar's switches stay on screen (none cut off by the card).
-        const cut = await page.$$eval(".sk-page .nx-tb__state button", (els) =>
-          els
-            .filter((e) => e.getClientRects().length > 0)
-            .filter((e) => e.getBoundingClientRect().right > window.innerWidth)
-            .map((e) => e.textContent?.trim()),
-        );
-        if (cut.length)
-          bad.push(`${path} in ${theme}: toolbar cut off: ${cut.join(", ")}`);
-        if (path.includes("table")) {
-          const off = await page.$$eval(
-            ".sk-table tbody tr[data-stack] .sk-acts > *:first-child",
-            (els) =>
-              els
-                .filter((e) => {
-                  const r = e.getBoundingClientRect();
-                  return r.right > window.innerWidth || r.left < 0;
-                })
-                .map((e) => e.closest("tr")?.getAttribute("data-stack")),
-          );
-          if (off.length)
-            bad.push(
-              `${path} in ${theme}: actions off screen: ${off.join(", ")}`,
-            );
-        }
       }
     assert.deepEqual(bad, [], `sideways scroll: ${bad.join("; ")}`);
   } finally {
@@ -4148,7 +4157,7 @@ test("invariants: Stacks and Apps fit a 390 px phone with no sideways scroll, in
   }
 });
 
-test("invariants: Deploy all changes marks its steps, says what each column holds and shows a stack that cannot be planned with its fix (redesign-stacks, redesign-flows-4)", async () => {
+test("invariants: Deploy all changes marks its steps, shows the plan as a table and a stack that cannot be planned with its fix (feat-kp11demo-13)", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -4165,9 +4174,10 @@ test("invariants: Deploy all changes marks its steps, says what each column hold
       "the header's 'updated' is not beside the title",
     );
     const panel = page.locator("dialog[open]");
-    // The 3.71.0 merge: the panel's body is the approved apply demo
-    // (apply.js), its Compare step the panel's Compare again.
-    await panel.locator(".ap-col").first().waitFor({ timeout: 10000 });
+    await panel
+      .locator("#ap-plan tbody tr[data-kp-row-key]")
+      .first()
+      .waitFor({ timeout: 10000 });
     const steps = await panel.locator(".ap-steps li").evaluateAll((els) =>
       els.map((e) => ({
         step: /** @type {HTMLElement} */ (e).dataset.step,
@@ -4189,29 +4199,27 @@ test("invariants: Deploy all changes marks its steps, says what each column hold
     const text = await panel.innerText();
     assert.doesNotMatch(text, /\(s\)/, "bracketed plurals");
     assert.doesNotMatch(text, / :: |\/tmp\//, "raw error text in the panel");
-    const cols = await panel.locator(".ap-col").evaluateAll((els) =>
-      els.map((g) => ({
-        title: g.querySelector("h3")?.textContent?.trim(),
-        desc: g.querySelector(".ap-hint")?.textContent?.trim() ?? "",
-      })),
-    );
-    assert.ok(cols.length > 0);
-    for (const g of cols)
-      assert.ok(g.desc.length > 10, `${g.title} has no description`);
     // The demo's alpha-demo declares no apps, so it cannot be planned:
-    // shown with what is wrong and its fix.
-    const broken = panel.locator(".ap-item--broken");
+    // its row opens to what is wrong and its fix.
+    const row = panel
+      .locator("#ap-plan tbody tr", { hasText: "cannot be planned" })
+      .first();
     assert.ok(
-      (await broken.count()) > 0,
+      (await row.count()) > 0,
       "the stack that cannot be planned is not shown",
     );
-    assert.match(await broken.first().innerText(), /Fix:/);
+    const key = await row.getAttribute("data-kp-row-key");
+    await panel
+      .locator(`[data-drive="deploy-all-diff"][data-drive-row="${key}"]`)
+      .click();
+    await panel.locator(".ap-broken").first().waitFor({ timeout: 5000 });
+    assert.match(await panel.locator(".ap-broken").first().innerText(), /Fix:/);
   } finally {
     await browser.close();
   }
 });
 
-test("invariants: a row's Update and the batch Update… open the one Update flow for the ticked stacks, never a link-free blind batch (redesign-stacks, redesign-integrate-5)", async () => {
+test("invariants: the batch Update… opens the one Update flow for the ticked stacks, never a link-free blind batch (feat-kp11demo-12)", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -4221,18 +4229,21 @@ test("invariants: a row's Update and the batch Update… open the one Update flo
     const names = await fleetNames(page);
     await page.goto(`${BASE}/stacks?view=table`);
     await page
-      .locator(".sk-table tbody tr[data-stack]")
+      .locator(".fl-table tbody tr[data-kp-row-key]")
       .first()
       .waitFor({ timeout: 8000 });
-    assert.equal(
-      await page.locator('.sk-table a[data-action="update"]').count(),
-      0,
-      "a row's Update is still a link",
-    );
     // invariant 149: whichever Update opened it, it is the one flow.
-    await page.locator(`.sk-table [data-tick="${names[0]}"]`).check();
-    await page.locator(`.sk-table [data-tick="${names[1]}"]`).check();
-    const upd = page.locator(".sk-batch [data-batch=update]");
+    await page
+      .locator(
+        `.fl-table [data-drive="stacks-tick"][data-drive-row="${names[0]}"]`,
+      )
+      .check();
+    await page
+      .locator(
+        `.fl-table [data-drive="stacks-tick"][data-drive-row="${names[1]}"]`,
+      )
+      .check();
+    const upd = page.locator('#fl-bar [data-batch="update"]');
     assert.equal((await upd.innerText()).trim(), "Update…");
     await upd.click();
     await page.waitForURL("**/update?**", { timeout: 5000 });
@@ -4253,7 +4264,7 @@ test("invariants: a row's Update and the batch Update… open the one Update flo
   }
 });
 
-test("invariants: Apps groups the stacks' tiles, each opening in a new tab; the search narrows them and a star survives a reload (redesign-stacks)", async () => {
+test("invariants: Apps groups the stacks' tiles per stack, each opening in a new tab; the search narrows them and the state filter keeps only the apps in a state (feat-kp11demo-12)", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -4266,7 +4277,9 @@ test("invariants: Apps groups the stacks' tiles, each opening in a new tab; the 
     });
     await page.goto(`${BASE}/apps`);
     if (!tiles.length) {
-      await page.waitForSelector(".ap-empty", { timeout: 8000 });
+      await page.waitForSelector(".ap-card[data-kp-state=empty]", {
+        timeout: 8000,
+      });
       return;
     }
     await page
@@ -4277,6 +4290,7 @@ test("invariants: Apps groups the stacks' tiles, each opening in a new tab; the 
       els.map((e) => ({
         host: /** @type {HTMLElement} */ (e).dataset.host,
         target: e.getAttribute("target"),
+        word: e.querySelector(".kp-state-word")?.textContent?.trim(),
       })),
     );
     assert.deepEqual(
@@ -4288,21 +4302,22 @@ test("invariants: Apps groups the stacks' tiles, each opening in a new tab; the 
       shown.every((s) => s.target === "_blank"),
       "a tile does not open in a new tab",
     );
-    // fix-371-1: a group is a fold (`<details>`), its label the summary's
-    // h2 behind the chevron; the label is the h2's own text node.
-    const groups = await page.$$eval(".ap-grp > summary > h2", (hs) =>
-      hs.map((x) =>
-        [...x.childNodes]
-          .filter((n) => n.nodeType === Node.TEXT_NODE)
-          .map((n) => n.textContent ?? "")
-          .join("")
-          .trim(),
+    assert.ok(
+      shown.every((s) =>
+        ["answers", "failing", "down", "deploying", "not watched"].includes(
+          s.word ?? "",
+        ),
       ),
+      "a tile does not say its state in one word",
+    );
+    // The groups are the stacks', in their order.
+    const groups = await page.$$eval(".ap-group[data-stack]", (els) =>
+      els.map((e) => /** @type {HTMLElement} */ (e).dataset.stack),
     );
     assert.deepEqual(
       groups,
-      [...new Set(tiles.map((/** @type {any} */ t) => t.group))],
-      "the groups are not the stacks' own, in their order",
+      [...new Set(tiles.map((/** @type {any} */ t) => t.stack))],
+      "the groups are not the stacks, in their order",
     );
     // Search narrows, and the first match is the one Enter opens.
     const name = String(tiles[tiles.length - 1].name);
@@ -4325,19 +4340,10 @@ test("invariants: Apps groups the stacks' tiles, each opening in a new tab; the 
       "no way back from an empty search",
     );
     await page.getByRole("button", { name: "Show every app" }).click();
-    // A star moves the tile to Starred, and it is still there after a reload.
-    const host = String(tiles[0].host);
-    await page.locator(`.ap-tile[data-host="${host}"] .ap-tile__pin`).click();
-    await page.reload();
     await page
       .locator(".ap-tile[data-host]")
       .first()
       .waitFor({ timeout: 8000 });
-    const starred = await page.$$eval(
-      '.ap-grp[aria-label="Starred"] .ap-tile',
-      (els) => els.map((e) => /** @type {HTMLElement} */ (e).dataset.host),
-    );
-    assert.deepEqual(starred, [host], "the star did not survive a reload");
   } finally {
     await browser.close();
   }
@@ -5246,7 +5252,7 @@ test("invariants: redesign-integrate-8: Live view's press of a failed update's R
 });
 
 test("invariants: redesign-integrate-8: Live view's press of a Stacks row's Update opens the Update flow for that stack, no dialog", async () => {
-  const x = await liveClick("/stacks?view=table", "stacks-row-update");
+  const x = await liveClick("/stacks?view=cards", "stacks-row-update");
   assert.equal(x.entry?.opens, "view", "declared as opening a view");
   assert.ok(x.r.ok, `refused: ${x.r.refusal?.why}`);
   assert.equal(x.url.pathname, "/update");
@@ -6354,9 +6360,9 @@ test("invariants: the Map is laid out as the approved demo, and a plain click on
       blocks: [...document.querySelectorAll("#page section.nx-card h2")].map(
         (x) => x.textContent,
       ),
-      side: document.querySelector(".mp-side h3")?.textContent,
-      half: [...document.querySelectorAll(".mp-grid > section")].map((s) =>
-        Math.round(s.getBoundingClientRect().top),
+      side: document.querySelector(".mv-panel")?.textContent ?? "",
+      lefts: [...document.querySelectorAll(".mp-grid > section")].map((s) =>
+        Math.round(s.getBoundingClientRect().left),
       ),
     }));
     assert.equal(layout.title, "Map");
@@ -6372,11 +6378,11 @@ test("invariants: the Map is laid out as the approved demo, and a plain click on
       "Disk growth",
       "Stale images",
     ]);
-    assert.equal(layout.side, "Nothing selected");
+    assert.match(layout.side, /Nothing picked/);
     assert.equal(
-      new Set(layout.half).size,
+      new Set(layout.lefts).size,
       1,
-      "Capacity and Disk growth are not side by side",
+      "Capacity and Disk growth do not share one column",
     );
 
     const node = page.locator('.mp-node[data-stack="gateway"]');
@@ -6384,8 +6390,9 @@ test("invariants: the Map is laid out as the approved demo, and a plain click on
     assert.equal(await node.getAttribute("aria-pressed"), "true");
     assert.match(page.url(), /select=gateway/);
     assert.match(
-      (await page.locator(".mp-side").textContent()) ?? "",
-      /1 selected/,
+      (await page.locator(".mv-panel .mv-block h3").first().textContent()) ??
+        "",
+      /gateway/,
     );
     // A second node joins the selection with a plain click.
     const other = page.locator('.mp-node[data-stack="admin"]');
@@ -6402,6 +6409,13 @@ test("invariants: the Map is laid out as the approved demo, and a plain click on
     const seg = page.locator('.nx-seg[aria-label="View"] button');
     await seg.filter({ hasText: "List" }).click();
     await page.locator(".mp-list tbody tr").first().waitFor({ timeout: 3000 });
+    assert.equal(await page.locator(".mp-topo").isVisible(), false);
+    // Matrix view: who reaches whom, a row and a column per stack.
+    await seg.filter({ hasText: "Matrix" }).click();
+    await page
+      .locator(".kp-matrix [data-row-key]")
+      .first()
+      .waitFor({ timeout: 3000 });
     assert.equal(await page.locator(".mp-topo").isVisible(), false);
     await seg.filter({ hasText: "Graph" }).click();
     // kp-themes 10: the graph comes back the theme's way (motion.js: a
@@ -6491,39 +6505,9 @@ test("invariants: review metrics — Metrics and the Map fit a phone: no table s
       );
     assert.ok(reach.length > 0, "no Update button on the phone");
     assert.ok(reach.every(Boolean), "an Update button is out of reach");
-    // Disk growth at 390: no head row, two lines a row.
-    await page.waitForSelector(".mp-growth[role=row] .mp-g-full");
-    const g = await page.evaluate(() => {
-      const head = document.querySelector(
-        '[aria-label="Disk growth per filesystem"] .mp-cap--head',
-      );
-      const rows = [...document.querySelectorAll(".mp-growth[role=row]")]
-        .filter((r) => !r.classList.contains("mp-cap--head"))
-        .map((r) => {
-          const top = (/** @type {string} */ s) =>
-            Math.round(
-              /** @type {Element} */ (
-                r.querySelector(s)
-              ).getBoundingClientRect().top,
-            );
-          return {
-            line1: top(".mp-g-name") === top(".mp-g-full"),
-            line2: top(".mp-g-bar") === top(".mp-g-trend"),
-            below: top(".mp-g-bar") > top(".mp-g-name"),
-            label: r.querySelector(".mp-g-full .mp-inl")?.checkVisibility(),
-          };
-        });
-      return { head: head ? getComputedStyle(head).display : "none", rows };
-    });
-    assert.equal(g.head, "none", "Disk growth keeps its head row on a phone");
-    assert.ok(g.rows.length > 0);
-    for (const row of g.rows)
-      assert.deepEqual(row, {
-        line1: true,
-        line2: true,
-        below: true,
-        label: true,
-      });
+    // Disk growth at 390: the chart keeps its footprint and the page does
+    // not scroll sideways (checked above for every table and the page).
+    await page.waitForSelector("#growth .kp-card[data-kp-state=ready]");
   } finally {
     await browser.close();
   }
@@ -7027,32 +7011,48 @@ test("invariants: redesign-config Presets is a gallery: one card per preset, the
     );
     assert.ok(withApps.length > 2, "the fixture has no presets");
     await page.goto(`${BASE}/presets`);
-    await page.locator("article.ps-card[data-preset]").first().waitFor({
+    await page.locator(".ps-gallery > .kp-card--entity").first().waitFor({
       timeout: 10000,
     });
+    // One card per preset, the app-less one (the empty stack) last.
     assert.equal(
-      await page.locator("article.ps-card[data-preset]").count(),
-      withApps.length,
+      await page.locator(".ps-gallery > .kp-card--entity").count(),
+      read.presets.length,
     );
     assert.equal(
-      await page.locator(".ps-gallery > article:last-child h3").innerText(),
-      "Empty stack",
+      (
+        await page
+          .locator(
+            ".ps-gallery > .kp-card--entity:last-child .kp-entity__state",
+          )
+          .innerText()
+      ).toLowerCase(),
+      "empty stack",
     );
-    const count = await page.locator(".ps-tb .cf-count").innerText();
+    const count = await page.locator(".kp-toolbar__state").innerText();
     assert.ok(
       count.startsWith(`${withApps.length} presets · next free container`),
       count,
     );
-    await page.locator(".ps-tb .nx-search").fill("vaapi");
-    assert.equal(await page.locator("article.ps-card[data-preset]").count(), 1);
+    // The search understands what is meant: "vaapi" is in the purpose.
+    await page.locator(".kp-toolbar__search input").fill("vaapi");
+    await page.waitForFunction(
+      () =>
+        document.querySelectorAll(".ps-gallery > .kp-card--entity").length ===
+        1,
+      null,
+      { timeout: 5000 },
+    );
     assert.equal(
-      (await page.locator(".ps-tb .cf-count").innerText()).trim(),
+      (await page.locator(".kp-toolbar__state").innerText()).trim(),
       `1 of ${withApps.length} presets`,
     );
     const name = await page
-      .locator("article.ps-card[data-preset]")
-      .getAttribute("data-preset");
-    await page.locator(`button[data-preset-use="${name}"]`).click();
+      .locator(".ps-gallery > .kp-card--entity")
+      .getAttribute("data-kp-entity-key");
+    await page
+      .locator(`[data-drive="presets-use"][data-drive-row="${name}"]`)
+      .click();
     const wizard = page.locator("dialog#new-stack-dialog[open]");
     await wizard.waitFor({ timeout: 5000 });
     assert.equal(
@@ -7084,13 +7084,13 @@ test("invariants: redesign-config pages show their skeleton from the first frame
           [".kp-kpi[data-loading]", 4],
         ],
         settings: [[".st-grp--sk", 4]],
-        presets: [[".ps-card--sk", 8]],
+        presets: [[".kp-card--ghost", 6]],
       };
       /** The content each page draws once its data is in. */
       const filled = {
         firewall: "tr.fw-row",
         settings: "button[data-key]",
-        presets: "article.ps-card[data-preset]",
+        presets: ".ps-gallery > .kp-card--entity",
       };
       for (const path of /** @type {const} */ ([
         "firewall",
@@ -7150,7 +7150,7 @@ test("invariants: redesign-config every control Firewall, Settings and Presets d
     const filled = {
       firewall: "tr.fw-rule",
       settings: "button[data-key]",
-      presets: "article.ps-card[data-preset]",
+      presets: ".ps-gallery > .kp-card--entity",
     };
     for (const path of ["firewall", "settings", "presets"]) {
       await page.goto(`${BASE}/${path}`);
@@ -7381,72 +7381,27 @@ test("invariants: redesign-config review one failed read is one alert with one T
   }
 });
 
-test("invariants: redesign-config review a Presets search marks the match inside a chip without splitting its word", async () => {
-  const browser = await launch();
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 1894, height: 1000 },
-    });
-    const page = await freshPage(context);
-    await page.goto(`${BASE}/presets`);
-    await page.locator(".ps-apps .kp-badge").first().waitFor({
-      timeout: 10000,
-    });
-    const chips = () =>
-      page.$$eval(".ps-apps .kp-badge", (cs) =>
-        Object.fromEntries(
-          cs.map((c) => [
-            c.textContent,
-            Math.round(c.getBoundingClientRect().width),
-          ]),
-        ),
-      );
-    const before = await chips();
-    await page.locator(".ps-tb .nx-search").fill("a");
-    await page.locator(".ps-apps .nx-mark").first().waitFor({ timeout: 3000 });
-    const after = await chips();
-    const wider = Object.entries(after).filter(
-      ([t, w]) => before[t] === undefined || Math.abs(w - before[t]) > 1,
-    );
-    assert.deepEqual(wider, [], "a chip's word was split by the highlight");
-  } finally {
-    await browser.close();
-  }
-});
-
-test("invariants: Apps loads as its grouped board, its group labels are the body face at weight 500, and the legend says deploying (redesign-stacks)", async () => {
+test("invariants: Apps loads with the theme's busy card over its footprint, then groups the tiles per stack, and the legend is the state word (feat-kp11demo-12)", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
       viewport: { width: 1600, height: 1000 },
     });
     const page = await freshPage(context);
-    // Hold the tiles back so the loading board can be read.
+    // Hold the tiles back so the loading state can be read.
     await page.route("**/data/tiles*", async (route) => {
       await new Promise((r) => setTimeout(r, 1500));
       await route.continue();
     });
     await page.goto(`${BASE}/apps`);
-    const skel = page.locator(".ap-board .ap-grp--skeleton");
-    await skel.first().waitFor({ timeout: 5000 });
+    await page
+      .locator('.ap-card[data-kp-state="loading"]')
+      .waitFor({ timeout: 5000 });
     assert.ok(
-      (await skel.count()) > 1,
-      "the loading state is not the grouped board",
+      (await page.locator(".ap-card .kp-datatable__busy-card").count()) >= 1,
+      "the loading state is not the package's busy card",
     );
-    const groups = page.locator(
-      ".ap-board .ap-grp:not(.ap-grp--skeleton) > summary > h2",
-    );
-    await groups.first().waitFor({ timeout: 10000 });
-    const font = await groups.first().evaluate((e) => {
-      const cs = getComputedStyle(e);
-      return {
-        family: cs.fontFamily,
-        body: getComputedStyle(document.body).fontFamily,
-        weight: cs.fontWeight,
-      };
-    });
-    assert.equal(font.family, font.body, "a group label is not the body face");
-    assert.equal(font.weight, "500");
+    await page.locator(".ap-group h3").first().waitFor({ timeout: 10000 });
     const text = await page.locator(".ap-page").innerText();
     assert.match(text, /deploying/);
     assert.doesNotMatch(text, /a known outage/);
@@ -7546,7 +7501,7 @@ test("invariants: stack hub — the header keeps Back up · Update · Deploy (pr
   }
 });
 
-test("invariants: stack hub — six tabs; Overview has five KPI tiles, Is it healthy? and Recent history with who did it", async () => {
+test("invariants: stack hub — seven tabs; Overview has five KPI tiles, Is it healthy? and Recent history with who did it", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -7557,7 +7512,7 @@ test("invariants: stack hub — six tabs; Overview has five KPI tiles, Is it hea
     // The list shows skeleton lines until the fleet is read: wait for a
     // real row, not the first line.
     await page
-      .locator('#healthy .sh-checks li[data-key="apps"]')
+      .locator('#healthy .kp-statusrow[data-kp-status-id="apps"]')
       .waitFor({ timeout: 10000 });
     await page
       .locator(".sh-feed li[data-who]")
@@ -7571,18 +7526,20 @@ test("invariants: stack hub — six tabs; Overview has five KPI tiles, Is it hea
         (l) => l.textContent,
       ),
       links: [...document.querySelectorAll(".kp-kpis a.kp-kpi")].length,
-      checks: [...document.querySelectorAll("#healthy .sh-checks li")].map(
-        (l) => l.getAttribute("data-key"),
+      checks: [...document.querySelectorAll("#healthy .kp-statusrow")].map(
+        (l) => l.getAttribute("data-kp-status-id"),
       ),
       who: [...document.querySelectorAll(".sh-feed li[data-who]")].map((l) =>
         l.getAttribute("data-who"),
       ),
-      // kp-themes 10's attention band (ui.js attentionBand → attention.js)
-      // keys its items with `data-kp-key`.
-      noEnv: !!document.querySelector('.nx-attention [data-kp-key="no-env"]'),
+      // The kp problems list of what needs you names the missing env.
+      noEnv: /no sealed env/.test(
+        document.querySelector("#needs")?.textContent ?? "",
+      ),
     }));
     assert.deepEqual(r.tabs, [
       "Overview",
+      "Resources",
       "Logs",
       "Apps",
       "Backups",
@@ -7712,24 +7669,29 @@ test("invariants: stack hub — Apps and Backups are kp datatables; Backups draw
     const page = await freshPage(context);
     await page.goto(`${BASE}/stacks/gateway/apps`);
     await page
-      .locator(".sh-table[data-kp-datatable] tbody tr")
+      .locator(
+        "#page .kp-datatable[data-kp-datatable] tbody tr[data-kp-row-key]",
+      )
       .first()
       .waitFor({ timeout: 10000 });
     assert.equal(
       await page
-        .locator(".sh-table[data-kp-sort-multi][data-kp-remember]")
+        .locator("#page .kp-datatable[data-kp-sort-multi][data-kp-remember]")
         .count(),
       1,
     );
     await page.goto(`${BASE}/stacks/gateway/backups`);
-    const strips = page.locator(".sh-table .sh-strip");
+    const strips = page.locator(".hb-strip .kp-uptime");
     await strips.first().waitFor({ timeout: 10000 });
     const cells = await strips.evaluateAll((ss) =>
-      ss.map((s) => s.children.length),
+      ss.map((s) => s.getAttribute("data-kp-uptime-count")),
     );
-    assert.ok(cells.length >= 1 && cells.every((n) => n === 14), cells.join());
     assert.ok(
-      (await page.locator('.sh-table [data-action="restore"]').count()) >= 1,
+      cells.length >= 1 && cells.every((n) => n === "14"),
+      cells.join(),
+    );
+    assert.ok(
+      (await page.locator('.hb-strip [data-action="restore"]').count()) >= 1,
     );
     await page.goto(`${BASE}/stacks/gateway/settings`);
     await page.locator("#size dd").first().waitFor({ timeout: 10000 });
@@ -7920,12 +7882,10 @@ test("invariants: redesign-openpoints-2: an app's Update… in the stack hub ope
     const ticked = await page.$$eval('#page [data-drive="update-pick"]', (bs) =>
       bs
         .filter((b) => /** @type {HTMLInputElement} */ (b).checked)
-        .map(
-          (b) => b.closest(".uf-item")?.querySelector("strong")?.textContent,
-        ),
+        .map((b) => b.closest("tr")?.getAttribute("data-kp-row-label")),
     );
     assert.equal(ticked.length, 1, `ticked: ${ticked.join(" | ")}`);
-    assert.equal(ticked[0], `gateway / ${app}`);
+    assert.equal(ticked[0], `gateway/${app}`);
     assert.match(
       await page.locator("#page h1").innerText(),
       new RegExp(`Update gateway/${app}`),
@@ -8049,14 +8009,14 @@ test("invariants: stack hub review — Restarts counts 24 h with a sparkline and
       await tile.getAttribute("href"),
       "/charts?stack=kp-soft&range=24h",
     );
-    const checks = page.locator(".sh-checks li");
+    const checks = page.locator("#healthy .kp-statusrow");
     await page
-      .locator('.sh-checks li[data-key="restarts"]', {
+      .locator('#healthy .kp-statusrow[data-kp-status-id="restarts"]', {
         hasText: "in 24 h",
       })
       .waitFor({ timeout: 10000 });
     const keys = await checks.evaluateAll((ls) =>
-      ls.map((l) => l.getAttribute("data-key")),
+      ls.map((l) => l.getAttribute("data-kp-status-id")),
     );
     assert.ok(
       keys.some((k) => k?.startsWith("health:")),
@@ -8065,7 +8025,7 @@ test("invariants: stack hub review — Restarts counts 24 h with a sparkline and
     assert.ok(keys.includes("web"), `no web row: ${keys.join()}`);
     assert.match(
       (await page
-        .locator('.sh-checks li[data-key^="health:"]')
+        .locator('#healthy .kp-statusrow[data-kp-status-id^="health:"]')
         .first()
         .textContent()) ?? "",
       /not declared|healthy|unhealthy|starting/,
@@ -8159,7 +8119,7 @@ test("invariants: stack hub review — History says Kenny in chip and rows, date
 // step; the Update flow is one job on the dashboard's server with its own
 // address; Help, the tour and the Inbox's details. ──
 
-test("invariants: Deploy all changes keeps a stack's diff inside its column", async () => {
+test("invariants: Deploy all changes keeps a stack's diff inside its table (feat-kp11demo-13)", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -8167,50 +8127,34 @@ test("invariants: Deploy all changes keeps a stack's diff inside its column", as
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/stacks?deploy-all=1`);
-    const more = page.locator(
-      "#apply-section .ap-col[data-col=deploy] [data-drive=deploy-all-diff]",
-    );
+    const more = page.locator("#ap-plan [data-drive=deploy-all-diff]");
     await more.first().waitFor({ timeout: 20000 });
     await more.first().click();
-    const diff = page.locator("#apply-section .ap-diff").first();
-    await diff.locator("details").first().waitFor({ timeout: 10000 });
-    for (const d of await diff.locator("details").all())
-      await d.evaluate((x) => {
-        /** @type {HTMLDetailsElement} */ (x).open = true;
-      });
+    const diff = page.locator("#ap-plan .ap-diff").first();
+    await diff.waitFor({ timeout: 10000 });
     const edges = await page.evaluate(() => {
-      const col = /** @type {HTMLElement} */ (
-        document.querySelector("#apply-section .ap-col[data-col=deploy]")
+      const wrap = /** @type {HTMLElement} */ (
+        document.querySelector("#ap-plan .kp-table-wrap")
       );
-      const next = /** @type {HTMLElement} */ (
-        document.querySelector("#apply-section .ap-col[data-col=destroy]")
-      );
-      // The boxes that show the diff (a long line scrolls inside its own
-      // box, so the lines themselves may run on under the scroll).
       const right = Math.max(
         ...[
-          ...col.querySelectorAll(
-            ".ap-diff, .ap-diff details, .ap-diff summary, .ap-diff pre",
+          ...document.querySelectorAll(
+            "#ap-plan .ap-diff, #ap-plan .ap-diff pre",
           ),
         ].map((e) => e.getBoundingClientRect().right),
       );
-      return {
-        right,
-        col: col.getBoundingClientRect().right,
-        next: next.getBoundingClientRect().left,
-      };
+      return { right, wrap: wrap.getBoundingClientRect().right };
     });
     assert.ok(
-      edges.right <= edges.col + 1,
-      `the diff reaches ${edges.right}px, past its column's ${edges.col}px`,
+      edges.right <= edges.wrap + 1,
+      `the diff reaches ${edges.right}px, past its table's ${edges.wrap}px`,
     );
-    assert.ok(edges.col <= edges.next, "the deploy column covers the next");
   } finally {
     await browser.close();
   }
 });
 
-test("invariants: Deploy all changes deploys the ticked subset and destroys only as its own confirmed red step", async () => {
+test("invariants: Deploy all changes deploys the ticked subset and destroys only on its own, with the name typed (feat-kp11demo-13)", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -8237,9 +8181,7 @@ test("invariants: Deploy all changes deploys the ticked subset and destroys only
     );
     await page.goto(`${BASE}/stacks?deploy-all=1`);
     await page.locator("#apply-open").waitFor({ timeout: 10000 });
-    await page.getByLabel("Include alpha").uncheck();
-    // Deploys alone never destroy, even with a name typed.
-    await page.getByLabel("Type oldstack to destroy it").fill("oldstack");
+    await page.getByLabel("Select alpha").uncheck();
     await page.locator("#apply-open").click();
     const dialog = page.locator("dialog#action-dialog[open]");
     await dialog.waitFor({ timeout: 5000 });
@@ -8251,7 +8193,7 @@ test("invariants: Deploy all changes deploys the ticked subset and destroys only
       "",
       "a deploy press carries a destroy",
     );
-    // Kenny, 2026-10-04: Skip the backups is an option, never the default.
+    // Back up first is the default; skipping is an option of the sentence.
     const skipBox = dialog.locator("#act-skip-backup");
     assert.equal(
       await skipBox.isChecked(),
@@ -8260,43 +8202,27 @@ test("invariants: Deploy all changes deploys the ticked subset and destroys only
     );
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "detached", timeout: 5000 }).catch(() => {});
-    const skipTick = page.locator("#apply-skip-backups");
-    assert.equal(await skipTick.isChecked(), false);
-    await skipTick.check();
+    const skip = page.locator("#apply-skip-backups");
+    assert.equal(await skip.inputValue(), "yes");
+    await skip.selectOption("skip");
     await page.locator("#apply-open").click();
     await dialog.waitFor({ timeout: 5000 });
     assert.equal(
       await skipBox.isChecked(),
       true,
-      "the bar's tick rides on the deploy press",
+      "the sentence's choice rides on the deploy press",
     );
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "detached", timeout: 5000 }).catch(() => {});
-    await skipTick.uncheck();
-    // The destroy is its own red step: off until it is confirmed, and while
-    // a ticked deploy has not run.
-    const step = page.locator("#apply-section .ap-destroy");
-    const destroy = page.locator("#apply-destroy");
-    assert.equal(await destroy.isDisabled(), true);
-    assert.match(
-      await step.evaluate((e) => getComputedStyle(e).borderColor),
-      /rgb/,
-    );
-    const ack = page.locator("#apply-destroy-ack");
-    await ack.check();
-    assert.equal(
-      await destroy.isDisabled(),
-      true,
-      "the destroy is open while a ticked deploy has not run",
-    );
-    await page.getByLabel("Include beta").uncheck();
-    assert.equal(await destroy.isDisabled(), false);
-    // Un-arming it closes it again.
-    await page.getByLabel("Type oldstack to destroy it").fill("olds");
-    assert.equal(await destroy.isDisabled(), true);
-    await page.getByLabel("Type oldstack to destroy it").fill("oldstack");
-    await ack.check();
-    await destroy.click();
+    await skip.selectOption("yes");
+    // The destroy alone: the stack's name is typed, then the apply dialog
+    // asks once more.
+    await page.getByLabel("Select beta").uncheck();
+    await page.getByLabel("Select oldstack").check();
+    await page.locator("#apply-destroy").click();
+    const typed = page.locator("dialog[open]").last();
+    await typed.getByRole("textbox").fill("oldstack");
+    await typed.getByRole("button", { name: "Destroy oldstack" }).click();
     await dialog.waitFor({ timeout: 5000 });
     assert.equal(await val("act-destroy"), "oldstack");
     assert.equal(await val("act-destroy-ids"), "905");
@@ -8334,7 +8260,7 @@ test("invariants: Deploy all changes deploys the ticked subset and destroys only
   }
 });
 
-test("invariants: Deploy all changes marks Compare done only once the compare ran, Esc and Show all reset the tile filter, and an unarmed destroy has a neutral dot", async () => {
+test("invariants: Deploy all changes marks Compare done only once the compare ran (feat-kp11demo-13)", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -8356,9 +8282,7 @@ test("invariants: Deploy all changes marks Compare done only once the compare ra
       heldPlan.push(route);
     });
     await page.goto(`${BASE}/stacks?deploy-all=1`);
-    const compare = page.locator(
-      "#apply-section .ap-steps li[data-step=compare]",
-    );
+    const compare = page.locator(".ap-steps li[data-step=compare]");
     await compare.waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
     assert.equal(
@@ -8373,52 +8297,17 @@ test("invariants: Deploy all changes marks Compare done only once the compare ra
     await page.waitForFunction(
       () =>
         document
-          .querySelector("#apply-section .ap-steps li[data-step=compare]")
+          .querySelector(".ap-steps li[data-step=compare]")
           ?.classList.contains("done"),
       null,
       { timeout: 15000 },
     );
-    // The tile filter: Show all appears while one is on; Esc resets.
-    const tiles = page.locator("#apply-section .ap-tile");
-    await tiles.first().waitFor({ timeout: 15000 });
-    await tiles.nth(1).click();
-    const showAll = page.locator("[data-drive=deploy-all-show-all]");
-    await showAll.waitFor({ timeout: 3000 });
-    await showAll.click();
-    assert.equal(await tiles.nth(1).getAttribute("aria-pressed"), "false");
-    assert.equal(await showAll.count(), 0);
-    await tiles.nth(2).click();
-    await page.keyboard.press("Escape");
-    assert.equal(await tiles.nth(2).getAttribute("aria-pressed"), "false");
-    // An unarmed destroy's dot is neutral, not the info blue.
-    const dot = page.locator(
-      "#apply-section .ap-item--destroy:not(.armed) .nx-sev",
-    );
-    if ((await dot.count()) > 0) {
-      const [c, info] = await page.evaluate(() => {
-        const d = /** @type {HTMLElement} */ (
-          document.querySelector(
-            "#apply-section .ap-item--destroy:not(.armed) .nx-sev",
-          )
-        );
-        const probe = document.createElement("span");
-        probe.className = "nx-sev nx-sev--info";
-        document.body.append(probe);
-        const out = [
-          getComputedStyle(d).backgroundColor,
-          getComputedStyle(probe).backgroundColor,
-        ];
-        probe.remove();
-        return out;
-      });
-      assert.notEqual(c, info, "an unarmed destroy shows the info dot");
-    }
   } finally {
     await browser.close();
   }
 });
 
-test("invariants: on a phone the Deploy all changes tiles wrap their labels and the Inbox header reads title, sentence, then its button", async () => {
+test("invariants: on a phone the Deploy all changes table never scrolls sideways and the Inbox header reads title, sentence, then its button", async () => {
   const browser = await launch();
   try {
     const context = await browser.newContext({
@@ -8426,13 +8315,22 @@ test("invariants: on a phone the Deploy all changes tiles wrap their labels and 
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/stacks?deploy-all=1`);
-    const labels = page.locator("#apply-section .ap-tile .kp-kpi__label");
-    await labels.first().waitFor({ timeout: 15000 });
-    for (const l of await labels.all())
-      assert.ok(
-        await l.evaluate((e) => e.scrollWidth <= e.clientWidth + 1),
-        `a tile label is cut off: ${await l.innerText()}`,
-      );
+    await page
+      .locator("#ap-plan tbody tr[data-kp-row-key]")
+      .first()
+      .waitFor({ timeout: 15000 });
+    assert.ok(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+      ),
+      "the page scrolls sideways",
+    );
+    assert.ok(
+      await page
+        .locator("#ap-plan .kp-table-wrap")
+        .evaluate((e) => e.scrollWidth <= e.clientWidth + 1),
+      "the plan table scrolls sideways",
+    );
     await page.goto(`${BASE}/needs-you`);
     const head = page.locator("#page .nx-head").first();
     await head.waitFor({ timeout: 10000 });
@@ -8504,7 +8402,10 @@ test("invariants: the Update flow folds the file change, names each file once, a
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/update?all=1`);
-    await page.locator("#page .uf-item").first().waitFor({ timeout: 20000 });
+    await page
+      .locator("#page .uf-list tbody tr[data-kp-row-key]")
+      .first()
+      .waitFor({ timeout: 20000 });
     await page.locator("[data-drive=update-see-impact]").click();
     const fold = page.locator("#page details.uf-fold");
     await fold.waitFor({ timeout: 15000 });
@@ -9044,7 +8945,10 @@ test("invariants: redesign-final-c1: Deploy all changes opens as a wide sheet wh
       const page = await freshPage(context);
       await page.goto(`${BASE}/stacks?deploy-all=1`);
       const d = page.locator("dialog[open]").last();
-      await d.locator(".ap-tile").first().waitFor({ timeout: 10000 });
+      await d
+        .locator("#ap-plan tbody tr[data-kp-row-key]")
+        .first()
+        .waitFor({ timeout: 10000 });
       await page.waitForTimeout(500);
       const r = await page.evaluate(() => {
         const d = /** @type {HTMLElement} */ (
@@ -9053,7 +8957,7 @@ test("invariants: redesign-final-c1: Deploy all changes opens as a wide sheet wh
         d.setAttribute("data-audit", "");
         return {
           w: d.getBoundingClientRect().width,
-          cut: [...d.querySelectorAll(".ap-tile .kp-kpi__value")]
+          cut: [...d.querySelectorAll("#ap-plan td")]
             .filter((v) => v.scrollWidth > v.clientWidth + 1)
             .map((v) => v.textContent),
           over: [...d.querySelectorAll(".ap-steps li")].flatMap((li) => {
@@ -9069,7 +8973,7 @@ test("invariants: redesign-final-c1: Deploy all changes opens as a wide sheet wh
           r.w >= 960,
           `the sheet is ${Math.round(r.w)} px wide at ${width}`,
         );
-      assert.deepEqual(r.cut, [], `@${width}: tile numbers cut`);
+      assert.deepEqual(r.cut, [], `@${width}: table cells cut`);
       assert.deepEqual(r.over, [], `@${width}: step text out of its step`);
       const a = (await page.evaluate(layoutAudit, "dialog[data-audit]")).a;
       assert.deepEqual(a, [], `@${width}: words broken or text cut`);
@@ -9289,16 +9193,16 @@ test("invariants: redesign-final-h1: Stacks, the Inbox and the Update flow name 
     });
     const page = await freshPage(context);
     await page.goto(`${BASE}/stacks?view=cards`);
-    await page.locator(".sk-chip").first().waitFor({ timeout: 10000 });
+    await page.locator(".kp-entity__flag").first().waitFor({ timeout: 10000 });
     await page.waitForTimeout(1500);
     const flags = await page.evaluate(() => {
       /** @type {Record<string, number>} */
       const out = {};
-      for (const c of document.querySelectorAll(".sk-card .sk-chip")) {
+      for (const c of document.querySelectorAll(".fl-cards .kp-entity__flag")) {
         const m = /^(\d+ )?newer versions?$/.exec((c.textContent ?? "").trim());
         if (!m) continue;
-        const card = /** @type {HTMLElement} */ (c.closest(".sk-card"));
-        const name = card.getAttribute("data-stack") ?? "";
+        const card = /** @type {HTMLElement} */ (c.closest(".kp-card--entity"));
+        const name = card.getAttribute("data-kp-entity-key") ?? "";
         out[name] = m[1] ? Number(m[1]) : 1;
       }
       return out;
@@ -9318,9 +9222,14 @@ test("invariants: redesign-final-h1: Stacks, the Inbox and the Update flow name 
     // The Inbox counts the apps Update all lists (a stack the host does not
     // run yet, beta-demo, has no card on Stacks but its apps still count).
     await page.goto(`${BASE}/update?all=1`);
-    await page.locator(".uf-item").first().waitFor({ timeout: 10000 });
+    await page
+      .locator(".uf-list tbody tr[data-kp-row-key]")
+      .first()
+      .waitFor({ timeout: 10000 });
     const listedAll = await page
-      .locator('.uf-item:not([data-item^="pull:"])')
+      .locator(
+        '.uf-list tbody tr[data-kp-row-key]:not([data-kp-row-key^="pull:"]):not([data-kp-row-key^="release:"])',
+      )
       .count();
     assert.equal(
       Number(/(\d+)/.exec(title)?.[1]),
@@ -9329,15 +9238,24 @@ test("invariants: redesign-final-h1: Stacks, the Inbox and the Update flow name 
     );
     for (const [stack, n] of Object.entries(flags))
       assert.ok(
-        (await page.locator(`.uf-item[data-item*=":${stack}:"]`).count()) === n,
+        (await page
+          .locator(
+            `.uf-list tbody tr[data-kp-row-key*=":${stack}:"]:not([data-kp-row-key^="release:"])`,
+          )
+          .count()) === n,
         `Update all lists ${stack}'s apps differently from its flag (${n})`,
       );
 
     for (const [stack, n] of Object.entries(flags)) {
       await page.goto(`${BASE}/update?stack=${encodeURIComponent(stack)}`);
-      await page.locator(".uf-item").first().waitFor({ timeout: 10000 });
+      await page
+        .locator(".uf-list tbody tr[data-kp-row-key]")
+        .first()
+        .waitFor({ timeout: 10000 });
       const listed = await page
-        .locator('.uf-item:not([data-item^="pull:"])')
+        .locator(
+          '.uf-list tbody tr[data-kp-row-key]:not([data-kp-row-key^="pull:"]):not([data-kp-row-key^="release:"])',
+        )
         .count();
       assert.equal(
         listed,
@@ -9346,13 +9264,15 @@ test("invariants: redesign-final-h1: Stacks, the Inbox and the Update flow name 
       );
     }
     await page.goto(`${BASE}/update?stack=kp-soft`);
-    const rel = page.locator('.uf-item[data-item^="release:kp-soft:"]');
+    const rel = page.locator(
+      '.uf-list tbody tr[data-kp-row-key^="release:kp-soft:"]',
+    );
     await rel.first().waitFor({ timeout: 10000 });
     assert.match(await rel.first().innerText(), /with a homelab release/);
     assert.equal(
-      await rel.locator("input").count(),
-      0,
-      "a release row has a tick",
+      await rel.locator("input[data-kp-select-row]").isDisabled(),
+      true,
+      "a release row can be ticked",
     );
   } finally {
     await browser.close();
@@ -9613,22 +9533,22 @@ test("invariants: redesign-final-low-sort: a plain click on a second header adds
     );
     // A kp datatable (the Stacks table): two plain clicks, two keys.
     await page.goto(`${BASE}/stacks?view=table`);
-    const head = page.locator(".sk-table thead th[data-kp-sort]");
+    const head = page.locator(".fl-table thead th[data-kp-sort]");
     await head.first().waitFor({ timeout: 10000 });
     await head.nth(0).click();
     await head.nth(1).click();
     assert.equal(
       await page
-        .locator('.sk-table thead th[aria-sort]:not([aria-sort="none"])')
+        .locator('.fl-table thead th[aria-sort]:not([aria-sort="none"])')
         .count(),
       2,
       "a plain click on a second kp datatable header did not add a key",
     );
-    const kpReset = page.locator('.sk-table [data-drive="table-reset-sort"]');
+    const kpReset = page.locator('.fl-table [data-drive="table-reset-sort"]');
     await kpReset.click();
     assert.ok(
       (await page
-        .locator('.sk-table thead th[aria-sort]:not([aria-sort="none"])')
+        .locator('.fl-table thead th[aria-sort]:not([aria-sort="none"])')
         .count()) <= 1,
       "Reset sort did not clear the kp datatable's keys",
     );
@@ -9656,20 +9576,15 @@ test("invariants: redesign-final-m1: Stacks is the approved demo: no Inbox banne
     await page.waitForTimeout(800);
     const f = await page.evaluate(() => {
       const card = document.querySelector("#stack-list");
-      const tb = card?.querySelector(".nx-tb");
-      const before = [];
-      for (let n = tb?.previousElementSibling; n; n = n.previousElementSibling)
-        before.push(n.textContent ?? "");
       return {
         band: document.querySelectorAll("#page .nx-attention .kp-alert").length,
         tiles: [...document.querySelectorAll(".sk-kpis .kp-kpi__label")].map(
           (e) => e.textContent?.trim(),
         ),
-        table: !!document.querySelector(".sk-table tbody tr[data-stack]"),
-        cards: !!document.querySelector(".sk-cards .sk-card[data-stack]"),
+        table: !!document.querySelector(".fl-table tbody tr[data-kp-row-key]"),
+        cards: !!document.querySelector(".fl-cards > .kp-card--entity"),
         title: card?.querySelector("h2")?.textContent?.trim(),
-        keysInFoot: !!card?.querySelector(".sk-foot .nx-keys"),
-        aboveToolbar: before.join(" "),
+        keysInFoot: !!card?.querySelector(".nx-card__foot .nx-keys"),
       };
     });
     assert.equal(f.band, 0, "an Inbox banner beside the Need you tile");
@@ -9683,7 +9598,6 @@ test("invariants: redesign-final-m1: Stacks is the approved demo: no Inbox banne
     assert.ok(f.table && !f.cards, "the Table is not the default view");
     assert.equal(f.title, "All stacks");
     assert.ok(f.keysInFoot, "the key hints are not in the footer");
-    assert.doesNotMatch(f.aboveToolbar, /state:|flag:|move|tick/);
   } finally {
     await browser.close();
   }

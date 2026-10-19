@@ -187,7 +187,7 @@ test("redesign-final-h2: a host action that targets one container is titled for 
 // "will be destroyed" chip on every card. A stack with a red chip is a
 // problem, so the counter and the chips always agree.
 test("redesign-final-gen-e: a stack whose card carries a red chip counts as a problem", async () => {
-  const { stackRows, onlyCounts } = await import("../js/stacksview.js");
+  const { stackRows } = await import("../js/stacksview.js");
   const NOW = 2_000_000;
   const st = (/** @type {string} */ name) => ({
     name,
@@ -221,5 +221,5 @@ test("redesign-final-gen-e: a stack whose card carries a red chip counts as a pr
       `${r.name}: problem ${r.problem}, red chip ${red}`,
     );
   }
-  assert.equal(onlyCounts(rows).problems, 2);
+  assert.equal(rows.filter((r) => r.problem).length, 2);
 });

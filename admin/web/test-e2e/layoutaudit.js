@@ -314,8 +314,8 @@ export function layoutAudit(rootSel) {
     ...[...root.querySelectorAll(".kp-kpis")].map((s) => [
       ...s.querySelectorAll(":scope > .kp-kpi"),
     ]),
-    ...[...root.querySelectorAll(".ap-board")].map((b) => [
-      ...b.querySelectorAll(".ap-tile:not(.ap-tile--skeleton)"),
+    ...[...root.querySelectorAll(".ap-group > .kp-actions")].map((b) => [
+      ...b.querySelectorAll(":scope > .ap-tile"),
     ]),
   ]) {
     const hs = set.filter(shown).map(tall);

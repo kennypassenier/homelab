@@ -74,32 +74,6 @@ export function filterTiles(tiles, q) {
 }
 
 /**
- * The board: Starred first (only while nothing is searched), then each
- * group in page order without its starred tiles; while searching, every
- * group shows all its matches and runs the full width.
- * @param {Tile[]} tiles already sorted by the host
- * @param {Set<string>} starred tile hosts
- * @param {string} q
- * @returns {{group: string, tiles: Tile[], wide: boolean}[]}
- */
-export function board(tiles, starred, q) {
-  const searching = q.trim() !== "";
-  const shown = filterTiles(tiles, q);
-  /** @type {{group: string, tiles: Tile[], wide: boolean}[]} */
-  const out = [];
-  const stars = shown.filter((t) => starred.has(t.host));
-  if (stars.length && !searching)
-    out.push({ group: "Starred", tiles: stars, wide: true });
-  for (const g of [...new Set(shown.map((t) => t.group))]) {
-    const ts = shown.filter(
-      (t) => t.group === g && (searching || !starred.has(t.host)),
-    );
-    if (ts.length) out.push({ group: g, tiles: ts, wide: searching });
-  }
-  return out;
-}
-
-/**
  * The text cut around the search's first match, for a `<mark>`.
  * @param {string} text
  * @param {string} q
@@ -115,21 +89,6 @@ export function markParts(text, q) {
     { text: text.slice(i + s.length), hit: false },
   ].filter((p) => p.text !== "");
 }
-
-/**
- * The tile's colour: one of the five chart hues, the same for a name
- * everywhere.
- * @param {string} name
- */
-export function hueOf(name) {
-  return ([...name].reduce((a, c) => a + c.charCodeAt(0), 0) % 5) + 1;
-}
-
-/**
- * The two letters on a tile's icon.
- * @param {string} name
- */
-export const initials = (name) => name.trim().slice(0, 2) || "?";
 
 /**
  * The page's one line: every tile answering, or how many need a person.
@@ -174,78 +133,4 @@ export function appsVerdict(tiles, watch) {
         : `${watched.length} of ${tiles.length} apps answer · ${tiles.length - watched.length} not watched`,
     checkedAt: at,
   };
-}
-
-/**
- * The starred tiles, read from what this browser kept (a list of hosts);
- * anything else reads as none.
- * @param {string | null} raw
- * @returns {Set<string>}
- */
-export function readStars(raw) {
-  try {
-    const v = JSON.parse(raw ?? "[]");
-    return new Set(
-      Array.isArray(v) ? v.filter((x) => typeof x === "string") : [],
-    );
-  } catch {
-    return new Set();
-  }
-}
-
-// fix-371-1 (Kenny approved the packed-columns demo 2026-10-04:
-// redesign-3.71/demos-3711/apps-packed.html): the board has as many
-// columns as its width allows, and each group goes into the column that
-// is shortest by tile count, so short groups stack under each other and
-// no group leaves a hole a whole group could fill. Starred stays full
-// width above the columns.
-
-/** A column's minimum width on a wide board (1000 px and up), in rem. */
-export const PACK_WIDE_REM = 22;
-/** A column's minimum width on a narrow board (700 px and 390 px), in rem. */
-export const PACK_NARROW_REM = 18;
-/** The board width, in rem, from which a column needs PACK_WIDE_REM. */
-export const PACK_BREAK_REM = 53;
-
-/**
- * A column's minimum width for a board this wide, in rem.
- * @param {number} boardPx
- * @param {number} remPx
- */
-export function packMinRem(boardPx, remPx) {
-  return boardPx >= PACK_BREAK_REM * remPx ? PACK_WIDE_REM : PACK_NARROW_REM;
-}
-
-/**
- * How many columns a board this wide holds.
- * @param {number} boardPx
- * @param {number} gapPx
- * @param {number} remPx
- */
-export function packColumns(boardPx, gapPx, remPx) {
-  const min = packMinRem(boardPx, remPx) * remPx;
-  return Math.max(1, Math.floor((boardPx + gapPx) / (min + gapPx)));
-}
-
-/**
- * Each group into the column that is shortest by tile count at that
- * moment, in page order; a folded group counts as its title alone. A
- * column must be shorter by more than half a tile to win, so equal
- * columns fill left to right.
- * @param {{tiles: number, folded?: boolean}[]} groups
- * @param {number} cols
- * @returns {number[][]} per column, the indexes of its groups in order
- */
-export function packGroups(groups, cols) {
-  const n = Math.max(1, cols);
-  const used = Array.from({ length: n }, () => 0);
-  /** @type {number[][]} */
-  const out = Array.from({ length: n }, () => []);
-  groups.forEach((g, i) => {
-    let c = 0;
-    for (let k = 1; k < n; k++) if (used[k] < used[c] - 0.5) c = k;
-    out[c].push(i);
-    used[c] += (g.folded ? 0 : g.tiles) + 0.6;
-  });
-  return out;
 }

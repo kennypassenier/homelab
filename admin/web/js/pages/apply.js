@@ -2,47 +2,57 @@
 // "Yes, plan first"; renamed from "Apply the whole fleet" in 3.71.0): every
 // stack of the working copy against what the host last applied.
 //
-// redesign-flows-4 (redesign 3.71.0, demo apply.html; Kenny approved
-// 2026-10-03): the plan as three steps (Compare → Review the plan → Apply),
-// four count tiles that each show only their column (a plain click, again
-// shows all), then three columns — Will deploy (untick one to leave it
-// out; its diff on request), Will be destroyed (a stack whose directory is
-// gone is included only when its name is typed) and Cannot be planned
-// (why, the fix, and its stack file) — and one bar that says what Apply
-// will do before it is pressed.
+// Rebuilt on the approved kp-themes 11 demo (feat-kp11demo-13): the plan is
+// one kp datatable, a row per stack with its action (deploy, new, destroy,
+// cannot be planned, unchanged), what changed, the files and +N −M, and a
+// row that opens to the exact lines (kp diff) of each file; one kp selection
+// bar and a sentence under the table ("Will deploy 5 stacks (2 new), destroy
+// 0, back up first") say what Apply will do before it is pressed. A destroy
+// never rides along with a deploy: Apply turns off and says so, and "Apply
+// the destroy alone" asks for the stack's name to be typed. The plan's own
+// steps (Compare, Review, Apply, Destroy) and "Plan again" keep their places
+// above the table. Pure half: js/applyplan.js, js/applytable.js.
 //
-// redesign-flows-5 (the senior review, 2026-10-03, and the coordinator's
-// destroy rule): one heading "Deploy all changes" (the caller's) with one
-// sentence, then the steps — Compare (done only once the compare ran),
-// Review the plan, Apply, and Destroy as its own red step. Apply deploys
-// the ticked stacks (`leave_out` names the unticked ones and those that
-// cannot be planned); a destroy never rides along with a deploy: it is
-// armed by typing the stack's name, confirmed by its own tick, sent with the
-// CT number the plan showed, and only once no ticked deploy is waiting.
-// Pure half: js/applyplan.js.
-//
-// `mount` paints only the section's body (the caller — Stacks' "Deploy all
-// changes" — owns its heading and one-line description) and starts with a
-// skeleton in the final geometry before the plan has been read.
+// `mount` paints only the section's body (the caller, Stacks' "Deploy all
+// changes", owns its heading and one-line description) and starts loading
+// the table's own way before the plan has been read.
 
 import { act, onAct } from "../act.js";
 import { openAction } from "../actiondialog.js";
 import { agoEl, setAgo } from "../ago.js";
 import { destroyStep, goPlan } from "../applyplan.js";
-import { ensureStyle, errorBox, fetchJson, h } from "../dom.js";
 import {
-  declare,
-  declareField,
-  drivable,
-  fieldId,
-  viaForm,
-} from "../drivable.js";
-import { diffBlocks } from "../editui.js";
+  applyRule,
+  diffFiles,
+  planRows,
+  plusMinus,
+  sentenceCounts,
+  sentenceParts,
+} from "../applytable.js";
+import {
+  ensureStyle,
+  errorBox,
+  fetchJson,
+  h,
+  labelCells,
+  selectCell,
+  tableBlock,
+} from "../dom.js";
+import { declare, declareField, drivable, viaForm } from "../drivable.js";
 import { fileViews } from "../plan.js";
 import { stackHref } from "../router.js";
 import { current } from "../store.js";
-import { stackMark } from "../ui.js";
+import { bindSelection } from "../selectbind.js";
+import { openConfirmation } from "/static/kp/js/components.js";
+import { attachDataTables } from "/static/kp/js/datatable.js";
+import { attachIdmarks } from "/static/kp/js/idmark.js";
+import { attachSentences } from "/static/kp/js/sentence.js";
 
+const SKIP_FIELD = declareField({
+  id: "apply-skip-backups",
+  page: "apply",
+  what: "whether to back up the stacks first or skip the backups",
+});
 const READ = declare({
   id: "deploy-all-plan-again",
   page: "overview",
@@ -51,22 +61,21 @@ const READ = declare({
   shows: "in the Deploy all changes panel",
   reach: [{ do: "click", control: "stacks-deploy-all" }],
 });
-const TILE = declare({
-  id: "deploy-all-tile",
-  page: "overview",
-  opens: "view",
-  row: "deploy|destroy|broken|same",
-  what: "show only one column of the plan (a plain click; again shows all)",
-  shows: "in the Deploy all changes panel",
-  reach: [{ do: "click", control: "stacks-deploy-all" }],
-});
 const PICK = declare({
   id: "deploy-all-pick",
   page: "overview",
   opens: "view",
   row: "<stack>",
-  what: "include or leave out one stack of the deploy batch",
+  what: "include or leave out one stack of the batch (a destroy is armed by ticking it)",
   selects: true,
+  shows: "in the Deploy all changes panel",
+  reach: [{ do: "click", control: "stacks-deploy-all" }],
+});
+const PICK_ALL = declare({
+  id: "deploy-all-pick-all",
+  page: "overview",
+  opens: "view",
+  what: "tick every stack that can be applied",
   shows: "in the Deploy all changes panel",
   reach: [{ do: "click", control: "stacks-deploy-all" }],
 });
@@ -75,17 +84,9 @@ const DIFF = declare({
   page: "overview",
   opens: "view",
   row: "<stack>",
-  what: "show or hide what deploying one stack changes",
+  what: "open or close the exact lines applying one stack changes",
   shows: "in the Deploy all changes panel",
   reach: [{ do: "click", control: "stacks-deploy-all" }],
-});
-// redesign-integrate-8: a text box is a field Live view types into, never
-// a control it clicks (a click on it does nothing; the sweep said so).
-const TYPE = declareField({
-  id: "deploy-all-destroy-name",
-  page: "overview",
-  row: "<stack>",
-  what: "type a gone stack's name to include its destroy",
 });
 const FILE = declare({
   id: "deploy-all-stack-file",
@@ -96,94 +97,47 @@ const FILE = declare({
   shows: "in the Deploy all changes panel",
   reach: [{ do: "click", control: "stacks-deploy-all" }],
 });
-const SHOW_ALL = declare({
-  id: "deploy-all-show-all",
+const UNTICK = declare({
+  id: "deploy-all-untick",
   page: "overview",
   opens: "view",
-  what: "show every column of the plan again (Esc does the same)",
-  shows: "in the Deploy all changes panel, while one column is shown",
-  reach: [
-    { do: "click", control: "stacks-deploy-all" },
-    { do: "click", control: "deploy-all-tile", row: "*" },
-  ],
-});
-const DESTROY_ACK = declare({
-  id: "deploy-all-destroy-confirm",
-  page: "overview",
-  opens: "view",
-  what: "tick the destroy step's own red confirmation",
-  shows: "in the Deploy all changes panel, once a gone stack's name is typed",
+  what: "untick every ticked stack of the plan",
+  shows: "in the Deploy all changes panel, while a stack is ticked",
   reach: [{ do: "click", control: "stacks-deploy-all" }],
 });
-// review M5: every page field Live view may set is declared (drivable.js
-// `declareField`); the client and the dashboard refuse any other.
-const DESTROY_ACK_FIELD = declareField({
-  id: "apply-destroy-ack",
-  page: "overview",
-  what: "the destroy step's own red confirmation (a tick)",
-});
-// Kenny, 2026-10-04: "overslaan moet terug een optie zijn, maar niet
-// standaard" — the deploys' Skip the backups, unticked on every visit.
 const SKIP = declare({
   id: "deploy-all-skip-backups",
   page: "overview",
   opens: "view",
-  what: "tick Skip the backups for the ticked deploys (off by default; a destroy always backs up)",
-  shows: "in the Deploy all changes panel's Apply bar, once the plan is read",
+  row: "back-up-first|skip",
+  what: "choose, in the sentence under the table, whether the deploys back each stack up first or skip the backups (back up first is the default)",
+  shows: "in the Deploy all changes panel, once the plan is read",
   reach: [{ do: "click", control: "stacks-deploy-all" }],
 });
-const SKIP_FIELD = declareField({
-  id: "apply-skip-backups",
+const APPLY = declare({
+  id: "deploy-all-apply",
   page: "overview",
-  what: "the deploys' Skip the backups (a tick, off by default)",
+  opens: "dialog",
+  what: "apply the ticked deploys: one confirmed batch, each stack backed up first unless skipped",
+  shows: "in the Deploy all changes panel, while stacks are ticked",
+  reach: [{ do: "click", control: "stacks-deploy-all" }],
 });
 const DESTROY = declare({
   id: "deploy-all-destroy",
   page: "overview",
   opens: "dialog",
-  what: "open the destroy of the armed gone stacks, a separate confirmed step after the deploys",
-  shows:
-    "in the Deploy all changes panel, once a destroy is armed and confirmed",
+  what: "apply the ticked destroy on its own: the stack's name is typed, then the apply dialog confirms once more",
+  shows: "in the Deploy all changes panel, while only a destroy is ticked",
   reach: [{ do: "click", control: "stacks-deploy-all" }],
 });
 
 /**
  * @typedef {import("../applyplan.js").Plan} Plan
- * @typedef {"deploy" | "destroy" | "broken" | "same"} Col
  * @typedef {{button: HTMLElement, at: () => number | null,
  *   onChange: (f: () => void) => () => void}} Compare
  */
 
 export { goPlan } from "../applyplan.js";
-
-/** The skeleton in the final geometry: tiles, three columns, the bar. */
-function skeleton() {
-  return h(
-    "div",
-    // `data-kp-skeleton`: the plan that replaces it is the data it waited
-    // for, not news (kp-themes motion.js): it is drawn at once rather than
-    // unfolding piece by piece for a second after the read lands.
-    {
-      class: "ap-body apply-grid--skeleton",
-      "aria-hidden": "true",
-      "data-kp-skeleton": "",
-    },
-    h(
-      "div",
-      { class: "ap-counts" },
-      ...Array.from({ length: 4 }, () =>
-        h("div", { class: "kp-kpi apply-row apply-row--skeleton" }),
-      ),
-    ),
-    h(
-      "div",
-      { class: "ap-cols" },
-      ...Array.from({ length: 3 }, () =>
-        h("div", { class: "ap-item apply-row apply-row--skeleton" }),
-      ),
-    ),
-  );
-}
 
 /**
  * @param {HTMLElement} root
@@ -224,20 +178,88 @@ export function mount(root, opts = {}) {
     );
   const steps = h("ol", { class: "ap-steps", "aria-label": "Steps" });
   const err = h("div");
-  const body = h("div", { class: "ap-body", id: "apply-body" });
-  const go = h("div", {
-    class: "ap-go",
-    role: "region",
-    "aria-label": "Apply",
-    id: "apply-head",
-    "aria-live": "polite",
+
+  // The plan: one kp datatable with a row per stack, opened for its lines.
+  const block = tableBlock({
+    remember: "deploy-all-plan",
+    caption: "What Apply would change; open a row to read the lines",
+    captionHidden: true,
+    search: null,
+    nothing: "Nothing to apply: the repository and the host agree.",
+    select: { label: "Select every stack that can be applied", actions: [] },
+    columns: [
+      { label: "Stack", sort: "text" },
+      { label: "Action", sort: "text" },
+      { label: "What changed", sort: null },
+      { label: "Files", sort: "number", cls: "kp-text-end" },
+      { label: "Lines", sort: "number", cls: "kp-text-end" },
+    ],
   });
-  const destroyBox = h("section", {
-    class: "ap-destroy",
-    id: "apply-destroy-step",
-    "aria-label": "Destroy",
-    hidden: "",
-  });
+  block.wrap.querySelector("[data-kp-datatable-actions]")?.remove();
+  block.wrap.setAttribute("data-kp-expandable", "");
+  block.wrap.setAttribute("data-kp-expand-single", "");
+  block.wrap.id = "ap-plan";
+  const pickAll = block.wrap.querySelector("[data-kp-select-all]");
+  if (pickAll instanceof HTMLElement) drivable(pickAll, PICK_ALL);
+  const bar = h(
+    "div",
+    {
+      class: "kp-selection ap-bar",
+      "data-kp-selection": "",
+      "data-kp-selection-for": "ap-plan",
+      "data-kp-placement": "sticky-top",
+      id: "ap-bar",
+      "aria-label": "Stacks to apply",
+    },
+    h(
+      "div",
+      { class: "kp-selection__actions" },
+      drivable(
+        viaForm(
+          h(
+            "button",
+            {
+              type: "button",
+              class: "kp-button kp-button--primary",
+              id: "apply-open",
+              "data-kp-selection-action": "apply",
+              title: "Deploy the ticked stacks after one confirmation",
+            },
+            "Apply",
+          ),
+          "apply",
+        ),
+        APPLY,
+      ),
+      drivable(
+        h(
+          "button",
+          {
+            type: "button",
+            class: "kp-button kp-button--destructive",
+            id: "apply-destroy",
+            "data-kp-selection-action": "destroy",
+            hidden: "",
+            title:
+              "Destroy the ticked stack on its own, after its name is typed",
+          },
+          "Apply the destroy alone",
+        ),
+        DESTROY,
+      ),
+    ),
+  );
+  const words = h("p", { class: "kp-sentence__text", id: "ap-plan-words" });
+  const form = h(
+    "form",
+    {
+      class: "kp-sentence ap-sentence",
+      "data-kp-sentence": "",
+      id: "ap-plan-sentence",
+    },
+    words,
+  );
+  form.addEventListener("submit", (e) => e.preventDefault());
   root.replaceChildren(
     steps,
     h(
@@ -246,35 +268,31 @@ export function mount(root, opts = {}) {
       h("div", { class: "ap-top__right" }, ago, read),
     ),
     err,
-    body,
-    go,
-    destroyBox,
+    bar,
+    block.wrap,
+    form,
   );
-  body.replaceChildren(skeleton());
   const abort = new AbortController();
+  const detachTables = attachDataTables(root, {
+    decorate: (part, info) => {
+      if (info.kind === "row-toggle") drivable(part, DIFF, String(info.value));
+    },
+  });
+  const detachMarks = attachIdmarks(root);
 
   /** @type {Plan | null} */
   let plan = null;
-  /** @type {Set<string>} */
-  let ticked = new Set();
-  /** @type {Map<string, string>} */
-  const typedText = new Map();
-  /** @type {Col | null} */
-  let only = null;
-  /** @type {string | null} */
-  let open = null;
-  /** @type {Map<string, Node[]>} */
+  /** @type {Map<string, import("../plan.js").FileDiff[] | null>} the diffs read so far (null: could not be read) */
   const diffs = new Map();
-  let ack = false;
-  // The deploys' Skip the backups: off by default, never remembered.
+  // Back up first is the default; Skip the backups is an option, never
+  // remembered (Kenny, 2026-10-04).
   let skipBackups = false;
   /** @type {"none" | "pressed" | "running" | "done"} */
   let applied = "none";
   /** @type {number | null} unix seconds of this page's Apply press */
   let pressedAt = null;
-
-  const typed = () =>
-    new Set((plan?.destroy ?? []).filter((s) => typedText.get(s) === s));
+  /** @type {string[]} */
+  let keys = [];
 
   const vmid = (/** @type {string} */ s) =>
     current().fleet?.stacks.find((x) => x.name === s)?.vmid ?? null;
@@ -320,7 +338,8 @@ export function mount(root, opts = {}) {
     if (plan) {
       if (applied === "pressed" || applied === "running") mark("apply", "on");
       else mark("review", "on");
-      if (plan.destroy.length && typed().size) mark("destroy", "armed");
+      if (plan.destroy.length && keys.some((k) => plan?.destroy.includes(k)))
+        mark("destroy", "armed");
     } else mark("compare", "on");
     for (const l of list)
       if (l.classList.contains("on")) l.setAttribute("aria-current", "step");
@@ -329,482 +348,280 @@ export function mount(root, opts = {}) {
   };
   const stopCompare = opts.compare?.onChange(paintSteps) ?? (() => {});
 
+  /** The sentence: counts, then the choice of backing up as a menu inside it. */
+  const sentence = () => {
+    const sel = form.querySelector("select");
+    const keep = sel?.value ?? (skipBackups ? "skip" : "yes");
+    const c = plan
+      ? sentenceCounts(plan, keys)
+      : { deploy: 0, fresh: 0, destroy: 0 };
+    const part = sentenceParts(c).map((x) =>
+      "bold" in x ? h("b", null, x.bold) : x.text,
+    );
+    const select = h(
+      "select",
+      {
+        name: "backup",
+        "aria-label": "Backups before applying",
+        id: SKIP_FIELD,
+      },
+      h(
+        "option",
+        { value: "yes", ...(keep === "yes" ? { selected: "" } : {}) },
+        "back up first",
+      ),
+      h(
+        "option",
+        { value: "skip", ...(keep === "skip" ? { selected: "" } : {}) },
+        "skip backups",
+      ),
+    );
+    drivable(select, SKIP, keep === "skip" ? "skip" : "back-up-first");
+    words.replaceChildren(
+      ...part,
+      h("span", { class: "kp-sentence__field" }, select),
+      ".",
+    );
+    attachSentences(form.parentElement ?? document);
+    select.addEventListener("change", () => {
+      skipBackups = select.value === "skip";
+    });
+  };
+
   /** @param {string} s */
   const loadDiff = async (s) => {
-    diffs.set(s, [h("p", { class: "ap-hint" }, "Reading…")]);
-    paint();
+    if (diffs.has(s)) return;
     const r = await fetchJson(
       `/data/plan/${encodeURIComponent(s)}`,
       `the plan of ${s}`,
       abort.signal,
     );
     if (abort.signal.aborted) return;
-    if (!r.ok) diffs.set(s, [errorBox(r.error)]);
-    else {
-      const files = fileViews(r.body.files ?? []);
-      diffs.set(s, [
-        ...(r.body.note ? [h("p", { class: "ap-hint" }, r.body.note)] : []),
-        ...(files.length
-          ? diffBlocks(files)
-          : [h("p", null, "No file changes.")]),
-      ]);
-    }
-    paint();
+    diffs.set(s, r.ok ? (r.body.files ?? []) : null);
+    if (plan) draw();
   };
 
-  const paint = () => {
+  /** Draw the table from the plan and the diffs read so far. */
+  const draw = () => {
     paintSteps();
     const p = plan;
     if (!p) return;
-    /** @param {Col} key @param {string} label @param {number} n @param {string} ctx @param {string} [tone] */
-    const tile = (key, label, n, ctx, tone) => {
-      const b = drivable(
-        h(
-          "button",
-          {
-            type: "button",
-            class: "kp-kpi kp-kpi--toggle ap-tile",
-            // The page keeps which column is on (its own click, below).
-            "data-kp-kpi-owned": "",
-            "data-kp-tone": tone
-              ? tone === "bad"
-                ? "destructive"
-                : "warning"
-              : null,
-            "aria-pressed": String(only === key),
-            title:
-              "Click to show only this column; again, Show all or Esc shows all",
-          },
-          h("span", { class: "kp-kpi__label" }, label),
-          h("span", { class: "kp-kpi__value" }, String(n)),
-          h("span", { class: "kp-kpi__trend" }, ctx),
-        ),
-        TILE,
-        key,
-      );
-      b.addEventListener("click", () => {
-        only = only === key ? null : key;
-        paint();
-      });
-      return b;
-    };
-    const show = (/** @type {Col} */ k) => !only || only === k;
-    const col = (
-      /** @type {Col} */ key,
-      /** @type {string} */ title,
-      /** @type {string} */ dot,
-      /** @type {number} */ n,
-      /** @type {string} */ desc,
-      /** @type {Node[]} */ items,
-    ) =>
-      h(
-        "section",
-        {
-          class: "ap-col",
-          ...(show(key) ? {} : { hidden: "" }),
-          "aria-label": title,
-          "data-col": key,
-        },
-        h(
-          "h3",
-          null,
-          h("span", { class: `nx-sev nx-sev--${dot}`, "aria-hidden": "true" }),
-          title,
-          h("span", { class: "kp-badge" }, String(n)),
-        ),
-        h("p", { class: "ap-hint" }, desc),
-        ...(items.length
-          ? items
-          : [h("p", { class: "ap-empty" }, "Nothing here.")]),
-      );
-    const deployItems = p.deploy.map((s) => {
-      const box = drivable(
-        h("input", {
-          type: "checkbox",
-          "aria-label": `Include ${s}`,
-          title: "Include this stack in the batch",
-        }),
-        PICK,
-        s,
-      );
-      /** @type {HTMLInputElement} */ (box).checked = ticked.has(s);
-      box.addEventListener("change", () => {
-        if (/** @type {HTMLInputElement} */ (box).checked) ticked.add(s);
-        else ticked.delete(s);
-        paint();
-      });
-      const more = drivable(
-        h(
-          "button",
-          {
-            type: "button",
-            class: "ap-link",
-            "aria-expanded": String(open === s),
-            title: "The files deploying this stack sends, as a diff",
-          },
-          open === s ? "Hide what changes" : "Show what changes",
-        ),
-        DIFF,
-        s,
-      );
-      more.addEventListener("click", () => {
-        open = open === s ? null : s;
-        if (open === s && !diffs.has(s)) void loadDiff(s);
-        paint();
-      });
-      return h(
-        "div",
-        { class: "ap-item", "data-stack": s },
-        h(
-          "div",
-          { class: "ap-item__top" },
-          box,
-          stackMark(s, 16),
-          h("a", { href: stackHref(s) }, h("strong", null, s)),
-          p.new.includes(s)
-            ? h("span", { class: "kp-badge kp-badge--info" }, "new")
-            : h("span"),
-        ),
-        h(
-          "p",
-          null,
-          p.reasons?.[s] ??
-            (p.new.includes(s)
-              ? "new: creates its container"
-              : "its files differ from what the host applied"),
-        ),
-        more,
-        ...(open === s
-          ? [h("div", { class: "ap-diff" }, ...(diffs.get(s) ?? []))]
-          : []),
-      );
-    });
-    const destroyItems = p.destroy.map((s) => {
-      const armed = typedText.get(s) === s;
-      const input = h("input", {
-        class: "kp-field__input",
-        id: fieldId(TYPE, s),
-        placeholder: `type ${s} to arm it`,
-        "aria-label": `Type ${s} to destroy it`,
-        autocomplete: "off",
-        spellcheck: "false",
-      });
-      /** @type {HTMLInputElement} */ (input).value = typedText.get(s) ?? "";
-      input.addEventListener("input", () => {
-        const v = /** @type {HTMLInputElement} */ (input).value;
-        const was = typedText.get(s) === s;
-        typedText.set(s, v);
-        if ((v === s) !== was) {
-          paint();
-          /** @type {HTMLInputElement | null} */ (
-            body.querySelector(
-              `[aria-label="Type ${CSS.escape(s)} to destroy it"]`,
-            )
-          )?.focus();
+    const rows = planRows(p, vmid);
+    block.tbody.replaceChildren(
+      ...rows.flatMap((r) => {
+        const off = r.action === "unchanged" || r.action === "broken";
+        const tick = selectCell(r.stack, `Select ${r.stack}`);
+        const box = /** @type {HTMLInputElement} */ (
+          tick.querySelector("input")
+        );
+        drivable(box, PICK, r.stack);
+        if (off) {
+          box.disabled = true;
+          box.title =
+            r.action === "broken"
+              ? "Cannot be planned: its file did not read"
+              : "Nothing changed: there is nothing to apply";
         }
-      });
-      const id = vmid(s);
-      return h(
-        "div",
-        {
-          class: `ap-item ap-item--destroy${armed ? " armed" : ""}`,
-          "data-stack": s,
-        },
-        h(
-          "div",
-          { class: "ap-item__top" },
-          // An unarmed destroy is neutral, not information (review item 12).
-          h("span", {
-            class: `nx-sev ${armed ? "nx-sev--bad" : "ap-sev--none"}`,
-            "aria-hidden": "true",
-          }),
-          stackMark(s, 16),
-          h("strong", null, s),
+        const files = diffs.get(r.stack);
+        const pm = files ? plusMinus(files) : null;
+        const tone =
+          r.action === "destroy"
+            ? " kp-badge--destructive"
+            : r.action === "new"
+              ? " kp-badge--success"
+              : r.action === "broken"
+                ? " kp-badge--warning"
+                : r.action === "unchanged"
+                  ? ""
+                  : " kp-badge--info";
+        return [
           h(
-            "span",
-            { class: `kp-badge${armed ? " kp-badge--destructive" : ""}` },
-            armed ? "armed" : "left alone",
-          ),
-        ),
-        h(
-          "p",
-          null,
-          `Stops and removes ${id != null ? `CT ${id}` : "its container"}; its data is kept under Backups ▸ Kept from removed stacks until you wipe it.`,
-        ),
-        input,
-      );
-    });
-    const brokenItems = p.broken.map(([s, why]) => {
-      const [what, fix] = String(why).split(" :: ");
-      return h(
-        "div",
-        { class: "ap-item ap-item--broken", "data-stack": s },
-        h(
-          "div",
-          { class: "ap-item__top" },
-          h("span", { class: "nx-sev", "aria-hidden": "true" }),
-          stackMark(s, 16),
-          h("strong", null, s),
-          h("span"),
-        ),
-        h("p", null, what),
-        // The working copy's own path says nothing to a person: from
-        // `stacks/` on, as the repository names it.
-        ...(fix
-          ? [
-              h(
-                "p",
-                null,
-                h("strong", null, "Fix: "),
-                fix.replace(/\S*\/repo\/(stacks\/)/g, "$1"),
-              ),
-            ]
-          : []),
-        drivable(
-          h(
-            "a",
-            {
-              class: "kp-button kp-button--sm",
-              href: `${stackHref(s, "settings")}?section=files`,
-              title: "Open this stack's file on its Settings tab",
-            },
-            "Open the stack file",
-          ),
-          FILE,
-          s,
-        ),
-      );
-    });
-    const showAll = only
-      ? [
-          drivable(
+            "tr",
+            { "data-kp-row-key": r.stack, "data-kp-row-label": r.stack },
+            tick,
             h(
-              "button",
-              {
-                type: "button",
-                class: "ap-link ap-showall",
-                title: "Show every column again (Esc)",
-              },
-              "Show all",
-            ),
-            SHOW_ALL,
-          ),
-        ]
-      : [];
-    showAll[0]?.addEventListener("click", () => {
-      only = null;
-      paint();
-    });
-    body.replaceChildren(
-      h(
-        "section",
-        { class: "ap-counts", "aria-label": "Plan summary" },
-        tile(
-          "deploy",
-          "Will deploy",
-          p.deploy.length,
-          `${p.new.length} new stack${p.new.length === 1 ? "" : "s"}`,
-        ),
-        tile(
-          "destroy",
-          "Will be destroyed",
-          p.destroy.length,
-          "directory gone from the files",
-          "bad",
-        ),
-        tile(
-          "broken",
-          "Cannot be planned",
-          p.broken.length,
-          "fix the file, then plan again",
-          "warn",
-        ),
-        tile("same", "Unchanged", p.unchanged.length, "nothing to do"),
-      ),
-      ...(showAll.length
-        ? [h("p", { class: "ap-filter" }, `Showing one column. `, ...showAll)]
-        : []),
-      h(
-        "div",
-        { class: "ap-cols" },
-        col(
-          "deploy",
-          "Will deploy",
-          "info",
-          p.deploy.length,
-          "Created or brought in line with its files. Untick one to leave it out of this batch.",
-          deployItems,
-        ),
-        col(
-          "destroy",
-          "Will be destroyed",
-          "bad",
-          p.destroy.length,
-          "Their directory is gone from the working copy. Type a stack's name to arm it for the separate Destroy step below.",
-          destroyItems,
-        ),
-        col(
-          "broken",
-          "Cannot be planned",
-          "warn",
-          p.broken.length,
-          "These stack files did not read. They are left alone; fix them and plan again.",
-          brokenItems,
-        ),
-        ...(only === "same"
-          ? [
+              "td",
+              { "data-kp-sort-value": r.stack },
               h(
-                "section",
-                {
-                  class: "ap-col",
-                  "aria-label": "Unchanged",
-                  "data-col": "same",
-                },
-                h(
-                  "h3",
-                  null,
-                  "Unchanged",
-                  h("span", { class: "kp-badge" }, String(p.unchanged.length)),
-                ),
-                h(
-                  "p",
-                  { class: "ap-hint" },
-                  p.unchanged.length ? p.unchanged.join(", ") : "Nothing here.",
-                ),
+                "span",
+                { class: "ap-name" },
+                h("span", {
+                  class: "kp-idmark kp-idmark--sm",
+                  "data-kp-idmark": r.stack,
+                  "aria-hidden": "true",
+                }),
+                h("a", { href: stackHref(r.stack) }, h("b", null, r.stack)),
               ),
-            ]
-          : []),
-      ),
-    );
-    const g = goPlan(p, ticked, skipBackups);
-    const skip = drivable(
-      h("input", {
-        type: "checkbox",
-        id: SKIP_FIELD,
-        ...(g.n === 0 ? { disabled: "" } : {}),
+            ),
+            h(
+              "td",
+              { "data-kp-sort-value": r.action },
+              h(
+                "span",
+                { class: `kp-badge${tone}` },
+                r.action === "broken" ? "cannot be planned" : r.action,
+              ),
+            ),
+            h("td", null, r.note),
+            h(
+              "td",
+              {
+                class: "kp-text-end",
+                "data-kp-sort-value": String(files?.length ?? 0),
+              },
+              files ? String(files.length) : files === null ? "—" : "…",
+            ),
+            h(
+              "td",
+              {
+                class: "kp-text-end ap-nowrap",
+                "data-kp-sort-value": String(pm ? pm.add + pm.del : 0),
+              },
+              pm
+                ? [
+                    h("span", { class: "ap-add" }, `+${pm.add}`),
+                    " ",
+                    h("span", { class: "ap-del" }, `\u2212${pm.del}`),
+                  ]
+                : files === null
+                  ? "—"
+                  : "…",
+            ),
+          ),
+          h(
+            "tr",
+            { "data-kp-row-detail": "" },
+            h(
+              "td",
+              { colspan: "6" },
+              r.action === "broken"
+                ? h(
+                    "div",
+                    { class: "ap-broken" },
+                    r.fix ? h("p", null, h("b", null, "Fix: "), r.fix) : null,
+                    drivable(
+                      h(
+                        "a",
+                        {
+                          class: "kp-button kp-button--sm",
+                          href: `${stackHref(r.stack, "settings")}?section=files`,
+                          title: "Open this stack's file on its Settings tab",
+                        },
+                        "Open the stack file",
+                      ),
+                      FILE,
+                      r.stack,
+                    ),
+                  )
+                : r.action === "unchanged"
+                  ? h(
+                      "p",
+                      { class: "ap-none" },
+                      "No file changed since the last apply.",
+                    )
+                  : files === undefined
+                    ? h("p", { class: "ap-none" }, "Reading the lines…")
+                    : files === null
+                      ? h(
+                          "p",
+                          { class: "ap-none" },
+                          "The lines could not be read for this stack.",
+                        )
+                      : diffFiles(files),
+            ),
+          ),
+        ];
       }),
-      SKIP,
     );
-    /** @type {HTMLInputElement} */ (skip).checked = skipBackups;
-    skip.addEventListener("change", () => {
-      skipBackups = /** @type {HTMLInputElement} */ (skip).checked;
-      paint();
-    });
-    const apply = viaForm(
-      h(
-        "button",
-        {
-          type: "button",
-          class: "kp-button kp-button--primary",
-          id: "apply-open",
-          ...(g.n === 0 ? { disabled: "" } : {}),
-          title: skipBackups
-            ? "Deploy the ticked stacks after one confirmation, without backing them up first. Nothing is destroyed here."
-            : "Deploy the ticked stacks after one confirmation; each stack is backed up first. Nothing is destroyed here.",
-        },
-        g.label,
-      ),
-      "apply",
-    );
-    apply.addEventListener("click", () => {
+    labelCells(block.tbody, () => [
+      "",
+      "Stack",
+      "Action",
+      "What changed",
+      "Files",
+      "Lines",
+    ]);
+    block.ready();
+    // The deploys start ticked; a destroy only when someone arms it.
+    for (const b of /** @type {NodeListOf<HTMLInputElement>} */ (
+      block.tbody.querySelectorAll("input[data-kp-select-row]")
+    )) {
+      const want = ticked0.has(b.value) && !b.disabled;
+      if (b.checked !== want) {
+        b.checked = want;
+        b.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }
+    sentence();
+  };
+  /** @type {Set<string>} what is ticked as the table is drawn (kept across a redraw) */
+  let ticked0 = new Set();
+
+  bar.addEventListener("kp-selection-change", (e) => {
+    keys = /** @type {CustomEvent} */ (e).detail.keys;
+    ticked0 = new Set(keys);
+    const onlyDestroy =
+      plan != null &&
+      keys.length > 0 &&
+      keys.every((k) => plan?.destroy.includes(k));
+    const apply = bar.querySelector('[data-kp-selection-action="apply"]');
+    const destroy = bar.querySelector('[data-kp-selection-action="destroy"]');
+    if (apply instanceof HTMLElement) apply.hidden = onlyDestroy;
+    if (destroy instanceof HTMLElement) destroy.hidden = !onlyDestroy;
+    sentence();
+    // Opening a row reads that stack's lines.
+  });
+  const sel = bindSelection(
+    root,
+    bar,
+    () => ({
+      apply: (items) =>
+        plan
+          ? applyRule(
+              plan,
+              items.map((i) => i.key),
+            )
+          : "",
+    }),
+    undefined,
+    (c) => drivable(c, UNTICK),
+  );
+  block.wrap.addEventListener("kp-datatable-expand", (e) => {
+    const d = /** @type {CustomEvent} */ (e).detail;
+    if (d.open && d.key) void loadDiff(String(d.key)).catch(() => {});
+  });
+  bar.addEventListener("kp-selection-action", (e) => {
+    const { action, button, keys: ks } = /** @type {CustomEvent} */ (e).detail;
+    const p = plan;
+    if (!p) return;
+    if (action === "apply") {
+      const g = goPlan(p, new Set(ks), skipBackups);
       pressedAt = Date.now() / 1000 - 2;
       applied = "pressed";
       void openAction("_host", "apply", { preset: g.preset });
-    });
-    go.replaceChildren(
-      h("div", null, h("strong", null, g.title), h("p", null, g.note)),
-      h(
-        "div",
-        { class: "ap-go__acts" },
-        h(
-          "label",
-          {
-            class: "ap-go__skip",
-            for: SKIP_FIELD,
-            title:
-              "Deploy the ticked stacks without backing each up first. A destroy always backs up.",
-          },
-          skip,
-          h("span", null, "Skip the backups"),
-        ),
-        apply,
-      ),
-    );
-    paintDestroy(p, g.n > 0 && applied !== "done");
-  };
-
-  /** @param {Plan} p @param {boolean} deploysPending */
-  const paintDestroy = (p, deploysPending) => {
-    if (!p.destroy.length) {
-      destroyBox.hidden = true;
-      destroyBox.replaceChildren();
       return;
     }
-    destroyBox.hidden = false;
-    const d = destroyStep(p, typed(), vmid, { ack, deploysPending });
-    if (!d.armed.length) ack = false;
-    const tick = drivable(
-      h("input", {
-        type: "checkbox",
-        id: DESTROY_ACK_FIELD,
-        ...(d.armed.length ? {} : { disabled: "" }),
+    const gone = ks.filter((/** @type {string} */ k) => p.destroy.includes(k));
+    openConfirmation(button, {
+      phrase: `Destroy ${gone.length === 1 ? `the stack ${gone[0]}` : `${gone.length} stacks`}? Each is backed up first.`,
+      typeName: gone.length === 1 ? gone[0] : `destroy ${gone.length} stacks`,
+      loses: gone.map((/** @type {string} */ s) => {
+        const id = vmid(s);
+        return `${s}: ${id != null ? `CT ${id}` : "its container"} and its place in the gateway`;
       }),
-      DESTROY_ACK,
-    );
-    /** @type {HTMLInputElement} */ (tick).checked = ack && d.armed.length > 0;
-    tick.addEventListener("change", () => {
-      ack = /** @type {HTMLInputElement} */ (tick).checked;
-      paintDestroy(p, deploysPending);
+      acceptLabel:
+        gone.length === 1
+          ? `Destroy ${gone[0]}`
+          : `Destroy ${gone.length} stacks`,
+      onAccept: () => {
+        const d = destroyStep(p, new Set(gone), vmid, {
+          ack: true,
+          deploysPending: false,
+        });
+        void openAction("_host", "apply", { preset: d.preset });
+      },
     });
-    const button = drivable(
-      h(
-        "button",
-        {
-          type: "button",
-          class: "kp-button kp-button--destructive",
-          id: "apply-destroy",
-          ...(d.ready ? {} : { disabled: "" }),
-          title:
-            "Destroy the armed stacks after one more confirmation: each is backed up and its backup restored as a check first",
-        },
-        d.label,
-      ),
-      DESTROY,
-    );
-    button.addEventListener("click", () => {
-      void openAction("_host", "apply", { preset: d.preset });
-    });
-    destroyBox.replaceChildren(
-      h(
-        "div",
-        { class: "ap-destroy__head" },
-        h("span", { class: "nx-sev nx-sev--bad", "aria-hidden": "true" }),
-        h("h3", null, "Destroy"),
-        h(
-          "p",
-          { class: "ap-hint" },
-          "A separate step after the deploys: only the stacks you armed by typing their name, only after this confirmation, each backed up and restore-checked first.",
-        ),
-      ),
-      h("strong", null, d.title),
-      h(
-        "label",
-        { class: "ap-destroy__ack", for: "apply-destroy-ack" },
-        tick,
-        h("span", null, d.ackLabel),
-      ),
-      h(
-        "div",
-        { class: "ap-destroy__go" },
-        h(
-          "p",
-          { class: "ap-hint", role: "status" },
-          d.why ?? "Ready to destroy.",
-        ),
-        button,
-      ),
-    );
-  };
+  });
 
   // The deploys this page started: once that job is done the plan is read
   // again, so the destroy step knows no ticked deploy is waiting.
@@ -820,7 +637,7 @@ export function mount(root, opts = {}) {
     if (j.state === "queued" || j.state === "running") {
       if (applied !== "running") {
         applied = "running";
-        paint();
+        paintSteps();
       }
       return;
     }
@@ -829,59 +646,50 @@ export function mount(root, opts = {}) {
     void load().catch(() => {});
   });
 
-  // Esc resets the tile filter (bound on mount, released on unmount).
-  /** @param {KeyboardEvent} e */
-  const onKey = (e) => {
-    if (e.key !== "Escape" || only == null || e.defaultPrevented) return;
-    // redesign-final (a case red on the base): the plan lives in the Deploy
-    // all changes sheet since 3.71.0; Esc there resets the filter first
-    // and closes the sheet only once no filter is on. Another dialog on
-    // top keeps its own Esc.
-    const top = [...document.querySelectorAll("dialog[open]")].pop();
-    if (top && !top.contains(root)) return;
-    e.preventDefault();
-    only = null;
-    paint();
-  };
-  document.addEventListener("keydown", onKey, true);
-
   const load = async () => {
     read.setAttribute("disabled", "");
-    body.replaceChildren(skeleton());
-    go.replaceChildren(
-      h(
-        "p",
-        { class: "ap-hint", "data-kp-skeleton": "" },
-        "Reading every stack (latch is asked for the secrets the host's hash covers)…",
-      ),
-    );
+    block.loading({
+      words:
+        "Working out the plan of every stack (latch is asked for the secrets the host's hash covers)…",
+      expect: 20,
+    });
     const r = await fetchJson("/data/apply/plan", "the plan", abort.signal);
     if (abort.signal.aborted) return;
     read.removeAttribute("disabled");
     if (!r.ok) {
-      err.replaceChildren(errorBox(r.error));
-      body.replaceChildren();
-      go.replaceChildren();
+      err.replaceChildren();
+      block.failed(r.error);
       return;
     }
     err.replaceChildren();
     plan = /** @type {Plan} */ (r.body.plan);
-    ticked = new Set(plan.deploy);
+    ticked0 = new Set(plan.deploy);
     diffs.clear();
-    paint();
+    draw();
+    // The lines of every stack that would change are read at once, so the
+    // Files and Lines columns are filled without opening a row.
+    for (const s of [...plan.deploy, ...plan.destroy])
+      void loadDiff(s).catch(() => {});
     opts.onRead?.({
       pending: plan.deploy.length + plan.destroy.length,
       broken: plan.broken.length,
     });
     setAgo(ago, r.body.measured_at ?? Date.now() / 1000);
   };
+  block.wrap.addEventListener(
+    "kp-datatable-retry",
+    () => void load().catch(() => {}),
+  );
   read.addEventListener("click", () => void load().catch(() => {}));
   paintSteps();
+  sentence();
   void load().catch(() => {});
   return () => {
     abort.abort();
     stopCompare();
     stopJobs();
-    document.removeEventListener("keydown", onKey, true);
+    detachTables();
+    sel.stop();
+    detachMarks();
   };
 }

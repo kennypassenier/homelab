@@ -1,49 +1,51 @@
-// The Presets page (redesign-presets, release 3.71.0; Kenny approved the
-// demo 2026-10-03: ~/.local/share/homelab/redesign-3.71/presets.html,
-// implemented exactly). The repository's presets/ directory as a gallery:
-// one card per preset with its mark, purpose, apps and size (RAM, cores,
-// disk — "default" where the preset leaves it to the fleet), "Use this
-// preset" and "Edit"; the app-less preset (presets/custom) is the dashed
-// "Empty stack" card at the end. A search and an A–Z / Largest first
-// switch sit above it; with no presets at all the page says why and offers
-// the three ways on (write one, import one, start empty).
+// The Presets page (redesign-presets, release 3.71.0; rebuilt on the approved
+// kp-themes 11 demo, feat-kp11demo-12.5). The repository's presets/ directory
+// as a gallery of kp entity cards (RAM, cores and disk as figures, GPU and VPN
+// as flags, Use and Edit as buttons; the app-less preset is the "Empty stack"
+// card at the end), a kp toolbar whose search understands what you mean
+// ("gpu media") with removable tags, and a second card that compares two or
+// three presets and costs one against the host's memory (presetscompare.js).
 //
-// "Use this preset" opens the existing New stack wizard with that preset
-// chosen (feat-stacks-3: name and number, size, data, plan and commit,
-// replayed by Live view), "Edit" the presets editor (feat-preset-1).
+// "Use" opens the existing New stack wizard with that preset chosen
+// (feat-stacks-3, replayed by Live view), "Edit" the presets editor
+// (feat-preset-1).
 
 import { agoEl, setAgo } from "../ago.js";
 import { fetchJson, h } from "../dom.js";
-import { declare, drivable, viaForm } from "../drivable.js";
+import { declare, declareField, drivable, viaForm } from "../drivable.js";
 import { openImport } from "../importstack.js";
 import { openNewStack } from "../newstack.js";
 import { openPresetEditor } from "../presetseditor.js";
-import {
-  countText,
-  emptyPreset,
-  galleryCards,
-  ramText,
-  sets,
-} from "../presetsview.js";
-import {
-  chip,
-  ensureStyle,
-  failBox,
-  highlight,
-  pageHeader,
-  pageTip,
-  segSwitch,
-  skeleton,
-  toolbar,
-} from "../ui.js";
+import { presetsCompare } from "../presetscompare.js";
+import { countText, emptyPreset, ramText, sets } from "../presetsview.js";
+import { ensureStyle, failBox, pageHeader, segSwitch } from "../ui.js";
 import { setParams } from "../urlstate.js";
+import {
+  ENTITY_ACTION_EVENT,
+  ENTITY_GRID_RETRY_EVENT,
+  ENTITY_NEW_EVENT,
+  setEntityGrid,
+  setEntityGridState,
+} from "/static/kp/js/entity-card.js";
+import { matchIntent } from "/static/kp/js/intent.js";
+import {
+  SEGMENTED_EVENT,
+  attachSegmented,
+  getSegmentedValues,
+  setSegmentedValues,
+} from "/static/kp/js/segmented.js";
+import {
+  TOOLBAR_CLEAR_EVENT,
+  TOOLBAR_REMOVE_EVENT,
+  attachToolbars,
+  setToolbarActive,
+} from "/static/kp/js/toolbar.js";
 
 /** @typedef {import("../presetsview.js").PresetView} PresetView */
 
 // Live view (invariant 39): every control on the page has its own id; the
 // buttons that open a dialog are also the server-modelled forms they open
 // (`homelab ui open new-stack | import | new-preset | preset <name>`).
-/** @param {string} id @param {string} what @param {string} [row] */
 /**
  * @param {string} id @param {string} what @param {string} [row]
  * @param {{shows?: string}} [more]
@@ -94,16 +96,11 @@ const SEARCH = ctl(
   "presets-search",
   "the gallery's search box (name, app or purpose)",
 );
-const SORT = ctl(
-  "presets-sort",
-  "sort the gallery A–Z or largest first",
-  "name|ram",
-);
-const CARD = ctl(
-  "presets-card",
-  "a preset's card: opens the New stack wizard on it",
-  "<preset>",
-);
+const SEARCH_FIELD = declareField({
+  id: "ps-search",
+  page: "presets",
+  what: "the preset search: a name, an app or a purpose",
+});
 const USE = ctl(
   "presets-use",
   "Use this preset: the New stack wizard on that preset",
@@ -118,26 +115,30 @@ const START_EMPTY = ctl(
   "presets-start-empty",
   "the Empty stack card: the New stack wizard with no apps",
 );
-const EMPTY_CARD = ctl(
-  "presets-empty-card",
-  "the Empty stack card itself: the New stack wizard with no apps",
-);
-const CLEAR = ctl(
-  "presets-clear-search",
-  "clear the gallery's search",
-  undefined,
-  {
-    shows: "when the search matches no preset",
-  },
-);
 
-const HUES = [
-  "var(--chart-1)",
-  "var(--chart-2)",
-  "var(--chart-3)",
-  "var(--chart-4)",
-  "var(--chart-5)",
-];
+const MODE = declare({
+  id: "presets-search-mode",
+  page: "presets",
+  opens: "view",
+  row: "intent|text",
+  what: "search the presets by meaning (gpu media finds the media preset) or by the letters of their name",
+});
+const NEEDS = declare({
+  id: "presets-needs",
+  page: "presets",
+  opens: "view",
+  row: "all|gpu|vpn",
+  what: "keep only the presets that need a GPU or a VPN (both on: those that need both)",
+});
+const CLEAR = declare({
+  id: "presets-clear-search",
+  page: "presets",
+  opens: "view",
+  what: "clear the gallery's search and filters",
+  shows: "when the search matches no preset",
+});
+
+const MODE_KEY = "homelab.presets.search";
 
 /**
  * @param {HTMLElement} root
@@ -150,19 +151,18 @@ export function mount(root, ctx) {
   root.classList.add("cf-page", "ps-page");
   const abort = new AbortController();
   const q0 = new URLSearchParams(location.search);
-  const S = {
-    q: (q0.get("q") ?? "").toLowerCase(),
-    /** @type {"name" | "ram"} */
-    sort: q0.get("sort") === "ram" ? "ram" : "name",
-  };
-  const keepUrl = () =>
-    history.replaceState(
-      history.state,
-      "",
-      `${location.pathname}${setParams(location.search, { q: S.q, sort: S.sort === "ram" ? "ram" : null })}`,
-    );
-  /** @type {{presets: PresetView[], suggest_vmid: number | null, working_copy: boolean, sync_error: string | null} | null} */
+  /** @type {"intent" | "text"} */
+  let mode = "intent";
+  try {
+    if (localStorage.getItem(MODE_KEY) === "text") mode = "text";
+  } catch {
+    // the choice lasts for this visit
+  }
+  /** @type {{presets: PresetView[], suggest_vmid: number | null, working_copy: boolean, sync_error: string | null, swap: {divisor: number, min_mb: number, max_mb: number} | null} | null} */
   let data = null;
+  /** @type {"loading" | "failed" | "ready"} */
+  let status = "loading";
+  let failWhy = "";
 
   /** @param {string} [preset] */
   const useStack = (preset) =>
@@ -220,294 +220,317 @@ export function mount(root, ctx) {
     ),
   });
 
-  // ── toolbar ───────────────────────────────────────────────────────────
-  const sortSeg = segSwitch({
-    label: "Sort",
+  // ── toolbar (the package's) ───────────────────────────────────────────
+  const search = /** @type {HTMLInputElement} */ (
+    h("input", {
+      type: "search",
+      class: "kp-field__input kp-toolbar__input",
+      placeholder: "Find a preset by name, app or purpose",
+      "aria-label": "Find a preset",
+      id: SEARCH_FIELD,
+    })
+  );
+  search.value = q0.get("q") ?? "";
+  drivable(search, SEARCH);
+  const needs = h(
+    "div",
+    {
+      class: "kp-segmented kp-segmented--chips",
+      "data-kp-segmented": "multi",
+      role: "group",
+      "aria-label": "Needs",
+      id: "ps-needs",
+    },
+    ...[
+      ["all", "All"],
+      ["gpu", "GPU"],
+      ["vpn", "VPN"],
+    ].map(([v, l]) =>
+      drivable(
+        h(
+          "button",
+          {
+            type: "button",
+            class: "kp-segmented__item",
+            "data-value": v,
+            ...(v === "all" ? { "data-kp-segmented-all": "" } : {}),
+            "aria-pressed": v === "all" ? "true" : "false",
+          },
+          h("span", { class: "kp-segmented__label" }, l),
+        ),
+        NEEDS,
+        v,
+      ),
+    ),
+  );
+  const modeSeg = segSwitch({
+    label: "Search by",
+    value: mode,
     items: [
-      { value: "name", label: "A–Z", hint: "Sort the presets by name" },
       {
-        value: "ram",
-        label: "Largest first",
-        hint: "Sort the presets by memory, largest first",
+        value: "intent",
+        label: "By meaning",
+        hint: "Every word you type must start a word of the preset's name, purpose or apps, in any order",
+      },
+      {
+        value: "text",
+        label: "Letters in the name",
+        hint: "The letters you type must be inside the preset's name",
       },
     ],
-    value: S.sort,
-    mark: (b, v) => void drivable(b, SORT, v),
     onChange: (v) => {
-      S.sort = v === "ram" ? "ram" : "name";
-      keepUrl();
+      mode = v === "text" ? "text" : "intent";
+      try {
+        localStorage.setItem(MODE_KEY, mode);
+      } catch {
+        // kept for this visit only
+      }
       paint();
     },
+    mark: (b, v) => void drivable(b, MODE, v),
   });
-  const count = h("span", { class: "cf-count" });
-  const tb = toolbar({
-    search: {
-      placeholder: "Find a preset by name, app or purpose",
-      label: "Find a preset",
-      value: S.q,
-      onInput: (v) => {
-        S.q = v.trim().toLowerCase();
-        keepUrl();
-        paint();
-      },
+  const count = h("div", { class: "kp-toolbar__state", "aria-live": "polite" });
+  const tb = h(
+    "div",
+    {
+      class: "kp-toolbar ps-tb",
+      "data-kp-toolbar": "",
+      role: "group",
+      "aria-label": "Presets",
     },
-    groups: [],
-    state: [sortSeg.el, count],
-  });
-  tb.el.classList.add("ps-tb");
-  if (tb.search) drivable(tb.search, SEARCH);
-
-  const gallery = h("section", {
-    class: "ps-gallery",
+    h("div", { class: "kp-toolbar__search" }, search),
+    h(
+      "div",
+      { class: "kp-toolbar__filters" },
+      h(
+        "div",
+        {
+          class: "kp-toolbar__group",
+          role: "group",
+          "aria-labelledby": "ps-needs-l",
+        },
+        h("b", { class: "kp-toolbar__label", id: "ps-needs-l" }, "Needs"),
+        needs,
+      ),
+      h(
+        "div",
+        {
+          class: "kp-toolbar__group",
+          role: "group",
+          "aria-labelledby": "ps-mode-l",
+        },
+        h("b", { class: "kp-toolbar__label", id: "ps-mode-l" }, "Search by"),
+        modeSeg.el,
+      ),
+    ),
+    count,
+    h("div", { class: "kp-toolbar__active", hidden: "" }),
+  );
+  const grid = h("div", {
+    class: "kp-entity-grid ps-gallery",
+    "data-kp-entity-grid": "",
+    "data-kp-entity-min": "18rem",
+    "data-kp-entity-meters": "0",
     "aria-label": "Presets",
   });
   const below = h("div", { class: "ps-below" });
-  root.replaceChildren(head.el, tb.el, gallery, below);
+  const compare = presetsCompare({
+    swap: () => data?.swap ?? null,
+    retry: () => retry(),
+  });
+  root.replaceChildren(head.el, tb, grid, below, compare.el);
+  const detachSeg = attachSegmented(root);
+  const detachTb = attachToolbars(root);
 
-  // ── cards ─────────────────────────────────────────────────────────────
-  /** @param {PresetView} p @param {number} i */
-  const card = (p, i) => {
-    const has = sets(p);
-    const use = viaForm(
-      h(
-        "button",
-        {
-          type: "button",
-          class: "kp-button kp-button--secondary",
-          title: `New stack from ${p.name}: name and container number next`,
-          "data-preset-use": p.name,
-          onclick: (/** @type {Event} */ e) => {
-            e.stopPropagation();
-            useStack(p.name);
-          },
-        },
-        "Use this preset",
-      ),
-      "new-stack",
+  const wanted = () =>
+    getSegmentedValues(needs).filter((v) => v === "gpu" || v === "vpn");
+  const keepUrl = () =>
+    history.replaceState(
+      history.state,
+      "",
+      `${location.pathname}${setParams(location.search, { q: search.value.trim().toLowerCase() })}`,
     );
-    drivable(use, USE, p.name);
-    const edit = viaForm(
-      h(
-        "button",
-        {
-          type: "button",
-          class: "kp-button kp-button--ghost",
-          title: `Edit presets/${p.name}/preset.yml and its apps`,
-          "data-preset-edit": p.name,
-          onclick: (/** @type {Event} */ e) => {
-            e.stopPropagation();
-            void openPresetEditor(p.name, retry);
-          },
-        },
-        "Edit",
-      ),
-      "preset",
-    );
-    drivable(edit, EDIT, p.name);
-    const gpu = p.gpu ? chip("GPU", { tone: "info" }) : null;
-    const vpn = p.vpn ? chip("VPN", { tone: "info" }) : null;
-    /** @param {string} label @param {string} value @param {boolean} set */
-    const spec = (label, value, set) => {
-      const b = h(
-        "b",
-        { class: set ? null : "ps-def" },
-        set ? value : "default",
-      );
-      if (!set)
-        pageTip().attach(b, () => [
-          h("b", null, "Not set by the preset"),
-          h(
-            "span",
-            null,
-            `The new-stack form fills in the fleet default (${value}); you can change it there.`,
-          ),
-        ]);
-      return h("div", null, h("span", null, label), b);
-    };
-    const c = h(
-      "article",
-      {
-        class: "ps-card",
-        tabindex: "0",
-        "data-preset": p.name,
-        title: `Start a new stack from ${p.name} (Enter)`,
-        onclick: () => useStack(p.name),
-        onkeydown: (/** @type {KeyboardEvent} */ e) => {
-          if (e.key === "Enter" && e.target === c) useStack(p.name);
-        },
-      },
-      h(
-        "div",
-        { class: "ps-card__top" },
-        h(
-          "span",
-          { class: "ps-card__mono", "aria-hidden": "true" },
-          p.name.slice(0, 2),
-        ),
-        h("h3", null, highlight(p.name, S.q)),
-        h("span", { class: "cf-row" }, gpu, vpn),
-      ),
-      h("p", null, highlight(p.description, S.q)),
-      h(
-        "div",
-        { class: "ps-apps" },
-        (p.apps ?? []).map((a) => chip(highlight(a, S.q))),
-      ),
-      h(
-        "div",
-        { class: "ps-spec" },
-        spec("RAM", ramText(p.ram_mb), true),
-        spec("Cores", String(p.cores), has.cores),
-        spec("Disk", `${p.disk_gb} GB`, has.disk),
-      ),
-      h("div", { class: "ps-card__foot" }, use, edit),
-    );
-    c.style.setProperty("--c", HUES[i % HUES.length]);
-    if (gpu)
-      pageTip().attach(gpu, () => [
-        h("b", null, "GPU passthrough"),
-        h(
-          "span",
-          null,
-          "The host's /dev/dri is passed into the container for VAAPI transcoding.",
-        ),
-      ]);
-    if (vpn)
-      pageTip().attach(vpn, () => [
-        h("b", null, "Tunnel device"),
-        h("span", null, "The container gets /dev/net/tun for a VPN client."),
-      ]);
-    drivable(c, CARD, p.name);
-    return c;
-  };
 
   /** @param {PresetView} p */
-  const emptyCard = (p) => {
-    const start = viaForm(
-      h(
-        "button",
-        {
-          type: "button",
-          class: "kp-button kp-button--secondary",
-          title: `A new stack with no apps (from presets/${p.name})`,
-          "data-preset-use": p.name,
-          onclick: (/** @type {Event} */ e) => {
-            e.stopPropagation();
-            useStack(p.name);
-          },
-        },
-        "Start empty",
-      ),
-      "new-stack",
-    );
-    drivable(start, START_EMPTY);
-    const c = h(
-      "article",
-      {
-        class: "ps-card ps-card--empty",
-        tabindex: "0",
-        title: "Start a new stack with no apps (Enter)",
-        onclick: () => useStack(p.name),
-        onkeydown: (/** @type {KeyboardEvent} */ e) => {
-          if (e.key === "Enter" && e.target === c) useStack(p.name);
-        },
-      },
-      h(
-        "div",
-        { class: "ps-card__top" },
-        h("span", { class: "ps-card__mono", "aria-hidden": "true" }, "+"),
-        h("h3", null, "Empty stack"),
-        h("span"),
-      ),
-      h(
-        "p",
-        null,
-        "No apps yet: a container with the default size. Add apps from the stack's own page afterwards.",
-      ),
-      h("span"),
-      h("span"),
-      h("div", { class: "ps-card__foot" }, start),
-    );
-    c.style.setProperty("--c", "var(--muted-foreground)");
-    drivable(c, EMPTY_CARD);
-    return c;
+  const match = (p) => {
+    const q = search.value.trim();
+    const words = [p.name, p.description, ...(p.apps ?? [])].join(" ");
+    const okText =
+      !q ||
+      (mode === "intent"
+        ? matchIntent(words, q, { typo: 1 })
+        : p.name.toLowerCase().includes(q.toLowerCase()));
+    return okText && wanted().every((n) => (n === "gpu" ? p.gpu : p.vpn));
   };
 
-  const skeletonCard = () =>
-    h(
-      "article",
-      { class: "ps-card ps-card--sk", "aria-hidden": "true" },
-      h(
-        "div",
-        { class: "ps-card__top" },
-        h("span", { class: "ps-card__mono" }),
-        h("h3", null, skeleton("60%")),
-        h("span"),
-      ),
-      h("p", null, skeleton("90%")),
-      h("div", { class: "ps-apps" }, skeleton("40%")),
-      h(
-        "div",
-        { class: "ps-spec" },
-        ...["RAM", "Cores", "Disk"].map((l) =>
-          h("div", null, h("span", null, l), h("b", null, skeleton("3ch"))),
-        ),
-      ),
-      h("div", { class: "ps-card__foot" }, skeleton("100%"), skeleton("100%")),
-    );
+  /** @param {PresetView} p @returns {import("/static/kp/js/entity-card.js").EntityData} */
+  const entity = (p) => {
+    const has = sets(p);
+    const empty = (p.apps ?? []).length === 0;
+    return {
+      key: p.name,
+      name: p.name,
+      state: { label: empty ? "empty stack" : "preset", tone: "info" },
+      figures: [
+        { value: ramText(p.ram_mb), label: "RAM" },
+        {
+          value: has.cores ? String(p.cores) : `${p.cores} (default)`,
+          label: "Cores",
+        },
+        {
+          value: has.disk ? `${p.disk_gb} GB` : `${p.disk_gb} GB (default)`,
+          label: "Disk",
+        },
+      ],
+      flags: [
+        ...(p.gpu
+          ? [{ label: "GPU", tone: /** @type {const} */ ("info") }]
+          : []),
+        ...(p.vpn
+          ? [{ label: "VPN", tone: /** @type {const} */ ("info") }]
+          : []),
+      ],
+      actions: [
+        { id: "use", label: empty ? "Start empty" : "Use" },
+        { id: "edit", label: "Edit" },
+      ],
+    };
+  };
+
+  /** Mark what the cards drew so Live view reaches it. */
+  const decorate = () => {
+    for (const card of /** @type {HTMLElement[]} */ ([
+      ...grid.querySelectorAll(":scope > .kp-card--entity"),
+    ])) {
+      const key = card.getAttribute("data-kp-entity-key") ?? "";
+      const p = data?.presets.find((x) => x.name === key);
+      const buttons = /** @type {HTMLElement[]} */ ([
+        ...card.querySelectorAll("button.kp-entity__action"),
+      ]);
+      const [use, edit] = buttons;
+      if (use && !use.dataset.drive) {
+        viaForm(use, "new-stack");
+        if ((p?.apps ?? []).length === 0) drivable(use, START_EMPTY);
+        else drivable(use, USE, key);
+      }
+      if (edit && !edit.dataset.drive) {
+        viaForm(edit, "preset");
+        drivable(edit, EDIT, key);
+      }
+    }
+  };
+  new MutationObserver(decorate).observe(grid, {
+    childList: true,
+    subtree: true,
+  });
 
   const paint = () => {
+    modeSeg.set(mode);
+    const tags = [
+      ...wanted().map((n) => ({ id: n, label: `Needs: ${n.toUpperCase()}` })),
+      ...(search.value.trim()
+        ? [{ id: "q", label: `Search: ${search.value.trim()}` }]
+        : []),
+    ];
+    setToolbarActive(tb, tags);
+    below.replaceChildren();
+    if (status === "loading") {
+      count.textContent = "";
+      setEntityGridState(grid, "loading", { count: 6 });
+      return;
+    }
+    if (status === "failed") {
+      count.textContent = "";
+      setEntityGridState(grid, "error", { message: failWhy });
+      return;
+    }
     if (!data) return;
     const all = data.presets;
-    const empty = emptyPreset(all);
-    const listed = all.filter((p) => p !== empty);
     if (!all.length) {
-      tb.el.hidden = false;
       count.textContent = "";
-      gallery.hidden = true;
+      setEntityGridState(grid, "empty", {
+        title: "No presets in this working copy",
+        message:
+          data.working_copy === false
+            ? "The dashboard has no working copy yet, so it lists no presets."
+            : "The working copy's presets/ directory is empty or missing.",
+        actionLabel: "New preset…",
+      });
       below.replaceChildren(noPresets());
       return;
     }
-    gallery.hidden = false;
-    below.replaceChildren();
-    const cards = galleryCards(all, S.q, S.sort);
+    const empty = emptyPreset(all);
+    const list = all.filter(match).sort((a, b) => {
+      // The app-less preset stays last.
+      if (a === empty) return 1;
+      if (b === empty) return -1;
+      return a.name.localeCompare(b.name);
+    });
+    const listed = all.filter((p) => p !== empty);
     count.textContent = countText(
-      cards.length,
+      list.filter((p) => p !== empty).length,
       listed.length,
-      S.q,
+      tags.length ? "x" : "",
       data.suggest_vmid,
     );
-    gallery.replaceChildren(
-      ...cards.map(card),
-      ...(S.q && !cards.length
-        ? [
-            h(
-              "div",
-              { class: "cf-empty ps-nomatch" },
-              h("strong", null, `No preset matches “${S.q}”`),
-              drivable(
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "cf-linkbtn",
-                    onclick: () => {
-                      S.q = "";
-                      if (tb.search) tb.search.value = "";
-                      keepUrl();
-                      paint();
-                    },
-                  },
-                  "Clear the search",
-                ),
-                CLEAR,
-              ),
-            ),
-          ]
-        : []),
-      ...(empty ? [emptyCard(empty)] : []),
-    );
+    if (!list.length) {
+      setEntityGridState(grid, "empty", {
+        title: "No preset matches",
+        message: search.value.trim()
+          ? `Nothing matches “${search.value.trim()}”. Fewer words or another spelling may.`
+          : "No preset needs all of that. Clear the filters to see every preset.",
+        actionLabel: "Clear the search",
+      });
+      return;
+    }
+    setEntityGrid(grid, list.map(entity));
+    decorate();
   };
+
+  search.addEventListener("input", () => {
+    keepUrl();
+    paint();
+  });
+  needs.addEventListener(SEGMENTED_EVENT, paint);
+  tb.addEventListener(TOOLBAR_REMOVE_EVENT, (e) => {
+    const id = /** @type {CustomEvent} */ (e).detail.id;
+    if (id === "q") search.value = "";
+    else
+      setSegmentedValues(
+        needs,
+        wanted().filter((n) => n !== id),
+      );
+    keepUrl();
+    paint();
+  });
+  tb.addEventListener(TOOLBAR_CLEAR_EVENT, () => {
+    search.value = "";
+    setSegmentedValues(needs, []);
+    keepUrl();
+    paint();
+  });
+  grid.addEventListener(ENTITY_NEW_EVENT, () => {
+    if (!data?.presets.length) {
+      void openPresetEditor(null, retry);
+      return;
+    }
+    search.value = "";
+    setSegmentedValues(needs, []);
+    keepUrl();
+    paint();
+  });
+  grid.addEventListener(ENTITY_GRID_RETRY_EVENT, () => retry());
+  grid.addEventListener(ENTITY_ACTION_EVENT, (e) => {
+    const { key, id } = /** @type {CustomEvent} */ (e).detail;
+    if (id === "use") useStack(key);
+    else void openPresetEditor(key, retry);
+  });
+  // The empty plate's button is a Live view control too.
+  new MutationObserver(() => {
+    const b = grid.querySelector(".kp-stateplate button");
+    if (b instanceof HTMLElement && !b.dataset.drive && data?.presets.length)
+      drivable(b, CLEAR);
+  }).observe(grid, { childList: true, subtree: true });
 
   /** The page with no presets: why, and the three ways on. */
   const noPresets = () =>
@@ -574,17 +597,16 @@ export function mount(root, ctx) {
       ),
     );
 
-  gallery.replaceChildren(...Array.from({ length: 8 }, skeletonCard));
-  count.replaceChildren(skeleton("14ch"));
-
   const load = async () => {
+    status = "loading";
+    compare.set({ status: "loading" });
+    paint();
     const r = await fetchJson("/data/presets", "the presets", abort.signal);
     if (!r.ok) {
-      gallery.hidden = true;
-      below.replaceChildren(
-        failBox(r.error, { run: retry, drive: { id: TRY_AGAIN } }),
-      );
-      count.textContent = "";
+      status = "failed";
+      failWhy = `${r.error.what}: ${r.error.why}`;
+      paint();
+      compare.set({ status: "failed", why: failWhy });
       return;
     }
     data = {
@@ -592,14 +614,23 @@ export function mount(root, ctx) {
       suggest_vmid: r.body.suggest_vmid ?? null,
       working_copy: r.body.working_copy !== false,
       sync_error: r.body.sync_error ?? null,
+      swap: r.body.swap ?? null,
     };
+    status = "ready";
     setAgo(ago, Date.now() / 1000);
     paint();
+    compare.set({ presets: data.presets, status: "ready" });
   };
   const retry = () => void load().catch(() => {});
+  paint();
   retry();
+  const hostWatch = setInterval(() => compare.host(), 5000);
   return () => {
     abort.abort();
+    clearInterval(hostWatch);
+    detachSeg();
+    detachTb();
+    compare.stop();
     root.classList.remove("cf-page", "ps-page");
   };
 }

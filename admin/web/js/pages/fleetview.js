@@ -15,7 +15,7 @@
 // Data: /data/topology, /data/fleet-traffic (only once the switch is on),
 // /data/capacity, /data/disk-growth, /data/stale-images, the fleet store.
 
-import { errorBox, fetchJson, h, slowRead } from "../dom.js";
+import { fetchJson, h, slowRead } from "../dom.js";
 import { declare, declareField, drivable } from "../drivable.js";
 import { formatDateTime } from "../format.js";
 import {
@@ -26,34 +26,33 @@ import {
   hues,
   isStack,
   mapFigures,
-  meterTone,
   neighbours,
-  shortDate,
-  sortCapacity,
   sortGrowth,
-  staleGroups,
   trafficByStack,
 } from "../mapview.js";
+import {
+  capacityCard,
+  diskCard,
+  matrixView,
+  sidePanel,
+  staleCard,
+} from "../mapviews.js";
 import { openPinUpdate } from "../pinupdate.js";
 import { stackHref } from "../router.js";
-import { releaseUrl } from "../staleimages.js";
 import { current, subscribe } from "../store.js";
-import { bytes } from "../charts.js";
+import { updateHref } from "../updateflow.js";
 import {
   dataTable,
-  dot,
-  emptyState,
   ensureStyle,
   kpiStrip,
-  meter,
+  dot,
   pageHeader,
   section,
   segSwitch,
-  skeletonBlock,
-  skeletonLines,
   tableSlot,
 } from "../ui.js";
 import { attachSwitches } from "/static/kp/js/forms.js";
+import { attachCardStates, setCardState } from "/static/kp/js/card-state.js";
 import { mapGraph } from "./mapgraph.js";
 
 // fix-239: Live view reaches every stale image's Update (`homelab ui click
@@ -71,8 +70,8 @@ const VIEW = declare({
   id: "map-view",
   page: "fleetview",
   opens: "view",
-  row: "graph|list",
-  what: "show the topology as a graph or as a list",
+  row: "graph|list|matrix",
+  what: "show the topology as a graph, as a list or as a matrix of who reaches whom",
 });
 const KIND = declare({
   id: "map-edge-kind",
@@ -116,20 +115,6 @@ const FW_RULES = declare({
   what: "open a stack's firewall rules from the Map's side panel",
   shows: "while a node is selected",
   reach: [{ do: "click", control: "map-node", row: "*" }],
-});
-const NOTES = declare({
-  id: "map-release-notes",
-  page: "fleetview",
-  opens: "view",
-  row: "<image>",
-  what: "a stale image's release notes, in a new tab",
-});
-const CAP_SORT = declare({
-  id: "map-capacity-sort",
-  page: "fleetview",
-  opens: "view",
-  row: "cpu|memory|disk",
-  what: "sort the Capacity card busiest first by CPU, memory or disk",
 });
 
 /**
@@ -254,8 +239,18 @@ export function mount(root) {
         label: "List",
         hint: "The topology as a table: one row per stack",
       },
+      {
+        value: "matrix",
+        label: "Matrix",
+        hint: "Who reaches whom, stack by stack, as a grid",
+      },
     ],
-    value: params.get("view") === "list" ? "list" : "graph",
+    value:
+      params.get("view") === "list"
+        ? "list"
+        : params.get("view") === "matrix"
+          ? "matrix"
+          : "graph",
     onChange: (v) => showView(v),
     drive: { id: VIEW },
   });
@@ -266,68 +261,55 @@ export function mount(root) {
     tools: [viewSeg.el],
   });
   topo.el.setAttribute("aria-label", "Topology");
-  topo.body.replaceChildren(skeletonBlock("30rem", "Reading the topology"));
-
-  // ── Capacity and Disk growth ──────────────────────────────────────────
-  /** @type {"cpu" | "mem" | "disk"} */
-  let capBy = "cpu";
-  /** @type {import("../mapview.js").CapRow[] | null} */
-  let capRows = null;
-  const capSeg = segSwitch({
-    label: "Sort by",
-    items: [
-      { value: "cpu", label: "CPU", hint: "Busiest CPU first" },
-      { value: "memory", label: "Memory", hint: "Fullest memory first" },
-      { value: "disk", label: "Disk", hint: "Fullest disk first" },
-    ],
-    value: "cpu",
-    onChange: (v) => {
-      capBy = v === "memory" ? "mem" : v === "disk" ? "disk" : "cpu";
-      paintCapacity();
-    },
-    drive: { id: CAP_SORT },
-  });
-  const cap = section({
-    id: "capacity",
-    title: "Capacity",
-    desc: "CPU, memory and disk per stack against its own allowance, busiest first.",
-    tools: [capSeg.el],
-    foot: ["Prometheus · now", "amber from 75% · red from 90%"],
-  });
-  cap.el.setAttribute("aria-label", "Capacity");
-  cap.el.classList.add("mp-half");
-  cap.body.replaceChildren(skeletonLines(5, "Reading the capacity"));
-  const growth = section({
-    id: "growth",
-    title: "Disk growth",
-    desc: "Which filesystems fill up, and when each would be full at its current trend.",
-  });
-  const growthFoot = h("span", null, "warns before a disk is full");
-  growth.foot.replaceChildren(
-    h("span", null, "Prometheus · 7-day robust trend"),
-    growthFoot,
+  // The topology sits in a kp card that carries the four data states: its
+  // loading is the package's busy card over the whole footprint.
+  const topoData = h("div", { class: "mv-topo" });
+  const topoStage = h(
+    "div",
+    { class: "kp-card mv-stage mv-stage--topo", "data-kp-state": "loading" },
+    h(
+      "div",
+      { class: "kp-card__stage" },
+      h("div", { class: "kp-card__data" }, topoData),
+    ),
   );
-  growth.foot.hidden = false;
-  growth.el.setAttribute("aria-label", "Disk growth");
-  growth.el.classList.add("mp-half");
-  growth.body.replaceChildren(skeletonLines(5, "Reading the disk trends"));
+  topo.body.replaceChildren(topoStage);
+  const detachStages = attachCardStates(topo.el);
+  setCardState(topoStage, "loading", { words: "Reading the topology" });
 
-  // ── Stale images ──────────────────────────────────────────────────────
-  const staleWhen = h("span", { class: "mk-muted mk-sm" }, "");
-  const stale = section({
-    id: "stale",
-    title: "Stale images",
-    desc: "Pinned images whose upstream has a newer release. Update backs the stack up, moves the pin and deploys it.",
-    tools: [staleWhen],
+  // ── Capacity, Disk growth and Stale images (mapviews.js) ──────────────
+  const retryAll = () => void readSides();
+  const cap = capacityCard({
+    stackHref,
+    navigate: (href) => {
+      history.pushState(null, "", href);
+      dispatchEvent(new PopStateEvent("popstate"));
+    },
+    retry: retryAll,
   });
-  stale.el.setAttribute("aria-label", "Stale images");
-  stale.body.replaceChildren(skeletonLines(3, "Reading the stale images"));
+  const disk = diskCard({ retry: retryAll });
+  const stale = staleCard({
+    navigate: (href) => {
+      history.pushState(null, "", href);
+      dispatchEvent(new PopStateEvent("popstate"));
+    },
+    updateHref: (stacks, pick) =>
+      `${updateHref(null)}&only=${encodeURIComponent(stacks.join(","))}&pick=${encodeURIComponent(pick.join(","))}`,
+    retry: retryAll,
+    rowAction: (g) => (g.key ? updateButton(g) : null),
+  });
+  stops.push(() => {
+    cap.stop();
+    disk.stop();
+    stale.stop();
+    detachStages();
+  });
 
   root.replaceChildren(
     head.el,
     strip.el,
     topo.el,
-    h("div", { class: "mp-grid" }, cap.el, growth.el),
+    h("div", { class: "mp-grid" }, cap.el, disk.el),
     stale.el,
   );
   stops.push(attachSwitches(root));
@@ -340,12 +322,48 @@ export function mount(root) {
   let graph = null;
   /** @type {Map<string, number> | null} */
   let traffic = null;
-  const side = h("aside", { class: "mp-side", "aria-live": "polite" });
+  /** @param {string} n */
+  const sideLinks = (n) => [
+    drivable(
+      h(
+        "a",
+        {
+          class: "kp-button kp-button--sm",
+          href: stackHref(n),
+          title: `Open ${n}'s own page`,
+        },
+        "Open stack",
+      ),
+      OPEN_STACK,
+      `side:${n}`,
+    ),
+    drivable(
+      h(
+        "a",
+        {
+          class: "kp-button kp-button--sm",
+          href: `${stackHref(n, "settings")}?section=firewall`,
+          title: `${n}'s firewall rules, in its settings`,
+        },
+        "Firewall rules",
+      ),
+      FW_RULES,
+      n,
+    ),
+  ];
+  const panel = sidePanel({
+    stackHref,
+    hues,
+    traffic: () => (input.checked ? traffic : null),
+    links: sideLinks,
+  });
+  const matrix = matrixView();
+  const side = panel.el;
   const listBox = h("div", { class: "mp-list", hidden: "" });
+  const matrixBox = h("div", { class: "mp-matrix", hidden: "" }, matrix.el);
   const topoGrid = h("div", { class: "mp-topo" });
   const listTable = tableSlot();
-  const staleTable = tableSlot();
-  stops.push(listTable.stop, staleTable.stop);
+  stops.push(listTable.stop, panel.stop);
 
   const paintTiles = () => {
     if (!topology) return;
@@ -393,197 +411,19 @@ export function mount(root) {
   /** @param {string} v */
   function showView(v) {
     const list = v === "list";
-    topoGrid.hidden = list;
+    const grid = v === "matrix";
+    topoGrid.hidden = list || grid;
     listBox.hidden = !list;
+    matrixBox.hidden = !grid;
     const url = new URL(location.href);
-    if (list) url.searchParams.set("view", "list");
-    else url.searchParams.delete("view");
+    if (v === "graph") url.searchParams.delete("view");
+    else url.searchParams.set("view", v);
     history.replaceState(history.state, "", url);
-    if (!list) graph?.draw();
+    if (v === "graph") graph?.draw();
   }
 
   /** @param {string[]} sel @param {string | null} hover */
-  const paintSide = (sel, hover) => {
-    if (!topology) return;
-    const t = topology;
-    const hue = hues(t);
-    const ids = sel.length ? sel : hover ? [hover] : [];
-    if (!ids.length) {
-      const hub = hubOf(t);
-      const f = mapFigures(t, null);
-      side.replaceChildren(
-        h("h3", null, "Nothing selected"),
-        h(
-          "p",
-          { class: "mk-muted mk-sm mp-side__p" },
-          "Hover a stack in the graph to see its connections; click one to add it to the selection (click again to remove it); select several to compare them side by side.",
-        ),
-        h(
-          "dl",
-          { class: "mp-kv" },
-          ...(hub
-            ? [
-                h("dt", null, "Hub"),
-                h(
-                  "dd",
-                  null,
-                  `${hub} (${neighbours(t, hub).edges.length} connections)`,
-                ),
-              ]
-            : []),
-          h("dt", null, "No firewall"),
-          h(
-            "dd",
-            null,
-            ...(f.firewallNone.length
-              ? f.firewallNone.map((s) =>
-                  h("span", { class: "mp-pill" }, dot("bad"), s),
-                )
-              : ["none"]),
-          ),
-          h("dt", null, "Repository differs"),
-          h(
-            "dd",
-            null,
-            ...(f.firewallDiffers.length
-              ? f.firewallDiffers.map((s) =>
-                  h("span", { class: "mp-pill" }, dot("warn"), s),
-                )
-              : ["none"]),
-          ),
-        ),
-      );
-      return;
-    }
-    const fleet = current().fleet;
-    side.replaceChildren(
-      h(
-        "p",
-        { class: "mp-side__label" },
-        sel.length
-          ? `${sel.length} selected · Esc or Show all clears`
-          : "hovering",
-      ),
-      ...ids.flatMap((id, i) => {
-        const n = t.nodes.find((x) => x.stack === id);
-        if (!n) return [];
-        const nb = neighbours(t, id);
-        const out = [];
-        if (i) out.push(h("hr", { class: "mp-side__hr" }));
-        if (!isStack(n)) {
-          out.push(
-            h("h3", null, mark(n, hue), n.stack),
-            h(
-              "p",
-              { class: "mk-muted mk-sm mp-side__p" },
-              "An address outside the fleet.",
-            ),
-            h(
-              "dl",
-              { class: "mp-kv" },
-              h("dt", null, "Reached by"),
-              h("dd", null, nb.dependedOnBy.join(", ") || "—"),
-            ),
-          );
-          return out;
-        }
-        const fw = firewallOf(n);
-        const st = fleet?.stacks.find((s) => s.name === n.stack);
-        const running = st ? st.online !== false : null;
-        out.push(
-          h(
-            "h3",
-            null,
-            mark(n, hue),
-            n.stack,
-            running == null
-              ? ""
-              : h(
-                  "span",
-                  { class: "mp-state" },
-                  dot(running ? "ok" : "bad"),
-                  running ? "running" : "offline",
-                ),
-          ),
-          h(
-            "dl",
-            { class: "mp-kv" },
-            h("dt", null, "vmid"),
-            h("dd", { class: "mono" }, String(n.vmid)),
-            h("dt", null, "Address"),
-            h("dd", { class: "mono" }, n.ip),
-            h("dt", null, "Firewall"),
-            h(
-              "dd",
-              null,
-              h("span", { class: "mp-pill" }, dot(fw.tone), fw.text),
-            ),
-            h("dt", null, "Depends on"),
-            h("dd", null, nb.dependsOn.join(", ") || "—"),
-            h("dt", null, "Depended on by"),
-            h("dd", null, nb.dependedOnBy.join(", ") || "—"),
-            ...(traffic
-              ? [
-                  h("dt", null, "Traffic"),
-                  h("dd", null, `${bytes(traffic.get(n.stack) ?? 0)}/s`),
-                ]
-              : []),
-          ),
-          h(
-            "ul",
-            { class: "mp-feed" },
-            ...nb.edges.map((e) =>
-              h(
-                "li",
-                null,
-                h("span", {
-                  class: `mp-feed__kind mp-feed__kind--${e.kind}`,
-                  "aria-hidden": "true",
-                }),
-                h(
-                  "span",
-                  null,
-                  `${e.from} → ${e.to}`,
-                  h("small", null, e.detail.join(", ") || e.kind),
-                ),
-              ),
-            ),
-          ),
-          h(
-            "div",
-            { class: "mp-side__acts" },
-            drivable(
-              h(
-                "a",
-                {
-                  class: "kp-button kp-button--sm",
-                  href: stackHref(n.stack),
-                  title: `Open ${n.stack}'s own page`,
-                },
-                "Open stack",
-              ),
-              OPEN_STACK,
-              `side:${n.stack}`,
-            ),
-            drivable(
-              h(
-                "a",
-                {
-                  class: "kp-button kp-button--sm",
-                  href: `${stackHref(n.stack, "settings")}?section=firewall`,
-                  title: `${n.stack}'s firewall rules, in its settings`,
-                },
-                "Firewall rules",
-              ),
-              FW_RULES,
-              n.stack,
-            ),
-          ),
-        );
-        return out;
-      }),
-    );
-  };
+  const paintSide = (sel, hover) => panel.pick(sel, hover);
 
   /** @param {string[]} sel @param {string | null} hover */
   const onGraph = (sel, hover) => {
@@ -599,12 +439,10 @@ export function mount(root) {
     if (!topology) return;
     const t = topology;
     if (!t.nodes.length) {
-      topo.body.replaceChildren(
-        emptyState({
-          title: "No stacks to draw yet",
-          text: "The topology is read from the working copy's stack files; once a stack has a working copy, it appears here.",
-        }),
-      );
+      setCardState(topoStage, "empty", {
+        title: "No stacks to draw yet",
+        text: "The topology is read from the working copy's stack files; once a stack has a working copy, it appears here.",
+      });
       return;
     }
     graph?.stop();
@@ -653,6 +491,8 @@ export function mount(root) {
         b.setAttribute("aria-pressed", "true");
     });
     topoGrid.replaceChildren(graph.el, side);
+    panel.set(t, "ready");
+    matrix.set(t, "ready");
     // The list view: one row per stack.
     const hue = hues(t);
     const tbl = dataTable({
@@ -696,11 +536,13 @@ export function mount(root) {
       }),
     );
     listBox.replaceChildren(tbl.wrap);
-    topo.body.replaceChildren(
+    topoData.replaceChildren(
       h("div", { class: "mp-legends" }, legend),
       topoGrid,
       listBox,
+      matrixBox,
     );
+    setCardState(topoStage, "ready");
     listTable.attach(listBox);
     showView(viewSeg.value());
     graph.draw();
@@ -731,7 +573,13 @@ export function mount(root) {
     const r = await fetchJson("/data/topology", "the topology", abort.signal);
     if (abort.signal.aborted) return;
     if (!r.ok) {
-      topo.body.replaceChildren(errorBox(r.error));
+      setCardState(topoStage, "error", {
+        title: "Could not read the topology",
+        text: `${r.error.what}: ${r.error.why}`,
+        retry: false,
+      });
+      panel.set(null, "failed", r.error.why);
+      matrix.set(null, "failed", r.error.why);
       return;
     }
     topology = r.body.topology;
@@ -747,284 +595,81 @@ export function mount(root) {
     }),
   );
 
-  // ── Capacity ──────────────────────────────────────────────────────────
-  function paintCapacity() {
-    if (!capRows) return;
-    if (!capRows.length) {
-      cap.body.replaceChildren(
-        emptyState({
-          title: "No stack has metrics yet",
-          text: "Each stack's node-exporter reports CPU, memory and disk to Prometheus; a stack appears here at its first reading.",
-        }),
-      );
-      return;
-    }
-    /** @param {number | null} v */
-    const cell = (v) =>
-      h(
-        "span",
-        { class: "mp-cap__cell" },
-        v == null
-          ? h("span", { class: "mk-muted" }, "—")
-          : meter({ pct: v, tone: meterTone(v) }).el,
-        h(
-          "span",
-          { class: "mp-cap__n" },
-          v == null ? "not read" : `${Math.round(v)}%`,
-        ),
-      );
-    cap.body.replaceChildren(
-      h(
-        "div",
-        { class: "mp-caps", role: "table", "aria-label": "Capacity per stack" },
-        h(
-          "div",
-          { class: "mp-cap mp-cap--head", role: "row" },
-          ...["Stack", "CPU", "Memory", "Disk"].map((x) =>
-            h("span", { role: "columnheader" }, x),
-          ),
-        ),
-        ...sortCapacity(capRows, capBy).map((r) =>
-          h(
-            "div",
-            { class: "mp-cap", role: "row", "data-stack": r.stack },
-            h(
-              "span",
-              { role: "cell" },
-              drivable(
-                h("a", { href: stackHref(r.stack) }, r.stack),
-                OPEN_STACK,
-                `capacity:${r.stack}`,
-              ),
-            ),
-            cell(r.cpu),
-            cell(r.mem),
-            cell(r.disk),
-          ),
-        ),
-      ),
-    );
-  }
-  void (async () => {
-    const r = await fetchJson("/data/capacity", "the capacity", abort.signal);
-    if (abort.signal.aborted) return;
-    if (!r.ok) {
-      cap.body.replaceChildren(errorBox(r.error));
-      return;
-    }
-    capRows = capacityRows(r.body.panels ?? []);
-    paintCapacity();
-  })().catch(() => {});
-
-  // ── Disk growth ───────────────────────────────────────────────────────
-  void (async () => {
-    const r = await fetchJson("/data/disk-growth", "disk growth", abort.signal);
-    if (abort.signal.aborted) return;
-    if (!r.ok) {
-      growth.body.replaceChildren(errorBox(r.error));
-      return;
-    }
-    const within = r.body.within_days;
-    if (within != null)
-      growthFoot.textContent = `warns ${within} days before full`;
-    const rows = r.body.rows ?? [];
-    if (!rows.length) {
-      growth.body.replaceChildren(
-        emptyState({
-          art: growthArt(),
-          title: "No filesystem has enough history to predict yet",
-          text: "A trend needs 7 days of disk readings; until then the Capacity card shows how full each disk is now.",
-        }),
-      );
-      return;
-    }
-    growth.body.replaceChildren(
-      h(
-        "div",
-        {
-          class: "mp-caps",
-          role: "table",
-          "aria-label": "Disk growth per filesystem",
-        },
-        h(
-          "div",
-          { class: "mp-growth mp-cap--head", role: "row" },
-          ...["Where", "Now", "Trend", "Full in"].map((x) =>
-            h("span", { role: "columnheader" }, x),
-          ),
-        ),
-        // One fixed order whatever order the read brings (finding 4).
-        ...sortGrowth(rows).map((/** @type {any} */ row) => {
-          const days = row.fit.days_to_full;
-          const now = row.fit.pct_now;
-          // On a phone the head row is hidden: two lines per row (name and
-          // "Full in", then the bar and the trend), each value with its
-          // own inline label.
-          const inl = (/** @type {string} */ t) =>
-            h("span", { class: "mp-inl" }, `${t} `);
-          return h(
-            "div",
-            { class: "mp-growth", role: "row" },
-            h(
-              "span",
-              { role: "cell", class: "mp-g-name" },
-              row.scope === "host" ? "Host" : "Stack",
-              " ",
-              h("b", { class: "mono" }, row.subject || "/"),
-            ),
-            h(
-              "span",
-              { class: "mp-cap__cell mp-g-bar", role: "cell" },
-              meter({ pct: now, tone: meterTone(now) }).el,
-              h("span", { class: "mp-cap__n" }, `${Math.round(now)}%`),
-            ),
-            h(
-              "span",
-              { role: "cell", class: "mp-cap__n mp-g-trend" },
-              inl("Trend"),
-              `${row.fit.pct_per_day_robust >= 0 ? "+" : "−"}${Math.abs(row.fit.pct_per_day_robust).toFixed(2)}%/day`,
-            ),
-            h(
-              "span",
-              {
-                role: "cell",
-                class: `mp-g-full${row.warning ? " mk-bad" : ""}`,
-              },
-              inl("Full in"),
-              days == null
-                ? "not growing"
-                : days > 365
-                  ? "more than a year"
-                  : `${days.toFixed(1)} days`,
-            ),
-          );
-        }),
-      ),
-    );
-  })().catch(() => {});
-
-  // ── Stale images ──────────────────────────────────────────────────────
-  /** @param {any} body */
+  // ── Capacity, Disk growth, Stale images ───────────────────────────────
+  /** @param {any} body `/data/stale-images` */
   const paintStale = (body) => {
     staleBody = body;
     paintTiles();
-    if (body.measured_at)
-      staleWhen.textContent = `from the fleet check · ${formatDateTime(body.measured_at)}`;
-    const groups = staleGroups(body.images ?? []);
-    if (!groups.length) {
-      stale.body.replaceChildren(
-        emptyState({
-          title: "Every pinned image is current",
-          text: "Every pinned image matches its upstream's latest release; the fleet check looks again on its own round.",
-        }),
-      );
-      return;
-    }
-    const t = dataTable({
-      cls: "mk-table",
-      remember: "stale-images",
-      caption: "Stale images",
-      columns: [
-        { label: "Image", sort: "text" },
-        { label: "Stack", sort: "text" },
-        { label: "Pinned → latest", sort: "text" },
-        { label: "Released", sort: "text" },
-        { label: "Upstream", sort: "none" },
-        { label: "Action", cls: "mk-n" },
-      ],
+    stale.set({
+      images: body.images ?? [],
+      at: body.measured_at ?? null,
+      status: "ready",
     });
-    // On a phone each row is a small card (the demo's nx-table--cards):
-    // the image first, then each cell with its column's name, the Update
-    // button on its own line, never behind a sideways scroll.
-    t.wrap.querySelector("table")?.classList.add("mk-cards");
-    t.tbody.replaceChildren(
-      ...groups.map((g) => {
-        const notes = releaseUrl(g.upstream, g.latest);
-        return h(
-          "tr",
-          { "data-kp-row-key": g.where.join(",") },
-          h("td", { class: "id" }, h("b", null, g.image)),
-          h("td", { "data-label": "Stack" }, g.stacks.join(", ")),
-          h(
-            "td",
-            { "data-label": "Pinned → latest" },
-            h(
-              "span",
-              { class: "mp-pin" },
-              h("span", { class: "mono" }, g.pinned),
-              " → ",
-              h("span", { class: "mono" }, g.latest),
-              h(
-                "span",
-                {
-                  class: `mp-tag${g.major ? " mp-tag--warn" : ""}`,
-                  title: g.major
-                    ? "The first number changes: read the release notes first"
-                    : "A minor or patch step",
-                },
-                g.major ? "major" : "minor",
-              ),
-            ),
-          ),
-          // The sort reads the cell's text: a hidden ISO date first makes
-          // "28 Sep" sort before "1 Oct" (finding 13).
-          h(
-            "td",
-            { "data-label": "Released" },
-            h("span", { class: "mk-sortkey", hidden: "" }, g.released ?? "~"),
-            shortDate(g.released),
-          ),
-          h(
-            "td",
-            { "data-label": "Upstream" },
-            notes
-              ? drivable(
-                  h(
-                    "a",
-                    {
-                      href: notes,
-                      target: "_blank",
-                      rel: "noopener noreferrer",
-                      title: `The ${g.latest} release notes (${g.upstream}), in a new tab`,
-                    },
-                    "release notes ↗",
-                  ),
-                  NOTES,
-                  g.where.join(","),
-                )
-              : h("span", { class: "mono" }, g.upstream),
-          ),
-          g.key
-            ? h("td", { class: "mk-n row-actions" }, updateButton(g))
-            : h(
-                "td",
-                {
-                  class: "mk-n mk-muted mk-sm row-actions",
-                  title:
-                    "This pin lives in the homelab binary, not a stack file: it moves with a homelab release, not from here",
-                },
-                "with a homelab release",
-              ),
-        );
-      }),
-    );
-    stale.body.replaceChildren(t.wrap);
-    staleTable.attach(stale.body);
   };
-  void (async () => {
-    const r = await slowRead(
-      "/data/stale-images",
-      "stale images",
-      abort.signal,
-      (last) => paintStale(last),
-    );
-    if (abort.signal.aborted) return;
-    if (!r.ok) {
-      stale.body.replaceChildren(errorBox(r.error));
-      return;
-    }
-    paintStale(r.body);
-  })().catch(() => {});
+  async function readSides() {
+    cap.set(null, "loading");
+    disk.set({ status: "loading" });
+    stale.set({ status: "loading" });
+    await Promise.allSettled([
+      (async () => {
+        const r = await fetchJson(
+          "/data/capacity",
+          "the capacity",
+          abort.signal,
+        );
+        if (abort.signal.aborted) return;
+        if (!r.ok) {
+          cap.set([], "failed", `${r.error.what}: ${r.error.why}`);
+          return;
+        }
+        cap.set(capacityRows(r.body.panels ?? []), "ready");
+      })(),
+      (async () => {
+        const [g, c] = await Promise.all([
+          fetchJson("/data/disk-growth", "disk growth", abort.signal),
+          fetchJson("/data/charts?range=30d", "the disk history", abort.signal),
+        ]);
+        if (abort.signal.aborted) return;
+        if (!g.ok) {
+          disk.set({
+            status: "failed",
+            why: `${g.error.what}: ${g.error.why}`,
+          });
+          return;
+        }
+        /** @type {import("../charts.js").Series[]} */
+        let history = [];
+        if (c.ok) {
+          const panel = (c.body?.panels ?? []).find((/** @type {any} */ x) =>
+            /^disk used per filesystem/i.test(x?.panel?.title ?? ""),
+          );
+          history = (panel?.series ?? []).filter(
+            (/** @type {any} */ x) => x?.points?.length,
+          );
+        }
+        disk.set({
+          rows: sortGrowth(g.body.rows ?? []),
+          history,
+          status: "ready",
+        });
+      })(),
+      (async () => {
+        const r = await slowRead(
+          "/data/stale-images",
+          "stale images",
+          abort.signal,
+          (last) => paintStale(last),
+        );
+        if (abort.signal.aborted) return;
+        if (!r.ok) {
+          stale.set({ status: "failed", error: r.error });
+          return;
+        }
+        paintStale(r.body);
+      })(),
+    ]);
+  }
+  void readSides().catch(() => {});
 
   return () => {
     abort.abort();
@@ -1032,18 +677,4 @@ export function mount(root) {
     for (const s of stops) s();
     root.classList.remove("mk-page", "mp-page");
   };
-}
-
-/** The empty Disk growth card's small drawing: a line that will rise. */
-function growthArt() {
-  const NS = "http://www.w3.org/2000/svg";
-  const s = document.createElementNS(NS, "svg");
-  s.setAttribute("class", "mp-illus");
-  s.setAttribute("width", "96");
-  s.setAttribute("height", "56");
-  s.setAttribute("viewBox", "0 0 96 56");
-  s.setAttribute("aria-hidden", "true");
-  s.innerHTML =
-    '<path d="M4 50h88" stroke="currentColor" stroke-width="1.5" opacity=".5"/><path d="M8 44 C 24 43 30 41 40 40 S60 38 70 37 84 36 90 35" fill="none" stroke="var(--chart-1)" stroke-width="2"/><path d="M70 37 L90 22" stroke="var(--chart-1)" stroke-width="2" stroke-dasharray="3 3" opacity=".6"/><circle cx="90" cy="22" r="3" fill="var(--warning-foreground)"/>';
-  return s;
 }

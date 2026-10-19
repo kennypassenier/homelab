@@ -334,24 +334,6 @@ export function capacityRows(panels) {
 }
 
 /**
- * Busiest first by the chosen measure; a stack without that reading last.
- * @param {CapRow[]} rows
- * @param {"cpu" | "mem" | "disk"} by
- */
-export function sortCapacity(rows, by) {
-  return [...rows].sort(
-    (a, b) => (b[by] ?? -1) - (a[by] ?? -1) || a.stack.localeCompare(b.stack),
-  );
-}
-
-/**
- * A meter's tone (the card's foot: amber from 75%, red from 90%).
- * @param {number | null} pct
- */
-export const meterTone = (pct) =>
-  pct == null ? "" : pct >= 90 ? "bad" : pct >= 75 ? "warn" : "";
-
-/**
  * A node's colour: its stack's evenly spaced hue (topology.js, the same
  * hue on the Backups page), muted for an address outside the fleet.
  * @param {Topology} topo

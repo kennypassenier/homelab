@@ -9,13 +9,8 @@ import {
   deployCount,
   hostStrip,
   newerByStack,
-  nextSort,
-  onlyCounts,
-  parseQuery,
   rowAction,
-  rowMatches,
   series,
-  sortRows,
   stackRows,
 } from "../js/stacksview.js";
 
@@ -200,47 +195,6 @@ test("redesign-stacks: a row offers the one action that fits it best", () => {
   );
 });
 
-test("redesign-stacks: the search takes words and state:/flag: tokens; Only chips add up", () => {
-  const all = rows();
-  const names = (/** @type {string} */ q, only = new Set()) =>
-    all.filter((r) => rowMatches(r, parseQuery(q), only)).map((r) => r.name);
-  assert.deepEqual(parseQuery(" Gate  state:run flag:noenv "), {
-    words: ["gate"],
-    state: ["run"],
-    flag: ["noenv"],
-  });
-  assert.deepEqual(names("gate"), ["gateway"]);
-  assert.deepEqual(names("jelly"), ["films"], "an app's name finds its stack");
-  assert.deepEqual(names("903"), ["films"], "a vmid finds its stack");
-  assert.deepEqual(names("state:offline"), ["kp-soft"]);
-  assert.deepEqual(names("flag:noenv"), ["gateway"]);
-  assert.deepEqual(names("", new Set(["newer"])), ["gateway"]);
-  assert.deepEqual(names("", new Set(["newer", "problems"])), [
-    "gateway",
-    "kp-soft",
-  ]);
-  assert.deepEqual(names("", new Set(["drift"])), ["films"]);
-  assert.deepEqual(onlyCounts(all), { newer: 1, problems: 1, drift: 1 });
-});
-
-test("redesign-stacks: the cards sort by vmid, name or busiest first, and the button cycles", () => {
-  const all = rows();
-  assert.deepEqual(
-    sortRows(all, "name").map((r) => r.name),
-    ["films", "gateway", "kp-soft"],
-  );
-  assert.deepEqual(
-    sortRows(all, "cpu").map((r) => r.name),
-    ["films", "gateway", "kp-soft"],
-  );
-  assert.deepEqual(
-    sortRows(all, "vmid").map((r) => r.vmid),
-    [104, 116, 903],
-  );
-  assert.equal(nextSort("vmid"), "name");
-  assert.equal(nextSort("cpu"), "vmid");
-});
-
 test("redesign-final M1: the strip has the approved demo's five tiles, each a link", () => {
   const t = hostStrip(
     fleet(),
@@ -324,7 +278,7 @@ test("redesign-stacks: a stack gone from the files says it will be destroyed, on
   assert.equal(broken?.label, "does not build");
   assert.match(broken?.title ?? "", /bad yaml/);
   assert.equal(kp.drift, true);
-  assert.equal(onlyCounts(r).drift, 2);
+  assert.equal(r.filter((x) => x.drift).length, 2);
   assert.notEqual(
     gw.action.kind,
     "deploy",
@@ -334,7 +288,7 @@ test("redesign-stacks: a stack gone from the files says it will be destroyed, on
 
 test("redesign-stacks: Stacks online links to the stacks not running, or to the Host page when all run", () => {
   const off = hostStrip(fleet(), null, { count: 0, urgent: 0 })[0];
-  assert.equal(off.href, "/stacks?only=problems");
+  assert.equal(off.href, "/stacks?view=cards&show=attention");
   assert.match(off.title, /not running/);
   const f = fleet();
   f.stacks[1].online = true;

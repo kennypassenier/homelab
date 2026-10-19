@@ -20,32 +20,6 @@ export const emptyPreset = (list) =>
   list.find((p) => (p.apps ?? []).length === 0) ?? null;
 
 /**
- * The gallery's cards: every preset but the empty one, filtered by the
- * search (name, description or an app) and sorted A–Z or largest first.
- * @param {PresetView[]} list
- * @param {string} q lower-case
- * @param {"name" | "ram"} sort
- */
-export function galleryCards(list, q, sort) {
-  const empty = emptyPreset(list);
-  return list
-    .filter((p) => p !== empty)
-    .filter(
-      (p) =>
-        !q ||
-        [p.name, p.description, ...(p.apps ?? [])]
-          .join(" ")
-          .toLowerCase()
-          .includes(q),
-    )
-    .sort((a, b) =>
-      sort === "ram"
-        ? b.ram_mb - a.ram_mb || a.name.localeCompare(b.name)
-        : a.name.localeCompare(b.name),
-    );
-}
-
-/**
  * Memory in the demo's words: 512 MB, 1 GB, 4 GB.
  * @param {number} mb
  */

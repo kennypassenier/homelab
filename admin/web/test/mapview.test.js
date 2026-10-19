@@ -10,11 +10,9 @@ import {
   hubOf,
   layout,
   mapFigures,
-  meterTone,
   neighbours,
   radius,
   shortDate,
-  sortCapacity,
   staleGroups,
 } from "../js/mapview.js";
 
@@ -207,13 +205,6 @@ test("redesign-371-map: capacity is one row per stack, busiest first, amber from
     { stack: "a", cpu: 13, mem: null, disk: null },
     { stack: "b", cpu: 6, mem: 78, disk: null },
   ]);
-  assert.deepEqual(
-    sortCapacity(rows, "mem").map((r) => r.stack),
-    ["b", "a"],
-  );
-  assert.equal(meterTone(74), "");
-  assert.equal(meterTone(75), "warn");
-  assert.equal(meterTone(91), "bad");
   assert.equal(radius(topo.nodes[0], null), 14);
   assert.equal(radius(topo.nodes[4], null), 9);
   const t = new Map([

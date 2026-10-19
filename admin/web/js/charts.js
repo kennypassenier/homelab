@@ -222,3 +222,19 @@ export function failChart(figure, label, error) {
  * @param {ParentNode} root
  */
 export const attachPageCharts = (root) => attachCharts(root, CHART_OPTIONS);
+
+/**
+ * Draw one chart on `host` (the hub's Resources and the Map's disk growth):
+ * the host becomes a `[data-kp-chart]` that never arrives as news, gets its
+ * readings through `feedChart`, and is attached with the dashboard's options.
+ * @param {HTMLElement} host
+ * @param {ChartSpec} opt
+ * @returns {HTMLElement}
+ */
+export function timeChart(host, opt) {
+  host.setAttribute("data-kp-chart", "");
+  host.setAttribute("data-kp-arrive", "none");
+  feedChart(host, opt);
+  attachPageCharts(host.ownerDocument ?? document);
+  return host;
+}

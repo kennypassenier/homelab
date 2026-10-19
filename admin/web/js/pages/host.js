@@ -814,7 +814,7 @@ export function mount(root, ctx) {
   /** @type {any} */
   let lineFacts = null;
   let lineOk = /** @type {boolean | null} */ (null);
-  const facts = h("dl", { class: "hk-facts", id: "host-line" });
+  const facts = h("dl", { class: "kp-kv", id: "host-line" });
   const lat = h("div", {
     class: "hk-lat",
     id: "host-lat",
@@ -908,7 +908,9 @@ export function mount(root, ctx) {
           : f?.host.tls_fingerprint || "not asked yet",
     ]);
     facts.replaceChildren(
-      ...rows.flatMap(([k, v]) => [h("dt", null, k), h("dd", null, v)]),
+      ...rows.map(([k, v]) =>
+        h("div", { class: "kp-kv__row" }, h("dt", null, k), h("dd", null, v)),
+      ),
     );
     const l = latencyBars(pings);
     lat.setAttribute("aria-label", l.label);
@@ -974,7 +976,7 @@ export function mount(root, ctx) {
   };
 
   // ── About, Templates ──────────────────────────────────────────────────
-  const about = h("dl", { class: "hk-facts", id: "host-about" });
+  const about = h("dl", { class: "kp-kv", id: "host-about" });
   const aboutCard = section({
     id: "host-about-card",
     title: "About this host",
@@ -1021,7 +1023,9 @@ export function mount(root, ctx) {
       ],
     ];
     about.replaceChildren(
-      ...rows.flatMap(([k, v]) => [h("dt", null, k), h("dd", null, v)]),
+      ...rows.map(([k, v]) =>
+        h("div", { class: "kp-kv__row" }, h("dt", null, k), h("dd", null, v)),
+      ),
     );
   };
   const tplList = h(
@@ -1148,13 +1152,7 @@ export function mount(root, ctx) {
           h("small", null, x.detail),
           // fix-kp11-9: the doctor's remedy was computed and never drawn.
           ...(x.remedy && x.health.tone !== "ok"
-            ? [
-                h(
-                  "small",
-                  { class: "hk-checks__fix" },
-                  `What to do: ${x.remedy}`,
-                ),
-              ]
+            ? [h("small", null, `What to do: ${x.remedy}`)]
             : []),
         ),
       ),
